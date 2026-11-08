@@ -11,7 +11,7 @@
 // dependencies first. A version already on npm is skipped, so a failed run can
 // simply run again.
 
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -102,9 +102,18 @@ const publish = () => {
     execFileSync("bun", ["pm", "pack", "--destination", out], { cwd: path.join(root, dir), stdio: "inherit" })
     const tarball = readdirSync(out).find((name) => !before.has(name))
     if (tarball === undefined) fail(`Bun did not pack ${json.name}.`)
-    execFileSync("npm", ["publish", path.join(out, tarball), "--access", "public", ...provenance], {
-      stdio: "inherit"
+    const result = spawnSync("npm", ["publish", path.join(out, tarball), "--access", "public", ...provenance], {
+      encoding: "utf8",
+      stdio: ["ignore", "inherit", "pipe"]
     })
+    process.stderr.write(result.stderr)
+    // `npm view` can lag a fresh publish by minutes, so a rerun may try a version
+    // that is already there; npm answers 409 and the run moves on.
+    if (result.status !== 0 && /E409|Cannot publish over/.test(result.stderr)) {
+      console.log(`${json.name}@${version} is already on npm.`)
+      continue
+    }
+    if (result.status !== 0) fail(`npm publish failed for ${json.name}@${version}.`)
     console.log(`Published ${json.name}@${version}.`)
   }
 }
