@@ -109,7 +109,7 @@ const publish = () => {
     process.stderr.write(result.stderr)
     // `npm view` can lag a fresh publish by minutes, so a rerun may try a version
     // that is already there; npm answers 409 and the run moves on.
-    if (result.status !== 0 && /E409|Cannot publish over/.test(result.stderr)) {
+    if (result.status !== 0 && /E409|cannot publish over/i.test(result.stderr)) {
       console.log(`${json.name}@${version} is already on npm.`)
       continue
     }
