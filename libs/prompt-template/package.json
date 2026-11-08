@@ -19,8 +19,7 @@
     "dist/**/*.d.ts",
     "dist/**/*.js.map",
     "dist/**/*.d.ts.map",
-    "LICENSE",
-    "src"
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
