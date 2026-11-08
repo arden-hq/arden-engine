@@ -1,0 +1,32 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "tags": ["-internal"],
+  "workspaces": {
+    ".": {
+      "entry": ["tooling/*.mjs"],
+      "project": ["tooling/**/*.mjs", "*.mjs"],
+      "ignoreDependencies": ["@typescript/native", "effect", "vitest"]
+    },
+    "libs/*": {
+      "entry": ["scripts/*.ts"],
+      "project": ["src/**/*.ts!", "test/**/*.ts"]
+    },
+    "apps/cli": {
+      "project": ["src/**/*.{ts,tsx}!", "test/**/*.{ts,tsx}"]
+    },
+    "apps/server-ts": {
+      "entry": [
+        "src/main.ts!",
+        "src/daemon.ts!",
+        "src/index.ts!",
+        "src/providers/openai-responses/index.ts!",
+        "scripts/**/*.{mjs,ts,cjs}"
+      ],
+      "project": ["src/**/*.ts!", "test/**/*.ts", "scripts/**/*.{mjs,ts,cjs}"]
+    },
+    "apps/relay": {
+      "entry": ["src/bun/main.ts!", "src/cloudflare/worker.ts!", "scripts/**/*.{mjs,ts}"],
+      "project": ["src/**/*.ts!", "test/**/*.ts", "scripts/**/*.{mjs,ts}"]
+    }
+  }
+}

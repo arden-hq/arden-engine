@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/headless",
+  "version": "0.1.0",
+  "description": "Node client for Arden's production HTTP and SSE runtime",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "arden-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "prepack": "bun run clean && bun run build",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/libs-headless.tsbuildinfo",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@arden-hq/protocol": "workspace:*",
+    "@arden-hq/std": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/headless"
+  }
+}

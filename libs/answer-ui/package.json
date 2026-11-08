@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/answer-ui",
+  "version": "0.1.0",
+  "description": "The parts an arden:ui answer block may use: names, descriptions and prop schemas, shared by the desktop renderer and the server check",
+  "license": "Apache-2.0",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "arden-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fence": {
+      "arden-source": "./src/fence.ts",
+      "types": "./dist/fence.d.ts",
+      "import": "./dist/fence.js"
+    },
+    "./state": {
+      "arden-source": "./src/state.ts",
+      "types": "./dist/state.d.ts",
+      "import": "./dist/state.js"
+    },
+    "./check": {
+      "arden-source": "./src/check.ts",
+      "types": "./dist/check.d.ts",
+      "import": "./dist/check.js"
+    },
+    "./tool-result": {
+      "arden-source": "./src/tool-result.ts",
+      "types": "./dist/tool-result.d.ts",
+      "import": "./dist/tool-result.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@arden-hq/std": "workspace:*",
+    "@openuidev/lang-core": "1.1.0"
+  },
+  "peerDependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "zod": "4.6.7",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/answer-ui"
+  }
+}

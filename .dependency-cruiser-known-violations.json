@@ -1,0 +1,45 @@
+[
+  {
+    "type": "dependency",
+    "from": "apps/server-ts/src/persistence/chat/store.ts",
+    "to": "apps/server-ts/src/context/local-instructions.ts",
+    "unresolvedTo": "../../context/local-instructions.js",
+    "dependencyTypes": [
+      "local",
+      "type-only",
+      "import"
+    ],
+    "rule": {
+      "severity": "error",
+      "name": "server-persistence-not-to-domain"
+    }
+  },
+  {
+    "type": "dependency",
+    "from": "apps/server-ts/src/persistence/sqlite/spaces.ts",
+    "to": "apps/server-ts/src/wiki/authority.ts",
+    "unresolvedTo": "../../wiki/authority.js",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ],
+    "rule": {
+      "severity": "error",
+      "name": "server-persistence-not-to-domain"
+    }
+  },
+  {
+    "type": "dependency",
+    "from": "apps/server-ts/src/persistence/sqlite/tool-approval-resolve.ts",
+    "to": "apps/server-ts/src/storage/local-paths.ts",
+    "unresolvedTo": "../../storage/local-paths.js",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ],
+    "rule": {
+      "severity": "error",
+      "name": "server-persistence-not-to-domain"
+    }
+  }
+]

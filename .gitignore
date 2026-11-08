@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+.DS_Store
+.local/
+.wrangler/
+*.db
+*.db-shm
+*.db-wal
+.claude/*
+!.claude/skills/
+.*.node-gyp/

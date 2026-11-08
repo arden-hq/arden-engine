@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic relay test vectors: generated keys, not secrets"
+paths = ['''libs/relay-protocol/test-vectors\.json''']
+
+[[allowlists]]
+description = "Test fixtures: idempotency keys are random UUIDs, and the redaction test checks that fake tokens never reach output"
+condition = "AND"
+regexTarget = "line"
+paths = ['''apps/server-ts/test/.*\.test\.ts''']
+regexes = ['''idempotency_key: "[0-9a-f-]{36}"''', '''"SECRETPATHTOKEN", "0123456789abcdef0123"''']

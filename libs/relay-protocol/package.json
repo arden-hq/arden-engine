@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/relay-protocol",
+  "version": "0.1.0",
+  "description": "Arden relay wire format, E2E crypto and app messages shared by the Mac, the relay and the phone",
+  "license": "Apache-2.0",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "arden-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "test-vectors.json",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/libs-relay-protocol.tsbuildinfo",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@arden-hq/std": "workspace:*",
+    "@noble/ciphers": "2.4.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "4.10.2",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/relay-protocol"
+  }
+}

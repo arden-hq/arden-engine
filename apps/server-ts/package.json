@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/server",
+  "version": "0.1.0",
+  "description": "The Node.js TypeScript server foundation for Arden",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.16"
+  },
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./openai-responses": {
+      "types": "./dist/providers/openai-responses/index.d.ts",
+      "import": "./dist/providers/openai-responses/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "dist/**/*.json",
+    "dist/**/*.md",
+    "scripts/smoke.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node ../../tooling/clean-dist.mjs && node node_modules/@typescript/native/bin/tsc -b && node ./scripts/copy-assets.mjs",
+    "prepack": "bun run build",
+    "smoke": "bun run build && node ./scripts/smoke.mjs",
+    "start": "node ./dist/main.js",
+    "storage": "node ./scripts/storage-maintenance.mjs",
+    "typecheck": "node node_modules/@typescript/native/bin/tsc -p tsconfig.check.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/apps-server-ts.tsbuildinfo",
+    "test": "bun run build && vitest run",
+    "check:migrations": "vitest run test/schema-migrations.test.ts"
+  },
+  "dependencies": {
+    "@arden-hq/answer-ui": "workspace:*",
+    "@arden-hq/jobs": "workspace:*",
+    "@arden-hq/journal": "workspace:*",
+    "@arden-hq/loop": "workspace:*",
+    "@arden-hq/prompt-template": "workspace:*",
+    "@arden-hq/protocol": "workspace:*",
+    "@arden-hq/relay-protocol": "workspace:*",
+    "@arden-hq/revisions": "workspace:*",
+    "@arden-hq/sqlite-thread": "workspace:*",
+    "@arden-hq/std": "workspace:*",
+    "@effect/platform-node": "catalog:",
+    "@effect/sql-sqlite-node": "catalog:",
+    "@mixmark-io/domino": "2.2.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@vscode/ripgrep": "1.18.0",
+    "diff": "9.0.0",
+    "effect": "catalog:",
+    "mdast-util-from-markdown": "2.0.3",
+    "node-pty": "1.1.0",
+    "proper-lockfile": "4.1.2",
+    "quickjs-emscripten": "0.32.0",
+    "turndown": "7.2.4",
+    "unpdf": "1.8.1",
+    "ws": "8.22.0",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/mdast": "4.0.4",
+    "@types/node": "catalog:",
+    "@types/proper-lockfile": "4.1.4",
+    "@types/turndown": "5.0.6",
+    "@types/ws": "8.18.2",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "fast-check": "4.10.2",
+    "typescript": "6.0.3",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "apps/server-ts"
+  }
+}

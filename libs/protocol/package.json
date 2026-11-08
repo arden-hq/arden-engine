@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/protocol",
+  "version": "0.1.0",
+  "description": "Shared Arden server events, contracts, and standards-compliant SSE codecs",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "types": "./dist/index.d.ts",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "arden-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./effect/*": {
+      "arden-source": "./src/*/effect.ts",
+      "types": "./dist/*/effect.d.ts",
+      "import": "./dist/*/effect.js"
+    },
+    "./daemon/effect": {
+      "arden-source": "./src/daemon/effect.ts",
+      "types": "./dist/daemon/effect.d.ts",
+      "import": "./dist/daemon/effect.js"
+    },
+    "./*": {
+      "arden-source": "./src/*/index.ts",
+      "types": "./dist/*/index.d.ts",
+      "import": "./dist/*/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "arden",
+    "events",
+    "sse",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "prepack": "bun run clean && bun run build",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/libs-protocol.tsbuildinfo",
+    "test": "bun run build && vitest run"
+  },
+  "dependencies": {
+    "@arden-hq/std": "workspace:*",
+    "mdast-util-from-markdown": "2.0.3"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.107"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "fast-check": "4.10.2",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/protocol"
+  }
+}

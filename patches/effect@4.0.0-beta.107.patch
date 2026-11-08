@@ -1,0 +1,49 @@
+diff --git a/dist/unstable/sql/SqlClient.js b/dist/unstable/sql/SqlClient.js
+index 7b3c49a0329bcd1734ceb741e8c87fb14c57f212..5a9435a2006f80256f474357d243c407da07017e 100644
+--- a/dist/unstable/sql/SqlClient.js
++++ b/dist/unstable/sql/SqlClient.js
+@@ -111,9 +111,12 @@ export const makeWithTransaction = options => {
+     const connOption = Context.getOption(services, options.transactionService);
+     const conn = connOption._tag === "Some" ? Effect.succeed([undefined, connOption.value[0]]) : options.acquireConnection;
+     const id = connOption._tag === "Some" ? connOption.value[1] + 1 : 0;
+-    const transaction = Effect.flatMap(conn, ([scope, conn]) => (id === 0 ? options.begin(conn) : options.savepoint(conn, id)).pipe(Effect.flatMap(() => Effect.provideContext(restore(effect), services.pipe(Context.add(options.transactionService, [conn, id]), Context.add(transactionSemaphore, Semaphore.makeUnsafe(1)), Context.add(Tracer.ParentSpan, span)))), Effect.exit, Effect.flatMap(exit => {
++    let started = false;
++    const transaction = Effect.flatMap(conn, ([scope, conn]) => (id === 0 ? options.begin(conn) : options.savepoint(conn, id)).pipe(Effect.tap(() => Effect.sync(() => { started = true; })), Effect.flatMap(() => Effect.provideContext(restore(effect), services.pipe(Context.add(options.transactionService, [conn, id]), Context.add(transactionSemaphore, Semaphore.makeUnsafe(1)), Context.add(Tracer.ParentSpan, span)))), Effect.exit, Effect.flatMap(exit => {
+       let effect;
+-      if (Exit.isSuccess(exit)) {
++      if (!started) {
++        effect = Effect.void;
++      } else if (Exit.isSuccess(exit)) {
+         if (id === 0) {
+           span.event("db.transaction.commit", clock.currentTimeNanosUnsafe());
+           effect = Effect.orDie(options.commit(conn));
+diff --git a/src/unstable/sql/SqlClient.ts b/src/unstable/sql/SqlClient.ts
+index b2bd662315f2c60d927641e0dd57f5354367477f..cc94bcb831c3966808db650dba6d19582a7b482c 100644
+--- a/src/unstable/sql/SqlClient.ts
++++ b/src/unstable/sql/SqlClient.ts
+@@ -250,12 +250,14 @@ export const makeWithTransaction = <I, S>(options: {
+               ? Effect.succeed([undefined, connOption.value[0]] as const)
+               : options.acquireConnection
+             const id = connOption._tag === "Some" ? connOption.value[1] + 1 : 0
++            let started = false
+             const transaction = Effect.flatMap(
+               conn,
+               (
+                 [scope, conn]
+               ) =>
+                 (id === 0 ? options.begin(conn) : options.savepoint(conn, id)).pipe(
++                  Effect.tap(() => Effect.sync(() => { started = true })),
+                   Effect.flatMap(() =>
+                     Effect.provideContext(
+                       restore(effect),
+@@ -269,7 +271,9 @@ export const makeWithTransaction = <I, S>(options: {
+                   Effect.exit,
+                   Effect.flatMap((exit) => {
+                     let effect: Effect.Effect<void>
+-                    if (Exit.isSuccess(exit)) {
++                    if (!started) {
++                      effect = Effect.void
++                    } else if (Exit.isSuccess(exit)) {
+                       if (id === 0) {
+                         span.event("db.transaction.commit", clock.currentTimeNanosUnsafe())
+                         effect = Effect.orDie(options.commit(conn))

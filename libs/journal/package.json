@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/journal",
+  "version": "0.1.0",
+  "description": "A small SQLite-backed journal for Effect applications",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.16"
+  },
+  "exports": {
+    "./effect": {
+      "arden-source": "./src/effect/index.ts",
+      "types": "./dist/effect/index.d.ts",
+      "import": "./dist/effect/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "arden",
+    "sqlite",
+    "journal",
+    "events",
+    "effect"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "prepack": "bun run clean && bun run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/libs-journal.tsbuildinfo",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.107"
+  },
+  "devDependencies": {
+    "@effect/sql-sqlite-node": "catalog:",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/journal"
+  }
+}

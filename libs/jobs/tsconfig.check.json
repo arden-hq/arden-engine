@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // `typecheck` without a build: sibling libs resolve to their `src` through the
+  // `arden-source` export condition. `references` are not inherited, so no
+  // declarations from a lib's `dist` are read. `tsc -b` (tsconfig.json) builds.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": "../..",
+    "customConditions": ["arden-source"]
+  }
+}

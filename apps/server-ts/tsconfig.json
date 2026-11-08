@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    // The server runs on Node >=22.16 (package.json engines), which ships ES2024.
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "references": [
+    { "path": "../../libs/answer-ui" },
+    { "path": "../../libs/jobs" },
+    { "path": "../../libs/journal" },
+    { "path": "../../libs/sqlite-thread" },
+    { "path": "../../libs/loop" },
+    { "path": "../../libs/prompt-template" },
+    { "path": "../../libs/revisions" },
+    { "path": "../../libs/protocol" },
+    { "path": "../../libs/relay-protocol" },
+    { "path": "../../libs/std" }
+  ],
+  "include": ["src/**/*.ts"]
+}

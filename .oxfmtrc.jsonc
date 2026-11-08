@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "singleQuote": false,
+  "tabWidth": 2,
+  "useTabs": false,
+  "trailingComma": "none",
+  "printWidth": 100,
+  "endOfLine": "lf",
+  "sortPackageJson": false,
+  // The desktop keeps semicolons.
+  "overrides": [{ "files": ["apps/desktop/**"], "options": { "semi": true } }],
+  // Formatted: apps/server-ts, apps/cli, apps/relay, every lib, and apps/desktop's
+  // src, electron, tests, scripts and contracts. Everything else is left as written.
+  "ignorePatterns": [
+    "/*",
+    "!/apps/",
+    "/apps/*",
+    "!/apps/server-ts/",
+    "!/apps/cli/",
+    "!/apps/relay/",
+    "!/apps/desktop/",
+    "/apps/desktop/*",
+    "!/apps/desktop/src/",
+    "!/apps/desktop/electron/",
+    "!/apps/desktop/tests/",
+    "!/apps/desktop/scripts/",
+    "!/apps/desktop/contracts/",
+    "!/libs/",
+    "**/dist/",
+    "**/node_modules/",
+    "**/*.md",
+    "**/*.toml",
+    // Generated or recorded data: written by scripts or captured runs, not by hand.
+    "/apps/desktop/src/components/iconData.ts",
+    "/apps/desktop/electron/icons/",
+    "/libs/relay-protocol/test-vectors.json",
+    "**/test/fixtures/**/*.json",
+    "**/__snapshots__/",
+  ]
+}

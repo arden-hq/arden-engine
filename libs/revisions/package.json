@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/revisions",
+  "version": "0.1.0",
+  "description": "Content-addressed managed-file revisions as an Effect service for Node.js, Bun, and Electron",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "exports": {
+    "./effect": {
+      "arden-source": "./src/effect/index.ts",
+      "types": "./dist/effect/index.d.ts",
+      "import": "./dist/effect/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "revisions",
+    "content-addressed",
+    "typescript",
+    "effect"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "prepack": "bun run clean && bun run build",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/libs-revisions.tsbuildinfo",
+    "test": "vitest run --exclude test/boundary.test.ts",
+    "test:dist": "bun run build && vitest run test/boundary.test.ts"
+  },
+  "dependencies": {
+    "@arden-hq/std": "workspace:*",
+    "@effect/platform-node": "catalog:",
+    "diff": "9.0.0",
+    "proper-lockfile": "4.1.2"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.107"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/proper-lockfile": "4.1.4",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/revisions"
+  }
+}

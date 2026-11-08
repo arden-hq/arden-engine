@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@arden-hq/std",
+  "version": "0.1.0",
+  "description": "Domain-free mechanics every Arden workspace shares, one behavior per subpath; no dependencies, no Effect",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "exports": {
+    "./atomic-file": {
+      "arden-source": "./src/atomic-file.ts",
+      "types": "./dist/atomic-file.d.ts",
+      "import": "./dist/atomic-file.js"
+    },
+    "./count": {
+      "arden-source": "./src/count.ts",
+      "types": "./dist/count.d.ts",
+      "import": "./dist/count.js"
+    },
+    "./paths": {
+      "arden-source": "./src/paths.ts",
+      "types": "./dist/paths.d.ts",
+      "import": "./dist/paths.js"
+    },
+    "./errors": {
+      "arden-source": "./src/errors.ts",
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./json": {
+      "arden-source": "./src/json.ts",
+      "types": "./dist/json.d.ts",
+      "import": "./dist/json.js"
+    },
+    "./hash": {
+      "arden-source": "./src/hash.ts",
+      "types": "./dist/hash.d.ts",
+      "import": "./dist/hash.js"
+    },
+    "./slug": {
+      "arden-source": "./src/slug.ts",
+      "types": "./dist/slug.d.ts",
+      "import": "./dist/slug.js"
+    },
+    "./publish": {
+      "arden-source": "./src/publish.ts",
+      "types": "./dist/publish.d.ts",
+      "import": "./dist/publish.js"
+    },
+    "./process": {
+      "arden-source": "./src/process.ts",
+      "types": "./dist/process.d.ts",
+      "import": "./dist/process.js"
+    },
+    "./time": {
+      "arden-source": "./src/time.ts",
+      "types": "./dist/time.d.ts",
+      "import": "./dist/time.js"
+    },
+    "./retry": {
+      "arden-source": "./src/retry.ts",
+      "types": "./dist/retry.d.ts",
+      "import": "./dist/retry.js"
+    },
+    "./attempt": {
+      "arden-source": "./src/attempt.ts",
+      "types": "./dist/attempt.d.ts",
+      "import": "./dist/attempt.js"
+    },
+    "./sleep": {
+      "arden-source": "./src/sleep.ts",
+      "types": "./dist/sleep.d.ts",
+      "import": "./dist/sleep.js"
+    },
+    "./text": {
+      "arden-source": "./src/text.ts",
+      "types": "./dist/text.d.ts",
+      "import": "./dist/text.js"
+    },
+    "./url": {
+      "arden-source": "./src/url.ts",
+      "types": "./dist/url.d.ts",
+      "import": "./dist/url.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "node ../../tooling/clean-dist.mjs",
+    "prepack": "bun run clean && bun run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/libs-std.tsbuildinfo",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "libs/std"
+  }
+}

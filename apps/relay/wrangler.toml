@@ -1,0 +1,22 @@
+# Cloudflare host for the Arden relay (not deployed yet). `wrangler deploy`
+# bundles src/cloudflare/worker.ts; build libs first (`bun run build:libs`) so
+# @arden-hq/relay-protocol resolves to its dist.
+name = "arden-relay"
+main = "src/cloudflare/worker.ts"
+compatibility_date = "2026-09-01"
+
+# Phones and Macs reach the relay here (the workers.dev address also works).
+routes = [{ pattern = "relay.fromarden.com", custom_domain = true }]
+
+# APNs push is off until these Worker secrets are set (never commit them):
+#   wrangler secret put APNS_KEY      # the AuthKey_<id>.p8 contents (PEM)
+#   wrangler secret put APNS_KEY_ID   # the key's 10-char Key ID
+#   wrangler secret put APNS_TEAM_ID  # the Apple Developer Team ID
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "RelayObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayObject"]

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "files": [],
+  // The workspaces' build projects. Editors and oxlint's type-aware rules find
+  // a file's project through these. `tsc -b` builds each workspace on its own.
+  "references": [
+    { "path": "./apps/cli" },
+    { "path": "./libs/answer-ui" },
+    { "path": "./libs/headless" },
+    { "path": "./libs/jobs" },
+    { "path": "./libs/journal" },
+    { "path": "./libs/loop" },
+    { "path": "./libs/prompt-template" },
+    { "path": "./libs/revisions" },
+    { "path": "./libs/sqlite-thread" },
+    { "path": "./libs/std" },
+    { "path": "./libs/protocol" },
+    { "path": "./libs/relay-protocol" },
+    { "path": "./apps/server-ts" },
+    { "path": "./apps/cli/tsconfig.test.json" },
+    { "path": "./apps/relay/tsconfig.test.json" },
+    { "path": "./apps/server-ts/tsconfig.test.json" },
+    { "path": "./libs/answer-ui/tsconfig.test.json" },
+    { "path": "./libs/headless/tsconfig.test.json" },
+    { "path": "./libs/jobs/tsconfig.test.json" },
+    { "path": "./libs/journal/tsconfig.test.json" },
+    { "path": "./libs/loop/tsconfig.test.json" },
+    { "path": "./libs/protocol/tsconfig.test.json" },
+    { "path": "./libs/relay-protocol/tsconfig.test.json" },
+    { "path": "./libs/revisions/tsconfig.test.json" },
+    { "path": "./libs/std/tsconfig.test.json" }
+  ]
+}

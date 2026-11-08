@@ -1,0 +1,252 @@
+{
+  "canonical_jsonl": {
+    "bytes_hex": "7b226b696e64223a2266697874757265222c2274657874223a2263616e6f6e6963616c222c2276657273696f6e223a327d0a",
+    "record": {
+      "kind": "fixture",
+      "text": "canonical",
+      "version": 2
+    },
+    "sha256": "a8bc0fc65b2a41fea1f4ad6d2fae80d99c28828441911621d2882443797ec415"
+  },
+  "final_resources": [
+    {
+      "blob_id": "09204dbfbdb8fc121fb2a47988fe1a42a1981ac4e16ea4afc915e2d87b40d324",
+      "path": "notes/restored.md",
+      "resource_id": "note",
+      "state": "active",
+      "version_id": "7008783e9e242414005741b58ad0950c234279ff5e39cff508b9376919399bca"
+    }
+  ],
+  "final_visible_files": {
+    "notes/restored.md": "09204dbfbdb8fc121fb2a47988fe1a42a1981ac4e16ea4afc915e2d87b40d324"
+  },
+  "fixture_version": 1,
+  "format_version": 2,
+  "head": "375474c04252033a7e16d98266ce940e69999ffe7840cb2f7cb67b0ed57cca59",
+  "history": [
+    {
+      "commit": {
+        "actor": "compat-fixture",
+        "changes": [
+          {
+            "action": "create",
+            "after": {
+              "blob_id": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+              "path": "notes/one.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "31190386102fe7f3a7349ba3743dbc7c1a5d86fb9d227f7e28454a88c28f5b5d"
+            },
+            "before": null
+          }
+        ],
+        "commit_id": "52ef4cb25bc94df2ec73fb36ad008254c61be8e431f98b5e243fb814ec00afd8",
+        "origin": "compat-test",
+        "parent_id": null,
+        "reason": "freeze format-v2 compatibility",
+        "timestamp": "2026-01-02T03:04:05.000000Z",
+        "tree_id": "a372bd0e7d9ee54f4b6a8443cbc0bbf91648acd160d390542f850299e9e87265"
+      },
+      "name": "create",
+      "resources": [
+        {
+          "blob_id": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+          "path": "notes/one.md",
+          "resource_id": "note",
+          "state": "active",
+          "version_id": "31190386102fe7f3a7349ba3743dbc7c1a5d86fb9d227f7e28454a88c28f5b5d"
+        }
+      ],
+      "visible_files": {
+        "notes/one.md": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+      }
+    },
+    {
+      "commit": {
+        "actor": "compat-fixture",
+        "changes": [
+          {
+            "action": "update",
+            "after": {
+              "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+              "path": "notes/one.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "9b81ecd091fbede61154f40f282010e8b2f00587b6ca8e313c86ae9cd5638d9a"
+            },
+            "before": {
+              "blob_id": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+              "path": "notes/one.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "31190386102fe7f3a7349ba3743dbc7c1a5d86fb9d227f7e28454a88c28f5b5d"
+            }
+          }
+        ],
+        "commit_id": "5ef854dcdd47c6017b5d50b55c28cfd219966a1524283e464d18e8b19b19ffd5",
+        "origin": "compat-test",
+        "parent_id": "52ef4cb25bc94df2ec73fb36ad008254c61be8e431f98b5e243fb814ec00afd8",
+        "reason": "freeze format-v2 compatibility",
+        "timestamp": "2026-01-02T03:04:06.000000Z",
+        "tree_id": "d23db8d8e021fa38d6fe780a6dbee3164143176f9491cbb765514e3430da91cc"
+      },
+      "name": "update",
+      "resources": [
+        {
+          "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+          "path": "notes/one.md",
+          "resource_id": "note",
+          "state": "active",
+          "version_id": "9b81ecd091fbede61154f40f282010e8b2f00587b6ca8e313c86ae9cd5638d9a"
+        }
+      ],
+      "visible_files": {
+        "notes/one.md": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+      }
+    },
+    {
+      "commit": {
+        "actor": "compat-fixture",
+        "changes": [
+          {
+            "action": "move",
+            "after": {
+              "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+              "path": "notes/two.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "a1ddadb3464684074fa31739fd43f80c855f580eae1cdbded116fc45c1b26b2e"
+            },
+            "before": {
+              "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+              "path": "notes/one.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "9b81ecd091fbede61154f40f282010e8b2f00587b6ca8e313c86ae9cd5638d9a"
+            }
+          }
+        ],
+        "commit_id": "399f0e0a5ec1ff3cbad1823596845d2d2e4a12c2568216efe8bc1ad77d8f26c6",
+        "origin": "compat-test",
+        "parent_id": "5ef854dcdd47c6017b5d50b55c28cfd219966a1524283e464d18e8b19b19ffd5",
+        "reason": "freeze format-v2 compatibility",
+        "timestamp": "2026-01-02T03:04:07.000000Z",
+        "tree_id": "89402ef427fa4050780e500f93e3af01ff44d19784a682ffaf219dae9d1fcfd5"
+      },
+      "name": "move",
+      "resources": [
+        {
+          "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+          "path": "notes/two.md",
+          "resource_id": "note",
+          "state": "active",
+          "version_id": "a1ddadb3464684074fa31739fd43f80c855f580eae1cdbded116fc45c1b26b2e"
+        }
+      ],
+      "visible_files": {
+        "notes/two.md": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a"
+      }
+    },
+    {
+      "commit": {
+        "actor": "compat-fixture",
+        "changes": [
+          {
+            "action": "archive",
+            "after": {
+              "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+              "path": "notes/two.md",
+              "resource_id": "note",
+              "state": "archived",
+              "version_id": "bde96d80c34309323242b583eb8d9cedf6416f59fffc03ff36aed53b0d6799d8"
+            },
+            "before": {
+              "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+              "path": "notes/two.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "a1ddadb3464684074fa31739fd43f80c855f580eae1cdbded116fc45c1b26b2e"
+            }
+          }
+        ],
+        "commit_id": "fefd30960df8450a7ecc660c435cb96529666da80e95c7e2dfb3b80c3c9398c2",
+        "origin": "compat-test",
+        "parent_id": "399f0e0a5ec1ff3cbad1823596845d2d2e4a12c2568216efe8bc1ad77d8f26c6",
+        "reason": "freeze format-v2 compatibility",
+        "timestamp": "2026-01-02T03:04:08.000000Z",
+        "tree_id": "c01e1f1a818aa3b482007534551946628b4d6e9dd6273ecab32fe0852c8930a8"
+      },
+      "name": "archive",
+      "resources": [
+        {
+          "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+          "path": "notes/two.md",
+          "resource_id": "note",
+          "state": "archived",
+          "version_id": "bde96d80c34309323242b583eb8d9cedf6416f59fffc03ff36aed53b0d6799d8"
+        }
+      ],
+      "visible_files": {}
+    },
+    {
+      "commit": {
+        "actor": "compat-fixture",
+        "changes": [
+          {
+            "action": "restore",
+            "after": {
+              "blob_id": "09204dbfbdb8fc121fb2a47988fe1a42a1981ac4e16ea4afc915e2d87b40d324",
+              "path": "notes/restored.md",
+              "resource_id": "note",
+              "state": "active",
+              "version_id": "7008783e9e242414005741b58ad0950c234279ff5e39cff508b9376919399bca"
+            },
+            "before": {
+              "blob_id": "27dd8ed44a83ff94d557f9fd0412ed5a8cbca69ea04922d88c01184a07300a5a",
+              "path": "notes/two.md",
+              "resource_id": "note",
+              "state": "archived",
+              "version_id": "bde96d80c34309323242b583eb8d9cedf6416f59fffc03ff36aed53b0d6799d8"
+            }
+          }
+        ],
+        "commit_id": "375474c04252033a7e16d98266ce940e69999ffe7840cb2f7cb67b0ed57cca59",
+        "origin": "compat-test",
+        "parent_id": "fefd30960df8450a7ecc660c435cb96529666da80e95c7e2dfb3b80c3c9398c2",
+        "reason": "freeze format-v2 compatibility",
+        "timestamp": "2026-01-02T03:04:09.000000Z",
+        "tree_id": "4953da134bb8d512d17dd4ba51cea64060f3222ede3fa988c0c9d617e884f5f2"
+      },
+      "name": "restore",
+      "resources": [
+        {
+          "blob_id": "09204dbfbdb8fc121fb2a47988fe1a42a1981ac4e16ea4afc915e2d87b40d324",
+          "path": "notes/restored.md",
+          "resource_id": "note",
+          "state": "active",
+          "version_id": "7008783e9e242414005741b58ad0950c234279ff5e39cff508b9376919399bca"
+        }
+      ],
+      "visible_files": {
+        "notes/restored.md": "09204dbfbdb8fc121fb2a47988fe1a42a1981ac4e16ea4afc915e2d87b40d324"
+      }
+    }
+  ],
+  "objects": {
+    "blob": {
+      "bytes_hex": "6f6e650a",
+      "id": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806",
+      "sha256": "2c8b08da5ce60398e1f19af0e5dccc744df274b826abe585eaba68c525434806"
+    },
+    "commit": {
+      "bytes_hex": "7b226163746f72223a22636f6d7061742d66697874757265222c226368616e676573223a5b7b22616374696f6e223a22637265617465222c226166746572223a7b22626c6f625f6964223a2232633862303864613563653630333938653166313961663065356463636337343464663237346238323661626535383565616261363863353235343334383036222c2270617468223a226e6f7465732f6f6e652e6d64222c227265736f757263655f6964223a226e6f7465222c227374617465223a22616374697665222c2276657273696f6e5f6964223a2233313139303338363130326665376633613733343962613337343364626337633161356438366662396432323766376532383435346138386332386635623564227d2c226265666f7265223a6e756c6c7d5d2c226b696e64223a22636f6d6d6974222c226f726967696e223a22636f6d7061742d74657374222c22706172656e745f6964223a6e756c6c2c22726561736f6e223a22667265657a6520666f726d61742d763220636f6d7061746962696c697479222c2274696d657374616d70223a22323032362d30312d30325430333a30343a30352e3030303030305a222c22747265655f6964223a2261333732626430653764396565353466346236613834343363626330626266393136343861636431363064333930353432663835303239396539653837323635222c2276657273696f6e223a327d0a",
+      "id": "52ef4cb25bc94df2ec73fb36ad008254c61be8e431f98b5e243fb814ec00afd8",
+      "sha256": "52ef4cb25bc94df2ec73fb36ad008254c61be8e431f98b5e243fb814ec00afd8"
+    },
+    "tree": {
+      "bytes_hex": "7b22656e7472696573223a5b7b226b696e64223a2273756274726565222c226e616d65223a226e6f746573222c22747265655f6964223a2236326133353631326562343831353363303065393735363662646635303666633732323961303635323464333032626338333666316466313636326237363064227d5d2c226b696e64223a2274726565222c2276657273696f6e223a327d0a",
+      "id": "a372bd0e7d9ee54f4b6a8443cbc0bbf91648acd160d390542f850299e9e87265",
+      "sha256": "a372bd0e7d9ee54f4b6a8443cbc0bbf91648acd160d390542f850299e9e87265"
+    }
+  }
+}
