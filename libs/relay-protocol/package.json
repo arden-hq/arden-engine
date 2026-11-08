@@ -20,7 +20,8 @@
     "dist/**/*.js.map",
     "dist/**/*.d.ts.map",
     "test-vectors.json",
-    "LICENSE"
+    "LICENSE",
+    "src"
   ],
   "sideEffects": false,
   "scripts": {

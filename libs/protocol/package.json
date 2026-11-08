@@ -38,7 +38,8 @@
     "dist/**/*.js.map",
     "dist/**/*.d.ts.map",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "sideEffects": false,
   "keywords": [
