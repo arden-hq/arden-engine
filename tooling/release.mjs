@@ -2,6 +2,7 @@
 //
 //   node tooling/release.mjs version 0.2.0   set that version in every workspace package
 //   node tooling/release.mjs publish         publish every public package whose version is not on npm yet
+//   node tooling/release.mjs trust           let the release workflow publish each package (once per new package)
 //
 // `just release 0.2.0` runs `version`, commits and tags v0.2.0. Pushing the tag
 // starts .github/workflows/release.yml, which runs `publish` with npm trusted
@@ -108,7 +109,19 @@ const publish = () => {
   }
 }
 
+/** Let .github/workflows/release.yml publish every public package (npm trusted
+ * publishing). Run once per new package, after its first manual publish. */
+const trust = () => {
+  for (const { json } of publishOrder())
+    execFileSync(
+      "npm",
+      ["trust", "github", json.name, "--repo", "arden-hq/arden-engine", "--file", "release.yml", "--yes"],
+      { stdio: "inherit" }
+    )
+}
+
 const [mode, argument] = process.argv.slice(2)
 if (mode === "version") setVersion(argument)
 else if (mode === "publish") publish()
-else fail("Usage: node tooling/release.mjs version X.Y.Z | publish")
+else if (mode === "trust") trust()
+else fail("Usage: node tooling/release.mjs version X.Y.Z | publish | trust")
