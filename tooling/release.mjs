@@ -43,6 +43,14 @@ const setVersion = (version) => {
     json.version = version
     writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`)
   }
+  // Bun packs `workspace:*` with the version bun.lock records for each
+  // workspace, and `bun install` never refreshes it, so write it here.
+  const lockPath = path.join(root, "bun.lock")
+  const lock = readFileSync(lockPath, "utf8").replace(
+    /("name": "@arden-hq\/[^"]+",\s*"version": ")[^"]+"/g,
+    (_, head) => `${head}${version}"`
+  )
+  writeFileSync(lockPath, lock)
   console.log(`Every package is now ${version}.`)
 }
 
@@ -102,6 +110,14 @@ const publish = () => {
     execFileSync("bun", ["pm", "pack", "--destination", out], { cwd: path.join(root, dir), stdio: "inherit" })
     const tarball = readdirSync(out).find((name) => !before.has(name))
     if (tarball === undefined) fail(`Bun did not pack ${json.name}.`)
+    const packed = JSON.parse(
+      execFileSync("tar", ["-xzOf", path.join(out, tarball), "package/package.json"], { encoding: "utf8" })
+    )
+    const stale = Object.entries({ ...packed.dependencies, ...packed.peerDependencies }).filter(
+      ([name, spec]) => name.startsWith("@arden-hq/") && spec !== version
+    )
+    if (stale.length > 0)
+      fail(`${json.name} would depend on ${stale.map(([name, spec]) => `${name}@${spec}`).join(", ")}, not ${version}.`)
     const result = spawnSync("npm", ["publish", path.join(out, tarball), "--access", "public", ...provenance], {
       encoding: "utf8",
       stdio: ["ignore", "inherit", "pipe"]

@@ -19,7 +19,7 @@
     },
     "apps/cli": {
       "name": "@arden-hq/cli",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "bin": {
         "arden": "./dist/main.js",
       },
@@ -36,7 +36,7 @@
     },
     "apps/relay": {
       "name": "@arden-hq/relay",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/relay-protocol": "workspace:*",
       },
@@ -47,7 +47,7 @@
     },
     "apps/server-ts": {
       "name": "@arden-hq/server",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/answer-ui": "workspace:*",
         "@arden-hq/jobs": "workspace:*",
@@ -89,7 +89,7 @@
     },
     "libs/answer-ui": {
       "name": "@arden-hq/answer-ui",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/std": "workspace:*",
         "@openuidev/lang-core": "1.1.0",
@@ -105,7 +105,7 @@
     },
     "libs/headless": {
       "name": "@arden-hq/headless",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/protocol": "workspace:*",
         "@arden-hq/std": "workspace:*",
@@ -118,7 +118,7 @@
     },
     "libs/jobs": {
       "name": "@arden-hq/jobs",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/std": "workspace:*",
       },
@@ -131,7 +131,7 @@
     },
     "libs/journal": {
       "name": "@arden-hq/journal",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "devDependencies": {
         "@effect/sql-sqlite-node": "catalog:",
         "@types/node": "catalog:",
@@ -145,7 +145,7 @@
     },
     "libs/loop": {
       "name": "@arden-hq/loop",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/std": "workspace:*",
         "eventsource-parser": "4.1.0",
@@ -158,14 +158,14 @@
     },
     "libs/prompt-template": {
       "name": "@arden-hq/prompt-template",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "devDependencies": {
         "typescript": "catalog:",
       },
     },
     "libs/protocol": {
       "name": "@arden-hq/protocol",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/std": "workspace:*",
         "mdast-util-from-markdown": "2.0.3",
@@ -183,7 +183,7 @@
     },
     "libs/relay-protocol": {
       "name": "@arden-hq/relay-protocol",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/std": "workspace:*",
         "@noble/ciphers": "2.4.0",
@@ -199,7 +199,7 @@
     },
     "libs/revisions": {
       "name": "@arden-hq/revisions",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@arden-hq/std": "workspace:*",
         "@effect/platform-node": "catalog:",
@@ -219,7 +219,7 @@
     },
     "libs/sqlite-thread": {
       "name": "@arden-hq/sqlite-thread",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "devDependencies": {
         "@types/node": "catalog:",
         "effect": "catalog:",
@@ -231,7 +231,7 @@
     },
     "libs/std": {
       "name": "@arden-hq/std",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "devDependencies": {
         "@types/node": "catalog:",
         "typescript": "catalog:",
