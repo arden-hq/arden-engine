@@ -149,8 +149,7 @@ const tables: Readonly<Record<string, RouteTable>> = {
     offers: () => mcpRoutes.offers("session-1")
   }),
   mobileRoutes: table(mobileRoutes, {
-    conversation: () => mobileRoutes.conversation(sessionId, "cursor-1"),
-    turn: () => mobileRoutes.turn(sessionId, "turn-1")
+    conversation: () => mobileRoutes.conversation(sessionId, "cursor-1")
   }),
   modelRoutes: table(modelRoutes, {}),
   permissionRoutes: table(permissionRoutes, {

@@ -14,11 +14,6 @@ const allowed: ReadonlyArray<{
     pattern: new RegExp(`^/mobile/sessions/${segment}/conversation$`),
     query: new Set(["before"])
   },
-  {
-    method: "GET",
-    pattern: new RegExp(`^/mobile/sessions/${segment}/turns/${segment}$`),
-    query: new Set()
-  },
   { method: "POST", pattern: new RegExp(`^/spaces/${segment}/conversation$`), query: new Set() }
 ]
 

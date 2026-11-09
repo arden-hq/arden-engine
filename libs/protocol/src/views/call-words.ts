@@ -81,12 +81,6 @@ export function callSubject(call: CallWordsInput, max: number): CallSubject | nu
   return subjectFromArgs(call.args, max)
 }
 
-/** The same object as one clipped line, for the places that only say it. */
-export function callDetail(call: CallWordsInput, max: number): string | null {
-  const subject = callSubject(call, max)
-  return subject === null ? null : clipLine(subject.value, max)
-}
-
 /** The row kind the desktop gives one `phase()` of a Code Mode script; no
  *  tool has this name. */
 export const CODE_MODE_PHASE_KIND = "code_mode_phase"

@@ -5,6 +5,7 @@ import {
   RuntimeRunStatusSchema
 } from "../common/schema.js"
 import { ChatSentFromSchema } from "../chat/schema.js"
+import { SpaceMarkLookSchema } from "../spaces/schema.js"
 
 /**
  * The phone's views: thin compositions the server derives with the same
@@ -116,7 +117,10 @@ export const MobileSpacesSchema = Schema.Struct({
       /** The Space's own conversation; null until it has one (opening the Space
        *  with `POST /spaces/:id/conversation` makes it). */
       conversation_session_id: Schema.NullOr(Id),
-      state_line: MobileStateLineSchema
+      state_line: MobileStateLineSchema,
+      /** How the owner set the Space's orb (the desktop's `SpaceMark`); null draws the standard
+       *  look. An older phone ignores it. */
+      mark: Schema.NullOr(SpaceMarkLookSchema)
     })
   ),
   /** Chats filed on no Space, most recent first. */
@@ -134,10 +138,10 @@ export const MobileSpacesSchema = Schema.Struct({
   cursor: Seq
 })
 
-/** One row of a conversation, in time order: what you said, one fold line
- *  for a turn's work, what Arden replied, and what arrived from elsewhere —
- *  a chat's handoff, a sender's row (an agent, an automation, a workflow, a
- *  command), news of a Task or run, and a line for each chat Arden sent to.
+/** One row of a conversation, in time order: what you said, what Arden
+ *  replied, and what arrived from elsewhere — a chat's handoff, a sender's row
+ *  (an agent, an automation, a workflow, a command), news of a Task or run, and
+ *  a line for each chat Arden sent to.
  *  Markdown links are rewritten to `arden://session|space|task/<id>`; a link
  *  the phone cannot open is left as its words. */
 export const MobileConversationItemSchema = Schema.Union([
@@ -159,15 +163,6 @@ export const MobileConversationItemSchema = Schema.Union([
     recipe: Schema.NullOr(Schema.String),
     /** The UI surface that wrote the message's words for the person to confirm. */
     sent_from: Schema.NullOr(ChatSentFromSchema)
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("work"),
-    turn_id: Id,
-    /** What the turn did ("Read files, searched email"), or how it ended. */
-    summary: Schema.String,
-    /** The turn's length, shown after the summary as its quiet second part;
-     *  null when the summary already says it (or it is unknown). */
-    seconds: Schema.NullOr(Seq)
   }),
   Schema.Struct({ kind: Schema.Literal("reply"), id: Id, markdown: Schema.String }),
   Schema.Struct({
@@ -222,42 +217,6 @@ export const MobileConversationSchema = Schema.Struct({
   latest_event_seq: Seq
 })
 
-/** One step of a turn's tool rail: a call, or what Arden said between calls. */
-export const MobileTurnStepSchema = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("tool"),
-    /** The tool call's id. */
-    id: Id,
-    /** The call's label as the desktop row shows it: the model's title for
-     *  the call, else the tool's verb ("Searched email"). */
-    title: Schema.String,
-    /** What the call acted on (a path, query, command), one line; null when
-     *  its arguments name nothing a reader can use. */
-    detail: Schema.NullOr(Schema.String),
-    state: Schema.Literals(["done", "failed", "running"]),
-    /** How long the call ran; null while it runs or when unknown. */
-    seconds: Schema.NullOr(Seq)
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("note"),
-    id: Id,
-    /** Plain text or Markdown, clipped. */
-    text: Schema.String
-  })
-]).pipe(Schema.toTaggedUnion("kind"))
-
-/** One turn's work, step by step, for the phone's rail under a fold line. */
-export const MobileTurnSchema = Schema.Struct({
-  turn_id: Id,
-  /** The fold line the conversation shows for this turn. */
-  summary: Schema.String,
-  /** As on the conversation's work item: null when the summary already says
-   *  it, while the turn runs, or when unknown. */
-  seconds: Schema.NullOr(Seq),
-  /** Oldest first; a long turn ends with a note counting the steps left out. */
-  steps: Schema.Array(MobileTurnStepSchema)
-})
-
 export type MobileChange = typeof MobileChangeSchema.Type
 export type MobileAsk = typeof MobileAskSchema.Type
 export type MobileLink = typeof MobileLinkSchema.Type
@@ -267,5 +226,3 @@ export type MobileStateLine = typeof MobileStateLineSchema.Type
 export type MobileSpaces = typeof MobileSpacesSchema.Type
 export type MobileConversationItem = typeof MobileConversationItemSchema.Type
 export type MobileConversation = typeof MobileConversationSchema.Type
-export type MobileTurnStep = typeof MobileTurnStepSchema.Type
-export type MobileTurn = typeof MobileTurnSchema.Type

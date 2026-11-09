@@ -1,8 +1,7 @@
 import {
   MobileConversationSchema,
   MobileSpacesSchema,
-  MobileHomeSchema,
-  MobileTurnSchema
+  MobileHomeSchema
 } from "@arden-hq/protocol/effect/mobile"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/unstable/httpapi"
@@ -25,10 +24,5 @@ export class MobileApi extends HttpApiGroup.make("mobile", { topLevel: true }).a
       HttpApiError.NotFoundNoContent,
       HttpApiError.InternalServerErrorNoContent
     ]
-  }),
-  HttpApiEndpoint.get("turn", "/mobile/sessions/:sessionId/turns/:turnId", {
-    params: { sessionId: Schema.NonEmptyString, turnId: Schema.NonEmptyString },
-    success: MobileTurnSchema,
-    error: [HttpApiError.NotFoundNoContent, HttpApiError.InternalServerErrorNoContent]
   })
 ) {}

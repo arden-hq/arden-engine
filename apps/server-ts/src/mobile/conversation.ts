@@ -9,8 +9,7 @@ import {
   type HistoryMessage,
   type HistoryResponse,
   type HistoryToolCall,
-  type Interaction,
-  type TurnShell
+  type Interaction
 } from "@arden-hq/protocol/chat"
 import type { MobileConversation, MobileConversationItem } from "@arden-hq/protocol/mobile"
 import type { RunProgress } from "@arden-hq/protocol/runs"
@@ -19,9 +18,7 @@ import {
   isCommandArrival,
   isInternalWorkMessage,
   isCorrespondence,
-  isSenderArrival,
-  turnCallsSummaryText,
-  turnHeading
+  isSenderArrival
 } from "@arden-hq/protocol/views"
 
 import type { JsonObject } from "../persistence/json.js"
@@ -49,27 +46,10 @@ export function conversationPage({
 }): Page {
   const active = history.runtime.active_run
   const running = active !== null && isActiveRunStatus(active.status) ? active : undefined
-  const shells = new Map((history.turn_shells ?? []).map((shell) => [shell.turn_id, shell]))
   const items: MobileConversationItem[] = []
-  const folded = new Set<string>()
   const sentTo = new Map<string, Set<string>>()
-  const fold = (turnId: string) => {
-    if (folded.has(turnId)) return
-    folded.add(turnId)
-    const shell = shells.get(turnId)
-    if (shell !== undefined && turnId !== running?.turn_id) items.push(...workItem(shell))
-  }
   for (const message of history.messages) {
-    const [first, ...rest] = messageItems(message, lookups)
-    if (first !== undefined && OPENING.has(first.kind) && !folded.has(message.turn_id)) {
-      items.push(first)
-      fold(message.turn_id)
-      items.push(...rest)
-    } else {
-      if (first !== undefined || shells.get(message.turn_id)?.has_tool_work === true)
-        fold(message.turn_id)
-      if (first !== undefined) items.push(first, ...rest)
-    }
+    items.push(...messageItems(message, lookups))
     for (const call of message.role === "assistant" ? (message.tool_calls ?? []) : []) {
       const sent = sentItem(call, lookups)
       if (sent === undefined) continue
@@ -91,8 +71,6 @@ export function conversationPage({
     latest_event_seq: history.runtime.latest_event_seq
   }
 }
-
-const OPENING: ReadonlySet<MobileConversationItem["kind"]> = new Set(["user", "handoff", "sender"])
 
 export function conversationLookupKeys(history: HistoryResponse): {
   readonly refs: ReadonlyArray<string>
@@ -295,25 +273,6 @@ function phoneLinks(markdown: string, lookups: ConversationLookups): string {
       ? words
       : `[${words}](arden://${home.kind}/${encodeURIComponent(home.id)})`
   })
-}
-
-function workItem(shell: TurnShell): MobileConversationItem[] {
-  return shell.has_work ? [{ kind: "work", turn_id: shell.turn_id, ...foldLine(shell) }] : []
-}
-
-export function foldLine(shell: TurnShell): { summary: string; seconds: number | null } {
-  const ms = Date.parse(shell.ended_at) - Date.parse(shell.started_at)
-  const duration = Number.isFinite(ms) && ms >= 0 ? ms : null
-  const heading = turnHeading(
-    duration,
-    false,
-    turnCallsSummaryText(shell.tool_calls ?? []),
-    !shell.has_tool_work
-  )
-  return {
-    summary: heading.text,
-    seconds: heading.time === null || duration === null ? null : Math.round(duration / 1000)
-  }
 }
 
 function liveText(progress: RunProgress | undefined): string {

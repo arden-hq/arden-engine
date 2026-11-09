@@ -1,10 +1,5 @@
 import { decoderFor } from "../common/boundary.js"
-import {
-  MobileConversationSchema,
-  MobileSpacesSchema,
-  MobileHomeSchema,
-  MobileTurnSchema
-} from "./schema.js"
+import { MobileConversationSchema, MobileSpacesSchema, MobileHomeSchema } from "./schema.js"
 
 export type {
   MobileAsk,
@@ -15,16 +10,13 @@ export type {
   MobileHome,
   MobileLetter,
   MobileLink,
-  MobileStateLine,
-  MobileTurn,
-  MobileTurnStep
+  MobileStateLine
 } from "./schema.js"
 
 export const mobileDecoders = {
   home: decoderFor(MobileHomeSchema, "Invalid phone Home"),
   spaces: decoderFor(MobileSpacesSchema, "Invalid phone Spaces"),
-  conversation: decoderFor(MobileConversationSchema, "Invalid phone conversation"),
-  turn: decoderFor(MobileTurnSchema, "Invalid phone turn")
+  conversation: decoderFor(MobileConversationSchema, "Invalid phone conversation")
 } as const
 
 export const mobileRoutes = {
@@ -33,7 +25,5 @@ export const mobileRoutes = {
   conversation: (sessionId: string, before?: string): string =>
     `/mobile/sessions/${encodeURIComponent(sessionId)}/conversation${
       before === undefined ? "" : `?before=${encodeURIComponent(before)}`
-    }`,
-  turn: (sessionId: string, turnId: string): string =>
-    `/mobile/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`
+    }`
 } as const
