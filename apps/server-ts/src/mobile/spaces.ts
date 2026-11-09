@@ -45,8 +45,7 @@ export function mobileSpace({
     state_line:
       tone === "asks" && ask !== undefined
         ? { tone, text: ask.text, more: ask.more }
-        : { tone, text: "", more: 0 },
-    mark: space.mark
+        : { tone, text: "", more: 0 }
   }
 }
 

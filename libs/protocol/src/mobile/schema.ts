@@ -5,7 +5,6 @@ import {
   RuntimeRunStatusSchema
 } from "../common/schema.js"
 import { ChatSentFromSchema } from "../chat/schema.js"
-import { SpaceMarkLookSchema } from "../spaces/schema.js"
 
 /**
  * The phone's views: thin compositions the server derives with the same
@@ -117,10 +116,7 @@ export const MobileSpacesSchema = Schema.Struct({
       /** The Space's own conversation; null until it has one (opening the Space
        *  with `POST /spaces/:id/conversation` makes it). */
       conversation_session_id: Schema.NullOr(Id),
-      state_line: MobileStateLineSchema,
-      /** How the owner set the Space's orb (the desktop's `SpaceMark`); null draws the standard
-       *  look. An older phone ignores it. */
-      mark: Schema.NullOr(SpaceMarkLookSchema)
+      state_line: MobileStateLineSchema
     })
   ),
   /** Chats filed on no Space, most recent first. */
