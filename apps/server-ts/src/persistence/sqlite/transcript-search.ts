@@ -15,7 +15,8 @@ import {
   TranscriptQueryError,
   TranscriptSearchError,
   type ConversationFind,
-  type ConversationFindHit
+  type ConversationFindHit,
+  type ChatSearchChat
 } from "../transcript/queries.js"
 import { findTextRanges, isAgentInstruction, isInternalWorkMessage } from "@arden-hq/protocol/views"
 import {
@@ -25,7 +26,13 @@ import {
   type TranscriptSearchInput
 } from "../transcript/model.js"
 import { catchUpTranscriptSearch } from "./search.js"
-import { findSnippet, snippetWithFileNames, SNIPPET_CLOSE, SNIPPET_OPEN } from "./find-snippet.js"
+import {
+  findSnippet,
+  markWords,
+  snippetWithFileNames,
+  visibleText,
+  wordStartRanges
+} from "./find-snippet.js"
 import { agentResultPresentation } from "./agent-result-presentation.js"
 import { decodeJson } from "./json.js"
 
@@ -272,9 +279,9 @@ interface ChatSearchRow {
   readonly message_rowid: number
   readonly session_id: string
   readonly session_name: string | null
+  readonly last_activity: string
   readonly message_id: string
   readonly created_at: string
-  readonly snippet: string | null
   readonly search_text: string | null
   readonly message_json: string
 }
@@ -345,6 +352,11 @@ const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInternalSea
 )
 
 const CHAT_SEARCH_MIN_CHARS = 2
+/** Chats whose name matches, listed before the chats whose messages match. */
+const CHAT_SEARCH_NAMED = 5
+/** Matches read per query. Larger than a page of chats: a match only inside a link
+ * target is read and dropped, and words common in links ("https") have many. */
+const CHAT_SEARCH_BATCH = 100
 
 const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function* (
   searchSql: SqlClient.SqlClient,
@@ -359,7 +371,22 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
   `
   const match =
     input.query.trim().length < CHAT_SEARCH_MIN_CHARS ? undefined : ftsQueryForFindText(input.query)
-  if (match === undefined) return { hits: [], hasMore: false }
+  if (match === undefined) return { chats: [], hasMore: false }
+  // Names are matched here, not in SQL: SQLite folds case for ASCII only.
+  // wordStartRanges matches words the way the message index does. The owner has
+  // thousands of chats at most.
+  const namedRows = yield* searchSql<NamedChatRow>`
+    SELECT s.session_id, s.name, s.last_activity
+    FROM sessions AS s
+    WHERE ${ownerChat("s")} AND s.name IS NOT NULL
+    ORDER BY s.last_activity DESC
+  `.pipe(Effect.mapError((cause) => searchError("storage", "Could not search chat names", cause)))
+  const namedAll = namedRows.flatMap((row) => {
+    const ranges = wordStartRanges(row.name, input.query)
+    return ranges === undefined ? [] : [{ row, ranges }]
+  })
+  const namedMatches = namedAll.length
+  const named = namedAll.slice(0, CHAT_SEARCH_NAMED)
   yield* catchUpTranscriptSearch(searchSql).pipe(
     Effect.mapError((cause) => searchError("storage", "Transcript search is not ready", cause))
   )
@@ -369,21 +396,27 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
   // outside the owner's chats (most of them: agent runs) is dropped against
   // the set of their message rowids, read from the (session_id, seq) index,
   // before its message row is read; the unary + keeps that set from driving
-  // the index lookup.
-  const rows: ChatSearchRow[] = []
+  // the index lookup. Each chat keeps its newest match: a chat already found
+  // is left out of the next batches, so one long chat cannot use up the walk.
+  const newest = new Map<string, ChatSearchRow & { readonly marked: string }>()
+  const namedIds = new Set(named.map(({ row }) => row.session_id))
+  const messageChats = () => [...newest.keys()].filter((id) => !namedIds.has(id)).length
   let beforeRowId: number | undefined
-  while (rows.length <= input.limit) {
+  while (messageChats() <= input.limit) {
     const cursor =
       beforeRowId === undefined
         ? searchSql``
         : searchSql`AND session_messages_fts.rowid < ${beforeRowId}`
+    const seen = [...newest.keys()]
+    const unseen =
+      seen.length === 0 ? searchSql`` : searchSql`AND m.session_id NOT IN ${searchSql.in(seen)}`
     const batch = yield* searchSql<ChatSearchRow>`
     SELECT m.message_rowid,
            s.session_id,
            s.name AS session_name,
+           s.last_activity,
            m.message_id,
            m.created_at,
-           snippet(session_messages_fts, 0, ${SNIPPET_OPEN}, ${SNIPPET_CLOSE}, '…', 24) AS snippet,
            m.search_text,
            m.message_json
     FROM search.session_messages_fts
@@ -400,9 +433,10 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
       -- Only rows the chat draws, so opening a hit lands on something.
       AND ${conversation}
       AND session_messages_fts.search_text = m.search_text
+      ${unseen}
       ${cursor}
     ORDER BY session_messages_fts.rowid DESC
-    LIMIT ${input.limit + 1}
+    LIMIT ${CHAT_SEARCH_BATCH}
     `.pipe(
       Effect.mapError((cause) =>
         isMalformedFtsQuery(cause)
@@ -411,30 +445,103 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
       )
     )
     for (const row of batch) {
+      if (newest.has(row.session_id)) continue
+      const marked = markWords(
+        visibleText(stripCitationMarkers(row.search_text ?? "")),
+        input.query
+      )
+      if (marked === undefined) continue
       if (yield* isInternalSearchMessage(searchSql, row)) continue
-      rows.push(row)
-      if (rows.length > input.limit) break
+      newest.set(row.session_id, { ...row, marked })
+      if (messageChats() > input.limit) break
     }
-    if (batch.length < input.limit + 1) break
+    if (batch.length < CHAT_SEARCH_BATCH) break
     beforeRowId = batch.at(-1)?.message_rowid
   }
-  return {
-    hits: rows.slice(0, input.limit).map((row) => {
-      const line = findSnippet(
-        snippetWithFileNames(stripCitationMarkers(row.snippet ?? ""), row.search_text ?? "")
+  // A chat that matches only by name shows its newest message, so every row has
+  // the same two lines.
+  const previews = new Map<string, ChatSearchRow>()
+  for (const { row: chat } of named) {
+    if (newest.has(chat.session_id)) continue
+    const recent = yield* searchSql<ChatSearchRow>`
+      SELECT m.message_rowid, s.session_id, s.name AS session_name, s.last_activity,
+             m.message_id, m.created_at, m.search_text, m.message_json
+      FROM session_messages AS m
+      JOIN sessions AS s ON s.session_id = m.session_id
+      WHERE m.session_id = ${chat.session_id} AND m.search_text IS NOT NULL AND ${conversation}
+      ORDER BY m.seq DESC
+      LIMIT 5
+    `.pipe(
+      Effect.mapError((cause) =>
+        searchError("storage", "Could not read a chat's newest message", cause)
       )
-      return {
-        sessionId: row.session_id,
-        sessionName: row.session_name,
-        messageId: row.message_id,
-        createdAt: row.created_at,
-        snippet: line.text,
-        ranges: line.ranges
-      }
-    }),
-    hasMore: rows.length > input.limit
+    )
+    for (const row of recent) {
+      if (yield* isInternalSearchMessage(searchSql, row)) continue
+      previews.set(row.session_id, row)
+      break
+    }
+  }
+  const lineOf = (row: ChatSearchRow, marked: string) => {
+    const line = findSnippet(snippetWithFileNames(marked, row.search_text ?? ""))
+    return {
+      messageId: row.message_id,
+      createdAt: row.created_at,
+      snippet: line.text,
+      ranges: line.ranges
+    }
+  }
+  const entry = (
+    chat: {
+      readonly sessionId: string
+      readonly sessionName: string | null
+      readonly lastActivity: string
+    },
+    nameRanges: ReadonlyArray<readonly [number, number]>
+  ): ChatSearchChat => {
+    const hit = newest.get(chat.sessionId)
+    if (hit !== undefined)
+      return { ...chat, nameRanges, match: "message", hit: lineOf(hit, hit.marked) }
+    const preview = previews.get(chat.sessionId)
+    return {
+      ...chat,
+      nameRanges,
+      match: "name",
+      preview:
+        preview === undefined
+          ? undefined
+          : lineOf(preview, visibleText(stripCitationMarkers(preview.search_text ?? "")))
+    }
+  }
+  const byMessage = [...newest.values()].filter((row) => !namedIds.has(row.session_id))
+  return {
+    chats: [
+      ...named.map(({ row, ranges }) =>
+        entry(
+          { sessionId: row.session_id, sessionName: row.name, lastActivity: row.last_activity },
+          ranges
+        )
+      ),
+      ...byMessage.slice(0, input.limit).map((row) =>
+        entry(
+          {
+            sessionId: row.session_id,
+            sessionName: row.session_name,
+            lastActivity: row.last_activity
+          },
+          []
+        )
+      )
+    ],
+    hasMore: byMessage.length > input.limit || named.length < namedMatches
   }
 })
+
+interface NamedChatRow {
+  readonly session_id: string
+  readonly name: string
+  readonly last_activity: string
+}
 
 const makeTranscriptSearch = (searchSql: SqlClient.SqlClient) => (input: TranscriptSearchInput) =>
   searchIn(searchSql, input).pipe(
@@ -504,7 +611,7 @@ const makeConversationFind = (sql: SqlClient.SqlClient, conversation: Statement.
     const hits: ConversationFindHit[] = []
     for (const row of rows.slice(0, FIND_MAX_ROWS)) {
       if (row.search_text === null || row.message_json === null) continue
-      const count = findTextRanges(row.search_text, needle).length
+      const count = findTextRanges(visibleText(row.search_text), needle).length
       if (count === 0) continue
       if (yield* isInternalSearchMessage(sql, { ...row, message_json: row.message_json })) continue
       if (hits.length === FIND_MAX_HITS) return { hits: hits.reverse(), truncated: true }

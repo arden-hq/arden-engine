@@ -271,10 +271,8 @@ export interface ChatFindResponse extends JsonRecord {
   readonly truncated: boolean
 }
 
-/** One message of another chat that matches a find across all chats. */
+/** One message that matches a find across all chats. */
 export interface ChatSearchHit extends JsonRecord {
-  readonly session_id: string
-  readonly session_name: string | null
   readonly message_id: string
   /** One line of the message, cut to start a little before its first match. */
   readonly snippet: string
@@ -283,9 +281,34 @@ export interface ChatSearchHit extends JsonRecord {
   readonly created_at: string
 }
 
-/** `GET /sessions/search`: the newest matches across all conversations. */
+interface ChatSearchChatBase extends JsonRecord {
+  readonly session_id: string
+  readonly session_name: string | null
+  /** Each match in `session_name`, as [start, end) offsets; empty when it does not match. */
+  readonly name_ranges: ReadonlyArray<readonly [start: number, end: number]>
+  readonly last_activity: string
+}
+
+/** A chat with a matching message, its newest one in `hit`; its name may match too. */
+export interface ChatSearchByMessage extends ChatSearchChatBase {
+  readonly match: "message"
+  readonly hit: ChatSearchHit
+}
+
+/** A chat whose name matches and no message does; `preview` is its newest message
+ * (no `ranges`), null when it has none to show. */
+export interface ChatSearchByName extends ChatSearchChatBase {
+  readonly match: "name"
+  readonly preview: ChatSearchHit | null
+}
+
+/** One chat that matches a find across all chats. */
+export type ChatSearchChat = ChatSearchByMessage | ChatSearchByName
+
+/** `GET /sessions/search`: chats whose name matches first, then chats whose messages
+ * match, the chat with the newest match first. One entry per chat. */
 export interface ChatSearchResponse extends JsonRecord {
-  readonly hits: ReadonlyArray<ChatSearchHit>
+  readonly chats: ReadonlyArray<ChatSearchChat>
   readonly has_more: boolean
 }
 

@@ -15,7 +15,7 @@ import {
   type SessionListEntry,
   type SessionListQuery
 } from "../../persistence/sessions/store.js"
-import { TranscriptQueries } from "../../persistence/transcript/queries.js"
+import { TranscriptQueries, type ChatSearchHit } from "../../persistence/transcript/queries.js"
 import {
   makeSessionExportModel,
   readSessionExportTranscript,
@@ -154,7 +154,9 @@ const listOptions = (query: {
       })
 })
 
-const CHAT_SEARCH_LIMIT = 30
+/** Chats whose messages match that a find across all chats returns. The panel shows
+ * about eight; the rest scroll, and `has_more` says there are more. */
+const CHAT_SEARCH_LIMIT = 20
 
 const sessionCursor = (session: SessionListEntry, sort: SessionListSort) =>
   sessionListCursorToWire({
@@ -438,14 +440,27 @@ export const SessionHandlers = HttpApiBuilder.group(
       .handle("search", ({ query }) =>
         transcript.searchChats({ query: query.q, limit: CHAT_SEARCH_LIMIT }).pipe(
           Effect.map((page) => ({
-            hits: page.hits.map((hit) => ({
-              session_id: hit.sessionId,
-              session_name: hit.sessionName,
-              message_id: hit.messageId,
-              snippet: hit.snippet,
-              ranges: hit.ranges,
-              created_at: hit.createdAt
-            })),
+            chats: page.chats.map((chat) => {
+              const base = {
+                session_id: chat.sessionId,
+                session_name: chat.sessionName,
+                name_ranges: chat.nameRanges,
+                last_activity: chat.lastActivity
+              }
+              const line = (hit: ChatSearchHit) => ({
+                message_id: hit.messageId,
+                snippet: hit.snippet,
+                ranges: hit.ranges,
+                created_at: hit.createdAt
+              })
+              return chat.match === "message"
+                ? { ...base, match: "message" as const, hit: line(chat.hit) }
+                : {
+                    ...base,
+                    match: "name" as const,
+                    preview: chat.preview === undefined ? null : line(chat.preview)
+                  }
+            }),
             has_more: page.hasMore
           })),
           Effect.mapError((error) =>

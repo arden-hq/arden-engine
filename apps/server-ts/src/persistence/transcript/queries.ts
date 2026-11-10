@@ -57,17 +57,36 @@ export interface ConversationFind {
   readonly truncated: boolean
 }
 
-interface ChatSearchHit {
-  readonly sessionId: string
-  readonly sessionName: string | null
+export interface ChatSearchHit {
   readonly messageId: string
   readonly createdAt: string
   readonly snippet: string
   readonly ranges: ReadonlyArray<readonly [start: number, end: number]>
 }
 
+interface ChatSearchChatBase {
+  readonly sessionId: string
+  readonly sessionName: string | null
+  readonly nameRanges: ReadonlyArray<readonly [start: number, end: number]>
+  readonly lastActivity: string
+}
+
+/** A chat with a matching message (its name may match too). */
+interface ChatSearchByMessage extends ChatSearchChatBase {
+  readonly match: "message"
+  readonly hit: ChatSearchHit
+}
+
+/** A chat whose name matches and no message does: its newest message, if any. */
+interface ChatSearchByName extends ChatSearchChatBase {
+  readonly match: "name"
+  readonly preview: ChatSearchHit | undefined
+}
+
+export type ChatSearchChat = ChatSearchByMessage | ChatSearchByName
+
 export interface ChatSearchPage {
-  readonly hits: ReadonlyArray<ChatSearchHit>
+  readonly chats: ReadonlyArray<ChatSearchChat>
   readonly hasMore: boolean
 }
 

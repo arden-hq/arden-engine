@@ -338,16 +338,32 @@ export const ChatSearchQuerySchema = withExtras({
   q: FindQueryTextSchema
 })
 
+const RangesSchema = Schema.Array(Schema.Tuple([NonNegativeIntSchema, NonNegativeIntSchema]))
+
+const ChatSearchHitSchema = withExtras({
+  message_id: Schema.NonEmptyString,
+  snippet: Schema.String,
+  ranges: RangesSchema,
+  created_at: IsoDateTimeStringSchema
+})
+
+const chatSearchBase = {
+  session_id: Schema.NonEmptyString,
+  session_name: Schema.NullOr(Schema.String),
+  name_ranges: RangesSchema,
+  last_activity: IsoDateTimeStringSchema
+}
+
 export const ChatSearchResponseSchema: Schema.Codec<ChatSearchResponse> = withExtras({
-  hits: Schema.Array(
-    withExtras({
-      session_id: Schema.NonEmptyString,
-      session_name: Schema.NullOr(Schema.String),
-      message_id: Schema.NonEmptyString,
-      snippet: Schema.String,
-      ranges: Schema.Array(Schema.Tuple([NonNegativeIntSchema, NonNegativeIntSchema])),
-      created_at: IsoDateTimeStringSchema
-    })
+  chats: Schema.Array(
+    Schema.Union([
+      withExtras({ ...chatSearchBase, match: Schema.Literal("message"), hit: ChatSearchHitSchema }),
+      withExtras({
+        ...chatSearchBase,
+        match: Schema.Literal("name"),
+        preview: Schema.NullOr(ChatSearchHitSchema)
+      })
+    ])
   ),
   has_more: Schema.Boolean
 })
