@@ -17,7 +17,9 @@
     "file_write",
     "file_edit",
     "web_search",
-    "web_fetch"
+    "web_fetch",
+    "skill"
   ],
-  "memory": false
+  "memory": false,
+  "commandSandbox": false
 }

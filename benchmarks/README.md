@@ -73,6 +73,11 @@ runner (`candidate.mjs`) sets them, and saves the evidence next to the result:
 - **Approvals.** Runs use the `allow` approval mode, so a command with host or
   network access runs without a card. A command asks for the sandbox only when
   the model passes `access: "sandbox"`.
+- **Arden's sandbox.** `"commandSandbox": false` in the profile starts the
+  server with its command sandbox off: every command runs with host access,
+  whatever the model asks for. Use it only where the trial already sits in a
+  throwaway container, as WildClawBench's does. Harbor's Codex agent and
+  WildClawBench's own Codex runner turn Codex's sandbox off the same way.
 - **Still from the host.** The prompt lists the command-line tools installed on
   the machine that runs the trial, and its time zone. In a container this is
   the image; on a bare host it is your machine.

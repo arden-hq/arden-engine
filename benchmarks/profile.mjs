@@ -21,6 +21,12 @@ export const ProfileSchema = Schema.Struct({
    * declared up front, as other harnesses present a benchmark's tools.
    */
   toolSearch: Schema.optionalKey(Schema.Boolean),
+  /**
+   * `false` runs every shell command without Arden's own sandbox, for a trial
+   * that already sits in a throwaway container. Other harnesses run these
+   * benchmarks the same way. Absent or `true`: the sandbox stays on.
+   */
+  commandSandbox: Schema.optionalKey(Schema.Boolean),
   /** Benchmark-owned stdio MCP servers; `environment` maps a server variable to a host variable name. */
   mcpServers: Schema.optionalKey(
     Schema.Array(

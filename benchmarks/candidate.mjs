@@ -157,7 +157,8 @@ async function main() {
       // and compacts only when the context fills: the engine's idle compaction
       // would otherwise fire on wall-clock time and make two equal trials differ.
       sharedSkillRoots: job.skills === undefined ? [] : [job.skills],
-      idleCompactionAfterMs: 0
+      idleCompactionAfterMs: 0,
+      ...(profile.commandSandbox === false ? { commandSandbox: false } : {})
     })
   let server = await start()
   let client = createHeadlessClient({ baseUrl: server.url, headers })
