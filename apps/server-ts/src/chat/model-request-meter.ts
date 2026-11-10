@@ -1,5 +1,6 @@
 import type { CompletionResponse, ModelProvider, ModelRequestMiddleware } from "@arden-hq/loop"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
+import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 
 interface MeterInput {
@@ -104,6 +105,17 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
             if (item._tag === "ProviderStreamRetry") {
               retries += 1
               scheduledBackoffMs += item.delayMs ?? 0
+              // A retry costs the run wall time; without this line a stall leaves no trace.
+              Effect.runSync(
+                Effect.logWarning("Model stream retry", {
+                  model: request.model,
+                  attempt: item.attempt,
+                  maxAttempts: item.maxAttempts,
+                  elapsedMs: elapsed,
+                  delayMs: item.delayMs ?? 0,
+                  reason: item.reason ?? "unknown"
+                })
+              )
             } else {
               firstItemMs ??= elapsed
             }

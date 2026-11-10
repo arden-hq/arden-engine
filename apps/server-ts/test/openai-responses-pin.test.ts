@@ -170,7 +170,8 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       _tag: "ProviderStreamRetry",
       attempt: 1,
       maxAttempts: 5,
-      delayMs: 5
+      delayMs: 5,
+      reason: expect.any(String)
     })
     expect((items.at(-1) as CompletionResponse).message.content).toBe("Recovered.")
   })
@@ -197,7 +198,8 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       _tag: "ProviderStreamRetry",
       attempt: 1,
       maxAttempts: 5,
-      delayMs: 20
+      delayMs: 20,
+      reason: expect.any(String)
     })
     expect(items).toHaveLength(2)
   })
@@ -228,7 +230,13 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(50)
     expect(items.slice(0, 2)).toEqual([
       { _tag: "TextDelta", content: "Stall" },
-      { _tag: "ProviderStreamRetry", attempt: 1, maxAttempts: 5, delayMs: 5 }
+      {
+        _tag: "ProviderStreamRetry",
+        attempt: 1,
+        maxAttempts: 5,
+        delayMs: 5,
+        reason: "OpenAI response stream became idle"
+      }
     ])
     expect((items.at(-1) as CompletionResponse).message.content).toBe("Recovered.")
   })

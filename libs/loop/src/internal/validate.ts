@@ -223,7 +223,8 @@ const checkStreamRetry = (value: Record<string, unknown>): ProviderStreamRetry =
     _tag: "ProviderStreamRetry",
     attempt: value.attempt as number,
     maxAttempts: value.maxAttempts as number,
-    ...(typeof value.delayMs === "number" ? { delayMs: value.delayMs } : {})
+    ...(typeof value.delayMs === "number" ? { delayMs: value.delayMs } : {}),
+    ...(typeof value.reason === "string" ? { reason: value.reason } : {})
   }
 }
 

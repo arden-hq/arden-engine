@@ -284,7 +284,8 @@ const streamResponse = async function* (
           _tag: "ProviderStreamRetry",
           attempt: attempts,
           maxAttempts: options.maxAttempts,
-          delayMs
+          delayMs,
+          reason: errorMessage(error, "Stream failed")
         }
         await waitBeforeRetry(delayMs, request.signal)
         continue

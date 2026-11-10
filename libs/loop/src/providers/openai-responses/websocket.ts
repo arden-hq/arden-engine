@@ -15,6 +15,7 @@ import {
   RetryableProviderError,
   HttpStatusError
 } from "../kit/index.js"
+import { errorMessage } from "@arden-hq/std/errors"
 import { OpenAiResponsesProviderError } from "./errors.js"
 import { asRecord, type RawResponseEvent } from "./items.js"
 import { makePayload } from "./request.js"
@@ -253,7 +254,13 @@ export const openResponsesSession = (options: {
         ) {
           recoveredRejections.add("context")
           close()
-          yield { _tag: "ProviderStreamRetry", attempt: 1, maxAttempts: 2, delayMs: 0 }
+          yield {
+            _tag: "ProviderStreamRetry",
+            attempt: 1,
+            maxAttempts: 2,
+            delayMs: 0,
+            reason: "turn context mismatch"
+          }
           connection = await connect()
           const { stream: _, ...body } = payload
           connection.socket.send({ type: "response.create", ...body })
@@ -442,14 +449,21 @@ export const openResponsesSession = (options: {
               _tag: "ProviderStreamRetry",
               attempt,
               maxAttempts: options.maxAttempts + 1,
-              delayMs: fallbackDelayMs
+              delayMs: fallbackDelayMs,
+              reason: `${errorMessage(cause, "WebSocket failed")}; falling back to HTTP`
             }
             if (fallbackDelayMs > 0) await backoffSleep(fallbackDelayMs, signal)
             signal.throwIfAborted()
             yield* await options.fallback(request)
             return
           }
-          yield { _tag: "ProviderStreamRetry", attempt, maxAttempts: options.maxAttempts, delayMs }
+          yield {
+            _tag: "ProviderStreamRetry",
+            attempt,
+            maxAttempts: options.maxAttempts,
+            delayMs,
+            reason: errorMessage(cause, "WebSocket failed")
+          }
           await backoffSleep(delayMs, signal)
         }
       }

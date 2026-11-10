@@ -94,6 +94,8 @@ export interface ProviderStreamRetry {
   readonly maxAttempts: number
   /** Backoff the provider will sleep before re-streaming, in milliseconds. */
   readonly delayMs?: number
+  /** Why the attempt failed, for logs. */
+  readonly reason?: string
 }
 
 export interface ProviderMessage {

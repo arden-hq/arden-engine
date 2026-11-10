@@ -298,7 +298,8 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       _tag: "ProviderStreamRetry",
       attempt: 1,
       maxAttempts: 5,
-      delayMs: expect.any(Number)
+      delayMs: expect.any(Number),
+      reason: "terminated"
     })
     expect(completionOf(items).message.content).toBe("Recovered.")
   })
