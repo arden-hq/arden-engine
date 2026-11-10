@@ -23,7 +23,6 @@ const Job = Schema.Struct({
   output: Schema.NonEmptyString,
   prompts: Schema.NonEmptyArray(Schema.NonEmptyString),
   // False sends each prompt as written, for a suite whose task uses no files.
-  nameWorkspace: Schema.optionalKey(Schema.Boolean),
   restartAfter: Schema.optionalKey(Schema.Array(Schema.Natural)),
   history: Schema.optionalKey(
     Schema.Array(
@@ -180,9 +179,7 @@ async function main() {
   }
   // A chat has no working folder of its own, so every prompt names the task's.
   const prompted = (prompt) =>
-    job.nameWorkspace === false
-      ? prompt
-      : `Your working folder is ${workspace}. Use absolute paths inside it, and pass it as the working directory of every command.\n\n${prompt}`
+    `Your working folder is ${workspace}. Use absolute paths inside it, and pass it as the working directory of every command.\n\n${prompt}`
   // `memory: false` keeps past chats out of the prompt: Memory recall and related
   // chats. The server holds the selection in memory, so each start sends it again.
   const selectContext = (id) =>

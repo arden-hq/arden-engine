@@ -64,8 +64,6 @@ runner (`candidate.mjs`) sets them, and saves the evidence next to the result:
 - **Working folder.** A chat has no working folder. The runner allows changes
   inside the task folder with a path rule, and starts every prompt with one
   sentence that names the folder. The benchmark's prompt follows unchanged.
-  A job with `"nameWorkspace": false` gets no such sentence; AutomationBench
-  uses it, because its tasks touch no files.
 - **Memory.** `"memory": false` turns off Memory recall and related chats for
   the chat (child agents keep the default). `context-N.json` is the server's
   record of which context parts each run used.
@@ -154,8 +152,14 @@ with host access inside the task container.
 
 Harbor counts the task's time limit, not the profile's. When Harbor stops a
 trial, the adapter tells the runner to stop, waits up to 45 seconds for it to
-write the transcript and token counts, then copies the trial folder out. A
-failed copy is logged and does not replace the run's own error.
+write the transcript, token counts and patch, then copies the trial folder out.
+A failed copy is logged and does not replace the run's own error. The runner's
+database is deleted before the copy, because it holds the values given to MCP
+servers and job logs get shared.
+
+Under Harbor the runner keeps the container's own `HOME` (`single --keep-home`),
+so commands see what the task set up there. Without the flag, `single` and `run`
+give the runner an empty home.
 
 For task images where setup cannot reach a package manager, export a
 ready Linux runtime from the `arden-bench` image once and pass
@@ -215,7 +219,7 @@ default to `openai/gpt-4o-mini`), pass `--yes` so Harbor does not stop to confir
 `BRAVE_API_KEY`, and export `OPENROUTER_API_KEY` for the judge.
 
 Per-trial reward, tokens, dollars and seconds (prices in $ per million
-`input`, `cached_input`, `output` tokens; the same pricing as AutomationBench).
+`input`, `cached_input`, `output` tokens).
 `reward_mean` is over graded trials only; `reward_mean_ungraded_as_zero`
 counts a trial with no reward (an error or a timeout) as zero:
 
@@ -332,111 +336,10 @@ tool rules, a sandboxed command in the task folder, a declined card, the memory
 switch, the request limit, restart, and compaction. They do not measure model
 quality or memory accuracy.
 
-Not verified in this repository yet: the Docker image, the Harbor adapter
-inside a container, the Linux sandbox path, and any paid run. Full-suite
-results and judge calibration are pending.
+Checked on 2026-11-10 with a fake provider, on arm64: the Docker image builds,
+`node-pty` compiles and opens a terminal in it, Bubblewrap runs, the Node tests
+above pass inside it, and the Harbor adapter completes Harbor's `hello-world`
+task end to end (install, sandboxed command, logs, token counts, reward 1).
 
-## AutomationBench (Zapier, `api` toolset)
-
-Business-workflow tasks over a simulated world (Gmail, Salesforce, HubSpot,
-Sheets, and others). The model gets the upstream `api` toolset
-(`api_search`, `api_fetch`, `base64_encode`); grading is the upstream rubric
-(`task_completed_correctly`, `partial_credit`) on the final world state. Pin:
-`upstreams.json` (`automationbench`, v1.0.6). Public domains: sales, marketing,
-operations, support, finance, hr (100 tasks each).
-
-`automationbench/bridge.py` is a stdio MCP server, one per trial. It builds the
-task's world with the upstream `AutomationBenchEnv.setup_state`, exposes the
-upstream tool definitions (names, descriptions, and schemas as upstream gives them to a model) and runs
-calls through the upstream environment, so results and errors are what the
-upstream model would see. After every call it rewrites `world.json` and appends
-to `world.calls.jsonl`. Grading (`upstream.py grade`) loads that world into the
-upstream rubric.
-
-```bash
-uv venv .arden-tmp/bench/automationbench-venv --python 3.13
-uv pip install --python .arden-tmp/bench/automationbench-venv/bin/python \
-  -e /path/to/AutomationBench 'mcp<2'
-git -C /path/to/AutomationBench checkout 4a8e1061254004d9dac807054eed33fad7d1ff14
-```
-
-Upstream needs Python 3.13. `run.py` itself uses only the standard library and
-calls the venv Python for task listing, prompts, grading, and the bridge.
-
-Smoke (3 tasks, one per sales/hr/finance; `--ids` takes task `example_id`s, use
-`--per-domain 1 --domains sales hr finance` instead for a seeded sample):
-
-```bash
-cp benchmarks/profiles/example.json benchmarks/profiles/local-ab.json  # model, effort; memory false
-V=.arden-tmp/bench/automationbench-venv/bin/python; U=/path/to/AutomationBench
-python3 benchmarks/automationbench/run.py run --upstream $U --python $V \
-  --harness arden --profile benchmarks/profiles/local-ab.json \
-  --domains sales hr finance --per-domain 1 --seed 0 \
-  --output benchmarks/results/ab-arden-smoke --allow-model-calls
-python3 benchmarks/automationbench/run.py run --upstream $U --python $V \
-  --harness codex --model MODEL --reasoning-effort high \
-  --domains sales hr finance --per-domain 1 --seed 0 \
-  --output benchmarks/results/ab-codex-smoke --allow-model-calls
-python3 benchmarks/automationbench/run.py report --output benchmarks/results/ab-arden-smoke \
-  --prices prices.json   # {"input": 2.5, "cached_input": 0.25, "output": 10}  USD per million tokens
-python3 benchmarks/automationbench/run.py compare \
-  --a benchmarks/results/ab-arden-smoke --b benchmarks/results/ab-codex-smoke
-```
-
-Selection is deterministic: per domain, sorted task ids, then a sample of
-`--per-domain` drawn with `random.Random("<seed>:<domain>")`, so the same seed
-and count give both harnesses the same tasks. It is written to `manifest.json`
-with the upstream commit, configuration and adapter hashes; `--resume` skips
-trials that finished (including step-limit ones) and retries errored ones, and
-rejects a changed manifest. Trials run one at a time.
-
-Fairness notes:
-
-- Both harnesses receive the same single message: the upstream system text, a
-  blank line, then the upstream task text (`prompt.txt`). Arden's job sets
-  `"nameWorkspace": false`, so nothing is put in front of it. Neither gets a custom system prompt
-  from the benchmark; Arden's own system prompt and Codex's own base
-  instructions still apply, so the comparison is of whole harnesses.
-- Same three benchmark tools. Arden's profile `tools` is replaced with the three
-  `mcp__ab__*` names. Arden still offers its tools that always ask (declined
-  when called) and its bookkeeping tools; see "What a trial changes". Codex runs with its shell, apply-patch-style tools,
-  web search, apps, plugins, memories, sub-agents and image tools disabled in a
-  fresh `CODEX_HOME` (`config.toml` written per trial, `auth.json` a symlink to
-  `~/.codex/auth.json`, never copied), read-only sandbox, approvals never.
-  The bridge server is set to `default_tools_approval_mode = "approve"`; without
-  it every MCP call fails ("MCP tool call requires approval") under approvals never.
-- Step cap: both leaderboards (Zapier's and Artificial Analysis's) stop every
-  model at 50 steps. Arden stops at 50 model requests (or the profile's lower
-  value). The count is every request the trial sends to the model; if the
-  engine sends a helper request of its own, Arden gets fewer than 50 steps
-  (not measured yet). `codex exec` has no such flag and reports tool calls, not model
-  responses, so the driver stops Codex when it starts its 51st tool call; a
-  response makes at least one call, so Codex never gets more than 50. Either way
-  the trial is graded as it stands and marked `step_limit`; a stopped Codex trial
-  has no token counts (Codex reports them only when a turn ends); its `usage`
-  is `null`, it is left out of token and dollar means, and `report` counts it
-  in `trials_missing_usage`. Codex receipts
-  record `turns` (`turn.completed` events, normally 1) rather than model requests. Every receipt records `bridge_calls` (lines in `world.calls.jsonl`).
-  A Codex trial with no successful MCP tool call and at least one failed one is
-  `error` (`tool calls failed: <first message>`), not graded. Step-limit status
-  comes from `budgetExhausted` in the candidate's `usage.json`.
-- Settings: `manifest.json` and every receipt record `harness`, `model`,
-  `reasoning_effort`, `step_cap` (50, or Arden's lower profile value) and
-  `timeout_s`. `compare` refuses experiments whose model or reasoning effort
-  differ unless `--allow-mismatch` is passed, and prints both sides' settings.
-  `run` also requires the upstream clone to be clean at the pinned commit.
-- Tokens: receipts hold uncached `input`, `cached_input`, `output` (Codex's
-  cached tokens are subtracted from its `input_tokens`; Codex reports a running
-  total, so the last `turn.completed` is used). Arden receipts also hold
-  `cache_write`. `tokens_total` leaves it out. Dollar figures need a prices
-  file and charge `cache_write` at the prices file's `cache_write` rate, or at
-  the `input` rate when it has none.
-- `status: error` (crash, no result, no world file) is not a fail. `report`
-  gives the pass rate over graded trials and, separately, with errors counted as
-  failures. `compare` pairs trials by domain and id on those graded in both,
-  and prints discordant counts and an exact two-sided McNemar p-value.
-- The public leaderboard scores a private task set, so these numbers are not
-  comparable to it. Task `example_id`s are the upstream public dataset's.
-- The candidate sees only tool results: its tools are the three bridge tools, and
-  assertions stay in the grader. Keep the upstream checkout outside the trial
-  workspace.
+Not verified yet: any run with a real model, x86_64, and the WildClawBench
+image. Full-suite results and judge calibration are pending.

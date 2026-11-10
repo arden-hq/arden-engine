@@ -18,9 +18,5 @@
   "harbor": {
     "repository": "harbor-framework/harbor",
     "commit": "5c364a538e0af19eb58a53fdb895d7c0f974cef5"
-  },
-  "automationbench": {
-    "repository": "zapier/AutomationBench",
-    "commit": "4a8e1061254004d9dac807054eed33fad7d1ff14"
   }
 }

@@ -1,13 +1,18 @@
 import base64
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datasets import case_for, official_prediction
+import cli
 from cli import export_predictions, write_json
 
 
@@ -35,6 +40,25 @@ class Adapters(unittest.TestCase):
         row["haystack_dates"] = []
         with self.assertRaises(ValueError):
             case_for("longmemeval", row)
+
+    def test_memory_rejects_a_session_the_importer_cannot_store(self):
+        row = {
+            "question_id": "q",
+            "question_date": "2025-01-03",
+            "question": "Name?",
+            "haystack_sessions": [[{"role": "assistant", "content": "Hello"}]],
+            "haystack_dates": ["2025/01/02 (Thu) 12:00"],
+            "haystack_session_ids": ["s"],
+        }
+        with self.assertRaisesRegex(ValueError, "session s"):
+            case_for("longmemeval", row)
+
+    def test_deepresearch_prediction_keeps_the_upstream_integer_id(self):
+        case = case_for("deepresearch", {"id": 7, "prompt": "Write"})
+        prediction = official_prediction(
+            "deepresearch", case["id"], {"prompt": "Write", "text": "Done"}, "p"
+        )
+        self.assertEqual(prediction["id"], 7)
 
     def test_browsecomp_decrypts_only_question(self):
         text = "Who made this?"
@@ -119,7 +143,7 @@ class PatchExport(unittest.TestCase):
             (root / "prompt").write_text("Implement fixture")
             (root / "profile.json").write_text('{"name":"fixture"}')
 
-            def fake_candidate(profile, job, directory):
+            def fake_candidate(profile, job, directory, **options):
                 (workspace / "new.txt").write_text("implemented\n")
                 git("add", ".")
                 git("commit", "-m", "candidate commit")
@@ -137,6 +161,7 @@ class PatchExport(unittest.TestCase):
                 id="case",
                 profile=str(root / "profile.json"),
                 patch=True,
+                keep_home=False,
             )
             with patch("cli.invoke_candidate", fake_candidate):
                 self.assertEqual(single(args), 0)
@@ -167,7 +192,7 @@ class PatchExport(unittest.TestCase):
             (root / "prompt").write_text("Implement fixture")
             (root / "profile.json").write_text('{"name":"fixture"}')
 
-            def fake_candidate(profile, job, directory):
+            def fake_candidate(profile, job, directory, **options):
                 (workspace / "base.txt").write_bytes(b"caf\xe9 au lait\n")
                 raise subprocess.TimeoutExpired("node", 1)
 
@@ -179,6 +204,7 @@ class PatchExport(unittest.TestCase):
                 id="case",
                 profile=str(root / "profile.json"),
                 patch=True,
+                keep_home=False,
             )
             with patch("cli.invoke_candidate", fake_candidate):
                 self.assertEqual(single(args), 124)
@@ -216,6 +242,63 @@ class HarborReport(unittest.TestCase):
             self.assertEqual(report["reward_mean"], 1.0)
             self.assertEqual(report["reward_mean_ungraded_as_zero"], 0.5)
             self.assertEqual(report["rows"][0]["seconds"], 60)
+
+
+class RunnerProcess(unittest.TestCase):
+    """invoke_candidate against a stand-in runner: a shell script, no server."""
+
+    def invoke(self, script, timeout_ms, **options):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        runner = root / "runner.sh"
+        runner.write_text("#!/bin/sh\n" + script)
+        runner.chmod(0o700)
+        (root / "profile.json").write_text(
+            json.dumps({"apiKeyEnv": "BENCH_FIXTURE_KEY", "timeoutMs": timeout_ms})
+        )
+        trial = root / "trial"
+        trial.mkdir()
+        variables = {
+            "ARDEN_BENCH_NODE": str(runner),
+            "BENCH_FIXTURE_KEY": "fixture-not-a-secret",
+            "HOME": str(root),
+            "BENCH_UNRELATED": "must-not-pass",
+        }
+        with patch.dict(os.environ, variables), patch.object(cli, "EXPORT_GRACE_S", 0):
+            try:
+                code = cli.invoke_candidate(
+                    root / "profile.json", trial / "job.json", trial, **options
+                )
+            except subprocess.TimeoutExpired:
+                code = "timeout"
+        return root, trial, code
+
+    def test_a_runner_past_its_time_limit_is_stopped_with_its_children(self):
+        script = (
+            'trap "echo stopped > $(dirname $ARDEN_DIR)/stopped; exit 1" TERM\n'
+            "sleep 60 & echo $! > $(dirname $ARDEN_DIR)/child.pid\nwait\n"
+        )
+        started = time.monotonic()
+        _, trial, code = self.invoke(script, 1500)
+        self.assertEqual(code, "timeout")
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual((trial / "stopped").read_text().strip(), "stopped")
+        child = int((trial / "child.pid").read_text())
+        time.sleep(0.2)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
+
+    def test_the_runner_gets_an_empty_home_unless_told_to_keep_it(self):
+        script = 'echo "$HOME|${BENCH_UNRELATED:-}|$BENCH_FIXTURE_KEY"\n'
+        root, trial, code = self.invoke(script, 5000)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            (trial / "candidate.log").read_text().strip(),
+            f"{trial / 'home'}||fixture-not-a-secret",
+        )
+        root, trial, code = self.invoke(script, 5000, keep_home=True)
+        self.assertEqual((trial / "candidate.log").read_text().split("|")[0], str(root))
+        self.assertFalse((trial / "home").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

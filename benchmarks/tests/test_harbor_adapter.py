@@ -70,8 +70,9 @@ class Environment:
     async def download_dir(self, source, target):
         if self.observations is None:
             raise OSError("copy failed")
+        self.copied = source
         folder = Path(target) / "observations"
-        folder.mkdir(parents=True)
+        folder.mkdir(parents=True, exist_ok=True)
         for name, value in self.observations.items():
             (folder / name).write_text(json.dumps(value))
 
@@ -95,6 +96,23 @@ class HarborAdapter(unittest.TestCase):
             stop = [command for command in environment.commands if "candidate.pid" in command]
             self.assertEqual(len(stop), 1)
             self.assertIn("kill -TERM", stop[0])
+            self.assertIn("driver.pid", stop[0])
+
+    def test_each_run_has_its_own_folder_and_the_database_is_not_copied(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            agent = self.agent(Path(temporary))
+            folders = []
+            for _ in range(2):
+                environment = Environment({})
+                with self.assertRaisesRegex(RuntimeError, "run failed"):
+                    asyncio.run(agent.run("task", environment, None))
+                folders.append(agent.trial)
+                run = next(c for c in environment.commands if "cli.py single" in c)
+                self.assertIn(f"--output {agent.trial} ", run)
+                self.assertIn("--keep-home", run)
+                self.assertIn(f"rm -rf {agent.trial}/state {agent.trial}/home", environment.commands)
+                self.assertEqual(environment.copied, agent.trial)
+            self.assertNotEqual(*folders)
 
     def test_transcript_and_tokens_are_collected_after_a_failed_run(self):
         archive = {

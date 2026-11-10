@@ -133,7 +133,6 @@ for (const mode of modes)
                 ...(["restart", "budget"].includes(mode) ? ["Reply again"] : [])
               ],
         ...(mode === "restart" ? { restartAfter: [0] } : {}),
-        ...(mode === "decline" ? { nameWorkspace: false } : {}),
         ...(withHistory
           ? {
               history: [
@@ -264,12 +263,9 @@ for (const mode of modes)
         assert.equal(skipped.includes("memory"), !withHistory, JSON.stringify(run.stages))
       }
       assert.ok(requests.length > 0)
-      // The folder sentence leads every prompt unless the job turns it off.
-      assert.equal(
-        requests.some((request) =>
-          JSON.stringify(request.input).includes("Your working folder is")
-        ),
-        mode !== "decline"
+      // The folder sentence leads every prompt.
+      assert.ok(
+        requests.some((request) => JSON.stringify(request.input).includes("Your working folder is"))
       )
       assert.ok(requests.every((request) => request.model === "fixture"))
       assert.ok(

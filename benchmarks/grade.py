@@ -45,7 +45,10 @@ def grade_browse(args, output):
         if identity not in by_id:
             continue
         prompt = module.QUERY_TEMPLATE.format(
+            # A row without a canary is plain text, as in datasets.case_for.
             Question=module.decrypt(row["problem"], row["canary"])
+            if row.get("canary")
+            else row["problem"]
         )
         if prompt in answers:
             raise ValueError("Duplicate BrowseComp question")

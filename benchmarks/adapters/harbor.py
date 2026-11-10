@@ -3,6 +3,7 @@
 import json
 import shlex
 import tempfile
+import uuid
 from pathlib import Path
 
 from harbor.agents.installed.base import BaseInstalledAgent
@@ -39,6 +40,7 @@ class Arden(BaseInstalledAgent):
         self.patch = patch
         self.transcript = transcript
         self.case_id = case_id
+        self.trial = None
         self.archive = Path(runtime_archive).resolve(strict=True)
         self.profile_path = Path(profile_path).resolve(strict=True)
         self.profile = json.loads(self.profile_path.read_text())
@@ -50,7 +52,11 @@ class Arden(BaseInstalledAgent):
         return "arden"
 
     def get_version_command(self):
-        return "cat /opt/arden/benchmark-build.json"
+        # Revision only: the file also lists a hash per file, too long for a result.
+        return (
+            "python3 -c 'import json; b = json.load(open(\"/opt/arden/benchmark-build.json\")); "
+            'print(b["revision"] + ("-dirty" if b["dirty"] else ""))\''
+        )
 
     async def install(self, environment):
         if self.prebuilt:
@@ -101,17 +107,25 @@ class Arden(BaseInstalledAgent):
             (
                 "stop the runner",
                 lambda: environment.exec(
-                    "pid=$(cat /tmp/arden-trial/candidate.pid 2>/dev/null) || exit 0; "
-                    'kill -TERM "$pid" 2>/dev/null || exit 0; '
-                    'n=0; while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 90 ]; '
-                    "do sleep 0.5; n=$((n + 1)); done",
+                    # The driver outlives the runner: it exports the patch.
+                    f"runner=$(cat {self.trial}/candidate.pid 2>/dev/null); "
+                    f"driver=$(cat {self.trial}/driver.pid 2>/dev/null); "
+                    '[ -n "$runner" ] && kill -TERM "$runner" 2>/dev/null; '
+                    'n=0; for pid in $runner $driver; do '
+                    'while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 90 ]; '
+                    "do sleep 0.5; n=$((n + 1)); done; done",
                     timeout_sec=60,
                 ),
             ),
             (
+                # The database holds the values given to MCP servers; logs get shared.
+                "drop the runner's database",
+                lambda: environment.exec(f"rm -rf {self.trial}/state {self.trial}/home"),
+            ),
+            (
                 "copy the trial folder",
                 lambda: environment.download_dir(
-                    "/tmp/arden-trial", (self.logs_dir / "arden").resolve()
+                    self.trial, (self.logs_dir / "arden").resolve()
                 ),
             ),
             *(
@@ -145,6 +159,8 @@ class Arden(BaseInstalledAgent):
             credentials[account_env] = account
         # Variables a benchmark-owned MCP server reads; exec_command never sees host variables.
         credentials.update(mcp_environment(self.profile, self._get_env))
+        # One folder per run: a second run in the same container starts clean.
+        self.trial = f"/tmp/arden-trial-{uuid.uuid4().hex}"
         try:
             await self.exec_as_agent(
                 environment,
@@ -153,7 +169,8 @@ class Arden(BaseInstalledAgent):
                     "python3 /opt/arden/benchmarks/cli.py single "
                     "--profile /opt/arden-profile.json --prompt-file /opt/arden-prompt.txt "
                     f"--workspace {shlex.quote(workspace.stdout.strip())} "
-                    f"--output /tmp/arden-trial --id {shlex.quote(self.case_id)} --allow-model-calls"
+                    f"--output {self.trial} --id {shlex.quote(self.case_id)} "
+                    "--keep-home --allow-model-calls"
                     + (" --patch" if self.patch else "")
                 ),
                 env={

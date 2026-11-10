@@ -52,6 +52,18 @@ def case_for(suite, row):
                 parsed = datetime.strptime(date, "%Y/%m/%d (%a) %H:%M")
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
+            roles = [message["role"] for message in source]
+            # The importer stores user turns, each answered by assistant messages.
+            if (
+                not roles
+                or roles[0] != "user"
+                or roles[-1] != "assistant"
+                or any(role not in ("user", "assistant") for role in roles)
+                or any(a == b == "user" for a, b in zip(roles, roles[1:]))
+            ):
+                raise ValueError(
+                    f"History session {source_id} is not user turns answered by the assistant"
+                )
             history.append(
                 {
                     "id": str(source_id),
@@ -100,7 +112,8 @@ def official_prediction(suite, case_id, result, profile, patch=None):
         return {"question_id": case_id, "hypothesis": result.get("text", "")}
     if suite == "deepresearch":
         return {
-            "id": case_id,
+            # Upstream ids are integers and its fact pipeline looks them up by value.
+            "id": int(case_id) if case_id.isdecimal() else case_id,
             "prompt": result["prompt"],
             "article": result.get("text", ""),
         }

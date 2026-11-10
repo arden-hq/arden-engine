@@ -139,7 +139,11 @@ def fingerprint(args, selection):
     }
 
 
-def invoke_candidate(profile, job, directory, image=None):
+# Seconds the runner gets after its own time limit to export the transcript.
+EXPORT_GRACE_S = 60
+
+
+def invoke_candidate(profile, job, directory, image=None, keep_home=False):
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -156,9 +160,13 @@ def invoke_candidate(profile, job, directory, image=None):
     mcp_values = mcp_environment(config, os.environ.get)
     environment.update(mcp_values)
     environment["ARDEN_DIR"] = str(directory / "state")
-    # Do not inherit the user's home/configuration or search credentials implicitly.
-    environment["HOME"] = str(directory / "home")
-    Path(environment["HOME"]).mkdir(mode=0o700)
+    if keep_home and "HOME" in os.environ:
+        # A benchmark's own sandbox: its home holds what the task set up there.
+        environment["HOME"] = os.environ["HOME"]
+    else:
+        # Do not inherit the user's home/configuration or search credentials implicitly.
+        environment["HOME"] = str(directory / "home")
+        Path(environment["HOME"]).mkdir(mode=0o700)
     container = "arden-benchmark-" + uuid.uuid4().hex
     command = [
         os.environ.get("ARDEN_BENCH_NODE", "node"),
@@ -212,8 +220,8 @@ def invoke_candidate(profile, job, directory, image=None):
         (directory / "candidate.pid").write_text(str(process.pid))
         try:
             # The runner stops itself at timeoutMs, counted from its start, then
-            # exports the transcript; the extra minute is for that export.
-            return process.wait(timeout=config["timeoutMs"] / 1000 + 60)
+            # exports the transcript; the grace is for that export.
+            return process.wait(timeout=config["timeoutMs"] / 1000 + EXPORT_GRACE_S)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
             os.killpg(process.pid, signal.SIGTERM)
             try:
@@ -352,6 +360,8 @@ def single(args):
         raise ValueError("Model calls require --allow-model-calls")
     directory = Path(args.output).resolve()
     directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+    # A caller that stops the trial waits for this process: it exports the patch.
+    (directory / "driver.pid").write_text(str(os.getpid()))
     prompt = Path(args.prompt_file).read_text()
     workspace = Path(args.workspace).resolve()
     job = {
@@ -372,7 +382,9 @@ def single(args):
             raise ValueError("Patch trials require a clean benchmark checkout")
         write_json(directory / "base.json", {"commit": base})
     try:
-        code = invoke_candidate(args.profile, directory / "job.json", directory)
+        code = invoke_candidate(
+            args.profile, directory / "job.json", directory, keep_home=args.keep_home
+        )
     except subprocess.TimeoutExpired:
         # Killed after its time limit; the patch below is still what it left.
         write_json(directory / "interruption.json", {"type": "TimeoutExpired"})
@@ -457,6 +469,11 @@ def main():
     for field in ("profile", "prompt-file", "workspace", "output", "id"):
         one.add_argument("--" + field, required=True)
     one.add_argument("--patch", action="store_true")
+    one.add_argument(
+        "--keep-home",
+        action="store_true",
+        help="run with the sandbox's own HOME instead of an empty one",
+    )
     one.add_argument("--allow-model-calls", action="store_true")
     harbor = sub.add_parser("harbor-report")
     harbor.add_argument("--jobs-dir", required=True)
