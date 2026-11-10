@@ -21,7 +21,7 @@ import type { ChatWriteError } from "../chat/store.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { appendMessagesInTransaction } from "./chat-transcript.js"
 import { writeError, type ChatWriteOperation } from "./chat-write-errors.js"
-import { communicationToldSql } from "./transcript.js"
+import { communicationToldSql, ownMessagePredicate } from "./transcript.js"
 import { questionVisiblePredicate } from "./question-events.js"
 import { runColumns, runDestinationSessionId } from "./run-destination.js"
 import { RUN_END_APPROVAL_FEEDBACK } from "./tool-receipts.js"
@@ -91,7 +91,10 @@ export const findChatEvents = Effect.fn("SqliteChatEvents.find")(function* (
     (spaceHome !== null && item.spaceId === spaceHome) ||
     (item.itemId !== null && started.has(item.itemId))
 
-  const found: ReadonlyArray<ChatEvent> = [
+  // One event has one key, and chat_event_deliveries holds each key once per chat. Keep
+  // the first of any repeats here, so no source can fail the whole write with a duplicate.
+  const byKey = new Map<string, ChatEvent>()
+  for (const event of [
     ...(yield* arrivals(sql, { sessionId, since, scope, spaceHome, inScope })),
     ...(yield* waiting(sql, { sessionId, since, inScope })),
     ...(yield* answers(sql, { sessionId, since, inScope })),
@@ -99,7 +102,10 @@ export const findChatEvents = Effect.fn("SqliteChatEvents.find")(function* (
     ...(yield* proposals(sql, { sessionId, since, spaceHome })),
     ...(yield* focusChoices(sql, { sessionId, since })),
     ...(yield* failedTurns(sql, { sessionId, since }))
-  ]
+  ]) {
+    if (!byKey.has(event.key)) byKey.set(event.key, event)
+  }
+  const found: ReadonlyArray<ChatEvent> = [...byKey.values()]
   const delivered = new Set(
     found.length === 0
       ? []
@@ -300,6 +306,9 @@ const arrivals = Effect.fn("SqliteChatEvents.arrivals")(function* (
       AND m.message_id >= 'arrival:' AND m.message_id < 'arrival;'
       AND (${communicationToldSql(sql)} OR (m.session_id <> ${options.sessionId}
         AND json_type(m.message_json, '$.update') = 'object'))
+      -- A fork copies its parent's arrivals and keeps their ids. Only the chat an arrival
+      -- came to counts, or each fork would tell the Space's main chat about it again.
+      AND (m.session_id = ${options.sessionId} OR ${ownMessagePredicate(sql)})
       AND m.created_at > ${options.since}`
   return rows.flatMap((row): ReadonlyArray<ChatEvent> => {
     if (row.source_session_id === options.sessionId || row.source_purpose === "system") return []

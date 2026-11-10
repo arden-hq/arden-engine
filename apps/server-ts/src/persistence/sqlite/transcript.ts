@@ -98,7 +98,9 @@ const communicationDrawnSql = (sql: SqlClient.SqlClient) =>
   sql`(${communicationToldSql(sql)}
     AND COALESCE(json_extract(m.message_json, '$.communication.shown'), 1) <> 0)`
 
-const ownMessagePredicate = (sql: SqlClient.SqlClient) => sql`
+/** True for a message the chat `m` got itself, false for one a fork or branch copied from
+ * its parent. A copy keeps the parent's message id. */
+export const ownMessagePredicate = (sql: SqlClient.SqlClient) => sql`
   json_type(m.message_json, '$.forked_from') IS NOT 'text'
   AND NOT EXISTS (
     SELECT 1 FROM session_fork_requests AS fork
