@@ -16,7 +16,8 @@ import {
   encodeSkillItemPathEffect,
   encodeSkillRecipeDraftRequestEffect,
   encodeSkillRecipePathEffect,
-  encodeSkillRecipeRequestEffect
+  encodeSkillRecipeRequestEffect,
+  SKILL_NAME_PATTERN
 } from "./schema.js"
 
 export * from "./contracts.js"
@@ -90,6 +91,8 @@ export const skillRoutes = {
   }
 } as const
 
+const SKILL_MENTION = new RegExp(`(?:^|(?<=\\s))/(${SKILL_NAME_PATTERN})(?![\\w/-])`, "g")
+
 /** Shared spelling and boundaries for composer tokens and server-side skill preparation. */
 export const skillMentions = (
   text: string
@@ -98,7 +101,7 @@ export const skillMentions = (
   readonly start: number
   readonly end: number
 }> =>
-  Array.from(text.matchAll(/(?:^|(?<=\s))\/([a-z][a-z0-9-]{0,47})(?![\w/-])/g)).flatMap((match) =>
+  Array.from(text.matchAll(SKILL_MENTION)).flatMap((match) =>
     match[1] === undefined
       ? []
       : [{ name: match[1], start: match.index, end: match.index + match[0].length }]

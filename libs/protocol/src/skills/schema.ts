@@ -15,7 +15,15 @@ import { NonNegativeIntSchema } from "../common/schema.js"
 const strict = { onExcessProperty: "error" } as const
 const skillsCollectionPath = "/skills"
 
-export const SkillNameSchema = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,47}$/))
+/** One spelling for a Skill name: lowercase letters, digits, hyphens and
+ *  underscores, not starting with a hyphen, up to 64 characters. It is a folder
+ *  name and a URL segment, so no dot, slash or space. Wider than Arden's own
+ *  Skills need, so that Skills written for other harnesses load too. */
+export const SKILL_NAME_PATTERN = "[a-z0-9_][a-z0-9_-]{0,63}"
+
+export const SkillNameSchema = Schema.String.check(
+  Schema.isPattern(new RegExp(`^${SKILL_NAME_PATTERN}$`))
+)
 
 export const SkillVersionSchema = Schema.String.check(
   Schema.isMaxLength(64),

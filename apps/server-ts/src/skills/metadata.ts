@@ -24,12 +24,13 @@ export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
   directoryName: string,
   operation: SkillOperation
 ) {
-  const lines = source.split("\n")
-  if (lines[0]?.replace(/\r$/, "") !== "---") {
+  // A SKILL.md saved with Windows line endings is the same Skill.
+  const lines = source.split("\n").map((line) => line.replace(/\r$/, ""))
+  if (lines[0] !== "---") {
     return yield* skillError(operation, "invalid", "Skill metadata is missing")
   }
 
-  const closing = lines.findIndex((line, index) => index > 0 && line.replace(/\r$/, "") === "---")
+  const closing = lines.findIndex((line, index) => index > 0 && line === "---")
   if (closing < 0) return yield* skillError(operation, "invalid", "Skill metadata is incomplete")
 
   const value = yield* Effect.try({
