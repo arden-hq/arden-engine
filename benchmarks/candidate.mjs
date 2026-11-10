@@ -22,6 +22,8 @@ const Job = Schema.Struct({
   workspace: Schema.NonEmptyString,
   output: Schema.NonEmptyString,
   prompts: Schema.NonEmptyArray(Schema.NonEmptyString),
+  // A folder of Skills the task itself ships; each one is a folder with SKILL.md.
+  skills: Schema.optionalKey(Schema.NonEmptyString),
   // False sends each prompt as written, for a suite whose task uses no files.
   restartAfter: Schema.optionalKey(Schema.Array(Schema.Natural)),
   history: Schema.optionalKey(
@@ -151,10 +153,10 @@ async function main() {
       provider,
       modelHost: models,
       localAccess,
-      // A trial reads no Skills from the host's shared folder, and compacts only
-      // when the context fills: the engine's idle compaction would otherwise fire
-      // on wall-clock time and make two equal trials differ.
-      sharedSkillRoots: [],
+      // A trial reads the task's own Skills only, never the host's shared folder,
+      // and compacts only when the context fills: the engine's idle compaction
+      // would otherwise fire on wall-clock time and make two equal trials differ.
+      sharedSkillRoots: job.skills === undefined ? [] : [job.skills],
       idleCompactionAfterMs: 0
     })
   let server = await start()

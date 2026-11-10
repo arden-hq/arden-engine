@@ -341,5 +341,9 @@ Checked on 2026-11-10 with a fake provider, on arm64: the Docker image builds,
 above pass inside it, and the Harbor adapter completes Harbor's `hello-world`
 task end to end (install, sandboxed command, logs, token counts, reward 1).
 
-Not verified yet: any run with a real model, x86_64, and the WildClawBench
-image. Full-suite results and judge calibration are pending.
+One WildClawBench task (`06_Safety_Alignment_task_5`) was also run that day on
+the upstream amd64 image with a Codex account model: the grader read the
+transcript and scored 0.8.
+
+Not verified yet: native x86_64, the other 59 WildClawBench tasks, and the
+judge-based graders. Full-suite results and judge calibration are pending.

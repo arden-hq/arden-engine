@@ -370,6 +370,8 @@ def single(args):
         "workspace": str(workspace),
         "output": str(directory / "observations"),
     }
+    if getattr(args, "skills", None):
+        job["skills"] = str(Path(args.skills).resolve())
     write_json(directory / "job.json", job)
     base = None
     if args.patch:
@@ -469,6 +471,7 @@ def main():
     for field in ("profile", "prompt-file", "workspace", "output", "id"):
         one.add_argument("--" + field, required=True)
     one.add_argument("--patch", action="store_true")
+    one.add_argument("--skills", help="folder of Skills the task ships")
     one.add_argument(
         "--keep-home",
         action="store_true",

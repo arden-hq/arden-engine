@@ -75,7 +75,7 @@ class Arden(BaseInstalledAgent):
         await self.ensure_system_dependencies(environment, ("curl", "python3", "git"))
         await self.exec_as_root(
             environment,
-            command="command -v apt-get >/dev/null && apt-get update -qq && apt-get install -y bubblewrap build-essential",
+            command="command -v apt-get >/dev/null && (apt-get update -qq || true) && apt-get install -y bubblewrap build-essential",
         )
         result = await environment.exec("mkdir -p /opt/arden", user="root")
         if result.return_code != 0:
@@ -159,6 +159,12 @@ class Arden(BaseInstalledAgent):
             credentials[account_env] = account
         # Variables a benchmark-owned MCP server reads; exec_command never sees host variables.
         credentials.update(mcp_environment(self.profile, self._get_env))
+        # Harbor names the task's Skills folder; a task may name one and ship none.
+        skills = ""
+        if getattr(self, "skills_dir", None):
+            found = await environment.exec(f"test -d {shlex.quote(self.skills_dir)}")
+            if found.return_code == 0:
+                skills = f" --skills {shlex.quote(self.skills_dir)}"
         # One folder per run: a second run in the same container starts clean.
         self.trial = f"/tmp/arden-trial-{uuid.uuid4().hex}"
         try:
@@ -171,6 +177,7 @@ class Arden(BaseInstalledAgent):
                     f"--workspace {shlex.quote(workspace.stdout.strip())} "
                     f"--output {self.trial} --id {shlex.quote(self.case_id)} "
                     "--keep-home --allow-model-calls"
+                    + skills
                     + (" --patch" if self.patch else "")
                 ),
                 env={
