@@ -68,8 +68,17 @@ export interface ResolvedShell {
   readonly codeAgent: boolean
 }
 
+/** The access a command runs with. A server started with `commandSandbox: false`
+ *  sits inside a container that is the sandbox, so what the model asks for does
+ *  not apply there. */
+export const shellAccess = (
+  commandSandbox: boolean | undefined,
+  asked: ShellAccess | undefined,
+  codeAgent: boolean
+): ShellAccess => (commandSandbox === false ? "host" : (asked ?? (codeAgent ? "sandbox" : "host")))
+
 export const workingDirectory = async (
-  services: LocalPathServices,
+  services: LocalPathServices & { readonly commandSandbox?: boolean },
   input: { readonly workdir?: string; readonly access?: ShellAccess },
   ctx: { readonly run: ServerRunContext; readonly signal: AbortSignal }
 ): Promise<ResolvedShell> => {
@@ -78,7 +87,11 @@ export const workingDirectory = async (
     runId: ctx.run.runId,
     signal: ctx.signal
   })
-  const access = input.access ?? (sessionPolicy.sandbox === "code_agent" ? "sandbox" : "host")
+  const access = shellAccess(
+    services.commandSandbox,
+    input.access,
+    sessionPolicy.sandbox === "code_agent"
+  )
   const cwd =
     input.workdir === undefined
       ? (sessionPolicy.cwd ?? (access === "host" ? homedir() : null))

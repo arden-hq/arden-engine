@@ -27,6 +27,7 @@ export interface ServerConfigShape {
   readonly data: DataLocation
   readonly llamaServer?: string
   readonly sharedSkillRoots: ReadonlyArray<string>
+  readonly commandSandbox: boolean
 }
 
 const isOnDisk = (databasePath: string | undefined): databasePath is string =>
@@ -42,7 +43,8 @@ const ServerOptionsSchema = Schema.Struct({
   databasePath: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
   managedOutputRoot: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
   llamaServer: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
-  sharedSkillRoots: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinLength(1))))
+  sharedSkillRoots: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
+  commandSandbox: Schema.optionalKey(Schema.Boolean)
 })
 
 const decodeOptions = Schema.decodeUnknownEffect(ServerOptionsSchema)
@@ -76,6 +78,7 @@ type ServerConfigInput = Pick<
   | "llamaServer"
   | "sharedSkillRoots"
   | "idleCompactionAfterMs"
+  | "commandSandbox"
 >
 
 const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
@@ -92,7 +95,8 @@ const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
     ...(parsed.llamaServer === undefined ? {} : { llamaServer: resolve(parsed.llamaServer) }),
     sharedSkillRoots: (parsed.sharedSkillRoots ?? defaultSharedSkillRoots(data)).map((root) =>
       resolve(root)
-    )
+    ),
+    commandSandbox: parsed.commandSandbox ?? true
   })
 })
 

@@ -255,6 +255,7 @@ const composeServer = (
     Layer.provide(artifacts),
     Layer.provide(outputs),
     Layer.provide(storage),
+    Layer.provide(Layer.succeed(ServerConfig, ServerConfig.of(config))),
     Layer.tap(() => Diagnostics.use((diagnostics) => diagnostics.startupPhase("tools_ready")))
   )
   const baseServices = Layer.mergeAll(

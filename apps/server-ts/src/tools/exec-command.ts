@@ -51,6 +51,7 @@ import { sessionPathPolicy } from "../storage/local-paths.js"
 import type { HostCommandGrantPlan } from "./bash-permissions.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { ardenDataRoots, mentionsArdenData } from "./arden-data-mention.js"
+import { ServerConfig } from "../config/service.js"
 import { DataRoot } from "../runtime/data-root.js"
 import { resolveCommandSandbox } from "../runtime/command-sandbox.js"
 import {
@@ -133,6 +134,7 @@ interface ShellToolServices extends LocalPathServices {
   readonly rules: PermissionRules["Service"]
   readonly artifacts?: ConversationArtifacts["Service"]
   readonly terminals: TerminalStore
+  readonly commandSandbox?: boolean
 }
 
 const makeExecCommandTool = (
@@ -653,7 +655,8 @@ export const shellTools = Effect.gen(function* () {
     rules: yield* PermissionRules,
     artifacts: yield* ConversationArtifacts,
     dataDir: (yield* DataRoot).dir,
-    terminals: yield* TerminalSessions
+    terminals: yield* TerminalSessions,
+    commandSandbox: (yield* ServerConfig).commandSandbox
   }
   return [makeExecCommandTool(services), makeWriteStdinTool(services)]
 })

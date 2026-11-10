@@ -29,6 +29,10 @@ export interface ServerOptions {
   /** Read-only Skill roots shared with other agents, scanned after Arden's own.
    *  Defaults to `~/.agents/skills` for a file-backed server; pass `[]` to isolate. */
   readonly sharedSkillRoots?: ReadonlyArray<string>
+  /** False runs every shell command on the host, whatever access the model
+   *  asks for. For a server inside a throwaway container, where the container
+   *  is the sandbox. Defaults to true. */
+  readonly commandSandbox?: boolean
   /** The model provider. It drives the built-in Loop runner and every
    *  helper-model feature: context compaction, structured completion, Session
    *  naming, letter subjects and `has_providers`. Omit for a server without a
