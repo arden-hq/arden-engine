@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Schema } from "effect"
-import { readProfile, modelHost } from "./profile.mjs"
+import { readProfile, modelHost, offeredTools } from "./profile.mjs"
 import { startServerWithLocalAccess } from "../apps/server-ts/dist/server.js"
 import { benchmarkProvider } from "./provider.mjs"
 import { createHeadlessClient } from "../libs/headless/dist/index.js"
@@ -300,18 +300,17 @@ async function main() {
       }
     }
     const catalog = toolDecoders.catalog(await request(toolRoutes.catalog))
-    const available = new Set(catalog.tools.map((tool) => tool.name))
-    for (const tool of profile.tools)
-      if (!available.has(tool)) throw new Error(`Unknown profile tool: ${tool}`)
+    const offered = offeredTools(profile, catalog.tools)
     // A `never` rule keeps a tool out of what the model is offered; the profile's
     // tools get `allow`. The task folder is the one place file tools may change.
     // A tool that always asks the owner takes no rule. A trial has nobody to
-    // answer, so a profile may not name one; the rest are listed in the output.
+    // answer, so an allow-list may not name one; the rest are listed in the output.
     const alwaysAsk = []
     for (const tool of catalog.tools) {
-      const wanted = profile.tools.includes(tool.name)
+      const wanted = offered.has(tool.name)
       if (await rule(wanted ? "allow" : "never", { kind: "tool", tool: tool.name })) continue
-      if (wanted) throw new Error(`Profile tool always asks the owner: ${tool.name}`)
+      if (wanted && profile.tools !== undefined)
+        throw new Error(`Profile tool always asks the owner: ${tool.name}`)
       alwaysAsk.push(tool.name)
     }
     await save(join(output, "tools-without-rule.json"), alwaysAsk)

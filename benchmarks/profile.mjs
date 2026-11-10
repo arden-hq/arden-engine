@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { readFile } from "node:fs/promises"
 
 const positive = Schema.Int.check(Schema.isGreaterThan(0))
+const names = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique())
 export const ProfileSchema = Schema.Struct({
   name: Schema.NonEmptyString,
   provider: Schema.optionalKey(Schema.Literals(["responses", "codex"])),
@@ -13,7 +14,14 @@ export const ProfileSchema = Schema.Struct({
   contextLimit: positive,
   timeoutMs: positive,
   maxModelRequests: positive,
-  tools: Schema.Array(Schema.NonEmptyString).check(Schema.isUnique()),
+  /** Allow-list: the model is offered only these tools. Give this or `blockedTools`. */
+  tools: Schema.optionalKey(names),
+  /**
+   * Block-list: the model is offered every tool in the server's catalog except
+   * these. `sources` hides a whole group by the catalog's `source` (for
+   * example `gmail`, `_browser`); `tools` hides single tools by name.
+   */
+  blockedTools: Schema.optionalKey(Schema.Struct({ sources: names, tools: names })),
   memory: Schema.Boolean,
   /**
    * `true` keeps the route's client-side tool search, as in the app, so the
@@ -52,8 +60,35 @@ export async function readProfile(filename) {
   }
   if (url.username || url.password || url.search || url.hash)
     throw new Error("Provider URL must not contain credentials, query, or fragment")
+  if ((profile.tools === undefined) === (profile.blockedTools === undefined))
+    throw new Error("Profile needs exactly one of `tools` and `blockedTools`")
   if (profile.model === "REPLACE_WITH_MODEL_ID") throw new Error("Choose a model before running")
   return profile
+}
+/**
+ * The catalog tools a profile offers the model. An unknown name or source is
+ * an error, so a typo cannot silently offer or hide a tool.
+ */
+export function offeredTools(profile, catalog) {
+  const known = (kind, wanted, present) => {
+    for (const name of wanted)
+      if (!present.has(name)) throw new Error(`Unknown profile ${kind}: ${name}`)
+  }
+  const tools = new Set(catalog.map((tool) => tool.name))
+  if (profile.tools !== undefined) {
+    known("tool", profile.tools, tools)
+    return new Set(profile.tools)
+  }
+  const blocked = profile.blockedTools
+  known("tool", blocked.tools, tools)
+  known("tool source", blocked.sources, new Set(catalog.map((tool) => tool.source)))
+  return new Set(
+    catalog
+      .filter(
+        (tool) => !blocked.sources.includes(tool.source) && !blocked.tools.includes(tool.name)
+      )
+      .map((tool) => tool.name)
+  )
 }
 export function modelHost(profile) {
   const inherit = { modelId: null, reasoningEffort: null }
