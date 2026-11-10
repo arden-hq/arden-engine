@@ -21,7 +21,8 @@ const SkillMetadataSchema = Schema.Struct({
 
 export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
   source: string,
-  directoryName: string,
+  /** The folder the Skill must be named after; null when the folder name is free. */
+  directoryName: string | null,
   operation: SkillOperation
 ) {
   // A SKILL.md saved with Windows line endings is the same Skill.
@@ -51,7 +52,7 @@ export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
   }).pipe(
     Effect.mapError((cause) => skillError(operation, "invalid", "Skill metadata is invalid", cause))
   )
-  if (metadata.name !== directoryName) {
+  if (directoryName !== null && metadata.name !== directoryName) {
     return yield* skillError(operation, "invalid", "Skill name does not match its directory")
   }
   return metadata

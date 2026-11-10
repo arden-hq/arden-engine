@@ -239,16 +239,24 @@ const disabled = (
     )
   )
 
+/**
+ * Reads the Skill in one folder of a root. In Arden's own root the folder is
+ * named after the Skill. A shared root is written by other tools, which name
+ * the folder freely (`my-skill-1.2.0`), so there the name comes from SKILL.md.
+ */
 const loadRecord = Effect.fn("Skills.loadRecord")(function* (
   root: string,
-  name: string,
-  operation: SkillOperation
+  folder: string,
+  operation: SkillOperation,
+  folderIsName = true
 ) {
   yield* requireDirectory(root, operation)
-  const safeName = yield* Schema.decodeUnknownEffect(SkillNameSchema)(name).pipe(
-    Effect.mapError((cause) => skillError(operation, "invalid", "Skill name is invalid", cause))
-  )
-  const directory = join(root, safeName)
+  if (folderIsName) {
+    yield* Schema.decodeUnknownEffect(SkillNameSchema)(folder).pipe(
+      Effect.mapError((cause) => skillError(operation, "invalid", "Skill name is invalid", cause))
+    )
+  }
+  const directory = join(root, folder)
   yield* requireDirectory(directory, operation)
   const identity = yield* storage(operation, "Skill directory is unavailable", () =>
     realpath(directory)
@@ -263,7 +271,7 @@ const loadRecord = Effect.fn("Skills.loadRecord")(function* (
     try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
     catch: (cause) => skillError(operation, "invalid", "Skill content is not valid UTF-8", cause)
   })
-  const metadata = yield* parseSkillMetadata(content, safeName, operation)
+  const metadata = yield* parseSkillMetadata(content, folderIsName ? folder : null, operation)
   const record: SkillRecord = {
     skill: {
       name: metadata.name,
@@ -336,7 +344,7 @@ const compactCatalog = (
 const storageUnavailable = (operation: SkillOperation): SkillError =>
   skillError(operation, "storage", "Skills storage is unavailable")
 
-const listRoot = Effect.fn("Skills.listRoot")(function* (root: string) {
+const listRoot = Effect.fn("Skills.listRoot")(function* (root: string, folderIsName: boolean) {
   const entries = yield* storage("list", "Skills storage is unavailable", () =>
     readdir(root, { withFileTypes: true })
   ).pipe(
@@ -356,7 +364,7 @@ const listRoot = Effect.fn("Skills.listRoot")(function* (root: string) {
   const records = yield* Effect.forEach(
     names,
     (name) =>
-      loadRecord(root, name, "list").pipe(
+      loadRecord(root, name, "list", folderIsName).pipe(
         Effect.catch((error) =>
           Effect.logWarning("Skipping unreadable Skill", {
             root,
@@ -391,7 +399,7 @@ const make = Effect.fn("Skills.make")(function* (
     const seenIdentities = new Set<string>()
     const kept: Array<SkillRecord> = []
     for (const root of readable) {
-      const found = yield* listRoot(root).pipe(
+      const found = yield* listRoot(root, root === primary).pipe(
         Effect.catch((error) =>
           Effect.logWarning("Skills root unavailable", { root, reason: error.reason }).pipe(
             Effect.as([] as ReadonlyArray<SkillRecord>)
@@ -471,6 +479,11 @@ const make = Effect.fn("Skills.make")(function* (
     operation: SkillOperation
   ) {
     for (const root of readable) {
+      if (root !== primary) {
+        const shared = (yield* listRoot(root, false)).find((record) => record.skill.name === name)
+        if (shared !== undefined) return shared
+        continue
+      }
       const record = yield* loadRecord(root, name, operation).pipe(
         Effect.catch((error) =>
           error.reason === "not_found" ? Effect.succeed(null) : Effect.fail(error)
