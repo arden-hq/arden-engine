@@ -12,3 +12,4 @@ build/
 .claude/*
 !.claude/skills/
 .*.node-gyp/
+.arden-tmp/

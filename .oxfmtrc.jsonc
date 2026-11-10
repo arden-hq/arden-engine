@@ -10,8 +10,9 @@
   "sortPackageJson": false,
   // The desktop keeps semicolons.
   "overrides": [{ "files": ["apps/desktop/**"], "options": { "semi": true } }],
-  // Formatted: apps/server-ts, apps/cli, apps/relay, every lib, and apps/desktop's
-  // src, electron, tests, scripts and contracts. Everything else is left as written.
+  // Formatted: apps/server-ts, apps/cli, apps/relay, every lib, benchmarks, and
+  // apps/desktop's src, electron, tests, scripts and contracts. Everything else is
+  // left as written.
   "ignorePatterns": [
     "/*",
     "!/apps/",
@@ -27,6 +28,7 @@
     "!/apps/desktop/scripts/",
     "!/apps/desktop/contracts/",
     "!/libs/",
+    "!/benchmarks/",
     "**/dist/",
     "**/node_modules/",
     "**/*.md",

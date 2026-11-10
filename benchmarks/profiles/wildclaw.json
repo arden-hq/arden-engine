@@ -1,0 +1,23 @@
+{
+  "name": "wildclaw-replace-model-before-running",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKeyEnv": "OPENAI_API_KEY",
+  "model": "REPLACE_WITH_MODEL_ID",
+  "reasoningEffort": null,
+  "contextLimit": 128000,
+  "timeoutMs": 1200000,
+  "maxModelRequests": 200,
+  "tools": [
+    "exec_command",
+    "write_stdin",
+    "file_read",
+    "file_list",
+    "file_find",
+    "file_search_text",
+    "file_write",
+    "file_edit",
+    "web_search",
+    "web_fetch"
+  ],
+  "memory": false
+}

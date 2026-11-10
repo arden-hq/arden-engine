@@ -1,0 +1,26 @@
+{
+  "deepresearch": {
+    "repository": "Ayanami0730/deep_research_bench",
+    "commit": "469cce54ea7f6a63c163d3d9fec879cf289ec484"
+  },
+  "browsecomp": {
+    "repository": "openai/simple-evals",
+    "commit": "652c89d0ca9df547706735883097e9537d40dc47"
+  },
+  "longmemeval": {
+    "repository": "xiaowu0162/LongMemEval",
+    "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc"
+  },
+  "swe-bench-pro": {
+    "repository": "scaleapi/SWE-bench_Pro-os",
+    "commit": "ca10a60a5fcae51e6948ffe1485d4153d421e6c5"
+  },
+  "harbor": {
+    "repository": "harbor-framework/harbor",
+    "commit": "5c364a538e0af19eb58a53fdb895d7c0f974cef5"
+  },
+  "automationbench": {
+    "repository": "zapier/AutomationBench",
+    "commit": "4a8e1061254004d9dac807054eed33fad7d1ff14"
+  }
+}

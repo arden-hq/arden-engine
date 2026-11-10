@@ -1,0 +1,442 @@
+# Arden benchmarks
+
+Developer CLI for the selected core: Terminal-Bench, SWE-bench Pro public,
+cleaned LongMemEval, BrowseComp, and DeepResearch Bench. Internal tests cover
+history import, tool execution, request limits, restart, and compaction.
+
+Arden runs its real server, provider, tools, persistence, and headless HTTP API.
+Coding follows the production Chat → code-worker path. The launcher waits for
+child work and queued result delivery before collecting the final answer.
+
+## Build once
+
+Requires Bun 1.3.10, Node 24+, Python 3.10+, and Docker. Run from the repository root:
+
+```bash
+bun run build:libs
+bun run build:server
+python3 benchmarks/package.py .arden-tmp/bench/runtime.tar.gz
+docker build -t arden-bench -f benchmarks/Dockerfile .arden-tmp/bench
+cp benchmarks/profiles/research.json benchmarks/profiles/local-research.json
+```
+
+Edit the copied profile: choose the exact model, reasoning effort, context limit,
+timeout, request cap, and tools. Credentials stay in the named environment
+variable, never in JSON. The model is offered only the tools in `tools`
+(see [What a trial changes](#what-a-trial-changes)), and they are declared up
+front, as other harnesses present a benchmark's tools; set `"toolSearch": true`
+to keep the app's deferred tools and tool search instead. `example.json` is the coding profile; `memory.json`
+enables real Wiki ingestion and retrieval. Research uses provider-hosted
+`web_search` and Arden `web_fetch`; the endpoint must support Responses and
+hosted search. For a Codex account, set `provider: "codex"`,
+`baseUrl: "https://chatgpt.com/backend-api/codex"`, and the exact live model ID
+(for example `openai-codex/gpt-5.6-sol`). Set `apiKeyEnv` to an environment
+variable containing the access token, and `accountIdEnv` to one containing the
+account ID. The runner validates model availability, reasoning effort, and
+context limit against the account's live catalog. It does not refresh tokens;
+expired authentication requires a fresh token before a new attempt. Never copy
+the authentication file or refresh token into an image or candidate workspace.
+
+The package contains built runtime files, workspace manifests, and the lockfile.
+It excludes the checkout, personal state, datasets, and credentials. Linux
+installs its own dependencies. Build between edits; batch runs resolve the image
+to its immutable ID so parallel source work cannot alter a running experiment.
+Use a new package filename or directory when rebuilding.
+
+## What a trial changes
+
+A trial runs the real server, but a benchmark needs a few things fixed. The
+runner (`candidate.mjs`) sets them, and saves the evidence next to the result:
+
+- **Tools.** Before the first prompt it writes one permission rule per tool in
+  the server's catalog: `allow` for the profile's `tools`, `never` for the rest.
+  A `never` rule keeps a tool out of what the model is offered. The rules are in
+  `permission-rules.json`, the catalog in `tool-catalog.json`.
+- **Tools that always ask.** A few tools take no rule because they always ask
+  the owner on a card (in 0.1.4: `space_archive`, `drive_upload`,
+  `drive_share_file`; the list is saved in `tools-without-rule.json`). They stay
+  offered. A profile may not name one. If the model calls one, or asks for a
+  connection, the runner declines the card and the model carries on; each
+  declined card is in `declined-requests.json`.
+- **Bookkeeping tools.** Tools outside the catalog (`set_chat_summary`,
+  `claim_record`, `claim_check`, `claim_review`, `evidence_record`) are always
+  offered.
+- **Working folder.** A chat has no working folder. The runner allows changes
+  inside the task folder with a path rule, and starts every prompt with one
+  sentence that names the folder. The benchmark's prompt follows unchanged.
+  A job with `"nameWorkspace": false` gets no such sentence; AutomationBench
+  uses it, because its tasks touch no files.
+- **Memory.** `"memory": false` turns off Memory recall and related chats for
+  the chat (child agents keep the default). `context-N.json` is the server's
+  record of which context parts each run used.
+- **Fixed defaults.** Shared Skills from the home folder are not read. Idle
+  compaction is off; compaction happens only when the context fills.
+  Automations are off, except Memory Capture while history is imported.
+- **Approvals.** Runs use the `allow` approval mode, so a command with host or
+  network access runs without a card. A command asks for the sandbox only when
+  the model passes `access: "sandbox"`.
+- **Still from the host.** The prompt lists the command-line tools installed on
+  the machine that runs the trial, and its time zone. In a container this is
+  the image; on a bare host it is your machine.
+- **Time limit.** `timeoutMs` counts from the start of the runner and covers
+  the whole trial: server start, setup (about three seconds for the rules),
+  history import, and every prompt. At the limit the runner cancels the run and
+  still writes the transcript and token counts. The driver allows one more
+  minute for that, then kills it. A trial that hits the limit is recorded as
+  an error; `run` goes on to the next trial.
+
+## Research and memory
+
+Download official data separately, outside the candidate workspace. Use the
+cleaned LongMemEval S/M files, the original encrypted BrowseComp CSV, and
+DeepResearch's `data/prompt_data/query.jsonl`. Pins and source repositories are
+in [upstreams.json](upstreams.json).
+
+```bash
+python3 benchmarks/cli.py inspect --suite browsecomp --data /path/to/browsecomp.csv
+python3 benchmarks/cli.py run --suite browsecomp --data /path/to/browsecomp.csv \
+  --profile benchmarks/profiles/local-research.json --image arden-bench \
+  --output benchmarks/results/browsecomp-smoke --limit 3 --repeats 1 --allow-model-calls
+python3 benchmarks/cli.py report --output benchmarks/results/browsecomp-smoke
+```
+
+Change `--suite` to `longmemeval` or `deepresearch` and select the corresponding
+data/profile. `--ids` selects explicit IDs. `--resume` skips recorded trials;
+incomplete attempts get fresh state and retain their earlier evidence. Changed
+dataset, profile, image, adapter, selection, or repeat count rejects resume.
+Recorded execution errors remain in predictions and the denominator; rerun them
+in a new experiment rather than silently replacing failures.
+
+Every trial gets a disposable container and fresh `ARDEN_DIR`. Only its sanitized
+job, profile, and trial artifacts are mounted. Raw gold/reference data stays on
+the host. Only credential variables named by the profile are forwarded.
+LongMemEval imports supplied user **and assistant** turns at their original dates,
+then waits for Arden's real memory capture before asking the held-out question.
+Memory capture costs count toward the same request limit as answering.
+
+`--allow-model-calls` acknowledges paid execution. Request caps are not dollar
+caps: token prices, output lengths, provider retries, and hosted searches affect
+cost. Establish a provider spending limit before large runs.
+
+## Terminal-Bench through Harbor
+
+Install Harbor at the commit in `upstreams.json` into a separate environment:
+
+```bash
+uv venv .arden-tmp/bench/venv
+uv pip install --python .arden-tmp/bench/venv/bin/python \
+  'harbor @ git+https://github.com/harbor-framework/harbor@5c364a538e0af19eb58a53fdb895d7c0f974cef5'
+```
+
+Use an explicit registry dataset version and absolute artifact paths:
+
+```bash
+PYTHONPATH="$PWD" .arden-tmp/bench/venv/bin/harbor run \
+  --dataset terminal-bench@2.0 --agent benchmarks.adapters.harbor:Arden \
+  --agent-kwarg runtime_archive="$PWD/.arden-tmp/bench/runtime.tar.gz" \
+  --agent-kwarg profile_path="$PWD/benchmarks/profiles/local-code.json" \
+  --extra-docker-compose benchmarks/harbor-compose.yaml \
+  --jobs-dir "$PWD/benchmarks/results/terminal-bench"
+```
+
+Copy/edit `example.json` as `local-code.json` first; export its credential variable
+in the host shell before running Harbor. Harbor owns environments,
+timeouts, reset, verifier execution, and scores. The adapter currently supports
+Debian/Ubuntu task images with `apt-get` and glibc. The Compose overlay enables
+nested Bubblewrap user/PID namespaces; it does not use privileged containers or
+mount the Docker socket. Keep candidate and verifier filesystem access under
+Harbor's control. Never mount your home or raw benchmark reference directory.
+
+Each trial records the server's own answer on whether a sandboxed command can
+run, in `arden/observations/command-sandbox.json` next to the trial logs.
+Without Bubblewrap Arden refuses sandboxed commands, and the model runs them
+with host access inside the task container.
+
+Harbor counts the task's time limit, not the profile's. When Harbor stops a
+trial, the adapter tells the runner to stop, waits up to 45 seconds for it to
+write the transcript and token counts, then copies the trial folder out. A
+failed copy is logged and does not replace the run's own error.
+
+For task images where setup cannot reach a package manager, export a
+ready Linux runtime from the `arden-bench` image once and pass
+`--agent-kwarg prebuilt=true` with it as `runtime_archive`. The archive
+holds `/opt/arden` with its Linux dependencies and Node as
+`/usr/local/bin/arden-bench-node`; the task image needs only `python3` and a
+glibc at least as new as the image's (Debian bookworm):
+
+```bash
+docker run --rm --entrypoint sh arden-bench -c \
+  'cp /usr/local/bin/node /usr/local/bin/arden-bench-node && tar -czf - /opt/arden /usr/local/bin/arden-bench-node' \
+  > "$PWD/.arden-tmp/bench/runtime-linux.tar.gz"
+```
+
+Tasks that limit the agent's network must also allow the model's host, e.g.
+`--allow-agent-host chatgpt.com` for the Codex route (present in current
+Harbor; check `harbor run --help` on the pinned commit).
+
+## WildClawBench through Harbor
+
+The 60 tasks ship as a Harbor dataset (`internlm/WildClawBench-Harbor`) on the prebuilt
+image `wildclawbench-ubuntu:v1.3` (workdir `/tmp_workspace`, public network). Install
+Harbor as above, then:
+
+```bash
+hf download internlm/WildClawBench-Harbor --repo-type dataset --local-dir "$PWD/.arden-tmp/bench/wildclaw"
+# The image is not pulled by Harbor: take Images/wildclawbench-ubuntu_v1.3.tar from the
+# original WildClawBench dataset and `docker load -i` it first.
+cp benchmarks/profiles/wildclaw.json benchmarks/profiles/local-wildclaw.json   # set model
+export OPENAI_API_KEY=...        # the profile's apiKeyEnv
+export OPENROUTER_API_KEY=... JUDGE_MODEL=...   # judge-based graders (see below)
+
+PYTHONPATH="$PWD" .arden-tmp/bench/venv/bin/harbor run \
+  -p "$PWD/.arden-tmp/bench/wildclaw" --include-task-name '06_Safety_Alignment_task_5*' \
+  --agent benchmarks.adapters.harbor:Arden \
+  --agent-kwarg runtime_archive="$PWD/.arden-tmp/bench/runtime.tar.gz" \
+  --agent-kwarg profile_path="$PWD/benchmarks/profiles/local-wildclaw.json" \
+  --agent-kwarg transcript=openclaw \
+  --extra-docker-compose benchmarks/harbor-compose.yaml \
+  --n-concurrent 2 --jobs-dir "$PWD/benchmarks/results/wildclaw"
+```
+
+Before the first run, fix two upstream dataset problems (2026-10-25; they
+break every harness, not only Arden):
+
+- The task scripts have Windows line endings, so `run-warmup.sh` fails with
+  "set: pipefail: invalid option name" and the trial ends in `HealthcheckError`:
+  `grep -rlI $'\r' --include='*.sh' .arden-tmp/bench/wildclaw | xargs sed -i '' $'s/\r$//'`.
+- The image sets `http_proxy` to the authors' private proxy; the tasks' `task.toml`
+  blanks it, so nothing to do inside Harbor, but a hand `docker run` needs
+  `-e http_proxy= -e https_proxy=`.
+
+Anonymous Hugging Face downloads of the full set (3,381 files) are rate-limited;
+log in (`huggingface-cli login`) or fetch tasks with `--include "<task>/*"`. Set
+`JUDGE_MODEL=openai/gpt-5.4` to match the upstream leaderboard (the Harbor tasks
+default to `openai/gpt-4o-mini`), pass `--yes` so Harbor does not stop to confirm
+`BRAVE_API_KEY`, and export `OPENROUTER_API_KEY` for the judge.
+
+Per-trial reward, tokens, dollars and seconds (prices in $ per million
+`input`, `cached_input`, `output` tokens; the same pricing as AutomationBench).
+`reward_mean` is over graded trials only; `reward_mean_ungraded_as_zero`
+counts a trial with no reward (an error or a timeout) as zero:
+
+```bash
+python3 benchmarks/cli.py harbor-report --jobs-dir benchmarks/results/wildclaw --prices prices.json
+```
+
+Check the `--include-task-name` / `--n-tasks` flags with `harbor run --help` at the pinned
+commit; the task directory names are `<category>_task_<n>_<slug>`.
+
+- `transcript=openclaw` converts `observations/session.json` into OpenClaw `chat.jsonl`
+  (`adapters/openclaw_transcript.py`) and writes it to
+  `/root/.openclaw/agents/main/sessions/chat.jsonl` in the container after the run,
+  also after a failed or timed-out run when the runner wrote a transcript. Without it Terminal-Bench runs are unchanged. Safety graders
+  only read assistant `text` and `tool_use` blocks (`name`, `input`); Arden tool names are
+  kept (`exec_command` is recognised as a shell tool, command read from `cmd`).
+- Use `linux/amd64` images on Apple silicon only with emulation; expect it to be slow.
+  The adapter needs `apt-get` and glibc in the image (Ubuntu: yes). Images are large;
+  check `df -h` before loading. Run at most 2 trials at once.
+- Search: Arden's `web_search` is provider-hosted (OpenAI Responses route only) and
+  `web_fetch` works from the sandbox. The benchmark's `BRAVE_API_KEY` is not used by
+  Arden: `exec_command` passes only an allowlist of host variables (shell, proxy, XDG)
+  into its child, so a skill that reads `BRAVE_API_KEY` finds nothing. A search backend
+  that needs a key must be a profile `mcpServers` entry; the adapter forwards the host
+  variables named in its `environment` map.
+- Commands run with host access inside the task container unless the model asks
+  for the sandbox; nothing stops for approval in a benchmark run.
+- Judge graders: whether the Harbor `tests/grader.py` needs `JUDGE_MODEL` and
+  `OPENROUTER_API_KEY` in the verifier environment was not verifiable without the
+  dataset (upstream judge defaults to `openai/gpt-5.4` through OpenRouter); read a
+  task's `tests/` after download and export what it reads.
+- Known gaps: no browser (Arden's browser tools need the desktop app, absent
+  in a headless run; OpenClaw has one), so browser-dependent tasks will score low; transcript-based
+  graders see Arden's format, not OpenClaw's; the Warmup mock services run from each
+  task's `run-warmup.sh` healthcheck, which the adapter does not touch.
+
+## SWE-bench Pro public
+
+Prepare one generation task using its **official instance image**, preferably
+pinned by digest:
+
+```bash
+python3 benchmarks/swe_task.py --data /path/to/public.csv --id INSTANCE_ID \
+  --image OFFICIAL_INSTANCE_IMAGE --output .arden-tmp/bench/swe-instance
+```
+
+Run the Harbor command above with `--path .arden-tmp/bench/swe-instance` instead
+of `--dataset`, plus `--disable-verification --agent-kwarg patch=true
+--agent-kwarg case_id=INSTANCE_ID`. The generated task only performs generation.
+Use the official evaluator in a fresh environment for grading.
+
+The adapter exports `agent/arden/prediction.json` as the native JSON array of
+`instance_id`, `patch`, and `prefix`. Patch extraction includes untracked files
+and compares against the original base even if the candidate commits changes.
+It uses a separate Git index. Combine arrays for a larger official evaluation:
+
+```bash
+python swe_bench_pro_eval.py --raw_sample_path /path/to/public.csv \
+  --patch_path /path/to/combined-patches.json --output_dir /path/to/scores \
+  --scripts_dir /path/to/official/run_scripts --dockerhub_username NAMESPACE --use_local_docker
+```
+
+Run from the pinned official checkout with its dependencies, image namespace,
+and other required flags configured according to its README.
+
+## Grade saved answers
+
+Install each official scorer's dependencies in its own Python environment and
+check out its exact `upstreams.json` commit. Generation and grading are separate:
+
+```bash
+/path/to/scorer/python benchmarks/grade.py --suite longmemeval \
+  --upstream /path/to/LongMemEval --data /path/to/longmemeval_s_cleaned.json \
+  --predictions benchmarks/results/memory/predictions-0.jsonl \
+  --output benchmarks/results/memory/grade-0 --judge gpt-4o --allow-judge-calls
+```
+
+The same command supports `browsecomp` and `deepresearch`. BrowseComp requires
+`--judge`; DeepResearch uses the pinned upstream judge configuration and rejects
+that override. Its RACE and FACT pipelines also require the upstream API/search
+credentials. Run once per repeat; `cli.py regrade` can invoke an explicit scorer
+command for every predictions file using the `{predictions}` placeholder.
+
+BrowseComp's pinned scorer returns `correct: yes` but compares it with `yes`.
+The bridge normalizes that label and records
+`upstream-with-correct-label-parser-v1`; it is an explicitly corrected scorer,
+not a byte-for-byte official run. Question formatting, grading prompt, and
+aggregation remain upstream-owned. Other suites use their native scorers.
+
+For BrowseComp grading through Codex, add `--provider-profile` with the same
+profile file and set `--judge` to its exact model ID. This uses Arden's provider
+transport with the upstream grading prompt, empty system instructions, and the
+profile's reasoning setting. It does not apply upstream temperature/max-token
+settings. Judge responses and token usage are saved separately. Using the same
+model for candidate and judge is useful for a smoke run; calibrate the judge
+before treating larger scores as comparative evidence.
+
+## Evidence and verification
+
+Artifacts include effective profile/tool configuration, native session archives,
+all run details and durable events (including children and ingestion), memory
+capture status, usage, errors, immutable image ID, and input hashes. Results are
+private local files. `report` describes execution and token usage; completion
+is not benchmark correctness, and there is no blended five-suite score.
+
+```bash
+python3 -m unittest discover -s benchmarks/tests -p 'test_*.py'
+node --test benchmarks/tests/candidate.test.mjs benchmarks/tests/history.test.mjs
+```
+
+Build first (`bun run build:libs && bun run build:server`); the runner imports
+the built server. These tests use a local fake provider. They verify plumbing:
+tool rules, a sandboxed command in the task folder, a declined card, the memory
+switch, the request limit, restart, and compaction. They do not measure model
+quality or memory accuracy.
+
+Not verified in this repository yet: the Docker image, the Harbor adapter
+inside a container, the Linux sandbox path, and any paid run. Full-suite
+results and judge calibration are pending.
+
+## AutomationBench (Zapier, `api` toolset)
+
+Business-workflow tasks over a simulated world (Gmail, Salesforce, HubSpot,
+Sheets, and others). The model gets the upstream `api` toolset
+(`api_search`, `api_fetch`, `base64_encode`); grading is the upstream rubric
+(`task_completed_correctly`, `partial_credit`) on the final world state. Pin:
+`upstreams.json` (`automationbench`, v1.0.6). Public domains: sales, marketing,
+operations, support, finance, hr (100 tasks each).
+
+`automationbench/bridge.py` is a stdio MCP server, one per trial. It builds the
+task's world with the upstream `AutomationBenchEnv.setup_state`, exposes the
+upstream tool definitions (names, descriptions, and schemas as upstream gives them to a model) and runs
+calls through the upstream environment, so results and errors are what the
+upstream model would see. After every call it rewrites `world.json` and appends
+to `world.calls.jsonl`. Grading (`upstream.py grade`) loads that world into the
+upstream rubric.
+
+```bash
+uv venv .arden-tmp/bench/automationbench-venv --python 3.13
+uv pip install --python .arden-tmp/bench/automationbench-venv/bin/python \
+  -e /path/to/AutomationBench 'mcp<2'
+git -C /path/to/AutomationBench checkout 4a8e1061254004d9dac807054eed33fad7d1ff14
+```
+
+Upstream needs Python 3.13. `run.py` itself uses only the standard library and
+calls the venv Python for task listing, prompts, grading, and the bridge.
+
+Smoke (3 tasks, one per sales/hr/finance; `--ids` takes task `example_id`s, use
+`--per-domain 1 --domains sales hr finance` instead for a seeded sample):
+
+```bash
+cp benchmarks/profiles/example.json benchmarks/profiles/local-ab.json  # model, effort; memory false
+V=.arden-tmp/bench/automationbench-venv/bin/python; U=/path/to/AutomationBench
+python3 benchmarks/automationbench/run.py run --upstream $U --python $V \
+  --harness arden --profile benchmarks/profiles/local-ab.json \
+  --domains sales hr finance --per-domain 1 --seed 0 \
+  --output benchmarks/results/ab-arden-smoke --allow-model-calls
+python3 benchmarks/automationbench/run.py run --upstream $U --python $V \
+  --harness codex --model MODEL --reasoning-effort high \
+  --domains sales hr finance --per-domain 1 --seed 0 \
+  --output benchmarks/results/ab-codex-smoke --allow-model-calls
+python3 benchmarks/automationbench/run.py report --output benchmarks/results/ab-arden-smoke \
+  --prices prices.json   # {"input": 2.5, "cached_input": 0.25, "output": 10}  USD per million tokens
+python3 benchmarks/automationbench/run.py compare \
+  --a benchmarks/results/ab-arden-smoke --b benchmarks/results/ab-codex-smoke
+```
+
+Selection is deterministic: per domain, sorted task ids, then a sample of
+`--per-domain` drawn with `random.Random("<seed>:<domain>")`, so the same seed
+and count give both harnesses the same tasks. It is written to `manifest.json`
+with the upstream commit, configuration and adapter hashes; `--resume` skips
+trials that finished (including step-limit ones) and retries errored ones, and
+rejects a changed manifest. Trials run one at a time.
+
+Fairness notes:
+
+- Both harnesses receive the same single message: the upstream system text, a
+  blank line, then the upstream task text (`prompt.txt`). Arden's job sets
+  `"nameWorkspace": false`, so nothing is put in front of it. Neither gets a custom system prompt
+  from the benchmark; Arden's own system prompt and Codex's own base
+  instructions still apply, so the comparison is of whole harnesses.
+- Same three benchmark tools. Arden's profile `tools` is replaced with the three
+  `mcp__ab__*` names. Arden still offers its tools that always ask (declined
+  when called) and its bookkeeping tools; see "What a trial changes". Codex runs with its shell, apply-patch-style tools,
+  web search, apps, plugins, memories, sub-agents and image tools disabled in a
+  fresh `CODEX_HOME` (`config.toml` written per trial, `auth.json` a symlink to
+  `~/.codex/auth.json`, never copied), read-only sandbox, approvals never.
+  The bridge server is set to `default_tools_approval_mode = "approve"`; without
+  it every MCP call fails ("MCP tool call requires approval") under approvals never.
+- Step cap: both leaderboards (Zapier's and Artificial Analysis's) stop every
+  model at 50 steps. Arden stops at 50 model requests (or the profile's lower
+  value). The count is every request the trial sends to the model; if the
+  engine sends a helper request of its own, Arden gets fewer than 50 steps
+  (not measured yet). `codex exec` has no such flag and reports tool calls, not model
+  responses, so the driver stops Codex when it starts its 51st tool call; a
+  response makes at least one call, so Codex never gets more than 50. Either way
+  the trial is graded as it stands and marked `step_limit`; a stopped Codex trial
+  has no token counts (Codex reports them only when a turn ends); its `usage`
+  is `null`, it is left out of token and dollar means, and `report` counts it
+  in `trials_missing_usage`. Codex receipts
+  record `turns` (`turn.completed` events, normally 1) rather than model requests. Every receipt records `bridge_calls` (lines in `world.calls.jsonl`).
+  A Codex trial with no successful MCP tool call and at least one failed one is
+  `error` (`tool calls failed: <first message>`), not graded. Step-limit status
+  comes from `budgetExhausted` in the candidate's `usage.json`.
+- Settings: `manifest.json` and every receipt record `harness`, `model`,
+  `reasoning_effort`, `step_cap` (50, or Arden's lower profile value) and
+  `timeout_s`. `compare` refuses experiments whose model or reasoning effort
+  differ unless `--allow-mismatch` is passed, and prints both sides' settings.
+  `run` also requires the upstream clone to be clean at the pinned commit.
+- Tokens: receipts hold uncached `input`, `cached_input`, `output` (Codex's
+  cached tokens are subtracted from its `input_tokens`; Codex reports a running
+  total, so the last `turn.completed` is used). Arden receipts also hold
+  `cache_write`. `tokens_total` leaves it out. Dollar figures need a prices
+  file and charge `cache_write` at the prices file's `cache_write` rate, or at
+  the `input` rate when it has none.
+- `status: error` (crash, no result, no world file) is not a fail. `report`
+  gives the pass rate over graded trials and, separately, with errors counted as
+  failures. `compare` pairs trials by domain and id on those graded in both,
+  and prints discordant counts and an exact two-sided McNemar p-value.
+- The public leaderboard scores a private task set, so these numbers are not
+  comparable to it. Task `example_id`s are the upstream public dataset's.
+- The candidate sees only tool results: its tools are the three bridge tools, and
+  assertions stay in the grader. Keep the upstream checkout outside the trial
+  workspace.

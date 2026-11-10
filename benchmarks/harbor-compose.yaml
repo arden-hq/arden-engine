@@ -1,0 +1,7 @@
+services:
+  main:
+    # Nested Bubblewrap needs user namespaces. The outer container still owns
+    # the task filesystem; do not mount host state or the Docker socket.
+    security_opt:
+      - seccomp=unconfined
+      - systempaths=unconfined

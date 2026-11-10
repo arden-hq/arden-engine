@@ -1,0 +1,24 @@
+{
+  "name": "memory-replace-model-before-running",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKeyEnv": "OPENAI_API_KEY",
+  "model": "REPLACE_WITH_MODEL_ID",
+  "reasoningEffort": null,
+  "contextLimit": 128000,
+  "timeoutMs": 3600000,
+  "maxModelRequests": 1000,
+  "tools": [
+    "wiki_search",
+    "wiki_read_page",
+    "wiki_list_pages",
+    "wiki_create_page",
+    "wiki_edit_page",
+    "wiki_patch_page",
+    "wiki_list_changes",
+    "wiki_page_history",
+    "wiki_links",
+    "wiki_create_directory",
+    "report"
+  ],
+  "memory": true
+}

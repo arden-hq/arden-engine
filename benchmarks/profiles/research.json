@@ -1,0 +1,12 @@
+{
+  "name": "research-replace-model-before-running",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKeyEnv": "OPENAI_API_KEY",
+  "model": "REPLACE_WITH_MODEL_ID",
+  "reasoningEffort": null,
+  "contextLimit": 128000,
+  "timeoutMs": 600000,
+  "maxModelRequests": 100,
+  "tools": ["web_search", "web_fetch"],
+  "memory": false
+}
