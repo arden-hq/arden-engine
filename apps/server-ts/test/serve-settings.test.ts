@@ -32,6 +32,19 @@ it("a settings file is refused with the reason when it cannot be applied", () =>
       provider: { kind: "responses", baseUrl: "http://127.0.0.1:9", apiKeyEnv: "KEY" }
     })
   ).toThrow(/needs `model` and `contextLimit`/)
+  expect(() => parseSettings({ ...base, reasoningEffort: "high" })).toThrow(/needs `model`/)
+  expect(() => parseSettings({ ...base, model: "a", helperModel: "b" })).toThrow(
+    /must be `model` or one of `extraModels`/
+  )
+  expect(() => parseSettings({ ...base, approvalMode: "always" })).toThrow(SettingsError)
+  expect(() =>
+    parseSettings({
+      ...base,
+      model: "a",
+      contextLimit: 1000,
+      provider: { kind: "responses", baseUrl: "http://example.com", apiKeyEnv: "KEY" }
+    })
+  ).toThrow(/HTTPS or loopback/)
   expect(parseSettings(base)).toEqual(base)
 })
 
@@ -55,6 +68,7 @@ it("start options carry the step limit, Memory, Skills, the sandbox and compacti
         dataDirectory: "/tmp/arden-settings",
         maxSteps: 40,
         memory: false,
+        approvalMode: "allow",
         skillRoots: [],
         commandSandbox: false,
         idleCompactionAfterMs: 0
@@ -65,6 +79,7 @@ it("start options carry the step limit, Memory, Skills, the sandbox and compacti
     databasePath: "/tmp/arden-settings/arden.db",
     maxRunSteps: 40,
     memory: false,
+    approvalMode: "allow",
     sharedSkillRoots: [],
     commandSandbox: false,
     idleCompactionAfterMs: 0
@@ -94,7 +109,10 @@ it("a configured server starts with its settings in place and publishes its acce
       memory: false,
       automations: false,
       skillRoots: [],
-      idleCompactionAfterMs: 0
+      idleCompactionAfterMs: 0,
+      helperModel: "small-model",
+      approvalMode: "allow",
+      compaction: { threshold: 0.6, summaryMaxTokens: 2000 }
     }),
     { SERVE_TEST_KEY: "not-a-real-key" }
   )
@@ -112,19 +130,20 @@ it("a configured server starts with its settings in place and publishes its acce
       expect(response.status).toBe(200)
       return response.json()
     }
-    // The published secret is the command-line one: it lists chats, and it
-    // cannot change settings. Without a secret nothing answers.
-    const commandLine = { [LOCAL_CAPABILITY_HEADER]: access.capability }
-    expect((await configured.server.fetch("/sessions", { headers: commandLine })).status).toBe(200)
+    // The published secret is the owner's: whoever started the server reaches
+    // every route with it. Without a secret nothing answers.
+    const published = { [LOCAL_CAPABILITY_HEADER]: access.capability }
     expect(
-      (await configured.server.fetch("/settings/intelligence", { headers: commandLine })).status
-    ).toBe(403)
+      (await configured.server.fetch("/settings/intelligence", { headers: published })).status
+    ).toBe(200)
     expect((await configured.server.fetch("/sessions")).status).toBe(403)
 
     // Sub-agents are off because `spawn_agent` is not offered.
     expect(await get("/settings/intelligence")).toMatchObject({
       max_agent_depth: 1,
-      max_concurrent_agents: 1
+      max_concurrent_agents: 1,
+      compaction_threshold: 0.6,
+      summary_max_tokens: 2000
     })
     // Every Automation is off.
     const { automations } = Schema.decodeUnknownSync(
@@ -160,6 +179,7 @@ it("a configured server starts with its settings in place and publishes its acce
       model: "test-model",
       contextLimit: 100_000,
       tools: ["exec_command", "spawn_agent"],
+      subAgents: { maxConcurrent: 2 },
       workspace
     }),
     { SERVE_TEST_KEY: "not-a-real-key" }
@@ -172,6 +192,9 @@ it("a configured server starts with its settings in place and publishes its acce
       rules.filter((entry) => entry.subject.kind === "tool" && entry.subject.tool === tool)
     expect(forTool("spawn_agent").map((entry) => entry.decision)).toEqual(["allow"])
     expect(forTool("exec_command").map((entry) => entry.decision)).toEqual(["allow"])
+    // Sub-agents are back on, with the file's limit and the default depth.
+    const settings = await again.request("/settings/intelligence")
+    expect(await settings.json()).toMatchObject({ max_agent_depth: 3, max_concurrent_agents: 2 })
   } finally {
     await again.stop()
     await rm(root, { recursive: true, force: true })

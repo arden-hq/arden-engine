@@ -1,3 +1,4 @@
+import { APPROVAL_MODES, type ApprovalMode } from "@arden-hq/protocol/permissions"
 import { ARDEN_DIR_VARIABLE, resolveArdenDir } from "@arden-hq/std/paths"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
@@ -34,6 +35,7 @@ export interface ServerConfigShape {
   readonly commandSandbox: boolean
   readonly maxRunSteps: number
   readonly memory: boolean
+  readonly approvalMode?: ApprovalMode
 }
 
 const isOnDisk = (databasePath: string | undefined): databasePath is string =>
@@ -52,7 +54,8 @@ const ServerOptionsSchema = Schema.Struct({
   sharedSkillRoots: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
   commandSandbox: Schema.optionalKey(Schema.Boolean),
   maxRunSteps: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
-  memory: Schema.optionalKey(Schema.Boolean)
+  memory: Schema.optionalKey(Schema.Boolean),
+  approvalMode: Schema.optionalKey(Schema.Literals(APPROVAL_MODES))
 })
 
 const decodeOptions = Schema.decodeUnknownEffect(ServerOptionsSchema)
@@ -89,6 +92,7 @@ type ServerConfigInput = Pick<
   | "commandSandbox"
   | "maxRunSteps"
   | "memory"
+  | "approvalMode"
 >
 
 const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
@@ -108,7 +112,8 @@ const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
     ),
     commandSandbox: parsed.commandSandbox ?? true,
     maxRunSteps: parsed.maxRunSteps ?? DEFAULT_MAX_RUN_STEPS,
-    memory: parsed.memory ?? true
+    memory: parsed.memory ?? true,
+    ...(parsed.approvalMode === undefined ? {} : { approvalMode: parsed.approvalMode })
   })
 })
 

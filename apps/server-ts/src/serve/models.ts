@@ -34,7 +34,16 @@ const hostOf = (
     defaults: {
       chatModelId: chat.id,
       reasoningEfforts: effort === undefined ? {} : { [chat.id]: effort },
-      roles: { background: inherit, helper: inherit }
+      roles: {
+        background:
+          settings.backgroundModel === undefined
+            ? inherit
+            : { modelId: settings.backgroundModel, reasoningEffort: null },
+        helper:
+          settings.helperModel === undefined
+            ? inherit
+            : { modelId: settings.helperModel, reasoningEffort: null }
+      }
     }
   }
 }

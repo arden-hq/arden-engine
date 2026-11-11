@@ -36,6 +36,7 @@ import {
 } from "../../persistence/chat/store.js"
 import { ToolExecutionStore, ToolExecutionStoreError } from "../../persistence/tools/store.js"
 import { ArdenApi } from "../api.js"
+import { ServerConfig } from "../../config/service.js"
 import { LocalCaller } from "../middleware/local-only.js"
 import { isRequestId } from "../middleware/request-id.js"
 import {
@@ -158,10 +159,17 @@ export const ChatHandlers = HttpApiBuilder.group(
       }
       return undefined
     })
+    const fixedApprovalMode = (yield* ServerConfig).approvalMode
     const sender = Effect.fn("ChatHandlers.sender")(function* (
       requested: ChatApprovalMode | undefined,
       sentFrom: ChatSentFrom | undefined
     ) {
+      // A server started with one approval mode runs every message in it.
+      if (fixedApprovalMode !== undefined)
+        return {
+          approvalMode: fixedApprovalMode,
+          sentFrom: (yield* LocalCaller) === "cli" ? ("cli" as const) : sentFrom
+        }
       if ((yield* LocalCaller) !== "cli") return { approvalMode: requested, sentFrom }
       if (requested !== undefined && !isCliApprovalMode(requested))
         return yield* new HttpApiError.Forbidden({})

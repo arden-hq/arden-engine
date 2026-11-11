@@ -1,5 +1,6 @@
 import type { ApprovalReviewSource, TranscriptionSource } from "../models/provider.js"
 import type { ModelProvider } from "@arden-hq/loop"
+import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 import type { BrowserBroker } from "../browser/service.js"
 import type { LocalAccess } from "../http/middleware/local-only.js"
 import type { ChatRunner } from "../chat/runner-contract.js"
@@ -37,6 +38,10 @@ export interface ServerOptions {
    *  chat and sub-agent. A chat's own context selection still applies on top.
    *  Defaults to true. */
   readonly memory?: boolean
+  /** Every message runs in this approval mode, whatever the request names.
+   *  For a server with nobody to answer a card. Omit to let each message and
+   *  chat decide, as in the app. */
+  readonly approvalMode?: ApprovalMode
   /** Most model steps one Chat run may take. Near the limit the run is told
    *  how many are left, and its last step has no tools so it ends in a reply.
    *  Defaults to 200. */

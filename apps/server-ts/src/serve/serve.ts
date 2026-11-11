@@ -21,11 +21,13 @@ export const serverOptionsFor = (
   | "sharedSkillRoots"
   | "commandSandbox"
   | "idleCompactionAfterMs"
+  | "approvalMode"
 > => ({
   port: settings.port ?? 0,
   databasePath: join(settings.dataDirectory, "arden.db"),
   ...(settings.maxSteps === undefined ? {} : { maxRunSteps: settings.maxSteps }),
   ...(settings.memory === undefined ? {} : { memory: settings.memory }),
+  ...(settings.approvalMode === undefined ? {} : { approvalMode: settings.approvalMode }),
   ...(settings.skillRoots === undefined ? {} : { sharedSkillRoots: settings.skillRoots }),
   ...(settings.commandSandbox === undefined ? {} : { commandSandbox: settings.commandSandbox }),
   ...(settings.idleCompactionAfterMs === undefined
@@ -60,9 +62,9 @@ export const startConfigured = async (
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
   const options = serverOptionsFor(settings)
   const models = await modelsFor(settings, env)
-  // Two secrets, as in the app. The owner one reaches every route and never
-  // leaves this process: it applies the settings. The command-line one reaches
-  // only what `arden` needs and is the one published in the access file.
+  // Whoever starts a configured server owns it and its data folder, so the
+  // access file carries the owner secret: every route, approvals included.
+  // The narrower command-line secret the app hands out is made and not used.
   const owner = randomBytes(32).toString("base64url")
   const commandLine = randomBytes(32).toString("base64url")
   const server = await startServerWithLocalAccess({
@@ -86,7 +88,7 @@ export const startConfigured = async (
     await publishCliAccess(accessFile, {
       version: 1,
       serverUrl: server.url.href,
-      capability: commandLine,
+      capability: owner,
       pid: process.pid
     })
     return {
@@ -95,7 +97,7 @@ export const startConfigured = async (
       applied,
       accessFile,
       stop: async () => {
-        await withdrawCliAccess(accessFile, commandLine).catch(() => undefined)
+        await withdrawCliAccess(accessFile, owner).catch(() => undefined)
         await server.stop()
       }
     }

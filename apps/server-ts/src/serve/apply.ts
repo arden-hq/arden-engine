@@ -1,6 +1,9 @@
 import { mcpDecoders, mcpRequests, mcpRoutes } from "@arden-hq/protocol/mcp"
 import { permissionDecoders, permissionRoutes } from "@arden-hq/protocol/permissions"
-import { intelligenceSettingsRequests } from "@arden-hq/protocol/settings"
+import {
+  DEFAULT_INTELLIGENCE_SETTINGS,
+  intelligenceSettingsRequests
+} from "@arden-hq/protocol/settings"
 import { toolDecoders, toolRoutes } from "@arden-hq/protocol/tools"
 import { sleep } from "@arden-hq/std/sleep"
 import { SettingsError, type Settings } from "./settings.js"
@@ -76,6 +79,9 @@ export interface ApplyInput {
 }
 
 const json = { "content-type": "application/json" }
+
+/** A stdio MCP server that has not connected by now will not: it waits for a sign-in or is off. */
+const MCP_CONNECT_TIMEOUT_MS = 60_000
 
 /**
  * Applies what a start option cannot carry, over the server's own HTTP API:
@@ -154,8 +160,15 @@ export const applySettings = async ({
     }
   }
 
+  // A server of the same name from an earlier start is replaced, so the file
+  // always wins and a second start does not fail on it.
   const mcpServers = settings.mcpServers ?? []
+  const present =
+    mcpServers.length === 0
+      ? new Set<string>()
+      : new Set(mcpDecoders.list(await call(mcpRoutes.collection)).servers.map((s) => s.name))
   for (const server of mcpServers) {
+    if (present.has(server.name)) await call(mcpRoutes.server(server.name), "DELETE")
     const set: Record<string, string> = {}
     for (const [name, source] of Object.entries(server.environment ?? {})) {
       const value = env[source]
@@ -180,6 +193,7 @@ export const applySettings = async ({
   }
   if (mcpServers.length > 0) {
     const wanted = new Set(mcpServers.map((server) => server.name))
+    const deadline = performance.now() + MCP_CONNECT_TIMEOUT_MS
     while (true) {
       signal?.throwIfAborted()
       const servers = mcpDecoders
@@ -195,6 +209,12 @@ export const applySettings = async ({
         servers.every((server) => server.status === "connected")
       )
         break
+      if (performance.now() > deadline)
+        throw new SettingsError(
+          `MCP servers did not connect in ${MCP_CONNECT_TIMEOUT_MS / 1000} s: ${[...wanted]
+            .map((name) => `${name} (${servers.find((s) => s.name === name)?.status ?? "missing"})`)
+            .join(", ")}`
+        )
       await sleep(200, signal)
     }
   }
@@ -213,15 +233,34 @@ export const applySettings = async ({
         throw new SettingsError(`Tool always asks the owner: ${tool.name}`)
       toolsWithoutRule.push(tool.name)
     }
-    // Sub-agents follow the tool: offered, they keep the server's own limits;
-    // not offered, they are off, so the two never disagree.
-    if (!offered.has("spawn_agent"))
-      await call(
-        "/settings/intelligence",
-        "PATCH",
-        intelligenceSettingsRequests.update({ maxAgentDepth: 1, maxConcurrentAgents: 1 })
-      )
   }
+  // Sub-agents follow the tool: offered, they get the file's limits or the
+  // defaults; not offered, they are off, so the two never disagree. Both are
+  // written on every start, so an earlier start's limits do not linger.
+  const subAgentLimits = (): { maxAgentDepth?: number; maxConcurrentAgents?: number } => {
+    if (offered !== undefined && !offered.has("spawn_agent"))
+      return { maxAgentDepth: 1, maxConcurrentAgents: 1 }
+    if (offered === undefined && settings.subAgents === undefined) return {}
+    return {
+      maxAgentDepth: settings.subAgents?.maxDepth ?? DEFAULT_INTELLIGENCE_SETTINGS.maxAgentDepth,
+      maxConcurrentAgents:
+        settings.subAgents?.maxConcurrent ?? DEFAULT_INTELLIGENCE_SETTINGS.maxConcurrentAgents
+    }
+  }
+  const limits = {
+    ...subAgentLimits(),
+    ...(settings.compaction?.threshold === undefined
+      ? {}
+      : { compactionThreshold: settings.compaction.threshold }),
+    ...(settings.compaction?.keepRatio === undefined
+      ? {}
+      : { compactionKeepRatio: settings.compaction.keepRatio }),
+    ...(settings.compaction?.summaryMaxTokens === undefined
+      ? {}
+      : { summaryMaxTokens: settings.compaction.summaryMaxTokens })
+  }
+  if (Object.keys(limits).length > 0)
+    await call("/settings/intelligence", "PATCH", intelligenceSettingsRequests.update(limits))
 
   if (settings.workspace !== undefined) {
     const allowed = await rule("allow", {

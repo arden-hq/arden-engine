@@ -16,9 +16,18 @@ export const runConfigured = async (file: string | undefined): Promise<void> => 
   try {
     if (file === undefined) throw new SettingsError("Usage: --config <settings file>")
     const settings = await readSettings(file)
+    // A signal during the start is kept and acted on once there is a server
+    // to stop, so the access file and the database are always left clean.
+    let wanted = false
+    let stop = (): void => {
+      wanted = true
+    }
+    const onSignal = (): void => stop()
+    process.on("SIGINT", onSignal)
+    process.on("SIGTERM", onSignal)
     const configured = await startConfigured(settings)
     let stopping = false
-    const stop = (): void => {
+    stop = (): void => {
       if (stopping) return
       stopping = true
       void configured.stop().then(
@@ -26,8 +35,7 @@ export const runConfigured = async (file: string | undefined): Promise<void> => 
         () => process.exit(1)
       )
     }
-    process.on("SIGINT", stop)
-    process.on("SIGTERM", stop)
+    if (wanted) return stop()
     process.stdout.write(
       `${JSON.stringify({
         type: "ready",
