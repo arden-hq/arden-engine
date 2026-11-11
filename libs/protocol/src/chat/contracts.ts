@@ -164,11 +164,22 @@ export type ChatReceiptStatus =
   | "failed"
   | "interrupted"
 
+/**
+ * What a sent message did. `started`: it began a new Run. `steered`: a Run was
+ * already going in the chat and the message joined it; the model reads it
+ * before its next step. A message that must wait for the Run to end goes to the
+ * chat's queue instead (`POST /sessions/:id/queue`).
+ */
+export type ChatDelivery = "started" | "steered"
+
 /** Receipt returned by `POST /chat/message`. Busy has no run identity. */
 export interface ChatReceipt extends JsonRecord {
   readonly runId: string | null
   readonly sessionId: string
   readonly status: ChatReceiptStatus
+  /** Present when the message started a Run or joined one. A steered message
+   *  keeps the older status `queued`; this field is the plain name for it. */
+  readonly delivery?: ChatDelivery
   readonly clientId?: string | null
 }
 

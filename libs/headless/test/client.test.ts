@@ -93,4 +93,68 @@ describe("HeadlessClient", () => {
       status: "completed"
     })
   })
+
+  it("names what a sent message did, and parks one behind the Run with queue", async () => {
+    const calls: Array<{ readonly method: string; readonly path: string; readonly body: unknown }> =
+      []
+    const queued = {
+      client_id: "later-1",
+      message: "after the run",
+      images: [],
+      enqueued_at: "2026-11-11T00:00:00.000Z"
+    }
+    const client = createHeadlessClient({
+      baseUrl: "http://arden.test",
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname
+        const method = init?.method ?? "GET"
+        calls.push({
+          method,
+          path,
+          body: typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined
+        })
+        if (path === "/chat/message")
+          return Response.json({
+            run_id: "run-1",
+            session_id: "session-1",
+            status: "queued",
+            delivery: "steered"
+          })
+        if (path === "/chat/runs")
+          return Response.json({
+            runs: [
+              {
+                run_id: "run-1",
+                session_id: "session-1",
+                status: "running",
+                active: true,
+                started_at: "2026-11-11T00:00:00.000Z"
+              }
+            ],
+            idle: false
+          })
+        if (method === "DELETE") return Response.json({ status: "cancelled", client_id: "later-1" })
+        if (method === "POST") return Response.json(queued)
+        return Response.json({ session_id: "session-1", messages: [queued] })
+      }
+    })
+    // A message sent while a Run is going joins it: the receipt says steered.
+    const steered = await client.submit({ sessionId: "session-1", message: "look at this too" })
+    expect(steered).toMatchObject({ runId: "run-1", status: "queued", delivery: "steered" })
+    // A queued message waits for the Run to end.
+    expect(
+      await client.queue({ sessionId: "session-1", message: "after the run", clientId: "later-1" })
+    ).toEqual(queued)
+    expect(await client.listQueued("session-1")).toEqual([queued])
+    expect(await client.cancelQueued("session-1", "later-1")).toMatchObject({ clientId: "later-1" })
+    expect(await client.listRuns()).toMatchObject({ idle: false, runs: [{ active: true }] })
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "POST /chat/message",
+      "POST /sessions/session-1/queue",
+      "GET /sessions/session-1/queue",
+      "DELETE /sessions/session-1/queue/later-1",
+      "GET /chat/runs"
+    ])
+    expect(calls[1]?.body).toMatchObject({ client_id: "later-1", message: "after the run" })
+  })
 })

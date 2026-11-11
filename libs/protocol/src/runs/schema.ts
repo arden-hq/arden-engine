@@ -237,6 +237,26 @@ export const UsageReportSchema: Schema.Codec<UsageReport, JsonRecord> = withExtr
   automations: Schema.Array(UsageAutomationRowSchema)
 })
 
+/**
+ * `GET /chat/runs`: every Run the server holds, oldest first, sub-agent Runs
+ * included. `idle` is true when no Run is going and no Automation delivery
+ * waits, so nothing more will happen until the next message.
+ */
+export const RunListSchema = withExtras({
+  runs: Schema.Array(
+    withExtras({
+      run_id: IdentifierSchema,
+      session_id: IdentifierSchema,
+      status: Schema.NonEmptyString,
+      /** True while the Run still owns its chat: not yet ended. */
+      active: Schema.Boolean,
+      started_at: Schema.NonEmptyString
+    })
+  ),
+  idle: Schema.Boolean
+})
+export type RunList = typeof RunListSchema.Type
+
 /** Query of `GET /usage/sessions/:sessionId`. */
 export const SessionUsageQuerySchema = Schema.Struct({
   limit: Schema.optionalKey(

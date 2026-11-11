@@ -22,6 +22,23 @@ export const ActiveRunSnapshotSchema = Schema.Struct({
 
 export type ActiveRunSnapshot = (typeof ActiveRunSnapshotSchema)["Type"]
 
+/** One Run of the server, as the run list shows it. */
+export interface ListedRun {
+  readonly runId: string
+  readonly sessionId: string
+  readonly status: string
+  /** Still owns its chat: not yet ended. */
+  readonly active: boolean
+  readonly startedAt: string
+}
+
+export interface RunListSnapshot {
+  /** Every Run, oldest first. */
+  readonly runs: ReadonlyArray<ListedRun>
+  /** Automation deliveries not yet sent; each will start a Run. */
+  readonly pendingDeliveries: number
+}
+
 export interface ActiveRunsSnapshot {
   readonly totalRetained: number
   readonly runs: ReadonlyArray<ActiveRunSnapshot>
@@ -137,6 +154,7 @@ export class RunQueries extends Context.Service<
       runId: string
     ) => Effect.Effect<ActiveRunSnapshot | undefined, RunQueryFailure>
     readonly listActive: () => Effect.Effect<ActiveRunsSnapshot, RunQueryFailure>
+    readonly listAll: () => Effect.Effect<RunListSnapshot, RunQueryFailure>
     readonly chatWork: (sessionId: string) => Effect.Effect<ChatWork, RunQueryError>
     readonly planLimitPauses: () => Effect.Effect<ReadonlyArray<PlanLimitPausedRun>, RunQueryError>
     readonly events: (

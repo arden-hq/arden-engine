@@ -5,8 +5,11 @@ import {
   chatRoutes,
   type CancelInput,
   type CancelResponse,
+  type ChatDelivery,
   type ChatMessageInput,
   type ChatReceiptStatus,
+  type QueuedCancelResponse,
+  type QueuedChatMessage,
   type ConnectionResultInput,
   type ToolResultInput
 } from "@arden-hq/protocol/chat"
@@ -20,6 +23,7 @@ import {
   type RunDetail,
   type RunEventPage,
   type RunEventPageOptions,
+  type RunList,
   type RunTerminalResult
 } from "@arden-hq/protocol/runs"
 import {
@@ -52,6 +56,17 @@ export interface SubmittedRun {
   readonly sessionId: string
   readonly clientId: string
   readonly status: ChatReceiptStatus
+  /** `started`: the message began this Run. `steered`: the Run was already
+   *  going and the message joined it. Absent from an older server. */
+  readonly delivery?: ChatDelivery
+}
+
+/** A message for `queue`: it waits for the chat's Run to end, then starts its own. */
+export interface QueueMessageInput {
+  readonly sessionId: string
+  readonly message: string
+  /** Caller-owned identity, so a retry cannot queue twice. Generated when absent. */
+  readonly clientId?: string
 }
 
 export interface HeadlessStreamOptions {
@@ -240,12 +255,57 @@ export class HeadlessClient {
       runId: receipt.runId,
       sessionId: receipt.sessionId,
       clientId: prepared.clientId,
-      status: receipt.status
+      status: receipt.status,
+      ...(receipt.delivery === undefined ? {} : { delivery: receipt.delivery })
     }
+  }
+
+  /**
+   * Park a message behind the chat's current Run. Unlike `submit`, which
+   * steers a Run that is going, the message waits for that Run to end and then
+   * starts a Run of its own. With no Run going it is sent at once.
+   */
+  async queue(input: QueueMessageInput): Promise<QueuedChatMessage> {
+    const clientId = input.clientId ?? globalThis.crypto.randomUUID()
+    return chatDecoders.queuedMessage(
+      await this.#requestJson(chatRoutes.queue(input.sessionId), {
+        method: "POST",
+        body: chatRequests.enqueue({
+          sessionId: input.sessionId,
+          clientId,
+          message: input.message
+        })
+      })
+    )
+  }
+
+  /** The messages parked behind the chat's Run, in the order they will be sent. */
+  async listQueued(sessionId: string): Promise<ReadonlyArray<QueuedChatMessage>> {
+    return chatDecoders.queue(
+      await this.#requestJson(chatRoutes.queue(sessionId), { method: "GET" })
+    ).messages
+  }
+
+  /** Take a parked message back before it is sent. */
+  async cancelQueued(sessionId: string, clientId: string): Promise<QueuedCancelResponse> {
+    return chatDecoders.queuedCancellation(
+      await this.#requestJson(chatRoutes.queuedMessage({ sessionId, clientId }), {
+        method: "DELETE"
+      })
+    )
   }
 
   async getRun(runId: string): Promise<RunDetail> {
     return this.#getRun(runId)
+  }
+
+  /**
+   * Every Run of the server, oldest first, sub-agent Runs included, and
+   * whether the server is idle. Owner access only: the app's command-line
+   * secret is refused.
+   */
+  async listRuns(): Promise<RunList> {
+    return runDecoders.list(await this.#requestJson(runRoutes.list, { method: "GET" }))
   }
 
   async getRunEvents(runId: string, options: HeadlessRunEventOptions = {}): Promise<RunEventPage> {

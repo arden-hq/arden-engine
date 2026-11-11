@@ -20,6 +20,7 @@ import {
   PlanLimitsReportSchema,
   RunDetailSchema,
   RunEventPageSchema,
+  RunListSchema,
   SessionUsageReportSchema,
   UsageReportSchema
 } from "./schema.js"
@@ -40,6 +41,7 @@ import {
 } from "./routes.js"
 
 export * from "./contracts.js"
+export type { RunList } from "./schema.js"
 export * from "./status.js"
 export * from "./end.js"
 export { hasPlanCredits } from "./plan-credits.js"
@@ -57,6 +59,7 @@ export const runDecoders = {
   progress: decoderFor(RunProgressSchema, "Invalid Run progress"),
   detail: decoderFor(RunDetailSchema, "Invalid Run detail"),
   eventPage: decoderFor(RunEventPageSchema, "Invalid Run event page"),
+  list: decoderFor(RunListSchema, "Invalid Run list"),
   usageReport: decoderFor(UsageReportSchema, "Invalid usage report"),
   sessionUsage: decoderFor(SessionUsageReportSchema, "Invalid chat usage"),
   planLimits: decoderFor(PlanLimitsReportSchema, "Invalid plan limits")
@@ -102,6 +105,7 @@ export const runRoutes = {
       "encode"
     )
   },
+  list: "/chat/runs",
   planLimits: "/usage/limits",
   usage(options: UsageReportOptions = {}): string {
     return runBoundary(encodeUsageReportPathEffect({ options }), "Invalid usage route", "encode")

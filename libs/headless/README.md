@@ -15,7 +15,8 @@ const detail = await client.wait(run)
 
 - `createHeadlessClient(options)` and the `HeadlessClient` class. Options are `baseUrl`, `headers` and `fetch`.
 - Sessions: `createSession`, `branchSession`, `listSessions`, `deleteSession`.
-- Runs: `submit`, `getRun`, `getRunEvents`, `wait`, `waitForRun`, `cancel`.
+- Runs: `submit`, `getRun`, `getRunEvents`, `wait`, `waitForRun`, `cancel`, `listRuns`.
+- Messages during a Run: `submit` steers the Run that is going (its result says `delivery: "steered"`); `queue`, `listQueued` and `cancelQueued` park a message until that Run ends.
 - Answers: `answerApproval` and `answerConnection` reply to a paused run.
 - Other: `health`, `listSpaces`.
 - Errors: `HeadlessHttpError`, `HeadlessProtocolError`, `HeadlessTimeoutError`, `HeadlessEventHandlerError`.

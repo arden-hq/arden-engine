@@ -235,6 +235,7 @@ export const ChatReceiptResponseSchema = withExtras({
   run_id: Schema.NullOr(Schema.NonEmptyString),
   session_id: chatIdentifier,
   status: ChatReceiptStatusSchema,
+  delivery: Schema.optionalKey(Schema.Literals(["started", "steered"] as const)),
   client_id: optionalNullableString
 }).check(
   Schema.makeFilter((receipt) =>

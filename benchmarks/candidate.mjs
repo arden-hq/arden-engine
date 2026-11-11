@@ -208,20 +208,13 @@ async function main() {
   let submitted
   let sessionId
   const runs = []
-  const db = new DatabaseSync(databasePath, { readOnly: true })
   let baselineRuns = new Set()
+  // The server's own word on whether anything is still going: a Run, or an
+  // Automation delivery that will start one.
   const settle = async () => {
     while (true) {
       signal.throwIfAborted()
-      const busy = db
-        .prepare(
-          "SELECT COUNT(*) AS count FROM chat_runs WHERE status IN ('pending', 'running', 'backgrounded')"
-        )
-        .get().count
-      const deliveries = db
-        .prepare("SELECT COUNT(*) AS count FROM automation_deliveries WHERE status = 'pending'")
-        .get().count
-      if (busy === 0 && deliveries === 0) return
+      if ((await client.listRuns()).idle) return
       await sleep(100, undefined, { signal })
     }
   }
@@ -263,12 +256,7 @@ async function main() {
       }
       await toggle(MEMORY_CAPTURE)
     }
-    baselineRuns = new Set(
-      db
-        .prepare("SELECT run_id FROM chat_runs")
-        .all()
-        .map((row) => row.run_id)
-    )
+    baselineRuns = new Set((await client.listRuns()).runs.map((run) => run.run_id))
     const session = await client.createSession({ name: job.id })
     sessionId = session.session_id
     for (const [index, prompt] of job.prompts.entries()) {
@@ -279,11 +267,9 @@ async function main() {
       })
       await client.wait(submitted, { signal, onEvent: decline(submitted.runId) })
       await settle()
-      const latest = db
-        .prepare(
-          "SELECT run_id FROM chat_runs WHERE session_id = ? ORDER BY started_at DESC, run_id DESC LIMIT 1"
-        )
-        .get(sessionId)
+      // A message sent mid-run joins that Run; a queued one starts another. The
+      // chat's last Run is the one that answered.
+      const latest = (await client.listRuns()).runs.findLast((run) => run.session_id === sessionId)
       const run = await client.getRun(latest.run_id)
       runs.push(run)
       await save(join(output, `run-${index}.json`), run)
@@ -308,13 +294,9 @@ async function main() {
       runs
     })
   } catch (error) {
-    for (const active of db
-      .prepare(
-        "SELECT run_id FROM chat_runs WHERE status IN ('pending', 'running', 'backgrounded')"
-      )
-      .all()) {
+    const listed = await client.listRuns().catch(() => ({ runs: [] }))
+    for (const active of listed.runs.filter((run) => run.active))
       await client.cancel({ runId: active.run_id }).catch(() => undefined)
-    }
     if (submitted) {
       await client.cancel({ runId: submitted.runId }).catch(() => undefined)
       if (!runs.some((run) => run.run_id === submitted.runId)) {
@@ -339,9 +321,7 @@ async function main() {
         if (!exported.ok) throw new Error(`Transcript export failed: ${exported.status}`)
         await save(join(output, "session.json"), await exported.json())
       }
-      const trialRows = db
-        .prepare("SELECT run_id, session_id FROM chat_runs ORDER BY started_at, run_id")
-        .all()
+      const trialRows = (await client.listRuns()).runs
       await save(
         join(output, "run-phases.json"),
         Object.fromEntries(
@@ -392,7 +372,6 @@ async function main() {
       } finally {
         process.off("SIGTERM", onSignal)
         process.off("SIGINT", onSignal)
-        db.close()
         await server.stop()
       }
     }

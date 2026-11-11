@@ -1,6 +1,7 @@
 import type {
   CancelInput,
   ChatApprovalMode,
+  ChatReceiptStatus,
   ChatSentFrom,
   HistoryRouteOptions,
   ToolCallRouteOptions,
@@ -121,6 +122,13 @@ const connectionCheckError = (error: ConnectionCheckError): ConnectionResultHttp
     case "storage":
       return new HttpApiError.InternalServerError({})
   }
+}
+
+/** The plain name for what a sent message did: `queued` is the older status of a steered one. */
+const deliveryOf = (status: ChatReceiptStatus): { readonly delivery?: "started" | "steered" } => {
+  if (status === "running") return { delivery: "started" }
+  if (status === "queued") return { delivery: "steered" }
+  return {}
 }
 
 export const ChatHandlers = HttpApiBuilder.group(
@@ -286,6 +294,7 @@ export const ChatHandlers = HttpApiBuilder.group(
                   run_id: receipt.runId,
                   session_id: receipt.sessionId,
                   status: receipt.status,
+                  ...deliveryOf(receipt.status),
                   ...(receipt.clientId === undefined ? {} : { client_id: receipt.clientId })
                 })),
                 Effect.mapError(messageError),

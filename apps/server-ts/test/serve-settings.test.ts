@@ -162,6 +162,8 @@ it("a configured server starts with its settings in place and publishes its acce
     expect(automations.every((automation) => !automation.enabled)).toBe(true)
     // The server lists the settings' models and no others.
     expect(JSON.stringify(await get("/config"))).toContain("test-model")
+    // The run list is the owner's view of the whole server; nothing ran yet.
+    expect(await get("/chat/runs")).toEqual({ runs: [], idle: true })
     // A new chat takes no Memory into its prompt.
     const created = await configured.request("/sessions", {
       method: "POST",

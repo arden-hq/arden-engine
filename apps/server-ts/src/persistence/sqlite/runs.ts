@@ -262,6 +262,35 @@ export const makeRunQueries = ({
     return { totalRetained, runs }
   })
 
+  const listAll = Effect.fn("SqliteRunQueries.listAll")(function* () {
+    const failed = (cause: unknown) => queryError("active", "Could not list runs", cause)
+    const rows = yield* sql<{
+      readonly run_id: string
+      readonly session_id: string
+      readonly status: string
+      readonly active: number
+      readonly started_at: string
+    }>`
+      SELECT run_id, session_id, status, started_at,
+             status IN ${activeRunStatusList} AS active
+      FROM chat_runs
+      ORDER BY started_at ASC, run_id ASC
+    `.pipe(Effect.mapError(failed))
+    const deliveries = yield* sql<{ readonly pending: number }>`
+      SELECT COUNT(*) AS pending FROM automation_deliveries WHERE status = 'pending'
+    `.pipe(Effect.mapError(failed))
+    return {
+      runs: rows.map((row) => ({
+        runId: row.run_id,
+        sessionId: row.session_id,
+        status: row.status,
+        active: row.active === 1,
+        startedAt: row.started_at
+      })),
+      pendingDeliveries: deliveries[0]?.pending ?? 0
+    }
+  })
+
   const events = Effect.fn("SqliteRunQueries.events")(
     function* (input: RunEventPageInput) {
       const run = yield* get(input.runId)
@@ -420,6 +449,7 @@ export const makeRunQueries = ({
     latestForSession,
     ...makeSessionRunQueries(sql),
     listActive: () => activeSnapshot(),
+    listAll,
     active: (runId) => activeSnapshot(runId).pipe(Effect.map((snapshot) => snapshot.runs[0])),
     events
   })

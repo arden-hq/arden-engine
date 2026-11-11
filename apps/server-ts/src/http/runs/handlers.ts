@@ -1,3 +1,4 @@
+import { LocalCaller } from "../middleware/local-only.js"
 import {
   RunLocalInstructionSourceSchema,
   RunTerminalResultSchema
@@ -88,6 +89,26 @@ export const RunHandlers = HttpApiBuilder.group(
       ).pipe(Effect.map((pairs) => new Map<string, number | null>(pairs)))
 
     return handlers
+      .handle(
+        "list",
+        Effect.fn("RunsHandlers.list")(function* () {
+          // Every chat's Runs at once is the owner's view; the command line sees its own chats.
+          if ((yield* LocalCaller) === "cli") return yield* new HttpApiError.Forbidden({})
+          const snapshot = yield* queries
+            .listAll()
+            .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+          return {
+            runs: snapshot.runs.map((run) => ({
+              run_id: run.runId,
+              session_id: run.sessionId,
+              status: run.status,
+              active: run.active,
+              started_at: run.startedAt
+            })),
+            idle: snapshot.pendingDeliveries === 0 && !snapshot.runs.some((run) => run.active)
+          }
+        })
+      )
       .handle("status", () =>
         Effect.gen(function* () {
           const snapshot = yield* queries.listActive()
