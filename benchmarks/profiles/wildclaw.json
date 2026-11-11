@@ -6,7 +6,7 @@
   "reasoningEffort": null,
   "contextLimit": 128000,
   "timeoutMs": 1200000,
-  "maxModelRequests": 200,
+  "maxModelRequests": 10000,
   "tools": [
     "exec_command",
     "write_stdin",

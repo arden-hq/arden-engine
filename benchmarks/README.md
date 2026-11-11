@@ -52,6 +52,10 @@ runner (`candidate.mjs`) sets them, and saves the evidence next to the result:
   the server's catalog: `allow` for the profile's `tools`, `never` for the rest.
   A profile may give `blockedTools` instead of `tools`: then every catalog tool
   is allowed except the listed `sources` (whole groups) and `tools` (names).
+  Sub-agents are on, with the app's default limits, only when `spawn_agent` is
+  offered.
+  A sub-agent runs on the profile's model unless `extraModels` lists more and
+  the main model picks one.
   A `never` rule keeps a tool out of what the model is offered. The rules are in
   `permission-rules.json`, the catalog in `tool-catalog.json`.
 - **Tools that always ask.** A few tools take no rule because they always ask

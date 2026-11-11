@@ -14,6 +14,12 @@ export const ProfileSchema = Schema.Struct({
   contextLimit: positive,
   timeoutMs: positive,
   maxModelRequests: positive,
+  /**
+   * More models the trial lists beside `model`, so the main model can give one
+   * to a sub-agent. Absent: the trial lists `model` only and every sub-agent
+   * runs on it.
+   */
+  extraModels: Schema.optionalKey(names),
   /** Allow-list: the model is offered only these tools. Give this or `blockedTools`. */
   tools: Schema.optionalKey(names),
   /**
@@ -90,7 +96,8 @@ export function offeredTools(profile, catalog) {
       .map((tool) => tool.name)
   )
 }
-export function modelHost(profile) {
+/** `extra` are the catalog entries of the profile's `extraModels`, from `benchmarkProvider`. */
+export function modelHost(profile, extra = []) {
   const inherit = { modelId: null, reasoningEffort: null }
   return {
     models: [
@@ -106,7 +113,8 @@ export function modelHost(profile) {
           hardLimit: profile.contextLimit,
           compactionTrigger: Math.floor(profile.contextLimit * 0.8)
         }
-      }
+      },
+      ...extra
     ],
     defaults: {
       chatModelId: profile.model,

@@ -78,16 +78,17 @@ async function main() {
   if (!token) throw new Error(`Missing credential environment variable ${profile.apiKeyEnv}`)
   await mkdir(output, { recursive: true, mode: 0o700 })
   await save(join(output, "profile.json"), profile)
-  const models = modelHost(profile)
+  const resolvedProvider = await benchmarkProvider(profile)
+  const transport = resolvedProvider.provider
+  await save(join(output, "provider-model.json"), resolvedProvider.catalog)
+  const models = modelHost(profile, resolvedProvider.extra)
+  await save(join(output, "model-list.json"), models.models)
   const imported = job.history
     ? await importHistory({ databasePath, models, history: job.history })
     : []
   await save(join(output, "history-import.json"), imported)
   const capability = randomUUID()
   const headers = { "x-arden-local-capability": capability }
-  const resolvedProvider = await benchmarkProvider(profile)
-  const transport = resolvedProvider.provider
-  await save(join(output, "provider-model.json"), resolvedProvider.catalog)
   const usage = {
     modelRequests: 0,
     promptTokens: 0,
@@ -316,14 +317,17 @@ async function main() {
     await save(join(output, "tools-without-rule.json"), alwaysAsk)
     if (!(await rule("allow", { kind: "path", path: workspace, access: "change" })))
       throw new Error(`The server refused the task folder: ${workspace}`)
-    await request(
-      "/settings/intelligence",
-      "PATCH",
-      intelligenceSettingsRequests.update({
-        maxAgentDepth: 1,
-        maxConcurrentAgents: 1
-      })
-    )
+    // Sub-agents follow the tool: a profile that offers `spawn_agent` keeps the
+    // app's own limits; without it they are off, so the two never disagree.
+    if (!offered.has("spawn_agent"))
+      await request(
+        "/settings/intelligence",
+        "PATCH",
+        intelligenceSettingsRequests.update({
+          maxAgentDepth: 1,
+          maxConcurrentAgents: 1
+        })
+      )
     await save(join(output, "effective-config.json"), await request("/config"))
     await save(join(output, "tool-catalog.json"), await request(toolRoutes.catalog))
     await save(join(output, "permission-rules.json"), await request(permissionRoutes.rules))
