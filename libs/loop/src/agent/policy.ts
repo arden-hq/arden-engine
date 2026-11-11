@@ -106,21 +106,53 @@ export const budgetDenialResult = (reason: StopReason, policy: RunPolicy): Requi
     retryable: false
   })
 
-export const appendBudgetDenials = (
+const appendDenials = (
   messages: ChatMessage[],
   calls: ReadonlyArray<ToolCall>,
-  reason: StopReason,
-  policy: RunPolicy
+  content: string
 ): void => {
-  const denial = budgetDenialResult(reason, policy)
   for (const call of calls) {
     messages.push({
       message_id: messageId("tool"),
       role: "tool",
       tool_call_id: call.id,
-      content: denial.content
+      content
     })
   }
+}
+
+export const appendBudgetDenials = (
+  messages: ChatMessage[],
+  calls: ReadonlyArray<ToolCall>,
+  reason: StopReason,
+  policy: RunPolicy
+): void => appendDenials(messages, calls, budgetDenialResult(reason, policy).content)
+
+/** Consecutive replies cut off at the output limit that the run continues past before it stops. */
+export const maxOutputLimitContinuations = 2
+
+/**
+ * Continues a run whose reply the provider cut off at the output limit: calls the reply did not
+ * finish are answered as not run, and one meta message asks the model to go on.
+ */
+export const appendOutputLimitContinuation = (
+  messages: ChatMessage[],
+  calls: ReadonlyArray<ToolCall>
+): void => {
+  appendDenials(
+    messages,
+    calls,
+    "Not run: the reply was cut off at the output token limit before this call was sent. " +
+      "Make the call again, with shorter arguments if it was long."
+  )
+  messages.push({
+    role: "user",
+    message_id: messageId("text"),
+    is_meta: true,
+    content:
+      "Your last reply was cut off at the output token limit. Continue from where it stopped " +
+      "and do not repeat what you already wrote. Split the remaining work into smaller steps."
+  })
 }
 
 export const withBudgetReminder = (

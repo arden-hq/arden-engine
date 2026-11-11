@@ -31,7 +31,8 @@ const checkModelRequest = (value: unknown): ModelRequest => {
       (!Number.isInteger(value.maxOutputTokens) || (value.maxOutputTokens as number) < 1)) ||
     (value.reasoningEffort !== undefined && typeof value.reasoningEffort !== "string") ||
     (value.cacheScope !== undefined && typeof value.cacheScope !== "string") ||
-    (value.compactionReplacement !== undefined && !Array.isArray(value.compactionReplacement))
+    (value.compactionReplacement !== undefined && !Array.isArray(value.compactionReplacement)) ||
+    (value.contextOverflow !== undefined && value.contextOverflow !== true)
   ) {
     throw new ModelRequestMiddlewareError(
       "model request middleware failed: middleware must return a structurally valid model request"

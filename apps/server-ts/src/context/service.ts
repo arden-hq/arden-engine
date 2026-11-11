@@ -54,6 +54,8 @@ export interface AutomaticCompactionInput {
   readonly sessionId: string
   readonly runId: string
   readonly inputTokens: number | null
+  /** The provider refused the request as too long, so the token count is not trusted. */
+  readonly overflow: boolean
   readonly pendingCallIds?: ReadonlySet<string>
   readonly signal: AbortSignal
 }
@@ -417,7 +419,7 @@ export class ContextCompaction extends Context.Service<
             messageCount: measured.messageCount
           })
           .pipe(Effect.mapError((cause) => mapModelError("automatic", input.sessionId, cause)))
-        if (inputTokens < budget.compaction_trigger) return null
+        if (!input.overflow && inputTokens < budget.compaction_trigger) return null
         const snapshot =
           loaded ??
           (yield* store

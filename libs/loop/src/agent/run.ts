@@ -3,7 +3,7 @@ import { pendingBackgroundCalls } from "./background-tools.js"
 import { isAbortError } from "../abort.js"
 import { decorateToolResult, type DispatchOutput } from "../tools/dispatch.js"
 import { admitToolCalls, loadDeferredCalls } from "./tool-admission.js"
-import { StructuredOutputError } from "../errors.js"
+import { providerErrorCode, StructuredOutputError } from "../errors.js"
 import { messageId, type ChatMessage } from "../contracts/messages.js"
 import { ToolChoice, type ProviderMessage } from "../contracts/provider.js"
 import { StopReason, type AgentEvent, type ToolPaused } from "../contracts/events.js"
@@ -12,7 +12,9 @@ import { normalizeToolResult } from "../internal/validate.js"
 import { hookCall, invoke } from "./guards.js"
 import {
   appendBudgetDenials,
+  appendOutputLimitContinuation,
   budgetDenialResult,
+  maxOutputLimitContinuations,
   nextNoProgressCount,
   recoveredTerminalText,
   terminalCompletionText,
@@ -288,15 +290,14 @@ const step = async (run: Run): Promise<StepOutcome> => {
     return "done"
   }
 
-  const view = await prepare(run)
+  const prepared = await prepare(run)
   const preparedBudgetStop = await stopForBudget(run)
   if (preparedBudgetStop !== null) {
     await finalize(run, state.resultText, preparedBudgetStop, state.step)
     return "done"
   }
 
-  const turnStart = messages.length
-  const turn = await callModel(run, view)
+  const { view, turn, turnStart } = await callModelPastOverflow(run, prepared)
   const response = turn.response
   const message = response.message
   const rawCalls = message.tool_calls ?? []
@@ -317,6 +318,14 @@ const step = async (run: Run): Promise<StepOutcome> => {
   }
 
   if (response.finish_reason === "length") {
+    // A cut-off structured reply cannot be continued into one valid value, so that run stops.
+    if (run.output === undefined && state.outputLimitContinuations < maxOutputLimitContinuations) {
+      state.outputLimitContinuations += 1
+      appendOutputLimitContinuation(messages, undispatched)
+      state.step += 1
+      await stepFinished(run)
+      return "continue"
+    }
     if (rawCalls.length > 0) {
       invoke("policy.budgetDenialContent", () => {
         appendBudgetDenials(
@@ -330,6 +339,7 @@ const step = async (run: Run): Promise<StepOutcome> => {
     await finalize(run, (message.content ?? "").trim(), StopReason.MAX_OUTPUT_LENGTH, state.step)
     return "done"
   }
+  state.outputLimitContinuations = 0
 
   if (rawCalls.length === 0 && response.continuation === true && !run.background.pending) {
     state.step += 1
@@ -338,6 +348,34 @@ const step = async (run: Run): Promise<StepOutcome> => {
   return rawCalls.length === 0
     ? settleTextTurn(run, view, message, turnStart)
     : runToolTurn(run, view, message)
+}
+
+/**
+ * Calls the model. When the provider refuses the request as longer than its context window before
+ * any reply, the request is prepared again with `contextOverflow` set and sent once more; unless a
+ * middleware shortened the history in answer, the refusal stands.
+ */
+const callModelPastOverflow = async (run: Run, view: StepView) => {
+  const turnStart = run.messages.length
+  try {
+    return { view, turn: await callModel(run, view), turnStart }
+  } catch (cause) {
+    if (
+      providerErrorCode(cause) !== "context_length_exceeded" ||
+      run.signal.aborted ||
+      run.messages.slice(turnStart).some((message) => message.role === "assistant")
+    )
+      throw cause
+    const shortened = await prepare(run, { contextOverflow: true })
+    if (!shortened.overflowAnswered) throw cause
+    // The refused call produced no message, so the retry mints its ids as that same turn.
+    run.state.modelTurnCount -= 1
+    return {
+      view: shortened,
+      turn: await callModel(run, shortened),
+      turnStart: run.messages.length
+    }
+  }
 }
 
 const settleTextTurn = async (

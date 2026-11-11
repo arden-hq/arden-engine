@@ -228,6 +228,12 @@ export interface ModelRequest {
   readonly previousResponse: CompletionResponse | null
   /** The only middleware field allowed to persist a canonical history projection. */
   readonly compactionReplacement?: ReadonlyArray<ChatMessage>
+  /**
+   * Set when the provider refused this step's request as longer than its context window. A
+   * middleware that shortens the history in answer returns the request without this field; while
+   * it is still set after the middlewares, the refusal stands and the run fails with it.
+   */
+  readonly contextOverflow?: true
 }
 
 export type ModelRequestNext = (request: ModelRequest) => MaybePromise<ModelRequest>

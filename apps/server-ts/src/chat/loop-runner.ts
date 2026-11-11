@@ -150,6 +150,8 @@ export interface LoopChatRunnerOptions {
     readonly reasoningEffort: string | null
     readonly messages: ReadonlyArray<ChatRunnerMessage>
     readonly inputTokens: number | null
+    /** The provider refused this request as too long: compact whatever the token count says. */
+    readonly overflow: boolean
     readonly pendingCallIds: ReadonlySet<string>
     readonly signal: AbortSignal
   }) => PromiseLike<LoopChatCompactionResult>
@@ -208,6 +210,7 @@ const makeCompactionMiddleware = (
       reasoningEffort: prepared.reasoningEffort ?? input.reasoningEffort,
       messages: toLoopMessages(prepared.messages),
       inputTokens: previousInputTokens(prepared),
+      overflow: prepared.contextOverflow === true,
       pendingCallIds: new Set(pending.map((call) => call.toolCall.id)),
       signal: input.signal
     })
@@ -217,8 +220,9 @@ const makeCompactionMiddleware = (
     }
     if (result.kind === "unchanged") return prepared
     const compacted = withStableSystemPrefix(prepared.messages, toLoopMessages(result.messages))
+    const { contextOverflow: _, ...answered } = prepared
     return {
-      ...prepared,
+      ...answered,
       messages: compacted,
       compactionReplacement: compacted
     }

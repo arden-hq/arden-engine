@@ -79,6 +79,7 @@ interface RunState {
   step: number
   resultText: string
   noProgressSteps: number
+  outputLimitContinuations: number
   usage: Usage
   localCost: number
   toolTimeMs: number
@@ -111,7 +112,12 @@ export interface Run {
   readonly background: BackgroundTools
 }
 
-export type StepView = Omit<ModelRequest, "step" | "previousResponse" | "compactionReplacement"> & {
+export type StepView = Omit<
+  ModelRequest,
+  "step" | "previousResponse" | "compactionReplacement" | "contextOverflow"
+> & {
+  /** A middleware shortened the history in answer to `ModelRequest.contextOverflow`. */
+  readonly overflowAnswered: boolean
   readonly toolSearch?: ToolSearch
   readonly metas: ReadonlyMap<string, ToolMeta>
   readonly asyncMode: "native" | "message"
@@ -134,6 +140,7 @@ export const makeRun = (input: {
     step: 0,
     resultText: "",
     noProgressSteps: 0,
+    outputLimitContinuations: 0,
     usage: zeroUsage(),
     localCost: 0,
     toolTimeMs: 0,
@@ -316,7 +323,10 @@ export const isOwnerMessage = (run: Run, message: ChatMessage): boolean =>
 export const announceInputTaken = (run: Run): Promise<void> =>
   run.emit({ _tag: "InputTaken", depth: 0, parent_id: null })
 
-export const prepare = async (run: Run): Promise<StepView> => {
+export const prepare = async (
+  run: Run,
+  { contextOverflow = false }: { readonly contextOverflow?: boolean } = {}
+): Promise<StepView> => {
   const { wiring, state, messages } = run
   const entries = await wiring.toolset.entries()
   const loaded = new Set([...(await wiring.toolset.loadedNames()), ...loadedInHistory(messages)])
@@ -365,11 +375,13 @@ export const prepare = async (run: Run): Promise<StepView> => {
       : { reasoningEffort: wiring.config.reasoningEffort }),
     ...(wiring.config.cacheScope === undefined ? {} : { cacheScope: wiring.config.cacheScope }),
     ...(run.responseFormat === null ? {} : { responseFormat: run.responseFormat }),
-    previousResponse: state.lastResponse
+    previousResponse: state.lastResponse,
+    ...(contextOverflow ? { contextOverflow: true as const } : {})
   }
+  const shaped = await applyModelRequestMiddlewares(request, wiring.config.modelRequestMiddlewares)
   const prepared = await prepareProviderRequest({
     provider: wiring.provider,
-    request: await applyModelRequestMiddlewares(request, wiring.config.modelRequestMiddlewares),
+    request: shaped,
     entries
   })
   const carried =
@@ -379,6 +391,7 @@ export const prepare = async (run: Run): Promise<StepView> => {
   if (carried !== undefined) messages.splice(0, messages.length, ...carried.history)
   const metas = new Map(entries.map((entry) => [entry.meta.name, entry.meta]))
   return {
+    overflowAnswered: contextOverflow && shaped.contextOverflow !== true,
     ...(prepared.deferredTools.length === 0
       ? {}
       : {

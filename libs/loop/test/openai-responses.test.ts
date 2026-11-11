@@ -542,6 +542,11 @@ it("preserves completed fragments at an output limit without executing truncated
           }
         })
         stream.end()
+      }),
+    () =>
+      sseResponse((stream) => {
+        stream.send({ type: "response.completed", response: simpleCompleted })
+        stream.end()
       })
   ])
   let executions = 0
@@ -560,10 +565,11 @@ it("preserves completed fragments at an output limit without executing truncated
       }
     }
   )
-  expect((await agent.run([{ role: "user", content: "weather" }])).stop_reason).toBe(
-    "max_output_length"
-  )
+  expect((await agent.run([{ role: "user", content: "weather" }])).stop_reason).toBe("end_turn")
   expect(executions).toBe(0)
+  const input = recordsOf(recordOf(transport.requests[1]?.body).input)
+  expect(input.filter((item) => item.type === "function_call")).toEqual([])
+  expect(JSON.stringify(input.at(-1))).toContain("cut off at the output token limit")
 })
 
 it.each([false, true, undefined])(

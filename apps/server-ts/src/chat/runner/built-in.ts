@@ -286,6 +286,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
               sessionId: input.sessionId,
               runId: input.runId,
               inputTokens: input.inputTokens,
+              overflow: input.overflow,
               pendingCallIds: input.pendingCallIds,
               signal: input.signal
             })
