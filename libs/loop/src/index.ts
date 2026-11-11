@@ -105,6 +105,7 @@ export type {
   ToolResultMessage,
   UserMessage
 } from "./contracts/messages.js"
+export { replyContexts } from "./agent/replies.js"
 export { callEndsTurn, mayEndTurn } from "./contracts/tools.js"
 export type {
   EndsTurn,

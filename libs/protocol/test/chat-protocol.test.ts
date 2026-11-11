@@ -2,7 +2,13 @@ import { expect, it } from "vitest"
 
 import { decodeServerEvent } from "@arden-hq/protocol"
 import { ProtocolError } from "@arden-hq/protocol"
-import { CHAT_QUEUE_LIMIT, chatRequests, type ChatRunErrorCode } from "@arden-hq/protocol/chat"
+import {
+  CHAT_QUEUE_LIMIT,
+  CHAT_REPLY_QUOTES_MAX,
+  chatRequests,
+  type ChatReplyContext,
+  type ChatRunErrorCode
+} from "@arden-hq/protocol/chat"
 
 it("keeps delta streams lossy and terminal events authoritative", () => {
   expect(
@@ -129,4 +135,28 @@ it("encodes queue order without reordering identities and rejects ambiguous memb
   ]) {
     expect(() => chatRequests.reorderQueue({ sessionId: "chat", clientIds })).toThrow(ProtocolError)
   }
+})
+
+it("sends the quoted messages of a reply as a list, one or several, up to the limit", () => {
+  const quote = (n: number): ChatReplyContext => ({
+    messageId: `answer-${n}`,
+    role: "assistant",
+    content: `Quoted line ${n}`
+  })
+  const sent = (replyTo: ChatReplyContext | ReadonlyArray<ChatReplyContext>): unknown =>
+    JSON.parse(
+      chatRequests.message({ sessionId: "chat", clientId: "c1", message: "Compare", replyTo }).body
+    ).reply_to
+  const wire = (n: number) => ({
+    message_id: `answer-${n}`,
+    role: "assistant",
+    content: `Quoted line ${n}`
+  })
+
+  expect(sent(quote(1))).toEqual([wire(1)])
+  expect(sent([quote(1), quote(2)])).toEqual([wire(1), wire(2)])
+  expect(() => sent([])).toThrow(ProtocolError)
+  expect(() => sent(Array.from({ length: CHAT_REPLY_QUOTES_MAX + 1 }, (_, n) => quote(n)))).toThrow(
+    ProtocolError
+  )
 })

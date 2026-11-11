@@ -65,6 +65,17 @@ export interface ChatReplyContext extends JsonRecord {
   readonly content: string
 }
 
+/** How many messages one reply can quote. */
+export const CHAT_REPLY_QUOTES_MAX = 10
+
+/** Every message a reply quotes, in the order they were quoted. */
+export const chatReplyContexts = (
+  replyTo: ChatReplyContext | ReadonlyArray<ChatReplyContext> | undefined
+): ReadonlyArray<ChatReplyContext> => {
+  if (replyTo === undefined) return []
+  return "messageId" in replyTo ? [replyTo] : replyTo
+}
+
 /** A message sent as a capture: the quick-capture window, or iPhone. */
 export type ChatCaptureVia = "quick" | "phone"
 
@@ -74,7 +85,8 @@ export interface ChatMessageInput {
   readonly clientId?: string
   readonly message: string
   readonly images?: ReadonlyArray<ChatImageInput>
-  readonly replyTo?: ChatReplyContext
+  /** One quoted message, or up to `CHAT_REPLY_QUOTES_MAX` of them. */
+  readonly replyTo?: ChatReplyContext | ReadonlyArray<ChatReplyContext>
   /** The exact visible approval this typed reply denies. */
   readonly approvalReply?: { readonly runId: string; readonly toolId: string }
   /** Approval policy captured for the run started by this message. */

@@ -211,7 +211,9 @@ export interface UserMessage extends MessageFields {
   readonly content?: string | null | ReadonlyArray<Metadata>
   /** Durable carrier; provider preparation derives the actual model role/item. */
   readonly interaction?: Interaction
-  readonly replyTo?: ReplyContext
+  /** One quoted message, or several. Stored histories hold either form; read it
+   *  through `replyContexts`. */
+  readonly replyTo?: ReplyContext | ReadonlyArray<ReplyContext>
   readonly async_tool_launch?: AsyncToolLaunch
   /** On the correction `hooks.checkFinalText` appended: the assistant records
    *  of the answer it sent back. Durable with the history, so a host that

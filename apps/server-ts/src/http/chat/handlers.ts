@@ -255,11 +255,14 @@ export const ChatHandlers = HttpApiBuilder.group(
                 ...(payload.reply_to === undefined
                   ? {}
                   : {
-                      replyTo: {
-                        messageId: payload.reply_to.message_id,
-                        role: payload.reply_to.role,
-                        content: payload.reply_to.content
-                      }
+                      replyTo: ("message_id" in payload.reply_to
+                        ? [payload.reply_to]
+                        : payload.reply_to
+                      ).map((quoted) => ({
+                        messageId: quoted.message_id,
+                        role: quoted.role,
+                        content: quoted.content
+                      }))
                     }),
                 ...(payload.images === undefined
                   ? {}

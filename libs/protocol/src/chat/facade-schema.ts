@@ -7,7 +7,7 @@ import {
 } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
 import { SkillNameSchema } from "../skills/schema.js"
-import { CHAT_QUEUE_LIMIT } from "./contracts.js"
+import { CHAT_QUEUE_LIMIT, CHAT_REPLY_QUOTES_MAX, chatReplyContexts } from "./contracts.js"
 import type {
   ActiveRunSummary,
   CancelResponse,
@@ -72,6 +72,12 @@ export const RunsStatusSchema = withExtras({
   })
 )
 
+const ReplyContextInputSchema = Schema.Struct({
+  messageId: chatIdentifier,
+  role: Schema.Literals(["user", "assistant"] as const),
+  content: chatMessage
+})
+
 export const ChatMessageInputSchema = Schema.Struct({
   sessionId: chatIdentifier,
   clientId: Schema.optionalKey(chatIdentifier),
@@ -89,11 +95,10 @@ export const ChatMessageInputSchema = Schema.Struct({
     )
   ),
   replyTo: Schema.optionalKey(
-    Schema.Struct({
-      messageId: chatIdentifier,
-      role: Schema.Literals(["user", "assistant"] as const),
-      content: chatMessage
-    })
+    Schema.Union([
+      ReplyContextInputSchema,
+      Schema.NonEmptyArray(ReplyContextInputSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
+    ])
   ),
   recipe: Schema.optionalKey(SkillNameSchema),
   sentFrom: Schema.optionalKey(ChatSentFromSchema),
@@ -358,11 +363,11 @@ export const encodeChatMessageRequestEffect = (value: unknown) =>
           ...(input.replyTo === undefined
             ? {}
             : {
-                reply_to: {
-                  message_id: input.replyTo.messageId,
-                  role: input.replyTo.role,
-                  content: input.replyTo.content
-                }
+                reply_to: chatReplyContexts(input.replyTo).map((quoted) => ({
+                  message_id: quoted.messageId,
+                  role: quoted.role,
+                  content: quoted.content
+                }))
               }),
           ...(input.images === undefined
             ? {}

@@ -77,6 +77,36 @@ describe("stored message decoding", () => {
     expect(decoded).toStrictEqual(stored.map((message) => ({ ...message })))
   })
 
+  it("decodes a reply that quotes several messages, and refuses one that quotes none", () => {
+    const quoting = (replyTo: StoredMessageEnvelope["replyTo"]): StoredMessageEnvelope => ({
+      message_id: "quoting",
+      role: "user",
+      created_at: createdAt,
+      content: "Compare these.",
+      replyTo
+    })
+    const several = quoting([
+      { messageId: "earlier", role: "assistant", content: "Earlier answer" },
+      { messageId: "later", role: "assistant", content: "Later answer" }
+    ])
+
+    expect(Effect.runSync(toChatRunnerMessages("session-1", [several]))).toStrictEqual([
+      { ...several }
+    ])
+    expect(Effect.runSyncExit(toChatRunnerMessages("session-1", [quoting([])]))).toStrictEqual(
+      Exit.fail(
+        new StoredMessageDecodeError({
+          sessionId: "session-1",
+          messageId: "quoting",
+          position: 1,
+          message:
+            "Stored message #1 (quoting) in session session-1 is not a valid chat message: " +
+            "replyTo needs at least one quoted message"
+        })
+      )
+    )
+  })
+
   it("fails on the first message that does not decode, naming the session and message", () => {
     const exit = Effect.runSyncExit(
       toChatRunnerMessages("session-1", [

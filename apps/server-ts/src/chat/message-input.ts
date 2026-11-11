@@ -19,6 +19,7 @@ import {
   isWorkflowDeliveryClientId,
   workflowDeliveryClientId
 } from "../persistence/chat/workflow-delivery.js"
+import { chatReplyContexts } from "@arden-hq/protocol/chat"
 import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
 import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
 import { ChatMessageError } from "./message-errors.js"
@@ -154,11 +155,7 @@ export const makeUserMessage = Effect.fn("ChatMessage.makeUserMessage")(function
     ...(input.replyTo === undefined
       ? {}
       : {
-          replyTo: {
-            messageId: input.replyTo.messageId,
-            role: input.replyTo.role,
-            content: input.replyTo.content
-          }
+          replyTo: storedReply(input.replyTo)
         }),
     ...(input.questionAnswer === undefined
       ? {}
@@ -269,7 +266,7 @@ export const requestHash = (input: ChatSendInput): string =>
       approvalMode: input.approvalMode ?? DEFAULT_APPROVAL_MODE,
       isMeta: input.isMeta === true,
       interaction: input.interaction ?? null,
-      replyTo: input.replyTo ?? null,
+      replyTo: input.replyTo === undefined ? null : storedReply(input.replyTo),
       ...(input.approvalReply === undefined ? {} : { approvalReply: input.approvalReply }),
       recipe: input.recipe ?? null,
       ...(input.sentFrom === undefined ? {} : { sentFrom: input.sentFrom }),
@@ -304,3 +301,15 @@ export const receipt = (
   status,
   clientId: input.clientId
 })
+
+/** One quote keeps the shape every stored row and request hash already has;
+ *  several are a list. */
+function storedReply(replyTo: NonNullable<ChatSendInput["replyTo"]>) {
+  const quotes = chatReplyContexts(replyTo).map((quoted) => ({
+    messageId: quoted.messageId,
+    role: quoted.role,
+    content: quoted.content
+  }))
+  const [only] = quotes
+  return quotes.length === 1 && only !== undefined ? only : quotes
+}

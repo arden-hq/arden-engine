@@ -79,6 +79,12 @@ const checkReplyContext = (value: unknown): void => {
   }
 }
 
+const checkReplyContexts = (value: unknown): void => {
+  if (!Array.isArray(value)) return checkReplyContext(value)
+  if (value.length === 0) fail("messages", "replyTo needs at least one quoted message")
+  value.forEach(checkReplyContext)
+}
+
 const checkToolCall = (value: unknown): void => {
   if (!isRecord(value)) fail("messages", "tool_calls entries must be objects")
   const call = value
@@ -127,7 +133,7 @@ const checkMessage = (value: unknown): void => {
         fail("messages", "user messages cannot be both interactions and replies")
       }
       if ("interaction" in message) checkInteraction(message.interaction)
-      if ("replyTo" in message) checkReplyContext(message.replyTo)
+      if ("replyTo" in message) checkReplyContexts(message.replyTo)
       if (
         "content" in message &&
         message.content !== null &&

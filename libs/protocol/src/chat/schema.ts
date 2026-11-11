@@ -12,6 +12,7 @@ import type { Agrees, Assert } from "../common/type-agreement.js"
 import type { HistoryMessage } from "./history.js"
 import type { HistoryResponse } from "./history.js"
 import type { TurnDetailsResponse, TurnWorkResponse } from "./history.js"
+import { CHAT_REPLY_QUOTES_MAX } from "./contracts.js"
 import type { ChatReceiptStatus, ToolCallResponse } from "./contracts.js"
 import {
   ConnectionActionSchema,
@@ -145,6 +146,12 @@ const ReplyContextSchema = Schema.Struct({
   content: chatMessage
 })
 
+/** A request quotes one message, or a list of them; history always lists them. */
+const ReplyContextsSchema = Schema.Union([
+  ReplyContextSchema,
+  Schema.NonEmptyArray(ReplyContextSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
+])
+
 export const ChatImageSchema = Schema.Struct({
   type: Schema.Literal("image"),
   media_type: ImageMediaTypeSchema,
@@ -166,7 +173,7 @@ export const ChatRequestSchema = withExtras({
   client_id: optionalNullableString,
   approval_mode: Schema.optionalKey(Schema.Literals(APPROVAL_MODES)),
   images: Schema.optionalKey(Schema.Array(ChatImageSchema)),
-  reply_to: Schema.optionalKey(ReplyContextSchema),
+  reply_to: Schema.optionalKey(ReplyContextsSchema),
   /** The Recipe the user started this message from, by its Skill name. */
   recipe: Schema.optionalKey(SkillNameSchema),
   /** The UI surface that wrote this message's words; the person only confirmed it. */
@@ -483,7 +490,7 @@ const historyMessageFields = {
    *  was sent. Absent on rows that started their turn and on older rows. */
   applied_at: optionalString,
   is_meta: optionalBoolean,
-  reply_to: Schema.optionalKey(ReplyContextSchema),
+  reply_to: Schema.optionalKey(Schema.Array(ReplyContextSchema)),
   recipe: Schema.optionalKey(SkillNameSchema),
   /** On the hidden row that carries a Run question's answer to the run: which
    *  question. A mid-run answer is where the question's card sits. */

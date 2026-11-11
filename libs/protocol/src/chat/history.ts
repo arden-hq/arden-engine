@@ -186,11 +186,12 @@ interface HistoryMessageBase extends JsonRecord {
   /** A steer's stamp: when the running turn took it in; absent on rows that started their turn. */
   readonly applied_at?: string
   readonly is_meta?: boolean
-  readonly reply_to?: {
+  /** The messages this one quotes, in the order they were quoted. */
+  readonly reply_to?: ReadonlyArray<{
     readonly message_id: string
     readonly role: "user" | "assistant"
     readonly content: string
-  }
+  }>
   /** The Recipe a user message was started from, by its Skill name. */
   readonly recipe?: string
   /** The Run question whose answer this hidden row carries to the run. */

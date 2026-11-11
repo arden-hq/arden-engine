@@ -48,6 +48,12 @@ const ReplyContextSchema = Schema.Struct({
   content: Schema.String
 })
 
+/** A stored reply quotes one message (every row before multi-quote) or a list. */
+const StoredReplySchema = Schema.Union([
+  ReplyContextSchema,
+  Schema.NonEmptyArray(ReplyContextSchema)
+])
+
 export const emptyHistory = (budget: HistoryResponse["context_budget"]): HistoryResponse => ({
   messages: [],
   active_work_tail: null,
@@ -368,7 +374,7 @@ const projectMessage = (
           ...(assignmentTask === undefined ? {} : { content: assignmentTask })
         }
   const replyTo = Option.getOrUndefined(
-    Schema.decodeUnknownOption(ReplyContextSchema)(envelope.replyTo)
+    Schema.decodeUnknownOption(StoredReplySchema)(envelope.replyTo)
   )
   const recipe =
     record.role === "user"
@@ -431,11 +437,11 @@ const projectMessage = (
     ...(replyTo === undefined
       ? {}
       : {
-          reply_to: {
-            message_id: replyTo.messageId,
-            role: replyTo.role,
-            content: replyTo.content
-          }
+          reply_to: ("messageId" in replyTo ? [replyTo] : replyTo).map((quoted) => ({
+            message_id: quoted.messageId,
+            role: quoted.role,
+            content: quoted.content
+          }))
         }),
     ...(recipe === undefined ? {} : { recipe }),
     ...(questionAnswer === undefined ? {} : { question_answer: questionAnswer }),

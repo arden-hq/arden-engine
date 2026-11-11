@@ -171,6 +171,8 @@ function messageItems(
 
 function userItem(message: HistoryMessage): MobileConversationItem {
   const sent = splitAttachedFiles(message.content)
+  // The phone shows one quoted line: the first of the messages this one quotes.
+  const quoted = message.reply_to?.[0]
   return {
     kind: "user",
     id: message.message_id,
@@ -179,11 +181,11 @@ function userItem(message: HistoryMessage): MobileConversationItem {
     photos: message.role === "user" ? (message.images?.length ?? 0) : 0,
     files: sent.files.map((file) => file.name),
     reply_to:
-      message.reply_to === undefined
+      quoted === undefined
         ? null
         : {
-            role: message.reply_to.role,
-            text: previewLine(withFileNames(message.reply_to.content)) ?? message.reply_to.content
+            role: quoted.role,
+            text: previewLine(withFileNames(quoted.content)) ?? quoted.content
           },
     recipe: message.recipe ?? null,
     sent_from: message.sent_from ?? null
