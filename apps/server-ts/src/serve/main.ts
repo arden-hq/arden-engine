@@ -45,6 +45,7 @@ export const runConfigured = async (
         url: configured.server.url.href,
         dataDirectory: settings.dataDirectory,
         accessFile: configured.accessFile,
+        usageFile: configured.usageFile,
         ...configured.applied
       })}\n`
     )

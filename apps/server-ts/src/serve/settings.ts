@@ -71,6 +71,12 @@ export const SettingsSchema = Schema.Struct({
   backgroundModel: Schema.optionalKey(text),
   /** Most model steps one run may take. */
   maxSteps: Schema.optionalKey(positive),
+  /** Most model requests the whole data folder may make, across chats,
+   *  sub-agents, side jobs and restarts. The next request fails. */
+  maxModelRequests: Schema.optionalKey(positive),
+  /** False declares every allowed tool to the model up front, as other
+   *  harnesses do, instead of letting it search for tools. */
+  toolSearch: Schema.optionalKey(Schema.Boolean),
   /** Allow-list: the model is offered only these tools. At most one of this and `blockedTools`. */
   tools: Schema.optionalKey(names),
   /** Block-list: every tool is offered except these `sources` (whole groups) and `tools` (names). */
@@ -109,6 +115,8 @@ export const SettingsSchema = Schema.Struct({
   memory: Schema.optionalKey(Schema.Boolean),
   /** False turns every Automation off, built-in ones included. */
   automations: Schema.optionalKey(Schema.Boolean),
+  /** Automations `automations: false` leaves on, by id. */
+  keepAutomations: Schema.optionalKey(names),
   mcpServers: Schema.optionalKey(Schema.Array(McpServerSchema)),
   /** Read-only Skill folders; `[]` reads none beside Arden's own. */
   skillRoots: Schema.optionalKey(Schema.Array(absolute)),

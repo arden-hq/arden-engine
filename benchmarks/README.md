@@ -46,9 +46,15 @@ Use a new package filename or directory when rebuilding.
 ## What a trial changes
 
 A trial runs the real server, but a benchmark needs a few things fixed. The
-runner (`candidate.mjs`) sets them, and saves the evidence next to the result:
+runner (`candidate.mjs`) writes them into one settings file (`settings.json`,
+saved with the result), starts the server as its own process with
+`--config settings.json`, and drives it over HTTP, as any outside program
+would. The server applies the settings before the first prompt
+(`apps/server-ts/src/serve/settings.ts` lists every field). It also counts the
+trial's model requests and tokens into `usage.json` and stops the trial at the
+profile's `maxModelRequests`. The evidence is saved next to the result:
 
-- **Tools.** Before the first prompt it writes one permission rule per tool in
+- **Tools.** Before the first prompt the server writes one permission rule per tool in
   the server's catalog: `allow` for the profile's `tools`, `never` for the rest.
   A profile may give `blockedTools` instead of `tools`: then every catalog tool
   is allowed except the listed `sources` (whole groups) and `tools` (names).

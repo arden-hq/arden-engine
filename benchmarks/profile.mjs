@@ -72,32 +72,27 @@ export async function readProfile(filename) {
   return profile
 }
 /**
- * The catalog tools a profile offers the model. An unknown name or source is
- * an error, so a typo cannot silently offer or hide a tool.
+ * The profile's provider and model as Arden's settings file names them. The
+ * key is not in it: the settings name the variable that holds it.
  */
-export function offeredTools(profile, catalog) {
-  const known = (kind, wanted, present) => {
-    for (const name of wanted)
-      if (!present.has(name)) throw new Error(`Unknown profile ${kind}: ${name}`)
+export function modelSettings(profile) {
+  return {
+    provider:
+      profile.provider === "codex"
+        ? {
+            kind: "codex",
+            accessTokenEnv: profile.apiKeyEnv,
+            ...(profile.accountIdEnv ? { accountIdEnv: profile.accountIdEnv } : {})
+          }
+        : { kind: "responses", baseUrl: profile.baseUrl, apiKeyEnv: profile.apiKeyEnv },
+    model: profile.model,
+    ...(profile.reasoningEffort === null ? {} : { reasoningEffort: profile.reasoningEffort }),
+    contextLimit: profile.contextLimit,
+    ...(profile.extraModels ? { extraModels: profile.extraModels } : {})
   }
-  const tools = new Set(catalog.map((tool) => tool.name))
-  if (profile.tools !== undefined) {
-    known("tool", profile.tools, tools)
-    return new Set(profile.tools)
-  }
-  const blocked = profile.blockedTools
-  known("tool", blocked.tools, tools)
-  known("tool source", blocked.sources, new Set(catalog.map((tool) => tool.source)))
-  return new Set(
-    catalog
-      .filter(
-        (tool) => !blocked.sources.includes(tool.source) && !blocked.tools.includes(tool.name)
-      )
-      .map((tool) => tool.name)
-  )
 }
-/** `extra` are the catalog entries of the profile's `extraModels`, from `benchmarkProvider`. */
-export function modelHost(profile, extra = []) {
+/** The model list history import writes its chats under, before the server starts. */
+export function modelHost(profile) {
   const inherit = { modelId: null, reasoningEffort: null }
   return {
     models: [
@@ -113,8 +108,7 @@ export function modelHost(profile, extra = []) {
           hardLimit: profile.contextLimit,
           compactionTrigger: Math.floor(profile.contextLimit * 0.8)
         }
-      },
-      ...extra
+      }
     ],
     defaults: {
       chatModelId: profile.model,

@@ -37,7 +37,6 @@ def package(destination):
         ROOT / "benchmarks" / name
         for name in (
             "candidate.mjs",
-            "provider.mjs",
             "history.mjs",
             "profile.mjs",
             "cli.py",

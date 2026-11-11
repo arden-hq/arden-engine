@@ -1,21 +1,21 @@
 import { mkdir, readFile, writeFile, realpath, stat } from "node:fs/promises"
 import { resolve, join, relative, isAbsolute } from "node:path"
-import { randomUUID } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Schema } from "effect"
-import { readProfile, modelHost, offeredTools } from "./profile.mjs"
-import { startServerWithLocalAccess } from "../apps/server-ts/dist/server.js"
-import { benchmarkProvider } from "./provider.mjs"
+import { fileURLToPath } from "node:url"
+import { spawn } from "node:child_process"
+import { readProfile, modelHost, modelSettings } from "./profile.mjs"
 import { createHeadlessClient } from "../libs/headless/dist/index.js"
-import { contextRoutes, fullContext } from "../libs/protocol/dist/context/index.js"
+import { contextRoutes } from "../libs/protocol/dist/context/index.js"
 import { permissionRoutes } from "../libs/protocol/dist/permissions/index.js"
-import { toolDecoders, toolRoutes } from "../libs/protocol/dist/tools/index.js"
+import { toolRoutes } from "../libs/protocol/dist/tools/index.js"
 import { sessionRoutes } from "../libs/protocol/dist/sessions/index.js"
-import { mcpDecoders, mcpRequests, mcpRoutes } from "../libs/protocol/dist/mcp/index.js"
-import { intelligenceSettingsRequests } from "../libs/protocol/dist/settings/index.js"
 import { errorMessage } from "../libs/std/dist/errors.js"
 import { importHistory } from "./history.mjs"
+
+// The server's own entry file; the runner starts it and imports none of it.
+const SERVER_ENTRY = fileURLToPath(new URL("../apps/server-ts/dist/main.js", import.meta.url))
 
 const Job = Schema.Struct({
   id: Schema.NonEmptyString,
@@ -78,100 +78,102 @@ async function main() {
   if (!token) throw new Error(`Missing credential environment variable ${profile.apiKeyEnv}`)
   await mkdir(output, { recursive: true, mode: 0o700 })
   await save(join(output, "profile.json"), profile)
-  const resolvedProvider = await benchmarkProvider(profile)
-  const transport = resolvedProvider.provider
-  await save(join(output, "provider-model.json"), resolvedProvider.catalog)
-  const models = modelHost(profile, resolvedProvider.extra)
-  await save(join(output, "model-list.json"), models.models)
+  const models = modelHost(profile)
   const imported = job.history
     ? await importHistory({ databasePath, models, history: job.history })
     : []
   await save(join(output, "history-import.json"), imported)
-  const capability = randomUUID()
-  const headers = { "x-arden-local-capability": capability }
-  const usage = {
-    modelRequests: 0,
-    promptTokens: 0,
-    completionTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    budgetExhausted: false
+  // An Automation that is off runs nothing, a run asked for by hand included, so
+  // Memory Capture stays on until the history it ingests is captured (below).
+  const MEMORY_CAPTURE = "builtin-memory-capture"
+  // The trial as a settings file: everything Arden is told is in it. The key is
+  // not; the file names the variable that holds it.
+  const settings = {
+    dataDirectory: stateRoot,
+    ...modelSettings(profile),
+    maxModelRequests: profile.maxModelRequests,
+    // Without tool search the loop declares every allowed tool up front, as
+    // other harnesses present a benchmark's tools.
+    toolSearch: profile.toolSearch === true,
+    ...(profile.tools ? { tools: profile.tools } : { blockedTools: profile.blockedTools }),
+    // The task folder is the one place file tools may change.
+    workspace,
+    // `memory: false` keeps past chats out of every prompt: Memory recall and related chats.
+    memory: profile.memory,
+    automations: false,
+    ...(imported.length ? { keepAutomations: [MEMORY_CAPTURE] } : {}),
+    ...(profile.mcpServers ? { mcpServers: profile.mcpServers } : {}),
+    // A trial reads the task's own Skills only, never the host's shared folder,
+    // and compacts only when the context fills: idle compaction would fire on
+    // wall-clock time and make two equal trials differ.
+    skillRoots: job.skills === undefined ? [] : [job.skills],
+    idleCompactionAfterMs: 0,
+    ...(profile.commandSandbox === false ? { commandSandbox: false } : {}),
+    // Nobody is there to answer a card.
+    approvalMode: "allow"
   }
-  const metered = (stream) =>
-    async function* (request) {
-      if (usage.modelRequests >= profile.maxModelRequests) {
-        usage.budgetExhausted = true
-        throw new Error("Trial model-request budget exhausted")
-      }
-      usage.modelRequests += 1
-      for await (const item of stream(request)) {
-        if (typeof item === "object" && item !== null && "usage" in item) {
-          usage.promptTokens += item.usage.prompt_tokens ?? 0
-          usage.completionTokens += item.usage.completion_tokens ?? 0
-          usage.cacheReadTokens += item.usage.cache_read_tokens ?? 0
-          usage.cacheWriteTokens += item.usage.cache_write_tokens ?? 0
-        }
-        yield item
-      }
-    }
-  // The route's own capabilities and sessions (hosted tools, async tools,
-  // connection reuse), so a trial runs Arden as the app does; metering is added.
-  // Tool search stays only when the profile asks: without it the loop declares
-  // every allowed tool up front (every other tool is denied below).
-  const provider = {
-    protocolVersion: 1,
-    ...(transport.capabilities
-      ? {
-          capabilities: async (model) => {
-            const capabilities = await transport.capabilities(model)
-            return profile.toolSearch ? capabilities : { ...capabilities, toolSearch: "none" }
-          }
-        }
-      : {}),
-    ...(transport.openSession
-      ? {
-          openSession: async () => {
-            const session = await transport.openSession()
-            return {
-              stream: metered((request) => session.stream(request)),
-              close: () => session.close()
-            }
-          }
-        }
-      : {}),
-    stream: metered((request) => transport.stream(request))
-  }
-  // The trial is the only local caller; no page ever loads from this origin.
-  const localAccess = {
-    capability,
-    rendererOrigin: "http://127.0.0.1",
-    cliCapability: randomUUID()
-  }
-  const start = () =>
-    startServerWithLocalAccess({
-      port: 0,
-      databasePath,
-      provider,
-      modelHost: models,
-      localAccess,
-      // A trial reads the task's own Skills only, never the host's shared folder,
-      // and compacts only when the context fills: the engine's idle compaction
-      // would otherwise fire on wall-clock time and make two equal trials differ.
-      sharedSkillRoots: job.skills === undefined ? [] : [job.skills],
-      idleCompactionAfterMs: 0,
-      ...(profile.commandSandbox === false ? { commandSandbox: false } : {})
-    })
-  let server = await start()
-  let client = createHeadlessClient({ baseUrl: server.url, headers })
+  const settingsFile = join(output, "settings.json")
+  await save(settingsFile, settings)
   const interrupted = new AbortController()
   const onSignal = () => interrupted.abort(new Error("Candidate interrupted"))
   process.on("SIGTERM", onSignal)
   process.on("SIGINT", onSignal)
   const signal = AbortSignal.any([deadline, interrupted.signal])
+  // Arden runs as its own process, started from the settings file and reached
+  // over HTTP with the secret in its access file, as any outside driver would.
+  const start = async () => {
+    const child = spawn(process.execPath, [SERVER_ENTRY, "--config", settingsFile], {
+      stdio: ["ignore", "pipe", "inherit"]
+    })
+    const stop = () =>
+      new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve()
+        const kill = setTimeout(() => child.kill("SIGKILL"), 10_000)
+        child.once("exit", () => {
+          clearTimeout(kill)
+          resolve()
+        })
+        child.kill("SIGTERM")
+      })
+    const ready = await new Promise((resolve, reject) => {
+      let line = ""
+      child.stdout.setEncoding("utf8")
+      child.stdout.on("data", (chunk) => {
+        line += chunk
+        if (line.includes("\n")) resolve(JSON.parse(line.slice(0, line.indexOf("\n"))))
+      })
+      child.once("error", reject)
+      child.once("exit", (code) => reject(new Error(`Arden did not start (exit ${code})`)))
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+    }).catch(async (error) => {
+      await stop()
+      throw error
+    })
+    const access = JSON.parse(await readFile(ready.accessFile, "utf8"))
+    const headers = { "x-arden-local-capability": access.capability }
+    return {
+      ready,
+      headers,
+      stop,
+      fetch: (path, init) => fetch(new URL(path, ready.url), init),
+      client: createHeadlessClient({ baseUrl: ready.url, headers })
+    }
+  }
+  let server = await start().catch(async (error) => {
+    await save(join(output, "result.json"), {
+      id: job.id,
+      status: "error",
+      error: errorMessage(error),
+      runs: []
+    })
+    throw error
+  })
+  let client = server.client
+  await save(join(output, "tools-without-rule.json"), server.ready.toolsWithoutRule)
   const send = (path, method, body) =>
     server.fetch(path, {
       method,
-      headers: { ...headers, "content-type": "application/json" },
+      headers: { ...server.headers, "content-type": "application/json" },
       ...(body === undefined ? {} : { body }),
       signal
     })
@@ -184,29 +186,6 @@ async function main() {
   // A chat has no working folder of its own, so every prompt names the task's.
   const prompted = (prompt) =>
     `Your working folder is ${workspace}. Use absolute paths inside it, and pass it as the working directory of every command.\n\n${prompt}`
-  // `memory: false` keeps past chats out of the prompt: Memory recall and related
-  // chats. The server holds the selection in memory, so each start sends it again.
-  const selectContext = (id) =>
-    profile.memory
-      ? undefined
-      : request(
-          contextRoutes.experiments(id),
-          "PUT",
-          JSON.stringify({ ...fullContext, memory: false, threads: false })
-        )
-  // Answers false for a subject the server keeps no rule for (422): a tool that
-  // always asks the owner.
-  const rule = async (decision, subject) => {
-    const response = await send(
-      permissionRoutes.rules,
-      "POST",
-      JSON.stringify({ list: { kind: "global" }, decision, subject })
-    )
-    const detail = await response.text()
-    if (response.status === 422) return false
-    if (!response.ok) throw new Error(`Permission rule: ${response.status} ${detail}`)
-    return true
-  }
   // Nobody is there to answer a card, so the trial declines it and the model
   // carries on. Three tools always ask (tools-without-rule.json); a connection
   // request asks too.
@@ -247,87 +226,9 @@ async function main() {
     }
   }
   try {
-    const automations = await request("/automations")
-    // An Automation that is off runs nothing, a run asked for by hand included, so
-    // Memory Capture stays on until the history it ingests is captured (below).
-    const MEMORY_CAPTURE = "builtin-memory-capture"
     const toggle = (id) => request(`/automations/${encodeURIComponent(id)}/toggle`, "POST")
-    for (const automation of automations.automations) {
-      if (automation.enabled && !(imported.length && automation.task_id === MEMORY_CAPTURE))
-        await toggle(automation.task_id)
-    }
-    for (const server of profile.mcpServers ?? []) {
-      const set = {}
-      for (const [name, source] of Object.entries(server.environment)) {
-        if (process.env[source] === undefined)
-          throw new Error(`Missing ${source} for MCP server ${server.name}`)
-        set[name] = process.env[source]
-      }
-      await request(
-        mcpRoutes.collection,
-        "POST",
-        mcpRequests.create({
-          name: server.name,
-          transport: {
-            type: "stdio",
-            command: server.command,
-            args: server.args,
-            environment: { set, retain: [] },
-            cwd: server.cwd
-          }
-        })
-      )
-    }
-    if (profile.mcpServers?.length) {
-      const wanted = new Set(profile.mcpServers.map((server) => server.name))
-      while (true) {
-        signal.throwIfAborted()
-        const servers = mcpDecoders
-          .list(await request(mcpRoutes.collection))
-          .servers.filter((server) => wanted.has(server.name))
-        const failed = servers.find((server) => server.status === "failed")
-        if (failed)
-          throw new Error(
-            `MCP server ${failed.name} failed: ${failed.diagnostics ?? failed.detail}`
-          )
-        if (
-          servers.length === wanted.size &&
-          servers.every((server) => server.status === "connected")
-        ) {
-          await save(join(output, "mcp-servers.json"), servers)
-          break
-        }
-        await sleep(200, undefined, { signal })
-      }
-    }
-    const catalog = toolDecoders.catalog(await request(toolRoutes.catalog))
-    const offered = offeredTools(profile, catalog.tools)
-    // A `never` rule keeps a tool out of what the model is offered; the profile's
-    // tools get `allow`. The task folder is the one place file tools may change.
-    // A tool that always asks the owner takes no rule. A trial has nobody to
-    // answer, so an allow-list may not name one; the rest are listed in the output.
-    const alwaysAsk = []
-    for (const tool of catalog.tools) {
-      const wanted = offered.has(tool.name)
-      if (await rule(wanted ? "allow" : "never", { kind: "tool", tool: tool.name })) continue
-      if (wanted && profile.tools !== undefined)
-        throw new Error(`Profile tool always asks the owner: ${tool.name}`)
-      alwaysAsk.push(tool.name)
-    }
-    await save(join(output, "tools-without-rule.json"), alwaysAsk)
-    if (!(await rule("allow", { kind: "path", path: workspace, access: "change" })))
-      throw new Error(`The server refused the task folder: ${workspace}`)
-    // Sub-agents follow the tool: a profile that offers `spawn_agent` keeps the
-    // app's own limits; without it they are off, so the two never disagree.
-    if (!offered.has("spawn_agent"))
-      await request(
-        "/settings/intelligence",
-        "PATCH",
-        intelligenceSettingsRequests.update({
-          maxAgentDepth: 1,
-          maxConcurrentAgents: 1
-        })
-      )
+    if (profile.mcpServers?.length)
+      await save(join(output, "mcp-servers.json"), (await request("/mcp/servers")).servers)
     await save(join(output, "effective-config.json"), await request("/config"))
     await save(join(output, "tool-catalog.json"), await request(toolRoutes.catalog))
     await save(join(output, "permission-rules.json"), await request(permissionRoutes.rules))
@@ -370,13 +271,11 @@ async function main() {
     )
     const session = await client.createSession({ name: job.id })
     sessionId = session.session_id
-    await selectContext(sessionId)
     for (const [index, prompt] of job.prompts.entries()) {
       submitted = await client.submit({
         sessionId,
         clientId: `${job.id}-${index}`,
-        message: prompted(prompt),
-        approvalMode: "allow"
+        message: prompted(prompt)
       })
       await client.wait(submitted, { signal, onEvent: decline(submitted.runId) })
       await settle()
@@ -398,8 +297,7 @@ async function main() {
       if (job.restartAfter?.includes(index)) {
         await server.stop()
         server = await start()
-        client = createHeadlessClient({ baseUrl: server.url, headers })
-        await selectContext(sessionId)
+        client = server.client
         await save(join(output, `restart-${index}.json`), { sessionId, afterRun: run.run_id })
       }
     }
@@ -435,7 +333,9 @@ async function main() {
     try {
       // Preserve native evidence even after timeout; do not reuse the aborted request signal.
       if (sessionId) {
-        const exported = await server.fetch(sessionRoutes.export(sessionId, "archive"), { headers })
+        const exported = await server.fetch(sessionRoutes.export(sessionId, "archive"), {
+          headers: server.headers
+        })
         if (!exported.ok) throw new Error(`Transcript export failed: ${exported.status}`)
         await save(join(output, "session.json"), await exported.json())
       }
@@ -454,7 +354,9 @@ async function main() {
       )
       for (const childId of new Set(trialRows.map((row) => row.session_id))) {
         if (childId === sessionId) continue
-        const exported = await server.fetch(sessionRoutes.export(childId, "archive"), { headers })
+        const exported = await server.fetch(sessionRoutes.export(childId, "archive"), {
+          headers: server.headers
+        })
         if (!exported.ok) throw new Error(`Child transcript export failed: ${exported.status}`)
         await save(join(output, `session-${childId}.json`), await exported.json())
       }
@@ -481,7 +383,11 @@ async function main() {
       throw error
     } finally {
       try {
-        await save(join(output, "usage.json"), usage)
+        // The server keeps the trial's model requests and tokens in its data folder.
+        await save(
+          join(output, "usage.json"),
+          JSON.parse(await readFile(server.ready.usageFile, "utf8"))
+        )
         await save(join(output, "declined-requests.json"), declined)
       } finally {
         process.off("SIGTERM", onSignal)

@@ -7,6 +7,7 @@ import { ownerDataDirectory } from "../config/service.js"
 import type { LocalAccess } from "../http/middleware/local-only.js"
 import { cliAccessPath, publishCliAccess, withdrawCliAccess } from "../runtime/cli-access.js"
 import { applySettings, type AppliedSettings, type ServerRequest } from "./apply.js"
+import { meteredProvider } from "./meter.js"
 import { modelsFor } from "./models.js"
 import { SettingsError, type Settings } from "./settings.js"
 
@@ -35,6 +36,8 @@ export const serverOptionsFor = (
     : { idleCompactionAfterMs: settings.idleCompactionAfterMs })
 })
 
+const USAGE_FILE = "usage.json"
+
 /** What a configured start needs of the server it starts. */
 export interface StartedServer {
   readonly url: URL
@@ -54,6 +57,8 @@ export interface ConfiguredServer<Server extends StartedServer = StartedServer> 
   readonly applied: AppliedSettings
   /** The file `arden` reads to reach this server: run it with `ARDEN_DIR` set to `dataDirectory`. */
   readonly accessFile: string
+  /** Model requests and tokens of the data folder so far, rewritten after every request. */
+  readonly usageFile: string
   readonly stop: () => Promise<void>
 }
 
@@ -74,7 +79,19 @@ export const startConfigured = async <Server extends StartedServer>(
     )
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
   const options = serverOptionsFor(settings)
-  const models = await modelsFor(settings, env)
+  const usageFile = join(dataDirectory, USAGE_FILE)
+  const route = await modelsFor(settings, env)
+  const models =
+    route.provider === undefined
+      ? route
+      : {
+          ...route,
+          provider: meteredProvider(route.provider, {
+            file: usageFile,
+            maxModelRequests: settings.maxModelRequests,
+            toolSearch: settings.toolSearch
+          })
+        }
   // Whoever starts a configured server owns it and its data folder, so the
   // access file carries the owner secret: every route, approvals included.
   // The narrower command-line secret the app hands out is made and not used.
@@ -97,7 +114,14 @@ export const startConfigured = async <Server extends StartedServer>(
       headers: { ...(init?.headers as Record<string, string>), [LOCAL_CAPABILITY_HEADER]: owner }
     })
   try {
-    const applied = await applySettings({ request, settings, env })
+    const applied = await applySettings({
+      request,
+      settings,
+      env,
+      ...(settings.keepAutomations === undefined
+        ? {}
+        : { keepAutomations: settings.keepAutomations })
+    })
     await publishCliAccess(accessFile, {
       version: 1,
       serverUrl: server.url.href,
@@ -109,6 +133,7 @@ export const startConfigured = async <Server extends StartedServer>(
       request,
       applied,
       accessFile,
+      usageFile,
       stop: async () => {
         await withdrawCliAccess(accessFile, owner).catch(() => undefined)
         await server.stop()
