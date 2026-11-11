@@ -7,7 +7,9 @@ import root from "../../vitest.config.mjs"
 const testDirectory = new URL("./test/", import.meta.url)
 const boot = readdirSync(testDirectory)
   .filter((name) => name.endsWith(".test.ts"))
-  .filter((name) => /\bstartServer\(/.test(readFileSync(new URL(name, testDirectory), "utf8")))
+  .filter((name) =>
+    /\b(startServer|startConfigured)\(/.test(readFileSync(new URL(name, testDirectory), "utf8"))
+  )
   .map((name) => `test/${name}`)
 
 // The growth check seeds two large databases and takes minutes: it runs only

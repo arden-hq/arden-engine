@@ -9,8 +9,12 @@ const DEFAULT_HOSTNAME = "127.0.0.1"
 const DEFAULT_PORT = 6877
 const DEFAULT_IDLE_COMPACTION_AFTER_MS = 5 * 60_000
 const DEFAULT_VERSION = "0.0.0-dev"
+const DEFAULT_MAX_RUN_STEPS = 200
 const IN_MEMORY_DATABASE = ":memory:"
 const AGENTS_SKILLS_DIRECTORY = join(homedir(), ".agents", "skills")
+
+/** The owner's own data folder, whatever `ARDEN_DIR` says: `~/.arden`. */
+export const ownerDataDirectory = (): string => resolveArdenDir({})
 
 export type DataLocation =
   | { readonly kind: "disk"; readonly databasePath: string }
@@ -28,6 +32,8 @@ export interface ServerConfigShape {
   readonly llamaServer?: string
   readonly sharedSkillRoots: ReadonlyArray<string>
   readonly commandSandbox: boolean
+  readonly maxRunSteps: number
+  readonly memory: boolean
 }
 
 const isOnDisk = (databasePath: string | undefined): databasePath is string =>
@@ -44,7 +50,9 @@ const ServerOptionsSchema = Schema.Struct({
   managedOutputRoot: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
   llamaServer: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
   sharedSkillRoots: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
-  commandSandbox: Schema.optionalKey(Schema.Boolean)
+  commandSandbox: Schema.optionalKey(Schema.Boolean),
+  maxRunSteps: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  memory: Schema.optionalKey(Schema.Boolean)
 })
 
 const decodeOptions = Schema.decodeUnknownEffect(ServerOptionsSchema)
@@ -79,6 +87,8 @@ type ServerConfigInput = Pick<
   | "sharedSkillRoots"
   | "idleCompactionAfterMs"
   | "commandSandbox"
+  | "maxRunSteps"
+  | "memory"
 >
 
 const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
@@ -96,7 +106,9 @@ const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
     sharedSkillRoots: (parsed.sharedSkillRoots ?? defaultSharedSkillRoots(data)).map((root) =>
       resolve(root)
     ),
-    commandSandbox: parsed.commandSandbox ?? true
+    commandSandbox: parsed.commandSandbox ?? true,
+    maxRunSteps: parsed.maxRunSteps ?? DEFAULT_MAX_RUN_STEPS,
+    memory: parsed.memory ?? true
   })
 })
 

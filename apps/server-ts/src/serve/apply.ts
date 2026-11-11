@@ -1,0 +1,241 @@
+import { mcpDecoders, mcpRequests, mcpRoutes } from "@arden-hq/protocol/mcp"
+import { permissionDecoders, permissionRoutes } from "@arden-hq/protocol/permissions"
+import { intelligenceSettingsRequests } from "@arden-hq/protocol/settings"
+import { toolDecoders, toolRoutes } from "@arden-hq/protocol/tools"
+import { sleep } from "@arden-hq/std/sleep"
+import { SettingsError, type Settings } from "./settings.js"
+
+/** The tool settings alone, so a caller with its own file format can reuse the rule. */
+export type ToolSettings = Pick<Settings, "tools" | "blockedTools">
+
+interface CatalogTool {
+  readonly name: string
+  readonly source: string | null
+}
+
+/**
+ * The tools the model is offered: the allow-list as given, or the whole catalog
+ * minus the block-list. Undefined when the settings name neither, which leaves
+ * the server's own rules alone. A name the catalog does not have is an error.
+ */
+export const offeredTools = (
+  settings: ToolSettings,
+  catalog: ReadonlyArray<CatalogTool>
+): ReadonlySet<string> | undefined => {
+  const known = (kind: string, wanted: ReadonlyArray<string>, present: ReadonlySet<string>) => {
+    for (const name of wanted)
+      if (!present.has(name)) throw new SettingsError(`Unknown ${kind}: ${name}`)
+  }
+  const tools = new Set(catalog.map((tool) => tool.name))
+  if (settings.tools !== undefined) {
+    known("tool", settings.tools, tools)
+    return new Set(settings.tools)
+  }
+  const blocked = settings.blockedTools
+  if (blocked === undefined) return undefined
+  known("tool", blocked.tools, tools)
+  known(
+    "tool source",
+    blocked.sources,
+    new Set(catalog.flatMap((tool) => (tool.source === null ? [] : [tool.source])))
+  )
+  return new Set(
+    catalog
+      .filter(
+        (tool) =>
+          !(tool.source !== null && blocked.sources.includes(tool.source)) &&
+          !blocked.tools.includes(tool.name)
+      )
+      .map((tool) => tool.name)
+  )
+}
+
+type RuleSubject =
+  | { readonly kind: "tool"; readonly tool: string }
+  | { readonly kind: "path"; readonly path: string; readonly access: "change" }
+
+/** One request to the started server, already carrying its access header. */
+export type ServerRequest = (path: string, init?: RequestInit) => Promise<Response>
+
+export interface AppliedSettings {
+  /** Undefined when the settings name no tools: the server's own rules stand. */
+  readonly offeredTools: ReadonlyArray<string> | undefined
+  /** Tools that take no rule because they always ask the owner. */
+  readonly toolsWithoutRule: ReadonlyArray<string>
+  readonly mcpServers: ReadonlyArray<string>
+}
+
+export interface ApplyInput {
+  readonly request: ServerRequest
+  readonly settings: Settings
+  /** Where an MCP server's `environment` values are read from. */
+  readonly env: NodeJS.ProcessEnv
+  readonly signal?: AbortSignal
+  /** Automations `automations: false` leaves on, for a caller that still needs one. */
+  readonly keepAutomations?: ReadonlyArray<string>
+}
+
+const json = { "content-type": "application/json" }
+
+/**
+ * Applies what a start option cannot carry, over the server's own HTTP API:
+ * Automations off, MCP servers, tool rules, the work folder and sub-agents.
+ * Model, step limit, Memory, Skills and the sandbox are start options instead
+ * (`serverOptionsFor`).
+ */
+export const applySettings = async ({
+  request,
+  settings,
+  env,
+  signal,
+  keepAutomations = []
+}: ApplyInput): Promise<AppliedSettings> => {
+  const call = async (path: string, method = "GET", body?: string): Promise<unknown> => {
+    const response = await request(path, {
+      method,
+      headers: json,
+      ...(body === undefined ? {} : { body }),
+      ...(signal === undefined ? {} : { signal })
+    })
+    if (!response.ok)
+      throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`)
+    return response.json()
+  }
+  // The rules already on the global list, so a second start on the same data
+  // folder changes what differs and adds nothing twice.
+  const held = permissionDecoders
+    .rules(await call(permissionRoutes.rules))
+    .rules.filter((entry) => entry.list.kind === "global")
+  const heldRule = (subject: RuleSubject) =>
+    held.find((entry) =>
+      subject.kind === "tool"
+        ? entry.subject.kind === "tool" &&
+          entry.subject.tool === subject.tool &&
+          entry.subject.server === null
+        : entry.subject.kind === "path" &&
+          entry.subject.path === subject.path &&
+          entry.subject.access === subject.access
+    )
+  // Answers false for a subject the server keeps no rule for (422): a tool that
+  // always asks the owner.
+  const rule = async (decision: "allow" | "never", subject: RuleSubject): Promise<boolean> => {
+    const existing = heldRule(subject)
+    if (existing !== undefined) {
+      if (existing.decision !== decision)
+        await call(
+          `${permissionRoutes.rules}/${encodeURIComponent(existing.id)}`,
+          "PATCH",
+          JSON.stringify({ decision })
+        )
+      return true
+    }
+    const response = await request(permissionRoutes.rules, {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ list: { kind: "global" }, decision, subject }),
+      ...(signal === undefined ? {} : { signal })
+    })
+    const detail = await response.text()
+    if (response.status === 422) return false
+    // 409: the server already holds this subject under its own spelling (a
+    // folder is stored by its real path), so there is nothing to add.
+    if (response.status === 409) return true
+    if (!response.ok) throw new Error(`Permission rule: ${response.status} ${detail}`)
+    return true
+  }
+
+  if (settings.automations === false) {
+    const { automations } = (await call("/automations")) as {
+      readonly automations: ReadonlyArray<{ readonly task_id: string; readonly enabled: boolean }>
+    }
+    for (const automation of automations) {
+      if (automation.enabled && !keepAutomations.includes(automation.task_id))
+        await call(`/automations/${encodeURIComponent(automation.task_id)}/toggle`, "POST")
+    }
+  }
+
+  const mcpServers = settings.mcpServers ?? []
+  for (const server of mcpServers) {
+    const set: Record<string, string> = {}
+    for (const [name, source] of Object.entries(server.environment ?? {})) {
+      const value = env[source]
+      if (value === undefined)
+        throw new SettingsError(`Missing ${source} for MCP server ${server.name}`)
+      set[name] = value
+    }
+    await call(
+      mcpRoutes.collection,
+      "POST",
+      mcpRequests.create({
+        name: server.name,
+        transport: {
+          type: "stdio",
+          command: server.command,
+          args: server.args,
+          environment: { set, retain: [] },
+          ...(server.cwd === undefined ? {} : { cwd: server.cwd })
+        }
+      })
+    )
+  }
+  if (mcpServers.length > 0) {
+    const wanted = new Set(mcpServers.map((server) => server.name))
+    while (true) {
+      signal?.throwIfAborted()
+      const servers = mcpDecoders
+        .list(await call(mcpRoutes.collection))
+        .servers.filter((server) => wanted.has(server.name))
+      const failed = servers.find((server) => server.status === "failed")
+      if (failed !== undefined)
+        throw new SettingsError(
+          `MCP server ${failed.name} failed: ${failed.diagnostics ?? failed.detail}`
+        )
+      if (
+        servers.length === wanted.size &&
+        servers.every((server) => server.status === "connected")
+      )
+        break
+      await sleep(200, signal)
+    }
+  }
+
+  // A `never` rule keeps a tool out of what the model is offered; an offered
+  // tool gets `allow`. A tool that always asks the owner takes no rule: a
+  // server with nobody to answer may not name one in an allow-list.
+  const catalog = toolDecoders.catalog(await call(toolRoutes.catalog))
+  const offered = offeredTools(settings, catalog.tools)
+  const toolsWithoutRule: Array<string> = []
+  if (offered !== undefined) {
+    for (const tool of catalog.tools) {
+      const wanted = offered.has(tool.name)
+      if (await rule(wanted ? "allow" : "never", { kind: "tool", tool: tool.name })) continue
+      if (wanted && settings.tools !== undefined)
+        throw new SettingsError(`Tool always asks the owner: ${tool.name}`)
+      toolsWithoutRule.push(tool.name)
+    }
+    // Sub-agents follow the tool: offered, they keep the server's own limits;
+    // not offered, they are off, so the two never disagree.
+    if (!offered.has("spawn_agent"))
+      await call(
+        "/settings/intelligence",
+        "PATCH",
+        intelligenceSettingsRequests.update({ maxAgentDepth: 1, maxConcurrentAgents: 1 })
+      )
+  }
+
+  if (settings.workspace !== undefined) {
+    const allowed = await rule("allow", {
+      kind: "path",
+      path: settings.workspace,
+      access: "change"
+    })
+    if (!allowed)
+      throw new SettingsError(`The server refused the work folder: ${settings.workspace}`)
+  }
+
+  return {
+    offeredTools: offered === undefined ? undefined : [...offered],
+    toolsWithoutRule,
+    mcpServers: mcpServers.map((server) => server.name)
+  }
+}

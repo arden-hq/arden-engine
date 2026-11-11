@@ -61,16 +61,14 @@ import type { StoredMessageDecodeError } from "../message-errors.js"
 import { toChatRunnerMessages } from "../run-driver.js"
 import type { AutomationId } from "../../persistence/automations/model.js"
 
-const MAX_RUN_STEPS = 200
-
-const stoppedEarly = (reason: StopReason): string => {
+const stoppedEarly = (reason: StopReason, maxRunSteps: number): string => {
   switch (reason) {
     case "cancelled":
     case "end_turn":
     case "paused":
       return ""
     case "max_iterations":
-      return `Stopped at the ${MAX_RUN_STEPS}-step limit before a final reply. The work so far is in this chat. Send it a message to continue.`
+      return `Stopped at the ${maxRunSteps}-step limit before a final reply. The work so far is in this chat. Send it a message to continue.`
     case "no_progress":
       return "Stopped after repeated failed steps, before a final reply."
     case "max_tool_calls":
@@ -82,7 +80,11 @@ const stoppedEarly = (reason: StopReason): string => {
   }
 }
 
-export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function* () {
+export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function* ({
+  maxRunSteps
+}: {
+  readonly maxRunSteps: number
+}) {
   const experiments = yield* ContextExperiments
   const services: TurnContextServices = {
     sessions: yield* SessionQueries,
@@ -245,9 +247,9 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
           })
         ),
       config: {
-        maxIterations: MAX_RUN_STEPS,
+        maxIterations: maxRunSteps,
         policy: {
-          fallbackResultText: (_messages, reason) => stoppedEarly(reason)
+          fallbackResultText: (_messages, reason) => stoppedEarly(reason, maxRunSteps)
         }
       },
       localTime: renderLocalTimeContext,

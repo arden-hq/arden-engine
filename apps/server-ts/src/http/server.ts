@@ -259,7 +259,7 @@ const composeServer = (
     Layer.tap(() => Diagnostics.use((diagnostics) => diagnostics.startupPhase("tools_ready")))
   )
   const baseServices = Layer.mergeAll(
-    contextExperimentsLayer,
+    contextExperimentsLayer(config.memory),
     modelProvider,
     workerStatus,
     storage,
@@ -310,7 +310,10 @@ const composeServer = (
           acknowledgeTerminalNotice(terminalsFile(root.dir), arrival.sessionId, arrival.clientId)
       }
       if (options.runner !== undefined) return ChatMessage.layer({ runner: options.runner }, boot)
-      return ChatMessage.layer({ runnerFor: yield* makeBuiltInChatRunners() }, boot)
+      return ChatMessage.layer(
+        { runnerFor: yield* makeBuiltInChatRunners({ maxRunSteps: config.maxRunSteps }) },
+        boot
+      )
     })
   )
   const history = ChatHistory.modelLayer

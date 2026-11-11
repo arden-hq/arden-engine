@@ -33,6 +33,14 @@ export interface ServerOptions {
    *  asks for. For a server inside a throwaway container, where the container
    *  is the sandbox. Defaults to true. */
   readonly commandSandbox?: boolean
+  /** False keeps Memory recall and related chats out of every prompt, in every
+   *  chat and sub-agent. A chat's own context selection still applies on top.
+   *  Defaults to true. */
+  readonly memory?: boolean
+  /** Most model steps one Chat run may take. Near the limit the run is told
+   *  how many are left, and its last step has no tools so it ends in a reply.
+   *  Defaults to 200. */
+  readonly maxRunSteps?: number
   /** The model provider. It drives the built-in Loop runner and every
    *  helper-model feature: context compaction, structured completion, Session
    *  naming, letter subjects and `has_providers`. Omit for a server without a

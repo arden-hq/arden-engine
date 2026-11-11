@@ -8,7 +8,14 @@ import {
 } from "@arden-hq/protocol/context"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
 
-export const makeContextExperiments = (clock: () => number = () => performance.now()) => {
+/**
+ * `base` is what a run takes into its prompt when its chat has no selection of
+ * its own: everything, unless the server was started with Memory off.
+ */
+export const makeContextExperiments = (
+  clock: () => number = () => performance.now(),
+  base: ContextSelection = fullContext
+) => {
   const selections = new Map<string, ContextSelection>()
   const runSelections = new Map<string, ContextSelection>()
   const runs = new Map<string, { sessionId: string; active: boolean; report: ContextRun }>()
@@ -23,7 +30,7 @@ export const makeContextExperiments = (clock: () => number = () => performance.n
       return existing.report.selection
     }
     const selection = runSelections.get(runId) ?? {
-      ...(personal ? (selections.get(sessionId) ?? fullContext) : fullContext)
+      ...(personal ? (selections.get(sessionId) ?? base) : base)
     }
     runSelections.set(runId, selection)
     runs.set(runId, {
@@ -85,7 +92,7 @@ export const makeContextExperiments = (clock: () => number = () => performance.n
     },
     report: (sessionId: string): ContextExperimentReport => ({
       sessionId,
-      selection: selections.get(sessionId) ?? fullContext,
+      selection: selections.get(sessionId) ?? base,
       runs: [...runs.values()].filter((run) => run.sessionId === sessionId).map((run) => run.report)
     })
   }
@@ -95,4 +102,11 @@ export const ContextExperiments = Context.Reference<ReturnType<typeof makeContex
   "@arden-hq/server/ContextExperiments",
   { defaultValue: () => makeContextExperiments() }
 )
-export const contextExperimentsLayer = Layer.sync(ContextExperiments, makeContextExperiments)
+/** `memory: false` keeps Memory recall and related chats out of every prompt. */
+export const contextExperimentsLayer = (memory: boolean) =>
+  Layer.sync(ContextExperiments, () =>
+    makeContextExperiments(
+      undefined,
+      memory ? fullContext : { ...fullContext, memory: false, threads: false }
+    )
+  )
