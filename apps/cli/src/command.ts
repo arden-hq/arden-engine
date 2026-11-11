@@ -19,6 +19,28 @@ export type CliClient = Pick<
   | "waitForRun"
 >
 
+/** The line a configured server prints on stdout once every setting is in place. */
+export interface ServerReady {
+  readonly url: string
+  readonly dataDirectory: string
+  readonly accessFile: string
+}
+
+export interface StartedServer {
+  readonly ready: ServerReady
+  /** Asks the server to stop and waits until it has. Never throws. */
+  readonly stop: () => Promise<void>
+}
+
+export interface StartServerInput {
+  readonly config: string
+  /** A file that takes the server's log lines; without it they are dropped. */
+  readonly logFile: string | undefined
+  readonly env: Readonly<Record<string, string | undefined>>
+}
+
+export type StartServer = (input: StartServerInput) => Promise<StartedServer>
+
 export type StdinKind = "terminal" | "pipe" | "file" | "other"
 
 export interface ServerConnection {
@@ -37,6 +59,11 @@ export interface CliDependencies {
   readonly writeStderr: (value: string) => void
   readonly onSigint: (listener: () => void) => () => void
   readonly createClient?: (connection: ServerConnection) => CliClient
+  /** Where the server is, for a command that brings its own (`arden exec`);
+   *  it replaces the lookup by --url, ARDEN_URL and the access file. */
+  readonly connect?: (() => Promise<ServerConnection>) | undefined
+  /** Starts the configured server for `arden exec`; the default spawns it. */
+  readonly startServer?: StartServer
 }
 
 export class UsageError extends Error {
@@ -102,6 +129,7 @@ export const resolveServer = async (
   argument: string | undefined,
   dependencies: CliDependencies
 ): Promise<ServerConnection> => {
+  if (dependencies.connect !== undefined) return dependencies.connect()
   const explicit = argument?.trim() || dependencies.env["ARDEN_URL"]?.trim()
   if (explicit !== undefined && explicit.length > 0) {
     return { url: parseServerUrl(explicit), headers: {} }

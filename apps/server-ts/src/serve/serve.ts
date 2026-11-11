@@ -4,8 +4,8 @@ import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import type { HostedServerOptions } from "../config/options.js"
 import { ownerDataDirectory } from "../config/service.js"
+import type { LocalAccess } from "../http/middleware/local-only.js"
 import { cliAccessPath, publishCliAccess, withdrawCliAccess } from "../runtime/cli-access.js"
-import { startServerWithLocalAccess, type ServerHandle } from "../server.js"
 import { applySettings, type AppliedSettings, type ServerRequest } from "./apply.js"
 import { modelsFor } from "./models.js"
 import { SettingsError, type Settings } from "./settings.js"
@@ -35,8 +35,20 @@ export const serverOptionsFor = (
     : { idleCompactionAfterMs: settings.idleCompactionAfterMs })
 })
 
-export interface ConfiguredServer {
-  readonly server: ServerHandle
+/** What a configured start needs of the server it starts. */
+export interface StartedServer {
+  readonly url: URL
+  readonly fetch: (input: string, init?: RequestInit) => Promise<Response>
+  readonly stop: () => Promise<void>
+}
+
+/** The server's own start, handed in by the entry file that composes it. */
+export type StartServer<Server extends StartedServer> = (
+  options: HostedServerOptions & { readonly localAccess: LocalAccess }
+) => Promise<Server>
+
+export interface ConfiguredServer<Server extends StartedServer = StartedServer> {
+  readonly server: Server
   /** Owner-level requests, for the process that started the server. */
   readonly request: ServerRequest
   readonly applied: AppliedSettings
@@ -50,10 +62,11 @@ export interface ConfiguredServer {
  * publishes the access file the `arden` command reads. The data folder is the
  * caller's own: the owner's `~/.arden` is refused.
  */
-export const startConfigured = async (
+export const startConfigured = async <Server extends StartedServer>(
   settings: Settings,
+  start: StartServer<Server>,
   env: NodeJS.ProcessEnv = process.env
-): Promise<ConfiguredServer> => {
+): Promise<ConfiguredServer<Server>> => {
   const dataDirectory = resolve(settings.dataDirectory)
   if (dataDirectory === ownerDataDirectory())
     throw new SettingsError(
@@ -67,7 +80,7 @@ export const startConfigured = async (
   // The narrower command-line secret the app hands out is made and not used.
   const owner = randomBytes(32).toString("base64url")
   const commandLine = randomBytes(32).toString("base64url")
-  const server = await startServerWithLocalAccess({
+  const server = await start({
     ...options,
     ...models,
     // No page loads from a configured server, so the renderer origin is unused.

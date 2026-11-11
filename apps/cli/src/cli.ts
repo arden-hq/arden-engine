@@ -18,6 +18,7 @@ import {
   type SessionTarget,
   type WaitOptions
 } from "./run.js"
+import { execCommand, serveCommand, type ExecOptions, type ServeOptions } from "./serve.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 export type {
@@ -32,14 +33,19 @@ type ParsedCommand =
   | { readonly kind: "run"; readonly options: RunOptions }
   | { readonly kind: "wait"; readonly options: WaitOptions }
   | { readonly kind: "sessions"; readonly options: SessionsOptions }
+  | { readonly kind: "serve"; readonly options: ServeOptions }
+  | { readonly kind: "exec"; readonly options: ExecOptions }
 
 const HELP = `Usage:
   arden run [prompt] [options]
   arden wait <run-id> [options]
   arden sessions [options]
+  arden serve --config <file>
+  arden exec --config <file> [prompt] [options]
 
-Talks to the running Arden app (or --url / ARDEN_URL). Chats started here
-appear in Arden like any other.
+run, wait and sessions talk to the running Arden app (or --url / ARDEN_URL).
+Chats started there appear in Arden like any other. serve and exec start a
+server of their own from a settings file, with its own data folder.
 
 Run options:
   --session <id>          Send to this chat
@@ -65,6 +71,17 @@ Run options:
 Wait options:
   --no-wait-approval, --output, --timeout, --url as above. Ctrl-C and
   --timeout stop waiting; the Run goes on.
+
+Serve:
+  --config <file>         The settings file. Prints one JSON ready line on
+                          stdout, then runs until Ctrl-C or SIGTERM. Reach it
+                          with ARDEN_DIR=<its dataDirectory> arden run ...
+
+Exec options:
+  --config <file>         The settings file; the server stops after the Run
+  --server-log <file>     Keep the server's log lines in this file
+  The Run options above except --url and --detach. --session and --continue
+  reach earlier chats of the same data folder.
 
 Sessions options:
   --limit <n>             How many chats (default: 20)
@@ -188,9 +205,7 @@ const sessionTarget = (parsed: ParsedArgs): SessionTarget => {
 const approvalHandling = (parsed: ParsedArgs): ApprovalHandling =>
   parsed.flags.has("--no-wait-approval") ? "decline" : "wait"
 
-const parseRun = (args: ReadonlyArray<string>): ParsedCommand => {
-  const parsed = splitArgs(args, RUN_OPTIONS)
-  if (parsed === undefined) return { kind: "help" }
+const runOptionsOf = (parsed: ParsedArgs): RunOptions => {
   const output = outputFormat(single(parsed, "--output") ?? "text")
   const timeout = single(parsed, "--timeout")
   const mode = single(parsed, "--approval")
@@ -202,19 +217,56 @@ const parseRun = (args: ReadonlyArray<string>): ParsedCommand => {
     throw new UsageError("--detach leaves approvals to Arden; drop --no-wait-approval")
   }
   return {
-    kind: "run",
+    promptArgument: parsed.positionals.length === 0 ? undefined : parsed.positionals.join(" "),
+    urlArgument: single(parsed, "--url"),
+    target: sessionTarget(parsed),
+    recipe: single(parsed, "--recipe"),
+    imagePaths: parsed.values.get("--image") ?? [],
+    outputSchemaPath: single(parsed, "--output-schema"),
+    approvalMode: mode === undefined ? undefined : approvalMode(mode),
+    approvals: approvalHandling(parsed),
+    output,
+    timeoutMs: timeout === undefined ? undefined : timeoutMilliseconds(timeout),
+    detach
+  }
+}
+
+const parseRun = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, RUN_OPTIONS)
+  return parsed === undefined ? { kind: "help" } : { kind: "run", options: runOptionsOf(parsed) }
+}
+
+const configOf = (parsed: ParsedArgs, command: string): string => {
+  const config = single(parsed, "--config")
+  if (config === undefined) throw new UsageError(`${command} requires --config <file>`)
+  return config
+}
+
+const SERVE_OPTIONS: ReadonlySet<string> = new Set(["--config"])
+
+const parseServe = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, SERVE_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  const [extra] = parsed.positionals
+  if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
+  return { kind: "serve", options: { config: configOf(parsed, "serve") } }
+}
+
+const EXEC_OPTIONS: ReadonlySet<string> = new Set([
+  ...[...RUN_OPTIONS].filter((name) => name !== "--url" && name !== "--detach"),
+  "--config",
+  "--server-log"
+])
+
+const parseExec = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, EXEC_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  return {
+    kind: "exec",
     options: {
-      promptArgument: parsed.positionals.length === 0 ? undefined : parsed.positionals.join(" "),
-      urlArgument: single(parsed, "--url"),
-      target: sessionTarget(parsed),
-      recipe: single(parsed, "--recipe"),
-      imagePaths: parsed.values.get("--image") ?? [],
-      outputSchemaPath: single(parsed, "--output-schema"),
-      approvalMode: mode === undefined ? undefined : approvalMode(mode),
-      approvals: approvalHandling(parsed),
-      output,
-      timeoutMs: timeout === undefined ? undefined : timeoutMilliseconds(timeout),
-      detach
+      config: configOf(parsed, "exec"),
+      logFile: single(parsed, "--server-log"),
+      run: runOptionsOf(parsed)
     }
   }
 }
@@ -278,6 +330,10 @@ const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
       return parseWait(rest)
     case "sessions":
       return parseSessions(rest)
+    case "serve":
+      return parseServe(rest)
+    case "exec":
+      return parseExec(rest)
     default:
       throw new UsageError(`Unknown command: ${command}`)
   }
@@ -286,7 +342,8 @@ const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
 const machineOutputFromArgs = (
   args: ReadonlyArray<string>
 ): { readonly command: "run" | "wait"; readonly output: "json" | "jsonl" } | undefined => {
-  const command = args[0]
+  // An exec receipt is a run receipt: the same Run, on a server of its own.
+  const command = args[0] === "exec" ? "run" : args[0]
   if (command !== "run" && command !== "wait") return undefined
   let output: string | undefined
   for (let index = 1; ; index += 1) {
@@ -325,5 +382,9 @@ export const runCli = async (
       return waitCommand(command.options, dependencies)
     case "sessions":
       return sessionsCommand(command.options, dependencies)
+    case "serve":
+      return serveCommand(command.options, dependencies)
+    case "exec":
+      return execCommand(command.options, dependencies)
   }
 }

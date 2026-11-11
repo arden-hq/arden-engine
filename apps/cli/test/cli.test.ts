@@ -323,3 +323,94 @@ describe("arden wait", () => {
     })
   })
 })
+
+describe("arden exec", () => {
+  const DATA = "/tmp/arden-exec-data"
+  const started = (events: Array<string>) => ({
+    startServer: async (input: {
+      readonly config: string
+      readonly logFile: string | undefined
+    }) => {
+      events.push(`start ${input.config} ${input.logFile ?? "-"}`)
+      return {
+        ready: {
+          url: "http://127.0.0.1:51234/",
+          dataDirectory: DATA,
+          accessFile: `${DATA}/cli-access.json`
+        },
+        stop: async () => {
+          events.push("stop")
+        }
+      }
+    }
+  })
+
+  it("starts the configured server, runs the prompt on it and stops it", async () => {
+    const events: Array<string> = []
+    const io = testIo({ files: { [`${DATA}/cli-access.json`]: accessFile() } })
+    const code = await runCli(
+      ["exec", "--config", "settings.json", "--server-log", "server.log", "--output", "json", "hi"],
+      { ...io.dependencies, ...started(events) }
+    )
+    expect(code).toBe(0)
+    expect(events).toEqual(["start settings.json server.log", "stop"])
+    // It reaches the server through that server's own access file.
+    expect(io.connections()).toEqual([
+      { url: "http://127.0.0.1:51234/", headers: { "x-arden-local-capability": CAPABILITY } }
+    ])
+    expect(jsonLines(io.stdout())).toMatchObject([
+      { type: "command_receipt", command: "run", status: "completed", exit_code: 0 }
+    ])
+  })
+
+  it("starts no server for a prompt it cannot send, and needs --config", async () => {
+    const events: Array<string> = []
+    const io = testIo()
+    expect(
+      await runCli(["exec", "--config", "settings.json", "--output", "json"], {
+        ...io.dependencies,
+        ...started(events)
+      })
+    ).toBe(2)
+    expect(events).toEqual([])
+    expect(await runCli(["exec", "--output", "json", "hi"], io.dependencies)).toBe(2)
+    expect(await runCli(["exec", "--config", "s.json", "--detach", "hi"], io.dependencies)).toBe(2)
+    expect(jsonLines(io.stdout())).toMatchObject([
+      { error: { code: "invalid_input" } },
+      { error: { code: "invalid_input", message: "exec requires --config <file>" } }
+    ])
+  })
+
+  it("reports a server that did not start, and stops the server when the Run fails", async () => {
+    const io = testIo()
+    expect(
+      await runCli(["exec", "--config", "settings.json", "--output", "json", "hi"], {
+        ...io.dependencies,
+        startServer: async () => {
+          throw new Error("Invalid settings: `dataDirectory` is missing")
+        }
+      })
+    ).toBe(1)
+    expect(jsonLines(io.stdout())).toMatchObject([
+      { status: "failed", error: { message: "Invalid settings: `dataDirectory` is missing" } }
+    ])
+
+    const events: Array<string> = []
+    const failing = testIo({
+      files: { [`${DATA}/cli-access.json`]: accessFile() },
+      client: {
+        ...defaultClient(),
+        submit: async () => {
+          throw new Error("the model is gone")
+        }
+      }
+    })
+    expect(
+      await runCli(["exec", "--config", "settings.json", "--output", "json", "hi"], {
+        ...failing.dependencies,
+        ...started(events)
+      })
+    ).toBe(1)
+    expect(events).toEqual(["start settings.json -", "stop"])
+  })
+})

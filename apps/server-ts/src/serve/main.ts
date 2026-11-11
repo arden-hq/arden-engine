@@ -1,13 +1,16 @@
 import { errorMessage } from "@arden-hq/std/errors"
 import { readSettings, SettingsError } from "./settings.js"
-import { startConfigured } from "./serve.js"
+import { startConfigured, type StartedServer, type StartServer } from "./serve.js"
 
 /**
  * The process behind `--config <file>`. On stdout it prints one JSON line when
  * the server is ready, then nothing; it runs until SIGINT or SIGTERM. A
  * settings mistake exits 2 with the reason on stderr, any other failure 1.
  */
-export const runConfigured = async (file: string | undefined): Promise<void> => {
+export const runConfigured = async (
+  file: string | undefined,
+  start: StartServer<StartedServer>
+): Promise<void> => {
   // Stdout carries the ready line and nothing else, so a driver can read it
   // as JSON. The server's log lines, which the logger writes with
   // console.log, go to stderr instead.
@@ -25,7 +28,7 @@ export const runConfigured = async (file: string | undefined): Promise<void> => 
     const onSignal = (): void => stop()
     process.on("SIGINT", onSignal)
     process.on("SIGTERM", onSignal)
-    const configured = await startConfigured(settings)
+    const configured = await startConfigured(settings, start)
     let stopping = false
     stop = (): void => {
       if (stopping) return

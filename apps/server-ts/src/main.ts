@@ -7,6 +7,7 @@ import { loadCodexCliRuntime } from "./providers/openai-codex/cli-runtime.js"
 import { resolveLoginShellPath } from "./runtime/login-shell-path.js"
 import { resolveCommandSandbox } from "./runtime/command-sandbox.js"
 import { runConfigured } from "./serve/main.js"
+import { startServerWithLocalAccess } from "./server.js"
 
 void resolveLoginShellPath()
 void resolveCommandSandbox()
@@ -32,4 +33,4 @@ const MainLayer = Layer.unwrap(
 // `--config <file>` starts with every setting of the file in place; without
 // it the server reads its few options from the environment, as before.
 if (configFlag === -1) Layer.launch(MainLayer).pipe(NodeRuntime.runMain)
-else void runConfigured(process.argv[configFlag + 1])
+else void runConfigured(process.argv[configFlag + 1], startServerWithLocalAccess)

@@ -143,7 +143,7 @@ export const parseSettings = (value: unknown): Settings => {
   try {
     settings = decode(value, { onExcessProperty: "error" })
   } catch (cause) {
-    throw new SettingsError(`Invalid settings: ${errorMessage(cause)}`)
+    throw new SettingsError(`Invalid settings: ${errorMessage(cause).replaceAll(/\n\s*/g, " ")}`)
   }
   if (settings.tools !== undefined && settings.blockedTools !== undefined)
     throw new SettingsError("Invalid settings: give `tools` or `blockedTools`, not both")

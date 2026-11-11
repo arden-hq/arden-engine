@@ -9,6 +9,7 @@ import { expect, it } from "vitest"
 import { offeredTools } from "../src/serve/apply.js"
 import { serverOptionsFor, startConfigured } from "../src/serve/serve.js"
 import { parseSettings, SettingsError } from "../src/serve/settings.js"
+import { startServerWithLocalAccess } from "../src/server.js"
 
 const catalog = [
   { name: "exec_command", source: "_local" },
@@ -20,7 +21,10 @@ it("a settings file is refused with the reason when it cannot be applied", () =>
   const base = { dataDirectory: "/tmp/arden-settings" }
   expect(() => parseSettings({})).toThrow(SettingsError)
   expect(() => parseSettings({ ...base, dataDirectory: "relative" })).toThrow(/absolute/)
-  expect(() => parseSettings({ ...base, stepLimit: 5 })).toThrow(SettingsError)
+  // The message is one line and names the field.
+  expect(() => parseSettings({ ...base, stepLimit: 5 })).toThrow(
+    /^Invalid settings: Expected no excess property at \["stepLimit"\]$/
+  )
   expect(() =>
     parseSettings({ ...base, tools: [], blockedTools: { sources: [], tools: [] } })
   ).toThrow(/not both/)
@@ -88,7 +92,11 @@ it("start options carry the step limit, Memory, Skills, the sandbox and compacti
 
 it("a configured server refuses the owner's own data folder", async () => {
   await expect(
-    startConfigured(parseSettings({ dataDirectory: join(homedir(), ".arden") }), {})
+    startConfigured(
+      parseSettings({ dataDirectory: join(homedir(), ".arden") }),
+      startServerWithLocalAccess,
+      {}
+    )
   ).rejects.toThrow(/owner's own Arden folder/)
 })
 
@@ -114,6 +122,7 @@ it("a configured server starts with its settings in place and publishes its acce
       approvalMode: "allow",
       compaction: { threshold: 0.6, summaryMaxTokens: 2000 }
     }),
+    startServerWithLocalAccess,
     { SERVE_TEST_KEY: "not-a-real-key" }
   )
   try {
@@ -182,6 +191,7 @@ it("a configured server starts with its settings in place and publishes its acce
       subAgents: { maxConcurrent: 2 },
       workspace
     }),
+    startServerWithLocalAccess,
     { SERVE_TEST_KEY: "not-a-real-key" }
   )
   try {
