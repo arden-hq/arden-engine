@@ -47,7 +47,7 @@ const McpServerSchema = Schema.Struct({
  * message. Only `dataDirectory` is required; an absent field keeps the
  * server's own default.
  */
-export const SettingsSchema = Schema.Struct({
+const SettingsSchema = Schema.Struct({
   /** Folder for the database and Arden's other files. Never the default
    *  `~/.arden`, so a configured server cannot change the owner's own data. */
   dataDirectory: absolute,
@@ -131,7 +131,6 @@ export const SettingsSchema = Schema.Struct({
 })
 
 export type Settings = typeof SettingsSchema.Type
-export type ProviderSettings = typeof ProviderSchema.Type
 
 /** A settings file the caller can fix: the message says which field and why. */
 export class SettingsError extends Error {

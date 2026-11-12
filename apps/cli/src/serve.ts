@@ -23,7 +23,7 @@ const NOT_INSTALLED =
  * starts the one named by ARDEN_SERVER_ENTRY, else the installed
  * @arden-hq/server, else the one that sits beside it in Arden's own checkout.
  */
-export const serverEntry = (env: Readonly<Record<string, string | undefined>>): string => {
+const serverEntry = (env: Readonly<Record<string, string | undefined>>): string => {
   const explicit = env["ARDEN_SERVER_ENTRY"]?.trim()
   if (explicit !== undefined && explicit.length > 0) return explicit
   try {
@@ -70,7 +70,7 @@ const readyFrom = (line: string): ServerReady | undefined => {
  * A start that fails rejects with the server's own last words: its `arden:`
  * line names the settings mistake.
  */
-export const startServer: StartServer = ({ config, logFile, env }) =>
+const startServer: StartServer = ({ config, logFile, env }) =>
   new Promise((resolve, reject) => {
     const entry = serverEntry(env)
     const child = spawn(process.execPath, [entry, "--config", config], {

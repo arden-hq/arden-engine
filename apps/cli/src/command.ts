@@ -32,7 +32,7 @@ export interface StartedServer {
   readonly stop: () => Promise<void>
 }
 
-export interface StartServerInput {
+interface StartServerInput {
   readonly config: string
   /** A file that takes the server's log lines; without it they are dropped. */
   readonly logFile: string | undefined

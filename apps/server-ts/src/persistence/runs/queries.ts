@@ -23,7 +23,7 @@ export const ActiveRunSnapshotSchema = Schema.Struct({
 export type ActiveRunSnapshot = (typeof ActiveRunSnapshotSchema)["Type"]
 
 /** One Run of the server, as the run list shows it. */
-export interface ListedRun {
+interface ListedRun {
   readonly runId: string
   readonly sessionId: string
   readonly status: string

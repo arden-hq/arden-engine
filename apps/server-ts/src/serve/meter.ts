@@ -3,7 +3,7 @@ import { writeAtomicSync } from "@arden-hq/std/atomic-file"
 import { readFileSync } from "node:fs"
 
 /** Every model request of the data folder so far, sub-agents and side jobs included. */
-export interface Usage {
+interface Usage {
   modelRequests: number
   promptTokens: number
   completionTokens: number
