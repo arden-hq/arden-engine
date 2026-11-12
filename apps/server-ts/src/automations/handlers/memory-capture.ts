@@ -11,7 +11,10 @@ import { withoutTools } from "../../execution/toolset-middleware.js"
 
 export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-capture")
 
-const CHAT_READ_TOOLS: ReadonlySet<string> = new Set(["session_read", "session_search_transcripts"])
+export const CHAT_READ_TOOLS: ReadonlySet<string> = new Set([
+  "session_read",
+  "session_search_transcripts"
+])
 
 const makeMemoryCaptureRunner = (services: {
   readonly memory: Pick<Memory["Service"], "nextCaptureBatch" | "completeCaptureBatch">

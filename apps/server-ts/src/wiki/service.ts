@@ -28,6 +28,10 @@ import {
 } from "./maintenance.js"
 import { makeWikiMutationMethods, type WikiMutationMethods } from "./mutations.js"
 import { makeWikiPublisher, WikiChangeSink } from "./publication.js"
+import {
+  makeWikiReportRetentionMethods,
+  type WikiReportRetentionMethods
+} from "./retire-reports.js"
 import { makeWikiRenameMethods, type WikiRenameMethods } from "./rename.js"
 import { makeWikiRestoreMethods, type WikiRestoreMethods } from "./restore.js"
 
@@ -44,6 +48,7 @@ type WikiShape = WikiListingMethods &
   WikiHistoryMethods &
   WikiChangeMethods &
   WikiRenameMethods &
+  WikiReportRetentionMethods &
   WikiImportMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
     readonly prepareMaintenance: (
@@ -97,6 +102,7 @@ const make = Effect.fn("Wiki.make")(function* (
   const rename = makeWikiRenameMethods(repository, spaces, renameStore)
   const imports = makeWikiImportMethods(repository)
   const contentSteps = makeWikiContentStepMethods(repository)
+  const reportRetention = makeWikiReportRetentionMethods(repository)
 
   yield* diagnostics.startupPhase("wiki_ready")
   return Wiki.of({
@@ -105,6 +111,8 @@ const make = Effect.fn("Wiki.make")(function* (
     ...makeWikiChangeMethods(repository),
     publishChanges,
     prepareMaintenance: makeWikiMaintenanceMethods(repository).prepare,
+    stepReportRetention: notifyAfter(reportRetention.stepReportRetention),
+    retireReportPart: notifyAfter(reportRetention.retireReportPart),
     observe: notifyAfter(mutations.observe),
     create: notifyAfter(mutations.create),
     createDirectory: notifyAfter(mutations.createDirectory),

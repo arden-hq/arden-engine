@@ -9,7 +9,7 @@
 - Do not create another Automation. Continue within the saved authorization; report a blocker when further work requires permission that this run does not have.
 - A question you ask with `ask_user` waits for the person; their answer continues as their own turn after this run ends, which can do what this run cannot, such as pausing the Automation.
 - The returned result is the delivery summary. When this run works in its reporting Chat, that reply is what the reader sees there. When configured to retain a Memory report, read its directory contract and publish with `wiki_publish_report`; never use shell/file writes to publish managed Memory.
-- Keep the actual observation period, original references, coverage gaps and meaningful subject links. A report is dated evidence, not a second current-status owner. Read an existing report before revising it; reuse the same dated filename on retry.
+- Keep the actual observation period, original references, coverage gaps and meaningful subject links. A report is dated evidence, not a second current-status owner. Unless the saved task asks for a history, keep one page and replace it each run; a new dated page per run fills Memory with copies of what can be read again at the source. Read an existing report before revising it; reuse the same filename on retry.
 
 ## Output
 

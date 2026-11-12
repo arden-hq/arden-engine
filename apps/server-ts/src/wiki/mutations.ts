@@ -21,6 +21,14 @@ import {
   type WikiCommitOrigin,
   updatePage
 } from "./commit.js"
+import {
+  isMonthlySummaryPath,
+  KEEP_RULE_FORMS,
+  MONTHLY_SUMMARY_MAX_CHARS,
+  unreadableKeepRule
+} from "./report-retention.js"
+import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
+import { directorySections } from "./collections.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { createWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
@@ -43,6 +51,14 @@ const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
   sessionId: undefined
 }
 const DESKTOP_ORIGIN: WikiCommitOrigin = { kind: "user", via: "desktop" }
+
+const isRetentionSummaryWrite = (origin: WikiCommitOrigin, path: string): boolean =>
+  origin.kind === "automation" &&
+  origin.automationId === REPORT_RETENTION_AUTOMATION &&
+  isMonthlySummaryPath(path)
+
+const summaryTooLong = (chars: number): string =>
+  `The monthly summary has ${chars} characters; it replaces a month of reports only when it is ${MONTHLY_SUMMARY_MAX_CHARS} or fewer. Nothing was saved. Keep fewer items and shorter links, then save it again.`
 
 interface WikiUpdateInput {
   readonly pageId: string
@@ -209,9 +225,16 @@ export const makeWikiMutationMethods = (
     if (directoryPage === undefined) {
       return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
     }
+    const origin = input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN
+    // Report Retention writes the one monthly summary that replaces a month of reports.
+    const writesMonthlySummary = isRetentionSummaryWrite(origin, input.path)
+    if (writesMonthlySummary && input.body.length > MONTHLY_SUMMARY_MAX_CHARS) {
+      return yield* wikiError("create", "invalid", summaryTooLong(input.body.length))
+    }
     if (
       Object.hasOwn(directoryPage.page.metadata, "producer_automation_id") &&
-      isAutomatedOrigin(input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN)
+      isAutomatedOrigin(origin) &&
+      !writesMonthlySummary
     ) {
       return yield* wikiError(
         "create",
@@ -337,6 +360,28 @@ export const makeWikiMutationMethods = (
           return yield* wikiError("update", "invalid", "A page update cannot create a redirect", {
             pageId: input.pageId
           })
+        }
+        if (
+          input.commit !== undefined &&
+          isRetentionSummaryWrite(input.commit.origin, current.resource.path) &&
+          replacement.body.length > MONTHLY_SUMMARY_MAX_CHARS
+        ) {
+          return yield* wikiError("update", "invalid", summaryTooLong(replacement.body.length), {
+            pageId: input.pageId
+          })
+        }
+        const keepRule =
+          posix.basename(current.resource.path).toLowerCase() === "readme.md" &&
+          Object.hasOwn(replacement.metadata, "producer_automation_id")
+            ? unreadableKeepRule(directorySections(replacement.body).get("Retention"))
+            : undefined
+        if (keepRule !== undefined) {
+          return yield* wikiError(
+            "update",
+            "invalid",
+            `The retention rule "${keepRule}" was not understood, so it would keep every report. Nothing was saved. Write ${KEEP_RULE_FORMS}.`,
+            { pageId: input.pageId }
+          )
         }
         const content = yield* writtenContent(replacement).pipe(
           Effect.mapError((cause) =>

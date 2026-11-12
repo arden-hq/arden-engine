@@ -84,7 +84,7 @@ export type StoredAutomationRunSkip = StoredPrefilterSkip | SpaceReviewGateSkip
 
 export type HandlerItemOwnerId = Extract<
   SystemHandlerId,
-  "memory_capture" | "daily_summary" | "wiki_maintenance"
+  "memory_capture" | "daily_summary" | "wiki_maintenance" | "report_retention"
 >
 
 export type AutomationJobHandler =

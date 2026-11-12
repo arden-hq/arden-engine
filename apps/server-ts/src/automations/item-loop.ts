@@ -19,6 +19,11 @@ interface ItemLoop<K extends HandlerItemKind> {
   readonly kind: K
   readonly next: () => Effect.Effect<HandlerItemDataOf<K> | "idle" | "advance", Error>
   readonly commit: (data: HandlerItemDataOf<K>) => Effect.Effect<void, Error>
+  /**
+   * Called when the model reports it cannot do an item. "continue" moves on to `next` instead
+   * of ending the job, for a handler that has another way to finish the item.
+   */
+  readonly blocked?: (data: HandlerItemDataOf<K>) => Effect.Effect<"stop" | "continue", Error>
   readonly summary: (item: HandlerItem | undefined) => string
   readonly cancelled: string
   readonly incomplete: string
@@ -47,8 +52,10 @@ export const runItemLoop = <K extends HandlerItemKind>(
       error === null
         ? jobResult.completed("finished", result, run())
         : jobResult.failed(error, result, run())
+    let handled: string | undefined
     while (true) {
-      if (item?.phase === "settled" && item.failure !== null) return finished(item.failure)
+      if (item?.phase === "settled" && item.failure !== null && item.id !== handled)
+        return finished(item.failure)
       if (item?.phase !== "pending") {
         const next = yield* loop.next()
         if (next === "idle") {
@@ -73,6 +80,14 @@ export const runItemLoop = <K extends HandlerItemKind>(
         return finished(outcome.detail ?? loop.cancelled, outcome.result ?? loop.summary(item))
       if (outcome.state === "failed" || outcome.state === "blocked") {
         item = yield* services.handlerItems.settleHandlerItem(job, outcome.item)
+        if (
+          outcome.state === "blocked" &&
+          loop.blocked !== undefined &&
+          (yield* loop.blocked(data)) === "continue"
+        ) {
+          handled = item.id
+          continue
+        }
         return finished(outcome.detail ?? loop.incomplete)
       }
       yield* loop.commit(data)

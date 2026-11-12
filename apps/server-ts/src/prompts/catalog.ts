@@ -237,6 +237,13 @@ export const PROMPT_CATALOG = Object.freeze({
     band: "background",
     slots: []
   }),
+  reportRetention: definePrompt({
+    id: "memory.report-retention",
+    revision: 1,
+    sourcePath: "memory/report-retention.md",
+    band: "background",
+    slots: []
+  }),
   wikiMaintenance: definePrompt({
     id: "memory.wiki-maintenance",
     revision: 11,
@@ -462,6 +469,7 @@ export const PROMPT_TEXT = Object.freeze({
     memory_filing_rule: memoryFilingRule
   }),
   dailySummary: renderText(PROMPT_CATALOG.dailySummary, {}),
+  reportRetention: renderText(PROMPT_CATALOG.reportRetention, {}),
   chatSummary: renderText(PROMPT_CATALOG.chatSummary, {}),
   spaceOverview: renderText(PROMPT_CATALOG.spaceOverview, {}),
   conversationCommunication: renderText(PROMPT_CATALOG.conversationCommunication, {}),

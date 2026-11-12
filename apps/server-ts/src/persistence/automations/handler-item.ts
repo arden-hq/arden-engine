@@ -20,7 +20,14 @@ export const HandlerItemInputSchema = Schema.Struct({
       processedHead: Schema.NullOr(Schema.NonEmptyString),
       sourceHead: Schema.NonEmptyString,
       markdown: Schema.NonEmptyString
-    }).annotate({ parseOptions: { onExcessProperty: "error" } })
+    }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+    Schema.Struct({
+      kind: Schema.Literal("reports"),
+      directory: Schema.NonEmptyString,
+      month: Schema.NonEmptyString,
+      pageIds: Schema.Array(Schema.NonEmptyString),
+      markdown: Schema.NonEmptyString
+    })
   ])
 })
 export type HandlerItemInput = typeof HandlerItemInputSchema.Type

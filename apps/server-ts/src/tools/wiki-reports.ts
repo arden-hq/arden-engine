@@ -6,6 +6,7 @@ import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../wiki/authority.js"
 import { directorySections } from "../wiki/collections.js"
+import { KEEP_RULE_FORMS, statesReportRetention } from "../wiki/report-retention.js"
 import { WikiReportContentSchema } from "../wiki/reports.js"
 import { Wiki } from "../wiki/service.js"
 import { resolveAutomation } from "./automation-records.js"
@@ -27,7 +28,8 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
       "Bind an empty Memory directory to one personal Automation for managed reports. " +
       "Run during user-requested setup, after automation_create with enabled=false. Enable with automation_update only after configuration succeeds. Reuse its existing destination or choose sources/<workflow>. " +
       "The parent must exist. Repeating identical setup is safe; existing unrelated pages or producers are never claimed. " +
-      "Save instructions to use wiki_publish_report in that Automation's prompt. Asks by default.",
+      "Save instructions to use wiki_publish_report in that Automation's prompt. " +
+      "Default to one rolling page that each run replaces; set up a dated page per run only when the user wants to look back at past reports. Asks by default.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         automation_ref: Schema.NonEmptyString.annotate({
@@ -38,7 +40,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
         }),
         contract: Schema.NonEmptyString.check(Schema.isMaxLength(40_000)).annotate({
           description:
-            "Complete README with nonempty ## Purpose, ## Producers, ## Consumers, ## Boundaries, ## Retention and ## Records sections. Records specifies filename/date/timezone and evidence lookup conventions."
+            "Complete README with nonempty ## Purpose, ## Producers, ## Consumers, ## Boundaries, ## Retention and ## Records sections. Retention holds one line the server runs: `Keep: forever`, `Keep: 30 days` (dated reports older than that are archived unless a subject page links to them), or `Keep: 30 days, monthly summary` (one summary page per month is written first). Records specifies filename/date/timezone and evidence lookup conventions; dated reports start with YYYY-MM-DD."
         })
       })
     ),
@@ -73,6 +75,12 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
           preview: "Missing record conventions",
           retryable: false
         })
+      }
+      if (!statesReportRetention(directorySections(input.contract).get("Retention"))) {
+        throw new ToolExecutionError(
+          `The ## Retention section needs one rule line: ${KEEP_RULE_FORMS}`,
+          { preview: "Missing retention rule", retryable: false }
+        )
       }
       const automation = await resolveAutomation(
         services.automations,
@@ -111,7 +119,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_publish_report",
     description:
-      "Publish a dated report in this Automation's configured Memory destination. " +
+      "Publish a report in this Automation's configured Memory destination: the rolling page each run replaces, or a dated page when the directory keeps a history. " +
       "Adds stable identity, revisions, source metadata, search and change events. Identical retries are unchanged; " +
       "read an existing report before revising it. Only the admitted producer can publish; filenames do not grant authority. Preauthorized by Read + save reports; other profiles may require approval.",
     parameters: Schema.toStandardSchemaV1(

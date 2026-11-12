@@ -9,6 +9,7 @@ import { dailySummaryHandler } from "./handlers/daily-summary.js"
 import { homeLetterHandler } from "./handlers/home-letter.js"
 import { managedHistoryHandler } from "./handlers/managed-history.js"
 import { memoryCaptureHandler } from "./handlers/memory-capture.js"
+import { reportRetentionHandler } from "./handlers/report-retention.js"
 import { wikiMaintenanceHandler } from "./handlers/wiki-maintenance.js"
 import type { SystemAutomationHandler } from "./system-handler.js"
 import type { AutomationId } from "../persistence/automations/model.js"
@@ -19,7 +20,8 @@ export const SYSTEM_HANDLERS: { readonly [Id in SystemHandlerId]: SystemAutomati
   home_letter: homeLetterHandler,
   managed_history_collection: managedHistoryHandler,
   wiki_maintenance: wikiMaintenanceHandler,
-  chat_summaries: chatSummariesHandler
+  chat_summaries: chatSummariesHandler,
+  report_retention: reportRetentionHandler
 }
 
 const handlers: ReadonlyArray<SystemAutomationHandler> = SYSTEM_HANDLER_IDS.map(

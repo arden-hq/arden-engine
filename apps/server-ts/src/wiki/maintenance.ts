@@ -4,6 +4,7 @@ import { Effect } from "effect"
 
 import { decodeWikiOrigin, LEGACY_MAINTENANCE_ORIGIN, wikiOriginSource } from "./commit.js"
 import { isContentStepOrigin } from "./content-steps.js"
+import { REPORT_RETENTION_AUTOMATION, REPORT_RETENTION_ORIGIN } from "./retire-reports.js"
 import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from "./errors.js"
 import { isImportedPath } from "./imported.js"
 import { pageWikiLinks } from "./links.js"
@@ -240,6 +241,8 @@ export const makeWikiMaintenanceMethods = (
       (source) =>
         source.origin !== LEGACY_MAINTENANCE_ORIGIN &&
         !isContentStepOrigin(source.origin) &&
+        source.origin !== REPORT_RETENTION_ORIGIN &&
+        !isReviewerCommit(source, REPORT_RETENTION_AUTOMATION) &&
         !isReviewerCommit(source, input.reviewerAutomationId) &&
         source.changes.some(isReviewableChange)
     )

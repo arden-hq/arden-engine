@@ -9,6 +9,7 @@ import type { WikiCommitOrigin } from "../wiki/commit.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { normal, pageNamesForPath, reviseWikiPage } from "../wiki/page.js"
+import { monthlySummaryPathOf } from "../wiki/report-retention.js"
 import { Wiki } from "../wiki/service.js"
 import { redirectTargetAt, type PageRecord, type Snapshot } from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
@@ -323,6 +324,14 @@ export const pageNotFound = (snapshot: Snapshot, path: string): ToolExecutionErr
     return new ToolExecutionError(
       `'${path}' now redirects to '${redirected.resource.path}'. Use '${redirected.resource.path}' to change that page.`,
       { preview: "Wiki page moved", retryable: false }
+    )
+  // An archived report leaves links to it in daily notes; they should lead to its month.
+  const summary = monthlySummaryPathOf(path)
+  const monthly = summary === undefined ? null : activePage(snapshot, summary)
+  if (monthly !== null)
+    return new ToolExecutionError(
+      `No active wiki page exists at '${path}'. Dated reports of that month were archived past retention; read the month's summary at '${monthly.resource.path}'.`,
+      { preview: "Wiki report archived", retryable: false }
     )
   const named = pagesWithPathAlias(snapshot, path).slice(0, 3)
   const hint =
