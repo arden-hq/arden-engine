@@ -236,9 +236,10 @@ const start = async (input: unknown): Promise<void> => {
       cliCapability
     }
     const startupSignal = new AbortController().signal
-    const initial = await requestCredential(false, startupSignal).catch(() => null)
-    if (stopRequested) return
-    const route = initial === null ? "local_only" : brokeredProviderRoute.id
+    // Opening the database and reading chats need no model credential, so the
+    // server starts while the host fetches it. Model calls wait for it inside
+    // the provider; a signed-out host swaps to local-only once that is known.
+    const initial = requestCredential(false, startupSignal).catch(() => null)
     const reportedPhases = new Set<StartupPhase>()
     const reportPhase = (phase: StartupPhase): void => {
       if (reportedPhases.has(phase)) return
@@ -247,7 +248,6 @@ const start = async (input: unknown): Promise<void> => {
         parentPort.postMessage({
           type: "startup_phase",
           phase,
-          route,
           elapsedMs: Math.round(performance.now() - startedAt)
         })
       } catch {
@@ -259,7 +259,6 @@ const start = async (input: unknown): Promise<void> => {
         parentPort.postMessage({
           type: "startup_phase",
           phase: "schema_migration",
-          route,
           elapsedMs: Math.round(performance.now() - startedAt),
           migration: progress
         })
@@ -273,8 +272,10 @@ const start = async (input: unknown): Promise<void> => {
       migration: reportMigration,
       operational: postOperationalEvent
     }
-    const provider = providerFor(initial, message.options.version)
-    if (stopRequested) return
+    const provider = brokeredProviderRoute.start(
+      { initial, request: requestCredential },
+      message.options.version
+    )
     server = await startServerWithLocalAccess({
       ...serverOptions,
       ...provider,
@@ -293,6 +294,7 @@ const start = async (input: unknown): Promise<void> => {
       port: server.port,
       serverUrl: server.url.href
     })
+    void initial.then((credential) => (credential === null ? replaceProvider() : undefined))
     const path = cliAccessPath(message.options.databasePath)
     const access: CliAccess = {
       version: 1,
@@ -334,7 +336,10 @@ const start = async (input: unknown): Promise<void> => {
 const providerFor = (credential: BrokerCredential | null, version: string): ModelProviderOptions =>
   credential === null
     ? {}
-    : brokeredProviderRoute.start({ initial: credential, request: requestCredential }, version)
+    : brokeredProviderRoute.start(
+        { initial: Promise.resolve(credential), request: requestCredential },
+        version
+      )
 
 const replaceProvider = async (): Promise<void> => {
   const current = server

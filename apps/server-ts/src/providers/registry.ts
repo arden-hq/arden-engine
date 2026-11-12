@@ -14,7 +14,11 @@ export interface BrokerCredential {
 }
 
 interface BrokeredCredentials {
-  readonly initial: BrokerCredential
+  /**
+   * The credential the host is still fetching; null when nobody is signed in.
+   * The provider waits for it on first use, so the server can open without it.
+   */
+  readonly initial: Promise<BrokerCredential | null>
   readonly request: (forceRefresh: boolean, signal: AbortSignal) => Promise<BrokerCredential | null>
 }
 
@@ -130,9 +134,11 @@ const openAiCodexRoute: ProviderRoute = {
       }
     }
     const starting = startLazyProvider(async () => {
+      const initial = await credentials.initial
+      if (initial === null) throw new Error("OpenAI Codex is not connected")
       const runtime = await makeOpenAiCodexRuntime({
         credentials: source,
-        initialCredential: codexCredential(credentials.initial),
+        initialCredential: codexCredential(initial),
         appVersion
       })
       if (!runtime) throw new Error("OpenAI Codex is not connected")
