@@ -105,7 +105,10 @@ export const RunHandlers = HttpApiBuilder.group(
               active: run.active,
               started_at: run.startedAt
             })),
-            idle: snapshot.pendingDeliveries === 0 && !snapshot.runs.some((run) => run.active)
+            idle:
+              snapshot.pendingDeliveries === 0 &&
+              snapshot.runningScripts === 0 &&
+              !snapshot.runs.some((run) => run.active)
           }
         })
       )

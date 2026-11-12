@@ -37,6 +37,8 @@ export interface RunListSnapshot {
   readonly runs: ReadonlyArray<ListedRun>
   /** Automation deliveries not yet sent; each will start a Run. */
   readonly pendingDeliveries: number
+  /** Scripts still running in the background; each reports back to its chat when it ends. */
+  readonly runningScripts: number
 }
 
 export interface ActiveRunsSnapshot {

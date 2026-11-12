@@ -239,8 +239,9 @@ export const UsageReportSchema: Schema.Codec<UsageReport, JsonRecord> = withExtr
 
 /**
  * `GET /chat/runs`: every Run the server holds, oldest first, sub-agent Runs
- * included. `idle` is true when no Run is going and no Automation delivery
- * waits, so nothing more will happen until the next message.
+ * included. `idle` is true when no Run is going, no script runs in the
+ * background and no Automation delivery waits, so nothing more will happen
+ * until the next message.
  */
 export const RunListSchema = withExtras({
   runs: Schema.Array(

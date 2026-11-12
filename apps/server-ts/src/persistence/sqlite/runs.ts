@@ -279,6 +279,9 @@ export const makeRunQueries = ({
     const deliveries = yield* sql<{ readonly pending: number }>`
       SELECT COUNT(*) AS pending FROM automation_deliveries WHERE status = 'pending'
     `.pipe(Effect.mapError(failed))
+    const scripts = yield* sql<{ readonly running: number }>`
+      SELECT COUNT(*) AS running FROM code_mode_scripts WHERE status = 'running'
+    `.pipe(Effect.mapError(failed))
     return {
       runs: rows.map((row) => ({
         runId: row.run_id,
@@ -287,7 +290,8 @@ export const makeRunQueries = ({
         active: row.active === 1,
         startedAt: row.started_at
       })),
-      pendingDeliveries: deliveries[0]?.pending ?? 0
+      pendingDeliveries: deliveries[0]?.pending ?? 0,
+      runningScripts: scripts[0]?.running ?? 0
     }
   })
 
