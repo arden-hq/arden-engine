@@ -2,11 +2,21 @@ import { backoffDelayMs } from "@arden-hq/std/retry"
 import { DateTime, Effect } from "effect"
 
 import { ManagedOutputLifecycleStore } from "../managed-output/lifecycle-store.js"
-import { CHAT_UPLOAD_MESSAGES_BACKFILL } from "./chat-upload-messages.js"
+import { CHAT_UPLOAD_MESSAGES_BACKFILL, listUploadRefsChunk } from "./chat-upload-messages.js"
 import type { PersistenceDeps } from "./deps.js"
 import { makeManagedOutputFence } from "./managed-output-fence.js"
 
 const UPLOAD_REMOVAL_TRIES = 5
+
+/**
+ * Whether a sent or queued message names an upload folder. Sent messages are
+ * a lookup in `chat_upload_refs`, written when the message is stored. Queued
+ * messages are few and short-lived, so their text is searched.
+ */
+export const UPLOAD_NAMED_SQL = `SELECT 1 AS named FROM chat_upload_refs WHERE upload_id = ?
+  UNION ALL
+  SELECT 1 AS named FROM session_queued_messages WHERE instr(message, ?) > 0
+  LIMIT 1`
 
 export const makeManagedOutputLifecycleStore = ({
   writer,
@@ -147,29 +157,33 @@ export const makeManagedOutputLifecycleStore = ({
 
   const decideUpload: ManagedOutputLifecycleStore["Service"]["decideUpload"] = (uploadId) =>
     Effect.runPromise(
-      writer.transact(
-        Effect.gen(function* () {
-          const queued = yield* sql<{ readonly upload_id: string }>`
+      Effect.gen(function* () {
+        // A large backlog (first run after the upgrade) is listed in short
+        // transactions, so a chat open never waits behind all of it.
+        while (yield* writer.transact(listUploadRefsChunk(sql))) yield* Effect.yieldNow
+        return yield* writer.transact(decideUploadInTransaction(uploadId))
+      })
+    )
+  const decideUploadInTransaction = Effect.fn("ManagedOutputLifecycle.decideUpload")(function* (
+    uploadId: string
+  ) {
+    const queued = yield* sql<{ readonly upload_id: string }>`
         SELECT upload_id FROM chat_upload_cleanup WHERE upload_id = ${uploadId}`
-          if (queued.length === 0) return "gone" as const
-          const listed = yield* sql<{ readonly done: number }>`
+    if (queued.length === 0) return "gone" as const
+    const listed = yield* sql<{ readonly done: number }>`
         SELECT 1 AS done FROM data_backfills
         WHERE name = ${CHAT_UPLOAD_MESSAGES_BACKFILL} AND finished_at IS NOT NULL`
-          if (listed.length === 0) return "wait" as const
-          const needle = `/uploads/${uploadId}/`
-          const named = yield* sql<{ readonly named: number }>`
-        SELECT 1 AS named FROM chat_upload_messages AS listed
-        JOIN session_messages AS m ON m.message_rowid = listed.message_rowid
-        WHERE m.role = 'user' AND instr(m.message_json, ${needle}) > 0
-        UNION ALL
-        SELECT 1 AS named FROM session_queued_messages WHERE instr(message, ${needle}) > 0
-        LIMIT 1`
-          if (named.length === 0) return "remove" as const
-          yield* sql`DELETE FROM chat_upload_cleanup WHERE upload_id = ${uploadId}`
-          return "kept" as const
-        })
-      )
-    )
+    if (listed.length === 0) return "wait" as const
+    // Messages stored since the last chunk above, in this same transaction.
+    while (yield* listUploadRefsChunk(sql)) yield* Effect.yieldNow
+    const named = yield* sql.unsafe<{ readonly named: number }>(UPLOAD_NAMED_SQL, [
+      uploadId,
+      `/uploads/${uploadId}/`
+    ])
+    if (named.length === 0) return "remove" as const
+    yield* sql`DELETE FROM chat_upload_cleanup WHERE upload_id = ${uploadId}`
+    return "kept" as const
+  })
 
   const finishUpload: ManagedOutputLifecycleStore["Service"]["finishUpload"] = (uploadId) =>
     Effect.runPromise(

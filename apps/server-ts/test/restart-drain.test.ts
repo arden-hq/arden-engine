@@ -230,6 +230,56 @@ it(
 )
 
 it(
+  "a call still running under an ended run turns uncertain at the next boot",
+  { timeout: 20_000 },
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "arden-restart-lost-call-"))
+    const databasePath = join(directory, "arden.db")
+    let toolStarted: () => void = () => {}
+    const started = new Promise<void>((resolve) => {
+      toolStarted = resolve
+    })
+    const rig = makeRig(
+      (signal) =>
+        new Promise((_, reject) => {
+          toolStarted()
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+        })
+    )
+    let server: ServerHandle | undefined
+    try {
+      server = await startServer({ port: 0, databasePath, runner: rig.runner, modelHost })
+      const runId = await startRun(server)
+      await started
+      await server.drain({ toolSettleMs: 100 })
+      await server.stop()
+      server = undefined
+      expect(readRun(databasePath, runId).tool?.status).toBe("running")
+      // A background call outlives its turn: end the run, leave the call running.
+      const database = new DatabaseSync(databasePath)
+      try {
+        database
+          .prepare(
+            "UPDATE chat_runs SET status = 'completed', ended_at = updated_at WHERE run_id = ?"
+          )
+          .run(runId)
+      } finally {
+        database.close()
+      }
+
+      server = await startServer({ port: 0, databasePath, runner: rig.runner, modelHost })
+      const recovered = readRun(databasePath, runId)
+      expect(recovered.run).toMatchObject({ status: "completed" })
+      expect(recovered.tool?.status).toBe("uncertain")
+      expect(rig.executions()).toBe(1)
+    } finally {
+      await server?.stop().catch(() => undefined)
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+)
+
+it(
   "a state-changing tool cut off by the stop resumes with a verify result instead of failing",
   { timeout: 20_000 },
   async () => {

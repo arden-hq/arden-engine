@@ -228,7 +228,8 @@ export const tableTells = {
   managed_output_gc_candidates: { silent: files },
   managed_output_lifecycle_lock: { silent: files },
   chat_upload_cleanup: { silent: files },
-  chat_upload_messages: { silent: files },
+  chat_upload_refs: { silent: files },
+  chat_upload_unlisted: { silent: files },
   code_mode_scripts: { silent: run },
   mcp_servers: {
     silent: "A connection: the MCP runtime's change feed (mcp/change-feed.ts) tells its state."

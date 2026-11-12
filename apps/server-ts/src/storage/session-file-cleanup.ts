@@ -50,6 +50,9 @@ const uploadFolder = (root: string): UploadFolder => ({
 const UNSENT_UPLOAD_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 const DRAIN_EVERY = "6 hours"
+// Launch is when the user opens a chat, and cleanup shares the write queue
+// with that. Deleting a chat still drains at once (`drainAfterDelete`).
+const FIRST_DRAIN_DELAY = "2 minutes"
 
 const makeSessionFileCleanup = Effect.fn("SessionFileCleanup.make")(function* (
   lifecycle: Pick<
@@ -197,14 +200,18 @@ export class SessionFileCleanup extends Context.Service<
           uploadFolder(uploadsRoot)
         )
         yield* server.background(
-          cleanup.drain().pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Could not drain deleted Session files", {
-                error: Cause.squash(cause)
-              })
-            ),
-            Effect.andThen(Effect.sleep(DRAIN_EVERY)),
-            Effect.forever
+          Effect.sleep(FIRST_DRAIN_DELAY).pipe(
+            Effect.andThen(
+              cleanup.drain().pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Could not drain deleted Session files", {
+                    error: Cause.squash(cause)
+                  })
+                ),
+                Effect.andThen(Effect.sleep(DRAIN_EVERY)),
+                Effect.forever
+              )
+            )
           )
         )
         return cleanup

@@ -1,4 +1,5 @@
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
+import { ACTIVE_RUN_STATUSES } from "@arden-hq/protocol/runs"
 import { disposableForkSql } from "../schema/fork-disposition.js"
 import { DateTime, Effect } from "effect"
 import { SqlClient, type Statement } from "effect/unstable/sql"
@@ -48,6 +49,8 @@ import {
 } from "./recovery-finish.js"
 import {
   activeRunStatusList,
+  statusSqlList,
+  UNRESOLVED_TOOL_STATUSES,
   modelTurnRunStatusList,
   terminalRunStatusList,
   unfinishedRequestStatusList
@@ -639,6 +642,18 @@ const recoverEachChatRun = Effect.fn("SqlitePersistence.recoverEachChatRun")(fun
   return settled
 })
 
+/**
+ * Ended runs that still have a running tool call: a background call outlives
+ * its turn, and a restart kills it. The inner WHERE repeats the predicate of
+ * `idx_tool_calls_session_unresolved`, so SQLite reads that short list of
+ * unsettled calls. Without it, every boot reads every tool call ever made.
+ */
+export const ENDED_RUNS_WITH_RUNNING_CALLS_SQL = `SELECT run.run_id FROM chat_runs AS run
+  WHERE run.run_id IN (
+      SELECT call.run_id FROM tool_calls AS call
+      WHERE call.status IN ${statusSqlList(UNRESOLVED_TOOL_STATUSES)} AND call.status = 'running')
+    AND run.status NOT IN ${statusSqlList(ACTIVE_RUN_STATUSES)}`
+
 export const interruptActiveChatRunsAfterRestart = Effect.fn(
   "SqlitePersistence.interruptActiveChatRunsAfterRestart"
 )(function* (deps: Pick<PersistenceDeps, "writer" | "chatEvents" | "sessionEvents">) {
@@ -707,10 +722,9 @@ export const interruptActiveChatRunsAfterRestart = Effect.fn(
     .transact(
       Effect.gen(function* () {
         const timestamp = DateTime.formatIso(yield* DateTime.now)
-        const ended = yield* sql<{ readonly run_id: string }>`
-          SELECT DISTINCT call.run_id FROM tool_calls AS call
-          JOIN chat_runs AS run ON run.run_id = call.run_id
-          WHERE call.status = 'running' AND run.status NOT IN ${activeRunStatusList}`
+        const ended = yield* sql.unsafe<{ readonly run_id: string }>(
+          ENDED_RUNS_WITH_RUNNING_CALLS_SQL
+        )
         for (const { run_id } of ended)
           yield* markRunToolExecutionsUncertainInTransaction(
             sql,

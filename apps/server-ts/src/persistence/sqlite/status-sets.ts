@@ -8,8 +8,12 @@ import {
 import { Statement } from "effect/unstable/sql"
 import type { StoredProcedure } from "../browser-procedures/model.js"
 
+/** A SQL `IN` list of status literals, for statements kept as plain text. */
+export const statusSqlList = (statuses: ReadonlyArray<string>): string =>
+  `(${statuses.map((status) => `'${status}'`).join(", ")})`
+
 const statusList = (statuses: ReadonlyArray<string>): Statement.Fragment =>
-  Statement.fragment([Statement.literal(`(${statuses.map((status) => `'${status}'`).join(", ")})`)])
+  Statement.fragment([Statement.literal(statusSqlList(statuses))])
 
 export const activeRunStatusList = statusList(ACTIVE_RUN_STATUSES)
 export const terminalRunStatusList = statusList(TERMINAL_RUN_STATUSES)
@@ -27,12 +31,13 @@ export const liveToolStatusList = statusList([
   "ready",
   "paused"
 ] as const satisfies ReadonlyArray<ToolStatus>)
-export const unresolvedToolStatusList = statusList([
+export const UNRESOLVED_TOOL_STATUSES = [
   "running",
   "ready",
   "paused",
   "uncertain"
-] as const satisfies ReadonlyArray<ToolStatus>)
+] as const satisfies ReadonlyArray<ToolStatus>
+export const unresolvedToolStatusList = statusList(UNRESOLVED_TOOL_STATUSES)
 
 export const resultToolStatusList = statusList([
   "completed",
