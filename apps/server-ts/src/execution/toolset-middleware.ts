@@ -54,3 +54,20 @@ export const mergeToolsets = (
         : base.decorateResult(request, result)
   }
 }
+
+/** The same toolset without the named tools: not advertised, not loadable, refused when called. */
+export const withoutTools = (base: Toolset, names: ReadonlySet<string>): Toolset => ({
+  ...base,
+  entries: async () => (await base.entries()).filter((entry) => !names.has(entry.meta.name)),
+  loadedNames: async () =>
+    new Set([...(await base.loadedNames())].filter((name) => !names.has(name))),
+  execute: (request) =>
+    names.has(request.name)
+      ? {
+          content: `${request.name} is not available in this run.`,
+          preview: "Tool not available",
+          is_error: true,
+          retryable: false
+        }
+      : base.execute(request)
+})

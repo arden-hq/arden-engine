@@ -7,8 +7,11 @@ import type { HandlerItemRunner } from "../handler-item-run.js"
 import { runItemLoop } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
+import { withoutTools } from "../../execution/toolset-middleware.js"
 
 export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-capture")
+
+const CHAT_READ_TOOLS: ReadonlySet<string> = new Set(["session_read", "session_search_transcripts"])
 
 const makeMemoryCaptureRunner = (services: {
   readonly memory: Pick<Memory["Service"], "nextCaptureBatch" | "completeCaptureBatch">
@@ -58,6 +61,8 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     rearmOnSeed: true
   },
   item: handlerItemText("memory", (data) => data.batch.markdown),
+  // Capture judges the batch it was handed. Reading other chats is Wiki Maintenance's job.
+  tools: (base) => withoutTools(base, CHAT_READ_TOOLS),
   run: (services) =>
     makeMemoryCaptureRunner({
       memory: services.memory,

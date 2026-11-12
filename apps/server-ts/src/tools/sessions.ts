@@ -569,6 +569,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       action: "read",
       approval_preview: "Read another chat.",
       source: "_sessions",
+      scopes: ["memory_capture"],
       changes_state: false,
       concurrency_group: null,
       background: true,

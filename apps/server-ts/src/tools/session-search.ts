@@ -158,6 +158,7 @@ const makeSessionSearchTool = ({
       action: "read",
       approval_preview: "Search chat transcript text.",
       source: "_sessions",
+      scopes: ["memory_capture"],
       changes_state: false,
       concurrency_group: null,
       background: true,
