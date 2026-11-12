@@ -40,7 +40,7 @@ export interface ScriptAgentView {
   readonly key: string
   readonly attempts: ReadonlyArray<ScriptAgentAttempt>
   readonly label: string
-  readonly mode: "research" | "code" | null
+  readonly mode: "research" | "code" | "work" | null
   readonly status: "running" | "completed" | "failed"
   readonly sessionRef: string
 }

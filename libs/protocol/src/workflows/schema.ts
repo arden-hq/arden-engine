@@ -71,7 +71,7 @@ const ScriptAgentSchema = withExtras({
     })
   ),
   label: Schema.String,
-  mode: Schema.NullOr(Schema.Literals(["research", "code"] as const)),
+  mode: Schema.NullOr(Schema.Literals(["research", "code", "work"] as const)),
   status: Schema.Literals(["running", "completed", "failed"] as const),
   session_ref: IdentifierSchema
 })

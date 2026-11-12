@@ -42,7 +42,7 @@ tool_group: Tasks in a chat, child Agents, Workflows, and Automations
 - Give a child one bounded handoff or independent side task, with scope no other worker has. If your next step depends on its result, do not start a Task in the chat merely to wait.
 - A child owns its one outcome: when later work advances, revises or answers that outcome, even after it finished, send it with `agent_message` instead of starting a new child. Sharing only a topic, person or tool is not enough for reuse.
 - Tell a child to save substantial generated data with `artifact_save` and return only a concise summary plus artifact paths, never raw JSON in its completion.
-- For several independent research or code agents, or results to combine, write one `code_mode` script instead of several `spawn_agent` calls. `work` agents start only with `spawn_agent`.
+- For several independent agents, or results to combine, write one `code_mode` script instead of several `spawn_agent` calls.
 
 ## Golden routes
 

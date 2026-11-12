@@ -281,7 +281,7 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
       __state.calls += 1;
       const request = {
         prompt: String(prompt),
-        mode: options.mode === "code" ? "code" : "research",
+        mode: options.mode === "code" || options.mode === "work" ? options.mode : "research",
         model: options.model === undefined ? undefined : String(options.model),
         reasoningEffort: options.reasoning_effort === undefined ? undefined : String(options.reasoning_effort),
         label: options.label === undefined ? undefined : String(options.label),
@@ -577,8 +577,8 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
     if (typeof prompt !== "string" || prompt.trim().length === 0) {
       return Promise.reject(new Error("agent prompt must not be empty"))
     }
-    if (mode !== "research" && mode !== "code") {
-      return Promise.reject(new Error("agent mode must be research or code"))
+    if (mode !== "research" && mode !== "code" && mode !== "work") {
+      return Promise.reject(new Error("agent mode must be research, code or work"))
     }
     if (typeof occurrence !== "number" || !Number.isInteger(occurrence) || occurrence < 0) {
       return Promise.reject(new Error("agent occurrence must be a natural number"))

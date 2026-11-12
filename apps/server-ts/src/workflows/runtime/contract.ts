@@ -31,7 +31,12 @@ export interface CodeModeHost {
   readonly concurrencyGroup?: (name: string) => string | null
 }
 
-export type ScriptAgentMode = Exclude<AgentMode, "work">
+/**
+ * Every kind of child a script may start. A worker acts with the parent's
+ * permissions; the journal refuses to run again a child that changed
+ * something, whatever its kind, so no kind is kept out for safety.
+ */
+export type ScriptAgentMode = AgentMode
 
 export interface ScriptAgentRequest {
   readonly beforeExecute?: ToolCallRequest["beforeExecute"]

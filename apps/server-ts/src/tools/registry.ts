@@ -283,7 +283,9 @@ const makeExecutionProfile = (builtins: ReadonlyArray<ServerTool>) => {
       hash: workflowHash(descriptor),
       modes: {
         research: { changesState: research.some((tool) => tool.changes_state) },
-        code: { changesState: code.some((tool) => tool.changes_state) }
+        code: { changesState: code.some((tool) => tool.changes_state) },
+        // A worker has the parent's own tools, so it may change anything.
+        work: { changesState: true }
       }
     }
     last = { key, profile }

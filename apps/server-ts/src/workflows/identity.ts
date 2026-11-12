@@ -4,7 +4,7 @@ import { sha256Bytes, sha256Hex } from "@arden-hq/std/hash"
 
 interface WorkflowNodeSpecification {
   readonly prompt: string
-  readonly mode: "research" | "code"
+  readonly mode: "research" | "code" | "work"
   readonly model: string | null
   readonly reasoning_effort: string | null
   readonly label: string | null
@@ -46,7 +46,7 @@ export const workflowOperationId = (...parts: ReadonlyArray<string>): string => 
 
 export const workflowNodeIdentity = (input: {
   readonly prompt: string
-  readonly mode: "research" | "code"
+  readonly mode: "research" | "code" | "work"
   readonly model?: string
   readonly reasoningEffort?: string
   readonly label: string | undefined
