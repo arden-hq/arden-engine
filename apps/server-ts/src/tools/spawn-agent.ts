@@ -305,6 +305,7 @@ const makeSpawnAgentTool = (
       "Start an independent child agent for one task: research for evidence-only work, code to write and test code in a Local folder, or work for other authorized actions.",
       "Research and code parents can spawn children only in their own mode, within the configured depth limit and inherited permissions.",
       "Returns immediately with the child's reference for agent_message; its completion is delivered here automatically at a model-step boundary while you work, or starts a continuation if you are idle.",
+      "Load the work-coordination Skill before the first call.",
       "Do not claim its findings before that notification arrives."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
