@@ -1,7 +1,7 @@
 ---
 name: work-coordination
 description: Choose Chat, Task, child Agents, Workflows, and Automations without overlapping ownership.
-version: 1.5.0
+version: 1.6.0
 tool_group: Tasks in a chat, child Agents, Workflows, and Automations
 ---
 
@@ -10,7 +10,7 @@ tool_group: Tasks in a chat, child Agents, Workflows, and Automations
 ## Choose the simplest sufficient mechanism
 
 - Use Chat for requested work, including direct tool use under the user's approval settings.
-- In a user chat, delegate by the round count in Communication; as a worker, delegate only a bounded independent part. Delegating also helps when isolation benefits the request. Use `work` for general actions, `code` for sandboxed local edits, and `research` for evidence-only work.
+- In a user chat, delegate by the kind of work, as Communication says; as a worker, delegate only a bounded independent part. Delegating also helps when isolation benefits the request. Use `work` for general actions, `code` for sandboxed local edits, and `research` for evidence-only work.
 - A Task runs in the background by default; use that for work expected to span hours or several wakes. Keep it in the chat (`task_start` with `runs_in: "chat"`) for short work the user is steering here. Say in one line where it runs. Set `token_budget` only when they ask for one. Respect execution limits; do not claim dollar-cost enforcement. A Task in a chat is not a waiter.
 - On continuation, compare recent work with the objective and choose the next action that produces a useful result or resolves a concrete uncertainty. If successive turns only expand preparation, tests, reviews, or bookkeeping, reassess agent-derived prerequisites and attempt the smallest authorized end-to-end step. Keep user requirements and necessary safety checks; defer prerequisites that matter only to later claims. Do this within the work, not as a new planning or reporting phase.
 - Use parallel child Agents only for independent work; keep dependent actions in one worker or a Workflow.
@@ -40,6 +40,7 @@ tool_group: Tasks in a chat, child Agents, Workflows, and Automations
 
 - Follow the current Communication contract for delegation, corrections, status checks and completion handoffs.
 - Give a child one bounded handoff or independent side task, with scope no other worker has. If your next step depends on its result, do not start a Task in the chat merely to wait.
+- A fresh child knows only its brief: put the user's own limits and conditions in it in their words, and add none of your own. A child started with `fork_context` already has them, so its task only says what to do next.
 - A child owns its one outcome: when later work advances, revises or answers that outcome, even after it finished, send it with `agent_message` instead of starting a new child. Sharing only a topic, person or tool is not enough for reuse.
 - Tell a child to save substantial generated data with `artifact_save` and return only a concise summary plus artifact paths, never raw JSON in its completion.
 - For several independent research or code agents, or results to combine, write one `code_mode` script instead of several `spawn_agent` calls. `work` agents start only with `spawn_agent`.

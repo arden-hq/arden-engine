@@ -65,7 +65,7 @@ const ParametersSchema = Schema.Struct({
   fork_context: Schema.optionalKey(
     Schema.Boolean.annotate({
       description:
-        "true starts the child from this conversation so far, so it already knows what you know and the task only says what to do next; it is cheap because the child reuses this conversation's cache. Omit for a fresh child that sees only its task."
+        "true starts the child from this conversation so far, so it already knows what you know and the task only says what to do next. Choose it when the work depends on what was said here and a brief would lose part of it. It is cheap because the child reuses this conversation's cache. Omit for a fresh child that sees only its task."
     })
   ),
   mode: AgentModeSchema.annotate({
