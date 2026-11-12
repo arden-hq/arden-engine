@@ -23,7 +23,7 @@ import { Wiki } from "../wiki/service.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
 import { compactAnswerBlocks } from "../context/answer-blocks.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
-import { oversizedCorePages } from "./core-memory.js"
+import { crowdedCorePages } from "./core-memory.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
 import { prepareMemoryRecall, type MemoryRecall } from "./retrieval.js"
@@ -522,9 +522,9 @@ export class Memory extends Context.Service<
                   runId: leader.runId
                 })
               }
-              const oversized = yield* snapshot().pipe(
+              const crowded = yield* snapshot().pipe(
                 Effect.map((current) =>
-                  oversizedCorePages(
+                  crowdedCorePages(
                     current.pages
                       .filter((record) => record.page.lifecycle === "active")
                       .map((record) => ({
@@ -542,15 +542,16 @@ export class Memory extends Context.Service<
                 identity: durable.identity,
                 markdown: [
                   renderTranscript(header, selected.excerpts, DateTime.toDate(yield* DateTime.now)),
-                  ...(oversized.length === 0
+                  ...(crowded.length === 0
                     ? []
                     : [
                         "",
-                        "## Core Memory over its size",
+                        "## Core Memory to condense",
                         "",
-                        ...oversized.map(
+                        ...crowded.map(
                           (page) =>
-                            `- ${page.path}: ${page.chars} characters; every chat receives only the first ${page.budget}.`
+                            `- ${page.path}: ${page.chars} characters; every chat receives only the first ${page.budget}. ` +
+                            `Bring it to ${page.target} or fewer.`
                         )
                       ])
                 ].join("\n"),

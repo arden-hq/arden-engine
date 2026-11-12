@@ -16,7 +16,12 @@ import { readTextPage } from "./read-text.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { MAX_PAGE_SOURCES, memorySource, pageReceipt, pagesReceipt } from "./wiki-records.js"
 import { sha256Hex } from "@arden-hq/std/hash"
-import { corePageBudget } from "../memory/core-memory.js"
+import {
+  CORE_CONDENSE_ADVICE,
+  coreCondenseTarget,
+  coreNeedsCondensing,
+  corePageBudget
+} from "../memory/core-memory.js"
 import { requireWithinCoreBudget } from "./wiki-records.js"
 
 const MAX_PAGE_LINES = 4_000
@@ -436,7 +441,9 @@ const makeWikiTools = ({
         pageId: record.page.pageId
       })
       const overBudget =
-        coreBudget === undefined ? chars >= WIKI_PAGE_BUDGET_CHARS : chars > coreBudget
+        coreBudget === undefined
+          ? chars >= WIKI_PAGE_BUDGET_CHARS
+          : coreNeedsCondensing(chars, coreBudget)
       const isReadme = input.path === "README.md" || input.path.endsWith("/README.md")
       const directory = input.path.slice(0, Math.max(0, input.path.length - "/README.md".length))
       const children = isReadme
@@ -471,9 +478,8 @@ const makeWikiTools = ({
               `Page size: ${chars} characters. Every chat receives only the first ${coreBudget} characters of this page (Core Memory).`,
               ...(overBudget
                 ? [
-                    "The rest never reaches a chat. Bring the whole page within that size: condense wording first, " +
-                      "then move project-specific, dated or rarely needed detail to the page that owns it, leaving a short link. " +
-                      "Keep every general fact and preference."
+                    `The page is full or nearly full, and a write over that size is refused. ` +
+                      `Bring it to ${coreCondenseTarget(coreBudget)} characters or fewer. ${CORE_CONDENSE_ADVICE}`
                   ]
                 : [])
             ]),

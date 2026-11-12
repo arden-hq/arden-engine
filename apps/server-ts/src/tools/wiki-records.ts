@@ -1,5 +1,5 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import { corePageBudget } from "../memory/core-memory.js"
+import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import type { PageRecord } from "../wiki/snapshot.js"
 import { appliedReceipt, type CallIdentity } from "./call-receipt.js"
 import { passage } from "./source-passage.js"
@@ -110,10 +110,12 @@ export const requireWithinCoreBudget = (page: {
 }): void => {
   const budget = corePageBudget(page)
   if (budget === undefined || page.body.length <= budget) return
+  const target = coreCondenseTarget(budget)
   throw new ToolExecutionError(
     `${page.path} would have ${page.body.length} characters, but every chat receives only the first ${budget}. ` +
-      `Bring the whole page within ${budget}: condense wording first, then move project-specific, dated or rarely needed detail ` +
-      "to the page that owns it with a short link. Keep every general fact and preference, then retry.",
+      `Nothing was saved. Cut at least ${page.body.length - budget} characters; aim for ${target} or fewer ` +
+      `(${page.body.length - target} less) so later updates fit. Trimming a few words will not do it. ` +
+      `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`,
     { preview: "Core Memory page too long", retryable: false }
   )
 }
