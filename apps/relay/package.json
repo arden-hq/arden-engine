@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@arden-hq/relay",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "The Arden relay: routes sealed frames between a Mac and its phones (Bun and Cloudflare adapters)",
   "license": "Apache-2.0",
