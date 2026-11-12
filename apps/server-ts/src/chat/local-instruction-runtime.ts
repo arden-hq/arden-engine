@@ -53,11 +53,18 @@ export type LocalInstructionRecorder = (input: {
 export const makeLocalInstructionRuntime = ({
   load,
   record,
-  input
+  input,
+  directories = []
 }: {
   readonly load: LocalInstructionLoader
   readonly record: LocalInstructionRecorder | undefined
   readonly input: Pick<ChatRunnerInput, "sessionId" | "runId" | "turnId" | "signal">
+  /**
+   * Folders whose instructions the model sees from its first step. A chat has
+   * no folder of its own, so without this it meets a folder's instructions
+   * only when its first call there is refused and retried.
+   */
+  readonly directories?: ReadonlyArray<string>
 }): {
   readonly modelMiddleware: ModelRequestMiddleware
   readonly preflight: (
@@ -65,7 +72,7 @@ export const makeLocalInstructionRuntime = ({
     host: Readonly<Record<string, unknown>> | undefined
   ) => Promise<ToolResult | undefined>
 } => {
-  const activeDirectories = new Set<string>()
+  const activeDirectories = new Set<string>(directories)
   let directoriesInitialized = false
   let recordedManifest: string | undefined
   const sourceKey = (source: LocalInstructionManifestEntry): string =>

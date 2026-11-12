@@ -42,6 +42,10 @@ export interface ServerOptions {
    *  For a server with nobody to answer a card. Omit to let each message and
    *  chat decide, as in the app. */
   readonly approvalMode?: ApprovalMode
+  /** The folder this server's chats work in. Its AGENTS.md is shown to the
+   *  model from its first step. It grants no access: a permission rule does
+   *  that. */
+  readonly workFolder?: string
   /** False when no person follows this server's chats as they run, as on a
    *  server a program drives. A chat then works on its request directly, as
    *  a worker does, instead of keeping itself free by handing work to a

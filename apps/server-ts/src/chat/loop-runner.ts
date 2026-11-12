@@ -125,6 +125,8 @@ export interface LoopChatRunnerOptions {
   }) => PromiseLike<RuntimeContext | undefined>
   readonly localInstructions?: LocalInstructionLoader
   readonly recordLocalInstructions?: LocalInstructionRecorder
+  /** Folders whose Local folder instructions every run sees from its first step. */
+  readonly localInstructionDirectories?: ReadonlyArray<string>
   readonly output?: (input: ChatRunnerInput) => Promise<AgentOutputOptions | undefined>
   /** Deferred tools a conversation starts with loaded, decided per run. */
   readonly preloadTools?: (input: {
@@ -479,7 +481,10 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
         : makeLocalInstructionRuntime({
             load: config.localInstructions,
             record: config.recordLocalInstructions,
-            input
+            input,
+            ...(config.localInstructionDirectories === undefined
+              ? {}
+              : { directories: config.localInstructionDirectories })
           })
     if (input.model === null) {
       throw new Error("The Loop Chat runner requires a selected ModelHost model")

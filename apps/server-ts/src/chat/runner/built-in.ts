@@ -82,10 +82,12 @@ const stoppedEarly = (reason: StopReason, maxRunSteps: number): string => {
 
 export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function* ({
   maxRunSteps,
-  userFacing
+  userFacing,
+  workFolder
 }: {
   readonly maxRunSteps: number
   readonly userFacing: boolean
+  readonly workFolder: string | undefined
 }) {
   const experiments = yield* ContextExperiments
   const services: TurnContextServices = {
@@ -178,6 +180,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
         ])
         return chatSystemPrompt(assistantName, globalInstructions.file, current)
       },
+      ...(workFolder === undefined ? {} : { localInstructionDirectories: [workFolder] }),
       localInstructions: async ({ sessionId, runId, signal, target, targetKind }) => {
         const policy = await sessionPathPolicy(services, { sessionId, runId, signal })
         if (target === undefined) return loadLocalInstructions({ policy })

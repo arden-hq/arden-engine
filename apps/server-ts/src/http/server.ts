@@ -314,7 +314,8 @@ const composeServer = (
         {
           runnerFor: yield* makeBuiltInChatRunners({
             maxRunSteps: config.maxRunSteps,
-            userFacing: config.userFacing
+            userFacing: config.userFacing,
+            workFolder: config.workFolder
           })
         },
         boot

@@ -24,12 +24,14 @@ export const serverOptionsFor = (
   | "idleCompactionAfterMs"
   | "approvalMode"
   | "userFacing"
+  | "workFolder"
 > => ({
   port: settings.port ?? 0,
   databasePath: join(settings.dataDirectory, "arden.db"),
   ...(settings.maxSteps === undefined ? {} : { maxRunSteps: settings.maxSteps }),
   // A program drives a configured server, so nobody follows its chats unless the file says so.
   userFacing: settings.userFacing ?? false,
+  ...(settings.workspace === undefined ? {} : { workFolder: settings.workspace }),
   ...(settings.memory === undefined ? {} : { memory: settings.memory }),
   ...(settings.approvalMode === undefined ? {} : { approvalMode: settings.approvalMode }),
   ...(settings.skillRoots === undefined ? {} : { sharedSkillRoots: settings.skillRoots }),
