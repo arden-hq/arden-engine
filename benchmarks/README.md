@@ -203,6 +203,9 @@ Harbor as above, then:
 
 ```bash
 hf download internlm/WildClawBench-Harbor --repo-type dataset --local-dir "$PWD/.arden-tmp/bench/wildclaw"
+# Some of the dataset's shell scripts have Windows line endings and fail in the task
+# image ("set: pipefail: invalid option name"); strip them once after the download:
+grep -lr $'\r' --include='*.sh' .arden-tmp/bench/wildclaw | xargs perl -pi -e 's/\r$//'
 # The image is not pulled by Harbor: take Images/wildclawbench-ubuntu_v1.3.tar from the
 # original WildClawBench dataset and `docker load -i` it first.
 cp benchmarks/profiles/wildclaw.json benchmarks/profiles/local-wildclaw.json   # set model

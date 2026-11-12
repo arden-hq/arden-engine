@@ -87,10 +87,17 @@ const yieldTime = (description: string) =>
     ).annotate({ description })
   )
 
+/**
+ * Longest command, in characters. Bash takes the source as one argument, and
+ * Linux refuses a single argument above 128 KiB, so a higher number would only
+ * move the refusal from here to the operating system.
+ */
+const MAX_COMMAND_LENGTH = 128_000
+
 const ExecParametersSchema = Schema.Struct({
-  cmd: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
+  cmd: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_COMMAND_LENGTH)).annotate({
     description:
-      "Bash source passed to /bin/bash -c (1-20,000 characters). Each call starts a fresh process: quote paths and include all shell state the command needs."
+      "Bash source passed to /bin/bash -c (1-128,000 characters). Each call starts a fresh process: quote paths and include all shell state the command needs."
   }),
   workdir: Schema.optionalKey(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
@@ -149,6 +156,7 @@ const makeExecCommandTool = (
       "Run one Bash command in a fresh local process.",
       "If it finishes within yield_time_ms you get its output and exit code. If it is still running (a dev server, a watcher, a long build, a prompt), you get the output so far and a session ID; the process keeps running and you can read it, type into it, or stop it with write_stdin.",
       "No shell state persists between calls. Prefer file_read, file_list, file_find, file_search_text, file_write, and file_edit for ordinary file work.",
+      "Decide before you write the command: keep cmd to a few short lines. A file's content, a multi-step script or embedded data goes into a file with file_write first, and cmd only runs or uses that file. Do not put such text in a heredoc, echo or an inline script: file_write takes far more text than a command may hold.",
       "Ordinary Chats default to host access; code agents default to their own folder's sandbox. A sandboxed command needs a workdir inside a folder a rule lets Arden change.",
       "The sandbox reads the whole machine except secret folders (ssh and gpg keys, cloud logins, keychains, browser profiles, Arden's data), so installed CLIs, virtualenvs and toolchains run; it writes only its Local folder and temporary directories, has no network, and may list processes but signal only ones it started.",
       "When a command needs more, run it again with the narrowest escalation instead of working around the sandbox: access=network when it only needs the network (a download, a package install, git over https, an API); access=host when it needs ssh, the user's saved logins or keys, Git config or a new repository (git init, clone, worktree add, remote add, git config; on macOS add, commit, branch, checkout and stash work in the sandbox), or changes outside the Local folder. Both follow the approval mode.",
