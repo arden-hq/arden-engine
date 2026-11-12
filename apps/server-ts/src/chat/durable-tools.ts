@@ -467,6 +467,7 @@ const spawnInput = (
     ...(request.taskItemId === undefined ? {} : { taskItemId: request.taskItemId }),
     ...(request.model === undefined ? {} : { model: request.model }),
     ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
+    ...(request.defaultModel === undefined ? {} : { defaultModel: request.defaultModel }),
     ...(request.name === undefined ? {} : { name: request.name }),
     ...(request.forkHistory === undefined ? {} : { forkHistory: request.forkHistory })
   }

@@ -457,6 +457,15 @@ export const makeAgentSpawner = ({
               valid.parent
             )
           }
+          // The model the call names; else the default the tool chose for this
+          // kind of child; else the parent's, with the parent's effort.
+          const childModel = valid.model ?? valid.defaultModel?.model ?? parent.model_id
+          const inheritedEffort =
+            valid.defaultModel === undefined
+              ? parent.reasoning_effort
+              : valid.defaultModel.reasoningEffort
+          const childEffort =
+            valid.reasoningEffort ?? (valid.model === undefined ? inheritedEffort : null)
           let agent: NewAgentSessionMetadata
           if (valid.mode === "research") {
             agent = {
@@ -614,7 +623,7 @@ export const makeAgentSpawner = ({
               name: childName,
               metadata: metadataJson,
               spaceId: parent.space_id,
-              chatModel: valid.model ?? parent.model_id,
+              chatModel: childModel,
               originAutomationId: parentAutomation?.automationId ?? parent.origin_automation_id,
               parent: {
                 sessionId: parent.session_id,
@@ -655,8 +664,8 @@ export const makeAgentSpawner = ({
                 client_id, assistant_message_id, model_id, reasoning_effort, authority_json
               ) VALUES (
                 ${childRunId}, ${childSessionId}, 'running', ${timestamp}, ${timestamp}, ${runMetadataJson},
-                ${childClientId}, ${childAssistantMessageId}, ${valid.model ?? parent.model_id},
-                ${valid.reasoningEffort ?? (valid.model === undefined ? parent.reasoning_effort : null)},
+                ${childClientId}, ${childAssistantMessageId}, ${childModel},
+                ${childEffort},
                 ${JSON.stringify(childAuthority)}
               )
             `
@@ -757,10 +766,8 @@ export const makeAgentSpawner = ({
               sessionId: childSessionId,
               assistantMessageId: childAssistantMessageId,
               mintedMessageIds: [],
-              model: valid.model ?? parent.model_id,
-              reasoningEffort:
-                valid.reasoningEffort ??
-                (valid.model === undefined ? parent.reasoning_effort : null),
+              model: childModel,
+              reasoningEffort: childEffort,
               approvalMode: "allow",
               outputSchema: valid.outputSchema ?? null,
               automation: parentAutomation,

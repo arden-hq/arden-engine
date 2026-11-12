@@ -153,6 +153,9 @@ interface ChatWriteSpawnAgentInputBase {
   readonly outputSchema?: JsonObject
   readonly model?: string
   readonly reasoningEffort?: string
+  /** The model the child runs on when the call names none; without it the
+   *  child takes the parent's. Not part of the call's arguments. */
+  readonly defaultModel?: { readonly model: string; readonly reasoningEffort: string | null }
   readonly forkHistory?: ReadonlyArray<Readonly<Record<string, unknown>>>
 }
 

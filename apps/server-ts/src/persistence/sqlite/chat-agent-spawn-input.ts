@@ -20,6 +20,12 @@ const SpawnAgentInputBaseSchema = Schema.Struct({
   task: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)),
   model: Schema.optionalKey(Schema.NonEmptyString),
   reasoningEffort: Schema.optionalKey(Schema.NonEmptyString),
+  defaultModel: Schema.optionalKey(
+    Schema.Struct({
+      model: Schema.NonEmptyString,
+      reasoningEffort: Schema.NullOr(Schema.NonEmptyString)
+    })
+  ),
   forkHistory: Schema.optionalKey(Schema.Array(Schema.Record(Schema.String, Schema.Unknown)))
 })
 

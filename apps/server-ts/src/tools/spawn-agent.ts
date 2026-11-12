@@ -23,6 +23,7 @@ import { JsonObjectSchema } from "../persistence/json.js"
 import { ModelProviderService } from "../models/provider.js"
 import { outputSchemaProblem } from "../models/structured-output.js"
 import { ModelCatalog } from "../models/catalog.js"
+import { ModelStore } from "../persistence/models/store.js"
 import { resolveLocalDirectory, sessionPathPolicy } from "../storage/local-paths.js"
 import type { CodeAgentWorkspace } from "../sessions/agent-mode.js"
 import { folderGrantFor, grantData, type FolderGrant } from "./folder-grant.js"
@@ -54,7 +55,7 @@ const ParametersSchema = Schema.Struct({
   model: Schema.optionalKey(
     Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(512)).annotate({
       description:
-        "Optional exact model id from model_catalog for a fresh child. Omit to inherit the parent model; a forked child always inherits it."
+        "Optional exact model id from model_catalog for a fresh child. Omit it and a research child runs on the Background model, any other child on your model; a forked child always keeps your model."
     })
   ),
   reasoning_effort: Schema.optionalKey(
@@ -294,6 +295,7 @@ const SPAWN_METADATA = {
 const makeSpawnAgentTool = (
   services: LocalPathServices & {
     readonly models: Pick<ModelCatalog["Service"], "catalog">
+    readonly modelSettings: Pick<ModelStore["Service"], "snapshot">
     readonly provider: ModelProviderService["Service"]
   }
 ): ServerTool =>
@@ -334,6 +336,18 @@ const makeSpawnAgentTool = (
       await validateRequestedModel(services.models, input, ctx.signal)
       const resolved = await resolveWorkspace(services, input, ctx)
       if (resolved !== null) verifyApproval(resolved, ctx.approval, ctx.run.approvalMode)
+      // A research child reads and searches, so it runs on the Background
+      // model unless the call names one, as a script's children do. A child
+      // started from this conversation keeps its model to reuse the cache.
+      const background =
+        input.mode === "research" && input.model === undefined && input.fork_context !== true
+          ? (await Effect.runPromise(services.modelSettings.snapshot(), { signal: ctx.signal }))
+              .effective.roles.background
+          : undefined
+      const defaultModel =
+        background === undefined || background.modelId === null
+          ? undefined
+          : { model: background.modelId, reasoningEffort: background.reasoningEffort }
       let raw: ToolResult
       try {
         if (input.mode !== "code") {
@@ -349,6 +363,7 @@ const makeSpawnAgentTool = (
             ...(input.reasoning_effort === undefined
               ? {}
               : { reasoningEffort: input.reasoning_effort }),
+            ...(defaultModel === undefined ? {} : { defaultModel }),
             ...(input.name === undefined ? {} : { name: input.name })
           })
         } else {
@@ -365,6 +380,7 @@ const makeSpawnAgentTool = (
             ...(input.reasoning_effort === undefined
               ? {}
               : { reasoningEffort: input.reasoning_effort }),
+            ...(defaultModel === undefined ? {} : { defaultModel }),
             workspace: resolved.workspace,
             ...(input.name === undefined ? {} : { name: input.name }),
             ...(input.working_directory === undefined
@@ -394,6 +410,7 @@ export const spawnAgentTools = Effect.gen(function* () {
       runs: yield* RunQueries,
       artifacts: yield* ConversationArtifacts,
       models: yield* ModelCatalog,
+      modelSettings: yield* ModelStore,
       provider: yield* ModelProviderService,
       rules: yield* PermissionRules,
       dataDir: (yield* DataRoot).dir
