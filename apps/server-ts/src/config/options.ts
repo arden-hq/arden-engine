@@ -42,6 +42,11 @@ export interface ServerOptions {
    *  For a server with nobody to answer a card. Omit to let each message and
    *  chat decide, as in the app. */
   readonly approvalMode?: ApprovalMode
+  /** False when no person follows this server's chats as they run, as on a
+   *  server a program drives. A chat then works on its request directly, as
+   *  a worker does, instead of keeping itself free by handing work to a
+   *  child. Defaults to true. */
+  readonly userFacing?: boolean
   /** Most model steps one Chat run may take. Near the limit the run is told
    *  how many are left, and its last step has no tools so it ends in a reply.
    *  Defaults to 200. */

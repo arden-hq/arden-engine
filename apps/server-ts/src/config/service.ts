@@ -35,6 +35,7 @@ export interface ServerConfigShape {
   readonly commandSandbox: boolean
   readonly maxRunSteps: number
   readonly memory: boolean
+  readonly userFacing: boolean
   readonly approvalMode?: ApprovalMode
 }
 
@@ -55,6 +56,7 @@ const ServerOptionsSchema = Schema.Struct({
   commandSandbox: Schema.optionalKey(Schema.Boolean),
   maxRunSteps: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
   memory: Schema.optionalKey(Schema.Boolean),
+  userFacing: Schema.optionalKey(Schema.Boolean),
   approvalMode: Schema.optionalKey(Schema.Literals(APPROVAL_MODES))
 })
 
@@ -92,6 +94,7 @@ type ServerConfigInput = Pick<
   | "commandSandbox"
   | "maxRunSteps"
   | "memory"
+  | "userFacing"
   | "approvalMode"
 >
 
@@ -113,6 +116,7 @@ const fromOptions = Effect.fn("ServerConfig.fromOptions")(function* (
     commandSandbox: parsed.commandSandbox ?? true,
     maxRunSteps: parsed.maxRunSteps ?? DEFAULT_MAX_RUN_STEPS,
     memory: parsed.memory ?? true,
+    userFacing: parsed.userFacing ?? true,
     ...(parsed.approvalMode === undefined ? {} : { approvalMode: parsed.approvalMode })
   })
 })

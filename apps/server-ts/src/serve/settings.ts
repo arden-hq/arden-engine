@@ -111,6 +111,10 @@ export const SettingsSchema = Schema.Struct({
   ),
   /** The one folder file tools may change. */
   workspace: Schema.optionalKey(absolute),
+  /** True when a person follows these chats as they run. Absent or false: a
+   *  chat works on its request directly instead of handing it to a child to
+   *  stay free for the next message. */
+  userFacing: Schema.optionalKey(Schema.Boolean),
   /** False keeps Memory recall and related chats out of every prompt. */
   memory: Schema.optionalKey(Schema.Boolean),
   /** False turns every Automation off, built-in ones included. */

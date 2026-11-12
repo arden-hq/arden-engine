@@ -311,7 +311,12 @@ const composeServer = (
       }
       if (options.runner !== undefined) return ChatMessage.layer({ runner: options.runner }, boot)
       return ChatMessage.layer(
-        { runnerFor: yield* makeBuiltInChatRunners({ maxRunSteps: config.maxRunSteps }) },
+        {
+          runnerFor: yield* makeBuiltInChatRunners({
+            maxRunSteps: config.maxRunSteps,
+            userFacing: config.userFacing
+          })
+        },
         boot
       )
     })

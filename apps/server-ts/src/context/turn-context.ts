@@ -87,6 +87,24 @@ export interface TurnContextServices {
   readonly permissions: ToolApprovalPolicy
   readonly rules: PermissionRules["Service"]
   readonly dataDir: string
+  /** False on a server no person follows; see `ServerOptions.userFacing`. Defaults to true. */
+  readonly userFacing?: boolean
+}
+
+/**
+ * Whether a person is in this chat for this turn. The "keep this chat
+ * responsive" guidance is for that case only: a chat on a server a program
+ * drives, or a turn asked for from the command line, has nobody to stay
+ * responsive for, so it does the work itself as a worker does.
+ */
+export const isLiveChat = (
+  origin: SessionOrigin,
+  messages: ReadonlyArray<ChatRunnerMessage>,
+  userFacing: boolean
+): boolean => {
+  if (origin.source !== "personal" || !userFacing) return false
+  const latest = messages.findLast((message) => message.role === "user")
+  return !(latest !== undefined && "sent_from" in latest && latest.sent_from === "cli")
 }
 
 interface TurnContextInput {
@@ -266,10 +284,9 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   const communication = renderPromptSection(
     "Communication",
     PROMPT_CATALOG.communication.render({
-      role_guidance:
-        origin.source === "personal"
-          ? PROMPT_TEXT.conversationCommunication
-          : PROMPT_TEXT.executorCommunication
+      role_guidance: isLiveChat(origin, input.messages, services.userFacing ?? true)
+        ? PROMPT_TEXT.conversationCommunication
+        : PROMPT_TEXT.executorCommunication
     }).text
   )
   const continuitySources: Array<ContinuityContextSource> = []

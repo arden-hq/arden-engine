@@ -82,6 +82,7 @@ it("start options carry the step limit, Memory, Skills, the sandbox and compacti
     port: 0,
     databasePath: "/tmp/arden-settings/arden.db",
     maxRunSteps: 40,
+    userFacing: false,
     memory: false,
     approvalMode: "allow",
     sharedSkillRoots: [],

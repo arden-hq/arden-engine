@@ -81,9 +81,11 @@ const stoppedEarly = (reason: StopReason, maxRunSteps: number): string => {
 }
 
 export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function* ({
-  maxRunSteps
+  maxRunSteps,
+  userFacing
 }: {
   readonly maxRunSteps: number
+  readonly userFacing: boolean
 }) {
   const experiments = yield* ContextExperiments
   const services: TurnContextServices = {
@@ -97,6 +99,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
     work: yield* WorkStore,
     wiki: yield* Wiki,
     cliTools: yield* CliTools,
+    userFacing,
     experiments,
     focusChoices: yield* FocusChoiceStore,
     answerBlocks: yield* AnswerBlockStore,

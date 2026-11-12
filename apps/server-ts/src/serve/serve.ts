@@ -23,10 +23,13 @@ export const serverOptionsFor = (
   | "commandSandbox"
   | "idleCompactionAfterMs"
   | "approvalMode"
+  | "userFacing"
 > => ({
   port: settings.port ?? 0,
   databasePath: join(settings.dataDirectory, "arden.db"),
   ...(settings.maxSteps === undefined ? {} : { maxRunSteps: settings.maxSteps }),
+  // A program drives a configured server, so nobody follows its chats unless the file says so.
+  userFacing: settings.userFacing ?? false,
   ...(settings.memory === undefined ? {} : { memory: settings.memory }),
   ...(settings.approvalMode === undefined ? {} : { approvalMode: settings.approvalMode }),
   ...(settings.skillRoots === undefined ? {} : { sharedSkillRoots: settings.skillRoots }),
