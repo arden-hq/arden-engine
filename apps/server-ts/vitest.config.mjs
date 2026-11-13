@@ -10,6 +10,14 @@ const boot = readdirSync(testDirectory)
   .filter((name) => /\bstartServer\(/.test(readFileSync(new URL(name, testDirectory), "utf8")))
   .map((name) => `test/${name}`)
 
+// The growth check seeds two large databases and takes minutes: it runs only
+// in its own project, from `just speed` (the last step of `just check`).
+const speed = ["test/sql-speed/**/*.test.ts"]
+const speedProject =
+  process.env.ARDEN_SQL_SPEED === "1"
+    ? [{ extends: true, test: { name: "speed", include: speed, testTimeout: 1_200_000 } }]
+    : []
+
 // The SQLite threads write here every table scan the tests cause; the check
 // in test/sql-scans/global.ts reads it after the run.
 const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
@@ -27,13 +35,18 @@ export default mergeConfig(
       projects: [
         {
           extends: true,
-          test: { name: "unit", exclude: [...configDefaults.exclude, ...boot], isolate: false }
+          test: {
+            name: "unit",
+            exclude: [...configDefaults.exclude, ...boot, ...speed],
+            isolate: false
+          }
         },
         // The boot project carries the scan check: its teardown runs once, after both projects.
         {
           extends: true,
           test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }
-        }
+        },
+        ...speedProject
       ]
     }
   })

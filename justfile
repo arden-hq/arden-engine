@@ -36,6 +36,7 @@ check:
     bun run knip
     bun run depcruise
     just test
+    just speed
 
 # Run every test suite.
 test:
@@ -44,6 +45,10 @@ test:
     bun run test:cli
     bun run test:dist
     bun run --cwd apps/relay test
+
+# Seed a database at the owner's size and at four times the history, open every screen and run every timer job on both, and fail on a statement that gets slower as the history grows. Takes minutes.
+speed:
+    cd apps/server-ts && ARDEN_SQL_SPEED=1 bunx vitest run --project speed
 
 # Register every engine package with `bun link`, so a local app checkout uses this engine.
 link:
