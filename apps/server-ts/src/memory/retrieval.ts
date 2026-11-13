@@ -26,10 +26,7 @@ export interface MemoryRecall {
   readonly sources: ReadonlyArray<MemorySource>
 }
 
-interface PageSelection {
-  readonly record: PageRecord
-  readonly excerpt?: string
-}
+type PageSelection = RankedMemoryPage
 
 const normalized = (value: string): string =>
   value.toLocaleLowerCase().split(/\s+/u).filter(Boolean).join(" ")
@@ -157,6 +154,90 @@ const appendPages = (
     )
 }
 
+export interface RankedMemoryPage {
+  readonly record: PageRecord
+  /** The passage that matched by meaning, when one did. */
+  readonly excerpt?: string
+}
+
+/**
+ * Pages ordered by how well they answer a query: the one ranking behind both the Memory
+ * attached to a chat turn and the `wiki_search` tool.
+ *
+ * Each way of matching ranks the pages on its own (words in the page, meaning, the query as an
+ * exact phrase) and the ranks are fused, so a page found several ways comes first and a page
+ * found only one way is still returned.
+ */
+export const rankMemoryPages = ({
+  pages,
+  queryTerms,
+  semanticMatches,
+  phraseMatches = []
+}: {
+  readonly pages: ReadonlyArray<PageRecord>
+  readonly queryTerms: ReadonlySet<string>
+  readonly semanticMatches: ReadonlyArray<SemanticMemoryMatch>
+  /** Page ids that hold the whole query as written, best first. */
+  readonly phraseMatches?: ReadonlyArray<string>
+}): ReadonlyArray<RankedMemoryPage> => {
+  const lexical = pages
+    .map((record) => ({ record, score: score(record, queryTerms) }))
+    .filter((entry) => entry.score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.record.resource.path.localeCompare(right.record.resource.path)
+    )
+  const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
+  interface Candidate {
+    readonly record: PageRecord
+    fusion: number
+    lexicalScore: number
+    semanticScore: number
+    excerpt?: string
+  }
+  const candidates = new Map<string, Candidate>()
+  const candidate = (record: PageRecord): Candidate => {
+    const existing = candidates.get(record.page.pageId)
+    if (existing !== undefined) return existing
+    const created: Candidate = {
+      record,
+      fusion: 0,
+      lexicalScore: 0,
+      semanticScore: Number.NEGATIVE_INFINITY
+    }
+    candidates.set(record.page.pageId, created)
+    return created
+  }
+  const rankWeight = (rank: number): number => 1 / (60 + rank + 1)
+  lexical.forEach((entry, rank) => {
+    const found = candidate(entry.record)
+    found.fusion += rankWeight(rank)
+    found.lexicalScore = entry.score
+  })
+  semanticMatches.forEach((match, rank) => {
+    const record = byId.get(match.pageId)
+    if (record === undefined) return
+    const found = candidate(record)
+    found.fusion += rankWeight(rank)
+    found.semanticScore = match.score
+    found.excerpt = match.chunkText
+  })
+  phraseMatches.forEach((pageId, rank) => {
+    const record = byId.get(pageId)
+    if (record !== undefined) candidate(record).fusion += rankWeight(rank)
+  })
+  return [...candidates.values()]
+    .sort(
+      (left, right) =>
+        right.fusion - left.fusion ||
+        right.lexicalScore - left.lexicalScore ||
+        right.semanticScore - left.semanticScore ||
+        left.record.resource.path.localeCompare(right.record.resource.path)
+    )
+    .map(({ record, excerpt }) => ({ record, ...(excerpt === undefined ? {} : { excerpt }) }))
+}
+
 export interface PreparedMemoryRecall {
   readonly pages: ReadonlyArray<PageRecord>
   readonly render: (discussed: ReadonlyMap<string, ReadonlyArray<DiscussedChat>>) => MemoryRecall
@@ -181,69 +262,11 @@ export const prepareMemoryRecall = ({
   const residentPages = active.filter(resident).map((record) => ({ record }))
   const readable = active.filter((record) => !excludedPageIds.has(record.page.pageId))
   const queryText = normalized(query.slice(0, QUERY_LIMIT))
-  const queryTerms = searchTerms(queryText)
-  const lexical =
-    queryText.length < MIN_QUERY_LENGTH
-      ? []
-      : readable
-          .filter((record) => !resident(record))
-          .map((record) => ({ record, score: score(record, queryTerms) }))
-          .filter((entry) => entry.score > 0)
-          .sort(
-            (left, right) =>
-              right.score - left.score ||
-              left.record.resource.path.localeCompare(right.record.resource.path)
-          )
-  const byId = new Map(readable.map((record) => [record.page.pageId, record] as const))
-  const candidates = new Map<
-    string,
-    {
-      readonly record: PageRecord
-      fusion: number
-      lexicalScore: number
-      semanticScore: number
-      excerpt?: string
-    }
-  >()
-  lexical.forEach((entry, rank) =>
-    candidates.set(entry.record.page.pageId, {
-      record: entry.record,
-      fusion: 1 / (60 + rank + 1),
-      lexicalScore: entry.score,
-      semanticScore: Number.NEGATIVE_INFINITY
-    })
-  )
-  semanticMatches.forEach((match, rank) => {
-    const record = byId.get(match.pageId)
-    if (record === undefined || resident(record)) return
-    const existing = candidates.get(match.pageId)
-    if (existing === undefined) {
-      candidates.set(match.pageId, {
-        record,
-        fusion: 1 / (60 + rank + 1),
-        lexicalScore: 0,
-        semanticScore: match.score,
-        excerpt: match.chunkText
-      })
-      return
-    }
-    existing.fusion += 1 / (60 + rank + 1)
-    existing.semanticScore = match.score
-    existing.excerpt = match.chunkText
-  })
-  const selected = [...candidates.values()]
-    .sort(
-      (left, right) =>
-        right.fusion - left.fusion ||
-        right.lexicalScore - left.lexicalScore ||
-        right.semanticScore - left.semanticScore ||
-        left.record.resource.path.localeCompare(right.record.resource.path)
-    )
-    .slice(0, RESULT_LIMIT)
-    .map(({ record, excerpt }): PageSelection => ({
-      record,
-      ...(excerpt === undefined ? {} : { excerpt })
-    }))
+  const selected = rankMemoryPages({
+    pages: readable.filter((record) => !resident(record)),
+    queryTerms: queryText.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(queryText),
+    semanticMatches
+  }).slice(0, RESULT_LIMIT)
 
   return {
     pages: selected.map(({ record }) => record),

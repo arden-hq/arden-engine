@@ -236,28 +236,32 @@ const composeServer = (
   }).pipe(Layer.provide(storage), Layer.provide(artifacts), Layer.provide(cleanup))
   const workerStatus = WorkerStatus.layer
   const terminals = TerminalSessions.layer
-  const tools = ServerToolRegistry.layer.pipe(
-    Layer.provide(terminals),
-    Layer.provide(modelProvider),
-    Layer.provide(workerStatus),
-    Layer.provide(completion),
-    Layer.provide(decisions),
-    Layer.provide(browser),
-    Layer.provide(computer),
-    Layer.provide(google),
-    Layer.provide(mcp),
-    Layer.provide(skills),
-    Layer.provide(globalInstructions),
-    Layer.provide(wiki),
-    Layer.provide(workflows),
-    Layer.provide(procedures),
-    Layer.provide(research),
-    Layer.provide(artifacts),
-    Layer.provide(outputs),
-    Layer.provide(storage),
-    Layer.provide(Layer.succeed(ServerConfig, ServerConfig.of(config))),
-    Layer.tap(() => Diagnostics.use((diagnostics) => diagnostics.startupPhase("tools_ready")))
-  )
+  const tools = ServerToolRegistry.layer
+    .pipe(
+      Layer.provide(terminals),
+      Layer.provide(modelProvider),
+      Layer.provide(workerStatus),
+      Layer.provide(completion),
+      Layer.provide(decisions),
+      Layer.provide(browser),
+      Layer.provide(computer),
+      Layer.provide(google),
+      Layer.provide(mcp),
+      Layer.provide(skills),
+      Layer.provide(globalInstructions),
+      Layer.provide(wiki),
+      Layer.provide(embeddings)
+    )
+    .pipe(
+      Layer.provide(workflows),
+      Layer.provide(procedures),
+      Layer.provide(research),
+      Layer.provide(artifacts),
+      Layer.provide(outputs),
+      Layer.provide(storage),
+      Layer.provide(Layer.succeed(ServerConfig, ServerConfig.of(config))),
+      Layer.tap(() => Diagnostics.use((diagnostics) => diagnostics.startupPhase("tools_ready")))
+    )
   const baseServices = Layer.mergeAll(
     contextExperimentsLayer(config.memory),
     modelProvider,

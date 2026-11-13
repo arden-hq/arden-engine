@@ -7,6 +7,7 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { writeIdentity } from "./wiki-identity.js"
 import { formatWikiPage } from "../wiki/page.js"
+import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
 import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
@@ -54,7 +55,7 @@ const MergedWikiPathSchema = WikiPathSchema.annotate({
 const SearchParametersSchema = Schema.Struct({
   query: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512)).pipe(
     Schema.annotateEncoded({
-      description: "Text to find in active Wiki page paths, titles, aliases, or bodies."
+      description: "What to look for: a few words, a name, a path, or an exact phrase."
     })
   ),
   limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_RESULTS }))
@@ -224,15 +225,17 @@ const linkData = (
 
 const makeWikiOperationTools = ({
   wiki,
-  runs
+  runs,
+  embeddings
 }: {
   readonly wiki: Wiki["Service"]
   readonly runs: Pick<RunQueries["Service"], "get" | "cause">
+  readonly embeddings: Pick<WikiEmbeddingIndex["Service"], "search">
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_search",
     description:
-      "Search active Wiki page paths, titles, aliases, and Markdown bodies. Read an exact result before changing it.",
+      "Search Memory pages. Write what you are looking for in a few words; pages are found by their words and by their meaning, best match first, and the query does not have to appear as an exact phrase. Read a result before changing it.",
     parameters: Schema.toStandardSchemaV1(SearchParametersSchema),
     metadata: {
       effect: "none",
@@ -247,11 +250,13 @@ const makeWikiOperationTools = ({
       destructive: null
     },
     execute: async (input, ctx) => {
-      const matches = searchPages(
-        activePages(await loadSnapshot(wiki, ctx.signal)),
-        input.query,
-        input.limit
+      const snapshot = await loadSnapshot(wiki, ctx.signal)
+      // Search by meaning is extra: when it is off or fails, words and phrases still find pages.
+      const semantic = await Effect.runPromise(
+        embeddings.search(snapshot, input.query).pipe(Effect.catchCause(() => Effect.succeed([]))),
+        { signal: ctx.signal }
       )
+      const matches = searchPages(activePages(snapshot), input.query, input.limit, semantic)
       const source_refs = matches
         .slice(0, MAX_PAGE_SOURCES)
         .map(({ record }) => pageSource(record, "found"))
@@ -745,5 +750,9 @@ const makeWikiOperationTools = ({
 ]
 
 export const wikiOperationTools = Effect.gen(function* () {
-  return makeWikiOperationTools({ wiki: yield* Wiki, runs: yield* RunQueries })
+  return makeWikiOperationTools({
+    wiki: yield* Wiki,
+    runs: yield* RunQueries,
+    embeddings: yield* WikiEmbeddingIndex
+  })
 })
