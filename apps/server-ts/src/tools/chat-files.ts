@@ -32,15 +32,21 @@ const makeChatFilesListTool = (services: SharedFileServices): ServerTool => {
       "List this chat's attached screenshots, attached file paths, and reusable generated or downloaded files.",
       "Returns metadata and stable artifact_ref values that email, Drive, and browser upload tools accept.",
       "Uses the complete chat history, including attachments older than the current model context.",
-      "Does not download content from Gmail or Drive; use their attachment metadata and download tools first."
+      "Does not download content from Gmail or Drive; use their attachment metadata and download tools first.",
+      "HTML visualizations are not listed. An attached screenshot is saved to this chat's files the first time it is listed, so it gets an artifact_ref.",
+      "When next_offset is not null, pass it as offset for the next page."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
-          Schema.withDecodingDefault(Effect.succeed(0))
+          Schema.withDecodingDefault(Effect.succeed(0)),
+          Schema.annotateEncoded({
+            description: "Files to skip, for the next page. Defaults to 0."
+          })
         ),
         limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })).pipe(
-          Schema.withDecodingDefault(Effect.succeed(50))
+          Schema.withDecodingDefault(Effect.succeed(50)),
+          Schema.annotateEncoded({ description: "Most files to return, 1 to 100. Defaults to 50." })
         )
       })
     ),

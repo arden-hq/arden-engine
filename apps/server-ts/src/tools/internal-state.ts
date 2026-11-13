@@ -103,7 +103,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
           "Runs in waiting_on_plan_limit are paused on the user's plan limits, not stuck: they resume by themselves at resumes_at, and their jobs look again within 15 minutes. Read usage_limits for the plan and limits.",
           "A valid lease is recorded ownership, not proof of progress. Live worker observations are separate from the database snapshot.",
           "No free slots means work waits. A free slot does not prove eligibility: retry delay, same-job execution, active destination chat, disabled schedule, or a pending Task question can block admission.",
-          "Manual runs can execute while a schedule is paused. Due schedules may not have queue rows until capacity is available.",
+          "A manual run of a paused Automation stays queued until it is resumed. Due schedules may not have queue rows until capacity is available.",
           "The worker does not poll: it admits when work is queued or changes, and otherwise sleeps until next_wake_at (the earliest due job, at most a minute away). last_claim_at is the latest completed admission query, even if it claimed no jobs. No heartbeat or old heartbeat means state is unknown; do not invent a stopped-scheduler diagnosis."
         ]
       }
@@ -153,7 +153,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
         })),
         interpretation: [
           "Chats and Tasks stop at the Arden limit unless keep_going_until is set. Available Codex credits allow work past 100% only when its stops allow it; without available credits it waits for the reset. A null limit means Never. Background work can use credits when both the Arden and background limits are null; an Automation's own lower limit still applies. keep_going_until only bypasses the Arden limit for chats.",
-          "The limits are the user's settings in Settings > Usage. Suggest a change; never claim to have made one.",
+          "The Arden limit, background limit and keep_going_until are the user's settings in Settings > Usage: suggest a change, never claim to have made one. One Automation's own limits (automation_limits) can be changed with automation_update.",
           "plans is empty when no provider with a plan meter is connected: say the plan cannot be read, not that it is unused."
         ]
       }
@@ -170,7 +170,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
   defineServerTool({
     name: "usage_report",
     description:
-      "Read Arden's recorded token usage by UTC calendar days, with totals, daily totals, top groups, sessions and automations. Use through_day for historical or page-selected windows. Includes usage receipts from unfinished/failed runs when available. Tokens are not billed money or subscription quota; cache reads may be cheaper but are not necessarily free. cache_read_percent_of_input is cache-read tokens divided by all recorded input tokens, not a provider cache hit rate. Arden does not record reasoning tokens separately. Use session_read and run_inspect before claiming why usage was high. Empty data means no recorded usage, not proven zero spending.",
+      "Read Arden's recorded token usage by UTC calendar days, with totals, daily totals, the top 20 groups, the top 12 sessions, and usage for each Automation and other background work. Use through_day for historical or page-selected windows. Includes usage receipts from unfinished/failed runs when available. Tokens are not billed money or subscription quota; cache reads may be cheaper but are not necessarily free. cache_read_percent_of_input is cache-read tokens divided by all recorded input tokens, not a provider cache hit rate. Arden does not record reasoning tokens separately. Use session_read and run_inspect before claiming why usage was high. Empty data means no recorded usage, not proven zero spending.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         days: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 })).pipe(
@@ -295,7 +295,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
           top_sessions: report.top_sessions,
           automations: report.automations,
           coverage:
-            "Daily totals survive trace retention; session and automation breakdowns cover retained runs only and are limited to the top 12. average_last_input is the mean final model input per Run, not total tokens per Run or mean input across every model step. Missing provider receipts cannot be counted."
+            "Daily totals survive trace retention; session and automation breakdowns cover retained runs only, and top_sessions is limited to the top 12. average_last_input is the mean final model input per Run, not total tokens per Run or mean input across every model step. Missing provider receipts cannot be counted."
         }),
         preview: countOf(totals.tokens, "recorded token")
       }

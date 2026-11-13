@@ -353,6 +353,7 @@ export const gmailSendTools = ({
       name: "email_send",
       description: [
         "Send a new plain-text or HTML email from an explicit connected Gmail account.",
+        "The user cannot edit an HTML email or save it as a draft from the approval card.",
         "Use email_reply for an existing conversation."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(SendParametersSchema),

@@ -640,8 +640,8 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
   defineServerTool({
     name: "session_archive",
     description: [
-      "Archive active Sessions by exact session_ref.",
-      "The current Session is archived once this turn and its agents finish, unless the user writes to it first; another Session with a live run is skipped. Every requested ref is reported."
+      "Archive active Sessions by exact session_ref. Inside a Space, only that Space's chats can be archived; others are reported as not found.",
+      "The current Session is archived once this turn and its agents finish, unless the user writes to it first. Skipped and reported: a Session with a live run, and this chat when archiving it would delete its Automations. Every requested ref is reported; restore from Settings → Archive."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ArchiveParametersSchema),
     metadata: {
@@ -654,7 +654,7 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
       changes_state: true,
       target: "reported",
       concurrency_group: "sessions",
-      destructive: true,
+      destructive: false,
       idempotent: true,
       permissions: ["session"]
     },

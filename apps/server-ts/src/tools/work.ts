@@ -5,7 +5,12 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { readSpecialChat } from "../context/special-chat.js"
 import { toolFailure } from "./tool-failure.js"
-import { AskUserParametersSchema, askUserQuestion, permissionRequest } from "./ask-user-input.js"
+import {
+  AskUserParametersSchema,
+  askUserQuestion,
+  PermissionOfferParametersSchema,
+  permissionRequest
+} from "./ask-user-input.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { takesAnswersMidRun } from "../execution/authority.js"
 import { FocusChoiceStore } from "../persistence/focus-choices/store.js"
@@ -28,7 +33,7 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
   defineServerTool({
     name: "ask_user",
     description:
-      'Ask one specific question in everyday language. Questions block by default. Only add timeout with an explicit first-choice fallback for work you already have authority to do; never time out a request for approval or permission. Ask for the concrete action or decision itself — "Reconnect Gmail for tim@example.com?", "Sign in to LinkedIn in the in-app browser, then answer Done" — never describe your own state ("I need some input"). When the answers are choices, the question names them: "Send the draft, or keep editing?", not "Still want this?"; put why you ask in detail. Keep answer labels short and concrete, such as \'Describe the task\' rather than \'Provide the specific objective\'. For a review or action on something outside the card, detail must include the actual material or a direct Markdown link labeled for the action. Reuse an exact destination returned by a tool; never ask the user to find the item or link only to its parent Task when a file link exists. The question stays open after this Run ends, in Chat, Task peek and the Inbox; a Task is optional. Never say where its card sits ("above", "below"). Do not poll or repeat the question. This records a question, never an approval to perform an external action.',
+      'Ask one specific question in everyday language. Questions block by default. Only add timeout with an explicit first-choice fallback for work you already have authority to do; never time out a request for approval or permission. Ask for the concrete action or decision itself — "Reconnect Gmail for tim@example.com?", "Sign in to LinkedIn in the in-app browser, then answer Done" — never describe your own state ("I need some input"). When the answers are choices, the question names them: "Send the draft, or keep editing?", not "Still want this?"; put why you ask in detail. Keep answer labels short and concrete, such as \'Describe the task\' rather than \'Provide the specific objective\'. For a review or action on something outside the card, detail must include the actual material or a direct Markdown link labeled for the action. Reuse an exact destination returned by a tool; never ask the user to find the item or link only to its parent Task when a file link exists. The question stays open after this Run ends, in Chat, Task peek and the Inbox; a Task is optional. Never say where its card sits ("above", "below"). Do not poll or repeat the question. This records a question, never an approval to perform an external action; to offer a lasting permission change, use permission_offer.',
     parameters: Schema.toStandardSchemaV1(AskUserParametersSchema),
     metadata: {
       effect: "run_record",
@@ -44,30 +49,6 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
       approval_preview: "Ask a question in this conversation."
     },
     execute: async (input, ctx, effects) => {
-      if (input.permission !== undefined) {
-        const offered = await ctx.run.offerPermission({
-          toolCallId: ctx.toolCallId,
-          request: permissionRequest(input.permission)
-        })
-        if (offered.kind === "offered") effects.applied()
-        if (offered.kind !== "offered")
-          return {
-            result: `No card shown. ${offered.kind === "refused" ? offered.reason : "Nothing to offer."}`,
-            preview: "No permission offered"
-          }
-        return {
-          result: `Offered: ${offered.prompt} (question_id ${offered.questionId}). The user sees it as a card in Chat; only their tap saves it, so do not say it is saved. Carry on with the work; their answer arrives at your next step.`,
-          preview: `Offered: ${offered.prompt}`,
-          host: appliedReceipt(
-            ctx,
-            inChatTarget({
-              resourceRef: `question:${offered.questionId}`,
-              title: offered.prompt,
-              chat: await thisChat(services, ctx.run)
-            })
-          )
-        }
-      }
       const { content, focusTarget } = askUserQuestion(input)
       const first = content.choices[0]
       if (input.timeout !== undefined && first === undefined)
@@ -131,9 +112,51 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
     }
   }),
   defineServerTool({
+    name: "permission_offer",
+    description:
+      'Offer the person a lasting permission change after they say, in their own message in this turn, what you may or may not do ("you can call GitHub when you want", "you can always upload my CV", "stop asking me about clicks", "all granted"). When their words name what and whether, offer it at once; ask only what they left out with ask_user. Offer in any approval mode: a rule holds for every chat of its Space or everywhere. The card names the change and where it holds, and only their tap saves it, so never say it is saved before they answer. The offer does not wait: carry on with the work, and their answer arrives at your next step. If the offer is refused, say so; never ask a plain question in its place, since a plain answer saves nothing. Read rules with permissions_read before changing or removing one.',
+    parameters: Schema.toStandardSchemaV1(PermissionOfferParametersSchema),
+    metadata: {
+      effect: "run_record",
+      display_name: "Offer permission",
+      kind: "tool",
+      action: "write",
+      source: "_spaces",
+      changes_state: true,
+      target: "reported",
+      destructive: false,
+      concurrency_group: "space_work",
+      approval_preview: "Offer a permission change in this conversation."
+    },
+    execute: async (input, ctx, effects) => {
+      const offered = await ctx.run.offerPermission({
+        toolCallId: ctx.toolCallId,
+        request: permissionRequest(input.permission)
+      })
+      if (offered.kind === "offered") effects.applied()
+      if (offered.kind !== "offered")
+        return {
+          result: `No card shown. ${offered.kind === "refused" ? offered.reason : "Nothing to offer."}`,
+          preview: "No permission offered"
+        }
+      return {
+        result: `Offered: ${offered.prompt} (question_id ${offered.questionId}). The user sees it as a card in Chat; only their tap saves it, so do not say it is saved. Carry on with the work; their answer arrives at your next step.`,
+        preview: `Offered: ${offered.prompt}`,
+        host: appliedReceipt(
+          ctx,
+          inChatTarget({
+            resourceRef: `question:${offered.questionId}`,
+            title: offered.prompt,
+            chat: await thisChat(services, ctx.run)
+          })
+        )
+      }
+    }
+  }),
+  defineServerTool({
     name: "permissions_read",
     description:
-      "Read this chat's approval mode, the permission rules it follows (its Space's list and Everywhere, with each rule's id), and the tools whose own check still asks for some calls in this mode whatever the rules say. Call it before you tell the user what a mode or rule covers, and before you offer to change or remove a rule.",
+      "Read this chat's approval mode, the permission rules it follows (its Space's list and Everywhere, with each rule's id), and the tools whose own check still asks for some calls in this mode whatever the rules say. Call it before you tell the user what a mode or rule covers, and before you offer to change or remove a rule. Works only in the user's own chat.",
     parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
     metadata: {
       effect: "none",

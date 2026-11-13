@@ -9,7 +9,8 @@ const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 const makeCurrentTimeTool = (): ServerTool =>
   defineServerTool({
     name: "current_time",
-    description: "Get the current date and time in the user's local timezone.",
+    description:
+      "Get the current date and time in this machine's local timezone, plus the UTC time.",
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     metadata: {
       effect: "none",

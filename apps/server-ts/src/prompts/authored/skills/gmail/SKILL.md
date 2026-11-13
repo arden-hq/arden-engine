@@ -24,7 +24,7 @@ tool_group: Gmail
 - Search with email_thread_search, then change every match in one batched email_update (up to 100 thread_refs: archive, read, starred, important, add_labels, remove_labels). One call is one approval card.
 - Call email_label_list first when a label name is uncertain. Labels are never created; an unknown name is an error.
 - Archive before you trash. Use email_trash only when the user asked to delete; Gmail keeps trashed threads 30 days. There is no permanent delete.
-- To undo, call email_update with the add_labels and remove_labels the result lists as undo for each thread.
+- To undo, call email_update again with account_ref and the restore array from its result, alone and unchanged.
 - If changes are not allowed for the account, say so; nothing was changed.
 
 ## Forwarding, attachments and unsubscribing

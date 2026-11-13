@@ -1,0 +1,118 @@
+import { Effect, Predicate } from "effect"
+
+import type { ServerTool } from "./define.js"
+import { catalogNameProblems } from "./tool-catalog.js"
+import { toolParametersJsonSchema } from "./tool-json-schema.js"
+import { TOOL_SUMMARIES } from "./tool-summaries.js"
+
+/**
+ * Rules every built-in tool must keep. The registry refuses to start when one
+ * breaks, so any test that boots the server catches a new tool that drifts.
+ * MCP tools are not checked: their text comes from outside Arden.
+ */
+export const checkToolContract = (tools: ReadonlyArray<ServerTool>): Effect.Effect<void> => {
+  const problems = toolContractProblems(tools)
+  return problems.length === 0
+    ? Effect.void
+    : Effect.die(new Error(`Built-in tools break their contract:\n${problems.join("\n")}`))
+}
+
+const toolContractProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
+  const names = new Set(tools.map((tool) => tool.definition.name))
+  return [
+    ...tools.flatMap(readLabelProblems),
+    ...tools.flatMap(summaryProblems),
+    ...Object.keys(TOOL_SUMMARIES)
+      .filter((name) => !names.has(name))
+      .map((name) => `TOOL_SUMMARIES has ${name}, which is not a built-in tool`),
+    ...tools.flatMap(parameterProblems),
+    ...tools.flatMap(groupProblems),
+    ...catalogNameProblems(tools)
+  ]
+}
+
+// Scopes treat action "read" as safe to hand to read-only runs, while the
+// approval gate treats any state change as a write. Both must agree.
+const readLabelProblems = (tool: ServerTool): ReadonlyArray<string> =>
+  tool.meta.action === "read" && tool.meta.changes_state
+    ? [`${tool.definition.name} is labeled read but changes state`]
+    : []
+
+// The public tool catalog shows this summary; without one it shows nothing.
+const summaryProblems = (tool: ServerTool): ReadonlyArray<string> =>
+  tool.meta.internal_catalog || TOOL_SUMMARIES[tool.definition.name] !== undefined
+    ? []
+    : [`${tool.definition.name} has no entry in TOOL_SUMMARIES`]
+
+// Checks the schema the model receives, not the source. `.annotate` on a field
+// that transforms its input (Trim, a decoding default) or on a checked struct
+// is dropped from that schema; `Schema.annotateEncoded` keeps it. Effect puts
+// a description on a checked field inside allOf and on a shared schema inside
+// $defs, so look through both. A choice field that only picks a variant (such
+// as report's event) passes when the tool description names every choice.
+const parameterProblems = (tool: ServerTool): ReadonlyArray<string> => {
+  const entry = tool.entry(toolParametersJsonSchema)
+  const properties = entry.parameters["properties"]
+  const definitions = Predicate.isObject(entry.parameters["$defs"]) ? entry.parameters["$defs"] : {}
+  if (!Predicate.isObject(properties)) return []
+  return Object.entries(properties)
+    .filter(
+      ([, schema]) => !described(schema, definitions) && !choicesNamed(schema, entry.description)
+    )
+    .map(([param]) => `${tool.definition.name}.${param} has no description`)
+}
+
+const choicesNamed = (schema: unknown, description: string): boolean =>
+  Predicate.isObject(schema) &&
+  Array.isArray(schema["enum"]) &&
+  schema["enum"].every((choice) => typeof choice === "string" && description.includes(choice))
+
+const described = (schema: unknown, definitions: Readonly<Record<string, unknown>>): boolean => {
+  if (!Predicate.isObject(schema)) return false
+  if (typeof schema["description"] === "string" && schema["description"].trim() !== "") return true
+  const ref = schema["$ref"]
+  if (typeof ref === "string" && described(definitions[ref.replace("#/$defs/", "")], definitions))
+    return true
+  return ["allOf", "anyOf"].some(
+    (key) => Array.isArray(schema[key]) && schema[key].some((part) => described(part, definitions))
+  )
+}
+
+// Calls in one group run one at a time. A second spelling for the same
+// service (drive_write and google_drive_write) let writes overlap.
+const CONCURRENCY_GROUPS: ReadonlySet<string> = new Set([
+  "agent_messages",
+  "agent_spawn",
+  "app_navigation",
+  "automation_followup",
+  "automations",
+  "browser",
+  "calendar_write",
+  "code_mode",
+  "communication",
+  "computer",
+  "computer_repl",
+  "conversation_artifacts",
+  "directives",
+  "drive_write",
+  "filesystem",
+  "gmail_write",
+  "research_workspace",
+  "session_todo",
+  "sessions",
+  "skills",
+  "space_work",
+  "terminal",
+  "web",
+  "wiki_write",
+  "workflow_control"
+])
+
+const groupProblems = (tool: ServerTool): ReadonlyArray<string> => {
+  const group = tool.meta.concurrency_group
+  return group === null || CONCURRENCY_GROUPS.has(group)
+    ? []
+    : [
+        `${tool.definition.name} uses concurrency group ${group}; add it to CONCURRENCY_GROUPS or reuse one`
+      ]
+}

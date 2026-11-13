@@ -1,30 +1,41 @@
 import { Schema } from "effect"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
+const SummarySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)).pipe(
+  Schema.annotateEncoded({
+    description: "What this review did, in one or two sentences (up to 500 characters)."
+  })
+)
+const IdsSchema = (description: string) =>
+  Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1)).annotate({ description })
+const ProposalIdsSchema = IdsSchema(
+  "Every proposal_id task_propose returned in this Run, passed verbatim (task-proposal:…)."
+)
+
 export const SpaceReviewDispositionSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("no_change"),
-    summary: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500))
+    summary: SummarySchema
   }),
   Schema.Struct({
     kind: Schema.Literal("changed"),
-    summary: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
-    task_ids: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1))
+    summary: SummarySchema,
+    task_ids: IdsSchema("Every Task this Run changed, commented on, or saved a result to.")
   }),
   Schema.Struct({
     kind: Schema.Literal("proposed"),
-    summary: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
-    proposal_ids: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1))
+    summary: SummarySchema,
+    proposal_ids: ProposalIdsSchema
   }),
   Schema.Struct({
     kind: Schema.Literal("reconciled"),
-    summary: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
-    proposal_ids: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1))
+    summary: SummarySchema,
+    proposal_ids: ProposalIdsSchema
   }),
   Schema.Struct({
     kind: Schema.Literal("needs_user"),
-    summary: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
-    question_ids: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1))
+    summary: SummarySchema,
+    question_ids: IdsSchema("Every active question this Run created for the user.")
   })
 ])
 export type SpaceReviewDisposition = typeof SpaceReviewDispositionSchema.Type

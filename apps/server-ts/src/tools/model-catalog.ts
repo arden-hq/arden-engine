@@ -32,7 +32,7 @@ const makeModelCatalogTool = ({
       }).catch((cause: unknown) => {
         if (ctx.signal.aborted) throw cause
         throw new ToolExecutionError(
-          "Could not refresh the model catalog. Omit model to inherit the current run's model.",
+          "Could not refresh the model catalog. Omit model to use the default model.",
           {
             preview: "Model catalog unavailable",
             retryable: true

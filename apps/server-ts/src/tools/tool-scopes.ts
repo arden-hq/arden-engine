@@ -1,4 +1,5 @@
 import { isUserAutomation, type Actor } from "../execution/authority.js"
+import { readsOnly } from "../execution/impact.js"
 import type { ToolScopeKey } from "../execution/policy.js"
 import type { ServerTool, ServerToolMetadata } from "./define.js"
 
@@ -27,8 +28,6 @@ const OUTCOME_SCOPES: ReadonlySet<ToolScopeKey> = new Set([
   "agent_code"
 ])
 
-const isRead = (metadata: ServerToolMetadata) => metadata.action === "read"
-
 const SCOPE_RULES: Record<
   ToolScopeKey,
   {
@@ -39,25 +38,25 @@ const SCOPE_RULES: Record<
   none: { internal: false, matches: () => false },
   worker: {
     internal: true,
-    matches: (metadata) => isRead(metadata) || !WORKER_EXCLUDED_SOURCES.has(metadata.source)
+    matches: (metadata) => readsOnly(metadata) || !WORKER_EXCLUDED_SOURCES.has(metadata.source)
   },
-  observer: { internal: false, matches: isRead },
-  read_only: { internal: false, matches: isRead },
-  reports: { internal: false, matches: isRead },
+  observer: { internal: false, matches: readsOnly },
+  read_only: { internal: false, matches: readsOnly },
+  reports: { internal: false, matches: readsOnly },
   browser: {
     internal: false,
-    matches: (metadata) => isRead(metadata) || metadata.source === "_browser"
+    matches: (metadata) => readsOnly(metadata) || metadata.source === "_browser"
   },
   memory_capture: {
     internal: false,
-    matches: (metadata) => isRead(metadata) && metadata.source === "_wiki"
+    matches: (metadata) => readsOnly(metadata) && metadata.source === "_wiki"
   },
   chat_summary: { internal: false, matches: () => false },
-  agent_research: { internal: false, matches: isRead },
+  agent_research: { internal: false, matches: readsOnly },
   agent_code: {
     internal: false,
     matches: (metadata) =>
-      (isRead(metadata) && CODE_AGENT_SOURCES.has(metadata.source)) ||
+      (readsOnly(metadata) && CODE_AGENT_SOURCES.has(metadata.source)) ||
       metadata.source === "_filesystem" ||
       metadata.source === "_shell" ||
       metadata.source === "_code"

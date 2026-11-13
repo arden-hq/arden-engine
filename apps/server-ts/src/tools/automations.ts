@@ -342,7 +342,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     defineServerTool({
       name: "automation_list",
       description:
-        "List the user's and the built-in system Automations by stable ref. Include instructions, schedule, chat, history, effective model, action mode, and current status; for a system Automation, the settings it accepts and those changed from their default.",
+        "List every user and built-in system Automation by stable ref, with no limit. Each entry has its full instructions, schedule, chat, history, effective model, action mode and current status. A system Automation also shows the settings it accepts and those changed from their default.",
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
       metadata: {
         effect: "none",
@@ -430,9 +430,9 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
       name: "automation_update",
       description: [
         "Update one Automation by exact automation_ref.",
-        "Use chat=current, chat=own or chat_ref to move future runs to another chat; history chooses whether each run starts fresh or reads that chat. Runs act with the action mode of their chat, or of their own chat when they start fresh in one of the user's; change action_mode in a separate call. Other changes edit instructions, model, triggers or schedule. Sending triggers replaces the list: send each trigger to keep with its id (t1, t2) from the Automation's text; a field you leave out keeps its stored value, such as an old field condition, and null clears it.",
+        "Use chat=current, chat=own or chat_ref to move future runs to another chat; history chooses whether each run starts fresh or reads that chat. Runs act with the action mode of their chat, or of their own chat when they start fresh in one of the user's. Four changes each go in a call of their own: action_mode, the plan limits (pause_at_percent and max_tokens_per_run together), reset_to_default, and a model change when the runs read one of the user's chats. Other changes edit instructions, model, triggers or schedule. Sending triggers replaces the list: send each trigger to keep with its id (t1, t2) from the Automation's text; a field you leave out keeps its stored value, such as an old field condition, and null clears it.",
         `${SYSTEM_ACCEPTS} Use reset_to_default to undo one of its changed settings.`,
-        "To add an installed tool to a built-in Automation: look the tool up if unsure what it is, check its command exists, offer that command with permission.command (its card has Arden's own jobs; a built-in runs only commands that list allows), then change its prompt here to use it, and tell the person reset_to_default prompt restores the shipped one."
+        "To add an installed tool to a built-in Automation: look the tool up if unsure what it is, check its command exists, offer that command with permission_offer (permission.command) (its card has Arden's own jobs; a built-in runs only commands that list allows), then change its prompt here to use it, and tell the person reset_to_default prompt restores the shipped one."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(UpdateParametersSchema, {
         parseOptions: { onExcessProperty: "error" }
@@ -704,7 +704,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     defineServerTool({
       name: "automation_run",
       description:
-        "Queue one immediate run of an Automation, including a paused one, without enabling its schedule. Returns before completion; inspect automation_list_runs for the outcome. A system Automation that needs its trigger's input (Chat summaries) has no manual run. Uses the user's approval settings.",
+        "Queue one run of an Automation now. An enabled Automation starts as soon as a worker is free. A paused one is queued but waits until it is resumed; this does not resume it or its schedule. Refused while it is already running. Returns before the run ends; check automation_list_runs for the outcome. A system Automation that needs its trigger's input (Chat summaries) has no manual run. Uses the user's approval settings.",
       parameters: Schema.toStandardSchemaV1(RefParametersSchema),
       metadata: {
         display: { refresh: "automations" },

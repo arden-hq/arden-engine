@@ -76,8 +76,7 @@ const ParametersSchema = Schema.Struct({
   working_directory: Schema.optionalKey(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
       description: [
-        "Optional starting directory for a code agent.",
-        "Defaults to the Space's Default folder.",
+        "Directory the code agent works in. Required when mode is code.",
         "A directory outside the Space's attached folders asks for approval unless this run uses Never ask."
       ].join(" ")
     })
@@ -137,7 +136,7 @@ const validateRequestedModel = async (
   const catalog = await Effect.runPromise(models.catalog(), { signal }).catch((cause: unknown) => {
     if (signal.aborted) throw cause
     throw new ToolExecutionError(
-      "Could not check available models. Omit model to inherit the current run's model.",
+      "Could not check available models. Omit model to use the default: the Background model for a research child, your model otherwise.",
       {
         preview: "Model catalog unavailable",
         retryable: true
@@ -149,7 +148,7 @@ const validateRequestedModel = async (
     .find((model) => model.id === input.model)
   if (definition === undefined) {
     throw new ToolExecutionError(
-      `${input.model} is not in Arden's current model catalog. Call model_catalog for exact available IDs, or omit model to inherit.`,
+      `${input.model} is not in Arden's current model catalog. Call model_catalog for exact available IDs, or omit model to use the default.`,
       { preview: "Agent model unavailable", retryable: false }
     )
   }

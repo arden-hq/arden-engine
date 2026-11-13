@@ -28,7 +28,7 @@ const makeTellTool = ({
     description: [
       "Say something now to the person, or to the agent that started you, while you keep working: a milestone reached or a finding they should hear before you finish.",
       "It goes to the same place your final reply goes.",
-      "Do not use it for the final result: your final reply is delivered by itself. Do not use it to ask a question: ask one instead.",
+      "Do not use it for the final result: your final reply is delivered by itself. Do not use it to ask a question: use ask_user instead.",
       "Use it rarely; only a few are allowed in one job."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(TellParametersSchema),

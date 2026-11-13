@@ -18,10 +18,10 @@ const requiredAccountRefSchema = (emails: ReadonlyArray<string>) =>
   )
 const accountRefSchema = (emails: ReadonlyArray<string>) =>
   Schema.optionalKey(calendarAccountRefSchema(optionalAccountRefDescription("calendar", emails)))
-const calendarIdSchema = (verb: string) =>
+const calendarIdSchema = (verb: string, fromEventRef = false) =>
   Schema.optionalKey(
     Schema.String.annotate({
-      description: `Calendar to ${verb}: an id from calendar_list_calendars. Defaults to the calendar in event_ref when supplied, otherwise "primary".`
+      description: `Calendar to ${verb}: an id from calendar_list_calendars. ${fromEventRef ? 'Defaults to the calendar in event_ref, otherwise "primary".' : 'Defaults to "primary".'}`
     }).check(Schema.isMinLength(1), Schema.isMaxLength(320))
   )
 export const CalendarDateTimeSchema = Schema.String.check(
@@ -55,7 +55,7 @@ export const searchParametersSchema = (emails: ReadonlyArray<string>) =>
     ),
     time_max: Schema.optionalKey(
       dateTimeSchema(
-        "Upper ISO 8601 date-time bound with an explicit offset or Z. Must be after time_min."
+        "Upper ISO 8601 date-time bound with an explicit offset or Z. Must be after time_min. Omit for no upper bound."
       )
     ),
     limit: LimitSchema,
@@ -114,7 +114,7 @@ export const createParametersSchema = (emails: ReadonlyArray<string>) =>
     timezone: Schema.optionalKey(
       Schema.String.annotate({
         description:
-          "IANA display time zone attached to both start and end, such as America/New_York; start and end still need explicit offsets."
+          "IANA display time zone attached to both start and end, such as America/New_York; timed start and end still need explicit offsets."
       }).check(Schema.isMinLength(1), Schema.isMaxLength(128))
     ),
     recurrence: Schema.optionalKey(
@@ -150,7 +150,7 @@ export const createParametersSchema = (emails: ReadonlyArray<string>) =>
 export const EditParametersSchema = Schema.Struct({
   add_attachments: Schema.optionalKey(CalendarAttachmentRefsSchema),
   remove_attachments: Schema.optionalKey(CalendarRemoveAttachmentsSchema),
-  calendar_id: calendarIdSchema("edit"),
+  calendar_id: calendarIdSchema("edit", true),
   event_ref: Schema.String.annotate({
     description: "Exact account-qualified event_ref returned by calendar_search."
   }).check(Schema.isMinLength(3), Schema.isMaxLength(1_024)),
@@ -199,7 +199,7 @@ export const EditParametersSchema = Schema.Struct({
   )
 })
 export const DeleteParametersSchema = Schema.Struct({
-  calendar_id: calendarIdSchema("delete from"),
+  calendar_id: calendarIdSchema("delete from", true),
   event_ref: Schema.String.annotate({
     description: "Exact account-qualified event_ref returned by calendar_search."
   }).check(Schema.isMinLength(3), Schema.isMaxLength(1_024)),
@@ -224,7 +224,7 @@ const EventRefSchema = Schema.String.annotate({
 }).check(Schema.isMinLength(3), Schema.isMaxLength(1_024))
 
 export const RespondParametersSchema = Schema.Struct({
-  calendar_id: calendarIdSchema("answer on"),
+  calendar_id: calendarIdSchema("answer on", true),
   event_ref: EventRefSchema,
   response: Schema.Literals(["accepted", "declined", "tentative"]).annotate({
     description: "Your answer to the invitation."

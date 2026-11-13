@@ -53,12 +53,12 @@ export const searchParametersSchema = (emails: ReadonlyArray<string>) =>
   })
 export const ListTabsParametersSchema = Schema.Struct({
   document_ref: fileRefSchema(
-    "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool."
+    "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool. A URL or raw id works only while one Drive account is connected."
   )
 })
 export const ReadDocParametersSchema = Schema.Struct({
   document_ref: fileRefSchema(
-    "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool."
+    "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool. A URL or raw id works only while one Drive account is connected."
   ),
   tab_id: Schema.optionalKey(
     Schema.String.annotate({
@@ -82,10 +82,10 @@ export const ReadDocParametersSchema = Schema.Struct({
 })
 export const ReadSheetParametersSchema = Schema.Struct({
   spreadsheet_ref: fileRefSchema(
-    "Google Sheets URL, raw spreadsheet id, or exact account-qualified spreadsheet_ref returned by a Drive tool."
+    "Google Sheets URL, raw spreadsheet id, or exact account-qualified spreadsheet_ref returned by a Drive tool. A URL or raw id works only while one Drive account is connected."
   ),
   range: Schema.String.annotate({
-    description: "Bounded A1 range to read, such as Sheet1!A1:D50."
+    description: "A1 range to read, such as Sheet1!A1:D50. All values in it are returned."
   }).check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 })
 export const createParametersSchema = (emails: ReadonlyArray<string>) =>
@@ -97,11 +97,11 @@ export const createParametersSchema = (emails: ReadonlyArray<string>) =>
   })
 export const EditDocParametersSchema = Schema.Struct({
   document_ref: fileRefSchema(
-    "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool."
+    "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool. A URL or raw id works only while one Drive account is connected."
   ),
   operation: Schema.Literals(["append", "replace"] as const).annotate({
     description:
-      "append inserts text at the document end; replace changes every exact case-sensitive match."
+      "append inserts text at the end of the first tab; replace changes every exact case-sensitive match in all tabs."
   }),
   text: Schema.String.annotate({
     description: "Text to append or use as the replacement, from 1 to 200,000 characters."
@@ -123,7 +123,7 @@ const SheetValuesSchema = Schema.Array(
   .check(Schema.isMinLength(1), Schema.isMaxLength(10_000))
 export const SheetWriteParametersSchema = Schema.Struct({
   spreadsheet_ref: fileRefSchema(
-    "Google Sheets URL, raw spreadsheet id, or exact account-qualified spreadsheet_ref returned by a Drive tool."
+    "Google Sheets URL, raw spreadsheet id, or exact account-qualified spreadsheet_ref returned by a Drive tool. A URL or raw id works only while one Drive account is connected."
   ),
   range: Schema.String.annotate({
     description:

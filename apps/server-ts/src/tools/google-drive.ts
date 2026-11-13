@@ -17,7 +17,7 @@ import {
 import type { EffectTarget } from "../execution/tool-effect.js"
 import { decodeGoogle, googleCall } from "./google-request.js"
 import { passage } from "./source-passage.js"
-import { docsDocument, documentTabs, documentText } from "./google-docs-document.js"
+import { docsDocument, documentTabs, documentText, replacedCount } from "./google-docs-document.js"
 import { documentImagesForModel } from "./google-docs-images.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { decodeOpaque, encodeOpaque } from "../lib/opaque-ref.js"
@@ -234,8 +234,9 @@ export const makeDriveTools = ({
     defineServerTool({
       name: "drive_search",
       description: [
-        "Search non-trashed Google Drive files and folders by name or indexed content, newest modified first.",
-        "Returns metadata and account-qualified refs. Use drive_download to download content explicitly."
+        "Search non-trashed files and folders in My Drive and files shared with the user, by name or indexed content, newest modified first.",
+        "Shared drives are not searched.",
+        "Returns metadata and file_ref values for the Drive read, edit, download and share tools."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(SearchParametersSchema),
       metadata: {
@@ -406,9 +407,9 @@ export const makeDriveTools = ({
     defineServerTool({
       name: "drive_read_doc",
       description: [
-        "Read up to the first 200,000 characters from all tabs of a Google Doc or one tab selected with drive_list_doc_tabs.",
-        "Each placed image shows as a numbered [Image N] marker where it sits; where the model takes images, the images of the page read are attached after the text.",
-        "Returns a stable next_cursor for bounded pages."
+        "Read text from all tabs of a Google Doc, or from one tab chosen with drive_list_doc_tabs.",
+        "Returns 20,000 characters per call by default; pass next_cursor to read on. Only the first 200,000 characters can be read.",
+        "Each placed image shows as a numbered [Image N] marker where it sits; where the model takes images, the images of the page read are attached after the text."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(ReadDocParametersSchema),
       metadata: {
@@ -506,8 +507,8 @@ export const makeDriveTools = ({
     defineServerTool({
       name: "drive_read_sheet",
       description: [
-        "Read values from one bounded A1 range in a Google Sheet; this tool does not paginate.",
-        "Request a narrower range when the result would be large."
+        "Read the values in one A1 range of a Google Sheet, such as Sheet1!A1:D50.",
+        "Returns every value in the range with no truncation or paging, so keep the range small."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(ReadSheetParametersSchema),
       metadata: {
@@ -563,7 +564,7 @@ export const makeDriveTools = ({
     defineServerTool({
       name: "drive_create_doc",
       description: [
-        "Create an empty Google Doc in an explicit connected Drive account.",
+        "Create an empty Google Doc in the root of My Drive for an explicit connected account.",
         "Use drive_edit_doc afterward to add content. Asks by default."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
@@ -575,7 +576,7 @@ export const makeDriveTools = ({
         approval_preview: "Create this Google Doc.",
         source: "google_drive",
         changes_state: true,
-        concurrency_group: "google_drive_write",
+        concurrency_group: "drive_write",
         destructive: false,
         default_approval: "ask",
         policy_scope: "external",
@@ -615,8 +616,8 @@ export const makeDriveTools = ({
     defineServerTool({
       name: "drive_edit_doc",
       description: [
-        "Append text at a Google Doc's end or replace every exact case-sensitive text match.",
-        "Asks by default; replace is destructive."
+        "Append text at the end of a Google Doc's first tab, or replace every exact case-sensitive match of text in all tabs.",
+        "A replace that matches nothing changes nothing and fails. Asks by default; replace is destructive."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(EditDocParametersSchema),
       metadata: {
@@ -627,7 +628,7 @@ export const makeDriveTools = ({
         approval_preview: "Edit this Google Doc.",
         source: "google_drive",
         changes_state: true,
-        concurrency_group: "google_drive_write",
+        concurrency_group: "drive_write",
         destructive: true,
         default_approval: "ask",
         policy_scope: "external",
@@ -655,7 +656,7 @@ export const makeDriveTools = ({
         await effects.target(
           await namedFile({ google, ref, link: documentUrl, signal: ctx.signal })
         )
-        await googleCall({
+        const response = await googleCall({
           google,
           service: "google_drive",
           url: `${DOCS_API}/${encodeURIComponent(ref.id)}:batchUpdate`,
@@ -668,17 +669,33 @@ export const makeDriveTools = ({
           signal: ctx.signal,
           effects
         })
+        const replaced = input.operation === "replace" ? replacedCount(response.value) : undefined
+        if (replaced === 0)
+          throw toolRefusal(
+            "No exact case-sensitive match for match text in the Google Doc. Nothing changed.",
+            "No match found"
+          )
         return {
-          result: `Updated Google Doc ${input.document_ref}.`,
-          preview: "Google Doc updated",
-          data: { document_ref: input.document_ref, operation: input.operation }
+          result:
+            replaced === undefined
+              ? `Appended text to Google Doc ${input.document_ref}.`
+              : `Replaced ${countOf(replaced, "match", "matches")} in Google Doc ${input.document_ref}.`,
+          preview:
+            replaced === undefined
+              ? "Text appended"
+              : `${countOf(replaced, "match", "matches")} replaced`,
+          data: {
+            document_ref: input.document_ref,
+            operation: input.operation,
+            ...(replaced === undefined ? {} : { occurrences_changed: replaced })
+          }
         }
       }
     }),
     defineServerTool({
       name: "drive_create_sheet",
       description: [
-        "Create an empty Google Sheet in an explicit connected Drive account.",
+        "Create an empty Google Sheet in the root of My Drive for an explicit connected account.",
         "Use drive_update_sheet or drive_append_sheet_rows afterward. Asks by default."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
@@ -690,7 +707,7 @@ export const makeDriveTools = ({
         approval_preview: "Create this Google Sheet.",
         source: "google_drive",
         changes_state: true,
-        concurrency_group: "google_drive_write",
+        concurrency_group: "drive_write",
         destructive: false,
         default_approval: "ask",
         policy_scope: "external",
@@ -748,7 +765,7 @@ export const makeDriveTools = ({
               : "Append rows to this Google Sheet.",
           source: "google_drive",
           changes_state: true,
-          concurrency_group: "google_drive_write",
+          concurrency_group: "drive_write",
           destructive: name === "drive_update_sheet",
           default_approval: "ask",
           policy_scope: "external",
@@ -783,12 +800,13 @@ export const makeDriveTools = ({
             effects
           })
           const body = sheetUpdate(response.value)
+          const written = body.updatedRange ?? body.updates?.updatedRange ?? input.range
           return {
-            result: `${name === "drive_update_sheet" ? "Updated" : "Appended rows to"} ${input.range}.`,
+            result: `${name === "drive_update_sheet" ? "Updated" : "Appended rows to"} ${written}.`,
             preview: name === "drive_update_sheet" ? "Sheet updated" : "Rows appended",
             data: {
               spreadsheet_ref: fileRef(response.account.email, ref.id),
-              range: body.updatedRange ?? body.updates?.updatedRange ?? input.range
+              range: written
             }
           }
         }

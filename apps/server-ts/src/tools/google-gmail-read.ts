@@ -135,8 +135,9 @@ export const gmailReadTools = ({
     defineServerTool({
       name: "email_search",
       description: [
-        "Search individual Gmail messages with Gmail query syntax.",
-        "Returns message_ref for email_read or email_reply and thread_ref for conversation reads; use email_thread_search for one result per conversation."
+        "Search individual Gmail messages with Gmail query syntax; the default query is the last 7 days.",
+        "Returns message_ref values for email_read, email_reply, email_forward, email_draft, email_attachment_save and email_unsubscribe, and thread_ref values for email_thread_read, email_update and email_trash.",
+        "Use email_thread_search for one result per conversation."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(SearchParametersSchema),
       metadata: {
@@ -281,7 +282,8 @@ export const gmailReadTools = ({
     defineServerTool({
       name: "email_thread_search",
       description: [
-        "Search distinct Gmail conversations with Gmail query syntax and return one thread_ref per conversation.",
+        "Search distinct Gmail conversations with Gmail query syntax; the default query is the last 7 days.",
+        "Returns one thread_ref per conversation, for email_thread_read, email_update and email_trash.",
         "Use email_search when individual matching messages matter."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(SearchParametersSchema),

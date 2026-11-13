@@ -282,3 +282,22 @@ export const documentTabs = (document: {
   }
   return tabs
 }
+
+const docsBatchUpdate = decodeGoogle(
+  Schema.Struct({
+    replies: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          replaceAllText: Schema.optionalKey(
+            Schema.Struct({ occurrencesChanged: Schema.optionalKey(Schema.Number) })
+          )
+        })
+      )
+    )
+  }),
+  { service: "google_drive", label: "document update" }
+)
+
+/** Matches changed by a one-request `replaceAllText` batch; Google omits the count when it is 0. */
+export const replacedCount = (value: unknown): number =>
+  docsBatchUpdate(value).replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0

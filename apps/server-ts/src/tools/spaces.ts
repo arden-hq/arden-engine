@@ -290,10 +290,11 @@ const boardRows = (detail: SpaceDetail) => {
     attachments.set(attachment.item_id, current)
   }
   const live = detail.work.work_items.filter((item) => item.status === "open")
+  const deferred = detail.work.work_items.filter((item) => item.status === "deferred")
   const settled = detail.work.work_items
     .filter((item) => item.status === "done" || item.status === "cancelled")
     .slice(0, 5)
-  const entries = [...live, ...settled].map((task) => ({
+  const entries = [...live, ...deferred, ...settled].map((task) => ({
     task,
     comments: comments.get(task.item_id) ?? [],
     attachments: attachments.get(task.item_id) ?? []
@@ -353,7 +354,7 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
   defineServerTool({
     name: "space_page_read",
     description:
-      "Read the attached Wiki page of a selected or current Space. If content_truncated is true, continue with a larger offset.",
+      "Read the attached Wiki page of a selected or current Space. If the body is cut off, continue with a larger offset.",
     parameters: Schema.toStandardSchemaV1(SpacePageReadParametersSchema),
     metadata: {
       effect: "none",
@@ -487,7 +488,7 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
   defineServerTool({
     name: "space_board_read",
     description:
-      "Read all live Tasks, up to five recently settled Tasks, and up to three comments per Task. Use returned item_id for Task links or app_open, and stable_key plus updated_at with the task_* tools.",
+      "Read a Space's board: every open and deferred Task, up to five recently done or cancelled Tasks, and up to three comments per Task. Use item_id for Task links or app_open, and stable_key plus updated_at with the task_* tools. With task_key, also returns that Task's internal working context.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         space_id: OptionalSpaceIdSchema,

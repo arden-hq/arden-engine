@@ -173,7 +173,8 @@ const makeBrowserTools = ({
     defineServerTool({
       name: "browser_close",
       description: [
-        "Close one exact browser tab in the shared Space or Home browser after approval.",
+        "Close one exact browser tab in the shared Space or Home browser.",
+        "Closing a tab this run opened needs no approval; any other tab asks the user first.",
         "Use browser_tabs first when the target ref is unclear."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(
@@ -423,8 +424,8 @@ const makeBrowserTools = ({
     defineServerTool({
       name: "browser_wait",
       description: [
-        "Wait for one bounded condition on an exact browser tab.",
-        "Waiting invalidates any prior action snapshot; set read to get the page in this call instead of a browser_snapshot."
+        "Wait for one bounded condition on an exact browser tab: page load, URL, visible text, element, elapsed time, or a finished download.",
+        "Except for download, waiting invalidates any prior action snapshot; set read to get the page in this call instead of a browser_snapshot. A download wait keeps refs and ignores read."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(WaitParametersSchema),
       metadata: {

@@ -8,7 +8,7 @@ import {
 import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 import type { ToolEffect } from "./tool-effect.js"
 import type { RuleDecision } from "../persistence/permissions/rules.js"
-import type { CallImpact } from "./impact.js"
+import { readsOnly, type CallImpact } from "./impact.js"
 import { firstAnswer, type Rung } from "./ladder.js"
 
 export interface ToolFacts {
@@ -161,7 +161,7 @@ const readOnlyRefusesChanges: DecisionRung = {
   name: "read_only_refuses_changes",
   answer: ({ authority, live, call }) => {
     const reads =
-      isRead(call.tool) || (call.tool.read_only_mode === "self_gated" && call.reads_only)
+      readsOnly(call.tool) || (call.tool.read_only_mode === "self_gated" && call.reads_only)
     return live.mode === "read_only" && !reads
       ? deny("read_only", refusalPath(authority.actor))
       : undefined
@@ -309,8 +309,6 @@ export const boundaryReach = (
 
 const standingChange = (call: CallFacts): boolean =>
   call.tool.standing === "always" || (call.tool.standing === "requirement" && call.requirement)
-
-const isRead = (tool: ToolFacts): boolean => tool.action === "read" && !tool.changes_state
 
 const deny = (
   rule: DenyRule,

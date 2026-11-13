@@ -24,7 +24,10 @@ const OPERATIONS = new Set([
   "browser_wait"
 ])
 const CellSchema = Schema.Struct({
-  code: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32_000))
+  code: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32_000)).annotate({
+    description:
+      "Body of an async JavaScript function, run in strict mode (1-32,000 characters). Await every call and return the result you need."
+  })
 })
 const EmptySchema = Schema.Struct({})
 
@@ -61,7 +64,7 @@ export const computerTools = Effect.gen(function* () {
     defineServerTool({
       name: COMPUTER_TOOL,
       description:
-        "Run a computer-use JavaScript cell in an isolated persistent session for this chat; the computer-use Skill has the cua API. state holds values and handles between calls; locals do not persist. Every child operation is authorized and recorded separately. Await every call and return compact JSON; screenshots are forwarded automatically. No filesystem, process, network or imports. Settled script errors preserve state. Cancellation, unfinished calls, inactivity or restart discard the heap; reacquire and observe. Never replay uncertain inputs.",
+        "Run a computer-use JavaScript cell in an isolated persistent session for this chat; the computer-use Skill has the cua API. state holds values and handles between calls; locals do not persist. Every child operation is authorized and recorded separately. Await every call and return compact JSON; screenshots are forwarded automatically. No filesystem, process, network or imports. Settled script errors preserve state. Cancellation, unfinished calls, 15 minutes of inactivity or restart discard the heap; reacquire and observe. At most 16 chats can hold a session at once. Never replay uncertain inputs.",
       parameters: Schema.toStandardSchemaV1(CellSchema),
       metadata: {
         effect: "run_record",
@@ -89,7 +92,7 @@ export const computerTools = Effect.gen(function* () {
           if (session === undefined) {
             if (sessions.size >= 16)
               throw new ToolExecutionError(
-                "Computer session limit reached; reset an unused chat session",
+                "16 chats already hold a computer script session. Sessions idle for 15 minutes are discarded; try again later.",
                 { preview: "Computer session limit", retryable: false }
               )
             session = {
@@ -158,7 +161,7 @@ export const computerTools = Effect.gen(function* () {
         effect: "run_record",
         changes_state: true,
         target: "reported",
-        action: "read",
+        action: "write",
         display_name: "Stop computer control",
         kind: "computer",
         source: "_computer",

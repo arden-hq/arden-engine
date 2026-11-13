@@ -41,6 +41,11 @@ const ServerToolMetadataInputSchema = Schema.Struct({
   source: Schema.String,
   changes_state: Schema.Boolean,
   concurrency_group: Schema.NullOr(Schema.String),
+  /**
+   * true when a call can remove or overwrite something Arden cannot bring
+   * back (delete, overwrite, unsubscribe). Archiving, which the user can
+   * undo, is false. null when it does not apply (reads).
+   */
   destructive: Schema.NullOr(Schema.Boolean),
   approval_preview: Schema.optionalKey(Schema.String),
   default_approval: Schema.optionalKey(Schema.Literals(["approve", "ask"])),

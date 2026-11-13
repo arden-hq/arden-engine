@@ -83,7 +83,8 @@ const makeBrowserPermissionTool = (browser: BrowserClient["Service"]): ServerToo
     description: [
       "Ask the user to let a page in an Arden browser tab use the location.",
       "Call it only when a browser tool result reports a Permission request and the task needs it; pass its tab, request, origin and permissions exactly.",
-      "The user answers on a card: allow once, always for this site, or deny.",
+      "A request that includes the camera or microphone is always refused.",
+      "The user answers on a card: allow once, always for this site, or deny. In Never ask or read-only runs it denies without asking.",
       "A request you leave alone is denied when the page stops waiting."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(PermissionParametersSchema),

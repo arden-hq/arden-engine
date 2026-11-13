@@ -272,10 +272,13 @@ const TOOL_META: Record<string, ToolMeta> = {
   google_client_import: { verb: "Saved your Google key", icon: "wrench" }
 }
 
-/** `ask_user`: its question card is the call's visible result, drawn by the
- *  transcript on its own, so the trail neither draws nor counts the call. */
+/** `ask_user` and `permission_offer`: the question card is the call's visible
+ *  result, drawn by the transcript on its own, so the trail neither draws nor
+ *  counts the call. */
+const ASK_CALLS: ReadonlySet<string> = new Set(["ask_user", "permission_offer"])
+
 export function isAskCall(kind: string | undefined): boolean {
-  return kind?.toLowerCase() === "ask_user"
+  return kind !== undefined && ASK_CALLS.has(kind.toLowerCase())
 }
 
 export function isPublicActivityTool({

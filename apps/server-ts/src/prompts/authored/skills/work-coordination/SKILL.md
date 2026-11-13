@@ -22,7 +22,7 @@ tool_group: Tasks in a chat, child Agents, Workflows, and Automations
 
 ## Ask once before work that spends, deletes or runs unattended
 
-- Before the first step of work that spends money, deletes things, or runs while the person is away, offer one rule that covers it with `ask_user` `permission` in its `words` form (for example "renting Modal GPUs within $30"), once.
+- Before the first step of work that spends money, deletes things, or runs while the person is away, offer one rule that covers it with `permission_offer` in its `words` form (for example "renting Modal GPUs within $30"), once.
 - Only their own words count for the reviewer; a brief you write for a child never does, so do not rely on one.
 - Offering is not waiting: keep going on the parts that need no yes.
 

@@ -25,7 +25,8 @@ const ParametersSchema = Schema.Struct({
   // Schema a model sees drops a filter together with its annotations.
   title: Schema.optionalKey(
     Schema.String.annotate({
-      description: "At most 7 words naming what this chat is about: concrete nouns."
+      description:
+        "Required with summary. At most 7 words naming what this chat is about: concrete nouns."
     }).check(
       Schema.makeFilter((title) =>
         title.trim().length > 0 && words(title) <= 7 ? undefined : "a title of 1 to 7 words"
@@ -34,7 +35,7 @@ const ParametersSchema = Schema.Struct({
   ),
   summary: Schema.optionalKey(
     Schema.String.annotate({
-      description: `One or two sentences, at most ${MAX_SUMMARY_CHARS} characters (about 45 words): what the chat covered, what was decided or produced, what is still open.`
+      description: `Required with summary. One or two sentences, at most ${MAX_SUMMARY_CHARS} characters (about 45 words): what the chat covered, what was decided or produced, what is still open.`
     }).check(
       Schema.isMaxLength(MAX_SUMMARY_CHARS),
       Schema.makeFilter((summary) =>

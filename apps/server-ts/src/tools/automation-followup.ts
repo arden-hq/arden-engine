@@ -19,8 +19,16 @@ const makeAutomationFollowupTools = ({
       Schema.Struct({
         followup: Schema.Union([
           Schema.Struct({ action: Schema.Literal("stop") }),
-          Schema.Struct({ action: Schema.Literal("check_again"), at: Schema.String })
-        ])
+          Schema.Struct({
+            action: Schema.Literal("check_again"),
+            at: Schema.String.annotate({
+              description: "When to check next: a future ISO 8601 timestamp."
+            })
+          })
+        ]).annotate({
+          description:
+            "stop ends this Automation when this run succeeds. check_again sets its next check to `at`."
+        })
       })
     ),
     metadata: {
@@ -35,8 +43,8 @@ const makeAutomationFollowupTools = ({
       policy_scope: "internal",
       changes_state: true,
       target: "reported",
-      concurrency_group: "automation-followup",
-      destructive: false
+      concurrency_group: "automation_followup",
+      destructive: true
     },
     execute: async (input, ctx, effects) => {
       const owner = await recordApplied(

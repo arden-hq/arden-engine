@@ -93,6 +93,9 @@ const editPrompt = async (
   }
 }
 
+const lineCount = (text: string): number =>
+  text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0)
+
 const writesWithoutCard = (mode: ApprovalMode, cwd: SessionPathPolicy, target: string): boolean =>
   pathRuleFor(cwd, { lexical: target, real: target }, "change") === "allow" ||
   (mode === "safe" && insideLocalFolder(cwd, target))
@@ -120,7 +123,7 @@ const readMutationSource = async (
     if (!info.isFile()) throw toolRefusal(`${target} is not a file.`, "Not a file")
     if (info.size > MAX_MUTATION_FILE_BYTES) {
       throw toolRefusal(
-        `The existing file is larger than ${formatBytes(MAX_MUTATION_FILE_BYTES)}. Use a narrower edit strategy.`,
+        `The existing file is larger than ${formatBytes(MAX_MUTATION_FILE_BYTES)}, which file_edit cannot change. Use exec_command instead.`,
         "File too large"
       )
     }
@@ -169,10 +172,10 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
   defineServerTool({
     name: "file_write",
     description: [
-      "Create or fully replace one UTF-8 file atomically after approval.",
+      "Create or fully replace one UTF-8 file atomically. It may need the user's approval.",
       "The reviewed revision must still match when approval resumes; read and retry after a conflict.",
       "Use file_edit for a localized change to an existing file.",
-      "A missing parent folder is an error; create it first."
+      "A missing parent folder is an error; create it first. Writing the content the file already has changes nothing."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(WriteParametersSchema),
     metadata: {
@@ -213,7 +216,7 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
         const current = before.revision
         if (current !== expected) throw new LocalRevisionConflict()
         const desired = sha256Hex(input.content)
-        const lines = input.content.length === 0 ? 0 : input.content.split("\n").length
+        const lines = lineCount(input.content)
         if (current === desired) {
           return {
             result: `No changes to ${displayFor(cwd, target)}.`,
@@ -286,7 +289,7 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
   defineServerTool({
     name: "file_edit",
     description: [
-      "Replace one exact, unique text block in an existing UTF-8 file after approval.",
+      "Replace one exact, unique text block in an existing UTF-8 file. It may need the user's approval. Files over 8 MiB are refused.",
       "Call file_read first; if old_text is missing or ambiguous, retry with current text and more surrounding context.",
       "The reviewed revision must still match when approval resumes. Use file_write for creation or full replacement."
     ].join(" "),

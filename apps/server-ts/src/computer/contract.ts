@@ -6,16 +6,34 @@ const Token = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)
 export const NativeTargetSchema = Schema.Struct({ pid: Id, window_id: Id })
 export type NativeTarget = typeof NativeTargetSchema.Type
 const ActionFields = {
-  target: NativeTargetSchema,
-  observation: Token,
-  delivery: Schema.Literals(["background", "foreground"])
+  target: NativeTargetSchema.annotate({
+    description:
+      "Exact pid and window_id of the window to act on. It must match the observation's window."
+  }),
+  observation: Token.annotate({
+    description:
+      "Observation ref from the latest computer_read state of this window. This call consumes it, even if the call fails."
+  }),
+  delivery: Schema.Literals(["background", "foreground"]).annotate({
+    description:
+      "background leaves the user's mouse and keyboard free. foreground visibly takes control and needs the user's grant for this chat unless foreground_allowed is true. activate, menu and drag take foreground only; set_value takes background only. A left pixel_click always runs as foreground."
+  })
 }
 const Modifiers = Schema.Array(Schema.Literals(["cmd", "shift", "alt", "ctrl"])).check(
   Schema.isMaxLength(4)
 )
 const PointerFields = {
-  button: Schema.optionalKey(Schema.Literals(["left", "right", "middle"])),
-  modifiers: Schema.optionalKey(Modifiers)
+  button: Schema.optionalKey(
+    Schema.Literals(["left", "right", "middle"]).annotate({
+      description: "Mouse button for click, pixel_click and drag. Defaults to left."
+    })
+  ),
+  modifiers: Schema.optionalKey(
+    Modifiers.annotate({
+      description:
+        "Modifier keys held during click, pixel_click or drag (up to 4). A modified click needs foreground delivery."
+    })
+  )
 }
 const Coordinate = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -33,8 +51,13 @@ export const NativeActionSchema = Schema.Union([
     ...ActionFields,
     action: Schema.Literal("set_value"),
     delivery: Schema.Literal("background"),
-    element: Token,
-    value: Schema.String.check(Schema.isMaxLength(10_000))
+    element: Token.annotate({
+      description: "element_token from the observation's elements."
+    }),
+    value: Schema.String.check(Schema.isMaxLength(10_000)).annotate({
+      description:
+        "Complete new value for the element; it replaces the current content (up to 10,000 characters). Used by set_value."
+    })
   }),
   Schema.Struct({
     ...ActionFields,
@@ -45,60 +68,124 @@ export const NativeActionSchema = Schema.Union([
     ...ActionFields,
     ...PointerFields,
     action: Schema.Literal("click"),
-    element: Token,
-    ax_action: Schema.optionalKey(Schema.Literals(Object.values(NativeAxActions)))
+    element: Token.annotate({
+      description: "element_token from the observation's elements."
+    }),
+    ax_action: Schema.optionalKey(
+      Schema.Literals(Object.values(NativeAxActions)).annotate({
+        description:
+          "Accessibility action to invoke on the element, one listed in that element's actions. Used by click. The driver's default applies when omitted."
+      })
+    )
   }),
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal("menu"),
     delivery: Schema.Literal("foreground"),
-    path: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
-      Schema.isMinLength(1),
-      Schema.isMaxLength(16)
-    )
+    path: Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)))
+      .check(Schema.isMinLength(1), Schema.isMaxLength(16))
+      .annotate({
+        description:
+          'Menu titles from the menu bar down to the item to invoke, such as ["File", "Save"] (1-16 titles of 1-200 characters). Used by menu.'
+      })
   }),
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal("type"),
-    element: Schema.optionalKey(Token),
-    text: Schema.String.check(Schema.isMaxLength(10_000))
+    element: Schema.optionalKey(
+      Token.annotate({
+        description:
+          "element_token to type into, from the observation's elements. Defaults to the window's current focus."
+      })
+    ),
+    text: Schema.String.check(Schema.isMaxLength(10_000)).annotate({
+      description: "Text to type as keystrokes (up to 10,000 characters). Used by type."
+    })
   }),
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal("key"),
-    element: Schema.optionalKey(Token),
-    key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
-    modifiers: Schema.optionalKey(Modifiers)
+    element: Schema.optionalKey(
+      Token.annotate({
+        description:
+          "element_token to send the key to, from the observation's elements. Defaults to the window's current focus."
+      })
+    ),
+    key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)).annotate({
+      description:
+        "Key to press, such as RETURN, TAB, DOWN or HOME (1-100 characters). Used by key."
+    }),
+    modifiers: Schema.optionalKey(
+      Modifiers.annotate({
+        description: "Modifier keys held while the key is pressed (up to 4). Defaults to none."
+      })
+    )
   }),
   Schema.Struct({
     ...ActionFields,
     action: Schema.Literal("scroll"),
-    element: Token,
-    direction: Schema.Literals(["up", "down", "left", "right"]),
-    amount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 })),
-    by: Schema.Literals(["line", "page"])
+    element: Token.annotate({
+      description: "element_token of the element to scroll, from the observation's elements."
+    }),
+    direction: Schema.Literals(["up", "down", "left", "right"]).annotate({
+      description: "Scroll direction. Used by scroll."
+    }),
+    amount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 })).annotate({
+      description: "How far to scroll, in the unit set by by (1-20). Used by scroll."
+    }),
+    by: Schema.Literals(["line", "page"]).annotate({
+      description: "Unit of amount. Used by scroll."
+    })
   }),
   Schema.Struct({
     ...ActionFields,
     ...PointerFields,
     action: Schema.Literal("pixel_click"),
-    capture: Token,
-    x: Coordinate,
-    y: Coordinate,
-    count: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3 })))
+    capture: Token.annotate({
+      description:
+        "capture_id from the same observation. Read it with screenshot=true so you see the image the coordinates refer to. Used by pixel_click and drag."
+    }),
+    x: Coordinate.annotate({
+      description:
+        "Click x in screenshot pixels from the left edge, never desktop frame coordinates. Used by pixel_click."
+    }),
+    y: Coordinate.annotate({
+      description:
+        "Click y in screenshot pixels from the top edge, never desktop frame coordinates. Used by pixel_click."
+    }),
+    count: Schema.optionalKey(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3 })).annotate({
+        description:
+          "Number of clicks (1-3). Used by pixel_click. The driver's default applies when omitted."
+      })
+    )
   }),
   Schema.Struct({
     ...ActionFields,
     ...PointerFields,
     action: Schema.Literal("drag"),
     delivery: Schema.Literal("foreground"),
-    capture: Token,
-    from_x: Coordinate,
-    from_y: Coordinate,
-    to_x: Coordinate,
-    to_y: Coordinate,
+    capture: Token.annotate({
+      description:
+        "capture_id from the same observation. Read it with screenshot=true so you see the image the coordinates refer to. Used by pixel_click and drag."
+    }),
+    from_x: Coordinate.annotate({
+      description: "Drag start x in screenshot pixels from the left edge. Used by drag."
+    }),
+    from_y: Coordinate.annotate({
+      description: "Drag start y in screenshot pixels from the top edge. Used by drag."
+    }),
+    to_x: Coordinate.annotate({
+      description: "Drag end x in screenshot pixels from the left edge. Used by drag."
+    }),
+    to_y: Coordinate.annotate({
+      description: "Drag end y in screenshot pixels from the top edge. Used by drag."
+    }),
     duration_ms: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
+      Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 })).annotate({
+        description:
+          "Drag duration in milliseconds (0-10,000). Used by drag. The driver's default applies when omitted."
+      })
     )
   })
 ])

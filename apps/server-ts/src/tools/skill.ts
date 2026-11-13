@@ -148,7 +148,7 @@ const makeSkillTool = ({ skills }: { readonly skills: SkillCatalog["Service"] })
       display_name: "Load Skill",
       kind: "skill",
       action: "read",
-      approval_preview: "Load this local Skill.",
+      approval_preview: "Load this Skill.",
       source: "_skills",
       changes_state: false,
       concurrency_group: null,
@@ -190,7 +190,8 @@ const makeSkillCreateTool = ({
     description: [
       "Create one reusable local Skill after the user reviews its full instructions. Built-in Skill names are reserved.",
       "Include only guidance that changes decisions; add supporting files only when useful.",
-      "The Skill becomes available immediately as /<name>."
+      "The Skill is available as /<name> from the next model step.",
+      "With recipe, it saves a Recipe instead: body is a prompt the user sends, not instructions for you."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
     metadata: {
@@ -263,7 +264,7 @@ const makeSkillListTool = ({ skills }: { readonly skills: SkillCatalog["Service"
   defineServerTool({
     name: "skill_list",
     description:
-      "Discover enabled Skills omitted from context. Page by offset; optionally filter names and descriptions with literal text. Does not load instructions.",
+      "List enabled Skills: built-in Skills, local Skills and Recipes (a Recipe has a non-null recipe). Page by offset; optionally filter names and descriptions with literal text. Does not load instructions.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         query: Schema.optionalKey(
@@ -376,8 +377,10 @@ const makeSkillUpdateTool = ({
       if (changed) effects.applied()
       else effects.unchanged()
       return {
-        result: `Updated /${updated.name}. Reload it before following its revised instructions.`,
-        preview: `Updated /${updated.name}`,
+        result: changed
+          ? `Updated /${updated.name}. Reload it before following its revised instructions.`
+          : `/${updated.name} already had this content; nothing changed.`,
+        preview: changed ? `Updated /${updated.name}` : `/${updated.name} unchanged`,
         data: { name: updated.name, source_sha256 },
         ...(changed
           ? {

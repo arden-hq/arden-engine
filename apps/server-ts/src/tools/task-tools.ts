@@ -674,7 +674,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   defineServerTool({
     name: "task_update",
     description:
-      "Change one Task: its text, details, owner, where it runs, whether it is open or put aside, its due text, or its internal continuation_context. To wait on someone or book a later check use task_wait; to finish or cancel it use task_finish. A Task run may change only its own Task's details and continuation_context.",
+      "Change one Task: its text, details, owner, where it runs, whether it is open or put aside, its due text, its token_budget, or its internal continuation_context. Change token_budget alone in its own call; raising or removing it asks the user. To wait on someone or book a later check use task_wait; to finish or cancel it use task_finish. A Task run may change only its own Task's details and continuation_context.",
     parameters: Schema.toStandardSchemaV1(UpdateParametersSchema),
     metadata: { ...taskWriteMetadata("Update Task", "Change a Task."), approval_bypass: true },
     approvalRequirement: async (input, ctx) => {
@@ -729,7 +729,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   defineServerTool({
     name: "task_finish",
     description:
-      "Finish one Task: done when its outcome is reached, with completion_result and completion_evidence; cancelled when it duplicates another Task or no distinct outcome remains. A message alone never finishes a Task. Cancel it directly rather than asking the user to operate the Task menu.",
+      "Finish one Task: done when its outcome is reached, with completion_result and completion_evidence (and completion_note if a write failed); cancelled when it duplicates another Task or no distinct outcome remains. If your todo list still has open items, the first done call changes nothing and lists them; a second done call in this run closes the Task anyway. A message alone never finishes a Task. Cancel it directly rather than asking the user to operate the Task menu.",
     parameters: Schema.toStandardSchemaV1(FinishParametersSchema),
     metadata: taskWriteMetadata("Finish Task", "Finish a Task."),
     execute: async (input, ctx, effects) => {

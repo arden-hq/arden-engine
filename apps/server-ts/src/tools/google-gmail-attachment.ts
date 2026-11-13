@@ -219,7 +219,8 @@ export const gmailAttachmentTool = ({
       display_name: "Save Email Attachment",
       kind: "tool",
       action: "write",
-      approval_preview: "Save an email attachment to the Local folder.",
+      approval_preview:
+        "Save an email attachment as a chat file, and to the Local folder when one is set.",
       source: "gmail",
       changes_state: true,
       target: "reported",

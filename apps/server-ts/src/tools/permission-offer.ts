@@ -358,7 +358,8 @@ const OFFER_REFUSAL: Record<OfferRefusal, string> = {
     "The person set this themselves in Settings; their setting stays. Tell them where it is if they want it changed.",
   already_allowed: "This already runs without asking here.",
   already_set: "This is already set that way.",
-  own_rule: "A command's own rule judges each call: offer its prefix with permission.command.",
+  own_rule:
+    "A command's own rule judges each call: offer its prefix with permission_offer (permission.command).",
   own_record: "This tool is the run's own record; it always runs.",
   does_not_ask: "This tool already runs without asking.",
   mode_elsewhere:
@@ -375,7 +376,7 @@ const OFFER_REFUSAL: Record<OfferRefusal, string> = {
   no_words: "The rule has no words. Write what Arden may or may not do.",
   no_rule_id: "No rule this chat reads has that id. Read the rules with permissions_read.",
   host_commands:
-    "The rule for commands on your Mac can only ask, or be removed. Offer a command's prefix with permission.command instead.",
+    "The rule for commands on your Mac can only ask, or be removed. Offer a command's prefix with permission_offer (permission.command) instead.",
   system_list:
     "That rule is on the list for Arden's own jobs; the person changes it in Settings, Permissions.",
   no_holder: "Nothing here can hold a lasting permission.",

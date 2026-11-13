@@ -154,10 +154,12 @@ const makeCapabilityProposeTool = (services: CapabilityToolServices): ServerTool
   defineServerTool({
     name: "capability_propose",
     description: [
-      "Offer the user a connection that would unblock what they asked for.",
+      "Offer the user a connection that would unblock what they asked for, shown as a card in chat.",
       "Call this only when you cannot proceed without one — never to list options.",
-      "Describe the need; the server resolves which presets fit and may return none.",
-      "It also offers a server the user gave you by URL (server), only if they wrote that URL in chat.",
+      "Describe the need; the server picks up to 3 presets whose name matches a word in it, and may return none.",
+      "It also offers a server the user gave you by URL (server), only if they wrote that URL in chat; other agents cannot offer a server.",
+      "One card per run; a preset or server already offered in this chat is not offered again.",
+      "A need naming Gmail, Google or Calendar is refused: Google is a built-in connection.",
       "This installs nothing: the user decides."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
@@ -193,8 +195,8 @@ const makeCapabilityProposeTool = (services: CapabilityToolServices): ServerTool
       if (server === undefined && BUILT_IN_SERVICE.test(need)) {
         return {
           result: [
-            "Gmail and Google Calendar are Arden's built-in Google connection, not a catalog entry.",
-            "Call the Gmail or Calendar tool you need: if the account is disconnected, its own reconnect prompt appears for the user.",
+            "Gmail, Google Calendar and Google Drive are Arden's built-in Google connection, not a catalog entry.",
+            "Call the Gmail, Calendar or Drive tool you need: if the account is disconnected, its own reconnect prompt appears for the user.",
             "Do not offer another integration."
           ].join(" "),
           preview: "Built-in Google connection",
@@ -273,7 +275,10 @@ const makeCapabilityProposeTool = (services: CapabilityToolServices): ServerTool
       const data = { need: proposal.need, candidates: proposal.candidates }
       if (candidates.length === 0) {
         return {
-          result: "No preset covers that. Say plainly that you cannot do it.",
+          result:
+            presets.length === 0
+              ? "No preset covers that. Say plainly that you cannot do it."
+              : "Every preset that covers that was already offered in this chat. Continue without offering it again.",
           preview: "No capability fits",
           data
         }

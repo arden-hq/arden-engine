@@ -15,7 +15,7 @@ const ParametersSchema = Schema.Struct({
   message_id: Schema.optionalKey(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
       description:
-        "The message that holds the block, as its compact line in the history names it. Omit for the latest answer with a block."
+        "The message that holds the block, as its compact line in the history names it. Omit for the latest answer with a block among this chat's last 100 messages."
     })
   ),
   block: Schema.optionalKey(

@@ -17,14 +17,48 @@ const Point = Schema.Struct({
   y: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThan(1))
 })
 const Fields = {
-  tab_ref: TabRefSchema,
-  profile_ref: ProfileRefSchema,
-  origin: OriginSchema,
-  screenshot_ref: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128))
+  tab_ref: TabRefSchema.annotate({
+    description: "Exact tab ref that browser_screenshot captured."
+  }),
+  profile_ref: ProfileRefSchema.annotate({
+    description: "Exact profile_ref for the screenshotted tab; it must still match at execution."
+  }),
+  origin: OriginSchema.annotate({
+    description: [
+      "Exact current HTTP(S) origin, such as https://example.com, without a path.",
+      "It must still match the tab at execution."
+    ].join(" ")
+  }),
+  screenshot_ref: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)).annotate({
+    description:
+      "One-use ref from the latest browser_screenshot of this tab. One screenshot permits one action."
+  })
 }
 const Parameters = Schema.Union([
-  Schema.Struct({ ...Fields, action: Schema.Literal("click"), point: Point }),
-  Schema.Struct({ ...Fields, action: Schema.Literal("drag"), from: Point, to: Point })
+  Schema.Struct({
+    ...Fields,
+    action: Schema.Literal("click").annotate({
+      description: "click presses at point. drag presses at from and releases at to."
+    }),
+    point: Point.annotate({
+      description:
+        "Click position as fractions of the screenshot: x from left, y from top, each >=0 and <1. Used by click."
+    })
+  }),
+  Schema.Struct({
+    ...Fields,
+    action: Schema.Literal("drag").annotate({
+      description: "click presses at point. drag presses at from and releases at to."
+    }),
+    from: Point.annotate({
+      description:
+        "Drag start as fractions of the screenshot: x from left, y from top, each >=0 and <1. Used by drag."
+    }),
+    to: Point.annotate({
+      description:
+        "Drag end as fractions of the screenshot: x from left, y from top, each >=0 and <1. Used by drag."
+    })
+  })
 ]).check(Schema.makeFilter((input) => originIssues(input.origin)))
 
 export const browserPointerTools: Effect.Effect<

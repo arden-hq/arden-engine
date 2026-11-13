@@ -109,7 +109,7 @@ const renderSearchResults = (
   summaries: ReadonlyArray<string>,
   query: string,
   hasMore: boolean,
-  nextOffset: number,
+  nextCall: string,
   scoped: boolean
 ): string => {
   if (hits.length === 0) return `No readable matches for ${JSON.stringify(query)}.`
@@ -119,7 +119,21 @@ const renderSearchResults = (
   const evidence =
     "Historical transcript evidence — verify mutable current state in its owning record."
   if (!hasMore) return `${evidence}\n${listing}`
-  return `${evidence}\n${listing}\n\nMore results: session_search_transcripts(offset=${nextOffset})`
+  return `${evidence}\n${listing}\n\nMore results: ${nextCall}`
+}
+
+const nextSearchCall = (input: typeof ParametersSchema.Type, offset: number): string => {
+  const args = [
+    `query=${JSON.stringify(input.query)}`,
+    ...(input.session_ref === undefined
+      ? []
+      : [`session_ref=${JSON.stringify(input.session_ref)}`]),
+    ...(input.within_days === undefined ? [] : [`within_days=${input.within_days}`]),
+    ...(input.scope === undefined ? [] : [`scope=${JSON.stringify(input.scope)}`]),
+    `limit=${input.limit}`,
+    `offset=${offset}`
+  ]
+  return `session_search_transcripts(${args.join(", ")})`
 }
 
 const sourceRef = (hit: SearchHit): SourceRef => ({
@@ -143,7 +157,7 @@ const makeSessionSearchTool = ({
   defineServerTool({
     name: "session_search_transcripts",
     description: [
-      "Full-text search across unarchived chat transcripts, one result per chat: its best-matching message and how many of its messages match, chats ranked by relevance. With session_ref it lists that chat's matching messages instead.",
+      "Full-text search across unarchived chat transcripts, one result per chat: its best-matching message and how many of its messages match, chats ranked by relevance. With session_ref it lists that chat's matching messages instead, archived or not.",
       "Old and manually created chats are included.",
       "Transcript hits are dated historical evidence, not current mutable state.",
       "Inside a Space, hits stay within that Space unless scope is all_spaces, which only the user's own chat and a Space review may use; each hit then names its Space.",
@@ -218,7 +232,7 @@ const makeSessionSearchTool = ({
         ),
         input.query,
         page.hasMore,
-        input.offset + input.limit,
+        nextSearchCall(input, input.offset + input.limit),
         input.session_ref !== undefined
       )
       const source_refs = hits.slice(0, 50).map(sourceRef)

@@ -21,6 +21,7 @@ import {
   type RuleSubject
 } from "../persistence/permissions/rules.js"
 import { TOOL_SUMMARIES } from "./tool-summaries.js"
+import { checkToolContract } from "./tool-contract.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { capabilityTools } from "./capability.js"
@@ -419,6 +420,7 @@ export class ServerToolRegistry extends Context.Service<
         return yield* Effect.die(new Error(`Tool role names an unregistered tool: ${missingRole}`))
       }
       const providers = yield* toolProviders
+      yield* checkToolContract([...builtins, ...providers[0].catalog()])
       const executionProfile = makeExecutionProfile(builtins)
       const cardTool = (name: string): ServerTool | undefined =>
         builtins.find((tool) => tool.definition.name === name) ??

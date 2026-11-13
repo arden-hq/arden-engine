@@ -36,24 +36,64 @@ import { currentMillis } from "../runtime/clock.js"
 import { ownWindowIssue } from "../computer/own-windows.js"
 
 const ReadSchema = Schema.Union([
-  Schema.Struct({ operation: Schema.Literal("apps") }),
   Schema.Struct({
-    operation: Schema.Literal("windows"),
-    pid: Schema.Int.check(Schema.isGreaterThan(0))
+    operation: Schema.Literal("apps").annotate({
+      description:
+        "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
+    })
   }),
   Schema.Struct({
-    operation: Schema.Literal("state"),
-    target: NativeTargetSchema,
-    screenshot: Schema.optionalKey(Schema.Boolean),
-    accessibility: Schema.optionalKey(Schema.Boolean),
-    max_depth: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 25 }))),
+    operation: Schema.Literal("windows").annotate({
+      description:
+        "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
+    }),
+    pid: Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+      description: "Process id of the app, from the apps operation. Used by windows."
+    })
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("state").annotate({
+      description:
+        "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
+    }),
+    target: NativeTargetSchema.annotate({
+      description:
+        "Exact pid and window_id of the window to observe, from the windows operation. Used by state."
+    }),
+    screenshot: Schema.optionalKey(
+      Schema.Boolean.annotate({
+        description:
+          "Return the window screenshot to you, scaled to at most 1,400 pixels, with element screenshot_frame boxes. Defaults to false. Use it before pixel_click or drag. Used by state."
+      })
+    ),
+    accessibility: Schema.optionalKey(
+      Schema.Boolean.annotate({
+        description:
+          "Walk the accessibility tree and return elements with their tokens. Defaults to true. false skips the walk and requires screenshot=true. Used by state."
+      })
+    ),
+    max_depth: Schema.optionalKey(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 25 })).annotate({
+        description: "Maximum accessibility-tree depth (1-25). Defaults to 12. Used by state."
+      })
+    ),
     timeout_ms: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 10000 }))
+      Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 10000 })).annotate({
+        description:
+          "Time budget for the accessibility walk in milliseconds (100-10,000). Defaults to 5,000. Used by state."
+      })
     ),
     max_elements: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 50, maximum: 2000 }))
+      Schema.Int.check(Schema.isBetween({ minimum: 50, maximum: 2000 })).annotate({
+        description: "Maximum elements to return (50-2,000). Defaults to 500. Used by state."
+      })
     ),
-    query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200)))
+    query: Schema.optionalKey(
+      Schema.String.check(Schema.isMaxLength(200)).annotate({
+        description:
+          "Case-insensitive substring, not a regex, that filters returned elements (up to 200 characters). Matches include their ancestors. It does not shorten the walk. Used by state."
+      })
+    )
   })
 ])
 const StateSchema = Schema.Struct({
@@ -171,7 +211,12 @@ export const computerNativeTools = (
       description:
         "Replace the system clipboard with plain text for a native paste, including tabs and newlines. This changes the shared clipboard; it does not paste, read, save, or restore previous clipboard contents. Observe the destination and use its Paste command, then verify the application result.",
       parameters: Schema.toStandardSchemaV1(
-        Schema.Struct({ text: Schema.String.check(Schema.isMaxLength(32_000)) })
+        Schema.Struct({
+          text: Schema.String.check(Schema.isMaxLength(32_000)).annotate({
+            description:
+              "Plain text to put on the clipboard (up to 32,000 characters). Tabs and newlines are kept."
+          })
+        })
       ),
       metadata: {
         effect: "external",
@@ -228,11 +273,17 @@ export const computerNativeTools = (
         "Launch an installed native macOS app by its bundle_id from computer_read apps. Optionally open file paths or URLs with urls. The driver requests background launch; inspect launch_state and self_activation_suppressed, then observe the returned PID/window before acting. Does not accept shell commands or application arguments.",
       parameters: Schema.toStandardSchemaV1(
         Schema.Struct({
-          bundle_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+          bundle_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)).annotate({
+            description:
+              "Bundle id of the installed app to launch, from computer_read apps (1-255 characters)."
+          }),
           urls: Schema.optionalKey(
-            Schema.Array(
-              Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096))
-            ).check(Schema.isMaxLength(20))
+            Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)))
+              .check(Schema.isMaxLength(20))
+              .annotate({
+                description:
+                  "File paths or URLs to open in the app (up to 20, each 1-4,096 characters)."
+              })
           )
         }).check(notOwnWindow())
       ),
@@ -440,7 +491,7 @@ export const computerNativeTools = (
     defineServerTool({
       name: "computer_act",
       description:
-        "Activate an exact window with action=activate and delivery=foreground, or perform one native input using a fresh computer_read observation of the exact same window. Element tokens come from that snapshot; pixel_click requires its screenshot capture. Background is preferred; foreground visibly takes control and must be authorized. Observations are consumed even on failure. Reobserve to verify the actual effect; never blindly repeat an uncertain input.",
+        "Activate an exact window with action=activate and delivery=foreground, or perform one native input using a fresh computer_read observation of the exact same window. The inputs are set_value, click, menu, type, key, scroll, pixel_click and drag. Element tokens come from that snapshot; pixel_click requires its screenshot capture. Background is preferred; foreground visibly takes control and must be authorized. Observations are consumed even on failure. Reobserve to verify the actual effect; never blindly repeat an uncertain input.",
       parameters: Schema.toStandardSchemaV1(NativeActionSchema.check(notOwnWindow())),
       metadata: ACT_METADATA,
       impact: nativeActImpact,

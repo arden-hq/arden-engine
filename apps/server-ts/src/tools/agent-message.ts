@@ -14,7 +14,7 @@ const makeAgentMessageTool = (services: {
   defineServerTool({
     name: "agent_message",
     description:
-      "Send a correction, question, or follow-up to your parent, child, or another agent in this conversation's family; interim news for whoever waits on your run goes through tell. Use its exact session_ref or arden:session/ link. A running recipient receives it at a model-step boundary; an idle recipient starts a continuation unless wake is false. Child updates continue the parent task with its captured permissions. This does not interrupt tools or expand permissions. Do not send acknowledgments or repeat automatically delivered final results.",
+      "Send a correction, question, or follow-up to your parent, child, or another agent in this conversation's family; interim news for whoever waits on your run goes through tell. Use its exact session_ref or arden:session/ link. A running recipient receives it at a model-step boundary; an idle recipient starts a continuation unless wake is false. A parent woken by a child's message keeps the permissions its task already had. Sending does not interrupt a running tool or widen anyone's permissions. Do not send acknowledgments or repeat automatically delivered final results.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         wake: Schema.optionalKey(Schema.Boolean).annotate({
@@ -92,10 +92,7 @@ const makeAgentMessageTool = (services: {
               new ToolExecutionError("Agent sender identity is unavailable.")
             )
           }
-          const sourceName = sourceSession.name?.trim()
-          if (!sourceName) {
-            return yield* Effect.fail(new ToolExecutionError("Agent sender has no display name."))
-          }
+          const sourceName = sourceSession.name?.trim() || source.publicRef
           return { target, source, sourceName, destination }
         }),
         { signal: ctx.signal }

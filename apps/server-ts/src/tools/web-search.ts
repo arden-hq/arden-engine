@@ -14,7 +14,8 @@ const parameterJsonSchema = {
 const makeWebSearchTool = (): ServerTool =>
   defineServerTool({
     name: "web_search",
-    description: "Search the live public web and return cited sources.",
+    description:
+      "Search the live public web and return cited sources. The model provider runs the search itself, so this tool is offered only with providers that support it.",
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     parameterJsonSchema,
     metadata: {

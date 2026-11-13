@@ -29,7 +29,10 @@ const ExportMimeSchema = Schema.Literals([
 const DownloadParametersSchema = Schema.Struct({ file_ref: FileRefSchema })
 const ExportParametersSchema = Schema.Struct({
   file_ref: FileRefSchema,
-  export_mime_type: ExportMimeSchema
+  export_mime_type: ExportMimeSchema.annotate({
+    description:
+      "Format to export to. Docs: PDF, Word, plain text or HTML. Sheets: Excel, PDF, or CSV or TSV (first sheet only). Slides: PowerPoint, PDF or plain text."
+  })
 })
 const READ_GRANT = {
   grant: "drive_read",
@@ -73,7 +76,13 @@ const exportExtension = (
       "text/plain": "txt"
     }
   }
-  const extension = formats[sourceMime]?.[targetMime]
+  const targets = formats[sourceMime]
+  if (targets === undefined)
+    throw toolRefusal(
+      "Only Google Docs, Sheets and Slides can be exported. Forms, Drawings, Sites and shortcuts cannot.",
+      "Unsupported Google file"
+    )
+  const extension = targets[targetMime]
   if (extension === undefined)
     throw toolRefusal(
       "This Google file cannot be exported to that format. Docs support PDF, DOCX, TXT or HTML; Sheets support PDF, XLSX, CSV or TSV; Slides support PDF, PPTX or TXT. CSV and TSV export only the first sheet.",
@@ -101,7 +110,7 @@ export const makeDriveDownloadTools = ({
       },
       name: exportFile ? "drive_export" : "drive_download",
       description: exportFile
-        ? "Export a native Google Doc, Sheet or Slide to a chosen file format, up to 10 MiB. Search lists metadata first; export only when content is needed. Returns a reusable artifact_ref and metadata, never base64 file contents. CSV and TSV export only the first sheet."
+        ? "Export a native Google Doc, Sheet or Slide to a chosen file format, up to 10 MiB. Other Google file types cannot be exported. Search lists metadata first; export only when content is needed. Returns a reusable artifact_ref and metadata, never base64 file contents. CSV and TSV export only the first sheet."
         : "Download an ordinary Drive file, up to 100 MiB, only when its content is needed. Search and Calendar reads list metadata first. Returns a reusable artifact_ref, filename, MIME type, size and digest. Use drive_export for native Google Docs, Sheets and Slides.",
       parameters: Schema.toStandardSchemaV1(ParametersSchema),
       metadata: {

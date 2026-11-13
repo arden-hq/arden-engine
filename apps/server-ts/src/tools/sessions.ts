@@ -753,7 +753,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       "Move the current chat into an existing Space at the user's explicit request.",
       "Use space_list to resolve the exact space_id; pass null only when the user asks to remove the chat from its Space.",
       "This changes the current chat's location; it does not create, copy, merge, or navigate to another chat.",
-      "The move lands when your current reply ends; call it once."
+      "The move lands now, or when your current reply ends if this chat is still running; the result says which. Call it once."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(MoveParametersSchema),
     metadata: {

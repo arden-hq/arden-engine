@@ -10,7 +10,7 @@ import type { ServerRunContext } from "./run-context.js"
 
 const AskSecretParametersSchema = Schema.Struct({
   tab_ref: TabRefSchema.annotate({
-    description: "The tab showing the sign-in form, from browser_tabs or browser_snapshot."
+    description: "The tab showing the sign-in form, from browser_tabs or browser_open."
   }),
   origin: OriginSchema.annotate({
     description:
@@ -127,7 +127,7 @@ const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool
     description: [
       "Ask the user for a password for the site open in a browser tab, on a secure card, when a sign-in form needs one.",
       "Never ask for a password in the chat. The user types it into the card; Arden saves it for that one site and you get only its name.",
-      "If it is already saved, it returns at once. Then fill the password field with browser_act action fill and secret set to the name."
+      "If it is already saved, it returns at once; set replace to ask again. In Never ask or read-only runs it does not ask and says so. Then fill the password field with browser_act action fill and secret set to the name."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(AskSecretParametersSchema),
     metadata: {

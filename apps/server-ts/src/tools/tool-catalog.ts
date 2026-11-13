@@ -1,4 +1,5 @@
 import type { ToolEntry, ToolInputSource } from "@arden-hq/loop"
+import { Predicate } from "effect"
 
 import type { ToolScopeKey } from "../execution/policy.js"
 import type { RunAuthority } from "../execution/authority.js"
@@ -7,6 +8,7 @@ import { renderRefusal } from "../execution/refusal.js"
 import { parseMcpSource } from "../mcp/naming.js"
 import type { ServerTool, ServerToolMetadata } from "./define.js"
 import { scopedRunToolNames } from "./tool-scopes.js"
+import { toolParametersJsonSchema } from "./tool-json-schema.js"
 import type { SpecialChat } from "../context/special-chat.js"
 
 const ALWAYS_LOADED: ReadonlySet<string> = new Set([
@@ -30,6 +32,7 @@ const ALWAYS_LOADED: ReadonlySet<string> = new Set([
   "current_time",
   "todo_update",
   "ask_user",
+  "permission_offer",
   "permissions_read"
 ])
 
@@ -266,8 +269,14 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
     ["tab_ref", "browser_tabs", "browser_snapshot"],
     ["origin", "browser_tabs", "browser_snapshot"]
   ),
-  artifact_export: inputs(["artifact_ref", "artifact_save", "browser_screenshot"]),
-  artifact_delete: inputs(["refs", "artifact_save", "browser_screenshot"]),
+  artifact_export: inputs([
+    "artifact_ref",
+    "artifact_save",
+    "browser_screenshot",
+    "exec_command",
+    "chat_files_list"
+  ]),
+  artifact_delete: inputs(["refs", "artifact_save", "browser_screenshot", "exec_command"]),
   skill_update: inputs(["name", "skill"], ["expected_sha256", "skill"]),
   wiki_edit_page: inputs(["path", "wiki_search", "wiki_read_page"]),
   wiki_patch_page: inputs(["path", "wiki_search"], ["old_text", "wiki_read_page"]),
@@ -345,6 +354,36 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   drive_append_sheet_rows: inputs(["spreadsheet_ref", "drive_search"]),
   drive_create_doc: inputs(["account_ref", "google_accounts_list"]),
   drive_create_sheet: inputs(["account_ref", "google_accounts_list"])
+}
+
+/** Names in the lists above that are not built-in tools or parameters; checked at startup. */
+export const catalogNameProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
+  const params = new Map(
+    tools.map((tool) => [tool.definition.name, topLevelParameters(tool)] as const)
+  )
+  const unknown = (where: string) => (name: string) =>
+    params.has(name) ? [] : [`${where} names ${name}, which is not a built-in tool`]
+  return [
+    ...[...ALWAYS_LOADED].flatMap(unknown("ALWAYS_LOADED")),
+    ...Object.entries(TOOL_GROUPS).flatMap(([group, names]) =>
+      names.flatMap(unknown(`TOOL_GROUPS.${group}`))
+    ),
+    ...Object.values(SPECIAL_CHAT_PRELOAD).flat().flatMap(unknown("SPECIAL_CHAT_PRELOAD")),
+    ...Object.entries(INPUT_SOURCES).flatMap(([name, sources]) => [
+      ...unknown("INPUT_SOURCES")(name),
+      ...sources.flatMap((source) => [
+        ...(params.get(name)?.has(source.input) === false
+          ? [`INPUT_SOURCES.${name} names input ${source.input}, which ${name} does not take`]
+          : []),
+        ...source.tools.flatMap(unknown(`INPUT_SOURCES.${name}.${source.input}`))
+      ])
+    ])
+  ]
+}
+
+const topLevelParameters = (tool: ServerTool): ReadonlySet<string> => {
+  const properties = tool.entry(toolParametersJsonSchema).parameters["properties"]
+  return new Set(Predicate.isObject(properties) ? Object.keys(properties) : [])
 }
 
 export const treeToolNames = (

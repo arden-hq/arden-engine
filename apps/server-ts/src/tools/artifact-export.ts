@@ -27,7 +27,8 @@ import { publishNoReplace } from "@arden-hq/std/publish"
 
 const ParametersSchema = Schema.Struct({
   artifact_ref: Schema.String.check(Schema.isPattern(/^(?:viz|file)-[a-f0-9]{32}$/)).annotate({
-    description: "Exact artifact_ref returned by artifact_save or browser_screenshot in this task."
+    description:
+      "Exact artifact_ref from this task, as returned by artifact_save, browser_screenshot, exec_command or chat_files_list."
   }),
   path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_000)).annotate({
     description:
@@ -96,10 +97,10 @@ const makeArtifactExportTool = (
   return defineServerTool({
     name: "artifact_export",
     description: [
-      "Copy a saved task artifact to a workspace file.",
-      "Use the artifact_ref returned by artifact_save or browser_screenshot; never transcribe artifact bytes into a message.",
-      "Relative paths use the current Local folder. Create the parent folder first. Existing identical files succeed unchanged; different content requires another filename.",
-      "Returns the absolute path, media type, byte length, and SHA-256. Embed the exported file using the project's asset URL, then verify it renders."
+      "Copy a saved task artifact into a local file. This is how you read an artifact: export it, then use file_read.",
+      "Takes an artifact_ref from artifact_save, browser_screenshot, exec_command or chat_files_list; never transcribe artifact bytes into a message.",
+      "Relative paths use the current Local folder. Create the parent folder first. An existing file with the same content succeeds unchanged; different content is never overwritten, so choose another filename.",
+      "May need the user's approval. Returns the absolute path, media type, byte length, and SHA-256."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
     metadata: {
@@ -107,7 +108,7 @@ const makeArtifactExportTool = (
       display_name: "Export artifact",
       kind: "filesystem",
       action: "write",
-      approval_preview: "Copy a conversation artifact into a local file.",
+      approval_preview: "Copy a saved artifact into a local file.",
       source: "_filesystem",
       changes_state: true,
       target: "reported",
@@ -143,7 +144,7 @@ const makeArtifactExportTool = (
         sha256: artifact.manifest.sha256
       })
       return {
-        result: `Exported ${input.artifact_ref} to ${target} (${artifact.bytes.byteLength} bytes). Use this file in the project and verify it renders.`,
+        result: `Exported ${input.artifact_ref} to ${target} (${artifact.bytes.byteLength} bytes).`,
         preview: outcome === "no_op" ? "Already exported" : `Exported ${displayPath}`,
         data: {
           artifact_ref: input.artifact_ref,

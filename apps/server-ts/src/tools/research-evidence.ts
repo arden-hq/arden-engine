@@ -19,6 +19,7 @@ import type { ServerRunContext } from "./run-context.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
 import type { ToolsetMiddleware } from "../execution/toolset-middleware.js"
 import { workflowOperationId } from "../workflows/identity.js"
+import { readsOnly } from "../execution/impact.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { toolFailure, toolFault } from "./tool-failure.js"
@@ -31,9 +32,11 @@ const ClaimRecordParametersSchema = Schema.Struct({
     description:
       "Exact workspace revision: 0 for a fresh workspace, otherwise the revision reported by the latest claim tool result, claim_review, or the workspace revision line on a read result."
   }),
-  statement: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8_000)).annotate({
-    description: "One atomic, qualified, time-scoped claim. Record it before seeking evidence."
-  }),
+  statement: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8_000)).pipe(
+    Schema.annotateEncoded({
+      description: "One atomic, qualified, time-scoped claim. Record it before seeking evidence."
+    })
+  ),
   qualifiers: Schema.optionalKey(
     Schema.Array(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1_000)))
       .check(Schema.isMaxLength(32))
@@ -80,7 +83,8 @@ const EvidenceRecordParametersSchema = Schema.Struct({
 
 const ClaimCheckParametersSchema = Schema.Struct({
   expected_revision: ExpectedRevisionSchema.annotate({
-    description: "Exact workspace revision to verify and update."
+    description:
+      "Exact workspace revision from the latest claim tool result or claim_review. The check fails if the workspace has changed since."
   }),
   claim_refs: Schema.optionalKey(
     Schema.Array(ClaimRefSchema)
@@ -96,7 +100,7 @@ const ClaimReviewParametersSchema = Schema.Struct({
     Schema.Array(ResearchClaimStatusSchema)
       .check(Schema.isMinLength(1), Schema.isUnique())
       .annotate({
-        description: "Optional claim statuses to include."
+        description: "Claim statuses to include. Omit to include every status."
       })
   ),
   cursor: Schema.optionalKey(
@@ -106,7 +110,7 @@ const ClaimReviewParametersSchema = Schema.Struct({
   ),
   limit: Schema.optionalKey(
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })).annotate({
-      description: "Maximum claims to return, from 1 through 100."
+      description: "Maximum claims to return, from 1 through 100. Defaults to 20."
     })
   )
 })
@@ -293,7 +297,8 @@ const makeResearchEvidenceTools = (services: ResearchToolServices): ReadonlyArra
   defineServerTool({
     name: "evidence_record",
     description: [
-      "Capture one immutable source snapshot and bind an exact canonical-text span to a recorded claim.",
+      "Bind an exact canonical-text span of an already captured source snapshot to a recorded claim.",
+      "Every successful read tool result in a research run ends with its snapshot_ref; this tool does not fetch anything.",
       "The relation is provisional; counter-search before claim_check."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EvidenceRecordParametersSchema),
@@ -356,7 +361,9 @@ const makeResearchEvidenceTools = (services: ResearchToolServices): ReadonlyArra
     name: "claim_check",
     description: [
       "Independently check each selected evidence span against its claim in an isolated no-tool verifier.",
-      "The caller cannot supply the verdict. Mixed and insufficient evidence remain explicit."
+      "It makes one model call per evidence span, one after another, so many spans take a while.",
+      "The caller cannot supply the verdict. Mixed and insufficient evidence remain explicit.",
+      "Fails if the workspace revision changed."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ClaimCheckParametersSchema),
     metadata: {
@@ -585,7 +592,7 @@ export const captureResearchSources = (options: {
   return {
     execute: async (request, next) => {
       const tool = toolsByName.get(request.name)
-      if (tool === undefined || tool.meta.action !== "read" || tool.meta.source === "_research") {
+      if (tool === undefined || !readsOnly(tool.meta) || tool.meta.source === "_research") {
         return next(request)
       }
       const signal = request.signal === undefined ? undefined : { signal: request.signal }

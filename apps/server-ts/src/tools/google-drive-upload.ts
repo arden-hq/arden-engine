@@ -29,10 +29,20 @@ const UploadParametersSchema = Schema.Struct({
   account_ref: Schema.NonEmptyString.annotate({
     description: "Connected Google Drive account email or id."
   }),
-  file: FileRefSchema,
-  name: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))),
+  file: FileRefSchema.annotate({
+    description:
+      "The file to upload: a local path, an artifact_ref, or an image attachment number from chat_files_list."
+  }),
+  name: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)).annotate({
+      description: "File name in Drive, up to 255 characters. Defaults to the file's own name."
+    })
+  ),
   folder_id: Schema.optionalKey(
-    Schema.NonEmptyString.annotate({ description: "Destination folder id. Omit for My Drive." })
+    Schema.NonEmptyString.annotate({
+      description:
+        "Destination folder id: the part after the last colon of a folder file_ref from drive_search. Omit for the root of My Drive."
+    })
   ),
   operation_key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
     description:
@@ -224,7 +234,7 @@ export const makeDriveUploadTool = (services: UploadServices): ServerTool =>
   defineServerTool({
     name: "drive_upload",
     description:
-      "Upload one chat attachment, generated artifact, or allowed local file to Google Drive. The card saves the exact bytes to upload. Reuse operation_key for retries, including after a lost response; it never creates a second file. Returns metadata and file_ref, not file contents.",
+      "Upload one chat attachment, generated artifact, or allowed local file to Google Drive, up to 100 MiB. The approval card fixes the exact bytes, so later changes to the file are not uploaded. Reuse operation_key for retries, including after a lost response; it never creates a second file. Returns metadata and file_ref, not file contents.",
     parameters: Schema.toStandardSchemaV1(UploadParametersSchema),
     metadata: {
       effect: "external",

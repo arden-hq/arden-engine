@@ -198,17 +198,17 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     } Never create a consolidation, cleanup, or replacement Task for overlap. The user's own chat starts Tasks with task_start instead. Cite observed evidence that fully defines the outcome. A reply that only answers, rejects or acknowledges prior conversation is not an outcome. Ambiguity or stale evidence should remain a suggestion. When nothing qualifies, do not call this tool. Admission rechecks ownership, the review snapshot, policy and rejected evidence; a refused call changes nothing.`,
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
-        decision: inferenceDecision,
         snapshot: Schema.NonEmptyString.annotate({
           description:
-            "Exact snapshot from the latest space_inference_review. Re-read after a conflict or successful creation."
+            "Required for every decision. The exact snapshot from the latest space_inference_review. Re-read after a conflict or successful creation."
         }),
         sources: Schema.NonEmptyArray(
           Schema.Union([evidence, ChatActionRetirementSourceSchema])
         ).annotate({
           description:
-            "For retirement, exact chat_action sources returned by session_read with view actions are also accepted, and Chat turns, items and Tasks need not belong to this Space. Other decisions cannot use action sources. Observed Chat turns, current Memory page revisions, connection items or this worker's own Task supporting this outcome. Proposing requires at least one current-Space Chat, Memory page inside the current Space boundary, connection item routed to this Space, or this worker's own Task."
-        })
+            "Required for every decision. The evidence for it: observed Chat turns, current Memory page revisions, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat, Memory page inside the current Space boundary, connection item routed to this Space, or this worker's own Task. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
+        }),
+        decision: inferenceDecision
       })
     ),
     metadata: {

@@ -5,7 +5,7 @@ export const TASK_TEXT_DESCRIPTION = `The row the user sees, at most 80 characte
   TASK_USER_FACING
 }`
 
-export const TASK_BODY_DESCRIPTION = `Longer Task context. When owner is user, open with one sentence naming what they must do and what Arden has already prepared, then the evidence; set due_at when a deadline is known. ${
+export const TASK_BODY_DESCRIPTION = `Longer Task context. When owner is user, open with one sentence naming what they must do and what Arden has already prepared, then the evidence. State any known deadline here. ${
   TASK_USER_FACING
 }`
 

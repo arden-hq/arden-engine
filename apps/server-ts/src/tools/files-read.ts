@@ -1,6 +1,6 @@
 import { countOf, formatBytes } from "@arden-hq/std/count"
 import { Effect, Option, Schema } from "effect"
-import { readdir, readFile, stat } from "node:fs/promises"
+import { lstat, readdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -43,7 +43,7 @@ const offerPage = (
   )
 
 const MAX_DISCOVERY_ENTRIES = 100_000
-const MAX_SEARCH_FILE_BYTES = 8 * 1024 * 1024
+const MAX_READ_BYTES = 64 * 1024 * 1024
 
 const ReadOffsetSchema = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 10_000_000 })
@@ -85,7 +85,7 @@ const CursorSchema = Schema.optionalKey(
 const ReadParametersSchema = Schema.Struct({
   path: PathSchema.annotate({
     description:
-      "Local file path or an arden:managed-output reference from this Session. Relative file paths use the current Local folder."
+      "Local file path or an arden:managed-output reference from this chat. Relative file paths use the current Local folder."
   }),
   offset: ReadOffsetSchema,
   limit: ReadLimitSchema,
@@ -169,7 +169,7 @@ const SearchParametersSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(true)),
     Schema.annotateEncoded({
       description:
-        "Search hidden files while still excluding VCS/dependency/cache directories. Defaults to true."
+        "Search hidden files while still excluding ignored files and VCS/dependency/cache directories. Defaults to true."
     })
   ),
   limit: MatchLimitSchema,
@@ -243,6 +243,8 @@ const entryKind = (entry: {
 
 const MAX_FOUND_SOURCES = 50
 
+const UNREADABLE_NOTE = "Some paths could not be read and were skipped."
+
 const foundSource = (absolute: string, title: string) => ({
   provider: "file",
   kind: "file",
@@ -274,7 +276,7 @@ export const fileReadTools = ({
     description: [
       "Read a known UTF-8 file with compact 1-based line numbers (number|text) by default; set line_numbers=false for plain text. Partial reads include the next 1-based offset when more content remains. To find something in a large file, set grep (a regular expression) instead of reading it all: it searches the whole file (offset, limit and line_numbers are ignored) and returns only the matching lines with grep_context lines around them.",
       "A PDF reads as its text, with a [Page N of M] line before each page, paged by the same offset and limit. A PNG, JPEG, GIF, WebP or HEIC image is shown to you as an image when this model takes images. Other binary files (Word, Excel, ZIP and the like) are refused; convert them with exec_command.",
-      "Read a managed-output reference shown in a tool result through path; it must belong to this Session. Relative file paths use the current Local folder. Use file_find for names or file_search_text for content discovery. Line-number prefixes are not file content; omit them from edit/write inputs."
+      "Files over 64 MiB are refused. Read a managed-output reference shown in a tool result through path; it must belong to this chat. Saved artifacts (file-... or viz-... refs) cannot be read here; copy one out with artifact_export first. Relative file paths use the current Local folder. Use file_find for names or file_search_text for content discovery. Line-number prefixes are not file content; omit them from edit/write inputs."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReadParametersSchema),
     metadata: {
@@ -319,9 +321,9 @@ export const fileReadTools = ({
       try {
         const info = await stat(target)
         if (!info.isFile()) throw toolRefusal(`${target} is not a file.`, "Not a file")
-        if (info.size > MAX_SEARCH_FILE_BYTES * 8) {
+        if (info.size > MAX_READ_BYTES) {
           throw toolRefusal(
-            `File is larger than ${formatBytes(MAX_SEARCH_FILE_BYTES * 8)}. Read a smaller file or use exec_command with a bounded command.`,
+            `File is larger than ${formatBytes(MAX_READ_BYTES)}. Read a smaller file or use exec_command with a bounded command.`,
             "File too large"
           )
         }
@@ -409,7 +411,7 @@ export const fileReadTools = ({
   defineServerTool({
     name: "file_list",
     description: [
-      "List one directory's immediate children with type, size, and modification time.",
+      "List one directory's immediate children with type, size, and modification time. A symbolic link shows kind other and its target's size. Folders the owner's rules hide are left out of the list and the total.",
       "Continue with next_cursor and the same path/include_hidden values; use file_find for recursive discovery."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ListParametersSchema),
@@ -446,7 +448,7 @@ export const fileReadTools = ({
         const items = await Promise.all(
           visible.map(async (entry) => {
             const absolute = path.join(root, entry.name)
-            const info = await stat(absolute)
+            const info = await stat(absolute).catch(() => lstat(absolute))
             return {
               name: `${entry.name}${entry.isDirectory() ? "/" : ""}`,
               path: displayFor(cwd, absolute),
@@ -492,8 +494,8 @@ export const fileReadTools = ({
   defineServerTool({
     name: "file_find",
     description: [
-      "Find file paths recursively by glob with ignore-file semantics; common dependency, cache, and VCS directories are skipped.",
-      "Results are capped without a cursor, so narrow path/pattern when has_more is true. Use file_search_text to inspect contents."
+      "Find file paths recursively by glob. Files listed in .gitignore and other ignore files are skipped, as are .git, node_modules, .venv, __pycache__ and folders the owner's rules hide.",
+      "Results are capped without a cursor, so narrow path/pattern when has_more is true. A search stops with an error after 20 seconds. Use file_search_text to inspect contents."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(FindParametersSchema),
     metadata: {
@@ -522,7 +524,7 @@ export const fileReadTools = ({
           signal: ctx.signal,
           skip: neverFoldersWithin(cwd, root)
         })
-        const hasMore = found.partial || found.truncated || found.items.length > input.limit
+        const hasMore = found.truncated || found.items.length > input.limit
         const files = await Promise.all(
           found.items.slice(0, input.limit).map(async (relative) => {
             const absolute = path.resolve(root, relative)
@@ -531,6 +533,7 @@ export const fileReadTools = ({
         )
         const lines = files.map((file) => `${file.relative.padEnd(72)} ${formatBytes(file.size)}`)
         if (hasMore) lines.push("More files exist; narrow the path or pattern.")
+        if (found.partial) lines.push(UNREADABLE_NOTE)
         const source_refs = files
           .slice(0, MAX_FOUND_SOURCES)
           .map((file) => foundSource(file.absolute, file.relative))
@@ -550,6 +553,7 @@ export const fileReadTools = ({
               size: file.size
             })),
             has_more: hasMore,
+            unreadable_skipped: found.partial,
             search_output_bytes: found.outputBytes
           }
         }
@@ -563,6 +567,7 @@ export const fileReadTools = ({
     name: "file_search_text",
     description: [
       "Search local UTF-8 files for literal text, including hidden files by default, in content, files-only, or count mode.",
+      "Files listed in .gitignore and other ignore files are not searched, nor are .git, node_modules, .venv, __pycache__ and folders the owner's rules hide. A search stops with an error after 20 seconds.",
       "Continue with next_cursor only under the identical request; narrow path, glob, or query if the result window is exhausted.",
       "Use file_find instead when only the file name or path is known."
     ].join(" "),
@@ -615,6 +620,7 @@ export const fileReadTools = ({
             Record<string, string | number | boolean>
         > = []
         let hasMore = false
+        let partial = false
         let searchOutputBytes = 0
         const addPath = (candidate: string) => {
           const absolute = path.isAbsolute(candidate) ? candidate : path.resolve(root, candidate)
@@ -627,10 +633,8 @@ export const fileReadTools = ({
           const searched = await ripgrepSearchFiles(request)
           const selected = searched.items.slice(offset, offset + input.limit)
           records.push(...selected.map((candidate) => addPath(candidate)))
-          hasMore =
-            searched.partial ||
-            searched.truncated ||
-            searched.items.length > offset + selected.length
+          partial = searched.partial
+          hasMore = searched.truncated || searched.items.length > offset + selected.length
           searchOutputBytes = searched.outputBytes
         } else if (input.output_mode === "count") {
           const searched = await ripgrepSearchCounts(request)
@@ -641,10 +645,8 @@ export const fileReadTools = ({
               count: match.count
             }))
           )
-          hasMore =
-            searched.partial ||
-            searched.truncated ||
-            searched.items.length > offset + selected.length
+          partial = searched.partial
+          hasMore = searched.truncated || searched.items.length > offset + selected.length
           searchOutputBytes = searched.outputBytes
         } else {
           const searched = await ripgrepSearchContent(request)
@@ -658,10 +660,8 @@ export const fileReadTools = ({
               snippet_truncated: match.textTruncated
             }))
           )
-          hasMore =
-            searched.partial ||
-            searched.truncated ||
-            searched.items.length > offset + selected.length
+          partial = searched.partial
+          hasMore = searched.truncated || searched.items.length > offset + selected.length
           searchOutputBytes = searched.outputBytes
         }
         const nextOffset = offset + records.length
@@ -678,6 +678,7 @@ export const fileReadTools = ({
           continuation =
             "\nThe bounded result window is exhausted; narrow the path, glob, or query."
         }
+        if (partial) continuation += `\n${UNREADABLE_NOTE}`
         const matchedFiles = new Map(records.map((record) => [record.path, record.relative_path]))
         const source_refs = [...matchedFiles]
           .slice(0, MAX_FOUND_SOURCES)
@@ -697,6 +698,7 @@ export const fileReadTools = ({
             matches: records,
             search_output_bytes: searchOutputBytes,
             has_more: hasMore,
+            unreadable_skipped: partial,
             result_window_exhausted: resultWindowExhausted,
             next_cursor: canContinue ? encodeCursor(nextOffset, fingerprint) : null
           }

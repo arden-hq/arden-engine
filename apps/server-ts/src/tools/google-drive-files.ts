@@ -22,7 +22,7 @@ const ShareParametersSchema = Schema.Struct({
     Schema.isMinLength(3),
     Schema.isMaxLength(320),
     Schema.isPattern(/^[^@\s]+@[^@\s]+$/u)
-  ),
+  ).annotate({ description: "Email address of the one person to share with." }),
   role: Schema.Literals(["reader", "writer"]).annotate({
     description: "Grant this person read or edit access. No public or domain sharing."
   })
@@ -75,7 +75,7 @@ export const makeDriveFileTools = ({
     },
     name: "drive_share_file",
     description:
-      "Explicitly grant one person read or edit access to a Drive file. Use separately from attaching the file to Calendar; attaching a link does not grant access. Existing equal or stronger access is left unchanged. Sends a Google sharing notification when granting new access. Requires the user's approval.",
+      "Explicitly grant one person read or edit access to a Drive file. Use separately from attaching the file to Calendar; attaching a link does not grant access. Existing equal or stronger access is left unchanged. Google emails a sharing notification only when the person had no access before; raising reader to writer sends none. Requires the user's approval.",
     parameters: Schema.toStandardSchemaV1(ShareParametersSchema),
     metadata: {
       effect: "external",

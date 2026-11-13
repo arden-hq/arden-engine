@@ -14,12 +14,21 @@ export const browserProcedureTools = Effect.gen(function* () {
     defineServerTool({
       name: "browser_procedure",
       description:
-        "Run saved browser steps discovered by browser_snapshot. Supply this task's input values, never copied example values. It uses the same browser tools, approvals and current page; its independent read-back must confirm the result. If no saved procedure fits, use browser_task or ordinary browser tools.",
+        "Run saved browser steps that browser_open or browser_snapshot listed for this tab. Supply this task's input values, never copied example values. It uses the same browser tools, approvals and current page; its independent read-back must confirm the result. If the steps do not fit or stop, it says so and you continue from the current page with browser_task or ordinary browser tools.",
       parameters: Schema.toStandardSchemaV1(
         Schema.Struct({
-          tab_ref: Schema.String,
-          procedure_id: Schema.String,
-          input: Schema.Record(Schema.String, Schema.Json)
+          tab_ref: Schema.String.annotate({
+            description:
+              "Exact tab ref of the page where browser_open or browser_snapshot listed the procedure."
+          }),
+          procedure_id: Schema.String.annotate({
+            description:
+              "id of a procedure in the browser_procedures list from browser_open or browser_snapshot."
+          }),
+          input: Schema.Record(Schema.String, Schema.Json).annotate({
+            description:
+              "This task's values, keyed by the procedure's input names. Never copy example values."
+          })
         })
       ),
       metadata: {
@@ -92,7 +101,7 @@ export const browserProcedureTools = Effect.gen(function* () {
     defineServerTool({
       name: "browser_procedure_verify",
       description:
-        "Internal saved-procedure checkpoint. Switch this invocation permanently to read-only verification. Only callable from a recorded browser procedure.",
+        "Internal checkpoint in a saved browser procedure. After it, the rest of this procedure run may only read, to check the result. Only a recorded procedure can call it.",
       parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
       metadata: {
         display_name: "Verify browser result",

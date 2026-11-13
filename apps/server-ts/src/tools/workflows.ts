@@ -1,4 +1,5 @@
 import { cutText } from "@arden-hq/std/text"
+import { groupedCount } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import type { ScriptDetail } from "@arden-hq/protocol/workflows"
 import { Effect, Schema } from "effect"
@@ -129,8 +130,7 @@ const formatScript = (detail: ScriptDetail, result: string | undefined): string 
 const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "workflow_get",
-    description:
-      "Read one script that moved to the background: its status, attempt, version, the error that stopped it, each agent's status and session, and its result once it settled.",
+    description: `Read one script that moved to the background: its status, attempt, version, the error that stopped it, each agent's status and session, and its result once it settled. The result is cut to its first ${groupedCount(MAX_RESULT_LENGTH)} characters.`,
     parameters: Schema.toStandardSchemaV1(GetParametersSchema),
     metadata: {
       effect: "none",
@@ -166,7 +166,7 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
     name: WORKFLOW_RETRY_TOOL,
     description: [
       "Run a settled script again from the start, on the chat run it began on.",
-      "Use the version from workflow_get. Agents and calls that succeeded are reused; failed ones that changed nothing run again. A retry is refused while an earlier step may have changed something outside Arden: review that first."
+      "Only the chat run that started it, or the person, can retry it. Use the version from workflow_get. Agents and calls that succeeded are reused; failed ones that changed nothing run again. A retry is refused while an earlier step may have changed something outside Arden: review that first."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(RetryParametersSchema),
     metadata: {

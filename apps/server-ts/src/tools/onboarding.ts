@@ -99,7 +99,7 @@ const makeOnboardingTools = ({
     description: [
       "List what the user taught other coding assistants on this Mac. Instructions: Claude Code (~/.claude/CLAUDE.md, ~/.claude/rules/*.md) and Codex (~/.codex/AGENTS.md, ~/.codex/memories/*.md).",
       "Separately, Claude Code's project memories (~/.claude/projects/*/memory/): per-repo working notes, imported only when the user asks for them.",
-      "Returns file paths and sizes, never contents."
+      "Returns file paths and file counts, never contents."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     metadata: {
@@ -208,7 +208,7 @@ const makeOnboardingTools = ({
   defineServerTool({
     name: "agent_knowledge_digest",
     description: [
-      "Read what the user taught Claude Code and Codex: the text of their instruction files, then each Claude Code project memory folder's index, each under its file path, within a fixed budget.",
+      "Read what the user taught Claude Code and Codex: the text of their instruction files, then each Claude Code project memory folder's index, each under its file path, within about 12000 characters. Files past that are named, not read.",
       "Use it to learn how the user works and what they are building; cite a fact by its file path. Files that look like they hold secrets are named, never read."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -320,7 +320,9 @@ const makeOnboardingTools = ({
     name: "google_client_import",
     description: [
       "Import the user's own Google OAuth client (a Desktop app client JSON downloaded from Google Cloud) so Arden can connect Gmail, Calendar and Drive.",
-      "Reads the newest client_secret_*.json in ~/Downloads unless a path is given. The secret is stored in Arden's vault and never returned. Load the google-setup Skill before the first call."
+      "Reads the newest client_secret_*.json in ~/Downloads unless a path is given; the file must be a Desktop app client of 64 KB or less.",
+      "Refuses while Google accounts are connected with another client or a sign-in is in progress.",
+      "The secret is stored in Arden's vault and never returned. Load the google-setup Skill before the first call."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(GoogleClientParametersSchema),
     metadata: {
@@ -336,8 +338,14 @@ const makeOnboardingTools = ({
       destructive: false
     },
     execute: async (input, ctx, effects) => {
+      if (input.path !== undefined && !isAbsolute(input.path)) {
+        throw new ToolExecutionError(
+          `${input.path} is not an absolute path. Retry with the full path of the client JSON, or omit path to use ~/Downloads.`,
+          { preview: "Path not absolute", retryable: false }
+        )
+      }
       const file = input.path ?? (await newestClientFile(join(home, "Downloads")))
-      if (file === undefined || !isAbsolute(file)) {
+      if (file === undefined) {
         throw new ToolExecutionError(
           "No client_secret_*.json was found in ~/Downloads. Download the Desktop client JSON from Google Cloud, then retry.",
           { preview: "Client file not found", retryable: true }

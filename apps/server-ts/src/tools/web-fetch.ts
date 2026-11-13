@@ -32,14 +32,15 @@ const ParametersSchema = Schema.Struct({
   }),
   format: FormatSchema.pipe(
     Schema.annotateEncoded({
-      description: "Output format. Defaults to readable markdown."
+      description:
+        "Output format for HTML pages: markdown (readable, the default), text, or the html itself. Other text responses come back as they are."
     })
   ),
   timeout_seconds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_TIMEOUT_SECONDS }))
     .pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMEOUT_SECONDS)))
     .pipe(
       Schema.annotateEncoded({
-        description: `Whole-request timeout in seconds, from 1 to ${MAX_TIMEOUT_SECONDS}.`
+        description: `Whole-request timeout in seconds, from 1 to ${MAX_TIMEOUT_SECONDS}. Defaults to ${DEFAULT_TIMEOUT_SECONDS}.`
       })
     ),
   ...textSelectFields
@@ -415,7 +416,8 @@ const makeWebFetchTool = (): ServerTool =>
       "Fetch one public HTTP(S) page as readable markdown, text, or HTML.",
       "Redirects are followed only after validating every destination.",
       "In markdown, the page's images come back as ![alt](url) lines with absolute addresses, its lead image first.",
-      "For a large page or feed, set grep (a regular expression) to get only the matching lines with grep_context lines around them."
+      "For a large page or feed, set grep (a regular expression) to get only the matching lines with grep_context lines around them.",
+      `It reads only text, HTML, JSON and XML responses up to ${formatBytes(MAX_RESPONSE_BYTES)}, and refuses local and private network hosts.`
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
     metadata: {
@@ -475,7 +477,7 @@ const makeWebFetchTool = (): ServerTool =>
             status: page.status,
             content_type: page.contentType,
             bytes: page.bytes,
-            truncated: false,
+            truncated: selected.truncated,
             ...(input.grep === undefined ? {} : { matches: selected.matches }),
             source_refs
           },

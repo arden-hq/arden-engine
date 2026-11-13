@@ -91,84 +91,18 @@ export const AskUserParametersSchema = Schema.Struct({
         "Optional timer. Omit for a blocking decision, approval, or permission. Expiry continues with the first choice under existing authority."
     })
   ),
-  focus_target: Schema.optionalKey(FocusTargetSchema),
-  permission: Schema.optionalKey(
-    Schema.Union([
-      Schema.Struct({
-        tool: Schema.NonEmptyString.check(Schema.isMaxLength(256)).annotate({
-          description: "Exact name of the tool the person spoke about."
-        }),
-        decision: Schema.optionalKey(
-          Schema.Literals(["allow", "ask", "deny"]).annotate({
-            description:
-              "allow (default): use it without asking. ask: always ask before it. deny: turn it off."
-          })
-        )
-      }),
-      Schema.Struct({
-        connector: Schema.NonEmptyString.check(Schema.isMaxLength(256)).annotate({
-          description:
-            'The MCP server whose tools may all run without asking, as their source names it ("you can call GitHub when you want"). Prefer it over one tool when the person names the service.'
-        })
-      }),
-      Schema.Struct({
-        mode: ApprovalModeSchema.annotate({
-          description:
-            'The chat\'s approval mode: allow is Never ask ("all granted", "stop asking me"), safe is Auto, ask is Ask every time, read_only is Read only.'
-        })
-      }),
-      Schema.Struct({
-        command: Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
-          description:
-            'A host command whose prefix may run without asking, as the person would type it ("git push", "runpodctl get pod"). Its card also offers Arden\'s own jobs, the list a built-in automation runs commands under.'
-        })
-      }),
-      Schema.Struct({
-        path: Schema.NonEmptyString.check(Schema.isMaxLength(1000)).annotate({
-          description:
-            'A folder or file by its full path or from ~ ("~/Documents", "~/src/demo"). read: use its files (open, attach, upload); change: write them. allow: without asking; never: not at all ("never touch Documents" is read, never).'
-        }),
-        access: Schema.Literals(["read", "change"]),
-        decision: Schema.Literals(["allow", "never"])
-      }),
-      Schema.Struct({
-        rule: Schema.NonEmptyString.annotate({
-          description: "The id of a rule from permissions_read, to change or remove."
-        }),
-        decision: Schema.Literals(["allow", "ask", "never", "remove"])
-      }),
-      Schema.Struct({
-        words: Schema.String.check(
-          Schema.isMinLength(1),
-          Schema.isMaxLength(WORDS_OFFER_MAX)
-        ).annotate({
-          description:
-            'The action the rule is about, as a short phrase: "uploading my CV to job sites", "sending an email". The decision goes in `decision`, never in the words: no "always", "never", "you can", "without asking". Nothing the person did not say: no caveats, no "this does not cover…". For what no tool, connector or command names; the Auto reviewer reads it, in Auto only.'
-        }),
-        decision: Schema.Literals(["allow", "ask", "never"])
-      })
-    ]).annotate({
-      description:
-        'Offer a lasting permission change when the person says what you may or may not do ("you can call GitHub when you want", "you can always upload my CV", "stop asking me about clicks", "all granted"): a connector, one tool\'s rule, a folder, the chat\'s approval mode, a command prefix, a change to or removal of a rule by its id, or a rule in their words. When their words name what and whether, offer it at once; ask only what they left out. Offer in any approval mode: a rule holds for every chat of its Space or everywhere. The card names it and offers where it holds; only their tap saves it, so never say it is saved before they answer. If the offer is refused, say so; never ask a plain question in its place, since a plain answer saves nothing. It brings its own question and answers: leave choices and focus_target out.'
-    })
-  )
+  focus_target: Schema.optionalKey(FocusTargetSchema)
 }).check(
   Schema.makeFilter((input) => {
     const choices = (input.choices ?? []).length
     if (input.timeout !== undefined) {
-      if (
-        input.permission !== undefined ||
-        input.focus_target !== undefined ||
-        input.multiple === true
-      )
-        return "Timers require an ordinary single-choice question, never a permission or focus decision"
+      if (input.focus_target !== undefined || input.multiple === true)
+        return "Timers require an ordinary single-choice question, never a focus decision"
       const first = input.choices?.[0]
       const label = typeof first === "string" ? first : first?.label
       if (label !== input.timeout.fallback)
         return "timeout.fallback must name the first choice exactly"
     }
-    if (input.permission !== undefined && (choices > 0 || input.focus_target !== undefined))
-      return "Send permission alone: it brings its own question and answers. Leave choices and focus_target out"
     if (input.focus_target !== undefined && choices > 0)
       return "Send focus_target without choices: it brings its own answers (Continue here, Continue in <chat>). To offer your own answers instead, send choices without focus_target"
     if (input.multiple === true && choices < 2)
@@ -178,6 +112,67 @@ export const AskUserParametersSchema = Schema.Struct({
 )
 
 type AskUserInput = typeof AskUserParametersSchema.Type
+
+export const PermissionOfferParametersSchema = Schema.Struct({
+  permission: Schema.Union([
+    Schema.Struct({
+      tool: Schema.NonEmptyString.check(Schema.isMaxLength(256)).annotate({
+        description: "Exact name of the tool the person spoke about."
+      }),
+      decision: Schema.optionalKey(
+        Schema.Literals(["allow", "ask", "deny"]).annotate({
+          description:
+            "allow (default): use it without asking. ask: always ask before it. deny: turn it off."
+        })
+      )
+    }),
+    Schema.Struct({
+      connector: Schema.NonEmptyString.check(Schema.isMaxLength(256)).annotate({
+        description:
+          'The MCP server whose tools may all run without asking, as their source names it ("you can call GitHub when you want"). Prefer it over one tool when the person names the service.'
+      })
+    }),
+    Schema.Struct({
+      mode: ApprovalModeSchema.annotate({
+        description:
+          'The chat\'s approval mode: allow is Never ask ("all granted", "stop asking me"), safe is Auto, ask is Ask every time, read_only is Read only.'
+      })
+    }),
+    Schema.Struct({
+      command: Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
+        description:
+          'A host command whose prefix may run without asking, as the person would type it ("git push", "runpodctl get pod"). Its card also offers Arden\'s own jobs, the list a built-in automation runs commands under.'
+      })
+    }),
+    Schema.Struct({
+      path: Schema.NonEmptyString.check(Schema.isMaxLength(1000)).annotate({
+        description:
+          'A folder or file by its full path or from ~ ("~/Documents", "~/src/demo"). read: use its files (open, attach, upload); change: write them. allow: without asking; never: not at all ("never touch Documents" is read, never).'
+      }),
+      access: Schema.Literals(["read", "change"]),
+      decision: Schema.Literals(["allow", "never"])
+    }),
+    Schema.Struct({
+      rule: Schema.NonEmptyString.annotate({
+        description: "The id of a rule from permissions_read, to change or remove."
+      }),
+      decision: Schema.Literals(["allow", "ask", "never", "remove"])
+    }),
+    Schema.Struct({
+      words: Schema.String.check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(WORDS_OFFER_MAX)
+      ).annotate({
+        description:
+          'The action the rule is about, as a short phrase: "uploading my CV to job sites", "sending an email". The decision goes in `decision`, never in the words: no "always", "never", "you can", "without asking". Nothing the person did not say: no caveats, no "this does not cover…". For what no tool, connector or command names; the Auto reviewer reads it, in Auto only.'
+      }),
+      decision: Schema.Literals(["allow", "ask", "never"])
+    })
+  ]).annotate({
+    description:
+      "The change to offer, as exactly one kind: a connector, one tool's rule, a folder, the chat's approval mode, a command prefix, a change to or removal of a rule by its id, or a rule in their words."
+  })
+})
 
 export const askUserQuestion = (
   input: AskUserInput
@@ -216,7 +211,7 @@ const slug = (label: string): string =>
   slugify(label, { separator: "_", normalize: "nfkd", lowerFirst: true, max: 48 })
 
 export const permissionRequest = (
-  permission: NonNullable<AskUserInput["permission"]>
+  permission: (typeof PermissionOfferParametersSchema.Type)["permission"]
 ): OfferRequest => {
   if ("connector" in permission) return { kind: "connector", server: permission.connector }
   if ("mode" in permission) return { kind: "mode", mode: permission.mode }

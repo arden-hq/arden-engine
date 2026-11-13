@@ -99,7 +99,7 @@ const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): Serv
     name: "todo_update",
     description: [
       "Replace the visible todo list for multi-step work.",
-      "Keep at most one item in_progress and mark every item completed only after verification, or cancelled with a reason; an all-completed list retires the sidebar state."
+      "Keep at most one item in_progress and mark every item completed only after verification, or cancelled with a reason; only a list where every item is completed retires the sidebar state; a cancelled item keeps it shown."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(TodoUpdateParametersSchema),
     metadata: {

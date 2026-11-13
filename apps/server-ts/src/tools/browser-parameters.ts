@@ -323,7 +323,8 @@ export const ActParametersSchema = Schema.Struct({
 
 export const WaitParametersSchema = Schema.Struct({
   tab_ref: TabRefSchema.annotate({
-    description: "Exact tab ref. Waiting invalidates any prior action snapshot."
+    description:
+      "Exact tab ref. Waiting for any condition except download invalidates any prior action snapshot."
   }),
   condition: Schema.Literals([
     "load",
@@ -341,8 +342,8 @@ export const WaitParametersSchema = Schema.Struct({
   value: Schema.optionalKey(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
       description: [
-        "Condition value: load-state name, URL pattern, text, selector, or milliseconds for time.",
-        "Length 1-4,096. Required for every condition except download, which takes none."
+        "Condition value: load state (load, domcontentloaded or networkidle), URL pattern, text, selector, or milliseconds for time.",
+        "A time wait longer than timeout_ms fails. Length 1-4,096. Required for every condition except download, which takes none."
       ].join(" ")
     })
   ),

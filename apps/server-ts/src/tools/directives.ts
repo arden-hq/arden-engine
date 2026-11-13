@@ -101,6 +101,19 @@ const requireInteractiveSession = async (
     })
 }
 
+const directivesOutcome = (
+  changed: boolean,
+  cleared: boolean
+): { readonly result: string; readonly preview: string } => {
+  if (!changed)
+    return {
+      result: "Global instructions already had this content; nothing changed.",
+      preview: "Instructions unchanged"
+    }
+  if (cleared) return { result: "Global instructions cleared.", preview: "Instructions cleared" }
+  return { result: "Global instructions replaced.", preview: "Instructions replaced" }
+}
+
 const makeDirectivesTools = ({
   instructions,
   sessions
@@ -139,8 +152,9 @@ const makeDirectivesTools = ({
   defineServerTool({
     name: "directives_set",
     description: [
-      "Replace the user's global instructions (their AGENTS.md) from an ordinary Chat only.",
-      "Pass the complete desired Markdown and call directives_get first. Asks by default."
+      "Replace the user's global instructions (their AGENTS.md) with the complete Markdown you pass; empty text clears them.",
+      "Call directives_get first; the change fails if they changed since that read.",
+      "Works only during the user's own turn in a chat; automations and other agents are refused. Asks by default."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReplaceParametersSchema),
     metadata: {
@@ -212,12 +226,9 @@ const makeDirectivesTools = ({
       if (changed) effects.applied()
       else effects.unchanged()
       ctx.run.observations.observe(DIRECTIVES_RESOURCE_ID, snapshot.version)
+      const outcome = directivesOutcome(changed, snapshot.content === undefined)
       return {
-        result:
-          snapshot.content === undefined
-            ? "Global instructions cleared."
-            : "Global instructions replaced.",
-        preview: snapshot.content === undefined ? "Instructions cleared" : "Instructions replaced",
+        ...outcome,
         data: { bytes: snapshot.bytes, version: snapshot.version },
         ...(changed
           ? {

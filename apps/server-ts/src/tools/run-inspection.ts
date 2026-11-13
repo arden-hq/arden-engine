@@ -27,7 +27,7 @@ export const runInspectTool = (services: {
         session_ref: Schema.optionalKey(
           ReferenceSchema.annotate({
             description:
-              "Exact session_ref from Agent family, spawn_agent or session_list. Selects the active run first, otherwise the newest admitted run."
+              "Exact session_ref from Agent family, spawn_agent or session_list. Selects the active run first, otherwise the newest started run."
           })
         )
       }).check(

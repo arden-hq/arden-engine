@@ -83,7 +83,7 @@ const makeSpaceControlTools = (services: Services): ReadonlyArray<ServerTool> =>
   defineServerTool({
     name: "space_settings_update",
     description:
-      "Change Space settings requested by the user from ordinary Chat. Read space_list first and pass its exact updated_at. Echo the saved settings. Folders Arden may use or change are rules: offer one with ask_user permission. Workers cannot change these settings.",
+      "Rename a Space or replace its instructions, when the user asks, from their own chat. Read space_list first and pass its exact updated_at. Returns the saved Space. Folders Arden may use or change are rules: offer one with ask_user permission. Workers cannot change these settings.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         space_id: Schema.NonEmptyString.annotate({
@@ -182,7 +182,7 @@ const makeSpaceSetupTools = (
   defineServerTool({
     name: "space_page_create",
     description:
-      "Create and attach a Space's Memory page at the user's request. Choose projects for a finite outcome, areas for ongoing responsibilities; the default is ongoing Space context in areas. Returns the existing page if already attached. Use space_page_write afterward to add context. Ordinary Chat only.",
+      "Create and attach a Space's Memory page at the user's request. Choose projects for a finite outcome, areas for ongoing responsibilities; the default is ongoing Space context in areas. If a page is already attached, changes nothing. Returns the Space with its page_path. To add context, read the page with space_page_read, then use space_page_write. Ordinary Chat only.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         space_id: Schema.NonEmptyString.annotate({

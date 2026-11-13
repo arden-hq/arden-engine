@@ -25,7 +25,7 @@ export const OmitAttachmentsSchema = Schema.optionalKey(
     .check(Schema.isMaxLength(500))
     .annotate({
       description:
-        "Attachment indices to omit, counting from zero. Omit this field to keep every attachment."
+        "Set by the approval card when the user removes an attachment: zero-based positions in attachments to leave out. Do not set it; leave a file out of attachments instead."
     })
 )
 

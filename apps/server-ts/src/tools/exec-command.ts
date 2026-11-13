@@ -118,7 +118,7 @@ const ExecParametersSchema = Schema.Struct({
     })
   ),
   yield_time_ms: yieldTime(
-    "How long to wait for the command to finish before returning its session ID (250-30,000; default 10,000). The command keeps running after that."
+    "How long to wait for the command to finish before returning its session ID, in ms. Defaults to 10,000; waits at least 250 and at most 30,000, and larger values are cut to 30,000. The command keeps running after that."
   )
 })
 
@@ -154,7 +154,7 @@ const makeExecCommandTool = (
     name: COMMAND_TOOL,
     description: [
       "Run one Bash command in a fresh local process.",
-      "If it finishes within yield_time_ms you get its output and exit code. If it is still running (a dev server, a watcher, a long build, a prompt), you get the output so far and a session ID; the process keeps running and you can read it, type into it, or stop it with write_stdin.",
+      "If it finishes within yield_time_ms you get its output; a non-zero exit fails the call with the output and the exit code. If it is still running (a dev server, a watcher, a long build, a prompt), you get the output so far and a session ID; the process keeps running and you can read it, type into it, or stop it with write_stdin.",
       "No shell state persists between calls. Prefer file_read, file_list, file_find, file_search_text, file_write, and file_edit for ordinary file work.",
       "Decide before you write the command: keep cmd to a few short lines. A file's content, a multi-step script or embedded data goes into a file with file_write first, and cmd only runs or uses that file. Do not put such text in a heredoc, echo or an inline script: file_write takes far more text than a command may hold.",
       "Ordinary Chats default to host access; code agents default to their own folder's sandbox. A sandboxed command needs a workdir inside a folder a rule lets Arden change.",
@@ -350,7 +350,7 @@ const exitedResult = async (
   const artifactNote =
     artifactRef === undefined
       ? ""
-      : `\n\n${outcome.fullOutputTruncated ? "Output head and tail (middle omitted)" : "Full output"}: artifact_ref ${artifactRef}. Use artifact_export to inspect it.`
+      : `\n\n${outcome.fullOutputTruncated ? "Output head and tail (middle omitted)" : "Full output"}: artifact_ref ${artifactRef}. To read it, copy it to a file with artifact_export, then use file_read.`
   if (outcome.exitCode !== 0) {
     throw toolRefusal(`${outcome.output}${artifactNote}`, `Exit ${outcome.exitCode}`)
   }
