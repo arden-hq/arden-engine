@@ -123,6 +123,9 @@ const checkOperational = (database) => {
     sourceId: source.source_id,
     head: clock.head_sequence,
     messages: database.prepare("SELECT count(*) AS n FROM session_messages").get().n,
+    searchable: database
+      .prepare("SELECT count(*) AS n FROM session_messages WHERE search_text IS NOT NULL")
+      .get().n,
     pendingChanges: database.prepare("SELECT count(*) AS n FROM transcript_search_changes").get().n,
     schemaObjects: live.length
   }
@@ -141,24 +144,29 @@ const checkDerived = (database, source) => {
   if (cursor?.source_id !== source.sourceId || cursor?.applied_sequence !== source.head) {
     throw new Error("Derived search cursor does not match its operational source")
   }
+  if (database.prepare("SELECT 1 FROM search.transcript_rebuild").get() !== undefined) {
+    throw new Error("Derived search index is still being rebuilt")
+  }
+  // The index is contentless: it holds the words of each message, not its text,
+  // so the check compares which messages are indexed.
   const indexed = database.prepare("SELECT count(*) AS n FROM search.session_messages_fts").get().n
   const missing = database
     .prepare(
       `SELECT count(*) AS n FROM (
-    SELECT message_rowid AS rowid, search_text FROM main.session_messages
-    EXCEPT SELECT rowid, search_text FROM search.session_messages_fts
+    SELECT message_rowid AS rowid FROM main.session_messages WHERE search_text IS NOT NULL
+    EXCEPT SELECT rowid FROM search.session_messages_fts
   )`
     )
     .get().n
   const extra = database
     .prepare(
       `SELECT count(*) AS n FROM (
-    SELECT rowid, search_text FROM search.session_messages_fts
-    EXCEPT SELECT message_rowid AS rowid, search_text FROM main.session_messages
+    SELECT rowid FROM search.session_messages_fts
+    EXCEPT SELECT message_rowid AS rowid FROM main.session_messages WHERE search_text IS NOT NULL
   )`
     )
     .get().n
-  if (indexed !== source.messages || missing !== 0 || extra !== 0) {
+  if (indexed !== source.searchable || missing !== 0 || extra !== 0) {
     throw new Error("Derived search rows differ from operational transcript source")
   }
   return indexed

@@ -27,7 +27,9 @@ import {
 } from "../transcript/model.js"
 import { catchUpTranscriptSearch } from "./search.js"
 import {
+  type FindSnippet,
   findSnippet,
+  markFtsQueryWords,
   markWords,
   snippetWithFileNames,
   visibleText,
@@ -53,7 +55,7 @@ interface SearchRow {
   readonly seq: number
   readonly role: string
   readonly created_at: string
-  readonly snippet: string | null
+  readonly search_text: string | null
   readonly match_count: number
 }
 
@@ -126,7 +128,7 @@ const searchIn = Effect.fn("SqliteTranscriptQueries.search")(function* (
   yield* catchUpTranscriptSearch(searchSql).pipe(
     Effect.mapError((cause) => searchError("storage", "Transcript search is not ready", cause))
   )
-  const clauses = [searchSql`session_messages_fts.search_text = m.search_text`]
+  const clauses = [indexIsCurrent(searchSql)]
   if (targetSessionId !== undefined) clauses.push(searchSql`m.session_id = ${targetSessionId}`)
   else {
     clauses.push(searchSql`s.archived_at IS NULL`)
@@ -144,35 +146,46 @@ const searchIn = Effect.fn("SqliteTranscriptQueries.search")(function* (
   const ranked = (match: string) =>
     rankedRows(searchSql, {
       grouped: targetSessionId === undefined,
-      match,
       clauses: [searchSql`session_messages_fts MATCH ${match}`, ...clauses],
       limit: query.limit,
       offset: query.offset
     })
   // The query is FTS5 syntax, so OR, NEAR and phrases work. One that does not
   // parse (a bare "foo-bar", stray punctuation) is searched as its quoted words.
-  const rows = yield* ranked(query.query).pipe(
+  const found = yield* ranked(query.query).pipe(
+    Effect.map((rows) => ({ rows, match: query.query })),
     Effect.catchIf(
       (error) => error.reason === "invalid",
       (error) => {
         const words = ftsQueryForWords(query.query)
-        return words === undefined ? Effect.fail(error) : ranked(words)
+        return words === undefined
+          ? Effect.fail(error)
+          : ranked(words).pipe(Effect.map((rows) => ({ rows, match: words })))
       }
     )
   )
-  return yield* searchPage(rows, query.limit, query.requestingSessionId)
+  return yield* searchPage(found, query.limit, query.requestingSessionId)
 })
+
+/** The index row of `m` is current: catch-up has applied every change to the
+ * message. A message written after catch-up (by a write between it and the
+ * query) is left out rather than matched by its old words. */
+const indexIsCurrent = (searchSql: SqlClient.SqlClient) => searchSql`NOT EXISTS (
+    SELECT 1 FROM transcript_search_changes AS pending
+    WHERE pending.sequence > (
+        SELECT applied_sequence FROM search.transcript_cursor WHERE singleton_id = 1
+      )
+      AND pending.message_rowid = m.message_rowid
+  )`
 
 const rankedRows = (
   searchSql: SqlClient.SqlClient,
   {
     grouped,
     clauses,
-    match,
     limit,
     offset
   }: {
-    readonly match: string
     readonly grouped: boolean
     readonly clauses: ReadonlyArray<Statement.Fragment>
     readonly limit: number
@@ -216,13 +229,11 @@ const rankedRows = (
            m.seq,
            m.role,
            m.created_at,
-           substr(snippet(session_messages_fts, 0, '[', ']', '…', 16), 1, 800) AS snippet,
+           m.search_text,
            page.match_count
     FROM page
-    JOIN search.session_messages_fts ON session_messages_fts.rowid = page.rid
     JOIN session_messages AS m ON m.message_rowid = page.rid
     JOIN sessions AS s ON s.session_id = m.session_id
-    WHERE session_messages_fts MATCH ${match}
     ORDER BY page.weight ASC, julianday(page.created_at) DESC, page.rid DESC
   `.pipe(
     Effect.mapError((cause) =>
@@ -232,7 +243,11 @@ const rankedRows = (
     )
   )
 
-const searchPage = (rows: ReadonlyArray<SearchRow>, limit: number, sessionId: string) =>
+const searchPage = (
+  { rows, match }: { readonly rows: ReadonlyArray<SearchRow>; readonly match: string },
+  limit: number,
+  sessionId: string
+) =>
   Schema.decodeUnknownEffect(TranscriptSearchPageSchema)({
     hits: rows.slice(0, limit).map((row) => ({
       sessionId: row.session_id,
@@ -243,7 +258,9 @@ const searchPage = (rows: ReadonlyArray<SearchRow>, limit: number, sessionId: st
       sequence: row.seq,
       role: row.role,
       createdAt: row.created_at,
-      snippet: stripCitationMarkers(row.snippet ?? ""),
+      snippet: bracketed(
+        findSnippet(markFtsQueryWords(stripCitationMarkers(row.search_text ?? ""), match))
+      ),
       matchCount: row.match_count
     })),
     hasMore: rows.length > limit
@@ -257,6 +274,17 @@ const searchPage = (rows: ReadonlyArray<SearchRow>, limit: number, sessionId: st
         })
     )
   )
+
+/** A snippet as plain text, each match between square brackets. */
+const bracketed = ({ text, ranges }: FindSnippet): string => {
+  let out = ""
+  let at = 0
+  for (const [start, end] of ranges) {
+    out += `${text.slice(at, start)}[${text.slice(start, end)}]`
+    at = end
+  }
+  return out + text.slice(at)
+}
 
 const ftsQueryForFindText = (text: string): string | undefined =>
   ftsQueryForWords(text, { prefixLast: true })
@@ -432,7 +460,7 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
       AND ${ownerChat("s")}
       -- Only rows the chat draws, so opening a hit lands on something.
       AND ${conversation}
-      AND session_messages_fts.search_text = m.search_text
+      AND ${indexIsCurrent(searchSql)}
       ${unseen}
       ${cursor}
     ORDER BY session_messages_fts.rowid DESC

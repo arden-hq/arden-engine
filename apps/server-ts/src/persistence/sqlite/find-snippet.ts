@@ -111,11 +111,7 @@ export const wordStartRanges = (
     .split(/\s+/u)
     .filter((word) => word.length > 0)
   const perWord = words.map((word, index) =>
-    findTextRanges(folded, word).filter(
-      ([start, end]) =>
-        !WORD_CHAR.test(folded.charAt(start - 1)) &&
-        (index === words.length - 1 || !WORD_CHAR.test(folded.charAt(end)))
-    )
+    indexedWordRanges(folded, { word, prefix: index === words.length - 1 })
   )
   if (perWord.length === 0 || perWord.some((ranges) => ranges.length === 0)) return undefined
   return perWord.flat().toSorted((a, b) => a[0] - b[0] || b[1] - a[1])
@@ -125,7 +121,63 @@ export const wordStartRanges = (
  * undefined when a word does not occur: the index matched a part the chat does not draw. */
 export const markWords = (text: string, query: string): string | undefined => {
   const ranges = wordStartRanges(text, query)
-  if (ranges === undefined) return undefined
+  return ranges === undefined ? undefined : markRanges(text, ranges)
+}
+
+/** `text` with every word a word of the FTS5 query `query` matches between
+ * snippet marks, the whole word for a prefix (`stag*` marks "staging").
+ * Operators, column filters and NEAR distances are not words. */
+export const markFtsQueryWords = (text: string, query: string): string => {
+  const folded = foldAccents(text)
+  const ranges = ftsQueryWords(foldAccents(query)).flatMap((term) =>
+    indexedWordRanges(folded, term).map(([start, end]) => [start, wordEnd(folded, end)] as const)
+  )
+  return markRanges(
+    text,
+    ranges.toSorted((a, b) => a[0] - b[0] || b[1] - a[1])
+  )
+}
+
+const WORD_REST = /[\p{L}\p{N}]*/uy
+
+const wordEnd = (text: string, from: number): number => {
+  WORD_REST.lastIndex = from
+  WORD_REST.exec(text)
+  return WORD_REST.lastIndex
+}
+
+interface IndexedWord {
+  readonly word: string
+  /** The word may be the start of a longer one (`word*`). */
+  readonly prefix: boolean
+}
+
+const indexedWordRanges = (folded: string, { word, prefix }: IndexedWord) =>
+  findTextRanges(folded, word).filter(
+    ([start, end]) =>
+      !WORD_CHAR.test(folded.charAt(start - 1)) && (prefix || !WORD_CHAR.test(folded.charAt(end)))
+  )
+
+const FTS_OPERATORS = new Set(["AND", "OR", "NOT", "NEAR"])
+/** A NEAR distance, a quoted phrase, or a bareword, each with a trailing `*`
+ * (prefix) or `:` (column filter). */
+const FTS_TOKEN = /,\s*\d+|"((?:[^"]|"")*)"(\*?)|([\p{L}\p{N}_]+)(\*?)(:?)/gu
+const INDEX_WORD = /[\p{L}\p{N}]+/gu
+
+const ftsQueryWords = (query: string): ReadonlyArray<IndexedWord> =>
+  [...query.matchAll(FTS_TOKEN)].flatMap(([, phrase, phraseStar, bare, bareStar, column]) => {
+    if (bare !== undefined && (column === ":" || FTS_OPERATORS.has(bare))) return []
+    const words = [...(phrase?.replaceAll('""', '"') ?? bare ?? "").matchAll(INDEX_WORD)].map(
+      ([word]) => word
+    )
+    const star = (phrase === undefined ? bareStar : phraseStar) === "*"
+    return words.map((word, index) => ({ word, prefix: star && index === words.length - 1 }))
+  })
+
+const markRanges = (
+  text: string,
+  ranges: ReadonlyArray<readonly [start: number, end: number]>
+): string => {
   let out = ""
   let at = 0
   for (const [start, end] of ranges) {

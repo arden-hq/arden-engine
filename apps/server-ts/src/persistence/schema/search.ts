@@ -34,33 +34,45 @@ const wikiEmbeddingStatements = [
       BEGIN SELECT RAISE(ABORT, 'embedding length does not match its index dimensions'); END`
 ] as const
 
+// Contentless: the text stays in main.session_messages.search_text only, and
+// snippets are cut from there. contentless_delete lets an edit or delete drop a
+// row by rowid without the old text.
+const transcriptIndexStatement = `CREATE VIRTUAL TABLE search.session_messages_fts USING fts5(
+      search_text, tokenize='unicode61 remove_diacritics 2', content='', contentless_delete=1
+      )`
+// Present while the index is being filled from main.session_messages: messages
+// up to after_rowid are indexed, the rest are copied in later chunks.
+const transcriptRebuildStatement = `CREATE TABLE search.transcript_rebuild (
+      singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+      after_rowid INTEGER NOT NULL CHECK(after_rowid >= 0)
+      )`
+
 export const searchSchemaSection = {
   name: "search",
-  version: 3,
+  version: 4,
   tables: [
     "session_messages_fts",
     "session_messages_fts_config",
-    "session_messages_fts_content",
     "session_messages_fts_data",
     "session_messages_fts_docsize",
     "session_messages_fts_idx",
     "wiki_embedding_indexes",
     "wiki_embedding_pages",
     "wiki_embedding_chunks",
-    "transcript_cursor"
+    "transcript_cursor",
+    "transcript_rebuild"
   ],
   indexes: [],
   triggers: ["wiki_embedding_chunks_dimensions"],
   statements: [
-    `CREATE VIRTUAL TABLE search.session_messages_fts USING fts5(
-      search_text, tokenize='unicode61 remove_diacritics 2'
-      )`,
+    transcriptIndexStatement,
     ...wikiEmbeddingStatements,
     `CREATE TABLE search.transcript_cursor (
       singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
        applied_sequence INTEGER NOT NULL CHECK(applied_sequence >= 0),
        source_id TEXT NOT NULL CHECK(length(source_id) = 32)
-      )`
+      )`,
+    transcriptRebuildStatement
   ]
 } as const satisfies VersionedSchemaSection
 
@@ -89,5 +101,13 @@ export const searchSchemaUpgrades: Readonly<Record<number, ReadonlyArray<string>
         AND page.page_id = old.page_id
         AND page.page_version = old.page_version`,
     "DROP TABLE search.wiki_embedding_chunks_v2"
+  ],
+  // The index drops its own copy of the text. The wiki embeddings stay: they are
+  // costly to compute again. Without a cursor, startup refills the index in chunks.
+  3: [
+    "DROP TABLE search.session_messages_fts",
+    transcriptIndexStatement,
+    transcriptRebuildStatement,
+    "DELETE FROM search.transcript_cursor"
   ]
 }
