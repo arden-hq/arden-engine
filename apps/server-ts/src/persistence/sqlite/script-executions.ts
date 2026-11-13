@@ -6,6 +6,7 @@ import type { Backfill } from "./backfills/backfill.js"
 
 import { ScriptJournalError, type ScriptOrigin } from "../scripts/journal.js"
 import { decodeJson } from "./json.js"
+import { loadFullResult, OMITTING_ROW_SQL } from "./tool-result-storage.js"
 
 const ProgressSchema = Schema.Struct({
   kind: Schema.Literals(["code_mode", "dynamic_workflow"]),
@@ -68,11 +69,12 @@ export const readScriptExecutions = Effect.fn("ScriptJournal.executions")(functi
       .filter((entry) => Number.isSafeInteger(entry.attempt) && entry.attempt > 0)
       .sort((a, b) => a.attempt - b.attempt)
   }
-  const rows = yield* sql<{ readonly data: string }>`
-    SELECT json_extract(result_json, '$.data') AS data FROM tool_calls
+  const rows = yield* sql<{ readonly data: string; readonly omitting_json: string | null }>`
+    SELECT json_extract(result_json, '$.data') AS data,
+      ${sql.literal(OMITTING_ROW_SQL)} AS omitting_json FROM tool_calls
     WHERE run_id = ${origin.originRunId} AND tool_call_id = ${origin.originToolCallId}
     UNION ALL
-    SELECT json_extract(data_json, '$.data') AS data FROM (
+    SELECT json_extract(data_json, '$.data') AS data, NULL AS omitting_json FROM (
       SELECT data_json FROM journal_records
       WHERE stream_id = (SELECT session_id FROM chat_runs WHERE run_id = ${origin.originRunId})
         AND event_type = 'TOOL_CALL_PROGRESS'
@@ -85,8 +87,19 @@ export const readScriptExecutions = Effect.fn("ScriptJournal.executions")(functi
       (cause) => new ScriptJournalError({ message: "Could not read script progress", cause })
     )
   )
-  const decoded = yield* Effect.forEach(rows, (row) =>
-    decodeJson(ProgressSchema, row.data).pipe(Effect.option)
+  const decoded = yield* Effect.forEach(
+    rows,
+    Effect.fn("ScriptJournal.executionData")(function* (row) {
+      // A slim row that left fields out is read whole, as before it was slimmed.
+      const full =
+        row.omitting_json === null
+          ? undefined
+          : yield* loadFullResult(row.omitting_json).pipe(
+              Effect.mapError((cause) => new ScriptJournalError({ message: cause.message, cause }))
+            )
+      const data = full === undefined ? row.data : JSON.stringify(full.data)
+      return yield* decodeJson(ProgressSchema, data).pipe(Effect.option)
+    })
   )
   return executions(decoded.flatMap((row) => (Option.isSome(row) ? [row.value] : [])))
 })

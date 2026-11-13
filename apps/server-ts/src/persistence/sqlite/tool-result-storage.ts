@@ -8,7 +8,7 @@ import {
 } from "../managed-output/descriptor.js"
 import { ToolResultObjects } from "../managed-output/tool-result-objects.js"
 import { decodeJson, encodeJson } from "./json.js"
-import { JsonObjectSchema } from "../json.js"
+import { JsonObjectSchema, type JsonObject } from "../json.js"
 
 const ContentBlockSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
@@ -290,6 +290,34 @@ export const loadFullResult = Effect.fn("ToolResultStorage.loadFull")(function* 
     ? full
     : { ...full, data: { ...full.data, change_evidence: evidence } }
 })
+
+/**
+ * SQL for the stored row when it left fields out, else NULL: readers select it
+ * beside their projection and load the object only for those rows.
+ */
+export const OMITTING_ROW_SQL = `CASE WHEN json_array_length(result_json, '$.stored_result.omitted') > 0
+  THEN result_json END`
+
+/**
+ * `projected` with the whole result's `data` and `host` when `omitting` (a row
+ * selected by `OMITTING_ROW_SQL`) left fields out; otherwise as it is, with no
+ * object read.
+ */
+export const withWholeDataAndHost = <
+  A extends { readonly data?: JsonObject | null; readonly host?: JsonObject }
+>(
+  projected: A,
+  omitting: string | null
+): Effect.Effect<A, StoredToolResultError> =>
+  omitting === null
+    ? Effect.succeed(projected)
+    : loadFullResult(omitting).pipe(
+        Effect.map((full) => ({
+          ...projected,
+          ...(full.data === undefined ? {} : { data: full.data }),
+          ...(full.host === undefined ? {} : { host: full.host })
+        }))
+      )
 
 /**
  * The whole result as JSON text, for readers that parse `result_json`

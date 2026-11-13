@@ -312,8 +312,9 @@ const readDefinition = Effect.fn("ScriptJournal.definition")(function* (
 })
 
 export const makeScriptJournal = ({
-  reader
-}: Pick<PersistenceDeps, "reader">): ScriptJournal["Service"] =>
+  reader,
+  writer
+}: Pick<PersistenceDeps, "reader" | "writer">): ScriptJournal["Service"] =>
   ScriptJournal.of({
     agentDecision: (input) => scriptAgentDecision(reader, input),
     nestedCall: (input) => scriptNestedCall(reader, input),
@@ -339,7 +340,7 @@ export const makeScriptJournal = ({
     agents: (origin) => readAgents(reader, origin),
     definition: (origin) => readDefinition(reader, origin),
     executions: (origin) =>
-      readScriptExecutions(reader, origin).pipe(
+      writer.withToolResults(readScriptExecutions(reader, origin)).pipe(
         Effect.flatMap((saved) =>
           readNestedCallFacts(reader, {
             runId: origin.originRunId,

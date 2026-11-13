@@ -20,6 +20,7 @@ import { SessionStore } from "../src/persistence/sessions/store.js"
 import { makeBackfillChunks } from "../src/persistence/sqlite/backfills/store.js"
 import { makeWriter } from "../src/persistence/sqlite/deps.js"
 import { deleteSessionTree } from "../src/persistence/sqlite/session-tree-deletion.js"
+import { readScriptExecutions } from "../src/persistence/sqlite/script-executions.js"
 import { slimToolResultsBackfill } from "../src/persistence/sqlite/tool-result-backfill.js"
 import { settleTerminalToolsInTransaction } from "../src/persistence/sqlite/tool-terminal.js"
 import { ToolHistoryQueries } from "../src/persistence/tools/history-queries.js"
@@ -330,6 +331,98 @@ describe("tool result storage", () => {
           message: "Tool execution already has a different result"
         }
       })
+    })
+  })
+
+  it("sends the app the same data and host from a slim row, reading objects only when it must", async () => {
+    const appResult: ToolResult = {
+      content: "Ran the script.\n".repeat(3_000),
+      preview: "Ran the script",
+      is_error: false,
+      data: {
+        kind: "code_mode",
+        phases: ["Review"],
+        tools: Array.from({ length: 60 }, (_, index) => ({
+          tool_call_id: `call-${index}`,
+          name: "gmail_draft",
+          args: "a".repeat(100)
+        })),
+        gmail_draft: { subject: "Hello", body: "b".repeat(5_000) },
+        small: 1
+      },
+      host: { source_refs: [{ ref: "https://example.com", title: "Example" }] }
+    }
+    const contentOnly: ToolResult = { ...smallResult, content: "Long output.\n".repeat(3_000) }
+    const objects = (rig: Rig) =>
+      makeToolResultObjects(rig.outputs, { withLiveSession: (_, action) => action() })
+    const read = (rig: Rig, slim: boolean, ids: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const run = yield* startRun
+        yield* settle(identityOf(run, "app"), appResult)
+        yield* settle(identityOf(run, "small"), smallResult)
+        yield* settle(identityOf(run, "content"), contentOnly)
+        const history = yield* ToolHistoryQueries
+        const sessions = yield* SessionQueries
+        const sql = yield* SqlClient.SqlClient
+        const metadata = yield* history.historyResultMetadata({
+          sessionId: run.sessionId,
+          toolCallIds: [...ids]
+        })
+        const evidence = yield* sessions.readToolEvidence({
+          sessionId: run.sessionId,
+          limit: 10,
+          contentChars: 1_000_000
+        })
+        const executions = yield* readScriptExecutions(sql, {
+          originRunId: run.runId,
+          originToolCallId: "app"
+        }).pipe(Effect.provideService(ToolResultObjects, objects(rig)))
+        return {
+          metadata: ids.map((id) => {
+            const entry = metadata.get(id)
+            return entry === undefined
+              ? undefined
+              : { isError: entry.isError, retryable: entry.retryable, data: entry.data }
+          }),
+          evidence: evidence.items.map((item) => [item.tool_call_id, item.payload.text]),
+          executions
+        }
+      })
+    const ids = ["app", "small", "content"]
+    let slim: unknown
+    let whole: unknown
+    await withRig(async (rig) => {
+      slim = await Effect.runPromise(
+        read(rig, true, ids).pipe(Effect.provide(storage(rig, { slim: true })))
+      )
+    })
+    await withRig(async (rig) => {
+      whole = await Effect.runPromise(
+        read(rig, false, ids).pipe(Effect.provide(storage(rig, { slim: false })))
+      )
+    })
+    expect(slim).toEqual(whole)
+    // Without the objects, rows that left nothing out still read: they never open one.
+    await withRig(async (rig) => {
+      const outcome = await Effect.runPromise(
+        Effect.gen(function* () {
+          const run = yield* startRun
+          yield* settle(identityOf(run, "small"), smallResult)
+          yield* settle(identityOf(run, "content"), contentOnly)
+          yield* settle(identityOf(run, "app"), appResult)
+          yield* Effect.promise(() => rm(rig.outputs, { recursive: true, force: true }))
+          const history = yield* ToolHistoryQueries
+          const kept = yield* history.historyResultMetadata({
+            sessionId: run.sessionId,
+            toolCallIds: ["small", "content"]
+          })
+          const missing = yield* history
+            .historyResultMetadata({ sessionId: run.sessionId, toolCallIds: ["app"] })
+            .pipe(Effect.flip)
+          return { kept: [...kept.keys()].toSorted(), missing: missing.reason }
+        }).pipe(Effect.provide(storage(rig, { slim: true })))
+      )
+      expect(outcome).toEqual({ kept: ["content", "small"], missing: "storage" })
     })
   })
 

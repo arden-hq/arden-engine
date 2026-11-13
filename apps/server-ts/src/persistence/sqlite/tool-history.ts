@@ -24,7 +24,12 @@ import type { PersistenceDeps } from "./deps.js"
 import { decisionLineageSql } from "../schema/decision-visibility.js"
 import { type ApprovalRow, toolError, decodePendingConnection } from "./tool-rows.js"
 import { resultToolStatusList } from "./status-sets.js"
-import { loadFullResult, PersistedToolResultSchema } from "./tool-result-storage.js"
+import {
+  loadFullResult,
+  OMITTING_ROW_SQL,
+  PersistedToolResultSchema,
+  withWholeDataAndHost
+} from "./tool-result-storage.js"
 import { sessionAncestors, sessionDescendants } from "./tree-walk.js"
 
 interface ToolHistoryResultRow {
@@ -33,6 +38,8 @@ interface ToolHistoryResultRow {
   readonly tool_call_id: string
   readonly tool_name: string
   readonly result_json: string
+  /** The stored row when it left fields out (`OMITTING_ROW_SQL`). */
+  readonly omitting_json: string | null
   readonly started_at: string
   readonly ended_at: string | null
 }
@@ -141,6 +148,7 @@ export const makeToolHistory = ({
       const rows = yield* historySql<ToolHistoryResultRow>`
       SELECT run_id, tool_call_id, tool_name, changes_state,
              json_remove(result_json, '$.content', '$.preview', '$.model_content', '$.message_extras') AS result_json,
+             ${historySql.literal(OMITTING_ROW_SQL)} AS omitting_json,
              started_at, ended_at
       FROM tool_calls
       WHERE session_id = ${decoded.sessionId}
@@ -156,7 +164,7 @@ export const makeToolHistory = ({
       const entries = yield* Effect.forEach(
         rows,
         Effect.fn("SqliteToolExecutionStore.decodeHistoryResultMetadata")(function* (row) {
-          const result = yield* decodeJson(ToolHistoryMetadataSchema, row.result_json).pipe(
+          const stored = yield* decodeJson(ToolHistoryMetadataSchema, row.result_json).pipe(
             Effect.mapError((cause) =>
               toolError(
                 "history",
@@ -167,6 +175,10 @@ export const makeToolHistory = ({
               )
             )
           )
+          // A slim row that left fields out sends the whole data and host, as a whole row did.
+          const result = yield* writer
+            .withToolResults(withWholeDataAndHost(stored, row.omitting_json))
+            .pipe(Effect.mapError((cause) => toolError("history", "storage", cause.message)))
           const projected = yield* refreshChangeEvidence(
             historySql,
             {
