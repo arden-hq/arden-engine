@@ -8,6 +8,7 @@ import { HttpApi } from "effect/unstable/httpapi"
 import { expect, it } from "vitest"
 import { ArdenApi } from "../../src/http/api.js"
 import { startServer, type ServerHandle } from "../../src/index.js"
+import { BREAKDOWN_QUERIES } from "../../src/persistence/sqlite/storage-breakdown-queries.js"
 import { seedFullSizeDatabase, type FullSizeIds } from "../fixtures/full-size-database.js"
 
 // The scan check (test/sql-scans) fails a statement whose plan reads a whole
@@ -42,11 +43,21 @@ const TIMER_JOBS_MS = 6_000
 const ROUTE_TIMEOUT_MS = 3_000
 
 /**
- * Statements allowed to grow. Only one-time work belongs here (a migration,
- * a backfill's first fill), each with its reason. Keep it empty otherwise: a
- * statement that grows with the history is fixed, not listed.
+ * Statements allowed to grow, each with its reason. Two kinds belong here:
+ * one-time work (a migration, a backfill's first fill), and an exception the
+ * owner approved, with the date. A statement that grows with the history is
+ * fixed, not listed.
  */
-const ONE_TIME_WORK: ReadonlyArray<{ readonly sql: string; readonly reason: string }> = []
+const ALLOWED_TO_GROW: ReadonlyArray<{ readonly sql: string; readonly reason: string }> = [
+  {
+    sql: BREAKDOWN_QUERIES.others,
+    reason:
+      "Owner-approved exception, 2026-11-13. The Storage page measures the size of the " +
+      "tables outside chat data page by page (dbstat), so it grows with the file by nature. " +
+      "It runs only when the owner opens Settings -> Storage or acts on that page (not at " +
+      "launch, not on a timer, not on chat open)."
+  }
+]
 
 /**
  * Routes whose id names something this database does not hold; each is still
@@ -455,7 +466,11 @@ it(
       await rm(join(directory, "small"), { recursive: true, force: true })
       const large = await measure(join(directory, "large"), LARGE_SCALE)
 
-      const allowed = new Set(ONE_TIME_WORK.map((entry) => shape(entry.sql)))
+      expect(
+        ALLOWED_TO_GROW.filter((entry) => entry.reason.trim().length === 0),
+        "Every statement allowed to grow says why"
+      ).toEqual([])
+      const allowed = new Set(ALLOWED_TO_GROW.map((entry) => shape(entry.sql)))
       const compared = [...large.measured.entries()].map(([sql, big]) => ({
         sql,
         small: small.measured.get(sql),
@@ -517,7 +532,7 @@ it(
         ),
         `Statements whose fastest time grows ${GROWTH_RATIO}x or more (and to ${GROWTH_FLOOR_MS} ms or more) ` +
           `when the history grows ${LARGE_SCALE}x. Start each from a short list, or list one-time ` +
-          "work in ONE_TIME_WORK with its reason."
+          "work or an owner-approved exception in ALLOWED_TO_GROW with its reason."
       ).toEqual([])
     } finally {
       await rm(directory, { recursive: true, force: true })
