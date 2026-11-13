@@ -45,7 +45,8 @@ export const automationSchemaSection = {
     "idx_automation_delivery_runs_delivery",
     "idx_automation_runs_no_outcome",
     "idx_automation_runs_started",
-    "idx_automation_runs_occurrence"
+    "idx_automation_runs_occurrence",
+    "idx_automation_runs_task_latest"
   ],
   triggers: [
     "automation_instruction_revisions_immutable_update",
@@ -330,6 +331,7 @@ export const automationSchemaSection = {
       END`,
     `CREATE INDEX idx_automation_runs_no_outcome ON automation_runs(id) WHERE outcome IS NULL`,
     `CREATE INDEX idx_automation_runs_started ON automation_runs(started_at)`,
-    `CREATE INDEX idx_automation_runs_occurrence ON automation_runs(json_extract(origin, '$.occurrence_id')) WHERE task_id IS NOT NULL`
+    `CREATE INDEX idx_automation_runs_occurrence ON automation_runs(json_extract(origin, '$.occurrence_id')) WHERE task_id IS NOT NULL`,
+    "CREATE INDEX idx_automation_runs_task_latest ON automation_runs(task_id, id DESC)"
   ]
 } as const satisfies OperationalSchemaSection

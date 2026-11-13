@@ -40,6 +40,7 @@ import { sessionSizes } from "./0145_session_sizes.js"
 import { browserProcedureJobOutcome } from "./0146_browser_procedure_job_outcome.js"
 import { statusAndTimeIndexes } from "./0147_status_and_time_indexes.js"
 import { traceTrimDue } from "./0148_trace_trim_due.js"
+import { runLookupLists } from "./0149_run_lookup_lists.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -322,7 +323,8 @@ export const migrations: ReadonlyArray<Migration> = [
   sessionSizes,
   browserProcedureJobOutcome,
   statusAndTimeIndexes,
-  traceTrimDue
+  traceTrimDue,
+  runLookupLists
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

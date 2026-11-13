@@ -72,7 +72,8 @@ export const contextExecutionSchemaSection = {
     "row_counts_chat_runs_ai",
     "row_counts_chat_runs_ad",
     "trace_trim_due_run_ai",
-    "trace_trim_due_run_au"
+    "trace_trim_due_run_au",
+    "browser_procedure_candidates_call_ai"
   ],
   statements: [
     `CREATE TABLE chat_runs (
@@ -386,6 +387,11 @@ export const contextExecutionSchemaSection = {
             THEN 'fork'
         END IS NOT NULL
             AND COALESCE(json_extract(s.metadata, '$.agent_trace_retained_run_id'), '') <> new.run_id;
+      END`,
+    `CREATE TRIGGER browser_procedure_candidates_call_ai
+      AFTER INSERT ON tool_calls WHEN new.tool_name IN ('browser_open', 'browser_snapshot', 'browser_act') BEGIN
+        INSERT OR IGNORE INTO browser_procedure_candidates(run_id)
+          SELECT run_id FROM chat_runs WHERE run_id = new.run_id;
       END`
   ]
 } as const satisfies OperationalSchemaSection

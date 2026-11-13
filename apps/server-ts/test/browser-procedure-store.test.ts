@@ -1,10 +1,16 @@
+import { DatabaseSync } from "node:sqlite"
+import { databaseSchema } from "../src/persistence/schema/database.js"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { createToolset } from "@arden-hq/loop"
 import { browserProceduresSchemaSection } from "../src/persistence/schema/sections/browser-procedures.js"
-import { makeBrowserProcedureStore } from "../src/persistence/sqlite/browser-procedures.js"
+import {
+  BROWSER_PROCEDURE_ENQUEUE_SQL,
+  BROWSER_PROCEDURE_SETTLE_SQL,
+  makeBrowserProcedureStore
+} from "../src/persistence/sqlite/browser-procedures.js"
 import { makeWriter } from "../src/persistence/sqlite/deps.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import {
@@ -80,6 +86,8 @@ it("admits safe read-only evidence, keeps an unchecked page's step without its p
         }
       })
       yield* sql`INSERT INTO tool_calls VALUES ('read','inspect','browser_snapshot','{"tab_ref":"tab-1"}',${safe},0,'completed','2026-10-28T00:01:01.000Z','none')`
+      // The real schema adds the run by a trigger on tool_calls; these tables are hand-made.
+      yield* sql`INSERT INTO browser_procedure_candidates VALUES ('read')`
       const store = makeBrowserProcedureStore({ writer })
       yield* store.enqueue()
       yield* store.recordOutcome("read", "skipped", "  ")
@@ -332,5 +340,63 @@ it("never sends or saves a typed value, a form field value or page body text whi
     expect(text).toContain('"value":"3000"')
     expect(text).toContain('"action":"check"')
     expect(text).toContain("https://example.com/start?email={email}&step={step}")
+  }
+})
+
+// The recipe check walked every completed run. It now reads a list that a
+// trigger fills at a run's first browser call and the check empties.
+it("lists a run at its first browser call and drops it once the run is judged", () => {
+  const database = new DatabaseSync(":memory:")
+  try {
+    for (const statement of databaseSchema.statements) database.exec(statement)
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type, name)
+      VALUES ('chat', 'ref-chat', '2026-09-01', '2026-09-01', 'chat', 'A chat')`)
+    const run = (id: string) =>
+      database.exec(`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
+          metadata_json, assistant_message_id)
+        VALUES ('${id}', 'chat', 'running', '2026-09-02', '2026-09-02', '{"turn_id":"t-${id}"}', 'am-${id}')`)
+    const call = (id: string, callId: string, tool: string) =>
+      database.exec(`INSERT INTO tool_calls (run_id, session_id, tool_call_id, tool_name, arguments_json,
+          changes_state, status, result_json, started_at, ended_at)
+        VALUES ('${id}', 'chat', '${callId}', '${tool}', '{}', 0, 'completed', '{}', '2026-09-02', '2026-09-02')`)
+    const listed = () =>
+      database
+        .prepare("SELECT run_id FROM browser_procedure_candidates ORDER BY run_id")
+        .all()
+        .map((row) => row.run_id)
+    const jobs = () =>
+      database
+        .prepare("SELECT run_id FROM browser_procedure_jobs ORDER BY run_id")
+        .all()
+        .map((row) => row.run_id)
+    const check = () => {
+      database.prepare(BROWSER_PROCEDURE_ENQUEUE_SQL).run("2026-09-03", "2026-09-03")
+      database.exec(BROWSER_PROCEDURE_SETTLE_SQL)
+    }
+    database.exec("UPDATE browser_procedure_settings SET since = '2026-09-01'")
+    for (const id of ["browser", "plain", "going", "failed"]) run(id)
+    call("browser", "c1", "browser_open")
+    call("browser", "c2", "browser_act")
+    call("plain", "c1", "read_file")
+    call("going", "c1", "browser_snapshot")
+    call("failed", "c1", "browser_open")
+    expect(listed()).toEqual(["browser", "failed", "going"])
+    database.exec(`UPDATE chat_runs SET status = 'completed', ended_at = '2026-09-02'
+      WHERE run_id IN ('browser', 'plain')`)
+    database.exec(`UPDATE chat_runs SET status = 'error', ended_at = '2026-09-02', error_code = 'x'
+      WHERE run_id = 'failed'`)
+    check()
+    // The finished browser run has its job; the failed one never gets one;
+    // the run still going stays on the list.
+    expect(jobs()).toEqual(["browser"])
+    expect(listed()).toEqual(["going"])
+    database.exec(
+      `UPDATE chat_runs SET status = 'completed', ended_at = '2026-09-02' WHERE run_id = 'going'`
+    )
+    check()
+    expect(jobs()).toEqual(["browser", "going"])
+    expect(listed()).toEqual([])
+  } finally {
+    database.close()
   }
 })

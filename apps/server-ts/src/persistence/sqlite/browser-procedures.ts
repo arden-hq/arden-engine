@@ -16,6 +16,7 @@ import {
 import { condenseBrowserRun, type BrowserRunCall } from "../browser-procedures/condense.js"
 import { jsonText } from "../json.js"
 import type { PersistenceDeps } from "./deps.js"
+import { ACTIVE_RUN_STATUSES } from "@arden-hq/protocol/runs"
 import { callChange } from "./run-effects.js"
 import { RejectedToolResultSchema } from "../tools/store.js"
 import {
@@ -97,25 +98,36 @@ const decode = Effect.fn("BrowserProcedures.decode")(function* (
   }
 })
 
+/** A run the check can judge for good: it has ended and nothing in it is
+ * still going, so its tool calls cannot change. */
+const SETTLED_CANDIDATE_SQL = `r.status NOT IN ${statusSqlList(ACTIVE_RUN_STATUSES)}
+    AND NOT EXISTS (SELECT 1 FROM tool_calls t WHERE t.run_id = r.run_id AND t.status IN ${statusSqlList(UNRESOLVED_TOOL_STATUSES)})
+    AND NOT EXISTS (SELECT 1 FROM code_mode_scripts s WHERE s.origin_run_id = r.run_id AND s.status = 'running')`
+
 /**
- * Finished runs that used the browser and have no learning job yet. It starts
- * from idx_tool_calls_browser, the short list of browser tool calls, and
- * reaches each run by its id. Before, it walked every completed run since the
- * feature was turned on, at startup, after every run and every 30 seconds.
+ * Finished runs that used the browser and have no learning job yet. It reads
+ * browser_procedure_candidates, the runs with a browser tool call that the
+ * check has not judged, and reaches each run by its id. Before, it walked
+ * every completed run, after every run and every 30 seconds.
  */
 export const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_jobs(id, run_id, status, created_at, updated_at)
-  SELECT r.run_id, r.run_id, 'pending', ?, ? FROM chat_runs r
-  WHERE r.run_id IN (SELECT t.run_id FROM tool_calls t WHERE t.tool_name IN ('browser_open', 'browser_snapshot', 'browser_act'))
-    AND r.status = 'completed' AND r.ended_at >= (SELECT since FROM browser_procedure_settings WHERE singleton = 1)
-    AND NOT EXISTS (SELECT 1 FROM tool_calls t WHERE t.run_id = r.run_id AND t.status IN ${statusSqlList(UNRESOLVED_TOOL_STATUSES)})
-    AND NOT EXISTS (SELECT 1 FROM code_mode_scripts s WHERE s.origin_run_id = r.run_id AND s.status = 'running')
+  SELECT r.run_id, r.run_id, 'pending', ?, ? FROM browser_procedure_candidates c
+  CROSS JOIN chat_runs r ON r.run_id = c.run_id
+  WHERE r.status = 'completed' AND r.ended_at >= (SELECT since FROM browser_procedure_settings WHERE singleton = 1)
+    AND ${SETTLED_CANDIDATE_SQL}
     AND NOT EXISTS (SELECT 1 FROM browser_procedure_jobs j WHERE j.run_id = r.run_id)
     AND (NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded')
       OR EXISTS (SELECT 1 FROM tool_calls extra WHERE extra.run_id=r.run_id
         AND extra.tool_name IN ('browser_open','browser_snapshot','browser_act','browser_wait')
         AND (extra.tool_name='browser_act' OR extra.started_at>(SELECT MIN(used.created_at) FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded'))
         AND NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded' AND substr(extra.tool_call_id,1,length(used.tool_call_id)+1)=used.tool_call_id || ':')))
-  ORDER BY r.ended_at DESC LIMIT 20`
+  ORDER BY r.ended_at DESC`
+
+/** Drops every judged run from the list: a settled run has its job by now or
+ * will never get one, so the list holds only runs still going. */
+export const BROWSER_PROCEDURE_SETTLE_SQL = `DELETE FROM browser_procedure_candidates
+  WHERE run_id IN (SELECT c.run_id FROM browser_procedure_candidates c
+    CROSS JOIN chat_runs r ON r.run_id = c.run_id WHERE ${SETTLED_CANDIDATE_SQL})`
 
 export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "writer">) => {
   const sql = writer.sql
@@ -192,9 +204,19 @@ export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "wri
       )
   })
   const enqueue = Effect.fn("BrowserProcedures.enqueue")(function* () {
-    if (!(yield* enabled)) return
+    // Nothing waits: the usual case, answered by a read of an empty table.
+    const waiting = yield* reader<{
+      readonly waiting: number
+    }>`SELECT 1 AS waiting FROM browser_procedure_candidates LIMIT 1`
+    if (waiting.length === 0) return
+    const learning = yield* enabled
     const at = yield* now
-    yield* writer.run(sql.unsafe(BROWSER_PROCEDURE_ENQUEUE_SQL, [at, at]))
+    yield* writer.transact(
+      Effect.gen(function* () {
+        if (learning) yield* sql.unsafe(BROWSER_PROCEDURE_ENQUEUE_SQL, [at, at])
+        yield* sql.unsafe(BROWSER_PROCEDURE_SETTLE_SQL)
+      })
+    )
   })
   const recordOutcome = Effect.fn("BrowserProcedures.recordOutcome")(function* (
     runId: string,

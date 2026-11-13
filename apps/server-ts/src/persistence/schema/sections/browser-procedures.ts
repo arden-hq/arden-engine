@@ -8,7 +8,8 @@ export const browserProceduresSchemaSection = {
     "browser_procedures",
     "browser_procedure_revisions",
     "browser_procedure_jobs",
-    "browser_procedure_invocations"
+    "browser_procedure_invocations",
+    "browser_procedure_candidates"
   ],
   indexes: [
     "idx_browser_procedures_scope",
@@ -82,6 +83,9 @@ export const browserProceduresSchemaSection = {
     "CREATE INDEX idx_browser_procedure_invocations_procedure_id_revision ON browser_procedure_invocations(procedure_id, revision)",
     "CREATE INDEX idx_browser_procedure_jobs_run_id ON browser_procedure_jobs(run_id)",
     "ALTER TABLE browser_procedure_jobs ADD COLUMN outcome TEXT CHECK(outcome IS NULL OR outcome IN ('saved', 'skipped'))",
-    "ALTER TABLE browser_procedure_jobs ADD COLUMN outcome_reason TEXT CHECK(outcome_reason IS NULL OR length(outcome_reason) BETWEEN 1 AND 2000)"
+    "ALTER TABLE browser_procedure_jobs ADD COLUMN outcome_reason TEXT CHECK(outcome_reason IS NULL OR length(outcome_reason) BETWEEN 1 AND 2000)",
+    `CREATE TABLE browser_procedure_candidates (
+      run_id TEXT PRIMARY KEY REFERENCES chat_runs(run_id) ON DELETE CASCADE
+    ) WITHOUT ROWID`
   ]
 } as const satisfies OperationalSchemaSection

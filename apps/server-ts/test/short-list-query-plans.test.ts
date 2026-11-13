@@ -66,7 +66,7 @@ it("startup and cleanup queries read their short lists, not whole tables", async
         database
           .prepare(`EXPLAIN QUERY PLAN ${BROWSER_PROCEDURE_ENQUEUE_SQL}`)
           .all("x", "x")
-          .some((row) => String(row.detail).includes("idx_tool_calls_browser"))
+          .some((row) => /^SCAN c\b/.test(String(row.detail)))
       ).toBe(true)
     } finally {
       database.close()

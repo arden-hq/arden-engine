@@ -216,6 +216,9 @@ export const tableTells = {
     silent:
       "The durable job worker owns learning leases and the browser learning screen reads their status."
   },
+  browser_procedure_candidates: {
+    silent: "A work list for the recipe check; no screen shows it."
+  },
   browser_procedure_invocations: {
     silent:
       "Browser procedure work is already reported by its normal durable tool and script records."
