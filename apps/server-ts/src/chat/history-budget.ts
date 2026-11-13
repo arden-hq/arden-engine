@@ -3,6 +3,14 @@ import { snapshotJsonBytes as bytes } from "./snapshot-encoding.js"
 
 const ACTIVE_WORK_TAIL_BYTES = 1024 * 1024
 
+/** A history response without its context budget, which comes from model
+ * settings rather than from the Chat's rows. `HistoryResponse` extends a JSON
+ * record, so `Omit` would erase its keys; this picks them instead. */
+export type HistoryRows = Pick<
+  HistoryResponse,
+  "messages" | "active_work_tail" | "runtime" | "page" | "turn_shells"
+>
+
 export const boundActiveWorkTail = (
   work: TurnWorkResponse,
   capacity = ACTIVE_WORK_TAIL_BYTES
@@ -51,10 +59,7 @@ export const boundActiveWorkTail = (
   }
 }
 
-export const boundConversationWindow = (
-  history: HistoryResponse,
-  capacity: number
-): HistoryResponse => {
+export const boundConversationWindow = <H extends HistoryRows>(history: H, capacity: number): H => {
   if (bytes(history) <= capacity) return history
   const fixedBytes =
     bytes({

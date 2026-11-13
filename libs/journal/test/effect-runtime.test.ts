@@ -3,11 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Deferred, Effect, Fiber, Stream } from "effect"
+import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
 import {
   JournalError,
+  appendInTransaction,
   initializeJournalSchema,
   makeJournalRuntime,
   type JournalRuntime,
@@ -315,5 +317,61 @@ describe("Effect journal follower", () => {
       { sequence: 2, type: "text_end", durable: true },
       { sequence: 3, type: "text_delta", durable: false }
     ])
+  })
+})
+
+describe("Effect journal read connection", () => {
+  it("reads and follows the last commit while the writer holds a transaction", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "arden-journal-reader-"))
+    const filename = join(directory, "journal.sqlite")
+    try {
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            yield* initializeJournalSchema(sql)
+            const reader = yield* SqliteClient.make({ filename, readonly: true }).pipe(
+              Effect.provide(Reactivity.layer)
+            )
+            const journal = yield* makeJournalRuntime(sql, { initialize: false, reader })
+            yield* journal.append("chat-1", [{ type: "run_started", data: {} }])
+
+            const held = yield* Deferred.make<void>()
+            const release = yield* Deferred.make<void>()
+            const writing = yield* sql
+              .withTransaction(
+                appendInTransaction(sql, "chat-1", [{ type: "text_end", data: {} }]).pipe(
+                  Effect.tap(() => Deferred.succeed(held, undefined)),
+                  Effect.tap(() => Deferred.await(release))
+                )
+              )
+              .pipe(Effect.forkScoped)
+            yield* Deferred.await(held)
+
+            const during = yield* journal.watermarks("chat-1").pipe(Effect.timeout("1 second"))
+            const opened = yield* journal
+              .openFollow({ streamId: "chat-1", startAt: "latest" })
+              .pipe(Effect.timeout("1 second"))
+            yield* Deferred.succeed(release, undefined)
+            yield* journal.notify(yield* Fiber.join(writing))
+            const delivered = yield* Effect.timeout(
+              Stream.runCollect(opened.stream.pipe(Stream.take(1))),
+              "1 second"
+            )
+            return {
+              during: during.headSequence,
+              initialSequence: opened.initialSequence,
+              delivered: delivered.map((delivery) =>
+                delivery.kind === "record" ? delivery.record.sequence : delivery.kind
+              )
+            }
+          }).pipe(Effect.provide(SqliteClient.layer({ filename })))
+        )
+      )
+
+      expect(result).toEqual({ during: 1, initialSequence: 1, delivered: [2] })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })

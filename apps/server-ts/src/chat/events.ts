@@ -23,11 +23,16 @@ import {
 } from "effect"
 import * as Sse from "effect/unstable/encoding/Sse"
 import type { SessionEventRecord } from "../persistence/events/model.js"
-import { ChatEventStore, type ChatEventDelivery } from "../persistence/events/store.js"
+import {
+  ChatEventStore,
+  type ChatEventDelivery,
+  type ChatEventStoreError
+} from "../persistence/events/store.js"
 import { Persistence } from "../persistence/service.js"
 import { boundConversationWindow } from "./history-budget.js"
 import { encodeSnapshotJson, snapshotJsonBytes } from "./snapshot-encoding.js"
-import { ChatHistory } from "./history.js"
+import { ChatHistory, type HistoryRead } from "./history.js"
+import type { ChatHistoryFailure } from "./history-errors.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import {
   chatOpenTimer,
@@ -149,6 +154,65 @@ interface ResumeSnapshotBudget {
   readonly occupiedSequences: ReadonlySet<number>
 }
 
+/** What one read of the database and the in-memory projection gives. */
+type ResumeRead =
+  | {
+      readonly kind: "overflow"
+      readonly result: "active_overflow" | "initial_budget_overflow" | "durable_overflow"
+      readonly checkpointSequence: number
+      readonly activeEventCount: number
+      readonly initialSnapshotBytes: number | undefined
+    }
+  | {
+      readonly kind: "complete"
+      readonly history: HistoryRead
+      readonly appliedSequence: number
+      readonly checkpointSequence: number
+      readonly active: ReadonlyArray<SessionEventRecord>
+      readonly durable: ReadonlyArray<SessionEventRecord>
+    }
+
+/**
+ * Whether the projection must be shown to agree with the database read.
+ * "checked" for a snapshot beside the write queue; "trusted" inside the write
+ * queue, where every commit has been applied before the read starts.
+ */
+type ResumeCoverage = "checked" | "trusted"
+
+/** The in-memory projection disagreed with the snapshot's commit point. */
+class ResumeSnapshotStale extends Schema.TaggedError<ResumeSnapshotStale>()("ResumeSnapshotStale", {
+  appliedSequence: Schema.Int,
+  checkpointSequence: Schema.Int,
+  publishedThrough: Schema.Int,
+  trimFloor: Schema.Int
+}) {}
+
+// A commit is applied to the projection right after COMMIT, so a stale
+// snapshot is current again within milliseconds: three more tries over about
+// 35 ms, then the write-queue read.
+const resumeSnapshotRetry = {
+  times: 3,
+  schedule: Schedule.exponential("5 millis"),
+  while: (error: unknown) => error instanceof ResumeSnapshotStale
+}
+
+/**
+ * Opening a chat sends one snapshot and then the live tail, with every
+ * journal sequence in exactly one of them. The follower subscribes first.
+ * Then one read transaction on a reader connection (`Persistence.snapshot`)
+ * reads history, run, approvals, the journal head A and the checkpoint C at
+ * one commit point, without waiting for the writer. The handover point P is
+ * that A: the snapshot holds the transaction's rows plus the in-memory
+ * projection's records in (C, P], and the tail drops every follower record at
+ * or below P. The projection is not part of the transaction, so the snapshot
+ * counts only when it agrees with A and C: it has applied every commit
+ * through P (`publishedThrough >= P`, else live-only records at or below P
+ * would be in neither part) and has dropped no record above C (`trimFloor <=
+ * C`, else a run that ended or restarted after the transaction began took
+ * records the transaction still needs). A disagreement is retried; if it
+ * persists, the capture runs inside the write queue (`consistentRead`), where
+ * the projection and the database agree by construction.
+ */
 const openResumeStream = Effect.fn("ChatEventStream.openResume")(function* (
   options: OpenResumeStreamInput
 ): Effect.fn.Return<Stream.Stream<Sse.Event, ChatStreamError>, ChatStreamError, Scope.Scope> {
@@ -159,21 +223,18 @@ const openResumeStream = Effect.fn("ChatEventStream.openResume")(function* (
     })
     .pipe(Effect.mapError(toStreamError))
   const followerMs = options.timer?.mark("resume_follower")
-  const queuedAt = options.timer?.now()
-  const capture = captureResumeProjection(
-    options.events,
-    options.history,
-    options.input.sessionId,
-    queuedAt,
-    options.timer
-  )
-  const projection = yield* options.persistence
-    .consistentRead(
-      options.resumeId === undefined
-        ? capture
-        : capture.pipe(Effect.annotateLogs("resume_id", options.resumeId))
-    )
-    .pipe(Effect.mapError(toStreamError))
+  const capture = captureResumeProjection({
+    events: options.events,
+    history: options.history,
+    persistence: options.persistence,
+    sessionId: options.input.sessionId,
+    timer: options.timer
+  })
+  const projection = yield* (
+    options.resumeId === undefined
+      ? capture
+      : capture.pipe(Effect.annotateLogs("resume_id", options.resumeId))
+  ).pipe(Effect.mapError(toStreamError))
   const captureTotalMs = options.timer?.mark("resume_total")
 
   if (options.timer !== undefined && chatOpenTracingEnabled()) {
@@ -207,69 +268,129 @@ const openResumeStream = Effect.fn("ChatEventStream.openResume")(function* (
   )
 })
 
-const boundedHistoryWindow = Effect.fn("ChatEventStream.boundedHistoryWindow")(function* (
-  history: ChatHistory["Service"],
-  sessionId: string
-): Effect.fn.Return<HistoryResponse, unknown> {
-  const snapshot = yield* history.get({ sessionId, limit: RESUME_HISTORY_WINDOW_LIMIT })
-  return boundConversationWindow(snapshot, RESUME_HISTORY_CAPACITY_BYTES)
-})
-
 const captureResumeProjection = Effect.fn("ChatEventStream.captureResumeProjection")(function* (
-  events: ChatEventStore["Service"],
-  history: ChatHistory["Service"],
-  sessionId: string,
-  queuedAt: number | undefined,
-  timer: ChatOpenTimer | undefined
+  input: Pick<OpenResumeStreamInput, "events" | "history" | "persistence" | "timer"> & {
+    readonly sessionId: string
+  }
 ): Effect.fn.Return<ResumeProjection, unknown> {
-  const captureStartedAt = timer?.now()
-  const queueWaitMs = timer?.mark("resume_capture_queue")
+  const { timer } = input
+  const read = (coverage: ResumeCoverage) => readResume({ ...input, coverage })
+  const captured = yield* input.persistence.snapshot(read("checked")).pipe(
+    Effect.retry(resumeSnapshotRetry),
+    Effect.catchTag("ResumeSnapshotStale", (stale) =>
+      Effect.logInfo("Chat open read the write queue: the projection lagged the snapshot", {
+        appliedSequence: stale.appliedSequence,
+        checkpointSequence: stale.checkpointSequence,
+        publishedThrough: stale.publishedThrough,
+        trimFloor: stale.trimFloor
+      }).pipe(Effect.andThen(input.persistence.consistentRead(read("trusted"))))
+    )
+  )
   const report = (result: string, fields: Readonly<Record<string, number | undefined>>) =>
     timer === undefined || !chatOpenTracingEnabled()
       ? Effect.void
       : logChatOpenTiming("chat.resume_capture_timing", {
-          queueWaitMs:
-            queuedAt === undefined || captureStartedAt === undefined
-              ? queueWaitMs
-              : Math.round((captureStartedAt - queuedAt) * 100) / 100,
           ...fields,
           totalMs: timer.total(),
           result
         })
-  const snapshot = yield* boundedHistoryWindow(history, sessionId)
-  const historyMs = timer?.mark("resume_history")
-  const checkpointSequence = snapshot.runtime.checkpoint_seq
-  const appliedSequence = snapshot.runtime.latest_event_seq
+  if (captured.kind === "overflow") {
+    yield* report(captured.result, {
+      activeEventCount: captured.activeEventCount,
+      initialSnapshotBytes: captured.initialSnapshotBytes
+    })
+    return { kind: "overflow", safeCursor: captured.checkpointSequence }
+  }
+
+  const history = yield* input.history.withBudget(captured.history)
+  const bySequence = new Map<number, SessionEventRecord>()
+  for (const record of captured.durable) bySequence.set(record.sequence, record)
+  for (const record of captured.active) bySequence.set(record.sequence, record)
+  const activeEvents = [...bySequence.values()]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map(eventRecordToProjectionEvent)
+  const encoded = encodeSnapshotJson(
+    snapshotProtocolEvent(input.sessionId, captured.appliedSequence, history, activeEvents)
+  )
+  if (
+    activeEvents.length > RESUME_SNAPSHOT_CAPACITY_EVENTS ||
+    encoded.bytes > RESUME_SNAPSHOT_CAPACITY_BYTES
+  ) {
+    yield* report("final_budget_overflow", { activeEventCount: activeEvents.length })
+    return { kind: "overflow", safeCursor: captured.checkpointSequence }
+  }
+  yield* report("complete", {
+    finalProjectionMs: timer?.mark("resume_final_projection"),
+    activeEventCount: activeEvents.length,
+    finalSnapshotBytes: encoded.bytes
+  })
+  return { kind: "complete", appliedSequence: captured.appliedSequence, snapshotData: encoded.data }
+})
+
+/** Every database statement here runs on a reader: inside `Persistence.snapshot`
+ * a statement on the writer would run outside the transaction and wait for it. */
+const readResume = Effect.fn("ChatEventStream.readResume")(function* (input: {
+  readonly events: ChatEventStore["Service"]
+  readonly history: ChatHistory["Service"]
+  readonly sessionId: string
+  readonly coverage: ResumeCoverage
+  readonly timer: ChatOpenTimer | undefined
+}): Effect.fn.Return<
+  ResumeRead,
+  ChatHistoryFailure | ChatEventStoreError | ChatStreamError | ResumeSnapshotStale
+> {
+  const { events, sessionId, timer } = input
+  // Time spent waiting for a snapshot permit, or for the write queue.
+  timer?.mark("resume_capture_queue")
+  const loaded = yield* input.history.read({ sessionId, limit: RESUME_HISTORY_WINDOW_LIMIT })
+  timer?.mark("resume_history")
+  const history = boundConversationWindow(loaded.history, RESUME_HISTORY_CAPACITY_BYTES)
+  const checkpointSequence = history.runtime.checkpoint_seq
+  const appliedSequence = history.runtime.latest_event_seq
   const active = yield* events.activeProjection({
     sessionId,
     afterSequence: checkpointSequence,
     throughSequence: appliedSequence
   })
-  const activeProjectionMs = timer?.mark("resume_active_projection")
+  timer?.mark("resume_active_projection")
+  if (
+    input.coverage === "checked" &&
+    (active.publishedThrough < appliedSequence || active.trimFloor > checkpointSequence)
+  ) {
+    return yield* new ResumeSnapshotStale({
+      appliedSequence,
+      checkpointSequence,
+      publishedThrough: active.publishedThrough,
+      trimFloor: active.trimFloor
+    })
+  }
   if (active.kind === "overflow") {
-    yield* report("active_overflow", { historyMs, activeProjectionMs })
-    return { kind: "overflow", safeCursor: checkpointSequence }
+    return {
+      kind: "overflow",
+      result: "active_overflow",
+      checkpointSequence,
+      activeEventCount: 0,
+      initialSnapshotBytes: undefined
+    }
   }
 
+  // An estimate that bounds the durable read: the snapshot's envelope and the
+  // context budget, which joins after the transaction, are counted only by the
+  // final check on the encoded snapshot.
   const projectedActive = active.records.map(eventRecordToProjectionEvent)
-  const occupiedSequences = new Set(active.records.map((record) => record.sequence))
-  const initialEncoded = encodeSnapshotJson(
-    snapshotProtocolEvent(sessionId, appliedSequence, snapshot, projectedActive)
-  )
-  const initialBytes = initialEncoded.bytes
-  const initialProjectionMs = timer?.mark("resume_initial_projection")
+  const initialBytes = snapshotJsonBytes(history) + snapshotJsonBytes(projectedActive)
+  timer?.mark("resume_initial_projection")
   if (
     projectedActive.length > RESUME_SNAPSHOT_CAPACITY_EVENTS ||
     initialBytes > RESUME_SNAPSHOT_CAPACITY_BYTES
   ) {
-    yield* report("initial_budget_overflow", {
-      historyMs,
-      activeProjectionMs,
-      initialProjectionMs,
+    return {
+      kind: "overflow",
+      result: "initial_budget_overflow",
+      checkpointSequence,
       activeEventCount: active.records.length,
       initialSnapshotBytes: initialBytes
-    })
-    return { kind: "overflow", safeCursor: checkpointSequence }
+    }
   }
 
   const durable = yield* readDurableRange({
@@ -280,67 +401,27 @@ const captureResumeProjection = Effect.fn("ChatEventStream.captureResumeProjecti
     budget: {
       bytes: initialBytes,
       eventCount: projectedActive.length,
-      occupiedSequences
+      occupiedSequences: new Set(active.records.map((record) => record.sequence))
     }
   })
-  const durableRangeMs = timer?.mark("resume_durable_range")
+  timer?.mark("resume_durable_range")
   if (durable.kind === "overflow") {
-    yield* report("durable_overflow", {
-      historyMs,
-      activeProjectionMs,
-      initialProjectionMs,
-      durableRangeMs,
+    return {
+      kind: "overflow",
+      result: "durable_overflow",
+      checkpointSequence,
       activeEventCount: active.records.length,
       initialSnapshotBytes: initialBytes
-    })
-    return { kind: "overflow", safeCursor: checkpointSequence }
+    }
   }
-  const hasNewDurable = durable.records.some((record) => !occupiedSequences.has(record.sequence))
-  if (!hasNewDurable) {
-    yield* report("complete", {
-      historyMs,
-      activeProjectionMs,
-      initialProjectionMs,
-      durableRangeMs,
-      finalProjectionMs: timer?.mark("resume_final_projection"),
-      activeEventCount: projectedActive.length,
-      finalSnapshotBytes: initialBytes
-    })
-    return { kind: "complete", appliedSequence, snapshotData: initialEncoded.data }
+  return {
+    kind: "complete",
+    history: { history, budget: loaded.budget },
+    appliedSequence,
+    checkpointSequence,
+    active: active.records,
+    durable: durable.records
   }
-  const bySequence = new Map<number, SessionEventRecord>()
-  for (const record of durable.records) bySequence.set(record.sequence, record)
-  for (const record of active.records) bySequence.set(record.sequence, record)
-  const activeEvents = [...bySequence.values()]
-    .sort((left, right) => left.sequence - right.sequence)
-    .map(eventRecordToProjectionEvent)
-  const encoded = encodeSnapshotJson(
-    snapshotProtocolEvent(sessionId, appliedSequence, snapshot, activeEvents)
-  )
-  const finalBytes = encoded.bytes
-  if (
-    activeEvents.length > RESUME_SNAPSHOT_CAPACITY_EVENTS ||
-    finalBytes > RESUME_SNAPSHOT_CAPACITY_BYTES
-  ) {
-    yield* report("final_budget_overflow", {
-      historyMs,
-      activeProjectionMs,
-      initialProjectionMs,
-      durableRangeMs,
-      activeEventCount: activeEvents.length
-    })
-    return { kind: "overflow", safeCursor: checkpointSequence }
-  }
-  yield* report("complete", {
-    historyMs,
-    activeProjectionMs,
-    initialProjectionMs,
-    durableRangeMs,
-    finalProjectionMs: timer?.mark("resume_final_projection"),
-    activeEventCount: activeEvents.length,
-    finalSnapshotBytes: finalBytes
-  })
-  return { kind: "complete", appliedSequence, snapshotData: encoded.data }
 })
 
 const readDurableRange = Effect.fn("ChatEventStream.readDurableRange")(function* (input: {
@@ -349,7 +430,7 @@ const readDurableRange = Effect.fn("ChatEventStream.readDurableRange")(function*
   readonly afterSequence: number
   readonly throughSequence: number
   readonly budget: ResumeSnapshotBudget
-}): Effect.fn.Return<DurableResumeRange, unknown> {
+}): Effect.fn.Return<DurableResumeRange, ChatEventStoreError | ChatStreamError> {
   const records: Array<SessionEventRecord> = []
   let cursor = input.afterSequence
   let bytes = input.budget.bytes

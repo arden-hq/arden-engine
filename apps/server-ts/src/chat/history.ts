@@ -29,7 +29,7 @@ import {
   type ToolExecutionResultMetadata
 } from "../persistence/tools/history-queries.js"
 import type { ToolExecutionStoreError } from "../persistence/tools/store.js"
-import { boundActiveWorkTail } from "./history-budget.js"
+import { boundActiveWorkTail, type HistoryRows } from "./history-budget.js"
 import {
   ChatHistoryError,
   ChatSessionNotFound,
@@ -66,6 +66,15 @@ interface ContextBudgetInput {
 
 type ContextBudget = HistoryResponse["context_budget"]
 
+/** A Chat's history as its rows give it, before the context budget, which
+ * comes from model settings on the writer rather than from the Chat. Every
+ * statement of `read` runs on a reader, so a snapshot transaction holds it
+ * to one commit. */
+export interface HistoryRead {
+  readonly history: HistoryRows
+  readonly budget: ContextBudgetInput
+}
+
 export interface ChatHistoryLiveOptions {
   readonly contextBudget: (
     input: ContextBudgetInput
@@ -74,6 +83,8 @@ export interface ChatHistoryLiveOptions {
 
 export interface ChatHistoryShape {
   readonly get: (input: HistoryRouteOptions) => Effect.Effect<HistoryResponse, ChatHistoryFailure>
+  readonly read: (input: HistoryRouteOptions) => Effect.Effect<HistoryRead, ChatHistoryFailure>
+  readonly withBudget: (read: HistoryRead) => Effect.Effect<HistoryResponse, ChatHistoryFailure>
   readonly getTurnWork: (
     input: TurnWorkRouteOptions
   ) => Effect.Effect<TurnWorkResponse, ChatHistoryFailure>
@@ -145,22 +156,19 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             : { session_id: parent.sessionId, session_ref: parent.publicRef }
         })
 
-        const get = Effect.fn("ChatHistory.get")(function* (
+        const read = Effect.fn("ChatHistory.read")(function* (
           input: HistoryRouteOptions
-        ): Effect.fn.Return<HistoryResponse, ChatHistoryFailure> {
+        ): Effect.fn.Return<HistoryRead, ChatHistoryFailure> {
           const timer = chatOpenTimer()
           const header = yield* sessions.loadHistoryHeader(input.sessionId)
           if (header === null) {
             if (input.sessionId !== undefined) {
               return yield* new ChatSessionNotFound({ sessionId: input.sessionId })
             }
-            return yield* options
-              .contextBudget({
-                model: null,
-                inputTokens: 0,
-                messageCount: 0
-              })
-              .pipe(Effect.map(emptyHistory), Effect.withSpan("ChatHistory.emptyHistory"))
+            return {
+              history: emptyHistory,
+              budget: { model: null, inputTokens: 0, messageCount: 0 }
+            }
           }
 
           const sessionId = header.sessionId
@@ -228,11 +236,6 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             parentSource
           )
           const messageProjectionMs = timer?.mark()
-          const budget = yield* options.contextBudget({
-            model: header.chatModel,
-            inputTokens: header.lastInputTokens ?? 0,
-            messageCount: header.activeMessageCount
-          })
 
           if (timer !== undefined)
             yield* logChatOpenTiming("chat.history_timing", {
@@ -244,7 +247,6 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               connectionsMs,
               metadataMs,
               messageProjectionMs,
-              budgetMs: timer.mark(),
               totalMs: timer.total(),
               pageRows: page.records.length,
               turnCount: turnIds.length,
@@ -253,7 +255,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               activeRun: run !== null
             })
 
-          return {
+          const history = {
             messages,
             active_work_tail: activeWorkTail,
             runtime: {
@@ -266,7 +268,6 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
               pending_connections: pendingConnections
             },
             page: historyPage(page),
-            context_budget: budget,
             turn_shells: turnShells.map((shell) => ({
               turn_id: shell.turnId,
               message_start_seq: shell.messageStartSeq,
@@ -281,6 +282,27 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
                 : { error_code: shell.failure.code, error_message: shell.failure.message })
             }))
           }
+          return {
+            history,
+            budget: {
+              model: header.chatModel,
+              inputTokens: header.lastInputTokens ?? 0,
+              messageCount: header.activeMessageCount
+            }
+          }
+        })
+
+        const withBudget = Effect.fn("ChatHistory.withBudget")(function* (
+          loaded: HistoryRead
+        ): Effect.fn.Return<HistoryResponse, ChatHistoryFailure> {
+          const budget = yield* options.contextBudget(loaded.budget)
+          return { ...loaded.history, context_budget: budget }
+        })
+
+        const get = Effect.fn("ChatHistory.get")(function* (
+          input: HistoryRouteOptions
+        ): Effect.fn.Return<HistoryResponse, ChatHistoryFailure> {
+          return yield* withBudget(yield* read(input))
         })
 
         const getTurnWork = Effect.fn("ChatHistory.getTurnWork")(function* (
@@ -421,6 +443,8 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
 
         return ChatHistory.of({
           get,
+          read,
+          withBudget,
           getTurnWork,
           getTurnDetails,
           getToolCall,

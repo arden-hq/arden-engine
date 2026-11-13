@@ -105,6 +105,10 @@ export interface JournalRuntimeOptions {
   readonly initialize?: boolean
   readonly subscriberCapacity?: number
   readonly subscriberByteCapacity?: number
+  /** A read-only connection for watermarks, pages and followers, so they do
+   * not wait behind a write transaction on the writer. Appends stay on the
+   * writer. Defaults to the writer (an in-memory database has one connection). */
+  readonly reader?: SqlClient.SqlClient
 }
 
 export interface OpenJournalFollow {
@@ -543,6 +547,7 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
   options: JournalRuntimeOptions = {}
 ): Effect.fn.Return<JournalRuntime, JournalError, Scope.Scope> {
   if (options.initialize !== false) yield* initializeJournalSchema(sql)
+  const reader = options.reader ?? sql
   const capacity = options.subscriberCapacity ?? DEFAULT_SUBSCRIBER_CAPACITY
   if (!Number.isSafeInteger(capacity) || capacity < 1) {
     return yield* journalError(
@@ -681,11 +686,11 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
   })
 
   const watermarks = Effect.fn("Journal.watermarks")(function* (streamId: string) {
-    return yield* readState(sql, yield* validateStreamId(streamId, "read"), "read")
+    return yield* readState(reader, yield* validateStreamId(streamId, "read"), "read")
   })
 
   const readPage = Effect.fn("Journal.readPagePublic")(function* (input: JournalReadPage) {
-    return yield* readPageWithSql(sql, input, "read")
+    return yield* readPageWithSql(reader, input, "read")
   })
 
   const append = Effect.fn("Journal.append")(function* (
@@ -726,7 +731,7 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
     }
     const replayFloor = yield* validateCursor(input.replayFloor ?? 0, "follow", "replayFloor")
     const subscriber = yield* subscribe(streamId)
-    const snapshot = yield* readState(sql, streamId, "follow")
+    const snapshot = yield* readState(reader, streamId, "follow")
     let cursor = startAt === "latest" ? snapshot.headSequence : 0
     if (input.afterSequence !== undefined) {
       cursor = yield* validateCursor(input.afterSequence, "follow", "afterSequence")
@@ -746,7 +751,7 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
     }
 
     const cursorRef = yield* Ref.make(cursor)
-    const replay = durableRange(sql, streamId, cursor, snapshot.headSequence, true)
+    const replay = durableRange(reader, streamId, cursor, snapshot.headSequence, true)
     const initial = reset === undefined ? replay : Stream.concat(Stream.make(reset), replay)
     const ready = Stream.fromEffect(Ref.set(cursorRef, snapshot.headSequence)).pipe(Stream.drain)
     const live = Stream.fromQueue(subscriber.queue).pipe(
@@ -784,7 +789,7 @@ export const makeJournalRuntime = Effect.fn("Journal.makeRuntime")(function* (
         return Stream.unwrap(
           Ref.get(cursorRef).pipe(
             Effect.map((afterSequence) =>
-              durableRange(sql, streamId, afterSequence, signal.throughSequence, false).pipe(
+              durableRange(reader, streamId, afterSequence, signal.throughSequence, false).pipe(
                 Stream.concat(
                   Stream.fromEffect(
                     Ref.update(cursorRef, (current) => Math.max(current, signal.throughSequence))

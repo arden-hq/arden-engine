@@ -5,6 +5,7 @@ import { disposableForkSql } from "../schema/fork-disposition.js"
 import { CODE_MODE_TOOL, SPAWN_AGENT_TOOL, nestedCallMarker } from "../tools/tool-roles.js"
 import { sanitizeApprovalPresentation, type RuntimeApprovalSnapshot } from "@arden-hq/protocol/chat"
 import { Effect, Predicate, Schema } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
 import type { PendingConnectionDecision } from "../../connections/recovery.js"
 import { JsonObjectSchema } from "../json.js"
 import { grantFolderField } from "../permissions/grant-folder.js"
@@ -68,6 +69,8 @@ export const makeToolHistory = ({
   ToolExecutionStore["Service"],
   "priorResults" | "pendingConnection" | "allPendingConnections"
 > => {
+  // History reads (a chat opening) run on a reader, inside its snapshot when
+  // there is one; the lookups for tool execution stay on the writer.
   const sql = writer.sql
   const historySql = reader
   const agentAssignment = Effect.fn("SqliteToolExecutionStore.agentAssignment")(function* (
@@ -320,11 +323,11 @@ export const makeToolHistory = ({
         toolError("pending_approvals", "invalid", "Invalid session id", undefined, cause)
       )
     )
-    const rows = yield* sql<ApprovalRow>`
+    const rows = yield* historySql<ApprovalRow>`
       SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
              preview, diff, status, requested_at, resolved_at, expires_at,
              result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(sql)})
+      FROM (${pendingDecisionCards(historySql)})
       WHERE session_id = ${validSessionId}
         AND COALESCE(json_extract(payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'
       ORDER BY requested_at, run_id, tool_call_id
@@ -339,19 +342,20 @@ export const makeToolHistory = ({
         )
       )
     )
-    yield* validatePendingLineage(rows, "pending_approvals")
+    yield* validatePendingLineage(historySql, rows, "pending_approvals")
     return yield* decodePendingApprovals(rows)
   })
 
   const descendantSessionIds = Effect.fn("SqliteToolExecutionStore.descendantSessionIds")(
     function* (
+      db: SqlClient.SqlClient,
       sessionId: string
     ): Effect.fn.Return<ReadonlyArray<string>, ToolExecutionStoreError> {
-      const rows = yield* sql<{ readonly session_id: string }>`
-      WITH RECURSIVE ${sessionDescendants(sql, {
+      const rows = yield* db<{ readonly session_id: string }>`
+      WITH RECURSIVE ${sessionDescendants(db, {
         name: "descendants",
-        from: sql`SELECT session_id FROM sessions WHERE session_id = ${sessionId}`,
-        where: sql`child.session_type = 'agent'`
+        from: db`SELECT session_id FROM sessions WHERE session_id = ${sessionId}`,
+        where: db`child.session_type = 'agent'`
       })}
       SELECT session_id FROM descendants WHERE session_id != ${sessionId}
     `.pipe(
@@ -371,10 +375,11 @@ export const makeToolHistory = ({
 
   const indexedVisibilityReady = Effect.fn("SqliteToolExecutionStore.indexedVisibilityReady")(
     function* (
+      db: SqlClient.SqlClient,
       viewerSessionId: string,
       operation: "pending_approvals" | "pending_connections"
     ): Effect.fn.Return<boolean, ToolExecutionStoreError> {
-      const rows = yield* sql<{ readonly finished_at: string | null }>`
+      const rows = yield* db<{ readonly finished_at: string | null }>`
         SELECT finished_at FROM data_backfills
         WHERE name = 'pending_decision_visibility_v2'`.pipe(
         Effect.mapError((cause) =>
@@ -388,7 +393,7 @@ export const makeToolHistory = ({
         )
       )
       if (rows[0]?.finished_at == null) return false
-      const unresolved = yield* sql`
+      const unresolved = yield* db`
         WITH RECURSIVE sources(session_id, source_kind, decision_kind) AS (
           SELECT source.session_id, 'run', source.kind
           FROM pending_decision_visibility_unresolved AS unresolved
@@ -397,8 +402,8 @@ export const makeToolHistory = ({
           WHERE unresolved.source_kind = 'run' AND source.status = 'pending'
             AND CASE WHEN json_valid(source.payload_json) THEN ${
               operation === "pending_connections"
-                ? sql`json_extract(source.payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
-                : sql`COALESCE(json_extract(source.payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
+                ? db`json_extract(source.payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
+                : db`COALESCE(json_extract(source.payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
             } ELSE 1 END
           UNION ALL
           SELECT source.session_id, 'deferred', 'tool_approval'
@@ -408,13 +413,13 @@ export const makeToolHistory = ({
           WHERE unresolved.source_kind = 'deferred' AND source.status = 'pending'
             AND CASE WHEN json_valid(source.payload_json) THEN ${
               operation === "pending_connections"
-                ? sql`json_extract(source.payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
-                : sql`COALESCE(json_extract(source.payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
+                ? db`json_extract(source.payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
+                : db`COALESCE(json_extract(source.payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
             } ELSE 1 END
-        ), ${sessionAncestors(sql, {
+        ), ${sessionAncestors(db, {
           name: "lineage",
-          from: sql`SELECT session_id FROM sources JOIN sessions USING(session_id)`,
-          where: sql`child.session_type = 'agent'`,
+          from: db`SELECT session_id FROM sources JOIN sessions USING(session_id)`,
+          where: db`child.session_type = 'agent'`,
           root: true
         })}
         SELECT 1 FROM lineage WHERE session_id = ${viewerSessionId}
@@ -424,7 +429,7 @@ export const makeToolHistory = ({
         JOIN sources AS source ON source.session_id = lineage.root_session_id
         JOIN session_fork_requests AS fork ON fork.child_session_id = lineage.session_id
           AND fork.state = 'ready' AND json_valid(fork.request_json)
-          AND ${sql.literal(disposableForkSql("fork"))}
+          AND ${db.literal(disposableForkSql("fork"))}
         JOIN sessions AS owner ON owner.session_id = fork.source_session_id
           AND owner.session_type = 'chat'
         WHERE session.session_type = 'chat' AND source.source_kind = 'run'
@@ -450,30 +455,31 @@ export const makeToolHistory = ({
 
   const legacySideOutcomeRows = Effect.fn("SqliteToolExecutionStore.legacySideOutcomeRows")(
     function* (
+      db: SqlClient.SqlClient,
       viewerSessionId: string,
       connection: boolean
     ): Effect.fn.Return<ReadonlyArray<ApprovalRow>, ToolExecutionStoreError> {
-      const rows = yield* sql<ApprovalRow>`
-        WITH RECURSIVE ${sessionDescendants(sql, {
+      const rows = yield* db<ApprovalRow>`
+        WITH RECURSIVE ${sessionDescendants(db, {
           name: "side_tree",
-          from: sql`SELECT fork.child_session_id AS session_id FROM session_fork_requests AS fork
+          from: db`SELECT fork.child_session_id AS session_id FROM session_fork_requests AS fork
             CROSS JOIN sessions AS side ON side.session_id = fork.child_session_id
               AND side.session_type = 'chat'
             WHERE fork.source_session_id = ${viewerSessionId} AND fork.state = 'ready'
               AND json_valid(fork.request_json)
-              AND ${sql.literal(disposableForkSql("fork"))}`,
-          where: sql`child.session_type = 'agent'`
+              AND ${db.literal(disposableForkSql("fork"))}`,
+          where: db`child.session_type = 'agent'`
         })}
         SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
           preview, diff, status, requested_at, resolved_at, expires_at,
           result_feedback, kind, payload_json, resolution_json, source
-        FROM (${pendingDecisionCards(sql)})
+        FROM (${pendingDecisionCards(db)})
         WHERE session_id IN (SELECT session_id FROM side_tree)
           AND source = 'run' AND kind = 'tool_outcome'
           AND ${
             connection
-              ? sql`json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
-              : sql`COALESCE(json_extract(payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
+              ? db`json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'`
+              : db`COALESCE(json_extract(payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'`
           }
         ORDER BY requested_at, run_id, tool_call_id
       `.pipe(
@@ -512,11 +518,12 @@ export const makeToolHistory = ({
 
   const validatePendingLineage = Effect.fn("SqliteToolExecutionStore.validatePendingLineage")(
     function* (
+      db: SqlClient.SqlClient,
       rows: ReadonlyArray<ApprovalRow>,
       operation: "pending_approvals" | "pending_connections"
     ): Effect.fn.Return<void, ToolExecutionStoreError> {
       for (const sourceSessionId of new Set(rows.map((row) => row.session_id))) {
-        const lineage = yield* sql
+        const lineage = yield* db
           .unsafe<{
             readonly session_type: string
             readonly edge_valid: number
@@ -547,12 +554,12 @@ export const makeToolHistory = ({
   )(function* (
     sessionId: string
   ): Effect.fn.Return<ReadonlyArray<RuntimeApprovalSnapshot>, ToolExecutionStoreError> {
-    if (yield* indexedVisibilityReady(sessionId, "pending_approvals")) {
-      const rows = yield* sql<ApprovalRow>`
+    if (yield* indexedVisibilityReady(historySql, sessionId, "pending_approvals")) {
+      const rows = yield* historySql<ApprovalRow>`
         SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
                preview, diff, status, requested_at, resolved_at, expires_at,
                result_feedback, kind, payload_json, resolution_json, source, work_json
-        FROM (${visiblePendingDecisionCards(sql, sessionId)})
+        FROM (${visiblePendingDecisionCards(historySql, sessionId)})
         WHERE session_id != ${sessionId}
           AND COALESCE(json_extract(payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'
         ORDER BY requested_at, run_id, tool_call_id, source
@@ -569,18 +576,18 @@ export const makeToolHistory = ({
       )
       return yield* decodePendingApprovals(rows)
     }
-    const descendantIds = yield* descendantSessionIds(sessionId)
+    const descendantIds = yield* descendantSessionIds(historySql, sessionId)
     const ids = yield* validDescendantSessionIds(descendantIds, "pending_approvals")
-    const sideRows = yield* legacySideOutcomeRows(sessionId, false)
+    const sideRows = yield* legacySideOutcomeRows(historySql, sessionId, false)
     if (ids.length === 0) {
-      yield* validatePendingLineage(sideRows, "pending_approvals")
+      yield* validatePendingLineage(historySql, sideRows, "pending_approvals")
       return yield* decodePendingApprovals(orderedDecisionRows(sideRows))
     }
-    const rows = yield* sql<ApprovalRow>`
+    const rows = yield* historySql<ApprovalRow>`
       SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
              preview, diff, status, requested_at, resolved_at, expires_at,
              result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(sql)})
+      FROM (${pendingDecisionCards(historySql)})
       WHERE session_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
         AND COALESCE(json_extract(payload_json, '$.approval_data._tag'), '') != 'ConnectionRequired'
       ORDER BY session_id, requested_at, run_id, tool_call_id
@@ -595,7 +602,7 @@ export const makeToolHistory = ({
         )
       )
     )
-    yield* validatePendingLineage([...rows, ...sideRows], "pending_approvals")
+    yield* validatePendingLineage(historySql, [...rows, ...sideRows], "pending_approvals")
     return yield* decodePendingApprovals(orderedDecisionRows([...rows, ...sideRows]))
   })
 
@@ -624,11 +631,11 @@ export const makeToolHistory = ({
         toolError("pending_connections", "invalid", "Invalid session id", undefined, cause)
       )
     )
-    const rows = yield* sql<ApprovalRow>`
+    const rows = yield* historySql<ApprovalRow>`
       SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
              preview, diff, status, requested_at, resolved_at, expires_at,
              result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(sql)})
+      FROM (${pendingDecisionCards(historySql)})
       WHERE session_id = ${validSessionId}
         AND json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
       ORDER BY requested_at, run_id, tool_call_id
@@ -643,7 +650,7 @@ export const makeToolHistory = ({
         )
       )
     )
-    yield* validatePendingLineage(rows, "pending_connections")
+    yield* validatePendingLineage(historySql, rows, "pending_connections")
     return yield* decodePendingConnections(rows)
   })
 
@@ -672,7 +679,7 @@ export const makeToolHistory = ({
       )
       const decisions = yield* Effect.forEach(rows, (row) =>
         Effect.gen(function* () {
-          yield* validatePendingLineage([row], "pending_connections")
+          yield* validatePendingLineage(sql, [row], "pending_connections")
           return (yield* decodePendingConnections([row]))[0]
         }).pipe(
           Effect.catchTag("ToolExecutionStoreError", (error) => {
@@ -697,12 +704,12 @@ export const makeToolHistory = ({
   )(function* (
     sessionId: string
   ): Effect.fn.Return<ReadonlyArray<PendingConnectionDecision>, ToolExecutionStoreError> {
-    if (yield* indexedVisibilityReady(sessionId, "pending_connections")) {
-      const rows = yield* sql<ApprovalRow>`
+    if (yield* indexedVisibilityReady(historySql, sessionId, "pending_connections")) {
+      const rows = yield* historySql<ApprovalRow>`
         SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
                preview, diff, status, requested_at, resolved_at, expires_at,
                result_feedback, kind, payload_json, resolution_json, source
-        FROM (${visiblePendingDecisionCards(sql, sessionId)})
+        FROM (${visiblePendingDecisionCards(historySql, sessionId)})
         WHERE session_id != ${sessionId}
           AND json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
         ORDER BY requested_at, run_id, tool_call_id, source
@@ -719,18 +726,18 @@ export const makeToolHistory = ({
       )
       return yield* decodePendingConnections(rows)
     }
-    const descendantIds = yield* descendantSessionIds(sessionId)
+    const descendantIds = yield* descendantSessionIds(historySql, sessionId)
     const ids = yield* validDescendantSessionIds(descendantIds, "pending_connections")
-    const sideRows = yield* legacySideOutcomeRows(sessionId, true)
+    const sideRows = yield* legacySideOutcomeRows(historySql, sessionId, true)
     if (ids.length === 0) {
-      yield* validatePendingLineage(sideRows, "pending_connections")
+      yield* validatePendingLineage(historySql, sideRows, "pending_connections")
       return yield* decodePendingConnections(orderedDecisionRows(sideRows))
     }
-    const rows = yield* sql<ApprovalRow>`
+    const rows = yield* historySql<ApprovalRow>`
       SELECT run_id, session_id, tool_call_id, tool_name, action, scope,
              preview, diff, status, requested_at, resolved_at, expires_at,
              result_feedback, kind, payload_json, resolution_json, source
-      FROM (${pendingDecisionCards(sql)})
+      FROM (${pendingDecisionCards(historySql)})
       WHERE session_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
         AND json_extract(payload_json, '$.approval_data._tag') = 'ConnectionRequired'
       ORDER BY session_id, requested_at, run_id, tool_call_id
@@ -745,7 +752,7 @@ export const makeToolHistory = ({
         )
       )
     )
-    yield* validatePendingLineage([...rows, ...sideRows], "pending_connections")
+    yield* validatePendingLineage(historySql, [...rows, ...sideRows], "pending_connections")
     return yield* decodePendingConnections(orderedDecisionRows([...rows, ...sideRows]))
   })
 
@@ -789,7 +796,7 @@ export const makeToolHistory = ({
       )
       const row = rows[0]
       if (row === undefined) return null
-      yield* validatePendingLineage([row], "pending_connections")
+      yield* validatePendingLineage(sql, [row], "pending_connections")
       return yield* decodePendingConnection(row, "pending_connections")
     }
   )

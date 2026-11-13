@@ -64,15 +64,28 @@ export interface OpenChatEventFollow {
   readonly stream: Stream.Stream<ChatEventDelivery, ChatEventStoreError>
 }
 
+/** How far the in-memory projection agrees with the journal. A read of the
+ * database outside the write queue can see a commit the projection has not
+ * applied yet, or miss one that made the projection drop records. */
+interface ChatActiveProjectionCoverage {
+  /** The projection has applied every commit through this sequence. With no
+   * append since the server started, nothing is pending: the requested
+   * `throughSequence`. */
+  readonly publishedThrough: number
+  /** The highest sequence of a record the projection dropped with nothing
+   * later replacing it (its run ended or restarted); 0 when it never did. */
+  readonly trimFloor: number
+}
+
 export type ChatActiveProjection =
-  | {
+  | (ChatActiveProjectionCoverage & {
       readonly kind: "complete"
       readonly records: ReadonlyArray<SessionEventRecord>
-    }
-  | {
+    })
+  | (ChatActiveProjectionCoverage & {
       readonly kind: "overflow"
       readonly throughSequence: number
-    }
+    })
 
 export interface ReadChatActiveProjection {
   readonly sessionId: string

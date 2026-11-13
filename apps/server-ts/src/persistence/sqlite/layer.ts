@@ -127,7 +127,7 @@ import { ScriptJournal } from "../scripts/journal.js"
 import { makeScriptJournal } from "./script-journal.js"
 import { makeScriptResults } from "./script-results.js"
 import { Persistence, StorageStartupError } from "../service.js"
-import { makeWriter, type PersistenceDeps } from "./deps.js"
+import { makeWriter, READER_CONNECTIONS, type PersistenceDeps } from "./deps.js"
 import { installCapture } from "./tells/capture.js"
 import { makeTellAtCommit } from "./tells/tell.js"
 import type { UnitOfWork } from "../unit-of-work.js"
@@ -413,6 +413,7 @@ const persistencePorts = (built: BuiltStores) => {
           Effect.andThen(trimJournals({ ...deps, policy: storagePolicy })),
           Effect.asVoid
         ),
+        snapshot: deps.writer.snapshot,
         consistentRead: writes.runInteractive,
         drain: writes.flush
       })
@@ -491,12 +492,14 @@ const persistencePorts = (built: BuiltStores) => {
 export type SqlitePersistence =
   ReturnType<typeof persistencePorts> extends Context.Context<infer Ports> ? Ports : never
 
-export const sqliteStoresLayer = (
+/** The stores over the writer connection in context. {@link sqliteStoresLayer}
+ * provides the server's own writer; a test provides one it can also hold. */
+export const sqliteStoresOnWriter = (
   options: SqlitePersistenceOptions
 ): Layer.Layer<
   SqlitePersistence,
   StorageStartupError,
-  PersistenceWriteQueue | AutomationRules | ChatRules
+  PersistenceWriteQueue | AutomationRules | ChatRules | SqlClient.SqlClient
 > =>
   Layer.effectContext(
     Effect.gen(function* () {
@@ -529,7 +532,7 @@ export const sqliteStoresLayer = (
           : yield* makeSqliteThreadClient({
               filename: options.filename,
               readonly: true,
-              connections: 4
+              connections: READER_CONNECTIONS
             }).pipe(Effect.provide(Reactivity.layer))
       let tellAtCommit: Effect.Effect<void, never, UnitOfWork> | undefined
       const writer = makeWriter({ sql, reader, queue: writes, beforeCommit: () => tellAtCommit })
@@ -556,7 +559,8 @@ export const sqliteStoresLayer = (
       const models = makeModelStore({ writer, catalog, intelligence })
       const journalRuntime = yield* makeJournalRuntime(sql, {
         initialize: false,
-        subscriberCapacity: 4_096
+        subscriberCapacity: 4_096,
+        reader
       }).pipe(Effect.mapError((cause) => initError("Could not construct journal runtime", cause)))
       const storagePolicy = yield* makeStoragePolicyStore({ writer }).pipe(
         Effect.mapError((cause) => initError("Could not construct Storage policy", cause))
@@ -600,7 +604,16 @@ export const sqliteStoresLayer = (
       yield* diagnostics.startupPhase("persistence_ready")
       return ports
     })
-  ).pipe(
+  )
+
+export const sqliteStoresLayer = (
+  options: SqlitePersistenceOptions
+): Layer.Layer<
+  SqlitePersistence,
+  StorageStartupError,
+  PersistenceWriteQueue | AutomationRules | ChatRules
+> =>
+  sqliteStoresOnWriter(options).pipe(
     Layer.provide(
       Layer.unwrap(
         migrateAtStartup(options.filename).pipe(

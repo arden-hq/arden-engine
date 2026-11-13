@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { Context, Effect } from "effect"
+import { Context, Effect, Option, Semaphore } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import type { ChatEventStore } from "../events/store.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -19,6 +19,15 @@ export const nextId: Effect.Effect<string> = Effect.service(IdGenerator).pipe(
 type Transact = <A, E>(
   effect: Effect.Effect<A, E, UnitOfWork>
 ) => Effect.Effect<A, E | SqlError.SqlError>
+
+/** Read-only connections the server opens beside the writer, each on its own thread. */
+export const READER_CONNECTIONS = 4
+
+// A snapshot keeps one reader connection to itself until its transaction ends
+// (`@arden-hq/sqlite-thread` pins the lane). At most half of them at once, so
+// a burst of chat opens or other snapshots leaves two connections for every
+// other read instead of queueing lists and history behind pinned lanes.
+const SNAPSHOT_CONCURRENCY = READER_CONNECTIONS / 2
 
 export interface Writer {
   readonly sql: SqlClient.SqlClient
@@ -45,6 +54,7 @@ export const makeWriter = (options: {
   readonly beforeCommit?: () => Effect.Effect<void, never, UnitOfWork> | undefined
 }): Writer => {
   const { sql, reader, queue } = options
+  const snapshots = Semaphore.makeUnsafe(SNAPSHOT_CONCURRENCY)
   const unitOfWork: Transact = (effect) =>
     Effect.suspend(() => {
       const committed: Array<Effect.Effect<void>> = []
@@ -77,6 +87,14 @@ export const makeWriter = (options: {
     transactInteractive: (effect) => queue.runInteractive(unitOfWork(effect)),
     run: queue.run,
     waiting: queue.waiting,
-    snapshot: (read) => reader.withTransaction(read)
+    // A snapshot inside another one joins its transaction and needs no second permit.
+    snapshot: (read) =>
+      Effect.serviceOption(reader.transactionService).pipe(
+        Effect.flatMap((open) =>
+          Option.isSome(open)
+            ? reader.withTransaction(read)
+            : snapshots.withPermit(reader.withTransaction(read))
+        )
+      )
   }
 }

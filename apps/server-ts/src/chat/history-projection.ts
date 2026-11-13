@@ -35,6 +35,7 @@ import type {
   ToolExecutionResultMetadata
 } from "../persistence/tools/history-queries.js"
 import { ChatHistoryError } from "./history-errors.js"
+import type { HistoryRows } from "./history-budget.js"
 import { conversationCall, surfaceOfCall, surfaceOfPart, type Surface } from "./surface.js"
 import { isAgentInstruction } from "@arden-hq/protocol/views"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
@@ -54,7 +55,7 @@ const StoredReplySchema = Schema.Union([
   Schema.NonEmptyArray(ReplyContextSchema)
 ])
 
-export const emptyHistory = (budget: HistoryResponse["context_budget"]): HistoryResponse => ({
+export const emptyHistory: HistoryRows = {
   messages: [],
   active_work_tail: null,
   runtime: {
@@ -66,9 +67,8 @@ export const emptyHistory = (budget: HistoryResponse["context_budget"]): History
     pending_approvals: [],
     pending_connections: []
   },
-  page: { has_more_before: false, has_more_after: false, before: null, after: null },
-  context_budget: budget
-})
+  page: { has_more_before: false, has_more_after: false, before: null, after: null }
+}
 
 export const historyPage = (page: TranscriptPage): HistoryResponse["page"] => ({
   has_more_before: page.hasMoreBefore,

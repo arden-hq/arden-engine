@@ -5,11 +5,13 @@ import {
   appendInTransaction as appendJournalInTransaction,
   journalRecordsSql,
   journalStreamsSql,
+  readHeadSequence,
   type JournalAppendResult,
   type JournalRecord,
   type JournalRuntime as GenericJournalRuntime
 } from "@arden-hq/journal/effect"
 import { DateTime, Effect, Schema, Stream } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
 import {
   ChatEventPageOverflow,
   ChatEventStore,
@@ -95,6 +97,23 @@ const eventAdmissionState = (
   if (current === undefined) return undefined
   if (current.kind === "terminal") return { kind: "terminal", runId: current.runId }
   return { kind: "active", runId: current.runId }
+}
+
+/** The highest sequence a projection still holds records for, which a run
+ * ending or restarting drops without a later event replacing them. */
+const heldThrough = (projection: ActiveProjectionState | undefined): number => {
+  if (projection === undefined) return 0
+  switch (projection.kind) {
+    case "ready":
+      return projection.records.reduce(
+        (highest, { record }) => Math.max(highest, record.sequence),
+        0
+      )
+    case "overflow":
+      return projection.throughSequence
+    case "terminal":
+      return 0
+  }
 }
 
 const draftRunId = (draft: EventDraft): string | undefined => {
@@ -226,6 +245,7 @@ export const makeChatEventStore = (
 ): ChatEventStore["Service"] => {
   const { writer, journal } = options
   const sql = writer.sql
+  const reader = writer.reader
   const activeProjectionCapacityBytes =
     options.activeProjectionCapacityBytes ?? DEFAULT_ACTIVE_PROJECTION_CAPACITY_BYTES
   const activeProjectionGlobalCapacityBytes =
@@ -241,6 +261,13 @@ export const makeChatEventStore = (
   }
   const activeProjections = new Map<string, ActiveProjectionState>()
   let activeProjectionBytes = 0
+  // Coverage of the projections, per session, for reads that run beside the
+  // write queue (see ChatActiveProjection). `staged` is the head of the last
+  // batch appended inside a transaction, set before COMMIT, and stays when that
+  // transaction rolls back; `published` is the head the projection has applied.
+  const staged = new Map<string, number>()
+  const published = new Map<string, number>()
+  const trimFloors = new Map<string, number>()
   const deltaWindow = makeDeltaWindow()
 
   const storedEventAdmission = Effect.fn("SqliteChatEventStore.storedEventAdmission")(function* (
@@ -309,6 +336,7 @@ export const makeChatEventStore = (
     const committed = yield* appendJournalInTransaction(sql, valid.sessionId, drafts).pipe(
       Effect.mapError(mapError("append", "Could not append Chat events"))
     )
+    staged.set(valid.sessionId, Math.max(staged.get(valid.sessionId) ?? 0, committed.headSequence))
     const records = yield* Effect.forEach(committed.records, (record) =>
       decodeRecord(record, "read")
     )
@@ -329,10 +357,10 @@ export const makeChatEventStore = (
     if (!Number.isSafeInteger(sequence) || sequence < 0) {
       return yield* eventError("checkpoint", "Checkpoint must be a non-negative safe integer")
     }
-    const state = yield* journal
-      .watermarks(sessionId)
-      .pipe(Effect.mapError(mapError("checkpoint", "Could not read the Chat event head")))
-    if (sequence > state.headSequence) {
+    const headSequence = yield* readHeadSequence(sql, sessionId).pipe(
+      Effect.mapError(mapError("checkpoint", "Could not read the Chat event head"))
+    )
+    if (sequence > (headSequence ?? 0)) {
       return yield* eventError("checkpoint", "Checkpoint cannot exceed the Chat event head")
     }
     yield* sql`
@@ -349,16 +377,17 @@ export const makeChatEventStore = (
     )
   })
 
-  const watermarks = Effect.fn("SqliteChatEventStore.watermarks")(function* (
+  const readWatermarks = Effect.fn("SqliteChatEventStore.watermarks")(function* (
+    db: SqlClient.SqlClient,
     sessionId: string
   ): Effect.fn.Return<EventWatermarks, ChatEventStoreError> {
-    const rows = yield* sql<WatermarkRow>`
+    const rows = yield* db<WatermarkRow>`
       SELECT
         COALESCE(stream.head_sequence, 0) AS head_sequence,
         stream.retained_from_sequence AS retained_from_sequence,
         COALESCE(checkpoint.checkpoint_seq, 0) AS checkpoint_seq
       FROM (SELECT ${sessionId} AS session_id) AS target
-      LEFT JOIN ${journalStreamsSql(sql)} AS stream ON stream.stream_id = target.session_id
+      LEFT JOIN ${journalStreamsSql(db)} AS stream ON stream.stream_id = target.session_id
       LEFT JOIN session_event_checkpoints AS checkpoint
         ON checkpoint.session_id = target.session_id
     `.pipe(
@@ -385,7 +414,7 @@ export const makeChatEventStore = (
     const checkpointSequence =
       terminal === undefined
         ? undefined
-        : yield* watermarks(committed.sessionId).pipe(
+        : yield* readWatermarks(sql, committed.sessionId).pipe(
             Effect.map((state) => state.checkpointSequence),
             Effect.catch((cause) =>
               Effect.logWarning("Could not verify the terminal Chat projection checkpoint", {
@@ -411,7 +440,9 @@ export const makeChatEventStore = (
       ))
     yield* Effect.sync(() => {
       let projection = seeded
+      let trimFloor = trimFloors.get(committed.sessionId) ?? 0
       for (const [index, record] of committed.records.entries()) {
+        const previous = projection
         const previousBytes = projectionBytes(projection)
         const otherProjectionBytes = activeProjectionBytes - previousBytes
         const availableBytes = Math.min(
@@ -426,9 +457,18 @@ export const makeChatEventStore = (
           index > 0
         )
         activeProjectionBytes = otherProjectionBytes + projectionBytes(projection)
+        const restarted = record.event.type === "RUN_STARTED" && projection !== previous
+        if (previous?.kind !== "terminal" && (projection?.kind === "terminal" || restarted)) {
+          trimFloor = Math.max(trimFloor, heldThrough(previous))
+        }
       }
       if (projection === undefined) activeProjections.delete(committed.sessionId)
       else activeProjections.set(committed.sessionId, projection)
+      trimFloors.set(committed.sessionId, trimFloor)
+      published.set(
+        committed.sessionId,
+        Math.max(published.get(committed.sessionId) ?? 0, committed.headSequence)
+      )
     })
     yield* journal.notify(journaled)
     yield* observeDeltaVolume(deltaWindow, committed)
@@ -459,7 +499,7 @@ export const makeChatEventStore = (
     const payloadSizes =
       capacityBytes === undefined
         ? undefined
-        : yield* sql<EventPayloadSizeRow>`
+        : yield* reader<EventPayloadSizeRow>`
           SELECT
             sequence,
             length(CAST(stream_id AS BLOB)) +
@@ -467,7 +507,7 @@ export const makeChatEventStore = (
               length(CAST(data_json AS BLOB)) +
               length(CAST(attributes_json AS BLOB)) +
               length(CAST(created_at AS BLOB)) AS payload_bytes
-          FROM ${journalRecordsSql(sql)}
+          FROM ${journalRecordsSql(reader)}
           WHERE stream_id = ${input.sessionId}
             AND sequence > ${input.afterSequence}
             AND sequence <= ${input.throughSequence}
@@ -520,14 +560,20 @@ export const makeChatEventStore = (
     ) {
       return yield* eventError("read", "Active projection requires an ordered non-negative range")
     }
+    const coverage = {
+      publishedThrough: staged.has(input.sessionId)
+        ? (published.get(input.sessionId) ?? 0)
+        : input.throughSequence,
+      trimFloor: trimFloors.get(input.sessionId) ?? 0
+    }
     const current = activeProjections.get(input.sessionId)
-    if (current === undefined) return { kind: "complete", records: [] }
+    if (current === undefined) return { ...coverage, kind: "complete", records: [] }
     if (current.kind === "overflow") {
       return input.throughSequence > input.afterSequence
-        ? { kind: "overflow", throughSequence: current.throughSequence }
-        : { kind: "complete", records: [] }
+        ? { ...coverage, kind: "overflow", throughSequence: current.throughSequence }
+        : { ...coverage, kind: "complete", records: [] }
     }
-    if (current.kind === "terminal") return { kind: "complete", records: [] }
+    if (current.kind === "terminal") return { ...coverage, kind: "complete", records: [] }
     const partial = current.records.find(
       ({ fromSequence, record }) =>
         fromSequence <= input.throughSequence &&
@@ -535,9 +581,10 @@ export const makeChatEventStore = (
         (fromSequence <= input.afterSequence || record.sequence > input.throughSequence)
     )
     if (partial !== undefined) {
-      return { kind: "overflow", throughSequence: partial.record.sequence }
+      return { ...coverage, kind: "overflow", throughSequence: partial.record.sequence }
     }
     return {
+      ...coverage,
       kind: "complete",
       records: current.records
         .map(({ record }) => record)
@@ -586,7 +633,7 @@ export const makeChatEventStore = (
     append,
     appendInTransaction,
     setCheckpointInTransaction,
-    watermarks,
+    watermarks: (sessionId) => readWatermarks(reader, sessionId),
     readPage,
     openFollow,
     activeProjection
