@@ -90,10 +90,12 @@ const EditParametersSchema = Schema.Struct({
     })
     .pipe(Schema.optionalKey),
   observation_period: Schema.optionalKey(
-    ObservationPeriodSchema.annotate({
-      description:
-        "Evidence-backed correction of the stored observation interval. Omit to preserve it. Producer and source attribution cannot be changed."
-    })
+    ObservationPeriodSchema.pipe(
+      Schema.annotateEncoded({
+        description:
+          "Evidence-backed correction of the stored observation interval. Omit to preserve it. Producer and source attribution cannot be changed."
+      })
+    )
   ),
   aliases: Schema.optionalKey(
     Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(4_096)))

@@ -135,10 +135,12 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
           description:
             "Useful Markdown summary with meaningful subject wikilinks, exact source pointers, uncertainty and coverage gaps. Never invent activity or copy raw logs."
         }),
-        period: fields.period.annotate({
-          description:
-            "Actual observation interval as ISO timestamps with explicit offsets. The server stores one UTC interval; do not include publication time or duplicate timezone conversions."
-        }),
+        period: fields.period.pipe(
+          Schema.annotateEncoded({
+            description:
+              "Actual observation interval as ISO timestamps with explicit offsets. The server stores one UTC interval; do not include publication time or duplicate timezone conversions."
+          })
+        ),
         sources: fields.sources.annotate({
           description:
             "One to thirty exact original source references (URLs, Chat references or source record identifiers). Never fabricate references."
