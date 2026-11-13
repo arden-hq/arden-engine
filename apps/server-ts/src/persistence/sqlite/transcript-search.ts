@@ -125,7 +125,7 @@ const searchIn = Effect.fn("SqliteTranscriptQueries.search")(function* (
     }
   }
 
-  yield* catchUpTranscriptSearch(searchSql).pipe(
+  const indexing = yield* catchUpTranscriptSearch(searchSql).pipe(
     Effect.mapError((cause) => searchError("storage", "Transcript search is not ready", cause))
   )
   const clauses = [indexIsCurrent(searchSql)]
@@ -164,7 +164,7 @@ const searchIn = Effect.fn("SqliteTranscriptQueries.search")(function* (
       }
     )
   )
-  return yield* searchPage(found, query.limit, query.requestingSessionId)
+  return yield* searchPage({ ...found, indexing }, query.limit, query.requestingSessionId)
 })
 
 /** The index row of `m` is current: catch-up has applied every change to the
@@ -244,7 +244,15 @@ const rankedRows = (
   )
 
 const searchPage = (
-  { rows, match }: { readonly rows: ReadonlyArray<SearchRow>; readonly match: string },
+  {
+    rows,
+    match,
+    indexing
+  }: {
+    readonly rows: ReadonlyArray<SearchRow>
+    readonly match: string
+    readonly indexing: boolean
+  },
   limit: number,
   sessionId: string
 ) =>
@@ -263,7 +271,8 @@ const searchPage = (
       ),
       matchCount: row.match_count
     })),
-    hasMore: rows.length > limit
+    hasMore: rows.length > limit,
+    indexing
   }).pipe(
     Effect.mapError(
       (cause) =>
@@ -389,7 +398,8 @@ const CHAT_SEARCH_BATCH = 100
 const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function* (
   searchSql: SqlClient.SqlClient,
   conversation: Statement.Fragment,
-  input: { readonly query: string; readonly limit: number }
+  input: { readonly query: string; readonly limit: number },
+  noteIndexing: Effect.Effect<void>
 ) {
   const ownerChat = (alias: string) => searchSql`
     ${searchSql(alias)}.archived_at IS NULL
@@ -415,9 +425,10 @@ const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function*
   })
   const namedMatches = namedAll.length
   const named = namedAll.slice(0, CHAT_SEARCH_NAMED)
-  yield* catchUpTranscriptSearch(searchSql).pipe(
+  const indexing = yield* catchUpTranscriptSearch(searchSql).pipe(
     Effect.mapError((cause) => searchError("storage", "Transcript search is not ready", cause))
   )
+  if (indexing) yield* noteIndexing
   // Newest first, in the index's own rowid order: SQLite walks the matches
   // from the newest and stops at the limit, so no match is ranked or sorted
   // (bm25 over every match took 0.1–0.6 s on the owner's 190k rows). A match
@@ -580,10 +591,18 @@ const makeTranscriptSearch = (searchSql: SqlClient.SqlClient) => (input: Transcr
     )
   )
 
-const makeChatSearch =
-  (searchSql: SqlClient.SqlClient, conversation: Statement.Fragment) =>
-  (input: { readonly query: string; readonly limit: number }) =>
-    searchChatsIn(searchSql, conversation, input)
+const makeChatSearch = (searchSql: SqlClient.SqlClient, conversation: Statement.Fragment) => {
+  // The chat search page has no field for it yet, so a search that ran on a
+  // part-filled index is only logged, once.
+  let noted = false
+  const noteIndexing = Effect.suspend(() => {
+    if (noted) return Effect.void
+    noted = true
+    return Effect.logInfo("Chat search ran while the search index is still being filled")
+  })
+  return (input: { readonly query: string; readonly limit: number }) =>
+    searchChatsIn(searchSql, conversation, input, noteIndexing)
+}
 
 interface FindRow {
   readonly session_id: string

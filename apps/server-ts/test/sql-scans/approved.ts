@@ -12,12 +12,6 @@ export interface ApprovedScan {
 
 export const APPROVED_SCANS: ReadonlyArray<ApprovedScan> = [
   {
-    id: "41877cc67f7c",
-    table: "session_messages",
-    reason:
-      "Rebuilds the search index from every message. Runs only when the search database is new or was reset."
-  },
-  {
     id: "85b930dd4659",
     table: "chat_runs",
     reason: "First fill of the usage rollup from every run. Runs only while usage_daily is empty."

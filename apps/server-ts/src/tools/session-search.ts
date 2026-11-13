@@ -222,7 +222,9 @@ const makeSessionSearchTool = ({
       )
       const source_refs = hits.slice(0, 50).map(sourceRef)
       return {
-        result: content,
+        result: page.indexing
+          ? `${content}\n\nThe search index is still being built: older messages may be missing.`
+          : content,
         preview: `${countOf(hits.length, "hit")}`,
         data: { source_refs },
         host: { source_refs }

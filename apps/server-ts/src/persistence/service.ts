@@ -19,6 +19,9 @@ export class Persistence extends Context.Service<
   {
     readonly recoverAfterRestart: Effect.Effect<void, StorageStartupError>
     readonly retentionTick: Effect.Effect<void, StorageStartupError>
+    /** Fills the search index in the background after an upgrade or reset, a
+     * chunk per write-queue item; returns when it is complete. */
+    readonly fillSearchIndex: Effect.Effect<void>
     /** Runs `read` in one read transaction on a reader connection: every
      * statement on the reader sees the same commit, and none waits for the
      * writer. A statement on the writer inside it runs outside it. */

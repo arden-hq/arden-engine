@@ -9,7 +9,12 @@ import { expect, it } from "vitest"
 import { searchSchemaSection } from "../src/persistence/schema/search.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import type { SqlitePersistence } from "../src/persistence/sqlite/layer.js"
-import { initializeSearchIndex } from "../src/persistence/sqlite/search.js"
+import {
+  initializeSearchIndex,
+  refillTranscriptSearch,
+  transcriptSearchStep
+} from "../src/persistence/sqlite/search.js"
+import { Persistence } from "../src/persistence/service.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { transcriptSearchText } from "../src/persistence/transcript/search-text.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
@@ -74,6 +79,45 @@ const search = Effect.fn("search")(function* (
   })
   return page.hits.map((hit) => [hit.messageId, hit.snippet])
 })
+
+const searchState = Effect.fn("searchState")(function* (
+  requestingSessionId: string,
+  query: string,
+  sessionRef: string
+) {
+  const transcript = yield* TranscriptQueries
+  const page = yield* transcript.search({
+    requestingSessionId,
+    query,
+    limit: 10,
+    offset: 0,
+    sessionRef
+  })
+  return { hits: page.hits.map((hit) => hit.messageId).toSorted(), indexing: page.indexing }
+})
+
+/** A chat with seven notes about the kettle, and no search database yet. */
+const kettleNotes = async (directory: string) => {
+  const filename = join(directory, "arden.db")
+  const chat = await openAt(
+    filename,
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* SessionStore
+      const session = yield* sessions.create({ name: "Notes" })
+      for (const seq of [1, 2, 3, 4, 5, 6, 7])
+        yield* say(session.sessionId, `n${seq}`, seq, `Note ${seq} about the kettle.`)
+      const refs = yield* sql<{ readonly public_ref: string }>`
+        SELECT public_ref FROM sessions WHERE session_id = ${session.sessionId}`
+      return { sessionId: session.sessionId, sessionRef: refs[0]?.public_ref ?? "" }
+    })
+  )
+  for (const suffix of ["", "-wal", "-shm"])
+    await rm(`${searchFile(directory)}${suffix}`, { force: true })
+  return { filename, ...chat }
+}
+
+const ALL_NOTES = ["n1", "n2", "n3", "n4", "n5", "n6", "n7"]
 
 const searchFile = (directory: string) => join(directory, "search.sqlite")
 
@@ -155,26 +199,36 @@ it("finds messages by their current text and cuts snippets from arden.db", async
   })
 })
 
-it("resumes a rebuild that stopped partway, without indexing a message twice", async () => {
+it("opens without filling a new index, and a search meanwhile returns what is indexed so far", async () => {
   await withDirectory(async (directory) => {
-    const filename = join(directory, "arden.db")
-    const { sessionId, sessionRef } = await openAt(
+    const { filename, sessionId, sessionRef } = await kettleNotes(directory)
+    const result = await openAt(
       filename,
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const sessions = yield* SessionStore
-        const session = yield* sessions.create({ name: "Notes" })
-        for (const seq of [1, 2, 3, 4, 5, 6, 7])
-          yield* say(session.sessionId, `n${seq}`, seq, `Note ${seq} about the kettle.`)
-        const refs = yield* sql<{ readonly public_ref: string }>`
-          SELECT public_ref FROM sessions WHERE session_id = ${session.sessionId}`
-        return { sessionId: session.sessionId, sessionRef: refs[0]?.public_ref ?? "" }
+        const persistence = yield* Persistence
+        const atOpen = yield* searchState(sessionId, "kettle", sessionRef)
+        // One background step of two messages, run on a second connection.
+        yield* sql.unsafe("ATTACH DATABASE ? AS search", [searchFile(directory)])
+        yield* transcriptSearchStep(sql, { rebuildBatchSize: 2 })
+        const partway = yield* searchState(sessionId, "kettle", sessionRef)
+        yield* persistence.fillSearchIndex
+        return { atOpen, partway, filled: yield* searchState(sessionId, "kettle", sessionRef) }
       })
     )
-    // A fresh search database whose rebuild fails after its first chunk, the way
-    // a stopped app leaves it.
-    for (const suffix of ["", "-wal", "-shm"])
-      await rm(`${searchFile(directory)}${suffix}`, { force: true })
+    expect(result).toEqual({
+      atOpen: { hits: [], indexing: true },
+      partway: { hits: ["n1", "n2"], indexing: true },
+      filled: { hits: ALL_NOTES, indexing: false }
+    })
+  })
+})
+
+it("resumes a fill that stopped partway, without indexing a message twice", async () => {
+  await withDirectory(async (directory) => {
+    const { filename, sessionId, sessionRef } = await kettleNotes(directory)
+    // A search database whose fill fails after its first chunk, the way a
+    // stopped app leaves it.
     const fresh = new DatabaseSync(":memory:")
     fresh.exec(`ATTACH DATABASE '${searchFile(directory)}' AS search`)
     for (const statement of searchSchemaSection.statements) fresh.exec(statement)
@@ -187,7 +241,8 @@ it("resumes a rebuild that stopped partway, without indexing a message twice", a
       Effect.exit(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* initializeSearchIndex(sql, filename, { rebuildBatchSize: 3 })
+          yield* initializeSearchIndex(sql, filename)
+          yield* refillTranscriptSearch(sql, { rebuildBatchSize: 3 })
         }).pipe(Effect.provide(SqliteClient.layer({ filename })))
       )
     )
@@ -205,16 +260,15 @@ it("resumes a rebuild that stopped partway, without indexing a message twice", a
     repaired.exec("DROP TRIGGER stop_rebuild")
     repaired.close()
 
-    const hits = await openAt(filename, search(sessionId, "kettle", { sessionRef }))
-    expect(hits.map(([messageId]) => messageId).toSorted()).toEqual([
-      "n1",
-      "n2",
-      "n3",
-      "n4",
-      "n5",
-      "n6",
-      "n7"
-    ])
+    const filled = await openAt(
+      filename,
+      Effect.gen(function* () {
+        const persistence = yield* Persistence
+        yield* persistence.fillSearchIndex
+        return yield* searchState(sessionId, "kettle", sessionRef)
+      })
+    )
+    expect(filled).toEqual({ hits: ALL_NOTES, indexing: false })
     const done = new DatabaseSync(searchFile(directory), { readOnly: true })
     expect({
       position: done.prepare("SELECT after_rowid FROM transcript_rebuild").all().map(plain),
@@ -224,7 +278,7 @@ it("resumes a rebuild that stopped partway, without indexing a message twice", a
   })
 })
 
-it("upgrades a version 3 index in place: drops its text copy and keeps the embeddings", async () => {
+it("upgrades a version 3 index in place at open, keeps the embeddings, and fills it after", async () => {
   await withDirectory(async (directory) => {
     const filename = join(directory, "arden.db")
     const sessionId = await openAt(
@@ -253,9 +307,20 @@ it("upgrades a version 3 index in place: drops its text copy and keeps the embed
 
     const hits = await openAt(
       filename,
-      Effect.all([search(sessionId, "tomatoes"), search(sessionId, "stale")])
+      Effect.gen(function* () {
+        const persistence = yield* Persistence
+        const atOpen = yield* search(sessionId, "tomatoes")
+        yield* persistence.fillSearchIndex
+        return {
+          atOpen,
+          filled: yield* Effect.all([search(sessionId, "tomatoes"), search(sessionId, "stale")])
+        }
+      })
     )
-    expect(hits).toEqual([[["g1", "[Tomatoes] need staking in June."]], []])
+    expect(hits).toEqual({
+      atOpen: [],
+      filled: [[["g1", "[Tomatoes] need staking in June."]], []]
+    })
     const upgraded = new DatabaseSync(searchFile(directory), { readOnly: true })
     expect({
       version: upgraded.prepare("PRAGMA user_version").all().map(plain),

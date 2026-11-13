@@ -353,7 +353,9 @@ const TranscriptSearchHitSchema = Schema.Struct({
 
 export const TranscriptSearchPageSchema = Schema.Struct({
   hits: Schema.Array(TranscriptSearchHitSchema),
-  hasMore: Schema.Boolean
+  hasMore: Schema.Boolean,
+  /** The index is still being filled in the background: older messages may be missing. */
+  indexing: Schema.Boolean
 })
 
 export type TranscriptSearchPage = (typeof TranscriptSearchPageSchema)["Type"]

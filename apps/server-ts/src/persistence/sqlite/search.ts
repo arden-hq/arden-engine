@@ -2,6 +2,8 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { dirname, join } from "node:path"
 import { searchSchemaSection, searchSchemaUpgrades } from "../schema/search.js"
+import { pauseBetweenBatches, runIsActive } from "./background-pause.js"
+import type { Writer } from "./deps.js"
 
 const CHANGE_BATCH_SIZE = 500
 /** Messages copied into the index per transaction while it is rebuilt. */
@@ -9,7 +11,6 @@ const REBUILD_BATCH_SIZE = 2_000
 
 interface SearchIndexOptions {
   readonly searchFilename?: string
-  readonly rebuildBatchSize?: number
 }
 
 interface SearchClockRow {
@@ -99,9 +100,10 @@ export const initializeSearchIndex = Effect.fn("SqliteSearch.initialize")(functi
       message: "Search database belongs to a different operational source; rebuild required"
     })
   }
-  // A new index starts at the head of the change log and is filled from
-  // main.session_messages by catch-up, a chunk per transaction, so a large
-  // transcript never holds one long transaction and a stopped fill resumes.
+  // A new index starts empty at the head of the change log. The engine fills it
+  // from main.session_messages in the background (transcriptSearchStep), a
+  // chunk per transaction from a saved position, so startup does not wait for
+  // it and a stopped fill resumes.
   if (cursor.length === 0) {
     yield* sql
       .withTransaction(
@@ -121,14 +123,17 @@ export const initializeSearchIndex = Effect.fn("SqliteSearch.initialize")(functi
         INSERT INTO search.transcript_cursor(singleton_id, applied_sequence, source_id)
         VALUES (1, ${clock[0].head_sequence}, ${sourceId})
       `
-          yield* sql`
+          const newest = yield* sql<{ readonly top: number | null }>`
+            SELECT max(message_rowid) AS top FROM main.session_messages
+          `
+          if (newest[0]?.top != null)
+            yield* sql`
         INSERT OR REPLACE INTO search.transcript_rebuild(singleton_id, after_rowid) VALUES (1, 0)
       `
         })
       )
       .pipe(Effect.provideService(SqlClient.SqlClient, sql))
   }
-  yield* catchUpTranscriptSearch(sql, options)
 })
 
 const searchVersion = Effect.fn("SqliteSearch.version")(function* (sql: SqlClient.SqlClient) {
@@ -166,101 +171,135 @@ const upgradeSearchSchema = Effect.fn("SqliteSearch.upgrade")(function* (
   }
 })
 
-/** Brings the index up to the head of the change log, then finishes a rebuild
- * in progress. Each step is its own transaction. */
+/** Brings the index up to the head of the change log, a batch per
+ * transaction. It never fills the index: true while a refill (the background
+ * step below) has not reached every message, so a search sees only part. */
 export const catchUpTranscriptSearch = Effect.fn("SqliteSearch.catchUp")(function* (
-  sql: SqlClient.SqlClient,
-  options: SearchIndexOptions = {}
+  sql: SqlClient.SqlClient
 ) {
-  while (true) {
-    yield* applyTranscriptChanges(sql)
-    const rebuilding = yield* rebuildTranscriptSearchBatch(
-      sql,
-      options.rebuildBatchSize ?? REBUILD_BATCH_SIZE
+  for (;;) {
+    if (!(yield* applyTranscriptChangeBatch(sql))) break
+  }
+  const rebuild = yield* sql<SearchRebuildRow>`
+    SELECT after_rowid FROM search.transcript_rebuild WHERE singleton_id = 1
+  `
+  return rebuild.length > 0
+})
+
+/** One step of background index upkeep, in one transaction: a batch of
+ * changes, or else the next chunk of a refill. False when there is nothing to do. */
+export const transcriptSearchStep = Effect.fn("SqliteSearch.step")(function* (
+  sql: SqlClient.SqlClient,
+  options: { readonly rebuildBatchSize?: number } = {}
+) {
+  if (yield* applyTranscriptChangeBatch(sql)) return true
+  return yield* rebuildTranscriptSearchBatch(sql, options.rebuildBatchSize ?? REBUILD_BATCH_SIZE)
+})
+
+/** The engine's background fill: one step per write-queue item, giving way to
+ * other writes and to active runs between steps. Searches meanwhile read the
+ * part already indexed. */
+export const fillTranscriptSearch = (writer: Writer): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    for (;;) {
+      if (!(yield* writer.run(transcriptSearchStep(writer.sql)))) return
+      yield* pauseBetweenBatches(yield* runIsActive(writer.reader))
+    }
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Search index fill stopped; it resumes on the next start", cause)
     )
-    if (!rebuilding) return
+  )
+
+/** Runs every step until the index is complete: for tools that build an index
+ * offline, not for the running engine. */
+export const refillTranscriptSearch = Effect.fn("SqliteSearch.refill")(function* (
+  sql: SqlClient.SqlClient,
+  options: { readonly rebuildBatchSize?: number } = {}
+) {
+  for (;;) {
+    if (!(yield* transcriptSearchStep(sql, options))) return
   }
 })
 
-const applyTranscriptChanges = Effect.fn("SqliteSearch.applyChanges")(function* (
+const applyTranscriptChangeBatch = Effect.fn("SqliteSearch.applyChanges")(function* (
   sql: SqlClient.SqlClient
 ) {
-  while (true) {
-    const advanced = yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const clock = yield* sql<SearchClockRow>`
+  const advanced = yield* sql
+    .withTransaction(
+      Effect.gen(function* () {
+        const clock = yield* sql<SearchClockRow>`
         SELECT head_sequence FROM transcript_search_clock WHERE singleton_id = 1
       `
-          const cursor = yield* sql<SearchCursorRow>`
+        const cursor = yield* sql<SearchCursorRow>`
         SELECT applied_sequence, source_id FROM search.transcript_cursor WHERE singleton_id = 1
       `
-          const identity = yield* sql<SearchIdentityRow>`
+        const identity = yield* sql<SearchIdentityRow>`
         SELECT source_id FROM transcript_search_source WHERE singleton_id = 1
       `
-          const head = clock[0]?.head_sequence
-          const applied = cursor[0]?.applied_sequence
-          if (
-            head === undefined ||
-            applied === undefined ||
-            applied > head ||
-            cursor[0]?.source_id !== identity[0]?.source_id
-          ) {
-            return yield* new SearchIndexError({
-              reason: "corrupt",
-              message: "Transcript search cursor is corrupt"
-            })
-          }
-          if (applied === head) return false
-          const changes = yield* sql<SearchChangeRow>`
+        const head = clock[0]?.head_sequence
+        const applied = cursor[0]?.applied_sequence
+        if (
+          head === undefined ||
+          applied === undefined ||
+          applied > head ||
+          cursor[0]?.source_id !== identity[0]?.source_id
+        ) {
+          return yield* new SearchIndexError({
+            reason: "corrupt",
+            message: "Transcript search cursor is corrupt"
+          })
+        }
+        if (applied === head) return false
+        const changes = yield* sql<SearchChangeRow>`
         SELECT sequence, message_rowid FROM transcript_search_changes
         WHERE sequence > ${applied} AND sequence <= ${head}
         ORDER BY sequence LIMIT ${CHANGE_BATCH_SIZE}
       `
-          if (
-            changes.length === 0 ||
-            changes.some(
-              (change, index) => change.sequence !== (changes[index - 1]?.sequence ?? applied) + 1
-            )
-          ) {
-            return yield* new SearchIndexError({
-              reason: "corrupt",
-              message: "Transcript search change log has a gap"
-            })
-          }
-          // While a rebuild runs, a message past its position is left to the
-          // rebuild, which reads the message's text when it gets there.
-          const rebuild = yield* sql<SearchRebuildRow>`
+        if (
+          changes.length === 0 ||
+          changes.some(
+            (change, index) => change.sequence !== (changes[index - 1]?.sequence ?? applied) + 1
+          )
+        ) {
+          return yield* new SearchIndexError({
+            reason: "corrupt",
+            message: "Transcript search change log has a gap"
+          })
+        }
+        // While a rebuild runs, a message past its position is left to the
+        // rebuild, which reads the message's text when it gets there.
+        const rebuild = yield* sql<SearchRebuildRow>`
         SELECT after_rowid FROM search.transcript_rebuild WHERE singleton_id = 1
       `
-          const indexedThrough = rebuild[0]?.after_rowid ?? Number.POSITIVE_INFINITY
-          for (const change of changes) {
-            if (change.message_rowid > indexedThrough) continue
-            const source = yield* sql<SearchSourceRow>`
+        const indexedThrough = rebuild[0]?.after_rowid ?? Number.POSITIVE_INFINITY
+        for (const change of changes) {
+          if (change.message_rowid > indexedThrough) continue
+          const source = yield* sql<SearchSourceRow>`
           SELECT search_text FROM session_messages WHERE message_rowid = ${change.message_rowid}
         `
-            yield* sql`DELETE FROM search.session_messages_fts WHERE rowid = ${change.message_rowid}`
-            const text = source[0]?.search_text
-            if (text !== undefined && text !== null) {
-              yield* sql`INSERT INTO search.session_messages_fts(rowid, search_text)
+          yield* sql`DELETE FROM search.session_messages_fts WHERE rowid = ${change.message_rowid}`
+          const text = source[0]?.search_text
+          if (text !== undefined && text !== null) {
+            yield* sql`INSERT INTO search.session_messages_fts(rowid, search_text)
             VALUES (${change.message_rowid}, ${text})`
-            }
           }
-          const last = changes[changes.length - 1]
-          if (last === undefined)
-            return yield* new SearchIndexError({
-              reason: "corrupt",
-              message: "Transcript search change log is empty"
-            })
-          yield* sql`UPDATE search.transcript_cursor SET applied_sequence = ${last.sequence}
+        }
+        const last = changes[changes.length - 1]
+        if (last === undefined)
+          return yield* new SearchIndexError({
+            reason: "corrupt",
+            message: "Transcript search change log is empty"
+          })
+        yield* sql`UPDATE search.transcript_cursor SET applied_sequence = ${last.sequence}
         WHERE singleton_id = 1`
-          return last.sequence
-        })
-      )
-      .pipe(Effect.provideService(SqlClient.SqlClient, sql))
-    if (advanced === false) return
-    yield* sql`DELETE FROM transcript_search_changes WHERE sequence <= ${advanced}`
-  }
+        return last.sequence
+      })
+    )
+    .pipe(Effect.provideService(SqlClient.SqlClient, sql))
+  if (advanced === false) return false
+  yield* sql`DELETE FROM transcript_search_changes WHERE sequence <= ${advanced}`
+  return true
 })
 
 /** Copies the next chunk of messages into the index; false once no rebuild is

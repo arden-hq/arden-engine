@@ -131,7 +131,7 @@ import { makeWriter, READER_CONNECTIONS, type PersistenceDeps } from "./deps.js"
 import { installCapture } from "./tells/capture.js"
 import { makeTellAtCommit } from "./tells/tell.js"
 import type { UnitOfWork } from "../unit-of-work.js"
-import { initializeSearchIndex } from "./search.js"
+import { fillTranscriptSearch, initializeSearchIndex } from "./search.js"
 import { sqliteWriterLayer } from "./writer-client.js"
 import { makeSqliteThreadClient } from "@arden-hq/sqlite-thread"
 import { ManagedOutputLifecycleStore } from "../managed-output/lifecycle-store.js"
@@ -413,6 +413,7 @@ const persistencePorts = (built: BuiltStores) => {
           Effect.andThen(trimJournals({ ...deps, policy: storagePolicy })),
           Effect.asVoid
         ),
+        fillSearchIndex: fillTranscriptSearch(deps.writer),
         snapshot: deps.writer.snapshot,
         consistentRead: writes.runInteractive,
         drain: writes.flush

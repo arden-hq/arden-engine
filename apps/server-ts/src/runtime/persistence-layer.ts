@@ -29,6 +29,7 @@ const persistenceBootLayer: Layer.Layer<never, StorageStartupError, Persistence>
       const lifecycle = yield* ServerLifecycle
       yield* persistence.recoverAfterRestart
       yield* diagnostics.startupPhase("recovery_ready")
+      yield* lifecycle.background(persistence.fillSearchIndex)
       yield* lifecycle.background(
         Effect.sleep(FIRST_RETENTION_DELAY).pipe(
           Effect.andThen(

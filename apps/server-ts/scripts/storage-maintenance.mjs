@@ -22,7 +22,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { databaseSchema } from "../dist/persistence/schema/database.js"
 import { searchSchemaSection } from "../dist/persistence/schema/search.js"
-import { initializeSearchIndex } from "../dist/persistence/sqlite/search.js"
+import { initializeSearchIndex, refillTranscriptSearch } from "../dist/persistence/sqlite/search.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 const usage = `Usage:
@@ -258,6 +258,7 @@ const buildSearch = async (paths, filename) => {
         (SELECT head_sequence FROM transcript_search_clock WHERE singleton_id=1) AS head,
         (SELECT count(*) FROM transcript_search_changes) AS changes`)
         yield* initializeSearchIndex(sql, paths.operational, { searchFilename: filename })
+        yield* refillTranscriptSearch(sql)
         const after = yield* sql.unsafe(`SELECT
         (SELECT head_sequence FROM transcript_search_clock WHERE singleton_id=1) AS head,
         (SELECT count(*) FROM transcript_search_changes) AS changes`)
