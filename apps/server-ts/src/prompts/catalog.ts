@@ -246,10 +246,10 @@ export const PROMPT_CATALOG = Object.freeze({
   }),
   wikiMaintenance: definePrompt({
     id: "memory.wiki-maintenance",
-    revision: 11,
+    revision: 12,
     sourcePath: "memory/wiki-maintenance.md",
     band: "background",
-    slots: ["memory_filing_rule"]
+    slots: []
   }),
   taskContinuation: definePrompt({
     id: "chat.task-continuation",
@@ -465,9 +465,7 @@ export const PROMPT_TEXT = Object.freeze({
     untrusted_data_rule: untrustedDataRule
   }),
   memoryCapture: renderText(PROMPT_CATALOG.memoryCapture, { memory_filing_rule: memoryFilingRule }),
-  wikiMaintenance: renderText(PROMPT_CATALOG.wikiMaintenance, {
-    memory_filing_rule: memoryFilingRule
-  }),
+  wikiMaintenance: renderText(PROMPT_CATALOG.wikiMaintenance, {}),
   dailySummary: renderText(PROMPT_CATALOG.dailySummary, {}),
   reportRetention: renderText(PROMPT_CATALOG.reportRetention, {}),
   chatSummary: renderText(PROMPT_CATALOG.chatSummary, {}),
