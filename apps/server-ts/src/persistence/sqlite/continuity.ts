@@ -182,11 +182,12 @@ export const makeCommunicationStore = ({
               readonly revision: number
               readonly status: RunQuestion["status"]
             }>`SELECT question_id, revision, status
-        FROM (${latestSettledQuestionChanges(sql)}) AS settled
+        FROM (${latestSettledQuestionChanges(sql, {
+          after: current.question_changes_through,
+          through: questionTarget
+        })}) AS settled
         JOIN space_conversations AS conversation ON conversation.space_id = ${spaceId}
-        WHERE revision > ${current.question_changes_through}
-          AND revision <= ${questionTarget}
-          AND destination_space_id = ${spaceId}
+        WHERE destination_space_id = ${spaceId}
           AND destination_session_id = conversation.session_id`
             if (
               settledQuestions.some(

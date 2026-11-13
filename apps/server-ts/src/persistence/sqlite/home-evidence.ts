@@ -1,5 +1,5 @@
 import { DateTime, Effect, Option, Schema } from "effect"
-import type { SqlClient, SqlError } from "effect/unstable/sql"
+import type { SqlClient, SqlError, Statement } from "effect/unstable/sql"
 import {
   HOME_HEADLINES,
   HomeEvidencePageSchema,
@@ -53,7 +53,7 @@ export const makeHomeEvidence = ({
     }
     return yield* consistent(
       Effect.gen(function* () {
-        const evidence = sql`
+        const tasks = sql`
         SELECT 'task:' || event.event_id AS id, event.created_at AS at, 'task' AS kind,
           json_object('id', 'task:' || event.event_id, 'at', event.created_at, 'kind', 'task',
             'event_id', event.event_id, 'item_id', task.item_id, 'title', task.text,
@@ -69,10 +69,10 @@ export const makeHomeEvidence = ({
           AND event.event_type <> 'scheduled'
           AND event.created_at > ${since} AND event.created_at <= ${through}
           AND NOT EXISTS (SELECT 1 FROM scheduled_tasks AS system_job WHERE system_job.builtin = 1
-            AND system_job.task_id = json_extract(source_run.metadata_json, '$.run_context.origin.automation_id'))
-        UNION ALL
-        -- A worker's note on a Task is news about that Task; the user's own notes are not.
-        SELECT 'task:comment:' || comment.comment_id, comment.created_at, 'task',
+            AND system_job.task_id = json_extract(source_run.metadata_json, '$.run_context.origin.automation_id'))`
+        // A worker's note on a Task is news about that Task; the user's own notes are not.
+        const comments = sql`
+        SELECT 'task:comment:' || comment.comment_id AS id, comment.created_at AS at, 'task' AS kind,
           json_object('id', 'task:comment:' || comment.comment_id, 'at', comment.created_at, 'kind', 'task',
             'event_id', NULL, 'item_id', task.item_id, 'title', task.text, 'history_revision', NULL,
             'event_type', 'comment', 'summary', comment.body, 'run_ref', NULL,
@@ -82,15 +82,17 @@ export const makeHomeEvidence = ({
         WHERE comment.author <> 'user'
           AND (task.space_id IS NULL OR space.archived_at IS NULL)
           AND task.status <> 'deferred' AND NOT ${taskHasHold(sql, sql`task`)}
-          AND comment.created_at > ${since} AND comment.created_at <= ${through}
-        UNION ALL
-        SELECT 'run:' || run.run_id, COALESCE(json_extract(run.metadata_json, '$.late_result_at'), run.ended_at), 'run',
+          AND comment.created_at > ${since} AND comment.created_at <= ${through}`
+        const runs = sql`
+        SELECT 'run:' || run.run_id AS id, COALESCE(json_extract(run.metadata_json, '$.late_result_at'), run.ended_at) AS at, 'run' AS kind,
           json_object('id', 'run:' || run.run_id, 'at', COALESCE(json_extract(run.metadata_json, '$.late_result_at'), run.ended_at),
             'kind', 'run', 'run_id', run.run_id, 'session_id', run.session_id,
             'context', json_extract(run.metadata_json, '$.run_context'), 'status', run.status,
             'text', COALESCE(json_extract(run.metadata_json, '$.terminal_result.text'), attempt.result, ''),
-            'error', COALESCE(run.error_message, attempt.error))
-        FROM chat_runs AS run
+            'error', COALESCE(run.error_message, attempt.error)) AS payload
+        -- Named: without statistics SQLite reads every ended run through the status
+        -- index; this one holds only worker runs, by the time their result came.
+        FROM chat_runs AS run INDEXED BY idx_chat_runs_worker_result
           LEFT JOIN automation_runs AS attempt ON attempt.chat_run_id = run.run_id
           LEFT JOIN space_tasks AS task ON task.item_id = json_extract(run.metadata_json, '$.run_context.task.item_id')
           LEFT JOIN spaces AS space ON space.space_id = task.space_id
@@ -103,45 +105,55 @@ export const makeHomeEvidence = ({
               AND NOT ${taskHasHold(sql, sql`task`)} AND space.archived_at IS NULL))
           AND NOT (run.status = 'completed' AND ${quietRunOutcome(sql, "run")})
           AND NOT EXISTS (SELECT 1 FROM scheduled_tasks AS system_job WHERE system_job.builtin = 1
-            AND system_job.task_id = json_extract(run.metadata_json, '$.run_context.origin.automation_id'))
-        UNION ALL
-        SELECT 'question:' || question_id, created_at, 'question',
+            AND system_job.task_id = json_extract(run.metadata_json, '$.run_context.origin.automation_id'))`
+        const openQuestions = sql`
+        SELECT 'question:' || question_id AS id, created_at AS at, 'question' AS kind,
           json_object('id', 'question:' || question_id, 'at', created_at, 'kind', 'question',
             'question', json_object('question_id', question_id, 'run_id', run_id, 'turn_id', turn_id, 'session_id', session_id,
               'destination_session_id', destination_session_id, 'content', json(content), 'context', json(context), 'resolution', NULL, 'continuation', NULL,
               'focus_choice', json(focus_choice),
               'permission_offer', json(permission_offer),
               'continuity_revision', continuity_revision,
-              'created_at', created_at, 'status', status))
-        FROM (${questions.select} WHERE q.resolution IS NULL AND q.closed_at IS NULL) WHERE status = 'open'
-        UNION ALL
-        -- An open Home offer, of any age, like an open question (I-23, D22).
-        SELECT 'offer:' || offer.proposal_id, offer.created_at, 'offer',
+              'created_at', created_at, 'status', status)) AS payload
+        FROM (${questions.openSelect}) WHERE status = 'open'`
+        // An open Home offer, of any age, like an open question (I-23, D22).
+        const offers = sql`
+        SELECT 'offer:' || offer.proposal_id AS id, offer.created_at AS at, 'offer' AS kind,
           json_object('id', 'offer:' || offer.proposal_id, 'at', offer.created_at, 'kind', 'offer',
-            'offer', ${homeOfferJson(sql)})
-        FROM task_proposals AS offer WHERE offer.place = 'home' AND offer.status = 'offered'
-        UNION ALL
-        SELECT 'approval:' || json_array(approval.run_id, approval.tool_call_id), approval.requested_at, 'approval',
+            'offer', ${homeOfferJson(sql)}) AS payload
+        FROM task_proposals AS offer WHERE offer.place = 'home' AND offer.status = 'offered'`
+        const approvals = sql`
+        SELECT 'approval:' || json_array(approval.run_id, approval.tool_call_id) AS id, approval.requested_at AS at, 'approval' AS kind,
           json_object('id', 'approval:' || json_array(approval.run_id, approval.tool_call_id), 'at', approval.requested_at,
             'kind', 'approval', 'run_id', approval.run_id, 'session_id', approval.session_id,
             'tool_call_id', approval.tool_call_id, 'tool_name', approval.tool_name, 'preview', approval.preview,
-            'context', json_extract(run.metadata_json, '$.run_context'))
+            'context', json_extract(run.metadata_json, '$.run_context')) AS payload
         FROM tool_approvals AS approval JOIN chat_runs AS run ON run.run_id = approval.run_id
           LEFT JOIN space_tasks AS task ON task.item_id = json_extract(run.metadata_json, '$.run_context.task.item_id')
           LEFT JOIN spaces AS space ON space.space_id = task.space_id
         WHERE approval.status = 'pending' AND (json_extract(run.metadata_json, '$.run_context.task') IS NULL
           OR (task.item_id IS NOT NULL AND ${taskOpenSql("task")}
             AND task.generation = json_extract(run.metadata_json, '$.run_context.task.generation') AND space.archived_at IS NULL))`
+        const kinds = [tasks, comments, runs, openQuestions, offers, approvals]
+        const unionAll = (parts: ReadonlyArray<Statement.Fragment>) =>
+          parts.reduce((all, part) => sql`${all} UNION ALL ${part}`)
+        const after =
+          cursor === undefined
+            ? sql``
+            : sql`WHERE at <= ${cursor.at} AND (at, id) < (${cursor.at}, ${cursor.id})`
+        // Each kind gives its own newest page through its time index, so a page
+        // reads about a page of each kind however long the window is.
+        const newest = (part: Statement.Fragment) => sql`SELECT * FROM (
+          SELECT id, at, kind, payload FROM (${part}) ${after} ORDER BY at DESC, id DESC LIMIT 101)`
         const rows = yield* sql<{
           readonly id: string
           readonly at: string
           readonly payload: string
         }>`
-        SELECT id, at, payload FROM (${evidence})
-        WHERE (${cursor?.at ?? null} IS NULL OR (at, id) < (${cursor?.at ?? null}, ${cursor?.id ?? null}))
+        SELECT id, at, payload FROM (${unionAll(kinds.map(newest))})
         ORDER BY at DESC, id DESC LIMIT 101`
         const action =
-          yield* sql`SELECT 1 FROM (${evidence}) WHERE kind IN ('question', 'approval') LIMIT 1`
+          yield* sql`SELECT 1 FROM (${unionAll(kinds)}) WHERE kind IN ('question', 'approval') LIMIT 1`
         const visible = rows.slice(0, 100)
         const last = visible.at(-1)
         return yield* Schema.decodeUnknownEffect(HomeEvidencePageSchema)({

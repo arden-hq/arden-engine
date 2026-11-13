@@ -35,7 +35,10 @@ export const workSchemaSection = {
     "idx_space_task_events_item_id",
     "idx_space_task_holds_question_id",
     "idx_space_tasks_home_session_id",
-    "idx_space_task_events_created"
+    "idx_space_task_events_created",
+    "idx_run_questions_created",
+    "idx_run_questions_unsettled",
+    "idx_space_task_comments_created"
   ],
   triggers: ["task_revoke_attempts", "space_revoke_task_attempts", "task_clear_hold"],
   statements: [
@@ -219,6 +222,10 @@ export const workSchemaSection = {
     "CREATE INDEX idx_space_task_events_item_id ON space_task_events(item_id)",
     "CREATE INDEX idx_space_task_holds_question_id ON space_task_holds(question_id)",
     "CREATE INDEX idx_space_tasks_home_session_id ON space_tasks(home_session_id)",
-    `CREATE INDEX idx_space_task_events_created ON space_task_events(created_at DESC, event_id DESC)`
+    `CREATE INDEX idx_space_task_events_created ON space_task_events(created_at DESC, event_id DESC)`,
+    `CREATE INDEX idx_run_questions_created ON run_questions(created_at DESC, question_id DESC)`,
+    `CREATE INDEX idx_run_questions_unsettled ON run_questions(created_at DESC, question_id DESC)
+      WHERE resolution IS NULL AND closed_at IS NULL`,
+    `CREATE INDEX idx_space_task_comments_created ON space_task_comments(created_at)`
   ]
 } as const satisfies OperationalSchemaSection

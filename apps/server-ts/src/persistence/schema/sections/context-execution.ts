@@ -57,6 +57,7 @@ export const contextExecutionSchemaSection = {
     "idx_chat_runs_status",
     "idx_chat_runs_result_at",
     "idx_chat_runs_started",
+    "idx_chat_runs_worker_result",
     "idx_trace_trim_due_kind_ended"
   ],
   triggers: [
@@ -324,6 +325,9 @@ export const contextExecutionSchemaSection = {
     `CREATE INDEX idx_chat_runs_status ON chat_runs(status, updated_at)`,
     `CREATE INDEX idx_chat_runs_result_at ON chat_runs(COALESCE(json_extract(metadata_json, '$.late_result_at'), ended_at))`,
     `CREATE INDEX idx_chat_runs_started ON chat_runs(started_at)`,
+    `CREATE INDEX idx_chat_runs_worker_result
+      ON chat_runs(COALESCE(json_extract(metadata_json, '$.late_result_at'), ended_at))
+      WHERE json_extract(metadata_json, '$.run_policy.execution.mode') = 'worker'`,
     `CREATE TABLE row_counts (
       name TEXT PRIMARY KEY CHECK(length(name) > 0),
       rows INTEGER NOT NULL DEFAULT 0

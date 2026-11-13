@@ -48,27 +48,35 @@ export const questionVisiblePredicate = (options: {
     AND ${runAsksVisiblePredicate(sql, run)}`
 }
 
-export const latestSettledQuestionChanges = (sql: SqlClient.SqlClient) => sql`
+/** Settled questions whose latest change falls in (after, through], read from
+ * the changes in that range rather than from every settled question. */
+export const latestSettledQuestionChanges = (
+  sql: SqlClient.SqlClient,
+  range: { readonly after: number; readonly through: number }
+) => sql`
   SELECT question.question_id, latest.sequence AS revision,
     CASE WHEN question.resolution IS NOT NULL THEN 'resolved' ELSE 'closed' END AS status,
     destination.space_id AS destination_space_id,
     destination.session_id AS destination_session_id
-  FROM run_questions AS question
+  FROM ${journalRecordsSql(sql)} AS latest
+  CROSS JOIN run_questions AS question
+    ON question.question_id = json_extract(latest.data_json, '$.question_id')
   JOIN chat_runs AS run ON run.run_id = question.run_id
-  JOIN ${journalRecordsSql(sql)} AS latest
-    ON latest.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
+  JOIN sessions AS destination
+    ON destination.session_id = ${runDestinationSessionId(sql, runColumns(sql, "run"))}
+    AND destination.session_id = json_extract(latest.data_json, '$.session_id')
+  WHERE latest.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
     AND latest.event_type = 'question_changed'
+    AND latest.sequence > ${range.after} AND latest.sequence <= ${range.through}
+    AND (question.resolution IS NOT NULL OR question.closed_at IS NOT NULL)
     AND latest.sequence = (
       SELECT MAX(record.sequence)
       FROM ${journalRecordsSql(sql)} AS record
       WHERE record.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
         AND record.event_type = 'question_changed'
-        AND json_extract(record.data_json, '$.question_id') = question.question_id
-    )
-  JOIN sessions AS destination
-    ON destination.session_id = ${runDestinationSessionId(sql, runColumns(sql, "run"))}
-    AND destination.session_id = json_extract(latest.data_json, '$.session_id')
-  WHERE question.resolution IS NOT NULL OR question.closed_at IS NOT NULL`
+        -- The + drops the column's TEXT affinity, so idx_journal_question_latest serves this.
+        AND json_extract(record.data_json, '$.question_id') = +question.question_id
+    )`
 
 export const appendQuestionChange = Effect.fn(function* (options: {
   readonly sql: SqlClient.SqlClient

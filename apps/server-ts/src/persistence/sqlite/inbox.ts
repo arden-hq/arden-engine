@@ -218,7 +218,7 @@ const makeSnapshotLoader = (sql: SqlClient.SqlClient) => {
   ): Effect.fn.Return<Snapshot, InboxStoreError> {
     const questionRows = yield* query(
       operation,
-      sql<QuestionRow>`SELECT * FROM (${questionReader.select}) WHERE status = 'open'`
+      sql<QuestionRow>`SELECT * FROM (${questionReader.openSelect}) WHERE status = 'open'`
     )
     const questions = yield* Effect.forEach(questionRows, questionReader.decode).pipe(
       Effect.mapError((cause) =>

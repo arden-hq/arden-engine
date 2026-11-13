@@ -135,7 +135,9 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
       })}) THEN 'closed'
       ELSE 'open' END AS status
     FROM run_questions AS q JOIN chat_runs AS r ON r.run_id = q.run_id
-    LEFT JOIN automation_deliveries AS delivery ON json_extract(delivery.payload, '$.questionId') = q.question_id
+    -- The unary + on q.question_id here and below drops its TEXT affinity, so the
+    -- comparison matches the expression index and each question is one lookup.
+    LEFT JOIN automation_deliveries AS delivery ON json_extract(delivery.payload, '$.questionId') = +q.question_id
       AND json_extract(delivery.payload, '$.kind') = 'answer'
     LEFT JOIN chat_idempotency_keys AS answer_receipt
       ON answer_receipt.session_id = json_extract(delivery.payload, '$.sessionId')
@@ -148,20 +150,18 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
     LEFT JOIN run_question_timers AS timer ON timer.question_id = q.question_id
     LEFT JOIN task_contract_proposals AS proposal ON proposal.question_id = q.question_id
     LEFT JOIN space_tasks AS proposal_task ON proposal_task.item_id = proposal.item_id
-    -- Each question's latest change, found in one grouped pass over the
-    -- journal: a MAX subquery per question scanned every journal record once
-    -- per question (24 questions × 460k records ≈ 1.4s on every read).
-    LEFT JOIN (
-      SELECT json_extract(record.data_json, '$.question_id') AS question_id, MAX(record.sequence) AS sequence
-      FROM ${journalRecordsSql(sql)} AS record
-      WHERE record.stream_id = ${SESSION_LIFECYCLE_STREAM_ID} AND record.event_type = 'question_changed'
-      GROUP BY json_extract(record.data_json, '$.question_id')
-    ) AS latest_change ON latest_change.question_id = q.question_id
+    -- Each question's latest change: one lookup in idx_journal_question_latest.
     LEFT JOIN ${journalRecordsSql(sql)} AS question_change
       ON question_change.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
-      AND question_change.sequence = latest_change.sequence
+      AND question_change.sequence = (
+        SELECT MAX(record.sequence) FROM ${journalRecordsSql(sql)} AS record
+        WHERE record.stream_id = ${SESSION_LIFECYCLE_STREAM_ID} AND record.event_type = 'question_changed'
+          AND json_extract(record.data_json, '$.question_id') = +q.question_id)
     LEFT JOIN space_tasks AS task ON task.item_id = json_extract(r.metadata_json, '$.run_context.task.item_id')
     LEFT JOIN spaces AS space ON space.space_id = task.space_id`
+  // Only an unanswered, unclosed question can be open: this reads the short
+  // list in idx_run_questions_unsettled, whose condition it repeats word for word.
+  const openSelect = sql`${select} WHERE q.resolution IS NULL AND q.closed_at IS NULL`
 
   const get = Effect.fn(function* (id: string) {
     const rows = yield* sql<QuestionRow>`${select} WHERE q.question_id = ${id}`.pipe(
@@ -208,7 +208,7 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
         sql`(created_at < ${cursor.at} OR (created_at = ${cursor.at} AND question_id < ${cursor.id}))`
       )
     const rows =
-      yield* sql<QuestionRow>`SELECT * FROM (${select}) AS question_scope WHERE ${sql.and(clauses)} ORDER BY created_at DESC, question_id DESC LIMIT 101`.pipe(
+      yield* sql<QuestionRow>`SELECT * FROM (${request.state === "all" ? select : openSelect}) AS question_scope WHERE ${sql.and(clauses)} ORDER BY created_at DESC, question_id DESC LIMIT 101`.pipe(
         Effect.mapError((cause) => workError("storage", "Could not list Run questions", cause))
       )
     const visible = rows.slice(0, 100)
@@ -221,5 +221,5 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient) => {
           : null
     }
   })
-  return { get, questions, select, decode }
+  return { get, questions, select, openSelect, decode }
 }
