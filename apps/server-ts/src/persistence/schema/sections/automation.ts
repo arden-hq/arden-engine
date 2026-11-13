@@ -48,7 +48,8 @@ export const automationSchemaSection = {
     "idx_automation_runs_occurrence",
     "idx_automation_runs_task_latest",
     "idx_automation_runs_status_started",
-    "idx_automation_runs_counted_completed"
+    "idx_automation_runs_counted_completed",
+    "idx_automation_runs_task_day"
   ],
   triggers: [
     "automation_instruction_revisions_immutable_update",
@@ -341,6 +342,7 @@ export const automationSchemaSection = {
       ON automation_runs(task_id, julianday(started_at))
       WHERE status = 'completed' AND (CASE WHEN outcome IS NULL
         THEN skip_json IS NULL AND disposition IS NOT 'superseded'
-        ELSE outcome <> 'superseded' AND outcome NOT GLOB 'skipped:*' END)`
+        ELSE outcome <> 'superseded' AND outcome NOT GLOB 'skipped:*' END)`,
+    `CREATE INDEX idx_automation_runs_task_day ON automation_runs(task_id, date(started_at))`
   ]
 } as const satisfies OperationalSchemaSection

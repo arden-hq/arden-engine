@@ -84,6 +84,8 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
   const SPACE_TASKS = size(300)
   const SPACE_TASK_EVENTS = size(2_000)
   const QUESTIONS = size(450)
+  /** Space reviews of space-00: about one an hour, like the owner's reviewer. */
+  const SPACE_REVIEWS = size(3_500)
 
   const FORK_FROM = USER_RUNS
   const THREAD_FROM = FORK_FROM + FORK_RUNS
@@ -363,6 +365,22 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
              THEN ${CHANNEL_FROM} + a.n - ${TASK_AUTOMATION_RUNS + AGENTS}
            ELSE (a.n - ${TASK_AUTOMATION_RUNS + AGENTS + CHANNEL_RUNS}) * 15 END
        WHERE a.n >= ${TASK_AUTOMATION_RUNS} AND a.n < ${AUTOMATION_RUNS}`,
+
+      // The reviewer of space-00, with its runs over the whole history; the
+      // Space page counts today's. Off, so the timer jobs leave it alone.
+      `INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers, enabled, created_at,
+         purpose, owner_space_id, context_mode)
+       VALUES ('space:space-00', 'ref-space-00', 'Space review', 'Review the Space.', '[]', 0, ${at("0")},
+         'space_review', 'space-00', 'fresh')`,
+      `INSERT INTO automation_runs (id, task_id, automation_ref, origin, purpose, context_mode, claim_count,
+         started_at, ended_at, status, outcome, disposition)
+       SELECT ${AUTOMATION_RUNS} + 1 + n, 'space:space-00', 'ref-space-00',
+         json_object('kind', 'automation', 'automation_id', 'space:space-00', 'occurrence_id', 'review-' || n),
+         'space_review', 'fresh', 1, ${at(`n * ${span} / ${SPACE_REVIEWS}`)},
+         ${at(`n * ${span} / ${SPACE_REVIEWS} + 90`)}, 'completed',
+         CASE WHEN n % 5 = 0 THEN 'no_change' ELSE 'finished' END,
+         CASE WHEN n % 5 = 0 THEN 'no_change' ELSE 'completed' END
+       FROM nums WHERE n < ${SPACE_REVIEWS}`,
 
       // How each Automation run, agent run and some chat runs ended.
       `INSERT INTO run_endings (run_id, purpose, status, detail, text, place, place_kind, occurred_at,
