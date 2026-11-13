@@ -19,7 +19,8 @@ export const contextExecutionSchemaSection = {
     "shown_asks",
     "journaled_decision_routes",
     "approval_reviews",
-    "session_todos"
+    "session_todos",
+    "row_counts"
   ],
   indexes: [
     "idx_chat_runs_session_status",
@@ -51,7 +52,10 @@ export const contextExecutionSchemaSection = {
     "idx_shown_asks_viewer_session_id",
     "idx_chat_runs_origin",
     "idx_chat_runs_automation",
-    "idx_tool_calls_browser"
+    "idx_tool_calls_browser",
+    "idx_chat_runs_status",
+    "idx_chat_runs_result_at",
+    "idx_chat_runs_started"
   ],
   triggers: [
     "chat_runs_delete_budget",
@@ -62,7 +66,9 @@ export const contextExecutionSchemaSection = {
     "pending_decision_visibility_deferred_insert",
     "pending_decision_visibility_deferred_update",
     "pending_decision_visibility_deferred_immutable_identity",
-    "pending_decision_visibility_immutable_agent_edge"
+    "pending_decision_visibility_immutable_agent_edge",
+    "row_counts_chat_runs_ai",
+    "row_counts_chat_runs_ad"
   ],
   statements: [
     `CREATE TABLE chat_runs (
@@ -309,6 +315,22 @@ export const contextExecutionSchemaSection = {
     "CREATE INDEX idx_shown_asks_viewer_session_id ON shown_asks(viewer_session_id)",
     "CREATE INDEX idx_chat_runs_origin ON chat_runs(json_extract(metadata_json, '$.run_context.origin'))",
     `CREATE INDEX idx_chat_runs_automation ON chat_runs(COALESCE(json_extract(metadata_json, '$.run_policy.automation_id'), json_extract(metadata_json, '$.automation.task_id')))`,
-    `CREATE INDEX idx_tool_calls_browser ON tool_calls(run_id) WHERE tool_name IN ('browser_open', 'browser_snapshot', 'browser_act')`
+    `CREATE INDEX idx_tool_calls_browser ON tool_calls(run_id) WHERE tool_name IN ('browser_open', 'browser_snapshot', 'browser_act')`,
+    `CREATE INDEX idx_chat_runs_status ON chat_runs(status, updated_at)`,
+    `CREATE INDEX idx_chat_runs_result_at ON chat_runs(COALESCE(json_extract(metadata_json, '$.late_result_at'), ended_at))`,
+    `CREATE INDEX idx_chat_runs_started ON chat_runs(started_at)`,
+    `CREATE TABLE row_counts (
+      name TEXT PRIMARY KEY CHECK(length(name) > 0),
+      rows INTEGER NOT NULL DEFAULT 0
+    ) WITHOUT ROWID`,
+    `CREATE TRIGGER row_counts_chat_runs_ai
+      AFTER INSERT ON chat_runs BEGIN
+        UPDATE row_counts SET rows = rows + 1 WHERE name = 'chat_runs';
+      END`,
+    `CREATE TRIGGER row_counts_chat_runs_ad
+      AFTER DELETE ON chat_runs BEGIN
+        UPDATE row_counts SET rows = rows - 1 WHERE name = 'chat_runs';
+      END`,
+    "INSERT INTO row_counts(name, rows) VALUES ('chat_runs', 0)"
   ]
 } as const satisfies OperationalSchemaSection

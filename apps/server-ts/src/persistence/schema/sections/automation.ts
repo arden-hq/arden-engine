@@ -42,7 +42,10 @@ export const automationSchemaSection = {
     "idx_automation_deliveries_session",
     "idx_automation_deliveries_paused",
     "idx_automation_deliveries_space_paused",
-    "idx_automation_delivery_runs_delivery"
+    "idx_automation_delivery_runs_delivery",
+    "idx_automation_runs_no_outcome",
+    "idx_automation_runs_started",
+    "idx_automation_runs_occurrence"
   ],
   triggers: [
     "automation_instruction_revisions_immutable_update",
@@ -324,6 +327,9 @@ export const automationSchemaSection = {
         INSERT OR IGNORE INTO automation_delivery_runs(run_id, delivery_id)
           SELECT member.value, new.delivery_id FROM json_each(new.payload, '$.runIds') AS member
           WHERE member.type = 'text' AND length(member.value) > 0;
-      END`
+      END`,
+    `CREATE INDEX idx_automation_runs_no_outcome ON automation_runs(id) WHERE outcome IS NULL`,
+    `CREATE INDEX idx_automation_runs_started ON automation_runs(started_at)`,
+    `CREATE INDEX idx_automation_runs_occurrence ON automation_runs(json_extract(origin, '$.occurrence_id')) WHERE task_id IS NOT NULL`
   ]
 } as const satisfies OperationalSchemaSection

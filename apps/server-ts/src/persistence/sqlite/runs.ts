@@ -226,8 +226,12 @@ export const makeRunQueries = ({
           ${runId === undefined ? sql`` : sql`AND r.run_id = ${runId}`}
       )
       SELECT totals.total_retained, active_runs.*
-      FROM (SELECT COUNT(*) AS total_retained FROM chat_runs
-        ${runId === undefined ? sql`` : sql`WHERE run_id = ${runId}`}) AS totals
+      FROM (${
+        runId === undefined
+          ? // Kept as a number by triggers (row_counts): counting every run grows with the table.
+            sql`SELECT COALESCE((SELECT rows FROM row_counts WHERE name = 'chat_runs'), 0) AS total_retained`
+          : sql`SELECT COUNT(*) AS total_retained FROM chat_runs WHERE run_id = ${runId}`
+      }) AS totals
       LEFT JOIN active_runs ON TRUE
       ORDER BY active_runs.started_at ASC, active_runs.run_id ASC
     `.pipe(Effect.mapError((cause) => queryError("active", "Could not list active runs", cause)))

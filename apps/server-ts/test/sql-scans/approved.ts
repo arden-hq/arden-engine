@@ -17,6 +17,12 @@ export const APPROVED_SCANS: ReadonlyArray<ApprovedScan> = [
     reason: "First fill of the usage rollup from every run. Runs only while usage_daily is empty."
   },
   {
+    id: "1451b6c58c1e",
+    table: "sessions",
+    reason:
+      "Counts what the chat-history backfill has left, for the Storage page. Asked only while that backfill is unfinished; a finished one reports zero without a query."
+  },
+  {
     id: "87109edd77d5",
     table: "usage_daily",
     reason: "Asks only whether the table has a row: EXISTS stops at the first one."

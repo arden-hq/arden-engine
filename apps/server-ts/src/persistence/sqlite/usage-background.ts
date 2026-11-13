@@ -110,14 +110,22 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
     LEFT JOIN spaces space ON space.space_id = coalesce(task.space_id, job.owner_space_id) AND space.archived_at IS NULL
     LEFT JOIN chat_runs final ON final.run_id = a.chat_run_id
     LEFT JOIN sessions session ON session.session_id = a.chat_session_id
-    WHERE (a.task_id IS NOT NULL OR a.item_id IS NOT NULL) AND ${countsAsRun(sql, sql`a`)} AND (
-      (a.started_at >= ${since} AND a.started_at < ${until})
-      OR a.chat_run_id IN (SELECT run_id FROM relevant)
-      OR (a.task_id IS NOT NULL AND json_extract(a.origin, '$.occurrence_id') IN (
-        SELECT json_extract(r.metadata_json, '$.run_context.origin.occurrence_id')
-        FROM relevant JOIN chat_runs r ON r.run_id = relevant.run_id
-      ))
-    )`
+    -- Three ways an attempt belongs to the window, each found through its own
+    -- index and then joined by id. Written as one OR across three columns,
+    -- SQLite read every attempt.
+    WHERE a.id IN (
+        SELECT id FROM automation_runs WHERE started_at >= ${since} AND started_at < ${until}
+        UNION
+        SELECT id FROM automation_runs
+        WHERE chat_run_id IS NOT NULL AND chat_run_id IN (SELECT run_id FROM relevant)
+        UNION
+        SELECT id FROM automation_runs
+        WHERE task_id IS NOT NULL AND json_extract(origin, '$.occurrence_id') IN (
+          SELECT json_extract(r.metadata_json, '$.run_context.origin.occurrence_id')
+          FROM relevant CROSS JOIN chat_runs r ON r.run_id = relevant.run_id
+        )
+      )
+      AND (a.task_id IS NOT NULL OR a.item_id IS NOT NULL) AND ${countsAsRun(sql, sql`a`)}`
 
   const byRun = new Map(runs.map((run) => [run.run_id, run]))
   const byOrigin = new Map<string, AttemptRow>()

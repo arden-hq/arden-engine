@@ -38,6 +38,7 @@ import { chatUploadRefs } from "./0143_chat_upload_refs.js"
 import { lookupIndexes } from "./0144_lookup_indexes.js"
 import { sessionSizes } from "./0145_session_sizes.js"
 import { browserProcedureJobOutcome } from "./0146_browser_procedure_job_outcome.js"
+import { statusAndTimeIndexes } from "./0147_status_and_time_indexes.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -318,7 +319,8 @@ export const migrations: ReadonlyArray<Migration> = [
   chatUploadRefs,
   lookupIndexes,
   sessionSizes,
-  browserProcedureJobOutcome
+  browserProcedureJobOutcome,
+  statusAndTimeIndexes
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

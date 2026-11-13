@@ -230,6 +230,7 @@ export const tableTells = {
   managed_output_lifecycle_lock: { silent: files },
   chat_upload_cleanup: { silent: files },
   session_sizes: { silent: files },
+  row_counts: { silent: files },
   session_type_sizes: { silent: files },
   chat_upload_refs: { silent: files },
   chat_upload_unlisted: { silent: files },
