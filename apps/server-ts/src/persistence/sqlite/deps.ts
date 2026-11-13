@@ -6,6 +6,10 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import type { PersistenceWriteQueue } from "../write-queue.js"
 import type { DiagnosticsService } from "../../runtime/diagnostics.js"
 import { makeUnitOfWork, UnitOfWork } from "../unit-of-work.js"
+import {
+  ToolResultObjects,
+  type ToolResultObjectStore
+} from "../managed-output/tool-result-objects.js"
 
 export const IdGenerator = Context.Reference<{ readonly next: () => string }>(
   "@arden-hq/server/persistence/IdGenerator",
@@ -37,6 +41,8 @@ export interface Writer {
   readonly run: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly waiting: Effect.Effect<number>
   readonly snapshot: <A, E>(read: Effect.Effect<A, E>) => Effect.Effect<A, E | SqlError.SqlError>
+  /** Gives `effect` the store that keeps large tool results; transactions and snapshots have it already. */
+  readonly withToolResults: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
 export interface PersistenceDeps {
@@ -52,9 +58,12 @@ export const makeWriter = (options: {
   readonly reader: SqlClient.SqlClient
   readonly queue: PersistenceWriteQueue["Service"]
   readonly beforeCommit?: () => Effect.Effect<void, never, UnitOfWork> | undefined
+  readonly toolResults?: () => ToolResultObjectStore | undefined
 }): Writer => {
   const { sql, reader, queue } = options
   const snapshots = Semaphore.makeUnsafe(SNAPSHOT_CONCURRENCY)
+  const withToolResults: Writer["withToolResults"] = (effect) =>
+    Effect.suspend(() => Effect.provideService(effect, ToolResultObjects, options.toolResults?.()))
   const unitOfWork: Transact = (effect) =>
     Effect.suspend(() => {
       const committed: Array<Effect.Effect<void>> = []
@@ -77,7 +86,7 @@ export const makeWriter = (options: {
               return result
             })
       return sql
-        .withTransaction(Effect.provideService(write, UnitOfWork, unit))
+        .withTransaction(withToolResults(Effect.provideService(write, UnitOfWork, unit)))
         .pipe(Effect.tap(() => Effect.forEach(committed, (notify) => notify, { discard: true })))
     })
   return {
@@ -92,9 +101,10 @@ export const makeWriter = (options: {
       Effect.serviceOption(reader.transactionService).pipe(
         Effect.flatMap((open) =>
           Option.isSome(open)
-            ? reader.withTransaction(read)
-            : snapshots.withPermit(reader.withTransaction(read))
+            ? reader.withTransaction(withToolResults(read))
+            : snapshots.withPermit(reader.withTransaction(withToolResults(read)))
         )
-      )
+      ),
+    withToolResults
   }
 }

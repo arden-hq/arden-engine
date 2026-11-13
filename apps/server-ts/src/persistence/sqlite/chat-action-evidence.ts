@@ -10,7 +10,7 @@ import type {
   SessionToolEvidencePage
 } from "../sessions/tool-evidence.js"
 import { decodeJson, type JsonColumnError } from "./json.js"
-import { PersistedToolResultSchema } from "./tool-rows.js"
+import { fullResultJson, PersistedToolResultSchema } from "./tool-result-storage.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 export interface ChatToolEvidenceRow {
@@ -74,12 +74,15 @@ export const decodeChatToolEvidence = Effect.fn("Chat.decodeToolEvidence")(funct
   const arguments_ = yield* decodeJson(JsonObjectSchema, row.arguments_json).pipe(
     Effect.orElseSucceed(() => row.arguments_json)
   )
-  const rawResult =
+  // The whole result, so a slim row cites the same revision as before it was slimmed.
+  const resultJson =
     row.result_json === null
       ? null
-      : yield* decodeJson(Schema.Json, row.result_json).pipe(
-          Effect.orElseSucceed(() => row.result_json)
-        )
+      : yield* fullResultJson(row.result_json).pipe(Effect.orElseSucceed(() => row.result_json))
+  const rawResult =
+    resultJson === null
+      ? null
+      : yield* decodeJson(Schema.Json, resultJson).pipe(Effect.orElseSucceed(() => resultJson))
   const result: unknown =
     Predicate.isObject(rawResult) &&
     Predicate.isObject(rawResult.data) &&

@@ -11,6 +11,11 @@ import {
 import { JsonObjectSchema, type JsonObject } from "../json.js"
 import { ToolExecutionStoreError, type ToolExecutionIdentity } from "../tools/store.js"
 import { decodeJson } from "./json.js"
+import {
+  loadFullResult,
+  PersistedToolResultSchema,
+  type PersistedToolResult
+} from "./tool-result-storage.js"
 import { TOOL_STATUSES, type ToolStatus } from "./status-sets.js"
 
 export type ToolOperation =
@@ -88,39 +93,6 @@ const ToolExecutionIdentitySchema = Schema.Struct({
   effect: Schema.optionalKey(ToolEffectSchema),
   source: Schema.optionalKey(Schema.NonEmptyString)
 })
-
-const ContentBlockSchema = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
-  Schema.Struct({
-    type: Schema.Literal("image"),
-    media_type: Schema.String,
-    data: Schema.String
-  }),
-  Schema.Struct({
-    type: Schema.Literal("audio"),
-    media_type: Schema.String,
-    data: Schema.String
-  }),
-  Schema.Struct({
-    type: Schema.Literal("context"),
-    content_type: Schema.String,
-    content: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    metadata: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.String)))
-  })
-])
-
-export const PersistedToolResultSchema = Schema.Struct({
-  content: Schema.String,
-  preview: Schema.String,
-  is_error: Schema.optionalKey(Schema.Boolean),
-  retryable: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-  data: Schema.optionalKey(Schema.NullOr(JsonObjectSchema)),
-  message_extras: Schema.optionalKey(JsonObjectSchema),
-  host: Schema.optionalKey(JsonObjectSchema),
-  model_content: Schema.optionalKey(Schema.Array(ContentBlockSchema))
-})
-
-export type PersistedToolResult = (typeof PersistedToolResultSchema)["Type"]
 
 export const argumentsEquivalent = Schema.toEquivalence(JsonObjectSchema)
 
@@ -268,6 +240,7 @@ export const validateRowIdentity = Effect.fn("SqliteToolExecutionStore.validateR
   }
 )
 
+/** The row's whole result; a slim row is resolved through its saved object. */
 export const decodeStoredResult = Effect.fn("SqliteToolExecutionStore.decodeStoredResult")(
   function* (
     row: ToolCallRow,
@@ -277,9 +250,15 @@ export const decodeStoredResult = Effect.fn("SqliteToolExecutionStore.decodeStor
     if (row.result_json === null) {
       return yield* toolError(operation, "corrupt", "Stored tool result is missing", identity)
     }
-    return yield* decodeJson(PersistedToolResultSchema, row.result_json).pipe(
+    return yield* loadFullResult(row.result_json).pipe(
       Effect.mapError((cause) =>
-        toolError(operation, "corrupt", "Stored tool result is corrupt", identity, cause)
+        toolError(
+          operation,
+          cause.reason === "corrupt" ? "corrupt" : "storage",
+          cause.message,
+          identity,
+          cause
+        )
       )
     )
   }

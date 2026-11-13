@@ -5,7 +5,7 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 
 import type { ManagedOutputWriter } from "../artifacts/managed-output/managed-output.js"
-import { isManagedObjectRef } from "../artifacts/managed-output/object-store.js"
+import { isManagedObjectRef } from "../persistence/managed-output/object-store.js"
 import { neverFoldersWithin, type LocalPathServices } from "../storage/local-paths.js"
 import { bodyFields } from "./code-mode-result.js"
 import { defineServerTool, type ServerTool } from "./define.js"

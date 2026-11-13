@@ -15,6 +15,7 @@ import { pendingDecisionVisibilityBackfill } from "../pending-decision-visibilit
 import { orphanAgentSessionsBackfill } from "../orphan-agent-sessions-backfill.js"
 import { spaceWordsBackfill } from "../space-words-backfill.js"
 import { keyMessageCopiesBackfill } from "../key-message-copies-backfill.js"
+import { slimToolResultsBackfill } from "../tool-result-backfill.js"
 import { checkBackfills, type AnyBackfill } from "./backfill.js"
 
 export const backfills: ReadonlyArray<AnyBackfill> = checkBackfills([
@@ -33,5 +34,6 @@ export const backfills: ReadonlyArray<AnyBackfill> = checkBackfills([
   automationHistoryBackfill,
   orphanAgentSessionsBackfill,
   spaceWordsBackfill,
-  keyMessageCopiesBackfill
+  keyMessageCopiesBackfill,
+  slimToolResultsBackfill
 ])

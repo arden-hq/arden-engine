@@ -136,6 +136,10 @@ import { sqliteWriterLayer } from "./writer-client.js"
 import { makeSqliteThreadClient } from "@arden-hq/sqlite-thread"
 import { ManagedOutputLifecycleStore } from "../managed-output/lifecycle-store.js"
 import { makeManagedOutputLifecycleStore } from "./managed-output-lifecycle.js"
+import {
+  makeToolResultObjects,
+  type ToolResultObjectStore
+} from "../managed-output/tool-result-objects.js"
 import { Diagnostics } from "../../runtime/diagnostics.js"
 import { migrateAtStartup, recordDataVersion, type ReleaseStorage } from "./release-safety.js"
 
@@ -145,6 +149,8 @@ export interface SqlitePersistenceOptions {
   readonly refreshModelHost?: (() => Promise<ModelHost>) | undefined
   readonly record?: { readonly storage: ReleaseStorage; readonly version: string } | undefined
   readonly dataDir: string | null
+  /** The managed-output folder; large tool results are kept there whole. Absent: rows stay whole. */
+  readonly managedOutputs?: string | undefined
 }
 
 const initError = (message: string, cause?: unknown): StorageStartupError =>
@@ -390,6 +396,7 @@ interface BuiltStores {
   readonly storagePolicy: StoragePolicyStore["Service"]
   readonly usage: UsageStore["Service"]
   readonly relay: RelayStore["Service"]
+  readonly fileLifecycle: ManagedOutputLifecycleStore["Service"]
 }
 
 const persistencePorts = (built: BuiltStores) => {
@@ -485,7 +492,7 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(DriveUploadStore, makeDriveUploadStore(deps)),
     Context.make(ScriptResults, makeScriptResults(deps)),
     Context.make(ScriptJournal, makeScriptJournal(deps)),
-    Context.make(ManagedOutputLifecycleStore, makeManagedOutputLifecycleStore(deps)),
+    Context.make(ManagedOutputLifecycleStore, built.fileLifecycle),
     Context.make(BackfillStore, makeBackfillRuntime(deps))
   )
 }
@@ -536,7 +543,20 @@ export const sqliteStoresOnWriter = (
               connections: READER_CONNECTIONS
             }).pipe(Effect.provide(Reactivity.layer))
       let tellAtCommit: Effect.Effect<void, never, UnitOfWork> | undefined
-      const writer = makeWriter({ sql, reader, queue: writes, beforeCommit: () => tellAtCommit })
+      let toolResults: ToolResultObjectStore | undefined
+      const writer = makeWriter({
+        sql,
+        reader,
+        queue: writes,
+        beforeCommit: () => tellAtCommit,
+        toolResults: () => toolResults
+      })
+      const fileLifecycle = makeManagedOutputLifecycleStore({ writer, reader })
+      const managedOutputs = options.managedOutputs
+      toolResults =
+        managedOutputs === undefined
+          ? undefined
+          : makeToolResultObjects(managedOutputs, fileLifecycle)
       const intelligence = yield* makeIntelligenceSettingsStore({ writer }).pipe(
         Effect.mapError((cause) =>
           initError("Could not construct intelligence settings storage", cause)
@@ -598,9 +618,9 @@ export const sqliteStoresOnWriter = (
         models,
         storagePolicy,
         usage,
-        relay
+        relay,
+        fileLifecycle
       })
-      const fileLifecycle = Context.get(ports, ManagedOutputLifecycleStore)
       yield* Effect.addFinalizer(() => Effect.promise(fileLifecycle.drain))
       yield* diagnostics.startupPhase("persistence_ready")
       return ports

@@ -45,12 +45,14 @@ export const makeBackfillChunks = ({
       const prepared =
         backfill.prepare === undefined || before?.finished_at != null
           ? undefined
-          : yield* backfill
-              .prepare({
-                cursor: before?.cursor ?? undefined,
-                limit,
-                reader
-              })
+          : yield* writer
+              .withToolResults(
+                backfill.prepare({
+                  cursor: before?.cursor ?? undefined,
+                  limit,
+                  reader
+                })
+              )
               .pipe(Effect.mapError(failed(`Could not prepare backfill ${backfill.name}`)))
       const attempted = yield* writer
         .transact(

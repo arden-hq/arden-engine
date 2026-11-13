@@ -23,6 +23,7 @@ import {
   toolError,
   preserveToolError,
   decodeIdentity,
+  decodeResult,
   loadRow,
   validateRowIdentity,
   decodeStoredResult,
@@ -47,6 +48,9 @@ import {
   type EffectTargetOrigin
 } from "../../execution/tool-effect.js"
 import { storeEffectTarget } from "./effect-targets.js"
+import { publishLargeToolResult } from "./tool-result-storage.js"
+import { ensureMutationReceipt } from "../tools/mutation-receipt.js"
+import { stripChangeEvidence } from "../tools/change-evidence.js"
 
 export const makeToolExecutions = ({
   writer,
@@ -246,9 +250,29 @@ export const makeToolExecutions = ({
     input: ToolExecutionIdentity,
     inputResult: ToolResult
   ): Effect.fn.Return<ToolResult, ToolExecutionStoreError> {
+    const identity = yield* decodeIdentity(input, "complete")
+    const result = yield* decodeResult(
+      identity.changesState
+        ? ensureMutationReceipt(identity, stripChangeEvidence(inputResult))
+        : stripChangeEvidence(inputResult),
+      "complete",
+      identity
+    )
+    // Without its object the row is written whole: a finished call never turns uncertain
+    // because a file could not be saved.
+    const published = yield* writer.withToolResults(publishLargeToolResult(identity, result)).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not save a large tool result outside the database", {
+          tool: identity.toolName,
+          cause: cause.cause
+        }).pipe(Effect.as(undefined))
+      )
+    )
     const endedAt = DateTime.formatIso(yield* DateTime.now)
     return yield* writer
-      .transactInteractive(settleToolExecutionInTransaction(sql, input, inputResult, endedAt))
+      .transactInteractive(
+        settleToolExecutionInTransaction(sql, input, inputResult, endedAt, { published })
+      )
       .pipe(Effect.mapError(preserveToolError("complete", input)))
   })
 

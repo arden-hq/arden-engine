@@ -9,6 +9,7 @@ import {
   type InstructionRow
 } from "./automation-instruction-provenance.js"
 import { userAutomationSql } from "./authority-sql.js"
+import { fullResultJson } from "./tool-result-storage.js"
 
 const NAME = "automation_instruction_provenance"
 
@@ -93,7 +94,11 @@ export const automationInstructionBackfill: Backfill = {
           AND call.tool_call_id = candidate.source_tool_call_id
         WHERE candidate.automation_ref = ${row.automation_ref} LIMIT 1`
       const destination = yield* instructionDestination(sql, row.task_id, row.thread_id)
-      const resultJson = candidate?.result_json
+      const storedJson = candidate?.result_json
+      const resultJson =
+        storedJson === null || storedJson === undefined
+          ? storedJson
+          : yield* fullResultJson(storedJson).pipe(Effect.orElseSucceed(() => storedJson))
       const sourceMatches =
         candidate !== undefined &&
         candidate.status === "completed" &&

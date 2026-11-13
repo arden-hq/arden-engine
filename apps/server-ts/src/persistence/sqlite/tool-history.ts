@@ -4,7 +4,7 @@ import { refreshChangeEvidence, withNestedCallFacts, withScriptState } from "./c
 import { disposableForkSql } from "../schema/fork-disposition.js"
 import { CODE_MODE_TOOL, SPAWN_AGENT_TOOL, nestedCallMarker } from "../tools/tool-roles.js"
 import { sanitizeApprovalPresentation, type RuntimeApprovalSnapshot } from "@arden-hq/protocol/chat"
-import { Effect, Predicate, Schema } from "effect"
+import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { PendingConnectionDecision } from "../../connections/recovery.js"
 import { JsonObjectSchema } from "../json.js"
@@ -22,13 +22,9 @@ import { decodeJson } from "./json.js"
 import { pendingDecisionCards, visiblePendingDecisionCards } from "./pending-decision-cards.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decisionLineageSql } from "../schema/decision-visibility.js"
-import {
-  type ApprovalRow,
-  PersistedToolResultSchema,
-  toolError,
-  decodePendingConnection
-} from "./tool-rows.js"
+import { type ApprovalRow, toolError, decodePendingConnection } from "./tool-rows.js"
 import { resultToolStatusList } from "./status-sets.js"
+import { loadFullResult, PersistedToolResultSchema } from "./tool-result-storage.js"
 import { sessionAncestors, sessionDescendants } from "./tree-walk.js"
 
 interface ToolHistoryResultRow {
@@ -119,15 +115,11 @@ export const makeToolHistory = ({
     )
     const results: Array<{ runId: string; data: Readonly<Record<string, unknown>> }> = []
     for (const row of rows) {
-      try {
-        const parsed = JSON.parse(row.result_json) as { readonly data?: unknown }
-        const data = parsed.data
-        if (data !== null && typeof data === "object" && !Array.isArray(data)) {
-          results.push({ runId: row.run_id, data: data as Readonly<Record<string, unknown>> })
-        }
-      } catch {
-        continue
-      }
+      const result = yield* writer
+        .withToolResults(loadFullResult(row.result_json))
+        .pipe(Effect.option)
+      const data = Option.isSome(result) ? result.value.data : undefined
+      if (data !== undefined && data !== null) results.push({ runId: row.run_id, data })
     }
     return results
   })
@@ -234,12 +226,9 @@ export const makeToolHistory = ({
     const rows = yield* historySql<{
       readonly tool_name: string
       readonly arguments_json: string
-      readonly content: string | null
-      readonly is_error: number | null
+      readonly result_json: string
     }>`
-      SELECT call.tool_name, call.arguments_json,
-             json_extract(call.result_json, '$.content') AS content,
-             json_extract(call.result_json, '$.is_error') AS is_error
+      SELECT call.tool_name, call.arguments_json, call.result_json
       FROM tool_calls AS call
       JOIN chat_runs AS run ON run.run_id = call.run_id AND run.session_id = call.session_id
       WHERE call.session_id = ${input.sessionId}
@@ -254,11 +243,16 @@ export const makeToolHistory = ({
     )
     const row = rows[0]
     if (row === undefined) return undefined
+    const result = yield* writer
+      .withToolResults(loadFullResult(row.result_json))
+      .pipe(
+        Effect.mapError((cause) => toolError("history", "storage", cause.message, undefined, cause))
+      )
     return {
       name: row.tool_name,
       arguments: row.arguments_json,
-      result: Predicate.isString(row.content) ? row.content : undefined,
-      isError: row.is_error === 1
+      result: result.content,
+      isError: result.is_error === true
     }
   })
 

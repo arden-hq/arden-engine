@@ -5,7 +5,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { makeWriter } from "../../dist/persistence/sqlite/deps.js"
 import { makeManagedOutputLifecycleStore } from "../../dist/persistence/sqlite/managed-output-lifecycle.js"
 import { PersistenceWriteQueue } from "../../dist/persistence/write-queue.js"
-import { makeManagedObjectStore } from "../../dist/artifacts/managed-output/object-store.js"
+import { makeManagedObjectStore } from "../../dist/persistence/managed-output/object-store.js"
 
 const [mode, filename, root, sessionId, marker] = process.argv.slice(2)
 if (

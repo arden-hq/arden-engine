@@ -32,13 +32,13 @@ import {
   type ToolCallRow,
   type ChatRunRow,
   type UpdatedToolRow,
-  PersistedToolResultSchema,
   toolError,
   preserveToolError,
   decodeResult,
   decodePendingConnection,
   loadApprovalRow
 } from "./tool-rows.js"
+import { storedResultJson } from "./tool-result-storage.js"
 import {
   attachFolderToSpaceInTransaction,
   type ApprovalFolderResolutions
@@ -415,7 +415,7 @@ LIMIT 1
           ? rejectedToolResult(decision, decision.feedback)
           : confirmedToolOutcomeResult(decision, decision.approved, decision.feedback)
       const result = yield* decodeResult(synthetic, "resolve", decision)
-      resultJson = yield* encodeJson(PersistedToolResultSchema, result).pipe(
+      resultJson = yield* storedResultJson(result, undefined).pipe(
         Effect.mapError((cause) =>
           toolError("resolve", "corrupt", "Resolved tool result is invalid", decision, cause)
         )

@@ -41,7 +41,12 @@ export const readTaskResults = Effect.fn("SqliteWorkStore.readTaskResults")(func
               AND receipt.tool_name IN ('space_task_update', 'task_update', 'task_wait')
               AND receipt.status = 'completed' AND json_extract(receipt.result_json, '$.is_error') = 0
               AND json_extract(receipt.arguments_json, '$.patch.completion_result') IS NULL
-              AND json_extract(receipt.result_json, '$.content') = candidate.result)
+              -- A slim row (tool-result-storage.ts) keeps the head of its content and the
+              -- whole content's length.
+              AND (json_extract(receipt.result_json, '$.content') = candidate.result
+                OR (json_extract(receipt.result_json, '$.stored_result.content_chars') = length(candidate.result)
+                  AND substr(candidate.result, 1, length(json_extract(receipt.result_json, '$.content')))
+                    = json_extract(receipt.result_json, '$.content'))))
         ORDER BY candidate.ended_at DESC, candidate.id DESC LIMIT 1
       )
     )

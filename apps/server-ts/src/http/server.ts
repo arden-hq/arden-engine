@@ -151,6 +151,7 @@ const composeServer = (
   const storage = recoveredSqlitePersistenceLayer({
     filename: root.databaseFile,
     dataDir: root.dir,
+    managedOutputs: root.managedOutputs,
     record,
     models: options.modelHost,
     refreshModelHost: options.refreshModelHost

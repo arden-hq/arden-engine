@@ -11,7 +11,7 @@ import {
   readManagedObjectDescriptor,
   type ManagedObjectDescriptor,
   type ManagedObjectSource
-} from "../../persistence/managed-output/descriptor.js"
+} from "./descriptor.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { publishNoReplace } from "@arden-hq/std/publish"
 
@@ -23,6 +23,8 @@ export interface ManagedObjectStore {
     readonly source: ManagedObjectSource
   }) => Promise<ManagedObjectDescriptor>
   readonly read: (input: { readonly sessionId: string; readonly ref: string }) => Promise<string>
+  /** Reads an object by a ref that Arden stored itself; `read` is for refs a model names. */
+  readonly readRef: (ref: string) => Promise<string>
   readonly attach: (input: {
     readonly descriptor: ManagedObjectDescriptor
     readonly sessionId: string
@@ -160,6 +162,12 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     if (parsed === undefined || parsed.owner !== sha256Hex(input.sessionId)) {
       throw new Error("Managed-output ref is not owned by this Session")
     }
+    return readRef(input.ref)
+  }
+
+  const readRef: ManagedObjectStore["readRef"] = async (ref) => {
+    const parsed = managedObjectRefParts(ref)
+    if (parsed === undefined) throw new Error("Managed-output ref is invalid")
     for (const parent of [
       directory,
       path.join(directory, "refs"),
@@ -183,7 +191,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
       typeof saved !== "object" ||
       saved === null ||
       !("ref" in saved) ||
-      saved.ref !== input.ref ||
+      saved.ref !== ref ||
       !("bytes" in saved) ||
       typeof saved.bytes !== "number" ||
       !Number.isSafeInteger(saved.bytes) ||
@@ -192,7 +200,7 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
       throw new Error("Managed-output owner ref is invalid")
     }
     return verify({
-      ref: input.ref,
+      ref,
       sha256: parsed.digest,
       bytes: saved.bytes,
       format: parsed.format,
@@ -354,5 +362,15 @@ export const makeManagedObjectStore = (root: string): ManagedObjectStore => {
     }
   }
 
-  return { publish, read, attach, ownerDigests, size, removeRef, removeOwner, collectDigest }
+  return {
+    publish,
+    read,
+    readRef,
+    attach,
+    ownerDigests,
+    size,
+    removeRef,
+    removeOwner,
+    collectDigest
+  }
 }

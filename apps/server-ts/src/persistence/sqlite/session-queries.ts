@@ -449,11 +449,13 @@ export const makeSessionQueries = ({
     )
 
   const readToolEvidence: SessionQueries["Service"]["readToolEvidence"] = (input) =>
-    readSessionToolEvidence(sql, input).pipe(
-      Effect.mapError((cause) =>
-        queryError("tool_evidence", "Could not read durable tool evidence", cause)
+    writer
+      .withToolResults(readSessionToolEvidence(sql, input))
+      .pipe(
+        Effect.mapError((cause) =>
+          queryError("tool_evidence", "Could not read durable tool evidence", cause)
+        )
       )
-    )
 
   return SessionQueries.of({
     readToolEvidence,

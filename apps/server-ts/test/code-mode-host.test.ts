@@ -20,7 +20,7 @@ import { defineServerTool } from "../src/tools/define.js"
 import { claimObservedRevision } from "../src/tools/browser-support.js"
 import { makeBrowserObservationRegistry } from "../src/tools/run-context.js"
 import { serverRunContext } from "./kit.js"
-import { PersistedToolResultSchema } from "../src/persistence/sqlite/tool-rows.js"
+import { PersistedToolResultSchema } from "../src/persistence/sqlite/tool-result-storage.js"
 
 it("invalidates browser authority when a recovered call failed before reporting its page", async () => {
   const tab = "browser-tab-4-3afbbbf5"

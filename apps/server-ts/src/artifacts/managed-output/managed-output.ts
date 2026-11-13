@@ -15,7 +15,10 @@ import {
   type ManagedObjectDescriptor,
   type ManagedObjectSource
 } from "../../persistence/managed-output/descriptor.js"
-import { makeManagedObjectStore, type ManagedObjectStore } from "./object-store.js"
+import {
+  makeManagedObjectStore,
+  type ManagedObjectStore
+} from "../../persistence/managed-output/object-store.js"
 
 const INLINE_LIMIT = { maxBytes: 50 * 1024, maxLines: 2_000 } as const
 const PREVIEW_LIMIT = { maxBytes: 32 * 1024, maxLines: 1_200 } as const

@@ -36,6 +36,7 @@ import {
   matchesInstructionReceipt
 } from "./automation-instruction-provenance.js"
 import { userAutomationSql } from "./authority-sql.js"
+import { fullResultJson } from "./tool-result-storage.js"
 
 interface AutomationRunRow {
   readonly id: number
@@ -143,120 +144,128 @@ export const makeAutomationCatalog = ({
 
   const instructionRevision = Effect.fn("SqliteAutomationStore.instructionRevision")(
     (revisionId: number) =>
-      Effect.gen(function* () {
-        const [row] = yield* sql<{
-          readonly revision_id: number
-          readonly task_id: string
-          readonly instruction_json: string
-          readonly instruction_hash: string
-          readonly prompt_author: string | null
-          readonly source_run_id: string | null
-          readonly source_tool_call_id: string | null
-        }>`
+      writer.withToolResults(
+        Effect.gen(function* () {
+          const [row] = yield* sql<{
+            readonly revision_id: number
+            readonly task_id: string
+            readonly instruction_json: string
+            readonly instruction_hash: string
+            readonly prompt_author: string | null
+            readonly source_run_id: string | null
+            readonly source_tool_call_id: string | null
+          }>`
         SELECT revision_id, task_id, instruction_json,
           instruction_hash, prompt_author, source_run_id, source_tool_call_id
         FROM automation_instruction_revisions WHERE revision_id = ${revisionId} LIMIT 1`
-        if (row === undefined) return null
-        const parsed = yield* Schema.decodeUnknownEffect(InstructionSnapshotSchema)(
-          JSON.parse(row.instruction_json) as unknown
-        ).pipe(
-          Effect.mapError((cause) =>
-            storeError(
-              "get",
-              "corrupt",
-              "Stored Automation instruction is corrupt",
-              row.task_id,
-              cause
-            )
-          )
-        )
-        if (instructionHash(row.instruction_json) !== row.instruction_hash)
-          return yield* storeError(
-            "get",
-            "corrupt",
-            "Automation instruction digest changed",
-            row.task_id
-          )
-        const author = yield* Schema.decodeUnknownEffect(PromptAuthorSchema)(
-          row.prompt_author ?? "unknown"
-        ).pipe(
-          Effect.mapError((cause) =>
-            storeError(
-              "get",
-              "corrupt",
-              "Automation instruction author is corrupt",
-              row.task_id,
-              cause
-            )
-          )
-        )
-        if ((row.source_run_id === null) !== (row.source_tool_call_id === null))
-          return yield* storeError(
-            "get",
-            "corrupt",
-            "Automation instruction source is incomplete",
-            row.task_id
-          )
-        if (row.source_run_id !== null && row.source_tool_call_id !== null) {
-          const [receipt] = yield* sql<{
-            readonly tool_name: string
-            readonly status: string
-            readonly arguments_json: string
-            readonly result_json: string | null
-          }>`SELECT tool_name, status, arguments_json, result_json FROM tool_calls
-          WHERE run_id = ${row.source_run_id} AND tool_call_id = ${row.source_tool_call_id} LIMIT 1`
-          const validName =
-            receipt?.tool_name === "automation_create" || receipt?.tool_name === "automation_update"
-          if (!validName || receipt.status !== "completed" || receipt.result_json === null)
-            return yield* storeError(
-              "get",
-              "corrupt",
-              "Automation write receipt is missing",
-              row.task_id
-            )
-          const result = JSON.parse(receipt.result_json) as unknown
-          const args = JSON.parse(receipt.arguments_json) as unknown
-          if (
-            !matchesInstructionReceipt({
-              result,
-              args,
-              toolName: receipt.tool_name,
-              automationRef: yield* automationRefOf(sql, row.task_id),
-              destination: yield* instructionDestination(sql, row.task_id, parsed.thread_id),
-              instruction: {
-                ...parsed,
-                triggers: JSON.stringify(parsed.triggers)
-              }
-            })
-          )
-            return yield* storeError(
-              "get",
-              "corrupt",
-              "Automation write receipt does not match its instruction",
-              row.task_id
-            )
-        }
-        return {
-          revisionId: row.revision_id,
-          automationId: row.task_id,
-          prompt: parsed.prompt,
-          author,
-          source:
-            row.source_run_id === null || row.source_tool_call_id === null
-              ? undefined
-              : { runId: row.source_run_id, toolCallId: row.source_tool_call_id }
-        } satisfies AutomationInstructionRevision
-      }).pipe(
-        Effect.mapError((cause) =>
-          cause instanceof AutomationStoreError
-            ? cause
-            : storeError(
+          if (row === undefined) return null
+          const parsed = yield* Schema.decodeUnknownEffect(InstructionSnapshotSchema)(
+            JSON.parse(row.instruction_json) as unknown
+          ).pipe(
+            Effect.mapError((cause) =>
+              storeError(
                 "get",
-                "storage",
-                "Could not load Automation instruction",
-                undefined,
+                "corrupt",
+                "Stored Automation instruction is corrupt",
+                row.task_id,
                 cause
               )
+            )
+          )
+          if (instructionHash(row.instruction_json) !== row.instruction_hash)
+            return yield* storeError(
+              "get",
+              "corrupt",
+              "Automation instruction digest changed",
+              row.task_id
+            )
+          const author = yield* Schema.decodeUnknownEffect(PromptAuthorSchema)(
+            row.prompt_author ?? "unknown"
+          ).pipe(
+            Effect.mapError((cause) =>
+              storeError(
+                "get",
+                "corrupt",
+                "Automation instruction author is corrupt",
+                row.task_id,
+                cause
+              )
+            )
+          )
+          if ((row.source_run_id === null) !== (row.source_tool_call_id === null))
+            return yield* storeError(
+              "get",
+              "corrupt",
+              "Automation instruction source is incomplete",
+              row.task_id
+            )
+          if (row.source_run_id !== null && row.source_tool_call_id !== null) {
+            const [receipt] = yield* sql<{
+              readonly tool_name: string
+              readonly status: string
+              readonly arguments_json: string
+              readonly result_json: string | null
+            }>`SELECT tool_name, status, arguments_json, result_json FROM tool_calls
+          WHERE run_id = ${row.source_run_id} AND tool_call_id = ${row.source_tool_call_id} LIMIT 1`
+            const validName =
+              receipt?.tool_name === "automation_create" ||
+              receipt?.tool_name === "automation_update"
+            if (!validName || receipt.status !== "completed" || receipt.result_json === null)
+              return yield* storeError(
+                "get",
+                "corrupt",
+                "Automation write receipt is missing",
+                row.task_id
+              )
+            const resultJson = yield* fullResultJson(receipt.result_json).pipe(
+              Effect.mapError((cause) =>
+                storeError("get", "corrupt", cause.message, row.task_id, cause)
+              )
+            )
+            const result = JSON.parse(resultJson) as unknown
+            const args = JSON.parse(receipt.arguments_json) as unknown
+            if (
+              !matchesInstructionReceipt({
+                result,
+                args,
+                toolName: receipt.tool_name,
+                automationRef: yield* automationRefOf(sql, row.task_id),
+                destination: yield* instructionDestination(sql, row.task_id, parsed.thread_id),
+                instruction: {
+                  ...parsed,
+                  triggers: JSON.stringify(parsed.triggers)
+                }
+              })
+            )
+              return yield* storeError(
+                "get",
+                "corrupt",
+                "Automation write receipt does not match its instruction",
+                row.task_id
+              )
+          }
+          return {
+            revisionId: row.revision_id,
+            automationId: row.task_id,
+            prompt: parsed.prompt,
+            author,
+            source:
+              row.source_run_id === null || row.source_tool_call_id === null
+                ? undefined
+                : { runId: row.source_run_id, toolCallId: row.source_tool_call_id }
+          } satisfies AutomationInstructionRevision
+        }).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof AutomationStoreError
+              ? cause
+              : storeError(
+                  "get",
+                  "storage",
+                  "Could not load Automation instruction",
+                  undefined,
+                  cause
+                )
+          )
         )
       )
   )

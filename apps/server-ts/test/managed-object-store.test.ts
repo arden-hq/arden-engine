@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 
-import { makeManagedObjectStore } from "../src/artifacts/managed-output/object-store.js"
+import { makeManagedObjectStore } from "../src/persistence/managed-output/object-store.js"
 
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex")
 

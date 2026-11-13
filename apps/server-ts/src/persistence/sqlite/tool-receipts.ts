@@ -24,8 +24,6 @@ import {
   type ChatRunRow,
   type UpdatedToolRow,
   type LoadedToolRow,
-  PersistedToolResultSchema,
-  type PersistedToolResult,
   resultEquivalent,
   canonicalToolArguments,
   toolError,
@@ -34,6 +32,16 @@ import {
   decodeStoredResult,
   requireRow
 } from "./tool-rows.js"
+import {
+  loadFullResult,
+  resultDigest,
+  storedResultDigest,
+  storedResultJson,
+  withoutChangeEvidence,
+  type PersistedToolResult,
+  type StoredToolResultError
+} from "./tool-result-storage.js"
+import type { ManagedObjectDescriptor } from "../managed-output/descriptor.js"
 import {
   answeredApprovalStatusList,
   outToolStatusList,
@@ -66,18 +74,23 @@ export interface SettledRunToolExecution {
   readonly confirmedOutcome: boolean
 }
 
-const withoutChangeEvidence = (result: PersistedToolResult): PersistedToolResult => {
-  const { change_evidence: _evidence, ...data } = result.data ?? {}
-  const { data: _data, ...rest } = result
-  return { ...rest, ...(Object.keys(data).length === 0 ? {} : { data }) }
-}
-
 const withoutApprovalFact = (result: PersistedToolResult): PersistedToolResult => {
   if (result.data === undefined || result.data === null || !("approval" in result.data))
     return result
   const { approval: _approval, ...data } = result.data
   return { ...result, data }
 }
+
+const storageError =
+  (operation: ToolOperation, identity: Pick<ToolExecutionIdentity, "runId" | "toolCallId">) =>
+  (cause: StoredToolResultError): ToolExecutionStoreError =>
+    toolError(
+      operation,
+      cause.reason === "corrupt" ? "corrupt" : "storage",
+      cause.message,
+      identity,
+      cause
+    )
 
 export const requireRunningToolExecutionInTransaction = Effect.fn(
   "SqliteToolExecutionStore.requireRunningInTransaction"
@@ -98,7 +111,11 @@ export const settleToolExecutionInTransaction = Effect.fn(
   sql: SqlClient.SqlClient,
   input: ToolExecutionIdentity,
   inputResult: ToolResult,
-  endedAt: string
+  endedAt: string,
+  options: {
+    /** The result's object, published before this transaction (`publishLargeToolResult`). */
+    readonly published?: ManagedObjectDescriptor | undefined
+  } = {}
 ): Effect.fn.Return<ToolResult, ToolExecutionStoreError> {
   const identity = yield* decodeIdentity(input, "complete")
   const result = yield* decodeResult(
@@ -116,14 +133,20 @@ export const settleToolExecutionInTransaction = Effect.fn(
     "complete",
     identity
   )
-  const resultJson = yield* encodeJson(PersistedToolResultSchema, result).pipe(
+  const resultJson = yield* storedResultJson(result, options.published).pipe(
     Effect.mapError((cause) =>
       toolError("complete", "invalid", "Tool result must be JSON-safe", identity, cause)
     )
   )
   const current = yield* requireRow(sql, identity, "complete")
   if (current.status === "completed") {
-    const stored = yield* decodeStoredResult(current.row, identity, "complete")
+    // A retry of a slim row with the same whole result matches by digest, without reading it.
+    const sameDigest =
+      current.row.result_json !== null &&
+      storedResultDigest(current.row.result_json) === resultDigest(result)
+    const stored = sameDigest
+      ? result
+      : yield* decodeStoredResult(current.row, identity, "complete")
     if (resultEquivalent(withoutChangeEvidence(stored), withoutChangeEvidence(result))) {
       return identity.changesState
         ? yield* withChangeEvidence(sql, identity, stored).pipe(
@@ -317,7 +340,7 @@ const uncertainToolResult = (identity?: UncertainToolIdentity): PersistedToolRes
     : UNCERTAIN_TOOL_RESULT
 
 const uncertainResultJson = (operation: ToolOperation, identity?: UncertainToolIdentity) =>
-  encodeJson(PersistedToolResultSchema, uncertainToolResult(identity)).pipe(
+  storedResultJson(uncertainToolResult(identity), undefined).pipe(
     Effect.mapError((cause) =>
       toolError(operation, "corrupt", "Uncertain tool result is invalid", undefined, cause)
     )
@@ -487,10 +510,8 @@ const decodeSettledRunToolRow = Effect.fn("SqliteToolExecutionStore.decodeSettle
         identity
       )
     }
-    const result = yield* decodeJson(PersistedToolResultSchema, row.result_json).pipe(
-      Effect.mapError((cause) =>
-        toolError("recover", "corrupt", "Stored settled tool result is corrupt", identity, cause)
-      )
+    const result = yield* loadFullResult(row.result_json).pipe(
+      Effect.mapError(storageError("recover", identity))
     )
     return {
       toolCallId: row.tool_call_id,
@@ -590,7 +611,7 @@ export const settleUnstartedToolWorkForTerminalInTransaction = Effect.fn(
       "uncertain",
       identity
     )
-    const resultJson = yield* encodeJson(PersistedToolResultSchema, result).pipe(
+    const resultJson = yield* storedResultJson(result, undefined).pipe(
       Effect.mapError((cause) =>
         toolError("uncertain", "corrupt", "Terminal tool result is invalid", identity, cause)
       )

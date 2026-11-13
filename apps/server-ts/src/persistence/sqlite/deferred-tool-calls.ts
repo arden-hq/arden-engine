@@ -18,7 +18,8 @@ import {
   cardStanding,
   pendingDecisionDraft
 } from "./tool-approvals.js"
-import { PersistedToolResultSchema, decodeResult, toolError } from "./tool-rows.js"
+import { decodeResult, toolError } from "./tool-rows.js"
+import { PersistedToolResultSchema } from "./tool-result-storage.js"
 import { assertRunTaskBinding } from "./run-context.js"
 import { noApprovalForRun } from "./approval-policy.js"
 import { loadPendingDecisionRoutes } from "./decision-route-journal.js"

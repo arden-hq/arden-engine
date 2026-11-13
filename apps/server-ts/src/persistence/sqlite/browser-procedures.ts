@@ -26,6 +26,7 @@ import {
   statusSqlList,
   UNRESOLVED_TOOL_STATUSES
 } from "./status-sets.js"
+import { fullResultJson } from "./tool-result-storage.js"
 
 const failure = (cause: unknown) =>
   new BrowserProcedureStoreError({ message: "Could not update browser procedures", cause })
@@ -233,7 +234,8 @@ export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "wri
       ORDER BY started_at,tool_call_id`
     const calls: Array<BrowserRunCall> = []
     for (const row of rows) {
-      const raw = yield* Schema.decodeUnknownEffect(jsonObject)(row.result_json)
+      const resultJson = yield* writer.withToolResults(fullResultJson(row.result_json))
+      const raw = yield* Schema.decodeUnknownEffect(jsonObject)(resultJson)
       const learning = captureLearning(raw["data"])
       if (learning === "sensitive") return undefined
       if (raw["is_error"] === true && row.change === "none") continue
@@ -336,10 +338,12 @@ export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "wri
       readonly result_json: string | null
     }>`SELECT i.run_id,i.tool_call_id,t.status,t.result_json FROM browser_procedure_invocations i JOIN tool_calls t ON t.run_id=i.run_id AND t.tool_call_id=i.tool_call_id WHERE i.status='running' AND t.status IN ${resultToolStatusList}`
     for (const row of rows) {
-      const value =
+      const resultJson =
         row.result_json === null
-          ? undefined
-          : yield* Schema.decodeUnknownEffect(jsonObject)(row.result_json)
+          ? null
+          : yield* writer.withToolResults(fullResultJson(row.result_json))
+      const value =
+        resultJson === null ? undefined : yield* Schema.decodeUnknownEffect(jsonObject)(resultJson)
       const outcome = Schema.decodeUnknownOption(
         Schema.Struct({
           data: Schema.Struct({
