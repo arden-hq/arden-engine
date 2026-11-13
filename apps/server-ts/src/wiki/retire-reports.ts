@@ -27,9 +27,9 @@ export const REPORT_RETENTION_AUTOMATION = "builtin-report-retention"
  * folds its reports into the same page and they are archived before the next part starts. A
  * whole busy month does not fit in one run.
  */
-export const REPORT_SUMMARY_PART = 30
+const REPORT_SUMMARY_PART = 30
 
-export type ReportRetentionStep =
+type ReportRetentionStep =
   | { readonly kind: "idle" }
   | {
       readonly kind: "retired"
@@ -46,7 +46,7 @@ export type ReportRetentionStep =
       readonly markdown: string
     }
 
-export type ReportPartResult =
+type ReportPartResult =
   | { readonly kind: "retired"; readonly reports: number }
   /** The month has no summary page yet, so its reports stay. */
   | { readonly kind: "no_summary" }
