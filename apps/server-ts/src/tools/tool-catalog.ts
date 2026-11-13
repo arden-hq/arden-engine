@@ -95,6 +95,7 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ],
   wiki_admin: [
     "wiki_archive_page",
+    "wiki_merge_page",
     "wiki_move_page",
     "wiki_restore_page",
     "wiki_create_directory",
@@ -273,6 +274,7 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   wiki_page_history: inputs(["path", "wiki_search"]),
   wiki_links: inputs(["path", "wiki_search"]),
   wiki_archive_page: inputs(["path", "wiki_search"]),
+  wiki_merge_page: inputs(["path", "wiki_search"], ["into", "wiki_search"]),
   wiki_move_page: inputs(["path", "wiki_search"]),
   wiki_restore_page: inputs(["path", "wiki_search"], ["revision_ref", "wiki_page_history"]),
   space_page_patch: inputs(["old_text", "space_page_read"]),

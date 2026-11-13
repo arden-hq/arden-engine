@@ -152,6 +152,7 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   wiki_create_directory: "Adds a folder to memory.",
   wiki_patch_page: "Changes part of a memory page.",
   wiki_archive_page: "Archives a memory page.",
+  wiki_merge_page: "Merges a memory page into another.",
   wiki_move_page: "Moves or renames a memory page.",
   wiki_configure_reports: "Sets up memory reports.",
   wiki_publish_report: "Publishes a memory report.",

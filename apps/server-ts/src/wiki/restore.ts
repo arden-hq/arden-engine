@@ -172,11 +172,8 @@ export const makeWikiRestoreMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        if (current.page.lifecycle !== "active") {
-          return yield* wikiError("restore", "invalid", "Only active Wiki pages can be restored", {
-            pageId: input.pageId
-          })
-        }
+        // A merged page is a redirect at its old path. Restoring an earlier revision over it
+        // brings the page back, which is how a merge is undone.
         const boundary = yield* resolveWikiWriteBoundary(
           spaces,
           input.authority,

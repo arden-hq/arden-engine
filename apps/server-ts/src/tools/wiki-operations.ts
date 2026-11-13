@@ -9,8 +9,7 @@ import { writeIdentity } from "./wiki-identity.js"
 import { formatWikiPage } from "../wiki/page.js"
 import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
-import type { PageRecord } from "../wiki/snapshot.js"
-import type { ServerRunContext } from "./run-context.js"
+import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
 import {
   MAX_WIKI_CONTENT_CHARS,
   WIKI_PAGE_BUDGET_CHARS,
@@ -26,12 +25,13 @@ import {
   writtenPageData
 } from "./wiki.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { mergeArchivedPage } from "./wiki-merge.js"
+import { makeWikiRetireTools } from "./wiki-retire.js"
 import {
   MAX_PAGE_SOURCES,
   directoryReceipt,
   pageReceipt,
   pageSource,
+  requireObserved,
   requireWithinCoreBudget
 } from "./wiki-records.js"
 import { searchPages } from "./wiki-search.js"
@@ -44,6 +44,11 @@ const MAX_CHANGE_ENTRIES = 200
 
 const ActiveWikiPathSchema = WikiPathSchema.annotate({
   description: "Exact relative POSIX .md path of an active page returned by Wiki search or listing."
+})
+
+const MergedWikiPathSchema = WikiPathSchema.annotate({
+  description:
+    "Exact relative POSIX .md path of an active page, or of a page that was merged into another."
 })
 
 const SearchParametersSchema = Schema.Struct({
@@ -90,7 +95,7 @@ const CreateDirectoryParametersSchema = Schema.Struct({
 })
 
 const HistoryParametersSchema = Schema.Struct({
-  path: ActiveWikiPathSchema,
+  path: MergedWikiPathSchema,
   limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_HISTORY_ENTRIES }))
     .annotate({
       description: `Maximum newest-first revisions to return, from 1 to ${MAX_HISTORY_ENTRIES}. Defaults to 20.`
@@ -99,7 +104,7 @@ const HistoryParametersSchema = Schema.Struct({
 })
 
 const RestoreParametersSchema = Schema.Struct({
-  path: ActiveWikiPathSchema,
+  path: MergedWikiPathSchema,
   revision_ref: Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
     description: "Exact reachable revision_ref returned by wiki_page_history."
   })
@@ -124,14 +129,6 @@ const PatchParametersSchema = Schema.Struct({
   })
 })
 
-const ArchiveParametersSchema = Schema.Struct({
-  path: ActiveWikiPathSchema,
-  merged_into: Schema.NullOr(ActiveWikiPathSchema).annotate({
-    description:
-      "The active page that now holds this page's content, or null when nothing replaces it. With a page, the archived path redirects there, so links to it, in the Wiki or elsewhere, keep working."
-  })
-})
-
 const MoveParametersSchema = Schema.Struct({
   path: ActiveWikiPathSchema,
   new_path: Schema.NonEmptyString.check(Schema.isMinLength(4), Schema.isMaxLength(4_096)).annotate({
@@ -140,14 +137,12 @@ const MoveParametersSchema = Schema.Struct({
   })
 })
 
-const requireObserved = (ctx: ServerRunContext, record: PageRecord): string => {
-  const observed = ctx.observations.observed(record.page.pageId)
-  if (observed !== undefined) return observed
-  throw new ToolExecutionError(`Read ${record.resource.path} before changing it, then retry.`, {
-    preview: "Read required",
-    retryable: false
-  })
-}
+/**
+ * The page stored at exactly this path, merged pages included. History and restore work on the
+ * page itself, where reading follows a merged path to the page that replaced it.
+ */
+const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
+  snapshot.pages.find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
 
 const exactOccurrences = (body: string, text: string): number => body.split(text).length - 1
 
@@ -346,7 +341,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_page_history",
     description:
-      "List newest-first revisions of one active Wiki page by exact path. Returned revision_ref values can be passed to wiki_restore_page.",
+      "List newest-first revisions of one Wiki page by exact path, including a page that was merged into another. Returned revision_ref values can be passed to wiki_restore_page.",
     parameters: Schema.toStandardSchemaV1(HistoryParametersSchema),
     metadata: {
       effect: "none",
@@ -362,7 +357,7 @@ const makeWikiOperationTools = ({
     },
     execute: async (input, ctx) => {
       const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = readablePage(snapshot, input.path)
+      const record = pageStoredAt(snapshot, input.path)
       if (record === null) throw pageNotFound(snapshot, input.path)
       const history = await Effect.runPromise(
         wiki.history(record.page.pageId, { limit: input.limit }).pipe(Effect.mapError(wikiFailure)),
@@ -405,7 +400,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_restore_page",
     description:
-      "Restore one active Wiki page exactly from a reachable revision while preserving its current path. Read the current page first. Asks by default.",
+      "Restore one Wiki page exactly from a reachable revision while preserving its current path. Read the current page first. A page that was merged into another comes back as its own page; give its old path. Asks by default.",
     parameters: Schema.toStandardSchemaV1(RestoreParametersSchema),
     metadata: {
       effect: "arden_db",
@@ -422,10 +417,16 @@ const makeWikiOperationTools = ({
     },
     execute: async (input, ctx, effects) => {
       const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = activePage(snapshot, input.path)
+      const record =
+        snapshot.pages.find((page) => page.resource.path === input.path) ??
+        activePage(snapshot, input.path)
       if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const expectedVersion = requireObserved(ctx.run, record)
+      // A merged page has no body to read; its stored version is the one to restore over.
+      const expectedVersion =
+        record.page.lifecycle === "redirect"
+          ? record.resource.versionId
+          : requireObserved(ctx.run, record)
       const restored = await Effect.runPromise(
         wiki
           .restoreRevision({
@@ -654,74 +655,7 @@ const makeWikiOperationTools = ({
       }
     }
   }),
-  defineServerTool({
-    name: "wiki_archive_page",
-    description:
-      "Recoverably archive one active Wiki page. Read it first; revision history is retained. Say in merged_into which page now holds its content, or null when none does. Asks by default.",
-    parameters: Schema.toStandardSchemaV1(ArchiveParametersSchema),
-    metadata: {
-      effect: "arden_db",
-      display_name: "Archive Wiki Page",
-      kind: "tool",
-      action: "write",
-      default_approval: "ask",
-      approval_preview: "Archive one Memory page.",
-      source: "_wiki",
-      changes_state: true,
-      concurrency_group: "wiki_write",
-      destructive: true,
-      target: "reported"
-    },
-    execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = activePage(snapshot, input.path)
-      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const expectedVersion = requireObserved(ctx.run, record)
-      if (input.merged_into !== null)
-        return mergeArchivedPage({
-          wiki,
-          snapshot,
-          head: snapshot.head,
-          record,
-          target: input.merged_into,
-          ctx,
-          effects,
-          identity,
-          expectedVersion
-        })
-      const archived = await recordApplied(
-        effects,
-        Effect.runPromise(
-          wiki
-            .archive({
-              pageId: record.page.pageId,
-              expectedVersion,
-              expectedHead: snapshot.head,
-              authority: identity.authority,
-              commit: {
-                actor: identity.actor,
-                origin: identity.origin,
-                reason: `archive wiki page ${record.resource.path}`
-              }
-            })
-            .pipe(Effect.mapError(wikiFailure)),
-          { signal: ctx.signal }
-        )
-      )
-      ctx.run.observations.observe(archived.pageId, archived.version)
-      return {
-        result: `Archived ${archived.path}.`,
-        preview: "Wiki page archived",
-        data: { page: archived, changed: true },
-        host: pageReceipt({
-          ctx,
-          page: { ...archived, title: record.page.title },
-          beforeVersion: expectedVersion
-        })
-      }
-    }
-  }),
+  ...makeWikiRetireTools({ wiki, runs }),
   defineServerTool({
     name: "wiki_move_page",
     description:

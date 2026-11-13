@@ -1,6 +1,7 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import type { PageRecord } from "../wiki/snapshot.js"
+import type { ServerRunContext } from "./run-context.js"
 import { appliedReceipt, type CallIdentity } from "./call-receipt.js"
 import { passage } from "./source-passage.js"
 
@@ -118,4 +119,14 @@ export const requireWithinCoreBudget = (page: {
       `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`,
     { preview: "Core Memory page too long", retryable: false }
   )
+}
+
+/** The version of a page this run read. A page is changed only after the run has read it. */
+export const requireObserved = (ctx: ServerRunContext, record: PageRecord): string => {
+  const observed = ctx.observations.observed(record.page.pageId)
+  if (observed !== undefined) return observed
+  throw new ToolExecutionError(`Read ${record.resource.path} before changing it, then retry.`, {
+    preview: "Read required",
+    retryable: false
+  })
 }

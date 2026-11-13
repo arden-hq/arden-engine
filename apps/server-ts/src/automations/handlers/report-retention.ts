@@ -10,7 +10,7 @@ import type { HandlerItemRunner } from "../handler-item-run.js"
 import { runItemLoop } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
-import { CHAT_READ_TOOLS } from "./memory-capture.js"
+import { MAINTENANCE_ONLY_TOOLS } from "./memory-capture.js"
 
 const REPORT_RETENTION_AUTOMATION_ID = AutomationId.make(REPORT_RETENTION_AUTOMATION)
 
@@ -100,7 +100,7 @@ export const reportRetentionHandler: SystemAutomationHandler<"report_retention">
   },
   item: handlerItemText("reports", (data) => data.markdown),
   // The summary is written from the reports alone.
-  tools: (base) => withoutTools(base, CHAT_READ_TOOLS),
+  tools: (base) => withoutTools(base, MAINTENANCE_ONLY_TOOLS),
   run: (services) =>
     makeReportRetentionRunner({
       wiki: services.wiki,

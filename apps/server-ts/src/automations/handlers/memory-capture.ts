@@ -11,9 +11,14 @@ import { withoutTools } from "../../execution/toolset-middleware.js"
 
 export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-capture")
 
-export const CHAT_READ_TOOLS: ReadonlySet<string> = new Set([
+/**
+ * Tools of the Memory tool scope that only Wiki Maintenance holds: it checks notes against the
+ * chats they cite and merges pages. Every other handler in the scope hides them.
+ */
+export const MAINTENANCE_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "session_read",
-  "session_search_transcripts"
+  "session_search_transcripts",
+  "wiki_merge_page"
 ])
 
 const makeMemoryCaptureRunner = (services: {
@@ -65,7 +70,7 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
   },
   item: handlerItemText("memory", (data) => data.batch.markdown),
   // Capture judges the batch it was handed. Reading other chats is Wiki Maintenance's job.
-  tools: (base) => withoutTools(base, CHAT_READ_TOOLS),
+  tools: (base) => withoutTools(base, MAINTENANCE_ONLY_TOOLS),
   run: (services) =>
     makeMemoryCaptureRunner({
       memory: services.memory,

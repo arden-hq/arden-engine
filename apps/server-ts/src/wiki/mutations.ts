@@ -43,7 +43,13 @@ import {
   writtenContent
 } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
-import { followRedirect, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
+import {
+  followRedirect,
+  loadSnapshot,
+  readRecord,
+  type PageRecord,
+  type Snapshot
+} from "./snapshot.js"
 
 const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
   kind: "capture",
@@ -441,6 +447,18 @@ export const makeWikiMutationMethods = (
     if (
       input.commit !== undefined &&
       isAutomatedOrigin(input.commit.origin) &&
+      posix.dirname(current.resource.path) === "."
+    ) {
+      return yield* wikiError(
+        operation,
+        "blocked",
+        "Automation runs cannot retire a page at the Memory root",
+        { pageId: input.pageId }
+      )
+    }
+    if (
+      input.commit !== undefined &&
+      isAutomatedOrigin(input.commit.origin) &&
       Object.hasOwn(current.page.metadata, "producer_automation_id")
     ) {
       return yield* wikiError(
@@ -479,6 +497,35 @@ export const makeWikiMutationMethods = (
         return yield* wikiError(operation, "blocked", `Active Wiki pages remain in ${directory}`, {
           pageId: input.pageId
         })
+      }
+    }
+  })
+
+  /**
+   * A page that was merged and then brought back is separate by someone's decision. An
+   * automated run that merged it again would undo that decision every time it ran.
+   */
+  const requireNeverUnmerged = Effect.fn("Wiki.requireNeverUnmerged")(function* (
+    current: PageRecord,
+    head: string
+  ): Effect.fn.Return<void, WikiError> {
+    const pageId = current.page.pageId
+    const history = yield* repository
+      .history({ resourceId: pageId, start: head, limit: null })
+      .pipe(Effect.mapError(mapRevisionError("merge", pageId)))
+    for (const commit of history) {
+      const version = commit.changes.find(
+        (change) => (change.after ?? change.before)?.resourceId === pageId
+      )?.after
+      if (version === undefined || version === null || version.state !== "active") continue
+      const earlier = yield* readRecord(repository, "merge", version)
+      if (earlier.page.lifecycle === "redirect") {
+        return yield* wikiError(
+          "merge",
+          "blocked",
+          `${current.resource.path} was merged before and then restored, so it stays its own page. Leave it.`,
+          { pageId }
+        )
       }
     }
   })
@@ -559,6 +606,9 @@ export const makeWikiMutationMethods = (
           input.expectedHead
         )
         yield* requireRetirable("merge", snapshot, current, input)
+        if (input.commit !== undefined && isAutomatedOrigin(input.commit.origin)) {
+          yield* requireNeverUnmerged(current, input.expectedHead)
+        }
         const target = snapshot.pages.find(
           (record) =>
             record.page.pageId === input.targetPageId && record.page.lifecycle === "active"
