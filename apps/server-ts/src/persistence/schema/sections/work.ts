@@ -38,7 +38,8 @@ export const workSchemaSection = {
     "idx_space_task_events_created",
     "idx_run_questions_created",
     "idx_run_questions_unsettled",
-    "idx_space_task_comments_created"
+    "idx_space_task_comments_created",
+    "idx_space_tasks_stuck"
   ],
   triggers: ["task_revoke_attempts", "space_revoke_task_attempts", "task_clear_hold"],
   statements: [
@@ -226,6 +227,8 @@ export const workSchemaSection = {
     `CREATE INDEX idx_run_questions_created ON run_questions(created_at DESC, question_id DESC)`,
     `CREATE INDEX idx_run_questions_unsettled ON run_questions(created_at DESC, question_id DESC)
       WHERE resolution IS NULL AND closed_at IS NULL`,
-    `CREATE INDEX idx_space_task_comments_created ON space_task_comments(created_at)`
+    `CREATE INDEX idx_space_task_comments_created ON space_task_comments(created_at)`,
+    `CREATE INDEX idx_space_tasks_stuck ON space_tasks(item_id)
+      WHERE status = 'open' AND owner = 'worker' AND next_attempt_at IS NULL`
   ]
 } as const satisfies OperationalSchemaSection

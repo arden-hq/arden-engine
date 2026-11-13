@@ -23,7 +23,7 @@ export const communicationSchemaSection = {
     "idx_entity_events_run",
     "idx_run_endings_undecided",
     "idx_automation_deliveries_answer",
-    "idx_run_endings_failed"
+    "idx_run_endings_status_at"
   ],
   triggers: [],
   statements: [
@@ -98,6 +98,7 @@ export const communicationSchemaSection = {
     `CREATE INDEX idx_run_endings_undecided ON run_endings(run_id) WHERE decided = 0`,
     `CREATE INDEX idx_automation_deliveries_answer
       ON automation_deliveries(destinations) WHERE json_extract(payload, '$.kind') = 'answer'`,
-    `CREATE INDEX idx_run_endings_failed ON run_endings(run_id) WHERE status = 'failed' AND decided = 1`
+    `CREATE INDEX idx_run_endings_status_at
+      ON run_endings(status, decided, julianday(occurred_at))`
   ]
 } as const satisfies OperationalSchemaSection

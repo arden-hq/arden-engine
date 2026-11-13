@@ -46,7 +46,9 @@ export const automationSchemaSection = {
     "idx_automation_runs_no_outcome",
     "idx_automation_runs_started",
     "idx_automation_runs_occurrence",
-    "idx_automation_runs_task_latest"
+    "idx_automation_runs_task_latest",
+    "idx_automation_runs_status_started",
+    "idx_automation_runs_counted_completed"
   ],
   triggers: [
     "automation_instruction_revisions_immutable_update",
@@ -332,6 +334,13 @@ export const automationSchemaSection = {
     `CREATE INDEX idx_automation_runs_no_outcome ON automation_runs(id) WHERE outcome IS NULL`,
     `CREATE INDEX idx_automation_runs_started ON automation_runs(started_at)`,
     `CREATE INDEX idx_automation_runs_occurrence ON automation_runs(json_extract(origin, '$.occurrence_id')) WHERE task_id IS NOT NULL`,
-    "CREATE INDEX idx_automation_runs_task_latest ON automation_runs(task_id, id DESC)"
+    "CREATE INDEX idx_automation_runs_task_latest ON automation_runs(task_id, id DESC)",
+    `CREATE INDEX idx_automation_runs_status_started
+      ON automation_runs(status, julianday(started_at))`,
+    `CREATE INDEX idx_automation_runs_counted_completed
+      ON automation_runs(task_id, julianday(started_at))
+      WHERE status = 'completed' AND (CASE WHEN outcome IS NULL
+        THEN skip_json IS NULL AND disposition IS NOT 'superseded'
+        ELSE outcome <> 'superseded' AND outcome NOT GLOB 'skipped:*' END)`
   ]
 } as const satisfies OperationalSchemaSection
