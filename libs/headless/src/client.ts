@@ -84,6 +84,12 @@ export interface WaitForRunOptions {
   readonly onEvent?: (event: HeadlessRunEvent) => void | PromiseLike<void>
 }
 
+/** Which Runs `listRuns` returns; every Run when empty. */
+export interface HeadlessRunListOptions {
+  readonly sessionId?: string
+  readonly active?: boolean
+}
+
 export class HeadlessHttpError extends Error {
   override readonly name = "HeadlessHttpError"
 
@@ -300,12 +306,29 @@ export class HeadlessClient {
   }
 
   /**
-   * Every Run of the server, oldest first, sub-agent Runs included, and
-   * whether the server is idle. Owner access only: the app's command-line
-   * secret is refused.
+   * The server's Runs, oldest first, sub-agent Runs included, and whether the
+   * server is idle. `sessionId` keeps one chat's Runs; `active` keeps the Runs
+   * still going. The server answers in pages; this reads them all. Owner
+   * access only: the app's command-line secret is refused.
    */
-  async listRuns(): Promise<RunList> {
-    return runDecoders.list(await this.#requestJson(runRoutes.list, { method: "GET" }))
+  async listRuns(options: HeadlessRunListOptions = {}): Promise<RunList> {
+    const runs: Array<RunList["runs"][number]> = []
+    let after: string | undefined
+    for (;;) {
+      const query = new URLSearchParams()
+      if (after !== undefined) query.set("after", after)
+      if (options.sessionId !== undefined) query.set("session_id", options.sessionId)
+      if (options.active === true) query.set("active", "true")
+      const text = query.toString()
+      const page = runDecoders.list(
+        await this.#requestJson(text.length === 0 ? runRoutes.list : `${runRoutes.list}?${text}`, {
+          method: "GET"
+        })
+      )
+      runs.push(...page.runs)
+      if (page.next === undefined) return { runs, idle: page.idle }
+      after = page.next
+    }
   }
 
   async getRunEvents(runId: string, options: HeadlessRunEventOptions = {}): Promise<RunEventPage> {

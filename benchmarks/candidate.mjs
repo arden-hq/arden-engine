@@ -214,7 +214,8 @@ async function main() {
   const settle = async () => {
     while (true) {
       signal.throwIfAborted()
-      if ((await client.listRuns()).idle) return
+      // Only the Runs still going: the answer still says whether the server is idle.
+      if ((await client.listRuns({ active: true })).idle) return
       await sleep(100, undefined, { signal })
     }
   }
@@ -269,7 +270,7 @@ async function main() {
       await settle()
       // A message sent mid-run joins that Run; a queued one starts another. The
       // chat's last Run is the one that answered.
-      const latest = (await client.listRuns()).runs.findLast((run) => run.session_id === sessionId)
+      const latest = (await client.listRuns({ sessionId })).runs.at(-1)
       const run = await client.getRun(latest.run_id)
       runs.push(run)
       await save(join(output, `run-${index}.json`), run)
@@ -294,8 +295,8 @@ async function main() {
       runs
     })
   } catch (error) {
-    const listed = await client.listRuns().catch(() => ({ runs: [] }))
-    for (const active of listed.runs.filter((run) => run.active))
+    const listed = await client.listRuns({ active: true }).catch(() => ({ runs: [] }))
+    for (const active of listed.runs)
       await client.cancel({ runId: active.run_id }).catch(() => undefined)
     if (submitted) {
       await client.cancel({ runId: submitted.runId }).catch(() => undefined)

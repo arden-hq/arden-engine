@@ -153,6 +153,11 @@ const routeCalls = (
     "/chat/events/:sessionId": [`/chat/events/${ids.chat}`, `/chat/events/${ids.fork}`],
     "/sessions/:sessionId/queue": [`/sessions/${ids.chat}/queue`],
     "/chat/runs/status": ["/chat/runs/status"],
+    "/chat/runs": [
+      "/chat/runs",
+      `/chat/runs${q({ session_id: ids.chat })}`,
+      `/chat/runs${q({ active: "true" })}`
+    ],
     "/chat/runs/:runId": [ids.chatRun, ids.forkRun, ids.agentRun].map((id) => `/chat/runs/${id}`),
     "/chat/runs/:runId/progress": [ids.chatRun, ids.forkRun].map(
       (id) => `/chat/runs/${id}/progress`

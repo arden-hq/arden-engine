@@ -1,5 +1,6 @@
 import { LocalCaller } from "../middleware/local-only.js"
 import {
+  RUN_LIST_PAGE_MAX,
   RunLocalInstructionSourceSchema,
   RunTerminalResultSchema
 } from "@arden-hq/protocol/effect/runs"
@@ -17,6 +18,10 @@ import { UsageStore, UsageStoreError } from "../../persistence/usage/store.js"
 import { ArdenApi } from "../api.js"
 import { storeErrorToHttp } from "../errors.js"
 import { currentMillis } from "../../runtime/clock.js"
+
+/** Joins a start time and a Run id into the list's `next` cursor. A start
+ * time never holds it. */
+const RUN_LIST_CURSOR_SEPARATOR = "|"
 
 const elapsedSeconds = (now: DateTime.Utc, then: DateTime.Utc): number =>
   Math.max(0, Math.floor((DateTime.toEpochMillis(now) - DateTime.toEpochMillis(then)) / 1_000))
@@ -91,12 +96,26 @@ export const RunHandlers = HttpApiBuilder.group(
     return handlers
       .handle(
         "list",
-        Effect.fn("RunsHandlers.list")(function* () {
+        Effect.fn("RunsHandlers.list")(function* ({ query }) {
           // Every chat's Runs at once is the owner's view; the command line sees its own chats.
           if ((yield* LocalCaller) === "cli") return yield* new HttpApiError.Forbidden({})
+          const cut = query.after?.indexOf(RUN_LIST_CURSOR_SEPARATOR) ?? -1
           const snapshot = yield* queries
-            .listAll()
+            .list({
+              ...(query.after === undefined || cut < 0
+                ? {}
+                : {
+                    after: {
+                      startedAt: query.after.slice(0, cut),
+                      runId: query.after.slice(cut + 1)
+                    }
+                  }),
+              ...(query.session_id === undefined ? {} : { sessionId: query.session_id }),
+              activeOnly: query.active === "true",
+              limit: query.limit ?? RUN_LIST_PAGE_MAX
+            })
             .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+          const last = snapshot.runs.at(-1)
           return {
             runs: snapshot.runs.map((run) => ({
               run_id: run.runId,
@@ -105,10 +124,13 @@ export const RunHandlers = HttpApiBuilder.group(
               active: run.active,
               started_at: run.startedAt
             })),
+            ...(snapshot.more && last !== undefined
+              ? { next: `${last.startedAt}${RUN_LIST_CURSOR_SEPARATOR}${last.runId}` }
+              : {}),
             idle:
               snapshot.pendingDeliveries === 0 &&
               snapshot.runningScripts === 0 &&
-              !snapshot.runs.some((run) => run.active)
+              !snapshot.anyActive
           }
         })
       )

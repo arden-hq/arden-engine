@@ -237,11 +237,33 @@ export const UsageReportSchema: Schema.Codec<UsageReport, JsonRecord> = withExtr
   automations: Schema.Array(UsageAutomationRowSchema)
 })
 
+/** The most Runs one `GET /chat/runs` answer holds. */
+export const RUN_LIST_PAGE_MAX = 500
+
 /**
- * `GET /chat/runs`: every Run the server holds, oldest first, sub-agent Runs
- * included. `idle` is true when no Run is going, no script runs in the
+ * Query of `GET /chat/runs`. `after` is the `next` of the page before;
+ * `session_id` keeps one chat's Runs; `active=true` keeps the Runs still going.
+ */
+export const RunListQuerySchema = Schema.Struct({
+  after: Schema.optionalKey(Schema.NonEmptyString),
+  session_id: Schema.optionalKey(Schema.NonEmptyString),
+  active: Schema.optionalKey(Schema.Literal("true")),
+  limit: Schema.optionalKey(
+    Schema.NumberFromString.check(
+      Schema.isInt(),
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(RUN_LIST_PAGE_MAX)
+    )
+  )
+})
+
+/**
+ * `GET /chat/runs`: a page of the server's Runs, oldest first, sub-agent Runs
+ * included. `next` is present when more Runs follow; pass it as `after` to
+ * read on. `idle` is true when no Run is going, no script runs in the
  * background and no Automation delivery waits, so nothing more will happen
- * until the next message.
+ * until the next message. It speaks for the whole server, whatever the page
+ * or filter.
  */
 export const RunListSchema = withExtras({
   runs: Schema.Array(
@@ -254,6 +276,7 @@ export const RunListSchema = withExtras({
       started_at: Schema.NonEmptyString
     })
   ),
+  next: Schema.optionalKey(Schema.NonEmptyString),
   idle: Schema.Boolean
 })
 export type RunList = typeof RunListSchema.Type

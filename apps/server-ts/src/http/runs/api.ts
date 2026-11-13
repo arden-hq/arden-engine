@@ -3,6 +3,7 @@ import {
   RunDetailSchema,
   RunEventPageQuerySchema,
   RunEventPageSchema,
+  RunListQuerySchema,
   RunListSchema,
   RunProgressSchema,
   PlanLimitsReportSchema,
@@ -21,6 +22,7 @@ export class RunsApi extends HttpApiGroup.make("runs", { topLevel: true }).add(
     error: [HttpApiError.InternalServerErrorNoContent]
   }),
   HttpApiEndpoint.get("list", "/chat/runs", {
+    query: RunListQuerySchema,
     success: RunListSchema,
     error: [HttpApiError.ForbiddenNoContent, HttpApiError.InternalServerErrorNoContent]
   }),

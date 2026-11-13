@@ -16,6 +16,7 @@ import {
   ActiveRunSnapshotSchema,
   type RunEventPageInput,
   type RunEventPageRecord,
+  type RunListInput,
   RunDataCorruptionError,
   RunQueries,
   RunQueryError
@@ -262,8 +263,12 @@ export const makeRunQueries = ({
     return { totalRetained, runs }
   })
 
-  const listAll = Effect.fn("SqliteRunQueries.listAll")(function* () {
+  /** A page of Runs in start order. It starts at the cursor through the index
+   * on start time (or at one chat's Runs, or the Runs still going), so it
+   * reads the page it returns, never every Run. */
+  const list = Effect.fn("SqliteRunQueries.list")(function* (input: RunListInput) {
     const failed = (cause: unknown) => queryError("active", "Could not list runs", cause)
+    const after = input.after ?? { startedAt: "", runId: "" }
     const rows = yield* sql<{
       readonly run_id: string
       readonly session_id: string
@@ -274,7 +279,14 @@ export const makeRunQueries = ({
       SELECT run_id, session_id, status, started_at,
              status IN ${activeRunStatusList} AS active
       FROM chat_runs
+      WHERE (started_at, run_id) > (${after.startedAt}, ${after.runId})
+        AND ${input.sessionId === undefined ? sql`1` : sql`session_id = ${input.sessionId}`}
+        AND ${input.activeOnly ? sql`status IN ${activeRunStatusList}` : sql`1`}
       ORDER BY started_at ASC, run_id ASC
+      LIMIT ${input.limit + 1}
+    `.pipe(Effect.mapError(failed))
+    const going = yield* sql<{ readonly going: number }>`
+      SELECT 1 AS going FROM chat_runs WHERE status IN ${activeRunStatusList} LIMIT 1
     `.pipe(Effect.mapError(failed))
     const deliveries = yield* sql<{ readonly pending: number }>`
       SELECT COUNT(*) AS pending FROM automation_deliveries WHERE status = 'pending'
@@ -283,13 +295,15 @@ export const makeRunQueries = ({
       SELECT COUNT(*) AS running FROM code_mode_scripts WHERE status = 'running'
     `.pipe(Effect.mapError(failed))
     return {
-      runs: rows.map((row) => ({
+      runs: rows.slice(0, input.limit).map((row) => ({
         runId: row.run_id,
         sessionId: row.session_id,
         status: row.status,
         active: row.active === 1,
         startedAt: row.started_at
       })),
+      more: rows.length > input.limit,
+      anyActive: going.length > 0,
       pendingDeliveries: deliveries[0]?.pending ?? 0,
       runningScripts: scripts[0]?.running ?? 0
     }
@@ -453,7 +467,7 @@ export const makeRunQueries = ({
     latestForSession,
     ...makeSessionRunQueries(sql),
     listActive: () => activeSnapshot(),
-    listAll,
+    list,
     active: (runId) => activeSnapshot(runId).pipe(Effect.map((snapshot) => snapshot.runs[0])),
     events
   })
