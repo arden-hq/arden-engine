@@ -20,7 +20,11 @@ import type { SpaceJobRecoveryCursor } from "./space-job-recovery.js"
 import { AutomationTriggersSchema, scheduleEffect } from "./automation-schedule.js"
 import { resumeAutomation } from "./automation-resume.js"
 import { deleteAutomationRow } from "./automation-removal.js"
-import { makeAutomationRowReads, type AutomationStoreDeps } from "./automation-rows.js"
+import {
+  automationRowSelect,
+  makeAutomationRowReads,
+  type AutomationStoreDeps
+} from "./automation-rows.js"
 import {
   type AutomationRow,
   storeError,
@@ -85,17 +89,7 @@ export const makeAutomationCatalog = ({
   const { project, findAutomationRow, get } = makeAutomationRowReads({ writer, rules })
   const list = Effect.fn("SqliteAutomationStore.list")(function* () {
     const rows = yield* sql<AutomationRow>`
-      SELECT task_id, automation_ref, name, description, description_source,
-             prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
-             next_run_at, last_result, running_since, auto_approve, handler,
-             builtin, cooldown_minutes, thread_id, tool_scope, triggers_source,
-             purpose, owner_space_id, owner_task_id,
-             (SELECT origin_automation_id FROM sessions WHERE session_id = scheduled_tasks.thread_id)
-               AS thread_origin_automation_id,
-             (SELECT session_id FROM sessions WHERE origin_automation_id = scheduled_tasks.task_id
-               AND session_type = 'channel' AND archived_at IS NULL
-               ORDER BY started_at DESC LIMIT 1) AS own_chat_id
-      FROM scheduled_tasks
+      ${automationRowSelect(sql)}
       WHERE purpose IN ('user_automation', 'system')
       ORDER BY created_at, task_id
     `.pipe(

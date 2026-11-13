@@ -255,6 +255,13 @@ export const makeSessionListing = ({
     else if (input.scope === "agent") agentFilter = reader`AND s.session_type = 'agent'`
     const liveFilter =
       input.live === true ? reader`AND latest_run.status IN ${activeRunStatusList}` : reader``
+    // A live chat has an active run: start from those few, not from every chat.
+    const sessions =
+      input.live === true
+        ? reader`(SELECT DISTINCT live_run.session_id FROM chat_runs AS live_run
+            WHERE live_run.status IN ${activeRunStatusList}) AS live
+          CROSS JOIN sessions AS s ON s.session_id = live.session_id`
+        : reader`sessions AS s`
     const parentFilter =
       input.parentSessionIds === undefined || input.parentSessionIds.length === 0
         ? reader``
@@ -324,7 +331,7 @@ export const makeSessionListing = ({
              CASE WHEN s.session_type = 'agent' AND json_extract(s.metadata, '$.agent.mode') = 'code'
                THEN json_extract(s.metadata, '$.agent.workspace.cwd') END AS agent_workspace,
              ${reader.literal(sessionOriginQuery)} AS origin
-      FROM sessions AS s
+      FROM ${sessions}
       LEFT JOIN chat_runs AS latest_run
         ON latest_run.run_id = (${reader.literal(latestSessionRunQuery)})
       WHERE ${archivedFilter}

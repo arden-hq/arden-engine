@@ -18,6 +18,7 @@ import type { JobClassification } from "../job-classification.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
 import type { PersistenceDeps } from "./deps.js"
+import type { SqlClient } from "effect/unstable/sql"
 import { inArdenWords } from "../restart-notice.js"
 import { oldConditions } from "../automations/event-words.js"
 
@@ -201,6 +202,23 @@ export const systemSpecOf = (
       )
     : Effect.succeed(spec)
 }
+
+/** An Automation's stored row, as both the list and the single read show it. */
+export const automationRowSelect = (sql: SqlClient.SqlClient) => sql`
+  SELECT task_id, automation_ref, name, description, description_source,
+         prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
+         next_run_at, last_result, running_since, auto_approve, handler,
+         builtin, cooldown_minutes, thread_id, tool_scope, triggers_source,
+         prompt_author, instruction_revision_id,
+         purpose, owner_space_id, owner_task_id,
+         (SELECT origin_automation_id FROM sessions WHERE session_id = scheduled_tasks.thread_id)
+           AS thread_origin_automation_id,
+         -- Its own chat: one lookup in idx_sessions_automation_channel, whose
+         -- condition this repeats word for word.
+         (SELECT session_id FROM sessions WHERE origin_automation_id = scheduled_tasks.task_id
+           AND session_type = 'channel' AND archived_at IS NULL
+           ORDER BY started_at DESC LIMIT 1) AS own_chat_id
+  FROM scheduled_tasks`
 
 export const makeAutomationRowReads = ({
   writer,
@@ -392,18 +410,7 @@ export const makeAutomationRowReads = ({
     operation: StoreOperation
   ) {
     const rows = yield* sql<AutomationRow>`
-      SELECT task_id, automation_ref, name, description, description_source,
-             prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
-             next_run_at, last_result, running_since, auto_approve, handler,
-             builtin, cooldown_minutes, thread_id, tool_scope, triggers_source,
-             prompt_author, instruction_revision_id,
-             purpose, owner_space_id, owner_task_id,
-             (SELECT origin_automation_id FROM sessions WHERE session_id = scheduled_tasks.thread_id)
-               AS thread_origin_automation_id,
-             (SELECT session_id FROM sessions WHERE origin_automation_id = scheduled_tasks.task_id
-               AND session_type = 'channel' AND archived_at IS NULL
-               ORDER BY started_at DESC LIMIT 1) AS own_chat_id
-      FROM scheduled_tasks
+      ${automationRowSelect(sql)}
       WHERE task_id = ${automationId}
         AND purpose IN ('user_automation', 'system')
       LIMIT 1

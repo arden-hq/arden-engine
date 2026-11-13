@@ -395,30 +395,39 @@ const CHAT_SEARCH_NAMED = 5
  * target is read and dropped, and words common in links ("https") have many. */
 const CHAT_SEARCH_BATCH = 100
 
+/** The owner's own chats: not archived, not a fork, an agent or a channel. */
+const ownerChatSql = (searchSql: SqlClient.SqlClient, alias: string) => searchSql`
+    ${searchSql(alias)}.archived_at IS NULL
+    AND ${searchSql(alias)}.session_type = 'chat'
+    AND ${searchSql(alias)}.parent_session_id IS NULL
+    AND ${searchSql(alias)}.parent_message_id IS NULL
+  `
+
+// Names are matched in code, not in SQL: SQLite folds case for ASCII only.
+// wordStartRanges matches words the way the message index does. The owner has
+// thousands of chats at most. idx_sessions_owner_chats holds exactly the
+// owner's chats (ownerChatSql word for word); it is named because SQLite would
+// otherwise pick idx_sessions_list and read every forked chat too.
+export const ownerNamedChats = (searchSql: SqlClient.SqlClient) => searchSql<NamedChatRow>`
+    SELECT s.session_id, s.name, s.last_activity
+    FROM sessions AS s INDEXED BY idx_sessions_owner_chats
+    WHERE ${ownerChatSql(searchSql, "s")} AND s.name IS NOT NULL
+    ORDER BY s.last_activity DESC, s.session_id DESC
+  `
+
 const searchChatsIn = Effect.fn("SqliteTranscriptQueries.searchChats")(function* (
   searchSql: SqlClient.SqlClient,
   conversation: Statement.Fragment,
   input: { readonly query: string; readonly limit: number },
   noteIndexing: Effect.Effect<void>
 ) {
-  const ownerChat = (alias: string) => searchSql`
-    ${searchSql(alias)}.archived_at IS NULL
-    AND ${searchSql(alias)}.session_type = 'chat'
-    AND ${searchSql(alias)}.parent_session_id IS NULL
-    AND ${searchSql(alias)}.parent_message_id IS NULL
-  `
+  const ownerChat = (alias: string) => ownerChatSql(searchSql, alias)
   const match =
     input.query.trim().length < CHAT_SEARCH_MIN_CHARS ? undefined : ftsQueryForFindText(input.query)
   if (match === undefined) return { chats: [], hasMore: false }
-  // Names are matched here, not in SQL: SQLite folds case for ASCII only.
-  // wordStartRanges matches words the way the message index does. The owner has
-  // thousands of chats at most.
-  const namedRows = yield* searchSql<NamedChatRow>`
-    SELECT s.session_id, s.name, s.last_activity
-    FROM sessions AS s
-    WHERE ${ownerChat("s")} AND s.name IS NOT NULL
-    ORDER BY s.last_activity DESC
-  `.pipe(Effect.mapError((cause) => searchError("storage", "Could not search chat names", cause)))
+  const namedRows = yield* ownerNamedChats(searchSql).pipe(
+    Effect.mapError((cause) => searchError("storage", "Could not search chat names", cause))
+  )
   const namedAll = namedRows.flatMap((row) => {
     const ranges = wordStartRanges(row.name, input.query)
     return ranges === undefined ? [] : [{ row, ranges }]

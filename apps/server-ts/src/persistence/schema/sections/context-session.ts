@@ -18,7 +18,6 @@ export const contextSessionSchemaSection = {
   ],
   indexes: [
     "idx_sessions_activity",
-    "idx_sessions_archived",
     "idx_session_messages_client",
     "idx_session_turns_session_turn",
     "idx_sessions_space_activity",
@@ -30,7 +29,13 @@ export const contextSessionSchemaSection = {
     "idx_session_fork_requests_preparing_source",
     "idx_message_turns_turn",
     "idx_sessions_origin_automation",
-    "idx_sessions_parent_run"
+    "idx_sessions_parent_run",
+    "idx_sessions_archived_activity",
+    "idx_sessions_archived_accessed",
+    "idx_sessions_space_live",
+    "idx_sessions_parent_live",
+    "idx_sessions_owner_chats",
+    "idx_sessions_automation_channel"
   ],
   triggers: [
     "session_messages_role_insert",
@@ -104,7 +109,6 @@ export const contextSessionSchemaSection = {
         AND CAST(json_extract(metadata, '$.fork_of.through_sequence') AS INTEGER) >= -1
         ELSE 0 END`,
     "CREATE INDEX idx_sessions_activity ON sessions(last_activity)",
-    "CREATE INDEX idx_sessions_archived ON sessions(archived_at)",
     `CREATE TABLE session_messages (
       message_rowid INTEGER PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -224,6 +228,20 @@ export const contextSessionSchemaSection = {
         DELETE FROM message_turns WHERE message_rowid = old.message_rowid;
       END`,
     "CREATE INDEX idx_sessions_origin_automation ON sessions(origin_automation_id) WHERE origin_automation_id IS NOT NULL",
-    "CREATE INDEX idx_sessions_parent_run ON sessions(parent_run_id) WHERE parent_run_id IS NOT NULL"
+    "CREATE INDEX idx_sessions_parent_run ON sessions(parent_run_id) WHERE parent_run_id IS NOT NULL",
+    `CREATE INDEX idx_sessions_archived_activity
+      ON sessions(archived_at, last_activity DESC, session_id DESC)`,
+    `CREATE INDEX idx_sessions_archived_accessed
+      ON sessions(archived_at, COALESCE(last_accessed_at, last_activity) DESC, session_id DESC)`,
+    `CREATE INDEX idx_sessions_space_live
+      ON sessions(space_id, archived_at, last_activity DESC, session_id DESC)`,
+    `CREATE INDEX idx_sessions_parent_live
+      ON sessions(parent_session_id, archived_at, last_activity DESC, session_id DESC)`,
+    `CREATE INDEX idx_sessions_owner_chats ON sessions(last_activity DESC, session_id DESC)
+      WHERE archived_at IS NULL AND session_type = 'chat'
+        AND parent_session_id IS NULL AND parent_message_id IS NULL`,
+    `CREATE INDEX idx_sessions_automation_channel
+      ON sessions(origin_automation_id, started_at DESC)
+      WHERE session_type = 'channel' AND archived_at IS NULL`
   ]
 } as const satisfies OperationalSchemaSection
