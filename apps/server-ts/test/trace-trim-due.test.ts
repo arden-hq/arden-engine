@@ -86,7 +86,7 @@ it("the due-for-trim list equals a fresh look after runs start, end and chats go
 const DAY = 86_400_000
 const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString()
 
-it("the hourly trim shrinks an agent log past the cutoff and leaves a recent one", async () => {
+it("the hourly trim shrinks agent logs past the cutoff, archived too, and leaves a recent one", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -103,6 +103,7 @@ it("the hourly trim shrinks an agent log past the cutoff and leaves a recent one
           '{"turn_id":"t-chat"}', 'am-chat')`
       for (const [id, days] of [
         ["old", 40],
+        ["shelved", 40],
         ["new", 5]
       ] as const) {
         const at = ago(days)
@@ -119,6 +120,8 @@ it("the hourly trim shrinks an agent log past the cutoff and leaves a recent one
         yield* sql`UPDATE chat_runs SET status = 'cancelled', ended_at = ${at}
           WHERE run_id = ${`r-${id}`}`
       }
+      // An archived chat has no row in the chat list; the trim must still shrink it.
+      yield* sql`UPDATE sessions SET archived_at = ${start} WHERE session_id = 'shelved'`
       yield* persistence.retentionTick
       const messages = yield* sql<{ readonly session_id: string }>`
         SELECT session_id FROM session_messages ORDER BY session_id`
@@ -126,11 +129,12 @@ it("the hourly trim shrinks an agent log past the cutoff and leaves a recent one
         SELECT session_id FROM trace_trim_due ORDER BY session_id`
       const marked = yield* sql<{ readonly session_id: string }>`
         SELECT session_id FROM sessions
-        WHERE json_extract(metadata, '$.agent_trace_retained_run_id') IS NOT NULL`
+        WHERE json_extract(metadata, '$.agent_trace_retained_run_id') IS NOT NULL
+        ORDER BY session_id`
       return { messages, due, marked }
     })
   )
   expect(outcome.messages).toEqual([{ session_id: "new" }])
   expect(outcome.due).toEqual([{ session_id: "new" }])
-  expect(outcome.marked).toEqual([{ session_id: "old" }])
+  expect(outcome.marked).toEqual([{ session_id: "old" }, { session_id: "shelved" }])
 })

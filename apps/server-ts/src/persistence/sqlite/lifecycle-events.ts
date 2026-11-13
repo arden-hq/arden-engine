@@ -27,6 +27,7 @@ import {
   type JournalRuntime
 } from "@arden-hq/journal/effect"
 import { DateTime, Effect, Schema, Scope, Stream } from "effect"
+import { archivedChatAppend, lifecycleError } from "./lifecycle-archived.js"
 import { SqlClient } from "effect/unstable/sql"
 import {
   SESSION_LIFECYCLE_STREAM_ID,
@@ -109,17 +110,6 @@ interface TaskWorkRow {
   readonly started_at: string
   readonly ended_at: string | null
 }
-
-const lifecycleError = (
-  operation: SessionLifecycleEventError["operation"],
-  message: string,
-  cause?: unknown
-): SessionLifecycleEventError =>
-  new SessionLifecycleEventError({
-    operation,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
 
 const loadSessionSnapshot = Effect.fn("SessionLifecycleEvents.loadSessionSnapshot")(function* (
   sql: SqlClient.SqlClient,
@@ -554,6 +544,8 @@ export const makeSessionLifecycleEvents = ({
     )({ type, sessionId }).pipe(
       Effect.mapError((cause) => lifecycleError("append", "Invalid Session lifecycle event", cause))
     )
+    const archived = yield* archivedChatAppend(sql, valid.sessionId)
+    if (archived !== null) return archived
     const session = yield* loadSessionSnapshot(sql, valid.sessionId)
     const lifecycleEvent = yield* journalEvent({ type: valid.type, session })
     const taskWork =

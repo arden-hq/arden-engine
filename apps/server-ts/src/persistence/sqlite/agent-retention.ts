@@ -223,12 +223,9 @@ export const compactExpiredAgentSessions = Effect.fn(
             "session_activity",
             row.session_id
           )
-          const retainedSequence = activity.records.at(-1)?.sequence
-          if (retainedSequence === undefined) {
-            return yield* retentionError(
-              new Error(`Session ${row.session_id} retained no lifecycle activity`)
-            )
-          }
+          // An archived chat announces nothing, so there is no boundary to
+          // prune its older list snapshots to.
+          const retainedSequence = activity.records.at(-1)?.sequence ?? null
           return { retainedSequence }
         })
       )
@@ -243,7 +240,11 @@ export const compactExpiredAgentSessions = Effect.fn(
       )
     if (retained !== null) {
       retainedSessionIds.push(candidate.session_id)
-      history.push({ sessionId: candidate.session_id, retainedSequence: retained.retainedSequence })
+      if (retained.retainedSequence !== null)
+        history.push({
+          sessionId: candidate.session_id,
+          retainedSequence: retained.retainedSequence
+        })
     }
   }
   yield* sessionEvents
