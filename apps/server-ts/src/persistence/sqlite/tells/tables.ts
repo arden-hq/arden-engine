@@ -229,6 +229,8 @@ export const tableTells = {
   managed_output_gc_candidates: { silent: files },
   managed_output_lifecycle_lock: { silent: files },
   chat_upload_cleanup: { silent: files },
+  session_sizes: { silent: files },
+  session_type_sizes: { silent: files },
   chat_upload_refs: { silent: files },
   chat_upload_unlisted: { silent: files },
   code_mode_scripts: { silent: run },

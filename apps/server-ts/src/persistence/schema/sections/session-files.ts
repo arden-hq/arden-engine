@@ -9,14 +9,25 @@ export const sessionFilesSchemaSection = {
     "managed_output_lifecycle_lock",
     "chat_upload_cleanup",
     "chat_upload_refs",
-    "chat_upload_unlisted"
+    "chat_upload_unlisted",
+    "session_sizes",
+    "session_type_sizes"
   ],
   indexes: ["idx_chat_upload_refs_message"],
   triggers: [
     "chat_upload_unlisted_ai",
     "chat_upload_unlisted_au",
     "chat_upload_unlisted_ad",
-    "session_file_cleanup_no_recreate"
+    "session_file_cleanup_no_recreate",
+    "session_sizes_message_ai",
+    "session_sizes_message_ad",
+    "session_sizes_message_au",
+    "session_sizes_run_ai",
+    "session_sizes_run_ad",
+    "session_sizes_run_au",
+    "session_sizes_session_ai",
+    "session_sizes_session_ad",
+    "session_sizes_session_au"
   ],
   statements: [
     `CREATE TABLE session_file_cleanup (
@@ -75,6 +86,139 @@ export const sessionFilesSchemaSection = {
       AFTER DELETE ON session_messages BEGIN
         DELETE FROM chat_upload_unlisted WHERE message_rowid = old.message_rowid;
         DELETE FROM chat_upload_refs WHERE message_rowid = old.message_rowid;
+      END`,
+    // Chat sizes as numbers, kept by triggers (migration 145).
+    `CREATE TABLE session_sizes (
+      session_id TEXT PRIMARY KEY,
+      message_json_bytes INTEGER NOT NULL DEFAULT 0,
+      search_text_bytes INTEGER NOT NULL DEFAULT 0,
+      run_bytes INTEGER NOT NULL DEFAULT 0
+    ) WITHOUT ROWID`,
+    `CREATE TABLE session_type_sizes (
+      session_type TEXT PRIMARY KEY,
+      message_json_bytes INTEGER NOT NULL DEFAULT 0,
+      search_text_bytes INTEGER NOT NULL DEFAULT 0,
+      run_bytes INTEGER NOT NULL DEFAULT 0,
+      own_bytes INTEGER NOT NULL DEFAULT 0,
+      sessions INTEGER NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0
+    ) WITHOUT ROWID`,
+    `CREATE TRIGGER session_sizes_message_ai
+      AFTER INSERT ON session_messages BEGIN
+        INSERT INTO session_sizes(session_id, message_json_bytes, search_text_bytes)
+          VALUES (new.session_id, octet_length(new.message_json), COALESCE(octet_length(new.search_text), 0))
+          ON CONFLICT(session_id) DO UPDATE SET
+            message_json_bytes = message_json_bytes + excluded.message_json_bytes,
+            search_text_bytes = search_text_bytes + excluded.search_text_bytes;
+        UPDATE session_type_sizes SET
+            message_json_bytes = message_json_bytes + octet_length(new.message_json),
+            search_text_bytes = search_text_bytes + COALESCE(octet_length(new.search_text), 0)
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = new.session_id);
+      END`,
+    `CREATE TRIGGER session_sizes_message_ad
+      AFTER DELETE ON session_messages BEGIN
+        UPDATE session_sizes SET
+            message_json_bytes = message_json_bytes - octet_length(old.message_json),
+            search_text_bytes = search_text_bytes - COALESCE(octet_length(old.search_text), 0)
+          WHERE session_id = old.session_id;
+        UPDATE session_type_sizes SET
+            message_json_bytes = message_json_bytes - octet_length(old.message_json),
+            search_text_bytes = search_text_bytes - COALESCE(octet_length(old.search_text), 0)
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = old.session_id);
+      END`,
+    `CREATE TRIGGER session_sizes_message_au
+      AFTER UPDATE OF session_id, message_json, search_text ON session_messages BEGIN
+        UPDATE session_sizes SET
+            message_json_bytes = message_json_bytes - octet_length(old.message_json),
+            search_text_bytes = search_text_bytes - COALESCE(octet_length(old.search_text), 0)
+          WHERE session_id = old.session_id;
+        UPDATE session_type_sizes SET
+            message_json_bytes = message_json_bytes - octet_length(old.message_json),
+            search_text_bytes = search_text_bytes - COALESCE(octet_length(old.search_text), 0)
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = old.session_id);
+        INSERT INTO session_sizes(session_id, message_json_bytes, search_text_bytes)
+          VALUES (new.session_id, octet_length(new.message_json), COALESCE(octet_length(new.search_text), 0))
+          ON CONFLICT(session_id) DO UPDATE SET
+            message_json_bytes = message_json_bytes + excluded.message_json_bytes,
+            search_text_bytes = search_text_bytes + excluded.search_text_bytes;
+        UPDATE session_type_sizes SET
+            message_json_bytes = message_json_bytes + octet_length(new.message_json),
+            search_text_bytes = search_text_bytes + COALESCE(octet_length(new.search_text), 0)
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = new.session_id);
+      END`,
+    `CREATE TRIGGER session_sizes_run_ai
+      AFTER INSERT ON chat_runs BEGIN
+        INSERT INTO session_sizes(session_id, run_bytes) VALUES (new.session_id, COALESCE(octet_length(new.metadata_json), 0) + COALESCE(octet_length(new.error_message), 0))
+          ON CONFLICT(session_id) DO UPDATE SET run_bytes = run_bytes + excluded.run_bytes;
+        UPDATE session_type_sizes SET run_bytes = run_bytes + COALESCE(octet_length(new.metadata_json), 0) + COALESCE(octet_length(new.error_message), 0)
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = new.session_id);
+      END`,
+    `CREATE TRIGGER session_sizes_run_ad
+      AFTER DELETE ON chat_runs BEGIN
+        UPDATE session_sizes SET run_bytes = run_bytes - (COALESCE(octet_length(old.metadata_json), 0) + COALESCE(octet_length(old.error_message), 0))
+          WHERE session_id = old.session_id;
+        UPDATE session_type_sizes SET run_bytes = run_bytes - (COALESCE(octet_length(old.metadata_json), 0) + COALESCE(octet_length(old.error_message), 0))
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = old.session_id);
+      END`,
+    `CREATE TRIGGER session_sizes_run_au
+      AFTER UPDATE OF session_id, metadata_json, error_message ON chat_runs BEGIN
+        UPDATE session_sizes SET run_bytes = run_bytes - (COALESCE(octet_length(old.metadata_json), 0) + COALESCE(octet_length(old.error_message), 0))
+          WHERE session_id = old.session_id;
+        UPDATE session_type_sizes SET run_bytes = run_bytes - (COALESCE(octet_length(old.metadata_json), 0) + COALESCE(octet_length(old.error_message), 0))
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = old.session_id);
+        INSERT INTO session_sizes(session_id, run_bytes) VALUES (new.session_id, COALESCE(octet_length(new.metadata_json), 0) + COALESCE(octet_length(new.error_message), 0))
+          ON CONFLICT(session_id) DO UPDATE SET run_bytes = run_bytes + excluded.run_bytes;
+        UPDATE session_type_sizes SET run_bytes = run_bytes + COALESCE(octet_length(new.metadata_json), 0) + COALESCE(octet_length(new.error_message), 0)
+          WHERE session_type = (SELECT session_type FROM sessions WHERE session_id = new.session_id);
+      END`,
+    `CREATE TRIGGER session_sizes_session_ai
+      AFTER INSERT ON sessions BEGIN
+        INSERT OR IGNORE INTO session_sizes(session_id) VALUES (new.session_id);
+        INSERT INTO session_type_sizes(session_type, message_json_bytes, search_text_bytes,
+            run_bytes, own_bytes, sessions, archived)
+          VALUES (new.session_type, COALESCE((SELECT message_json_bytes FROM session_sizes WHERE session_id = new.session_id), 0), COALESCE((SELECT search_text_bytes FROM session_sizes WHERE session_id = new.session_id), 0),
+            COALESCE((SELECT run_bytes FROM session_sizes WHERE session_id = new.session_id), 0), COALESCE(octet_length(new.messages), 0) + COALESCE(octet_length(new.metadata), 0) + COALESCE(octet_length(new.name), 0), 1, new.archived_at IS NOT NULL)
+          ON CONFLICT(session_type) DO UPDATE SET
+            message_json_bytes = message_json_bytes + excluded.message_json_bytes,
+            search_text_bytes = search_text_bytes + excluded.search_text_bytes,
+            run_bytes = run_bytes + excluded.run_bytes,
+            own_bytes = own_bytes + excluded.own_bytes,
+            sessions = sessions + 1,
+            archived = archived + excluded.archived;
+      END`,
+    `CREATE TRIGGER session_sizes_session_ad
+      AFTER DELETE ON sessions BEGIN
+        UPDATE session_type_sizes SET
+            message_json_bytes = message_json_bytes - COALESCE((SELECT message_json_bytes FROM session_sizes WHERE session_id = old.session_id), 0),
+            search_text_bytes = search_text_bytes - COALESCE((SELECT search_text_bytes FROM session_sizes WHERE session_id = old.session_id), 0),
+            run_bytes = run_bytes - COALESCE((SELECT run_bytes FROM session_sizes WHERE session_id = old.session_id), 0),
+            own_bytes = own_bytes - (COALESCE(octet_length(old.messages), 0) + COALESCE(octet_length(old.metadata), 0) + COALESCE(octet_length(old.name), 0)),
+            sessions = sessions - 1,
+            archived = archived - (old.archived_at IS NOT NULL)
+          WHERE session_type = old.session_type;
+        DELETE FROM session_sizes WHERE session_id = old.session_id;
+      END`,
+    `CREATE TRIGGER session_sizes_session_au
+      AFTER UPDATE OF session_type, archived_at, messages, metadata, name ON sessions BEGIN
+        UPDATE session_type_sizes SET
+            message_json_bytes = message_json_bytes - COALESCE((SELECT message_json_bytes FROM session_sizes WHERE session_id = old.session_id), 0),
+            search_text_bytes = search_text_bytes - COALESCE((SELECT search_text_bytes FROM session_sizes WHERE session_id = old.session_id), 0),
+            run_bytes = run_bytes - COALESCE((SELECT run_bytes FROM session_sizes WHERE session_id = old.session_id), 0),
+            own_bytes = own_bytes - (COALESCE(octet_length(old.messages), 0) + COALESCE(octet_length(old.metadata), 0) + COALESCE(octet_length(old.name), 0)),
+            sessions = sessions - 1,
+            archived = archived - (old.archived_at IS NOT NULL)
+          WHERE session_type = old.session_type;
+        INSERT INTO session_type_sizes(session_type, message_json_bytes, search_text_bytes,
+            run_bytes, own_bytes, sessions, archived)
+          VALUES (new.session_type, COALESCE((SELECT message_json_bytes FROM session_sizes WHERE session_id = new.session_id), 0), COALESCE((SELECT search_text_bytes FROM session_sizes WHERE session_id = new.session_id), 0),
+            COALESCE((SELECT run_bytes FROM session_sizes WHERE session_id = new.session_id), 0), COALESCE(octet_length(new.messages), 0) + COALESCE(octet_length(new.metadata), 0) + COALESCE(octet_length(new.name), 0), 1, new.archived_at IS NOT NULL)
+          ON CONFLICT(session_type) DO UPDATE SET
+            message_json_bytes = message_json_bytes + excluded.message_json_bytes,
+            search_text_bytes = search_text_bytes + excluded.search_text_bytes,
+            run_bytes = run_bytes + excluded.run_bytes,
+            own_bytes = own_bytes + excluded.own_bytes,
+            sessions = sessions + 1,
+            archived = archived + excluded.archived;
       END`
   ]
 } as const satisfies OperationalSchemaSection

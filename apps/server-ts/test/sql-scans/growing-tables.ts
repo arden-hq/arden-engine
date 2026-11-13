@@ -18,6 +18,7 @@ export const GROWING_TABLES: ReadonlySet<string> = new Set([
   "run_endings", // 6,300
   "session_revisions", // 6,200
   "sessions", // 5,100
+  "session_sizes", // one per chat
   "run_sidecars", // 5,100
   "tool_call_targets", // 4,900
   "journal_streams", // 4,700

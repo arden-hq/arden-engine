@@ -51,6 +51,8 @@ const storeError = (
     ...(cause === undefined ? {} : { cause })
   })
 
+// A chat's size is read from `session_sizes`, which triggers keep current as
+// messages and runs change. Adding up message lengths here read every message.
 const sessionOwnBytesSql = (sql: SqlClient.SqlClient, alias: string) => {
   const session = sql.literal(alias)
   return sql`MAX(1,
@@ -58,23 +60,17 @@ const sessionOwnBytesSql = (sql: SqlClient.SqlClient, alias: string) => {
     + COALESCE(octet_length(${session}.metadata), 0)
     + COALESCE(octet_length(${session}.name), 0)
     + COALESCE((
-        SELECT sum(
-          octet_length(message.message_json)
-          + COALESCE(octet_length(message.search_text), 0)
-        )
-        FROM session_messages AS message
-        WHERE message.session_id = ${session}.session_id
-      ), 0)
-    + COALESCE((
-        SELECT sum(COALESCE(octet_length(run.metadata_json), 0)
-          + COALESCE(octet_length(run.error_message), 0))
-        FROM chat_runs AS run
-        WHERE run.session_id = ${session}.session_id
+        SELECT size.message_json_bytes + size.search_text_bytes + size.run_bytes
+        FROM session_sizes AS size
+        WHERE size.session_id = ${session}.session_id
       ), 0))`
 }
 
+// One row per kind of chat. An empty chat counted as one byte in the old sum;
+// here it counts as zero, which does not move the share this total is used for.
 const loadTotalBytes = (sql: SqlClient.SqlClient) => sql<{ readonly total: number }>`
-  SELECT COALESCE(SUM(${sessionOwnBytesSql(sql, "s")}), 0) AS total FROM sessions AS s`
+  SELECT COALESCE(SUM(message_json_bytes + search_text_bytes + run_bytes + own_bytes), 0) AS total
+  FROM session_type_sizes`
 
 const loadRows = (sql: SqlClient.SqlClient, scope: CandidateScope) => sql<CandidateRow>`
   WITH RECURSIVE ${sessionDeletionTree(sql, {

@@ -26,11 +26,5 @@ export const APPROVED_SCANS: ReadonlyArray<ApprovedScan> = [
     id: "87109edd77d5",
     table: "usage_daily",
     reason: "Asks only whether the table has a row: EXISTS stops at the first one."
-  },
-  {
-    id: "459a89eb7688",
-    table: "sessions",
-    reason:
-      "Storage page total: sums the size of every chat. Runs only when the user opens Storage, on a reader connection. Known slow (17 s on an 8 GB database); a saved size per chat would remove it."
   }
 ]

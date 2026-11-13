@@ -26,16 +26,12 @@ export const BREAKDOWN_QUERIES = {
     SELECT page_count * page_size AS bytes, freelist_count * page_size AS free_bytes
     FROM pragma_page_count(), pragma_page_size(), pragma_freelist_count()
   `,
+  // Both read `session_type_sizes`, one row per kind of chat, kept by triggers.
   weights: `
-    SELECT s.session_type, SUM((
-      SELECT SUM(octet_length(m.message_json))
-      FROM session_messages AS m WHERE m.session_id = s.session_id
-    )) AS bytes
-    FROM sessions AS s GROUP BY s.session_type
+    SELECT session_type, message_json_bytes AS bytes FROM session_type_sizes WHERE sessions > 0
   `,
   counts: `
-    SELECT session_type, COUNT(*) AS total, SUM(archived_at IS NOT NULL) AS archived
-    FROM sessions GROUP BY session_type
+    SELECT session_type, sessions AS total, archived FROM session_type_sizes WHERE sessions > 0
   `
 } as const
 

@@ -36,6 +36,7 @@ import { spaceNames } from "./0141_space_names.js"
 import { journalRetentionCursors } from "./0142_journal_retention_cursors.js"
 import { chatUploadRefs } from "./0143_chat_upload_refs.js"
 import { lookupIndexes } from "./0144_lookup_indexes.js"
+import { sessionSizes } from "./0145_session_sizes.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -314,7 +315,8 @@ export const migrations: ReadonlyArray<Migration> = [
   spaceNames,
   journalRetentionCursors,
   chatUploadRefs,
-  lookupIndexes
+  lookupIndexes,
+  sessionSizes
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {
