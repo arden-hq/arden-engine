@@ -341,3 +341,36 @@ it("upgrades a version 3 index in place at open, keeps the embeddings, and fills
 })
 
 const plain = (row: object) => ({ ...row })
+
+// A changed message used to wait in the change list until the next search or
+// the next launch, and the launch then applied the whole backlog in large
+// writes. The engine now applies changes as it runs.
+it("applies message changes to the index while running, with no search and no restart", async () => {
+  await withDirectory(async (directory) => {
+    const { filename, sessionId } = await kettleNotes(directory)
+    process.env["ARDEN_TIMERS_AT_ONCE"] = "1"
+    try {
+      const pending = await openAt(
+        filename,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const persistence = yield* Persistence
+          const waiting = sql<{ readonly rows: number }>`
+            SELECT COUNT(*) AS rows FROM transcript_search_changes`.pipe(
+            Effect.map((rows) => rows[0]?.rows ?? -1)
+          )
+          yield* Effect.forkScoped(persistence.keepSearchIndexCurrent)
+          yield* Effect.sleep("1 second")
+          const settled = yield* waiting
+          for (const seq of [8, 9, 10]) yield* say(sessionId, `n${seq}`, seq, `Late note ${seq}.`)
+          const before = yield* waiting
+          yield* Effect.sleep("2 seconds")
+          return { settled, before, after: yield* waiting }
+        }).pipe(Effect.scoped)
+      )
+      expect(pending).toEqual({ settled: 0, before: 3, after: 0 })
+    } finally {
+      delete process.env["ARDEN_TIMERS_AT_ONCE"]
+    }
+  })
+})

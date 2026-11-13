@@ -2,10 +2,16 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { dirname, join } from "node:path"
 import { searchSchemaSection, searchSchemaUpgrades } from "../schema/search.js"
+import { timerSleep } from "../../lib/timer-sleep.js"
 import { pauseBetweenBatches, runIsActive } from "./background-pause.js"
 import type { Writer } from "./deps.js"
 
-const CHANGE_BATCH_SIZE = 500
+/** Changed messages applied to the index per write. Each costs three
+ * statements, so 100 keeps one write near a quarter second; 500 held the
+ * single writer for one to two and a half seconds. */
+const CHANGE_BATCH_SIZE = 100
+/** How often the engine looks for changes the index has not applied yet. */
+const KEEP_CURRENT_EVERY = "2 seconds"
 /** Messages copied into the index per transaction while it is rebuilt. */
 const REBUILD_BATCH_SIZE = 2_000
 
@@ -202,12 +208,40 @@ export const transcriptSearchStep = Effect.fn("SqliteSearch.step")(function* (
 export const fillTranscriptSearch = (writer: Writer): Effect.Effect<void> =>
   Effect.gen(function* () {
     for (;;) {
-      if (!(yield* writer.run(transcriptSearchStep(writer.sql)))) return
+      // The span names the write: the write queue reports a slow write by the
+      // span it was submitted in, and this one was reported as "untraced".
+      const stepped = yield* writer
+        .run(transcriptSearchStep(writer.sql))
+        .pipe(Effect.withSpan("SqliteSearch.fill"))
+      if (!stepped) return
       yield* pauseBetweenBatches(yield* runIsActive(writer.reader))
     }
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("Search index fill stopped; it resumes on the next start", cause)
+    )
+  )
+
+/** Keeps the index current for as long as the engine runs. A changed message
+ * leaves a row in `transcript_search_changes`, and the index applied those
+ * rows only at the next search or the next launch: after a long session the
+ * launch applied the whole backlog in large writes. This applies them within
+ * seconds, in small writes, so no backlog builds up. The look for pending
+ * rows is one read of a table that is empty when there is nothing to do. */
+export const keepTranscriptSearchCurrent = (writer: Writer): Effect.Effect<void> =>
+  fillTranscriptSearch(writer).pipe(
+    Effect.andThen(
+      timerSleep(KEEP_CURRENT_EVERY).pipe(
+        Effect.andThen(
+          writer.reader<{ readonly pending: number }>`
+            SELECT 1 AS pending FROM transcript_search_changes LIMIT 1`
+        ),
+        Effect.flatMap((rows) => (rows.length > 0 ? fillTranscriptSearch(writer) : Effect.void)),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Could not look for pending search index changes", cause)
+        ),
+        Effect.forever
+      )
     )
   )
 
@@ -250,7 +284,12 @@ const applyTranscriptChangeBatch = Effect.fn("SqliteSearch.applyChanges")(functi
             message: "Transcript search cursor is corrupt"
           })
         }
-        if (applied === head) return false
+        if (applied === head) {
+          // A new or reset index starts at the head, and the rows before it
+          // would stay for good: the look for pending rows would never rest.
+          yield* sql`DELETE FROM transcript_search_changes WHERE sequence <= ${applied}`
+          return false
+        }
         const changes = yield* sql<SearchChangeRow>`
         SELECT sequence, message_rowid FROM transcript_search_changes
         WHERE sequence > ${applied} AND sequence <= ${head}

@@ -137,7 +137,28 @@ const noteScans = (sql: string): void => {
   }
 }
 
+// Slow-statement log, for finding what a slow write or read spends its time
+// on. With ARDEN_SQL_SLOW_LOG set to a directory, the thread writes down each
+// statement that takes 50 ms or more: its time, its text and when it ran.
+// Unset, as in the app by default, this costs one comparison per statement.
+const slowLog = process.env.ARDEN_SQL_SLOW_LOG
+const SLOW_STATEMENT_MS = 50
 const run = (request: SqliteThreadRequest): unknown => {
+  if (slowLog === undefined || slowLog.length === 0) return runStatement(request)
+  const started = performance.now()
+  try {
+    return runStatement(request)
+  } finally {
+    const ms = performance.now() - started
+    if (ms >= SLOW_STATEMENT_MS)
+      appendFileSync(
+        `${slowLog}/slow-${process.pid}-${threadId}.jsonl`,
+        `${JSON.stringify({ at: new Date().toISOString(), ms: Math.round(ms), sql: request.sql })}\n`
+      )
+  }
+}
+
+const runStatement = (request: SqliteThreadRequest): unknown => {
   noteScans(request.sql)
   const statement = request.prepared ? prepare(request.sql) : database.prepare(request.sql)
   const params = request.params as Array<never>
