@@ -25,6 +25,7 @@ import { spaceJobId } from "../space-job-id.js"
 import { userChatSql } from "./chat-ownership.js"
 import { queuedEventType } from "./automation-listening.js"
 import { RUNS_ALONE } from "../automations/event-batch.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 const ITEM_REVIEW_DAYS = 14
 const ITEM_REVIEW_LIMIT = 20
@@ -376,7 +377,7 @@ export const makeSpaceReviewStore = ({
               AND json_extract(source.source, '$.session_id') = session.session_id)
             OR EXISTS (SELECT 1 FROM space_chat_links AS link WHERE link.space_id = ${current.space_id}
               AND link.session_id = session.session_id AND link.run_id = run.run_id))
-          AND run.status = 'completed' AND json_extract(request.message_json, '$.is_meta') IS NOT 1
+          AND run.status = 'completed' AND json_extract(${keyMessageJson(sql, "request")}, '$.is_meta') IS NOT 1
           AND json_extract(run.metadata_json, '$.automation') IS NULL
           AND json_extract(run.metadata_json, '$.turn_id') IS NOT NULL
         ORDER BY session.session_id, run.started_at, run.run_id`

@@ -32,6 +32,7 @@ import { SPACE_REVIEW_LADDER_MS, ladderStepMs } from "../automations/retry-ladde
 import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { keyMessageJson } from "./chat-key-message.js"
 
 interface JobState {
   readonly automationId: string
@@ -442,7 +443,7 @@ export const makeSpaceJobSql = (
         AND session.archived_at IS NULL
         AND space.archived_at IS NULL AND json_extract(space.inference_policy, '$.enabled') = 1
         AND run.status = 'completed' AND json_extract(run.metadata_json, '$.turn_id') IS NOT NULL
-        AND json_extract(request.message_json, '$.is_meta') IS NOT 1
+        AND json_extract(${keyMessageJson(sql, "request")}, '$.is_meta') IS NOT 1
         AND json_extract(run.metadata_json, '$.automation') IS NULL
       ORDER BY run.started_at DESC, run.run_id DESC, ancestors.depth DESC LIMIT 1`
     const row = rows[0]
@@ -488,7 +489,7 @@ export const makeSpaceJobSql = (
       LEFT JOIN session_messages AS answer ON answer.session_id = run.session_id
         AND answer.message_id = run.assistant_message_id
       WHERE session.session_id = ${sessionId} AND ${userChatSql("session")} AND session.archived_at IS NULL
-        AND run.status = 'completed' AND json_extract(request.message_json, '$.is_meta') IS NOT 1
+        AND run.status = 'completed' AND json_extract(${keyMessageJson(sql, "request")}, '$.is_meta') IS NOT 1
         AND json_extract(run.metadata_json, '$.automation') IS NULL
         AND json_extract(run.metadata_json, '$.turn_id') IS NOT NULL
         AND (answer.seq IS NULL OR answer.seq <= ${throughSequence})

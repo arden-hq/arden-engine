@@ -60,6 +60,7 @@ import { transactWithActiveContext } from "./active-context-stage.js"
 import { nextId } from "./deps.js"
 import { userChatSql } from "./chat-ownership.js"
 import { claimQueued } from "./chat-queue.js"
+import { insertChatKey } from "./chat-key-message.js"
 
 const transcriptChanged = { type: "transcript_changed" } satisfies ChatProjectionEvent
 
@@ -309,6 +310,14 @@ export const makeChatAdmission = ({
             })
           )
         )
+        const key = {
+          sessionId: valid.sessionId,
+          clientId: valid.clientId,
+          requestHash: valid.requestHash,
+          messageId: acceptedMessage.message_id,
+          messageJson,
+          at: timestamp
+        }
 
         const requestedModel = yield* Effect.gen(function* () {
           if (runInheritsChatModel(valid.automationContextMode, session.chat_model))
@@ -373,15 +382,7 @@ export const makeChatAdmission = ({
           if (delivery?.kind === "answer" && delivery.runIds[0] !== activeRun.run_id) {
             return yield* conflict("Arrival waits for the current Chat turn")
           }
-          yield* sql`
-          INSERT INTO chat_idempotency_keys (
-            session_id, client_id, request_hash, run_id, message_id, message_json, status,
-            created_at, updated_at
-          ) VALUES (
-            ${valid.sessionId}, ${valid.clientId}, ${valid.requestHash}, ${activeRun.run_id},
-            ${acceptedMessage.message_id}, ${messageJson}, 'queued', ${timestamp}, ${timestamp}
-          )
-        `
+          yield* insertChatKey(sql, { ...key, runId: activeRun.run_id, status: "queued" })
           if (valid.deliveryId !== undefined) {
             yield* sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${timestamp},
             destinations = ${JSON.stringify([`chat:${activeRun.run_id}`])}
@@ -435,10 +436,7 @@ export const makeChatAdmission = ({
             "start",
             acceptedMessage.message_id
           )
-          yield* sql`INSERT INTO chat_idempotency_keys (
-              session_id, client_id, request_hash, message_id, message_json, status, created_at, updated_at
-            ) VALUES (${valid.sessionId}, ${valid.clientId}, ${valid.requestHash},
-              ${acceptedMessage.message_id}, ${messageJson}, 'accepted', ${timestamp}, ${timestamp})`
+          yield* insertChatKey(sql, { ...key, runId: null, status: "accepted" })
           if (valid.deliveryId !== undefined) {
             yield* sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${timestamp},
                 destinations = ${JSON.stringify([`chat:${valid.sessionId}`])}
@@ -639,15 +637,7 @@ export const makeChatAdmission = ({
           ${valid.assistantMessageId}, ${model.modelId}, ${model.reasoningEffort}, ${JSON.stringify(authority)}
         )
       `
-        yield* sql`
-        INSERT INTO chat_idempotency_keys (
-          session_id, client_id, request_hash, run_id, message_id, message_json, status,
-          created_at, updated_at
-        ) VALUES (
-          ${valid.sessionId}, ${valid.clientId}, ${valid.requestHash}, ${runId},
-          ${acceptedMessage.message_id}, ${messageJson}, 'running', ${timestamp}, ${timestamp}
-        )
-      `
+        yield* insertChatKey(sql, { ...key, runId, status: "running" })
 
         if (valid.automation !== undefined) {
           if (valid.automationLease !== undefined) {

@@ -64,6 +64,7 @@ import { textBefore } from "../../lib/text.js"
 import { spawnClientId } from "../sessions/lineage.js"
 import { mutationReceiptHost, type MutationOperationIdentity } from "../tools/mutation-receipt.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { insertChatKey } from "./chat-key-message.js"
 
 interface SpawnParentRow extends RunRow {
   readonly public_ref: string
@@ -673,17 +674,16 @@ export const makeAgentSpawner = ({
                     })
                   )
                 )
-                yield* sql`
-              INSERT INTO chat_idempotency_keys (
-                session_id, client_id, request_hash, run_id, message_id, message_json,
-                status, created_at, updated_at
-              ) VALUES (
-                ${childSessionId}, ${childClientId},
-                ${sha256Hex(valid.task)},
-                ${childRunId}, ${childMessage.message_id}, ${messageJson},
-                'running', ${timestamp}, ${timestamp}
-              )
-            `
+                yield* insertChatKey(sql, {
+                  sessionId: childSessionId,
+                  clientId: childClientId,
+                  requestHash: sha256Hex(valid.task),
+                  runId: childRunId,
+                  messageId: childMessage.message_id,
+                  messageJson,
+                  status: "running",
+                  at: timestamp
+                })
 
                 const committed = yield* chatEvents
                   .appendInTransaction({

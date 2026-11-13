@@ -18,6 +18,7 @@ import { nextId } from "./deps.js"
 import type { PersistenceDeps } from "./deps.js"
 import { OptionalInputTokens, storeError, sessionIdSchema } from "./session-rows.js"
 import { ActiveContextError, loadActiveContext, replaceActiveContext } from "./active-context.js"
+import { restoreKeyMessageCopies } from "./chat-key-message.js"
 
 interface MutableSessionRow {
   readonly session_id: string
@@ -177,6 +178,7 @@ export const makeSessionContext = ({
           }
           const clearedTurns = yield* sql<{ readonly turn_id: string }>`
             SELECT turn_id FROM session_turns WHERE session_id = ${row.session_id}`
+          yield* restoreKeyMessageCopies(sql, row.session_id)
           yield* sql`DELETE FROM session_messages WHERE session_id = ${row.session_id}`
           yield* sql`DELETE FROM session_turns WHERE session_id = ${row.session_id}`
           yield* sql`DELETE FROM chat_compactions WHERE session_id = ${row.session_id}`
@@ -482,6 +484,7 @@ export const makeSessionContext = ({
                     AND message_id IN ${sql.in(discardedMessageIds)}
                 `
           const discardedTurnIds = yield* turnIdsOf(sql, row.session_id, discardedMessageIds)
+          yield* restoreKeyMessageCopies(sql, row.session_id, discardedMessageIds)
           yield* Effect.forEach(
             discardedMessageIds,
             (messageId) => sql`

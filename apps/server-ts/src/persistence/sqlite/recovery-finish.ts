@@ -22,6 +22,7 @@ import { requireActiveContextWindow } from "./active-context.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { appendSessionTurn } from "./turns.js"
 import type { RunTerminal } from "./run-ending.js"
+import { releaseKeyMessageCopies } from "./chat-key-message.js"
 
 interface LatestMessageRow {
   readonly message_json: string
@@ -200,6 +201,7 @@ export const appendRecoveredMessagesInTransaction = Effect.fn(
     firstSequence,
     messages
   })
+  yield* releaseKeyMessageCopies(sql, run.session_id, messages)
   return stamped
 })
 

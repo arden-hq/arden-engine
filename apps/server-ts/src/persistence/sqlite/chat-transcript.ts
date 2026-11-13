@@ -25,6 +25,7 @@ import {
   loadActiveTail
 } from "./active-context.js"
 import { liftChat, turnTouchesRecencySql } from "./session-unread.js"
+import { releaseKeyMessageCopies } from "./chat-key-message.js"
 
 export const MessageListSchema = Schema.Array(StoredMessageEnvelopeSchema)
 const envelopeEquivalent = Schema.toEquivalence(StoredMessageEnvelopeSchema)
@@ -398,6 +399,14 @@ export const appendMessagesInTransaction = Effect.fn("SqliteChatWriteStore.appen
     }).pipe(
       Effect.mapError((cause) =>
         writeError(operation, "storage", "Could not update session turn", {
+          sessionId,
+          cause
+        })
+      )
+    )
+    yield* releaseKeyMessageCopies(sql, sessionId, batch).pipe(
+      Effect.mapError((cause) =>
+        writeError(operation, "storage", "Could not settle admitted message copies", {
           sessionId,
           cause
         })

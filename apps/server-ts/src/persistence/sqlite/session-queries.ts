@@ -32,6 +32,7 @@ import { OptionalInputTokens } from "./session-rows.js"
 import { ActiveContextError, loadActiveContext } from "./active-context.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { sessionForkOriginFromMetadata } from "../sessions/fork-origin.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 interface SessionRow {
   readonly session_id: string
@@ -312,10 +313,10 @@ export const makeSessionQueries = ({
     const pageSize = 64
     let offset = 0
     while (true) {
-      const rows = yield* sql<{ readonly message_json: string }>`
-        SELECT message_json
-        FROM chat_idempotency_keys
-        WHERE session_id = ${sessionId} AND message_json IS NOT NULL
+      const rows = yield* sql<{ readonly message_json: string | null }>`
+        SELECT ${keyMessageJson(sql, "receipt")} AS message_json
+        FROM chat_idempotency_keys AS receipt
+        WHERE session_id = ${sessionId}
         ORDER BY created_at ASC, rowid ASC
         LIMIT ${pageSize} OFFSET ${offset}
       `.pipe(
@@ -324,6 +325,7 @@ export const makeSessionQueries = ({
         )
       )
       for (const row of rows) {
+        if (row.message_json === null) continue
         const candidate = yield* decodeCandidate(row.message_json)
         if (candidate !== null) return candidate
       }

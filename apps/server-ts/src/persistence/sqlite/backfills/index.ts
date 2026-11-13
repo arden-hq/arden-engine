@@ -14,6 +14,7 @@ import { automationInstructionBackfill } from "../automation-instruction-backfil
 import { pendingDecisionVisibilityBackfill } from "../pending-decision-visibility-backfill.js"
 import { orphanAgentSessionsBackfill } from "../orphan-agent-sessions-backfill.js"
 import { spaceWordsBackfill } from "../space-words-backfill.js"
+import { keyMessageCopiesBackfill } from "../key-message-copies-backfill.js"
 import { checkBackfills, type AnyBackfill } from "./backfill.js"
 
 export const backfills: ReadonlyArray<AnyBackfill> = checkBackfills([
@@ -31,5 +32,6 @@ export const backfills: ReadonlyArray<AnyBackfill> = checkBackfills([
   sessionHistoryBackfill,
   automationHistoryBackfill,
   orphanAgentSessionsBackfill,
-  spaceWordsBackfill
+  spaceWordsBackfill,
+  keyMessageCopiesBackfill
 ])

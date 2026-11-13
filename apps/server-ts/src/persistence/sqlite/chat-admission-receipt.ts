@@ -7,6 +7,7 @@ import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../tran
 import { workflowDeliveryClientId } from "../chat/workflow-delivery.js"
 import { writeError } from "./chat-write-errors.js"
 import { decodeJson } from "./json.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 interface ReceiptRow {
   readonly request_hash: string
@@ -53,8 +54,8 @@ export const loadReceipt = Effect.fn("SqliteChatWriteStore.loadReceipt")(functio
   incomingMessage: StoredMessageEnvelope
 ): Effect.fn.Return<LoadedReceipt | null, ChatWriteError | ChatWriteConflictError> {
   const rows = yield* sql<ReceiptRow>`
-    SELECT request_hash, run_id, status, message_json
-    FROM chat_idempotency_keys
+    SELECT request_hash, run_id, status, ${keyMessageJson(sql, "receipt")} AS message_json
+    FROM chat_idempotency_keys AS receipt
     WHERE session_id = ${sessionId} AND client_id = ${clientId}
     LIMIT 1
   `.pipe(

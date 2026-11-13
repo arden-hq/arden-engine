@@ -58,6 +58,7 @@ import {
 import { RESTART_APPROVAL_DETAIL, RESTART_INTERRUPTION } from "../restart-notice.js"
 import { appendRunSettledInTransaction } from "./run-settled.js"
 import { decisionLineageSql } from "../schema/decision-visibility.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 interface PendingMessageRow {
   readonly client_id: string
@@ -321,8 +322,8 @@ const recoverChatRunInTransaction = Effect.fn("SqlitePersistence.recoverChatRun"
   }
   const finalReply = !cancelled ? completed : undefined
   const pendingRows = yield* sql<PendingMessageRow>`
-    SELECT client_id, message_id, message_json
-    FROM chat_idempotency_keys
+    SELECT client_id, message_id, ${keyMessageJson(sql, "receipt")} AS message_json
+    FROM chat_idempotency_keys AS receipt
     WHERE session_id = ${run.session_id}
       AND run_id = ${run.run_id}
       AND status = 'queued'

@@ -9,6 +9,7 @@ import { appendQuestionChanges } from "./question-events.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import type { RunRow } from "./chat-run.js"
 import { writeError, type ChatWriteOperation } from "./chat-write-errors.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 interface PendingMessageRow {
   readonly client_id: string
@@ -32,7 +33,7 @@ export const loadPendingInTransaction = Effect.fn("SqliteChatWriteStore.loadPend
 ): Effect.fn.Return<PendingIngestion, ChatWriteError> {
   const rows = yield* sql<PendingMessageRow>`
     SELECT receipts.client_id, receipts.message_id,
-           receipts.message_json, receipts.created_at
+           ${keyMessageJson(sql, "receipts")} AS message_json, receipts.created_at
     FROM chat_idempotency_keys AS receipts
     WHERE receipts.session_id = ${run.session_id}
       AND receipts.run_id = ${run.run_id}

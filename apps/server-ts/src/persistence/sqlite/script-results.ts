@@ -15,6 +15,7 @@ import { nextOutboxAttemptAt } from "../../runtime/outbox.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
 import { scriptResultDeliveryId, scriptResultRow, type ScriptResultInput } from "./script-derive.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 const MAX_ERROR_LENGTH = 2_000
 
@@ -84,14 +85,15 @@ export const makeScriptResults = ({
       attempt: delivery.payload.attempt
     }
     const clientId = workflowDeliveryClientId(identity)
-    const rows = yield* sql<{ readonly message_json: string }>`
-      SELECT message_json FROM chat_idempotency_keys
+    const rows = yield* sql<{ readonly message_json: string | null }>`
+      SELECT ${keyMessageJson(sql, "receipt")} AS message_json
+      FROM chat_idempotency_keys AS receipt
       WHERE session_id = ${delivery.payload.sessionId} AND client_id = ${clientId}
       LIMIT 1
     `.pipe(Effect.mapError(storage("Could not inspect script result admission")))
-    const row = rows[0]
-    if (row === undefined) return false
-    const message = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json).pipe(
+    const json = rows[0]?.message_json
+    if (json === undefined || json === null) return false
+    const message = yield* decodeJson(StoredMessageEnvelopeSchema, json).pipe(
       Effect.mapError(
         (cause) =>
           new ScriptResultError({

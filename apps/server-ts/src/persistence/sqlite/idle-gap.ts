@@ -1,6 +1,7 @@
 import { DateTime, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ChatWriteError } from "../chat/store.js"
+import { keyMessageJson } from "./chat-key-message.js"
 
 interface VisibleActivityRow {
   readonly created_at: string
@@ -46,13 +47,14 @@ export const latestVisibleActivityMs = Effect.fn("SqliteChatWriteStore.latestVis
         LIMIT 1
       )
       UNION ALL
-      SELECT receipt.created_at
-      FROM chat_idempotency_keys AS receipt
-      WHERE receipt.session_id = ${sessionId}
-        AND receipt.status = 'queued'
-        AND receipt.message_json IS NOT NULL
-        AND json_extract(receipt.message_json, '$.role') IN ('user', 'assistant')
-        AND COALESCE(json_extract(receipt.message_json, '$.is_meta'), 0) <> 1
+      SELECT queued.created_at FROM (
+        SELECT receipt.created_at, ${keyMessageJson(sql, "receipt")} AS message_json
+        FROM chat_idempotency_keys AS receipt
+        WHERE receipt.session_id = ${sessionId} AND receipt.status = 'queued'
+      ) AS queued
+      WHERE queued.message_json IS NOT NULL
+        AND json_extract(queued.message_json, '$.role') IN ('user', 'assistant')
+        AND COALESCE(json_extract(queued.message_json, '$.is_meta'), 0) <> 1
     ) AS activity
     ORDER BY julianday(activity.created_at) DESC, activity.created_at DESC
     LIMIT 1
