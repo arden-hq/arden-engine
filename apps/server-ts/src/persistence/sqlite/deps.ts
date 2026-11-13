@@ -26,6 +26,7 @@ export interface Writer {
   readonly transact: Transact
   readonly transactInteractive: Transact
   readonly run: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  readonly waiting: Effect.Effect<number>
   readonly snapshot: <A, E>(read: Effect.Effect<A, E>) => Effect.Effect<A, E | SqlError.SqlError>
 }
 
@@ -75,6 +76,7 @@ export const makeWriter = (options: {
     transact: (effect) => queue.run(unitOfWork(effect)),
     transactInteractive: (effect) => queue.runInteractive(unitOfWork(effect)),
     run: queue.run,
+    waiting: queue.waiting,
     snapshot: (read) => reader.withTransaction(read)
   }
 }

@@ -40,6 +40,23 @@ export interface StorageDatabaseBreakdown {
   readonly agentRuns: number
 }
 
+/** Pages SQLite keeps for reuse; `incremental_vacuum` returns them to the
+ * file system. */
+export interface FreePages {
+  readonly free: number
+  readonly pageSize: number
+}
+
+export interface ReleasedPages {
+  readonly released: number
+  /** Free pages left after the batch. */
+  readonly free: number
+}
+
+/** "passive" copies what it can without waiting; "truncate" waits for readers
+ * and empties the WAL file. */
+export type CheckpointMode = "passive" | "truncate"
+
 export class StorageSessionStoreError extends Schema.TaggedError<StorageSessionStoreError>()(
   "StorageSessionStoreError",
   {
@@ -58,7 +75,15 @@ export class StorageSessionStore extends Context.Service<
     readonly deleteCandidate: (
       candidate: StorageSessionCandidate
     ) => Effect.Effect<void, StorageSessionStoreError>
-    readonly compact: () => Effect.Effect<void, StorageSessionStoreError>
+    readonly freePages: () => Effect.Effect<FreePages, StorageSessionStoreError>
+    /** One write: releases at most `pages`, never below `reservePages`. */
+    readonly releaseFreePages: (options: {
+      readonly pages: number
+      readonly reservePages: number
+    }) => Effect.Effect<ReleasedPages, StorageSessionStoreError>
+    readonly checkpoint: (mode: CheckpointMode) => Effect.Effect<void, StorageSessionStoreError>
+    /** Whether writes are queued or a chat run is active: background work gives way. */
+    readonly foregroundWork: () => Effect.Effect<boolean, StorageSessionStoreError>
     readonly breakdown: () => Effect.Effect<StorageDatabaseBreakdown, StorageSessionStoreError>
   }
 >()("@arden-hq/server/persistence/storage/StorageSessionStore") {}

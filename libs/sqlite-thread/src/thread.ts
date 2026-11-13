@@ -144,7 +144,14 @@ const run = (request: SqliteThreadRequest): unknown => {
   statement.setReadBigInts(request.safeIntegers)
   statement.setReturnArrays(request.shape === "values")
   try {
+    // `run` takes one step, and a statement without result columns can need
+    // more: `PRAGMA incremental_vacuum(n)` releases one page per step. `all`
+    // steps to the end. Only a raw request needs `run`, for its change count.
     if (statement.columns().length > 0) return statement.all(...params)
+    if (!request.raw) {
+      statement.all(...params)
+      return []
+    }
     const result = statement.run(...params)
     return request.raw ? { changes: result.changes, lastInsertRowid: result.lastInsertRowid } : []
   } finally {

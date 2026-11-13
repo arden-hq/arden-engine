@@ -21,6 +21,9 @@ export class PersistenceWriteQueue extends Context.Service<
     readonly run: <A, E>(operation: Effect.Effect<A, E>) => Effect.Effect<A, E>
     readonly runInteractive: <A, E>(operation: Effect.Effect<A, E>) => Effect.Effect<A, E>
     readonly flush: Effect.Effect<void>
+    /** Writes admitted and not yet started, in both lanes. Background work
+     * that runs in batches checks it to give way between batches. */
+    readonly waiting: Effect.Effect<number>
   }
 >()("@arden-hq/server/persistence/PersistenceWriteQueue") {
   static readonly layer: Layer.Layer<PersistenceWriteQueue> = Layer.effect(
@@ -131,7 +134,10 @@ export class PersistenceWriteQueue extends Context.Service<
       return PersistenceWriteQueue.of({
         run: (operation) => submit("ordinary", operation),
         runInteractive: (operation) => submit("interactive", operation),
-        flush
+        flush,
+        waiting: Effect.all([Queue.size(queues.interactive), Queue.size(queues.ordinary)]).pipe(
+          Effect.map(([interactive, ordinary]) => interactive + ordinary)
+        )
       })
     })
   )

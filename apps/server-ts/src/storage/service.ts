@@ -27,6 +27,8 @@ import {
 } from "./inventory.js"
 import { makeStorageFiles } from "./files.js"
 import { SessionFileCleanup } from "./session-file-cleanup.js"
+import { makeFreeSpaceWorker } from "./free-space.js"
+import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { currentIso, currentMillis } from "../runtime/clock.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
@@ -138,6 +140,9 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
   const fileCleanup = yield* SessionFileCleanup
   const semaphore = yield* Semaphore.make(1)
   const files = makeStorageFiles(options)
+  const lifecycle = yield* ServerLifecycle
+  const freeSpace = yield* makeFreeSpaceWorker(sessionStore)
+  yield* lifecycle.background(freeSpace.loop)
 
   const scanInventory = (operation: StorageOperation) =>
     filesystem(operation, "Could not inspect Arden storage", () =>
@@ -366,8 +371,8 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
   const tidy = () =>
     semaphore.withPermit(
       Effect.gen(function* () {
-        yield* sessionStore
-          .compact()
+        yield* freeSpace
+          .drainNow()
           .pipe(
             Effect.mapError((cause) => storageError("tidy", cause.reason, cause.message, cause))
           )
@@ -414,8 +419,8 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
         yield* deleted
 
         if (current.candidates.length > 0) {
-          yield* sessionStore
-            .compact()
+          yield* freeSpace
+            .drainNow()
             .pipe(
               Effect.mapError((cause) =>
                 storageError("execute", cause.reason, cause.message, cause)

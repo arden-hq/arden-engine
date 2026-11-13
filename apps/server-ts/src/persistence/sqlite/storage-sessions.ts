@@ -15,6 +15,7 @@ import {
 import type { PersistenceDeps } from "./deps.js"
 import { taskUnfinishedSql } from "./task-status-sql.js"
 import { userChatSql } from "./chat-ownership.js"
+import { makeFreePages } from "./free-pages.js"
 
 interface CandidateRow {
   readonly session_id: string
@@ -333,61 +334,6 @@ export const makeStorageSessionStore = (
       )
   })
 
-  const compact = Effect.fn("SqliteStorageSessionStore.compact")(function* () {
-    yield* writer.run(
-      Effect.gen(function* () {
-        const rows = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`.pipe(
-          Effect.mapError((cause) =>
-            storeError(
-              "compact",
-              "storage",
-              "Could not inspect reusable database pages",
-              undefined,
-              cause
-            )
-          )
-        )
-        const freePages = rows[0]?.freelist_count
-        if (freePages === undefined || !Number.isSafeInteger(freePages) || freePages < 0) {
-          return yield* storeError(
-            "compact",
-            "storage",
-            "SQLite reported an invalid reusable-page count"
-          )
-        }
-        const pages = Math.min(freePages, 2_048)
-        if (pages > 0) {
-          yield* sql
-            .unsafe(`PRAGMA incremental_vacuum(${pages})`)
-            .pipe(
-              Effect.mapError((cause) =>
-                storeError(
-                  "compact",
-                  "storage",
-                  "Could not compact reusable database pages",
-                  undefined,
-                  cause
-                )
-              )
-            )
-        }
-        yield* sql
-          .unsafe("PRAGMA wal_checkpoint(TRUNCATE)")
-          .pipe(
-            Effect.mapError((cause) =>
-              storeError(
-                "compact",
-                "storage",
-                "Could not checkpoint the compacted database",
-                undefined,
-                cause
-              )
-            )
-          )
-      })
-    )
-  })
-
   const breakdown = Effect.fn("SqliteStorageSessionStore.breakdown")(function* () {
     const fail = (message: string) => (cause: unknown) =>
       storeError("breakdown", "storage", message, undefined, cause)
@@ -442,5 +388,10 @@ export const makeStorageSessionStore = (
     }
   })
 
-  return StorageSessionStore.of({ candidates, deleteCandidate, compact, breakdown })
+  return StorageSessionStore.of({
+    candidates,
+    deleteCandidate,
+    breakdown,
+    ...makeFreePages({ writer })
+  })
 }
