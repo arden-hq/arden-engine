@@ -103,6 +103,30 @@ const owned = async (
   )
 }
 
+type ScriptControl = "retry" | "cancel"
+
+const CONTROL_REFUSAL: Record<ScriptControl, { readonly verb: string; readonly preview: string }> =
+  {
+    retry: { verb: "run it again", preview: "Retry not allowed" },
+    cancel: { verb: "stop it", preview: "Cancel not allowed" }
+  }
+
+/** Reads a script the caller may change: only the chat run that started it, or the person. */
+const controlled = async (
+  services: ScriptToolServices,
+  ctx: ToolContext<ServerRunContext>,
+  ref: string,
+  control: ScriptControl
+): Promise<ScriptRecord> => {
+  const record = await owned(services, ctx, ref)
+  if (ctx.run.runId === record.originRunId || actsAsPerson(ctx.run.authority.actor)) return record
+  const refusal = CONTROL_REFUSAL[control]
+  throw new ToolExecutionError(
+    `Only the chat run that started this script, or the person, can ${refusal.verb}`,
+    { preview: refusal.preview, retryable: false }
+  )
+}
+
 const workflowResource = (record: ScriptRecord, state: string) => ({
   kind: "target" as const,
   resourceRef: `workflow:${record.ref}`,
@@ -185,13 +209,7 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
       idempotent: true
     },
     execute: async (input, ctx, effects) => {
-      const record = await owned(services, ctx, input.workflow_ref)
-      if (ctx.run.runId !== record.originRunId && !actsAsPerson(ctx.run.authority.actor)) {
-        throw new ToolExecutionError(
-          "Only the chat run that started this script, or the person, can run it again",
-          { preview: "Retry not allowed", retryable: false }
-        )
-      }
+      const record = await controlled(services, ctx, input.workflow_ref, "retry")
       const origin = await ctx.run
         .detachedRun({ sessionId: record.originSessionId, runId: record.originRunId })
         .catch(() => {
@@ -221,7 +239,8 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
   }),
   defineServerTool({
     name: WORKFLOW_CANCEL_TOOL,
-    description: "Stop a script that is still running, and its agents.",
+    description:
+      "Stop a script that is still running, and its agents. Only the chat run that started it, or the person, can cancel it.",
     parameters: Schema.toStandardSchemaV1(CancelParametersSchema),
     metadata: {
       effect: "arden_db",
@@ -238,7 +257,7 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
       idempotent: true
     },
     execute: async (input, ctx, effects) => {
-      const record = await owned(services, ctx, input.workflow_ref)
+      const record = await controlled(services, ctx, input.workflow_ref, "cancel")
       const cancelled = await run(
         services.runner.cancel({ ref: record.ref, cancelAgent: ctx.run.cancelAgent }),
         ctx.signal

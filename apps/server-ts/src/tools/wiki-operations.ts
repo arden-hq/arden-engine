@@ -535,7 +535,7 @@ const makeWikiOperationTools = ({
       "Create one managed Wiki directory with a complete README contract.",
       "The parent must already exist for nested paths. If <path>.md owns the name and is safe to move,",
       "it becomes <path>/README.md with the same page identity and history.",
-      "Repeating the same contract changes nothing. Asks by default."
+      "Repeating the same contract changes nothing. Asks by default, except in Memory runs."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateDirectoryParametersSchema),
     metadata: {
@@ -547,6 +547,7 @@ const makeWikiOperationTools = ({
       approval_preview: "Create a Memory folder.",
       source: "_wiki",
       scopes: ["memory_capture"],
+      unattended_scope: "memory_capture",
       changes_state: true,
       concurrency_group: "wiki_write",
       destructive: false,
@@ -601,7 +602,7 @@ const makeWikiOperationTools = ({
       "Replace one exact text block in an active Wiki page body. The old text must match exactly once; no prior read is needed. " +
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting; ` +
       "create another page only for a distinct subject or useful reading scope, with a contextual link. " +
-      "The root README.md and me.md have smaller Core Memory limits; a patch that leaves either over its limit is refused. Asks by default.",
+      "The root README.md and me.md have smaller Core Memory limits; a patch that leaves either over its limit is refused. Asks by default, except in Memory runs.",
     parameters: Schema.toStandardSchemaV1(PatchParametersSchema),
     metadata: {
       display: { card: "page_patch" },
@@ -613,6 +614,7 @@ const makeWikiOperationTools = ({
       approval_preview: "Edit part of a Memory page.",
       source: "_wiki",
       scopes: ["memory_capture"],
+      unattended_scope: "memory_capture",
       changes_state: true,
       concurrency_group: "wiki_write",
       destructive: true,

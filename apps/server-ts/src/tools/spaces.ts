@@ -314,11 +314,44 @@ const taskStateWords = (task: SpaceDetail["work"]["work_items"][number]): string
 const namedLink = (label: string, url: string): string =>
   `[${label.replace(/[\\[\]]/g, "\\$&").replace(/[\r\n]+/g, " ")}](${url})`
 
+/** Per-Space cap on instructions in the full list; one Space read by space_id shows them whole. */
+const MAX_LISTED_INSTRUCTIONS_CHARS = 2_000
+
+const SpaceListParametersSchema = Schema.Struct({
+  space_id: Schema.optionalKey(
+    Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
+      description:
+        "Exact space_id to list only that Space with its instructions in full. Omit to list every active Space."
+    })
+  )
+})
+
+const indented = (text: string): string =>
+  text
+    .split(/\r?\n/)
+    .map((line) => `    ${line}`)
+    .join("\n")
+
+/** The model sees only this text, so it carries the instructions space_settings_update replaces whole. */
+const spaceInstructionsText = (
+  space: ReturnType<typeof publicSpace>,
+  limit: number | undefined
+): string => {
+  const instructions = space.instructions ?? ""
+  if (instructions.trim() === "") return "  instructions: none"
+  if (limit === undefined || instructions.length <= limit)
+    return `  instructions:\n${indented(instructions)}`
+  return `  instructions (first ${limit} of ${instructions.length} characters; call space_list with space_id "${space.space_id}" to read them in full before replacing them):\n${indented(instructions.slice(0, limit))}`
+}
+
+const spaceListEntry = (space: ReturnType<typeof publicSpace>, limit: number | undefined): string =>
+  `- ${namedLink(space.name, `arden:space/${encodeURIComponent(space.space_id)}`)}${space.page_path === null ? "" : ` — ${namedLink("Memory", `arden:memory/${space.page_path.split("/").map(encodeURIComponent).join("/")}`)}`} · space_id ${space.space_id} · updated_at ${space.updated_at}\n${spaceInstructionsText(space, limit)}`
+
 const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "space_list",
-    description: "List active Spaces with their exact ids, names and attached Wiki pages.",
-    parameters: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Never)),
+    description: `List active Spaces with their exact ids, names, attached Wiki pages and current instructions. Instructions longer than ${MAX_LISTED_INSTRUCTIONS_CHARS} characters are cut off; pass space_id to read one Space's instructions in full.`,
+    parameters: Schema.toStandardSchemaV1(SpaceListParametersSchema),
     metadata: {
       effect: "none",
       display_name: "List Spaces",
@@ -330,22 +363,25 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
       concurrency_group: null,
       destructive: null
     },
-    execute: async (_input, ctx) => {
+    execute: async (input, ctx) => {
       const spaces = await Effect.runPromise(
         services.spaces.list().pipe(Effect.mapError(spaceFailure)),
         { signal: ctx.signal }
       )
-      const entries = spaces.map(publicSpace)
+      const entries = spaces
+        .filter((space) => input.space_id === undefined || space.space_id === input.space_id)
+        .map(publicSpace)
+      if (input.space_id !== undefined && entries.length === 0)
+        throw new ToolExecutionError(
+          `No active Space has space_id '${input.space_id}'. Call space_list without space_id to see the active Spaces.`,
+          { preview: "Space not found", retryable: false }
+        )
+      const limit = input.space_id === undefined ? MAX_LISTED_INSTRUCTIONS_CHARS : undefined
       return {
         result:
           entries.length === 0
             ? "No active Spaces."
-            : `Active Spaces\n${entries
-                .map(
-                  (space) =>
-                    `- ${namedLink(space.name, `arden:space/${encodeURIComponent(space.space_id)}`)}${space.page_path === null ? "" : ` — ${namedLink("Memory", `arden:memory/${space.page_path.split("/").map(encodeURIComponent).join("/")}`)}`} · updated_at ${space.updated_at}`
-                )
-                .join("\n")}`,
+            : `Active Spaces\n${entries.map((space) => spaceListEntry(space, limit)).join("\n")}`,
         preview: `${countOf(entries.length, "Space")}`,
         data: { spaces: entries }
       }

@@ -164,7 +164,7 @@ export const makeWikiRetireTools = ({
   defineServerTool({
     name: "wiki_merge_page",
     description:
-      "Retire one active Wiki page whose content another page now holds. Read both pages first and move anything unique into the other page before merging. The retired path redirects to the other page, so links keep working, and wiki_restore_page can bring the page back. Asks by default.",
+      "Retire one active Wiki page whose content another page now holds. Read both pages first and move anything unique into the other page before merging. The retired path redirects to the other page, so links keep working, and wiki_restore_page can bring the page back. Asks by default, except in Memory runs.",
     parameters: Schema.toStandardSchemaV1(MergeParametersSchema),
     metadata: {
       effect: "arden_db",

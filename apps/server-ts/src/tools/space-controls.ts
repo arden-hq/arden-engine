@@ -27,7 +27,8 @@ const patchSchema = UpdateSpaceInputSchema.mapFields((fields) => ({
     })
   ),
   instructions: fields.instructions.annotate({
-    description: "Complete replacement of the Space instructions, or null to clear them."
+    description:
+      "Complete replacement of the Space instructions, or null to clear them. Start from the current instructions space_list shows and keep every part the user did not ask to change."
   })
 })).annotate({
   description: "Only changed settings; preserve settings the user did not ask to change."
@@ -74,7 +75,7 @@ const readCurrent = async (
     throw failure({
       reason: "conflict",
       message:
-        "Space settings changed or are unavailable. Call space_list and rebuild the update from its current updated_at"
+        "Space settings changed or are unavailable. Call space_list, reread the current instructions and rebuild the update from its current updated_at"
     })
   return space
 }
@@ -83,7 +84,7 @@ const makeSpaceControlTools = (services: Services): ReadonlyArray<ServerTool> =>
   defineServerTool({
     name: "space_settings_update",
     description:
-      "Rename a Space or replace its instructions, when the user asks, from their own chat. Read space_list first and pass its exact updated_at. Returns the saved Space. Folders Arden may use or change are rules: offer one with ask_user permission. Workers cannot change these settings.",
+      "Rename a Space or replace its instructions, when the user asks, from their own chat. Read the current instructions with space_list first (pass space_id when they are cut off) and pass its exact updated_at. Returns the saved Space. Folders Arden may use or change are rules: offer one with ask_user permission. Workers cannot change these settings.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         space_id: Schema.NonEmptyString.annotate({
