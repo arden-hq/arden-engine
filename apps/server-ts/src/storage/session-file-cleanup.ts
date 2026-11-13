@@ -1,3 +1,4 @@
+import { timerSleep } from "../lib/timer-sleep.js"
 import { readdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { Cause, Clock, Context, Effect, Layer, Schema, Semaphore } from "effect"
@@ -200,7 +201,7 @@ export class SessionFileCleanup extends Context.Service<
           uploadFolder(uploadsRoot)
         )
         yield* server.background(
-          Effect.sleep(FIRST_DRAIN_DELAY).pipe(
+          timerSleep(FIRST_DRAIN_DELAY).pipe(
             Effect.andThen(
               cleanup.drain().pipe(
                 Effect.catchCause((cause) =>
@@ -208,7 +209,7 @@ export class SessionFileCleanup extends Context.Service<
                     error: Cause.squash(cause)
                   })
                 ),
-                Effect.andThen(Effect.sleep(DRAIN_EVERY)),
+                Effect.andThen(timerSleep(DRAIN_EVERY)),
                 Effect.forever
               )
             )

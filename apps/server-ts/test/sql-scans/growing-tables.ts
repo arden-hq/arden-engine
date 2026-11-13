@@ -19,6 +19,7 @@ export const GROWING_TABLES: ReadonlySet<string> = new Set([
   "session_revisions", // 6,200
   "sessions", // 5,100
   "session_sizes", // one per chat
+  "trace_trim_due", // one per untrimmed agent or forked chat
   "run_sidecars", // 5,100
   "tool_call_targets", // 4,900
   "journal_streams", // 4,700

@@ -20,7 +20,8 @@ export const contextExecutionSchemaSection = {
     "journaled_decision_routes",
     "approval_reviews",
     "session_todos",
-    "row_counts"
+    "row_counts",
+    "trace_trim_due"
   ],
   indexes: [
     "idx_chat_runs_session_status",
@@ -55,7 +56,8 @@ export const contextExecutionSchemaSection = {
     "idx_tool_calls_browser",
     "idx_chat_runs_status",
     "idx_chat_runs_result_at",
-    "idx_chat_runs_started"
+    "idx_chat_runs_started",
+    "idx_trace_trim_due_kind_ended"
   ],
   triggers: [
     "chat_runs_delete_budget",
@@ -68,7 +70,9 @@ export const contextExecutionSchemaSection = {
     "pending_decision_visibility_deferred_immutable_identity",
     "pending_decision_visibility_immutable_agent_edge",
     "row_counts_chat_runs_ai",
-    "row_counts_chat_runs_ad"
+    "row_counts_chat_runs_ad",
+    "trace_trim_due_run_ai",
+    "trace_trim_due_run_au"
   ],
   statements: [
     `CREATE TABLE chat_runs (
@@ -331,6 +335,57 @@ export const contextExecutionSchemaSection = {
       AFTER DELETE ON chat_runs BEGIN
         UPDATE row_counts SET rows = rows - 1 WHERE name = 'chat_runs';
       END`,
-    "INSERT INTO row_counts(name, rows) VALUES ('chat_runs', 0)"
+    "INSERT INTO row_counts(name, rows) VALUES ('chat_runs', 0)",
+    `CREATE TABLE trace_trim_due (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN ('agent', 'fork')),
+      run_id TEXT NOT NULL,
+      ended_at TEXT NOT NULL
+    ) WITHOUT ROWID`,
+    `CREATE INDEX idx_trace_trim_due_kind_ended ON trace_trim_due(kind, ended_at)`,
+    `CREATE TRIGGER trace_trim_due_run_ai
+      AFTER INSERT ON chat_runs BEGIN
+        DELETE FROM trace_trim_due WHERE session_id = new.session_id;
+        INSERT INTO trace_trim_due(session_id, kind, run_id, ended_at)
+          SELECT s.session_id, CASE
+          WHEN s.session_type = 'agent' THEN 'agent'
+          WHEN s.session_type = 'chat' AND s.parent_session_id IS NOT NULL
+            AND s.origin_automation_id IS NOT NULL
+            AND COALESCE(json_type(s.metadata, '$.fork_origin'), json_type(s.metadata, '$.fork_of')) IS NOT NULL
+            THEN 'fork'
+        END, new.run_id, new.ended_at
+          FROM sessions AS s
+          WHERE s.session_id = new.session_id AND new.ended_at IS NOT NULL
+            AND CASE
+          WHEN s.session_type = 'agent' THEN 'agent'
+          WHEN s.session_type = 'chat' AND s.parent_session_id IS NOT NULL
+            AND s.origin_automation_id IS NOT NULL
+            AND COALESCE(json_type(s.metadata, '$.fork_origin'), json_type(s.metadata, '$.fork_of')) IS NOT NULL
+            THEN 'fork'
+        END IS NOT NULL
+            AND COALESCE(json_extract(s.metadata, '$.agent_trace_retained_run_id'), '') <> new.run_id;
+      END`,
+    `CREATE TRIGGER trace_trim_due_run_au
+      AFTER UPDATE OF ended_at ON chat_runs WHEN old.ended_at IS NOT new.ended_at BEGIN
+        DELETE FROM trace_trim_due WHERE session_id = new.session_id;
+        INSERT INTO trace_trim_due(session_id, kind, run_id, ended_at)
+          SELECT s.session_id, CASE
+          WHEN s.session_type = 'agent' THEN 'agent'
+          WHEN s.session_type = 'chat' AND s.parent_session_id IS NOT NULL
+            AND s.origin_automation_id IS NOT NULL
+            AND COALESCE(json_type(s.metadata, '$.fork_origin'), json_type(s.metadata, '$.fork_of')) IS NOT NULL
+            THEN 'fork'
+        END, new.run_id, new.ended_at
+          FROM sessions AS s
+          WHERE s.session_id = new.session_id AND new.ended_at IS NOT NULL
+            AND CASE
+          WHEN s.session_type = 'agent' THEN 'agent'
+          WHEN s.session_type = 'chat' AND s.parent_session_id IS NOT NULL
+            AND s.origin_automation_id IS NOT NULL
+            AND COALESCE(json_type(s.metadata, '$.fork_origin'), json_type(s.metadata, '$.fork_of')) IS NOT NULL
+            THEN 'fork'
+        END IS NOT NULL
+            AND COALESCE(json_extract(s.metadata, '$.agent_trace_retained_run_id'), '') <> new.run_id;
+      END`
   ]
 } as const satisfies OperationalSchemaSection

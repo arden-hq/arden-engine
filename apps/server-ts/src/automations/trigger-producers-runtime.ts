@@ -1,3 +1,4 @@
+import { timerSleep } from "../lib/timer-sleep.js"
 import { Effect, Layer } from "effect"
 
 import type { AutomationEventType } from "@arden-hq/protocol/automations"
@@ -49,7 +50,7 @@ export const AutomationTriggerProducersRuntime: Layer.Layer<
       yield* Effect.forkScoped(
         pollAutomationEventProducer(producer).pipe(
           Effect.catchCause((cause) => Effect.logWarning(producer.failureMessage, cause)),
-          Effect.andThen(Effect.sleep(pollInterval(producer))),
+          Effect.andThen(timerSleep(pollInterval(producer))),
           Effect.forever
         )
       )

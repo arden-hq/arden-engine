@@ -11,12 +11,17 @@ import { startServer, type ServerHandle } from "../../src/index.js"
 // planned. This calls every GET route the API declares, on an empty database:
 // a query's plan does not depend on the rows, so one call is enough for the
 // check to see it. A new route is covered the day it is added.
+//
+// Jobs on a timer (log trim, file cleanup, stranded-run sweep) start minutes
+// after launch. ARDEN_TIMERS_AT_ONCE makes each run within a quarter second,
+// so the check sees their queries too.
 it(
   "every GET route runs once, so the scan check plans its queries",
   { timeout: 120_000 },
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "arden-route-sweep-"))
     let server: ServerHandle | undefined
+    process.env["ARDEN_TIMERS_AT_ONCE"] = "1"
     try {
       server = await startServer({ port: 0, databasePath: join(directory, "arden.db") })
       const created = await server.fetch("/sessions", {
@@ -54,6 +59,7 @@ it(
       }
       expect(new Set(answered).size).toBeGreaterThan(50)
     } finally {
+      delete process.env["ARDEN_TIMERS_AT_ONCE"]
       await server?.stop().catch(() => undefined)
       await rm(directory, { recursive: true, force: true })
     }

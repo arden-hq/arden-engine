@@ -1,3 +1,4 @@
+import { timerSleep } from "../lib/timer-sleep.js"
 import { formatDurationFine } from "@arden-hq/std/time"
 import { Effect, FiberSet, Layer } from "effect"
 
@@ -45,7 +46,7 @@ export const TerminalNoticesRuntime: Layer.Layer<
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
     yield* Effect.forkScoped(
-      Effect.sleep("1 minute").pipe(
+      timerSleep("1 minute").pipe(
         Effect.andThen(
           Effect.suspend(() =>
             Effect.forEach(

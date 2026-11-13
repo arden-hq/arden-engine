@@ -1,3 +1,4 @@
+import { timerSleep } from "../lib/timer-sleep.js"
 import { Effect, Layer } from "effect"
 import { automationRulesLayer } from "../automations/rules.js"
 import { chatRulesLayer } from "../chat/rules.js"
@@ -31,11 +32,11 @@ const persistenceBootLayer: Layer.Layer<never, StorageStartupError, Persistence>
       yield* diagnostics.startupPhase("recovery_ready")
       yield* lifecycle.background(persistence.fillSearchIndex)
       yield* lifecycle.background(
-        Effect.sleep(FIRST_RETENTION_DELAY).pipe(
+        timerSleep(FIRST_RETENTION_DELAY).pipe(
           Effect.andThen(
             persistence.retentionTick.pipe(
               Effect.catchCause((cause) => Effect.logWarning("Storage retention failed", cause)),
-              Effect.andThen(Effect.sleep("1 hour")),
+              Effect.andThen(timerSleep("1 hour")),
               Effect.forever
             )
           )

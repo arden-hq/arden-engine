@@ -1,3 +1,4 @@
+import { timerSleep } from "../../lib/timer-sleep.js"
 import { DateTime, Effect, Layer, Queue } from "effect"
 import type { PowerHost } from "../../config/options.js"
 import { GoogleConnections } from "../../google/service.js"
@@ -90,11 +91,11 @@ export const connectionItemsRuntime = <R>(options: {
 
       const next = Queue.take(wakes).pipe(
         Effect.timeoutOption(FETCH_EVERY),
-        Effect.flatMap((woken) => (woken._tag === "Some" ? Effect.sleep(AFTER_WAKE) : Effect.void))
+        Effect.flatMap((woken) => (woken._tag === "Some" ? timerSleep(AFTER_WAKE) : Effect.void))
       )
 
       yield* Effect.forkScoped(
-        Effect.sleep(FIRST_FETCH_AFTER).pipe(
+        timerSleep(FIRST_FETCH_AFTER).pipe(
           Effect.andThen(cycle),
           Effect.andThen(next.pipe(Effect.andThen(cycle), Effect.forever))
         )

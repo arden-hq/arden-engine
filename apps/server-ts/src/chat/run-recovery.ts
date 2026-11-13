@@ -1,3 +1,4 @@
+import { timerSleep } from "../lib/timer-sleep.js"
 import { Cause, Effect, Scope, Stream, type Semaphore } from "effect"
 import { ChatWriteStore, type ChatWriteResume } from "../persistence/chat/store.js"
 import { WorkStore } from "../persistence/work/store.js"
@@ -110,7 +111,7 @@ export const startRunRecovery = Effect.fn("ChatMessage.runRecovery")(function* (
       })
     )
     .pipe(Effect.andThen(resumeReady))
-  const sweepStranded = Effect.sleep(STRANDED_RUN_SWEEP_INTERVAL).pipe(
+  const sweepStranded = timerSleep(STRANDED_RUN_SWEEP_INTERVAL).pipe(
     Effect.andThen(Effect.suspend(() => (input.available() ? sweep : Effect.void))),
     Effect.catchCause((cause) => Effect.logWarning("Could not sweep stranded Chat runs", cause)),
     Effect.forever

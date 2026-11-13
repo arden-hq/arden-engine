@@ -231,6 +231,7 @@ export const tableTells = {
   chat_upload_cleanup: { silent: files },
   session_sizes: { silent: files },
   row_counts: { silent: files },
+  trace_trim_due: { silent: files },
   session_type_sizes: { silent: files },
   chat_upload_refs: { silent: files },
   chat_upload_unlisted: { silent: files },

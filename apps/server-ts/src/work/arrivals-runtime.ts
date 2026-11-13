@@ -1,3 +1,4 @@
+import { timerSleep } from "../lib/timer-sleep.js"
 import { Cause, Effect, Exit, Layer } from "effect"
 import { arrivalBatches } from "./arrival-batches.js"
 import type { ChatSendInput } from "../chat/message-input.js"
@@ -116,7 +117,7 @@ export const WorkArrivalsRuntime: Layer.Layer<never, never, WorkStore | ChatMess
           Effect.catchCause((cause) =>
             Effect.logWarning("Could not inspect revoked Task attempts", cause)
           ),
-          Effect.andThen(Effect.sleep(pollEverySecond.first)),
+          Effect.andThen(timerSleep(pollEverySecond.first)),
           Effect.forever
         )
       )

@@ -95,21 +95,21 @@ export const compactExpiredAgentSessions = Effect.fn(
         : DateTime.formatIso(DateTime.subtract(now, { days: retention.agentTraceDays }))
     const forkCutoff = DateTime.formatIso(DateTime.subtract(now, { days: UNUSED_FORK_TRACE_DAYS }))
     return yield* sql<ExpiredAgentRow>`
-      -- Cheap filters first, materialized: each agent's latest Run comes from
-      -- the index, and the live-work checks below run only for expired agents
-      -- whose latest Run is not yet retained, never for every agent.
+      -- trace_trim_due lists the agents and forked chats whose latest Run has
+      -- ended and is not trimmed yet; triggers on chat_runs keep it. The rows
+      -- past a cutoff come from its index, so this never reads every chat.
+      -- CROSS JOIN keeps that order. The live-work checks below run only for
+      -- the rows found here.
       WITH expired AS MATERIALIZED (
         SELECT s.session_id, s.public_ref, s.metadata, run.run_id, run.ended_at
-        FROM sessions AS s
-        JOIN chat_runs AS run ON run.run_id = (${sql.literal(latestSessionRunQuery)})
-        WHERE ${sessionId === undefined ? sql`1` : sql`s.session_id = ${sessionId}`} AND (
-            (s.session_type = 'agent' AND run.ended_at <= ${agentCutoff})
-            OR (s.session_type = 'chat' AND s.parent_session_id IS NOT NULL
-              AND s.origin_automation_id IS NOT NULL
-              AND COALESCE(json_type(s.metadata, '$.fork_origin'),
-                json_type(s.metadata, '$.fork_of')) IS NOT NULL
-              AND run.ended_at <= ${forkCutoff})
+        FROM trace_trim_due AS due
+        CROSS JOIN sessions AS s ON s.session_id = due.session_id
+        CROSS JOIN chat_runs AS run ON run.run_id = (${sql.literal(latestSessionRunQuery)})
+        WHERE ${sessionId === undefined ? sql`1` : sql`due.session_id = ${sessionId}`} AND (
+            (due.kind = 'agent' AND due.ended_at <= ${agentCutoff})
+            OR (due.kind = 'fork' AND due.ended_at <= ${forkCutoff})
           )
+          AND run.run_id = due.run_id
           AND COALESCE(
             json_extract(s.metadata, '$.agent_trace_retained_run_id'),
             ''
@@ -205,6 +205,7 @@ export const compactExpiredAgentSessions = Effect.fn(
           WHERE session_id = ${row.session_id}
         `
           yield* replaceActiveContext(sql, row.session_id, projection)
+          yield* sql`DELETE FROM trace_trim_due WHERE session_id = ${row.session_id}`
           yield* sql`
           UPDATE chat_runs
           SET metadata_json = json_object('turn_id', json_extract(metadata_json, '$.turn_id'),
