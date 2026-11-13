@@ -13,7 +13,7 @@ import {
   type PageRecord,
   type Snapshot
 } from "./snapshot.js"
-import { WikiPageTimestampCache } from "./timestamps.js"
+import { WikiPageTimestampCache, type PageTimes } from "./timestamps.js"
 import { decodeOpaque, encodeOpaque } from "../lib/opaque-ref.js"
 
 interface WikiListChangesInput {
@@ -47,6 +47,10 @@ export interface WikiListingMethods {
   readonly list: (options?: WikiPageListOptions) => Effect.Effect<WikiPagePage, WikiError>
   readonly listChanges: (input: WikiListChangesInput) => Effect.Effect<WikiChangesPage, WikiError>
   readonly read: (pageId: string) => Effect.Effect<WikiPage, WikiError>
+  /** When each page at this head was created and last changed. */
+  readonly pageTimes: (
+    head: string | null
+  ) => Effect.Effect<ReadonlyMap<string, PageTimes>, WikiError>
 }
 
 interface WikiListCursor {
@@ -225,5 +229,10 @@ export const makeWikiListingMethods = (
     return detail(record, current.head, times.get(pageId))
   })
 
-  return { head, snapshot, list, listChanges, read }
+  const pageTimes = Effect.fn("Wiki.pageTimes")(function* (at: string | null) {
+    if (at === null) return new Map<string, PageTimes>()
+    return yield* pageTimestamps.forHead(at).pipe(Effect.mapError(mapRevisionError("list")))
+  })
+
+  return { head, snapshot, list, listChanges, read, pageTimes }
 }

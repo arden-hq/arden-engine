@@ -19,7 +19,9 @@ import type {
   TranscriptMessageRecord
 } from "../persistence/transcript/model.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
+import { lastChangedLines } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
+import type { PageTimes } from "../wiki/timestamps.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
 import { compactAnswerBlocks } from "../context/answer-blocks.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
@@ -138,7 +140,18 @@ export class Memory extends Context.Service<
                 Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
               )
             )
+          const now = DateTime.toEpochMillis(yield* DateTime.now)
+          const times = yield* wiki
+            .pageTimes(current.head)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Memory page times unavailable", cause).pipe(
+                  Effect.as(new Map<string, PageTimes>())
+                )
+              )
+            )
           const prepared = prepareMemoryRecall({
+            lastChanged: lastChangedLines(times, now),
             revision: current.head,
             pages: current.pages,
             query: valid.query,

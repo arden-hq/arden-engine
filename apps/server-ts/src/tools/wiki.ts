@@ -10,12 +10,20 @@ import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { normal, pageNamesForPath, reviseWikiPage } from "../wiki/page.js"
 import { monthlySummaryPathOf } from "../wiki/report-retention.js"
+import { PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import { redirectTargetAt, type PageRecord, type Snapshot } from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
+import { loadPageAges } from "./wiki-page-age.js"
 import { readTextPage } from "./read-text.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { MAX_PAGE_SOURCES, memorySource, pageReceipt, pagesReceipt } from "./wiki-records.js"
+import {
+  MAX_PAGE_SOURCES,
+  memorySource,
+  pageReceipt,
+  pagesReceipt,
+  reportProvenanceLines
+} from "./wiki-records.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import {
   CORE_CONDENSE_ADVICE,
@@ -419,7 +427,8 @@ const makeWikiTools = ({
     name: "wiki_read_page",
     description: [
       "Read the current body of one wiki page by exact path, paginated by line.",
-      "Read a page before editing it."
+      "Read a page before editing it.",
+      `It also says when the page last changed. ${PAGE_AGE_RULE}`
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReadParametersSchema),
     metadata: {
@@ -455,6 +464,7 @@ const makeWikiTools = ({
         coreBudget === undefined
           ? chars >= WIKI_PAGE_BUDGET_CHARS
           : coreNeedsCondensing(chars, coreBudget)
+      const lastChanged = (await loadPageAges(wiki, snapshot, ctx.signal)).line(record.page.pageId)
       const isReadme = input.path === "README.md" || input.path.endsWith("/README.md")
       const directory = input.path.slice(0, Math.max(0, input.path.length - "/README.md".length))
       const children = isReadme
@@ -469,20 +479,8 @@ const makeWikiTools = ({
           : [`${input.path} now redirects here, to ${record.resource.path}.`]),
         `page_ref: ${record.page.pageId}`,
         `revision: ${record.resource.versionId}`,
-        ...(typeof record.page.metadata["observation_period"] === "string"
-          ? [`Observation period: ${record.page.metadata["observation_period"]}`]
-          : []),
-        ...(typeof record.page.metadata["producer_automation_id"] === "string"
-          ? [`Producer Automation: ${record.page.metadata["producer_automation_id"]}`]
-          : []),
-        ...(Array.isArray(record.page.metadata["source_refs"])
-          ? [
-              "Original source references:",
-              ...record.page.metadata["source_refs"]
-                .filter((ref): ref is string => typeof ref === "string")
-                .slice(0, 30)
-            ]
-          : []),
+        ...(lastChanged === undefined ? [] : [lastChanged]),
+        ...reportProvenanceLines(record),
         ...(coreBudget === undefined
           ? []
           : [

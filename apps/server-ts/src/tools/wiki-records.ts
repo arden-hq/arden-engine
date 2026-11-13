@@ -130,3 +130,21 @@ export const requireObserved = (ctx: ServerRunContext, record: PageRecord): stri
     retryable: false
   })
 }
+
+/** What a published report says about itself: the period it covers, who made it, its sources. */
+export const reportProvenanceLines = (record: PageRecord): ReadonlyArray<string> => [
+  ...(typeof record.page.metadata["observation_period"] === "string"
+    ? [`Observation period: ${record.page.metadata["observation_period"]}`]
+    : []),
+  ...(typeof record.page.metadata["producer_automation_id"] === "string"
+    ? [`Producer Automation: ${record.page.metadata["producer_automation_id"]}`]
+    : []),
+  ...(Array.isArray(record.page.metadata["source_refs"])
+    ? [
+        "Original source references:",
+        ...record.page.metadata["source_refs"]
+          .filter((ref): ref is string => typeof ref === "string")
+          .slice(0, 30)
+      ]
+    : [])
+]

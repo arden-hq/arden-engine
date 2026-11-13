@@ -26,6 +26,7 @@ import {
   writtenPageData
 } from "./wiki.js"
 import { recordApplied } from "../execution/tool-effect.js"
+import { loadPageAges } from "./wiki-page-age.js"
 import { makeWikiRetireTools } from "./wiki-retire.js"
 import {
   MAX_PAGE_SOURCES,
@@ -235,7 +236,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_search",
     description:
-      "Search Memory pages. Write what you are looking for in a few words; pages are found by their words and by their meaning, best match first, and the query does not have to appear as an exact phrase. Read a result before changing it.",
+      "Search Memory pages. Write what you are looking for in a few words; pages are found by their words and by their meaning, best match first, and the query does not have to appear as an exact phrase. Each result says how long ago the page last changed. Read a result before changing it.",
     parameters: Schema.toStandardSchemaV1(SearchParametersSchema),
     metadata: {
       effect: "none",
@@ -257,6 +258,11 @@ const makeWikiOperationTools = ({
         { signal: ctx.signal }
       )
       const matches = searchPages(activePages(snapshot), input.query, input.limit, semantic)
+      const ages = await loadPageAges(wiki, snapshot, ctx.signal)
+      const changed = (record: PageRecord): string => {
+        const ago = ages.ago(record.page.pageId)
+        return ago === undefined ? "" : ` (changed ${ago})`
+      }
       const source_refs = matches
         .slice(0, MAX_PAGE_SOURCES)
         .map(({ record }) => pageSource(record, "found"))
@@ -273,7 +279,7 @@ const makeWikiOperationTools = ({
             : `Wiki search results\n${matches
                 .map(
                   ({ record, snippet: excerpt }) =>
-                    `- ${record.resource.path} — ${record.page.title}${excerpt === "" ? "" : ` — ${excerpt}`}`
+                    `- ${record.resource.path} — ${record.page.title}${changed(record)}${excerpt === "" ? "" : ` — ${excerpt}`}`
                 )
                 .join("\n")}`,
         preview: `${countOf(matches.length, "Wiki match")}`,

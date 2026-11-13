@@ -97,7 +97,8 @@ export class WikiPageTimestampCache {
     )
   }
 
-  private forHead(head: string): Effect.Effect<CompleteTimestampMap, RevisionError> {
+  /** Times of every page that ever existed at this head. */
+  forHead(head: string): Effect.Effect<ReadonlyMap<string, PageTimes>, RevisionError> {
     return Effect.suspend(() => {
       const cached = this.byHead.get(head)
       if (cached !== undefined) {
