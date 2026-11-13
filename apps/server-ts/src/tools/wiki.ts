@@ -426,8 +426,8 @@ const makeWikiTools = ({
   defineServerTool({
     name: "wiki_read_page",
     description: [
-      "Read the current body of one wiki page by exact path, paginated by line.",
-      "Read a page before editing it.",
+      "Read the current body of one wiki page by exact path, paginated by line. A moved or merged path reads the page that replaced it. This read is what wiki_edit_page, wiki_move_page, wiki_archive_page, wiki_merge_page and wiki_restore_page require first.",
+      "After the body it lists the page_ref, revision, any observation period, producer and original source references, the Core Memory size limit when one applies, and a README's child pages.",
       `It also says when the page last changed. ${PAGE_AGE_RULE}`
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReadParametersSchema),
@@ -541,8 +541,8 @@ const makeWikiTools = ({
   defineServerTool({
     name: "wiki_apply_patch_set",
     description: [
-      "Commit complete replacements for several already-read Wiki pages as one atomic Memory Capture revision.",
-      "Include every page this evidence batch needs to change. The whole set conflicts if any page or the Wiki head changed."
+      "Commit complete replacements for several already-read Wiki pages as one atomic Memory Capture revision. Only the Memory Capture worker can use it.",
+      "Include every page this evidence batch needs to change. The whole set conflicts if any page or the Wiki head changed since it was read."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CapturePatchSetParametersSchema),
     metadata: {
@@ -664,7 +664,7 @@ const makeWikiTools = ({
     name: "wiki_create_page",
     description: [
       "Create a new wiki page at an exact relative POSIX .md path inside an existing wiki directory.",
-      "Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists."
+      "Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists, unless that page already has exactly this title and body; then nothing changes. me.md has a smaller Core Memory limit; a longer body is refused."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
     metadata: {
@@ -745,7 +745,7 @@ const makeWikiTools = ({
       "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read the page first to base the edit on its",
       "current content; the edit fails if the wiki changed since that read.",
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting;`,
-      "create another page only for a distinct subject or useful reading scope, with a contextual link."
+      "create another page only for a distinct subject or useful reading scope, with a contextual link. The root README.md and me.md have smaller Core Memory limits; a longer body is refused."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EditParametersSchema),
     metadata: {

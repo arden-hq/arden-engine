@@ -113,10 +113,10 @@ const RestoreParametersSchema = Schema.Struct({
 })
 
 const LinksParametersSchema = Schema.Struct({
-  path: ActiveWikiPathSchema,
+  path: MergedWikiPathSchema,
   limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_LINKS }))
     .annotate({
-      description: `Maximum outgoing links and backlinks to return, from 1 to ${MAX_LINKS}. Defaults to 100.`
+      description: `Maximum links to return in each list (outgoing and backlinks), from 1 to ${MAX_LINKS}. Defaults to 100.`
     })
     .pipe(Schema.withDecodingDefault(Effect.succeed(100)))
 })
@@ -399,7 +399,7 @@ const makeWikiOperationTools = ({
             : `Wiki history for ${input.path}\n${entries
                 .map(
                   (entry) =>
-                    `- ${entry.timestamp} — ${entry.revision_ref} — ${entry.action} — ${entry.reason}`
+                    `- ${entry.timestamp} — ${entry.revision_ref} — ${entry.action} — ${entry.reason}${entry.restorable ? "" : " (not restorable)"}`
                 )
                 .join("\n")}`,
         preview: `${countOf(entries.length, "Wiki revision")}`,
@@ -477,7 +477,8 @@ const makeWikiOperationTools = ({
   }),
   defineServerTool({
     name: "wiki_links",
-    description: "Read exact outgoing links and backlinks for one active Wiki page.",
+    description:
+      "List one Wiki page's outgoing links, with each target's path or unresolved status, and the pages that link to it. A merged path reads the page that replaced it.",
     parameters: Schema.toStandardSchemaV1(LinksParametersSchema),
     metadata: {
       effect: "none",
@@ -507,8 +508,13 @@ const makeWikiOperationTools = ({
       return {
         result: [
           `Wiki links for ${record.resource.path}`,
-          `Outgoing: ${outgoing.length}/${report.outgoing.length}`,
-          `Backlinks: ${backlinks.length}/${report.backlinks.length}`
+          `Outgoing (${outgoing.length} of ${report.outgoing.length}):`,
+          ...outgoing.map(
+            (link) =>
+              `- ${link.target_path ?? link.target}${link.heading === null ? "" : `#${link.heading}`}${link.status === "unresolved" ? " (unresolved)" : ""}`
+          ),
+          `Backlinks (${backlinks.length} of ${report.backlinks.length}):`,
+          ...backlinks.map((link) => `- ${link.source_path ?? link.source_page_id}`)
         ].join("\n"),
         preview: `${outgoing.length} outgoing, ${countOf(backlinks.length, "backlink")}`,
         data: {
@@ -526,9 +532,10 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_create_directory",
     description: [
-      "Open one managed Wiki directory with a complete README contract.",
+      "Create one managed Wiki directory with a complete README contract.",
       "The parent must already exist for nested paths. If <path>.md owns the name and is safe to move,",
-      "it becomes <path>/README.md with the same page identity and history."
+      "it becomes <path>/README.md with the same page identity and history.",
+      "Repeating the same contract changes nothing. Asks by default."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateDirectoryParametersSchema),
     metadata: {
@@ -591,9 +598,10 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_patch_page",
     description:
-      "Replace one exact text block in an active Wiki page body. The old text must match exactly once. " +
+      "Replace one exact text block in an active Wiki page body. The old text must match exactly once; no prior read is needed. " +
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting; ` +
-      "create another page only for a distinct subject or useful reading scope, with a contextual link.",
+      "create another page only for a distinct subject or useful reading scope, with a contextual link. " +
+      "The root README.md and me.md have smaller Core Memory limits; a patch that leaves either over its limit is refused. Asks by default.",
     parameters: Schema.toStandardSchemaV1(PatchParametersSchema),
     metadata: {
       display: { card: "page_patch" },

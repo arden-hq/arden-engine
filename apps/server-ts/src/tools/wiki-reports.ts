@@ -25,7 +25,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_configure_reports",
     description:
-      "Bind an empty Memory directory to one personal Automation for managed reports. " +
+      "Bind an empty Memory directory to one personal Automation for managed reports. Works only in a chat with the user. " +
       "Run during user-requested setup, after automation_create with enabled=false. Enable with automation_update only after configuration succeeds. Reuse its existing destination or choose sources/<workflow>. " +
       "The parent must exist. Repeating identical setup is safe; existing unrelated pages or producers are never claimed. " +
       "Save instructions to use wiki_publish_report in that Automation's prompt. " +
@@ -121,7 +121,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
     description:
       "Publish a report in this Automation's configured Memory destination: the rolling page each run replaces, or a dated page when the directory keeps a history. " +
       "Adds stable identity, revisions, source metadata, search and change events. Identical retries are unchanged; " +
-      "read an existing report before revising it. Only the admitted producer can publish; filenames do not grant authority. Preauthorized by Read + save reports; other profiles may require approval.",
+      "read an existing report before revising it. Works only in a run of the Automation bound to that directory; filenames do not grant authority.",
     parameters: Schema.toStandardSchemaV1(
       WikiReportContentSchema.mapFields((fields) => ({
         path: fields.path.annotate({
