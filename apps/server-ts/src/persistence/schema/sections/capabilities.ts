@@ -4,7 +4,14 @@ export const capabilitiesSchemaSection = {
   name: "capabilities",
   storageDomain: "configuration",
   tables: ["mcp_servers", "permission_rules", "permission_settings", "capability_offers"],
-  indexes: ["idx_permission_rules_identity", "idx_capability_offers_open"],
+  indexes: [
+    "idx_permission_rules_identity",
+    "idx_capability_offers_open",
+    "idx_permission_rules_from_rule_id",
+    "idx_permission_rules_server_name",
+    "idx_permission_rules_source_question_id",
+    "idx_permission_rules_space_id"
+  ],
   triggers: ["space_archive_drops_rules"],
   statements: [
     `CREATE TABLE mcp_servers (
@@ -86,6 +93,10 @@ export const capabilitiesSchemaSection = {
       PRIMARY KEY (session_id, tool_call_id),
       CHECK((outcome IS NULL) = (outcome_at IS NULL))
     )`,
-    "CREATE INDEX idx_capability_offers_open ON capability_offers(offered_at) WHERE outcome IS NULL"
+    "CREATE INDEX idx_capability_offers_open ON capability_offers(offered_at) WHERE outcome IS NULL",
+    "CREATE INDEX idx_permission_rules_from_rule_id ON permission_rules(from_rule_id)",
+    "CREATE INDEX idx_permission_rules_server_name ON permission_rules(server_name)",
+    "CREATE INDEX idx_permission_rules_source_question_id ON permission_rules(source_question_id)",
+    "CREATE INDEX idx_permission_rules_space_id ON permission_rules(space_id)"
   ]
 } as const satisfies OperationalSchemaSection

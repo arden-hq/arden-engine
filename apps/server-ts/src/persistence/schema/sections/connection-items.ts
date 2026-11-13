@@ -12,7 +12,8 @@ export const connectionItemsSchemaSection = {
   indexes: [
     "idx_connection_items_thread",
     "idx_connection_items_owner",
-    "idx_connection_item_threads_thread"
+    "idx_connection_item_threads_thread",
+    "idx_connection_threads_owner_space_id"
   ],
   triggers: [],
   statements: [
@@ -66,6 +67,7 @@ export const connectionItemsSchemaSection = {
       thread_key TEXT NOT NULL CHECK(length(thread_key) > 0)
     )`,
     `CREATE INDEX idx_connection_item_threads_thread
-      ON connection_item_threads(source, account, thread_key)`
+      ON connection_item_threads(source, account, thread_key)`,
+    "CREATE INDEX idx_connection_threads_owner_space_id ON connection_threads(owner_space_id)"
   ]
 } as const satisfies OperationalSchemaSection

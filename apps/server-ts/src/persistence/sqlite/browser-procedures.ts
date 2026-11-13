@@ -23,7 +23,8 @@ import {
   eligibleBrowserProcedureStatusList,
   restartCutRunSql,
   resultToolStatusList,
-  unresolvedToolStatusList
+  statusSqlList,
+  UNRESOLVED_TOOL_STATUSES
 } from "./status-sets.js"
 
 const failure = (cause: unknown) =>
@@ -94,6 +95,26 @@ const decode = Effect.fn("BrowserProcedures.decode")(function* (
     evidence: yield* Schema.decodeUnknownEffect(evidenceJson)(row.evidence_json)
   }
 })
+
+/**
+ * Finished runs that used the browser and have no learning job yet. It starts
+ * from idx_tool_calls_browser, the short list of browser tool calls, and
+ * reaches each run by its id. Before, it walked every completed run since the
+ * feature was turned on, at startup, after every run and every 30 seconds.
+ */
+export const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_jobs(id, run_id, status, created_at, updated_at)
+  SELECT r.run_id, r.run_id, 'pending', ?, ? FROM chat_runs r
+  WHERE r.run_id IN (SELECT t.run_id FROM tool_calls t WHERE t.tool_name IN ('browser_open', 'browser_snapshot', 'browser_act'))
+    AND r.status = 'completed' AND r.ended_at >= (SELECT since FROM browser_procedure_settings WHERE singleton = 1)
+    AND NOT EXISTS (SELECT 1 FROM tool_calls t WHERE t.run_id = r.run_id AND t.status IN ${statusSqlList(UNRESOLVED_TOOL_STATUSES)})
+    AND NOT EXISTS (SELECT 1 FROM code_mode_scripts s WHERE s.origin_run_id = r.run_id AND s.status = 'running')
+    AND NOT EXISTS (SELECT 1 FROM browser_procedure_jobs j WHERE j.run_id = r.run_id)
+    AND (NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded')
+      OR EXISTS (SELECT 1 FROM tool_calls extra WHERE extra.run_id=r.run_id
+        AND extra.tool_name IN ('browser_open','browser_snapshot','browser_act','browser_wait')
+        AND (extra.tool_name='browser_act' OR extra.started_at>(SELECT MIN(used.created_at) FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded'))
+        AND NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded' AND substr(extra.tool_call_id,1,length(used.tool_call_id)+1)=used.tool_call_id || ':')))
+  ORDER BY r.ended_at DESC LIMIT 20`
 
 export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "writer">) => {
   const sql = writer.sql
@@ -172,19 +193,7 @@ export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "wri
   const enqueue = Effect.fn("BrowserProcedures.enqueue")(function* () {
     if (!(yield* enabled)) return
     const at = yield* now
-    yield* writer.run(sql`INSERT OR IGNORE INTO browser_procedure_jobs(id, run_id, status, created_at, updated_at)
-      SELECT r.run_id, r.run_id, 'pending', ${at}, ${at} FROM chat_runs r
-      WHERE r.status = 'completed' AND r.ended_at >= (SELECT since FROM browser_procedure_settings WHERE singleton = 1)
-        AND EXISTS (SELECT 1 FROM tool_calls t WHERE t.run_id = r.run_id AND t.tool_name IN ('browser_open','browser_snapshot','browser_act'))
-        AND NOT EXISTS (SELECT 1 FROM tool_calls t WHERE t.run_id = r.run_id AND t.status IN ${unresolvedToolStatusList})
-        AND NOT EXISTS (SELECT 1 FROM code_mode_scripts s WHERE s.origin_run_id = r.run_id AND s.status = 'running')
-        AND NOT EXISTS (SELECT 1 FROM browser_procedure_jobs j WHERE j.run_id = r.run_id)
-        AND (NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded')
-          OR EXISTS (SELECT 1 FROM tool_calls extra WHERE extra.run_id=r.run_id
-            AND extra.tool_name IN ('browser_open','browser_snapshot','browser_act','browser_wait')
-            AND (extra.tool_name='browser_act' OR extra.started_at>(SELECT MIN(used.created_at) FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded'))
-            AND NOT EXISTS (SELECT 1 FROM browser_procedure_invocations used WHERE used.run_id=r.run_id AND used.status='succeeded' AND substr(extra.tool_call_id,1,length(used.tool_call_id)+1)=used.tool_call_id || ':')))
-      ORDER BY r.ended_at DESC LIMIT 20`)
+    yield* writer.run(sql.unsafe(BROWSER_PROCEDURE_ENQUEUE_SQL, [at, at]))
   })
   const evidence = Effect.fn("BrowserProcedures.evidence")(function* (
     runId: string

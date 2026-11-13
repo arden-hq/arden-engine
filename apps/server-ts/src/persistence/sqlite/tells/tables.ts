@@ -157,6 +157,7 @@ export const tableTells = {
   automation_instruction_candidates: { silent: history },
   automation_runs: { silent: automationRuntime },
   automation_deliveries: { silent: automationRuntime },
+  automation_delivery_runs: { silent: automationRuntime },
   delivery_incidents: { silent: automationRuntime },
   automation_event_dedupe: { silent: automationRuntime },
   automation_event_queue: { silent: automationRuntime },

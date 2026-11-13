@@ -10,7 +10,11 @@ export const contextJournalSchemaSection = {
     "journal_retention_cursors",
     "journal_retention_held"
   ],
-  indexes: [...journalSqliteSchema.indexes, "idx_journal_question_changes"],
+  indexes: [
+    ...journalSqliteSchema.indexes,
+    "idx_journal_question_changes",
+    "idx_journal_retention_held_stream_id"
+  ],
   triggers: [],
   statements: [
     ...journalSqliteSchema.statements,
@@ -36,6 +40,7 @@ export const contextJournalSchemaSection = {
       stream_id TEXT NOT NULL REFERENCES journal_streams(stream_id) ON DELETE CASCADE,
       from_sequence INTEGER NOT NULL CHECK(from_sequence >= 1),
       through_sequence INTEGER NOT NULL CHECK(through_sequence >= from_sequence)
-    ) WITHOUT ROWID`
+    ) WITHOUT ROWID`,
+    "CREATE INDEX idx_journal_retention_held_stream_id ON journal_retention_held(stream_id)"
   ]
 } as const satisfies OperationalSchemaSection

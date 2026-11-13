@@ -45,7 +45,13 @@ export const contextExecutionSchemaSection = {
     "idx_pending_decision_visibility_deferred_fk",
     "idx_pending_decision_visibility_source_session",
     "idx_pending_decision_visibility_unresolved_run_fk",
-    "idx_pending_decision_visibility_unresolved_deferred_fk"
+    "idx_pending_decision_visibility_unresolved_deferred_fk",
+    "idx_execution_budgets_task_item_id",
+    "idx_journaled_decision_routes_viewer_session_id",
+    "idx_shown_asks_viewer_session_id",
+    "idx_chat_runs_origin",
+    "idx_chat_runs_automation",
+    "idx_tool_calls_browser"
   ],
   triggers: [
     "chat_runs_delete_budget",
@@ -297,6 +303,12 @@ export const contextExecutionSchemaSection = {
       explanation TEXT,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (session_id, edited)
-    )`
+    )`,
+    "CREATE INDEX idx_execution_budgets_task_item_id ON execution_budgets(task_item_id)",
+    "CREATE INDEX idx_journaled_decision_routes_viewer_session_id ON journaled_decision_routes(viewer_session_id)",
+    "CREATE INDEX idx_shown_asks_viewer_session_id ON shown_asks(viewer_session_id)",
+    "CREATE INDEX idx_chat_runs_origin ON chat_runs(json_extract(metadata_json, '$.run_context.origin'))",
+    `CREATE INDEX idx_chat_runs_automation ON chat_runs(COALESCE(json_extract(metadata_json, '$.run_policy.automation_id'), json_extract(metadata_json, '$.automation.task_id')))`,
+    `CREATE INDEX idx_tool_calls_browser ON tool_calls(run_id) WHERE tool_name IN ('browser_open', 'browser_snapshot', 'browser_act')`
   ]
 } as const satisfies OperationalSchemaSection

@@ -15,7 +15,8 @@ export const automationSchemaSection = {
     "automation_event_queue",
     "automation_count_state",
     "automation_idle_state",
-    "automation_trigger_cursor"
+    "automation_trigger_cursor",
+    "automation_delivery_runs"
   ],
   indexes: [
     "idx_scheduled_tasks_next_run",
@@ -36,14 +37,21 @@ export const automationSchemaSection = {
     "idx_delivery_incidents_created",
     "idx_automation_event_dedupe_seen_at",
     "idx_automation_event_queue_task_claimed_id",
-    "idx_automation_count_state_updated_at"
+    "idx_automation_count_state_updated_at",
+    "idx_automation_runs_task_ended",
+    "idx_automation_deliveries_session",
+    "idx_automation_deliveries_paused",
+    "idx_automation_deliveries_space_paused",
+    "idx_automation_delivery_runs_delivery"
   ],
   triggers: [
     "automation_instruction_revisions_immutable_update",
     "automation_instruction_revisions_immutable_delete",
     "automation_runs_immutable_context",
     "chat_runs_immutable_context",
-    "worker_attempt_state"
+    "worker_attempt_state",
+    "automation_delivery_runs_ai",
+    "automation_delivery_runs_au"
   ],
   statements: [
     `CREATE TABLE scheduled_tasks (
@@ -292,6 +300,30 @@ export const automationSchemaSection = {
     `CREATE TABLE automation_trigger_cursor (
       stream_id TEXT PRIMARY KEY,
       after_sequence INTEGER NOT NULL
-    )`
+    )`,
+    "CREATE INDEX idx_automation_runs_task_ended ON automation_runs(task_id, ended_at DESC) WHERE ended_at IS NOT NULL",
+    "CREATE INDEX idx_automation_deliveries_session ON automation_deliveries(json_extract(payload, '$.sessionId')) WHERE json_extract(payload, '$.sessionId') IS NOT NULL",
+    `CREATE TABLE automation_delivery_runs (
+      run_id TEXT NOT NULL CHECK(length(run_id) > 0),
+      delivery_id TEXT NOT NULL REFERENCES automation_deliveries(delivery_id) ON DELETE CASCADE,
+      PRIMARY KEY (run_id, delivery_id)
+    ) WITHOUT ROWID`,
+    `CREATE INDEX idx_automation_deliveries_paused ON automation_deliveries(task_id) WHERE json_extract(payload, '$.kind') = 'automation_paused'`,
+    `CREATE INDEX idx_automation_deliveries_space_paused ON automation_deliveries(task_id) WHERE json_extract(payload, '$.kind') = 'automation_space_paused'`,
+    `CREATE INDEX idx_automation_delivery_runs_delivery ON automation_delivery_runs(delivery_id)`,
+    `CREATE TRIGGER automation_delivery_runs_ai
+      AFTER INSERT ON automation_deliveries
+      WHEN json_type(new.payload, '$.runIds') = 'array' BEGIN
+        INSERT OR IGNORE INTO automation_delivery_runs(run_id, delivery_id)
+          SELECT member.value, new.delivery_id FROM json_each(new.payload, '$.runIds') AS member
+          WHERE member.type = 'text' AND length(member.value) > 0;
+      END`,
+    `CREATE TRIGGER automation_delivery_runs_au
+      AFTER UPDATE OF payload ON automation_deliveries BEGIN
+        DELETE FROM automation_delivery_runs WHERE delivery_id = new.delivery_id;
+        INSERT OR IGNORE INTO automation_delivery_runs(run_id, delivery_id)
+          SELECT member.value, new.delivery_id FROM json_each(new.payload, '$.runIds') AS member
+          WHERE member.type = 'text' AND length(member.value) > 0;
+      END`
   ]
 } as const satisfies OperationalSchemaSection

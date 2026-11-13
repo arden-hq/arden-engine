@@ -755,7 +755,9 @@ export const interruptStrandedChatRuns = Effect.fn("SqlitePersistence.interruptS
                ${runCancellationRequested(sql, sql`run.metadata_json`)} AS cancellation_requested,
                run.assistant_message_id
         FROM chat_runs AS run
-        WHERE (
+        -- The first line repeats idx_chat_runs_active's own condition, so SQLite
+        -- reads that short list of unfinished runs instead of every run.
+        WHERE run.status IN ${activeRunStatusList} AND (
             -- Turns the lost process was running; their background work is the script's.
             run.status IN ${modelTurnRunStatusList}
             OR (run.status = 'pending' AND ${executionBudgetExpired(sql, sql`run.metadata_json`)})

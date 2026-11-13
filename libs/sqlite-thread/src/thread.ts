@@ -1,5 +1,6 @@
+import { appendFileSync } from "node:fs"
 import { DatabaseSync, type StatementSync } from "node:sqlite"
-import { parentPort, workerData } from "node:worker_threads"
+import { parentPort, threadId, workerData } from "node:worker_threads"
 
 // This file imports only node: modules so Node can load it straight from
 // source under tests (type stripping) as well as from the build.
@@ -95,7 +96,49 @@ const prepare = (sql: string): StatementSync => {
   return statement
 }
 
+// Scan log, for tests. With ARDEN_SQL_SCAN_LOG set to a directory, the thread
+// asks SQLite for the plan of each new statement and writes down every step
+// that reads a table or an index from start to end. A check after the test
+// run fails on a scan of a table that grows with use: such a query gets
+// slower with every chat, and SQLite picks it silently (a join started from
+// the wrong side, a partial index the WHERE does not repeat). Unset, as in
+// the app, this costs one comparison per statement.
+const scanLog = process.env.ARDEN_SQL_SCAN_LOG
+const planned = new Set<string>()
+const SCAN_STEP = /^SCAN (\S+)(?: USING (?:COVERING )?INDEX (\S+))?/
+const noteScans = (sql: string): void => {
+  if (scanLog === undefined || scanLog.length === 0 || planned.has(sql)) return
+  planned.add(sql)
+  try {
+    const steps = database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all()
+    for (const step of steps) {
+      const detail = String(step.detail)
+      const scan = SCAN_STEP.exec(detail)
+      if (scan === null) continue
+      const index = scan[2]
+      const owner =
+        index === undefined
+          ? undefined
+          : database.prepare("SELECT tbl_name, sql FROM sqlite_schema WHERE name = ?").get(index)
+      appendFileSync(
+        `${scanLog}/${process.pid}-${threadId}.jsonl`,
+        `${JSON.stringify({
+          name: scan[1],
+          table: owner?.tbl_name,
+          index,
+          partial: typeof owner?.sql === "string" && /\sWHERE\s/i.test(owner.sql),
+          detail,
+          sql
+        })}\n`
+      )
+    }
+  } catch {
+    // Not a statement SQLite can plan (a PRAGMA, several statements, DDL).
+  }
+}
+
 const run = (request: SqliteThreadRequest): unknown => {
+  noteScans(request.sql)
   const statement = request.prepared ? prepare(request.sql) : database.prepare(request.sql)
   const params = request.params as Array<never>
   statement.setReadBigInts(request.safeIntegers)

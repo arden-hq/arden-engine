@@ -10,7 +10,12 @@ export const browserProceduresSchemaSection = {
     "browser_procedure_jobs",
     "browser_procedure_invocations"
   ],
-  indexes: ["idx_browser_procedures_scope", "idx_browser_procedure_jobs_status"],
+  indexes: [
+    "idx_browser_procedures_scope",
+    "idx_browser_procedure_jobs_status",
+    "idx_browser_procedure_invocations_procedure_id_revision",
+    "idx_browser_procedure_jobs_run_id"
+  ],
   triggers: ["browser_procedure_revision_immutable"],
   statements: [
     `CREATE TABLE browser_procedure_settings (
@@ -73,6 +78,8 @@ export const browserProceduresSchemaSection = {
       UNIQUE(run_id,parent_tool_call_id),
       FOREIGN KEY(procedure_id,revision) REFERENCES browser_procedure_revisions(procedure_id,revision)
     )`,
-    "INSERT INTO browser_procedure_settings VALUES (1, 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    "INSERT INTO browser_procedure_settings VALUES (1, 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+    "CREATE INDEX idx_browser_procedure_invocations_procedure_id_revision ON browser_procedure_invocations(procedure_id, revision)",
+    "CREATE INDEX idx_browser_procedure_jobs_run_id ON browser_procedure_jobs(run_id)"
   ]
 } as const satisfies OperationalSchemaSection

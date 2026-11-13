@@ -29,7 +29,12 @@ export const workSchemaSection = {
     "idx_space_task_events_space_created",
     "idx_space_task_events_result",
     "idx_space_task_comments_space_created",
-    "idx_space_task_attachments_item"
+    "idx_space_task_attachments_item",
+    "idx_space_task_attachments_space_id",
+    "idx_space_task_comments_item_id",
+    "idx_space_task_events_item_id",
+    "idx_space_task_holds_question_id",
+    "idx_space_tasks_home_session_id"
   ],
   triggers: ["task_revoke_attempts", "space_revoke_task_attempts", "task_clear_hold"],
   statements: [
@@ -207,6 +212,11 @@ export const workSchemaSection = {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX idx_space_task_attachments_item
-      ON space_task_attachments(item_id, created_at)`
+      ON space_task_attachments(item_id, created_at)`,
+    "CREATE INDEX idx_space_task_attachments_space_id ON space_task_attachments(space_id)",
+    "CREATE INDEX idx_space_task_comments_item_id ON space_task_comments(item_id)",
+    "CREATE INDEX idx_space_task_events_item_id ON space_task_events(item_id)",
+    "CREATE INDEX idx_space_task_holds_question_id ON space_task_holds(question_id)",
+    "CREATE INDEX idx_space_tasks_home_session_id ON space_tasks(home_session_id)"
   ]
 } as const satisfies OperationalSchemaSection

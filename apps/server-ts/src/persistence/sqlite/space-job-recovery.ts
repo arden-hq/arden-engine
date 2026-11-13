@@ -106,11 +106,14 @@ export const makeSpaceJobRecovery = (options: {
 export const automationRecoveryAuthority = (sql: SqlClient.SqlClient): Statement.Fragment => sql`
           SELECT COALESCE(json_extract(metadata_json, '$.run_policy.automation_id'),
             json_extract(metadata_json, '$.automation.task_id')) AS automation_id
-          FROM chat_runs WHERE status IN ${activeRunStatusList}
+          -- Named, because idx_chat_runs_automation also holds this value and
+          -- SQLite would read all of it instead of the short list of active runs.
+          FROM chat_runs INDEXED BY idx_chat_runs_active WHERE status IN ${activeRunStatusList}
           UNION
           SELECT COALESCE(json_extract(run.metadata_json, '$.run_policy.automation_id'),
             json_extract(run.metadata_json, '$.automation.task_id')) AS automation_id
-          FROM run_questions AS question JOIN chat_runs AS run ON run.run_id = question.run_id
+          -- CROSS JOIN keeps this order: the few open questions first, each run by its id.
+          FROM run_questions AS question CROSS JOIN chat_runs AS run ON run.run_id = question.run_id
           WHERE question.resolution IS NULL AND question.closed_at IS NULL
           UNION
           SELECT task_id AS automation_id FROM automation_runs WHERE status = 'running'

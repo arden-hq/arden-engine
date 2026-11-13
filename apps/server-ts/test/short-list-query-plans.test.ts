@@ -4,6 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect, Layer } from "effect"
 import { expect, it } from "vitest"
+import { BROWSER_PROCEDURE_ENQUEUE_SQL } from "../src/persistence/sqlite/browser-procedures.js"
+import {
+  EVIDENCE_TOOL_CALL_SQL,
+  EVIDENCE_URL_SQL
+} from "../src/persistence/sqlite/criterion-evidence.js"
 import { UPLOAD_NAMED_SQL } from "../src/persistence/sqlite/managed-output-lifecycle.js"
 import { ENDED_RUNS_WITH_RUNNING_CALLS_SQL } from "../src/persistence/sqlite/recovery.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
@@ -46,6 +51,23 @@ it("startup and cleanup queries read their short lists, not whole tables", async
         .map((row) => String(row.detail))
       expect(uploadPlan.some((step) => step.includes("session_messages"))).toBe(false)
       expect(uploadPlan.some((step) => /SEARCH chat_upload_refs/.test(step))).toBe(true)
+      // No test runs these three through the engine's own connection, so the
+      // scan check after the test run cannot see them. They are planned here.
+      const scansWholeTable = (sql: string, parameters: number): ReadonlyArray<string> =>
+        database
+          .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+          .all(...Array.from({ length: parameters }, () => "x"))
+          .map((row) => String(row.detail))
+          .filter((step) => /^SCAN (call|run|r|tool_calls|chat_runs)\b/.test(step))
+      expect(scansWholeTable(EVIDENCE_TOOL_CALL_SQL, 4)).toEqual([])
+      expect(scansWholeTable(EVIDENCE_URL_SQL, 5)).toEqual([])
+      expect(scansWholeTable(BROWSER_PROCEDURE_ENQUEUE_SQL, 2)).toEqual([])
+      expect(
+        database
+          .prepare(`EXPLAIN QUERY PLAN ${BROWSER_PROCEDURE_ENQUEUE_SQL}`)
+          .all("x", "x")
+          .some((row) => String(row.detail).includes("idx_tool_calls_browser"))
+      ).toBe(true)
     } finally {
       database.close()
     }

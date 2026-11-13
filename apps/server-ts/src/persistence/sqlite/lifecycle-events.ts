@@ -275,7 +275,10 @@ const loadTaskWork = Effect.fn("SessionLifecycleEvents.loadTaskWork")(function* 
   const targetPredicate =
     target.kind === "session"
       ? sql`run.session_id = ${target.id}`
-      : sql`task.item_id = ${target.id}`
+      : // Named on the run as well as on the Task: only then can SQLite reach the
+        // run through idx_chat_runs_task_item instead of reading every run.
+        sql`task.item_id = ${target.id}
+          AND json_extract(run.metadata_json, '$.run_context.task.item_id') = ${target.id}`
   const rows = yield* sql<TaskWorkRow>`
     SELECT task.space_id, task.item_id, task.text AS task_name,
       task.status AS task_status,

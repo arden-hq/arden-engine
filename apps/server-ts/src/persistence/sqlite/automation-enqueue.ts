@@ -62,9 +62,12 @@ export const cooldownEnd = Effect.fn("AutomationQueue.cooldownEnd")(function* (
 ) {
   const rows = yield* sql<{ readonly minutes: number | null; readonly ended: string | null }>`
     SELECT task.cooldown_minutes AS minutes,
-      (SELECT MAX(run.ended_at) FROM automation_runs AS run
+      -- Newest first through idx_automation_runs_task_ended, stopping at the
+      -- first run that counts, instead of reading every run of the Automation.
+      (SELECT run.ended_at FROM automation_runs AS run
         WHERE run.task_id = task.task_id AND run.ended_at IS NOT NULL
-          AND ${countsAsRun(sql, sql`run`)}) AS ended
+          AND ${countsAsRun(sql, sql`run`)}
+        ORDER BY run.ended_at DESC LIMIT 1) AS ended
     FROM scheduled_tasks AS task WHERE task.task_id = ${automationId}`
   const row = rows[0]
   if (row === undefined || row.minutes === null || row.minutes <= 0 || row.ended === null)

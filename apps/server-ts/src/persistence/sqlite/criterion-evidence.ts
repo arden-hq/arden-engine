@@ -6,6 +6,34 @@ import type { EvidenceInput, RecordedEvidence } from "../work/contract.js"
 import type { WorkStoreError } from "../work/store.js"
 import { workError } from "./work-records.js"
 
+// The runs of one Task: the ones started for it, found through
+// idx_chat_runs_task_item, and the ones in its own chat. Evidence queries start
+// here and reach tool calls by run id. Asked the other way round, "calls whose
+// run belongs to this Task", SQLite read every tool call ever made.
+const TASK_RUNS_SQL = `SELECT run.run_id FROM chat_runs AS run
+      WHERE json_extract(run.metadata_json, '$.run_context.task.item_id') = ?
+    UNION
+    SELECT run.run_id FROM chat_runs AS run
+      WHERE run.session_id = (SELECT home_session_id FROM space_tasks
+        WHERE item_id = ? AND runs_in = 'chat')`
+
+export const EVIDENCE_TOOL_CALL_SQL = `SELECT call.run_id, call.tool_name, call.status, call.effect,
+    json_extract(call.result_json, '$.is_error') AS is_error,
+    json_extract(call.result_json, '$.data.exit_code') AS exit_code
+  FROM tool_calls AS call
+  WHERE call.run_id IN (${TASK_RUNS_SQL}) AND call.tool_call_id = ? AND call.started_at > ?
+  ORDER BY call.started_at DESC LIMIT 1`
+
+export const EVIDENCE_URL_SQL = `SELECT call.tool_call_id
+  FROM tool_calls AS call
+  WHERE call.run_id IN (${TASK_RUNS_SQL})
+    AND call.tool_name = 'web_fetch' AND call.status = 'completed'
+    AND COALESCE(json_extract(call.result_json, '$.is_error'), 0) = 0
+    AND (json_extract(call.result_json, '$.data.requested_url') = ?
+      OR json_extract(call.result_json, '$.data.final_url') = ?)
+    AND call.started_at > ?
+  ORDER BY call.started_at DESC LIMIT 1`
+
 export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly itemId: string
@@ -16,26 +44,18 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
   const tooOld = `It predates the criterion (saved ${after}); cite work done since.`
   const read = <A>(effect: Effect.Effect<A, unknown>) =>
     effect.pipe(Effect.mapError((cause) => workError("storage", "Could not read evidence", cause)))
-  const ofThisTask = sql`EXISTS (SELECT 1 FROM chat_runs AS run WHERE run.run_id = call.run_id
-    AND (json_extract(run.metadata_json, '$.run_context.task.item_id') = ${itemId}
-      OR run.session_id = (SELECT home_session_id FROM space_tasks
-        WHERE item_id = ${itemId} AND runs_in = 'chat')))`
   switch (evidence.kind) {
     case "tool_call": {
-      const rows = yield* read(sql<{
-        readonly run_id: string
-        readonly tool_name: string
-        readonly status: string
-        readonly effect: string | null
-        readonly is_error: number | null
-        readonly exit_code: number | null
-      }>`SELECT call.run_id, call.tool_name, call.status, call.effect,
-          json_extract(call.result_json, '$.is_error') AS is_error,
-          json_extract(call.result_json, '$.data.exit_code') AS exit_code
-        FROM tool_calls AS call
-        WHERE call.tool_call_id = ${evidence.tool_call_id} AND ${ofThisTask}
-          AND call.started_at > ${after}
-        ORDER BY call.started_at DESC LIMIT 1`)
+      const rows = yield* read(
+        sql.unsafe<{
+          readonly run_id: string
+          readonly tool_name: string
+          readonly status: string
+          readonly effect: string | null
+          readonly is_error: number | null
+          readonly exit_code: number | null
+        }>(EVIDENCE_TOOL_CALL_SQL, [itemId, itemId, evidence.tool_call_id, after])
+      )
       const call = rows[0]
       if (call === undefined)
         return yield* refuse(
@@ -99,14 +119,15 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
     case "url": {
       const url = canonicalUrl(evidence.url)
       if (url === undefined) return yield* refuse(`${JSON.stringify(evidence.url)} is not a URL.`)
-      const rows = yield* read(sql<{ readonly tool_call_id: string }>`SELECT call.tool_call_id
-        FROM tool_calls AS call
-        WHERE call.tool_name = 'web_fetch' AND call.status = 'completed'
-          AND COALESCE(json_extract(call.result_json, '$.is_error'), 0) = 0
-          AND (json_extract(call.result_json, '$.data.requested_url') = ${url}
-            OR json_extract(call.result_json, '$.data.final_url') = ${url})
-          AND ${ofThisTask} AND call.started_at > ${after}
-        ORDER BY call.started_at DESC LIMIT 1`)
+      const rows = yield* read(
+        sql.unsafe<{ readonly tool_call_id: string }>(EVIDENCE_URL_SQL, [
+          itemId,
+          itemId,
+          url,
+          url,
+          after
+        ])
+      )
       const fetched = rows[0]
       if (fetched === undefined)
         return yield* refuse(

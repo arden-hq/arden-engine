@@ -4,7 +4,7 @@ export const contextModelSchemaSection = {
   name: "context.model",
   storageDomain: "model_context",
   tables: ["run_sidecars", "chat_compactions"],
-  indexes: ["idx_chat_compactions_session_boundary"],
+  indexes: ["idx_chat_compactions_session_boundary", "idx_run_sidecars_session"],
   triggers: [],
   statements: [
     `CREATE TABLE run_sidecars (
@@ -25,6 +25,7 @@ export const contextModelSchemaSection = {
       created_at TEXT NOT NULL,
       PRIMARY KEY (session_id, compaction_id)
     )`,
-    "CREATE INDEX idx_chat_compactions_session_boundary ON chat_compactions(session_id, boundary_seq)"
+    "CREATE INDEX idx_chat_compactions_session_boundary ON chat_compactions(session_id, boundary_seq)",
+    "CREATE INDEX idx_run_sidecars_session ON run_sidecars(session_id)"
   ]
 } as const satisfies OperationalSchemaSection

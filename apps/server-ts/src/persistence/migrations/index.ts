@@ -35,6 +35,7 @@ import { dropRunRecoveryIndex } from "./0140_drop_run_recovery_index.js"
 import { spaceNames } from "./0141_space_names.js"
 import { journalRetentionCursors } from "./0142_journal_retention_cursors.js"
 import { chatUploadRefs } from "./0143_chat_upload_refs.js"
+import { lookupIndexes } from "./0144_lookup_indexes.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -312,7 +313,8 @@ export const migrations: ReadonlyArray<Migration> = [
   dropRunRecoveryIndex,
   spaceNames,
   journalRetentionCursors,
-  chatUploadRefs
+  chatUploadRefs,
+  lookupIndexes
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

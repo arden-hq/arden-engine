@@ -4,7 +4,13 @@ export const taskAuthoritySchemaSection = {
   name: "task-authority",
   storageDomain: "work",
   tables: ["focus_choices", "permission_offers"],
-  indexes: ["idx_focus_choices_space_status", "idx_permission_offers_session_tool"],
+  indexes: [
+    "idx_focus_choices_space_status",
+    "idx_permission_offers_session_tool",
+    "idx_focus_choices_result_session_id",
+    "idx_focus_choices_source_session_id",
+    "idx_focus_choices_target_session_id"
+  ],
   triggers: [],
   statements: [
     `CREATE TABLE focus_choices (
@@ -50,6 +56,9 @@ export const taskAuthoritySchemaSection = {
       CHECK((decision IS NULL) = (settled_at IS NULL))
     )`,
     `CREATE INDEX idx_permission_offers_session_tool
-      ON permission_offers(session_id, tool_name)`
+      ON permission_offers(session_id, tool_name)`,
+    "CREATE INDEX idx_focus_choices_result_session_id ON focus_choices(result_session_id)",
+    "CREATE INDEX idx_focus_choices_source_session_id ON focus_choices(source_session_id)",
+    "CREATE INDEX idx_focus_choices_target_session_id ON focus_choices(target_session_id)"
   ]
 } as const satisfies OperationalSchemaSection

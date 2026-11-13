@@ -38,9 +38,8 @@ export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")
       yield* sql`DELETE FROM chat_runs WHERE session_id = ${sessionId}
         AND NOT EXISTS (SELECT 1 FROM run_questions WHERE run_questions.run_id = chat_runs.run_id)
         AND NOT EXISTS (SELECT 1 FROM automation_runs WHERE automation_runs.chat_run_id = chat_runs.run_id)
-        AND run_id NOT IN (SELECT parent_run_id FROM sessions WHERE parent_run_id IS NOT NULL)
-        AND run_id NOT IN (SELECT member.value FROM automation_deliveries AS delivery, json_each(delivery.payload, '$.runIds') AS member
-          WHERE member.value IS NOT NULL)`
+        AND NOT EXISTS (SELECT 1 FROM sessions AS spawned WHERE spawned.parent_run_id = chat_runs.run_id)
+        AND NOT EXISTS (SELECT 1 FROM automation_delivery_runs AS named WHERE named.run_id = chat_runs.run_id)`
     } else {
       yield* sql.unsafe(`DELETE FROM "${table}" WHERE session_id = ?`, [sessionId])
     }

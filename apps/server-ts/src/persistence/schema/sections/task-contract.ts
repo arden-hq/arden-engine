@@ -4,7 +4,12 @@ export const taskContractSchemaSection = {
   name: "task-contract",
   storageDomain: "work",
   tables: ["task_contract_lines", "task_contract_proposals"],
-  indexes: ["idx_task_contract_lines_item", "idx_task_contract_proposals_open"],
+  indexes: [
+    "idx_task_contract_lines_item",
+    "idx_task_contract_proposals_open",
+    "idx_task_contract_lines_item_id",
+    "idx_task_contract_proposals_item_id"
+  ],
   triggers: [],
   statements: [
     `CREATE TABLE task_contract_lines (
@@ -31,6 +36,8 @@ export const taskContractSchemaSection = {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX idx_task_contract_proposals_open
-      ON task_contract_proposals(item_id) WHERE decision IS NULL`
+      ON task_contract_proposals(item_id) WHERE decision IS NULL`,
+    "CREATE INDEX idx_task_contract_lines_item_id ON task_contract_lines(item_id)",
+    "CREATE INDEX idx_task_contract_proposals_item_id ON task_contract_proposals(item_id)"
   ]
 } as const satisfies OperationalSchemaSection

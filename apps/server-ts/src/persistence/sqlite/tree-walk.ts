@@ -29,6 +29,9 @@ export const delegatedLinkSql = (sql: SqlClient.SqlClient) => sql`EXISTS (
   WHERE delegating_run.run_id = child.parent_run_id
     AND delegating_run.session_id = child.parent_session_id)`
 
+// The descendant steps and runAncestors use CROSS JOIN: SQLite then keeps the
+// written order, rows walked so far first. With a plain JOIN it is free to
+// start from `sessions` or `chat_runs` and read all of it for every step.
 interface Step {
   readonly id: "session_id" | "run_id"
   readonly next: string
@@ -40,25 +43,27 @@ const steps = {
   sessionDescendants: {
     id: "session_id",
     next: "child.session_id",
-    join: "JOIN sessions AS child ON child.parent_session_id = walk.session_id"
+    join: "CROSS JOIN sessions AS child ON child.parent_session_id = walk.session_id"
   },
   sessionAncestors: {
     id: "session_id",
     next: "parent.session_id",
+    // Left as a plain JOIN: released migrations and triggers carry this text
+    // (sessionAncestorsText), and both lookups are by primary key.
     join: `JOIN sessions AS child ON child.session_id = walk.session_id
       JOIN sessions AS parent ON parent.session_id = child.parent_session_id`
   },
   runDescendants: {
     id: "run_id",
     next: "run.run_id",
-    join: `JOIN sessions AS child ON child.parent_run_id = walk.run_id
-      JOIN chat_runs AS run ON run.session_id = child.session_id`
+    join: `CROSS JOIN sessions AS child ON child.parent_run_id = walk.run_id
+      CROSS JOIN chat_runs AS run ON run.session_id = child.session_id`
   },
   runAncestors: {
     id: "run_id",
     next: "child.parent_run_id",
-    join: `JOIN chat_runs AS run ON run.run_id = walk.run_id
-      JOIN sessions AS child ON child.session_id = run.session_id`,
+    join: `CROSS JOIN chat_runs AS run ON run.run_id = walk.run_id
+      CROSS JOIN sessions AS child ON child.session_id = run.session_id`,
     link: "child.parent_run_id IS NOT NULL"
   }
 } as const satisfies Record<string, Step>

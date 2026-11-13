@@ -148,7 +148,7 @@ export const readMutationChildren = Effect.fn("MutationLinks.children")(function
   }>`WITH RECURSIVE ${runDescendants(sql, {
     name: "admitted",
     from: sql`SELECT run.run_id
-      FROM sessions AS child JOIN chat_runs AS run ON run.session_id = child.session_id
+      FROM sessions AS child CROSS JOIN chat_runs AS run ON run.session_id = child.session_id
         AND ${spawnedRunSql}
       WHERE child.session_type = 'agent'
         AND child.parent_run_id = ${identity.runId} AND child.parent_tool_call_id = ${identity.toolCallId}`,
@@ -156,8 +156,8 @@ export const readMutationChildren = Effect.fn("MutationLinks.children")(function
     limit: 101
   })}
   SELECT admitted.run_id, child.session_id, child.parent_run_id, child.parent_tool_call_id, run.status
-    FROM admitted JOIN chat_runs AS run USING(run_id)
-    JOIN sessions AS child ON child.session_id = run.session_id
+    FROM admitted CROSS JOIN chat_runs AS run USING(run_id)
+    CROSS JOIN sessions AS child ON child.session_id = run.session_id
     ORDER BY admitted.run_id`
   return { runs: rows.slice(0, 100), truncated: rows.length > 100 }
 })

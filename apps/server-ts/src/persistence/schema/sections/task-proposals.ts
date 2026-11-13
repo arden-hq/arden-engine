@@ -7,7 +7,9 @@ export const taskProposalsSchemaSection = {
   indexes: [
     "idx_task_proposals_space_status",
     "idx_task_proposals_place_status",
-    "idx_task_proposals_chat_status"
+    "idx_task_proposals_chat_status",
+    "idx_task_proposals_item_id",
+    "idx_task_proposals_source_session_id"
   ],
   triggers: [],
   statements: [
@@ -61,6 +63,8 @@ export const taskProposalsSchemaSection = {
     `CREATE INDEX idx_task_proposals_place_status
       ON task_proposals(place, status, seq)`,
     `CREATE INDEX idx_task_proposals_chat_status
-      ON task_proposals(chat_session_id, status)`
+      ON task_proposals(chat_session_id, status)`,
+    "CREATE INDEX idx_task_proposals_item_id ON task_proposals(item_id)",
+    "CREATE INDEX idx_task_proposals_source_session_id ON task_proposals(source_session_id)"
   ]
 } as const satisfies OperationalSchemaSection

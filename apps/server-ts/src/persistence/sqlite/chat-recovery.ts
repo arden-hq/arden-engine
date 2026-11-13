@@ -23,6 +23,7 @@ import { loadRunStreamedMessages } from "./recovery-finish.js"
 import { staleStreamedIds } from "../transcript/minted-ids.js"
 import type { PersistenceDeps } from "./deps.js"
 import { noApprovalForRun } from "./approval-policy.js"
+import { activeRunStatusList } from "./status-sets.js"
 
 export const makeChatRecovery = ({
   writer,
@@ -81,7 +82,9 @@ export const makeChatRecovery = ({
       const rows = yield* sql<{ readonly run_id: string }>`
       SELECT run.run_id
       FROM chat_runs AS run
-      WHERE run.status = 'pending'
+      -- The first line repeats idx_chat_runs_active's own condition, so SQLite
+      -- reads that short list of unfinished runs instead of every run.
+      WHERE run.status IN ${activeRunStatusList} AND run.status = 'pending'
         AND NOT ${quotaPaused(sql, sql`run.metadata_json`, now)}
         AND NOT ${awaitingApproval(sql, sql`run.run_id`)}
       ORDER BY run.updated_at, run.started_at, run.run_id

@@ -28,7 +28,9 @@ export const contextSessionSchemaSection = {
     "idx_sessions_context_unconverted",
     "idx_sessions_fork_origin_backfill",
     "idx_session_fork_requests_preparing_source",
-    "idx_message_turns_turn"
+    "idx_message_turns_turn",
+    "idx_sessions_origin_automation",
+    "idx_sessions_parent_run"
   ],
   triggers: [
     "session_messages_role_insert",
@@ -220,6 +222,8 @@ export const contextSessionSchemaSection = {
     `CREATE TRIGGER message_turns_ad
       AFTER DELETE ON session_messages BEGIN
         DELETE FROM message_turns WHERE message_rowid = old.message_rowid;
-      END`
+      END`,
+    "CREATE INDEX idx_sessions_origin_automation ON sessions(origin_automation_id) WHERE origin_automation_id IS NOT NULL",
+    "CREATE INDEX idx_sessions_parent_run ON sessions(parent_run_id) WHERE parent_run_id IS NOT NULL"
   ]
 } as const satisfies OperationalSchemaSection

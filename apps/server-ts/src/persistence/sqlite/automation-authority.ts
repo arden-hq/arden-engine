@@ -53,7 +53,7 @@ export const revokeAutomationWork = Effect.fn("AutomationAuthority.revoke")(func
     FROM automation_runs AS attempt JOIN scheduled_tasks AS task ON task.task_id = attempt.task_id
     WHERE attempt.task_id = ${automationId} AND attempt.status = 'running'
       AND NOT EXISTS (SELECT 1 FROM chat_runs AS run
-        WHERE json_extract(run.metadata_json, '$.run_context.origin') = attempt.origin)`
+        WHERE json_extract(run.metadata_json, '$.run_context.origin') = json(attempt.origin))`
   for (const attempt of retired) {
     const run: EndedAutomationRun = {
       id: attempt.id,

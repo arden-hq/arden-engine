@@ -108,7 +108,7 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
 }: Pick<PersistenceDeps, "writer">) {
   const sql = writer.sql
   const counted = yield* sql<CountRow>`
-    SELECT count(*) AS rows FROM usage_daily
+    SELECT EXISTS (SELECT 1 FROM usage_daily) AS rows
   `.pipe(Effect.mapError(storage("backfill", "Could not inspect the usage rollup")))
   if (counted[0]?.rows === 0) {
     yield* writer

@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { configDefaults, defineConfig, mergeConfig } from "vitest/config"
 
 import root from "../../vitest.config.mjs"
@@ -9,17 +10,30 @@ const boot = readdirSync(testDirectory)
   .filter((name) => /\bstartServer\(/.test(readFileSync(new URL(name, testDirectory), "utf8")))
   .map((name) => `test/${name}`)
 
+// The SQLite threads write here every table scan the tests cause; the check
+// in test/sql-scans/global.ts reads it after the run.
+const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
+rmSync(scanLog, { recursive: true, force: true })
+mkdirSync(scanLog, { recursive: true })
+// Set here as well as in `test.env`: the check runs in this process, the tests in workers.
+process.env.ARDEN_SQL_SCAN_LOG = scanLog
+
 export default mergeConfig(
   root,
   defineConfig({
     test: {
+      env: { ARDEN_SQL_SCAN_LOG: scanLog },
       sequence: { shuffle: true },
       projects: [
         {
           extends: true,
           test: { name: "unit", exclude: [...configDefaults.exclude, ...boot], isolate: false }
         },
-        { extends: true, test: { name: "boot", include: boot } }
+        // The boot project carries the scan check: its teardown runs once, after both projects.
+        {
+          extends: true,
+          test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }
+        }
       ]
     }
   })

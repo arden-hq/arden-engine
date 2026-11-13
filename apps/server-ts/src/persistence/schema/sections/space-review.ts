@@ -4,7 +4,7 @@ export const spaceReviewSchemaSection = {
   name: "space-review",
   storageDomain: "work",
   tables: ["space_review_checkpoints", "space_chat_links"],
-  indexes: [],
+  indexes: ["idx_space_chat_links_session_id", "idx_space_review_checkpoints_run_id"],
   triggers: [],
   statements: [
     `CREATE TABLE space_review_checkpoints (
@@ -19,6 +19,8 @@ export const spaceReviewSchemaSection = {
       run_id TEXT NOT NULL CHECK(length(run_id) > 0),
       linked_at TEXT NOT NULL,
       PRIMARY KEY (space_id, session_id)
-    )`
+    )`,
+    "CREATE INDEX idx_space_chat_links_session_id ON space_chat_links(session_id)",
+    "CREATE INDEX idx_space_review_checkpoints_run_id ON space_review_checkpoints(run_id)"
   ]
 } as const satisfies OperationalSchemaSection

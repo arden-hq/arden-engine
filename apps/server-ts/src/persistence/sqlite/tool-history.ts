@@ -457,7 +457,7 @@ export const makeToolHistory = ({
         WITH RECURSIVE ${sessionDescendants(sql, {
           name: "side_tree",
           from: sql`SELECT fork.child_session_id AS session_id FROM session_fork_requests AS fork
-            JOIN sessions AS side ON side.session_id = fork.child_session_id
+            CROSS JOIN sessions AS side ON side.session_id = fork.child_session_id
               AND side.session_type = 'chat'
             WHERE fork.source_session_id = ${viewerSessionId} AND fork.state = 'ready'
               AND json_valid(fork.request_json)
