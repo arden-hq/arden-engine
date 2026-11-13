@@ -80,6 +80,8 @@ export const browserProceduresSchemaSection = {
     )`,
     "INSERT INTO browser_procedure_settings VALUES (1, 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
     "CREATE INDEX idx_browser_procedure_invocations_procedure_id_revision ON browser_procedure_invocations(procedure_id, revision)",
-    "CREATE INDEX idx_browser_procedure_jobs_run_id ON browser_procedure_jobs(run_id)"
+    "CREATE INDEX idx_browser_procedure_jobs_run_id ON browser_procedure_jobs(run_id)",
+    "ALTER TABLE browser_procedure_jobs ADD COLUMN outcome TEXT CHECK(outcome IS NULL OR outcome IN ('saved', 'skipped'))",
+    "ALTER TABLE browser_procedure_jobs ADD COLUMN outcome_reason TEXT CHECK(outcome_reason IS NULL OR length(outcome_reason) BETWEEN 1 AND 2000)"
   ]
 } as const satisfies OperationalSchemaSection

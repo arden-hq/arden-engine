@@ -82,6 +82,16 @@ it("admits safe read-only evidence, keeps an unchecked page's step without its p
       yield* sql`INSERT INTO tool_calls VALUES ('read','inspect','browser_snapshot','{"tab_ref":"tab-1"}',${safe},0,'completed','2026-10-28T00:01:01.000Z','none')`
       const store = makeBrowserProcedureStore({ writer })
       yield* store.enqueue()
+      yield* store.recordOutcome("read", "skipped", "  ")
+      const blank = yield* sql<{
+        readonly outcome: string
+        readonly outcome_reason: string
+      }>`SELECT outcome, outcome_reason FROM browser_procedure_jobs WHERE run_id = 'read'`
+      yield* store.recordOutcome("read", "saved", "The reviewer accepted the draft.")
+      const recorded = yield* sql<{
+        readonly outcome: string
+        readonly outcome_reason: string
+      }>`SELECT outcome, outcome_reason FROM browser_procedure_jobs WHERE run_id = 'read'`
       const catalog = yield* store.list()
       const learned = yield* store.evidence("read")
       yield* sql`INSERT INTO tool_calls VALUES ('read','refused','browser_act','{"value":"never-captured"}','{"is_error":true,"host":{"mutation_receipt":{"outcome":"no_op"}}}',1,'completed','2026-10-28T00:01:00.000Z','external')`
@@ -97,6 +107,7 @@ it("admits safe read-only evidence, keeps an unchecked page's step without its p
       yield* sql`INSERT INTO tool_calls VALUES ('read','secret','browser_act','{"tab_ref":"tab-1","secret":"login"}',${safe},1,'completed','2026-10-28T00:01:02.000Z','external')`
       const secret = yield* store.evidence("read")
       return {
+        outcomes: [blank[0], recorded[0]],
         jobs: catalog.jobs.map((job) => job.status),
         scope: learned === undefined ? undefined : procedureEvidenceScope(learned),
         count: learned?.calls.length,
@@ -114,6 +125,10 @@ it("admits safe read-only evidence, keeps an unchecked page's step without its p
     )
   )
   expect(result).toEqual({
+    outcomes: [
+      { outcome: "skipped", outcome_reason: "No reason given." },
+      { outcome: "saved", outcome_reason: "The reviewer accepted the draft." }
+    ],
     jobs: ["pending"],
     scope: { origin: "https://example.com", profile: "default" },
     count: 1,

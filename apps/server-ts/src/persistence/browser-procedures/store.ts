@@ -32,6 +32,12 @@ export class BrowserProcedureStore extends Context.Service<
       id?: string
     ) => Effect.Effect<void, BrowserProcedureStoreError>
     readonly enqueue: () => Effect.Effect<void, BrowserProcedureStoreError>
+    /** Writes on the run's review job whether it saved a procedure, and if not, why. */
+    readonly recordOutcome: (
+      runId: string,
+      outcome: "saved" | "skipped",
+      reason: string
+    ) => Effect.Effect<void, BrowserProcedureStoreError>
     readonly jobs: JobDriver<ProcedureJob, void>
     readonly tabOwner: (
       tabRef: string

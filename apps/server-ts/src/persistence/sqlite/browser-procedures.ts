@@ -195,6 +195,15 @@ export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "wri
     const at = yield* now
     yield* writer.run(sql.unsafe(BROWSER_PROCEDURE_ENQUEUE_SQL, [at, at]))
   })
+  const recordOutcome = Effect.fn("BrowserProcedures.recordOutcome")(function* (
+    runId: string,
+    outcome: "saved" | "skipped",
+    reason: string
+  ) {
+    yield* writer.run(sql`UPDATE browser_procedure_jobs
+      SET outcome = ${outcome}, outcome_reason = ${reason.trim().slice(0, 2000) || "No reason given."}
+      WHERE run_id = ${runId}`)
+  })
   const evidence = Effect.fn("BrowserProcedures.evidence")(function* (
     runId: string
   ): Effect.fn.Return<ProcedureEvidence | undefined, unknown> {
@@ -541,6 +550,8 @@ export const makeBrowserProcedureStore = ({ writer }: Pick<PersistenceDeps, "wri
     eligible: (origin, profile) => eligible(origin, profile).pipe(Effect.mapError(failure)),
     enable: (value, id) => enable(value, id).pipe(Effect.mapError(failure)),
     enqueue: () => enqueue().pipe(Effect.mapError(failure)),
+    recordOutcome: (runId, outcome, reason) =>
+      recordOutcome(runId, outcome, reason).pipe(Effect.mapError(failure)),
     evidence: (runId) => evidence(runId).pipe(Effect.mapError(failure)),
     publish,
     begin,

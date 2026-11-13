@@ -153,8 +153,12 @@ export class BrowserProcedures extends Context.Service<
         runId: string,
         signal: AbortSignal
       ) {
+        // Every review ends in one of two outcomes, written on its job: the
+        // log line alone is not kept anywhere a person can read later.
         const skipped = (reason: string, details: Readonly<Record<string, unknown>> = {}) =>
-          Effect.logInfo("Browser procedure learning skipped", { runId, reason, ...details })
+          Effect.logInfo("Browser procedure learning skipped", { runId, reason, ...details }).pipe(
+            Effect.andThen(store.recordOutcome(runId, "skipped", reason))
+          )
         const evidence = yield* store.evidence(runId)
         if (evidence === undefined)
           return yield* skipped("The completed run has no eligible browser evidence.")
@@ -281,12 +285,13 @@ export class BrowserProcedures extends Context.Service<
             spec: procedure,
             evidence: [...(previous?.evidence ?? []), evidence]
           })
-          return yield* Effect.logInfo("Browser procedure saved as a candidate", {
+          yield* Effect.logInfo("Browser procedure saved as a candidate", {
             runId,
             procedureId,
             round,
             reason: review.reason
           })
+          return yield* store.recordOutcome(runId, "saved", review.reason)
         }
         return yield* skipped(feedback?.reason ?? "No draft passed review.", {
           stage: "review",
