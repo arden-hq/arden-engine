@@ -16,6 +16,7 @@ import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt } from "./call-receipt.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { toolFailure } from "./tool-failure.js"
+import { observedKey } from "./run-context.js"
 
 const SKILLS_HREF = "arden:settings/skills"
 
@@ -163,6 +164,7 @@ const makeSkillTool = ({ skills }: { readonly skills: SkillCatalog["Service"] })
         loadSkillInstructions({ skills, ...input }).pipe(Effect.mapError(failure)),
         { signal: ctx.signal }
       )
+      ctx.run.observations.observe(observedKey.skill(content.name, input.resource), sha256)
       return {
         result: `Loaded /${content.name}${input.resource === undefined ? "" : ` ${input.resource}`}.`,
         preview: content.name,
@@ -171,8 +173,7 @@ const makeSkillTool = ({ skills }: { readonly skills: SkillCatalog["Service"] })
             name: content.name,
             description: content.description,
             version: content.version,
-            builtin: content.builtin,
-            source_sha256: sha256
+            builtin: content.builtin
           }
         },
         model_content: [block]
@@ -323,15 +324,11 @@ const makeSkillUpdateTool = ({
   defineServerTool({
     name: "skill_update",
     description:
-      "Replace an existing local SKILL.md or linked Markdown reference after reading it with skill. Requires that file's source_sha256 and previews the full replacement. Other files and enabled state stay unchanged; built-ins are immutable.",
+      "Replace an existing local SKILL.md or linked Markdown reference after reading that file with skill in this Run; a file changed since that read is refused. Previews the full replacement. Other files and enabled state stay unchanged; built-ins are immutable.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         name: SkillNameSchema.annotate({
           description: "Exact local Skill name previously read with skill."
-        }),
-        expected_sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)).annotate({
-          description:
-            "source_sha256 from the current target file load. Stale hashes reject the update."
         }),
         resource: Schema.optionalKey(
           Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)).pipe(
@@ -369,11 +366,20 @@ const makeSkillUpdateTool = ({
       }
     }),
     execute: async (input, ctx, effects) => {
-      const updated = await Effect.runPromise(skills.update(input).pipe(Effect.mapError(failure)), {
-        signal: ctx.signal
-      })
+      const read = observedKey.skill(input.name, input.resource)
+      const expected_sha256 = ctx.run.observations.observed(read)
+      if (expected_sha256 === undefined)
+        throw new ToolExecutionError(
+          `Read ${input.resource ?? `/${input.name}`} with skill in this Run before replacing it, then retry.`,
+          { preview: "Read required", retryable: false }
+        )
+      const updated = await Effect.runPromise(
+        skills.update({ ...input, expected_sha256 }).pipe(Effect.mapError(failure)),
+        { signal: ctx.signal }
+      )
       const source_sha256 = sha256Hex(updated.content)
-      const changed = source_sha256 !== input.expected_sha256
+      ctx.run.observations.observe(read, source_sha256)
+      const changed = source_sha256 !== expected_sha256
       if (changed) effects.applied()
       else effects.unchanged()
       return {
@@ -381,13 +387,13 @@ const makeSkillUpdateTool = ({
           ? `Updated /${updated.name}. Reload it before following its revised instructions.`
           : `/${updated.name} already had this content; nothing changed.`,
         preview: changed ? `Updated /${updated.name}` : `/${updated.name} unchanged`,
-        data: { name: updated.name, source_sha256 },
+        data: { name: updated.name },
         ...(changed
           ? {
               host: appliedReceipt(ctx, {
                 kind: "versioned_resource",
                 resourceRef: skillRef(updated.name, input.resource),
-                beforeVersion: input.expected_sha256,
+                beforeVersion: expected_sha256,
                 afterVersion: source_sha256,
                 domain: "resource",
                 title:

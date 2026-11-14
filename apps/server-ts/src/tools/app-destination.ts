@@ -1,4 +1,5 @@
 import { AppSettingsTabIdSchema } from "@arden-hq/protocol/effect/common"
+import { memoryHref } from "../lib/memory-link.js"
 import { Schema } from "effect"
 
 export const SessionRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200)).annotate({
@@ -91,9 +92,7 @@ const placeHref = (destination: ToolDestination): string => {
     case "task":
       return part("task", destination.item_id)
     case "memory":
-      return destination.path === undefined
-        ? "arden:memory"
-        : `arden:memory/${destination.path.split("/").map(encodeURIComponent).join("/")}`
+      return destination.path === undefined ? "arden:memory" : memoryHref(destination.path)
     case "space":
       return part("space", destination.space_id)
   }

@@ -8,16 +8,32 @@ import type { CodeModeHost, ScriptHost } from "../workflows/runtime/contract.js"
 import type { BrowserObservationCheckpoint, BrowserPageView } from "../browser/observation.js"
 export type { BrowserPageView } from "../browser/observation.js"
 
-export interface WikiObservationRegistry {
+/**
+ * What this run has read, and at which version. A tool that must know "did
+ * this change since the run read it" asks here; the model never carries a
+ * version or a hash from one call to the next.
+ */
+export interface ObservationRegistry {
   readonly observeHead: (head: string) => void
   readonly observedHead: () => string | undefined
-  readonly observe: (pageId: string, versionId: string) => void
-  readonly observed: (pageId: string) => string | undefined
+  readonly observe: (id: string, version: string) => void
+  readonly observed: (id: string) => string | undefined
 }
+
+/** Names for what a run read that is not a Memory page; a page uses its page id. */
+export const observedKey = {
+  task: (itemId: string): string => `task:${itemId}`,
+  skill: (name: string, resource: string | undefined): string =>
+    resource === undefined ? `skill:${name}` : `skill:${name}/${resource}`,
+  inferenceReview: (spaceId: string | undefined): string =>
+    spaceId === undefined ? "inference-review" : `inference-review:${spaceId}`,
+  chatAction: (runId: string, toolCallId: string): string => `chat-action:${runId}:${toolCallId}`,
+  collections: "wiki-collections"
+} as const
 
 const MAX_OBSERVATIONS = 256
 
-export const makeObservationRegistry = (): WikiObservationRegistry => {
+export const makeObservationRegistry = (): ObservationRegistry => {
   const versions = new Map<string, string>()
   let head: string | undefined
   return {
@@ -25,15 +41,15 @@ export const makeObservationRegistry = (): WikiObservationRegistry => {
       head = value
     },
     observedHead: (): string | undefined => head,
-    observe: (pageId: string, versionId: string): void => {
-      versions.delete(pageId)
+    observe: (id: string, version: string): void => {
+      versions.delete(id)
       if (versions.size >= MAX_OBSERVATIONS) {
         const oldest = versions.keys().next().value
         if (oldest !== undefined) versions.delete(oldest)
       }
-      versions.set(pageId, versionId)
+      versions.set(id, version)
     },
-    observed: (pageId: string): string | undefined => versions.get(pageId)
+    observed: (id: string): string | undefined => versions.get(id)
   }
 }
 
@@ -226,7 +242,7 @@ export const makeBrowserObservationRegistry = ({
 
 export interface ServerRunContext extends ServerToolRun {
   readonly approvalMode: ChatApprovalMode
-  readonly observations: WikiObservationRegistry
+  readonly observations: ObservationRegistry
   readonly browserObservations: BrowserObservationRegistry
   readonly mayUseBrowserTab: (tabRef: string, toolCallId: string | undefined) => Promise<boolean>
   readonly reviewPlans: ReviewPlans

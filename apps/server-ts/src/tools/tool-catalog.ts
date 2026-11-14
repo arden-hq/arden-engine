@@ -277,7 +277,7 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
     "chat_files_list"
   ]),
   artifact_delete: inputs(["refs", "artifact_save", "browser_screenshot", "exec_command"]),
-  skill_update: inputs(["name", "skill"], ["expected_sha256", "skill"]),
+  skill_update: inputs(["name", "skill"]),
   wiki_edit_page: inputs(["path", "wiki_search", "wiki_read_page"]),
   wiki_patch_page: inputs(["path", "wiki_search"], ["old_text", "wiki_read_page"]),
   wiki_page_history: inputs(["path", "wiki_search"]),
@@ -285,7 +285,7 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   wiki_archive_page: inputs(["path", "wiki_search"]),
   wiki_merge_page: inputs(["path", "wiki_search"], ["into", "wiki_search"]),
   wiki_move_page: inputs(["path", "wiki_search"]),
-  wiki_restore_page: inputs(["path", "wiki_search"], ["revision_ref", "wiki_page_history"]),
+  wiki_restore_page: inputs(["path", "wiki_search"], ["at", "wiki_page_history"]),
   space_page_patch: inputs(["old_text", "space_page_read"]),
   space_page_create: inputs(["space_id", "space_list"]),
   space_settings_update: inputs(["space_id", "space_list"], ["expected_updated_at", "space_list"]),
@@ -306,7 +306,6 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   task_comment: inputs(["key", "space_board_read", "task_get"]),
   task_save_result: inputs(["item_id", "space_board_read"]),
   task_move_here: inputs(["item_id", "space_board_read"]),
-  task_propose: inputs(["snapshot", "space_inference_review"]),
   email_read: inputs(["message_ref", "email_search", "email_thread_read"]),
   email_reply: inputs(
     ["message_ref", "email_search", "email_thread_read"],
@@ -335,7 +334,7 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
     ["add_attachments", "drive_search", "drive_upload"]
   ),
   calendar_read_event: inputs(["event_id", "calendar_search"], ["account", "google_accounts_list"]),
-  wiki_read_change: inputs(["revision", "wiki_list_changes"]),
+  wiki_read_change: inputs(["page", "wiki_search", "wiki_list_changes"]),
   calendar_delete_event: inputs(["event_ref", "calendar_search"]),
   calendar_respond: inputs(["event_ref", "calendar_search"]),
   calendar_create_event: inputs(

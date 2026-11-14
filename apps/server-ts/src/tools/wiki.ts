@@ -427,7 +427,7 @@ const makeWikiTools = ({
     name: "wiki_read_page",
     description: [
       "Read the current body of one wiki page by exact path, paginated by line. A moved or merged path reads the page that replaced it. This read is what wiki_edit_page, wiki_move_page, wiki_archive_page, wiki_merge_page and wiki_restore_page require first.",
-      "After the body it lists the page_ref, revision, any observation period, producer and original source references, the Core Memory size limit when one applies, and a README's child pages.",
+      "After the body it lists the page_ref, any observation period, producer and original source references, the Core Memory size limit when one applies, and a README's child pages.",
       `It also says when the page last changed. ${PAGE_AGE_RULE}`
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReadParametersSchema),
@@ -478,7 +478,6 @@ const makeWikiTools = ({
           ? []
           : [`${input.path} now redirects here, to ${record.resource.path}.`]),
         `page_ref: ${record.page.pageId}`,
-        `revision: ${record.resource.versionId}`,
         ...(lastChanged === undefined ? [] : [lastChanged]),
         ...reportProvenanceLines(record),
         ...(coreBudget === undefined

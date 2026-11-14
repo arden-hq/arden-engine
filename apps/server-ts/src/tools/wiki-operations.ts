@@ -37,6 +37,8 @@ import {
   requireWithinCoreBudget
 } from "./wiki-records.js"
 import { searchPages } from "./wiki-search.js"
+import { changeFailure, ChangeTimeSchema } from "./wiki-change.js"
+import { readChangeCall } from "../lib/memory-link.js"
 
 const MAX_HISTORY_ENTRIES = 100
 const MAX_LINKS = 500
@@ -107,8 +109,9 @@ const HistoryParametersSchema = Schema.Struct({
 
 const RestoreParametersSchema = Schema.Struct({
   path: MergedWikiPathSchema,
-  revision_ref: Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
-    description: "Exact reachable revision_ref returned by wiki_page_history."
+  at: ChangeTimeSchema.annotate({
+    description:
+      "Time of the version to bring back, as wiki_page_history lists it. The page returns to how it was at that time."
   })
 })
 
@@ -291,7 +294,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_list_changes",
     description:
-      "List bounded newest-first Wiki commits since an inclusive timestamp, with each revision, changed paths and provenance. Open one with wiki_read_change.",
+      "List bounded newest-first Memory changes since an inclusive timestamp, with each one's time, changed paths and provenance. Open one with wiki_read_change, a changed page and that time.",
     parameters: Schema.toStandardSchemaV1(ListChangesParametersSchema),
     metadata: {
       effect: "none",
@@ -313,7 +316,6 @@ const makeWikiOperationTools = ({
         }
       )
       const entries = page.entries.map((entry) => ({
-        revision: entry.revision,
         timestamp: entry.timestamp,
         actor: entry.actor,
         origin: entry.origin,
@@ -326,6 +328,12 @@ const makeWikiOperationTools = ({
         }))
       }))
       const nextOffset = input.offset + entries.length
+      const [newest] = entries
+      const [changed] = newest?.changes ?? []
+      const opened =
+        newest === undefined || changed === undefined
+          ? undefined
+          : readChangeCall(changed.path, newest.timestamp)
       return {
         result:
           entries.length === 0
@@ -333,11 +341,11 @@ const makeWikiOperationTools = ({
             : `Wiki changes\n${entries
                 .map(
                   (entry) =>
-                    `- ${entry.timestamp} — ${entry.revision} — ${entry.changes.map((change) => change.path).join(", ")} — ${entry.reason}`
+                    `- ${entry.timestamp} — ${entry.changes.map((change) => change.path).join(", ")} — ${entry.reason}`
                 )
                 .join(
                   "\n"
-                )}${page.hasMore ? `\nMore changes exist; retry with offset=${nextOffset}.` : ""}\nOpen a change's diff with wiki_read_change and its revision, as in wiki_read_change(revision=${JSON.stringify(entries[0]?.revision ?? "")}).`,
+                )}${page.hasMore ? `\nMore changes exist; retry with offset=${nextOffset}.` : ""}${opened === undefined ? "" : `\nOpen a change's diff with a page it changed and its time, as in ${opened}.`}`,
         preview: `${countOf(entries.length, "Wiki change")}${page.hasMore ? " (capped)" : ""}`,
         data: {
           since: input.since,
@@ -352,7 +360,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_page_history",
     description:
-      "List newest-first revisions of one Wiki page by exact path, including a page that was merged into another. Returned revision_ref values can be passed to wiki_restore_page.",
+      "List newest-first saved changes of one Wiki page by exact path, including a page that was merged into another. Pass a listed time as `at` to wiki_read_change to see that change, or to wiki_restore_page to bring that version back.",
     parameters: Schema.toStandardSchemaV1(HistoryParametersSchema),
     metadata: {
       effect: "none",
@@ -381,7 +389,6 @@ const makeWikiOperationTools = ({
         if (change === undefined) return []
         return [
           {
-            revision_ref: commit.commitId,
             timestamp: commit.timestamp,
             actor: commit.actor,
             origin: commit.origin,
@@ -399,7 +406,7 @@ const makeWikiOperationTools = ({
             : `Wiki history for ${input.path}\n${entries
                 .map(
                   (entry) =>
-                    `- ${entry.timestamp} — ${entry.revision_ref} — ${entry.action} — ${entry.reason}${entry.restorable ? "" : " (not restorable)"}`
+                    `- ${entry.timestamp} — ${entry.action} — ${entry.reason}${entry.restorable ? "" : " (not restorable)"}`
                 )
                 .join("\n")}`,
         preview: `${countOf(entries.length, "Wiki revision")}`,
@@ -411,7 +418,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_restore_page",
     description:
-      "Restore one Wiki page exactly from a reachable revision while preserving its current path. Read the current page first. A page that was merged into another comes back as its own page; give its old path. Asks by default.",
+      "Restore one Wiki page to how it was at a time wiki_page_history lists, while preserving its current path. Read the current page first. A page that was merged into another comes back as its own page; give its old path. Asks by default.",
     parameters: Schema.toStandardSchemaV1(RestoreParametersSchema),
     metadata: {
       effect: "arden_db",
@@ -438,18 +445,24 @@ const makeWikiOperationTools = ({
         record.page.lifecycle === "redirect"
           ? record.resource.versionId
           : requireObserved(ctx.run, record)
+      const version = await Effect.runPromise(
+        wiki
+          .changeAt({ path: record.resource.path, pageId: record.page.pageId, at: input.at })
+          .pipe(Effect.mapError((error) => changeFailure(error, record.resource.path))),
+        { signal: ctx.signal }
+      )
       const restored = await Effect.runPromise(
         wiki
           .restoreRevision({
             pageId: record.page.pageId,
-            commitId: input.revision_ref,
+            commitId: version.commitId,
             expectedVersion,
             expectedHead: snapshot.head,
             authority: identity.authority,
             commit: {
               actor: identity.actor,
               origin: identity.origin,
-              reason: `restore wiki page ${record.resource.path} from ${input.revision_ref}`
+              reason: `restore wiki page ${record.resource.path} to its version saved ${version.timestamp}`
             }
           })
           .pipe(Effect.mapError(wikiFailure)),
@@ -461,12 +474,12 @@ const makeWikiOperationTools = ({
       ctx.run.observations.observe(restored.pageId, restored.version)
       return {
         result: changed
-          ? `Restored ${restored.path} from revision ${input.revision_ref}.`
-          : `${restored.path} already matches revision ${input.revision_ref}.`,
+          ? `Restored ${restored.path} to its version saved ${version.timestamp}.`
+          : `${restored.path} already matches its version saved ${version.timestamp}.`,
         preview: changed ? "Wiki page restored" : "Wiki page unchanged",
         data: {
           page: writtenPageData(restored),
-          restored_from_revision: input.revision_ref,
+          restored_from: version.timestamp,
           changed
         },
         ...(changed

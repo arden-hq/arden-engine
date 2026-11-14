@@ -392,9 +392,9 @@ const activityNote = (task: SpaceTask): string => {
   return words === undefined ? "" : `, ${words}`
 }
 
-const taskState = (task: SpaceTask): string =>
+const taskState = (run: ServerRunContext, task: SpaceTask): string =>
   [
-    `${namedLink(task.text, taskUrl(task))} (${taskHandle(task)})`,
+    `${namedLink(task.text, taskUrl(task))} (${taskHandle(run, task)})`,
     `Status: ${task.status}${task.blocked ? `, waiting on ${task.waiting_on ?? "you"}` : ""}${activityNote(task)}; runs in ${task.runs_in === "chat" ? "its chat" : "the background"}; owner ${task.owner}.`,
     ...(task.token_budget === null ? [] : [`Token budget: ${task.token_budget}.`]),
     ...(task.next_attempt_at === null ? [] : [`Next check: ${task.next_attempt_at}.`]),
@@ -533,7 +533,7 @@ const applyTaskChange = async (
   })
   const confirmation = taskUpdateConfirmation(updated, patch)
   return {
-    result: `${confirmation.result}\n\n${taskHandle(updated)}`,
+    result: `${confirmation.result}\n\n${taskHandle(ctx.run, updated)}`,
     preview: confirmation.preview,
     data: { task: updated, execution, task_url: taskUrl(updated) }
   }
@@ -594,7 +594,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
             ),
           { signal: ctx.signal }
         )
-        return { result: taskState(task), preview: task.text, data: { task } }
+        return { result: taskState(ctx.run, task), preview: task.text, data: { task } }
       }
       if (input.key === undefined) {
         const current = await Effect.runPromise(
@@ -615,10 +615,10 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
             .pipe(Effect.mapError(workFailure)),
           { signal: ctx.signal }
         )
-        return { result: taskState(task), preview: task.text, data: { task } }
+        return { result: taskState(ctx.run, task), preview: task.text, data: { task } }
       }
       const task = await readTaskAt(services, ctx, input.space_id, input.key)
-      return { result: taskState(task), preview: task.text, data: { task } }
+      return { result: taskState(ctx.run, task), preview: task.text, data: { task } }
     }
   }),
   defineServerTool({
@@ -665,7 +665,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
           ? "It works in this chat: keep going on it now, turn after turn, until it is done or needs the user."
           : executionWords(execution)
       return {
-        result: `Started ${namedLink(task.text, taskUrl(task))} (${taskHandle(task)}). ${where}`,
+        result: `Started ${namedLink(task.text, taskUrl(task))} (${taskHandle(ctx.run, task)}). ${where}`,
         preview: task.text,
         data: { task, execution, task_url: taskUrl(task) }
       }

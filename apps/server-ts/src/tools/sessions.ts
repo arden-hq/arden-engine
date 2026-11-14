@@ -3,7 +3,7 @@ import { authoredText, evidenceText, isHumanMessage } from "../persistence/trans
 import { defineServerTool, type ServerTool } from "./define.js"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { endKindOf } from "@arden-hq/protocol/runs"
-import { DateTime, Effect, Predicate, Schema } from "effect"
+import { DateTime, Effect, Predicate, Schema, Struct } from "effect"
 import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
 import {
   SessionStore,
@@ -12,6 +12,7 @@ import {
   type SessionListQuery
 } from "../persistence/sessions/store.js"
 import { toolFailure } from "./tool-failure.js"
+import { observedKey } from "./run-context.js"
 import type {
   TranscriptMessageRecord,
   TranscriptPageQuery
@@ -450,7 +451,7 @@ const actionsPage = (input: ActionsInput, page: SessionToolEvidencePage) => {
       tool_name: item.tool_name,
       status: item.status,
       changes_state: item.changes_state,
-      source: item.source ?? null,
+      source: item.source === undefined ? null : Struct.omit(item.source, ["revision"]),
       payload: { text: item.payload.text, total_chars: item.payload.total_chars },
       continue_args:
         item.payload.next_offset === undefined
@@ -607,6 +608,12 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
         const source_refs = [
           { ...sessionSource(input.session_ref, session.name), use: "read" as const }
         ]
+        for (const { source } of page.items)
+          if (source !== undefined)
+            ctx.run.observations.observe(
+              observedKey.chatAction(source.run_id, source.tool_call_id),
+              source.revision
+            )
         const data = { ...actionsPage(input, page), source_refs }
         return {
           result: JSON.stringify(data),

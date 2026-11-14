@@ -413,7 +413,7 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
       const source_refs = [pageSource(target.page, "read")]
       return {
         host: { source_refs },
-        result: `page_ref: ${target.page.page.pageId}\nrevision: ${target.page.resource.versionId}\n\n${body.content}`,
+        result: `page_ref: ${target.page.page.pageId}\n\n${body.content}`,
         preview: target.page.page.title,
         data: {
           source_refs,
@@ -589,7 +589,7 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
             task.status,
             task.owner,
             ...taskStateWords(task),
-            taskHandle(task)
+            taskHandle(ctx.run, task)
           ].join(" · "),
           ...attachments.map(
             (attachment) =>

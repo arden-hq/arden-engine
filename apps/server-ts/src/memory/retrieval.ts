@@ -126,7 +126,6 @@ const appendPages = (
     const prefix = [
       `### ${record.page.title}`,
       `Page: ${record.resource.path}`,
-      `Revision: ${record.resource.versionId}`,
       ...(lastChanged.get(record.page.pageId) === undefined
         ? []
         : [lastChanged.get(record.page.pageId)]),

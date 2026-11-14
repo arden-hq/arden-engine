@@ -6,6 +6,7 @@ import type { AutomationEventProducer } from "../event-producer.js"
 export const wikiChangedEvent = (input: {
   readonly paths: ReadonlyArray<string>
   readonly revision: string
+  readonly savedAt: string
   readonly source: WikiCommitSource
   readonly hasSpacePage: boolean
   readonly producedBy: string | null
@@ -19,6 +20,7 @@ export const wikiChangedEvent = (input: {
     change: {
       paths: [...input.paths],
       page_count: input.paths.length,
+      saved_at: input.savedAt,
       source: input.source,
       has_space_page: input.hasSpacePage
     }

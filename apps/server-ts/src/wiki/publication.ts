@@ -12,6 +12,7 @@ export class WikiChangeSinkError extends Schema.TaggedError<WikiChangeSinkError>
 export interface WikiChange {
   readonly previousRevision: string | null
   readonly revision: string
+  readonly savedAt: string
   readonly paths: ReadonlyArray<string>
   readonly origin: WikiCommitOrigin
   readonly hasSpacePage: boolean
@@ -77,6 +78,7 @@ export const makeWikiPublisher = Effect.fn("Wiki.makePublisher")(function* (
         .publish({
           previousRevision: commit.parentId,
           revision: commit.commitId,
+          savedAt: commit.timestamp,
           paths: [...new Set(resources.map((resource) => resource.path))].sort(),
           origin,
           hasSpacePage

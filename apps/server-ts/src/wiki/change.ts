@@ -1,4 +1,4 @@
-import type { ManagedFileRepositoryShape, ResourceChange } from "@arden-hq/revisions/effect"
+import type { Commit, ManagedFileRepositoryShape, ResourceChange } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 
 import { decodeWikiOrigin, wikiOriginSource, type WikiCommitSource } from "./commit.js"
@@ -6,6 +6,8 @@ import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 
 const CHANGE_DIFF_CHARS = 12_000
 const MIN_PAGE_CHARS = 400
+// How far back a page with no id (an archived one) is looked for by its path.
+const CHANGE_SEARCH_COMMITS = 2_000
 
 interface WikiChangedPage {
   readonly action: string
@@ -23,13 +25,12 @@ interface WikiChangeDiff {
   readonly text: string
 }
 
-export interface WikiChangeCursor {
+interface WikiChangeCursor {
   readonly path: string
   readonly offset: number
 }
 
 export interface WikiChangeRead {
-  readonly revision: string
   readonly timestamp: string
   readonly actor: string
   readonly source: WikiCommitSource
@@ -39,13 +40,31 @@ export interface WikiChangeRead {
   readonly next: WikiChangeCursor | undefined
 }
 
-export interface WikiChangeMethods {
-  readonly readChange: (input: {
-    readonly revision: string
-    readonly path: string | undefined
-    readonly offset: number
-  }) => Effect.Effect<WikiChangeRead, WikiError>
+/**
+ * Names one saved change the way a person does: a page and a time. `pageId`
+ * is the page's id when it is still in Memory; without it the page is found
+ * by its path in recent changes, which covers an archived page. `at` picks
+ * the change in effect at that time; omitted, the page's latest change.
+ */
+interface WikiChangeName {
+  readonly path: string
+  readonly pageId: string | undefined
+  readonly at: string | undefined
 }
+
+export interface WikiChangeMethods {
+  readonly changeAt: (name: WikiChangeName) => Effect.Effect<Commit, WikiError>
+  readonly readChange: (
+    input: WikiChangeName & { readonly offset: number }
+  ) => Effect.Effect<WikiChangeRead, WikiError>
+}
+
+const touches =
+  (name: WikiChangeName) =>
+  (change: ResourceChange): boolean =>
+    name.pageId === undefined
+      ? change.before?.path === name.path || change.after?.path === name.path
+      : (change.after ?? change.before)?.resourceId === name.pageId
 
 const pathOf = (change: ResourceChange): string => (change.after ?? change.before)?.path ?? ""
 
@@ -59,40 +78,36 @@ const sameText = (change: ResourceChange): boolean =>
 export const makeWikiChangeMethods = (
   repository: ManagedFileRepositoryShape
 ): WikiChangeMethods => {
-  const readChange = Effect.fn("Wiki.readChange")(function* (input: {
-    readonly revision: string
-    readonly path: string | undefined
-    readonly offset: number
-  }) {
-    const commit = yield* repository
-      .inspectCommit(input.revision)
-      .pipe(
-        Effect.mapError((cause) =>
-          cause._tag === "RevisionConflictError"
-            ? wikiError(
-                "history",
-                "not_found",
-                `No saved Memory change has revision ${input.revision}.`
-              )
-            : mapRevisionError("history")(cause)
-        )
-      )
+  const changeAt = Effect.fn("Wiki.changeAt")(function* (name: WikiChangeName) {
+    const until = name.at === undefined ? undefined : Date.parse(name.at)
+    if (until !== undefined && Number.isNaN(until))
+      return yield* wikiError("history", "invalid", `${name.at ?? ""} is not a time.`)
+    const commits = yield* repository
+      .history({ resourceId: name.pageId ?? null, limit: CHANGE_SEARCH_COMMITS })
+      .pipe(Effect.mapError(mapRevisionError("history", name.pageId)))
+    const ofPage = commits.filter((commit) => commit.changes.some(touches(name)))
+    // A time copied from a listing names that change exactly, even when two
+    // changes were saved within one millisecond.
+    const found =
+      ofPage.find((commit) => commit.timestamp === name.at) ??
+      ofPage.find((commit) => until === undefined || Date.parse(commit.timestamp) <= until)
+    if (found !== undefined) return found
+    const oldest = ofPage.at(-1)
+    return yield* wikiError(
+      "history",
+      "not_found",
+      oldest === undefined
+        ? `No saved Memory change to ${name.path} was found.`
+        : `${name.path} had no saved change at or before ${name.at ?? ""}; its oldest change found was saved ${oldest.timestamp}.`
+    )
+  })
+
+  const readChange = Effect.fn("Wiki.readChange")(function* (
+    input: WikiChangeName & { readonly offset: number }
+  ) {
+    const commit = yield* changeAt(input)
     const changes = commit.changes
-    const start =
-      input.path === undefined
-        ? 0
-        : changes.findIndex(
-            (change) =>
-              pathOf(change) === input.path ||
-              change.before?.path === input.path ||
-              change.after?.path === input.path
-          )
-    if (start < 0)
-      return yield* wikiError(
-        "history",
-        "invalid",
-        `Revision ${input.revision} did not change ${input.path ?? ""}.`
-      )
+    const start = changes.findIndex(touches(input))
     const diffs: Array<WikiChangeDiff> = []
     let budget = CHANGE_DIFF_CHARS
     let next: WikiChangeCursor | undefined
@@ -134,7 +149,6 @@ export const makeWikiChangeMethods = (
       budget -= page.endOffset - page.offset
     }
     return {
-      revision: commit.commitId,
       timestamp: commit.timestamp,
       actor: commit.actor,
       source: wikiOriginSource(decodeWikiOrigin(commit.origin)),
@@ -149,5 +163,5 @@ export const makeWikiChangeMethods = (
       next
     }
   })
-  return { readChange }
+  return { changeAt, readChange }
 }

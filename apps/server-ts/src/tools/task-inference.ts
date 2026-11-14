@@ -1,6 +1,7 @@
 import { quoted } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { ChatActionRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
+import type { TaskProposalRetirementSource } from "@arden-hq/protocol/proposals"
 import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
 import { CreateSpaceTaskInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema, Struct } from "effect"
@@ -19,6 +20,7 @@ import {
   TASK_TEXT_DESCRIPTION
 } from "./task-wording.js"
 import { loadSnapshot } from "./wiki.js"
+import { observedKey, type ServerRunContext } from "./run-context.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
 
@@ -36,40 +38,35 @@ const evidence = Schema.Union([
     session_id: Schema.NonEmptyString.annotate({ description: "Exact source Chat session id." }),
     turn_id: Schema.NonEmptyString.annotate({
       description: "Recorded physical turn id, not the worker Run id."
-    }),
-    revision: Schema.NonEmptyString.annotate({ description: "The exact turn id read as evidence." })
+    })
   }),
   Schema.Struct({
     kind: Schema.Literal("memory").annotate({
-      description: "Evidence from an observed Memory page."
+      description:
+        "Evidence from a Memory page this Run read; an unread or since-changed page is refused."
     }),
     page_ref: Schema.NonEmptyString.annotate({
       description: "Exact page_ref returned by wiki_read_page or space_page_read."
-    }),
-    revision: Schema.NonEmptyString.annotate({
-      description:
-        "Exact revision returned by the page read in this Run; stale or unread versions are refused."
     })
   }),
   Schema.Struct({
     kind: Schema.Literal("task").annotate({
       description:
-        "For new proposals, only the Task this worker runs. For retirement, any live or done Task that covers the outcome."
+        "For new proposals, only the Task this worker runs. For retirement, any live or done Task that covers the outcome. Read it in this Run with task_get or space_board_read first."
     }),
-    item_id: Schema.NonEmptyString.annotate({ description: "That Task's exact item_id." }),
-    revision: Schema.NonEmptyString.annotate({
-      description: "Exact history_revision from task_get or space_board_read."
-    })
+    item_id: Schema.NonEmptyString.annotate({ description: "That Task's exact item_id." })
   }),
   Schema.Struct({
     kind: Schema.Literal("connection_item").annotate({
       description:
         "Evidence from a mail or GitHub item. To create, one routed to this Space, listed under Routed connection items. To retire, any stored item, found with connection_items_state."
     }),
-    item_id: Schema.NonEmptyString.annotate({ description: "Exact item_id from that list." }),
-    revision: Schema.NonEmptyString.annotate({ description: "The same item_id again." })
-  })
+    item_id: Schema.NonEmptyString.annotate({ description: "Exact item_id from that list." })
+  }),
+  ChatActionRetirementSourceSchema.mapFields(Struct.omit(["revision"]))
 ])
+type CitedSource = typeof evidence.Type
+
 const taskInput = CreateSpaceTaskInputSchema.mapFields((fields) => ({
   key: fields.key.pipe(
     Schema.annotateEncoded({
@@ -159,7 +156,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
   defineServerTool({
     name: "space_inference_review",
     description:
-      "Read Tasks, open proposals, Chat activity and durable rejections before inferring work. Never duplicate an open proposal or completed Chat outcome. Compare semantic overlap and reuse existing Tasks. A fact, preference or one-off question is not a Task. A recent trigger is not fresh evidence: inspect the actual changed Chat turn or Memory page. Use the returned snapshot for one admission; re-read after any change.",
+      "Read Tasks, open proposals, Chat activity and durable rejections before inferring work. Never duplicate an open proposal or completed Chat outcome. Compare semantic overlap and reuse existing Tasks. A fact, preference or one-off question is not a Task. A recent trigger is not fresh evidence: inspect the actual changed Chat turn or Memory page. task_propose is checked against this Run's latest review: call this again after a proposal succeeds or is refused because the Space changed.",
     parameters: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Never)),
     metadata: {
       effect: "none",
@@ -174,39 +171,37 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     },
     execute: async (_input, ctx) => {
       const spaceId = await runSpace(services, ctx.run.sessionId, ctx.signal)
-      if (spaceId === undefined)
+      if (spaceId === undefined) {
+        ctx.run.observations.observe(observedKey.inferenceReview(spaceId), HOME_REVIEW)
         return {
-          result: `This run works in no Space, so a proposal goes to Home, where the user picks its Space. There are no Space Tasks to reuse. Pass snapshot "${HOME_REVIEW}" to task_propose.`,
+          result:
+            "This run works in no Space, so a proposal goes to Home, where the user picks its Space. There are no Space Tasks to reuse.",
           preview: "No Space: proposals go to Home",
-          data: { tasks: [], rejections: [], snapshot: HOME_REVIEW }
+          data: { tasks: [], rejections: [] }
         }
-      const review = await Effect.runPromise(
+      }
+      const { snapshot, ...review } = await Effect.runPromise(
         services.work.inferenceReview(spaceId).pipe(Effect.mapError((cause) => failure(cause))),
         { signal: ctx.signal }
       )
+      ctx.run.observations.observe(observedKey.inferenceReview(spaceId), snapshot)
       return {
         result: JSON.stringify(review),
         preview: `${review.tasks.length} Tasks, ${review.rejections.length} rejected inferences`,
-        data: { ...review }
+        data: review
       }
     }
   }),
   defineServerTool({
     name: "task_propose",
-    description: `Propose one Task for the user to start, on this run's Space while it suggests tasks: from its Space review, a worker of one of its Tasks, or an Automation working in it. Background runs never start Tasks; the user's Start does. Read space_inference_review first. A Space review chooses revise with the exact proposal_id and expected_revision when an open proposal still names the same outcome but needs current wording or evidence; cite newly observed sources, and preserve the proposal identity. Revise does not start a Task. Choose retire with the exact proposal_id and expected_revision when a settled record shows an open proposal's outcome is done; retirement is not a user rejection. Retirement may cite any record Arden holds, on any Space or none: a Chat's latest finished turn (find it with session_search_transcripts, scope all_spaces), an exact applied action (session_read with view actions, copy its chat_action source), a Memory page read at its current revision, a live or done Task, or a stored mail or GitHub item (connection_items_state, connection_item_read). Retire only on a record showing the outcome is done; a mention, draft, plan, or run that ended with no clear result is not proof. Unsure: keep the proposal. Do not duplicate work already being performed in Chat or already completed there. Choose reuse with the canonical Task item_id whenever a live or done Task already owns the outcome; a cancelled Task owns nothing, and a Task that does not own the outcome is never a reuse target; it returns the exact Task deep link and performs no mutation. Choose create only for a distinct outcome anchored by a Chat or Memory page owned by the current Space, a connection item routed to it, or the Task this worker works on; an item whose thread is already an offer, a Task or a skipped offer is refused, and so is any new proposal while the Space has three open ones. Linked or foreign evidence may support existing work but cannot create work here. A run that works in no Space (an Automation, or a worker of a Task without one) proposes to Home instead, where the user picks the Space: it creates only, citing a turn of its own chat, a Memory page it read, or its own Task. ${
+    description: `Propose one Task for the user to start, on this run's Space while it suggests tasks: from its Space review, a worker of one of its Tasks, or an Automation working in it. Background runs never start Tasks; the user's Start does. Read space_inference_review first. A Space review chooses revise with the exact proposal_id and expected_revision when an open proposal still names the same outcome but needs current wording or evidence; cite newly observed sources, and preserve the proposal identity. Revise does not start a Task. Choose retire with the exact proposal_id and expected_revision when a settled record shows an open proposal's outcome is done; retirement is not a user rejection. Retirement may cite any record Arden holds, on any Space or none: a Chat's latest finished turn (find it with session_search_transcripts, scope all_spaces), an exact applied action (session_read with view actions, copy its chat_action source), a Memory page read in this Run, a live or done Task, or a stored mail or GitHub item (connection_items_state, connection_item_read). Retire only on a record showing the outcome is done; a mention, draft, plan, or run that ended with no clear result is not proof. Unsure: keep the proposal. Do not duplicate work already being performed in Chat or already completed there. Choose reuse with the canonical Task item_id whenever a live or done Task already owns the outcome; a cancelled Task owns nothing, and a Task that does not own the outcome is never a reuse target; it returns the exact Task deep link and performs no mutation. Choose create only for a distinct outcome anchored by a Chat or Memory page owned by the current Space, a connection item routed to it, or the Task this worker works on; an item whose thread is already an offer, a Task or a skipped offer is refused, and so is any new proposal while the Space has three open ones. Linked or foreign evidence may support existing work but cannot create work here. A run that works in no Space (an Automation, or a worker of a Task without one) proposes to Home instead, where the user picks the Space: it creates only, citing a turn of its own chat, a Memory page it read, or its own Task. ${
       TASK_SPACE_RULE
-    } Never create a consolidation, cleanup, or replacement Task for overlap. The user's own chat starts Tasks with task_start instead. Cite observed evidence that fully defines the outcome. A reply that only answers, rejects or acknowledges prior conversation is not an outcome. Ambiguity or stale evidence should remain a suggestion. When nothing qualifies, do not call this tool. Admission rechecks ownership, the review snapshot, policy and rejected evidence; a refused call changes nothing.`,
+    } Never create a consolidation, cleanup, or replacement Task for overlap. The user's own chat starts Tasks with task_start instead. Cite observed evidence that fully defines the outcome. A reply that only answers, rejects or acknowledges prior conversation is not an outcome. Ambiguity or stale evidence should remain a suggestion. When nothing qualifies, do not call this tool. Admission rechecks ownership, that the Space is still as this Run's space_inference_review showed it, policy and rejected evidence; a refused call changes nothing.`,
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
-        snapshot: Schema.NonEmptyString.annotate({
+        sources: Schema.NonEmptyArray(evidence).annotate({
           description:
-            "Required for every decision. The exact snapshot from the latest space_inference_review. Re-read after a conflict or successful creation."
-        }),
-        sources: Schema.NonEmptyArray(
-          Schema.Union([evidence, ChatActionRetirementSourceSchema])
-        ).annotate({
-          description:
-            "Required for every decision. The evidence for it: observed Chat turns, current Memory page revisions, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat, Memory page inside the current Space boundary, connection item routed to this Space, or this worker's own Task. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
+            "Required for every decision. The evidence for it: observed Chat turns, Memory pages read in this Run, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat, Memory page inside the current Space boundary, connection item routed to this Space, or this worker's own Task. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
         }),
         decision: inferenceDecision
       })
@@ -226,40 +221,28 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     },
     execute: async (input, ctx, effects) => {
       const spaceId = await runSpace(services, ctx.run.sessionId, ctx.signal)
-      const ordinarySources = input.sources.filter((source) => source.kind !== "chat_action")
-      if (input.decision.kind !== "retire" && ordinarySources.length !== input.sources.length)
+      const reviewed = ctx.run.observations.observed(observedKey.inferenceReview(spaceId))
+      if (reviewed === undefined)
+        throw failure({
+          reason: "conflict",
+          message:
+            "Call space_inference_review first; a proposal is checked against what that review showed"
+        })
+      if (
+        input.decision.kind !== "retire" &&
+        input.sources.some((source) => source.kind === "chat_action")
+      )
         throw refusal("Action evidence is for proposal retirement only")
-      if (ordinarySources.some((source) => source.kind === "memory")) {
-        const snapshot = await loadSnapshot(services.wiki, ctx.signal)
-        for (const source of input.sources) {
-          if (source.kind !== "memory") continue
-          const page = snapshot.pages.find(
-            (record) => record.page.pageId === source.page_ref && record.page.lifecycle === "active"
-          )
-          if (
-            !page ||
-            source.revision !== page.resource.versionId ||
-            ctx.run.observations.observed(page.page.pageId) !== source.revision
-          ) {
-            throw failure({
-              reason: "conflict",
-              message: "Read the current Memory page first and cite its exact page_ref and revision"
-            })
-          }
-        }
-        if (
-          (input.decision.kind === "create" || input.decision.kind === "revise") &&
-          spaceId !== undefined
-        ) {
-          await requireSpaceOwnershipAnchor(
-            services,
-            spaceId,
-            ordinarySources,
-            snapshot,
-            ctx.signal
-          )
-        }
-      }
+      const memoryCited = input.sources.some((source) => source.kind === "memory")
+      const snapshot = memoryCited ? await loadSnapshot(services.wiki, ctx.signal) : undefined
+      const sources = input.sources.map((source) => observedSource(ctx.run, source, snapshot))
+      const ordinarySources = sources.filter((source) => source.kind !== "chat_action")
+      if (
+        snapshot !== undefined &&
+        (input.decision.kind === "create" || input.decision.kind === "revise") &&
+        spaceId !== undefined
+      )
+        await requireSpaceOwnershipAnchor(services, spaceId, ordinarySources, snapshot, ctx.signal)
       if (input.decision.kind === "retire") {
         if (spaceId === undefined) throw refusal("Retirement requires a Space review")
         const proposal = await recordApplied(
@@ -272,9 +255,9 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
                 toolCallId: ctx.toolCallId,
                 proposalId: input.decision.proposal_id,
                 expectedRevision: input.decision.expected_revision,
-                snapshot: input.snapshot,
+                snapshot: reviewed,
                 reason: input.decision.reason,
-                sources: input.sources
+                sources
               })
               .pipe(Effect.mapError((cause) => failure(cause))),
             { signal: ctx.signal }
@@ -297,7 +280,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
           services.work.inferenceReview(spaceId).pipe(Effect.mapError((cause) => failure(cause))),
           { signal: ctx.signal }
         )
-        if (review.snapshot !== input.snapshot)
+        if (review.snapshot !== reviewed)
           throw failure({
             reason: "conflict",
             message: "Space work changed since review; inspect the new Tasks before deciding again"
@@ -335,7 +318,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
                 input: decision.task,
                 capture: { basis: "inferred", reason: decision.reason },
                 sources: ordinarySources,
-                inferenceSnapshot: input.snapshot
+                inferenceSnapshot: reviewed
               })
               .pipe(Effect.mapError((cause) => failure(cause))),
             { signal: ctx.signal }
@@ -356,7 +339,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
               runId: ctx.run.runId,
               sessionId: ctx.run.sessionId,
               toolCallId: ctx.toolCallId,
-              inferenceSnapshot: input.snapshot,
+              inferenceSnapshot: reviewed,
               input: input.decision.task,
               capture: { basis: "inferred", reason: input.decision.reason },
               sources: ordinarySources
@@ -400,6 +383,50 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     }
   })
 ]
+
+const unread = (message: string): ToolExecutionError => failure({ reason: "conflict", message })
+
+// Fills in the version of each cited record from what this run read, so the
+// store still checks "unchanged since read" and the model passes no version.
+const observedSource = (
+  run: ServerRunContext,
+  source: CitedSource,
+  snapshot: Snapshot | undefined
+): TaskProposalRetirementSource => {
+  switch (source.kind) {
+    case "chat":
+      return { ...source, revision: source.turn_id }
+    case "connection_item":
+      return { ...source, revision: source.item_id }
+    case "memory": {
+      const page = snapshot?.pages.find(
+        (record) => record.page.pageId === source.page_ref && record.page.lifecycle === "active"
+      )
+      const revision = run.observations.observed(source.page_ref)
+      if (page === undefined || revision !== page.resource.versionId)
+        throw unread("Read the current Memory page in this Run first, then cite its exact page_ref")
+      return { ...source, page_ref: page.page.pageId, revision }
+    }
+    case "task": {
+      const revision = run.observations.observed(observedKey.task(source.item_id))
+      if (revision === undefined)
+        throw unread(
+          "Read the Task in this Run with task_get or space_board_read first, then cite its item_id"
+        )
+      return { ...source, revision }
+    }
+    case "chat_action": {
+      const revision = run.observations.observed(
+        observedKey.chatAction(source.run_id, source.tool_call_id)
+      )
+      if (revision === undefined)
+        throw unread(
+          "Read the action in this Run with session_read (view actions) first, then copy its chat_action source"
+        )
+      return { ...source, revision }
+    }
+  }
+}
 
 const namedLink = (label: string, url: string): string =>
   `[${label.replace(/[\\[\]]/g, "\\$&").replace(/[\r\n]+/g, " ")}](${url})`

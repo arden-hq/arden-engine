@@ -12,6 +12,7 @@ import {
   type RunEventsPage
 } from "./event-batch.js"
 import { iso } from "../../runtime/clock.js"
+import { readChangeArgs } from "../../lib/memory-link.js"
 
 export const SHOWN_EVENTS = 25
 
@@ -233,6 +234,7 @@ const describe = (event: BatchedEvent): EventLines => {
       const paths = readTexts(event.context, "change.paths")
       const author = text("change.source")
       const [first] = paths
+      const savedAt = text("change.saved_at")
       return {
         what: "Memory changed",
         at: queuedAt,
@@ -243,11 +245,17 @@ const describe = (event: BatchedEvent): EventLines => {
           "."
         ].join(""),
         excerpt: [],
-        followUps: [
-          call("wiki_read_change", `revision=${jsonText(event.event_key)}`),
-          ...(first === undefined ? [] : [call("wiki_read_page", `path=${jsonText(first)}`)])
-        ],
-        note: "The first call shows what this change did; the second shows the page as it is now."
+        followUps:
+          first === undefined
+            ? []
+            : [
+                call("wiki_read_change", readChangeArgs(first, savedAt)),
+                call("wiki_read_page", `path=${jsonText(first)}`)
+              ],
+        note:
+          first === undefined
+            ? undefined
+            : "The first call shows what this change did; the second shows the page as it is now."
       }
     }
     case "event_approaching":

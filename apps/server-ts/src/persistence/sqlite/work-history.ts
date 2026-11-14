@@ -17,7 +17,7 @@ export const assertCurrentTaskRevision = Effect.fn("WorkHistory.assertCurrentTas
     if (rows.length === 0)
       return yield* workError(
         "conflict",
-        "Task evidence changed or has no baseline; read the Task's history_revision again"
+        "Task evidence changed or has no baseline; read the Task again"
       )
   }
 )

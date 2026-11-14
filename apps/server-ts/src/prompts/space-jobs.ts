@@ -8,6 +8,7 @@ import {
   WORK_TASK_BODY_MAX_CHARS
 } from "@arden-hq/protocol/spaces/work"
 import { cutText, foldSpace } from "@arden-hq/std/text"
+import { memoryHref } from "../lib/memory-link.js"
 import { joinPromptSections, renderPromptSection } from "./format.js"
 import { renderTaskStateSection } from "./task-state.js"
 import { PROMPT_TEXT } from "./catalog.js"
@@ -40,12 +41,7 @@ const taskLink = (text: string, itemId: string): string =>
   appLink(boundedLine(text, TASK_TEXT_LIMIT), `arden:task/${encodeURIComponent(itemId)}`)
 
 const memoryLink = (pagePath: string | undefined): string =>
-  pagePath === undefined
-    ? "No attached Memory page"
-    : appLink(
-        "Space Memory",
-        `arden:memory/${pagePath.split("/").map(encodeURIComponent).join("/")}`
-      )
+  pagePath === undefined ? "No attached Memory page" : appLink("Space Memory", memoryHref(pagePath))
 
 const blockedState = (blocked: boolean, waitingOn: string | undefined): string =>
   blocked ? jsonLine(waitingOn ?? "yes", STATE_FIELD_LIMIT) : "no"
@@ -235,7 +231,7 @@ const renderTaskWorkerPrompt = (task: TaskWorkerSnapshot | undefined): string =>
     renderPromptSection(
       "Operating rules",
       [
-        "- Change only this Task. Finish it with `task_finish` when its outcome is achieved; cancel it yourself the same way when it duplicates another Task or no distinct outcome remains. Wait on something external, or book the next check, with `task_wait`. Do not create unrelated Work: you cannot start Tasks. When the work shows a distinct new outcome for the user, propose it with `task_propose` (read `space_inference_review` first; cite this Task) if the Space suggests tasks, or to Home when the Task has no Space; otherwise name it in your result.",
+        "- Change only this Task. Finish it with `task_finish` when its outcome is achieved; cancel it yourself the same way when it duplicates another Task or no distinct outcome remains. Wait on something external, or book the next check, with `task_wait`. Do not create unrelated Work: you cannot start Tasks. When the work shows a distinct new outcome for the user, propose it with `task_propose` (read `space_inference_review` and this Task with `task_get` first; cite this Task) if the Space suggests tasks, or to Home when the Task has no Space; otherwise name it in your result.",
         "- If you need the user, call `ask_user`. Offer only choices supported by Task evidence; if the objective is missing, ask for it or offer hold without guessing possible objectives. Preserve any link the question shows in continuation_context for reminders. End while waiting. Answers resume a new attempt under current authority.",
         "- Before the attempt ends, save the Task state record (the last section below) in the call that ends it (`task_wait` or `task_update`). Keep it separate from the short result. If you leave this Task open, set next_attempt_at based on the deadline and reason for the check; do not schedule beyond a deadline when earlier action is needed. If no check is needed, say why.",
         "- Otherwise make concrete progress and update canonical Task state."

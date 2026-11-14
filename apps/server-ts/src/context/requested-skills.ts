@@ -24,7 +24,7 @@ export const requestedSkillsContext = Effect.fn("Context.requestedSkills")(funct
         text: renderPromptSection(
           `Requested Skill /${loaded.name}`,
           [
-            `Loaded from ${block.metadata.source}; SHA-256 ${block.metadata.source_sha256}. These instructions are already available; do not call skill again for this content. Apply them according to the user's request.`,
+            `Loaded from ${block.metadata.source}. These instructions are already available; do not call skill again to follow them. Apply them according to the user's request.`,
             block.content
           ].join("\n\n")
         ),

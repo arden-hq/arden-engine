@@ -47,6 +47,7 @@ const automationWikiChangeSink = (
             : wikiChangedEvent({
                 paths,
                 revision: change.revision,
+                savedAt: change.savedAt,
                 source: wikiOriginSource(change.origin),
                 hasSpacePage: change.hasSpacePage,
                 producedBy: producingAutomation(change.origin),

@@ -1,12 +1,10 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
+import { memoryHref } from "../lib/memory-link.js"
 import type { PageRecord } from "../wiki/snapshot.js"
 import type { ServerRunContext } from "./run-context.js"
 import { appliedReceipt, type CallIdentity } from "./call-receipt.js"
 import { passage } from "./source-passage.js"
-
-const memoryHref = (path: string): string =>
-  `arden:memory/${path.split("/").map(encodeURIComponent).join("/")}`
 
 export const MAX_PAGE_SOURCES = 50
 

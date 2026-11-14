@@ -121,38 +121,20 @@ const groupProblems = (tool: ServerTool): ReadonlyArray<string> => {
 // The model names things by link or slug, never by a hash. It cannot copy 64
 // random characters reliably: in one month wiki_read_change failed on 36% of
 // its calls and task_propose lost offers to a mistyped snapshot. A version
-// check ("did this change since I read it") belongs to the server, per run.
+// check ("did this change since I read it") belongs to the server, per run:
+// the tool that shows a thing records its version in ctx.run.observations and
+// the tool that changes or cites it reads the version back from there.
 // This finds a hash input by its name or description, so a hash hidden in a
 // plainly named field still passes; AGENTS.md states the whole rule.
 const HASH_NAME =
   /^(snapshot|fingerprint|etag|checksum|digest|sha256|hash|revision|revision_ref)$|_(hash|sha256|fingerprint|digest|checksum|etag)$/
 const HASH_TEXT = /\b(hash|sha-?256|fingerprint|digest|checksum|etag)\b/i
 
-// Inputs that broke the rule when it was written (2026-11-14). Remove an entry
-// when its tool stops taking the hash. Never add one.
-const KNOWN_HASH_INPUTS: ReadonlySet<string> = new Set([
-  "skill_update.expected_sha256",
-  "task_propose.snapshot",
-  "task_propose.sources.revision",
-  "wiki_list_collections.revision",
-  "wiki_read_change.revision",
-  "wiki_restore_page.revision_ref"
-])
-
-const hashInputProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
-  const found = new Set(tools.flatMap(hashInputs))
-  return [
-    ...[...found]
-      .filter((input) => !KNOWN_HASH_INPUTS.has(input))
-      .map(
-        (input) =>
-          `${input} asks the model for a hash; take a link or slug and keep the version check on the server`
-      ),
-    ...[...KNOWN_HASH_INPUTS]
-      .filter((input) => !found.has(input))
-      .map((input) => `KNOWN_HASH_INPUTS has ${input}, which no longer takes a hash; remove it`)
-  ]
-}
+const hashInputProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> =>
+  [...new Set(tools.flatMap(hashInputs))].map(
+    (input) =>
+      `${input} asks the model for a hash; take a link or slug and keep the version check on the run (ctx.run.observations)`
+  )
 
 const hashInputs = (tool: ServerTool): ReadonlyArray<string> =>
   hashInputPaths(tool.definition.name, tool.entry(toolParametersJsonSchema).parameters)
