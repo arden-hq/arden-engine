@@ -81,6 +81,8 @@ export interface TaskProposal extends JsonRecord {
   readonly retirement: TaskProposalRetirement | null
   /** The Task Start created; null before, or once that Task is gone. */
   readonly item_id: string | null
+  /** An open offer the owner put off with Later stays out of sight until then; null otherwise. */
+  readonly put_off_until: string | null
   readonly created_at: string
   readonly updated_at: string
   readonly settled_at: string | null
@@ -99,7 +101,8 @@ export type TaskProposalScope =
 export interface ResolveTaskProposalInput {
   readonly expected_revision: number
   readonly client_id: string
-  readonly decision: "accept" | "reject"
+  /** `later` keeps an open offer but puts it out of sight for a while; it settles nothing. */
+  readonly decision: "accept" | "reject" | "later"
   /** The chat it was accepted in, which then hears how the Task goes. */
   readonly session_id?: string
   /** The Space Start puts the Task on: required on Home; a Space's own proposal
@@ -109,7 +112,7 @@ export interface ResolveTaskProposalInput {
 
 export interface ResolveTaskProposalResponse extends JsonRecord {
   readonly proposal: TaskProposal
-  /** The Task Start created; null for a Skip, or a Start whose Task is gone. */
+  /** The Task Start created; null for a Skip or a Later, or a Start whose Task is gone. */
   readonly task: SpaceTask | null
 }
 

@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   citedTurnFinished,
+  HOME_OFFER_SOURCES,
   OFFER_NEEDS_ANCHOR,
   offerAnchorRefusal,
   storedOfferStands
@@ -22,16 +23,29 @@ describe("a cited chat turn", () => {
 })
 
 describe("an offer's anchor", () => {
-  it("is a chat turn, a mail item or the worker's own Task", () => {
-    expect(offerAnchorRefusal([{ kind: "chat" }])).toBeUndefined()
-    expect(offerAnchorRefusal([{ kind: "connection_item" }, { kind: "memory" }])).toBeUndefined()
-    expect(offerAnchorRefusal([{ kind: "task" }])).toBeUndefined()
+  it("in a Space is a chat turn, a mail item or the worker's own Task", () => {
+    expect(offerAnchorRefusal("space", [{ kind: "chat" }])).toBeUndefined()
+    expect(
+      offerAnchorRefusal("space", [{ kind: "connection_item" }, { kind: "memory" }])
+    ).toBeUndefined()
+    expect(offerAnchorRefusal("space", [{ kind: "task" }])).toBeUndefined()
   })
 
-  it("is never a Memory page alone, and the refusal says what to cite without a hash", () => {
-    expect(offerAnchorRefusal([{ kind: "memory" }, { kind: "memory" }])).toBe(OFFER_NEEDS_ANCHOR)
+  it("at Home is the run's own chat turn or its own Task, never a mail item", () => {
+    expect(offerAnchorRefusal("home", [{ kind: "chat" }, { kind: "memory" }])).toBeUndefined()
+    expect(offerAnchorRefusal("home", [{ kind: "task" }])).toBeUndefined()
+    expect(offerAnchorRefusal("home", [{ kind: "connection_item" }])).toBe(HOME_OFFER_SOURCES)
+  })
+
+  it("is never a Memory page alone, and each refusal says what to cite without a hash", () => {
+    expect(offerAnchorRefusal("space", [{ kind: "memory" }, { kind: "memory" }])).toBe(
+      OFFER_NEEDS_ANCHOR
+    )
+    expect(offerAnchorRefusal("home", [{ kind: "memory" }])).toBe(HOME_OFFER_SOURCES)
     expect(OFFER_NEEDS_ANCHOR).toMatch(/chat turn or the mail item/u)
-    expect(OFFER_NEEDS_ANCHOR).not.toMatch(/[0-9a-f]{16}/u)
+    expect(HOME_OFFER_SOURCES).toMatch(/own chat turn or its own Task/u)
+    for (const refusal of [OFFER_NEEDS_ANCHOR, HOME_OFFER_SOURCES])
+      expect(refusal).not.toMatch(/[0-9a-f]{16}/u)
   })
 })
 
@@ -72,5 +86,24 @@ it("leaves no reader or writer of the dropped rejections table", () => {
   const offenders = readdirSync(SRC, { recursive: true, encoding: "utf8" })
     .filter((name) => name.endsWith(".ts") && !name.startsWith(join("persistence", "migrations")))
     .filter((name) => readFileSync(join(SRC, name), "utf8").includes("task_inference_rejections"))
+  expect(offenders).toEqual([])
+})
+
+// One owner of "which chat turn an offer may cite": `citedTurnFinished`. The deleted rule that
+// only the chat's latest turn counts may not come back in the text the worker reads either.
+it("leaves no prompt or tool text that limits chat evidence to the latest turn", () => {
+  const SRC = join(import.meta.dirname, "..", "src")
+  const offenders = ["prompts", "tools", "automations"]
+    .flatMap((folder) =>
+      readdirSync(join(SRC, folder), { recursive: true, encoding: "utf8" }).map((name) =>
+        join(folder, name)
+      )
+    )
+    .filter((name) => /\.(ts|md)$/u.test(name))
+    .filter((name) =>
+      /(latest|last) (completed |settled |finished )?turn/iu.test(
+        readFileSync(join(SRC, name), "utf8")
+      )
+    )
   expect(offenders).toEqual([])
 })

@@ -81,6 +81,7 @@ describe("task_propose after a review", () => {
     status: "offered",
     retirement: null,
     item_id: null,
+    put_off_until: null,
     created_at: "2026-11-04T10:00:00.000Z",
     updated_at: "2026-11-04T10:00:00.000Z",
     settled_at: null

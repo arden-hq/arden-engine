@@ -2,9 +2,12 @@ import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
 /** `task_proposals.status` gains `expired`: an offer nobody answered in time. It is settled like a
- * retirement, with no settlement decision. SQLite cannot change a CHECK in place, so the table is
- * rebuilt with every row copied unchanged, and its indexes and history triggers are made again.
- * No row changes status here; the server's sweep expires overdue offers once it runs. */
+ * retirement, with no settlement decision. Two columns hold an open offer's expiry clock:
+ * `put_off_until`, set by the owner's Later, and `waiting_since`, the first time the owner was
+ * around after it was last offered, revised or put off. SQLite cannot change a CHECK in place, so
+ * the table is rebuilt with every row copied unchanged and both clocks empty, and its indexes and
+ * history triggers are made again. No row changes status here, and no open offer has started
+ * waiting: the sweep starts each clock when the owner is next around. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE task_proposals_next (
       proposal_id TEXT PRIMARY KEY CHECK(length(proposal_id) > 0),
@@ -37,6 +40,8 @@ const up = (database: DatabaseSync): void => {
       updated_at TEXT NOT NULL,
       settled_at TEXT,
       retirement_json TEXT CHECK(retirement_json IS NULL OR (json_valid(retirement_json) AND json_type(retirement_json) = 'object')),
+      put_off_until TEXT,
+      waiting_since TEXT,
       CHECK((status = 'retired') = (retirement_json IS NOT NULL)),
       CHECK(status != 'retired' OR (settlement_client_id IS NULL AND settlement_decision IS NULL AND settled_at IS NOT NULL)),
       CHECK(status != 'expired' OR (settlement_client_id IS NULL AND settlement_decision IS NULL AND settled_at IS NOT NULL)),

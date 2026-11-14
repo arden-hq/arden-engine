@@ -32,8 +32,13 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { routeItem } from "./connection-item-route.js"
 import { nextId, type Writer } from "./deps.js"
 import { decodeJson } from "./json.js"
-import { expireOverdueOffers, openHeldOnHome } from "./proposal-room.js"
-import { storedOfferStands } from "./offer-rules.js"
+import {
+  expireOverdueOffers,
+  openHeldOnHome,
+  putOfferOff,
+  restartOfferWait
+} from "./proposal-room.js"
+import { KEY_CLOSING_STATUSES, storedOfferStands } from "./offer-rules.js"
 import { homeTaskBody, writeHomeSuggestion } from "./task-proposal-home.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
@@ -78,6 +83,8 @@ export interface ProposalRow {
   readonly created_at: string
   readonly updated_at: string
   readonly settled_at: string | null
+  readonly put_off_until: string | null
+  readonly waiting_since: string | null
 }
 
 const SignalSnapshotSchema = Schema.Struct({
@@ -184,6 +191,7 @@ export const makeTaskProposalStore = (options: {
       status: row.status,
       retirement,
       item_id: row.item_id,
+      put_off_until: row.status === "offered" ? row.put_off_until : null,
       created_at: row.created_at,
       updated_at: row.updated_at,
       settled_at: row.settled_at
@@ -300,7 +308,10 @@ export const makeTaskProposalStore = (options: {
             ProposalRow & { readonly retired_evidence_key: string | null }
           >`SELECT *,
             json_extract(retirement_json, '$.evidence_revision_key') AS retired_evidence_key FROM task_proposals
-          WHERE proposal_id = ${proposalId}`
+          WHERE proposal_id = ${proposalId}
+            OR (place = ${place} AND space_id IS ${request.spaceId ?? null}
+              AND stable_key = ${input.key} AND status IN ${sql.in(KEY_CLOSING_STATUSES)})
+          ORDER BY status IN ${sql.in(KEY_CLOSING_STATUSES)} DESC, settled_at DESC LIMIT 1`
           const existing = existingRows[0]
           if (
             existing !== undefined &&
@@ -385,7 +396,7 @@ export const makeTaskProposalStore = (options: {
           settlement_decision = NULL,
           settlement_task_json = NULL,
           updated_at = excluded.updated_at,
-          settled_at = NULL, retirement_json = NULL`
+          settled_at = NULL, retirement_json = NULL, ${restartOfferWait}`
           const row = yield* read(proposalId)
           const proposal = yield* project(row)
           yield* changed(row)
@@ -597,7 +608,8 @@ export const makeTaskProposalStore = (options: {
       }).pipe(
         Effect.mapError((cause) => failure("invalid", "Invalid Task proposal decision", cause))
       )
-      const now = DateTime.formatIso(yield* DateTime.now)
+      const at = yield* DateTime.now
+      const now = DateTime.formatIso(at)
       return yield* writer.transact(
         Effect.gen(function* () {
           const row = yield* read(proposalId)
@@ -654,6 +666,12 @@ export const makeTaskProposalStore = (options: {
               kind: "proposal_changed",
               message: "This Task proposal changed; review it again"
             })
+          }
+          if (input.decision === "later") {
+            yield* putOfferOff(sql, proposalId, at)
+            const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
+            yield* changed(row)
+            return { proposal, task: null }
           }
           if (input.decision === "reject") {
             yield* sql`UPDATE task_proposals SET

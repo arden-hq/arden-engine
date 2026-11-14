@@ -7,7 +7,7 @@ import { migrations } from "../src/persistence/migrations/index.js"
 
 const at = "2026-10-01T00:00:00.000Z"
 
-it("migrations 0159 and 0160 drop the dead rejections table and let an offer expire, rows unchanged", () => {
+it("migrations 0159 and 0160 drop the dead rejections table and let an offer expire, rows unchanged and no clock started", () => {
   const database = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false })
   for (const statement of baselineStatements) database.exec(statement)
   for (const migration of migrations.filter(
@@ -32,7 +32,12 @@ it("migrations 0159 and 0160 drop the dead rejections table and let an offer exp
     .prepare("SELECT name FROM sqlite_schema WHERE name = 'task_inference_rejections'")
     .all()
   expect(tables).toEqual([])
-  expect(database.prepare("SELECT * FROM task_proposals ORDER BY seq").all()).toEqual(before)
+  const after = database.prepare("SELECT * FROM task_proposals ORDER BY seq").all()
+  expect(after.map(({ put_off_until, waiting_since, ...row }) => row)).toEqual(before)
+  expect(after.map((row) => [row["put_off_until"], row["waiting_since"]])).toEqual([
+    [null, null],
+    [null, null]
+  ])
   database.exec(`UPDATE task_proposals SET status = 'expired', revision = 1,
     updated_at = '2026-10-04T00:00:00.000Z', settled_at = '2026-10-04T00:00:00.000Z'
     WHERE proposal_id = 'offer_a'`)

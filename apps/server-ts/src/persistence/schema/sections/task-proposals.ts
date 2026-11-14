@@ -44,6 +44,8 @@ export const taskProposalsSchemaSection = {
       updated_at TEXT NOT NULL,
       settled_at TEXT,
       retirement_json TEXT CHECK(retirement_json IS NULL OR (json_valid(retirement_json) AND json_type(retirement_json) = 'object')),
+      put_off_until TEXT,
+      waiting_since TEXT,
       CHECK((status = 'retired') = (retirement_json IS NOT NULL)),
       CHECK(status != 'retired' OR (settlement_client_id IS NULL AND settlement_decision IS NULL AND settled_at IS NOT NULL)),
       CHECK(status != 'expired' OR (settlement_client_id IS NULL AND settlement_decision IS NULL AND settled_at IS NOT NULL)),

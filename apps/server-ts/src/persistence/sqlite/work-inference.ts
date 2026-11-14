@@ -11,7 +11,12 @@ import { decodeJson } from "./json.js"
 import { runMayActSql } from "./run-liveness.js"
 import { openProposalStatusList, refusedProposalStatusList } from "./status-sets.js"
 import { ownerTurnFingerprint, readChatSettled, userChatSql } from "./chat-ownership.js"
-import { citedTurnFinished, offerAnchorRefusal, UNFINISHED_TURN } from "./offer-rules.js"
+import {
+  citedTurnFinished,
+  HOME_OFFER_SOURCES,
+  offerAnchorRefusal,
+  UNFINISHED_TURN
+} from "./offer-rules.js"
 import { assertItemEvidence } from "./connection-item-evidence.js"
 import { assertHomeProposalRoom, assertOpenProposalRoom } from "./proposal-room.js"
 import { sha256Hex } from "@arden-hq/std/hash"
@@ -172,7 +177,7 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
     )
     if (!policy.enabled || !captured.enabled)
       return yield* workError("conflict", "Task inference is disabled for this Space")
-    const unanchored = offerAnchorRefusal(options.sources)
+    const unanchored = offerAnchorRefusal("space", options.sources)
     if (unanchored !== undefined) return yield* workError("invalid", unanchored)
     const review = yield* readInferenceReview({ sql, consistent: (read) => read }, options.spaceId)
     if (review.snapshot !== options.snapshot)
@@ -253,7 +258,7 @@ export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(f
         "conflict",
         "Only an Automation or a Task worker with no Space proposes to Home"
       )
-    const unanchored = offerAnchorRefusal(options.sources)
+    const unanchored = offerAnchorRefusal("home", options.sources)
     if (unanchored !== undefined) return yield* workError("invalid", unanchored)
     for (const source of options.sources) {
       if (source.kind === "chat") {
@@ -274,10 +279,7 @@ export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(f
             "A proposal cites only the Task whose worker is proposing it"
           )
       } else if (source.kind !== "memory") {
-        return yield* workError(
-          "invalid",
-          "With no Space, a proposal cites this run's chat, a Memory page it read, or its own Task"
-        )
+        return yield* workError("invalid", HOME_OFFER_SOURCES)
       }
     }
     yield* assertHomeProposalRoom(sql, options.proposalId)
