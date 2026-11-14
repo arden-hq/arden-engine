@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { join, relative } from "node:path"
 import { DateTime, Effect, Exit } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -380,6 +382,30 @@ it("gives every owner chat a place to start before it can hold a message", async
     positions: [{ session_id: "new-owner-chat", read_seq: -1 }],
     becomesOwner: "refused"
   })
+})
+
+const SOURCE = join(import.meta.dirname, "../src")
+
+const sources = (directory: string): ReadonlyArray<string> =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return sources(path)
+    return entry.name.endsWith(".ts") ? [path] : []
+  })
+
+it("copies messages from one chat into another only where Capture starts after the copies", () => {
+  // A chat that is made an owner chat and then filled with copies starts at its beginning
+  // (migration 0157), so the copies would be read again. The one copier writes the position
+  // in the same step; a copy anywhere else fails here.
+  const copiers = sources(SOURCE)
+    .map((path) => relative(SOURCE, path))
+    .filter((path) => !path.startsWith("persistence/migrations/"))
+    .filter((path) =>
+      /INSERT INTO session_messages\b[^`]*?\bFROM session_messages\b/u.test(
+        readFileSync(join(SOURCE, path), "utf8")
+      )
+    )
+  expect(copiers).toEqual(["persistence/sqlite/memory-capture-positions.ts"])
 })
 
 it("reads a turn that was stopped or failed with nothing after it", async () => {

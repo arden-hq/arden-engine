@@ -19,7 +19,7 @@ import {
   sessionForkOriginMetadata
 } from "./session-fork.js"
 import { appendMessagesInTransaction } from "./chat-transcript.js"
-import { startCaptureAfterCopies } from "./memory-capture-positions.js"
+import { copyIntoOwnerChat } from "./memory-capture-positions.js"
 import { sessionBlockingWorkPredicate } from "./session-blocking-work.js"
 import type { PersistenceDeps } from "./deps.js"
 import {
@@ -401,30 +401,13 @@ export const makeSessionBranch = ({
               storeError("branch", "storage", "Could not create branch session", branchId, cause)
             )
           )
-          yield* sql`
-        INSERT INTO session_messages (
-          session_id, message_id, seq, role, message_json, client_id,
-          created_at, search_text
-        )
-        SELECT ${branchId}, message_id, ROW_NUMBER() OVER (ORDER BY seq) - 1,
-               role, message_json, client_id, created_at, search_text
-        FROM session_messages
-        WHERE session_id = ${validSessionId} AND seq <= ${boundaryRow?.seq ?? -1}
-        ORDER BY seq ASC
-      `.pipe(
+          yield* copyIntoOwnerChat(sql, {
+            from: validSessionId,
+            to: branchId,
+            throughSeq: boundaryRow?.seq ?? -1
+          }).pipe(
             Effect.mapError((cause) =>
               storeError("branch", "storage", "Could not copy branch transcript", branchId, cause)
-            )
-          )
-          yield* startCaptureAfterCopies(sql, branchId).pipe(
-            Effect.mapError((cause) =>
-              storeError(
-                "branch",
-                "storage",
-                "Could not start Memory capture after the copies",
-                branchId,
-                cause
-              )
             )
           )
           yield* sql`INSERT INTO chat_event_deliveries

@@ -178,10 +178,10 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
 
 /**
  * Capture reads an owner chat from after the messages it held when it became one. A new chat
- * holds none, and a trigger starts it at its beginning (migration 0157). A branch, and an
- * Automation's working copy that continues as a chat, hold copies their source is read for, so
- * every producer of such a chat calls this; a trigger refuses a chat that becomes an owner chat
- * before it does.
+ * holds none, and a trigger starts it at its beginning (migration 0157). An Automation's working
+ * copy that continues as a chat holds copies its source is read for, so it calls this before it
+ * becomes an owner chat, and a trigger refuses it otherwise. A chat filled with copies after it
+ * is made goes through `copyIntoOwnerChat`, the one place messages are copied between chats.
  */
 export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")(function* (
   sql: SqlClient.SqlClient,
@@ -197,4 +197,25 @@ export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")
       read_seq = excluded.read_seq, read_offset = NULL, prepared_json = NULL,
       updated_at = excluded.updated_at
   `
+})
+
+/**
+ * Copies a chat's messages up to `throughSeq` into a new owner chat, renumbered from 0, and
+ * starts Capture after them in the same step: the source is where they are read.
+ */
+export const copyIntoOwnerChat = Effect.fn("MemoryCapturePositions.copyIntoOwnerChat")(function* (
+  sql: SqlClient.SqlClient,
+  input: { readonly from: string; readonly to: string; readonly throughSeq: number }
+) {
+  yield* sql`
+      INSERT INTO session_messages (
+        session_id, message_id, seq, role, message_json, client_id, created_at, search_text
+      )
+      SELECT ${input.to}, message_id, ROW_NUMBER() OVER (ORDER BY seq) - 1,
+             role, message_json, client_id, created_at, search_text
+      FROM session_messages
+      WHERE session_id = ${input.from} AND seq <= ${input.throughSeq}
+      ORDER BY seq ASC
+    `
+  yield* startCaptureAfterCopies(sql, input.to)
 })
