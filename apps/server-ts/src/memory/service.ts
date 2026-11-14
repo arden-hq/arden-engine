@@ -30,6 +30,104 @@ export interface MemoryTurn {
 
 export type { MemoryCaptureBatch } from "../persistence/memory/store.js"
 
+interface MemoryTurnServices {
+  readonly wiki: Wiki["Service"]
+  readonly embeddings: Pick<WikiEmbeddingIndex["Service"], "search">
+  readonly sessions: SessionQueries["Service"]
+  readonly spaces: SpaceStore["Service"]
+}
+
+const memorySnapshot = Effect.fn("Memory.snapshot")(function* (wiki: Wiki["Service"]) {
+  const observed = yield* wiki.observe()
+  const loaded = yield* wiki.snapshot()
+  return loaded.head === observed ? loaded : yield* wiki.snapshot()
+})
+
+const recall = Effect.fn("Memory.recall")(function* (
+  services: MemoryTurnServices,
+  input: MemoryRecallInput,
+  current: Snapshot
+) {
+  const { wiki, embeddings, sessions, spaces } = services
+  const valid = yield* Schema.decodeUnknownEffect(
+    Schema.Struct({
+      sessionId: Schema.NonEmptyString,
+      query: Schema.String,
+      excludePageIds: Schema.optionalKey(Schema.Array(Schema.NonEmptyString))
+    })
+  )(input).pipe(
+    Effect.mapError(
+      (cause) =>
+        new MemoryError({
+          operation: "recall",
+          message: "Invalid Memory recall request",
+          sessionId: input.sessionId,
+          cause
+        })
+    )
+  )
+  const excludedPageIds = new Set(valid.excludePageIds ?? [])
+  const semantic = yield* embeddings
+    .search(current, valid.query, excludedPageIds)
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
+      )
+    )
+  const now = DateTime.toEpochMillis(yield* DateTime.now)
+  const times = yield* wiki
+    .pageTimes(current.head)
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Memory page times unavailable", cause).pipe(
+          Effect.as(new Map<string, PageTimes>())
+        )
+      )
+    )
+  const prepared = prepareMemoryRecall({
+    lastChanged: lastChangedLines(times, now),
+    pages: current.pages,
+    query: valid.query,
+    semanticMatches: semantic,
+    excludedPageIds
+  })
+  const chats = yield* discussedIn({
+    wiki,
+    sessions,
+    spaceName: (spaceId) => spaces.get(spaceId).pipe(Effect.map((space) => space?.name)),
+    sessionId: valid.sessionId,
+    cited: new Map(
+      prepared.pages.map((record) => [record.page.pageId, citedChatRefs(record.page.body)] as const)
+    )
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Memory page chats unavailable", cause).pipe(Effect.as(new Map()))
+    )
+  )
+  return prepared.render(chats)
+})
+
+/**
+ * The Memory one chat turn reads: one snapshot of the pages and recall over it, or undefined
+ * when the pages cannot be read. `Memory.withTurn` hands it to a chat turn; the memory test
+ * opens it the same way on a replay copy.
+ */
+export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
+  services: MemoryTurnServices
+) {
+  const current = yield* memorySnapshot(services.wiki).pipe(
+    Effect.catchTag("WikiError", (cause) =>
+      Effect.logWarning("Memory snapshot unavailable", { cause }).pipe(Effect.as(undefined))
+    )
+  )
+  if (current === undefined) return undefined
+  return {
+    revision: current.head,
+    readContent: (pageId) => readSnapshotContent(current, pageId),
+    recall: (input) => recall(services, input, current)
+  } satisfies MemoryTurn
+})
+
 export class Memory extends Context.Service<
   Memory,
   {
@@ -58,95 +156,14 @@ export class Memory extends Context.Service<
 
         yield* startMemoryContentSteps({ wiki, sessions, transcript })
 
-        const snapshot = Effect.fn("Memory.snapshot")(function* () {
-          const observed = yield* wiki.observe()
-          const loaded = yield* wiki.snapshot()
-          return loaded.head === observed ? loaded : yield* wiki.snapshot()
-        })
-
+        const snapshot = () => memorySnapshot(wiki)
         const preparation = yield* makeMemoryPreparation({ wiki })
-
-        const recall = Effect.fn("Memory.recall")(function* (
-          input: MemoryRecallInput,
-          current: Snapshot
-        ) {
-          const valid = yield* Schema.decodeUnknownEffect(
-            Schema.Struct({
-              sessionId: Schema.NonEmptyString,
-              query: Schema.String,
-              excludePageIds: Schema.optionalKey(Schema.Array(Schema.NonEmptyString))
-            })
-          )(input).pipe(
-            Effect.mapError(
-              (cause) =>
-                new MemoryError({
-                  operation: "recall",
-                  message: "Invalid Memory recall request",
-                  sessionId: input.sessionId,
-                  cause
-                })
-            )
-          )
-          const excludedPageIds = new Set(valid.excludePageIds ?? [])
-          const semantic = yield* embeddings
-            .search(current, valid.query, excludedPageIds)
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
-              )
-            )
-          const now = DateTime.toEpochMillis(yield* DateTime.now)
-          const times = yield* wiki
-            .pageTimes(current.head)
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Memory page times unavailable", cause).pipe(
-                  Effect.as(new Map<string, PageTimes>())
-                )
-              )
-            )
-          const prepared = prepareMemoryRecall({
-            lastChanged: lastChangedLines(times, now),
-            pages: current.pages,
-            query: valid.query,
-            semanticMatches: semantic,
-            excludedPageIds
-          })
-          const chats = yield* discussedIn({
-            wiki,
-            sessions,
-            spaceName: (spaceId) => spaces.get(spaceId).pipe(Effect.map((space) => space?.name)),
-            sessionId: valid.sessionId,
-            cited: new Map(
-              prepared.pages.map(
-                (record) => [record.page.pageId, citedChatRefs(record.page.body)] as const
-              )
-            )
-          }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Memory page chats unavailable", cause).pipe(Effect.as(new Map()))
-            )
-          )
-          return prepared.render(chats)
-        })
+        const turnServices = { wiki, embeddings, sessions, spaces }
 
         const withTurn = Effect.fn("Memory.withTurn")(function* <A, E, R>(
           consume: (turn: MemoryTurn | undefined) => Effect.Effect<A, E, R>
         ): Effect.fn.Return<A, E, R> {
-          const current = yield* snapshot().pipe(
-            Effect.catchTag("WikiError", (cause) =>
-              Effect.logWarning("Memory snapshot unavailable", { cause }).pipe(Effect.as(undefined))
-            )
-          )
-          return yield* consume(
-            current === undefined
-              ? undefined
-              : {
-                  revision: current.head,
-                  readContent: (pageId) => readSnapshotContent(current, pageId),
-                  recall: (input) => recall(input, current)
-                }
-          )
+          return yield* consume(yield* openMemoryTurn(turnServices))
         }, preparation.foreground)
 
         const captureBatches = makeMemoryCaptureBatches({

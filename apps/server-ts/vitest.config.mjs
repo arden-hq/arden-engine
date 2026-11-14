@@ -32,6 +32,19 @@ const backlogProject =
       ]
     : []
 
+// The memory test's two halves are scripts on the replay copy, not tests: each runs only in its
+// own project, from `just memory-test-sent` or `just memory-test-answered`.
+const memoryTestHalf = process.env.ARDEN_MEMORY_TEST
+const memoryTestProject =
+  memoryTestHalf === "sent" || memoryTestHalf === "answered"
+    ? [
+        {
+          extends: true,
+          test: { name: "memory-test", include: [`scripts/memory-test-${memoryTestHalf}.ts`] }
+        }
+      ]
+    : []
+
 // The SQLite threads write here every table scan the tests cause; the check
 // in test/sql-scans/global.ts reads it after the run.
 const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
@@ -61,7 +74,8 @@ export default mergeConfig(
           test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }
         },
         ...speedProject,
-        ...backlogProject
+        ...backlogProject,
+        ...memoryTestProject
       ]
     }
   })

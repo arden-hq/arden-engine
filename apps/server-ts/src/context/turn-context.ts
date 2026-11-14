@@ -152,26 +152,14 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     effect: Effect.Effect<A, E, R>,
     skipped: A
   ) => experiments.measure(input.runId, part, selection[part], effect, skipped)
-  const space = yield* measure(
-    "space",
-    origin.source === "personal"
-      ? spaceConversationContextSnapshot({
-          spaceId: origin.header?.spaceId ?? undefined,
-          sessionId: input.sessionId,
-          spaces: services.spaces,
-          summaries: services.summaries,
-          memory,
-          work: services.work
-        })
-      : Effect.succeed(undefined),
-    undefined
-  )
-  const spaceRender = space === undefined ? undefined : renderSpaceContext(space.view)
-  const deliveredPageId =
-    space?.page !== undefined && spaceRender?.page === "whole" && space.view.page?.content !== ""
-      ? space.page.pageId
-      : undefined
-  const query = latestHumanText(input.messages) ?? ""
+  const { space, memoryContext } = yield* prefetchTurnMemory(services, {
+    sessionId: input.sessionId,
+    runId: input.runId,
+    spaceId: origin.source === "personal" ? (origin.header?.spaceId ?? undefined) : undefined,
+    query: latestHumanText(input.messages) ?? "",
+    memory,
+    measure
+  })
   const authority = yield* boundAuthority(services.runs, input)
   const context = yield* Effect.all({
     task: services.work.continuationContext(input.runId),
@@ -253,25 +241,6 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
           cause
         }).pipe(Effect.as(undefined))
       )
-    ),
-    memory: measure(
-      "memory",
-      memory === undefined
-        ? Effect.succeed(undefined)
-        : memory.recall({
-            sessionId: input.sessionId,
-            query,
-            ...(deliveredPageId === undefined ? {} : { excludePageIds: [deliveredPageId] })
-          }),
-      undefined
-    ).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Memory recall failed", {
-          sessionId: input.sessionId,
-          runId: input.runId,
-          cause
-        }).pipe(Effect.as(undefined))
-      )
     )
   })
   const preparedSkills =
@@ -289,43 +258,6 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
         : PROMPT_TEXT.executorCommunication
     }).text
   )
-  const memoryContext = assembleMemoryContext({
-    space:
-      space === undefined || spaceRender === undefined
-        ? undefined
-        : {
-            view: space.view,
-            text: spaceRender.text,
-            page:
-              space.page === undefined || spaceRender.page === undefined
-                ? undefined
-                : { ...space.page, shown: spaceRender.page }
-          },
-    recall: context.memory,
-    revision: memory?.revision ?? null,
-    query
-  })
-  yield* Effect.logInfo("Continuity context composed", {
-    sessionId: input.sessionId,
-    runId: input.runId,
-    excludedRecallPages: deliveredPageId === undefined ? 0 : 1,
-    ...memoryContext.telemetry
-  })
-  yield* services.chat
-    .recordMemoryContext({
-      runId: input.runId,
-      sessionId: input.sessionId,
-      context: memoryContext.record
-    })
-    .pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Memory context record failed", {
-          sessionId: input.sessionId,
-          runId: input.runId,
-          cause
-        })
-      )
-    )
   const authorityLine = renderAuthority(authority)
   const authorityText =
     authorityLine === undefined ? undefined : renderPromptSection("Run authority", authorityLine)
@@ -403,6 +335,110 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     ],
     endNote: space?.threads
   } satisfies RuntimeContext
+})
+
+type TurnMeasure = <A, E, R>(
+  part: "space" | "memory",
+  effect: Effect.Effect<A, E, R>,
+  skipped: A
+) => Effect.Effect<A, E, R>
+
+/**
+ * What a chat turn is sent from Memory and its Space: the Space snapshot, Memory recall (Core
+ * Memory and the recalled pages) for the turn's text, and the continuity budget over them,
+ * as prompt sections. The run's record of what it was sent is written here, from the same
+ * sections. The memory test calls this same function on a replay copy and reads that record,
+ * so it measures what a chat is really sent.
+ */
+export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(function* (
+  services: Pick<TurnContextServices, "spaces" | "summaries" | "work" | "chat">,
+  input: {
+    readonly sessionId: string
+    readonly runId: string
+    /** The chat's Space; undefined for a chat outside one and for every run not in a personal chat. */
+    readonly spaceId: string | undefined
+    /** The latest text the user typed. */
+    readonly query: string
+    readonly memory: MemoryTurn | undefined
+    readonly measure: TurnMeasure
+  }
+) {
+  const space = yield* input.measure(
+    "space",
+    spaceConversationContextSnapshot({
+      spaceId: input.spaceId,
+      sessionId: input.sessionId,
+      spaces: services.spaces,
+      summaries: services.summaries,
+      memory: input.memory,
+      work: services.work
+    }),
+    undefined
+  )
+  const spaceRender = space === undefined ? undefined : renderSpaceContext(space.view)
+  const deliveredPageId =
+    space?.page !== undefined && spaceRender?.page === "whole" && space.view.page?.content !== ""
+      ? space.page.pageId
+      : undefined
+  const recall = yield* input
+    .measure(
+      "memory",
+      input.memory === undefined
+        ? Effect.succeed(undefined)
+        : input.memory.recall({
+            sessionId: input.sessionId,
+            query: input.query,
+            ...(deliveredPageId === undefined ? {} : { excludePageIds: [deliveredPageId] })
+          }),
+      undefined
+    )
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Memory recall failed", {
+          sessionId: input.sessionId,
+          runId: input.runId,
+          cause
+        }).pipe(Effect.as(undefined))
+      )
+    )
+  const memoryContext = assembleMemoryContext({
+    space:
+      space === undefined || spaceRender === undefined
+        ? undefined
+        : {
+            view: space.view,
+            text: spaceRender.text,
+            page:
+              space.page === undefined || spaceRender.page === undefined
+                ? undefined
+                : { ...space.page, shown: spaceRender.page }
+          },
+    recall,
+    revision: input.memory?.revision ?? null,
+    query: input.query
+  })
+  yield* Effect.logInfo("Continuity context composed", {
+    sessionId: input.sessionId,
+    runId: input.runId,
+    excludedRecallPages: deliveredPageId === undefined ? 0 : 1,
+    ...memoryContext.telemetry
+  })
+  yield* services.chat
+    .recordMemoryContext({
+      runId: input.runId,
+      sessionId: input.sessionId,
+      context: memoryContext.record
+    })
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Memory context record failed", {
+          sessionId: input.sessionId,
+          runId: input.runId,
+          cause
+        })
+      )
+    )
+  return { space, memoryContext }
 })
 
 const taskContractSections = (

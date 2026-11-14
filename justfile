@@ -58,6 +58,14 @@ replay-copy into *flags:
 capture-backlog copy:
     cd apps/server-ts && ARDEN_CAPTURE_BACKLOG=1 ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project capture-backlog
 
+# Score, on the replay copy in <copy> and with no model, whether a new chat is sent the Memory pages that answer each question in the private <questions> file. Results go beside <questions>.
+memory-test-sent questions copy:
+    cd apps/server-ts && ARDEN_MEMORY_TEST=sent ARDEN_MEMORY_TEST_QUESTIONS={{questions}} ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project memory-test
+
+# Print the plan and cost of the paid "answered" memory test for <questions> on the replay copy in <copy>, from first turns measured there. Sends nothing to a model; the paid run is not built.
+memory-test-answered questions copy *flags:
+    cd apps/server-ts && ARDEN_MEMORY_TEST=answered ARDEN_MEMORY_TEST_FLAGS="{{flags}}" ARDEN_MEMORY_TEST_QUESTIONS={{questions}} ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project memory-test
+
 # Register every engine package with `bun link`, so a local app checkout uses this engine.
 link:
     for dir in libs/* apps/server-ts; do (cd "$dir" && bun link); done
