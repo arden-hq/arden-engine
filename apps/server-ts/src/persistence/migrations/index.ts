@@ -160,15 +160,16 @@ import { taskReportLinks } from "./0006_task_report_links.js"
 import { answerBlockState } from "./0052_answer_block_state.js"
 import { queuedSentFrom } from "./0053_queued_sent_from.js"
 
-// `enforced` never drops a table: with enforcement on, a DROP runs each child table's ON DELETE.
 /**
  * How a migration keeps every reference whole. A whole-database check reads
  * every table that holds a reference, gigabytes on a long-used database, so a
  * migration names the narrowest one that is still sound.
  * - `enforced`: foreign keys stay on while `up` runs, so SQLite refuses a
  *   broken reference at the write that would make it. For a migration that
- *   adds tables, columns or indexes, or rewrites values; never one that drops
- *   a table (with enforcement on, a DROP runs each child table's ON DELETE).
+ *   adds tables, columns or indexes, rewrites values, or drops a table nothing
+ *   references; never one that drops a table another table references (with
+ *   enforcement on, that DROP runs each child table's ON DELETE). A test in
+ *   schema-migrations.test.ts runs every migration and holds it to this.
  * - `rebuilds`: `up` drops and recreates `tables`, so it runs with foreign
  *   keys off; the runner then checks those tables and every table that
  *   references them.

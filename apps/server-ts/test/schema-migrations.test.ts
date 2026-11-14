@@ -123,9 +123,94 @@ const renderedMigrationSql = (): Readonly<Record<number, string>> => {
   }
 }
 
+/** The table each `DROP TABLE` in a statement names, with its schema when it gives one. */
+const DROPPED_TABLE = /\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:"?(\w+)"?\.)?"?(\w+)"?/giu
+
+/**
+ * Runs `list` from the baseline and returns each `enforced` migration's drop of a table another
+ * table references when the statement runs, as "version table". With foreign keys on, that drop runs each child table's
+ * ON DELETE action, so it belongs in a migration that declares `rebuilds`.
+ */
+const enforcedParentDrops = (list: ReadonlyArray<Migration>): ReadonlyArray<string> => {
+  const database = new DatabaseSync(":memory:")
+  const referenced = () =>
+    new Set(
+      database
+        .prepare(
+          `SELECT DISTINCT lower(f."table") AS parent
+           FROM sqlite_schema AS m, pragma_foreign_key_list(m.name) AS f
+           WHERE m.type = 'table' AND lower(f."table") <> lower(m.name)`
+        )
+        .all()
+        .map((row) => String(row.parent))
+    )
+  const offenders: string[] = []
+  const watched = list.map((migration): Migration =>
+    migration.foreignKeys?.kind !== "enforced"
+      ? migration
+      : {
+          ...migration,
+          up: (target) => {
+            const check = (text: string) => {
+              const parents = referenced()
+              for (const [, schema, name] of text.matchAll(DROPPED_TABLE))
+                if (schema?.toLowerCase() !== "temp" && parents.has(String(name).toLowerCase()))
+                  offenders.push(`${migration.version} ${name}`)
+            }
+            migration.up(
+              new Proxy(target, {
+                get: (proxied, key) => {
+                  const value: unknown = Reflect.get(proxied, key, proxied)
+                  if (typeof value !== "function") return value
+                  if (key !== "exec" && key !== "prepare") return value.bind(proxied)
+                  return (text: string) => {
+                    check(text)
+                    return value.call(proxied, text)
+                  }
+                }
+              })
+            )
+          }
+        }
+  )
+  try {
+    for (const statement of baselineStatements) database.exec(statement)
+    database.exec(`PRAGMA user_version = ${BASELINE_VERSION}`)
+    runMigrations(database, { kind: "pending", from: BASELINE_VERSION, bridge: undefined }, watched)
+  } finally {
+    database.close()
+  }
+  return offenders
+}
+
 describe("schema migrations", () => {
   it("every migration runs the SQL pinned for it", () => {
     expect(renderedMigrationSql()).toEqual(releasedMigrationSql)
+  })
+
+  it("no migration that keeps foreign keys on drops a table another table references", () => {
+    const parents: Migration = {
+      version: 2,
+      name: "adds_parents",
+      foreignKeys: { kind: "enforced" },
+      up: (database) => {
+        database.exec("CREATE TABLE parents (id INTEGER PRIMARY KEY)")
+        database.exec(
+          "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents(id))"
+        )
+        database.exec("CREATE TABLE leaves (id INTEGER PRIMARY KEY)")
+      }
+    }
+    const drops = (version: number, table: string): Migration => ({
+      version,
+      name: `drops_${table}`,
+      foreignKeys: { kind: "enforced" },
+      up: (database) => database.exec(`DROP TABLE IF EXISTS "${table}"`)
+    })
+    expect(enforcedParentDrops([parents, drops(3, "leaves"), drops(4, "parents")])).toEqual([
+      "4 parents"
+    ])
+    expect(enforcedParentDrops(migrations)).toEqual([])
   })
 
   it("the baseline plus every migration builds exactly the schema sections declare", () => {
