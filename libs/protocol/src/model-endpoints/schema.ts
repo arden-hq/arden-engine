@@ -162,16 +162,12 @@ export const ModelEndpointSaveResponseSchema = Schema.Union([
   FailureWireSchema
 ])
 
-const SiteIdSchema = Schema.Literals([
-  "automation_prefilter",
-  "space_review_gate",
-  "capture"
-] as const)
+const SiteIdSchema = Schema.Literals(["automation_prefilter", "capture"] as const)
 
 const SiteWireSchema = withExtras({
   site: SiteIdSchema,
   needs_images: Schema.Boolean,
-  state: Schema.Literals(["decision_model", "helper", "not_used"] as const)
+  state: Schema.Literals(["decision_model", "helper"] as const)
 })
 
 type SiteWire = typeof SiteWireSchema.Type

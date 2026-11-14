@@ -13,7 +13,6 @@ import { SummaryStore } from "../persistence/summaries/store.js"
 import { StructuredCompletion } from "../models/structured-completion.js"
 import { Decisions } from "../models/decisions/service.js"
 import { screenEventWake } from "./prefilter.js"
-import { screenSpaceReview } from "./space-review-gate.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { makeSpaceOverview } from "../memory/space-overview.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
@@ -184,7 +183,6 @@ export class AutomationRuntime extends Context.Service<
       const executeReview = makeSpaceReviewRunner({
         wiki,
         spaceReviews,
-        screen: screenSpaceReview({ decisions, spaceReviews }),
         execute: executeChat
       })
       const executeTask = Effect.fn("AutomationRuntime.executeTask")(function* (

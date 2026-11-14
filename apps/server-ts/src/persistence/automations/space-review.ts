@@ -1,4 +1,6 @@
+import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
 import { Schema } from "effect"
+import { RUNS_ALONE } from "./event-batch.js"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
 const SummarySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)).pipe(
@@ -101,10 +103,18 @@ const SpaceReviewReadsSchema = Schema.Struct({
 })
 export type SpaceReviewReads = typeof SpaceReviewReadsSchema.Type
 
+/**
+ * Whether the review starts, from `spaceReviewAdmission`:
+ * - `changed`: something it can act on changed, or the owner asked; the review runs.
+ * - `unchanged`: nothing changed since the last review; no run.
+ * - `nothing_to_act_on`: something changed, but nothing the review can act on; no run.
+ */
+const SpaceReviewAdmissionSchema = Schema.Literals(["changed", "unchanged", "nothing_to_act_on"])
+export type SpaceReviewAdmission = typeof SpaceReviewAdmissionSchema.Type
+
 export const SpaceReviewInputSchema = Schema.Struct({
-  admission: Schema.Literals(["changed", "unchanged"]),
+  admission: SpaceReviewAdmissionSchema,
   spaceId: Schema.String,
-  fingerprint: Schema.String,
   repositoryHead: Schema.NullOr(Schema.String),
   pages: Schema.Array(
     Schema.Struct({
@@ -123,23 +133,6 @@ export const SpaceReviewInputSchema = Schema.Struct({
   prompt: Schema.String
 })
 export type SpaceReviewInput = typeof SpaceReviewInputSchema.Type
-
-export type ChangedChatTurn = SpaceReviewReads["chats"][number]
-
-export interface GateTurn {
-  readonly sessionId: string
-  readonly startedAt: string
-  readonly chatTitle: string | undefined
-  readonly user: string | undefined
-  readonly assistant: string | undefined
-}
-
-export interface SpaceReviewGateEvidence {
-  readonly wokenBy: ReadonlyArray<string>
-  readonly heldSince: string | undefined
-  readonly turns: ReadonlyArray<GateTurn>
-  readonly unread: number
-}
 
 export interface SpaceReviewItem {
   readonly itemId: string
@@ -162,4 +155,15 @@ export interface SpaceReviewEvidence {
   readonly openProposals: ReadonlyArray<string>
   readonly space: SpaceReviewSnapshot | undefined
   readonly reviewed?: SpaceReviewInput
+  /** The owner asked for this review: `askedByOwner` of the run's trigger. */
+  readonly asked: boolean
 }
+
+/** The one answer to "did the owner ask for this review": a manual run or a
+ * proposal recheck among the run's causes, alone or folded into a coalesced
+ * trigger with other waiting rows. */
+export const askedByOwner = (trigger: AutomationTriggerContext): boolean =>
+  (trigger.source === "coalesced" ? trigger.causes : [trigger]).some(
+    (cause) =>
+      cause.source === "manual" || (cause.source === "event" && cause.event_type === RUNS_ALONE)
+  )

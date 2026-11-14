@@ -8,7 +8,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
 import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
 import type { UnitOfWork } from "../unit-of-work.js"
-import { enqueue, freshRow, type QueueWriter } from "./automation-enqueue.js"
+import { enqueue, type QueueWriter } from "./automation-enqueue.js"
 import type { JsonColumnError } from "./json.js"
 
 import { spaceJobId, taskJobId } from "../space-job-id.js"
@@ -20,7 +20,6 @@ import { insertSession } from "./session-insert.js"
 import { readJobSpace, readJobTask, type SpaceRow } from "./space-job-rows.js"
 import { readSpaceJobContext, readSpaceReviewContext } from "./space-job-context.js"
 import { endExternalWaitAtCheck, failTaskItem, keepTaskMoving } from "./task-next-move.js"
-import { iso } from "../../runtime/clock.js"
 import {
   automationRecoveryAuthority,
   makeSpaceJobRecovery,
@@ -55,7 +54,6 @@ export interface SpaceJobSql {
   readonly syncSpace: (spaceId: string, now: string) => SpaceJobWrite<JobState | null>
   readonly queueSpaceWake: (spaceId: string, now: string) => SpaceJobWrite<void>
   readonly retryReview: (automationId: string, now: string) => SpaceJobWrite<void>
-  readonly holdReview: (automationId: string, now: string, until: string) => SpaceJobWrite<void>
   readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
   readonly linkChat: (
     spaceId: string,
@@ -358,63 +356,19 @@ export const makeSpaceJobSql = (
     const streak = recent.findIndex((row) => row.failed !== 1)
     const delay = ladderStepMs(SPACE_REVIEW_LADDER_MS, streak === -1 ? recent.length : streak)
     if (spaceId == null || delay === undefined) return
-    yield* queueReviewFollowUp({
-      automationId,
-      spaceId,
-      now,
-      eventType: "space.review_retry",
-      at: iso(Date.parse(now) + delay),
-      waiting: "delay"
-    })
-  })
-
-  const holdReview = Effect.fn("SpaceJobSql.holdReview")(function* (
-    automationId: string,
-    now: string,
-    until: string
-  ) {
-    const jobs = yield* sql<{ readonly space_id: string | null }>`
-      SELECT owner_space_id AS space_id FROM scheduled_tasks
-      WHERE task_id = ${automationId} AND purpose = 'space_review'`
-    const spaceId = jobs[0]?.space_id
-    if (spaceId == null) return
-    yield* queueReviewFollowUp({
-      automationId,
-      spaceId,
-      now,
-      eventType: "space.review_held",
-      at: until,
-      waiting: "keep"
-    })
-  })
-
-  const queueReviewFollowUp = Effect.fn("SpaceJobSql.queueReviewFollowUp")(function* (input: {
-    readonly automationId: string
-    readonly spaceId: string
-    readonly now: string
-    readonly eventType: "space.review_retry" | "space.review_held"
-    readonly at: string
-    readonly waiting: "delay" | "keep"
-  }) {
-    const state = yield* syncSpace(input.spaceId, input.now)
+    const state = yield* syncSpace(spaceId, now)
     if (state === null || !state.enabled) return
-    if (input.waiting === "keep") {
-      const waiting = yield* sql`SELECT 1 FROM automation_event_queue
-        WHERE task_id = ${input.automationId} AND ${freshRow(sql)} AND source = 'wake'
-        LIMIT 1`
-      if (waiting.length > 0) return
-    }
     yield* queue(
       state,
       {
         source: "event",
-        queued_at: input.now,
-        event_type: input.eventType,
-        event_key: input.automationId,
+        queued_at: now,
+        event_type: "space.review_retry",
+        event_key: automationId,
         produced_by: null,
-        context: { space_id: input.spaceId }
+        context: { space_id: spaceId }
       },
-      { dueAt: Date.parse(input.at) }
+      { dueAt: Date.parse(now) + delay }
     )
   })
 
@@ -714,7 +668,6 @@ export const makeSpaceJobSql = (
     syncSpace,
     queueSpaceWake,
     retryReview,
-    holdReview,
     queueInferenceChat,
     linkChat,
     unlinkedSpaces,

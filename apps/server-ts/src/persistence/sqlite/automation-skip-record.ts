@@ -8,11 +8,6 @@ export const skipEnd = (skip: StoredAutomationRunSkip) => {
         outcome: "skipped:prefilter",
         result: "Run only if said no to this event; no run started."
       } as const
-    case "space_review_gate":
-      return {
-        outcome: "skipped:space_review_gate",
-        result: "Nothing new to review; no run started."
-      } as const
   }
 }
 

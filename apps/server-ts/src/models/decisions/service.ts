@@ -156,7 +156,7 @@ export class Decisions extends Context.Service<
           images: request.images ?? [],
           questions: { [site.question]: request.question },
           usage: { kind: request.site, owner: { type: "none" } },
-          fallback: site.helper === "answers" ? "helper" : "none",
+          fallback: "helper",
           ...(request.signal === undefined ? {} : { signal: request.signal })
         }).pipe(
           Effect.map((result) => {
@@ -165,9 +165,7 @@ export class Decisions extends Context.Service<
             const value = answer.value as AnswerValue<Q>
             switch (answer.distribution.kind) {
               case "selected-only":
-                return site.helper === "answers"
-                  ? { by: "helper" as const, value, backend: result.backend }
-                  : fallback
+                return { by: "helper" as const, value, backend: result.backend }
               case "calibrated": {
                 const probability = answer.distribution.probabilities[String(answer.value)] ?? 0
                 return probability >= site.threshold

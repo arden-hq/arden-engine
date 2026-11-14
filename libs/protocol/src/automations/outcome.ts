@@ -17,8 +17,9 @@ import type { AutomationRunStatus } from "./contracts.js"
  * - `cancelled`: it was stopped before it ended.
  * - `superseded`: its Automation changed or turned off before its run started.
  * - `skipped:<reason>`: it ended before any run (`prefilter`: its "Run only if"
- *   said no; `space_review_gate`: a Space review had nothing new). A skip is never
- *   a run: only the history lists it.
+ *   said no; `space_review_gate`: a decision model judged a Space review had nothing
+ *   new, kept for past rows only, since a Space review now ends as `no_change` when
+ *   nothing it can act on changed). A skip is never a run: only the history lists it.
  */
 export const AUTOMATION_RUN_OUTCOMES = [
   "finished",
