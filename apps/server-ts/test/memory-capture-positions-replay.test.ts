@@ -2,11 +2,11 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { MemoryCaptureStore } from "../src/persistence/memory/store.js"
-import { memoryCaptureBacklogBackfill } from "../src/persistence/sqlite/memory-capture-backlog-backfill.js"
 import {
-  countCaptureBacklog,
-  listCaptureWork
-} from "../src/persistence/sqlite/memory-capture-positions.js"
+  memoryCaptureBacklogBackfill,
+  TYPED_TURN
+} from "../src/persistence/sqlite/memory-capture-backlog-backfill.js"
+import { listCaptureWork } from "../src/persistence/sqlite/memory-capture-positions.js"
 import {
   locateReplayCopy,
   rollBackOnReplayCopy,
@@ -42,10 +42,12 @@ it("reads every owner turn from its position, and keeps every old unread turn co
     })
   )
   const replayed = await rollBackOnReplayCopy(located.copy, replay)
-  console.info(
+  // Vitest swallows console output; a direct write reaches the terminal.
+  process.stdout.write(
     `Replay: ${migrated.chats?.owner} owner chats, ${migrated.chats?.positions} positions, ` +
       `${migrated.work} listed after the update. ` +
-      `Backfill: ${replayed.marksBefore} marks before, ${replayed.marksAfter} after, ` +
+      `Backfill: ${replayed.marksBefore} marks before, ${replayed.marksAfter} after; ` +
+      `${replayed.sidecars.before} sidecar rows before, ${replayed.sidecars.after} after; ` +
       `${replayed.backlog.ranges} ranges. Excerpts in finished Capture prompts ` +
       `${replayed.excerpts}. Typed owner turns at or below a position: ` +
       `${replayed.partition.messages}; handed to a finished run ${replayed.partition.read}, ` +
@@ -56,10 +58,8 @@ it("reads every owner turn from its position, and keeps every old unread turn co
       `since ${replayed.backlog.since.typedTurns} (expected ${replayed.expected.since}) ` +
       `in ${replayed.backlog.since.chats} chats; unread typed turns that are branch copies ` +
       `${replayed.expected.copies}; inside a finished batch but never quoted ` +
-      `${replayed.expected.unquoted}. Batches ${replayed.backlog.before.batches} + ` +
-      `${replayed.backlog.since.batches}, ${replayed.backlog.freshTokensPerBatch} fresh tokens ` +
-      `per batch. A new turn lists ${replayed.listed} of ${replayed.chats} owner chats from ` +
-      `their position.`
+      `${replayed.expected.unquoted}. A new turn lists ${replayed.listed} of ${replayed.chats} owner chats from ` +
+      `their position.\n`
   )
   expect(migrated).toEqual({
     chats: { owner: migrated.chats?.owner, positions: migrated.chats?.owner },
@@ -164,6 +164,8 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
             WHERE batch.session_id = message.session_id
               AND message.seq BETWEEN batch.from_seq AND batch.through_seq
               AND message.created_at <= batch.started_at)) AS unquoted`
+  const sidecarRows = sql<{ readonly count: number }>`SELECT COUNT(*) AS count FROM run_sidecars`
+  const [sidecarsBefore] = yield* sidecarRows
   for (let cursor: string | undefined = undefined, rounds = 0; rounds < 10_000; rounds += 1) {
     const chunk: { readonly next: string | undefined } = yield* memoryCaptureBacklogBackfill
       .chunk({ cursor, limit: 200 })
@@ -192,7 +194,26 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
       SUM(ranged = 1 AND (read = 1 OR copy = 1)) AS both,
       SUM(ranged = 0 AND read = 0 AND copy = 0) AS neither
     FROM placed`
-  const backlog = yield* countCaptureBacklog(sql, { splitAt: first.at })
+  const [sidecarsAfter] = yield* sidecarRows
+  const parts = yield* sql<{
+    readonly before: number
+    readonly chats: number
+    readonly typed_turns: number
+  }>`
+    SELECT message.created_at < ${first.at} AS before,
+           COUNT(DISTINCT message.session_id) AS chats,
+           SUM(${sql.literal(TYPED_TURN)}) AS typed_turns
+    FROM memory_capture_backlog AS backlog
+    JOIN session_messages AS message ON message.session_id = backlog.session_id
+      AND message.seq BETWEEN backlog.from_seq AND backlog.through_seq
+    GROUP BY before`
+  const [ranges] = yield* sql<{ readonly count: number }>`
+    SELECT COUNT(*) AS count FROM memory_capture_backlog`
+  const part = (before: 0 | 1) => {
+    const row = parts.find((candidate) => candidate.before === before)
+    return { chats: row?.chats ?? 0, typedTurns: row?.typed_turns ?? 0 }
+  }
+  const backlog = { ranges: ranges?.count ?? 0, before: part(1), since: part(0) }
   const chats = yield* sql<{ readonly session_id: string; readonly next_seq: number }>`
     SELECT session.session_id,
       COALESCE((SELECT MAX(seq) + 1 FROM session_messages
@@ -235,6 +256,7 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
     partition: partition ?? { messages: 0, read: 0, copies: 0, backlog: 0, both: 0, neither: 0 },
     expected: expected ?? { before: 0, since: 0, copies: 0, unquoted: 0 },
     backlog,
+    sidecars: { before: sidecarsBefore?.count, after: sidecarsAfter?.count },
     chats: chats.length,
     listed
   }

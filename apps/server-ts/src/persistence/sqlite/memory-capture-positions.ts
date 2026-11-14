@@ -3,8 +3,6 @@ import type { SqlClient } from "effect/unstable/sql"
 
 import {
   MemoryCaptureBatchIdentitySchema,
-  type MemoryCaptureBacklog,
-  type MemoryCaptureBacklogPart,
   type MemoryCaptureBatchIdentity,
   type MemoryCaptureMove,
   type MemoryCapturePosition,
@@ -18,9 +16,6 @@ import { activeRunStatusList } from "./status-sets.js"
 // `session_messages` moves a position back when messages it covers are deleted
 // (revert, clear), because new messages then reuse their numbers, and marks where a deletion
 // cut a prepared batch (migration 0158).
-
-/** Characters Capture reads in one batch; the backlog count uses it to estimate batches. */
-export const CAPTURE_CHAR_LIMIT = 6_000
 
 const IdentityJson = Schema.fromJsonString(MemoryCaptureBatchIdentitySchema)
 
@@ -202,73 +197,4 @@ export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")
       read_seq = excluded.read_seq, read_offset = NULL, prepared_json = NULL,
       updated_at = excluded.updated_at
   `
-})
-
-interface BacklogPartRow {
-  readonly before: number
-  readonly chats: number
-  readonly typed_turns: number
-  readonly user_characters: number
-  readonly assistant_characters: number
-}
-
-/**
- * Counts the old unread messages kept out of Capture's work, split by when they were written,
- * and the uncached input a Capture run used over the last 30 days. Reads no message text.
- */
-export const countCaptureBacklog = Effect.fn("MemoryCapturePositions.backlogCount")(function* (
-  sql: SqlClient.SqlClient,
-  input: { readonly splitAt: string }
-): Effect.fn.Return<MemoryCaptureBacklog, unknown> {
-  const ranges = yield* sql<{ readonly count: number }>`
-    SELECT COUNT(*) AS count FROM memory_capture_backlog`
-  const parts = yield* sql<BacklogPartRow>`
-    WITH unread AS (
-      SELECT message.session_id,
-             message.created_at < ${input.splitAt} AS before,
-             message.role,
-             LENGTH(COALESCE(message.search_text, '')) AS characters,
-             message.role = 'user'
-               AND json_extract(message.message_json, '$.is_meta') IS NULL
-               AND EXISTS (SELECT 1 FROM session_turns AS turn
-                 WHERE turn.session_id = message.session_id
-                   AND turn.user_message_id = message.message_id) AS typed
-      FROM memory_capture_backlog AS backlog
-      JOIN session_messages AS message ON message.session_id = backlog.session_id
-        AND message.seq BETWEEN backlog.from_seq AND backlog.through_seq
-    )
-    SELECT before,
-           COUNT(DISTINCT session_id) AS chats,
-           SUM(typed) AS typed_turns,
-           SUM(CASE WHEN role = 'user' THEN characters ELSE 0 END) AS user_characters,
-           SUM(CASE WHEN role = 'assistant' THEN characters ELSE 0 END) AS assistant_characters
-    FROM unread
-    GROUP BY before`
-  const since = DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { days: 30 }))
-  const usage = yield* sql<{ readonly tokens: number | null }>`
-    SELECT AVG((SELECT SUM(COALESCE(json_extract(usage.usage_json, '$.prompt'), 0))
-                FROM run_model_usage AS usage WHERE usage.run_id = run.run_id)) AS tokens
-    FROM chat_runs AS run
-    WHERE run.started_at >= ${since}
-      AND json_type(run.metadata_json, '$.memory_capture_batch') = 'object'
-      AND EXISTS (SELECT 1 FROM run_model_usage AS used WHERE used.run_id = run.run_id)`
-  const part = (before: 0 | 1): MemoryCaptureBacklogPart => {
-    const row = parts.find((candidate) => candidate.before === before)
-    if (row === undefined)
-      return { chats: 0, typedTurns: 0, userCharacters: 0, assistantCharacters: 0, batches: 0 }
-    return {
-      chats: row.chats,
-      typedTurns: row.typed_turns,
-      userCharacters: row.user_characters,
-      assistantCharacters: row.assistant_characters,
-      batches: Math.ceil((row.user_characters + row.assistant_characters) / CAPTURE_CHAR_LIMIT)
-    }
-  }
-  const tokens = usage[0]?.tokens ?? null
-  return {
-    ranges: ranges[0]?.count ?? 0,
-    before: part(1),
-    since: part(0),
-    freshTokensPerBatch: tokens === null ? undefined : Math.round(tokens)
-  }
 })

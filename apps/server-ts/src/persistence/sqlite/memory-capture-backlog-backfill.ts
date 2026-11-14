@@ -21,6 +21,12 @@ import type { Backfill } from "./backfills/backfill.js"
 
 const MARKS = "json_type(evidence_json, '$.memory_capture') IS NOT NULL"
 
+/** A `message` the owner typed: the user message that opens a turn, not a note the app added. */
+export const TYPED_TURN = `message.role = 'user'
+  AND json_extract(message.message_json, '$.is_meta') IS NULL
+  AND EXISTS (SELECT 1 FROM session_turns AS turn
+    WHERE turn.session_id = message.session_id AND turn.user_message_id = message.message_id)`
+
 /** The old batch shape: its end is a bare sequence and offset. The current shape tags its end. */
 const OLD_BATCH = "json_type(run.metadata_json, '$.memory_capture_batch.end.offset') = 'integer'"
 
@@ -74,11 +80,7 @@ export const memoryCaptureBacklogBackfill: Backfill = {
     for (const { session_id: sessionId } of sessions) {
       const messages = yield* sql<RangedMessage>`
         SELECT message.seq, message.role, message.created_at,
-               message.role = 'user'
-                 AND json_extract(message.message_json, '$.is_meta') IS NULL
-                 AND EXISTS (SELECT 1 FROM session_turns AS turn
-                   WHERE turn.session_id = message.session_id
-                     AND turn.user_message_id = message.message_id) AS typed,
+               ${sql.literal(TYPED_TURN)} AS typed,
                EXISTS (SELECT 1 FROM session_messages AS source
                  WHERE source.session_id = json_extract(session.metadata,
                      '$.fork_origin.sourceSessionId')

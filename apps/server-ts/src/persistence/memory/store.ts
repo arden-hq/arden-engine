@@ -47,34 +47,13 @@ export const MemoryCaptureBatchSchema = Schema.Struct({
 })
 export type MemoryCaptureBatch = typeof MemoryCaptureBatchSchema.Type
 
-/** Old unread messages, kept out of Capture's work: counts for one side of `splitAt`. */
-export interface MemoryCaptureBacklogPart {
-  readonly chats: number
-  readonly typedTurns: number
-  readonly userCharacters: number
-  readonly assistantCharacters: number
-  /** Capture batches the characters fill, at most 6,000 characters each. */
-  readonly batches: number
-}
-
-export interface MemoryCaptureBacklog {
-  readonly ranges: number
-  readonly before: MemoryCaptureBacklogPart
-  readonly since: MemoryCaptureBacklogPart
-  /**
-   * Mean uncached input tokens of a Capture run over the last 30 days, or undefined when
-   * Capture used no model in that time.
-   */
-  readonly freshTokensPerBatch: number | undefined
-}
-
 /** `superseded`: the chat moved on since the batch was read, so nothing was written. */
 export type MemoryCaptureMove = "moved" | "superseded"
 
 export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureStoreError>()(
   "MemoryCaptureStoreError",
   {
-    operation: Schema.Literals(["list", "prepare", "advance", "count"] as const),
+    operation: Schema.Literals(["list", "prepare", "advance"] as const),
     message: Schema.String,
     sessionId: Schema.optionalKey(Schema.NonEmptyString),
     cause: Schema.optionalKey(Schema.Defect())
@@ -98,8 +77,5 @@ export class MemoryCaptureStore extends Context.Service<
     readonly advance: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    readonly backlogCount: (input: {
-      readonly splitAt: string
-    }) => Effect.Effect<MemoryCaptureBacklog, MemoryCaptureStoreError>
   }
 >()("@arden-hq/server/persistence/memory/MemoryCaptureStore") {}

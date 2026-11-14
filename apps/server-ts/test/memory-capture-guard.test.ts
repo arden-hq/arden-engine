@@ -4,9 +4,11 @@ import { expect, it } from "vitest"
 
 // How far Memory Capture has read a chat has one owner: `memory_capture_positions`. These keep
 // a second copy from coming back: the old marks in `run_sidecars`, or a Capture module that
-// depends on the chat's context number, which compaction, clear and revert change.
+// depends on the chat's context number, which compaction, clear and revert change. How Capture
+// cuts a chat into batches has one owner too: `readCaptureBatch`, which the backlog count calls.
 
 const SOURCE = join(import.meta.dirname, "../src")
+const SCRIPTS = join(import.meta.dirname, "../scripts")
 
 const sources = (directory: string): ReadonlyArray<string> =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -42,4 +44,11 @@ it("keeps the context number out of every Capture module", () => {
     /context_generation|contextGeneration/u.test(readFileSync(join(SOURCE, path), "utf8"))
   )
   expect(naming).toEqual([])
+})
+
+it("names Capture's batch limits only in the module that batches", () => {
+  const naming = [...sources(SOURCE), ...sources(SCRIPTS)]
+    .filter((path) => /CAPTURE_(?:CHAR|RECORD)_LIMIT/u.test(readFileSync(path, "utf8")))
+    .map((path) => relative(SOURCE, path))
+  expect(naming).toEqual(["memory/capture-batches.ts"])
 })

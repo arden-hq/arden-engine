@@ -6,12 +6,7 @@ import {
   MemoryCaptureStoreError,
   type MemoryCaptureBatchIdentity
 } from "../memory/store.js"
-import {
-  advanceCapture,
-  countCaptureBacklog,
-  listCaptureWork,
-  prepareCapture
-} from "./memory-capture-positions.js"
+import { advanceCapture, listCaptureWork, prepareCapture } from "./memory-capture-positions.js"
 import type { PersistenceDeps } from "./deps.js"
 
 const failed =
@@ -48,18 +43,9 @@ export const makeMemoryCaptureStore = ({
         .pipe(Effect.mapError(failed(operation, message, valid.sessionId)))
     })
 
-  const backlogCount = Effect.fn("SqliteMemoryCaptureStore.backlogCount")(function* (input: {
-    readonly splitAt: string
-  }) {
-    return yield* countCaptureBacklog(writer.reader, input).pipe(
-      Effect.mapError(failed("count", "Could not count the Memory capture backlog"))
-    )
-  })
-
   return MemoryCaptureStore.of({
     listWork,
     prepare: move("prepare", prepareCapture, "Could not prepare a Memory capture batch"),
-    advance: move("advance", advanceCapture, "Could not advance Memory capture"),
-    backlogCount
+    advance: move("advance", advanceCapture, "Could not advance Memory capture")
   })
 }

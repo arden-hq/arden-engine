@@ -54,6 +54,10 @@ speed:
 replay-copy into *flags:
     node --conditions=arden-source apps/server-ts/scripts/replay-copy.ts --into {{into}} {{flags}}
 
+# Count, on the replay copy in <copy> and with no model, the Memory Capture runs a catch-up of the old unread turns would take, and the typed owner turns, before and since 28 Aug 2026.
+capture-backlog copy:
+    cd apps/server-ts && ARDEN_CAPTURE_BACKLOG=1 ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project capture-backlog
+
 # Register every engine package with `bun link`, so a local app checkout uses this engine.
 link:
     for dir in libs/* apps/server-ts; do (cd "$dir" && bun link); done

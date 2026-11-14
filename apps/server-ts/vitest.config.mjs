@@ -20,6 +20,18 @@ const speedProject =
     ? [{ extends: true, test: { name: "speed", include: speed, testTimeout: 1_200_000 } }]
     : []
 
+// The Capture backlog count is a script on the replay copy, not a test: it runs only in its
+// own project, from `just capture-backlog`.
+const backlogProject =
+  process.env.ARDEN_CAPTURE_BACKLOG === "1"
+    ? [
+        {
+          extends: true,
+          test: { name: "capture-backlog", include: ["scripts/capture-backlog-count.ts"] }
+        }
+      ]
+    : []
+
 // The SQLite threads write here every table scan the tests cause; the check
 // in test/sql-scans/global.ts reads it after the run.
 const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
@@ -48,7 +60,8 @@ export default mergeConfig(
           extends: true,
           test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }
         },
-        ...speedProject
+        ...speedProject,
+        ...backlogProject
       ]
     }
   })

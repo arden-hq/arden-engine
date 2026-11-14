@@ -15,7 +15,7 @@ import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 
 // The update puts every owner chat at its last message, so nothing old is read, and keeps the
-// old unread messages as ranges that can be counted. Branch copies are not counted twice. A
+// old unread messages as ranges. Branch copies are not kept twice. A
 // turn counts as read only if a finished Capture run quoted it, whatever the old marks say.
 
 const BEFORE_POSITIONS = 154
@@ -197,7 +197,7 @@ const migrateTo154 = (filename: string): void => {
   }
 }
 
-it("starts each owner chat at its last message and keeps old unread messages countable", async () => {
+it("starts each owner chat at its last message and keeps old unread messages as ranges", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-capture-positions-"))
   const filename = join(directory, "arden.db")
   try {
@@ -218,7 +218,6 @@ it("starts each owner chat at its last message and keeps old unread messages cou
         const backlog = yield* sql`SELECT session_id, from_seq, through_seq
           FROM memory_capture_backlog ORDER BY session_id, from_seq`
         const sidecars = yield* sql`SELECT run_id, evidence_json FROM run_sidecars ORDER BY run_id`
-        const count = yield* captures.backlogCount({ splitAt: "2026-12-01T00:00:00.000Z" })
         yield* sql`INSERT INTO session_messages
           (session_id, message_id, seq, role, message_json, created_at, search_text)
           VALUES ('owner', 'u4', 6, 'user', ${JSON.stringify({
@@ -232,7 +231,6 @@ it("starts each owner chat at its last message and keeps old unread messages cou
           workAfterUpdate,
           backlog,
           sidecars,
-          count,
           workAfterTurn: yield* captures.listWork()
         }
       }).pipe(
@@ -272,18 +270,6 @@ it("starts each owner chat at its last message and keeps old unread messages cou
           evidence_json: JSON.stringify({ automation_outcome: BLOCKED })
         }
       ],
-      count: {
-        ranges: 4,
-        before: {
-          chats: 3,
-          typedTurns: 7,
-          userCharacters: "u2u3ownc0c1c2c6".length,
-          assistantCharacters: "a2a3own-answerd0d1d2".length,
-          batches: 1
-        },
-        since: { chats: 0, typedTurns: 0, userCharacters: 0, assistantCharacters: 0, batches: 0 },
-        freshTokensPerBatch: undefined
-      },
       workAfterTurn: [
         {
           sessionId: "owner",
