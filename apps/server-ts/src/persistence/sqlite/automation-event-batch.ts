@@ -57,6 +57,7 @@ export const batchAtClaim = Effect.fn("AutomationEventBatch.batchAtClaim")(funct
     runsAlone(options.context.trigger_context_snapshot.event_type)
   )
     return options.context
+  if (row.handler === "wiki_maintenance") return yield* absorbMemoryChanges(options)
   if (batchWindow(row) !== undefined) return yield* absorbBatch(options)
   if (
     (row.source === "event" || row.source === "manual") &&
@@ -119,6 +120,64 @@ const absorbBatch = Effect.fn("AutomationEventBatch.absorbBatch")(function* (opt
         : { source: "coalesced", queued_at: row.created_at, causes: [first, ...rest] }
   } satisfies QueueContext
 })
+
+/** Wiki Maintenance reads every commit since its own head, so a Memory change
+ * only wakes it. One claim takes every waiting change into its run instead of
+ * one run per change. Its timer and requests by hand stay queued. */
+const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges")(
+  function* (options: {
+    readonly sql: SqlClient.SqlClient
+    readonly row: {
+      readonly id: number
+      readonly task_id: string
+      readonly source: AutomationQueueSource
+      readonly created_at: string
+    }
+    readonly context: QueueContext
+  }) {
+    const { sql, row } = options
+    const waiting = yield* sql<{ readonly id: number; readonly context: string }>`
+      SELECT id, context FROM automation_event_queue
+      WHERE task_id = ${row.task_id} AND id != ${row.id} AND source = 'event'
+        AND ${queuedEventType(sql)} = 'wiki.changed' AND ${freshRow(sql)}
+      ORDER BY id`
+    if (waiting.length === 0) return options.context
+    const batches = yield* Effect.forEach(waiting, (other) =>
+      decodeQueueContext({ context: other.context, task_id: row.task_id }, "claim").pipe(
+        Effect.map((context) => eventBatchOf(context))
+      )
+    )
+    yield* sql`DELETE FROM automation_event_queue WHERE id IN ${sql.in(waiting.map(({ id }) => id))}`
+    const own = eventBatchOf(options.context)
+    const merged = mergeEventBatches(
+      [own, ...batches].filter((batch): batch is EventBatch => batch !== undefined)
+    )
+    if (merged === undefined) return options.context
+    const trigger =
+      own === undefined
+        ? triggerContextForClaim({
+            context: options.context,
+            source: row.source,
+            createdAt: row.created_at
+          })
+        : undefined
+    const ownCauses = (trigger === undefined ? [] : [trigger]).flatMap((cause) =>
+      cause.source === "coalesced" ? cause.causes : [cause]
+    )
+    const [first, ...more] = merged.events
+    const [head, ...tail] = [...ownCauses, ...[first, ...more, ...merged.overflow].map(eventCause)]
+    if (head === undefined) return options.context
+    return {
+      ...options.context,
+      event_batch: merged,
+      trigger_context_snapshot: {
+        source: "coalesced",
+        queued_at: row.created_at,
+        causes: [head, ...tail]
+      }
+    } satisfies QueueContext
+  }
+)
 
 export const withEventText = (
   context: QueueContext,
