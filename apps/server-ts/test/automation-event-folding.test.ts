@@ -159,3 +159,69 @@ it("a run asked for by hand folds no event deeper than itself", async () => {
     })
   )
 })
+
+/** A Space's review job: it batches what it hears in a window, then runs. */
+const review = (key: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const automation = yield* listener(key)
+    yield* sql`UPDATE scheduled_tasks SET purpose = 'space_review', owner_space_id = 'space-1' WHERE task_id = ${automation}`
+    return automation
+  })
+
+const AFTER_WINDOW = 31 * 60_000
+
+it("a batch-window run folds no event held behind its running producer", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const catalog = yield* AutomationCatalog
+      const queue = yield* AutomationQueue
+      yield* catalog.seedSystemAutomations([memoryCaptureHandler.spec])
+      const automation = yield* review("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a07")
+      yield* queue.requestRun(CAPTURE)
+      const [capture] = yield* Effect.promise(async () =>
+        queue.jobs.claim({
+          workerId: "folding",
+          now: Date.now(),
+          limit: 1,
+          leaseDurationMs: 3_600_000
+        })
+      )
+      expect(capture?.payload.automationId).toBe(CAPTURE)
+      yield* change("revision-1", null)
+      yield* change("revision-2", CAPTURE)
+      const [lease] = yield* claim(Date.now() + AFTER_WINDOW)
+      expect(lease?.payload.automationId).toBe(automation)
+      expect(yield* folded(automation)).toEqual({
+        causes: [{ source: "event", event_key: "revision-1" }],
+        waiting: [{ source: "event", event_key: "revision-2" }]
+      })
+    })
+  )
+})
+
+it("a batch-window run folds no event deeper than itself, nor one not yet due", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const producer = yield* listener("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a08", "task.changed")
+      const automation = yield* review("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a09")
+      yield* change("revision-1", null)
+      yield* change("revision-2", producer)
+      yield* change("revision-3", null)
+      const later = new Date(Date.now() + 2 * AFTER_WINDOW).toISOString()
+      yield* sql`UPDATE automation_event_queue SET next_attempt_at = ${later}
+        WHERE task_id = ${automation}
+          AND json_extract(context, '$.trigger_context_snapshot.event_key') = 'revision-3'`
+      const [lease] = yield* claim(Date.now() + AFTER_WINDOW)
+      expect(lease?.payload.automationId).toBe(automation)
+      expect(yield* folded(automation)).toEqual({
+        causes: [{ source: "event", event_key: "revision-1" }],
+        waiting: [
+          { source: "event", event_key: "revision-2" },
+          { source: "event", event_key: "revision-3" }
+        ]
+      })
+    })
+  )
+})

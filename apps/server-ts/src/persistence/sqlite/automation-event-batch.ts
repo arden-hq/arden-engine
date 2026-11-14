@@ -77,26 +77,44 @@ const absorbBatch = Effect.fn("AutomationEventBatch.absorbBatch")(function* (opt
     readonly created_at: string
   }
   readonly context: QueueContext
+  readonly now: string
 }) {
   const { sql, row } = options
-  const waiting = yield* sql<{
+  const run = { depth: contextDepth(options.context), asked: row.source === "manual" }
+  const rows = yield* sql<{
     readonly id: number
     readonly source: AutomationQueueSource
     readonly context: string
     readonly created_at: string
+    readonly due: number
+    readonly held: number
   }>`
-    SELECT id, source, context, created_at FROM automation_event_queue
-    WHERE task_id = ${row.task_id} AND id != ${row.id}
-      AND ${queuedEventType(sql)} IS NOT ${RUNS_ALONE}
+    SELECT queue.id, queue.source, queue.context, queue.created_at,
+      ${foldFacts(sql, options.now)}
+    FROM automation_event_queue AS queue
+    WHERE queue.task_id = ${row.task_id} AND queue.id != ${row.id}
+      AND ${queuedEventType(sql, sql`queue.context`)} IS NOT ${RUNS_ALONE}
       AND ${freshRow(sql)}
-    ORDER BY id`
-  if (waiting.length === 0) return options.context
-  const others = yield* Effect.forEach(waiting, (other) =>
+    ORDER BY queue.id`
+  const decoded = yield* Effect.forEach(rows, (other) =>
     decodeQueueContext({ context: other.context, task_id: row.task_id }, "claim").pipe(
-      Effect.map((context) =>
-        triggerContextForClaim({ context, source: other.source, createdAt: other.created_at })
-      )
+      Effect.map((context) => ({ ...other, context }))
     )
+  )
+  const waiting = decoded.filter((other) =>
+    foldsInto(run, {
+      depth: contextDepth(other.context),
+      due: other.due === 1,
+      held: other.held === 1
+    })
+  )
+  if (waiting.length === 0) return options.context
+  const others = waiting.map((other) =>
+    triggerContextForClaim({
+      context: other.context,
+      source: other.source,
+      createdAt: other.created_at
+    })
   )
   yield* sql`DELETE FROM automation_event_queue WHERE id IN ${sql.in(waiting.map(({ id }) => id))}`
   const own = triggerContextForClaim({
@@ -139,10 +157,7 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
   }) {
     const { sql, row } = options
     const own = eventBatchOf(options.context)
-    const run = {
-      depth: own === undefined ? 0 : batchChainDepth(own),
-      asked: row.source === "manual"
-    }
+    const run = { depth: contextDepth(options.context), asked: row.source === "manual" }
     const waiting = yield* sql<{
       readonly id: number
       readonly context: string
@@ -165,7 +180,9 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
       )
     )
     const folded = decoded.flatMap(({ batch, ...other }) =>
-      batch !== undefined && foldsInto(run, { ...other, batch }) ? [{ id: other.id, batch }] : []
+      batch !== undefined && foldsInto(run, { ...other, depth: batchChainDepth(batch) })
+        ? [{ id: other.id, batch }]
+        : []
     )
     if (folded.length === 0) return options.context
     yield* sql`DELETE FROM automation_event_queue WHERE id IN ${sql.in(folded.map(({ id }) => id))}`
@@ -216,15 +233,15 @@ const foldFacts = (sql: SqlClient.SqlClient, now: string) =>
   sql`(queue.next_attempt_at IS NULL OR queue.next_attempt_at <= ${now}) AS due,
     ${heldBehindProducer(sql, "queue")} AS held`
 
-/** The one rule for which waiting event a claim takes into its run: one that
- * could start a run of its own now (due, or the run was asked for by hand, and
- * not held behind its producer) at the run's own chain depth. A deeper event
- * would lift the run's depth, and what the run writes would then wake no one. */
+/** The one rule for which waiting row a claim takes into its run, on all three
+ * fold paths: one that could start a run of its own now (due, or the run was
+ * asked for by hand, and not held behind its producer) at the run's own chain
+ * depth. A deeper event would lift the run's depth, and what the run writes
+ * would then wake no one. */
 const foldsInto = (
   run: { readonly depth: number; readonly asked: boolean },
-  waiting: { readonly batch: EventBatch; readonly due: boolean; readonly held: boolean }
-): boolean =>
-  (run.asked || waiting.due) && !waiting.held && batchChainDepth(waiting.batch) === run.depth
+  waiting: { readonly depth: number; readonly due: boolean; readonly held: boolean }
+): boolean => (run.asked || waiting.due) && !waiting.held && waiting.depth === run.depth
 
 export const withEventText = (
   context: QueueContext,
@@ -324,7 +341,9 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
     const manual = claimedManual || manualRows.length > 0
     const run = { depth: own === undefined ? 0 : batchChainDepth(own), asked: manual }
     const folded = decoded.flatMap(({ id, source, due, held, batch }) =>
-      source === "event" && batch !== undefined && foldsInto(run, { batch, due, held })
+      source === "event" &&
+      batch !== undefined &&
+      foldsInto(run, { depth: batchChainDepth(batch), due, held })
         ? [{ id, batch: manual ? unasked(batch) : batch }]
         : []
     )
@@ -367,6 +386,12 @@ const stripAsked = ({ run_only_if: _asked, ...event }: BatchedEvent): BatchedEve
 
 const batchChainDepth = (batch: EventBatch): number =>
   Math.max(0, ...[...batch.events, ...batch.overflow].map((event) => event.chain_depth ?? 0))
+
+/** A row that carries no event, a timer or a request by hand, is at depth 0. */
+const contextDepth = (context: QueueContext): number => {
+  const batch = eventBatchOf(context)
+  return batch === undefined ? 0 : batchChainDepth(batch)
+}
 
 const eventCause = ({ run_only_if: _sentences, ...event }: BatchedEvent) =>
   ({ source: "event", ...event }) as const
