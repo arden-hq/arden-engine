@@ -11,13 +11,12 @@ export const taskRevisionRef = (
 
 export const assertCurrentTaskRevision = Effect.fn("WorkHistory.assertCurrentTaskRevision")(
   function* (sql: SqlClient.SqlClient, itemId: string, revision: string | null) {
-    const rows = yield* sql`SELECT 1 FROM space_task_revisions WHERE item_id = ${itemId}
-    AND item_id || ':' || version = ${revision}
-    AND version = (SELECT MAX(version) FROM space_task_revisions WHERE item_id = ${itemId})`
+    // A Task with no saved history is at version 0 (unsavedTaskRevision).
+    const rows = yield* sql`SELECT 1 FROM space_tasks AS task WHERE task.item_id = ${itemId}
+    AND task.item_id || ':' || COALESCE(
+      (SELECT MAX(version) FROM space_task_revisions WHERE item_id = task.item_id), 0
+    ) = ${revision}`
     if (rows.length === 0)
-      return yield* workError(
-        "conflict",
-        "Task evidence changed or has no baseline; read the Task again"
-      )
+      return yield* workError("conflict", "Task evidence changed; read the Task again")
   }
 )

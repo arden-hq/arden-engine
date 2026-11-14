@@ -7,12 +7,16 @@ import type {
   ResourceVersion
 } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
+import { SpaceReviewStore } from "../src/persistence/automations/space-review-store.js"
+import type { SpaceReviewReads } from "../src/persistence/automations/space-review.js"
 import {
   TaskProposalStore,
   type ProposeSpaceTaskInput
 } from "../src/persistence/proposals/store.js"
+import { assertCurrentTaskRevision } from "../src/persistence/sqlite/work-history.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import type { TaskInferenceReview } from "../src/persistence/work/inference.js"
@@ -27,6 +31,7 @@ import { wikiChangeTools } from "../src/tools/wiki-change.js"
 import { makeWikiChangeMethods } from "../src/wiki/change.js"
 import { Wiki } from "../src/wiki/service.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
+import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService, serverRunContext, sessionHeader } from "./kit.js"
 
 // The model names a page, a Task or a Chat turn; the server keeps the versions.
@@ -194,6 +199,49 @@ describe("task_propose after a review", () => {
     await named(tools, "task_propose").execute(create([own]), ctx)
     expect(proposed[0]?.sources).toEqual([{ ...own, revision: "task-1:3" }])
   })
+
+  // An old Task the history backfill has not reached has no saved version.
+  it("cites a Task that has no saved history", async () => {
+    const { proposed, tools } = fixture()
+    const ctx = context()
+    await named(tools, "space_inference_review").execute({}, ctx)
+    taskHandle(ctx.run, {
+      item_id: "task-1",
+      stable_key: "ship-it",
+      updated_at: "2026-11-04T09:00:00Z",
+      history_revision: null
+    })
+    const own = { kind: "task", item_id: "task-1" }
+    await named(tools, "task_propose").execute(create([own]), ctx)
+    expect(proposed[0]?.sources).toEqual([{ ...own, revision: "task-1:0" }])
+  })
+
+  it("admits that Task until its first saved change", async () => {
+    const AT = "2026-11-04T09:00:00.000Z"
+    const admitted = (sql: SqlClient.SqlClient, itemId: string, revision: string) =>
+      assertCurrentTaskRevision(sql, itemId, revision).pipe(
+        Effect.match({ onFailure: () => false, onSuccess: () => true })
+      )
+    const seen = await withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner,
+            created_at, updated_at)
+          VALUES ('task-1', NULL, 'ship-it', 'Ship it', 'open', 'worker', ${AT}, ${AT})`
+        yield* sql`DELETE FROM space_task_revisions WHERE item_id = 'task-1'`
+        const unsaved = yield* admitted(sql, "task-1", "task-1:0")
+        const missing = yield* admitted(sql, "task-2", "task-2:0")
+        yield* sql`UPDATE space_tasks SET text = 'Ship it today' WHERE item_id = 'task-1'`
+        return {
+          unsaved,
+          missing,
+          afterChange: yield* admitted(sql, "task-1", "task-1:0"),
+          current: yield* admitted(sql, "task-1", "task-1:2")
+        }
+      })
+    )
+    expect(seen).toEqual({ unsaved: true, missing: false, afterChange: false, current: true })
+  })
 })
 
 describe("wiki_read_change by page link", () => {
@@ -228,8 +276,15 @@ describe("wiki_read_change by page link", () => {
   const arden2 = version("arden", "projects/arden.md", "2")
   const notes1 = version("notes", "projects/notes.md", "3")
   const gone1 = version("gone", "projects/gone.md", "4")
+  const [plan1, plan2, plan3, plan4] = ["5", "6", "7", "8"].map((content) =>
+    version("plan", "projects/plan.md", content)
+  ) as [ResourceVersion, ResourceVersion, ResourceVersion, ResourceVersion]
   // Newest first, as the repository returns history.
   const commits = [
+    commit("h", "2026-11-04T16:00:00.000000Z", [edit(plan3, plan4)]),
+    commit("f", "2026-11-04T15:00:00.000000Z", [edit(plan2, plan3)]),
+    commit("e", "2026-11-04T14:00:00.000000Z", [edit(plan1, plan2)]),
+    commit("d", "2026-11-04T13:00:00.000000Z", [edit(null, plan1)]),
     commit("c", "2026-11-04T12:00:00.000000Z", [edit(null, notes1)]),
     commit("b", "2026-11-04T11:00:00.000000Z", [edit(arden1, arden2)]),
     commit("9", "2026-11-04T10:30:00.000000Z", [edit(null, gone1)]),
@@ -249,25 +304,80 @@ describe("wiki_read_change by page link", () => {
     }
   })
 
+  const position = (commitId: string | null | undefined, fallback: number): number =>
+    commitId == null ? fallback : commits.findIndex((each) => each.commitId === commitId)
+  const versionAt = (commitId: string | null, resourceId: string): ResourceVersion | null =>
+    commitId === null
+      ? null
+      : (commits
+          .slice(position(commitId, 0))
+          .flatMap((each) => each.changes)
+          .find((change) => change.after?.resourceId === resourceId)?.after ?? null)
+  const diffText = (before: ResourceVersion | null, after: ResourceVersion | null): string =>
+    `-${before?.versionId.slice(0, 1) ?? "nothing"}\n+${after?.versionId.slice(0, 1) ?? "nothing"}\n`
+
   const repository = partialService<ManagedFileRepositoryShape>("Repository", {
     history: (options) =>
       Effect.succeed(
-        commits.filter(
-          (each) =>
-            options?.resourceId == null ||
-            each.changes.some(
-              (change) => (change.after ?? change.before)?.resourceId === options.resourceId
-            )
-        )
+        commits
+          .slice(position(options?.start, 0), position(options?.stopBefore, commits.length))
+          .filter(
+            (each) =>
+              options?.resourceId == null ||
+              each.changes.some(
+                (change) => (change.after ?? change.before)?.resourceId === options.resourceId
+              )
+          )
       ),
+    diffPage: (base, head, resourceId) => {
+      const before = versionAt(base, resourceId)
+      const after = versionAt(head, resourceId)
+      return Effect.succeed({
+        resourceId,
+        before,
+        after,
+        offset: 0,
+        endOffset: 20,
+        hasMore: false,
+        unifiedDiff: diffText(before, after)
+      })
+    },
     diffVersionsPage: (before, after) =>
       Effect.succeed({
         offset: 0,
         endOffset: 20,
         hasMore: false,
-        unifiedDiff: `-${before?.versionId.slice(0, 1) ?? "nothing"}\n+${after?.versionId.slice(0, 1) ?? "nothing"}\n`
+        unifiedDiff: diffText(before, after)
       })
   })
+  // The previous review ended after the plan page was created; three changes
+  // to it were saved before this review. The notes page is new to the review.
+  const REVIEW_RUN = "review-run"
+  const reads: SpaceReviewReads = {
+    space: { name: "Arden", instructions: null },
+    openTasks: [],
+    proposals: [],
+    memory: { base: hash("d"), head: hash("h") },
+    pages: [
+      {
+        pageId: "plan",
+        path: "projects/plan.md",
+        version: plan4.versionId,
+        basis: "owned",
+        previousVersion: plan1.versionId
+      },
+      {
+        pageId: "notes",
+        path: "notes.md",
+        version: notes1.versionId,
+        basis: "linked",
+        previousVersion: null
+      }
+    ],
+    chats: [],
+    removed: [],
+    items: []
+  }
   const tools = Effect.runSync(
     wikiChangeTools.pipe(
       Effect.provideService(
@@ -276,15 +386,21 @@ describe("wiki_read_change by page link", () => {
           snapshot: () =>
             Effect.succeed({
               head: hash("c"),
-              pages: [page(arden2, "Arden"), page(notes1, "Notes")]
+              pages: [page(arden2, "Arden"), page(notes1, "Notes"), page(plan4, "Plan")]
             }),
           ...makeWikiChangeMethods(repository)
+        })
+      ),
+      Effect.provideService(
+        SpaceReviewStore,
+        partialService<SpaceReviewStore["Service"]>("SpaceReviewStore", {
+          reviewReads: (runId) => Effect.succeed(runId === REVIEW_RUN ? reads : undefined)
         })
       )
     )
   )
-  const read = (args: Record<string, string>) =>
-    named(tools, "wiki_read_change").execute(args, context())
+  const read = (args: Record<string, string>, runId = "chat-run") =>
+    named(tools, "wiki_read_change").execute(args, context(serverRunContext({ runId })))
 
   it("takes no hash from the model", () => {
     expect(hashInputsOf(tools)).toEqual([])
@@ -310,6 +426,33 @@ describe("wiki_read_change by page link", () => {
   it("finds a page that is no longer in Memory by the path it had", async () => {
     const result = await read({ page: "projects/gone.md" })
     expect(result.content).toContain("Saved 2026-11-04T10:30:00.000000Z")
+  })
+
+  it("shows a Space review every change to a page since its previous review", async () => {
+    const result = await read({ page: "arden:memory/projects/plan.md" }, REVIEW_RUN)
+    expect(result.is_error).toBe(false)
+    expect(result.content).toContain("saved 3 times since the previous review")
+    for (const hour of ["14", "15", "16"])
+      expect(result.content).toContain(`Saved 2026-11-04T${hour}:00:00.000000Z`)
+    expect(result.content).not.toContain("Saved 2026-11-04T13:00:00.000000Z")
+    expect(result.content).toContain("-5\n+8")
+    expect(result.content).not.toMatch(HEX_64)
+  })
+
+  it("shows a Space review a page it has not seen before as added", async () => {
+    const result = await read({ page: "arden:memory/notes.md" }, REVIEW_RUN)
+    expect(result.content).toContain("new to this review")
+    expect(result.content).toContain("-nothing\n+3")
+  })
+
+  it("opens only the latest change outside a review, or at a named time inside one", async () => {
+    const latest = await read({ page: "arden:memory/projects/plan.md" })
+    expect(latest.content).toContain("-7\n+8")
+    const named = await read(
+      { page: "arden:memory/projects/plan.md", at: "2026-11-04T15:00:00.000000Z" },
+      REVIEW_RUN
+    )
+    expect(named.content).toContain("-6\n+7")
   })
 
   it("says how to list a page's changes when none matches", async () => {

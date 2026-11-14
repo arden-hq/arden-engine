@@ -8,6 +8,7 @@ const CHANGE_DIFF_CHARS = 12_000
 const MIN_PAGE_CHARS = 400
 // How far back a page with no id (an archived one) is looked for by its path.
 const CHANGE_SEARCH_COMMITS = 2_000
+const MAX_LISTED_SAVES = 20
 
 interface WikiChangedPage {
   readonly action: string
@@ -52,11 +53,38 @@ interface WikiChangeName {
   readonly at: string | undefined
 }
 
+/**
+ * One page between two saved states of Memory: `base` is the state a reader
+ * last saw, `head` the state it reads now. A null `base` means the reader
+ * never saw the page, so its whole text counts as added.
+ */
+interface WikiPageSpan {
+  readonly pageId: string
+  readonly path: string
+  readonly base: string | null
+  readonly head: string
+  readonly offset: number
+}
+
+export interface WikiPageChangesRead {
+  readonly path: string
+  readonly isNew: boolean
+  /** The saved changes the diff covers, newest first, up to a listing limit. */
+  readonly saved: ReadonlyArray<{
+    readonly timestamp: string
+    readonly source: WikiCommitSource
+    readonly reason: string
+  }>
+  readonly unlisted: number
+  readonly diff: WikiChangeDiff
+}
+
 export interface WikiChangeMethods {
   readonly changeAt: (name: WikiChangeName) => Effect.Effect<Commit, WikiError>
   readonly readChange: (
     input: WikiChangeName & { readonly offset: number }
   ) => Effect.Effect<WikiChangeRead, WikiError>
+  readonly readChangesSince: (span: WikiPageSpan) => Effect.Effect<WikiPageChangesRead, WikiError>
 }
 
 const touches =
@@ -163,5 +191,39 @@ export const makeWikiChangeMethods = (
       next
     }
   })
-  return { changeAt, readChange }
+  const readChangesSince = Effect.fn("Wiki.readChangesSince")(function* (span: WikiPageSpan) {
+    const commits = yield* repository
+      .history({
+        resourceId: span.pageId,
+        start: span.head,
+        stopBefore: span.base,
+        limit: CHANGE_SEARCH_COMMITS
+      })
+      .pipe(Effect.mapError(mapRevisionError("history", span.pageId)))
+    const page = yield* repository
+      .diffPage(span.base, span.head, span.pageId, {
+        offset: span.offset,
+        limit: CHANGE_DIFF_CHARS
+      })
+      .pipe(Effect.mapError(mapRevisionError("diff", span.pageId)))
+    return {
+      path: page.after?.path ?? span.path,
+      isNew: page.before === null,
+      saved: commits.slice(0, MAX_LISTED_SAVES).map((commit) => ({
+        timestamp: commit.timestamp,
+        source: wikiOriginSource(decodeWikiOrigin(commit.origin)),
+        reason: commit.reason
+      })),
+      unlisted: Math.max(0, commits.length - MAX_LISTED_SAVES),
+      diff: {
+        path: page.after?.path ?? span.path,
+        action: page.before === null ? "create" : "update",
+        offset: page.offset,
+        endOffset: page.endOffset,
+        complete: !page.hasMore,
+        text: page.unifiedDiff
+      }
+    }
+  })
+  return { changeAt, readChange, readChangesSince }
 }

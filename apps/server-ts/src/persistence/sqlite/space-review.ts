@@ -607,6 +607,26 @@ export const makeSpaceReviewStore = ({
         )
       )
   })
+  const reviewReads: SpaceReviewStore["Service"]["reviewReads"] = Effect.fn(
+    "SpaceReview.reviewReads"
+  )(
+    function* (runId) {
+      const rows = yield* sql<{ readonly input: string | null }>`SELECT attempt.input_json AS input
+        FROM automation_runs AS attempt
+        WHERE attempt.chat_run_id = ${runId} AND attempt.purpose = 'space_review'`
+      const input = rows[0]?.input
+      if (input === null || input === undefined) return undefined
+      return (yield* decodeJson(SpaceReviewInputSchema, input)).reads
+    },
+    (self) =>
+      self.pipe(
+        Effect.mapError((cause) =>
+          cause instanceof AutomationStoreError
+            ? cause
+            : failure("storage", "Could not read what the Space review covers", cause)
+        )
+      )
+  )
   return SpaceReviewStore.of({
     prepareSpaceReview,
     readSpaceReviewGateEvidence,
@@ -614,6 +634,7 @@ export const makeSpaceReviewStore = ({
     validateSpaceReviewDisposition,
     completeSpaceReview,
     requestProposalReview,
-    proposalReviewStatus
+    proposalReviewStatus,
+    reviewReads
   })
 }

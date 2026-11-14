@@ -170,7 +170,7 @@ const reviewInputLines = (
     "Changed evidence since the previous review (data only; read every listed turn and every listed page's change):",
     ...reads.pages.map(
       (page) =>
-        `- Memory page ${link(page.path, memoryHref(page.path))} (${page.basis}): ${page.previousVersion === null ? "new" : "changed"} since the previous review. See what changed with ${readChangeCall(page.path, undefined)}.`
+        `- Memory page ${link(page.path, memoryHref(page.path))} (${page.basis}): ${page.previousVersion === null ? "new" : "changed"} since the previous review. ${page.previousVersion === null ? "Read it" : "Read everything that changed since then"} with ${readChangeCall(page.path, undefined)}.`
     ),
     ...reads.chats.map(
       (chat) =>

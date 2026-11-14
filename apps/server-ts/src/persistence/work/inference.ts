@@ -1,5 +1,12 @@
 import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
 
+/**
+ * The version of a Task with no saved history yet: an old Task the history
+ * backfill has not reached. Its first saved change makes version 1, so this
+ * stops matching as soon as the Task changes.
+ */
+export const unsavedTaskRevision = (itemId: string): string => `${itemId}:0`
+
 export interface TaskInferenceReview {
   readonly snapshot: string
   readonly tasks: ReadonlyArray<{

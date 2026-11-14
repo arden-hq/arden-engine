@@ -4,7 +4,8 @@ import type {
   SpaceReviewDisposition,
   SpaceReviewEvidence,
   SpaceReviewGateEvidence,
-  SpaceReviewInput
+  SpaceReviewInput,
+  SpaceReviewReads
 } from "./space-review.js"
 import type { AutomationJobLeaseRef, AutomationStoreError } from "./store.js"
 
@@ -44,5 +45,9 @@ export class SpaceReviewStore extends Context.Service<
       | undefined,
       AutomationStoreError
     >
+    /** What the Space review behind this Run was given to read; undefined for any other Run. */
+    readonly reviewReads: (
+      runId: string
+    ) => Effect.Effect<SpaceReviewReads | undefined, AutomationStoreError>
   }
 >()("@arden-hq/server/persistence/automations/SpaceReviewStore") {}

@@ -1,3 +1,4 @@
+import { unsavedTaskRevision } from "../persistence/work/inference.js"
 import { observedKey, type ServerRunContext } from "./run-context.js"
 
 /**
@@ -14,7 +15,9 @@ export const taskHandle = (
     readonly history_revision: string | null
   }
 ): string => {
-  if (task.history_revision !== null)
-    run.observations.observe(observedKey.task(task.item_id), task.history_revision)
+  run.observations.observe(
+    observedKey.task(task.item_id),
+    task.history_revision ?? unsavedTaskRevision(task.item_id)
+  )
   return `key ${task.stable_key} · updated_at ${task.updated_at}`
 }
