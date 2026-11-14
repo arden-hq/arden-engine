@@ -32,9 +32,9 @@ export const automationsOfChat = (sql: SqlClient.SqlClient, sessionId: string) =
     readonly task_id: string
     readonly name: string
     readonly running: number
-  }>`SELECT task_id, name, (running_since IS NOT NULL OR EXISTS (
+  }>`SELECT task_id, name, EXISTS (
         SELECT 1 FROM automation_runs AS run
-        WHERE run.task_id = task.task_id AND run.status = 'running')) AS running
+        WHERE run.task_id = task.task_id AND run.status = 'running') AS running
       FROM scheduled_tasks AS task
       WHERE thread_id = ${sessionId} AND ${userAutomationSql()}
       ORDER BY task_id`

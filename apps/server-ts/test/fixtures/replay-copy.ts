@@ -58,11 +58,14 @@ export const runOnReplayCopy = async <A, E>(
     return await Effect.runPromise(
       body.pipe(
         Effect.provide(
-          Layer.merge(
-            sqlitePersistenceLayer({ dataDir: null, filename: database }).pipe(
-              Layer.provide(PersistenceWriteQueue.layer)
-            ),
-            SqliteClient.layer({ filename: database, readonly: true })
+          // The read-only connection opens after the stores: a pending
+          // migration refuses to run while another connection is open.
+          SqliteClient.layer({ filename: database, readonly: true }).pipe(
+            Layer.provideMerge(
+              sqlitePersistenceLayer({ dataDir: null, filename: database }).pipe(
+                Layer.provide(PersistenceWriteQueue.layer)
+              )
+            )
           )
         )
       )

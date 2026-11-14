@@ -290,7 +290,6 @@ export const makeAutomationCatalogEdits = ({
           const threadChanged = threadId !== row.thread_id
           if (threadChanged) {
             if (
-              row.running_since !== null ||
               (yield* sql`
                 SELECT 1 FROM automation_runs WHERE task_id = ${validAutomationId} AND status = 'running' LIMIT 1
               `).length > 0

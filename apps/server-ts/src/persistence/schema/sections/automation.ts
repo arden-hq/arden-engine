@@ -58,7 +58,9 @@ export const automationSchemaSection = {
     "chat_runs_immutable_context",
     "worker_attempt_state",
     "automation_delivery_runs_ai",
-    "automation_delivery_runs_au"
+    "automation_delivery_runs_au",
+    "automation_job_closes_run_ad",
+    "automation_job_closes_run_au"
   ],
   statements: [
     `CREATE TABLE scheduled_tasks (
@@ -343,6 +345,39 @@ export const automationSchemaSection = {
       WHERE status = 'completed' AND (CASE WHEN outcome IS NULL
         THEN skip_json IS NULL AND disposition IS NOT 'superseded'
         ELSE outcome <> 'superseded' AND outcome NOT GLOB 'skipped:*' END)`,
-    `CREATE INDEX idx_automation_runs_task_day ON automation_runs(task_id, date(started_at))`
+    `CREATE INDEX idx_automation_runs_task_day ON automation_runs(task_id, date(started_at))`,
+    // A job run is open exactly while a queue row names it (migration 0154).
+    `CREATE TRIGGER automation_job_closes_run_ad
+      AFTER DELETE ON automation_event_queue
+      WHEN json_extract(OLD.context, '$.automation_run_id') IS NOT NULL
+      BEGIN
+        UPDATE automation_runs
+        SET status = 'interrupted', outcome = 'interrupted',
+          ended_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          error = 'Its job ended before the run did'
+        WHERE id = json_extract(OLD.context, '$.automation_run_id')
+          AND task_id IS NOT NULL AND status = 'running';
+        UPDATE scheduled_tasks SET running_since = NULL
+        WHERE task_id = OLD.task_id AND running_since IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS queue
+            WHERE queue.task_id = OLD.task_id AND queue.claimed_at IS NOT NULL);
+      END`,
+    `CREATE TRIGGER automation_job_closes_run_au
+      AFTER UPDATE OF context ON automation_event_queue
+      WHEN json_extract(OLD.context, '$.automation_run_id') IS NOT NULL
+        AND json_extract(NEW.context, '$.automation_run_id')
+          IS NOT json_extract(OLD.context, '$.automation_run_id')
+      BEGIN
+        UPDATE automation_runs
+        SET status = 'interrupted', outcome = 'interrupted',
+          ended_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          error = 'Its job ended before the run did'
+        WHERE id = json_extract(OLD.context, '$.automation_run_id')
+          AND task_id IS NOT NULL AND status = 'running';
+        UPDATE scheduled_tasks SET running_since = NULL
+        WHERE task_id = OLD.task_id AND running_since IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS queue
+            WHERE queue.task_id = OLD.task_id AND queue.claimed_at IS NOT NULL);
+      END`
   ]
 } as const satisfies OperationalSchemaSection
