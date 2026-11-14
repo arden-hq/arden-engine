@@ -102,6 +102,9 @@ const discussedLine = (chats: ReadonlyArray<DiscussedChat> | undefined): Readonl
           .join("; ")}`
       ]
 
+/** The line that names a page in what a chat is sent; the memory test finds sent pages by it. */
+export const pageLine = (path: string): string => `Page: ${path}`
+
 const appendPages = (
   blocks: Array<string>,
   sources: Array<MemorySource>,
@@ -125,7 +128,7 @@ const appendPages = (
     if (body.length === 0) continue
     const prefix = [
       `### ${record.page.title}`,
-      `Page: ${record.resource.path}`,
+      pageLine(record.resource.path),
       ...(lastChanged.get(record.page.pageId) === undefined
         ? []
         : [lastChanged.get(record.page.pageId)]),

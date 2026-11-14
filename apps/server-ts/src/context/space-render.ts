@@ -58,7 +58,11 @@ const byteLength = (value: string): number => encoder.encode(value).byteLength
 export const renderSpaceContext = (
   view: SpaceView,
   { maxBytes = SPACE_CONTEXT_MAX_BYTES }: { readonly maxBytes?: number } = {}
-): { readonly text: string; readonly pageWhole: boolean } => {
+): {
+  readonly text: string
+  /** How much of the Space memory page the text holds; an empty page counts as absent. */
+  readonly page: "whole" | "partial" | "absent"
+} => {
   const head = [
     "## Current Space",
     "",
@@ -118,10 +122,9 @@ export const renderSpaceContext = (
       ? undefined
       : pageBlock(view.page, Math.min(remaining, SPACE_PAGE_MAX_BYTES))
   place(page?.text)
-  return {
-    text: [head, ...blocks, navigation].join("\n\n"),
-    pageWhole: page?.whole === true && view.page?.content !== ""
-  }
+  const text = [head, ...blocks, navigation].join("\n\n")
+  if (page === undefined || view.page?.content === "") return { text, page: "absent" }
+  return { text, page: page.whole ? "whole" : "partial" }
 }
 
 export const SpaceFactsSchema = Schema.Struct({
