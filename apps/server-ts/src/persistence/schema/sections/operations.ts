@@ -12,7 +12,11 @@ export const operationsSchemaSection = {
     "monitor_state",
     "wiki_rename_approvals"
   ],
-  indexes: ["idx_wiki_rename_approvals_open_page", "idx_wiki_rename_approvals_open_created"],
+  indexes: [
+    "idx_home_presence_lease",
+    "idx_wiki_rename_approvals_open_page",
+    "idx_wiki_rename_approvals_open_created"
+  ],
   triggers: [],
   statements: [
     `CREATE TABLE home_presence (
@@ -21,6 +25,7 @@ export const operationsSchemaSection = {
       last_seen_at TEXT,
       lease_until TEXT NOT NULL
     )`,
+    "CREATE INDEX idx_home_presence_lease ON home_presence(lease_until)",
     `CREATE TABLE home_letter (
       singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
       window_id TEXT NOT NULL,
