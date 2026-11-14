@@ -21,6 +21,21 @@ export type RuntimeSection =
       readonly space: SpaceView
     }
 
+/**
+ * A text section, or none when `value` is blank. A value that opens with its own `## `
+ * heading is keyed by that heading, else by `name`.
+ */
+export const textSection = (
+  name: string,
+  value: string | undefined,
+  lifetime: "state" | "turn" = "state"
+): ReadonlyArray<RuntimeSection> => {
+  const trimmed = value?.trim()
+  if (trimmed === undefined || trimmed === "") return []
+  const heading = /^## (.+)/.exec(trimmed)?.[1]?.trim()
+  return [{ kind: "text", key: heading ?? name, text: trimmed, lifetime }]
+}
+
 export interface RuntimeContext {
   readonly sections: ReadonlyArray<RuntimeSection>
   readonly endNote: string | undefined

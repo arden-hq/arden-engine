@@ -58,7 +58,7 @@ const byteLength = (value: string): number => encoder.encode(value).byteLength
 export const renderSpaceContext = (
   view: SpaceView,
   { maxBytes = SPACE_CONTEXT_MAX_BYTES }: { readonly maxBytes?: number } = {}
-): { readonly text: string; readonly pageWhole: boolean } => {
+): { readonly text: string; readonly page: SpacePageShown | undefined } => {
   const head = [
     "## Current Space",
     "",
@@ -120,8 +120,20 @@ export const renderSpaceContext = (
   place(page?.text)
   return {
     text: [head, ...blocks, navigation].join("\n\n"),
-    pageWhole: page?.whole === true && view.page?.content !== ""
+    page: spacePageShown(view.page, page)
   }
+}
+
+/** How much of the Space's Memory page its context holds; `undefined` when it has no page. */
+export type SpacePageShown = "whole" | "cut" | "dropped"
+
+const spacePageShown = (
+  page: SpaceView["page"],
+  block: { readonly whole: boolean } | undefined
+): SpacePageShown | undefined => {
+  if (page === undefined) return undefined
+  if (block === undefined) return "dropped"
+  return block.whole ? "whole" : "cut"
 }
 
 export const SpaceFactsSchema = Schema.Struct({

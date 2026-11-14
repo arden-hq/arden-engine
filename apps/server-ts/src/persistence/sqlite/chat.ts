@@ -22,6 +22,7 @@ import { mapFailure, validateInput, writeError } from "./chat-write-errors.js"
 import { assertRunModelAuthority } from "./run-context.js"
 import { sessionTreeRoot } from "./chat-session.js"
 import { recordModelRunUsage } from "./run-usage.js"
+import { recordMemoryContextInTransaction } from "./run-memory-context.js"
 import { admitModelRequest, readExecutionBudget } from "./execution-budgets.js"
 import type { PersistenceDeps } from "./deps.js"
 import { iso } from "../../runtime/clock.js"
@@ -92,6 +93,11 @@ const makeChatWriteStore = ({
     }
   )
 
+  const recordMemoryContext: ChatWriteStore["Service"]["recordMemoryContext"] = (input) =>
+    writer
+      .transactInteractive(recordMemoryContextInTransaction(sql, input))
+      .pipe(Effect.mapError(mapFailure("checkpoint", { runId: input.runId })))
+
   return ChatWriteStore.of({
     executionBudget: (runId) =>
       readExecutionBudget(sql, runId).pipe(Effect.mapError(mapFailure("start", { runId }))),
@@ -150,6 +156,7 @@ const makeChatWriteStore = ({
     }),
     recordModelUsage,
     recordLocalInstructions,
+    recordMemoryContext,
     ...makeChatAdmission({
       writer,
       chatEvents,

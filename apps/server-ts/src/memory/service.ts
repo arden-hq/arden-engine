@@ -22,6 +22,8 @@ interface MemoryRecallInput {
 }
 
 export interface MemoryTurn {
+  /** The Memory revision every read in this turn is made at. */
+  readonly revision: string | null
   readonly readContent: (pageId: string) => ReturnType<typeof readSnapshotContent>
   readonly recall: (input: MemoryRecallInput) => Effect.Effect<MemoryRecall, MemoryError>
 }
@@ -105,7 +107,6 @@ export class Memory extends Context.Service<
             )
           const prepared = prepareMemoryRecall({
             lastChanged: lastChangedLines(times, now),
-            revision: current.head,
             pages: current.pages,
             query: valid.query,
             semanticMatches: semantic,
@@ -141,6 +142,7 @@ export class Memory extends Context.Service<
             current === undefined
               ? undefined
               : {
+                  revision: current.head,
                   readContent: (pageId) => readSnapshotContent(current, pageId),
                   recall: (input) => recall(input, current)
                 }
