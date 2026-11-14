@@ -1,3 +1,4 @@
+import { openRunSince } from "./automation-running.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { outcomeSql, shownRunStatus } from "./automation-run-outcome.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
@@ -72,7 +73,7 @@ export type QueueRow = JobClassification & {
   readonly thread_id: string | null
   readonly handler: string | null
   readonly enabled: number
-  readonly running_since: string | null
+  readonly held_by_worker_since: string | null
   readonly task_next_run_at: string | null
   readonly task_last_run_at: string | null
 }
@@ -207,8 +208,8 @@ export const systemSpecOf = (
 export const automationRowSelect = (sql: SqlClient.SqlClient) => sql`
   SELECT task_id, automation_ref, name, description, description_source,
          prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
-         next_run_at, last_result, running_since, auto_approve, handler,
-         builtin, cooldown_minutes, thread_id, tool_scope, triggers_source,
+         next_run_at, last_result, ${openRunSince(sql, sql`scheduled_tasks.task_id`)} AS running_since,
+         auto_approve, handler, builtin, cooldown_minutes, thread_id, tool_scope, triggers_source,
          prompt_author, instruction_revision_id,
          purpose, owner_space_id, owner_task_id,
          (SELECT origin_automation_id FROM sessions WHERE session_id = scheduled_tasks.thread_id)

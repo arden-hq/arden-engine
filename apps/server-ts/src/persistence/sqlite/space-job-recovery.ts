@@ -45,7 +45,7 @@ export const makeSpaceJobRecovery = (options: {
           AND archived_at IS NULL) AS ended
         FROM scheduled_tasks
         WHERE purpose = 'space_review'
-          AND (enabled = 1 OR running_since IS NOT NULL
+          AND (enabled = 1
             OR EXISTS (SELECT 1 FROM automation_event_queue AS queue
               WHERE queue.task_id = scheduled_tasks.task_id)
             OR task_id IN (${automationRecoveryAuthority(sql)}))
@@ -68,7 +68,7 @@ export const makeSpaceJobRecovery = (options: {
         WHERE job.purpose = 'task_execution'
           AND ${after === undefined ? sql`1` : sql`job.task_id > ${after}`}
           AND ((${taskOpenSql("item")})
-            OR job.enabled = 1 OR job.running_since IS NOT NULL
+            OR job.enabled = 1
             OR authority.automation_id IS NOT NULL
             OR EXISTS (SELECT 1 FROM automation_event_queue AS queue WHERE queue.task_id = job.task_id))
         ORDER BY job.task_id LIMIT ${CHUNK_SIZE}`

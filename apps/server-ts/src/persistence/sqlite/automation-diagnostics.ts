@@ -1,3 +1,4 @@
+import { jobHeldSince } from "./automation-running.js"
 import { hasPendingTaskQuestion } from "./task-question-state.js"
 import { DateTime, Effect } from "effect"
 import type { PersistenceDeps } from "./deps.js"
@@ -38,7 +39,7 @@ export const makeAutomationDiagnostics = ({
           const queue = yield* sql<QueueRow>`SELECT
       q.id AS queue_id, q.task_id, t.automation_ref, t.name, q.source, t.enabled,
       q.created_at, q.claimed_at, q.lease_expires_at, q.next_attempt_at, q.attempt_count,
-      q.last_error, t.running_since, r.chat_run_id, c.status AS chat_status,
+      q.last_error, ${jobHeldSince(sql, "t")} AS held_by_worker_since, r.chat_run_id, c.status AS chat_status,
       (SELECT active.status FROM chat_runs active WHERE active.session_id = t.thread_id
         AND active.status IN ${activeRunStatusList} ORDER BY active.started_at DESC LIMIT 1) AS destination_chat_status,
       (t.purpose = 'task_execution' AND ${hasPendingTaskQuestion(sql, sql`t.owner_task_id`)}) AS pending_task_question,
@@ -50,7 +51,7 @@ export const makeAutomationDiagnostics = ({
       LIMIT 51`
           const schedules =
             yield* sql<ScheduleRow>`SELECT t.task_id, t.automation_ref, t.name, t.enabled,
-      t.next_run_at, t.running_since, t.last_run_at, t.cooldown_minutes, t.thread_id AS session_id,
+      t.next_run_at, ${jobHeldSince(sql, "t")} AS held_by_worker_since, t.last_run_at, t.cooldown_minutes, t.thread_id AS session_id,
       (SELECT c.status FROM chat_runs c WHERE c.session_id = t.thread_id
         AND c.status IN ${activeRunStatusList} ORDER BY c.started_at DESC LIMIT 1) AS active_chat_status
       FROM scheduled_tasks t

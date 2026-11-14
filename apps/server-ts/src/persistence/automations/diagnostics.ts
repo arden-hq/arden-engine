@@ -11,7 +11,7 @@ export interface QueueRow {
   readonly next_attempt_at: string | null
   readonly attempt_count: number
   readonly last_error: string | null
-  readonly running_since: string | null
+  readonly held_by_worker_since: string | null
   readonly chat_run_id: string | null
   readonly chat_status: string | null
   readonly destination_chat_status: string | null
@@ -25,7 +25,7 @@ export interface ScheduleRow {
   readonly name: string
   readonly enabled: number
   readonly next_run_at: string | null
-  readonly running_since: string | null
+  readonly held_by_worker_since: string | null
   readonly last_run_at: string | null
   readonly cooldown_minutes: number | null
   readonly session_id: string | null

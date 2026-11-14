@@ -112,7 +112,7 @@ export const makeSpaceJobSql = (
     const needsHalt =
       reason === "hold"
         ? sql`job.enabled = 1 OR job.next_run_at IS NOT NULL`
-        : sql`job.enabled = 1 OR job.next_run_at IS NOT NULL OR job.running_since IS NOT NULL
+        : sql`job.enabled = 1 OR job.next_run_at IS NOT NULL
           OR EXISTS (SELECT 1 FROM automation_event_queue AS queue WHERE queue.task_id = job.task_id)
           OR job.task_id IN (${automationRecoveryAuthority(sql)})`
     const pending = yield* sql`SELECT 1 FROM scheduled_tasks AS job

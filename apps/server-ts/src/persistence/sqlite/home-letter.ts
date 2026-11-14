@@ -1,3 +1,4 @@
+import { openRunSince } from "./automation-running.js"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql"
 import {
@@ -218,7 +219,7 @@ export const makeHomeStore = ({
             yield* sql<LetterRow>`SELECT run_id, window_since, window_through, generated_at, body_json, sources_json
         FROM home_letters ORDER BY generated_at DESC, letter_id DESC LIMIT ${LETTERS_KEPT}`
           const running =
-            yield* sql`SELECT 1 FROM scheduled_tasks WHERE task_id = ${HOME_LETTER_AUTOMATION_ID} AND running_since IS NOT NULL`
+            yield* sql`SELECT 1 WHERE ${openRunSince(sql, sql`${HOME_LETTER_AUTOMATION_ID}`)} IS NOT NULL`
           const now = DateTime.formatIso(yield* DateTime.now)
           const pending =
             yield* sql`SELECT 1 FROM automation_event_queue AS queue JOIN scheduled_tasks AS task ON task.task_id = queue.task_id

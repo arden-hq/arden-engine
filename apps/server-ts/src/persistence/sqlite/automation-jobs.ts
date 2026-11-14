@@ -1,3 +1,4 @@
+import { jobHeldSince } from "./automation-running.js"
 import { cutText } from "@arden-hq/std/text"
 import { triggerContextForClaim } from "./automation-occurrence.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
@@ -229,7 +230,7 @@ export const makeAutomationJobs = ({
       WHERE enabled = 1
         AND next_run_at IS NOT NULL
         AND next_run_at <= ${now}
-        AND running_since IS NULL
+        AND ${jobHeldSince(sql, "task")} IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM automation_event_queue AS queued
           WHERE queued.task_id = task.task_id
@@ -274,7 +275,7 @@ export const makeAutomationJobs = ({
                    queue.claimed_at, queue.lease_expires_at, queue.attempt_count, queue.next_attempt_at,
                    task.name, task.prompt, task.model, task.context_mode, task.thread_id, task.handler, task.purpose, task.owner_space_id, task.owner_task_id, task.enabled,
                    run_chat.origin_automation_id AS run_chat_origin_automation_id,
-                   task.running_since, task.cooldown_minutes,
+                   ${jobHeldSince(sql, "task")} AS held_by_worker_since, task.cooldown_minutes,
                    task.next_run_at AS task_next_run_at,
                    task.last_run_at AS task_last_run_at, admitted.id AS admitted_run_id
             FROM automation_event_queue AS queue
@@ -310,10 +311,10 @@ export const makeAutomationJobs = ({
                 OR (json_extract(queue.context, '$.person_change_at') IS NOT NULL
                   AND NOT ${hasPendingTaskApproval(sql, sql`task.owner_task_id`)}))
               AND (
-                (queue.claimed_at IS NULL AND task.running_since IS NULL)
+                (queue.claimed_at IS NULL AND ${jobHeldSince(sql, "task")} IS NULL)
                 OR
                 (queue.claimed_at IS NOT NULL AND queue.lease_expires_at <= ${nowText}
-                  AND task.running_since IS NOT NULL)
+                  AND ${jobHeldSince(sql, "task")} IS NOT NULL)
               )
               -- An Automation that is off runs nothing new, a run you asked for by
               -- hand included: it waits for the resume (automation-halt.ts).
@@ -392,7 +393,7 @@ export const makeAutomationJobs = ({
                 context = withEventText(context, input.now, candidate.cooldown_minutes)
             }
             const stamp = nextLeaseStamp(input.now, candidate.claimed_at)
-            const startedAt = candidate.running_since ?? nowText
+            const startedAt = candidate.held_by_worker_since ?? nowText
             yield* sql`
             UPDATE automation_event_queue
             SET claimed_at = ${stamp}, lease_expires_at = ${iso(Date.parse(stamp) + input.leaseDurationMs)}, attempt_count = attempt_count + 1,
@@ -402,7 +403,7 @@ export const makeAutomationJobs = ({
           `
             yield* sql`
             UPDATE scheduled_tasks
-            SET running_since = ${startedAt}
+            SET job_held_since = ${startedAt}
             WHERE task_id = ${candidate.task_id}
           `
             let automationRunId = context.automation_run_id
@@ -598,14 +599,15 @@ export const makeAutomationJobs = ({
         SET claimed_at = NULL, lease_expires_at = NULL
         WHERE claimed_at IS NOT NULL
           AND task_id IN (
-            SELECT task_id FROM scheduled_tasks WHERE running_since IS NULL
+            SELECT task.task_id FROM scheduled_tasks AS task
+            WHERE ${jobHeldSince(sql, "task")} IS NULL
           )
         RETURNING id
       `
           const cleared = yield* sql<{ readonly task_id: string }>`
         UPDATE scheduled_tasks
-        SET running_since = NULL
-        WHERE running_since IS NOT NULL
+        SET job_held_since = NULL
+        WHERE ${jobHeldSince(sql, "scheduled_tasks")} IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM automation_event_queue AS queue
             WHERE queue.task_id = scheduled_tasks.task_id
@@ -656,7 +658,7 @@ export const makeAutomationJobs = ({
                 (SELECT owner_space_id FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS owner_space_id,
                 (SELECT owner_task_id FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS owner_task_id,
                 (SELECT enabled FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS enabled,
-                (SELECT running_since FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS running_since,
+                (SELECT ${jobHeldSince(sql, "task")} FROM scheduled_tasks AS task WHERE task.task_id = automation_event_queue.task_id) AS held_by_worker_since,
                 (SELECT next_run_at FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS task_next_run_at,
                 (SELECT last_run_at FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS task_last_run_at
     `.pipe(

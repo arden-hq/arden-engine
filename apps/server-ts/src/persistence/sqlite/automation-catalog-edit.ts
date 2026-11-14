@@ -183,7 +183,7 @@ export const makeAutomationCatalogEdits = ({
           INSERT INTO scheduled_tasks (
             task_id, automation_ref, name, description, description_source,
             prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
-            next_run_at, last_result, running_since, auto_approve, handler,
+            next_run_at, last_result, auto_approve, handler,
             builtin, cooldown_minutes, thread_id, idempotency_key, idempotency_scope,
             tool_scope, triggers_source, purpose, prompt_author, instruction_revision_id
           ) VALUES (
@@ -191,7 +191,7 @@ export const makeAutomationCatalogEdits = ({
             ${valid.description ?? null}, ${valid.description === undefined ? null : "manual"},
             ${valid.prompt}, ${model}, ${historyContextMode(valid.history)}, ${triggersJson},
             ${written.lastId}, ${enabled ? 1 : 0}, ${timestamp}, NULL, ${nextRun === null ? null : iso(nextRun)},
-            NULL, NULL, 0, NULL, 0, ${valid.cooldown_minutes ?? null},
+            NULL, 0, NULL, 0, ${valid.cooldown_minutes ?? null},
             ${threadId},
             ${valid.idempotency_key}, 'global', 'all', 'manual', 'user_automation', ${promptWriter},
             ${instructionRevisionId}

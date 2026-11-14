@@ -1,3 +1,4 @@
+import { jobHeldSince } from "./automation-running.js"
 import { freshRow } from "./automation-enqueue.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
 import { readAutomationFollowup } from "./automation-followup.js"
@@ -95,7 +96,7 @@ export const makeFencedOccurrences = ({
       SELECT queue.id, queue.task_id, queue.source, queue.context, queue.created_at,
              queue.claimed_at, queue.lease_expires_at, queue.attempt_count, queue.next_attempt_at,
              task.prompt, task.model, task.context_mode, task.thread_id, task.handler, task.purpose, task.owner_space_id, task.owner_task_id,
-             task.enabled, task.running_since,
+             task.enabled, ${jobHeldSince(sql, "task")} AS held_by_worker_since,
              task.next_run_at AS task_next_run_at,
              task.last_run_at AS task_last_run_at, task.last_result AS task_last_result, task.triggers,
              task.cooldown_minutes,
@@ -236,7 +237,7 @@ export const makeFencedOccurrences = ({
     const lastResult = ran ? run.result : run.error
     yield* sql`
         UPDATE scheduled_tasks
-        SET running_since = NULL,
+        SET job_held_since = NULL,
             last_run_at = ${counted && ran ? endedAt : fenced.row.task_last_run_at},
             last_result = ${counted ? lastResult : fenced.row.task_last_result},
             next_run_at = ${nextRunAt === undefined ? fenced.row.task_next_run_at : nextRunAt}
@@ -420,7 +421,7 @@ export const makeAutomationJobSettlement = ({
           WHERE id = ${fenced.parsed.queueId}
         `
           yield* sql`
-          UPDATE scheduled_tasks SET running_since = NULL
+          UPDATE scheduled_tasks SET job_held_since = NULL
           WHERE task_id = ${fenced.row.task_id}
         `
           return {
@@ -481,7 +482,7 @@ export const makeAutomationJobSettlement = ({
           WHERE id = ${fenced.parsed.queueId}
         `
           yield* sql`
-          UPDATE scheduled_tasks SET running_since = NULL
+          UPDATE scheduled_tasks SET job_held_since = NULL
           WHERE task_id = ${fenced.row.task_id}
         `
           yield* sessionEvents.appendEventInTransaction({
@@ -512,7 +513,7 @@ export const makeAutomationJobSettlement = ({
         WHERE id = ${fenced.parsed.queueId}
       `
           yield* sql`
-        UPDATE scheduled_tasks SET running_since = NULL
+        UPDATE scheduled_tasks SET job_held_since = NULL
         WHERE task_id = ${fenced.row.task_id}
       `
         })

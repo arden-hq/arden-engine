@@ -83,8 +83,8 @@ it("closes a run whose queue row is deleted without settlement", async () => {
       yield* sql`DELETE FROM automation_event_queue WHERE id = ${Number(lease.id)}`
       expect(yield* runRow(lease.payload.automationRunId)).toEqual(interrupted(1))
       expect(
-        yield* sql`SELECT running_since FROM scheduled_tasks WHERE task_id = ${automation.task_id}`
-      ).toEqual([{ running_since: null }])
+        yield* sql`SELECT job_held_since FROM scheduled_tasks WHERE task_id = ${automation.task_id}`
+      ).toEqual([{ job_held_since: null }])
     })
   )
 })
@@ -104,7 +104,9 @@ it("closes a run whose queue row is pointed at another run", async () => {
   )
 })
 
-it("leaves no running run when an Automation is removed during its chat run", async () => {
+// The job is released while its chat run goes on, so no worker holds it, but
+// its run is open: removing it is refused until the run ends.
+it("refuses to remove an Automation during its chat run, and keeps the run", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const catalog = yield* AutomationCatalog
@@ -145,8 +147,11 @@ it("leaves no running run when an Automation is removed during its chat run", as
       yield* Effect.promise(async () =>
         Promise.resolve(queue.jobs.release({ ...lease, releasedAt: now + 1_000 }))
       )
-      expect(yield* catalog.delete(AutomationId.make(automation.task_id))).toBe(true)
-      expect(yield* runningRuns(automation.task_id)).toEqual([])
+      const refused = yield* catalog.delete(AutomationId.make(automation.task_id)).pipe(Effect.flip)
+      expect(refused.message).toBe("A running Automation cannot be deleted")
+      expect(yield* runningRuns(automation.task_id)).toEqual([
+        { id: lease.payload.automationRunId }
+      ])
     })
   )
 })

@@ -1,3 +1,4 @@
+import { openRunSince } from "./automation-running.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import type { SpaceAgentAvailability, SpaceDetail, SpacesOverview } from "@arden-hq/protocol/spaces"
 import { SpaceDetailSchema, SpacesOverviewSchema } from "@arden-hq/protocol/effect/spaces"
@@ -132,7 +133,7 @@ export const makeSpaceReads = (
       const spaces = yield* reader<OverviewSpaceRow>`
         SELECT d.space_id, d.name, d.instructions, d.instructions_source, d.page_path, d.page_id,
                d.inference_policy, d.mark, d.created_at, d.updated_at, d.archived_at,
-               worker.running_since, d.pinned_position,
+               ${openRunSince(reader, reader`worker.task_id`)} AS running_since, d.pinned_position,
                (SELECT m.search_text FROM session_messages AS m
                 WHERE m.session_id = latest.session_id AND m.role = 'assistant'
                   AND TRIM(COALESCE(m.search_text, '')) <> ''
@@ -415,7 +416,8 @@ export const makeSpaceReads = (
         )
 
       const workers = yield* reader<SpaceWorkerRow>`
-        SELECT task.task_id, task.last_result, task.running_since,
+        SELECT task.task_id, task.last_result,
+               ${openRunSince(reader, reader`task.task_id`)} AS running_since,
                latest.chat_run_id AS latest_chat_run_id,
                latest.status AS latest_status, latest.error AS latest_error
         FROM scheduled_tasks AS task

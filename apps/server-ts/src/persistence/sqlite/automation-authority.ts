@@ -71,7 +71,5 @@ export const revokeAutomationWork = Effect.fn("AutomationAuthority.revoke")(func
   if (retired.length > 0) {
     yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${automationId}
       AND json_extract(context, '$.automation_run_id') IN ${sql.in(retired.map((row) => row.id))}`
-    yield* sql`UPDATE scheduled_tasks SET running_since = NULL WHERE task_id = ${automationId}
-      AND NOT EXISTS (SELECT 1 FROM automation_runs WHERE task_id = ${automationId} AND status = 'running')`
   }
 })

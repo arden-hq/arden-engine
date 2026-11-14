@@ -151,13 +151,13 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                   INSERT INTO scheduled_tasks (
                     task_id, automation_ref, name, description, description_source,
                     prompt, model, context_mode, triggers, trigger_last_id, enabled, created_at, last_run_at,
-                    next_run_at, last_result, running_since, auto_approve, handler,
+                    next_run_at, last_result, auto_approve, handler,
                     builtin, cooldown_minutes, thread_id, purpose,
                     idempotency_key, idempotency_scope, tool_scope, triggers_source
                   ) VALUES (
                     ${spec.automationId}, ${namedPublicRef(spec.name, spec.automationId)}, ${spec.name},
                     ${spec.description}, 'manual', ${spec.prompt}, NULL, ${spec.contextMode}, ${triggers},
-                    ${lastId}, ${spec.enabled ? 1 : 0}, ${createdAt(index)}, NULL, ${nextRunAt}, NULL, NULL,
+                    ${lastId}, ${spec.enabled ? 1 : 0}, ${createdAt(index)}, NULL, ${nextRunAt}, NULL,
                     1, ${spec.handler}, 1, ${spec.cooldownMinutes}, ${session.id}, 'system',
                     NULL, NULL, ${spec.toolScope}, NULL
                   )

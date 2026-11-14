@@ -201,7 +201,7 @@ describe("persistence schema", () => {
         "last_run_at",
         "next_run_at",
         "last_result",
-        "running_since",
+        "job_held_since",
         "auto_approve",
         "handler",
         "builtin",

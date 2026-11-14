@@ -78,7 +78,7 @@ export const automationSchemaSection = {
       last_run_at TEXT,
       next_run_at TEXT,
       last_result TEXT,
-      running_since TEXT,
+      job_held_since TEXT,
       auto_approve INTEGER NOT NULL DEFAULT 0,
       handler TEXT,
       builtin INTEGER NOT NULL DEFAULT 0,
@@ -357,8 +357,8 @@ export const automationSchemaSection = {
           error = 'Its job ended before the run did'
         WHERE id = json_extract(OLD.context, '$.automation_run_id')
           AND task_id IS NOT NULL AND status = 'running';
-        UPDATE scheduled_tasks SET running_since = NULL
-        WHERE task_id = OLD.task_id AND running_since IS NOT NULL
+        UPDATE scheduled_tasks SET job_held_since = NULL
+        WHERE task_id = OLD.task_id AND job_held_since IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS queue
             WHERE queue.task_id = OLD.task_id AND queue.claimed_at IS NOT NULL);
       END`,
@@ -374,8 +374,8 @@ export const automationSchemaSection = {
           error = 'Its job ended before the run did'
         WHERE id = json_extract(OLD.context, '$.automation_run_id')
           AND task_id IS NOT NULL AND status = 'running';
-        UPDATE scheduled_tasks SET running_since = NULL
-        WHERE task_id = OLD.task_id AND running_since IS NOT NULL
+        UPDATE scheduled_tasks SET job_held_since = NULL
+        WHERE task_id = OLD.task_id AND job_held_since IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS queue
             WHERE queue.task_id = OLD.task_id AND queue.claimed_at IS NOT NULL);
       END`
