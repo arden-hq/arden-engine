@@ -4,8 +4,10 @@ import type { Backfill } from "./backfills/backfill.js"
 
 // Migration 0155 put every old message of an owner chat into one backlog range. This backfill
 // removes from those ranges the messages a finished Capture run was shown, and the messages a
-// branch copied from its source chat, which the source reads. Then it deletes the old marks. It
-// only ever shrinks a range, so a chat that changed since the update stays correct.
+// branch copied from its source chat, which the source reads. Then it deletes the old marks, and
+// the `run_sidecars` rows that held nothing else: every reader of that table asks only for an
+// Automation's blocked outcome, so an empty row has none. It only ever shrinks a range, so a chat
+// that changed since the update stays correct.
 //
 // What Capture read comes from its finished runs, not from the old marks. The old Capture
 // settled every waiting mark of a chat with one batch, and a chat's first batch read only its
@@ -95,11 +97,16 @@ export const memoryCaptureBacklogBackfill: Backfill = {
       for (const range of ranges)
         yield* sql`INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq)
           VALUES (${sessionId}, ${range.from}, ${range.through})`
+      const deleted = yield* sql`DELETE FROM run_sidecars
+        WHERE session_id = ${sessionId} AND ${sql.literal(MARKS)}
+          AND json_remove(evidence_json, '$.memory_capture') = '{}'
+          AND context_manifest_json = '[]' AND source_refs_json = '[]'
+        RETURNING run_id`
       const removed = yield* sql`UPDATE run_sidecars
         SET evidence_json = json_remove(evidence_json, '$.memory_capture')
         WHERE session_id = ${sessionId} AND ${sql.literal(MARKS)}
         RETURNING run_id`
-      converted += removed.length
+      converted += deleted.length + removed.length
     }
     const last = sessions.at(-1)
     return { converted, next: last === undefined ? undefined : last.session_id }

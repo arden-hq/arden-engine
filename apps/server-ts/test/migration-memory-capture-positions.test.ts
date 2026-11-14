@@ -22,6 +22,7 @@ const BEFORE_POSITIONS = 154
 const AT = "2026-10-01T09:00:00.000Z"
 const LATER = "2026-10-01T10:00:00.000Z"
 const COHORT_TURNS = 10
+const BLOCKED = { status: "blocked", kind: "needs_input", reason: "Waiting" }
 
 const seed = (database: DatabaseSync): void => {
   const session = database.prepare(`INSERT INTO sessions
@@ -91,7 +92,13 @@ const seed = (database: DatabaseSync): void => {
   mark.run("owner-a1", "owner", capture("done", 0, 1), AT)
   mark.run("owner-a2", "owner", capture("pending", 0, 3), AT)
   mark.run("owner-a3", "owner", capture("pending", 1.5, 5), AT)
-  mark.run("automation-job-answer", "automation", capture("pending", 0, 1), AT)
+  // A row that also holds an Automation's blocked outcome keeps it.
+  mark.run(
+    "automation-job-answer",
+    "automation",
+    JSON.stringify({ ...JSON.parse(capture("pending", 0, 1)), automation_outcome: BLOCKED }),
+    AT
+  )
   // The old Capture settled all ten waiting marks of this chat with one batch, which read only
   // its latest records. Every mark says done, but the first three turns were never read.
   for (let index = 0; index < COHORT_TURNS; index += 1)
@@ -210,8 +217,7 @@ it("starts each owner chat at its last message and keeps old unread messages cou
         }
         const backlog = yield* sql`SELECT session_id, from_seq, through_seq
           FROM memory_capture_backlog ORDER BY session_id, from_seq`
-        const marks = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
-          FROM run_sidecars WHERE json_type(evidence_json, '$.memory_capture') IS NOT NULL`
+        const sidecars = yield* sql`SELECT run_id, evidence_json FROM run_sidecars ORDER BY run_id`
         const count = yield* captures.backlogCount({ splitAt: "2026-12-01T00:00:00.000Z" })
         yield* sql`INSERT INTO session_messages
           (session_id, message_id, seq, role, message_json, created_at, search_text)
@@ -225,7 +231,7 @@ it("starts each owner chat at its last message and keeps old unread messages cou
           positions,
           workAfterUpdate,
           backlog,
-          marks: marks[0]?.count,
+          sidecars,
           count,
           workAfterTurn: yield* captures.listWork()
         }
@@ -259,7 +265,13 @@ it("starts each owner chat at its last message and keeps old unread messages cou
         { session_id: "cohort", from_seq: 12, through_seq: 12 },
         { session_id: "owner", from_seq: 2, through_seq: 5 }
       ],
-      marks: 0,
+      // Rows that held only a mark have no reader left and are gone.
+      sidecars: [
+        {
+          run_id: "automation-job-answer",
+          evidence_json: JSON.stringify({ automation_outcome: BLOCKED })
+        }
+      ],
       count: {
         ranges: 4,
         before: {
