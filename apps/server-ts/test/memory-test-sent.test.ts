@@ -1,7 +1,12 @@
 import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
 import { describe, expect, it } from "vitest"
 import { parseQuestions, type Question } from "../scripts/memory-test/questions.js"
-import { countByKind, deliveryOf, renderCountTable, scoreSent } from "../scripts/memory-test/sent.js"
+import {
+  countByKind,
+  deliveryOf,
+  renderCountTable,
+  scoreSent
+} from "../scripts/memory-test/sent.js"
 
 // Made-up pages and questions; nothing here comes from anyone's Memory.
 
