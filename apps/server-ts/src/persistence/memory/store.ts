@@ -33,7 +33,10 @@ export type MemoryCaptureBatchIdentity = typeof MemoryCaptureBatchIdentitySchema
 export interface MemoryCaptureWork {
   readonly sessionId: string
   readonly position: MemoryCapturePosition
-  /** The chat's last message when the work was listed. */
+  /**
+   * The last message the work may read: the chat's last message when it was listed, or, when a
+   * revert cut the prepared batch, the last message of it that is still there.
+   */
   readonly throughSequence: number
   readonly prepared: MemoryCaptureBatchIdentity | undefined
 }
@@ -88,7 +91,10 @@ export class MemoryCaptureStore extends Context.Service<
     readonly prepare: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /** Moves the chat's position from the batch's start to its end. */
+    /**
+     * Moves the chat's position from the batch's start to its end, or to the last message of it a
+     * revert left.
+     */
     readonly advance: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>

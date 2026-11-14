@@ -226,6 +226,67 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
   })
 })
 
+it("reads a batch's turns once when a later turn of it is reverted while it runs", async () => {
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const { batches } = yield* capture()
+      const sessions = yield* SessionStore
+      const chat = yield* newChat()
+      yield* turn(chat, "inflight-a")
+      yield* turn(chat, "inflight-b")
+      const handed = yield* batches.nextCaptureBatch()
+      if (handed === null) throw new Error("Capture was handed nothing")
+      yield* sessions.revert({ sessionId: chat, turns: 1 })
+      yield* batches.completeCaptureBatch(handed)
+      yield* turn(chat, "inflight-c")
+      return { handed: ownerLines(handed), after: yield* drain(batches) }
+    })
+  )
+  expect(read).toEqual({ handed: ["inflight-a", "inflight-b"], after: ["inflight-c"] })
+})
+
+it("drops a running batch whose every turn is reverted, and reads what replaces them", async () => {
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const { batches } = yield* capture()
+      const sessions = yield* SessionStore
+      const chat = yield* newChat()
+      yield* turn(chat, "gone-a")
+      yield* drain(batches)
+      yield* turn(chat, "gone-b")
+      const handed = yield* batches.nextCaptureBatch()
+      if (handed === null) throw new Error("Capture was handed nothing")
+      yield* sessions.revert({ sessionId: chat, turns: 1 })
+      yield* batches.completeCaptureBatch(handed)
+      yield* turn(chat, "gone-c")
+      return { handed: ownerLines(handed), after: yield* drain(batches) }
+    })
+  )
+  expect(read).toEqual({ handed: ["gone-b"], after: ["gone-c"] })
+})
+
+it("resumes a batch cut by a revert with only the turns that are left", async () => {
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const { batches, receipts } = yield* capture()
+      const sessions = yield* SessionStore
+      const chat = yield* newChat()
+      yield* turn(chat, "cut-a")
+      yield* turn(chat, "cut-b")
+      const handed = yield* batches.nextCaptureBatch()
+      if (handed === null) throw new Error("Capture was handed nothing")
+      yield* sessions.revert({ sessionId: chat, turns: 1 })
+      yield* turn(chat, "cut-c")
+      const { batches: restarted } = yield* capture(receipts)
+      const resumed = yield* restarted.nextCaptureBatch()
+      if (resumed === null) throw new Error("The prepared batch was lost")
+      yield* restarted.completeCaptureBatch(resumed)
+      return { resumed: ownerLines(resumed), after: yield* drain(restarted) }
+    })
+  )
+  expect(read).toEqual({ resumed: ["cut-a"], after: ["cut-c"] })
+})
+
 it("does not read a branch's copied turns again", async () => {
   const read = await withTempDatabase(
     Effect.gen(function* () {

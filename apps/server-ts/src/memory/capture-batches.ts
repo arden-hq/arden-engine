@@ -233,11 +233,15 @@ export const makeMemoryCaptureBatches = (input: {
       })
   })
 
-  /** Reads the work's chat from `start`, through the batch's end when it was prepared. */
+  /**
+   * Reads the work's chat from `start`, through the batch's end when it was prepared, and never
+   * past the work's last message: a revert may have cut the prepared batch.
+   */
   const readWork = Effect.fn("Memory.readCaptureWork")(function* (work: MemoryCaptureWork) {
     const start = work.prepared?.start ?? work.position
     const stop = work.prepared?.end
-    const last = stop === undefined ? work.throughSequence : sequenceOf(stop)
+    const last =
+      stop === undefined ? work.throughSequence : Math.min(work.throughSequence, sequenceOf(stop))
     const page = yield* transcript
       .page({
         _tag: "After",

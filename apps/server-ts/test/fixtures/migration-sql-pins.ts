@@ -155,5 +155,6 @@ export const releasedMigrationSql: Readonly<Record<number, string>> = {
   154: "d4b28a4f3db0e3f79a7f416f2332bc3b5ef32c1232d1bb63fa7aa1e98412ad71",
   155: "7ba64f937d5d9b5146b6af19b95efb2b38937fac7ff0aa7f1745235d4ad5c213",
   156: "172277e4efc18e14b7f08a89aa11d1d20d8bbf5dbf61a1b726865e421eac995a",
-  157: "ba72d4091bc3bbb6550abf07bed0fc08d500f59082022cadccc62e36c5e1ee44"
+  157: "ba72d4091bc3bbb6550abf07bed0fc08d500f59082022cadccc62e36c5e1ee44",
+  158: "9f194d0cd6a1bddeec9bc2fc113b0e7c2859678bdfccc2415a7e843f579e06c9"
 }

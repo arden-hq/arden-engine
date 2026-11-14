@@ -250,14 +250,15 @@ export const contextSessionSchemaSection = {
       ON sessions(origin_automation_id, started_at DESC)
       WHERE session_type = 'channel' AND archived_at IS NULL`,
     // How far Memory Capture has read each owner chat, and old unread ranges it never reads
-    // (migration 0155).
+    // (migrations 0155, 0157, 0158).
     `CREATE TABLE memory_capture_positions (
       session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
       read_seq INTEGER NOT NULL CHECK(read_seq >= -1),
       read_offset INTEGER CHECK(read_offset IS NULL OR (read_offset > 0 AND read_seq >= 0)),
       prepared_json TEXT CHECK(prepared_json IS NULL OR json_valid(prepared_json)),
       updated_at TEXT NOT NULL
-    ) WITHOUT ROWID`,
+    , prepared_cut_seq INTEGER
+      CHECK(prepared_cut_seq IS NULL OR (prepared_json IS NOT NULL AND prepared_cut_seq > read_seq))) WITHOUT ROWID`,
     `CREATE TABLE memory_capture_backlog (
       session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
       from_seq INTEGER NOT NULL CHECK(from_seq >= 0),
@@ -272,11 +273,14 @@ export const contextSessionSchemaSection = {
       WHEN EXISTS (SELECT 1 FROM memory_capture_positions WHERE session_id = OLD.session_id)
       BEGIN
         UPDATE memory_capture_positions
-        SET read_seq = OLD.seq - 1, read_offset = NULL,
-          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        SET read_seq = OLD.seq - 1, read_offset = NULL, prepared_json = NULL,
+          prepared_cut_seq = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE session_id = OLD.session_id AND read_seq >= OLD.seq;
         UPDATE memory_capture_positions
-        SET prepared_json = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        SET prepared_json = CASE WHEN OLD.seq <= read_seq + (read_offset IS NULL) THEN NULL ELSE prepared_json END,
+          prepared_cut_seq = CASE WHEN OLD.seq <= read_seq + (read_offset IS NULL) THEN NULL
+            ELSE MIN(COALESCE(prepared_cut_seq, OLD.seq), OLD.seq) END,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE session_id = OLD.session_id AND prepared_json IS NOT NULL
           AND COALESCE(json_extract(prepared_json, '$.end.sequence'),
             json_extract(prepared_json, '$.end.progress.sequence')) >= OLD.seq;

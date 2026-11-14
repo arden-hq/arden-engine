@@ -16,7 +16,8 @@ import { activeRunStatusList } from "./status-sets.js"
 // The one writer of `memory_capture_positions`: how far Capture has read each owner chat.
 // The transcript owns where a chat ends, so the end is never stored. A trigger on
 // `session_messages` moves a position back when messages it covers are deleted
-// (revert, clear), because new messages then reuse their numbers.
+// (revert, clear), because new messages then reuse their numbers, and marks where a deletion
+// cut a prepared batch (migration 0158).
 
 /** Characters Capture reads in one batch; the backlog count uses it to estimate batches. */
 export const CAPTURE_CHAR_LIMIT = 6_000
@@ -75,8 +76,10 @@ export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(func
              position.read_seq,
              position.read_offset,
              position.prepared_json,
-             (SELECT MAX(seq) FROM session_messages AS message
-               WHERE message.session_id = session.session_id) AS through_seq,
+             CASE WHEN position.prepared_cut_seq IS NULL
+               THEN (SELECT MAX(seq) FROM session_messages AS message
+                 WHERE message.session_id = session.session_id)
+               ELSE position.prepared_cut_seq - 1 END AS through_seq,
              EXISTS (SELECT 1 FROM chat_runs AS run
                WHERE run.session_id = session.session_id
                  AND run.status IN ${activeRunStatusList}) AS running
@@ -115,21 +118,24 @@ export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(func
 
 interface StoredPosition extends PositionColumns {
   readonly prepared_json: string | null
+  readonly prepared_cut_seq: number | null
   readonly end_holds: number
 }
 
 /**
- * The chat's position and prepared batch, if they still match `batch`: the position is at its
- * start, no other batch is prepared, and the message at its end is still the one it read.
+ * Where the chat's position goes when `batch` is read, or undefined when the chat moved on: the
+ * position is not at the batch's start, another batch is prepared, or the message at its end is
+ * gone. When a revert removed later messages of the prepared batch, it ends before the first
+ * one removed: the last message it read that is still there.
  */
-const matching = Effect.fn("MemoryCapturePositions.matching")(function* (
+const endOf = Effect.fn("MemoryCapturePositions.endOf")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity,
   encoded: string
-) {
+): Effect.fn.Return<PositionColumns | undefined, unknown> {
   const end = columnsOf(batch.end)
   const rows = yield* sql<StoredPosition>`
-    SELECT read_seq, read_offset, prepared_json,
+    SELECT read_seq, read_offset, prepared_json, prepared_cut_seq,
            EXISTS (SELECT 1 FROM session_messages AS message
              WHERE message.session_id = position.session_id AND message.seq = ${end.read_seq}
                AND message.message_id = ${batch.endMessageId}) AS end_holds
@@ -137,12 +143,12 @@ const matching = Effect.fn("MemoryCapturePositions.matching")(function* (
     WHERE position.session_id = ${batch.sessionId}
   `
   const row = rows[0]
-  return (
-    row !== undefined &&
-    row.end_holds === 1 &&
-    samePosition(row, columnsOf(batch.start)) &&
-    (row.prepared_json === null || row.prepared_json === encoded)
-  )
+  if (row === undefined || !samePosition(row, columnsOf(batch.start))) return undefined
+  if (row.prepared_json === encoded && row.prepared_cut_seq !== null)
+    return { read_seq: row.prepared_cut_seq - 1, read_offset: null }
+  if (row.end_holds === 1 && (row.prepared_json === null || row.prepared_json === encoded))
+    return end
+  return undefined
 })
 
 export const prepareCapture = Effect.fn("MemoryCapturePositions.prepare")(function* (
@@ -150,7 +156,7 @@ export const prepareCapture = Effect.fn("MemoryCapturePositions.prepare")(functi
   batch: MemoryCaptureBatchIdentity
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
   const encoded = yield* encodeIdentity(batch)
-  if (!(yield* matching(sql, batch, encoded))) return "superseded"
+  if ((yield* endOf(sql, batch, encoded)) === undefined) return "superseded"
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
     UPDATE memory_capture_positions SET prepared_json = ${encoded}, updated_at = ${now}
@@ -163,13 +169,13 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
-  if (!(yield* matching(sql, batch, yield* encodeIdentity(batch)))) return "superseded"
-  const end = columnsOf(batch.end)
+  const end = yield* endOf(sql, batch, yield* encodeIdentity(batch))
+  if (end === undefined) return "superseded"
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
     UPDATE memory_capture_positions
     SET read_seq = ${end.read_seq}, read_offset = ${end.read_offset}, prepared_json = NULL,
-      updated_at = ${now}
+      prepared_cut_seq = NULL, updated_at = ${now}
     WHERE session_id = ${batch.sessionId}
   `
   return "moved"
