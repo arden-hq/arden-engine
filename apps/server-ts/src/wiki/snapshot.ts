@@ -42,10 +42,10 @@ export const readSnapshotPage = Effect.fn("Wiki.readSnapshotPage")(function* (
 export const readSnapshotContent = Effect.fn("Wiki.readSnapshotContent")(function* (
   snapshot: Snapshot,
   pageId: string
-): Effect.fn.Return<Pick<WikiPage, "pageId" | "path" | "content">, WikiError> {
+): Effect.fn.Return<Pick<WikiPage, "pageId" | "path" | "version" | "content">, WikiError> {
   const record = yield* readSnapshotPage(snapshot, pageId)
   const page = detail(record, snapshot.head)
-  return { pageId: page.pageId, path: page.path, content: page.content }
+  return { pageId: page.pageId, path: page.path, version: page.version, content: page.content }
 })
 
 const corruptPage = (

@@ -13,11 +13,22 @@ const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
 const RESULT_LIMIT = 3
 
-interface MemorySource {
+/**
+ * How much of a page the recall placed: `block` is the exact text it put in, `passage` is the
+ * part a search matched, `cut` is shortened to the page's allowance, `dropped` found no room.
+ */
+export type MemoryPlacement =
+  | { readonly shown: "whole" | "passage" | "cut"; readonly block: string }
+  | { readonly shown: "dropped" }
+
+/** A page the recall chose, in the role it was chosen for. */
+export interface MemorySource {
+  readonly role: "core" | "recalled" | "collection"
   readonly pageId: string
   readonly path: string
   readonly title: string
   readonly version: string
+  readonly placement: MemoryPlacement
 }
 
 export interface MemoryRecall {
@@ -105,6 +116,7 @@ const discussedLine = (chats: ReadonlyArray<DiscussedChat> | undefined): Readonl
 const appendPages = (
   blocks: Array<string>,
   sources: Array<MemorySource>,
+  role: "core" | "recalled",
   heading: string,
   pages: ReadonlyArray<PageSelection>,
   allowance:
@@ -132,22 +144,27 @@ const appendPages = (
       ...discussedLine(discussed.get(record.page.pageId)),
       ""
     ].join("\n")
-    const remaining =
-      "total" in allowance
-        ? Math.floor((allowance.total - used) / (nonempty.length - index)) - prefix.length - 2
-        : (allowance.perPage(record) ?? 0)
-    if (remaining <= 0) continue
-    const excerpt = memoryExcerpt(body, remaining, body !== record.page.body.trim())
-    if (excerpt.length === 0) continue
-    const block = `${prefix}${excerpt}`
-    rendered.push(block)
-    used += block.length + 2
-    sources.push({
+    const source = {
+      role,
       pageId: record.page.pageId,
       path: record.resource.path,
       title: record.page.title,
       version: record.resource.versionId
-    })
+    }
+    const remaining =
+      "total" in allowance
+        ? Math.floor((allowance.total - used) / (nonempty.length - index)) - prefix.length - 2
+        : (allowance.perPage(record) ?? 0)
+    const excerpt =
+      remaining <= 0 ? "" : memoryExcerpt(body, remaining, body !== record.page.body.trim())
+    if (excerpt.length === 0) {
+      sources.push({ ...source, placement: { shown: "dropped" } })
+      continue
+    }
+    const block = `${prefix}${excerpt}`
+    rendered.push(block)
+    used += block.length + 2
+    sources.push({ ...source, placement: { shown: shownOf(selection, body, excerpt), block } })
   }
   if (rendered.length > 0)
     blocks.push(
@@ -156,6 +173,15 @@ const appendPages = (
         [...(note === undefined ? [] : [note]), ...rendered].join("\n\n")
       )
     )
+}
+
+const shownOf = (
+  selection: PageSelection,
+  body: string,
+  excerpt: string
+): "whole" | "passage" | "cut" => {
+  if (selection.excerpt !== undefined) return "passage"
+  return excerpt === body ? "whole" : "cut"
 }
 
 export interface RankedMemoryPage {
@@ -284,6 +310,7 @@ export const prepareMemoryRecall = ({
       appendPages(
         coreBlocks,
         sources,
+        "core",
         "Core Memory",
         residentPages,
         { perPage: coreBudget },
@@ -295,6 +322,7 @@ export const prepareMemoryRecall = ({
       appendPages(
         blocks,
         sources,
+        "recalled",
         "Relevant Memory",
         selected,
         { total: RETRIEVAL_BUDGET },
@@ -309,14 +337,14 @@ export const prepareMemoryRecall = ({
           const entry = renderCollection(collection)
           if (entry.length > remaining) break
           visible.push(entry)
-          if (!sources.some((source) => source.pageId === collection.pageId)) {
-            sources.push({
-              pageId: collection.pageId,
-              path: collection.path,
-              title: collection.title,
-              version: collection.version
-            })
-          }
+          sources.push({
+            role: "collection",
+            pageId: collection.pageId,
+            path: collection.path,
+            title: collection.title,
+            version: collection.version,
+            placement: { shown: "whole", block: entry }
+          })
           remaining -= entry.length + 1
         }
         blocks.push(

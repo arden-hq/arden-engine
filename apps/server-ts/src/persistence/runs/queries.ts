@@ -1,4 +1,4 @@
-import type { RunProgress } from "@arden-hq/protocol/runs"
+import type { RunMemorySource, RunProgress } from "@arden-hq/protocol/runs"
 import type { GoogleServiceId } from "@arden-hq/protocol/google"
 import { ActiveRunStatusSchema } from "@arden-hq/protocol/effect/chat"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
@@ -158,6 +158,10 @@ export class RunQueries extends Context.Service<
     readonly cause: (runId: string) => Effect.Effect<RunCause, RunQueryError>
     readonly liveness: (runId: string) => Effect.Effect<RunLiveness | undefined, RunQueryError>
     readonly authority: (runId: string) => Effect.Effect<RunAuthority | undefined, RunQueryError>
+    /** What the run was sent from Memory; empty when it was sent none. */
+    readonly memoryContext: (
+      runId: string
+    ) => Effect.Effect<ReadonlyArray<RunMemorySource>, RunQueryError>
     readonly latestForSession: (
       sessionId: string
     ) => Effect.Effect<ChatRunRecord | null, RunQueryFailure>

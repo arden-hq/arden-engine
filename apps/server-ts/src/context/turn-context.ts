@@ -23,11 +23,8 @@ import type { AgentMode } from "../sessions/agent-mode.js"
 import type { CliTools } from "../cli-tools/service.js"
 import type { SkillCatalog } from "../skills/service.js"
 import type { Wiki } from "../wiki/service.js"
-import {
-  budgetContinuityContext,
-  LIVE_CONTINUITY_CONTEXT_MAX_BYTES,
-  type ContinuityContextSource
-} from "./continuity-budget.js"
+import { assembleMemoryContext } from "./memory-context.js"
+import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
 import { spaceAsksContext } from "./space-asks.js"
 import { renderThreadLocations } from "./thread.js"
@@ -35,7 +32,7 @@ import type { FocusChoiceStore } from "../persistence/focus-choices/store.js"
 import type { AnswerBlockStore } from "../persistence/answer-blocks/store.js"
 import { latestAnswer, renderAnswerBlockNote } from "./answer-block-note.js"
 import { renderSpaceContext } from "./space-render.js"
-import type { RuntimeContext, RuntimeSection } from "./runtime-update.js"
+import { textSection, type RuntimeContext, type RuntimeSection } from "./runtime-update.js"
 import { effectiveAccessContext, renderAuthority } from "./effective-access.js"
 import { boundAuthority } from "../chat/run-authority.js"
 import {
@@ -84,6 +81,7 @@ export interface TurnContextServices {
   readonly cliTools: CliTools["Service"]
   readonly focusChoices: FocusChoiceStore["Service"]
   readonly answerBlocks: AnswerBlockStore["Service"]
+  readonly chat: Pick<ChatWriteStore["Service"], "recordMemoryContext">
   readonly permissions: ToolApprovalPolicy
   readonly rules: PermissionRules["Service"]
   readonly dataDir: string
@@ -169,9 +167,11 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     undefined
   )
   const spaceRender = space === undefined ? undefined : renderSpaceContext(space.view)
-  const spaceText = spaceRender?.text
   const deliveredPageId =
-    space?.pageId !== undefined && spaceRender?.pageWhole === true ? space.pageId : undefined
+    space?.page !== undefined && spaceRender?.page === "whole" && space.view.page?.content !== ""
+      ? space.page.pageId
+      : undefined
+  const query = latestHumanText(input.messages) ?? ""
   const authority = yield* boundAuthority(services.runs, input)
   const context = yield* Effect.all({
     task: services.work.continuationContext(input.runId),
@@ -260,7 +260,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
         ? Effect.succeed(undefined)
         : memory.recall({
             sessionId: input.sessionId,
-            query: latestHumanText(input.messages) ?? "",
+            query,
             ...(deliveredPageId === undefined ? {} : { excludePageIds: [deliveredPageId] })
           }),
       undefined
@@ -289,65 +289,61 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
         : PROMPT_TEXT.executorCommunication
     }).text
   )
-  const continuitySources: Array<ContinuityContextSource> = []
-  if (spaceText !== undefined)
-    continuitySources.push({
-      identity: `space:${origin.header?.spaceId ?? "unknown"}`,
-      kind: "session",
-      content: spaceText,
-      priority: 100
-    })
-  if (context.memory?.text !== null && context.memory?.text !== undefined) {
-    continuitySources.push({
-      identity: `recall:${context.memory.revision ?? "none"}:${context.memory.sources
-        .map((source) => source.pageId)
-        .sort()
-        .join(",")}`,
-      kind: "recall",
-      content: context.memory.text,
-      priority: 50
-    })
-  }
-  const continuity = budgetContinuityContext({
-    sources: continuitySources,
-    maxBytes: LIVE_CONTINUITY_CONTEXT_MAX_BYTES
+  const memoryContext = assembleMemoryContext({
+    space:
+      space === undefined || spaceRender === undefined
+        ? undefined
+        : {
+            view: space.view,
+            text: spaceRender.text,
+            page:
+              space.page === undefined || spaceRender.page === undefined
+                ? undefined
+                : { ...space.page, shown: spaceRender.page }
+          },
+    recall: context.memory,
+    query
   })
   yield* Effect.logInfo("Continuity context composed", {
     sessionId: input.sessionId,
     runId: input.runId,
     excludedRecallPages: deliveredPageId === undefined ? 0 : 1,
-    ...continuity.telemetry
+    ...memoryContext.telemetry
   })
+  yield* services.chat
+    .recordMemoryContext({
+      runId: input.runId,
+      sessionId: input.sessionId,
+      sources: memoryContext.record
+    })
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Memory context record failed", {
+          sessionId: input.sessionId,
+          runId: input.runId,
+          cause
+        })
+      )
+    )
   const authorityLine = renderAuthority(authority)
   const authorityText =
     authorityLine === undefined ? undefined : renderPromptSection("Run authority", authorityLine)
-  const recall = continuity.sources.find((source) => source.kind === "recall")?.content
   const contractSections = taskContractSections(
     context.chatTask?.task.contract ?? context.task?.contract
   )
   const { contract: _contract, ...continuation } = context.task ?? { contract: undefined }
   const continuationShown = origin.source !== "scheduled_task" && context.task !== undefined
   const stateTask = context.chatTask?.task ?? context.task
-  const text = (
-    name: string,
-    value: string | undefined,
-    lifetime: "state" | "turn" = "state"
-  ): ReadonlyArray<RuntimeSection> => {
-    const trimmed = value?.trim()
-    if (trimmed === undefined || trimmed === "") return []
-    const heading = /^## (.+)/.exec(trimmed)?.[1]?.trim()
-    return [{ kind: "text", key: heading ?? name, text: trimmed, lifetime }]
-  }
   return {
     sections: [
-      ...text("Core Memory", context.memory?.core ?? undefined),
-      ...text("Fork origin", renderForkOriginContext(context.lineage[0]?.forkOrigin)),
-      ...text("Communication", communication),
-      ...text(
+      ...memoryContext.core,
+      ...textSection("Fork origin", renderForkOriginContext(context.lineage[0]?.forkOrigin)),
+      ...textSection("Communication", communication),
+      ...textSection(
         "Agent family",
         renderAgentFamilyContext(context.lineage, context.directChildren, childRuns)
       ),
-      ...text(
+      ...textSection(
         "Execution",
         renderExecutionContext(
           origin.source === "scheduled_task"
@@ -359,15 +355,15 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
             : undefined
         )
       ),
-      ...text(
+      ...textSection(
         "Research agent",
         renderResearchAgentContext(origin.source === "agent" && origin.mode === "research")
       ),
       ...contractSections.lines,
-      ...text("Task in this chat", renderChatTaskContext(context.chatTask)),
+      ...textSection("Task in this chat", renderChatTaskContext(context.chatTask)),
       ...contractSections.progress,
-      ...text("Todo override", renderTodoOverrideContext(context.todo)),
-      ...text(
+      ...textSection("Todo override", renderTodoOverrideContext(context.todo)),
+      ...textSection(
         "Current Task continuation",
         continuationShown
           ? renderPromptSection(
@@ -379,26 +375,30 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
             )
           : undefined
       ),
-      ...text(
+      ...textSection(
         "Task state record",
         stateTask === undefined ? undefined : renderTaskStateSection(stateTask.state)
       ),
-      ...text("Run authority", authorityText),
-      ...text("Effective prerequisites", context.access),
-      ...text("Skills", context.skills),
+      ...textSection("Run authority", authorityText),
+      ...textSection("Effective prerequisites", context.access),
+      ...textSection("Skills", context.skills),
       ...preparedSkills,
-      ...text("Space context authority", space?.authority),
-      ...(space === undefined || spaceText === undefined
-        ? []
-        : [{ kind: "space" as const, key: "Current Space", text: spaceText, space: space.view }]),
-      ...text("Asked on this Space", context.spaceAsks),
-      ...text("Memory recall", recall, "turn"),
-      ...text("Answer block values", context.answerBlocks, "turn"),
-      ...text("Starting context", origin.source === "personal" ? origin.starting : undefined),
-      ...text("Threads between chats", renderThreadLocations(context.threads)),
-      ...text("Special chat", origin.source === "personal" ? origin.special?.context : undefined),
-      ...text("Capture Spaces", context.captureSpaces),
-      ...text("Command-line tools", renderCliToolsContext(context.cliTools))
+      ...textSection("Space context authority", space?.authority),
+      ...memoryContext.space,
+      ...textSection("Asked on this Space", context.spaceAsks),
+      ...memoryContext.recall,
+      ...textSection("Answer block values", context.answerBlocks, "turn"),
+      ...textSection(
+        "Starting context",
+        origin.source === "personal" ? origin.starting : undefined
+      ),
+      ...textSection("Threads between chats", renderThreadLocations(context.threads)),
+      ...textSection(
+        "Special chat",
+        origin.source === "personal" ? origin.special?.context : undefined
+      ),
+      ...textSection("Capture Spaces", context.captureSpaces),
+      ...textSection("Command-line tools", renderCliToolsContext(context.cliTools))
     ],
     endNote: space?.threads
   } satisfies RuntimeContext

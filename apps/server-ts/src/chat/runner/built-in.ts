@@ -90,6 +90,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
   readonly workFolder: string | undefined
 }) {
   const experiments = yield* ContextExperiments
+  const chat = yield* ChatWriteStore
   const services: TurnContextServices = {
     sessions: yield* SessionQueries,
     runs: yield* RunQueries,
@@ -105,6 +106,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
     experiments,
     focusChoices: yield* FocusChoiceStore,
     answerBlocks: yield* AnswerBlockStore,
+    chat,
     permissions: makeToolApprovalPolicy({
       policy: yield* ApprovalPolicyStore,
       rules: yield* PermissionRules
@@ -114,7 +116,6 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
   }
   const registry = yield* ServerToolRegistry
   const compaction = yield* ContextCompaction
-  const chat = yield* ChatWriteStore
   const automations = yield* AutomationCatalog
   const automationQueue = yield* AutomationQueue
   const globalInstructions = yield* GlobalInstructions

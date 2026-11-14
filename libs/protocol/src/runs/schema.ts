@@ -14,6 +14,7 @@ import type {
   PlanLimitsReport,
   RunDetail,
   RunEventPage,
+  RunMemorySource,
   SessionUsageReport,
   UsageReport
 } from "./contracts.js"
@@ -55,6 +56,44 @@ export const RunLocalInstructionSourceSchema = withExtras({
   digest: Schema.NullOr(Schema.String)
 })
 
+const RunMemoryOutcomeSchema = Schema.Literals(["whole", "passage", "cut", "dropped"] as const)
+const RunMemoryCutReasonSchema = Schema.Literals([
+  "core_page_budget",
+  "recall_allowance",
+  "space_page_allowance",
+  "continuity_budget"
+] as const)
+const memoryPlacement = {
+  bytes: NonNegativeIntSchema,
+  outcome: RunMemoryOutcomeSchema,
+  reason: Schema.NullOr(RunMemoryCutReasonSchema)
+}
+
+/** The one shape of the Memory record: the server stores and reads a Run's record with it. */
+export const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
+  withExtras({
+    kind: Schema.Literal("space"),
+    space_id: IdentifierSchema,
+    page_id: Schema.NullOr(IdentifierSchema),
+    version: Schema.NullOr(IdentifierSchema),
+    ...memoryPlacement
+  }),
+  withExtras({
+    kind: Schema.Literals(["core", "recalled", "collection"] as const),
+    page_id: IdentifierSchema,
+    version: IdentifierSchema,
+    revision: Schema.NullOr(IdentifierSchema),
+    query: Schema.NullOr(Schema.String),
+    ...memoryPlacement
+  })
+]).check(
+  Schema.makeFilter((source) =>
+    (source.outcome === "cut" || source.outcome === "dropped") === (source.reason !== null)
+      ? undefined
+      : { path: ["reason"], issue: "names the limit exactly when the source was cut or dropped" }
+  )
+)
+
 export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
   version: Schema.Literal(1),
   run_id: IdentifierSchema,
@@ -72,7 +111,8 @@ export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
   result: Schema.NullOr(RunTerminalResultSchema),
   late_result_at: Schema.NullOr(IsoDateTimeStringSchema),
   error: Schema.NullOr(RunErrorSchema),
-  local_instructions: Schema.optionalKey(Schema.Array(RunLocalInstructionSourceSchema))
+  local_instructions: Schema.optionalKey(Schema.Array(RunLocalInstructionSourceSchema)),
+  memory_context: Schema.optionalKey(Schema.Array(RunMemorySourceSchema))
 }).check(
   Schema.makeFilter((run) => {
     const active = isActiveRunStatus(run.status)

@@ -11,7 +11,7 @@ import type {
 } from "@arden-hq/protocol/chat"
 import type { ModelRole } from "@arden-hq/protocol/models"
 import type { ChatSentFrom } from "@arden-hq/protocol/chat"
-import type { RunTerminalResult } from "@arden-hq/protocol/runs"
+import type { RunMemorySource, RunTerminalResult } from "@arden-hq/protocol/runs"
 import type { StoredMessageEnvelope } from "../transcript/model.js"
 import type { JsonObject } from "../json.js"
 import type { CommittedEventBatch } from "../events/model.js"
@@ -303,6 +303,12 @@ export class ChatWriteStore extends Context.Service<
     readonly recordLocalInstructions: (input: {
       readonly runId: string
       readonly sources: ReadonlyArray<LocalInstructionManifestEntry>
+    }) => Effect.Effect<void, ChatWriteFailure>
+    /** Stores what the run was sent from Memory, replacing any earlier record of it. */
+    readonly recordMemoryContext: (input: {
+      readonly runId: string
+      readonly sessionId: string
+      readonly sources: ReadonlyArray<RunMemorySource>
     }) => Effect.Effect<void, ChatWriteFailure>
     readonly recordLateOutcome: (input: {
       readonly runId: string

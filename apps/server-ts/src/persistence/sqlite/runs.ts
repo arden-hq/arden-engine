@@ -1,5 +1,6 @@
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { readRunAuthority } from "./run-authority.js"
+import { readMemoryContext } from "./run-memory-context.js"
 import { readCause } from "./run-cause.js"
 import { readChatWork } from "./chat-work.js"
 import { makeRunProgressQuery, makeWaitingToolCallsQuery } from "./run-progress.js"
@@ -414,6 +415,19 @@ export const makeRunQueries = ({
       )
     )
 
+  const memoryContext = (runId: string) =>
+    readMemoryContext(sql, runId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new RunQueryError({
+            reason: "storage",
+            operation: "get",
+            message: "Could not read what the Run was sent from Memory",
+            cause
+          })
+      )
+    )
+
   const liveness = (runId: string) =>
     readRunLiveness(sql, runId).pipe(
       Effect.mapError(
@@ -457,6 +471,7 @@ export const makeRunQueries = ({
     planLimitPauses,
     chatWork,
     authority,
+    memoryContext,
     liveness,
     cause,
     progress: makeRunProgressQuery({ sql, get, snapshot: writer.snapshot }),

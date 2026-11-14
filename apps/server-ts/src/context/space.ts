@@ -22,7 +22,8 @@ interface SpaceConversationContextSnapshot {
   readonly authority: string
   readonly view: SpaceView
   readonly threads: string
-  readonly pageId?: string
+  /** The Space's Memory page, at the version this run read. */
+  readonly page?: { readonly pageId: string; readonly version: string }
 }
 
 interface SpaceConversationContextInput {
@@ -103,7 +104,7 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
       },
       authority: SPACE_CONTEXT_AUTHORITY,
       threads: SPACE_THREADS,
-      ...(page === undefined ? {} : { pageId: page.pageId })
+      ...(page === undefined ? {} : { page: { pageId: page.pageId, version: page.version } })
     } satisfies SpaceConversationContextSnapshot
   },
   Effect.catchCause((cause) =>

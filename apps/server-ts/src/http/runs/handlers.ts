@@ -162,7 +162,11 @@ export const RunHandlers = HttpApiBuilder.group(
         Effect.fn("RunHandlers.detail")(function* ({ params }) {
           const run = yield* queries.get(params.runId).pipe(Effect.mapError(internalError))
           if (run === null) return yield* new HttpApiError.NotFound({})
-          return yield* runDetail(run)
+          const memory = yield* queries
+            .memoryContext(run.runId)
+            .pipe(Effect.mapError(internalError))
+          const detail = yield* runDetail(run)
+          return memory.length === 0 ? detail : { ...detail, memory_context: memory }
         })
       )
       .handle(

@@ -51,6 +51,47 @@ export interface RunLocalInstructionSource extends JsonRecord {
   readonly digest: string | null
 }
 
+/**
+ * How much of a Memory source reached the prompt: `passage` is the part a search matched,
+ * chosen rather than cut. `cut` and `dropped` name the limit in `reason`.
+ */
+export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
+
+export type RunMemoryCutReason =
+  | "core_page_budget"
+  | "recall_allowance"
+  | "space_page_allowance"
+  | "continuity_budget"
+
+/**
+ * The Space context, sent whole: `bytes` is all of it. `page_id` names its Memory page when it
+ * has one, and `outcome` says how much of that page the Space context held.
+ */
+export interface RunMemorySpaceSource extends JsonRecord {
+  readonly kind: "space"
+  readonly space_id: string
+  readonly page_id: string | null
+  readonly version: string | null
+  readonly bytes: number
+  readonly outcome: RunMemoryOutcome
+  readonly reason: RunMemoryCutReason | null
+}
+
+/** One Memory page at `version` of Memory `revision`; `query` is the search that found it. */
+export interface RunMemoryPageSource extends JsonRecord {
+  readonly kind: "core" | "recalled" | "collection"
+  readonly page_id: string
+  readonly version: string
+  readonly revision: string | null
+  readonly query: string | null
+  readonly bytes: number
+  readonly outcome: RunMemoryOutcome
+  readonly reason: RunMemoryCutReason | null
+}
+
+/** One Memory source a Run was sent before the model ran: identity and bytes, never text. */
+export type RunMemorySource = RunMemorySpaceSource | RunMemoryPageSource
+
 /** Durable, restart-safe projection of one Run. */
 export interface RunDetail extends JsonRecord {
   readonly version: 1
@@ -70,6 +111,8 @@ export interface RunDetail extends JsonRecord {
   readonly late_result_at: string | null
   readonly error: RunError | null
   readonly local_instructions?: ReadonlyArray<RunLocalInstructionSource>
+  /** What the Run was sent from Memory; absent when it was sent none. */
+  readonly memory_context?: ReadonlyArray<RunMemorySource>
 }
 
 export interface RunEvent extends JsonRecord {
