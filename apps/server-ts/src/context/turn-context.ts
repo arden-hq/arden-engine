@@ -387,7 +387,7 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
   )
   const spaceRender = space === undefined ? undefined : renderSpaceContext(space.view)
   const deliveredPageId =
-    space?.pageId !== undefined && spaceRender?.page === "whole" ? space.pageId : undefined
+    space?.pageId !== undefined && spaceRender?.page?.whole === true ? space.pageId : undefined
   const recall = yield* input
     .measure(
       "memory",

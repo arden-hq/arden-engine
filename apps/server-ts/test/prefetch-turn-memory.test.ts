@@ -21,7 +21,8 @@ const recalled = (text: string): MemoryRecall => ({
   revision: "rev-1",
   core: "## Core Memory\nPage: me.md",
   text,
-  sources: [{ pageId: "garden", path: "projects/garden.md", title: "Garden", version: "v1" }]
+  sources: [{ pageId: "garden", path: "projects/garden.md", title: "Garden", version: "v1" }],
+  pages: [{ path: "me.md", text: "Page: me.md", whole: true }]
 })
 
 const turn = (

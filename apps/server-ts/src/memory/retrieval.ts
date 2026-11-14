@@ -20,11 +20,23 @@ interface MemorySource {
   readonly version: string
 }
 
+/** A Memory page as a renderer put it into what a chat is sent. */
+export interface RenderedPage {
+  readonly path: string
+  /** The page's block, exactly as it appears in the rendered text. */
+  readonly text: string
+  /** False when the renderer sent only part of the page. */
+  readonly whole: boolean
+}
+
 export interface MemoryRecall {
   readonly revision: string | null
   readonly core: string | null
   readonly text: string | null
   readonly sources: ReadonlyArray<MemorySource>
+  /** The page blocks in `core` and `text`, in order. A page named only in a collection line is
+   * not one. */
+  readonly pages: ReadonlyArray<RenderedPage>
 }
 
 type PageSelection = RankedMemoryPage
@@ -102,12 +114,10 @@ const discussedLine = (chats: ReadonlyArray<DiscussedChat> | undefined): Readonl
           .join("; ")}`
       ]
 
-/** The line that names a page in what a chat is sent; the memory test finds sent pages by it. */
-export const pageLine = (path: string): string => `Page: ${path}`
-
 const appendPages = (
   blocks: Array<string>,
   sources: Array<MemorySource>,
+  placed: Array<RenderedPage>,
   heading: string,
   pages: ReadonlyArray<PageSelection>,
   allowance:
@@ -128,7 +138,7 @@ const appendPages = (
     if (body.length === 0) continue
     const prefix = [
       `### ${record.page.title}`,
-      pageLine(record.resource.path),
+      `Page: ${record.resource.path}`,
       ...(lastChanged.get(record.page.pageId) === undefined
         ? []
         : [lastChanged.get(record.page.pageId)]),
@@ -144,6 +154,11 @@ const appendPages = (
     if (excerpt.length === 0) continue
     const block = `${prefix}${excerpt}`
     rendered.push(block)
+    placed.push({
+      path: record.resource.path,
+      text: block,
+      whole: excerpt === record.page.body.trim()
+    })
     used += block.length + 2
     sources.push({
       pageId: record.page.pageId,
@@ -284,9 +299,11 @@ export const prepareMemoryRecall = ({
       const coreBlocks: Array<string> = []
       const blocks: Array<string> = []
       const sources: Array<MemorySource> = []
+      const pages: Array<RenderedPage> = []
       appendPages(
         coreBlocks,
         sources,
+        pages,
         "Core Memory",
         residentPages,
         { perPage: coreBudget },
@@ -298,6 +315,7 @@ export const prepareMemoryRecall = ({
       appendPages(
         blocks,
         sources,
+        pages,
         "Relevant Memory",
         selected,
         { total: RETRIEVAL_BUDGET },
@@ -333,7 +351,7 @@ export const prepareMemoryRecall = ({
           )
         )
       }
-      if (blocks.length === 0) return { revision, core, text: null, sources }
+      if (blocks.length === 0) return { revision, core, text: null, sources, pages }
       const text = joinPromptSections([
         renderPromptSection(
           "Memory context",
@@ -351,7 +369,8 @@ export const prepareMemoryRecall = ({
         revision,
         core,
         text,
-        sources
+        sources,
+        pages
       }
     }
   }

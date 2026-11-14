@@ -12,43 +12,61 @@ import {
 
 const block = (path: string, body: string) => `### ${path}\nPage: ${path}\n\n${body}`
 
+/** A page as its renderer sent it: whole, or (`partial`) cut short by the renderer itself. */
+const rendered = (path: string, body: string, partial = false) => ({
+  path,
+  text: block(path, partial ? `${body}\n\n[Partial page]` : body),
+  whole: !partial
+})
+
 const prefetched = (input: {
   readonly core?: ReadonlyArray<string>
   readonly recalled?: ReadonlyArray<string>
+  /** Recalled pages the renderer sent in part. */
+  readonly recalledInPart?: ReadonlyArray<string>
   readonly listed?: ReadonlyArray<string>
   readonly keptRecall?: (text: string) => string
   readonly space?: {
     readonly path: string
-    readonly page: "whole" | "partial"
-    readonly truncated: boolean
+    readonly whole: boolean
+    readonly kept?: (text: string) => string
   }
 }): PrefetchedMemory => {
-  const core = (input.core ?? []).map((path) => block(path, "core fact")).join("\n\n")
-  const recalled = (input.recalled ?? []).map((path) => block(path, "recalled fact")).join("\n\n")
+  const corePages = (input.core ?? []).map((path) => rendered(path, "core fact"))
+  const recalledPages = [
+    ...(input.recalled ?? []).map((path) =>
+      rendered(path, "recalled fact, first line\nsecond line")
+    ),
+    ...(input.recalledInPart ?? []).map((path) => rendered(path, "recalled fact", true))
+  ]
+  const core = corePages.map((page) => page.text).join("\n\n")
+  const recalled = recalledPages.map((page) => page.text).join("\n\n")
   const listed = (input.listed ?? []).map((path) => `- ${path}: a folder`).join("\n")
   const text = [recalled, listed].filter((part) => part !== "").join("\n\n")
   const kept = (input.keptRecall ?? ((all) => all))(text)
+  const spacePage =
+    input.space === undefined
+      ? undefined
+      : {
+          path: input.space.path,
+          text: `Space memory page (${input.space.path}):\nplan, first line\nplan, second line`,
+          whole: input.space.whole
+        }
   const spaceText =
-    input.space === undefined ? undefined : `Space memory page (${input.space.path}):\nplan`
+    spacePage === undefined
+      ? undefined
+      : `## Current Space\n\n${spacePage.text}\n\nUse the Space tools.`
+  const keptSpace =
+    spaceText === undefined ? undefined : (input.space?.kept ?? ((all) => all))(spaceText)
   return {
-    space: input.space === undefined ? undefined : { view: { page: { path: input.space.path } } },
-    spaceRender:
-      spaceText === undefined || input.space === undefined
-        ? undefined
-        : { text: spaceText, page: input.space.page },
-    recall: {
-      core: core === "" ? null : core,
-      text: text === "" ? null : text,
-      sources: [...(input.core ?? []), ...(input.recalled ?? []), ...(input.listed ?? [])].map(
-        (path) => ({ path })
-      )
-    },
+    spaceRender: spaceText === undefined ? undefined : { page: spacePage },
+    recall: { core: core === "" ? null : core, pages: [...corePages, ...recalledPages] },
     continuity: {
       sources: [
-        ...(spaceText === undefined
+        ...(keptSpace === undefined || keptSpace === ""
           ? []
-          : [{ kind: "session", content: spaceText, truncated: input.space?.truncated ?? false }]),
-        ...(kept === "" ? [] : [{ kind: "recall", content: kept, truncated: kept !== text }])
+          : [{ kind: "session", content: keptSpace }]),
+        ...(kept === "" ? [] : [{ kind: "recall", content: kept }])
       ],
       telemetry: { outputBytes: kept.length, truncatedBytes: text.length - kept.length }
     }
@@ -109,15 +127,15 @@ describe("sent score", () => {
         prefetched({
           core: ["me.md"],
           recalled: ["people/gardener.md"],
-          space: { path: "projects/garden.md", page: "whole", truncated: false }
+          space: { path: "projects/garden.md", whole: true }
         })
       )
     )
     expect(result.sent).toBe(true)
     expect(result.pages).toEqual([
-      { path: "me.md", via: "core" },
-      { path: "people/gardener.md", via: "recall" },
-      { path: "projects/garden.md", via: "space" }
+      { path: "me.md", via: "core", whole: true },
+      { path: "people/gardener.md", via: "recall", whole: true },
+      { path: "projects/garden.md", via: "space", whole: true }
     ])
   })
 
@@ -156,27 +174,88 @@ describe("sent score", () => {
     expect(delivery.bytes.cut).toBeGreaterThan(0)
   })
 
-  it("counts a Space page cut by the budget as cut, not sent", () => {
+  it("names a recalled page the budget cut mid-body as cut, not sent", () => {
+    const delivery = deliveryOf(
+      prefetched({
+        recalled: ["projects/kitchen.md", "projects/garden.md"],
+        keptRecall: (text) =>
+          text.slice(0, text.indexOf("second line", text.indexOf("Page: projects/garden.md")))
+      })
+    )
+    const result = scoreSent(
+      question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
+      delivery
+    )
+    expect(result).toMatchObject({
+      sent: false,
+      missing: ["projects/garden.md"],
+      cut: ["projects/garden.md"],
+      pages: [{ path: "projects/kitchen.md", via: "recall", whole: true }]
+    })
+  })
+
+  it("counts a Space page the budget cut mid-page as cut, not sent", () => {
     const result = scoreSent(
       question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
       deliveryOf(
-        prefetched({ space: { path: "projects/garden.md", page: "whole", truncated: true } })
+        prefetched({
+          space: {
+            path: "projects/garden.md",
+            whole: true,
+            kept: (text) => text.slice(0, text.indexOf("second line"))
+          }
+        })
       )
     )
     expect(result).toMatchObject({ sent: false, cut: ["projects/garden.md"] })
   })
 
-  it("counts a Space page sent in part as sent, and says it was in part", () => {
+  it("counts a Space page as sent when the budget cut only the text after it", () => {
     const result = scoreSent(
       question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
       deliveryOf(
-        prefetched({ space: { path: "projects/garden.md", page: "partial", truncated: false } })
+        prefetched({
+          space: {
+            path: "projects/garden.md",
+            whole: true,
+            kept: (text) => text.slice(0, text.indexOf("Use the Space tools"))
+          }
+        })
       )
     )
-    expect(result).toMatchObject({
-      sent: true,
-      pages: [{ path: "projects/garden.md", via: "space_partial" }]
+    expect(result).toMatchObject({ sent: true, cut: [], budgetCut: [] })
+  })
+
+  it("says when the renderer sent an expected page in part, for recall and Space alike", () => {
+    const results = [
+      scoreSent(
+        question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
+        deliveryOf(prefetched({ recalledInPart: ["projects/garden.md"] }))
+      ),
+      scoreSent(
+        question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
+        deliveryOf(prefetched({ space: { path: "projects/garden.md", whole: false } }))
+      ),
+      scoreSent(
+        question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
+        deliveryOf(prefetched({ recalled: ["projects/garden.md"] }))
+      )
+    ]
+    expect(results.map((result) => [result.sent, result.inPart])).toEqual([
+      [true, ["projects/garden.md"]],
+      [true, ["projects/garden.md"]],
+      [true, []]
+    ])
+    expect(results[0]?.pages).toEqual([{ path: "projects/garden.md", via: "recall", whole: false }])
+    expect(results[1]?.pages).toEqual([{ path: "projects/garden.md", via: "space", whole: false }])
+    expect(countByKind(results).find((row) => row.kind === "total")).toEqual({
+      kind: "total",
+      questions: 3,
+      sent: 3,
+      inPart: 2,
+      cut: 0
     })
+    expect(renderCountTable(results).split("\n")[0]).toContain("sent in part")
   })
 
   it("a question with no answer is sent when nothing misleading reached the chat", () => {
@@ -193,7 +272,7 @@ describe("sent score", () => {
       ...misleadingPage,
       continuity: {
         ...misleadingPage.continuity,
-        sources: [{ kind: "recall", content: "Shoe size 44 (guessed).", truncated: false }]
+        sources: [{ kind: "recall", content: "Shoe size 44 (guessed)." }]
       }
     })
     expect(scoreSent(question({ kind: "no_answer" }), delivery)).toMatchObject({
@@ -225,6 +304,7 @@ describe("sent score", () => {
       kind: "total",
       questions: 2,
       sent: 1,
+      inPart: 0,
       cut: 0
     })
     const table = renderCountTable(results)

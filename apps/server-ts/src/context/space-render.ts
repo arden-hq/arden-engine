@@ -1,5 +1,6 @@
 import { isTaskUnfinished, taskActivityWords, type SpaceTask } from "@arden-hq/protocol/spaces/work"
 import { Schema } from "effect"
+import type { RenderedPage } from "../memory/retrieval.js"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { clipLine, cutText } from "@arden-hq/std/text"
@@ -60,8 +61,9 @@ export const renderSpaceContext = (
   { maxBytes = SPACE_CONTEXT_MAX_BYTES }: { readonly maxBytes?: number } = {}
 ): {
   readonly text: string
-  /** How much of the Space memory page the text holds; an empty page counts as absent. */
-  readonly page: "whole" | "partial" | "absent"
+  /** The Space memory page as the text holds it, whole or in part; undefined when the page is
+   * empty or there is no room for it. */
+  readonly page: RenderedPage | undefined
 } => {
   const head = [
     "## Current Space",
@@ -123,8 +125,9 @@ export const renderSpaceContext = (
       : pageBlock(view.page, Math.min(remaining, SPACE_PAGE_MAX_BYTES))
   place(page?.text)
   const text = [head, ...blocks, navigation].join("\n\n")
-  if (page === undefined || view.page?.content === "") return { text, page: "absent" }
-  return { text, page: page.whole ? "whole" : "partial" }
+  if (page === undefined || view.page === undefined || view.page.content === "")
+    return { text, page: undefined }
+  return { text, page: { path: view.page.path, text: page.text, whole: page.whole } }
 }
 
 export const SpaceFactsSchema = Schema.Struct({

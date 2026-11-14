@@ -1,4 +1,5 @@
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -52,10 +53,23 @@ it("refuses the owner's real data folder as the copy", () => {
   expect(accepted.questions.map((question) => question.id)).toEqual(["q1"])
 })
 
-it("refuses a question file inside the repository, where results would be written", () => {
+it("refuses a question file inside any git checkout, where results would be written", () => {
   expect(() =>
     memoryTestFiles({ questions: join(server, "package.json"), copy: join(root, "copy") })
-  ).toThrow(/inside the repository/)
+  ).toThrow(/inside the git checkout/)
+  // Another checkout than the one the script runs from: a worktree's main checkout, or any
+  // other repository. A worktree marks its root with a `.git` file, a main checkout with a folder.
+  for (const marker of ["file", "folder"] as const) {
+    const checkout = join(root, `checkout-${marker}`)
+    mkdirSync(join(checkout, "nested"), { recursive: true })
+    if (marker === "file") writeFileSync(join(checkout, ".git"), "gitdir: elsewhere\n")
+    else mkdirSync(join(checkout, ".git"))
+    const questions = join(checkout, "nested", "questions.json")
+    writeFileSync(questions, questionFile)
+    expect(() => memoryTestFiles({ questions, copy: join(root, "copy") })).toThrow(
+      new RegExp(`inside the git checkout ${checkout}`)
+    )
+  }
 })
 
 const sources = (folder: string): ReadonlyArray<string> =>

@@ -1,11 +1,10 @@
 // The memory test's question file and the folders it may touch. The question file is the
 // owner's private list of questions with dated answers: it lives beside the research notes,
-// never in this repository, and every result is written beside it.
+// never in a git checkout, and every result is written beside it.
 
-import { readFileSync, realpathSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { Schema } from "effect"
-import { isWithin } from "@arden-hq/std/paths"
 import { assertReplayFolder, type ReplayFolder } from "../replay-folder.js"
 
 /** The kinds of question, in the order the tables print them. */
@@ -81,8 +80,17 @@ export const parseQuestions = (text: string): ReadonlyArray<Question> => {
   return questions
 }
 
-/** The engine repository, which must never hold the questions or the results. */
-const REPOSITORY = realpathSync(resolve(import.meta.dirname, "../../../.."))
+/**
+ * The git checkout that holds `file`, if any: the nearest folder above it with a `.git` entry,
+ * a folder in a main checkout and a file in a worktree. Any checkout counts, not only the one
+ * this script runs from, so a run from a worktree cannot write into the main checkout.
+ */
+const gitCheckoutOf = (file: string): string | undefined => {
+  for (let folder = dirname(file); ; folder = dirname(folder)) {
+    if (existsSync(join(folder, ".git"))) return folder
+    if (dirname(folder) === folder) return undefined
+  }
+}
 
 export interface MemoryTestFiles {
   readonly questions: ReadonlyArray<Question>
@@ -92,7 +100,7 @@ export interface MemoryTestFiles {
 }
 
 /**
- * The inputs of a memory test run: the private question file, outside this repository, and a
+ * The inputs of a memory test run: the private question file, outside any git checkout, and a
  * replay copy that passes the replay folder guard (so never the owner's real data folder).
  */
 export const memoryTestFiles = (input: {
@@ -100,9 +108,10 @@ export const memoryTestFiles = (input: {
   readonly copy: string
 }): MemoryTestFiles => {
   const questionFile = realpathSync(resolve(input.questions))
-  if (isWithin(REPOSITORY, questionFile))
+  const checkout = gitCheckoutOf(questionFile)
+  if (checkout !== undefined)
     throw new Error(
-      `Refusing question file ${questionFile}: it is inside the repository, and the questions and results are private`
+      `Refusing question file ${questionFile}: it is inside the git checkout ${checkout}, and the questions and results are private`
     )
   const copy = assertReplayFolder(input.copy)
   return {
