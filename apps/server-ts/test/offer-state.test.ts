@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { join, relative } from "node:path"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -7,8 +9,10 @@ import {
   HOME_OFFER_SOURCES,
   OFFER_EXPIRY_HOURS,
   OFFER_LATER_HOURS,
+  storedOfferStands,
   UNFINISHED_TURN
 } from "../src/persistence/sqlite/offer-rules.js"
+import { REFUSED_PROPOSAL_STATUSES } from "../src/persistence/sqlite/status-sets.js"
 import {
   assertCitedTurnsFinished,
   readInferenceReview
@@ -305,4 +309,36 @@ it("refuses a Home offer's mail item and Memory page with one message that names
   expect(outcome.page).toBe(HOME_OFFER_SOURCES)
   expect(outcome.mail).toBe(HOME_OFFER_SOURCES)
   expect(HOME_OFFER_SOURCES).not.toMatch(/mail|Memory page it read/u)
+})
+
+const SOURCE = join(import.meta.dirname, "../src")
+
+const sourceFiles = (directory: string): ReadonlyArray<string> =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return sourceFiles(path)
+    return entry.name.endsWith(".ts") ? [path] : []
+  })
+
+// "Rejected or expired" is one fact with one owner: the Space review lists those offers as
+// refused, and `propose` finds them by Task key and answers with them unchanged.
+it("writes the set of refused offer statuses once, and every one of them stands", () => {
+  const pair = /[[(]\s*(["'])(?:rejected\1,\s*\1expired|expired\1,\s*\1rejected)\1\s*[\])]/u
+  const owners = sourceFiles(SOURCE)
+    .map((path) => relative(SOURCE, path))
+    .filter((path) => !path.startsWith("persistence/migrations/"))
+    .filter((path) => pair.test(readFileSync(join(SOURCE, path), "utf8")))
+  expect(owners).toEqual(["persistence/sqlite/status-sets.ts"])
+  for (const status of REFUSED_PROPOSAL_STATUSES)
+    expect(
+      storedOfferStands(
+        {
+          status,
+          evidence_revision_key: "old-evidence",
+          candidate_hash: "old-candidate",
+          retired_evidence_key: null
+        },
+        { evidenceKey: "new-evidence", candidateHash: "new-candidate" }
+      )
+    ).toBe(true)
 })

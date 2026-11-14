@@ -70,13 +70,10 @@ export const offerAnchorRefusal = (
 /**
  * Whether the stored offer answers a new propose call unchanged. The store reads the offer with
  * the same identity (place, Task key, cited records), or else a No (`rejected`) or an unanswered
- * offer (`expired`) for the same place and Task key: those two are final for the Task whatever
- * records a later call cites. Only a retirement, which was the worker's call, yields to changed
- * evidence.
+ * offer (`expired`) for the same place and Task key (`REFUSED_PROPOSAL_STATUSES`): those two are
+ * final for the Task whatever records a later call cites. Only a retirement, which was the
+ * worker's call, yields to changed evidence.
  */
-/** The answers that close a Task key in its place for good, whatever a later call cites. */
-export const KEY_CLOSING_STATUSES = ["rejected", "expired"] as const
-
 export const storedOfferStands = (
   stored: Pick<ProposalRow, "status" | "evidence_revision_key" | "candidate_hash"> & {
     readonly retired_evidence_key: string | null

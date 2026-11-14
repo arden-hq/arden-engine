@@ -65,8 +65,11 @@ export const openDeferredCallStatusList = statusList(["pending", "approved"])
 export const followUpRecordableStatusList = statusList(["approved", "rejected"])
 export const answeredApprovalStatusList = statusList(["approved", "rejected"])
 export const openProposalStatusList = statusList(["offered", "held"])
-/** An offer the owner said no to, or left unanswered until it expired: final either way. */
-export const refusedProposalStatusList = statusList(["rejected", "expired"])
+/** An offer the owner said no to, or left unanswered until it expired: final either way. The Space
+ * review lists these as refused, and a later propose of the same Task key in the same place gets
+ * the stored offer back unchanged, whatever records it cites. */
+export const REFUSED_PROPOSAL_STATUSES = ["rejected", "expired"] as const
+export const refusedProposalStatusList = statusList(REFUSED_PROPOSAL_STATUSES)
 export const answeredProposalStatusList = statusList(["accepted", "rejected"])
 export const endedUnsuccessfullyAutomationRunStatusList = statusList([
   "failed",

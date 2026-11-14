@@ -38,7 +38,7 @@ import {
   putOfferOff,
   restartOfferWait
 } from "./proposal-room.js"
-import { KEY_CLOSING_STATUSES, storedOfferStands } from "./offer-rules.js"
+import { storedOfferStands } from "./offer-rules.js"
 import { homeTaskBody, writeHomeSuggestion } from "./task-proposal-home.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
@@ -50,7 +50,7 @@ import { projectRetirements } from "./proposal-retirement-view.js"
 import { isOrdinaryChat } from "./in-chat-task.js"
 import { makeProposalRevision, proposalHash } from "./proposal-revision.js"
 import { userChatSql } from "./chat-ownership.js"
-import { openProposalStatusList } from "./status-sets.js"
+import { openProposalStatusList, refusedProposalStatusList } from "./status-sets.js"
 
 export interface ProposalRow {
   readonly proposal_id: string
@@ -310,8 +310,8 @@ export const makeTaskProposalStore = (options: {
             json_extract(retirement_json, '$.evidence_revision_key') AS retired_evidence_key FROM task_proposals
           WHERE proposal_id = ${proposalId}
             OR (place = ${place} AND space_id IS ${request.spaceId ?? null}
-              AND stable_key = ${input.key} AND status IN ${sql.in(KEY_CLOSING_STATUSES)})
-          ORDER BY status IN ${sql.in(KEY_CLOSING_STATUSES)} DESC, settled_at DESC LIMIT 1`
+              AND stable_key = ${input.key} AND status IN ${refusedProposalStatusList})
+          ORDER BY status IN ${refusedProposalStatusList} DESC, settled_at DESC LIMIT 1`
           const existing = existingRows[0]
           if (
             existing !== undefined &&
