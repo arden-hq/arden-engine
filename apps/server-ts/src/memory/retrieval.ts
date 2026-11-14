@@ -17,7 +17,7 @@ const RESULT_LIMIT = 3
  * How much of a page the recall placed: `block` is the exact text it put in, `passage` is the
  * part a search matched, `cut` is shortened to the page's allowance, `dropped` found no room.
  */
-export type MemoryPlacement =
+type MemoryPlacement =
   | { readonly shown: "whole" | "passage" | "cut"; readonly block: string }
   | { readonly shown: "dropped" }
 

@@ -5,7 +5,7 @@ import type { SqlClient } from "effect/unstable/sql"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
 
-export const taskSourceKey = (source: SpaceTaskSource): string => {
+const taskSourceKey = (source: SpaceTaskSource): string => {
   switch (source.kind) {
     case "chat":
       return JSON.stringify([source.kind, source.session_id, source.turn_id, source.revision])
