@@ -27,6 +27,7 @@ const toolContractProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<s
       .map((name) => `TOOL_SUMMARIES has ${name}, which is not a built-in tool`),
     ...tools.flatMap(parameterProblems),
     ...tools.flatMap(groupProblems),
+    ...hashInputProblems(tools),
     ...catalogNameProblems(tools)
   ]
 }
@@ -116,3 +117,76 @@ const groupProblems = (tool: ServerTool): ReadonlyArray<string> => {
         `${tool.definition.name} uses concurrency group ${group}; add it to CONCURRENCY_GROUPS or reuse one`
       ]
 }
+
+// The model names things by link or slug, never by a hash. It cannot copy 64
+// random characters reliably: in one month wiki_read_change failed on 36% of
+// its calls and task_propose lost offers to a mistyped snapshot. A version
+// check ("did this change since I read it") belongs to the server, per run.
+// This finds a hash input by its name or description, so a hash hidden in a
+// plainly named field still passes; AGENTS.md states the whole rule.
+const HASH_NAME =
+  /^(snapshot|fingerprint|etag|checksum|digest|sha256|hash|revision|revision_ref)$|_(hash|sha256|fingerprint|digest|checksum|etag)$/
+const HASH_TEXT = /\b(hash|sha-?256|fingerprint|digest|checksum|etag)\b/i
+
+// Inputs that broke the rule when it was written (2026-11-14). Remove an entry
+// when its tool stops taking the hash. Never add one.
+const KNOWN_HASH_INPUTS: ReadonlySet<string> = new Set([
+  "skill_update.expected_sha256",
+  "task_propose.snapshot",
+  "task_propose.sources.revision",
+  "wiki_list_collections.revision",
+  "wiki_read_change.revision",
+  "wiki_restore_page.revision_ref"
+])
+
+const hashInputProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
+  const found = new Set(tools.flatMap(hashInputs))
+  return [
+    ...[...found]
+      .filter((input) => !KNOWN_HASH_INPUTS.has(input))
+      .map(
+        (input) =>
+          `${input} asks the model for a hash; take a link or slug and keep the version check on the server`
+      ),
+    ...[...KNOWN_HASH_INPUTS]
+      .filter((input) => !found.has(input))
+      .map((input) => `KNOWN_HASH_INPUTS has ${input}, which no longer takes a hash; remove it`)
+  ]
+}
+
+const hashInputs = (tool: ServerTool): ReadonlyArray<string> =>
+  hashInputPaths(tool.definition.name, tool.entry(toolParametersJsonSchema).parameters)
+
+/** Every input of one tool, as `tool.field.child`, that asks for a hash. */
+export const hashInputPaths = (
+  tool: string,
+  parameters: Readonly<Record<string, unknown>>
+): ReadonlyArray<string> => {
+  const definitions = Predicate.isObject(parameters["$defs"]) ? parameters["$defs"] : {}
+  const found = new Set<string>()
+  const seen = new Set<unknown>()
+  const visit = (schema: unknown, path: string, name: string | undefined): void => {
+    if (!Predicate.isObject(schema) || seen.has(schema)) return
+    seen.add(schema)
+    const ref = schema["$ref"]
+    if (typeof ref === "string") visit(definitions[ref.replace("#/$defs/", "")], path, name)
+    if (name !== undefined && takesText(schema) && namesHash(name, schema)) found.add(path)
+    for (const key of ["allOf", "anyOf", "oneOf"])
+      if (Array.isArray(schema[key])) for (const part of schema[key]) visit(part, path, name)
+    visit(schema["items"], path, undefined)
+    const properties = schema["properties"]
+    if (Predicate.isObject(properties))
+      for (const [child, value] of Object.entries(properties))
+        visit(value, `${path}.${child}`, child)
+  }
+  visit(parameters, tool, undefined)
+  return [...found]
+}
+
+// A fixed choice such as "none" is text the model can copy; free text is not.
+const takesText = (schema: Readonly<Record<string, unknown>>): boolean =>
+  schema["type"] === "string" && schema["enum"] === undefined && schema["const"] === undefined
+
+const namesHash = (name: string, schema: Readonly<Record<string, unknown>>): boolean =>
+  HASH_NAME.test(name) ||
+  (typeof schema["description"] === "string" && HASH_TEXT.test(schema["description"]))

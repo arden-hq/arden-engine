@@ -11,6 +11,10 @@
   `persistence/schema/sections`. Never edit a released migration; fix forward.
   Heavy row rewrites are backfills (`persistence/sqlite/backfills/`), not
   blocking migrations.
+- Tool inputs: the model names a page, task, offer, chat or mail by link or
+  slug, never by a hash, and never passes a version code back. The server
+  keeps "did this change since the run read it" itself. `tool-contract.ts`
+  refuses a new hash input at start; `KNOWN_HASH_INPUTS` there only shrinks.
 - Before a commit: `just check` (typecheck, lint, format, tests).
 
 ## Pull request descriptions
