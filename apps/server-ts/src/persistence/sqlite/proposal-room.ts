@@ -1,5 +1,8 @@
-import { Effect } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import { DateTime, Effect } from "effect"
+import { Statement, type SqlClient } from "effect/unstable/sql"
+import { ownerPresentSql } from "./home-presence.js"
+import { OFFER_EXPIRY_HOURS, OFFER_LATER_HOURS } from "./offer-rules.js"
+import type { ProposalRow } from "./task-proposals.js"
 import { workError } from "./work-records.js"
 
 const SPACE_OPEN_PROPOSAL_CAP = 3
@@ -34,10 +37,50 @@ export const assertHomeProposalRoom = Effect.fn("Work.assertHomeProposalRoom")(f
     )
 })
 
+/** Every write that (re)opens an offer sets this: its expiry clock starts over, unput off and not
+ * yet waiting, until the owner is next around. */
+export const restartOfferWait = Statement.fragment([
+  Statement.literal("put_off_until = NULL, waiting_since = NULL")
+])
+
 export const openHeldOnHome = (sql: SqlClient.SqlClient, now: string) =>
-  sql`UPDATE task_proposals SET status = 'offered', revision = revision + 1, updated_at = ${now}
+  sql`UPDATE task_proposals SET status = 'offered', revision = revision + 1, updated_at = ${now},
+    ${restartOfferWait}
     WHERE proposal_id IN (SELECT proposal_id FROM task_proposals
       WHERE place = 'home' AND status = 'held'
       ORDER BY seq
       LIMIT MAX(0, ${HOME_OPEN_PROPOSAL_CAP} - (SELECT COUNT(*) FROM task_proposals
         WHERE place = 'home' AND status = 'offered')))`.pipe(Effect.asVoid)
+
+/** The owner's Later: the offer stays open but out of sight for `OFFER_LATER_HOURS`, and its
+ * expiry clock starts over once it is back. */
+export const putOfferOff = (sql: SqlClient.SqlClient, proposalId: string, now: DateTime.Utc) =>
+  sql`UPDATE task_proposals SET revision = revision + 1, updated_at = ${DateTime.formatIso(now)},
+    ${restartOfferWait},
+    put_off_until = ${DateTime.formatIso(DateTime.add(now, { hours: OFFER_LATER_HOURS }))}
+    WHERE proposal_id = ${proposalId} AND status = 'offered'`.pipe(Effect.asVoid)
+
+/** Starts the expiry clock of every open offer that is in sight while the owner has Arden open,
+ * then moves every offer that has waited `OFFER_EXPIRY_HOURS` since to `expired`, and lets held
+ * Home offers take the room. A held offer's clock starts once it moves up and the owner is
+ * around. Returns the offers that expired. */
+export const expireOverdueOffers = Effect.fn("Work.expireOverdueOffers")(function* (
+  sql: SqlClient.SqlClient,
+  now: DateTime.Utc
+) {
+  const at = DateTime.formatIso(now)
+  const cutoff = DateTime.formatIso(DateTime.subtract(now, { hours: OFFER_EXPIRY_HOURS }))
+  yield* sql`UPDATE task_proposals SET waiting_since = ${at}
+    WHERE status = 'offered' AND waiting_since IS NULL
+      AND (put_off_until IS NULL OR put_off_until <= ${at})
+      AND ${ownerPresentSql(sql, at)}`
+  const overdue = yield* sql<ProposalRow>`SELECT * FROM task_proposals
+    WHERE status = 'offered' AND waiting_since <= ${cutoff}
+    ORDER BY seq`
+  if (overdue.length === 0) return overdue
+  yield* sql`UPDATE task_proposals SET status = 'expired', revision = revision + 1,
+    updated_at = ${at}, settled_at = ${at}
+    WHERE proposal_id IN ${sql.in(overdue.map((row) => row.proposal_id))}`
+  yield* openHeldOnHome(sql, at)
+  return overdue
+})

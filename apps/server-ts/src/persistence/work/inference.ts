@@ -22,6 +22,7 @@ export interface TaskInferenceReview {
     readonly run_id: string | null
     readonly turn_id: string | null
     readonly status: string | null
+    readonly owner_turn_id: string | null
     readonly pending: number
     readonly settled: boolean
   }>
@@ -34,7 +35,8 @@ export interface TaskInferenceReview {
     readonly sources: ReadonlyArray<SpaceTaskSource>
   }>
   readonly rejections: ReadonlyArray<{
-    readonly kind: "task_undo" | "proposal" | "stopped_task"
+    /** `proposal`: an offer the owner rejected. `expired`: an offer left unanswered. */
+    readonly kind: "proposal" | "expired" | "stopped_task"
     readonly item_id: string | null
     readonly proposal_id: string | null
     readonly sources: ReadonlyArray<SpaceTaskSource>

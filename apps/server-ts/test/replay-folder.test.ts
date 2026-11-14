@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
@@ -73,4 +82,16 @@ it("refuses a link anywhere in the copy", () => {
   const folder = copyAt(join(root, "copy"))
   symlinkSync(root, join(folder, "memory", "wiki", "pages", "elsewhere"))
   expect(() => assertReplayFolder(folder)).toThrow(/link/)
+})
+
+// Real data reaches a test only through the replay copy: a fixed, migrated snapshot the guard
+// above checks. A test that opened the owner's live data directory would assert on data that
+// changes under it, and its result would depend on when it ran.
+it("leaves no test reading the owner's live data directory", () => {
+  const TEST = import.meta.dirname
+  const offenders = readdirSync(TEST, { recursive: true, encoding: "utf8" })
+    .filter((name) => name.endsWith(".ts"))
+    .filter((name) => readFileSync(join(TEST, name), "utf8").includes("ownerDataDirectory("))
+    .filter((name) => name !== "replay-folder.test.ts")
+  expect(offenders).toEqual([])
 })

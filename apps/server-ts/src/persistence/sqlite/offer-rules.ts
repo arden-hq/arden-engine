@@ -1,0 +1,101 @@
+import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
+import type { ProposalRow } from "./task-proposals.js"
+
+// The rules that decide whether a task offer is made, stays, or comes back. Each is a pure
+// function so the store and the replay over real history run the same rule.
+
+/**
+ * An offer nobody answered expires once it has waited this many hours on the owner: counted from
+ * the first time the owner had Arden open after it was last offered, revised or put off, so an
+ * offer made while the owner was away does not age. From the owner's answered offers up to 14
+ * November 2026: every accepted offer was answered within 35 hours, and 26 of 28 answers came
+ * within 48 hours; the two later answers were both a No.
+ */
+export const OFFER_EXPIRY_HOURS = 48
+
+/** How long the owner's Later puts an offer out of sight. Its expiry clock starts again once
+ * the offer is back and the owner is around. */
+export const OFFER_LATER_HOURS = 24
+
+/**
+ * A cited chat turn is usable evidence once it has finished: it is recorded, and no run of
+ * that turn is still active. What came after it in the chat, such as a Task or helper result,
+ * does not matter; an owner turn that came after it changes the review's snapshot instead.
+ */
+export const citedTurnFinished = (runStatuses: ReadonlyArray<string>): boolean =>
+  runStatuses.length > 0 && !runStatuses.some(isActiveRunStatus)
+
+export const UNFINISHED_TURN =
+  "That chat turn has not finished, or is not a turn of one of your chats; wait for its outcome and review again"
+
+/** What may anchor an offer in each place. In a Space: a chat turn, a mail item, or the worker's
+ * own Task. At Home, where no Space reviews the evidence: this run's own chat turn or its own
+ * Task (the Home admission checks which turn and which Task). A Memory page only supports an
+ * offer anywhere: a page changes on any edit, so an offer built on one came back after a No. */
+const anchors = (place: OfferPlace, kind: SpaceTaskSource["kind"]): boolean => {
+  switch (kind) {
+    case "chat":
+    case "task":
+      return true
+    case "connection_item":
+      return place === "space"
+    case "memory":
+    case "space":
+      return false
+  }
+}
+
+export type OfferPlace = "space" | "home"
+
+export const OFFER_NEEDS_ANCHOR =
+  "A Memory page is background, not a reason to offer a Task. Cite the chat turn or the mail item that asks for this outcome (a Task's worker may cite its own Task); if none does, offer nothing."
+
+export const HOME_OFFER_SOURCES =
+  "With no Space, an offer cites this run's own chat turn or its own Task, and a Memory page only supports it. If neither asks for this outcome, offer nothing."
+
+const refusals: Record<OfferPlace, string> = {
+  space: OFFER_NEEDS_ANCHOR,
+  home: HOME_OFFER_SOURCES
+}
+
+/** The refusal for an offer whose sources hold no anchor for its place; undefined when one
+ * does. The Home admission refuses any other source it never accepts with the same words. */
+export const offerAnchorRefusal = (
+  place: OfferPlace,
+  sources: ReadonlyArray<{ readonly kind: SpaceTaskSource["kind"] }>
+): string | undefined =>
+  sources.some((source) => anchors(place, source.kind)) ? undefined : refusals[place]
+
+/**
+ * Whether the stored offer answers a new propose call unchanged. The store reads the offer with
+ * the same identity (place, Task key, cited records), or else a No (`rejected`) or an unanswered
+ * offer (`expired`) for the same place and Task key: those two are final for the Task whatever
+ * records a later call cites. Only a retirement, which was the worker's call, yields to changed
+ * evidence.
+ */
+/** The answers that close a Task key in its place for good, whatever a later call cites. */
+export const KEY_CLOSING_STATUSES = ["rejected", "expired"] as const
+
+export const storedOfferStands = (
+  stored: Pick<ProposalRow, "status" | "evidence_revision_key" | "candidate_hash"> & {
+    readonly retired_evidence_key: string | null
+  },
+  call: { readonly evidenceKey: string; readonly candidateHash: string }
+): boolean => {
+  switch (stored.status) {
+    case "accepted":
+    case "rejected":
+    case "expired":
+      return true
+    case "retired":
+      return (
+        stored.evidence_revision_key === call.evidenceKey ||
+        stored.retired_evidence_key === call.evidenceKey
+      )
+    case "offered":
+      return stored.candidate_hash === call.candidateHash
+    case "held":
+      return false
+  }
+}

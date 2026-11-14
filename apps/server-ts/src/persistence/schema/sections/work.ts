@@ -8,7 +8,6 @@ export const workSchemaSection = {
     "space_task_sources",
     "space_task_result_reads",
     "space_task_holds",
-    "task_inference_rejections",
     "run_questions",
     "run_question_timers",
     "space_task_events",
@@ -23,7 +22,6 @@ export const workSchemaSection = {
     "idx_space_tasks_home",
     "idx_space_tasks_in_chat",
     "idx_space_task_sources_chat",
-    "idx_task_inference_rejections_evidence",
     "idx_run_questions_run",
     "idx_run_question_timers_pending",
     "idx_space_task_events_space_created",
@@ -147,15 +145,6 @@ export const workSchemaSection = {
             OR NEW.status <> 'open');
         UPDATE space_task_holds SET task_generation = NEW.generation WHERE item_id = NEW.item_id;
       END`,
-    `CREATE TABLE task_inference_rejections (
-      item_id TEXT PRIMARY KEY,
-      space_id TEXT NOT NULL REFERENCES spaces(space_id) ON DELETE CASCADE,
-      evidence_key TEXT NOT NULL,
-      sources TEXT NOT NULL CHECK(json_valid(sources) AND json_type(sources) = 'array'),
-      reason TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )`,
-    "CREATE INDEX idx_task_inference_rejections_evidence ON task_inference_rejections(space_id, evidence_key)",
     `CREATE TABLE run_questions (
       question_id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL REFERENCES chat_runs(run_id) ON DELETE RESTRICT,

@@ -50,6 +50,8 @@ import { memoryCapturePositions } from "./0155_memory_capture_positions.js"
 import { jobHoldNamedForWhatItIs } from "./0156_job_hold_named_for_what_it_is.js"
 import { ownerChatStartsCapture } from "./0157_owner_chat_starts_capture.js"
 import { captureBatchCutByRevert } from "./0158_capture_batch_cut_by_revert.js"
+import { dropInferenceRejections } from "./0159_drop_inference_rejections.js"
+import { offersExpire } from "./0160_offers_expire.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -342,7 +344,9 @@ export const migrations: ReadonlyArray<Migration> = [
   memoryCapturePositions,
   jobHoldNamedForWhatItIs,
   ownerChatStartsCapture,
-  captureBatchCutByRevert
+  captureBatchCutByRevert,
+  dropInferenceRejections,
+  offersExpire
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

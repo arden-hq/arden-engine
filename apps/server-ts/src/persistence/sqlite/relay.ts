@@ -16,6 +16,7 @@ import { iso } from "../../runtime/clock.js"
 import { makeSettingsDocument } from "./settings-document.js"
 import { modelTurnRunStatusList } from "./status-sets.js"
 import { recentNotices } from "./notices.js"
+import { ownerPresentSql } from "./home-presence.js"
 
 interface DeviceRow {
   readonly dev: string
@@ -153,8 +154,8 @@ export const makeRelayStore = Effect.fn("SqliteRelayStore.make")(function* ({
     function* () {
       const at = yield* now
       const rows = yield* reader<{ readonly present: number }>`
-        SELECT 1 AS present FROM home_presence WHERE lease_until > ${at} LIMIT 1`
-      return rows.length > 0
+        SELECT ${ownerPresentSql(reader, at)} AS present`
+      return rows[0]?.present === 1
     },
     Effect.mapError(failure("devices", "Could not read whether you are at the Mac"))
   )

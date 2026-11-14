@@ -74,9 +74,17 @@ export const TaskProposalSchema: Schema.Codec<TaskProposal> = withExtras({
   source_tool_call_id: Schema.NullOr(identity),
   capture_policy: Schema.NullOr(TaskProposalCapturePolicySchema),
   revision: NonNegativeIntSchema,
-  status: Schema.Literals(["held", "offered", "accepted", "rejected", "retired"] as const),
+  status: Schema.Literals([
+    "held",
+    "offered",
+    "accepted",
+    "rejected",
+    "expired",
+    "retired"
+  ] as const),
   retirement: Schema.NullOr(TaskProposalRetirementSchema),
   item_id: Schema.NullOr(identity),
+  put_off_until: Schema.NullOr(IsoDateTimeStringSchema),
   created_at: IsoDateTimeStringSchema,
   updated_at: IsoDateTimeStringSchema,
   settled_at: Schema.NullOr(IsoDateTimeStringSchema)
@@ -88,13 +96,17 @@ export const TaskProposalSchema: Schema.Codec<TaskProposal> = withExtras({
       return "a proposal names a chat exactly when it waits in one"
     if ((proposal.status === "retired") !== (proposal.retirement !== null))
       return "a retirement is recorded exactly when a proposal is retired"
+    if (proposal.put_off_until !== null && proposal.status !== "offered")
+      return "only an open offer is put off"
     if (proposal.status === "held" || proposal.status === "offered") {
       return proposal.item_id === null && proposal.settled_at === null
         ? undefined
         : "open proposals cannot have settlement fields"
     }
     if (
-      (proposal.status === "rejected" || proposal.status === "retired") &&
+      (proposal.status === "rejected" ||
+        proposal.status === "expired" ||
+        proposal.status === "retired") &&
       proposal.item_id !== null
     )
       return "a skipped proposal has no Task"
@@ -116,7 +128,7 @@ export const TaskProposalListQuerySchema = Schema.Struct({
 export const ResolveTaskProposalInputSchema = Schema.Struct({
   expected_revision: NonNegativeIntSchema,
   client_id: identity,
-  decision: Schema.Literals(["accept", "reject"] as const),
+  decision: Schema.Literals(["accept", "reject", "later"] as const),
   session_id: Schema.optionalKey(identity),
   space_id: Schema.optionalKey(identity)
 })

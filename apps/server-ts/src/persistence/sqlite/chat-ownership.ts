@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { Statement, type SqlClient } from "effect/unstable/sql"
+import { keyMessageJson } from "./chat-key-message.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { delegatedLinkSql, sessionAncestors, sessionDescendants } from "./tree-walk.js"
 
@@ -12,15 +13,12 @@ export const userChatSql = (alias?: string): Statement.Fragment => {
 
 type ChatScope =
   | { readonly kind: "space"; readonly spaceId: string }
-  | { readonly kind: "chats"; readonly sessionIds: ReadonlyArray<string> }
   | { readonly kind: "within"; readonly sessionId: string }
 
 const rootChats = (sql: SqlClient.SqlClient, scope: ChatScope) => {
   switch (scope.kind) {
     case "space":
       return sql`space_id = ${scope.spaceId}`
-    case "chats":
-      return sql`session_id IN ${sql.in(scope.sessionIds)}`
     case "within":
       return sql`session_id IN (SELECT session_id FROM up)`
   }
@@ -63,15 +61,14 @@ export interface ChatSettledState {
   readonly run_id: string | null
   readonly turn_id: string | null
   readonly status: string | null
+  /** The latest turn the owner typed, finished or not. A Task or helper result is not one. */
+  readonly owner_turn_id: string | null
   readonly pending: number
   readonly settled: boolean
 }
 
 export const readChatSettled = (sql: SqlClient.SqlClient, spaceId: string) =>
   chatSettled(sql, { kind: "space", spaceId })
-
-export const readSessionSettled = (sql: SqlClient.SqlClient, sessionIds: ReadonlyArray<string>) =>
-  sessionIds.length === 0 ? Effect.succeed([]) : chatSettled(sql, { kind: "chats", sessionIds })
 
 const chatSettled = Effect.fn("Chat.settled")(function* (
   sql: SqlClient.SqlClient,
@@ -81,6 +78,14 @@ const chatSettled = Effect.fn("Chat.settled")(function* (
     WITH RECURSIVE ${ownedSessions(sql, scope)}
     SELECT chat.session_id, chat.public_ref AS session_ref, chat.name AS title,
       latest.run_id, json_extract(latest.metadata_json, '$.turn_id') AS turn_id, latest.status,
+      (SELECT json_extract(run.metadata_json, '$.turn_id') FROM chat_runs AS run
+        JOIN chat_idempotency_keys AS request
+          ON request.session_id = run.session_id AND request.client_id = run.client_id
+            AND request.run_id = run.run_id
+        WHERE run.session_id = chat.session_id
+          AND json_extract(${keyMessageJson(sql, "request")}, '$.is_meta') IS NOT 1
+          AND json_extract(run.metadata_json, '$.automation') IS NULL
+        ORDER BY run.started_at DESC, run.run_id DESC LIMIT 1) AS owner_turn_id,
       (SELECT COUNT(*) FROM owned JOIN session_queued_messages AS queued
         ON queued.session_id = owned.session_id
         WHERE owned.chat_session_id = chat.session_id) AS pending,
@@ -95,6 +100,17 @@ const chatSettled = Effect.fn("Chat.settled")(function* (
   return rows.map(({ active, ...row }) => ({ ...row, settled: active === 0 && row.pending === 0 }))
 })
 
+/** What the Space review's snapshot holds of each chat: what the owner said, and what waits to be
+ * said. A Task or helper result landing in the chat leaves it unchanged; a new owner turn does
+ * not, so an offer is refused until the worker has read it. */
+export const ownerTurnFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
+  chats.map((chat) => ({
+    session_id: chat.session_id,
+    owner_turn_id: chat.owner_turn_id,
+    pending: chat.pending
+  }))
+
+/** What the Space review's wake fingerprint holds of each chat: its latest run and state. */
 export const settledFingerprint = (chats: ReadonlyArray<ChatSettledState>) =>
   chats.map((chat) => ({
     session_id: chat.session_id,

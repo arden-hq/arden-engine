@@ -188,9 +188,6 @@ export const tableTells = {
   space_task_sources: { tell: "task", id: "{row}.item_id" },
   space_task_result_reads: { tell: "task_visibility", id: "{row}.item_id" },
   space_task_holds: { tell: "task", id: "{row}.item_id" },
-  task_inference_rejections: {
-    silent: "What Space review learned not to propose; prompts read it."
-  },
   run_questions: { silent: ask },
   run_question_timers: { silent: ask },
   space_task_events: { tell: "task", id: "{row}.item_id", scope: "{row}.space_id" },

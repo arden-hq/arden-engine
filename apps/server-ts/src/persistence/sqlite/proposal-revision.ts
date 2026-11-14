@@ -18,6 +18,7 @@ import type { ProposalRow } from "./task-proposals.js"
 import type { Writer } from "./deps.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { restartOfferWait } from "./proposal-room.js"
 
 const failure = (
   reason: TaskProposalStoreError["reason"],
@@ -80,10 +81,7 @@ export const makeProposalRevision = (options: {
           }
           if (row.status !== "offered") {
             return yield* new TaskProposalConflictError({
-              kind:
-                row.status === "accepted" || row.status === "rejected" || row.status === "retired"
-                  ? "settled"
-                  : "not_offered",
+              kind: row.status === "held" ? "not_offered" : "settled",
               message: "This proposal is no longer open"
             })
           }
@@ -171,7 +169,7 @@ export const makeProposalRevision = (options: {
           candidate_hash = ${candidateHash}, source_run_id = ${request.runId},
           source_session_id = ${request.sessionId}, source_turn_id = ${run.turn_id},
           source_tool_call_id = ${request.toolCallId}, capture_policy_json = ${JSON.stringify(capturePolicy)},
-          revision = revision + 1, updated_at = ${now}
+          revision = revision + 1, updated_at = ${now}, ${restartOfferWait}
           WHERE proposal_id = ${request.proposalId} AND status = 'offered'
             AND revision = ${request.expectedRevision}`
           const updated = yield* read(request.proposalId)

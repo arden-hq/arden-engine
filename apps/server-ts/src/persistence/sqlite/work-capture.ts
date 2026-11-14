@@ -173,12 +173,6 @@ export const makeWorkCaptureSql = (options: {
         yield* requireInChatHome(sql, { sessionId: home, itemId })
       }
 
-      const undone = yield* sql`SELECT 1 FROM task_inference_rejections WHERE item_id = ${itemId}`
-      if (undone.length > 0)
-        return yield* workError(
-          "conflict",
-          "This inferred Task was undone. Use a new key for a newly requested Task; its prior history is retained."
-        )
       const existing = (yield* sql<WorkItemRow>`
         SELECT ${workItemColumns(sql, "item")} FROM space_tasks AS item
         WHERE item.stable_key = ${validInput.key} AND ${taskScopeSql(sql, scope)}
