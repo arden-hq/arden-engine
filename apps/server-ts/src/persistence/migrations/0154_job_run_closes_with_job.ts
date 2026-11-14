@@ -14,7 +14,10 @@ import type { Migration } from "./index.js"
  * deletes the row, so there they change nothing. The task's `running_since`
  * is cleared too once none of its rows is claimed, as recovery does at start.
  * Runs that belong to a chat run (`task_id IS NULL`) have no queue row and are
- * left alone. The runs already open with no job are closed the same way. */
+ * left alone. The runs already open with no job are closed the same way, but
+ * at the last time each is known to have been alive (its chat run's last
+ * update, else its start), not at the update: an Automation's cooldown counts
+ * from its last ending and the history sorts by it. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TRIGGER automation_job_closes_run_ad
       AFTER DELETE ON automation_event_queue
@@ -50,7 +53,8 @@ const up = (database: DatabaseSync): void => {
       END`)
   database.exec(`UPDATE automation_runs
       SET status = 'interrupted', outcome = 'interrupted',
-        ended_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        ended_at = MAX(started_at, COALESCE((SELECT chat.updated_at FROM chat_runs AS chat
+          WHERE chat.run_id = automation_runs.chat_run_id), started_at)),
         error = 'Its job ended before the run did'
       WHERE status = 'running' AND task_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS queue
