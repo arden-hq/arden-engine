@@ -1,45 +1,15 @@
-import { RunMemorySourceSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunMemorySource } from "@arden-hq/protocol/runs"
+import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
+import type { RunMemoryContext } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
-// `run_sidecars.context_manifest_json` holds what a run was sent from Memory, in the shape of
-// `RunMemorySourceSchema`; `'[]'` (the column default) is "sent none". It is kept as long as
-// the run is.
-const MemoryContextJson = Schema.fromJsonString(Schema.Array(RunMemorySourceSchema))
+// `run_sidecars.context_manifest_json` holds what a run was sent from Memory: every composition
+// of its Memory context, in order, in the shape of `RunMemoryContextSchema`. `'[]'` (the column
+// default) is "sent none". It is kept as long as the run is.
+const MemoryContextJson = Schema.fromJsonString(Schema.Array(RunMemoryContextSchema))
+const CompositionJson = Schema.fromJsonString(RunMemoryContextSchema)
 
-/**
- * Stores the latest Memory record of a run. An empty record only clears an earlier one, so a
- * run sent no Memory adds no row.
- */
-export const recordMemoryContextInTransaction = Effect.fn("RunSidecars.recordMemoryContext")(
-  function* (
-    sql: SqlClient.SqlClient,
-    input: {
-      readonly runId: string
-      readonly sessionId: string
-      readonly sources: ReadonlyArray<RunMemorySource>
-    }
-  ) {
-    const encoded = yield* Schema.encodeEffect(MemoryContextJson)(input.sources)
-    const updatedAt = DateTime.formatIso(yield* DateTime.now)
-    if (input.sources.length === 0) {
-      yield* sql`UPDATE run_sidecars SET context_manifest_json = '[]', updated_at = ${updatedAt}
-        WHERE run_id = ${input.runId} AND context_manifest_json <> '[]'`
-      return
-    }
-    yield* sql`
-      INSERT INTO run_sidecars (
-        run_id, session_id, context_manifest_json, source_refs_json, evidence_json, updated_at
-      ) VALUES (${input.runId}, ${input.sessionId}, ${encoded}, '[]', '{}', ${updatedAt})
-      ON CONFLICT(run_id) DO UPDATE SET
-        context_manifest_json = excluded.context_manifest_json,
-        updated_at = excluded.updated_at
-    `
-  }
-)
-
-/** What the run was sent from Memory; empty when it was sent none or ran before records. */
+/** What the run was sent from Memory, in order; empty when it was sent none or ran before records. */
 export const readMemoryContext = Effect.fn("RunSidecars.readMemoryContext")(function* (
   sql: SqlClient.SqlClient,
   runId: string
@@ -51,3 +21,34 @@ export const readMemoryContext = Effect.fn("RunSidecars.readMemoryContext")(func
     ? []
     : yield* Schema.decodeUnknownEffect(MemoryContextJson)(row.context_manifest_json)
 })
+
+/**
+ * Adds a composition to the run's record. A rebuilt context that repeats the last composition
+ * adds nothing, and a run whose first composition holds nothing adds no row.
+ */
+export const recordMemoryContextInTransaction = Effect.fn("RunSidecars.recordMemoryContext")(
+  function* (
+    sql: SqlClient.SqlClient,
+    input: {
+      readonly runId: string
+      readonly sessionId: string
+      readonly context: RunMemoryContext
+    }
+  ) {
+    const record = yield* readMemoryContext(sql, input.runId)
+    const last = record.at(-1)
+    if (last === undefined && input.context.sources.length === 0) return
+    const encode = Schema.encodeEffect(CompositionJson)
+    if (last !== undefined && (yield* encode(last)) === (yield* encode(input.context))) return
+    const encoded = yield* Schema.encodeEffect(MemoryContextJson)([...record, input.context])
+    const updatedAt = DateTime.formatIso(yield* DateTime.now)
+    yield* sql`
+      INSERT INTO run_sidecars (
+        run_id, session_id, context_manifest_json, source_refs_json, evidence_json, updated_at
+      ) VALUES (${input.runId}, ${input.sessionId}, ${encoded}, '[]', '{}', ${updatedAt})
+      ON CONFLICT(run_id) DO UPDATE SET
+        context_manifest_json = excluded.context_manifest_json,
+        updated_at = excluded.updated_at
+    `
+  }
+)

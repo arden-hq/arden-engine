@@ -60,7 +60,6 @@ describe("page age", () => {
     )
     const undated = page("areas/career/applications/cohere.md", "Cohere", "Status: Applied.")
     const recall = prepareMemoryRecall({
-      revision: HASH,
       pages: [elicit, undated],
       query: "elicit cohere application status applied",
       lastChanged: lastChangedLines(

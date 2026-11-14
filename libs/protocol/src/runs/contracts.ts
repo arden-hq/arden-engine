@@ -77,13 +77,11 @@ export interface RunMemorySpaceSource extends JsonRecord {
   readonly reason: RunMemoryCutReason | null
 }
 
-/** One Memory page at `version` of Memory `revision`; `query` is the search that found it. */
+/** One Memory page, at `version`. */
 export interface RunMemoryPageSource extends JsonRecord {
   readonly kind: "core" | "recalled" | "collection"
   readonly page_id: string
   readonly version: string
-  readonly revision: string | null
-  readonly query: string | null
   readonly bytes: number
   readonly outcome: RunMemoryOutcome
   readonly reason: RunMemoryCutReason | null
@@ -91,6 +89,18 @@ export interface RunMemoryPageSource extends JsonRecord {
 
 /** One Memory source a Run was sent before the model ran: identity and bytes, never text. */
 export type RunMemorySource = RunMemorySpaceSource | RunMemoryPageSource
+
+/**
+ * One composition of a Run's Memory context: what every model request was sent from it until
+ * the Run composed its context again. All pages were read at Memory `revision` (null when
+ * Memory could not be read). `query` is the latest owner text as far as the recall's word
+ * search reads it (the meaning search embeds all of it); null when no recall ran.
+ */
+export interface RunMemoryContext extends JsonRecord {
+  readonly revision: string | null
+  readonly query: string | null
+  readonly sources: ReadonlyArray<RunMemorySource>
+}
 
 /** Durable, restart-safe projection of one Run. */
 export interface RunDetail extends JsonRecord {
@@ -111,8 +121,8 @@ export interface RunDetail extends JsonRecord {
   readonly late_result_at: string | null
   readonly error: RunError | null
   readonly local_instructions?: ReadonlyArray<RunLocalInstructionSource>
-  /** What the Run was sent from Memory; absent when it was sent none. */
-  readonly memory_context?: ReadonlyArray<RunMemorySource>
+  /** What the Run was sent from Memory, each composition in order; absent when it was sent none. */
+  readonly memory_context?: ReadonlyArray<RunMemoryContext>
 }
 
 export interface RunEvent extends JsonRecord {

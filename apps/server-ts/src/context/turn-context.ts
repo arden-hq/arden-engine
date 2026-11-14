@@ -302,6 +302,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
                 : { ...space.page, shown: spaceRender.page }
           },
     recall: context.memory,
+    revision: memory?.revision ?? null,
     query
   })
   yield* Effect.logInfo("Continuity context composed", {
@@ -314,7 +315,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     .recordMemoryContext({
       runId: input.runId,
       sessionId: input.sessionId,
-      sources: memoryContext.record
+      context: memoryContext.record
     })
     .pipe(
       Effect.catchCause((cause) =>

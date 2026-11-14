@@ -32,7 +32,6 @@ export interface MemorySource {
 }
 
 export interface MemoryRecall {
-  readonly revision: string | null
   readonly core: string | null
   readonly text: string | null
   readonly sources: ReadonlyArray<MemorySource>
@@ -184,6 +183,9 @@ const shownOf = (
   return excerpt === body ? "whole" : "cut"
 }
 
+/** The part of a query the word search reads; the meaning search embeds all of it. */
+export const recallQuery = (query: string): string => query.slice(0, QUERY_LIMIT)
+
 export interface RankedMemoryPage {
   readonly record: PageRecord
   /** The passage that matched by meaning, when one did. */
@@ -274,14 +276,12 @@ export interface PreparedMemoryRecall {
 }
 
 export const prepareMemoryRecall = ({
-  revision,
   pages,
   query,
   semanticMatches = [],
   excludedPageIds = new Set(),
   lastChanged
 }: {
-  readonly revision: string | null
   readonly pages: ReadonlyArray<PageRecord>
   readonly query: string
   readonly semanticMatches?: ReadonlyArray<SemanticMemoryMatch>
@@ -294,7 +294,7 @@ export const prepareMemoryRecall = ({
   )
   const residentPages = active.filter(resident).map((record) => ({ record }))
   const readable = active.filter((record) => !excludedPageIds.has(record.page.pageId))
-  const queryText = normalized(query.slice(0, QUERY_LIMIT))
+  const queryText = normalized(recallQuery(query))
   const selected = rankMemoryPages({
     pages: readable.filter((record) => !resident(record)),
     queryTerms: queryText.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(queryText),
@@ -358,7 +358,7 @@ export const prepareMemoryRecall = ({
           )
         )
       }
-      if (blocks.length === 0) return { revision, core, text: null, sources }
+      if (blocks.length === 0) return { core, text: null, sources }
       const text = joinPromptSections([
         renderPromptSection(
           "Memory context",
@@ -372,12 +372,7 @@ export const prepareMemoryRecall = ({
         ...blocks
       ])
       if (text === undefined) throw new Error("Memory context must not be empty")
-      return {
-        revision,
-        core,
-        text,
-        sources
-      }
+      return { core, text, sources }
     }
   }
 }

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import type { RunMemorySource } from "@arden-hq/protocol/runs"
+import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
@@ -14,7 +14,7 @@ import {
   type SessionOrigin,
   type TurnContextServices
 } from "../src/context/turn-context.js"
-import { prepareMemoryRecall } from "../src/memory/retrieval.js"
+import { prepareMemoryRecall, recallQuery } from "../src/memory/retrieval.js"
 import type { Memory, MemoryTurn } from "../src/memory/service.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
@@ -70,7 +70,7 @@ const orchard = page("notes/orchard.md", "Orchard lantern", "The orchard lantern
 const ledger = page("notes/ledger.md", "Ledger notes", "Ledger notes for the orchard week.")
 
 const recallOf = (pages: ReadonlyArray<PageRecord>, query: string) =>
-  prepareMemoryRecall({ revision: "rev-1", pages, query, lastChanged: new Map() }).render(new Map())
+  prepareMemoryRecall({ pages, query, lastChanged: new Map() }).render(new Map())
 
 const encoder = new TextEncoder()
 const bytes = (value: string): number => encoder.encode(value).byteLength
@@ -108,17 +108,19 @@ const recordedBlocks = (
 
 interface Composed {
   readonly sections: ReadonlyArray<RuntimeSection>
-  readonly writes: ReadonlyArray<ReadonlyArray<RunMemorySource>>
+  readonly writes: ReadonlyArray<RunMemoryContext>
   readonly searches: ReadonlyArray<string>
 }
 
 const compose = async (
   origin: SessionOrigin,
-  pages: ReadonlyArray<PageRecord>
+  pages: ReadonlyArray<PageRecord>,
+  query: string = QUERY
 ): Promise<Composed> => {
-  const writes: Array<ReadonlyArray<RunMemorySource>> = []
+  const writes: Array<RunMemoryContext> = []
   const searches: Array<string> = []
   const turn: MemoryTurn = {
+    revision: "rev-1",
     readContent: () => Effect.die("no Space page in this test"),
     recall: (input) =>
       Effect.sync(() => {
@@ -161,7 +163,7 @@ const compose = async (
     }),
     answerBlocks: partialService<AnswerBlockStore["Service"]>("AnswerBlockStore", {}),
     chat: {
-      recordMemoryContext: (input) => Effect.sync(() => void writes.push(input.sources))
+      recordMemoryContext: (input) => Effect.sync(() => void writes.push(input.context))
     },
     permissions: partialService<ToolApprovalPolicy>("ToolApprovalPolicy", {}),
     rules: partialService<PermissionRules["Service"]>("PermissionRules", {}),
@@ -171,7 +173,7 @@ const compose = async (
     composeTurnContext(services, origin, {
       sessionId: "session-1",
       runId: "run-1",
-      messages: [{ role: "user", content: QUERY }],
+      messages: [{ role: "user", content: query }],
       signal: new AbortController().signal
     })
   )
@@ -207,15 +209,18 @@ describe("what a run was sent from Memory", () => {
   it("an owner chat records each source it was sent, and the record matches the prompt", async () => {
     const pages = [core, orchard, ledger]
     const composed = await compose(personal, pages)
-    const record = composed.writes.at(-1) ?? []
+    const record = composed.writes.at(-1)?.sources ?? []
     expect(memoryKeys(composed.sections)).toEqual(["Core Memory", "Memory context"])
+    expect({ ...composed.writes.at(-1), sources: undefined }).toEqual({
+      revision: "rev-1",
+      query: QUERY,
+      sources: undefined
+    })
     expect(record.map(({ bytes: _bytes, ...rest }) => rest)).toEqual([
       {
         kind: "core",
         page_id: "id-me.md",
         version: "version-me.md",
-        revision: "rev-1",
-        query: null,
         outcome: "whole",
         reason: null
       },
@@ -223,8 +228,6 @@ describe("what a run was sent from Memory", () => {
         kind: "recalled",
         page_id: record.page.pageId,
         version: record.resource.versionId,
-        revision: "rev-1",
-        query: QUERY,
         outcome: "whole",
         reason: null
       }))
@@ -243,7 +246,22 @@ describe("what a run was sent from Memory", () => {
       sections: memoryKeys(composed.sections),
       searches: composed.searches,
       writes: composed.writes
-    }).toEqual({ sections: [], searches: [], writes: [[]] })
+    }).toEqual({
+      sections: [],
+      searches: [],
+      writes: [{ revision: null, query: null, sources: [] }]
+    })
+  })
+
+  it("a long owner message is kept once, as far as the word search read it", async () => {
+    const long = `${QUERY} ${"pasted document text ".repeat(2_000)}`
+    const composed = await compose(personal, [core, orchard, ledger], long)
+    const record = composed.writes.at(-1)
+    expect(composed.searches).toEqual([long])
+    expect(record?.query).toBe(recallQuery(long))
+    expect(record?.query).toHaveLength(512)
+    expect(record?.sources.filter((source) => source.kind === "recalled")).toHaveLength(2)
+    expect(JSON.stringify(record).length).toBeLessThan(2_000)
   })
 
   it("names the allowance that cut or dropped a page, and still matches the prompt", async () => {
@@ -252,7 +270,7 @@ describe("what a run was sent from Memory", () => {
     const crowded = page("notes/ledger.md", `Ledger notes ${"x".repeat(4_000)}`, "Ledger week.")
     const pages = [bigCore, long, crowded]
     const composed = await compose(personal, pages)
-    const record = composed.writes.at(-1) ?? []
+    const record = composed.writes.at(-1)?.sources ?? []
     expect(
       record.map((source) => ({
         page: source.page_id,
@@ -283,7 +301,11 @@ const spaceView = (content: string | undefined): SpaceView => ({
 
 describe("the continuity budget and the Space", () => {
   const recall = recallOf([orchard, ledger], QUERY)
-  const assemble = (text: string, content: string | undefined) => {
+  const assemble = (
+    text: string,
+    content: string | undefined,
+    recalled: "recalled" | "no recall" = "recalled"
+  ) => {
     const view = spaceView(content)
     const rendered = renderSpaceContext(view)
     return assembleMemoryContext({
@@ -295,7 +317,8 @@ describe("the continuity budget and the Space", () => {
             ? undefined
             : { pageId: "space-page", version: "space-page-v1", shown: rendered.page }
       },
-      recall,
+      recall: recalled === "recalled" ? recall : undefined,
+      revision: "rev-1",
       query: QUERY
     })
   }
@@ -307,7 +330,7 @@ describe("the continuity budget and the Space", () => {
     const tight = assemble("s".repeat(16_000 - 2 - recallBytes + 20), undefined)
     const full = assemble("s".repeat(16_000), undefined)
     const outcomes = (context: ReturnType<typeof assemble>) =>
-      context.record.map((source) => [source.kind, source.outcome, source.reason])
+      context.record.sources.map((source) => [source.kind, source.outcome, source.reason])
     expect(outcomes(roomy)).toEqual([
       ["space", "whole", null],
       ["recalled", "whole", null],
@@ -325,8 +348,8 @@ describe("the continuity budget and the Space", () => {
     ])
     expect(full.recall).toEqual([])
     for (const context of [roomy, tight, full]) {
-      expect(context.record[0]?.bytes).toBe(bytes(context.space[0]?.text ?? ""))
-      expect(recordedBlocks(context.record, [orchard, ledger])).toEqual(
+      expect(context.record.sources[0]?.bytes).toBe(bytes(context.space[0]?.text ?? ""))
+      expect(recordedBlocks(context.record.sources, [orchard, ledger])).toEqual(
         blocksInPrompt(context.recall)
       )
     }
@@ -335,7 +358,7 @@ describe("the continuity budget and the Space", () => {
   it("names the Space page, and says when the Space's allowance cut it", () => {
     const whole = assemble("Space context.", "A short page.")
     const cut = assemble("Space context.", "line\n".repeat(20_000))
-    expect([whole.record[0], cut.record[0]]).toEqual([
+    expect([whole.record.sources[0], cut.record.sources[0]]).toEqual([
       {
         kind: "space",
         space_id: "space-1",
@@ -355,6 +378,13 @@ describe("the continuity budget and the Space", () => {
         reason: "space_page_allowance"
       }
     ])
+  })
+
+  it("names the Memory revision the Space page was read at when no recall ran", () => {
+    const alone = assemble("Space context.", "A short page.", "no recall")
+    expect({ ...alone.record, sources: alone.record.sources.map((source) => source.kind) }).toEqual(
+      { revision: "rev-1", query: null, sources: ["space"] }
+    )
   })
 })
 
@@ -388,37 +418,43 @@ describe("one assembler", () => {
 })
 
 describe("the stored record", () => {
-  it("is read back as written, and an empty record clears it without adding a row", async () => {
-    const sources: ReadonlyArray<RunMemorySource> = [
-      {
-        kind: "recalled",
-        page_id: "page-1",
-        version: "version-1",
-        revision: "rev-1",
-        query: "a made-up question",
-        bytes: 120,
-        outcome: "cut",
-        reason: "continuity_budget"
-      }
-    ]
+  const source = (pageId: string): RunMemorySource => ({
+    kind: "recalled",
+    page_id: pageId,
+    version: "version-1",
+    bytes: 120,
+    outcome: "cut",
+    reason: "continuity_budget"
+  })
+  const first: RunMemoryContext = {
+    revision: "rev-1",
+    query: "a made-up question",
+    sources: [source("page-a"), source("page-b")]
+  }
+  const steered: RunMemoryContext = {
+    revision: "rev-1",
+    query: "a made-up steer",
+    sources: [source("page-c")]
+  }
+  const none: RunMemoryContext = { revision: null, query: null, sources: [] }
+
+  it("keeps every composition of a run in order, once each, and adds no row for none", async () => {
     const result = await withTempDatabase(
       Effect.gen(function* () {
         const chat = yield* ChatWriteStore
         const runs = yield* RunQueries
-        yield* chat.recordMemoryContext({ runId: "run-a", sessionId: "s-a", sources })
-        const written = yield* runs.memoryContext("run-a")
-        yield* chat.recordMemoryContext({ runId: "run-a", sessionId: "s-a", sources: [] })
-        yield* chat.recordMemoryContext({ runId: "run-b", sessionId: "s-b", sources: [] })
+        for (const context of [first, first, steered, steered, none, none])
+          yield* chat.recordMemoryContext({ runId: "run-a", sessionId: "s-a", context })
+        yield* chat.recordMemoryContext({ runId: "run-b", sessionId: "s-b", context: none })
         const sql = yield* SqlClient.SqlClient
         const rows = yield* sql<{ readonly run_id: string }>`SELECT run_id FROM run_sidecars`
         return {
-          written,
-          cleared: yield* runs.memoryContext("run-a"),
+          kept: yield* runs.memoryContext("run-a"),
           never: yield* runs.memoryContext("run-b"),
           rows: rows.map((row) => row.run_id)
         }
       })
     )
-    expect(result).toEqual({ written: sources, cleared: [], never: [], rows: ["run-a"] })
+    expect(result).toEqual({ kept: [first, steered, none], never: [], rows: ["run-a"] })
   })
 })

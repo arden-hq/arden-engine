@@ -1,5 +1,10 @@
-import type { RunMemoryCutReason, RunMemoryOutcome, RunMemorySource } from "@arden-hq/protocol/runs"
-import type { MemoryRecall, MemorySource } from "../memory/retrieval.js"
+import type {
+  RunMemoryContext,
+  RunMemoryCutReason,
+  RunMemoryOutcome,
+  RunMemorySource
+} from "@arden-hq/protocol/runs"
+import { recallQuery, type MemoryRecall, type MemorySource } from "../memory/retrieval.js"
 import {
   budgetContinuityContext,
   LIVE_CONTINUITY_CONTEXT_MAX_BYTES,
@@ -22,8 +27,8 @@ export interface MemoryContext {
   readonly core: ReadonlyArray<RuntimeSection>
   readonly space: ReadonlyArray<RuntimeSection>
   readonly recall: ReadonlyArray<RuntimeSection>
-  /** What `core`, `space` and `recall` hold, source by source: the run's Memory record. */
-  readonly record: ReadonlyArray<RunMemorySource>
+  /** What `core`, `space` and `recall` hold, source by source: one composition of the record. */
+  readonly record: RunMemoryContext
   readonly telemetry: BudgetedContinuityContext["telemetry"]
 }
 
@@ -44,10 +49,13 @@ const byteLength = (value: string): number => encoder.encode(value).byteLength
 export const assembleMemoryContext = ({
   space,
   recall,
+  revision,
   query
 }: {
   readonly space: SpaceMemoryInput | undefined
   readonly recall: MemoryRecall | undefined
+  /** The Memory revision the Space page and the recall were read at. */
+  readonly revision: string | null
   /** The text the recall searched with. */
   readonly query: string
 }): MemoryContext => {
@@ -61,7 +69,7 @@ export const assembleMemoryContext = ({
     })
   if (recall?.text !== null && recall?.text !== undefined)
     continuitySources.push({
-      identity: `recall:${recall.revision ?? "none"}:${[
+      identity: `recall:${revision ?? "none"}:${[
         ...new Set(
           recall.sources
             .filter((source) => source.placement.shown !== "dropped")
@@ -92,16 +100,16 @@ export const assembleMemoryContext = ({
         ? []
         : [{ kind: "space", key: "Current Space", text: space.text, space: space.view }],
     recall: recalled,
-    record: [
-      ...(space === undefined ? [] : [spaceRecord(space)]),
-      ...(recall === undefined
-        ? []
-        : pageRecords({
-            recall,
-            query,
-            sentRecallBytes: byteLength(recalled[0]?.text ?? "")
-          }))
-    ],
+    record: {
+      revision,
+      query: recall === undefined || query === "" ? null : recallQuery(query),
+      sources: [
+        ...(space === undefined ? [] : [spaceRecord(space)]),
+        ...(recall === undefined
+          ? []
+          : pageRecords({ recall, sentRecallBytes: byteLength(recalled[0]?.text ?? "") }))
+      ]
+    },
     telemetry: continuity.telemetry
   }
 }
@@ -134,11 +142,9 @@ const spacePagePlacement = (
  */
 const pageRecords = ({
   recall,
-  query,
   sentRecallBytes
 }: {
   readonly recall: MemoryRecall
-  readonly query: string
   readonly sentRecallBytes: number
 }): ReadonlyArray<RunMemorySource> => {
   const inCore = locator(recall.core)
@@ -147,8 +153,6 @@ const pageRecords = ({
     kind: source.role,
     page_id: source.pageId,
     version: source.version,
-    revision: recall.revision,
-    query: source.role === "recalled" && query !== "" ? query : null,
     ...placementOf(source, source.role === "core" ? inCore : inRecall, sentRecallBytes)
   }))
 }

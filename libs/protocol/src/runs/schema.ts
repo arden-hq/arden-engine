@@ -14,6 +14,7 @@ import type {
   PlanLimitsReport,
   RunDetail,
   RunEventPage,
+  RunMemoryContext,
   RunMemorySource,
   SessionUsageReport,
   UsageReport
@@ -69,8 +70,8 @@ const memoryPlacement = {
   reason: Schema.NullOr(RunMemoryCutReasonSchema)
 }
 
-/** The one shape of the Memory record: the server stores and reads a Run's record with it. */
-export const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
+/** One Memory source of a composition: identity and bytes, never text. */
+const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
   withExtras({
     kind: Schema.Literal("space"),
     space_id: IdentifierSchema,
@@ -82,8 +83,6 @@ export const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union
     kind: Schema.Literals(["core", "recalled", "collection"] as const),
     page_id: IdentifierSchema,
     version: IdentifierSchema,
-    revision: Schema.NullOr(IdentifierSchema),
-    query: Schema.NullOr(Schema.String),
     ...memoryPlacement
   })
 ]).check(
@@ -93,6 +92,13 @@ export const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union
       : { path: ["reason"], issue: "names the limit exactly when the source was cut or dropped" }
   )
 )
+
+/** The one shape of a stored Memory composition; a Run's record is a list of them. */
+export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras({
+  revision: Schema.NullOr(IdentifierSchema),
+  query: Schema.NullOr(Schema.String),
+  sources: Schema.Array(RunMemorySourceSchema)
+})
 
 export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
   version: Schema.Literal(1),
@@ -112,7 +118,7 @@ export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
   late_result_at: Schema.NullOr(IsoDateTimeStringSchema),
   error: Schema.NullOr(RunErrorSchema),
   local_instructions: Schema.optionalKey(Schema.Array(RunLocalInstructionSourceSchema)),
-  memory_context: Schema.optionalKey(Schema.Array(RunMemorySourceSchema))
+  memory_context: Schema.optionalKey(Schema.Array(RunMemoryContextSchema))
 }).check(
   Schema.makeFilter((run) => {
     const active = isActiveRunStatus(run.status)
