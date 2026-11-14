@@ -146,7 +146,7 @@ export interface TaskProposalChangedEvent extends CommonServerEventFields {
   readonly space_id: string
   readonly proposal_id: string
   readonly revision: number
-  readonly status: "offered" | "accepted" | "rejected" | "retired"
+  readonly status: "offered" | "accepted" | "rejected" | "expired" | "retired"
 }
 
 export interface FocusChoiceChangedEvent extends CommonServerEventFields {

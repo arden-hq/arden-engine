@@ -76,7 +76,7 @@ export interface TaskProposal extends JsonRecord {
   readonly source_tool_call_id: string | null
   readonly capture_policy: TaskProposalCapturePolicy | null
   readonly revision: number
-  readonly status: "held" | "offered" | "accepted" | "rejected" | "retired"
+  readonly status: "held" | "offered" | "accepted" | "rejected" | "expired" | "retired"
   /** Set exactly when `status` is `retired`. */
   readonly retirement: TaskProposalRetirement | null
   /** The Task Start created; null before, or once that Task is gone. */

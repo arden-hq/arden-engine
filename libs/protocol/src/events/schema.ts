@@ -138,7 +138,7 @@ export const TaskProposalChangedEventSchema = event("task_proposal_changed", {
   space_id: Schema.NonEmptyString,
   proposal_id: Schema.NonEmptyString,
   revision: NonNegativeIntSchema,
-  status: Schema.Literals(["offered", "accepted", "rejected", "retired"] as const)
+  status: Schema.Literals(["offered", "accepted", "rejected", "expired", "retired"] as const)
 })
 
 export const FocusChoiceChangedEventSchema = event("focus_choice_changed", {

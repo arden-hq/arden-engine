@@ -5,7 +5,7 @@ import { TaskProposalRetirementSourceSchema } from "@arden-hq/protocol/effect/pr
 import { decodeChatToolEvidence, type ChatToolEvidenceRow } from "./chat-action-evidence.js"
 import { TaskProposalStoreError, type RetireTaskProposalInput } from "../proposals/store.js"
 import { isUserChatSession } from "./chat-ownership.js"
-import { assertSettledCitedChats, readInferenceReview } from "./work-inference.js"
+import { assertCitedTurnsFinished, readInferenceReview } from "./work-inference.js"
 import { sourceIdentity, evidenceKey } from "./proposal-evidence.js"
 import { runMayActSql } from "./run-liveness.js"
 
@@ -106,7 +106,9 @@ export const retireProposal = Effect.fn("TaskProposal.retireInTransaction")(func
     }
   }
   const ordinarySources = sources.filter((source) => source.kind !== "chat_action")
-  yield* assertSettledCitedChats(sql, ordinarySources)
+  yield* assertCitedTurnsFinished(sql, ordinarySources).pipe(
+    Effect.mapError((cause) => conflict(cause.message))
+  )
   const observed = new Map(ordinarySources.map((source) => [sourceIdentity(source), source]))
   const receipt = JSON.stringify({
     run_id: input.runId,

@@ -80,10 +80,7 @@ export const makeProposalRevision = (options: {
           }
           if (row.status !== "offered") {
             return yield* new TaskProposalConflictError({
-              kind:
-                row.status === "accepted" || row.status === "rejected" || row.status === "retired"
-                  ? "settled"
-                  : "not_offered",
+              kind: row.status === "held" ? "not_offered" : "settled",
               message: "This proposal is no longer open"
             })
           }

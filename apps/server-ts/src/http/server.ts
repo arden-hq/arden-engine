@@ -95,6 +95,7 @@ import { AutomationRuntime } from "../automations/runtime.js"
 import { AutomationTriggerProducersRuntime } from "../automations/trigger-producers-runtime.js"
 import { CommunicationDeliveryRuntime } from "../continuity/delivery-runtime.js"
 import { WorkArrivalsRuntime } from "../work/arrivals-runtime.js"
+import { OfferExpiryRuntime } from "../work/offer-expiry-runtime.js"
 import { connectionItemsRuntime } from "../connections/items/runtime.js"
 import { capabilityOfferRuntime } from "../mcp/offer-runtime.js"
 import { mcpChangeFeedRuntime } from "../mcp/change-feed.js"
@@ -340,6 +341,7 @@ const composeServer = (
     idleCompactionRuntime({ enabled: config.idleCompactionAfterMs > 0 }),
     EventLoopMonitor,
     WorkArrivalsRuntime,
+    OfferExpiryRuntime,
     TerminalNoticesRuntime,
     ArchivePendingRuntime,
     QueueDispatchRuntime,

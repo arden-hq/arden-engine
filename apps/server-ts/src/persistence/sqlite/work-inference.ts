@@ -8,15 +8,10 @@ import type { TaskInferenceReview } from "../work/inference.js"
 import { WorkStoreError } from "../work/store.js"
 import { workError } from "./work-records.js"
 import { decodeJson } from "./json.js"
-import { assertInferenceNotRejected } from "./work-inference-rejections.js"
 import { runMayActSql } from "./run-liveness.js"
-import { openProposalStatusList } from "./status-sets.js"
-import {
-  readChatSettled,
-  readSessionSettled,
-  settledFingerprint,
-  type ChatSettledState
-} from "./chat-ownership.js"
+import { openProposalStatusList, refusedProposalStatusList } from "./status-sets.js"
+import { ownerTurnFingerprint, readChatSettled, userChatSql } from "./chat-ownership.js"
+import { citedTurnFinished, offerAnchorRefusal, UNFINISHED_TURN } from "./offer-rules.js"
 import { assertItemEvidence } from "./connection-item-evidence.js"
 import { assertHomeProposalRoom, assertOpenProposalRoom } from "./proposal-room.js"
 import { sha256Hex } from "@arden-hq/std/hash"
@@ -54,36 +49,39 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
             Effect.map((sources) => ({ ...row, sources }))
           )
         )
-        const rejectedTasks = yield* sql<{
-          readonly item_id: string
-          readonly sources: string
-          readonly reason: string
-        }>`
-      SELECT item_id, sources, reason FROM task_inference_rejections WHERE space_id = ${spaceId} ORDER BY item_id LIMIT 1001`
-        const rejectedProposals = yield* sql<{
+        // The owner's No: an offer rejected, or left to expire, keeps its own status.
+        const refusedProposals = yield* sql<{
           readonly proposal_id: string
+          readonly status: "rejected" | "expired"
           readonly sources: string
           readonly reason: string
-        }>`SELECT proposal_id, sources_json AS sources,
+        }>`SELECT proposal_id, status, sources_json AS sources,
       json_extract(capture_json, '$.reason') AS reason
       FROM task_proposals
-      WHERE space_id = ${spaceId} AND status = 'rejected'
+      WHERE space_id = ${spaceId} AND status IN ${refusedProposalStatusList}
       ORDER BY proposal_id LIMIT 1001`
+        // An inferred Task the owner stopped, whether it came from an offer or not.
         const stoppedTasks = yield* sql<{
-          readonly proposal_id: string
+          readonly proposal_id: string | null
           readonly item_id: string
           readonly sources: string
           readonly reason: string
-        }>`SELECT proposal.proposal_id, proposal.item_id, proposal.sources_json AS sources,
-      json_extract(proposal.capture_json, '$.reason') AS reason
-      FROM task_proposals AS proposal JOIN space_tasks AS task ON task.item_id = proposal.item_id
-      WHERE proposal.space_id = ${spaceId} AND proposal.status = 'accepted'
-        AND task.status = 'cancelled'
-      ORDER BY proposal.proposal_id LIMIT 1001`
+        }>`SELECT task.item_id,
+      (SELECT proposal.proposal_id FROM task_proposals AS proposal
+        WHERE proposal.item_id = task.item_id AND proposal.status = 'accepted'
+        ORDER BY proposal.proposal_id LIMIT 1) AS proposal_id,
+      COALESCE((SELECT json_group_array(json(cited.source)) FROM (SELECT source.source
+        FROM space_task_sources AS source WHERE source.item_id = task.item_id
+        ORDER BY source.source_key) AS cited), '[]') AS sources,
+      COALESCE(json_extract(task.capture, '$.reason'), '') AS reason
+      FROM space_tasks AS task
+      WHERE task.space_id = ${spaceId} AND task.status = 'cancelled'
+        AND json_extract(task.capture, '$.basis') = 'inferred'
+      ORDER BY task.item_id LIMIT 1001`
         if (
           tasks.length > 1000 ||
           proposals.length > 1000 ||
-          rejectedTasks.length + rejectedProposals.length + stoppedTasks.length > 1000
+          refusedProposals.length + stoppedTasks.length > 1000
         ) {
           return yield* workError(
             "conflict",
@@ -92,15 +90,8 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
         }
         const rejections = yield* Effect.forEach(
           [
-            ...rejectedTasks.map((row) => ({
-              kind: "task_undo" as const,
-              item_id: row.item_id,
-              proposal_id: null,
-              sources: row.sources,
-              reason: row.reason
-            })),
-            ...rejectedProposals.map((row) => ({
-              kind: "proposal" as const,
+            ...refusedProposals.map((row) => ({
+              kind: row.status === "rejected" ? ("proposal" as const) : ("expired" as const),
               item_id: null,
               proposal_id: row.proposal_id,
               sources: row.sources,
@@ -123,7 +114,7 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
           JSON.stringify({
             tasks,
             rejections,
-            chats: settledFingerprint(chats),
+            chats: ownerTurnFingerprint(chats),
             proposals: proposals.map(({ proposal_id, revision, status }) => ({
               proposal_id,
               revision,
@@ -181,14 +172,15 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
     )
     if (!policy.enabled || !captured.enabled)
       return yield* workError("conflict", "Task inference is disabled for this Space")
+    const unanchored = offerAnchorRefusal(options.sources)
+    if (unanchored !== undefined) return yield* workError("invalid", unanchored)
     const review = yield* readInferenceReview({ sql, consistent: (read) => read }, options.spaceId)
     if (review.snapshot !== options.snapshot)
       return yield* workError(
         "conflict",
         "Space work changed since review; inspect the new Tasks and rejections before inferring again"
       )
-    yield* assertSettledChatEvidence(sql, options.spaceId, options.sources)
-    yield* assertInferenceNotRejected(sql, options.spaceId, options.sources)
+    yield* assertCitedTurnsFinished(sql, options.sources)
     for (const source of options.sources) {
       if (source.revision === null)
         return yield* workError("invalid", "Inferred Tasks require exact evidence revisions")
@@ -261,6 +253,8 @@ export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(f
         "conflict",
         "Only an Automation or a Task worker with no Space proposes to Home"
       )
+    const unanchored = offerAnchorRefusal(options.sources)
+    if (unanchored !== undefined) return yield* workError("invalid", unanchored)
     for (const source of options.sources) {
       if (source.kind === "chat") {
         const own = yield* sql`SELECT 1 FROM chat_runs WHERE session_id = ${run.session_id}
@@ -296,33 +290,20 @@ export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(f
   )
 })
 
-const assertSettledChatEvidence = Effect.fn("Work.settledChatEvidence")(function* (
-  sql: SqlClient.SqlClient,
-  spaceId: string,
-  sources: ReadonlyArray<SpaceTaskSource>
-) {
-  return yield* requireSettledTurns(sources, yield* readChatSettled(sql, spaceId))
-})
-
-export const assertSettledCitedChats = Effect.fn("Work.settledCitedChats")(function* (
+/** Every cited chat turn has finished, in one of the owner's chats (see `citedTurnFinished`).
+ * Propose, revise and retire all check chat evidence here. */
+export const assertCitedTurnsFinished = Effect.fn("Work.citedTurnsFinished")(function* (
   sql: SqlClient.SqlClient,
   sources: ReadonlyArray<SpaceTaskSource>
-) {
-  const cited = sources.flatMap((source) => (source.kind === "chat" ? [source.session_id] : []))
-  return yield* requireSettledTurns(sources, yield* readSessionSettled(sql, cited))
-})
-
-const requireSettledTurns = Effect.fn("Work.requireSettledTurns")(function* (
-  sources: ReadonlyArray<SpaceTaskSource>,
-  chats: ReadonlyArray<ChatSettledState>
 ) {
   for (const source of sources) {
     if (source.kind !== "chat") continue
-    const chat = chats.find((row) => row.session_id === source.session_id)
-    if (chat === undefined || !chat.settled || chat.turn_id !== source.turn_id)
-      return yield* workError(
-        "conflict",
-        "Chat evidence is unfinished, queued, or unavailable; wait for its outcome and review again"
-      )
+    const runs = yield* sql<{ readonly status: string }>`SELECT run.status
+      FROM chat_runs AS run JOIN sessions AS session ON session.session_id = run.session_id
+      WHERE run.session_id = ${source.session_id}
+        AND json_extract(run.metadata_json, '$.turn_id') = ${source.turn_id}
+        AND ${userChatSql("session")} AND session.archived_at IS NULL`
+    if (!citedTurnFinished(runs.map((run) => run.status)))
+      return yield* workError("conflict", UNFINISHED_TURN)
   }
 })

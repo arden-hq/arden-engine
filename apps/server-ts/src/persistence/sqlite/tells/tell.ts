@@ -100,7 +100,7 @@ const tellProposal = Effect.fn("Tells.proposal")(function* (context: TellContext
   const [proposal] = yield* context.sql<{
     readonly space_id: string | null
     readonly revision: number
-    readonly status: "held" | "offered" | "accepted" | "rejected" | "retired"
+    readonly status: "held" | "offered" | "accepted" | "rejected" | "expired" | "retired"
   }>`SELECT space_id, revision, status FROM task_proposals WHERE proposal_id = ${id}`
   if (proposal === undefined || proposal.space_id === null)
     return yield* entityChanged(context, "proposal", id)

@@ -2,15 +2,12 @@ import { quoted } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { ChatActionRetirementSourceSchema } from "@arden-hq/protocol/effect/proposals"
 import type { TaskProposalRetirementSource } from "@arden-hq/protocol/proposals"
-import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
 import { CreateSpaceTaskInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema, Struct } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { SpaceStore } from "../persistence/spaces/store.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { wikiPathWithinSpaceBoundary } from "../wiki/authority.js"
 import { Wiki } from "../wiki/service.js"
 import type { Snapshot } from "../wiki/snapshot.js"
 import {
@@ -25,7 +22,6 @@ import { recordApplied } from "../execution/tool-effect.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
 
 interface Services {
-  readonly spaces: SpaceStore["Service"]
   readonly work: WorkStore["Service"]
   readonly proposals: TaskProposalStore["Service"]
   readonly sessions: SessionQueries["Service"]
@@ -43,7 +39,7 @@ const evidence = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("memory").annotate({
       description:
-        "Evidence from a Memory page this Run read; an unread or since-changed page is refused."
+        "Evidence from a Memory page this Run read; an unread or since-changed page is refused. A page supports an offer but never anchors one."
     }),
     page_ref: Schema.NonEmptyString.annotate({
       description: "Exact page_ref returned by wiki_read_page or space_page_read."
@@ -156,7 +152,7 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
   defineServerTool({
     name: "space_inference_review",
     description:
-      "Read Tasks, open proposals, Chat activity and durable rejections before inferring work. Never duplicate an open proposal or completed Chat outcome. Compare semantic overlap and reuse existing Tasks. A fact, preference or one-off question is not a Task. A recent trigger is not fresh evidence: inspect the actual changed Chat turn or Memory page. task_propose is checked against this Run's latest review: call this again after a proposal succeeds or is refused because the Space changed.",
+      "Read Tasks, open proposals, Chat activity and the offers the user rejected or left to expire before inferring work. Never duplicate an open proposal or completed Chat outcome. Compare semantic overlap and reuse existing Tasks. A fact, preference or one-off question is not a Task. A recent trigger is not fresh evidence: inspect the actual changed Chat turn or Memory page. task_propose is checked against this Run's latest review: call this again after a proposal succeeds or is refused because the Space changed.",
     parameters: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Never)),
     metadata: {
       effect: "none",
@@ -194,14 +190,14 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
   }),
   defineServerTool({
     name: "task_propose",
-    description: `Propose one Task for the user to start, on this run's Space while it suggests tasks: from its Space review, a worker of one of its Tasks, or an Automation working in it. Background runs never start Tasks; the user's Start does. Read space_inference_review first. A Space review chooses revise with the exact proposal_id and expected_revision when an open proposal still names the same outcome but needs current wording or evidence; cite newly observed sources, and preserve the proposal identity. Revise does not start a Task. Choose retire with the exact proposal_id and expected_revision when a settled record shows an open proposal's outcome is done; retirement is not a user rejection. Retirement may cite any record Arden holds, on any Space or none: a Chat's latest finished turn (find it with session_search_transcripts, scope all_spaces), an exact applied action (session_read with view actions, copy its chat_action source), a Memory page read in this Run, a live or done Task, or a stored mail or GitHub item (connection_items_state, connection_item_read). Retire only on a record showing the outcome is done; a mention, draft, plan, or run that ended with no clear result is not proof. Unsure: keep the proposal. Do not duplicate work already being performed in Chat or already completed there. Choose reuse with the canonical Task item_id whenever a live or done Task already owns the outcome; a cancelled Task owns nothing, and a Task that does not own the outcome is never a reuse target; it returns the exact Task deep link and performs no mutation. Choose create only for a distinct outcome anchored by a Chat or Memory page owned by the current Space, a connection item routed to it, or the Task this worker works on; an item whose thread is already an offer, a Task or a skipped offer is refused, and so is any new proposal while the Space has three open ones. Linked or foreign evidence may support existing work but cannot create work here. A run that works in no Space (an Automation, or a worker of a Task without one) proposes to Home instead, where the user picks the Space: it creates only, citing a turn of its own chat, a Memory page it read, or its own Task. ${
+    description: `Propose one Task for the user to start, on this run's Space while it suggests tasks: from its Space review, a worker of one of its Tasks, or an Automation working in it. Background runs never start Tasks; the user's Start does. Read space_inference_review first. A Space review chooses revise with the exact proposal_id and expected_revision when an open proposal still names the same outcome but needs current wording or evidence; cite newly observed sources, and preserve the proposal identity. Revise does not start a Task. Choose retire with the exact proposal_id and expected_revision when a settled record shows an open proposal's outcome is done; retirement is not a user rejection. Retirement may cite any record Arden holds, on any Space or none: a finished Chat turn (find it with session_search_transcripts, scope all_spaces), an exact applied action (session_read with view actions, copy its chat_action source), a Memory page read in this Run, a live or done Task, or a stored mail or GitHub item (connection_items_state, connection_item_read). Retire only on a record showing the outcome is done; a mention, draft, plan, or run that ended with no clear result is not proof. Unsure: keep the proposal. Do not duplicate work already being performed in Chat or already completed there. Choose reuse with the canonical Task item_id whenever a live or done Task already owns the outcome; a cancelled Task owns nothing, and a Task that does not own the outcome is never a reuse target; it returns the exact Task deep link and performs no mutation. Choose create only for a distinct outcome anchored by a finished Chat turn in the current Space, a connection item routed to it, or the Task this worker works on; a Memory page may support it but never anchors it; an item whose thread is already an offer, a Task or a skipped offer is refused, and so is any new proposal while the Space has three open ones. Linked or foreign evidence may support existing work but cannot create work here. A run that works in no Space (an Automation, or a worker of a Task without one) proposes to Home instead, where the user picks the Space: it creates only, citing a turn of its own chat or its own Task; a Memory page it read may support it. ${
       TASK_SPACE_RULE
     } Never create a consolidation, cleanup, or replacement Task for overlap. The user's own chat starts Tasks with task_start instead. Cite observed evidence that fully defines the outcome. A reply that only answers, rejects or acknowledges prior conversation is not an outcome. Ambiguity or stale evidence should remain a suggestion. When nothing qualifies, do not call this tool. Admission rechecks ownership, that the Space is still as this Run's space_inference_review showed it, policy and rejected evidence; a refused call changes nothing.`,
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         sources: Schema.NonEmptyArray(evidence).annotate({
           description:
-            "Required for every decision. The evidence for it: observed Chat turns, Memory pages read in this Run, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat, Memory page inside the current Space boundary, connection item routed to this Space, or this worker's own Task. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
+            "Required for every decision. The evidence for it: observed Chat turns, Memory pages read in this Run, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat turn, connection item routed to this Space, or this worker's own Task; Memory pages only support it. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
         }),
         decision: inferenceDecision
       })
@@ -237,12 +233,6 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
       const snapshot = memoryCited ? await loadSnapshot(services.wiki, ctx.signal) : undefined
       const sources = input.sources.map((source) => observedSource(ctx.run, source, snapshot))
       const ordinarySources = sources.filter((source) => source.kind !== "chat_action")
-      if (
-        snapshot !== undefined &&
-        (input.decision.kind === "create" || input.decision.kind === "revise") &&
-        spaceId !== undefined
-      )
-        await requireSpaceOwnershipAnchor(services, spaceId, ordinarySources, snapshot, ctx.signal)
       if (input.decision.kind === "retire") {
         if (spaceId === undefined) throw refusal("Retirement requires a Space review")
         const proposal = await recordApplied(
@@ -364,7 +354,10 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
           result = `The proposal ${quoted(proposal.text)} was retired after its outcome was reviewed.`
           break
         case "rejected":
-          result = `The unchanged proposal ${quoted(proposal.text)} remains rejected.`
+          result = `You rejected ${quoted(proposal.text)}; it is not offered again. This call changed nothing.`
+          break
+        case "expired":
+          result = `${quoted(proposal.text)} expired unanswered; it is not offered again. This call changed nothing.`
           break
         case "accepted":
           if (taskUrl === null) throw refusal("Accepted Task proposal is missing its Task")
@@ -431,49 +424,8 @@ const observedSource = (
 const namedLink = (label: string, url: string): string =>
   `[${label.replace(/[\\[\]]/g, "\\$&").replace(/[\r\n]+/g, " ")}](${url})`
 
-const requireSpaceOwnershipAnchor = async (
-  services: Services,
-  spaceId: string,
-  sources: ReadonlyArray<SpaceTaskSource>,
-  snapshot: Snapshot,
-  signal: AbortSignal
-): Promise<void> => {
-  if (sources.some((source) => source.kind !== "memory")) return
-  const [space, spaces] = await Effect.runPromise(
-    Effect.all([services.spaces.get(spaceId), services.spaces.list()]).pipe(
-      Effect.mapError((cause) => failure(cause))
-    ),
-    { signal }
-  )
-  if (space === null) throw refusal("Inference requires the current Space")
-  const sourcePaths = sources.flatMap((source) => {
-    if (source.kind !== "memory") return []
-    const record = snapshot.pages.find((page) => page.page.pageId === source.page_ref)
-    return record === undefined ? [] : [record.resource.path]
-  })
-  const ownsSource = (pagePath: string | null): boolean =>
-    pagePath !== null && sourcePaths.some((path) => wikiPathWithinSpaceBoundary(pagePath, path))
-  if (ownsSource(space.page_path)) return
-  const ownerNames = [
-    ...new Set(
-      spaces
-        .filter((candidate) => candidate.space_id !== spaceId && ownsSource(candidate.page_path))
-        .map((candidate) => candidate.name)
-    )
-  ]
-  const detail =
-    ownerNames.length === 0
-      ? "The cited evidence is not owned by this Space."
-      : `The cited evidence belongs to ${ownerNames.join(", ")}.`
-  throw new ToolExecutionError(
-    `New inferred Tasks need at least one Chat or Memory source owned by ${space.name}. ${detail} Do not create it here.`,
-    { preview: "Task belongs elsewhere", retryable: false }
-  )
-}
-
 export const taskInferenceTools = Effect.gen(function* () {
   return makeTaskInferenceTools({
-    spaces: yield* SpaceStore,
     work: yield* WorkStore,
     proposals: yield* TaskProposalStore,
     sessions: yield* SessionQueries,

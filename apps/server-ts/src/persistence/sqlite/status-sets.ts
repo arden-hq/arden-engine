@@ -65,6 +65,8 @@ export const openDeferredCallStatusList = statusList(["pending", "approved"])
 export const followUpRecordableStatusList = statusList(["approved", "rejected"])
 export const answeredApprovalStatusList = statusList(["approved", "rejected"])
 export const openProposalStatusList = statusList(["offered", "held"])
+/** An offer the owner said no to, or left unanswered until it expired: final either way. */
+export const refusedProposalStatusList = statusList(["rejected", "expired"])
 export const answeredProposalStatusList = statusList(["accepted", "rejected"])
 export const endedUnsuccessfullyAutomationRunStatusList = statusList([
   "failed",

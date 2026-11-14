@@ -19,6 +19,8 @@ const currentOfferMessage = (message: string, proposal: TaskProposalReview["prop
       return "This offer was accepted while the review was running. The current proposal shows the settled Task."
     case "rejected":
       return "This offer was rejected while the review was running."
+    case "expired":
+      return "This offer expired unanswered while the review was running."
     case "offered":
       return message
     case "held":
@@ -44,11 +46,7 @@ export const withTaskProposalReview = (
       if (proposal.status !== "offered")
         return yield* Effect.fail(
           conflict(
-            proposal.status === "accepted" ||
-              proposal.status === "rejected" ||
-              proposal.status === "retired"
-              ? "settled"
-              : "not_offered",
+            proposal.status === "held" ? "not_offered" : "settled",
             "Only an offered Task proposal can be rechecked"
           )
         )

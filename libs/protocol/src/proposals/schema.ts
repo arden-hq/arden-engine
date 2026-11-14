@@ -74,7 +74,14 @@ export const TaskProposalSchema: Schema.Codec<TaskProposal> = withExtras({
   source_tool_call_id: Schema.NullOr(identity),
   capture_policy: Schema.NullOr(TaskProposalCapturePolicySchema),
   revision: NonNegativeIntSchema,
-  status: Schema.Literals(["held", "offered", "accepted", "rejected", "retired"] as const),
+  status: Schema.Literals([
+    "held",
+    "offered",
+    "accepted",
+    "rejected",
+    "expired",
+    "retired"
+  ] as const),
   retirement: Schema.NullOr(TaskProposalRetirementSchema),
   item_id: Schema.NullOr(identity),
   created_at: IsoDateTimeStringSchema,
@@ -94,7 +101,9 @@ export const TaskProposalSchema: Schema.Codec<TaskProposal> = withExtras({
         : "open proposals cannot have settlement fields"
     }
     if (
-      (proposal.status === "rejected" || proposal.status === "retired") &&
+      (proposal.status === "rejected" ||
+        proposal.status === "expired" ||
+        proposal.status === "retired") &&
       proposal.item_id !== null
     )
       return "a skipped proposal has no Task"

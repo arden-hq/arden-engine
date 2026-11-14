@@ -32,7 +32,8 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { routeItem } from "./connection-item-route.js"
 import { nextId, type Writer } from "./deps.js"
 import { decodeJson } from "./json.js"
-import { openHeldOnHome } from "./proposal-room.js"
+import { expireOverdueOffers, openHeldOnHome } from "./proposal-room.js"
+import { storedOfferStands } from "./offer-rules.js"
 import { homeTaskBody, writeHomeSuggestion } from "./task-proposal-home.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
@@ -68,7 +69,7 @@ export interface ProposalRow {
   readonly capture_policy_json: string | null
   readonly revision: number
   readonly seq: number
-  readonly status: "held" | "offered" | "accepted" | "rejected" | "retired"
+  readonly status: "held" | "offered" | "accepted" | "rejected" | "expired" | "retired"
   readonly retirement_json: string | null
   readonly item_id: string | null
   readonly settlement_client_id: string | null
@@ -302,22 +303,10 @@ export const makeTaskProposalStore = (options: {
           WHERE proposal_id = ${proposalId}`
           const existing = existingRows[0]
           if (
-            existing?.status === "accepted" ||
-            (existing?.status === "retired" &&
-              (existing.evidence_revision_key === evidenceRevisionKey ||
-                existing.retired_evidence_key === evidenceRevisionKey))
-          ) {
+            existing !== undefined &&
+            storedOfferStands(existing, { evidenceKey: evidenceRevisionKey, candidateHash })
+          )
             return yield* project(existing)
-          }
-          if (
-            existing?.status === "rejected" &&
-            existing.evidence_revision_key === evidenceRevisionKey
-          ) {
-            return yield* project(existing)
-          }
-          if (existing?.status === "offered" && existing.candidate_hash === candidateHash) {
-            return yield* project(existing)
-          }
           yield* (
             request.spaceId === undefined
               ? assertHomeProposalAdmission(sql, { runId: request.runId, sources, proposalId })
@@ -617,6 +606,11 @@ export const makeTaskProposalStore = (options: {
               kind: "settled",
               message: "This proposal was retired after its evidence was reviewed"
             })
+          if (row.status === "expired")
+            return yield* new TaskProposalConflictError({
+              kind: "settled",
+              message: "This offer expired unanswered"
+            })
           if (row.status === "accepted" || row.status === "rejected") {
             if (
               row.settlement_client_id !== input.client_id ||
@@ -718,10 +712,26 @@ export const makeTaskProposalStore = (options: {
         : failure("conflict", "Could not retire proposal", cause)
     )
   )
+  const expireOffers: TaskProposalStore["Service"]["expireOffers"] = Effect.fn(
+    "TaskProposal.expireOffers"
+  )(
+    function* () {
+      const now = yield* DateTime.now
+      return yield* writer.transact(
+        Effect.gen(function* () {
+          const expired = yield* expireOverdueOffers(sql, now)
+          for (const row of expired) yield* changed(row)
+          return expired.length
+        })
+      )
+    },
+    Effect.mapError((cause) => failure("storage", "Could not expire Task proposals", cause))
+  )
   return {
     list,
     get,
     propose,
+    expireOffers,
     revise,
     suggestFromItem,
     resolve,
