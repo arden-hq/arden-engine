@@ -8,6 +8,7 @@ import {
 } from "../src/automations/space-review-admission.js"
 import { DECISION_SITES } from "../src/models/decisions/sites.js"
 import {
+  askedByOwner,
   SpaceReviewInputSchema,
   type SpaceReviewReads
 } from "../src/persistence/automations/space-review.js"
@@ -144,6 +145,29 @@ describe("Space review admission", () => {
       true
     )
     expect(verdict.admission).toBe("changed")
+  })
+
+  it("the owner asked when a manual run or a proposal recheck is among the run's causes", () => {
+    const queued_at = "2026-01-01T00:00:00.000Z"
+    const event = (event_type: string) =>
+      ({
+        source: "event",
+        queued_at,
+        event_type,
+        event_key: "k-1",
+        produced_by: null,
+        context: {}
+      }) as const
+    const wake = { source: "wake", queued_at } as const
+    const manual = { source: "manual", queued_at } as const
+    expect(askedByOwner(manual)).toBe(true)
+    expect(askedByOwner(event("space.proposal_review_requested"))).toBe(true)
+    expect(askedByOwner(wake)).toBe(false)
+    expect(askedByOwner(event("wiki.changed"))).toBe(false)
+    expect(askedByOwner({ source: "coalesced", queued_at, causes: [wake, manual] })).toBe(true)
+    expect(
+      askedByOwner({ source: "coalesced", queued_at, causes: [wake, event("wiki.changed")] })
+    ).toBe(false)
   })
 
   it("pages only, with nothing held, never starts, for every page basis and a removed source", () => {

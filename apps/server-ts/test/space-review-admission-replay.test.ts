@@ -8,10 +8,14 @@
 
 import { existsSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
+import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { Schema } from "effect"
 import { expect, it } from "vitest"
 import { spaceReviewAdmission } from "../src/automations/space-review-admission.js"
-import { SpaceReviewInputSchema } from "../src/persistence/automations/space-review.js"
+import {
+  askedByOwner,
+  SpaceReviewInputSchema
+} from "../src/persistence/automations/space-review.js"
 
 const DATABASE = process.env["ARDEN_REVIEW_REPLAY_DB"]?.trim() ?? ""
 // The window the rebuild plan measured: 1,293 review rows, 113 of which did something.
@@ -21,16 +25,8 @@ const ACTED = new Set(["finished", "needs_you"])
 // A review that ran a model and ended with one of these advanced the Space's checkpoint.
 const CHECKPOINTED = new Set(["finished", "no_change", "needs_you"])
 
-const TriggerSchema = Schema.fromJsonString(
-  Schema.Struct({
-    source: Schema.String,
-    event_type: Schema.optionalKey(Schema.String),
-    causes: Schema.optionalKey(
-      Schema.Array(
-        Schema.Struct({ source: Schema.String, event_type: Schema.optionalKey(Schema.String) })
-      )
-    )
-  })
+const decodeTrigger = Schema.decodeUnknownSync(
+  Schema.fromJsonString(AutomationTriggerContextSchema)
 )
 const decodeInput = Schema.decodeUnknownSync(Schema.fromJsonString(SpaceReviewInputSchema))
 
@@ -43,14 +39,6 @@ const RowsSchema = Schema.Array(
     input_json: Schema.String
   })
 )
-
-/** The owner asked: a manual run or a proposal recheck, alone or among merged wakes. */
-const askedBy = (trigger: string): boolean => {
-  const decoded = Schema.decodeUnknownSync(TriggerSchema)(trigger)
-  return [decoded, ...(decoded.causes ?? [])].some(
-    (cause) => cause.source === "manual" || cause.event_type === "space.proposal_review_requested"
-  )
-}
 
 it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
   "past Space reviews through the one admission check",
@@ -78,7 +66,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           const verdict = spaceReviewAdmission(
             { semantic: input.semantic, reads: input.reads },
             checkpoint.get(input.spaceId),
-            askedBy(row.trigger_json)
+            askedByOwner(decodeTrigger(row.trigger_json))
           )
           const starts = verdict.admission === "changed"
           const acted = ACTED.has(row.outcome)

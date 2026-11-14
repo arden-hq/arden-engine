@@ -1,10 +1,12 @@
 import { readChatSettled, settledFingerprint } from "./chat-ownership.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
+import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { Clock, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationStoreError, type AutomationJobLeaseRef } from "../automations/store.js"
 import { SpaceReviewStore } from "../automations/space-review-store.js"
 import {
+  askedByOwner,
   canonicalDisposition,
   canonicalProposalId,
   SpaceReviewDispositionSchema,
@@ -296,8 +298,9 @@ export const makeSpaceReviewStore = ({
       readonly context: string
       readonly space_id: string
       readonly prompt: string
+      readonly trigger_json: string | null
     }>`
-      SELECT queue.context, job.owner_space_id AS space_id, job.prompt FROM automation_event_queue AS queue
+      SELECT queue.context, job.owner_space_id AS space_id, job.prompt, attempt.trigger_json FROM automation_event_queue AS queue
       JOIN scheduled_tasks AS job ON job.task_id = queue.task_id AND job.purpose = 'space_review'
       JOIN automation_runs AS attempt ON attempt.id = ${parsed.runId} AND attempt.task_id = queue.task_id
       WHERE queue.id = ${parsed.queueId} AND queue.task_id = ${lease.payload.automationId}
@@ -407,8 +410,8 @@ export const makeSpaceReviewStore = ({
             space: yield* readSpaceReviewContext(sql, current.space_id),
             ...(reviewed === undefined ? {} : { reviewed }),
             asked:
-              lease.payload.proposalReviewTarget !== undefined ||
-              lease.payload.occurrence === "manual"
+              current.trigger_json !== null &&
+              askedByOwner(yield* decodeJson(AutomationTriggerContextSchema, current.trigger_json))
           })
           const encoded = yield* encodeJson(QueueContextSchema, {
             ...context,

@@ -8,6 +8,8 @@ import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
+import { SpaceReviewStore } from "../src/persistence/automations/space-review-store.js"
+import { buildSpaceReviewInput } from "../src/automations/space-review-input.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 // A claim folds a waiting event into its run only when that event could start
@@ -222,6 +224,38 @@ it("a batch-window run folds no event deeper than itself, nor one not yet due", 
           { source: "event", event_key: "revision-3" }
         ]
       })
+    })
+  )
+})
+
+// No path queues a manual row for a Space review today (Run now refuses one, a
+// proposal recheck runs alone), so the row is written directly: whatever folds a
+// manual cause into a review's run, the review counts as asked.
+it("a manual row folded into an older Space review row still counts as asked", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const reviews = yield* SpaceReviewStore
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO spaces (space_id, name, name_key, created_at, updated_at)
+        VALUES ('space-1', 'Space', 'space', ${at}, ${at})`
+      const automation = yield* review("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a0a")
+      yield* change("revision-1", null)
+      yield* sql`INSERT INTO automation_event_queue (task_id, source, event_key, context, created_at,
+          claimed_at, attempt_count, last_error, next_attempt_at)
+        VALUES (${automation}, 'manual', 'manual-1', '{"scheduled_for":null,"automation_run_id":null}',
+          ${new Date(Date.now() + 1).toISOString()}, NULL, 0, NULL, NULL)`
+      const [lease] = yield* claim(Date.now() + AFTER_WINDOW)
+      expect(lease?.payload.automationId).toBe(automation)
+      expect(lease?.payload.occurrence).toBe("event")
+      expect((yield* folded(automation)).waiting).toEqual([])
+      if (lease === undefined) return
+      let asked: boolean | undefined
+      yield* reviews.prepareSpaceReview(lease, (evidence) => {
+        asked = evidence.asked
+        return buildSpaceReviewInput({ head: null, pages: [] })(evidence)
+      })
+      expect(asked).toBe(true)
     })
   )
 })

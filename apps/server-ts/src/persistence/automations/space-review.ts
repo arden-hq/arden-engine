@@ -1,4 +1,6 @@
+import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
 import { Schema } from "effect"
+import { RUNS_ALONE } from "./event-batch.js"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
 const SummarySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)).pipe(
@@ -153,6 +155,15 @@ export interface SpaceReviewEvidence {
   readonly openProposals: ReadonlyArray<string>
   readonly space: SpaceReviewSnapshot | undefined
   readonly reviewed?: SpaceReviewInput
-  /** The owner asked for this review: a proposal recheck or a manual run. */
+  /** The owner asked for this review: `askedByOwner` of the run's trigger. */
   readonly asked: boolean
 }
+
+/** The one answer to "did the owner ask for this review": a manual run or a
+ * proposal recheck among the run's causes, alone or folded into a coalesced
+ * trigger with other waiting rows. */
+export const askedByOwner = (trigger: AutomationTriggerContext): boolean =>
+  (trigger.source === "coalesced" ? trigger.causes : [trigger]).some(
+    (cause) =>
+      cause.source === "manual" || (cause.source === "event" && cause.event_type === RUNS_ALONE)
+  )
