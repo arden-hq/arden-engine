@@ -416,12 +416,7 @@ export const makeSessionBranch = ({
               storeError("branch", "storage", "Could not copy branch transcript", branchId, cause)
             )
           )
-          const copied = yield* sql<{ readonly count: number }>`
-            SELECT COUNT(*) AS count FROM session_messages WHERE session_id = ${branchId}`
-          yield* startCaptureAfterCopies(sql, {
-            sessionId: branchId,
-            lastCopiedSeq: (copied[0]?.count ?? 0) - 1
-          }).pipe(
+          yield* startCaptureAfterCopies(sql, branchId).pipe(
             Effect.mapError((cause) =>
               storeError(
                 "branch",

@@ -72,7 +72,7 @@ export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(func
   const rows = yield* sql<WorkRow>`
     WITH chats AS (
       SELECT session.session_id,
-             COALESCE(position.read_seq, -1) AS read_seq,
+             position.read_seq,
              position.read_offset,
              position.prepared_json,
              (SELECT MAX(seq) FROM session_messages AS message
@@ -81,7 +81,7 @@ export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(func
                WHERE run.session_id = session.session_id
                  AND run.status IN ${activeRunStatusList}) AS running
       FROM sessions AS session
-      LEFT JOIN memory_capture_positions AS position ON position.session_id = session.session_id
+      JOIN memory_capture_positions AS position ON position.session_id = session.session_id
       WHERE ${userChatSql("session")}
     )
     SELECT session_id, read_seq, read_offset, prepared_json, through_seq
@@ -129,15 +129,12 @@ const matching = Effect.fn("MemoryCapturePositions.matching")(function* (
 ) {
   const end = columnsOf(batch.end)
   const rows = yield* sql<StoredPosition>`
-    SELECT COALESCE(position.read_seq, -1) AS read_seq,
-           position.read_offset,
-           position.prepared_json,
-           EXISTS (SELECT 1 FROM session_messages
-             WHERE session_id = session.session_id AND seq = ${end.read_seq}
-               AND message_id = ${batch.endMessageId}) AS end_holds
-    FROM sessions AS session
-    LEFT JOIN memory_capture_positions AS position ON position.session_id = session.session_id
-    WHERE session.session_id = ${batch.sessionId}
+    SELECT read_seq, read_offset, prepared_json,
+           EXISTS (SELECT 1 FROM session_messages AS message
+             WHERE message.session_id = position.session_id AND message.seq = ${end.read_seq}
+               AND message.message_id = ${batch.endMessageId}) AS end_holds
+    FROM memory_capture_positions AS position
+    WHERE position.session_id = ${batch.sessionId}
   `
   const row = rows[0]
   return (
@@ -154,13 +151,10 @@ export const prepareCapture = Effect.fn("MemoryCapturePositions.prepare")(functi
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
   const encoded = yield* encodeIdentity(batch)
   if (!(yield* matching(sql, batch, encoded))) return "superseded"
-  const start = columnsOf(batch.start)
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
-    INSERT INTO memory_capture_positions (session_id, read_seq, read_offset, prepared_json, updated_at)
-    VALUES (${batch.sessionId}, ${start.read_seq}, ${start.read_offset}, ${encoded}, ${now})
-    ON CONFLICT(session_id) DO UPDATE SET
-      prepared_json = excluded.prepared_json, updated_at = excluded.updated_at
+    UPDATE memory_capture_positions SET prepared_json = ${encoded}, updated_at = ${now}
+    WHERE session_id = ${batch.sessionId}
   `
   return "moved"
 })
@@ -173,24 +167,34 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
   const end = columnsOf(batch.end)
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
-    INSERT INTO memory_capture_positions (session_id, read_seq, read_offset, prepared_json, updated_at)
-    VALUES (${batch.sessionId}, ${end.read_seq}, ${end.read_offset}, NULL, ${now})
-    ON CONFLICT(session_id) DO UPDATE SET
-      read_seq = excluded.read_seq, read_offset = excluded.read_offset,
-      prepared_json = NULL, updated_at = excluded.updated_at
+    UPDATE memory_capture_positions
+    SET read_seq = ${end.read_seq}, read_offset = ${end.read_offset}, prepared_json = NULL,
+      updated_at = ${now}
+    WHERE session_id = ${batch.sessionId}
   `
   return "moved"
 })
 
-/** A branch starts with copies of messages its source chat reads, so Capture starts after them. */
-export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.startBranch")(function* (
+/**
+ * Capture reads an owner chat from after the messages it held when it became one. A new chat
+ * holds none, and a trigger starts it at its beginning (migration 0157). A branch, and an
+ * Automation's working copy that continues as a chat, hold copies their source is read for, so
+ * every producer of such a chat calls this; a trigger refuses a chat that becomes an owner chat
+ * before it does.
+ */
+export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")(function* (
   sql: SqlClient.SqlClient,
-  input: { readonly sessionId: string; readonly lastCopiedSeq: number }
+  sessionId: string
 ) {
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
     INSERT INTO memory_capture_positions (session_id, read_seq, read_offset, prepared_json, updated_at)
-    VALUES (${input.sessionId}, ${input.lastCopiedSeq}, NULL, NULL, ${now})
+    VALUES (${sessionId},
+      COALESCE((SELECT MAX(seq) FROM session_messages WHERE session_id = ${sessionId}), -1),
+      NULL, NULL, ${now})
+    ON CONFLICT(session_id) DO UPDATE SET
+      read_seq = excluded.read_seq, read_offset = NULL, prepared_json = NULL,
+      updated_at = excluded.updated_at
   `
 })
 

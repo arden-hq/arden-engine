@@ -48,6 +48,7 @@ import { runsByDay } from "./0153_runs_by_day.js"
 import { jobRunClosesWithJob } from "./0154_job_run_closes_with_job.js"
 import { memoryCapturePositions } from "./0155_memory_capture_positions.js"
 import { jobHoldNamedForWhatItIs } from "./0156_job_hold_named_for_what_it_is.js"
+import { ownerChatStartsCapture } from "./0157_owner_chat_starts_capture.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -338,7 +339,8 @@ export const migrations: ReadonlyArray<Migration> = [
   runsByDay,
   jobRunClosesWithJob,
   memoryCapturePositions,
-  jobHoldNamedForWhatItIs
+  jobHoldNamedForWhatItIs,
+  ownerChatStartsCapture
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

@@ -48,7 +48,9 @@ export const contextSessionSchemaSection = {
     "message_turns_ad",
     "sessions_legacy_context_revision",
     "sessions_archive_drops_pending",
-    "memory_capture_cut_at_removal"
+    "memory_capture_cut_at_removal",
+    "memory_capture_owner_chat_starts",
+    "memory_capture_owner_chat_starts_after_copies"
   ],
   statements: [
     `CREATE TABLE sessions (
@@ -282,6 +284,24 @@ export const contextSessionSchemaSection = {
         WHERE session_id = OLD.session_id AND from_seq >= OLD.seq;
         UPDATE memory_capture_backlog SET through_seq = OLD.seq - 1
         WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
+      END`,
+    `CREATE TRIGGER memory_capture_owner_chat_starts
+      AFTER INSERT ON sessions
+      WHEN NEW.session_type = 'chat' AND NEW.origin_automation_id IS NULL
+      BEGIN
+        INSERT INTO memory_capture_positions (session_id, read_seq, read_offset, prepared_json, updated_at)
+        VALUES (NEW.session_id, -1, NULL, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+      END`,
+    `CREATE TRIGGER memory_capture_owner_chat_starts_after_copies
+      BEFORE UPDATE OF session_type, origin_automation_id ON sessions
+      WHEN NEW.session_type = 'chat' AND NEW.origin_automation_id IS NULL
+        AND NOT (OLD.session_type = 'chat' AND OLD.origin_automation_id IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM memory_capture_positions AS position
+          WHERE position.session_id = NEW.session_id
+            AND position.read_seq >= COALESCE((SELECT MAX(seq) FROM session_messages
+              WHERE session_id = NEW.session_id), -1))
+      BEGIN
+        SELECT RAISE(ABORT, 'A chat becomes an owner chat only once Memory Capture starts after the messages it holds');
       END`
   ]
 } as const satisfies OperationalSchemaSection

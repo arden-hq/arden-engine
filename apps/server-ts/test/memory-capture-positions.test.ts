@@ -1,4 +1,5 @@
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Exit } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import {
   makeMemoryCaptureBatches,
@@ -242,6 +243,78 @@ it("does not read a branch's copied turns again", async () => {
     })
   )
   expect(read).toEqual({ source: ["branch-a", "branch-b"], branch: ["branch-c"] })
+})
+
+/**
+ * The working copy an Automation run makes of `source`: its messages, copied as a fork copies
+ * them, then a turn the Automation ran in the copy.
+ */
+const automationCopy = Effect.fn("automationCopy")(function* (source: string) {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql`INSERT INTO scheduled_tasks
+    (task_id, automation_ref, name, prompt, triggers, created_at, thread_id)
+    VALUES ('copy-automation', 'copy-automation-ref', 'Copy check', 'Check.', '[]', ${AT}, 'thread')`
+  yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, metadata,
+      origin_automation_id, parent_session_id, context_generation, active_message_count,
+      visible_message_count, context_from_seq)
+    SELECT 'copy', 'copy-ref', ${AT}, ${AT},
+      json_object('fork_origin', json_object('sourceSessionId', session_id)), 'copy-automation',
+      session_id, context_generation, active_message_count, visible_message_count,
+      context_from_seq
+    FROM sessions WHERE session_id = ${source}`
+  yield* sql`INSERT INTO session_messages
+      (session_id, message_id, seq, role, message_json, client_id, created_at, search_text)
+    SELECT 'copy', message_id, seq, role, json_set(message_json, '$.forked_from', session_id),
+      client_id, created_at, search_text
+    FROM session_messages WHERE session_id = ${source}`
+  yield* turn("copy", "copy-automation-turn")
+  return "copy"
+})
+
+it("does not read the copies when an Automation's working copy continues as a chat", async () => {
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const { batches } = yield* capture()
+      const sessions = yield* SessionStore
+      const chat = yield* newChat()
+      yield* turn(chat, "copy-owner")
+      const source = yield* drain(batches)
+      const copy = yield* automationCopy(chat)
+      yield* sessions.continueRun(copy)
+      yield* turn(copy, "copy-own")
+      return { source, copy: yield* drain(batches) }
+    })
+  )
+  expect(read).toEqual({ source: ["copy-owner"], copy: ["copy-own"] })
+})
+
+it("gives every owner chat a place to start before it can hold a message", async () => {
+  const result = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const session = (sessionId: string, automationId: string | null) => sql`INSERT INTO sessions
+          (session_id, public_ref, started_at, last_activity, origin_automation_id)
+        VALUES (${sessionId}, ${`${sessionId}-ref`}, ${AT}, ${AT}, ${automationId})`
+      yield* session("new-owner-chat", null)
+      yield* session("held", "some-automation")
+      yield* sql`INSERT INTO session_messages
+          (session_id, message_id, seq, role, message_json, created_at, search_text)
+        VALUES ('held', 'm', 0, 'user',
+          json_object('message_id', 'm', 'role', 'user', 'content', 'm', 'created_at', ${AT}),
+          ${AT}, 'm')`
+      const becomesOwner = yield* Effect.exit(
+        sql`UPDATE sessions SET origin_automation_id = NULL WHERE session_id = 'held'`
+      )
+      return {
+        positions: yield* sql`SELECT session_id, read_seq FROM memory_capture_positions`,
+        becomesOwner: Exit.isFailure(becomesOwner) ? "refused" : "kept"
+      }
+    })
+  )
+  expect(result).toEqual({
+    positions: [{ session_id: "new-owner-chat", read_seq: -1 }],
+    becomesOwner: "refused"
+  })
 })
 
 it("reads a turn that was stopped or failed with nothing after it", async () => {

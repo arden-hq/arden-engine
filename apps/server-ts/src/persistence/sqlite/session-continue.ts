@@ -10,6 +10,7 @@ import { requireActiveContextWindow, loadActiveContext } from "./active-context.
 import { transactWithActiveContext } from "./active-context-stage.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { userAutomationSql } from "./authority-sql.js"
+import { startCaptureAfterCopies } from "./memory-capture-positions.js"
 
 export const makeSessionContinue = ({
   writer,
@@ -83,6 +84,7 @@ export const makeSessionContinue = ({
               WHERE session_id = ${validSessionId} AND message_id = ${message.message_id}`
         }
         const projection = yield* loadActiveContext(sql, validSessionId)
+        yield* startCaptureAfterCopies(sql, validSessionId)
         yield* sql`UPDATE sessions
             SET parent_session_id = NULL, parent_message_id = NULL, origin_automation_id = NULL,
               name = COALESCE(name, ${row.automation_name}),
