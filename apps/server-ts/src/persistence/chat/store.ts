@@ -70,7 +70,6 @@ export interface ChatWriteFinishInput {
   readonly usage?: EventUsage
   readonly lastInputTokens?: number | null
   readonly terminalTextEnded?: boolean
-  readonly captureMemory?: boolean
   readonly supersededMessageIds?: ReadonlyArray<string>
 }
 

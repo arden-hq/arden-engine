@@ -14,7 +14,9 @@ export const contextSessionSchemaSection = {
     "chat_event_deliveries",
     "answer_block_state",
     "message_turns",
-    "session_pending_archives"
+    "session_pending_archives",
+    "memory_capture_positions",
+    "memory_capture_backlog"
   ],
   indexes: [
     "idx_sessions_activity",
@@ -35,7 +37,8 @@ export const contextSessionSchemaSection = {
     "idx_sessions_space_live",
     "idx_sessions_parent_live",
     "idx_sessions_owner_chats",
-    "idx_sessions_automation_channel"
+    "idx_sessions_automation_channel",
+    "idx_sessions_capture_owner"
   ],
   triggers: [
     "session_messages_role_insert",
@@ -44,7 +47,8 @@ export const contextSessionSchemaSection = {
     "message_turns_au",
     "message_turns_ad",
     "sessions_legacy_context_revision",
-    "sessions_archive_drops_pending"
+    "sessions_archive_drops_pending",
+    "memory_capture_cut_at_removal"
   ],
   statements: [
     `CREATE TABLE sessions (
@@ -242,6 +246,42 @@ export const contextSessionSchemaSection = {
         AND parent_session_id IS NULL AND parent_message_id IS NULL`,
     `CREATE INDEX idx_sessions_automation_channel
       ON sessions(origin_automation_id, started_at DESC)
-      WHERE session_type = 'channel' AND archived_at IS NULL`
+      WHERE session_type = 'channel' AND archived_at IS NULL`,
+    // How far Memory Capture has read each owner chat, and old unread ranges it never reads
+    // (migration 0155).
+    `CREATE TABLE memory_capture_positions (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+      read_seq INTEGER NOT NULL CHECK(read_seq >= -1),
+      read_offset INTEGER CHECK(read_offset IS NULL OR (read_offset > 0 AND read_seq >= 0)),
+      prepared_json TEXT CHECK(prepared_json IS NULL OR json_valid(prepared_json)),
+      updated_at TEXT NOT NULL
+    ) WITHOUT ROWID`,
+    `CREATE TABLE memory_capture_backlog (
+      session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+      from_seq INTEGER NOT NULL CHECK(from_seq >= 0),
+      through_seq INTEGER NOT NULL,
+      CHECK(through_seq >= from_seq),
+      PRIMARY KEY (session_id, from_seq)
+    ) WITHOUT ROWID`,
+    `CREATE INDEX idx_sessions_capture_owner ON sessions(session_id)
+      WHERE session_type = 'chat' AND origin_automation_id IS NULL`,
+    `CREATE TRIGGER memory_capture_cut_at_removal
+      AFTER DELETE ON session_messages
+      WHEN EXISTS (SELECT 1 FROM memory_capture_positions WHERE session_id = OLD.session_id)
+      BEGIN
+        UPDATE memory_capture_positions
+        SET read_seq = OLD.seq - 1, read_offset = NULL,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE session_id = OLD.session_id AND read_seq >= OLD.seq;
+        UPDATE memory_capture_positions
+        SET prepared_json = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE session_id = OLD.session_id AND prepared_json IS NOT NULL
+          AND COALESCE(json_extract(prepared_json, '$.end.sequence'),
+            json_extract(prepared_json, '$.end.progress.sequence')) >= OLD.seq;
+        DELETE FROM memory_capture_backlog
+        WHERE session_id = OLD.session_id AND from_seq >= OLD.seq;
+        UPDATE memory_capture_backlog SET through_seq = OLD.seq - 1
+        WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
+      END`
   ]
 } as const satisfies OperationalSchemaSection

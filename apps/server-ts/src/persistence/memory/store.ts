@@ -1,59 +1,78 @@
 import { Context, Effect, Schema } from "effect"
 
-export const MemoryCaptureProgressSchema = Schema.Struct({
+const MemoryCaptureProgressSchema = Schema.Struct({
   sequence: Schema.Natural,
   offset: Schema.Natural
 })
 
-export type MemoryCaptureProgress = typeof MemoryCaptureProgressSchema.Type
-
-const MemoryCaptureStartSchema = Schema.Union([
+/**
+ * How far Capture has read a chat. `Beginning`: nothing yet. `AfterSequence`: every message up
+ * to and including `sequence`. `AtPosition`: the messages before `progress.sequence`, and the
+ * first `progress.offset` characters of that message, which is longer than one batch.
+ */
+const MemoryCapturePositionSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Beginning") }),
   Schema.Struct({ _tag: Schema.Literal("AfterSequence"), sequence: Schema.Natural }),
   Schema.Struct({ _tag: Schema.Literal("AtPosition"), progress: MemoryCaptureProgressSchema })
 ])
-export type MemoryCaptureStart = typeof MemoryCaptureStartSchema.Type
+export type MemoryCapturePosition = typeof MemoryCapturePositionSchema.Type
 
+/**
+ * One batch of a chat: from the position Capture had read to, through `end`. The message at the
+ * end is named by id because a revert lets later messages reuse its sequence number.
+ */
 export const MemoryCaptureBatchIdentitySchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,
-  contextGeneration: Schema.Natural,
-  start: MemoryCaptureStartSchema,
-  end: MemoryCaptureProgressSchema
+  start: MemoryCapturePositionSchema,
+  end: MemoryCapturePositionSchema,
+  endMessageId: Schema.NonEmptyString
 })
 export type MemoryCaptureBatchIdentity = typeof MemoryCaptureBatchIdentitySchema.Type
 
-export const PreparedMemoryCaptureBatchSchema = Schema.Struct({
-  identity: MemoryCaptureBatchIdentitySchema,
-  runIds: Schema.Array(Schema.NonEmptyString).check(Schema.isMinLength(1)),
-  final: Schema.Boolean
-})
-export type PreparedMemoryCaptureBatch = typeof PreparedMemoryCaptureBatchSchema.Type
-
-export const MemoryCaptureJobSchema = Schema.Struct({
-  runId: Schema.NonEmptyString,
-  sessionId: Schema.NonEmptyString,
-  contextGeneration: Schema.Natural,
-  throughSequence: Schema.Natural,
-  progress: Schema.optionalKey(MemoryCaptureProgressSchema),
-  prepared: Schema.optionalKey(PreparedMemoryCaptureBatchSchema)
-})
-
-export type MemoryCaptureJob = (typeof MemoryCaptureJobSchema)["Type"]
+/** A chat with messages Capture has not read, or with a batch it prepared and did not finish. */
+export interface MemoryCaptureWork {
+  readonly sessionId: string
+  readonly position: MemoryCapturePosition
+  /** The chat's last message when the work was listed. */
+  readonly throughSequence: number
+  readonly prepared: MemoryCaptureBatchIdentity | undefined
+}
 
 export const MemoryCaptureBatchSchema = Schema.Struct({
   identity: MemoryCaptureBatchIdentitySchema,
-  markdown: Schema.NonEmptyString,
-  jobs: Schema.Array(MemoryCaptureJobSchema).check(Schema.isMinLength(1)),
-  final: Schema.Boolean
+  markdown: Schema.NonEmptyString
 })
 export type MemoryCaptureBatch = typeof MemoryCaptureBatchSchema.Type
+
+/** Old unread messages, kept out of Capture's work: counts for one side of `splitAt`. */
+export interface MemoryCaptureBacklogPart {
+  readonly chats: number
+  readonly typedTurns: number
+  readonly userCharacters: number
+  readonly assistantCharacters: number
+  /** Capture batches the characters fill, at most 6,000 characters each. */
+  readonly batches: number
+}
+
+export interface MemoryCaptureBacklog {
+  readonly ranges: number
+  readonly before: MemoryCaptureBacklogPart
+  readonly since: MemoryCaptureBacklogPart
+  /**
+   * Mean uncached input tokens of a Capture run over the last 30 days, or undefined when
+   * Capture used no model in that time.
+   */
+  readonly freshTokensPerBatch: number | undefined
+}
+
+/** `superseded`: the chat moved on since the batch was read, so nothing was written. */
+export type MemoryCaptureMove = "moved" | "superseded"
 
 export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureStoreError>()(
   "MemoryCaptureStoreError",
   {
-    operation: Schema.Literals(["list", "cursor", "prepare", "advance", "complete"] as const),
+    operation: Schema.Literals(["list", "prepare", "advance", "count"] as const),
     message: Schema.String,
-    runId: Schema.optionalKey(Schema.NonEmptyString),
     sessionId: Schema.optionalKey(Schema.NonEmptyString),
     cause: Schema.optionalKey(Schema.Defect())
   }
@@ -62,21 +81,19 @@ export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureSto
 export class MemoryCaptureStore extends Context.Service<
   MemoryCaptureStore,
   {
-    readonly listPending: (
+    readonly listWork: (
       limit?: number
-    ) => Effect.Effect<ReadonlyArray<MemoryCaptureJob>, MemoryCaptureStoreError>
-    readonly cursor: (
-      sessionId: string,
-      contextGeneration: number
-    ) => Effect.Effect<number, MemoryCaptureStoreError>
+    ) => Effect.Effect<ReadonlyArray<MemoryCaptureWork>, MemoryCaptureStoreError>
+    /** Records the batch before the model reads it, if the chat is still at its start. */
     readonly prepare: (
-      job: MemoryCaptureJob,
-      prepared: PreparedMemoryCaptureBatch
-    ) => Effect.Effect<void, MemoryCaptureStoreError>
+      batch: MemoryCaptureBatchIdentity
+    ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
+    /** Moves the chat's position from the batch's start to its end. */
     readonly advance: (
-      job: MemoryCaptureJob,
-      progress: MemoryCaptureProgress
-    ) => Effect.Effect<void, MemoryCaptureStoreError>
-    readonly complete: (job: MemoryCaptureJob) => Effect.Effect<void, MemoryCaptureStoreError>
+      batch: MemoryCaptureBatchIdentity
+    ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
+    readonly backlogCount: (input: {
+      readonly splitAt: string
+    }) => Effect.Effect<MemoryCaptureBacklog, MemoryCaptureStoreError>
   }
 >()("@arden-hq/server/persistence/memory/MemoryCaptureStore") {}

@@ -34,7 +34,6 @@ import { JsonObjectSchema } from "../json.js"
 import { settleTerminalToolsInTransaction } from "./tool-terminal.js"
 import { supersedeMessagesInTransaction } from "./superseded-messages.js"
 import { conversationMessagePredicate } from "./transcript.js"
-import { reserveMemoryCaptureInTransaction } from "./run-sidecar-mutations.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
 import { transactWithActiveContext } from "./active-context-stage.js"
 import { appendRunSettledInTransaction } from "./run-settled.js"
@@ -60,7 +59,6 @@ const finishInputSchema = Schema.Struct({
   usage: Schema.optionalKey(finishUsageSchema),
   lastInputTokens: Schema.optionalKey(Schema.NullOr(Schema.Natural)),
   terminalTextEnded: Schema.optionalKey(Schema.Boolean),
-  captureMemory: Schema.optionalKey(Schema.Boolean),
   supersededMessageIds: Schema.optionalKey(Schema.Array(Schema.NonEmptyString))
 }).check(
   Schema.makeFilter((input) => {
@@ -473,31 +471,6 @@ export const makeChatTerminal = ({
           SET status = 'completed', updated_at = ${timestamp}
           WHERE session_id = ${run.session_id} AND client_id = ${run.client_id}
         `
-        if (valid.captureMemory === true) {
-          const captureRows = yield* sql<{
-            readonly context_generation: number
-            readonly through_sequence: number
-          }>`
-            SELECT session.context_generation,
-                   message.seq AS through_sequence
-            FROM sessions AS session
-            JOIN session_messages AS message
-              ON message.session_id = session.session_id
-             AND message.message_id = ${run.assistant_message_id}
-            WHERE session.session_id = ${run.session_id}
-          `
-          const captureRow = captureRows[0]
-          const throughSequence = captureRow?.through_sequence
-          if (captureRow !== undefined && throughSequence !== undefined) {
-            yield* reserveMemoryCaptureInTransaction(sql, {
-              runId: run.run_id,
-              sessionId: run.session_id,
-              contextGeneration: captureRow.context_generation,
-              throughSequence,
-              updatedAt: timestamp
-            })
-          }
-        }
         yield* setCheckpoint(
           sql,
           chatEvents,

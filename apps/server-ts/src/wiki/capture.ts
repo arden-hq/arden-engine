@@ -17,15 +17,17 @@ import { parseWikiPage, writtenContent } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
+// Version 2 names the batch by its chat, its start and end positions and the message at its
+// end, which tells a batch apart from a later one that reuses its numbers after a revert.
 const receiptKey = (identity: MemoryCaptureBatchIdentity, phase: "patch" | "final"): string =>
   `memory-capture-${phase}:${sha256Hex(
     JSON.stringify({
-      version: 1,
+      version: 2,
       phase,
       session_id: identity.sessionId,
-      context_generation: identity.contextGeneration,
       start: identity.start,
-      end: identity.end
+      end: identity.end,
+      end_message_id: identity.endMessageId
     })
   )}`
 

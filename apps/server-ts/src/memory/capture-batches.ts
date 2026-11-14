@@ -3,12 +3,11 @@ import { DateTime, Effect, Option, Schema } from "effect"
 
 import { compactAnswerBlocks } from "../context/answer-blocks.js"
 import type {
-  MemoryCaptureStore,
   MemoryCaptureBatch,
-  MemoryCaptureJob,
-  MemoryCaptureProgress,
-  MemoryCaptureStart,
-  PreparedMemoryCaptureBatch
+  MemoryCaptureBatchIdentity,
+  MemoryCapturePosition,
+  MemoryCaptureStore,
+  MemoryCaptureWork
 } from "../persistence/memory/store.js"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
@@ -23,9 +22,9 @@ import type { Wiki } from "../wiki/service.js"
 import type { Snapshot } from "../wiki/snapshot.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
 import { crowdedCorePages } from "./core-memory.js"
+import { CAPTURE_CHAR_LIMIT } from "../persistence/sqlite/memory-capture-positions.js"
 
 const CAPTURE_RECORD_LIMIT = 40
-const CAPTURE_CHAR_LIMIT = 6_000
 const TRANSCRIPT_PAGE_LIMIT = 120
 
 type CaptureEvidenceKind =
@@ -51,7 +50,6 @@ export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError"
   operation: Schema.Literals(["recall", "capture"] as const),
   message: Schema.String,
   sessionId: Schema.optionalKey(Schema.NonEmptyString),
-  runId: Schema.optionalKey(Schema.NonEmptyString),
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
 
@@ -149,39 +147,47 @@ export const makeMemoryCaptureBatches = (input: {
       })
     ].join("\n")
 
-  const compareProgress = (left: MemoryCaptureProgress, right: MemoryCaptureProgress): number =>
-    left.sequence - right.sequence || left.offset - right.offset
-
-  const boundedExcerpts = (
+  /**
+   * Picks the excerpts after `start`, in order, up to the record and character limits, and
+   * stops at `stop` when a prepared batch is read again. The end is the last message read in
+   * full, or the place inside a long message where the characters ran out.
+   */
+  const selectExcerpts = (
     records: ReadonlyArray<TranscriptMessageRecord>,
     origins: ReadonlyMap<string, RunOrigin>,
-    latest: boolean,
-    start: MemoryCaptureProgress | undefined,
-    stop?: MemoryCaptureProgress
-  ): {
-    readonly excerpts: ReadonlyArray<CaptureExcerpt>
-    readonly progress: MemoryCaptureProgress
-  } => {
-    const eligible = records.filter(
-      (record) =>
-        (record.role === "user" || record.role === "assistant") &&
-        (stop === undefined || record.sequence <= stop.sequence)
-    )
-    const ordered = latest ? eligible.slice(-CAPTURE_RECORD_LIMIT) : eligible
+    start: MemoryCapturePosition,
+    stop: MemoryCapturePosition | undefined
+  ):
+    | {
+        readonly excerpts: ReadonlyArray<CaptureExcerpt>
+        readonly end: MemoryCapturePosition
+        readonly endMessageId: string
+      }
+    | undefined => {
     const excerpts: Array<CaptureExcerpt> = []
     let characters = 0
-    for (const record of ordered) {
+    let read: TranscriptMessageRecord | undefined
+    for (const record of records) {
+      if (record.role !== "user" && record.role !== "assistant") {
+        read = record
+        continue
+      }
       const content = messageContent(record.envelope)
-      const startOffset = start?.sequence === record.sequence ? start.offset : 0
-      if (content === null || startOffset >= content.length) continue
+      const startOffset = offsetIn(start, record.sequence) ?? 0
+      if (content === null || startOffset >= content.length) {
+        read = record
+        continue
+      }
       if (excerpts.length >= CAPTURE_RECORD_LIMIT || characters >= CAPTURE_CHAR_LIMIT) break
-      const stopOffset = stop?.sequence === record.sequence ? stop.offset : content.length
       const endOffset = Math.min(
         content.length,
-        stopOffset,
+        (stop === undefined ? undefined : offsetIn(stop, record.sequence)) ?? content.length,
         startOffset + CAPTURE_CHAR_LIMIT - characters
       )
-      if (endOffset <= startOffset) continue
+      if (endOffset <= startOffset) {
+        read = record
+        continue
+      }
       excerpts.push({
         record,
         content: content.slice(startOffset, endOffset),
@@ -190,197 +196,146 @@ export const makeMemoryCaptureBatches = (input: {
         evidence: evidenceKind(record, origins.get(record.envelope.turn_id ?? record.messageId))
       })
       characters += endOffset - startOffset
-      if (endOffset < content.length) break
+      if (endOffset < content.length) {
+        return {
+          excerpts,
+          end: { _tag: "AtPosition", progress: { sequence: record.sequence, offset: endOffset } },
+          endMessageId: record.messageId
+        }
+      }
+      read = record
     }
-    const last = excerpts.at(-1)
-    const fallback = ordered.at(-1) ?? records.at(-1)
-    const fallbackContent = fallback === undefined ? null : messageContent(fallback.envelope)
-    return {
-      excerpts,
-      progress:
-        last === undefined
-          ? {
-              sequence: fallback?.sequence ?? start?.sequence ?? 0,
-              offset: fallbackContent?.length ?? start?.offset ?? 0
-            }
-          : { sequence: last.record.sequence, offset: last.endOffset }
-    }
+    return read === undefined
+      ? undefined
+      : {
+          excerpts,
+          end: { _tag: "AfterSequence", sequence: read.sequence },
+          endMessageId: read.messageId
+        }
   }
 
-  const captureError = (message: string, leader: MemoryCaptureJob) => (cause: unknown) =>
-    new MemoryError({
-      operation: "capture",
-      message,
-      sessionId: leader.sessionId,
-      runId: leader.runId,
-      cause
-    })
+  const captureError = (message: string, sessionId: string) => (cause: unknown) =>
+    new MemoryError({ operation: "capture", message, sessionId, cause })
 
-  const settleGroup = (jobs: ReadonlyArray<MemoryCaptureJob>, leader: MemoryCaptureJob) =>
-    Effect.forEach(jobs, (job) => captures.complete(job), { discard: true }).pipe(
-      Effect.mapError(captureError("Could not settle durable Memory capture work", leader))
-    )
+  const advance = Effect.fn("Memory.advanceCapture")(function* (
+    identity: MemoryCaptureBatchIdentity
+  ) {
+    const moved = yield* captures
+      .advance(identity)
+      .pipe(
+        Effect.mapError(
+          captureError("Could not record Memory capture progress", identity.sessionId)
+        )
+      )
+    if (moved === "superseded")
+      yield* Effect.logInfo("Memory capture batch superseded before it advanced", {
+        sessionId: identity.sessionId
+      })
+  })
+
+  /** Reads the work's chat from `start`, through the batch's end when it was prepared. */
+  const readWork = Effect.fn("Memory.readCaptureWork")(function* (work: MemoryCaptureWork) {
+    const start = work.prepared?.start ?? work.position
+    const stop = work.prepared?.end
+    const last = stop === undefined ? work.throughSequence : sequenceOf(stop)
+    const page = yield* transcript
+      .page({
+        _tag: "After",
+        sessionId: work.sessionId,
+        sequence: afterSequence(start),
+        limit: TRANSCRIPT_PAGE_LIMIT
+      })
+      .pipe(
+        Effect.mapError(
+          captureError("Could not read the Memory capture transcript", work.sessionId)
+        )
+      )
+    const records = page.records.filter((record) => record.sequence <= last)
+    const turnIds = [
+      ...new Set(records.map((record) => record.envelope.turn_id ?? record.messageId))
+    ]
+    const origins = yield* transcript
+      .originsForTurns(work.sessionId, turnIds)
+      .pipe(
+        Effect.mapError(captureError("Could not read Memory source provenance", work.sessionId))
+      )
+    const selected = selectExcerpts(records, origins, start, stop)
+    if (selected === undefined) return undefined
+    return {
+      excerpts: selected.excerpts,
+      identity: work.prepared ?? {
+        sessionId: work.sessionId,
+        start,
+        end: selected.end,
+        endMessageId: selected.endMessageId
+      }
+    }
+  })
 
   const nextCaptureBatch = Effect.fn("Memory.nextCaptureBatch")(function* (): Effect.fn.Return<
     MemoryCaptureBatch | null,
     MemoryError
   > {
     while (true) {
-      const pending = yield* captures.listPending().pipe(
+      const listed = yield* captures.listWork().pipe(
         Effect.mapError(
           (cause) =>
             new MemoryError({
               operation: "capture",
-              message: "Could not list pending Memory capture work",
+              message: "Could not list Memory capture work",
               cause
             })
         )
       )
-      const first = pending[0]
-      if (first === undefined) return null
-      const preparedLeader = pending.find((job) => job.prepared !== undefined)
-      const seed = preparedLeader ?? first
-      const cohort = pending
-        .filter(
-          (job) =>
-            job.sessionId === seed.sessionId && job.contextGeneration === seed.contextGeneration
-        )
-        .sort(
-          (left, right) =>
-            left.throughSequence - right.throughSequence || left.runId.localeCompare(right.runId)
-        )
-      const prepared = preparedLeader?.prepared
-      const ordered =
-        prepared === undefined
-          ? cohort
-          : prepared.runIds.flatMap((runId) => {
-              const job = cohort.find((candidate) => candidate.runId === runId)
-              return job === undefined ? [] : [job]
-            })
-      const leader = preparedLeader ?? ordered.at(-1) ?? seed
-      if (prepared !== undefined) {
+      const work = listed[0]
+      if (work === undefined) return null
+      if (work.prepared !== undefined) {
         const committed = yield* wiki
-          .hasFinalizedCaptureBatch(prepared.identity)
+          .hasFinalizedCaptureBatch(work.prepared)
           .pipe(
-            Effect.mapError(captureError("Could not inspect the Memory capture receipt", leader))
+            Effect.mapError(
+              captureError("Could not inspect the Memory capture receipt", work.sessionId)
+            )
           )
         if (committed) {
-          yield* prepared.final
-            ? settleGroup(ordered, leader)
-            : captures
-                .advance(leader, prepared.identity.end)
-                .pipe(
-                  Effect.mapError(
-                    captureError("Could not settle committed Memory capture progress", leader)
-                  )
-                )
+          yield* advance(work.prepared)
           continue
         }
       }
-      const cursor = yield* captures
-        .cursor(leader.sessionId, leader.contextGeneration)
-        .pipe(Effect.mapError(captureError("Could not read the Memory capture cursor", leader)))
-      const progress =
-        prepared === undefined
-          ? ordered.reduce<MemoryCaptureProgress | undefined>(
-              (latest, job) =>
-                job.progress !== undefined &&
-                (latest === undefined || compareProgress(job.progress, latest) > 0)
-                  ? job.progress
-                  : latest,
-              cursor < 0 ? undefined : { sequence: cursor, offset: Number.MAX_SAFE_INTEGER }
-            )
-          : undefined
-      const start = prepared?.identity.start ?? captureStartFrom(progress)
-      const latestBootstrap = start._tag === "Beginning"
-      const startProgress = start._tag === "AtPosition" ? start.progress : undefined
-      const page = yield* (
-        latestBootstrap
-          ? transcript.page({
-              _tag: "Before",
-              sessionId: leader.sessionId,
-              sequence: leader.throughSequence + 1,
-              limit: TRANSCRIPT_PAGE_LIMIT
-            })
-          : transcript.page({
-              _tag: "After",
-              sessionId: leader.sessionId,
-              sequence:
-                start._tag === "AfterSequence"
-                  ? start.sequence
-                  : Math.max(-1, start.progress.sequence - 1),
-              limit: TRANSCRIPT_PAGE_LIMIT
-            })
-      ).pipe(Effect.mapError(captureError("Could not read the Memory capture transcript", leader)))
-      const withinBoundary = page.records.filter(
-        (record) => record.sequence <= leader.throughSequence
-      )
-      const turnIds = [
-        ...new Set(withinBoundary.map((record) => record.envelope.turn_id ?? record.messageId))
-      ]
-      const origins = yield* transcript
-        .originsForTurns(leader.sessionId, turnIds)
-        .pipe(Effect.mapError(captureError("Could not read Memory source provenance", leader)))
-      const selected = boundedExcerpts(
-        withinBoundary,
-        origins,
-        latestBootstrap,
-        startProgress,
-        prepared?.identity.end
-      )
-      const boundary = withinBoundary.find((record) => record.sequence === leader.throughSequence)
-      const boundaryLength =
-        boundary === undefined ? 0 : (messageContent(boundary.envelope)?.length ?? 0)
-      const final =
-        prepared?.final ??
-        (selected.progress.sequence > leader.throughSequence ||
-          (selected.progress.sequence === leader.throughSequence &&
-            selected.progress.offset >= boundaryLength))
-      const reviewable = selected.excerpts.some(
+      const read = yield* readWork(work)
+      // Listed work with nothing to read means the chat changed after it was listed.
+      if (read === undefined) return null
+      const reviewable = read.excerpts.some(
         (excerpt) =>
           excerpt.evidence.kind !== "unknown" &&
           (excerpt.record.role === "user" || excerpt.evidence.kind !== "human")
       )
       if (!reviewable) {
-        yield* final
-          ? settleGroup(ordered, leader)
-          : captures
-              .advance(leader, selected.progress)
-              .pipe(
-                Effect.mapError(captureError("Could not persist Memory capture progress", leader))
-              )
+        yield* advance(read.identity)
         continue
       }
-      const durable: PreparedMemoryCaptureBatch = prepared ?? {
-        identity: {
-          sessionId: leader.sessionId,
-          contextGeneration: leader.contextGeneration,
-          start,
-          end: selected.progress
-        },
-        runIds: ordered.map((job) => job.runId),
-        final
-      }
-      if (prepared === undefined) {
-        yield* captures
-          .prepare(leader, durable)
+      if (work.prepared === undefined) {
+        const prepared = yield* captures
+          .prepare(read.identity)
           .pipe(
-            Effect.mapError(captureError("Could not prepare durable Memory capture work", leader))
+            Effect.mapError(
+              captureError("Could not prepare durable Memory capture work", work.sessionId)
+            )
           )
+        if (prepared === "superseded") continue
       }
       const header = yield* sessions
-        .loadHistoryHeader(leader.sessionId)
+        .loadHistoryHeader(work.sessionId)
         .pipe(
           Effect.mapError(
-            captureError("Could not read the Memory capture Session reference", leader)
+            captureError("Could not read the Memory capture Session reference", work.sessionId)
           )
         )
       if (header === null) {
         return yield* new MemoryError({
           operation: "capture",
           message: "Memory capture Session was not found",
-          sessionId: leader.sessionId,
-          runId: leader.runId
+          sessionId: work.sessionId
         })
       }
       const crowded = yield* snapshot().pipe(
@@ -400,9 +355,9 @@ export const makeMemoryCaptureBatches = (input: {
         )
       )
       return {
-        identity: durable.identity,
+        identity: read.identity,
         markdown: [
-          renderTranscript(header, selected.excerpts, DateTime.toDate(yield* DateTime.now)),
+          renderTranscript(header, read.excerpts, DateTime.toDate(yield* DateTime.now)),
           ...(crowded.length === 0
             ? []
             : [
@@ -415,9 +370,7 @@ export const makeMemoryCaptureBatches = (input: {
                     `Bring it to ${page.target} or fewer.`
                 )
               ])
-        ].join("\n"),
-        jobs: ordered,
-        final
+        ].join("\n")
       }
     }
   })
@@ -425,30 +378,45 @@ export const makeMemoryCaptureBatches = (input: {
   const completeCaptureBatch = Effect.fn("Memory.completeCaptureBatch")(function* (
     batch: MemoryCaptureBatch
   ): Effect.fn.Return<void, MemoryError> {
-    const leader = batch.jobs.at(-1)
-    if (leader === undefined) {
-      return yield* new MemoryError({
-        operation: "capture",
-        message: "A Memory capture batch holds no jobs",
-        sessionId: batch.identity.sessionId
-      })
-    }
     yield* wiki
       .finalizeCaptureBatch(batch.identity)
-      .pipe(Effect.mapError(captureError("Could not finalize the Memory capture batch", leader)))
-    yield* batch.final
-      ? settleGroup(batch.jobs, leader)
-      : captures
-          .advance(leader, batch.identity.end)
-          .pipe(Effect.mapError(captureError("Could not persist Memory capture progress", leader)))
+      .pipe(
+        Effect.mapError(
+          captureError("Could not finalize the Memory capture batch", batch.identity.sessionId)
+        )
+      )
+    yield* advance(batch.identity)
   })
 
   return { nextCaptureBatch, completeCaptureBatch }
 }
 
-const captureStartFrom = (progress: MemoryCaptureProgress | undefined): MemoryCaptureStart => {
-  if (progress === undefined) return { _tag: "Beginning" }
-  if (progress.offset === Number.MAX_SAFE_INTEGER)
-    return { _tag: "AfterSequence", sequence: progress.sequence }
-  return { _tag: "AtPosition", progress }
+/** The characters of message `sequence` that `position` has read, if it stops inside it. */
+const offsetIn = (position: MemoryCapturePosition, sequence: number): number | undefined =>
+  position._tag === "AtPosition" && position.progress.sequence === sequence
+    ? position.progress.offset
+    : undefined
+
+/** The last message a position has read in full; -1 before the first. */
+const afterSequence = (position: MemoryCapturePosition): number => {
+  switch (position._tag) {
+    case "Beginning":
+      return -1
+    case "AfterSequence":
+      return position.sequence
+    case "AtPosition":
+      return position.progress.sequence - 1
+  }
+}
+
+/** The message a batch ends in. */
+const sequenceOf = (position: MemoryCapturePosition): number => {
+  switch (position._tag) {
+    case "Beginning":
+      return -1
+    case "AfterSequence":
+      return position.sequence
+    case "AtPosition":
+      return position.progress.sequence
+  }
 }

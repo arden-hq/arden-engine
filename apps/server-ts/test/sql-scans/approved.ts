@@ -26,5 +26,11 @@ export const APPROVED_SCANS: ReadonlyArray<ApprovedScan> = [
     id: "87109edd77d5",
     table: "usage_daily",
     reason: "Asks only whether the table has a row: EXISTS stops at the first one."
+  },
+  {
+    id: "e5a4adf47b55",
+    table: "run_sidecars",
+    reason:
+      "Counts the old Memory Capture marks the capture backlog backfill has left, for the Storage page. Asked only while that backfill is unfinished."
   }
 ]

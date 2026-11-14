@@ -24,7 +24,6 @@ import type { PersistenceDeps } from "./deps.js"
 import { assertIdleCompaction } from "./compaction-idle.js"
 import { ActiveRunStatusSchema } from "@arden-hq/protocol/effect/chat"
 import { activeRunStatusList } from "./status-sets.js"
-import { moveMemoryCaptureContextInTransaction } from "./run-sidecar-mutations.js"
 
 const snapshotInputSchema = Schema.Struct({
   purpose: Schema.optionalKey(Schema.Literal("idle")),
@@ -562,19 +561,6 @@ export const makeContextCompactionStore = ({
               valid
             )
           }
-          yield* moveMemoryCaptureContextInTransaction(sql, {
-            sessionId: valid.sessionId,
-            from: valid.expectedContextGeneration,
-            to: nextGeneration
-          }).pipe(
-            Effect.mapError(
-              mapStorage(
-                "commit",
-                "Could not preserve Memory capture progress across compaction",
-                valid
-              )
-            )
-          )
           yield* appendSessionTurn(sql, {
             sessionId: valid.sessionId,
             turnId: handoffTurnId,

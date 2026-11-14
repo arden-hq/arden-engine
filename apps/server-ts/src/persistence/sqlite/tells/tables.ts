@@ -100,6 +100,8 @@ export const tableTells = {
   chat_event_deliveries: { silent: internal },
   answer_block_state: { silent: transcript },
   message_turns: { silent: transcript },
+  memory_capture_positions: { silent: internal },
+  memory_capture_backlog: { silent: internal },
   chat_runs: { silent: run },
   run_model_usage: { silent: "Usage: Settings reads it when opened." },
   execution_budgets: { silent: ownSetting },

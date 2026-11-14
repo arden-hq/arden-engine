@@ -444,7 +444,6 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
           runId: input.runId,
           messages,
           result: terminalResult,
-          captureMemory: true,
           stopReason: result.stop_reason,
           usage,
           lastInputTokens: result.last_input_tokens,

@@ -19,6 +19,7 @@ import {
   sessionForkOriginMetadata
 } from "./session-fork.js"
 import { appendMessagesInTransaction } from "./chat-transcript.js"
+import { startCaptureAfterCopies } from "./memory-capture-positions.js"
 import { sessionBlockingWorkPredicate } from "./session-blocking-work.js"
 import type { PersistenceDeps } from "./deps.js"
 import {
@@ -413,6 +414,22 @@ export const makeSessionBranch = ({
       `.pipe(
             Effect.mapError((cause) =>
               storeError("branch", "storage", "Could not copy branch transcript", branchId, cause)
+            )
+          )
+          const copied = yield* sql<{ readonly count: number }>`
+            SELECT COUNT(*) AS count FROM session_messages WHERE session_id = ${branchId}`
+          yield* startCaptureAfterCopies(sql, {
+            sessionId: branchId,
+            lastCopiedSeq: (copied[0]?.count ?? 0) - 1
+          }).pipe(
+            Effect.mapError((cause) =>
+              storeError(
+                "branch",
+                "storage",
+                "Could not start Memory capture after the copies",
+                branchId,
+                cause
+              )
             )
           )
           yield* sql`INSERT INTO chat_event_deliveries
