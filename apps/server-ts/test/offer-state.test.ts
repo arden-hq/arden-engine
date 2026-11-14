@@ -14,6 +14,10 @@ import {
 } from "../src/persistence/sqlite/offer-rules.js"
 import { REFUSED_PROPOSAL_STATUSES } from "../src/persistence/sqlite/status-sets.js"
 import { makeHomeEvidence } from "../src/persistence/sqlite/home-evidence.js"
+import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
+import { AutomationQueue } from "../src/persistence/automations/queue.js"
+import { SpaceReviewStore } from "../src/persistence/automations/space-review-store.js"
+import { buildSpaceReviewInput } from "../src/automations/space-review-input.js"
 import {
   assertCitedTurnsFinished,
   readInferenceReview
@@ -373,4 +377,97 @@ it("writes the set of refused offer statuses once, and every one of them stands"
         { evidenceKey: "new-evidence", candidateHash: "new-candidate" }
       )
     ).toBe(true)
+})
+
+// Where the two tracks meet: a new owner turn wakes the Space review, the review's admission
+// starts on it, and the worker's offer citing that turn is admitted. Admission and the offer
+// check each have their own tests; this one keeps them agreeing about which turns count.
+it("offers from the finished owner turn that started the Space review", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      const queue = yield* AutomationQueue
+      const reviews = yield* SpaceReviewStore
+      const proposals = yield* TaskProposalStore
+      yield* space(sql)
+      yield* turn(sql, {
+        id: "run-1",
+        turn: "turn-1",
+        status: "completed",
+        owner: true,
+        hoursAgo: 2
+      })
+      const review = yield* catalog.create(
+        {
+          history: "fresh",
+          name: "Space review",
+          prompt: "Review the Space",
+          triggers: [{ type: "event", event_type: "task.changed" }],
+          idempotency_key: "5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7b01",
+          idempotency_scope: "global"
+        },
+        "owner"
+      )
+      yield* sql`UPDATE scheduled_tasks SET purpose = 'space_review', owner_space_id = 'space-1'
+        WHERE task_id = ${review.task_id}`
+      yield* sql`INSERT INTO automation_event_queue (task_id, source, event_key, context, created_at,
+          claimed_at, attempt_count, last_error, next_attempt_at)
+        VALUES (${review.task_id}, 'wake', 'wake-1', '{"scheduled_for":null,"automation_run_id":null}',
+          ${at(0)}, NULL, 0, NULL, NULL)`
+      const [lease] = yield* Effect.promise(async () =>
+        queue.jobs.claim({
+          workerId: "meeting",
+          now: Date.now(),
+          limit: 1,
+          leaseDurationMs: 60_000
+        })
+      )
+      if (lease === undefined) throw new Error("the Space review was not claimed")
+      const input = yield* reviews.prepareSpaceReview(
+        lease,
+        buildSpaceReviewInput({ head: null, pages: [] })
+      )
+      const [policy] = yield* sql<{ readonly generation: number }>`
+        SELECT policy_generation AS generation FROM spaces WHERE space_id = 'space-1'`
+      yield* sql`INSERT INTO execution_budgets (budget_id) VALUES ('budget-review')`
+      yield* sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
+          metadata_json, assistant_message_id, client_id)
+        VALUES ('review-run', 'chat-1', 'running', ${at(0)}, ${at(0)}, ${JSON.stringify({
+          turn_id: "review-turn",
+          run_policy: {
+            budget_id: "budget-review",
+            space: {
+              space_id: "space-1",
+              generation: policy?.generation,
+              inference: { enabled: true }
+            }
+          },
+          run_context: {
+            origin: { kind: "space", space_id: "space-1", occurrence_id: "wake-1" },
+            task: null
+          }
+        })}, 'assistant-review-run', 'client-review-run')`
+      const read = { sql, consistent: <A, E>(effect: Effect.Effect<A, E>) => effect }
+      const offer = yield* proposals.propose({
+        spaceId: "space-1",
+        runId: "review-run",
+        sessionId: "chat-1",
+        toolCallId: "call-review",
+        input: { key: "made-up-follow-up", text: "Do the made-up follow-up" },
+        capture: { basis: "inferred", reason: "Made up." },
+        sources: input.reads.chats.map((chat) => ({
+          kind: "chat" as const,
+          session_id: chat.sessionId,
+          turn_id: chat.turnId,
+          revision: chat.turnId
+        })),
+        inferenceSnapshot: (yield* readInferenceReview(read, "space-1")).snapshot
+      })
+      return { input, offer }
+    })
+  )
+  expect(outcome.input.admission).toBe("changed")
+  expect(outcome.input.reads.chats.map((chat) => chat.turnId)).toEqual(["turn-1"])
+  expect(outcome.offer).toMatchObject({ place: "space", status: "offered" })
 })
