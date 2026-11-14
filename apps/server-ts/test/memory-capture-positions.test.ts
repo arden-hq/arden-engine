@@ -170,7 +170,10 @@ it("reads a turn after a long gap and a compaction, however many came after it",
   })
 })
 
-it("reads turns written after a clear, though their message numbers start again", async () => {
+// Clear deletes the chat's messages. Whether clear also means "forget" is the owner's open
+// decision, so this pins today's behavior: what Capture read before the clear stays in Memory,
+// a turn it had not read yet is gone with the messages, and turns after the clear are read.
+it("keeps turns read before a clear, loses unread turns it deletes, and reads turns after it", async () => {
   const read = await withTempDatabase(
     Effect.gen(function* () {
       const { batches } = yield* capture()
@@ -179,6 +182,7 @@ it("reads turns written after a clear, though their message numbers start again"
       yield* turn(chat, "clear-a")
       yield* turn(chat, "clear-b")
       const before = yield* drain(batches)
+      yield* turn(chat, "clear-unread")
       yield* sessions.clear(chat)
       yield* turn(chat, "clear-c")
       return { before, after: yield* drain(batches) }
