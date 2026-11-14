@@ -24,7 +24,12 @@ import {
 } from "./run-context.js"
 import { hasPendingTaskApproval, hasPendingTaskQuestion } from "./task-question-state.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import { batchAtClaim, jobPrefilter, withEventText } from "./automation-event-batch.js"
+import {
+  batchAtClaim,
+  heldBehindProducer,
+  jobPrefilter,
+  withEventText
+} from "./automation-event-batch.js"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { Clock, Effect, Schema } from "effect"
 import { wakeChainDepth } from "../automations/chain-depth.js"
@@ -57,7 +62,6 @@ import { iso } from "../../runtime/clock.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { causingAutomation } from "./run-cause.js"
-import { queuedEventType } from "./automation-listening.js"
 
 const JobChatRunSchema = Schema.NullOr(
   Schema.Struct({
@@ -293,16 +297,7 @@ export const makeAutomationJobs = ({
                     AND json_extract(step.metadata_json, '$.run_context.origin.session_id') =
                       (SELECT home_session_id FROM space_tasks WHERE item_id = task.owner_task_id)
                     AND step.status IN ${activeRunStatusList}))
-              AND (
-                queue.source != 'event'
-                OR ${queuedEventType(sql, sql`queue.context`)} != 'wiki.changed'
-                OR json_extract(queue.context, '$.trigger_context_snapshot.produced_by') IS NULL
-                OR NOT EXISTS (
-                  SELECT 1 FROM automation_runs AS producer
-                  WHERE producer.task_id = json_extract(queue.context, '$.trigger_context_snapshot.produced_by')
-                    AND producer.status = 'running'
-                )
-              )
+              AND NOT ${heldBehindProducer(sql, "queue")}
               AND (task.purpose != 'space_review' OR NOT EXISTS (
                 SELECT 1 FROM automation_event_queue AS earlier
                 JOIN automation_runs AS waiting ON waiting.id = json_extract(earlier.context, '$.automation_run_id')

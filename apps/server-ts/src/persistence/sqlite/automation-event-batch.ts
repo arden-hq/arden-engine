@@ -122,8 +122,9 @@ const absorbBatch = Effect.fn("AutomationEventBatch.absorbBatch")(function* (opt
 })
 
 /** Wiki Maintenance reads every commit since its own head, so a Memory change
- * only wakes it. One claim takes every waiting change into its run instead of
- * one run per change. Its timer and requests by hand stay queued. */
+ * only wakes it. One claim takes every waiting change the fold rule allows into
+ * its run instead of one run per change. Its timer and requests by hand stay
+ * queued. */
 const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges")(
   function* (options: {
     readonly sql: SqlClient.SqlClient
@@ -134,24 +135,44 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
       readonly created_at: string
     }
     readonly context: QueueContext
+    readonly now: string
   }) {
     const { sql, row } = options
-    const waiting = yield* sql<{ readonly id: number; readonly context: string }>`
-      SELECT id, context FROM automation_event_queue
-      WHERE task_id = ${row.task_id} AND id != ${row.id} AND source = 'event'
-        AND ${queuedEventType(sql)} = 'wiki.changed' AND ${freshRow(sql)}
-      ORDER BY id`
-    if (waiting.length === 0) return options.context
-    const batches = yield* Effect.forEach(waiting, (other) =>
+    const own = eventBatchOf(options.context)
+    const run = {
+      depth: own === undefined ? 0 : batchChainDepth(own),
+      asked: row.source === "manual"
+    }
+    const waiting = yield* sql<{
+      readonly id: number
+      readonly context: string
+      readonly due: number
+      readonly held: number
+    }>`
+      SELECT queue.id, queue.context, ${foldFacts(sql, options.now)}
+      FROM automation_event_queue AS queue
+      WHERE queue.task_id = ${row.task_id} AND queue.id != ${row.id} AND queue.source = 'event'
+        AND ${queuedEventType(sql, sql`queue.context`)} = 'wiki.changed' AND ${freshRow(sql)}
+      ORDER BY queue.id`
+    const decoded = yield* Effect.forEach(waiting, (other) =>
       decodeQueueContext({ context: other.context, task_id: row.task_id }, "claim").pipe(
-        Effect.map((context) => eventBatchOf(context))
+        Effect.map((context) => ({
+          id: other.id,
+          due: other.due === 1,
+          held: other.held === 1,
+          batch: eventBatchOf(context)
+        }))
       )
     )
-    yield* sql`DELETE FROM automation_event_queue WHERE id IN ${sql.in(waiting.map(({ id }) => id))}`
-    const own = eventBatchOf(options.context)
-    const merged = mergeEventBatches(
-      [own, ...batches].filter((batch): batch is EventBatch => batch !== undefined)
+    const folded = decoded.flatMap(({ batch, ...other }) =>
+      batch !== undefined && foldsInto(run, { ...other, batch }) ? [{ id: other.id, batch }] : []
     )
+    if (folded.length === 0) return options.context
+    yield* sql`DELETE FROM automation_event_queue WHERE id IN ${sql.in(folded.map(({ id }) => id))}`
+    const merged = mergeEventBatches([
+      ...(own === undefined ? [] : [own]),
+      ...folded.map(({ batch }) => batch)
+    ])
     if (merged === undefined) return options.context
     const trigger =
       own === undefined
@@ -178,6 +199,32 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
     } satisfies QueueContext
   }
 )
+
+/** A Memory change waits while the Automation that made it still runs, so the
+ * run it wakes reads the producer's finished work. The claim and both fold
+ * paths read this one fragment. */
+export const heldBehindProducer = (sql: SqlClient.SqlClient, queue: string) => {
+  const alias = sql.literal(queue)
+  return sql`(${alias}.source = 'event'
+    AND ${queuedEventType(sql, sql`${alias}.context`)} = 'wiki.changed'
+    AND EXISTS (SELECT 1 FROM automation_runs AS producer
+      WHERE producer.task_id = json_extract(${alias}.context, '$.trigger_context_snapshot.produced_by')
+        AND producer.status = 'running'))`
+}
+
+const foldFacts = (sql: SqlClient.SqlClient, now: string) =>
+  sql`(queue.next_attempt_at IS NULL OR queue.next_attempt_at <= ${now}) AS due,
+    ${heldBehindProducer(sql, "queue")} AS held`
+
+/** The one rule for which waiting event a claim takes into its run: one that
+ * could start a run of its own now (due, or the run was asked for by hand, and
+ * not held behind its producer) at the run's own chain depth. A deeper event
+ * would lift the run's depth, and what the run writes would then wake no one. */
+const foldsInto = (
+  run: { readonly depth: number; readonly asked: boolean },
+  waiting: { readonly batch: EventBatch; readonly due: boolean; readonly held: boolean }
+): boolean =>
+  (run.asked || waiting.due) && !waiting.held && batchChainDepth(waiting.batch) === run.depth
 
 export const withEventText = (
   context: QueueContext,
@@ -249,13 +296,14 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
       readonly context: string
       readonly created_at: string
       readonly due: number
+      readonly held: number
     }>`
-      SELECT id, source, context, created_at,
-        (next_attempt_at IS NULL OR next_attempt_at <= ${options.now}) AS due
-      FROM automation_event_queue
-      WHERE task_id = ${row.task_id} AND id != ${row.id} AND source IN ('event', 'manual')
-        AND ${freshRow(sql)}
-      ORDER BY id`
+      SELECT queue.id, queue.source, queue.context, queue.created_at,
+        ${foldFacts(sql, options.now)}
+      FROM automation_event_queue AS queue
+      WHERE queue.task_id = ${row.task_id} AND queue.id != ${row.id}
+        AND queue.source IN ('event', 'manual') AND ${freshRow(sql)}
+      ORDER BY queue.id`
     const decoded = yield* Effect.forEach(waiting, (other) =>
       decodeQueueContext({ context: other.context, task_id: row.task_id }, "claim").pipe(
         Effect.map((context) => ({
@@ -263,6 +311,7 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
           source: other.source,
           createdAt: other.created_at,
           due: other.due === 1,
+          held: other.held === 1,
           context,
           batch: other.source === "event" ? eventBatchOf(context) : undefined
         }))
@@ -273,12 +322,9 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
         source === "manual" && due && context.from_skipped_run === undefined
     )
     const manual = claimedManual || manualRows.length > 0
-    const depth = own === undefined || manual ? undefined : batchChainDepth(own)
-    const folded = decoded.flatMap(({ id, source, due, batch }) =>
-      source === "event" &&
-      batch !== undefined &&
-      (manual || due) &&
-      (depth === undefined || batchChainDepth(batch) === depth)
+    const run = { depth: own === undefined ? 0 : batchChainDepth(own), asked: manual }
+    const folded = decoded.flatMap(({ id, source, due, held, batch }) =>
+      source === "event" && batch !== undefined && foldsInto(run, { batch, due, held })
         ? [{ id, batch: manual ? unasked(batch) : batch }]
         : []
     )
