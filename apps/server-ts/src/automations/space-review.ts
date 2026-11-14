@@ -5,22 +5,16 @@ import type {
 } from "../persistence/automations/store.js"
 import type { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
 import type { Wiki } from "../wiki/service.js"
-import type { SpaceReviewInput } from "../persistence/automations/space-review.js"
 import { buildSpaceReviewInput } from "./space-review-input.js"
 import { renderProposalRecheckPrompt } from "../prompts/space-jobs.js"
-import type { SpaceReviewHold } from "./space-review-gate.js"
 import { jobResult } from "./runner.js"
 
 export const makeSpaceReviewRunner = (services: {
   readonly wiki: Pick<Wiki["Service"], "snapshot">
   readonly spaceReviews: Pick<
     SpaceReviewStore["Service"],
-    "prepareSpaceReview" | "completeSpaceReview" | "holdSpaceReview"
+    "prepareSpaceReview" | "completeSpaceReview"
   >
-  readonly screen: (
-    job: AutomationJobLease,
-    input: SpaceReviewInput
-  ) => Effect.Effect<SpaceReviewHold | undefined>
   readonly execute: (job: AutomationJobLease) => Effect.Effect<AutomationJobSettlement, Error>
 }): ((job: AutomationJobLease) => Effect.Effect<AutomationJobSettlement, Error>) =>
   Effect.fn("SpaceReviewRunner")(function* (
@@ -35,12 +29,13 @@ export const makeSpaceReviewRunner = (services: {
             job,
             buildSpaceReviewInput(yield* services.wiki.snapshot())
           )
-    if (input === null || input.admission === "unchanged")
-      return jobResult.withoutRun("no_change", "Space evidence is unchanged.")
-    const hold = yield* services.screen(job, input)
-    if (hold !== undefined) {
-      yield* services.spaceReviews.holdSpaceReview(job, hold.until)
-      return { status: "skipped", skip: hold.skip }
+    switch (input.admission) {
+      case "unchanged":
+        return jobResult.withoutRun("no_change", "Space evidence is unchanged.")
+      case "nothing_to_act_on":
+        return jobResult.withoutRun("no_change", "Nothing this review can act on changed.")
+      case "changed":
+        break
     }
     const result = yield* services.execute({
       ...job,

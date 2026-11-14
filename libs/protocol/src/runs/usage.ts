@@ -20,7 +20,7 @@
  * - `automation_prefilter`: asking whether an event that woke an Automation
  *   matches its pre-filter, before a run starts.
  * - `space_review_gate`: asking whether a Space review would find anything to do,
- *   before its run starts.
+ *   before its run starts. Past spend only: a fixed check replaced the call.
  * - `composer_shortcut`: reading words in the composer as a rule, a Task or a
  *   question about earlier work, and writing the card that offers it.
  */

@@ -1,9 +1,7 @@
 import { Context, type Effect } from "effect"
 import type {
-  ChangedChatTurn,
   SpaceReviewDisposition,
   SpaceReviewEvidence,
-  SpaceReviewGateEvidence,
   SpaceReviewInput,
   SpaceReviewReads
 } from "./space-review.js"
@@ -15,15 +13,7 @@ export class SpaceReviewStore extends Context.Service<
     readonly prepareSpaceReview: (
       lease: AutomationJobLeaseRef,
       build: (evidence: SpaceReviewEvidence) => SpaceReviewInput
-    ) => Effect.Effect<SpaceReviewInput | null, AutomationStoreError>
-    readonly readSpaceReviewGateEvidence: (
-      lease: AutomationJobLeaseRef,
-      turns: ReadonlyArray<ChangedChatTurn>
-    ) => Effect.Effect<SpaceReviewGateEvidence, AutomationStoreError>
-    readonly holdSpaceReview: (
-      lease: AutomationJobLeaseRef,
-      until: string
-    ) => Effect.Effect<void, AutomationStoreError>
+    ) => Effect.Effect<SpaceReviewInput, AutomationStoreError>
     readonly validateSpaceReviewDisposition: (
       runId: string,
       disposition: SpaceReviewDisposition

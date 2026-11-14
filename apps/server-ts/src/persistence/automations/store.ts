@@ -74,13 +74,7 @@ interface StoredPrefilterSkip extends AutomationRunSkip {
   readonly prompt: string
 }
 
-export interface SpaceReviewGateSkip {
-  readonly reason: "space_review_gate"
-  readonly backend: string
-  readonly nothing: number
-}
-
-export type StoredAutomationRunSkip = StoredPrefilterSkip | SpaceReviewGateSkip
+export type StoredAutomationRunSkip = StoredPrefilterSkip
 
 export type HandlerItemOwnerId = Extract<
   SystemHandlerId,

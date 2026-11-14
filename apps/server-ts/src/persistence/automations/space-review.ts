@@ -101,10 +101,18 @@ const SpaceReviewReadsSchema = Schema.Struct({
 })
 export type SpaceReviewReads = typeof SpaceReviewReadsSchema.Type
 
+/**
+ * Whether the review starts, from `spaceReviewAdmission`:
+ * - `changed`: something it can act on changed, or the owner asked; the review runs.
+ * - `unchanged`: nothing changed since the last review; no run.
+ * - `nothing_to_act_on`: something changed, but nothing the review can act on; no run.
+ */
+const SpaceReviewAdmissionSchema = Schema.Literals(["changed", "unchanged", "nothing_to_act_on"])
+export type SpaceReviewAdmission = typeof SpaceReviewAdmissionSchema.Type
+
 export const SpaceReviewInputSchema = Schema.Struct({
-  admission: Schema.Literals(["changed", "unchanged"]),
+  admission: SpaceReviewAdmissionSchema,
   spaceId: Schema.String,
-  fingerprint: Schema.String,
   repositoryHead: Schema.NullOr(Schema.String),
   pages: Schema.Array(
     Schema.Struct({
@@ -123,23 +131,6 @@ export const SpaceReviewInputSchema = Schema.Struct({
   prompt: Schema.String
 })
 export type SpaceReviewInput = typeof SpaceReviewInputSchema.Type
-
-export type ChangedChatTurn = SpaceReviewReads["chats"][number]
-
-export interface GateTurn {
-  readonly sessionId: string
-  readonly startedAt: string
-  readonly chatTitle: string | undefined
-  readonly user: string | undefined
-  readonly assistant: string | undefined
-}
-
-export interface SpaceReviewGateEvidence {
-  readonly wokenBy: ReadonlyArray<string>
-  readonly heldSince: string | undefined
-  readonly turns: ReadonlyArray<GateTurn>
-  readonly unread: number
-}
 
 export interface SpaceReviewItem {
   readonly itemId: string
@@ -162,4 +153,6 @@ export interface SpaceReviewEvidence {
   readonly openProposals: ReadonlyArray<string>
   readonly space: SpaceReviewSnapshot | undefined
   readonly reviewed?: SpaceReviewInput
+  /** The owner asked for this review: a proposal recheck or a manual run. */
+  readonly asked: boolean
 }

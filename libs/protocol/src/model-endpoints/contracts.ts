@@ -129,22 +129,20 @@ export type DecisionBackendState =
  * The server's site registry (`models/decisions/sites.ts`) is the list of
  * callers; an id is added here when a caller asks.
  * - `automation_prefilter`: if an event should start an Automation ("Run only if").
- * - `space_review_gate`: if a Space review would find anything to do.
  * - `capture`: where a handed screenshot belongs.
  */
-export type DecisionSiteId = "automation_prefilter" | "space_review_gate" | "capture"
+export type DecisionSiteId = "automation_prefilter" | "capture"
 
 /**
  * Who decides at a place now:
  * - `decision_model`: the decision model, retried after failure, when its answer is sure enough.
  * - `helper`: the Helper, because the model cannot (off, unavailable, or the place
- *   needs images it does not read) and the place lets the Helper answer.
- * - `not_used`: nobody; the place keeps its default.
+ *   needs images it does not read).
  */
 export interface DecisionSiteStatus {
   readonly site: DecisionSiteId
   readonly needsImages: boolean
-  readonly state: "decision_model" | "helper" | "not_used"
+  readonly state: "decision_model" | "helper"
 }
 
 export interface DecisionStatus extends JsonRecord {

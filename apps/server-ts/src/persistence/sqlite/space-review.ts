@@ -1,5 +1,4 @@
 import { readChatSettled, settledFingerprint } from "./chat-ownership.js"
-import { makeSpaceJobSql } from "./space-jobs.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
 import { Clock, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -14,7 +13,6 @@ import {
 } from "../automations/space-review.js"
 import { parseLease } from "./automation-lease.js"
 import { QueueContextSchema } from "./automation-queue-context.js"
-import { readGateEvidence } from "./space-review-gate-evidence.js"
 import { decodeJson, encodeJson } from "./json.js"
 import type { PersistenceDeps } from "./deps.js"
 import { modelTurnRunStatusList, restartCutRunSql } from "./status-sets.js"
@@ -137,7 +135,6 @@ export const makeSpaceReviewStore = ({
   sessionEvents
 }: Pick<PersistenceDeps, "writer" | "sessionEvents">): SpaceReviewStore["Service"] => {
   const sql = writer.sql
-  const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const proposalReviewRequestId = (proposalId: string, revision: number) =>
     `proposal-review:${proposalId}:${revision}`
 
@@ -319,20 +316,7 @@ export const makeSpaceReviewStore = ({
         Effect.gen(function* () {
           const current = yield* currentLease(lease)
           const context = yield* decodeJson(QueueContextSchema, current.context)
-          if (context.space_review_input !== undefined) {
-            if (context.space_review_input.admission !== "unchanged")
-              return context.space_review_input
-            if (lease.payload.proposalReviewTarget === undefined) return null
-            const forced = { ...context.space_review_input, admission: "changed" as const }
-            const encoded = yield* encodeJson(QueueContextSchema, {
-              ...context,
-              space_review_input: forced
-            })
-            const frozen = yield* encodeJson(SpaceReviewInputSchema, forced)
-            yield* sql`UPDATE automation_event_queue SET context = ${encoded} WHERE id = ${current.queueId}`
-            yield* sql`UPDATE automation_runs SET input_json = ${frozen} WHERE id = ${current.runId}`
-            return forced
-          }
+          if (context.space_review_input !== undefined) return context.space_review_input
           const spaces = yield* sql<{
             readonly page_id: string | null
             readonly page_path: string | null
@@ -406,7 +390,7 @@ export const makeSpaceReviewStore = ({
               ? undefined
               : yield* decodeJson(SpaceReviewInputSchema, previous[0].reviewed_input)
           const settled = settledFingerprint(yield* readChatSettled(sql, current.space_id))
-          const built = build({
+          const input = build({
             spaceId: current.space_id,
             pageId: space.page_id,
             pagePath: space.page_path,
@@ -421,12 +405,11 @@ export const makeSpaceReviewStore = ({
             items,
             openProposals: offers.map((offer) => offer.text),
             space: yield* readSpaceReviewContext(sql, current.space_id),
-            ...(reviewed === undefined ? {} : { reviewed })
+            ...(reviewed === undefined ? {} : { reviewed }),
+            asked:
+              lease.payload.proposalReviewTarget !== undefined ||
+              lease.payload.occurrence === "manual"
           })
-          const input =
-            built.admission === "unchanged" && lease.payload.proposalReviewTarget !== undefined
-              ? { ...built, admission: "changed" as const }
-              : built
           const encoded = yield* encodeJson(QueueContextSchema, {
             ...context,
             space_review_input: input
@@ -434,7 +417,7 @@ export const makeSpaceReviewStore = ({
           yield* sql`UPDATE automation_event_queue SET context = ${encoded} WHERE id = ${current.queueId}`
           const frozen = yield* encodeJson(SpaceReviewInputSchema, input)
           yield* sql`UPDATE automation_runs SET input_json = ${frozen} WHERE id = ${current.runId} AND input_json IS NULL`
-          return input.admission === "unchanged" ? null : input
+          return input
         })
       )
       .pipe(
@@ -442,40 +425,6 @@ export const makeSpaceReviewStore = ({
           cause instanceof AutomationStoreError
             ? cause
             : failure("storage", "Could not prepare Space review", cause)
-        )
-      )
-  })
-
-  const readSpaceReviewGateEvidence: SpaceReviewStore["Service"]["readSpaceReviewGateEvidence"] = (
-    lease,
-    changedTurns
-  ) =>
-    readGateEvidence(
-      sql,
-      { runId: parseLease(lease).runId, automationId: lease.payload.automationId },
-      changedTurns
-    ).pipe(
-      Effect.mapError((cause) =>
-        failure("storage", "Could not read the Space review gate evidence", cause)
-      )
-    )
-
-  const holdSpaceReview: SpaceReviewStore["Service"]["holdSpaceReview"] = Effect.fn(
-    "SpaceReview.hold"
-  )(function* (lease, until) {
-    const now = iso(yield* Clock.currentTimeMillis)
-    yield* writer
-      .transact(
-        Effect.gen(function* () {
-          yield* currentLease(lease)
-          yield* spaceJobs.holdReview(lease.payload.automationId, now, until)
-        })
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof AutomationStoreError
-            ? cause
-            : failure("storage", "Could not hold the Space review", cause)
         )
       )
   })
@@ -629,8 +578,6 @@ export const makeSpaceReviewStore = ({
   )
   return SpaceReviewStore.of({
     prepareSpaceReview,
-    readSpaceReviewGateEvidence,
-    holdSpaceReview,
     validateSpaceReviewDisposition,
     completeSpaceReview,
     requestProposalReview,
