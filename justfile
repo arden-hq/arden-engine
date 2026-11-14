@@ -50,6 +50,10 @@ test:
 speed:
     cd apps/server-ts && ARDEN_SQL_SPEED=1 bunx vitest run --project speed
 
+# Copy the owner's database and Memory folder into <into> for replays, reading the source only. Refuses under 10 GB free. Tests find the copy through ARDEN_REPLAY_COPY=<into>.
+replay-copy into *flags:
+    node --conditions=arden-source apps/server-ts/scripts/replay-copy.ts --into {{into}} {{flags}}
+
 # Register every engine package with `bun link`, so a local app checkout uses this engine.
 link:
     for dir in libs/* apps/server-ts; do (cd "$dir" && bun link); done
