@@ -1,3 +1,4 @@
+import { openRunSince } from "./automation-running.js"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -32,9 +33,7 @@ export const automationsOfChat = (sql: SqlClient.SqlClient, sessionId: string) =
     readonly task_id: string
     readonly name: string
     readonly running: number
-  }>`SELECT task_id, name, EXISTS (
-        SELECT 1 FROM automation_runs AS run
-        WHERE run.task_id = task.task_id AND run.status = 'running') AS running
+  }>`SELECT task_id, name, ${openRunSince(sql, sql`task.task_id`)} IS NOT NULL AS running
       FROM scheduled_tasks AS task
       WHERE thread_id = ${sessionId} AND ${userAutomationSql()}
       ORDER BY task_id`

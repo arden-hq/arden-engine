@@ -1,3 +1,4 @@
+import { openRunSince } from "./automation-running.js"
 import { isAutomationEventType } from "@arden-hq/protocol/automations"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { Effect } from "effect"
@@ -224,9 +225,7 @@ export const heldBehindProducer = (sql: SqlClient.SqlClient, queue: string) => {
   const alias = sql.literal(queue)
   return sql`(${alias}.source = 'event'
     AND ${queuedEventType(sql, sql`${alias}.context`)} = 'wiki.changed'
-    AND EXISTS (SELECT 1 FROM automation_runs AS producer
-      WHERE producer.task_id = json_extract(${alias}.context, '$.trigger_context_snapshot.produced_by')
-        AND producer.status = 'running'))`
+    AND ${openRunSince(sql, sql`json_extract(${alias}.context, '$.trigger_context_snapshot.produced_by')`)} IS NOT NULL)`
 }
 
 const foldFacts = (sql: SqlClient.SqlClient, now: string) =>

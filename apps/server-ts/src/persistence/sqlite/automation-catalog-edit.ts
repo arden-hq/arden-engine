@@ -1,3 +1,4 @@
+import { openRunSince } from "./automation-running.js"
 import { captureMutationVersions } from "./mutation-links.js"
 import { haltAutomation } from "./automation-halt.js"
 import type {
@@ -291,7 +292,7 @@ export const makeAutomationCatalogEdits = ({
           if (threadChanged) {
             if (
               (yield* sql`
-                SELECT 1 FROM automation_runs WHERE task_id = ${validAutomationId} AND status = 'running' LIMIT 1
+                SELECT 1 WHERE ${openRunSince(sql, sql`${validAutomationId}`)} IS NOT NULL
               `).length > 0
             ) {
               return yield* storeError(
