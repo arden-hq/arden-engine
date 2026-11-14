@@ -38,11 +38,11 @@ it("writes to the replay copy through the engine and reads the write back", asyn
       const committed = onDisk()
       yield* policy.updateRetention(original)
       const restored = yield* policy.retention()
-      return { original, probe, readBack, committed, restored }
+      return { original, probe, readBack, committed, restored, restoredOnDisk: onDisk() }
     })
   )
   expect(trial.readBack, "the store refused the write or lost it").toEqual(trial.probe)
   expect(trial.committed, "the write never reached the file").toBe(trial.probe.wikiHistoryDays)
   expect(trial.restored).toEqual(trial.original)
-  expect(onDisk()).toBe(trial.original.wikiHistoryDays)
+  expect(trial.restoredOnDisk).toBe(trial.original.wikiHistoryDays)
 }, 600_000)

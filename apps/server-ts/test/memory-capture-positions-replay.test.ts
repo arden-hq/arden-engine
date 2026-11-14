@@ -1,4 +1,3 @@
-import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -8,12 +7,17 @@ import {
   countCaptureBacklog,
   listCaptureWork
 } from "../src/persistence/sqlite/memory-capture-positions.js"
-import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
+import {
+  locateReplayCopy,
+  rollBackOnReplayCopy,
+  rolledBack,
+  runOnReplayCopy
+} from "./fixtures/replay-copy.js"
 
 // Capture positions over the real history, with no model. The copy is opened the way the
 // server opens it, so migration 0155 runs on it. The backfill and every appended turn then run
-// in one transaction on the copy that is rolled back, so the old marks stay for the next run.
-// Only counts leave this file.
+// through rollBackOnReplayCopy, so the old marks stay for the next run. Only counts leave this
+// file.
 
 const located = locateReplayCopy()
 
@@ -21,28 +25,6 @@ const OWNER = "session.session_type = 'chat' AND session.origin_automation_id IS
 
 /** The header the old Capture wrote before each excerpt in its prompt. */
 const EXCERPTS = /\[(?:user|assistant); sequence (\d+); characters \d+-\d+; /gu
-
-const ROLLBACK = "rollback"
-
-/** Runs `body` in a transaction that is always rolled back, and returns what it computed. */
-const rolledBack = Effect.fn("rolledBack")(function* <A, E, R>(
-  sql: SqlClient.SqlClient,
-  body: Effect.Effect<A, E, R>
-) {
-  const kept: { value?: A } = {}
-  yield* sql
-    .withTransaction(
-      body.pipe(
-        Effect.flatMap((value) => {
-          kept.value = value
-          return Effect.fail(ROLLBACK)
-        })
-      )
-    )
-    .pipe(Effect.catch((failure) => (failure === ROLLBACK ? Effect.void : Effect.fail(failure))))
-  if (!("value" in kept)) throw new Error("The rolled back body returned nothing")
-  return kept.value
-})
 
 it("reads every owner turn from its position, and keeps every old unread turn countable, on the real history", async (context) => {
   if (located.kind === "absent") return context.skip(located.reason)
@@ -59,12 +41,7 @@ it("reads every owner turn from its position, and keeps every old unread turn co
       return { chats, work: (yield* captures.listWork(100)).length }
     })
   )
-  const replayed = await Effect.runPromise(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      return yield* rolledBack(sql, replay(sql))
-    }).pipe(Effect.provide(SqliteClient.layer({ filename: located.copy.database })))
-  )
+  const replayed = await rollBackOnReplayCopy(located.copy, replay)
   console.info(
     `Replay: ${migrated.chats?.owner} owner chats, ${migrated.chats?.positions} positions, ` +
       `${migrated.work} listed after the update. ` +

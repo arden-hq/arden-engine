@@ -1,7 +1,10 @@
-import { existsSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { closeSync, existsSync, openSync, readFileSync, rmSync, writeSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/unstable/sql"
 
 import {
   assertReplayFolder,
@@ -41,36 +44,151 @@ const refuseNetwork = (): Promise<never> =>
   Promise.reject(new Error("A replay on the copy must not reach the network"))
 
 /**
+ * The rules for a replay on the copy, kept here so each test follows them by
+ * calling this file, not by a note:
+ *
+ * - One test file at a time. Vitest runs files at once and there is one copy, so
+ *   a migration or write on it in one file refuses another's ("database is
+ *   locked"). Every connection to the copy opens inside `holdingReplayCopy`.
+ * - The engine's own stores write. `runOnReplayCopy` adds a read-only connection
+ *   for queries no store answers.
+ * - A replay that must write outside the stores (temporary tables, a backfill
+ *   run ahead of its turn, a turn appended to see what is listed) runs through
+ *   `rollBackOnReplayCopy`: one transaction that is always rolled back, so the
+ *   copy is left exactly as the stores left it for the next replay.
+ */
+
+/** Runs `body` while this process alone holds the copy, across vitest workers. */
+const holdingReplayCopy = async <A>(copy: ReplayFolder, body: () => Promise<A>) => {
+  const lock = join(
+    tmpdir(),
+    `arden-replay-${createHash("sha256").update(copy.database).digest("hex").slice(0, 16)}.lock`
+  )
+  for (;;) {
+    const taken = takeLock(lock)
+    if (taken) break
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  try {
+    return await body()
+  } finally {
+    rmSync(lock, { force: true })
+  }
+}
+
+/** Creates the lock file, or clears one whose process is gone. A lock with no
+ * process number yet is being written, and is left alone. */
+const takeLock = (lock: string): boolean => {
+  try {
+    const handle = openSync(lock, "wx")
+    writeSync(handle, String(process.pid))
+    closeSync(handle)
+    return true
+  } catch (cause) {
+    if (errorCode(cause) !== "EEXIST") throw cause
+  }
+  const holder = readHolder(lock)
+  if (holder !== undefined && !processAlive(holder)) rmSync(lock, { force: true })
+  return false
+}
+
+const readHolder = (lock: string): number | undefined => {
+  try {
+    const holder = Number(readFileSync(lock, "utf8"))
+    return Number.isInteger(holder) && holder > 0 ? holder : undefined
+  } catch (cause) {
+    if (errorCode(cause) === "ENOENT") return undefined
+    throw cause
+  }
+}
+
+const errorCode = (cause: unknown): unknown =>
+  cause instanceof Error && "code" in cause ? cause.code : undefined
+
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (cause) {
+    return errorCode(cause) !== "ESRCH"
+  }
+}
+
+/**
  * Runs `body` against the copy with the engine's own stores, after the same
  * migrations the server runs at start. Nothing else starts: no server, no
  * scheduler, no model, and `fetch` refuses while the body runs. The extra
- * `SqlClient` is a read-only connection for queries no store answers; every
- * write goes through a store.
+ * `SqlClient` is a read-only connection for queries no store answers.
  */
 export const runOnReplayCopy = async <A, E>(
   copy: ReplayFolder,
   body: Effect.Effect<A, E, SqlitePersistence | SqlClient.SqlClient>
 ): Promise<A> => {
   const { database } = assertReplayFolder(copy.folder)
-  const fetch = globalThis.fetch
-  globalThis.fetch = refuseNetwork
-  try {
-    return await Effect.runPromise(
-      body.pipe(
-        Effect.provide(
-          // The read-only connection opens after the stores: a pending
-          // migration refuses to run while another connection is open.
-          SqliteClient.layer({ filename: database, readonly: true }).pipe(
-            Layer.provideMerge(
-              sqlitePersistenceLayer({ dataDir: null, filename: database }).pipe(
-                Layer.provide(PersistenceWriteQueue.layer)
+  return holdingReplayCopy(copy, async () => {
+    const fetch = globalThis.fetch
+    globalThis.fetch = refuseNetwork
+    try {
+      return await Effect.runPromise(
+        body.pipe(
+          Effect.provide(
+            // The read-only connection opens after the stores: a pending
+            // migration refuses to run while another connection is open.
+            SqliteClient.layer({ filename: database, readonly: true }).pipe(
+              Layer.provideMerge(
+                sqlitePersistenceLayer({ dataDir: null, filename: database }).pipe(
+                  Layer.provide(PersistenceWriteQueue.layer)
+                )
               )
             )
           )
         )
       )
-    )
-  } finally {
-    globalThis.fetch = fetch
-  }
+    } finally {
+      globalThis.fetch = fetch
+    }
+  })
 }
+
+/**
+ * Runs `body` on a writable connection to the copy, inside one transaction that
+ * is always rolled back, and returns what it computed. Call `runOnReplayCopy`
+ * first, so the copy is migrated; nothing here migrates it.
+ */
+export const rollBackOnReplayCopy = async <A, E>(
+  copy: ReplayFolder,
+  body: (sql: SqlClient.SqlClient) => Effect.Effect<A, E, SqlClient.SqlClient>
+): Promise<A> => {
+  const { database } = assertReplayFolder(copy.folder)
+  return holdingReplayCopy(copy, async () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* rolledBack(sql, body(sql))
+      }).pipe(Effect.provide(SqliteClient.layer({ filename: database })))
+    )
+  )
+}
+
+const ROLLBACK = "rollback"
+
+/** Runs `body` in a transaction, or a savepoint inside one, that is always rolled
+ * back, and returns what it computed. */
+export const rolledBack = Effect.fn("rolledBack")(function* <A, E, R>(
+  sql: SqlClient.SqlClient,
+  body: Effect.Effect<A, E, R>
+) {
+  const kept: { value?: A } = {}
+  yield* sql
+    .withTransaction(
+      body.pipe(
+        Effect.flatMap((value) => {
+          kept.value = value
+          return Effect.fail(ROLLBACK)
+        })
+      )
+    )
+    .pipe(Effect.catch((failure) => (failure === ROLLBACK ? Effect.void : Effect.fail(failure))))
+  if (!("value" in kept)) throw new Error("The rolled back body returned nothing")
+  return kept.value
+})
