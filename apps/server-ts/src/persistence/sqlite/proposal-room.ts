@@ -52,6 +52,19 @@ export const openHeldOnHome = (sql: SqlClient.SqlClient, now: string) =>
       LIMIT MAX(0, ${HOME_OPEN_PROPOSAL_CAP} - (SELECT COUNT(*) FROM task_proposals
         WHERE place = 'home' AND status = 'offered')))`.pipe(Effect.asVoid)
 
+/** An open offer the owner can see at `at`: offered, and not put off past `at`. Its expiry clock
+ * runs only then, and only then is it Home evidence. */
+export const offerInSightSql = (
+  sql: SqlClient.SqlClient,
+  alias: string | undefined,
+  at: string
+) => {
+  const column = (name: string) =>
+    Statement.fragment([Statement.literal(alias === undefined ? name : `${alias}.${name}`)])
+  return sql`(${column("status")} = 'offered'
+    AND (${column("put_off_until")} IS NULL OR ${column("put_off_until")} <= ${at}))`
+}
+
 /** The owner's Later: the offer stays open but out of sight for `OFFER_LATER_HOURS`, and its
  * expiry clock starts over once it is back. */
 export const putOfferOff = (sql: SqlClient.SqlClient, proposalId: string, now: DateTime.Utc) =>
@@ -71,8 +84,7 @@ export const expireOverdueOffers = Effect.fn("Work.expireOverdueOffers")(functio
   const at = DateTime.formatIso(now)
   const cutoff = DateTime.formatIso(DateTime.subtract(now, { hours: OFFER_EXPIRY_HOURS }))
   yield* sql`UPDATE task_proposals SET waiting_since = ${at}
-    WHERE status = 'offered' AND waiting_since IS NULL
-      AND (put_off_until IS NULL OR put_off_until <= ${at})
+    WHERE ${offerInSightSql(sql, undefined, at)} AND waiting_since IS NULL
       AND ${ownerPresentSql(sql, at)}`
   const overdue = yield* sql<ProposalRow>`SELECT * FROM task_proposals
     WHERE status = 'offered' AND waiting_since <= ${cutoff}

@@ -13,6 +13,7 @@ import {
   UNFINISHED_TURN
 } from "../src/persistence/sqlite/offer-rules.js"
 import { REFUSED_PROPOSAL_STATUSES } from "../src/persistence/sqlite/status-sets.js"
+import { makeHomeEvidence } from "../src/persistence/sqlite/home-evidence.js"
 import {
   assertCitedTurnsFinished,
   readInferenceReview
@@ -217,6 +218,37 @@ it("keeps an offer the owner put off for later until it is back and waits again"
   expect(outcome.whilePutOff).toBe(0)
   expect(outcome.putOff).toEqual([["offer_a", "offered", 0]])
   expect(outcome.back).toEqual([["offer_a", "offered", 1]])
+})
+
+it("leaves an offer the owner put off out of Home's evidence until it is back", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const proposals = yield* TaskProposalStore
+      const homeEvidence = makeHomeEvidence({ sql, consistent: (read) => read })
+      const offers = () =>
+        homeEvidence({ since: at(100) }).pipe(
+          Effect.map((page) =>
+            page.entries.flatMap((entry) => (entry.kind === "offer" ? [entry.id] : []))
+          )
+        )
+      yield* homeOffer(sql, "offer_a", "offered", 3, 1)
+      yield* homeOffer(sql, "offer_b", "offered", 2, 2)
+      const before = yield* offers()
+      yield* proposals.resolve(
+        "offer_a",
+        { client_id: "client-x", decision: "later", expected_revision: 0 },
+        { memory: [] }
+      )
+      const putOff = yield* offers()
+      yield* sql`UPDATE task_proposals SET put_off_until = ${at(1)} WHERE proposal_id = 'offer_a'`
+      const back = yield* offers()
+      return { before, putOff, back }
+    })
+  )
+  expect(outcome.before).toEqual(["offer:offer_b", "offer:offer_a"])
+  expect(outcome.putOff).toEqual(["offer:offer_b"])
+  expect(outcome.back).toEqual(["offer:offer_b", "offer:offer_a"])
 })
 
 const automationRun = (

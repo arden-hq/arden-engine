@@ -15,6 +15,7 @@ import { workError } from "./work-records.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { terminalRunStatusList } from "./status-sets.js"
 import { homeOfferJson } from "./task-proposal-home.js"
+import { offerInSightSql } from "./proposal-room.js"
 import { taskRevisionRef } from "./work-history.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import { decodeOpaque, encodeOpaque } from "../../lib/opaque-ref.js"
@@ -116,12 +117,14 @@ export const makeHomeEvidence = ({
               'continuity_revision', continuity_revision,
               'created_at', created_at, 'status', status)) AS payload
         FROM (${questions.openSelect}) WHERE status = 'open'`
-        // An open Home offer, of any age, like an open question (I-23, D22).
+        // An open Home offer in sight, of any age, like an open question (I-23, D22). One the
+        // owner put off with Later is back once its time is up.
         const offers = sql`
         SELECT 'offer:' || offer.proposal_id AS id, offer.created_at AS at, 'offer' AS kind,
           json_object('id', 'offer:' || offer.proposal_id, 'at', offer.created_at, 'kind', 'offer',
             'offer', ${homeOfferJson(sql)}) AS payload
-        FROM task_proposals AS offer WHERE offer.place = 'home' AND offer.status = 'offered'`
+        FROM task_proposals AS offer
+        WHERE offer.place = 'home' AND ${offerInSightSql(sql, "offer", through)}`
         const approvals = sql`
         SELECT 'approval:' || json_array(approval.run_id, approval.tool_call_id) AS id, approval.requested_at AS at, 'approval' AS kind,
           json_object('id', 'approval:' || json_array(approval.run_id, approval.tool_call_id), 'at', approval.requested_at,
