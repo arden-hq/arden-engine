@@ -63,7 +63,7 @@ export interface WikiHistoryMethods {
  * earlier version lacks the line. A line removed and later put back names the change that put it
  * back. `ambiguous` counts the different current lines that hold the text.
  */
-export type WikiLineOrigin =
+type WikiLineOrigin =
   | {
       readonly kind: "added"
       readonly line: string
