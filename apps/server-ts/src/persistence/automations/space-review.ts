@@ -1,5 +1,5 @@
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
-import { Schema, SchemaTransformation } from "effect"
+import { Schema } from "effect"
 import { RUNS_ALONE } from "./event-batch.js"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
@@ -78,45 +78,25 @@ const ChatTurnSchema = Schema.Struct({
 })
 
 const ReviewPageBasisSchema = Schema.Literals(["owned", "source", "linked"])
-const StoredPageBasisSchema = Schema.Literals(["owned", "source", "linked", "resident"])
 
-const leaveOutResident = <Page extends { readonly basis: string }>(
-  pages: ReadonlyArray<Page>
-): ReadonlyArray<Page & { readonly basis: typeof ReviewPageBasisSchema.Type }> =>
-  pages.flatMap((page) =>
-    page.basis === "owned" || page.basis === "source" || page.basis === "linked"
-      ? [{ ...page, basis: page.basis }]
-      : []
-  )
-
-const readPageFields = {
-  pageId: Schema.String,
-  path: Schema.String,
-  version: Schema.String,
-  previousVersion: Schema.NullOr(Schema.String)
-}
 const ReadPagesSchema = Schema.Array(
-  Schema.Struct({ ...readPageFields, basis: StoredPageBasisSchema })
-).pipe(
-  Schema.decodeTo(
-    Schema.Array(Schema.Struct({ ...readPageFields, basis: ReviewPageBasisSchema })),
-    SchemaTransformation.transform({ decode: leaveOutResident, encode: (pages) => pages })
-  )
+  Schema.Struct({
+    pageId: Schema.String,
+    path: Schema.String,
+    version: Schema.String,
+    previousVersion: Schema.NullOr(Schema.String),
+    basis: ReviewPageBasisSchema
+  })
 )
 
-const inputPageFields = {
-  pageId: Schema.String,
-  path: Schema.String,
-  version: Schema.String,
-  rootPageId: Schema.String
-}
 const InputPagesSchema = Schema.Array(
-  Schema.Struct({ ...inputPageFields, basis: StoredPageBasisSchema })
-).pipe(
-  Schema.decodeTo(
-    Schema.Array(Schema.Struct({ ...inputPageFields, basis: ReviewPageBasisSchema })),
-    SchemaTransformation.transform({ decode: leaveOutResident, encode: (pages) => pages })
-  )
+  Schema.Struct({
+    pageId: Schema.String,
+    path: Schema.String,
+    version: Schema.String,
+    rootPageId: Schema.String,
+    basis: ReviewPageBasisSchema
+  })
 )
 
 const SpaceReviewReadsSchema = Schema.Struct({
