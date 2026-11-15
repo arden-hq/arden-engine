@@ -13,7 +13,7 @@ import { automationOrigin } from "../../wiki/commit.js"
 import { pageKind, producingAutomation, recordFolders } from "../../wiki/collections.js"
 import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
-import type { DailySummaryPosition } from "../../persistence/daily-summary/store.js"
+import type { ReaderPosition } from "../../persistence/reader-position.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
 import { chatHref } from "../../sessions/chat-href.js"
 
@@ -57,7 +57,7 @@ export const makeDailySummaryRunner = (
     readonly wiki: Pick<Wiki["Service"], "snapshot" | "pageTimes" | "createDirectory">
     readonly sessions: Pick<SessionStore["Service"], "list">
     readonly transcripts: Pick<TranscriptQueries["Service"], "conversationPage">
-    readonly position: DailySummaryPosition["Service"]
+    readonly position: Pick<ReaderPosition<string>, "start" | "advance">
     readonly timezone?: string
   }
 ): AutomationRunner => {
@@ -219,18 +219,18 @@ export const makeDailySummaryRunner = (
     const today = localDayOf(job.leasedAt, timezone)
     const notes: Array<string> = []
     const settle = (data: HandlerItemDataOf<"daily">) =>
-      services.position.advance({ from: nextDay(data.date, -1), to: data.date })
+      services.position.advance({ expected: nextDay(data.date, -1), next: data.date })
     return runItemLoop(services, {
       label: "Daily summary",
       kind: "daily",
       next: Effect.fn("DailySummary.next")(function* () {
-        const settled = yield* services.position.current(dailyStartPosition(job.leasedAt, timezone))
+        const settled = yield* services.position.start(dailyStartPosition(job.leasedAt, timezone))
         const date = nextDay(settled)
         if (date >= today) return "idle" as const
         const prepared = yield* prepareDay(date)
         if (prepared.kind === "settled") {
           if (prepared.note !== undefined) notes.push(prepared.note)
-          yield* services.position.advance({ from: settled, to: date })
+          yield* services.position.advance({ expected: settled, next: date })
           return "advance" as const
         }
         return { kind: "daily" as const, date, timezone, markdown: prepared.markdown }
@@ -284,7 +284,7 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
       wiki: services.wiki,
       sessions: services.sessions,
       transcripts: services.transcripts,
-      position: services.dailyPosition,
+      position: services.positions.dailySummary,
       handlerItems: services.handlerItems,
       runItem: services.runItem
     })

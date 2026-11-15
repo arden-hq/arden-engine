@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { Wiki } from "../../wiki/service.js"
-import type { WikiMaintenanceStore } from "../../persistence/wiki-maintenance/store.js"
+import type { ReaderPosition } from "../../persistence/reader-position.js"
 import { AutomationId } from "../../persistence/automations/model.js"
 import type { HandlerItemDataOf } from "../../persistence/automations/handler-item.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
@@ -13,23 +13,20 @@ const WIKI_MAINTENANCE_AUTOMATION_ID = AutomationId.make("builtin-wiki-maintenan
 const makeWikiMaintenanceRunner = (
   services: ItemLoopServices & {
     readonly wiki: Pick<Wiki["Service"], "prepareMaintenance">
-    readonly maintenance: WikiMaintenanceStore["Service"]
+    readonly position: ReaderPosition<string | null>
   }
 ): AutomationRunner => {
   const moveOn = (data: HandlerItemDataOf<"wiki">) =>
-    services.maintenance.compareAndSet({ expected: data.processedHead, next: data.sourceHead })
+    services.position.advance({ expected: data.processedHead, next: data.sourceHead })
   return runItemLoop(services, {
     label: "Wiki Maintenance",
     kind: "wiki",
     next: Effect.fn("WikiMaintenance.next")(function* () {
-      const processedHead = yield* services.maintenance.processedHead()
+      const processedHead = yield* services.position.read()
       const prepared = yield* services.wiki.prepareMaintenance({ processedHead })
       if (prepared.kind === "idle") return "idle" as const
       if (prepared.kind === "advance") {
-        yield* services.maintenance.compareAndSet({
-          expected: processedHead,
-          next: prepared.sourceHead
-        })
+        yield* services.position.advance({ expected: processedHead, next: prepared.sourceHead })
         return "advance" as const
       }
       return {
@@ -72,7 +69,7 @@ export const wikiMaintenanceHandler: SystemAutomationHandler<"wiki_maintenance">
   run: (services) =>
     makeWikiMaintenanceRunner({
       wiki: services.wiki,
-      maintenance: services.wikiMaintenance,
+      position: services.positions.maintenance,
       handlerItems: services.handlerItems,
       runItem: services.runItem
     })

@@ -127,10 +127,10 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
               sessions: yield* SessionStore,
               transcripts: yield* TranscriptQueries,
               position: {
-                current: () => Effect.succeed(settled),
-                advance: ({ to }) =>
+                start: () => Effect.succeed(settled),
+                advance: ({ next }) =>
                   Effect.sync(() => {
-                    settled = to
+                    settled = next
                   })
               },
               handlerItems: {
