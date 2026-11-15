@@ -124,15 +124,22 @@ const stateOf = (change: WorkingFileChange): string => {
   }
 }
 
-const rank = (change: WorkingFileChange): number => {
-  if (change.kind !== "missing") return 0
-  return posix.basename(change.resource.path).toLowerCase() === "readme.md" ? 2 : 1
+const STAGES = ["update", "archive", "archive_readme"] as const
+
+const stage = (change: WorkingFileChange): (typeof STAGES)[number] => {
+  if (change.kind !== "missing") return "update"
+  return posix.basename(change.resource.path).toLowerCase() === "readme.md"
+    ? "archive_readme"
+    : "archive"
 }
 
 const depth = (change: WorkingFileChange): number => change.resource.path.split("/").length
 
-const byOrder = (left: WorkingFileChange, right: WorkingFileChange): number =>
-  rank(left) - rank(right) ||
+const updatesThenDeepestArchivesReadmeLast = (
+  left: WorkingFileChange,
+  right: WorkingFileChange
+): number =>
+  STAGES.indexOf(stage(left)) - STAGES.indexOf(stage(right)) ||
   depth(right) - depth(left) ||
   compareCodePoints(left.resource.path, right.resource.path)
 
@@ -250,7 +257,7 @@ export const makeOutsideEdits = (input: {
       manyMissing: missing > MAX_MISSING_ARCHIVED ? missing : undefined
     }
     let pages = yield* input.snapshot()
-    for (const change of [...status.changes].sort(byOrder)) {
+    for (const change of [...status.changes].sort(updatesThenDeepestArchivesReadmeLast)) {
       if (before.get(change.resource.resourceId) !== stateOf(change)) {
         settling.push(change.resource.path)
         continue

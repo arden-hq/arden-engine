@@ -2,9 +2,10 @@ import { DateTime, Effect, Schema } from "effect"
 
 import { DAILY_SUMMARY_AUTOMATION_ID } from "../automations/model.js"
 import { DailySummaryPosition, DailySummaryPositionError } from "../daily-summary/store.js"
+import { automationPositionNamespace } from "./automation-resume.js"
 import type { PersistenceDeps } from "./deps.js"
 
-const NAMESPACE = DAILY_SUMMARY_AUTOMATION_ID
+const NAMESPACE = automationPositionNamespace(DAILY_SUMMARY_AUTOMATION_ID)
 const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
 const StateJson = Schema.fromJsonString(
   Schema.Struct({ settledDay: Day, tries: Schema.optionalKey(Schema.Int) })

@@ -198,10 +198,20 @@ export const commitWiki = (
   )
   return replayKey === undefined
     ? checked
-    : repository
-        .idempotencyReceipt(replayKey)
-        .pipe(Effect.flatMap((receipt) => (receipt === null ? checked : commit)))
+    : replayOrCommit(repository, replayKey, { checked, landed: commit })
 }
+
+const replayOrCommit = (
+  repository: ManagedFileRepositoryShape,
+  replayKey: string,
+  write: {
+    readonly checked: Effect.Effect<CommitResult, WikiCommitError>
+    readonly landed: Effect.Effect<CommitResult, WikiCommitError>
+  }
+): Effect.Effect<CommitResult, WikiCommitError> =>
+  repository
+    .idempotencyReceipt(replayKey)
+    .pipe(Effect.flatMap((receipt) => (receipt === null ? write.checked : write.landed)))
 
 /**
  * Record one change made outside Arden that is already in the page's file. It meets the commit
@@ -287,7 +297,7 @@ const limitRefusal = (
   })
 }
 
-const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
+const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,
   operation: WikiPageOperation
@@ -331,7 +341,7 @@ const COMMIT_RULES: ReadonlyArray<{
   ) => Effect.Effect<void, WikiCommitError>
 }> = [
   { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
-  { binds: (origin) => !isOutsideEdit(origin), check: requireWithinLimit }
+  { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */

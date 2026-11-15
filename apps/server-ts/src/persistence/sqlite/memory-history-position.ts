@@ -1,5 +1,6 @@
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
+import type { UnitOfWork } from "../unit-of-work.js"
 
 const READERS = {
   publication: { namespace: "wiki_publication", field: "revision" },
@@ -81,7 +82,7 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
   const advance = Effect.fn("MemoryHistoryPosition.advance")(function* (
     sql: SqlClient.SqlClient,
     input: { readonly expected: string | null; readonly next: string }
-  ): Effect.fn.Return<PositionAdvance, PositionError> {
+  ): Effect.fn.Return<PositionAdvance, PositionError, UnitOfWork> {
     yield* Schema.decodeUnknownEffect(Move)(input).pipe(
       Effect.mapError(
         (cause) =>

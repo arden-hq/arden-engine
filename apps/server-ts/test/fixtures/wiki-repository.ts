@@ -3,7 +3,7 @@ import {
   managedFileRepositoryNodeLayer,
   type ManagedFileRepositoryShape
 } from "@arden-hq/revisions/effect"
-import { Context, Effect, Exit, Layer, Scope } from "effect"
+import { Clock, Context, Effect, Exit, Layer, Scope } from "effect"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -61,8 +61,8 @@ export const withWikiRepository = async <A>(
       ...makeWikiChangeMethods(repository),
       ...makeWikiRestoreMethods(repository, spaces, listing.read)
     })
+    const clock = distinctMillisClock()
     const save: WikiRepositoryFixture["save"] = async ({ pageId, path, body, origin, actor }) => {
-      await new Promise((resolve) => setTimeout(resolve, 5))
       const content = formatWikiPage({
         pageId,
         title: pageId,
@@ -81,13 +81,33 @@ export const withWikiRepository = async <A>(
             { actor: actor ?? "Agent", origin, reason: `save ${path}`, expectedRevision: head },
             [current === null ? createPage(pageId, path, content) : updatePage(current, content)]
           )
-        })
+        }).pipe(Effect.provideService(Clock.Clock, clock))
       )
     }
     return await use({ repository, wiki, save })
   } finally {
     await Effect.runPromise(Scope.close(scope, Exit.void))
     await rm(directory, { recursive: true, force: true })
+  }
+}
+
+/** Real time, but each reading at least a millisecond after the one before, so every saved version has its own time. */
+const distinctMillisClock = (): Clock.Clock => {
+  const real = Effect.runSync(Clock.clockWith(Effect.succeed))
+  let last = 0
+  const millis = (): number => {
+    last = Math.max(real.currentTimeMillisUnsafe(), last + 1)
+    return last
+  }
+  const nanos = (): bigint => BigInt(millis()) * 1_000_000n
+  return {
+    currentTimeMillisUnsafe: millis,
+    currentTimeMillis: Effect.sync(millis),
+    currentTimeNanosUnsafe: nanos,
+    currentTimeNanos: Effect.sync(nanos),
+    monotonicTimeNanosUnsafe: () => real.monotonicTimeNanosUnsafe(),
+    monotonicTimeNanos: real.monotonicTimeNanos,
+    sleep: (duration) => real.sleep(duration)
   }
 }
 

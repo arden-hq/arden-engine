@@ -27,7 +27,10 @@ import { sha256Hex } from "@arden-hq/std/hash"
 const GLOBAL_INSTRUCTIONS_FILE = "AGENTS.md"
 /** The most rules text, in bytes, the rules may hold. */
 export const MAX_RULES_BYTES = 128 * 1024
-const storedText = (content: string): string => (content === "" ? "" : `${content}\n`)
+const CLOSING_NEWLINE = "\n"
+const MAX_STORED_RULES_BYTES = MAX_RULES_BYTES + CLOSING_NEWLINE.length
+const storedText = (content: string): string =>
+  content === "" ? "" : `${content}${CLOSING_NEWLINE}`
 const withinLimit = (content: string): boolean =>
   Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
 const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
@@ -78,7 +81,7 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
   if (!status.isFile() || status.isSymbolicLink()) {
     return yield* error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file`)
   }
-  if (status.size > MAX_RULES_BYTES + 1) return yield* error("read", "invalid", tooLarge)
+  if (status.size > MAX_STORED_RULES_BYTES) return yield* error("read", "invalid", tooLarge)
   const bytes = yield* Effect.tryPromise({
     try: () => readFile(filename),
     catch: (cause) => error("read", "storage", "Global instructions could not be read", cause)
@@ -121,6 +124,12 @@ export class GlobalInstructions extends Context.Service<
   }
 >()("@arden-hq/server/context/GlobalInstructions") {}
 
+/** A version the file holds that the history failed to record, and the writer to record it under. */
+interface MissedVersion {
+  readonly digest: string
+  readonly writer: InstructionWriter
+}
+
 const historyError = (cause: InstructionVersionStoreError): GlobalInstructionsError =>
   error("history", "storage", "The standing rules history could not be read", cause)
 
@@ -128,7 +137,14 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
   const lock = yield* Semaphore.make(1)
   const store = yield* InstructionVersionStore
 
-  let missed: { readonly digest: string; readonly writer: InstructionWriter } | undefined
+  let missed: MissedVersion | undefined
+  const recordMissedVersion = (version: MissedVersion, cause: InstructionVersionStoreError) =>
+    Effect.sync(() => {
+      missed = version
+    }).pipe(
+      Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
+    )
+
   const record = (snapshot: GlobalInstructionsSnapshot, writer: InstructionWriter) =>
     store.append({ content: snapshot.content ?? "", digest: snapshot.version, writer }).pipe(
       Effect.tap(() =>
@@ -137,16 +153,10 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
         })
       ),
       Effect.asVoid,
-      Effect.catch((cause) =>
-        Effect.sync(() => {
-          missed = { digest: snapshot.version, writer }
-        }).pipe(
-          Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
-        )
-      )
+      Effect.catch((cause) => recordMissedVersion({ digest: snapshot.version, writer }, cause))
     )
 
-  const adopt = (snapshot: GlobalInstructionsSnapshot) =>
+  const recordUnseenVersion = (snapshot: GlobalInstructionsSnapshot) =>
     store.latest().pipe(
       Effect.matchEffect({
         onFailure: (cause) =>
@@ -159,7 +169,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
       })
     )
 
-  const read = () => lock.withPermit(readSnapshot(file).pipe(Effect.tap(adopt)))
+  const read = () => lock.withPermit(readSnapshot(file).pipe(Effect.tap(recordUnseenVersion)))
 
   const replace = Effect.fn("GlobalInstructions.replace")(function* (input: {
     readonly content: string
@@ -171,7 +181,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
         const content = input.content.trim()
         if (!withinLimit(content)) return yield* error("replace", "invalid", tooLarge)
         const current = yield* readSnapshot(file)
-        yield* adopt(current)
+        yield* recordUnseenVersion(current)
         if (current.content === (content === "" ? undefined : content)) return current
         if (current.version !== input.expectedVersion) {
           return yield* error(

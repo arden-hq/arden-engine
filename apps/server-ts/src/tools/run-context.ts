@@ -18,6 +18,8 @@ export interface ObservationRegistry {
   readonly observeHead: (head: string) => void
   readonly observedHead: () => string | undefined
   readonly observe: (id: string, version: string) => void
+  /** Records `version` only when the run has not read `id` yet: a version read earlier is kept. */
+  readonly observeIfUnseen: (id: string, version: string) => void
   readonly observed: (id: string) => string | undefined
   /** Everything this run has read, oldest first, to carry into a call it asked approval for. */
   readonly snapshot: () => ObservationSnapshot
@@ -56,12 +58,16 @@ export const makeObservationRegistry = (): ObservationRegistry => {
     }
     versions.set(id, version)
   }
+  const observeIfUnseen = (id: string, version: string): void => {
+    if (!versions.has(id)) observe(id, version)
+  }
   return {
     observeHead: (value: string): void => {
       head = value
     },
     observedHead: (): string | undefined => head,
     observe,
+    observeIfUnseen,
     observed: (id: string): string | undefined => versions.get(id),
     snapshot: (): ObservationSnapshot => ({
       ...(head === undefined ? {} : { head }),
@@ -69,7 +75,7 @@ export const makeObservationRegistry = (): ObservationRegistry => {
     }),
     adopt: (snapshot: ObservationSnapshot): void => {
       if (head === undefined && snapshot.head !== undefined) head = snapshot.head
-      for (const [id, version] of snapshot.versions) if (!versions.has(id)) observe(id, version)
+      for (const [id, version] of snapshot.versions) observeIfUnseen(id, version)
     }
   }
 }

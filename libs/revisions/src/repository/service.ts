@@ -7,7 +7,6 @@ import {
   Effect,
   Layer,
   Result,
-  Schema,
   Semaphore,
   type FileSystem,
   type Path,
@@ -31,7 +30,14 @@ import {
 } from "../domain/errors.js"
 import type { RevisionError } from "../domain/errors.js"
 import { encodeUtf8 } from "../domain/format.js"
-import { commit, type CommitResult } from "./commit.js"
+import {
+  adoptWorkingChange,
+  commit,
+  decodeChangeSet,
+  type AdoptWorkingChangeOptions,
+  type CommitInput,
+  type CommitResult
+} from "./commit.js"
 import { makeHistoryQuery } from "./history.js"
 import {
   diff as queryDiff,
@@ -85,16 +91,6 @@ export interface ManagedFileRepositoryOptions extends RevisionStorageOptions {
   readonly onOpenPhase?: (phase: RepositoryOpenPhase) => void
 }
 
-/**
- * One commit request. `expectedHead` is a repository-wide compare-and-swap:
- * omit it for none; `null` with `enforceExpectedHead` asserts an empty repository.
- * `idempotencyKey` is the durable write identity — a retry with the same key and
- * request replays the first commit; omit it for a fresh identity.
- */
-export type CommitInput = Omit<typeof ChangeSet.Encoded, "idempotencyKey"> & {
-  readonly idempotencyKey?: string
-}
-
 /** One active resource whose working file differs from history. */
 export type WorkingFileChange =
   | {
@@ -125,14 +121,6 @@ export interface WorkingTreeStatus {
 export interface WorkingTreeStatusOptions {
   /** Which untracked files to read, under the same lock as the scan. */
   readonly readUntracked?: (path: string) => boolean
-}
-
-export interface AdoptWorkingChangeOptions {
-  readonly actor: string
-  readonly origin: string
-  readonly reason: string
-  /** The head the caller decided on; the adoption fails when the head has moved since. */
-  readonly expectedHead: string | null
 }
 
 export interface ManagedFileRepositoryShape {
@@ -240,15 +228,6 @@ export class ManagedFileRepository extends Context.Service<
 >()("@arden-hq/revisions/ManagedFileRepository") {}
 
 const defaultGcGracePeriodMs = 30 * 24 * 60 * 60 * 1_000
-
-const decodeChangeSet = Effect.fn("decodeChangeSet")(function* (
-  request: CommitInput
-): Effect.fn.Return<ChangeSet, InvalidRevisionInputError> {
-  return yield* Schema.decodeUnknownEffect(ChangeSet)({
-    ...request,
-    idempotencyKey: request.idempotencyKey ?? randomUUID()
-  }).pipe(Effect.mapError((cause) => new InvalidRevisionInputError({ message: cause.message })))
-})
 
 /**
  * A scan reads a tracked file only when its stamp (identity, size, modification time) differs
@@ -547,31 +526,16 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
       ),
     adoptWorkingChange: (change, input) =>
       withLockQueue(
-        decodeChangeSet({
-          operations: [
-            change.kind === "changed"
-              ? {
-                  _tag: "Update",
-                  resourceId: change.resource.resourceId,
-                  expectedVersion: change.resource.versionId,
-                  content: change.content
-                }
-              : {
-                  _tag: "Archive",
-                  resourceId: change.resource.resourceId,
-                  expectedVersion: change.resource.versionId
-                }
-          ],
-          actor: input.actor,
-          origin: input.origin,
-          reason: input.reason,
-          ...(input.expectedHead === null
-            ? { expectedHead: null, enforceExpectedHead: true }
-            : { expectedHead: input.expectedHead })
-        }).pipe(
-          Effect.flatMap((changeSet) =>
-            commit(storage, head, changeSet, options.checkpoint, change.resource.resourceId)
-          )
+        adoptWorkingChange(
+          storage,
+          head,
+          {
+            resourceId: change.resource.resourceId,
+            expectedVersion: change.resource.versionId,
+            content: change.kind === "changed" ? change.content : null
+          },
+          input,
+          options.checkpoint
         )
       ),
     prepareHistory: Effect.fn("RevisionRepository.prepareHistory")(function* () {
