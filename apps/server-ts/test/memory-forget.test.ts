@@ -35,6 +35,7 @@ import {
   createPage,
   movePage,
   ownerInApp,
+  requireCommitRules,
   updatePage,
   type WikiCommitIdentity,
   type WikiCommitOrigin
@@ -683,6 +684,50 @@ describe("no run is sent forgotten.md", () => {
       listedSystem: false,
       history: true
     })
+  })
+
+  it("refuses a run that would restore an archived page holding a forgotten line", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        const river = "The river floods the lower town every spring."
+        yield* commitWiki(
+          memory.repository,
+          { ...ownerInApp("x"), expectedRevision: yield* memory.listing.head() },
+          [createPage("river", "places/river.md", content("river", `${river}\n${LINE}\n`))]
+        )
+        const made = yield* memory.page("places/river.md")
+        yield* commitWiki(
+          memory.repository,
+          { ...ownerInApp("x"), expectedRevision: yield* memory.listing.head() },
+          [archivePage(made.resource)]
+        )
+        yield* forget(memory)
+        const archived = yield* memory.repository.get("river")
+        const restored = yield* refusal(
+          memory.restores.restoreArchived({
+            pageId: "river",
+            expectedVersion: archived?.versionId ?? "",
+            expectedHead: (yield* memory.listing.head()) ?? "",
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AGENT
+          })
+        )
+        return refusedFor(restored)
+      })
+    )
+    expect(outcome).toBe("retraction")
+  })
+
+  it("words a size refusal for the owner's own forget as it does for the owner", async () => {
+    const message = await withMemory((memory) =>
+      requireCommitRules(memory.repository, { kind: "forget", sessionId: TURN.sessionId }, [
+        createPage("me", "me.md", content("me", `${"word ".repeat(2_000)}\n`))
+      ]).pipe(
+        Effect.flip,
+        Effect.map((error) => error.message)
+      )
+    )
+    expect(message).toMatch(/Nothing was saved\. Shorten it by at least \d+ characters\.$/u)
   })
 })
 

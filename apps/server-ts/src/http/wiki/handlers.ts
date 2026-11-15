@@ -166,7 +166,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             pageId: params.pageId,
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: ownerInApp("restore archived wiki page")
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )
@@ -200,7 +201,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             pageId: params.pageId,
             commitId: params.commitId,
             expectedVersion: payload.expected_version,
-            expectedHead: payload.expected_head
+            expectedHead: payload.expected_head,
+            commit: ownerInApp(`restore Maintenance commit ${params.commitId}`, "desktop.restore")
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )

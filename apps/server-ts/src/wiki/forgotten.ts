@@ -11,7 +11,7 @@ import {
   type WikiPageOperation
 } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
-import { formatWikiPage } from "./page.js"
+import { formatWikiPage, reviseWikiPage } from "./page.js"
 import {
   claimKey,
   MAX_CLAIM_CHARS,
@@ -180,13 +180,15 @@ const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
     for (const line of lines)
       if (wanted.has(claimKey(line) ?? "")) removed.push({ path: record.resource.path, line })
     changes.push({ path: record.resource.path, before: record.page.body, after: body })
-    const content = record.page.content
-    operations.push(
-      updatePage(
-        record.resource,
-        `${content.slice(0, content.length - record.page.body.length)}${body}`
+    const content = yield* reviseWikiPage(record.page, { body }).pipe(
+      Effect.mapError((cause) =>
+        wikiError("forget", "invalid", `${record.resource.path} could not be rewritten.`, {
+          pageId: record.page.pageId,
+          cause
+        })
       )
     )
+    operations.push(updatePage(record.resource, content))
   }
   const missing = keys.findIndex((key) => !removed.some((line) => claimKey(line.line) === key))
   if (missing >= 0)

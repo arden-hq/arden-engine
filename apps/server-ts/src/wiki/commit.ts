@@ -296,7 +296,7 @@ const limitRefusal = (
   const target = coreCondenseTarget(over.limit)
   return new WikiCommitRuleError({
     rule: "size",
-    message: origin.kind === "user"
+    message: isOwnerOrigin(origin)
       ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
         `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
       : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
