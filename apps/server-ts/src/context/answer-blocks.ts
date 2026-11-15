@@ -1,56 +1,5 @@
-import { cutText } from "@arden-hq/std/text"
-import { answerBlockText } from "@arden-hq/answer-ui"
-import { answerBlockTitle, replaceAnswerBlocks } from "@arden-hq/protocol/chat"
-
-const SUMMARY_CHARS = 300
-
-const compactAnswerBlock = (body: string): string => {
-  const lines = answerBlockText(body)
-    .split("\n")
-    .map((line) => line.trim())
-  const heading = lines.find((line) => line.startsWith("## "))?.slice(3)
-  const title = heading ?? answerBlockTitle(body)
-  const summary = cutText(
-    lines
-      .filter((line) => line.length > 0 && !line.startsWith("## ") && !TABLE_RULE.test(line))
-      .map(plainLine)
-      .filter((line) => line.length > 0)
-      .join("; "),
-    SUMMARY_CHARS
-  )
-  const label = title === undefined ? "interactive block" : `interactive block: ${title}`
-  return summary.length === 0 ? `[${label}]` : `[${label} — ${summary}]`
-}
-
-const COMPACT_CACHE_SIZE = 256
-const compacted = new Map<string, string>()
-
-const cachedCompactBlock = (body: string): string => {
-  const known = compacted.get(body)
-  if (known !== undefined) return known
-  const line = compactAnswerBlock(body)
-  if (compacted.size >= COMPACT_CACHE_SIZE) {
-    const oldest = compacted.keys().next()
-    if (oldest.done !== true) compacted.delete(oldest.value)
-  }
-  compacted.set(body, line)
-  return line
-}
-
-export const compactAnswerBlocks = (markdown: string): string =>
-  replaceAnswerBlocks(markdown, cachedCompactBlock)
-
-const TABLE_RULE = /^\|(?:\s*-+\s*\|)+$/
-
-const plainLine = (line: string): string =>
-  line.startsWith("|")
-    ? line
-        .slice(1, -1)
-        .split(" | ")
-        .map((cell) => cell.trim())
-        .filter(Boolean)
-        .join(" ")
-    : line.replace(/\*\*(.+?)\*\*/g, "$1")
+import { replaceAnswerBlocks } from "@arden-hq/protocol/chat"
+import { compactAnswerBlock } from "../persistence/transcript/content.js"
 
 interface HistoryMessage {
   readonly role: string
@@ -97,7 +46,7 @@ const withCompactBlocks = <Message extends HistoryMessage>(message: Message): Me
   const compact = (markdown: string): string =>
     replaceAnswerBlocks(markdown, (body) => {
       ordinal += 1
-      const line = cachedCompactBlock(body)
+      const line = compactAnswerBlock(body)
       return messageId === undefined ? line : `${line} ${answerBlockReference(messageId, ordinal)}`
     })
   const content = message.content

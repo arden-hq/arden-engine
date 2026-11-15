@@ -1,5 +1,10 @@
 import { countOf } from "@arden-hq/std/count"
-import { authoredText, evidenceText, isHumanMessage } from "../persistence/transcript/content.js"
+import {
+  authoredText,
+  compactAnswerBlocks,
+  evidenceText,
+  isHumanMessage
+} from "../persistence/transcript/content.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { endKindOf } from "@arden-hq/protocol/runs"
@@ -27,7 +32,6 @@ import { chatSummaryText } from "./chat-summary.js"
 import { unknownSession } from "./session-visibility.js"
 import { BrowseScopeSchema, spaceLabel, permittedBrowseScope } from "./session-browse-scope.js"
 import { eventRowText } from "../persistence/transcript/chat-events.js"
-import { compactAnswerBlocks } from "../context/answer-blocks.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
 import type { SessionToolEvidencePage } from "../persistence/sessions/tool-evidence.js"

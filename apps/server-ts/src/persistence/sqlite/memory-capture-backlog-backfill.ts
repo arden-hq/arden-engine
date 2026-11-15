@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { messageContent } from "../../memory/capture-batches.js"
+import { capturedText } from "../transcript/content.js"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
 import type { Backfill } from "./backfills/backfill.js"
 
@@ -192,7 +192,7 @@ const batchStart = (row: BatchRow, quoted: ReadonlyArray<number>): number | unde
 const endsWhole = (row: BatchRow): boolean => {
   if (row.ending === null) return true
   const ending = decodeMessage(row.ending)
-  return Option.isSome(ending) && row.end_offset >= (messageContent(ending.value)?.length ?? 0)
+  return Option.isSome(ending) && row.end_offset >= (capturedText(ending.value)?.length ?? 0)
 }
 
 const readBy = (message: RangedMessage, batch: ReadBatch): boolean =>

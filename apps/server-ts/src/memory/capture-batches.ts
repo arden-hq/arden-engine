@@ -1,7 +1,6 @@
 import type { RunOrigin } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Option, Schema } from "effect"
 
-import { compactAnswerBlocks } from "../context/answer-blocks.js"
 import type {
   MemoryCaptureBatch,
   MemoryCaptureBatchIdentity,
@@ -11,11 +10,8 @@ import type {
 } from "../persistence/memory/store.js"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
-import { authoredText } from "../persistence/transcript/content.js"
-import type {
-  StoredMessageEnvelope,
-  TranscriptMessageRecord
-} from "../persistence/transcript/model.js"
+import { capturedText } from "../persistence/transcript/content.js"
+import type { TranscriptMessageRecord } from "../persistence/transcript/model.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
 import type { Wiki } from "../wiki/service.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
@@ -420,12 +416,6 @@ export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   }
 })
 
-export const messageContent = (message: StoredMessageEnvelope): string | null => {
-  if (message.superseded === true) return null
-  const text = compactAnswerBlocks(authoredText(message.content)).trim()
-  return text.length === 0 ? null : text
-}
-
 const evidenceKind = (
   record: TranscriptMessageRecord,
   origin: RunOrigin | undefined
@@ -479,7 +469,7 @@ const selectExcerpts = (
       read = record
       continue
     }
-    const content = messageContent(record.envelope)
+    const content = capturedText(record.envelope)
     const startOffset = offsetIn(start, record.sequence) ?? 0
     if (content === null || startOffset >= content.length) {
       read = record

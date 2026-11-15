@@ -47,8 +47,6 @@ export interface MemoryTurn {
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
 
-export type { MemoryCaptureBatch } from "../persistence/memory/store.js"
-
 interface MemoryTurnServices {
   readonly wiki: Wiki["Service"]
   readonly embeddings: Pick<WikiEmbeddingIndex["Service"], "search">

@@ -2,7 +2,7 @@ import { Predicate } from "effect"
 
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 import { ownerText } from "../persistence/transcript/owner-words.js"
-import { compactAnswerBlocks } from "./answer-blocks.js"
+import { compactAnswerBlocks } from "../persistence/transcript/content.js"
 import { readHandoff } from "./handoff.js"
 import { TIME_SINCE_LAST_MESSAGE_CONTEXT } from "./idle-gap.js"
 
