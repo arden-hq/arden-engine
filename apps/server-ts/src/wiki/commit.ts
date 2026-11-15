@@ -166,7 +166,7 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
 })
 
 /** A rule at the commit point refused the write. */
-export class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()(
+class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()(
   "WikiCommitRuleError",
   { rule: Schema.Literals(["aliases", "size"] as const), message: Schema.String }
 ) {}

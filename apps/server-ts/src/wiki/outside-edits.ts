@@ -363,7 +363,7 @@ export const makeOutsideEdits = (input: {
 }
 
 /** The refusal a writer gets for a page whose file was changed outside Arden. */
-export const outsideEditRefusal = (path: string, state: OutsideEditState | undefined): string =>
+const outsideEditRefusal = (path: string, state: OutsideEditState | undefined): string =>
   state?.kind === "set_aside"
     ? `${path} was changed outside Arden and Memory set that change aside: ${state.detail}. Nothing was saved. Arden cannot write this page until its file is fixed or put back.`
     : `${path} was changed outside Arden and Memory has not taken that change in yet. Nothing was saved. Memory checks the files every minute and takes a change in once it stays the same for one check.`

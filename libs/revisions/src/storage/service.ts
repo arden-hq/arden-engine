@@ -49,7 +49,7 @@ export type StorageError = RevisionStorageError | RevisionConflictError | Unsafe
 /** One entry under the working root, by its relative path. */
 /** A regular file's identity, size and modification time, as listed; equal stamps mean it was
  *  not replaced, resized or modified since. */
-export interface WorkingStamp {
+interface WorkingStamp {
   readonly id: string
   readonly modifiedAt: number
 }
