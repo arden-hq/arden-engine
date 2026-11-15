@@ -378,6 +378,7 @@ const makeWikiOperationTools = ({
       const snapshot = await loadSnapshot(wiki, ctx.signal)
       const record = pageStoredAt(snapshot, input.path)
       if (record === null) throw pageNotFound(snapshot, input.path)
+      ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
       const history = await Effect.runPromise(
         wiki.history(record.page.pageId, { limit: input.limit }).pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -418,7 +419,7 @@ const makeWikiOperationTools = ({
   defineServerTool({
     name: "wiki_restore_page",
     description:
-      "Restore one Wiki page to how it was at a time wiki_page_history lists, while preserving its current path. Read the current page first. A page that was merged into another comes back as its own page; give its old path. Asks by default.",
+      "Restore one Wiki page to how it was at a time wiki_page_history lists, while preserving its current path. Read the page or list its history first. A page that was merged into another comes back as its own page; give its old path. Asks by default.",
     parameters: Schema.toStandardSchemaV1(RestoreParametersSchema),
     metadata: {
       effect: "arden_db",
@@ -435,9 +436,7 @@ const makeWikiOperationTools = ({
     },
     execute: async (input, ctx, effects) => {
       const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record =
-        snapshot.pages.find((page) => page.resource.path === input.path) ??
-        activePage(snapshot, input.path)
+      const record = pageStoredAt(snapshot, input.path)
       if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
       // A merged page has no body to read; its stored version is the one to restore over.
