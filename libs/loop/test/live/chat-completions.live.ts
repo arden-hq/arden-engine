@@ -18,7 +18,11 @@ import { errorMessage } from "@arden-hq/std/errors"
 
 import { isAbortError } from "../../src/abort.js"
 import type { ChatMessage, StandardSchemaV1 } from "../../src/contracts/messages.js"
-import type { ModelProvider, ModelProviderRequest } from "../../src/contracts/provider.js"
+import {
+  usageInputTokens,
+  type ModelProvider,
+  type ModelProviderRequest
+} from "../../src/contracts/provider.js"
 import type { ToolDeclaration, ToolEntry, Toolset } from "../../src/contracts/tools.js"
 import { renderInteraction } from "../../src/agent/interactions.js"
 import { makeAgent, providerErrorCode } from "../../src/index.js"
@@ -187,8 +191,7 @@ const declarationOf = (entry: ToolEntry): ToolDeclaration => ({
 /** The whole prompt one request costs, cached or not. */
 const promptTokens = async (request: ModelProviderRequest): Promise<number> => {
   for await (const item of await chatCompletions.stream(request)) {
-    if (item._tag === "Completed")
-      return (item.usage.prompt_tokens ?? 0) + (item.usage.cache_read_tokens ?? 0)
+    if (item._tag === "Completed") return usageInputTokens(item.usage)
   }
   throw new Error("no completion")
 }
@@ -259,7 +262,13 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       let reasoning = ""
       let text = ""
       for await (const event of agentWith(noTools).stream([
-        { role: "user", content: "Think briefly, then answer: what is 17 * 3?" }
+        // A question a model reasons about at any effort: OpenRouter's Claude
+        // and GPT models skip thinking on "what is 17 * 3?" (2026-11-16).
+        {
+          role: "user",
+          content:
+            "A train leaves at 9:47 and arrives at 13:12 the same day. Work it out step by step, then answer with the trip length in minutes."
+        }
       ])) {
         if (!("_tag" in event)) continue
         if (event._tag === "ReasoningDelta") reasoning += event.content
@@ -267,7 +276,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       }
       check(reasoning.length > 0, "no reasoning deltas arrived")
       check(!text.includes(reasoning), "the reasoning leaked into the text")
-      check(/51/.test(text), `text was ${JSON.stringify(text)}`)
+      check(/205/.test(text), `text was ${JSON.stringify(text)}`)
       return `reasoning=${reasoning.length} chars text=${JSON.stringify(text)}`
     }
   ],
