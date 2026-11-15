@@ -227,7 +227,9 @@ export const makeDailySummaryRunner = (services: {
         const date = nextDay(settled)
         if (date >= today) return "idle" as const
         if (place.tries >= DAY_TRIES) {
-          notes.push(`daily/${date}.md was not written: its run did not finish in ${DAY_TRIES} jobs`)
+          notes.push(
+            `daily/${date}.md was not written: its run did not finish in ${DAY_TRIES} jobs`
+          )
           yield* services.position.advance({ from: settled, to: date })
           return "advance" as const
         }

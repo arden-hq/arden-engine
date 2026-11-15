@@ -1,11 +1,11 @@
 import { DateTime, Effect, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
 
 import { DAILY_SUMMARY_AUTOMATION_ID } from "../automations/model.js"
 import { DailySummaryPosition, DailySummaryPositionError } from "../daily-summary/store.js"
 import type { PersistenceDeps } from "./deps.js"
 
-const NAMESPACE = "daily_summary"
+/** Kept under the Automation's own id, so resuming it starts the position again. */
+const NAMESPACE = DAILY_SUMMARY_AUTOMATION_ID
 const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
 const StateJson = Schema.fromJsonString(
   Schema.Struct({ settledDay: Day, tries: Schema.optionalKey(Schema.Int) })
@@ -25,12 +25,6 @@ const failure =
           ...(cause === undefined ? {} : { cause })
         })
 
-/** A paused Daily Summary owes no pages for the days it was off: its position starts again. */
-export const restartDailySummaryPosition = (sql: SqlClient.SqlClient, automationId: string) =>
-  automationId === DAILY_SUMMARY_AUTOMATION_ID
-    ? sql`DELETE FROM monitor_state WHERE namespace = ${NAMESPACE}`.pipe(Effect.asVoid)
-    : Effect.void
-
 export const makeDailySummaryPosition = ({
   writer
 }: Pick<PersistenceDeps, "writer">): DailySummaryPosition["Service"] => {
@@ -43,9 +37,7 @@ export const makeDailySummaryPosition = ({
       Effect.mapError(failure(operation, "invalid", `Not a calendar day: ${state.settledDay}`))
     )
 
-  const current = Effect.fn("SqliteDailySummaryPosition.current")(function* (
-    startIfUnset: string
-  ) {
+  const current = Effect.fn("SqliteDailySummaryPosition.current")(function* (startIfUnset: string) {
     const state = yield* encode({ settledDay: startIfUnset }, "read")
     const at = DateTime.formatIso(yield* DateTime.now)
     yield* writer.run(
