@@ -172,3 +172,31 @@ export const renderCountTable = (results: ReadonlyArray<SentResult>): string => 
     cells.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join("  ")
   return [line(header), ...body.map(line)].join("\n")
 }
+
+/** How fully a question was sent: every expected page whole, some in part, or not sent. */
+const level = (result: Pick<SentResult, "sent" | "inPart">): 0 | 1 | 2 => {
+  if (!result.sent) return 0
+  return result.inPart.length > 0 ? 1 : 2
+}
+const LEVEL_NAMES = ["not sent", "sent in part", "sent whole"] as const
+
+export interface Regression {
+  readonly id: string
+  readonly was: (typeof LEVEL_NAMES)[number]
+  readonly now: (typeof LEVEL_NAMES)[number]
+}
+
+/** Questions sent less fully than in a baseline run: sent to not sent, or whole to in part. */
+export const regressionsFrom = (
+  baseline: ReadonlyArray<Pick<SentResult, "id" | "sent" | "inPart">>,
+  results: ReadonlyArray<SentResult>
+): ReadonlyArray<Regression> => {
+  const before = new Map(baseline.map((result) => [result.id, level(result)] as const))
+  return results.flatMap((result) => {
+    const was = before.get(result.id)
+    const now = level(result)
+    return was === undefined || now >= was
+      ? []
+      : [{ id: result.id, was: LEVEL_NAMES[was], now: LEVEL_NAMES[now] }]
+  })
+}

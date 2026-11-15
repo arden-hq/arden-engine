@@ -4,6 +4,7 @@ import { parseQuestions, type Question } from "../scripts/memory-test/questions.
 import {
   countByKind,
   deliveryOf,
+  regressionsFrom,
   renderCountTable,
   scoreSent
 } from "../scripts/memory-test/sent.js"
@@ -274,6 +275,33 @@ describe("sent score", () => {
     const table = renderCountTable(results)
     expect(table).not.toContain("Tidy my desk")
     expect(table).not.toContain("gardener")
+  })
+})
+
+describe("against a baseline", () => {
+  const ask = () => question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] })
+  const whole = scoreSent(ask(), recorded({ recalled: ["projects/garden.md"] }))
+  const inPart = scoreSent(
+    ask(),
+    recorded({ recalled: [["projects/garden.md", RENDERED_IN_PART]] })
+  )
+  const notSent = scoreSent(ask(), recorded({ recalled: ["projects/kitchen.md"] }))
+
+  it("fails a question sent less fully: sent to not sent, or whole to in part", () => {
+    expect(regressionsFrom([whole], [inPart])).toEqual([
+      { id: "q-test", was: "sent whole", now: "sent in part" }
+    ])
+    expect(regressionsFrom([inPart], [notSent])).toEqual([
+      { id: "q-test", was: "sent in part", now: "not sent" }
+    ])
+    expect(regressionsFrom([whole], [notSent])).toHaveLength(1)
+  })
+
+  it("passes a question sent as fully or more, and one the baseline did not have", () => {
+    expect(regressionsFrom([notSent], [inPart])).toEqual([])
+    expect(regressionsFrom([inPart], [whole])).toEqual([])
+    expect(regressionsFrom([whole], [whole])).toEqual([])
+    expect(regressionsFrom([], [notSent])).toEqual([])
   })
 })
 

@@ -6,16 +6,18 @@
 // sent. Writes the results beside the question file, never in the
 // repository, and prints counts by kind only.
 //
-// Run it with `just memory-test-sent <question file> <replay folder>`. It runs under vitest,
+// Run it with `just memory-test-sent <question file> <replay folder> [--baseline <results file>]`.
+// With a baseline it fails when any question is sent less fully than there: sent to not sent,
+// or whole to in part. It runs under vitest,
 // which resolves the engine's TypeScript sources, and opens the copy only through
 // test/fixtures/replay-copy.ts: no server, no scheduler, no model, and `fetch` refuses.
 //
 // Semantic recall is off: matching by meaning embeds the question with the local embedding
 // model, which is a model call. Recall here is by words.
 
-import { existsSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { Effect, Layer, References } from "effect"
+import { Effect, Layer, References, Schema } from "effect"
 import { it } from "vitest"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { prefetchTurnMemory } from "../src/context/turn-context.js"
@@ -29,7 +31,13 @@ import { WorkStore } from "../src/persistence/work/store.js"
 import { Wiki, wikiLayer } from "../src/wiki/service.js"
 import { runOnReplayCopy } from "../test/fixtures/replay-copy.js"
 import { memoryTestFiles } from "./memory-test/questions.js"
-import { deliveryOf, renderCountTable, scoreSent, type SentResult } from "./memory-test/sent.js"
+import {
+  deliveryOf,
+  regressionsFrom,
+  renderCountTable,
+  scoreSent,
+  type SentResult
+} from "./memory-test/sent.js"
 
 const SEMANTIC_RECALL = "off: matching by meaning needs the local embedding model"
 
@@ -39,7 +47,38 @@ const required = (name: string): string => {
   return value
 }
 
+const BaselineFile = Schema.fromJsonString(
+  Schema.Struct({
+    results: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        sent: Schema.Boolean,
+        inPart: Schema.Array(Schema.String)
+      })
+    )
+  })
+)
+
+/** The results file named by `--baseline <file>` in the flags, if any. */
+const baselineOf = (flags: string): string | undefined => {
+  const words = flags.split(/\s+/u).filter(Boolean)
+  const at = words.indexOf("--baseline")
+  if (at < 0) {
+    if (words.length > 0) throw new Error(`Unknown flags: ${flags}`)
+    return undefined
+  }
+  const file = words[at + 1]
+  if (file === undefined || words.length !== 2)
+    throw new Error("Use --baseline <results file>, and nothing else")
+  return file
+}
+
 it("scores whether a new chat is sent the pages that answer each question", async () => {
+  const baselineFile = baselineOf(process.env.ARDEN_MEMORY_TEST_FLAGS ?? "")
+  const baseline =
+    baselineFile === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(BaselineFile)(readFileSync(baselineFile, "utf8")).results
   const files = memoryTestFiles({
     questions: required("ARDEN_MEMORY_TEST_QUESTIONS"),
     copy: required("ARDEN_REPLAY_COPY")
@@ -120,13 +159,24 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
     { mode: 0o600 }
   )
   // Vitest swallows console output here; a direct write reaches the terminal.
+  const regressions = baseline === undefined ? [] : regressionsFrom(baseline, results)
   process.stdout.write(
     [
       "",
       `Sent: every expected page in what a new chat is sent. Semantic recall ${SEMANTIC_RECALL}.`,
       renderCountTable(results),
       `Results: ${resultFile}`,
+      ...(baselineFile === undefined
+        ? []
+        : [
+            `Against ${baselineFile}: ${regressions.length === 0 ? "no question is sent less fully." : `${regressions.length} sent less fully:`}`,
+            ...regressions.map(
+              (regression) => `  ${regression.id}: ${regression.was} to ${regression.now}`
+            )
+          ]),
       ""
     ].join("\n")
   )
+  if (regressions.length > 0)
+    throw new Error(`${regressions.length} questions are sent less fully than the baseline`)
 }, 3_600_000)
