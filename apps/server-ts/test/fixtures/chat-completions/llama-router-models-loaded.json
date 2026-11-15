@@ -1,0 +1,76 @@
+{
+  "data": [
+    {
+      "id": "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
+      "aliases": [],
+      "tags": [
+        "chat"
+      ],
+      "object": "model",
+      "owned_by": "llamacpp",
+      "created": 1794771583,
+      "status": {
+        "value": "loaded",
+        "args": [
+          "/opt/homebrew/Cellar/llama.cpp/1.0.0/bin/llama",
+          "serve",
+          "--host",
+          "127.0.0.1",
+          "--log-colors",
+          "off",
+          "--port",
+          "64179",
+          "--sleep-idle-seconds",
+          "300",
+          "--spec-default",
+          "--model-draft",
+          "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/mtp-gemma-4-E2B-it-Q8_0.gguf",
+          "--spec-draft-n-max",
+          "3",
+          "--spec-type",
+          "draft-mtp",
+          "--tags",
+          "chat",
+          "--alias",
+          "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
+          "--ctx-size",
+          "4096",
+          "--fit-target",
+          "1024",
+          "--model",
+          "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf",
+          "--mmproj",
+          "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/mmproj-gemma-4-E2B-it-Q8_0.gguf",
+          "--ubatch-size",
+          "2048"
+        ],
+        "preset": "[ggml-org/gemma-4-E2B-it-GGUF:Q8_0]\nlog-colors = off\nsleep-idle-seconds = 300\nspec-default = 1\nmodel-draft = /Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/mtp-gemma-4-E2B-it-Q8_0.gguf\nspec-draft-n-max = 3\nspec-type = draft-mtp\nctx-size = 4096\nfit-target = 1024\nmodel = /Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf\nmmproj = /Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/mmproj-gemma-4-E2B-it-Q8_0.gguf\nubatch-size = 2048\n\n"
+      },
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "source": "preset",
+      "can_remove": false,
+      "context_length": 131072,
+      "meta": {
+        "vocab_type": 2,
+        "n_vocab": 262144,
+        "n_ctx": 4096,
+        "n_ctx_train": 131072,
+        "n_embd": 1536,
+        "n_params": 4647450147,
+        "size": 4951677068,
+        "ftype": "Q8_0"
+      }
+    }
+  ],
+  "object": "list"
+}

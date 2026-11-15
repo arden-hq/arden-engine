@@ -52,6 +52,33 @@ it("a settings file is refused with the reason when it cannot be applied", () =>
   expect(parseSettings(base)).toEqual(base)
 })
 
+it("a chat-completions provider needs only what its server does not report", () => {
+  const base = { dataDirectory: "/tmp/arden-settings" }
+  const provider = (fields: Record<string, string>) => ({
+    ...base,
+    provider: { kind: "chat-completions", baseUrl: "http://127.0.0.1:9931/v1", ...fields }
+  })
+  // llama.cpp lists its models and windows; an absent server is detected at start.
+  expect(parseSettings(provider({ server: "llama.cpp" }))).toEqual(
+    provider({ server: "llama.cpp" })
+  )
+  expect(parseSettings(provider({}))).toEqual(provider({}))
+  expect(() => parseSettings(provider({ server: "openrouter" }))).toThrow(
+    /^Invalid settings: a `chat-completions` provider on openrouter needs `model`$/
+  )
+  expect(() => parseSettings({ ...provider({ server: "generic" }), model: "m" })).toThrow(
+    /^Invalid settings: a `chat-completions` provider on a generic server needs `model` and `contextLimit`$/
+  )
+  expect(() => parseSettings(provider({ server: "vllm" }))).toThrow(/server/)
+  // The same address rule as `responses`: a conversation leaves this machine only over HTTPS.
+  expect(() =>
+    parseSettings({
+      ...base,
+      provider: { kind: "chat-completions", baseUrl: "http://10.0.0.2:8080/v1" }
+    })
+  ).toThrow(/HTTPS or loopback/)
+})
+
 it("the offered tools are the allow-list, or the catalog minus the block-list", () => {
   expect(offeredTools({}, catalog)).toBeUndefined()
   expect([...(offeredTools({ tools: ["exec_command"] }, catalog) ?? [])]).toEqual(["exec_command"])

@@ -1,0 +1,126 @@
+{
+  "data": [
+    {
+      "id": "gemma-32k",
+      "aliases": [],
+      "tags": [],
+      "object": "model",
+      "owned_by": "llamacpp",
+      "created": 1794771730,
+      "status": {
+        "value": "unloaded",
+        "args": [
+          "/opt/homebrew/Cellar/llama.cpp/1.0.0/bin/llama-server",
+          "--host",
+          "127.0.0.1",
+          "--log-colors",
+          "off",
+          "--port",
+          "0",
+          "--no-webui",
+          "--alias",
+          "gemma-32k",
+          "--ctx-size",
+          "32768",
+          "--model",
+          "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf"
+        ],
+        "preset": "[gemma-32k]\nlog-colors = off\nwebui = 0\nctx-size = 32768\nmodel = /Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf\n\n"
+      },
+      "architecture": {
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "source": "preset",
+      "can_remove": false,
+      "context_length": 131072
+    },
+    {
+      "id": "gemma-8k",
+      "aliases": [],
+      "tags": [],
+      "object": "model",
+      "owned_by": "llamacpp",
+      "created": 1794771730,
+      "status": {
+        "value": "unloaded",
+        "args": [
+          "/opt/homebrew/Cellar/llama.cpp/1.0.0/bin/llama-server",
+          "--host",
+          "127.0.0.1",
+          "--log-colors",
+          "off",
+          "--port",
+          "0",
+          "--no-webui",
+          "--alias",
+          "gemma-8k",
+          "--ctx-size",
+          "8192",
+          "--model",
+          "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf"
+        ],
+        "preset": "[gemma-8k]\nlog-colors = off\nwebui = 0\nctx-size = 8192\nmodel = /Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf\n\n"
+      },
+      "architecture": {
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "source": "preset",
+      "can_remove": false,
+      "context_length": 131072
+    },
+    {
+      "id": "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
+      "aliases": [],
+      "tags": [],
+      "object": "model",
+      "owned_by": "llamacpp",
+      "created": 1794771730,
+      "status": {
+        "value": "unloaded",
+        "args": [
+          "/opt/homebrew/Cellar/llama.cpp/1.0.0/bin/llama-server",
+          "--host",
+          "127.0.0.1",
+          "--log-colors",
+          "off",
+          "--port",
+          "0",
+          "--no-webui",
+          "--alias",
+          "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
+          "--hf-repo",
+          "ggml-org/gemma-4-E2B-it-GGUF:Q8_0"
+        ],
+        "preset": "[ggml-org/gemma-4-E2B-it-GGUF:Q8_0]\nlog-colors = off\nwebui = 0\nhf-repo = ggml-org/gemma-4-E2B-it-GGUF:Q8_0\n\n"
+      },
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image",
+          "audio"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "source": "cache",
+      "can_remove": true,
+      "context_length": 131072,
+      "sidecars": [
+        "mmproj",
+        "mtp"
+      ]
+    }
+  ],
+  "object": "list"
+}

@@ -1,0 +1,61 @@
+{
+  "models": [
+    {
+      "name": "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf",
+      "model": "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf",
+      "modified_at": "",
+      "size": "",
+      "digest": "",
+      "type": "model",
+      "description": "",
+      "tags": [
+        ""
+      ],
+      "capabilities": [
+        "completion"
+      ],
+      "parameters": "",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "",
+        "families": [
+          ""
+        ],
+        "parameter_size": "",
+        "quantization_level": ""
+      }
+    }
+  ],
+  "object": "list",
+  "data": [
+    {
+      "id": "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf",
+      "aliases": [
+        "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf"
+      ],
+      "tags": [],
+      "object": "model",
+      "architecture": {
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "created": 1794771760,
+      "owned_by": "llamacpp",
+      "meta": {
+        "vocab_type": 2,
+        "n_vocab": 262144,
+        "n_ctx": 2048,
+        "n_ctx_train": 131072,
+        "n_embd": 1536,
+        "n_params": 4647450147,
+        "size": 4951677068,
+        "ftype": "Q8_0"
+      }
+    }
+  ]
+}

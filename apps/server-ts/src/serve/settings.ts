@@ -4,6 +4,10 @@ import { serverUrlIssue, type ServerUrlIssue } from "@arden-hq/std/url"
 import { Schema } from "effect"
 import { readFile } from "node:fs/promises"
 import { isAbsolute } from "node:path"
+import {
+  CHAT_COMPLETIONS_SERVERS,
+  type ChatCompletionsServer
+} from "../providers/chat-completions/discovery.js"
 
 const text = Schema.String.check(Schema.isMinLength(1))
 const positive = Schema.Int.check(Schema.isGreaterThan(0))
@@ -28,6 +32,20 @@ const ProviderSchema = Schema.Union([
     kind: Schema.Literal("codex"),
     accessTokenEnv: text,
     accountIdEnv: Schema.optionalKey(text)
+  }),
+  /**
+   * Any endpoint that speaks the OpenAI Chat Completions API: llama.cpp's
+   * `llama-server`, OpenRouter, or another. A local server needs no key.
+   * `server` says which, for what it can tell about a model; absent, it is
+   * detected at start (`detectServer`). `llama.cpp` and `openrouter` report
+   * the window and what the model can do; `generic` needs `model` and
+   * `contextLimit`.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("chat-completions"),
+    baseUrl: text,
+    apiKeyEnv: Schema.optionalKey(text),
+    server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS))
   }),
   /** The Codex sign-in on this machine (`codex login`). The default. */
   Schema.Struct({ kind: Schema.Literal("codex-login") })
@@ -56,12 +74,15 @@ const SettingsSchema = Schema.Struct({
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(65535))
   ),
   provider: Schema.optionalKey(ProviderSchema),
-  /** The chat model. Required for a `responses` provider, which has no catalog.
-   *  When given, the server lists only this model and `extraModels`. */
+  /** The chat model. Required for a `responses` provider, which has no catalog,
+   *  and for a `chat-completions` one on OpenRouter or a generic server. A
+   *  llama.cpp server with one model may leave it out. When given, the server
+   *  lists only this model and `extraModels`. */
   model: Schema.optionalKey(text),
   reasoningEffort: Schema.optionalKey(text),
-  /** Context window in tokens. Required for a `responses` provider; for a
-   *  Codex model it may only lower the model's own limit. */
+  /** Context window in tokens. Required for a `responses` provider and a
+   *  generic `chat-completions` one. Where the provider reports the model's
+   *  own window (Codex, llama.cpp, OpenRouter) it may only lower it. */
   contextLimit: Schema.optionalKey(positive),
   /** More models listed beside `model`, for the main model to give a sub-agent. */
   extraModels: Schema.optionalKey(names),
@@ -176,17 +197,50 @@ export const parseSettings = (value: unknown): Settings => {
       throw new SettingsError(
         `Invalid settings: \`${field}\` must be \`model\` or one of \`extraModels\``
       )
-  if (settings.provider?.kind === "responses") {
-    // A key goes only to an HTTPS endpoint or to this machine.
-    const issue = serverUrlIssue(settings.provider.baseUrl)
+  const provider = settings.provider
+  if (provider !== undefined && "baseUrl" in provider) {
+    // A key, and a conversation, go only to an HTTPS endpoint or to this machine.
+    const issue = serverUrlIssue(provider.baseUrl)
     if (issue !== undefined)
       throw new SettingsError(`Invalid settings: \`provider.baseUrl\` ${BASE_URL_ISSUES[issue]}`)
-    if (settings.model === undefined || settings.contextLimit === undefined)
-      throw new SettingsError(
-        "Invalid settings: a `responses` provider needs `model` and `contextLimit`"
-      )
   }
+  if (provider?.kind === "responses")
+    requireFields(settings, "a `responses` provider", ["model", "contextLimit"])
+  // An absent `server` is checked once it is detected, by the same rule.
+  if (provider?.kind === "chat-completions" && provider.server !== undefined)
+    requireServerFields(settings, provider.server)
   return settings
+}
+
+type ModelField = "model" | "contextLimit"
+
+/**
+ * What a `chat-completions` provider needs from the settings: what its server
+ * does not report. llama.cpp lists its models and their windows; OpenRouter
+ * lists windows for hundreds of models, so the settings pick one.
+ */
+const SERVER_NEEDS: Record<ChatCompletionsServer, ReadonlyArray<ModelField>> = {
+  "llama.cpp": [],
+  openrouter: ["model"],
+  generic: ["model", "contextLimit"]
+}
+
+export const requireServerFields = (settings: Settings, server: ChatCompletionsServer): void =>
+  requireFields(
+    settings,
+    `a \`chat-completions\` provider on ${server === "generic" ? "a generic server" : server}`,
+    SERVER_NEEDS[server]
+  )
+
+const requireFields = (
+  settings: Settings,
+  who: string,
+  fields: ReadonlyArray<ModelField>
+): void => {
+  if (fields.some((field) => settings[field] === undefined))
+    throw new SettingsError(
+      `Invalid settings: ${who} needs ${fields.map((field) => `\`${field}\``).join(" and ")}`
+    )
 }
 
 export const readSettings = async (path: string): Promise<Settings> => {
