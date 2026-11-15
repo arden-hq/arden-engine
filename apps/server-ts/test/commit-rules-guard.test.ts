@@ -19,7 +19,7 @@ it("makes the upkeep writer only through its constructor", () => {
   expect(naming(/\bupkeepOrigin\(/u)).toEqual(["tools/wiki-identity.ts", "wiki/commit.ts"])
 })
 
-it("decides what a writer may do only at the commit point", () => {
+it("reads a writer's kind only at the commit point (its Space boundary is still checked in each write path)", () => {
   const wiki = (paths: ReadonlyArray<string>) => paths.filter((path) => path.startsWith("wiki/"))
   expect(wiki(naming(/\.origin\.kind\b/u))).toEqual(["wiki/commit.ts"])
   expect(naming(/from "\.\/commit\.js"/u)).not.toContain("wiki/write-rules.ts")
