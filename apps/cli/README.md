@@ -72,16 +72,17 @@ Checked on 2026-11-16 with llama.cpp b12359 and Gemma 4 E2B (Q8_0) on an Apple-s
 
 llama.cpp names a model by its file path unless `llama-server --alias <name>` gives it a name; `arden models` prints the id either way. OpenRouter needs its key variable and a model: `"provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini"`.
 
-What each failure says, checked the same day:
+What each failure says, checked on 2026-11-16 (llama.cpp b12359):
 
 | Case | Exit | Message |
 | --- | --- | --- |
-| `llama-server` not running at start (`exec`, `serve`) | 2 | `Cannot reach http://127.0.0.1:8080/props: fetch failed` |
+| `llama-server` not running at start (`exec`, `serve`) | 3 | `provider_unavailable`: ``The model server at http://127.0.0.1:8080/v1 (`provider.baseUrl`) did not answer: cannot reach http://127.0.0.1:8080/props: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)`` |
 | `model` not on the llama.cpp server | 2 | `Model is not on the llama.cpp server: <id> (it lists: <ids>)` |
 | `server: "generic"` without `contextLimit` | 2 | ``Invalid settings: a `chat-completions` provider on a generic server needs `model` and `contextLimit` `` |
-| `apiKeyEnv` names an unset variable | 2 | `Missing environment variable <NAME>` |
+| `apiKeyEnv` names an unset variable | 2 | ``Missing environment variable <NAME>, named by `provider.apiKeyEnv` `` |
+| `baseUrl` with a query (`…/v1?api_key=…`) or a fragment | 2 | ``Invalid settings: `provider.baseUrl` must not contain a query: a request path is appended to it`` |
 | prompt larger than the model's window | 1 | `context_length_exceeded`: `Your input exceeds this model's context window. …` |
-| `llama-server` stopped after the start | 1 | `provider_unavailable`: `fetch failed` |
+| `llama-server` stopped after the start | 1 | `provider_unavailable`: `llama.cpp: cannot reach http://127.0.0.1:8080/v1/chat/completions: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)` |
 | `--model` the server does not list (`run`) | 2 | `This server has no model <id>. It lists: <ids>` |
 
 ## Layout
