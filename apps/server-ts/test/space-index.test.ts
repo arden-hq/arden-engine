@@ -15,6 +15,7 @@ import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import { commitWiki } from "../src/wiki/commit.js"
 import {
+  bindingOwnsPath,
   planSpacePage,
   spaceBinding,
   spaceOwnsPath,
@@ -115,6 +116,30 @@ describe("which pages a Space owns", () => {
       10_000
     )
     expect(own.lines.map((line) => line.path)).toEqual(["areas/kitchen/pans.md"])
+  })
+})
+
+describe("a half-made binding", () => {
+  it("is any binding whose page column is missing or whose path does not read", () => {
+    const kinds = [
+      { space_id: "a", page_id: "page-a", page_path: "areas/garden.md" },
+      { space_id: "a", page_id: "page-a", page_path: null },
+      { space_id: "a", page_id: null, page_path: "areas/garden.md" },
+      { space_id: "a", page_id: "page-a", page_path: "../garden.md" },
+      { space_id: "a", page_id: "page-a", page_path: "areas//garden.md" }
+    ].map((row) => spaceBinding(row).kind)
+    expect(kinds).toEqual(["bound", "half_made", "half_made", "half_made", "half_made"])
+  })
+
+  it("owns every path, so nothing is written where its pages might be", () => {
+    const halfMade = [
+      spaceBinding({ space_id: "a", page_id: "page-a", page_path: null }),
+      spaceBinding({ space_id: "a", page_id: "page-a", page_path: "../garden.md" })
+    ]
+    const bound = binding("b", "areas/garden.md")
+    expect(halfMade.map((one) => bindingOwnsPath(one, "people/sam.md"))).toEqual([true, true])
+    expect(bindingOwnsPath(bound, "areas/garden/beds.md")).toBe(true)
+    expect(bindingOwnsPath(bound, "people/sam.md")).toBe(false)
   })
 })
 

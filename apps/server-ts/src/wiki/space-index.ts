@@ -69,7 +69,7 @@ export const freeSpacePage = (
   heldByAnother(others, page.pageId, page.pagePath) ? undefined : (page as FreeSpacePage)
 
 const isBoundPage = (
-  bindings: ReadonlyArray<SpaceBindingRow>,
+  bindings: ReadonlyArray<SpaceBinding>,
   pageId: string,
   path: string
 ): boolean => bindings.some((binding) => binding.page_id === pageId || binding.page_path === path)
@@ -88,7 +88,7 @@ export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
 
 /** Whether the page is an active Space's own page. */
 export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
-  spaces.activeBindings().pipe(Effect.map((rows) => isBoundPage(rows, pageId, path)))
+  activeSpaceBindings(spaces).pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
 
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
