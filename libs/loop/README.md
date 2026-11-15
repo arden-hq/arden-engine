@@ -117,11 +117,11 @@ One implementation per concern, in the kit, so every adapter behaves the same:
 
 ### Origin and replay
 
-Every assistant answer carries `origin: { provider, api, model }`: who served it, which wire, and the model that actually answered (a router can answer with another model than the one requested). The loop persists it untouched beside `provider_state`.
+Every assistant answer carries `origin: { provider, api, model, requested_model }`: who served it, which wire, the model that actually answered, and the model ID the request named. They differ on a router: `openrouter/auto` answers with a model of its choice, and OpenRouter names `anthropic/claude-haiku-5.5` in every chunk of an answer to `anthropic/claude-haiku-5.5:nitro`. The loop persists it untouched beside `provider_state`.
 
 An adapter reads both to decide what it sends back on a later request:
 
-- Chat Completions sends a stored `provider_state["chat-completions"].reasoning_details` back only when the turn's origin matches this provider id, this wire and the request's model (`sameOrigin`). Encrypted reasoning and signatures are bound to the issuer and model that wrote them; every reference agent drops them on a mismatch. Plain reasoning text is never sent back in `content`.
+- Chat Completions sends a stored `provider_state["chat-completions"].reasoning_details` back only on the route that wrote it: this provider id, this wire and the same requested model ID (`sameRoute`). OpenRouter's docs ask for the details back unmodified so a model keeps its reasoning across tool calls; signatures are bound to the model that wrote them, so a model switch drops them, as every reference agent does. Checked on OpenRouter on 2026-11-16 with Claude Haiku 5.5, Gemini 3.1 Flash Lite and GPT-6 Luna: a tool loop continued with the details and without them. Plain reasoning text is never sent back in `content`.
 - Responses still replays its own `provider_state` whatever the origin. Whether OpenAI accepts encrypted reasoning across models is an open question; the stamp is there for when it is decided.
 - A tool search crosses wires through its provider-neutral record. Chat Completions replays any search (its own or one Responses answered) as a call to `tool_search` plus a `tool` message with the stored `result`. Responses replays a search another wire answered as native `tool_search_call` / `tool_search_output` items, the tools looked up by `loaded_tool_names`; a turn Responses wrote itself without its stored items is still refused, since it cannot be rebuilt. Other provider calls (a hosted web search) have no form on the other wire; their results reached the model as the turn's text.
 

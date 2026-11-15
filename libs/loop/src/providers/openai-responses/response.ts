@@ -214,7 +214,12 @@ export const makeEventMapper = ({
   readonly providerId: string
 }): ((event: RawResponseEvent) => ReadonlyArray<ModelStreamItem>) => {
   let answeredBy = requestedModel
-  const origin = (): MessageOrigin => ({ provider: providerId, api: API, model: answeredBy })
+  const origin = (): MessageOrigin => ({
+    provider: providerId,
+    api: API,
+    model: answeredBy,
+    requested_model: requestedModel
+  })
   const items: Array<OutputItem> = []
   const functionCallsByIndex = new Map<number, string>()
   const citationFilter = new OpenAiCitationFilter()

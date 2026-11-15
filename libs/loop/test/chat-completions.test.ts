@@ -167,7 +167,12 @@ describe("Chat Completions stream mapping", () => {
             { type: "tool_call", tool_call_id: "Z7zb", execution: "runtime" },
             { type: "tool_call", tool_call_id: "gQg6", execution: "runtime" }
           ],
-          origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+          origin: {
+            provider: "llama.cpp",
+            api: "chat-completions",
+            model: GEMMA,
+            requested_model: GEMMA
+          }
         },
         finish_reason: "tool_calls",
         usage: {
@@ -214,7 +219,12 @@ describe("Chat Completions stream mapping", () => {
           tool_calls: [call("whole")],
           reasoning_content: null,
           output_parts: [{ type: "tool_call", tool_call_id: "whole", execution: "runtime" }],
-          origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+          origin: {
+            provider: "llama.cpp",
+            api: "chat-completions",
+            model: GEMMA,
+            requested_model: GEMMA
+          }
         },
         finish_reason: "length",
         usage: {
@@ -658,7 +668,12 @@ describe("OpenRouter reasoning_details", () => {
           { type: "text", text: "Done." }
         ],
         provider_state: { "chat-completions": { reasoning_details: details } },
-        origin: { provider: "openrouter", api: "chat-completions", model: "openai/gpt-5-mini" }
+        origin: {
+          provider: "openrouter",
+          api: "chat-completions",
+          model: "openai/gpt-5-mini",
+          requested_model: "openai/gpt-5-mini"
+        }
       },
       finish_reason: "stop",
       usage: {
@@ -699,6 +714,113 @@ describe("OpenRouter reasoning_details", () => {
       { role: "assistant", content: "Done." },
       { role: "assistant", content: "Done." }
     ])
+  })
+
+  /**
+   * Cut from a real stream (2026-11-16): Claude Haiku 5.5 thinking before a
+   * tool call, asked as `anthropic/claude-haiku-5.5:nitro`. Every chunk names
+   * the model without the variant suffix, so the answering model never equals
+   * the requested ID; replay must key on the requested one.
+   */
+  it("replays Claude's signed thinking to the same requested model, whatever model the chunks name", async () => {
+    const claude = "anthropic/claude-haiku-5.5"
+    const nitro = `${claude}:nitro`
+    const chunk = (delta: unknown, finish: string | null = null) => ({
+      id: "gen-1794783488-ieTU1vJr5cK7obkeT6IG",
+      object: "chat.completion.chunk",
+      created: 1794783488,
+      model: claude,
+      provider: "Claude Platform on AWS",
+      choices: [{ index: 0, delta, finish_reason: finish, native_finish_reason: null }]
+    })
+    const claudeFormat = "anthropic-claude-v1"
+    const thinking = {
+      type: "reasoning.text",
+      text: "I'm comparing the city-proper populations.",
+      format: claudeFormat,
+      index: 0,
+      signature: "CAQSsQsKEAgTGAI4AUIIdGhpbmtpbmcSDM87ubSpLWuDWL6Oehoa"
+    }
+    const router = provider(
+      [
+        () =>
+          sseResponse([
+            chunk({
+              content: "",
+              role: "assistant",
+              reasoning: "I'm comparing the city",
+              reasoning_details: [
+                {
+                  type: "reasoning.text",
+                  text: "I'm comparing the city",
+                  format: claudeFormat,
+                  index: 0
+                }
+              ]
+            }),
+            chunk({
+              reasoning: "-proper populations.",
+              reasoning_details: [
+                {
+                  type: "reasoning.text",
+                  text: "-proper populations.",
+                  format: claudeFormat,
+                  index: 0
+                }
+              ]
+            }),
+            chunk({
+              reasoning_details: [
+                {
+                  type: "reasoning.text",
+                  signature: thinking.signature,
+                  format: claudeFormat,
+                  index: 0
+                }
+              ]
+            }),
+            chunk({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "toolu_01WYJTGCTKXaWEYTCuggotAr",
+                  type: "function",
+                  function: { name: "weather", arguments: "" }
+                }
+              ]
+            }),
+            chunk({ tool_calls: [{ index: 0, function: { arguments: '{"city": "Berlin"}' } }] }),
+            chunk({}, "tool_calls"),
+            "[DONE]"
+          ]),
+        answered("Sunny."),
+        answered("Sunny.")
+      ],
+      { providerId: "openrouter", baseUrl: "https://openrouter.ai/api/v1" }
+    )
+    const completed = completionOf(
+      await collect(router.provider.stream(request({ model: nitro, tools: [weather] })))
+    )
+    expect(completed.message.origin).toEqual({
+      provider: "openrouter",
+      api: "chat-completions",
+      model: claude,
+      requested_model: nitro
+    })
+    expect(completed.message.provider_state).toEqual({
+      "chat-completions": { reasoning_details: [thinking] }
+    })
+    const messages: ReadonlyArray<ChatMessage> = [
+      { role: "user", content: "Q" },
+      completed.message,
+      { role: "tool", tool_call_id: "toolu_01WYJTGCTKXaWEYTCuggotAr", content: "Sunny, 21C" }
+    ]
+    await collect(router.provider.stream(request({ model: nitro, tools: [weather], messages })))
+    await collect(router.provider.stream(request({ model: claude, tools: [weather], messages })))
+    const replayed = router.transport.requests
+      .slice(1)
+      .map((sent) => recordOf((sentMessages(sent.body) as ReadonlyArray<unknown>)[1]))
+    expect(replayed.map((message) => message.reasoning_details)).toEqual([[thinking], undefined])
   })
 })
 
@@ -939,7 +1061,7 @@ it("persists the origin through a makeAgent run and decodes it back", async () =
     role: "assistant",
     content: "Hi there.",
     output_parts: [{ type: "text", text: "Hi there." }],
-    origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+    origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA, requested_model: GEMMA }
   })
   expect(decodeMessage(JSON.parse(JSON.stringify(assistant)))).toEqual(assistant)
   expect(() => decodeMessage({ ...assistant, origin: { provider: "llama.cpp" } })).toThrow()
@@ -1046,7 +1168,12 @@ describe("Chat Completions client tool search", () => {
               source_refs: []
             }
           ],
-          origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+          origin: {
+            provider: "llama.cpp",
+            api: "chat-completions",
+            model: GEMMA,
+            requested_model: GEMMA
+          }
         },
         finish_reason: "stop",
         usage: {
@@ -1108,7 +1235,12 @@ describe("Chat Completions client tool search", () => {
           source_refs: []
         }
       ],
-      origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+      origin: {
+        provider: "llama.cpp",
+        api: "chat-completions",
+        model: GEMMA,
+        requested_model: GEMMA
+      }
     })
   })
 
@@ -1225,7 +1357,12 @@ describe("Chat Completions client tool search", () => {
         { type: "tool_call", tool_call_id: "tsc_1", execution: "provider" }
       ],
       provider_state: { "openai-responses": [{ type: "tool_search_call", id: "tsc_1" }] },
-      origin: { provider: "openai", api: "openai-responses", model: "gpt-5.4" }
+      origin: {
+        provider: "openai",
+        api: "openai-responses",
+        model: "gpt-5.4",
+        requested_model: "gpt-5.4"
+      }
     }
     const { provider: cc, transport } = provider([answered("Ok."), answered("Ok.")])
     await collect(
@@ -1297,7 +1434,12 @@ describe("Chat Completions client tool search", () => {
           source_refs: []
         }
       ],
-      origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+      origin: {
+        provider: "llama.cpp",
+        api: "chat-completions",
+        model: GEMMA,
+        requested_model: GEMMA
+      }
     }
     const transport = scriptedFetch([
       () =>
@@ -1353,7 +1495,12 @@ describe("Chat Completions client tool search", () => {
 
     const ownTurnWithoutItems: AssistantMessage = {
       ...chatTurn,
-      origin: { provider: "openai", api: "openai-responses", model: "gpt-5.4" }
+      origin: {
+        provider: "openai",
+        api: "openai-responses",
+        model: "gpt-5.4",
+        requested_model: "gpt-5.4"
+      }
     }
     expect(() =>
       responses.stream(

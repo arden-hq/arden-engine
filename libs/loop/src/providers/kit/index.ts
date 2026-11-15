@@ -14,7 +14,7 @@ export {
   RetryableProviderError,
   SemanticResponseError
 } from "./errors.js"
-export { sameOrigin } from "./origin.js"
+export { sameRoute, type MessageRoute } from "./origin.js"
 export {
   classifyRejection,
   httpRejection,

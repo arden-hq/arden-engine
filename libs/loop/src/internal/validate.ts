@@ -40,7 +40,8 @@ const isMessageOrigin = (value: unknown): value is MessageOrigin =>
   isRecord(value) &&
   typeof value.provider === "string" &&
   typeof value.api === "string" &&
-  typeof value.model === "string"
+  typeof value.model === "string" &&
+  typeof value.requested_model === "string"
 
 const checkInteraction = (value: unknown): void => {
   if (!isRecord(value)) fail("messages", "interaction must be an object")
@@ -178,7 +179,7 @@ const checkMessage = (value: unknown): void => {
         fail("messages", "output_parts must contain valid ordered assistant parts")
       }
       if ("origin" in message && !isMessageOrigin(message.origin)) {
-        fail("messages", "origin must name a provider, api and model")
+        fail("messages", "origin must name a provider, api, model and requested_model")
       }
       return
     }
@@ -441,7 +442,7 @@ const checkCompletion = (value: Record<string, unknown>): CompletionResponse => 
     invalidItem("provider_state must be an object")
   }
   if (message.origin !== undefined && !isMessageOrigin(message.origin)) {
-    invalidItem("origin must name a provider, api and model")
+    invalidItem("origin must name a provider, api, model and requested_model")
   }
   if (value.finish_reason !== null && !finishReasons.has(value.finish_reason)) {
     invalidItem(`unknown finish_reason: ${String(value.finish_reason)}`)

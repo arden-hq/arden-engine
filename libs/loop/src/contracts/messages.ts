@@ -268,13 +268,20 @@ export interface ProviderToolCall {
  * Who produced an assistant turn: `provider` names who served it (`"openai"`,
  * `"openrouter"`, `"llama.cpp"`), `api` the wire (`"openai-responses"`,
  * `"chat-completions"`), `model` the model that actually answered, as the
- * server reported it (a router can answer with another model than requested).
- * The loop persists it untouched beside `provider_state`.
+ * server reported it, and `requested_model` the model ID the request named.
+ * Both are kept because they differ: a router answers `openrouter/auto` with
+ * a model of its choice, and OpenRouter names `anthropic/claude-haiku-5.5`
+ * in every chunk of an answer to `anthropic/claude-haiku-5.5:nitro` (live,
+ * 2026-11-16). `model` is what wrote the turn; `requested_model` is the route
+ * a later request must name to reach the same writer, which is what replay
+ * rules compare (`sameRoute`). The loop persists it untouched beside
+ * `provider_state`.
  */
 export interface MessageOrigin {
   readonly provider: string
   readonly api: string
   readonly model: string
+  readonly requested_model: string
 }
 
 /**

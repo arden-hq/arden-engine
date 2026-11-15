@@ -270,7 +270,8 @@ export const makeChunkMapper = (options: {
     const origin: MessageOrigin = {
       provider: options.providerId,
       api: API,
-      model: answeredBy ?? options.requestedModel
+      model: answeredBy ?? options.requestedModel,
+      requested_model: options.requestedModel
     }
     const replay = [...details].sort(([left], [right]) => left - right).map(([, detail]) => detail)
     const completed: CompletionResponse = {
