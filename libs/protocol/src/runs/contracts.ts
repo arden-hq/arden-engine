@@ -177,6 +177,9 @@ export interface RunMemoryContext extends JsonRecord {
   readonly sources: ReadonlyArray<RunMemorySource>
 }
 
+/** A composition as it is written now: every new one names its budget. */
+export type RunMemoryComposition = RunMemoryContext & { readonly budget: RunMemoryBudget }
+
 /** Durable, restart-safe projection of one Run. */
 export interface RunDetail extends JsonRecord {
   readonly version: 1

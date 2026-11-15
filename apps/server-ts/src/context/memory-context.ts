@@ -1,6 +1,6 @@
 import type {
   RunMemoryBudget,
-  RunMemoryContext,
+  RunMemoryComposition,
   RunMemoryReader,
   RunMemorySource
 } from "@arden-hq/protocol/runs"
@@ -93,7 +93,7 @@ export interface MemoryContext {
   readonly space: ReadonlyArray<RuntimeSection>
   readonly recall: ReadonlyArray<RuntimeSection>
   /** What the sections hold, source by source: one composition of the record. */
-  readonly record: RunMemoryContext
+  readonly record: RunMemoryComposition
 }
 
 const encoder = new TextEncoder()

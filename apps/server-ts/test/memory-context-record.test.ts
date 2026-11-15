@@ -1,7 +1,11 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
+import type {
+  RunMemoryComposition,
+  RunMemoryContext,
+  RunMemorySource
+} from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
@@ -726,19 +730,37 @@ describe("the stored record", () => {
     outcome: "cut",
     reason: "recall_allowance"
   })
-  const first: RunMemoryContext = {
+  const budget = {
+    standing_page: 28_000,
+    standing_frame: 1_000,
+    index: 10_000,
+    space: 10_000,
+    space_instructions: 4_000,
+    space_page: 4_000,
+    space_page_list: 2_000,
+    recall: 7_000
+  }
+  const first: RunMemoryComposition = {
     reader: "owner",
     revision: "rev-1",
     query: "a made-up question",
+    budget,
     sources: [source("page-a"), source("page-b")]
   }
-  const steered: RunMemoryContext = {
+  const steered: RunMemoryComposition = {
     reader: "owner",
     revision: "rev-1",
     query: "a made-up steer",
+    budget,
     sources: [source("page-c")]
   }
-  const none: RunMemoryContext = { reader: "worker", revision: null, query: null, sources: [] }
+  const none: RunMemoryComposition = {
+    reader: "worker",
+    revision: null,
+    query: null,
+    budget,
+    sources: []
+  }
 
   it("keeps every composition of a run in order, once each, and adds no row for none", async () => {
     const result = await withTempDatabase(
@@ -776,7 +798,8 @@ describe("the stored record", () => {
     expect(Object.keys(budget ?? {})).toHaveLength(Object.keys(MEMORY_BUDGET).length)
     const decode = Schema.decodeUnknownSync(RunMemoryContextSchema)
     expect(decode(composed.writes[0])).toEqual(composed.writes[0])
-    expect(decode(first)).toEqual(first)
+    const { budget: _budget, ...before } = first
+    expect(decode(before)).toEqual(before)
   })
 
   it("never writes a retired value", () => {

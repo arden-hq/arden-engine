@@ -1,5 +1,5 @@
 import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunMemoryContext } from "@arden-hq/protocol/runs"
+import type { RunMemoryComposition } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
@@ -32,7 +32,7 @@ export const recordMemoryContextInTransaction = Effect.fn("RunSidecars.recordMem
     input: {
       readonly runId: string
       readonly sessionId: string
-      readonly context: RunMemoryContext
+      readonly context: RunMemoryComposition
     }
   ) {
     const record = yield* readMemoryContext(sql, input.runId)
