@@ -1,5 +1,6 @@
+import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect, Layer } from "effect"
-import { lstat, readFile, rm } from "node:fs/promises"
+import { readFile, rm } from "node:fs/promises"
 import { dirname } from "node:path"
 
 import { isErrnoCode } from "../fs/private-store.js"
@@ -7,7 +8,6 @@ import { PROMPT_CATALOG } from "../prompts/catalog.js"
 import { baseSystemPrompt } from "../models/instructions.js"
 import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
 import { isRulesPage } from "../wiki/code-owned-pages.js"
-import type { WikiError } from "../wiki/errors.js"
 import { Wiki } from "../wiki/service.js"
 import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
 import {
@@ -22,25 +22,26 @@ export const rulesPage = (snapshot: Snapshot): PageRecord | undefined =>
 
 const readRulesFile = async (file: string): Promise<string | undefined> => {
   try {
-    if (!(await lstat(file)).isFile()) throw new Error(`${file} is not a regular file`)
+    return new TextDecoder("utf-8", { fatal: true }).decode(await readFile(file))
   } catch (cause) {
     if (isErrnoCode(cause, "ENOENT")) return undefined
     throw cause
   }
-  return new TextDecoder("utf-8", { fatal: true }).decode(await readFile(file))
 }
 
 /**
  * Moves the rules file at the data root into Memory as the rules page, once: the page is made
- * only while Memory has none, and the file is removed after.
+ * only while Memory has none, and the file is removed after. A file left behind that holds what
+ * the page holds is removed at the next start. A file that cannot be read stays, and runs are told.
  */
 export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const wiki = yield* Wiki
-      if (rulesPage(yield* wiki.snapshot()) !== undefined) return
+      const page = rulesPage(yield* wiki.snapshot())
       const content = yield* Effect.tryPromise(() => readRulesFile(file))
-      yield* wiki.createRulesPage(content ?? "")
+      if (page === undefined) yield* wiki.createRulesPage(content ?? "")
+      else if (page.page.body !== content) return
       if (content !== undefined) yield* Effect.tryPromise(() => rm(file))
     }).pipe(
       Effect.catch((cause) =>
@@ -49,13 +50,27 @@ export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
     )
   )
 
+/**
+ * The rules a run is sent: the rules page, or the rules file while a start could not move it into
+ * Memory; `failed` when neither could be read.
+ */
 export type GlobalInstructionsLoad =
   | { readonly kind: "read"; readonly page: PageRecord | undefined }
-  | { readonly kind: "failed"; readonly error: WikiError }
+  | { readonly kind: "file"; readonly text: string }
+  | { readonly kind: "failed"; readonly error: unknown }
 
-export const loadForRun = (wiki: Wiki["Service"]): Effect.Effect<GlobalInstructionsLoad> =>
-  wiki.snapshot().pipe(
-    Effect.map((snapshot): GlobalInstructionsLoad => ({ kind: "read", page: rulesPage(snapshot) })),
+export const loadForRun = (
+  wiki: Wiki["Service"],
+  file: string
+): Effect.Effect<GlobalInstructionsLoad> =>
+  Effect.gen(function* () {
+    const page = rulesPage(yield* wiki.snapshot())
+    if (page !== undefined) return { kind: "read", page } as const
+    const text = yield* Effect.tryPromise(() => readRulesFile(file))
+    return text === undefined
+      ? ({ kind: "read", page } as const)
+      : ({ kind: "file", text } as const)
+  }).pipe(
     Effect.catch((error) =>
       Effect.as(Effect.logWarning("Running without the global instructions", { error }), {
         kind: "failed",
@@ -65,8 +80,9 @@ export const loadForRun = (wiki: Wiki["Service"]): Effect.Effect<GlobalInstructi
   )
 
 const rulesText = (load: GlobalInstructionsLoad): string | undefined => {
-  const body = load.kind === "read" ? load.page?.page.body.trim() : undefined
-  return body === "" ? undefined : body
+  const rules =
+    load.kind === "read" ? load.page?.page.body : load.kind === "file" ? load.text : undefined
+  return rules?.trim() === "" ? undefined : rules?.trim()
 }
 
 export const globalInstructionManifest = (
@@ -84,10 +100,9 @@ export const globalInstructionManifest = (
     digest
   })
   if (load.kind === "failed") return [entry("unreadable", null)]
-  if (load.page === undefined) return []
-  return rulesText(load) === undefined
-    ? [entry("empty", null)]
-    : [entry("loaded", load.page.resource.versionId)]
+  const digest = load.kind === "file" ? sha256Hex(load.text) : load.page?.resource.versionId
+  if (digest === undefined) return []
+  return rulesText(load) === undefined ? [entry("empty", null)] : [entry("loaded", digest)]
 }
 
 export const chatSystemPrompt = (

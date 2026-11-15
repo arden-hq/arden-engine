@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect"
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile, symlink, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { expect, it } from "vitest"
 
@@ -58,5 +58,21 @@ it("keeps each writer of the rules in page history, takes in outside edits, plai
     await run(outside.check())
     expect((await run(outside.check())).takenIn.map((item) => item.path)).toEqual(["AGENTS.md"])
     expect((await current()).page.body).toBe("A rule written as plain Markdown.\n")
+  })
+})
+
+it("moves a rules file reached by a symlink, and finishes a move whose delete failed", async () => {
+  await withWikiRepository(async ({ workingRoot, wiki }) => {
+    const target = join(workingRoot, "..", `${basename(workingRoot)}-rules.md`)
+    const link = `${target}-link`
+    await writeFile(target, "A rule by link.\n")
+    await symlink(target, link)
+    const move = () =>
+      run(Layer.build(rulesMoveLayer(link)).pipe(Effect.scoped, Effect.provideService(Wiki, wiki)))
+    await move()
+    expect(rulesPage(await run(wiki.snapshot()))?.page.body).toBe("A rule by link.\n")
+    await writeFile(link, "A rule by link.\n")
+    await move()
+    await expect(readFile(link)).rejects.toThrow()
   })
 })

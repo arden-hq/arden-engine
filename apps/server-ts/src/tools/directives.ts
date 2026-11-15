@@ -88,7 +88,7 @@ const makeDirectivesTools = ({
     const record = rulesPage(snapshot)
     if (record === undefined || snapshot.head === null)
       throw toolFault(
-        `Memory has no ${RULES_PAGE_PATH} page yet; Arden makes it when it starts.`,
+        `Memory has no ${RULES_PAGE_PATH} page: Arden could not move the rules file into it at start. Ask the user to check the rules file, then restart Arden.`,
         "Instructions unavailable"
       )
     return { record, head: snapshot.head }
