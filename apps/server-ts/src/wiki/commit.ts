@@ -202,11 +202,6 @@ type Operation<Tag extends WikiPageOperation["_tag"]> = Extract<
   { readonly _tag: Tag }
 >
 
-/**
- * One page write, with the action its caller states. The commit rules read the action, never
- * the operation's shape: an edit, a merge, a version restore and a report all replace a page's
- * content, and each is told apart only here. A rename's link rewrites are edits.
- */
 export type WikiWrite =
   | { readonly action: "create"; readonly operation: Operation<"Create"> }
   | { readonly action: "publish"; readonly operation: Operation<"Create" | "Update"> }
@@ -311,7 +306,6 @@ class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("Wik
 
 export type WikiCommitError = RevisionError | SpaceStoreError | WikiCommitRuleError
 
-/** What the commit rules read: the pages and their history, and which pages Spaces own. */
 export interface WikiCommitPoint {
   readonly repository: ManagedFileRepositoryShape
   readonly spaces: Pick<SpaceStore["Service"], "activeBindings">
@@ -388,17 +382,12 @@ export const commitOutsideChange = (
     )
   )
 
-/** One write and the facts the rules read about it, each looked up once per commit. */
 interface ResolvedWrite {
   readonly action: WikiPageAction
   readonly resourceId: string
-  /** The page as it stands before the write, archived or not; null for a new page. */
   readonly before: ResourceVersion | null
-  /** Where the page is before the write, and where it is after; none once archived. */
   readonly path: { readonly before: string | undefined; readonly after: string | undefined }
-  /** The content the write gives; none for an archive, a restore or a move that keeps it. */
   readonly given: Uint8Array | undefined
-  /** The content of `before`, read at most once. */
   readonly beforeContent: Effect.Effect<Uint8Array | null, RevisionError>
 }
 
@@ -427,7 +416,6 @@ interface CommitView {
   readonly repository: ManagedFileRepositoryShape
   readonly origin: WikiCommitOrigin
   readonly folders: Effect.Effect<RecordFolders, RevisionError>
-  /** Where each active page is once the commit's writes are made, by its id. */
   readonly occupied: Effect.Effect<ReadonlyMap<string, string>, RevisionError>
   readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
   readonly spaceOwns: (pageId: string, path: string) => Effect.Effect<boolean, SpaceStoreError>
@@ -545,11 +533,6 @@ const occupiedAfter = (
   return paths
 }
 
-/**
- * A folder's README and the page at the folder's own path (`x/README.md` and `x.md`) may stand
- * together: a Space keeps its page at its path while its folder gets a README
- * (`wiki/directories.ts`), and Memory holds such pairs.
- */
 const readmeBesideItsPage = (one: string, other: string): boolean => {
   const [readme, page] = isReadme(one) ? [one, other] : [other, one]
   return isReadme(readme) && `${posix.dirname(readme)}.md`.toLowerCase() === page.toLowerCase()
@@ -659,7 +642,6 @@ const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(
     )
 })
 
-/** Whether the page was a redirect in some earlier version: merged once, then restored. */
 const wasUnmerged = Effect.fn("Wiki.wasUnmerged")(function* (
   repository: ManagedFileRepositoryShape,
   resourceId: string
@@ -677,10 +659,6 @@ const wasUnmerged = Effect.fn("Wiki.wasUnmerged")(function* (
   return false
 })
 
-/**
- * A Space's own page keeps its path: no writer moves, archives or merges it away, since the Space
- * is moved or archived first. Capture also leaves its earlier versions alone.
- */
 const requireSpacePageKept = Effect.fn("Wiki.requireSpacePageKept")(function* (
   { origin, spaceOwns }: CommitView,
   write: ResolvedWrite
@@ -698,7 +676,6 @@ const requireSpacePageKept = Effect.fn("Wiki.requireSpacePageKept")(function* (
   )
 })
 
-/** Only a merge turns a page into a redirect; the owner may still do it by hand in the file. */
 const requireRedirectOnlyByMerge = Effect.fn("Wiki.requireRedirectOnlyByMerge")(function* (
   _view: CommitView,
   write: ResolvedWrite
@@ -787,7 +764,6 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
   if (entry !== undefined) return yield* ruleError("retraction", retractionRefusal(path, entry))
 })
 
-/** Each rule, the writers it binds and the check it makes on every write of a commit. */
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (view: CommitView, write: ResolvedWrite) => Effect.Effect<void, WikiCommitError>

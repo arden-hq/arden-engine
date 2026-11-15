@@ -172,12 +172,10 @@ export interface RunMemoryContext extends JsonRecord {
   readonly reader: RunMemoryReader
   readonly revision: string | null
   readonly query: string | null
-  /** Absent in a composition stored before the record named its budget, so not known. */
   readonly budget?: RunMemoryBudget
   readonly sources: ReadonlyArray<RunMemorySource>
 }
 
-/** A composition as it is written now: every new one names its budget. */
 export type RunMemoryComposition = RunMemoryContext & { readonly budget: RunMemoryBudget }
 
 /** Durable, restart-safe projection of one Run. */

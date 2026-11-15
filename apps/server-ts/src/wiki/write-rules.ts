@@ -14,7 +14,6 @@ import { isReadme, parseWikiPage, writtenContent } from "./page.js"
 import { followRedirect, nameTakenBy, type PageRecord, type Snapshot } from "./snapshot.js"
 import { isSpacePage } from "./space-index.js"
 
-/** A write's page and where its writer may write. Who the writer is, the commit rules decide. */
 export interface WikiWriter {
   readonly pageId: string
   readonly authority: WikiLocationAuthority

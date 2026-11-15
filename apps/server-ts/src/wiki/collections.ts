@@ -62,7 +62,6 @@ interface RecordFolder {
   readonly producer: RecordProducer
 }
 
-/** `imported/` is a record folder by its name, README or not. */
 const IMPORTED_FOLDER: RecordFolder = {
   directory: IMPORTED_DIRECTORY,
   producer: { kind: "import" }
@@ -115,16 +114,11 @@ const dayOfName = (path: string): string | undefined => {
 
 const KNOWLEDGE_PAGE: PageKind = { kind: "knowledge" }
 
-/** A record folder's own README is its contract. */
 const folderContract = (folders: RecordFolders, path: string): PageKind | undefined => {
   const own = folders.get(normal(posix.dirname(path)))
   return own !== undefined && isReadme(path) ? { kind: "contract", folder: own } : undefined
 }
 
-/**
- * Every other page in a record folder, at any depth, is a record. A report's day is the date its
- * file name starts with; imported notes have none.
- */
 const recordPage = (folders: RecordFolders, path: string): PageKind | undefined => {
   for (let at = posix.dirname(path); at !== "." && at !== "/"; at = posix.dirname(at)) {
     const folder = folders.get(normal(at))

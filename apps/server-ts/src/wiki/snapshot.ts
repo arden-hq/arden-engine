@@ -32,9 +32,7 @@ export type RunPage = PageRecord & { readonly [shownToRuns]: true }
 
 export interface Snapshot {
   readonly head: string | null
-  /** The pages a run may be shown: every page but the code-owned ones. */
   readonly pages: ReadonlyArray<RunPage>
-  /** Every page, code-owned ones included: for consistency checks and the owner's routes. */
   readonly wholeSet: ReadonlyArray<PageRecord>
 }
 

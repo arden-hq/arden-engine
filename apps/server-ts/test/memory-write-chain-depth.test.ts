@@ -21,7 +21,6 @@ import { partialService, runAuthority } from "./kit.js"
 
 const AT = DateTime.makeUnsafe("2026-11-01T10:00:00Z")
 
-/** The origin each write stored in Memory history, read back as the change publisher reads it. */
 const storedOrigins = (origins: ReadonlyArray<WikiCommitOrigin>) =>
   Effect.gen(function* () {
     const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "arden-write-depth-")))

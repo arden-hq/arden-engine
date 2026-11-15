@@ -32,7 +32,6 @@ export const causingWakeDepth = (
         ${delegationRoot(run)}), 0)
     )`)
 
-/** The depth of the wake an attempt answered, as its stored origin records it. */
 export const attemptWakeDepth = (
   sql: SqlClient.SqlClient,
   attempt: string
@@ -49,7 +48,7 @@ export const taskWakeDepth = (
     WHERE attempt.item_id = ${itemId} ORDER BY attempt.id DESC LIMIT 1), 0)`
 
 /** The depth an in-chat Task step goes on at: that of the run whose end handed it the step, or
- *  else that of the wake the Task's latest attempt answered. Read where the step is admitted. */
+ *  else that of the wake the Task's latest attempt answered. */
 export const taskStepDepth = (
   sql: SqlClient.SqlClient,
   step: { readonly itemId: string; readonly afterRunId?: string | undefined }

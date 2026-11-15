@@ -173,7 +173,6 @@ export const makeWikiListingMethods = (
       }))
     )
 
-  /** The newest `wanted` commits with a change a run sees, or fewer when history ends first. */
   const readUntilShown = Effect.fn("Wiki.readUntilShown")(function* (wanted: number) {
     let limit = wanted
     let read = yield* shownIn(limit)

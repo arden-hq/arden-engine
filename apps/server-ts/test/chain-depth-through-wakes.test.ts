@@ -37,7 +37,6 @@ const journalHead = (sql: SqlClient.SqlClient) =>
     Effect.map((rows) => rows[0]?.head ?? 0)
   )
 
-/** Sends every Task change journaled since `after` to the Automation triggers, as the feed does. */
 const dispatchTaskChanges = (after: number) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -63,11 +62,6 @@ const dispatchTaskChanges = (after: number) =>
     return yield* journalHead(sql)
   })
 
-/**
- * A made-up Space with an owner Automation that edits a Task whenever a Task changes, and one
- * Task made by `makeTask`. Nothing waits when it returns: the Task's first wake is dropped, so the
- * owner's edit by hand is the only start.
- */
 const followerAndTask = <T extends { readonly item_id: string }, R>(
   makeTask: Effect.Effect<T, unknown, R>
 ) =>
@@ -109,8 +103,6 @@ const followerAndTask = <T extends { readonly item_id: string }, R>(
     }
   })
 
-/** Each round the Task changes go out, then every claimed wake runs once: the follower's edits
- *  the Task, and `worker` runs the Task's worker. */
 const rounds = <R>(
   setup: Effect.Success<ReturnType<typeof followerAndTask>>,
   worker: (lease: JobLease, round: number) => Effect.Effect<void, unknown, R>,
@@ -134,7 +126,6 @@ const rounds = <R>(
     return ran
   })
 
-/** A made-up chat in the Space, and a Task that runs in it. */
 const inChatTask = Effect.gen(function* () {
   const chat = yield* (yield* SessionStore).create({ name: "Made-up chat", spaceId: "space-1" })
   const task = yield* (yield* WorkStore).createInChat(chat.sessionId, {
@@ -143,7 +134,6 @@ const inChatTask = Effect.gen(function* () {
   return { ...task, sessionId: chat.sessionId }
 })
 
-/** The next step of an in-chat Task, as `continueTask` finds it. */
 const nextStep = (itemId: string) =>
   Effect.gen(function* () {
     const step = yield* (yield* WorkStore).nextInChat({ itemId })
@@ -154,8 +144,6 @@ const nextStep = (itemId: string) =>
 const followerRuns = (ran: ReadonlyArray<ReadonlyArray<string>>) =>
   ran.map((round) => round.filter((job) => job === "follower").length)
 
-// The owner's edit wakes the follower and the worker; the worker's change wakes the follower once
-// more. The follower's own edits wake the worker one step deeper each time, so the chain ends.
 it("an owner Automation on task.changed that edits a Task stops at the chain limit, not in a loop through the Task's worker", async () => {
   const ran = await withTempDatabase(
     Effect.gen(function* () {
@@ -177,8 +165,6 @@ it("an owner Automation on task.changed that edits a Task stops at the chain lim
   expect(followerRuns(ran)).toEqual([1, 1, 0, 0, 0, 0])
 })
 
-// An in-chat step is not an Automation run, so it adds no depth; it passes on the depth it was
-// woken at, and the follower's runs add theirs, so this chain ends too.
 it("an owner Automation on task.changed that edits an in-chat Task stops at the chain limit", async () => {
   const ran = await withTempDatabase(
     Effect.gen(function* () {
@@ -242,8 +228,6 @@ it("a Memory write by an in-chat step carries the depth it was woken at to the c
   expect(queued).toEqual({ atOne: 1, atTwo: 0 })
 })
 
-// Tidy keeps a place in Memory history and reads every change from it; it never wakes itself, and
-// each of its changes is one step deeper, so the owner's Automations still stop at the limit.
 it("Tidy is woken by a Memory change at any depth; an owner Automation on wiki.changed stops at the limit", async () => {
   const queued = await withTempDatabase(
     Effect.gen(function* () {
@@ -343,8 +327,6 @@ it("a failed Space review is retried at the depth of the wake it answered", asyn
   expect(retried).toEqual([{ event: "space.review_retry", depth: 1 }])
 })
 
-// A wake and a restart both hand an in-chat Task on by its id only; admission reads the depth of
-// the Task's latest wake, as a due check does, so no caller states a depth.
 it("an in-chat Task step is admitted at the depth of the Task's latest wake", async () => {
   const depths = await withTempDatabase(
     Effect.gen(function* () {
@@ -371,8 +353,6 @@ it("an in-chat Task step is admitted at the depth of the Task's latest wake", as
   expect(depths).toEqual({ created: 0, woken: 1 })
 })
 
-// The end of a run hands the step on at the depth that run's changes carry: an owner Automation's
-// run adds one to the wake it answered, whatever the Task's own latest wake was.
 it("an in-chat Task step handed on by a run's end is admitted at the depth of that run's changes", async () => {
   const depth = await withTempDatabase(
     Effect.gen(function* () {

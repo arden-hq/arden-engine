@@ -17,15 +17,10 @@ const FOLD_NOTICE =
 const CUT_NOTICE = "[Cut to fit: the last lines are left out; list the pages with wiki_list_pages.]"
 const SEPARATOR = "\n\n"
 
-/**
- * Which generated page list to render: the Memory index, which leaves out the pages another
- * list the run is sent shows by line, or a Space's list of its other pages.
- */
 export type IndexList =
   | { readonly kind: "memory"; readonly shownElsewhere: ReadonlySet<string> }
   | { readonly kind: "space"; readonly space: SpacePageBinding }
 
-/** A rendered page list, and the paths of the pages it shows by line. */
 export interface RenderedIndex extends RenderedMemory {
   readonly shown: ReadonlySet<string>
 }
@@ -33,11 +28,6 @@ export interface RenderedIndex extends RenderedMemory {
 const encoder = new TextEncoder()
 const byteLength = (value: string): number => encoder.encode(value).byteLength
 
-/**
- * The one renderer of a generated page list, in at most `maxBytes` with its notices, and the
- * record of what it holds. The Memory index is sent with its note when it has nothing to list,
- * which tells the run that Memory has no other page; a Space list with nothing in it is not sent.
- */
 export const renderIndex = (
   pages: ReadonlyArray<RunPage>,
   list: IndexList,

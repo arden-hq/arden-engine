@@ -35,10 +35,6 @@ export interface WikiSpacePageInput {
   readonly home?: "projects" | "areas"
 }
 
-/**
- * How an active Space has its page: the page it was bound to, that page at the path it now has,
- * or a page made for it now.
- */
 export type SpacePageEnsured =
   | { readonly kind: "kept" | "rebound"; readonly space: PersistedSpace }
   | {
@@ -90,11 +86,6 @@ export const logNoSpacePage = (spaceId: string, error: WikiError) =>
     message: error.message
   })
 
-/**
- * How an archived Space came back. A Space whose page is gone, or held or overlapped by another
- * active Space, gets a fresh page; when none can be made now it comes back pageless, and the
- * next start gives it one.
- */
 export type SpaceRestore = {
   readonly kind: SpacePageEnsured["kind"] | "pageless"
   readonly space: PersistedSpace

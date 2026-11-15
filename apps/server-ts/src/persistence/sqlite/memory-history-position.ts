@@ -24,7 +24,6 @@ export type PositionAdvance = "advanced" | "already_there" | "moved"
 const Revision = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 const Move = Schema.Struct({ expected: Schema.NullOr(Revision), next: Revision })
 const State = Schema.fromJsonString(Schema.Record(Schema.String, Schema.NullOr(Revision)))
-/** The head of a range the reader was refused on once, from where it stands; it goes when it moves. */
 const REFUSED = "refusedTo"
 
 type PositionError = MemoryHistoryPositionError | SqlError.SqlError
@@ -92,7 +91,6 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
   const read = (sql: SqlClient.SqlClient): Effect.Effect<string | null, PositionError> =>
     readRow(sql).pipe(Effect.map((row) => row.revision))
 
-  /** Where the reader stands, and the head of the range from there it was refused on once. */
   const readRefusal = (
     sql: SqlClient.SqlClient
   ): Effect.Effect<
@@ -101,7 +99,6 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
   > =>
     readRow(sql).pipe(Effect.map((row) => ({ revision: row.revision, refusedTo: row.refusedTo })))
 
-  /** Marks the range from `at` to `to` refused once. "moved" when the reader no longer stands at `at`. */
   const refuse = Effect.fn("MemoryHistoryPosition.refuse")(function* (
     sql: SqlClient.SqlClient,
     input: { readonly at: string | null; readonly to: string }

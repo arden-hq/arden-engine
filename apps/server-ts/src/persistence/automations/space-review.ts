@@ -138,8 +138,6 @@ export type SpaceReviewReads = typeof SpaceReviewReadsSchema.Type
 const SpaceReviewAdmissionSchema = Schema.Literals(["changed", "unchanged", "nothing_to_act_on"])
 export type SpaceReviewAdmission = typeof SpaceReviewAdmissionSchema.Type
 
-/** Decoded only while its run is running. A finished run's stored input is the record of what the
- *  review was given and may keep a retired shape (pages with basis `resident`); nothing decodes it. */
 export const SpaceReviewInputSchema = Schema.Struct({
   admission: SpaceReviewAdmissionSchema,
   spaceId: Schema.String,

@@ -37,8 +37,6 @@ import { renameOwnedJob } from "./job-labels.js"
 
 type EventWake = Extract<AutomationTriggerContext, { readonly source: "event" }>
 
-/** Who made the change a wake answers: the run's Automation and chain depth, carried so the run
- *  the wake starts inherits them (`chain-depth.ts`). */
 type WakeCause = Pick<EventWake, "produced_by" | "chain_depth">
 
 const woken = (producedBy: string | null, chainDepth: number): WakeCause =>
@@ -46,11 +44,8 @@ const woken = (producedBy: string | null, chainDepth: number): WakeCause =>
     ? { produced_by: producedBy }
     : { produced_by: producedBy, chain_depth: chainDepth }
 
-/** The owner, the outside world or a clock: no run made the change. */
 const NO_RUN = woken(null, 0)
 
-/** What wakes a Task's worker: a run's change, the owner's, or the Task's own work going on (a
- *  check it booked coming due, a deferral ending), which continues at its last attempt's depth. */
 export type TaskWaker =
   | { readonly kind: "run"; readonly runId: string }
   | { readonly kind: "owner" }

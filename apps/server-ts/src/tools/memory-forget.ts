@@ -57,7 +57,6 @@ const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
 const isForgetRefusal = (error: WikiError): boolean =>
   error.operation === "forget" && (error.reason === "invalid" || error.reason === "not_found")
 
-/** A forget's own refusal already says what to pass instead. */
 const forgetRefusal = (error: WikiError): ToolExecutionError =>
   new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
 

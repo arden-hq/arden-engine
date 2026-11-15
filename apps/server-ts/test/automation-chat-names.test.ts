@@ -88,7 +88,6 @@ it("a renamed Task's chats follow while they carry its old name, open or archive
         .sort((a, b) => a.name.localeCompare(b.name) || Number(a.archived) - Number(b.archived))
     })
   )
-  // The job's thread, made with the Task, and the two own chats that carry its name follow.
   expect(names).toEqual([
     { name: "My own name", archived: false },
     { name: "the Task's new name", archived: false },

@@ -25,11 +25,6 @@ export const spaceOwnsPath = (pagePath: string, path: string): boolean => {
   return target === boundary || isWithin(`/${spaceFolder(boundary)}`, `/${target}`)
 }
 
-/**
- * Which pages an active Space is bound to. A half-made binding, with a page column missing or a
- * path that does not read, owns every path, so nothing is written where its pages might be. Its
- * row is kept apart, so a reader of its page must say what a half-made binding means.
- */
 export type SpaceBinding =
   | {
       readonly kind: "bound"
@@ -70,11 +65,6 @@ export const freeSpacePage = (
 ): FreeSpacePage | undefined =>
   heldByAnother(others, page.pageId, page.pagePath) ? undefined : (page as FreeSpacePage)
 
-/**
- * Whether the page is the binding's own page. A half-made binding keeps the page its row names
- * by a column that is set; when neither column names one, its own page is not known, and no
- * page is kept for it.
- */
 const keepsPage = (binding: SpaceBinding, pageId: string, path: string): boolean => {
   switch (binding.kind) {
     case "bound":
@@ -92,11 +82,9 @@ const isBoundPage = (
 
 type ActiveBindings = Pick<SpaceStore["Service"], "activeBindings">
 
-/** The active Spaces' bindings. An archived Space owns nothing. */
 export const activeSpaceBindings = (spaces: ActiveBindings) =>
   spaces.activeBindings().pipe(Effect.map((rows) => rows.map(spaceBinding)))
 
-/** Whether an active Space owns `path`. */
 export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
   activeSpaceBindings(spaces).pipe(
     Effect.map((bindings) => bindings.some((binding) => bindingOwnsPath(binding, path)))

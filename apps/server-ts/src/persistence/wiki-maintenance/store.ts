@@ -34,7 +34,6 @@ export class WikiMaintenanceStore extends Context.Service<
     readonly compareAndSet: (
       input: WikiMaintenanceCompareAndSetInput
     ) => Effect.Effect<string | null, WikiMaintenanceStoreError>
-    /** The range from where Tidy stands that it was blocked on once, if any. */
     readonly refusal: () => Effect.Effect<
       WikiMaintenanceRefusal | undefined,
       WikiMaintenanceStoreError

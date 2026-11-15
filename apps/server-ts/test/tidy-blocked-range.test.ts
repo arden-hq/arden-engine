@@ -25,12 +25,6 @@ const job = {
   }
 } as unknown as AutomationJobLease
 
-/**
- * Tidy over a made-up Memory history whose head moves one commit before each job. Each review ends
- * as `reports` says for that review, by default blocked, as a run refused an edit to a record
- * would. Returns, per job, the ranges Tidy reviewed, where its place stood after, what the job told
- * the owner, and whether a refused range is still marked.
- */
 const tidy = (jobs: number, reports: (review: number) => "blocked" | "done" = () => "blocked") =>
   Effect.gen(function* () {
     const maintenance = yield* WikiMaintenanceStore

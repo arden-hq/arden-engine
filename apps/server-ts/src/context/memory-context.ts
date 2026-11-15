@@ -45,11 +45,6 @@ const standingPageLimitChars = Math.max(
 const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3
 const STANDING_PAGE_HEADING_BYTES = 1_000
 
-/**
- * Every allowance in a run's Memory block, in UTF-8 bytes, under the names the run record
- * gives them. Each source renders itself into its own allowance with its own notices and takes
- * no room from another, so the block is at most `MEMORY_BLOCK_MAX_BYTES`.
- */
 export const MEMORY_BUDGET = {
   standing_page:
     standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
@@ -71,8 +66,6 @@ export const MEMORY_BLOCK_MAX_BYTES =
   MEMORY_BUDGET.space_page_list +
   MEMORY_BUDGET.recall
 
-/** A Space's view, and its Memory page at the version read with the list of the Space's other
- *  pages, when it has one. */
 export interface SpaceMemoryInput {
   readonly view: SpaceView
   readonly page: SpacePageInput | undefined
@@ -81,7 +74,6 @@ export interface SpaceMemoryInput {
 export interface SpacePageInput {
   readonly pageId: string
   readonly version: string
-  /** The generated list of the Space's other pages, in at most `maxBytes`. */
   readonly list: (maxBytes: number) => RenderedIndex
 }
 

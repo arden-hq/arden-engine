@@ -25,7 +25,6 @@ import {
 
 const SEMANTIC_RECALL = "off: matching by meaning needs the local embedding model"
 
-/** A fault in the copy or the harness: it stops the batch and is never a score. */
 class SetupFault extends Schema.TaggedError<SetupFault>()("SetupFault", {
   message: Schema.String
 }) {}

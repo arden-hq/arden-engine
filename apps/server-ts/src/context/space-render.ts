@@ -142,7 +142,6 @@ export const renderSpaceContext = (
   }
 }
 
-/** The Space instructions cut to `room`, so the Space context is never left out whole. */
 const fitInstructions = (instructions: string, room: number): string =>
   cutBytes(instructions, Math.max(0, room), { suffix: INSTRUCTIONS_CUT })
 

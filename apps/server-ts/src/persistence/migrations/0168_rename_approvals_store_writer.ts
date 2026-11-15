@@ -4,10 +4,8 @@ import type { Migration } from "./index.js"
 const LEGACY_OPEN =
   "Asked for before Arden kept who asked for a rename. If the page already has the new name, the rename was saved; otherwise ask for it again."
 
-/** A rename approval keeps the writer that asked for it, and an accepted rename commits as that
- * writer. An open approval from before has no writer to commit as, so it is closed as rejected
- * with a resolution that says so. SQLite cannot add a CHECK in place, so the table is rebuilt
- * with every row copied and its indexes made again. */
+/** SQLite cannot add a CHECK in place, so the table is rebuilt with every row copied and its
+ *  indexes made again. */
 const up = (database: DatabaseSync): void => {
   database
     .prepare(

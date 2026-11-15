@@ -20,7 +20,6 @@ export const wakeChainDepth = (wokenBy: AutomationTriggerContext | undefined): n
   }
 }
 
-/** The depth of the wake that started a run: every run a wake starts carries it in its origin. */
 export const originChainDepth = (origin: RunOrigin): number =>
   origin.kind === "unrecorded" ? 0 : (origin.chain_depth ?? 0)
 
@@ -31,8 +30,5 @@ export const causedChainDepth = (
   producerWakeDepth: number | undefined
 ): number => (producerWakeDepth ?? 0) + (producedBy === null ? 0 : 1)
 
-/** The limit stops the owner's Automations, whose triggers and actions code cannot see. A system
- *  Automation is woken at any depth: it never wakes itself, and none makes an event another
- *  listens for (pinned in `automation-chain-depth.test.ts`). */
 export const chainMayWake = (chainDepth: number, listener: "user_automation" | "system"): boolean =>
   listener === "system" || chainDepth <= CHAIN_LIMIT

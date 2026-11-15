@@ -13,7 +13,6 @@ const message = (id: string, isMeta: boolean) => ({
   ...(isMeta ? { is_meta: true } : {})
 })
 
-/** Starts a chat run through admission, as the app or the runtime does. */
 export const startChat = (
   sessionId: string,
   id: string,
@@ -66,7 +65,6 @@ export const startChat = (
     return started
   })
 
-/** Ends a started run with one answer, as the runtime does. */
 export const finishChat = (started: Effect.Success<ReturnType<typeof startChat>>, id: string) =>
   Effect.gen(function* () {
     const chat = yield* ChatWriteStore
@@ -84,7 +82,6 @@ export const finishChat = (started: Effect.Success<ReturnType<typeof startChat>>
     })
   })
 
-/** Claims every waiting job wake, as the runtime does at each tick. */
 export const claimAll = (workerId: string) =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
@@ -142,7 +139,6 @@ const completeJob = (
     )
   })
 
-/** Runs one claimed job in its own chat: starts its run, lets `act` do its work, ends both. */
 export const runJob = <R>(
   lease: JobLease,
   id: string,
@@ -155,13 +151,10 @@ export const runJob = <R>(
     yield* completeJob(lease, { runId: started.run.runId, sessionId: started.sessionId })
   })
 
-/** Ends a claimed job that ran no chat run of its own, as an in-chat Task's wake does. */
 export const endJobWithoutRun = (lease: JobLease) => completeJob(lease, null)
 
-/** Ends a claimed job as failed before it ran a chat run. */
 export const failJob = (lease: JobLease) => completeJob(lease, null, "failed")
 
-/** Claims every waiting job wake, then starts the named jobs' runs, as the runtime does. */
 export const startJobs = (ids: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
     const leases = yield* claimAll("wakes")

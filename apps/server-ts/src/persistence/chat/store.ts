@@ -28,8 +28,6 @@ export interface ChatAutomationOrigin {
   readonly name: string
 }
 
-/** What handed an in-chat Task its step: a wake of the Task, or the end of `afterRunId`.
- *  Admission reads the step's chain depth from it (`run-cause.ts`); no caller states one. */
 export interface TaskStepCause {
   readonly itemId: string
   readonly afterRunId?: string

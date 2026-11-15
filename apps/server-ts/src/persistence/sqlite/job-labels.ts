@@ -2,9 +2,6 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 
-/** Renames every chat of a job's own that still carries the job's name, open or archived, before
- *  the job takes `name`; a name the owner gave a chat stays. Every writer of a job's name calls
- *  it first. */
 export const chatsFollowJobName = Effect.fn("JobLabels.chatsFollow")(function* (
   sql: SqlClient.SqlClient,
   automationId: string,

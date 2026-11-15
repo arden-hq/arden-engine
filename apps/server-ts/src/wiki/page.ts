@@ -118,11 +118,9 @@ const pageNamesForPath = (path: string): ReadonlyArray<string> => {
 /** The names a page at `path` takes, in the one form any two names are compared in. */
 export const nameKeys = (path: string): ReadonlyArray<string> => pageNamesForPath(path).map(normal)
 
-/** Every name pages at `paths` take. */
 export const namesTakenAt = (paths: Iterable<string>): Set<string> =>
   new Set([...paths].flatMap(nameKeys))
 
-/** Whether a page at `path` would take a name in `taken`. */
 export const takesName = (taken: ReadonlySet<string>, path: string): boolean =>
   nameKeys(path).some((key) => taken.has(key))
 

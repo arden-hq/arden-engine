@@ -117,7 +117,6 @@ export const serverRunContext = (overrides: Partial<ServerRunContext> = {}): Ser
   }
 }
 
-/** A page as a run is given it, made through the run view; a code-owned page throws. */
 export const runPage = (record: PageRecord): RunPage => {
   const [shown] = snapshotOf(null, [record]).pages
   if (shown === undefined) throw new Error(`${record.resource.path} is never shown to a run`)

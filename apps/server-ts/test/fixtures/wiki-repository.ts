@@ -116,7 +116,6 @@ const distinctMillisClock = (): Clock.Clock => {
   }
 }
 
-/** The commit point of a Memory with no Space. */
 export const withoutSpaces = (repository: ManagedFileRepositoryShape): WikiCommitPoint => ({
   repository,
   spaces: { activeBindings: () => Effect.succeed([]) }

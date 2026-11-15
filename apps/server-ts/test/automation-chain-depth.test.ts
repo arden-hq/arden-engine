@@ -135,8 +135,6 @@ it("a stored run's or attempt's depth is read in SQL in one file", () => {
 })
 
 it("the system Automations an event can wake are Tidy on a Memory change and chat summaries on a quiet chat", () => {
-  // Both are woken past the chain limit. Neither makes an event the other listens for: Tidy writes
-  // Memory, chat summaries write a chat's summary. A new one here must show it cannot loop.
   expect(
     SYSTEM_AUTOMATION_SPECS.flatMap((spec) =>
       spec.triggers.flatMap((trigger) =>

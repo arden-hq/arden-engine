@@ -13,7 +13,6 @@ import { Context, Effect, Schema } from "effect"
 
 export type PersistedSpace = Space & { readonly page_id: string | null }
 
-/** The page columns of a Space's row, as stored. */
 export interface SpaceBindingRow {
   readonly space_id: string
   readonly page_id: string | null

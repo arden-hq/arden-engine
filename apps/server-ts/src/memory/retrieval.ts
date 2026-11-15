@@ -32,7 +32,6 @@ export interface RenderedMemory {
 export interface MemorySources {
   /** Standing facts, each page in its writer limit and in `maxPageBytes`. */
   readonly standing: (maxPageBytes: number) => RenderedMemory
-  /** The Memory index; `shownElsewhere` are the paths a Space list the run is also sent shows. */
   readonly index: (room: {
     readonly maxBytes: number
     readonly shownElsewhere: ReadonlySet<string>
@@ -392,11 +391,8 @@ const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageK
   )
 }
 
-/** The pages one recall may choose from: decided once, and handed to both searches. */
 export interface RecallCandidates {
   readonly query: string
-  /** The page ids the recall may not choose: standing facts, records past their recall age,
-   *  and the pages the run is sent another way. */
   readonly excluded: ReadonlySet<string>
 }
 
@@ -451,7 +447,6 @@ export const prepareMemorySources = ({
   lastChanged
 }: {
   readonly pages: ReadonlyArray<RunPage>
-  /** Undefined for a run with no recall. */
   readonly recall: RecallCandidates | undefined
   readonly semanticMatches?: ReadonlyArray<SemanticMemoryMatch>
   /** Each page's "Last changed" line, by page id; a page without one is shown without it. */

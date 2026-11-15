@@ -18,8 +18,6 @@ interface WikiRenameApprovalFields {
   readonly resolution: string | null
 }
 
-/** An approval and the writer that asked for it, which an accepted rename commits as. Only an
- *  approval closed before writers were kept has none. */
 export type WikiRenameApprovalRecord = WikiRenameApprovalFields &
   (
     | { readonly status: "pending" | "applying"; readonly writer: JsonObject }

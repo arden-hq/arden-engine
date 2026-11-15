@@ -79,8 +79,6 @@ const RenamePlanSchema = Schema.Struct({
 
 type RenamePlan = typeof RenamePlanSchema.Type
 
-/** Who asked for a rename and where they may write; the accepted rename commits as them. The
- *  origin is kept as history records it. */
 const RenameWriterSchema = Schema.Struct({
   actor: Schema.NonEmptyString,
   origin: Schema.NonEmptyString,

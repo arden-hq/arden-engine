@@ -21,8 +21,6 @@ import {
 } from "./fixtures/wiki-repository.js"
 import { gatePolicy, recordOf, serverRunContext } from "./kit.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const PATH = "topics/note.md"
 const PAGE = "note"
 

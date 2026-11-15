@@ -29,7 +29,6 @@ import { withoutSpaces } from "./fixtures/wiki-repository.js"
 const located = locateReplayCopy()
 const decoder = new TextDecoder()
 
-/** The repository as it stood just before `parent`'s child commit: every read is pinned there. */
 const pinnedAt = (
   repository: ManagedFileRepositoryShape,
   parent: string | null
@@ -50,7 +49,6 @@ const pinnedAt = (
         history: (options) => repository.history({ ...options, start: parent })
       }
 
-/** The action a past commit's caller would state today, told from its reason and its changes. */
 const updateAction = (
   commit: Commit,
   text: string

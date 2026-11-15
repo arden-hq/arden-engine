@@ -9,7 +9,6 @@ import type { ServerRunContext } from "./run-context.js"
 interface OwnerTurnRefusalWording {
   /** Completes "The current Session could not be verified before …". */
   readonly unverifiedBefore: string
-  /** The rule a run that is not the owner's own turn is refused by. */
   readonly notOwnerTurn: string
 }
 

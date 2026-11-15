@@ -21,8 +21,6 @@ export const makeWikiMaintenanceRunner = (services: {
   >
   readonly runItem: HandlerItemRunner
 }): AutomationRunner => {
-  /** A range Tidy is blocked on is tried once more, then left behind: the second report moves
-   *  Tidy's place to the end of the range it was first blocked on, and the job says so. */
   const leaveRefusedRange = Effect.fn("WikiMaintenance.leaveRefusedRange")(function* (
     data: HandlerItemDataOf<"wiki">,
     reason: string | null,
