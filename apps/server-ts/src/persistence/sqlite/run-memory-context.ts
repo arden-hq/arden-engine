@@ -8,6 +8,40 @@ import type { SqlClient } from "effect/unstable/sql"
 // default) is "sent none". It is kept as long as the run is.
 const MemoryContextJson = Schema.fromJsonString(Schema.Array(RunMemoryContextSchema))
 const CompositionJson = Schema.fromJsonString(RunMemoryContextSchema)
+const StoredJson = Schema.fromJsonString(Schema.Array(Schema.Record(Schema.String, Schema.Unknown)))
+const decodeRecord = Schema.decodeUnknownEffect(Schema.Array(RunMemoryContextSchema))
+
+// Records written before each Memory source had its own allowance (by the memory test and
+// unreleased builds only) hold retired values: `collection` sources, retired cut reasons and
+// no `reader`. They are read as the record says now: collection lines left out, each retired
+// reason as the allowance of its source's kind, and `owner`, since only owner chats were
+// recorded before `reader`.
+const RETIRED_REASONS: ReadonlySet<unknown> = new Set([
+  "block_budget",
+  "core_page_budget",
+  "continuity_budget"
+])
+const ALLOWANCE_OF: Readonly<Record<string, string>> = {
+  core: "standing_page_allowance",
+  index: "index_allowance",
+  space: "space_allowance",
+  recalled: "recall_allowance"
+}
+const currentSource = (source: unknown): ReadonlyArray<unknown> => {
+  if (typeof source !== "object" || source === null) return [source]
+  if ("kind" in source && source.kind === "collection") return []
+  if ("reason" in source && RETIRED_REASONS.has(source.reason) && "kind" in source)
+    return [{ ...source, reason: ALLOWANCE_OF[String(source.kind)] ?? source.reason }]
+  return [source]
+}
+const currentShape = (composition: Readonly<Record<string, unknown>>): unknown => {
+  const sources = composition["sources"]
+  return {
+    reader: "owner",
+    ...composition,
+    sources: Array.isArray(sources) ? sources.flatMap(currentSource) : sources
+  }
+}
 
 /** What the run was sent from Memory, in order; empty when it was sent none or ran before records. */
 export const readMemoryContext = Effect.fn("RunSidecars.readMemoryContext")(function* (
@@ -17,9 +51,9 @@ export const readMemoryContext = Effect.fn("RunSidecars.readMemoryContext")(func
   const rows = yield* sql<{ readonly context_manifest_json: string }>`
     SELECT context_manifest_json FROM run_sidecars WHERE run_id = ${runId}`
   const row = rows[0]
-  return row === undefined
-    ? []
-    : yield* Schema.decodeUnknownEffect(MemoryContextJson)(row.context_manifest_json)
+  if (row === undefined) return []
+  const stored = yield* Schema.decodeUnknownEffect(StoredJson)(row.context_manifest_json)
+  return yield* decodeRecord(stored.map(currentShape))
 })
 
 /**

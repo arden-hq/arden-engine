@@ -44,7 +44,6 @@ type SpaceTaskView = Pick<
   | "next_attempt_at"
 >
 
-const SPACE_CONTEXT_MAX_BYTES = 10_000
 const SPACE_PAGE_MAX_BYTES = 4_000
 const SPACE_CHANGES_MAX_BYTES = 4_000
 const SETTLED_TASKS_SHOWN = 15
@@ -55,9 +54,10 @@ const MORE_LINE_BYTES = 120
 const encoder = new TextEncoder()
 const byteLength = (value: string): number => encoder.encode(value).byteLength
 
+/** The Space context in at most `maxBytes`, the room the Memory block gives it. */
 export const renderSpaceContext = (
   view: SpaceView,
-  { maxBytes = SPACE_CONTEXT_MAX_BYTES }: { readonly maxBytes?: number } = {}
+  { maxBytes }: { readonly maxBytes: number }
 ): { readonly text: string; readonly page: SpacePageShown | undefined } => {
   const head = [
     "## Current Space",

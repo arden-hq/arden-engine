@@ -5,7 +5,7 @@
 import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
 import { QUESTION_KINDS, type Question, type QuestionKind } from "./questions.js"
 
-/** Core Memory is sent outside the budget; recall and the Space page share the budget. */
+/** The route a page reached the chat by: standing facts, recall or the Space context. */
 export type Via = "core" | "recall" | "space"
 
 export interface Placed {
@@ -16,18 +16,18 @@ export interface Placed {
 }
 
 export interface Delivery {
-  /** Pages whose rendered block reached the chat. A page named only in a collection line is
-   * not here. */
+  /** Pages whose rendered block reached the chat. A page named only in the index is not
+   * here. */
   readonly pages: ReadonlyArray<Placed>
-  /** Pages whose rendered block the continuity budget cut, in part or whole. */
+  /** Pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<Placed>
   /** Everything the chat was sent from Memory and its Space. */
   readonly text: string
-  /** Bytes sent, by route, as the record counts them. */
-  readonly bytes: Readonly<Record<Via, number>>
+  /** Bytes sent, by route and for the index, as the record counts them. */
+  readonly bytes: Readonly<Record<Via | "index", number>>
 }
 
-const viaOf = (source: RunMemorySource): Via | undefined => {
+const viaOf = (source: Exclude<RunMemorySource, { readonly kind: "index" }>): Via => {
   switch (source.kind) {
     case "core":
       return "core"
@@ -35,14 +35,12 @@ const viaOf = (source: RunMemorySource): Via | undefined => {
       return "recall"
     case "space":
       return "space"
-    case "collection":
-      return undefined
   }
 }
 
 /**
  * What a new chat was sent, read from one composition of its run's record. A page reached the
- * chat unless its renderer found no room for it or the continuity budget cut its block.
+ * chat unless its source's allowance had no room for it.
  */
 export const deliveryOf = ({
   composition,
@@ -57,17 +55,20 @@ export const deliveryOf = ({
 }): Delivery => {
   const pages: Array<Placed> = []
   const cut: Array<Placed> = []
-  const bytes: Record<Via, number> = { core: 0, recall: 0, space: 0 }
+  const bytes: Record<Via | "index", number> = { core: 0, recall: 0, space: 0, index: 0 }
   for (const source of composition.sources) {
+    if (source.kind === "index") {
+      bytes.index += source.bytes
+      continue
+    }
     const via = viaOf(source)
-    if (via === undefined) continue
     bytes[via] += source.bytes
     if (source.page_id === null) continue
     const path = paths.get(source.page_id)
     if (path === undefined) throw new Error("A recorded Memory page has no path on the copy")
     const placed = { path, via, whole: source.outcome === "whole" }
-    if (source.reason === "continuity_budget") cut.push(placed)
-    else if (source.outcome !== "dropped") pages.push(placed)
+    if (source.outcome !== "dropped") pages.push(placed)
+    else cut.push(placed)
   }
   return { pages, cut, text, bytes }
 }
@@ -79,7 +80,7 @@ export interface SentResult {
   readonly sent: boolean
   /** Expected pages that did not reach the chat. */
   readonly missing: ReadonlyArray<string>
-  /** Expected pages the budget cut. */
+  /** Expected pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<string>
   /** Expected pages that reached the chat only in part, cut short by their renderer. Whether
    * the answer lies in the part sent is not checked: the answered score judges that. */
@@ -129,7 +130,7 @@ export interface KindCount {
   readonly sent: number
   /** Of the questions sent, those where an expected page reached the chat only in part. */
   readonly inPart: number
-  /** Of the questions not sent, those where the budget cut an expected page. */
+  /** Of the questions not sent, those where an expected page was left out for room. */
   readonly cut: number
 }
 
@@ -155,7 +156,7 @@ export const countByKind = (
 /** The printed table: counts only, never a question or an answer. */
 export const renderCountTable = (results: ReadonlyArray<SentResult>): string => {
   const rows = countByKind(results)
-  const header = ["kind", "questions", "sent", "sent in part", "not sent", "cut by budget"]
+  const header = ["kind", "questions", "sent", "sent in part", "not sent", "left out for room"]
   const body = rows.map((row) => [
     row.kind,
     String(row.questions),
@@ -170,4 +171,41 @@ export const renderCountTable = (results: ReadonlyArray<SentResult>): string => 
   const line = (cells: ReadonlyArray<string>) =>
     cells.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join("  ")
   return [line(header), ...body.map(line)].join("\n")
+}
+
+const LEVEL_NAMES = ["not sent", "sent in part", "sent whole"] as const
+
+/** How fully a page was sent, read from its question's result. */
+const pageLevel = (result: Pick<SentResult, "missing" | "inPart">, path: string): 0 | 1 | 2 => {
+  if (result.missing.includes(path)) return 0
+  return result.inPart.includes(path) ? 1 : 2
+}
+
+export interface Regression {
+  readonly id: string
+  readonly path: string
+  readonly was: (typeof LEVEL_NAMES)[number]
+  readonly now: (typeof LEVEL_NAMES)[number]
+}
+
+/**
+ * Expected pages sent less fully than in a baseline run, page by page: whole to in part, or
+ * whole or in part to not sent. A page missing or in part now was expected then too.
+ */
+export const regressionsFrom = (
+  baseline: ReadonlyArray<Pick<SentResult, "id" | "missing" | "inPart">>,
+  results: ReadonlyArray<SentResult>
+): ReadonlyArray<Regression> => {
+  const before = new Map(baseline.map((result) => [result.id, result] as const))
+  return results.flatMap((result) => {
+    const was = before.get(result.id)
+    if (was === undefined) return []
+    return [...result.missing, ...result.inPart].flatMap((path) => {
+      const then = pageLevel(was, path)
+      const now = pageLevel(result, path)
+      return now >= then
+        ? []
+        : [{ id: result.id, path, was: LEVEL_NAMES[then], now: LEVEL_NAMES[now] }]
+    })
+  })
 }

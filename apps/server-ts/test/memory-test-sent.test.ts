@@ -4,6 +4,7 @@ import { parseQuestions, type Question } from "../scripts/memory-test/questions.
 import {
   countByKind,
   deliveryOf,
+  regressionsFrom,
   renderCountTable,
   scoreSent
 } from "../scripts/memory-test/sent.js"
@@ -13,11 +14,10 @@ import {
 type Placement = Pick<RunMemorySource, "outcome" | "reason">
 
 const WHOLE: Placement = { outcome: "whole", reason: null }
-/** Cut short by its own renderer, before any budget. */
+/** Cut short at a boundary, with a notice, to fit the recall's allowance. */
 const RENDERED_IN_PART: Placement = { outcome: "cut", reason: "recall_allowance" }
 const PASSAGE: Placement = { outcome: "passage", reason: null }
-const BUDGET_DROPPED: Placement = { outcome: "dropped", reason: "continuity_budget" }
-const BUDGET_CUT: Placement = { outcome: "cut", reason: "continuity_budget" }
+const NO_ROOM: Placement = { outcome: "dropped", reason: "recall_allowance" }
 
 const pageId = (path: string) => `page-${path.replaceAll(/[/.]/gu, "-")}`
 
@@ -25,12 +25,12 @@ const pageId = (path: string) => `page-${path.replaceAll(/[/.]/gu, "-")}`
 const recorded = (input: {
   readonly core?: ReadonlyArray<string>
   readonly recalled?: ReadonlyArray<readonly [string, Placement] | string>
-  readonly listed?: ReadonlyArray<string>
+  readonly indexed?: number
   readonly space?: { readonly path: string; readonly outcome: "whole" | "cut" | "dropped" }
   readonly text?: string
 }) => {
   const page = (
-    kind: "core" | "recalled" | "collection",
+    kind: "core" | "recalled",
     path: string,
     placement: Placement
   ): RunMemorySource => ({
@@ -58,14 +58,29 @@ const recorded = (input: {
     ...(input.recalled ?? []).map((entry) =>
       typeof entry === "string" ? page("recalled", entry, WHOLE) : page("recalled", ...entry)
     ),
-    ...(input.listed ?? []).map((path) => page("collection", path, WHOLE))
+    ...(input.indexed === undefined
+      ? []
+      : [
+          {
+            kind: "index" as const,
+            root: "",
+            listed: input.indexed,
+            folded: [],
+            bytes: 500,
+            ...WHOLE
+          }
+        ])
   ]
-  const composition: RunMemoryContext = { revision: "rev-1", query: "a question", sources }
+  const composition: RunMemoryContext = {
+    reader: "owner",
+    revision: "rev-1",
+    query: "a question",
+    sources
+  }
   const paths = new Map(
     [
       ...(input.core ?? []),
       ...(input.recalled ?? []).map((entry) => (typeof entry === "string" ? entry : entry[0])),
-      ...(input.listed ?? []),
       ...(input.space === undefined ? [] : [input.space.path])
     ].map((path) => [pageId(path), path] as const)
   )
@@ -132,7 +147,7 @@ describe("sent score", () => {
       { path: "me.md", via: "core", whole: true },
       { path: "people/gardener.md", via: "recall", whole: true }
     ])
-    expect(delivery.bytes).toEqual({ core: 40, recall: 40, space: 300 })
+    expect(delivery.bytes).toEqual({ core: 40, recall: 40, space: 300, index: 0 })
   })
 
   it("is not sent when one expected page is missing, and names it", () => {
@@ -143,35 +158,39 @@ describe("sent score", () => {
     expect(result).toMatchObject({ sent: false, missing: ["people/gardener.md"], cut: [] })
   })
 
-  it("does not count a page named only in a collection line", () => {
+  it("does not count a page named only in the index", () => {
+    const delivery = recorded({ indexed: 12 })
     const result = scoreSent(
       question({ kind: "people", expected_pages: ["people/gardener.md"] }),
-      recorded({ listed: ["people/gardener.md"] })
+      delivery
     )
     expect(result).toMatchObject({ sent: false, missing: ["people/gardener.md"] })
+    expect(delivery.bytes.index).toBe(500)
   })
 
-  it("names an expected page the continuity budget dropped or cut mid-body", () => {
-    for (const placement of [BUDGET_DROPPED, BUDGET_CUT]) {
-      const result = scoreSent(
-        question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
-        recorded({ recalled: ["projects/kitchen.md", ["projects/garden.md", placement]] })
-      )
-      expect(result).toMatchObject({
-        sent: false,
-        missing: ["projects/garden.md"],
-        cut: ["projects/garden.md"],
-        pages: [{ path: "projects/kitchen.md", via: "recall", whole: true }]
-      })
-    }
+  it("names an expected page left out for room", () => {
+    const result = scoreSent(
+      question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
+      recorded({ recalled: ["projects/kitchen.md", ["projects/garden.md", NO_ROOM]] })
+    )
+    expect(result).toMatchObject({
+      sent: false,
+      missing: ["projects/garden.md"],
+      cut: ["projects/garden.md"],
+      pages: [{ path: "projects/kitchen.md", via: "recall", whole: true }]
+    })
   })
 
-  it("counts a Space page its allowance dropped as not sent, and not cut by the budget", () => {
+  it("counts a Space page its allowance dropped as not sent, left out for room", () => {
     const result = scoreSent(
       question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
       recorded({ space: { path: "projects/garden.md", outcome: "dropped" } })
     )
-    expect(result).toMatchObject({ sent: false, missing: ["projects/garden.md"], cut: [] })
+    expect(result).toMatchObject({
+      sent: false,
+      missing: ["projects/garden.md"],
+      cut: ["projects/garden.md"]
+    })
   })
 
   it("says when an expected page reached the chat in part, for recall and Space alike", () => {
@@ -220,6 +239,7 @@ describe("sent score", () => {
     expect(() =>
       deliveryOf({
         composition: {
+          reader: "owner",
           revision: "rev-1",
           query: "a question",
           sources: [{ kind: "core", page_id: "page-x", version: "v1", ...WHOLE, bytes: 4 }]
@@ -259,6 +279,51 @@ describe("sent score", () => {
     const table = renderCountTable(results)
     expect(table).not.toContain("Tidy my desk")
     expect(table).not.toContain("gardener")
+  })
+})
+
+describe("against a baseline", () => {
+  const GARDEN = "projects/garden.md"
+  const KITCHEN = "projects/kitchen.md"
+  const ask = () => question({ kind: "where_it_stands", expected_pages: [GARDEN, KITCHEN] })
+  const score = (
+    garden: Placement | "missing",
+    kitchen: Placement | "missing"
+  ): ReturnType<typeof scoreSent> =>
+    scoreSent(
+      ask(),
+      recorded({
+        recalled: [
+          ...(garden === "missing" ? [] : [[GARDEN, garden] as const]),
+          ...(kitchen === "missing" ? [] : [[KITCHEN, kitchen] as const])
+        ]
+      })
+    )
+
+  it("fails each expected page sent less fully: whole to in part, in part or whole to not sent", () => {
+    expect(regressionsFrom([score(WHOLE, WHOLE)], [score(RENDERED_IN_PART, WHOLE)])).toEqual([
+      { id: "q-test", path: GARDEN, was: "sent whole", now: "sent in part" }
+    ])
+    expect(regressionsFrom([score(RENDERED_IN_PART, WHOLE)], [score("missing", WHOLE)])).toEqual([
+      { id: "q-test", path: GARDEN, was: "sent in part", now: "not sent" }
+    ])
+  })
+
+  it("fails a page that gets worse while its question stays at the same level", () => {
+    expect(regressionsFrom([score("missing", WHOLE)], [score("missing", "missing")])).toEqual([
+      { id: "q-test", path: KITCHEN, was: "sent whole", now: "not sent" }
+    ])
+    expect(
+      regressionsFrom([score(RENDERED_IN_PART, WHOLE)], [score(RENDERED_IN_PART, PASSAGE)])
+    ).toEqual([{ id: "q-test", path: KITCHEN, was: "sent whole", now: "sent in part" }])
+  })
+
+  it("passes pages sent as fully or more, and a question the baseline did not have", () => {
+    expect(
+      regressionsFrom([score("missing", "missing")], [score(RENDERED_IN_PART, WHOLE)])
+    ).toEqual([])
+    expect(regressionsFrom([score(WHOLE, WHOLE)], [score(WHOLE, WHOLE)])).toEqual([])
+    expect(regressionsFrom([], [score("missing", "missing")])).toEqual([])
   })
 })
 

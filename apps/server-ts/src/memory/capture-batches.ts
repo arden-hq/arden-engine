@@ -248,7 +248,7 @@ export const makeMemoryCaptureBatches = (input: {
                 "",
                 ...crowded.map(
                   (page) =>
-                    `- ${page.path}: ${page.chars} characters; every chat receives only the first ${page.budget}. ` +
+                    `- ${page.path}: ${page.chars} characters; it is sent whole to every run and limited to ${page.budget}. ` +
                     `Bring it to ${page.target} or fewer.`
                 )
               ])

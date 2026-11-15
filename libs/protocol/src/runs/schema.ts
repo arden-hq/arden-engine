@@ -59,10 +59,11 @@ export const RunLocalInstructionSourceSchema = withExtras({
 
 const RunMemoryOutcomeSchema = Schema.Literals(["whole", "passage", "cut", "dropped"] as const)
 const RunMemoryCutReasonSchema = Schema.Literals([
-  "core_page_budget",
-  "recall_allowance",
+  "standing_page_allowance",
+  "index_allowance",
+  "space_allowance",
   "space_page_allowance",
-  "continuity_budget"
+  "recall_allowance"
 ] as const)
 const memoryPlacement = {
   bytes: NonNegativeIntSchema,
@@ -80,9 +81,16 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
     ...memoryPlacement
   }),
   withExtras({
-    kind: Schema.Literals(["core", "recalled", "collection"] as const),
+    kind: Schema.Literals(["core", "recalled"] as const),
     page_id: IdentifierSchema,
     version: IdentifierSchema,
+    ...memoryPlacement
+  }),
+  withExtras({
+    kind: Schema.Literal("index"),
+    root: Schema.String,
+    listed: NonNegativeIntSchema,
+    folded: Schema.Array(withExtras({ folder: Schema.String, pages: PositiveIntSchema })),
     ...memoryPlacement
   })
 ]).check(
@@ -95,6 +103,7 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
 
 /** The one shape of a stored Memory composition; a Run's record is a list of them. */
 export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras({
+  reader: Schema.Literals(["owner", "worker"] as const),
   revision: Schema.NullOr(IdentifierSchema),
   query: Schema.NullOr(Schema.String),
   sources: Schema.Array(RunMemorySourceSchema)

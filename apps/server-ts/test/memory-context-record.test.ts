@@ -1,30 +1,30 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
 import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
-import { assembleMemoryContext } from "../src/context/memory-context.js"
+import type { ChatRunnerMessage } from "../src/chat/runner-contract.js"
 import { makeContextExperiments } from "../src/context/experiments.js"
 import type { RuntimeSection } from "../src/context/runtime-update.js"
-import { renderSpaceContext, type SpaceView } from "../src/context/space-render.js"
 import {
   composeTurnContext,
   type SessionOrigin,
   type TurnContextServices
 } from "../src/context/turn-context.js"
-import { prepareMemoryRecall, recallQuery } from "../src/memory/retrieval.js"
+import { unrecordedAuthority, type Actor, type RunAuthority } from "../src/execution/authority.js"
+import { prepareMemorySources, recallQuery } from "../src/memory/retrieval.js"
 import type { Memory, MemoryTurn } from "../src/memory/service.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
-import { AutomationId } from "../src/persistence/automations/model.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type { SkillCatalog } from "../src/skills/service.js"
 import type { TodoStore } from "../src/persistence/todos/store.js"
-import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store.js"
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import type { Wiki } from "../src/wiki/service.js"
@@ -33,8 +33,11 @@ import type { FocusChoiceStore } from "../src/persistence/focus-choices/store.js
 import type { AnswerBlockStore } from "../src/persistence/answer-blocks/store.js"
 import type { PermissionRules } from "../src/persistence/permissions/rules.js"
 import type { ToolApprovalPolicy } from "../src/tools/approval-policy.js"
+import type { AutomationId } from "../src/persistence/automations/model.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService, sessionHeader } from "./kit.js"
+
+// Made-up pages; nothing here comes from anyone's Memory.
 
 const QUERY = "orchard lantern ledger notes for the week"
 
@@ -68,24 +71,27 @@ const page = (path: string, title: string, body: string): PageRecord => {
 const core = page("me.md", "Me", "Prefers short replies.")
 const orchard = page("notes/orchard.md", "Orchard lantern", "The orchard lantern ledger is kept.")
 const ledger = page("notes/ledger.md", "Ledger notes", "Ledger notes for the orchard week.")
-
-const recallOf = (pages: ReadonlyArray<PageRecord>, query: string) =>
-  prepareMemoryRecall({ pages, query, lastChanged: new Map() }).render(new Map())
+const spacePage = page("spaces/garden.md", "Garden", "The garden orchard ledger plan.")
+const PAGES = [core, orchard, ledger, spacePage]
 
 const encoder = new TextEncoder()
 const bytes = (value: string): number => encoder.encode(value).byteLength
 
+const MEMORY_KEYS = ["Core Memory", "Memory index", "Current Space", "Memory context"]
+const memoryKeys = (sections: ReadonlyArray<RuntimeSection>) =>
+  sections.map((section) => section.key).filter((key) => MEMORY_KEYS.includes(key))
+
 /**
- * Reads the prompt sections back without the assembler: every `### ` page block in the Memory
- * sections, by the page path it names, with its bytes as they stand in the prompt.
+ * Reads the prompt back without the assembler: every `### ` page block in the Memory sections,
+ * by the page path it names, with its bytes as they stand in the prompt.
  */
 const blocksInPrompt = (sections: ReadonlyArray<RuntimeSection>): ReadonlyMap<string, number> =>
   new Map(
     sections
       .filter((section) => section.key === "Core Memory" || section.key === "Memory context")
-      .flatMap((section) => section.text.split(/\n\n(?=#{2,3} )/u))
+      .flatMap((section) => section.text.split(/\n\n(?=#{2,3} |\[Also matched)/u))
       .filter((part) => part.startsWith("### "))
-      .map((part) => [/\nPage: (.+)/u.exec(part)?.[1] ?? "", bytes(part)] as const)
+      .map((part) => [/\nPage: (.+)/u.exec(part)?.[1] ?? "", bytes(part.trimEnd())] as const)
   )
 
 /** The record's sent page sources, by path, with their bytes. */
@@ -95,7 +101,7 @@ const recordedBlocks = (
 ): ReadonlyMap<string, number> =>
   new Map(
     record.flatMap((source) =>
-      source.kind === "space" || source.outcome === "dropped"
+      (source.kind !== "core" && source.kind !== "recalled") || source.outcome === "dropped"
         ? []
         : [
             [
@@ -112,23 +118,70 @@ interface Composed {
   readonly searches: ReadonlyArray<string>
 }
 
-const compose = async (
-  origin: SessionOrigin,
-  pages: ReadonlyArray<PageRecord>,
-  query: string = QUERY
-): Promise<Composed> => {
+const gardenSpace = (spaceId: string, instructions: string | null): PersistedSpace => ({
+  inference: { enabled: false },
+  space_id: spaceId,
+  name: "Garden",
+  instructions,
+  instructions_source: null,
+  page_path: spacePage.resource.path,
+  mark: null,
+  created_at: "2026-11-01T00:00:00Z",
+  updated_at: "2026-11-01T00:00:00Z",
+  archived_at: null,
+  page_id: spacePage.page.pageId
+})
+
+const authorityOf = (actor: Actor | undefined): RunAuthority | undefined =>
+  actor === undefined ? undefined : { ...unrecordedAuthority("session-1"), actor }
+
+type OriginSource = SessionOrigin["source"]
+
+const compose = async ({
+  actor,
+  pages = PAGES,
+  messages = [{ role: "user", content: QUERY }],
+  spaceId = null,
+  instructions = null,
+  spaceBody = spacePage.page.body,
+  originSource = "personal"
+}: {
+  readonly actor: Actor | undefined
+  readonly pages?: ReadonlyArray<PageRecord>
+  readonly messages?: ReadonlyArray<ChatRunnerMessage>
+  readonly spaceId?: string | null
+  readonly instructions?: string | null
+  readonly spaceBody?: string
+  readonly originSource?: OriginSource
+}): Promise<Composed> => {
   const writes: Array<RunMemoryContext> = []
   const searches: Array<string> = []
   const turn: MemoryTurn = {
     revision: "rev-1",
-    readContent: () => Effect.die("no Space page in this test"),
-    recall: (input) =>
+    readContent: (pageId) =>
+      Effect.succeed({
+        pageId,
+        path: spacePage.resource.path,
+        version: spacePage.resource.versionId,
+        content: spaceBody
+      }),
+    sources: (input) =>
       Effect.sync(() => {
-        searches.push(input.query)
-        return recallOf(pages, input.query)
+        if (input.recall !== undefined) searches.push(input.recall.query)
+        return prepareMemorySources({
+          pages,
+          recall:
+            input.recall === undefined
+              ? undefined
+              : {
+                  query: input.recall.query,
+                  excludedPageIds: new Set(input.recall.excludePageIds ?? [])
+                },
+          lastChanged: new Map()
+        }).render(new Map())
       })
   }
-  const header = sessionHeader({ sessionId: "session-1" })
+  const header = sessionHeader({ sessionId: "session-1", spaceId })
   const services: TurnContextServices = {
     experiments: makeContextExperiments(),
     sessions: partialService<SessionQueries["Service"]>("SessionQueries", {
@@ -136,8 +189,10 @@ const compose = async (
       listDirectAgentChildren: () => Effect.succeed([])
     }),
     runs: partialService<RunQueries["Service"]>("RunQueries", {
-      authority: () => Effect.succeed(undefined),
-      currentForSessions: () => Effect.succeed(new Map())
+      authority: () => Effect.succeed(authorityOf(actor)),
+      currentForSessions: () => Effect.succeed(new Map()),
+      get: () => Effect.die("no run rows in this test"),
+      cause: () => Effect.die("no run rows in this test")
     }),
     skills: partialService<SkillCatalog["Service"]>("SkillCatalog", {
       promptCatalog: () => Effect.succeed(undefined)
@@ -148,11 +203,17 @@ const compose = async (
     todos: partialService<TodoStore["Service"]>("TodoStore", {
       getOverride: () => Effect.succeed(null)
     }),
-    spaces: partialService<SpaceStore["Service"]>("SpaceStore", {}),
-    summaries: partialService<SummaryStore["Service"]>("SummaryStore", {}),
+    spaces: partialService<SpaceStore["Service"]>("SpaceStore", {
+      get: (id) => Effect.succeed(gardenSpace(id, instructions)),
+      detail: () => Effect.succeed(null)
+    }),
+    summaries: partialService<SummaryStore["Service"]>("SummaryStore", {
+      spaceChats: () => Effect.succeed([])
+    }),
     work: partialService<WorkStore["Service"]>("WorkStore", {
       continuationContext: () => Effect.succeed(undefined),
-      chatTask: () => Effect.succeed(undefined)
+      chatTask: () => Effect.succeed(undefined),
+      questions: () => Effect.succeed({ questions: [], next_cursor: null })
     }),
     wiki: partialService<Wiki["Service"]>("Wiki", {}),
     cliTools: partialService<CliTools["Service"]>("CliTools", {
@@ -165,53 +226,139 @@ const compose = async (
     chat: {
       recordMemoryContext: (input) => Effect.sync(() => void writes.push(input.context))
     },
-    permissions: partialService<ToolApprovalPolicy>("ToolApprovalPolicy", {}),
-    rules: partialService<PermissionRules["Service"]>("PermissionRules", {}),
+    permissions: partialService<ToolApprovalPolicy>("ToolApprovalPolicy", {
+      live: () => Effect.fail("no permission rules in this test" as never)
+    }),
+    rules: partialService<PermissionRules["Service"]>("PermissionRules", {
+      inLists: () => Effect.die("no permission rules in this test")
+    }),
     dataDir: "/nonexistent-data-dir"
   }
+  const origins: Record<OriginSource, SessionOrigin> = {
+    personal: { source: "personal", header, starting: undefined, special: undefined },
+    agent: { source: "agent", mode: "research", header },
+    scheduled_task: {
+      source: "scheduled_task",
+      automationId: "automation-1" as AutomationId,
+      policy: {
+        purpose: "user_automation",
+        handler: null,
+        toolScope: "all",
+        autoApprove: false,
+        threadId: "session-1"
+      },
+      header,
+      fork: false,
+      ownRun: true
+    }
+  }
+  const origin = origins[originSource]
   const context = await Effect.runPromise(
     composeTurnContext(services, origin, {
       sessionId: "session-1",
       runId: "run-1",
-      messages: [{ role: "user", content: query }],
+      messages,
       signal: new AbortController().signal
     })
   )
   return { sections: context.sections, writes, searches }
 }
 
-const personal: SessionOrigin = {
-  source: "personal",
-  header: null,
-  starting: undefined,
-  special: undefined
-}
-const automation = (purpose: "user_automation" | "task_execution"): SessionOrigin => ({
-  source: "scheduled_task",
-  automationId: AutomationId.make("automation-1"),
-  policy: { purpose, handler: null, toolScope: "all", autoApprove: false, threadId: null },
-  header: sessionHeader({ sessionId: "session-1" }),
-  fork: false,
-  ownRun: true
+const person: Actor = { kind: "person", session_id: "session-1", turn_id: "turn-1" }
+const ACTORS: ReadonlyArray<readonly [string, Actor | undefined, "owner" | "worker" | "none"]> = [
+  ["a person", person, "owner"],
+  [
+    "a helper of a person's chat",
+    { kind: "agent", mode: "research", parent_run_id: "run-0", root: "person" },
+    "worker"
+  ],
+  ["a Task worker", { kind: "task_worker", item_id: "task-1", space_id: "space-1" }, "worker"],
+  ["a Space review", { kind: "space_review", space_id: "space-1" }, "worker"],
+  ["a run with no recorded actor", undefined, "worker"],
+  [
+    "an owner Automation",
+    { kind: "automation", automation_id: "a-1", purpose: "user_automation", handler: null },
+    "none"
+  ],
+  [
+    "a system Automation",
+    { kind: "automation", automation_id: "a-2", purpose: "system", handler: "memory_capture" },
+    "none"
+  ],
+  [
+    "a helper of an Automation",
+    { kind: "agent", mode: "research", parent_run_id: "run-0", root: "automation" },
+    "none"
+  ]
+]
+
+const ORIGINS: ReadonlyArray<OriginSource> = ["personal", "agent", "scheduled_task"]
+
+describe("which runs are sent Memory, by recorded actor, whatever the chat's origin", () => {
+  it.each(
+    ACTORS.flatMap(([name, actor, reader]) =>
+      ORIGINS.flatMap(
+        (originSource) =>
+          [
+            [`${name}, ${originSource} chat`, actor, reader, null, originSource],
+            [`${name}, ${originSource} chat in a Space`, actor, reader, "space-1", originSource]
+          ] as const
+      )
+    )
+  )("%s", async (_name, actor, reader, spaceId, originSource) => {
+    const composed = await compose({ actor, spaceId, originSource })
+    const expected = {
+      owner: [
+        "Core Memory",
+        "Memory index",
+        ...(spaceId === null ? [] : ["Current Space"]),
+        "Memory context"
+      ],
+      worker: ["Core Memory", "Memory index"],
+      none: []
+    }[reader]
+    expect(memoryKeys(composed.sections)).toEqual(expected)
+    expect(composed.searches).toEqual(reader === "owner" ? [QUERY] : [])
+    if (reader === "none") expect(composed.writes).toEqual([])
+    else expect(composed.writes.map((write) => write.reader)).toEqual([reader])
+  })
+
+  it("never recalls a standing-facts page, which is sent whole already", async () => {
+    const matching = page("profile.md", "Profile", QUERY)
+    const composed = await compose({ actor: person, pages: [matching, orchard, ledger] })
+    expect(
+      composed.writes[0]?.sources.filter((source) => source.page_id === "id-profile.md")
+    ).toEqual([expect.objectContaining({ kind: "core" })])
+  })
+
+  it("records a Space page its share cut as cut", async () => {
+    const composed = await compose({
+      actor: person,
+      spaceId: "space-1",
+      spaceBody: "The garden orchard ledger plan, line by line.\n".repeat(200)
+    })
+    expect(composed.writes[0]?.sources.find((source) => source.kind === "space")).toMatchObject({
+      outcome: "cut",
+      reason: "space_page_allowance"
+    })
+  })
+
+  it("never recalls the Space page a second time", async () => {
+    const composed = await compose({ actor: person, spaceId: "space-1" })
+    const record = composed.writes[0]?.sources ?? []
+    expect(record.filter((source) => source.page_id === spacePage.page.pageId)).toEqual([
+      expect.objectContaining({ kind: "space" })
+    ])
+  })
 })
-const helper: SessionOrigin = {
-  source: "agent",
-  mode: "research",
-  header: sessionHeader({ sessionId: "session-1", sessionType: "agent" })
-}
 
-const memoryKeys = (sections: ReadonlyArray<RuntimeSection>) =>
-  sections
-    .map((section) => section.key)
-    .filter((key) => ["Core Memory", "Current Space", "Memory context"].includes(key))
-
-describe("what a run was sent from Memory", () => {
-  it("an owner chat records each source it was sent, and the record matches the prompt", async () => {
-    const pages = [core, orchard, ledger]
-    const composed = await compose(personal, pages)
-    const record = composed.writes.at(-1)?.sources ?? []
-    expect(memoryKeys(composed.sections)).toEqual(["Core Memory", "Memory context"])
-    expect({ ...composed.writes.at(-1), sources: undefined }).toEqual({
+describe("what an owner chat is sent and records", () => {
+  it("records each source it was sent, and the record matches the prompt", async () => {
+    const composed = await compose({ actor: person })
+    const write = composed.writes.at(-1)
+    const record = write?.sources ?? []
+    expect({ ...write, sources: undefined }).toEqual({
+      reader: "owner",
       revision: "rev-1",
       query: QUERY,
       sources: undefined
@@ -224,196 +371,221 @@ describe("what a run was sent from Memory", () => {
         outcome: "whole",
         reason: null
       },
-      ...[ledger, orchard].map((record) => ({
+      { kind: "index", root: "", listed: 3, folded: [], outcome: "whole", reason: null },
+      ...[ledger, orchard, spacePage].map((page) => ({
         kind: "recalled",
-        page_id: record.page.pageId,
-        version: record.resource.versionId,
+        page_id: page.page.pageId,
+        version: page.resource.versionId,
         outcome: "whole",
         reason: null
       }))
     ])
-    expect(recordedBlocks(record, pages)).toEqual(blocksInPrompt(composed.sections))
-    expect(composed.writes).toHaveLength(1)
+    expect(recordedBlocks(record, PAGES)).toEqual(blocksInPrompt(composed.sections))
+    const index = composed.sections.find((section) => section.key === "Memory index")
+    expect(record.find((source) => source.kind === "index")?.bytes).toBe(bytes(index?.text ?? ""))
+    expect(index?.text).not.toContain("me.md")
   })
 
-  it.each([
-    ["an Automation run", automation("user_automation")],
-    ["a task worker", automation("task_execution")],
-    ["a helper", helper]
-  ])("%s is sent no Memory, so it records none", async (_kind, origin) => {
-    const composed = await compose(origin, [core, orchard, ledger])
-    expect({
-      sections: memoryKeys(composed.sections),
-      searches: composed.searches,
-      writes: composed.writes
-    }).toEqual({
-      sections: [],
-      searches: [],
-      writes: [{ revision: null, query: null, sources: [] }]
-    })
+  it("says in each section that holds page text that it is context, not instructions", async () => {
+    const composed = await compose({ actor: person })
+    const sections = composed.sections.filter((section) =>
+      ["Core Memory", "Memory index", "Memory context"].includes(section.key)
+    )
+    expect(sections).toHaveLength(3)
+    for (const section of sections) expect(section.text).toMatch(/not (new )?instructions/u)
   })
 
-  it("a long owner message is kept once, as far as the word search read it", async () => {
+  const turns = (...typed: ReadonlyArray<string>): ReadonlyArray<ChatRunnerMessage> =>
+    typed.flatMap((content) => [
+      { role: "user" as const, content },
+      { role: "assistant" as const, content: "Which ledger?" }
+    ])
+
+  it("adds earlier typed turns, newest first, only when the word search reads nothing of the latest", async () => {
+    const short = await compose({ actor: person, messages: turns(QUERY, "yes ok fine") })
+    expect(short.searches).toEqual([`yes ok fine\n${QUERY}`])
+    expect(short.writes[0]?.sources.filter((source) => source.kind === "recalled")).not.toEqual([])
+    const readable = await compose({ actor: person, messages: turns(QUERY, "orchard plan") })
+    expect(readable.searches).toEqual(["orchard plan"])
+    const question = "what did we decide about the second greenhouse"
+    const later = await compose({ actor: person, messages: turns(QUERY, question) })
+    expect(later.searches).toEqual([question])
+  })
+
+  it("adds earlier turns only as far as the word search reads", async () => {
+    const paste = `${QUERY} ${"pasted document text ".repeat(2_000)}`
+    const composed = await compose({ actor: person, messages: turns(paste, "yes") })
+    expect(composed.searches).toEqual([`yes\n${paste}`.slice(0, 512)])
+    expect(composed.writes[0]?.query).toBe(composed.searches[0])
+  })
+
+  it("keeps a long owner message once, as far as the word search read it", async () => {
     const long = `${QUERY} ${"pasted document text ".repeat(2_000)}`
-    const composed = await compose(personal, [core, orchard, ledger], long)
+    const composed = await compose({ actor: person, messages: [{ role: "user", content: long }] })
     const record = composed.writes.at(-1)
-    expect(composed.searches).toEqual([long])
+    expect(composed.searches).toEqual([long.trim()])
     expect(record?.query).toBe(recallQuery(long))
     expect(record?.query).toHaveLength(512)
-    expect(record?.sources.filter((source) => source.kind === "recalled")).toHaveLength(2)
     expect(JSON.stringify(record).length).toBeLessThan(2_000)
   })
-
-  it("names the allowance that cut or dropped a page, and still matches the prompt", async () => {
-    const bigCore = page("me.md", "Me", `${"Prefers short replies. ".repeat(600)}`)
-    const long = page("notes/orchard.md", "Orchard lantern", `${"orchard ledger ".repeat(900)}`)
-    const crowded = page("notes/ledger.md", `Ledger notes ${"x".repeat(4_000)}`, "Ledger week.")
-    const pages = [bigCore, long, crowded]
-    const composed = await compose(personal, pages)
-    const record = composed.writes.at(-1)?.sources ?? []
-    expect(
-      record.map((source) => ({
-        page: source.page_id,
-        outcome: source.outcome,
-        reason: source.reason
-      }))
-    ).toEqual([
-      { page: "id-me.md", outcome: "cut", reason: "core_page_budget" },
-      { page: "id-notes/ledger.md", outcome: "dropped", reason: "recall_allowance" },
-      { page: "id-notes/orchard.md", outcome: "cut", reason: "recall_allowance" }
-    ])
-    expect(record.find((source) => source.outcome === "dropped")?.bytes).toBe(0)
-    expect(recordedBlocks(record, pages)).toEqual(blocksInPrompt(composed.sections))
-  })
 })
 
-const spaceView = (content: string | undefined): SpaceView => ({
-  space_id: "space-1",
-  name: "Garden",
-  instructions: undefined,
-  isConversation: true,
-  conversation: undefined,
-  chats: [],
-  page: content === undefined ? undefined : { path: "spaces/garden.md", content },
-  questions: [],
-  tasks: []
-})
-
-describe("the continuity budget and the Space", () => {
-  const recall = recallOf([orchard, ledger], QUERY)
-  const assemble = (
-    text: string,
-    content: string | undefined,
-    recalled: "recalled" | "no recall" = "recalled"
-  ) => {
-    const view = spaceView(content)
-    const rendered = renderSpaceContext(view)
-    return assembleMemoryContext({
-      space: {
-        view,
-        text,
-        page:
-          rendered.page === undefined
-            ? undefined
-            : { pageId: "space-page", version: "space-page-v1", shown: rendered.page }
-      },
-      recall: recalled === "recalled" ? recall : undefined,
-      revision: "rev-1",
-      query: QUERY
-    })
-  }
-
-  it("records the Space whole, and the recall it leaves room for cut or dropped", () => {
-    const recallBytes = bytes(recall.text ?? "")
-    const roomy = assemble("Space context.", undefined)
-    // Room for the intro and the first page block only, part of the second.
-    const tight = assemble("s".repeat(16_000 - 2 - recallBytes + 20), undefined)
-    const full = assemble("s".repeat(16_000), undefined)
-    const outcomes = (context: ReturnType<typeof assemble>) =>
-      context.record.sources.map((source) => [source.kind, source.outcome, source.reason])
-    expect(outcomes(roomy)).toEqual([
-      ["space", "whole", null],
-      ["recalled", "whole", null],
-      ["recalled", "whole", null]
-    ])
-    expect(outcomes(tight)).toEqual([
-      ["space", "whole", null],
-      ["recalled", "whole", null],
-      ["recalled", "cut", "continuity_budget"]
-    ])
-    expect(outcomes(full)).toEqual([
-      ["space", "whole", null],
-      ["recalled", "dropped", "continuity_budget"],
-      ["recalled", "dropped", "continuity_budget"]
-    ])
-    expect(full.recall).toEqual([])
-    for (const context of [roomy, tight, full]) {
-      expect(context.record.sources[0]?.bytes).toBe(bytes(context.space[0]?.text ?? ""))
-      expect(recordedBlocks(context.record.sources, [orchard, ledger])).toEqual(
-        blocksInPrompt(context.recall)
+describe("each source in its own allowance", () => {
+  const many = (prefix: string, count: number, size: number) =>
+    Array.from({ length: count }, (_, index) =>
+      page(
+        `${prefix}/page-${index}.md`,
+        `Orchard ledger ${prefix} ${index}`,
+        `${"Orchard lantern ledger notes. ".repeat(Math.ceil(size / 30))}`
       )
-    }
-  })
+    )
+  const sectionBytes = (composed: Composed, key: string) =>
+    bytes(composed.sections.find((section) => section.key === key)?.text ?? "")
+  const recallBytes = (composed: Composed) =>
+    (composed.writes[0]?.sources ?? [])
+      .filter((source) => source.kind === "recalled")
+      .reduce((sum, source) => sum + source.bytes, 0)
 
-  it("names the Space page, and says when the Space's allowance cut it", () => {
-    const whole = assemble("Space context.", "A short page.")
-    const cut = assemble("Space context.", "line\n".repeat(20_000))
-    expect([whole.record.sources[0], cut.record.sources[0]]).toEqual([
-      {
-        kind: "space",
-        space_id: "space-1",
-        page_id: "space-page",
-        version: "space-page-v1",
-        bytes: bytes("Space context."),
-        outcome: "whole",
-        reason: null
-      },
-      {
-        kind: "space",
-        space_id: "space-1",
-        page_id: "space-page",
-        version: "space-page-v1",
-        bytes: bytes("Space context."),
-        outcome: "cut",
-        reason: "space_page_allowance"
-      }
+  it("fits the index in 10,000 bytes, the Space in 10,000 and recall in 7,000, with 6,000 for its pages", async () => {
+    const pages = [
+      page("me.md", "Me", "Prefers short replies. ".repeat(380)),
+      ...many("daily", 300, 9_000),
+      ...many("notes", 40, 9_000)
+    ]
+    const composed = await compose({
+      actor: person,
+      pages,
+      spaceId: "space-1",
+      instructions: "Keep the garden ledger current. ".repeat(200)
+    })
+    expect(sectionBytes(composed, "Memory index")).toBeLessThanOrEqual(10_000)
+    expect(sectionBytes(composed, "Current Space")).toBeLessThanOrEqual(10_000)
+    expect(sectionBytes(composed, "Current Space")).toBeGreaterThan(4_000)
+    expect(sectionBytes(composed, "Memory context")).toBeLessThanOrEqual(7_000)
+    expect(recallBytes(composed)).toBeGreaterThanOrEqual(6_000)
+    const recalled =
+      composed.writes[0]?.sources.filter((source) => source.kind === "recalled") ?? []
+    expect(recalled.map((source) => [source.outcome, source.reason])).toEqual([
+      ["cut", "recall_allowance"],
+      ["cut", "recall_allowance"],
+      ["cut", "recall_allowance"]
     ])
   })
 
-  it("names the Memory revision the Space page was read at when no recall ran", () => {
-    const alone = assemble("Space context.", "A short page.", "no recall")
-    expect({ ...alone.record, sources: alone.record.sources.map((source) => source.kind) }).toEqual(
-      { revision: "rev-1", query: null, sources: ["space"] }
+  it("sends both standing-facts pages whole at their writer limit, taking nothing from the rest", async () => {
+    const atLimit = (path: string) =>
+      page(path, path, `${"Prefers short replies. ".repeat(400).slice(0, 8_999)}.`)
+    const small = await compose({ actor: person, pages: [core, ...many("notes", 3, 9_000)] })
+    const full = [atLimit("me.md"), atLimit("profile.md")]
+    expect(full.map((record) => record.page.body.trim().length)).toEqual([9_000, 9_000])
+    const composed = await compose({ actor: person, pages: [...full, ...many("notes", 3, 9_000)] })
+    const record = composed.writes[0]?.sources ?? []
+    expect(record.filter((source) => source.kind === "core")).toEqual([
+      expect.objectContaining({ outcome: "whole", reason: null }),
+      expect.objectContaining({ outcome: "whole", reason: null })
+    ])
+    expect(recallBytes(composed)).toBe(recallBytes(small))
+    expect(composed.sections.find((section) => section.key === "Memory index")?.text).not.toMatch(
+      /profile\.md|me\.md/u
+    )
+  })
+
+  it("cuts a standing-facts page past its writer limit at a boundary, with a notice", async () => {
+    const pasted = page("me.md", "Me", "Prefers short replies.\n\n".repeat(1_700))
+    const notes = many("notes", 3, 9_000)
+    const composed = await compose({ actor: person, spaceId: "space-1", pages: [pasted, ...notes] })
+    const record = composed.writes[0]?.sources ?? []
+    const coreText = composed.sections.find((section) => section.key === "Core Memory")?.text ?? ""
+    expect(coreText).toContain("Prefers short replies.\n\n[Partial page; use wiki_read_page")
+    expect(record.map((source) => [source.kind, source.outcome, source.reason])).toEqual([
+      ["core", "cut", "standing_page_allowance"],
+      ["index", "whole", null],
+      ["space", "whole", null],
+      ["recalled", "cut", "recall_allowance"],
+      ["recalled", "cut", "recall_allowance"],
+      ["recalled", "cut", "recall_allowance"]
+    ])
+    expect(recordedBlocks(record, [pasted, ...notes])).toEqual(blocksInPrompt(composed.sections))
+  })
+
+  it("folds the index to fit its share, with a notice, and counts every page", async () => {
+    const pages = [core, ...many("daily", 250, 40), ...many("notes", 20, 40)]
+    const composed = await compose({ actor: person, pages })
+    const index = composed.writes[0]?.sources.find((source) => source.kind === "index")
+    const text = composed.sections.find((section) => section.key === "Memory index")?.text ?? ""
+    expect(index).toMatchObject({
+      kind: "index",
+      listed: 20,
+      folded: [{ folder: "daily", pages: 250 }],
+      outcome: "cut",
+      reason: "index_allowance"
+    })
+    expect(index?.bytes).toBeLessThanOrEqual(10_000)
+    expect(text).toContain("- daily/ (folded)")
+    expect(text).toContain("[Folded to fit: a folder marked folded is not listed page by page")
+    expect(text).not.toContain("250")
+  })
+
+  it("cuts the index from the end, with a notice, when folding alone does not fit it", async () => {
+    const singles = Array.from({ length: 700 }, (_, index) =>
+      page(`folder-${String(index).padStart(3, "0")}/only.md`, "Only", "")
+    )
+    const composed = await compose({
+      actor: { kind: "task_worker", item_id: "t", space_id: "s" },
+      pages: [core, ...singles]
+    })
+    const index = composed.writes[0]?.sources.find((source) => source.kind === "index")
+    const text = composed.sections.find((section) => section.key === "Memory index")?.text ?? ""
+    expect(index).toMatchObject({ outcome: "cut", reason: "index_allowance" })
+    expect(bytes(text)).toBeLessThanOrEqual(10_000)
+    expect(text).toContain("[Cut to fit: the last lines are left out")
+  })
+
+  it("recalls three pages at most", async () => {
+    const composed = await compose({ actor: person, pages: [core, ...many("notes", 6, 300)] })
+    expect(composed.writes[0]?.sources.filter((source) => source.kind === "recalled")).toHaveLength(
+      3
     )
   })
 })
 
-describe("one assembler", () => {
-  // Memory reaches the prompt only through `assembleMemoryContext`, which returns the
-  // sections and their record together. A second place that budgets Memory or builds its
-  // sections would send Memory without a record.
-  it("no other source file budgets Memory context or builds its sections", () => {
-    const root = join(import.meta.dirname, "../src")
-    const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter((file) =>
-      file.endsWith(".ts")
+describe("one owner for each limit and rule", () => {
+  const root = join(import.meta.dirname, "../src")
+  const files = readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((file) => file.endsWith(".ts"))
+    .toSorted()
+  const offenders = (pattern: RegExp, allowed: ReadonlyArray<string>) =>
+    files.filter(
+      (relative) =>
+        !allowed.includes(relative) && pattern.test(readFileSync(join(root, relative), "utf8"))
     )
-    const offenders = files.toSorted().flatMap((relative) => {
-      const text = readFileSync(join(root, relative), "utf8")
-      return [
-        /budgetContinuityContext\(/u.test(text) && !relative.endsWith("continuity-budget.ts")
-          ? `${relative}: budgetContinuityContext`
-          : undefined,
-        /"(Core Memory|Memory recall|Current Space)"/u.test(text) &&
-        /textSection\(|kind: "space"/u.test(text) &&
-        !relative.endsWith("runtime-update.ts")
-          ? `${relative}: Memory section`
-          : undefined
-      ].filter((offender) => offender !== undefined)
-    })
-    expect(offenders).toEqual([
-      "context/memory-context.ts: budgetContinuityContext",
-      "context/memory-context.ts: Memory section"
-    ])
+
+  // Memory reaches the prompt only through `assembleMemoryContext`, which gives every source
+  // its room and returns the sections with their record.
+  it("only the assembler builds Memory sections or gives a source its room", () => {
+    expect(
+      offenders(/"(Core Memory|Memory recall|Memory index|Current Space)"[^\n]*\)/u, [
+        "context/memory-context.ts",
+        "memory/retrieval.ts"
+      ])
+    ).toEqual([])
+    expect(
+      offenders(/\brenderSpaceContext\(/u, ["context/memory-context.ts", "context/space-render.ts"])
+    ).toEqual([])
+    expect(
+      offenders(/\.(index|recall)\??\.?\(\s*[\d_A-Z]/u, ["context/memory-context.ts"])
+    ).toEqual([])
+    expect(files.filter((file) => file.endsWith("continuity-budget.ts"))).toEqual([])
+  })
+
+  // The seed README tells the model where profile facts go; it states no limit or rule.
+  it("only core-memory.ts names the standing-facts pages", () => {
+    expect(
+      offenders(/["'`](me|profile)["'`]|\b(me|profile)\.md\b/u, [
+        "memory/core-memory.ts",
+        "wiki/foundation.ts"
+      ])
+    ).toEqual([])
   })
 })
 
@@ -424,19 +596,21 @@ describe("the stored record", () => {
     version: "version-1",
     bytes: 120,
     outcome: "cut",
-    reason: "continuity_budget"
+    reason: "recall_allowance"
   })
   const first: RunMemoryContext = {
+    reader: "owner",
     revision: "rev-1",
     query: "a made-up question",
     sources: [source("page-a"), source("page-b")]
   }
   const steered: RunMemoryContext = {
+    reader: "owner",
     revision: "rev-1",
     query: "a made-up steer",
     sources: [source("page-c")]
   }
-  const none: RunMemoryContext = { revision: null, query: null, sources: [] }
+  const none: RunMemoryContext = { reader: "worker", revision: null, query: null, sources: [] }
 
   it("keeps every composition of a run in order, once each, and adds no row for none", async () => {
     const result = await withTempDatabase(
@@ -456,5 +630,188 @@ describe("the stored record", () => {
       })
     )
     expect(result).toEqual({ kept: [first, steered, none], never: [], rows: ["run-a"] })
+  })
+
+  it("reads a record stored before the one block in today's shape, and adds to it", async () => {
+    const old = [
+      {
+        revision: "rev-0",
+        query: "an older question",
+        sources: [
+          {
+            kind: "core",
+            page_id: "me",
+            version: "v",
+            bytes: 9,
+            outcome: "cut",
+            reason: "core_page_budget"
+          },
+          {
+            kind: "recalled",
+            page_id: "a",
+            version: "v",
+            bytes: 9,
+            outcome: "cut",
+            reason: "recall_allowance"
+          },
+          {
+            kind: "recalled",
+            page_id: "b",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "continuity_budget"
+          },
+          {
+            kind: "collection",
+            page_id: "c",
+            version: "v",
+            bytes: 9,
+            outcome: "whole",
+            reason: null
+          }
+        ]
+      },
+      {
+        reader: "worker",
+        revision: "rev-0",
+        query: null,
+        sources: [
+          {
+            kind: "core",
+            page_id: "me",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          },
+          {
+            kind: "index",
+            root: "",
+            listed: 0,
+            folded: [],
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          },
+          {
+            kind: "space",
+            space_id: "s",
+            page_id: null,
+            version: null,
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          },
+          {
+            kind: "recalled",
+            page_id: "d",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          }
+        ]
+      }
+    ]
+    const result = await withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          INSERT INTO run_sidecars (
+            run_id, session_id, context_manifest_json, source_refs_json, evidence_json, updated_at
+          ) VALUES ('run-old', 's-old', ${JSON.stringify(old)}, '[]', '{}', '2026-11-14T00:00:00Z')`
+        const chat = yield* ChatWriteStore
+        yield* chat.recordMemoryContext({ runId: "run-old", sessionId: "s-old", context: first })
+        return yield* (yield* RunQueries).memoryContext("run-old")
+      })
+    )
+    expect(result).toEqual([
+      {
+        reader: "owner",
+        revision: "rev-0",
+        query: "an older question",
+        sources: [
+          {
+            kind: "core",
+            page_id: "me",
+            version: "v",
+            bytes: 9,
+            outcome: "cut",
+            reason: "standing_page_allowance"
+          },
+          {
+            kind: "recalled",
+            page_id: "a",
+            version: "v",
+            bytes: 9,
+            outcome: "cut",
+            reason: "recall_allowance"
+          },
+          {
+            kind: "recalled",
+            page_id: "b",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "recall_allowance"
+          }
+        ]
+      },
+      {
+        reader: "worker",
+        revision: "rev-0",
+        query: null,
+        sources: [
+          {
+            kind: "core",
+            page_id: "me",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "standing_page_allowance"
+          },
+          {
+            kind: "index",
+            root: "",
+            listed: 0,
+            folded: [],
+            bytes: 0,
+            outcome: "dropped",
+            reason: "index_allowance"
+          },
+          {
+            kind: "space",
+            space_id: "s",
+            page_id: null,
+            version: null,
+            bytes: 0,
+            outcome: "dropped",
+            reason: "space_allowance"
+          },
+          {
+            kind: "recalled",
+            page_id: "d",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "recall_allowance"
+          }
+        ]
+      },
+      first
+    ])
+  })
+
+  it("never writes a retired value", () => {
+    const encode = Schema.encodeUnknownSync(RunMemoryContextSchema)
+    for (const retired of [
+      { ...first, sources: [{ ...source("a"), kind: "collection" }] },
+      { ...first, sources: [{ ...source("a"), reason: "continuity_budget" }] },
+      { ...first, sources: [{ ...source("a"), reason: "block_budget" }] },
+      { ...first, sources: [{ ...source("a"), reason: "core_page_budget" }] },
+      { revision: null, query: null, sources: [] }
+    ])
+      expect(() => encode(retired)).toThrow()
   })
 })

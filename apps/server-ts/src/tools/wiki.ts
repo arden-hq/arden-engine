@@ -29,7 +29,8 @@ import {
   CORE_CONDENSE_ADVICE,
   coreCondenseTarget,
   coreNeedsCondensing,
-  corePageBudget
+  corePageBudget,
+  STANDING_LIMIT_NOTE
 } from "../memory/core-memory.js"
 import { requireWithinCoreBudget } from "./wiki-records.js"
 
@@ -76,7 +77,7 @@ const ReadParametersSchema = Schema.Struct({
 const CreateParametersSchema = Schema.Struct({
   path: Schema.NonEmptyString.check(Schema.isMinLength(4), Schema.isMaxLength(4_096)).annotate({
     description:
-      "Relative POSIX .md path inside an existing wiki directory, or me.md for the root profile."
+      "Relative POSIX .md path inside an existing wiki directory, or a root profile page named in the tool description."
   }),
   title: Schema.NonEmptyString.check(Schema.isMaxLength(4_096)).annotate({
     description: "Human-readable page title."
@@ -483,7 +484,7 @@ const makeWikiTools = ({
         ...(coreBudget === undefined
           ? []
           : [
-              `Page size: ${chars} characters. Every chat receives only the first ${coreBudget} characters of this page (Core Memory).`,
+              `Page size: ${chars} characters. Every run that reads Memory is sent this page whole (Core Memory), so it is limited to ${coreBudget} characters.`,
               ...(overBudget
                 ? [
                     `The page is full or nearly full, and a write over that size is refused. ` +
@@ -663,7 +664,7 @@ const makeWikiTools = ({
     name: "wiki_create_page",
     description: [
       "Create a new wiki page at an exact relative POSIX .md path inside an existing wiki directory.",
-      "Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists, unless that page already has exactly this title and body; then nothing changes. me.md has a smaller Core Memory limit; a longer body is refused."
+      `Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists, unless that page already has exactly this title and body; then nothing changes. ${STANDING_LIMIT_NOTE}`
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
     metadata: {
@@ -744,7 +745,7 @@ const makeWikiTools = ({
       "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read the page first to base the edit on its",
       "current content; the edit fails if the wiki changed since that read.",
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting;`,
-      "create another page only for a distinct subject or useful reading scope, with a contextual link. The root README.md and me.md have smaller Core Memory limits; a longer body is refused."
+      `create another page only for a distinct subject or useful reading scope, with a contextual link. ${STANDING_LIMIT_NOTE}`
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EditParametersSchema),
     metadata: {

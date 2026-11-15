@@ -10,6 +10,7 @@ import { formatWikiPage } from "../wiki/page.js"
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
+import { STANDING_LIMIT_NOTE } from "../memory/core-memory.js"
 import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
 import {
   MAX_WIKI_CONTENT_CHARS,
@@ -615,7 +616,7 @@ const makeWikiOperationTools = ({
       "Replace one exact text block in an active Wiki page body. The old text must match exactly once; no prior read is needed. " +
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting; ` +
       "create another page only for a distinct subject or useful reading scope, with a contextual link. " +
-      "The root README.md and me.md have smaller Core Memory limits; a patch that leaves either over its limit is refused. Asks by default, except in Memory runs.",
+      `${STANDING_LIMIT_NOTE} Asks by default, except in Memory runs.`,
     parameters: Schema.toStandardSchemaV1(PatchParametersSchema),
     metadata: {
       display: { card: "page_patch" },

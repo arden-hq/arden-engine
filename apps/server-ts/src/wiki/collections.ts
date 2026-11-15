@@ -3,7 +3,7 @@ import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
-import type { ParsedWikiPage } from "./page.js"
+import { wikiPageSummary, type ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
@@ -112,3 +112,138 @@ export const renderCollection = (collection: WikiCollection): string =>
     ...(collection.consumers ? [`Read for: ${collection.consumers}`] : []),
     ...(collection.records ? [`Records: ${collection.records}`] : [])
   ].join(" ")
+
+interface MemoryIndexLine {
+  readonly path: string
+  readonly summary: string | null
+}
+
+/** A folder whose direct pages are counted on one line instead of listed; "" is the root. */
+interface MemoryIndexFold {
+  readonly folder: string
+  readonly pages: number
+}
+
+/**
+ * The generated list of the pages under one folder: every active page has a line, falls under
+ * a folded folder's line, or is `unlisted`, past the size once every folder is folded.
+ * `folded` is in the order folders were folded; `text` holds the lines in path order and names
+ * no count, so a page that joins or leaves a folded folder leaves the text as it was.
+ */
+export interface MemoryIndex {
+  readonly root: string
+  readonly lines: ReadonlyArray<MemoryIndexLine>
+  readonly folded: ReadonlyArray<MemoryIndexFold>
+  readonly unlisted: number
+  readonly text: string
+  readonly bytes: number
+}
+
+// At 120 characters a summary line still says what the page is for, and on the owner's copy
+// every page outside the four largest folders fits the Memory block's index allowance.
+const INDEX_SUMMARY_CHARS = 120
+
+const encoder = new TextEncoder()
+const byteLength = (value: string): number => encoder.encode(value).byteLength
+
+const indexLine = ({ path, summary }: MemoryIndexLine): string =>
+  summary === null ? `- ${path}` : `- ${path}: ${summary}`
+
+const foldLine = (folder: string): string => `- ${folder === "" ? "(top level)" : folder}/ (folded)`
+
+/** Reads each page's summary line ahead of the first index, so a turn does not wait for it. */
+export const prepareMemoryIndex = (pages: ReadonlyArray<PageRecord>): void => {
+  for (const record of pages) wikiPageSummary(record.page, INDEX_SUMMARY_CHARS)
+}
+
+/**
+ * The index of the active pages under `root` ("" for all of Memory), in at most `maxBytes`.
+ * Over the size it folds the folder with the most direct pages, one at a time, and the root
+ * folder last, until it fits. When every folder that can fold is folded and it still does not
+ * fit, lines are left out from the end. Pure: the same pages give the same index.
+ */
+export const memoryIndex = (
+  pages: ReadonlyArray<PageRecord>,
+  options: {
+    readonly root: string
+    readonly maxBytes: number
+    /** Pages the caller sends another way; they are neither listed nor counted. */
+    readonly leaveOut?: (record: PageRecord) => boolean
+  }
+): MemoryIndex => {
+  const prefix = options.root === "" ? "" : `${options.root}/`
+  const listed = pages
+    .filter(
+      (record) =>
+        record.resource.state === "active" &&
+        record.page.lifecycle === "active" &&
+        record.resource.path.startsWith(prefix) &&
+        options.leaveOut?.(record) !== true
+    )
+    .map((record) => ({
+      path: record.resource.path,
+      summary: wikiPageSummary(record.page, INDEX_SUMMARY_CHARS)
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path))
+  const byFolder = new Map<string, Array<MemoryIndexLine>>()
+  for (const line of listed) {
+    const folder = posix.dirname(line.path)
+    const key = folder === "." ? "" : folder
+    byFolder.set(key, [...(byFolder.get(key) ?? []), line])
+  }
+  const lineBytes = (lines: ReadonlyArray<MemoryIndexLine>): number =>
+    lines.reduce((sum, line) => sum + byteLength(indexLine(line)) + 1, 0)
+  const folded: Array<MemoryIndexFold> = []
+  let bytes = lineBytes(listed)
+  while (bytes > options.maxBytes) {
+    const next = [...byFolder]
+      .filter(([folder]) => !folded.some((fold) => fold.folder === folder))
+      .map(([folder, lines]) => ({
+        folder,
+        lines,
+        saves: lineBytes(lines) - byteLength(foldLine(folder)) - 1
+      }))
+      .filter((candidate) => candidate.saves > 0)
+      .sort(
+        (left, right) =>
+          Number(left.folder === options.root) - Number(right.folder === options.root) ||
+          right.lines.length - left.lines.length ||
+          left.folder.localeCompare(right.folder)
+      )[0]
+    if (next === undefined) break
+    folded.push({ folder: next.folder, pages: next.lines.length })
+    bytes -= next.saves
+  }
+  const foldedFolders = new Set(folded.map((fold) => fold.folder))
+  const lines = listed.filter((line) => {
+    const folder = posix.dirname(line.path)
+    return !foldedFolders.has(folder === "." ? "" : folder)
+  })
+  const entries = [
+    ...lines.map((line) => ({ key: line.path, text: indexLine(line), line, fold: undefined })),
+    ...folded.map((fold) => ({
+      key: `${fold.folder}/`,
+      text: foldLine(fold.folder),
+      line: undefined,
+      fold
+    }))
+  ].sort((left, right) => left.key.localeCompare(right.key))
+  let shown = entries.length
+  let shownBytes = entries.reduce((sum, entry) => sum + byteLength(entry.text) + 1, 0) - 1
+  while (shown > 0 && shownBytes > options.maxBytes) {
+    shown -= 1
+    shownBytes -= byteLength(entries[shown]?.text ?? "") + 1
+  }
+  const kept = entries.slice(0, shown)
+  const text = kept.map((entry) => entry.text).join("\n")
+  return {
+    root: options.root,
+    lines: kept.flatMap((entry) => (entry.line === undefined ? [] : [entry.line])),
+    folded: folded.filter((fold) => kept.some((entry) => entry.fold === fold)),
+    unlisted: entries
+      .slice(shown)
+      .reduce((sum, entry) => sum + (entry.fold === undefined ? 1 : entry.fold.pages), 0),
+    text,
+    bytes: byteLength(text)
+  }
+}

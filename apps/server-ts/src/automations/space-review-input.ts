@@ -69,16 +69,6 @@ const spaceReviewInput = (
       }
     }
   }
-  for (const record of options.snapshot.pages) {
-    if (
-      ["readme.md", "me.md", "profile.md"].includes(record.resource.path.toLowerCase()) ||
-      ["me", "profile"].includes(record.page.pageId.toLowerCase())
-    ) {
-      selected.add(record.page.pageId)
-      if (!provenance.has(record.page.pageId))
-        provenance.set(record.page.pageId, { basis: "resident", rootPageId: record.page.pageId })
-    }
-  }
   const pages = [...selected].sort().flatMap((id) => {
     const record = byId.get(id)
     const origin = provenance.get(id)
