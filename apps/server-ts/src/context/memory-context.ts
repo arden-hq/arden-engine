@@ -51,7 +51,7 @@ export const MEMORY_BUDGET = {
   standingFrame: 1_000,
   index: 10_000,
   space: 10_000,
-  spacePages: 2_000,
+  spacePageList: 2_000,
   spaceInstructions: 4_000,
   spacePage: 4_000,
   recall: 7_000
@@ -62,7 +62,7 @@ export const MEMORY_BLOCK_MAX_BYTES =
   MEMORY_BUDGET.standingFrame +
   MEMORY_BUDGET.index +
   MEMORY_BUDGET.space +
-  MEMORY_BUDGET.spacePages +
+  MEMORY_BUDGET.spacePageList +
   MEMORY_BUDGET.recall
 
 /** A Space's view, and its Memory page at the version read, when it has one. */
@@ -138,7 +138,7 @@ const renderSpace = (
     maxBytes: MEMORY_BUDGET.space,
     instructionsBytes: MEMORY_BUDGET.spaceInstructions,
     pageBytes: MEMORY_BUDGET.spacePage,
-    pagesBytes: MEMORY_BUDGET.spacePages
+    pageListBytes: MEMORY_BUDGET.spacePageList
   })
   const list = rendered.list
   const listBytes = list === undefined ? 0 : byteLength(list.text)

@@ -78,12 +78,12 @@ export const renderSpaceContext = (
     maxBytes,
     instructionsBytes,
     pageBytes,
-    pagesBytes
+    pageListBytes
   }: {
     readonly maxBytes: number
     readonly instructionsBytes: number
     readonly pageBytes: number
-    readonly pagesBytes: number
+    readonly pageListBytes: number
   }
 ): {
   readonly text: string
@@ -163,7 +163,7 @@ export const renderSpaceContext = (
   const page =
     view.page === undefined ? undefined : pageBlock(view.page, Math.min(remaining, pageBytes))
   place(page?.text)
-  const list = view.page === undefined ? undefined : pageList(view.page, pagesBytes - 2)
+  const list = view.page === undefined ? undefined : pageList(view.page, pageListBytes - 2)
   return {
     text: [head, ...blocks, ...(list === undefined ? [] : [list.text]), navigation].join("\n\n"),
     page: spacePageShown(view.page, page),
