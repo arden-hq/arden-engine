@@ -16,6 +16,7 @@ import { commitWiki, createPage } from "../src/wiki/commit.js"
 import { makeOutsideEdits, type OutsideEditCheck } from "../src/wiki/outside-edits.js"
 import { formatRedirectPage, formatWikiPage } from "../src/wiki/page.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
+import { WikiPageTimestampCache } from "../src/wiki/timestamps.js"
 import { partialService } from "./kit.js"
 
 // Made-up pages on a temporary Memory folder; nothing here comes from anyone's Memory.
@@ -226,6 +227,30 @@ describe("changes made outside Arden", () => {
       ["old/README.md", "archive"]
     ])
     expect(result.setAside).toEqual([])
+  })
+
+  it("keeps the last outside change with each page's times", async () => {
+    const result = await withMemory(({ root, repository, check }) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          writeFile(join(root, "notes/edited.md"), page("edited", "Changed outside.\n"))
+        )
+        const checked = yield* check()
+        const head = yield* repository.currentRevision
+        const times = yield* new WikiPageTimestampCache(repository).forHead(head ?? "")
+        return {
+          edited: times.get("edited")?.outside,
+          kept: times.get("kept")?.outside,
+          revision: checked.takenIn[0]?.revision
+        }
+      })
+    )
+    expect(result.edited).toEqual({
+      at: expect.any(String),
+      action: "update",
+      revision: result.revision
+    })
+    expect(result.kept).toBeNull()
   })
 
   it("never rewrites a file it set aside", async () => {
