@@ -2,13 +2,14 @@ import type { ManagedFileRepositoryShape, ResourceVersion } from "@arden-hq/revi
 import {
   commitWiki,
   createPage,
-  isAutomatedOrigin,
   movePage,
+  requireCommitRules,
   updatePage,
-  type WikiCommitIdentity
+  type WikiCommitIdentity,
+  type WikiCommitOrigin
 } from "./commit.js"
 import type { WikiRenameApproval } from "@arden-hq/protocol/wiki"
-import { Effect, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
@@ -25,8 +26,20 @@ import {
 } from "./authority.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, rewriteWikiLinkTargets } from "./links.js"
-import { formatRedirectPage, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
+import {
+  formatRedirectPage,
+  isReadme,
+  pageNamesForPath,
+  parseWikiPage,
+  reviseWikiPage
+} from "./page.js"
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
+
+/**
+ * Who renames when the owner accepts in the app. A request is checked against the rules that bind
+ * this writer, so a rename even the owner may not make is refused before anyone approves it.
+ */
+const RENAME_ORIGIN: WikiCommitOrigin = { kind: "user", via: "desktop.rename" }
 
 const ResourceSchema = Schema.Struct({
   resourceId: Schema.NonEmptyString,
@@ -155,7 +168,7 @@ const approvalView = Effect.fn("WikiRename.approvalView")(function* (
 
 const linkTarget = (path: string, keepExtension: boolean): string => {
   if (keepExtension) return path
-  if (posix.basename(path).toLowerCase() === "readme.md") {
+  if (isReadme(path)) {
     const directory = posix.dirname(path)
     return directory === "." ? posix.basename(path, ".md") : directory
   }
@@ -339,18 +352,6 @@ const planMutationPaths = Effect.fn("WikiRename.planMutationPaths")(function* (
   return paths
 })
 
-const reportDestination = (
-  pages: ReadonlyArray<PageRecord>,
-  path: string
-): PageRecord | undefined =>
-  pages.find(
-    (record) =>
-      record.page.lifecycle === "active" &&
-      Object.hasOwn(record.page.metadata, "producer_automation_id") &&
-      posix.basename(record.resource.path).toLowerCase() === "readme.md" &&
-      path.toLowerCase().startsWith(`${posix.dirname(record.resource.path).toLowerCase()}/`)
-  )
-
 export const makeWikiRenameMethods = (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
@@ -390,16 +391,9 @@ export const makeWikiRenameMethods = (
         pageId: input.pageId
       })
     }
-    if (reportDestination(snapshot.pages, input.newPath) !== undefined) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "Publish reports through their producer instead of moving pages into its directory",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
+    yield* requireCommitRules(repository, RENAME_ORIGIN, [
+      movePage(current.resource, input.newPath)
+    ]).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
     const targetNames = new Set(
       pageNamesForPath(input.newPath).map((name) => name.trim().toLowerCase())
     )
@@ -434,7 +428,7 @@ export const makeWikiRenameMethods = (
         }
       )
     }
-    if (posix.basename(current.resource.path).toLowerCase() === "readme.md") {
+    if (isReadme(current.resource.path)) {
       const prefix = `${posix.dirname(current.resource.path)}/`
       if (
         snapshot.pages.some(
@@ -512,34 +506,6 @@ export const makeWikiRenameMethods = (
       const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
       const paths = yield* planMutationPaths(plan, snapshot.pages)
       yield* requireWikiWritePaths(boundary, "rename", paths)
-      if (reportDestination(snapshot.pages, plan.newPath) !== undefined) {
-        return yield* wikiError(
-          "rename",
-          "blocked",
-          "Publish reports through their producer instead of moving pages into its directory",
-          {
-            pageId: plan.pageId
-          }
-        )
-      }
-      if (input.commit !== undefined && isAutomatedOrigin(input.commit.origin)) {
-        const rewrites = new Set(plan.rewrites.map((rewrite) => rewrite.resource.resourceId))
-        const protectedPage = snapshot.pages.find(
-          (record) =>
-            Object.hasOwn(record.page.metadata, "producer_automation_id") &&
-            (record.page.pageId === plan.pageId || rewrites.has(record.page.pageId))
-        )
-        if (protectedPage !== undefined) {
-          return yield* wikiError(
-            "rename",
-            "blocked",
-            "Automation runs cannot move produced pages or rewrite producer-owned reports",
-            {
-              pageId: protectedPage.page.pageId
-            }
-          )
-        }
-      }
       const spaceBound = yield* spaces.hasPageBinding(plan.pageId, plan.oldPath).pipe(
         Effect.mapError((cause) =>
           wikiError("rename", "storage", "Could not check Space page ownership", {
@@ -580,7 +546,7 @@ export const makeWikiRenameMethods = (
       {
         idempotencyKey: `wiki-rename:${approval.approvalId}`,
         actor: input.commit?.actor ?? "user:desktop",
-        origin: input.commit?.origin ?? { kind: "user", via: "desktop.rename" },
+        origin: input.commit?.origin ?? RENAME_ORIGIN,
         reason: input.commit?.reason ?? "rename wiki page",
         expectedRevision: plan.baseHead
       },
@@ -593,7 +559,9 @@ export const makeWikiRenameMethods = (
       Effect.mapError(mapRevisionError("rename", plan.pageId)),
       Effect.map((result) => ({ _tag: "Committed" as const, result })),
       Effect.catch((cause) =>
-        cause.reason === "conflict" || cause.reason === "invalid"
+        cause.reason === "conflict" ||
+        cause.reason === "invalid" ||
+        Predicate.isTagged(cause.cause, "WikiCommitRuleError")
           ? Effect.succeed({ _tag: "Uncommitted" as const, cause })
           : Effect.fail(cause)
       )

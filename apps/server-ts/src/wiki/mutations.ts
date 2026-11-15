@@ -2,46 +2,30 @@ import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import type { WikiArchiveResponse, WikiPage } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
-import { posix } from "node:path"
 
-import { isStandingFactsPage } from "../memory/core-memory.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import {
-  authorityOwnsBoundaryPage,
-  requireWikiWritePaths,
-  resolveWikiWriteBoundary,
-  type WikiLocationAuthority
-} from "./authority.js"
+import type { WikiLocationAuthority } from "./authority.js"
 import {
   archivePage,
   commitWiki,
   createPage,
-  isAutomatedOrigin,
   type WikiCommitIdentity,
   type WikiCommitOrigin,
   updatePage
 } from "./commit.js"
-import { MONTHLY_SUMMARY_MAX_CHARS } from "./report-retention.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { createWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import {
-  formatRedirectPage,
-  formatWikiPage,
-  normal,
-  pageNamesForPath,
-  parseWikiPage
-} from "./page.js"
+import { formatRedirectPage, formatWikiPage, parseWikiPage } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
-import { loadSnapshot, readRecord, type PageRecord } from "./snapshot.js"
+import { loadSnapshot } from "./snapshot.js"
 import {
-  isRetentionSummaryWrite,
   requireArchivable,
+  requireCreatable,
   requireRetirable,
-  requireUpdatable,
-  summaryTooLong
+  requireUpdatable
 } from "./write-rules.js"
 
 const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
@@ -102,34 +86,12 @@ export interface WikiMutationMethods {
   ) => Effect.Effect<WikiPage, WikiError>
 }
 
-/**
- * Why a page may not be created at `path`, if it may not: a page is a .md file inside an
- * existing directory, or a standing-facts page at the root; a README is never created this way.
- */
-export const createRefusal = (
-  path: string
-): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
-  if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
-  if (
-    (posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) ||
-    posix.basename(path).toLowerCase() === "readme.md"
-  )
-    return {
-      code: "blocked",
-      message: "Wiki pages can be created only inside an existing Wiki directory"
-    }
-  return undefined
-}
-
 export const makeWikiMutationMethods = (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
   read: WikiListingMethods["read"]
 ): WikiMutationMethods => {
   const create = Effect.fn("Wiki.create")(function* (input: WikiCreateInput) {
-    const refused = createRefusal(input.path)
-    if (refused !== undefined) return yield* wikiError("create", refused.code, refused.message)
-    const directory = posix.dirname(input.path)
     const pageId = randomUUID()
     const content = formatWikiPage({
       pageId,
@@ -144,74 +106,14 @@ export const makeWikiMutationMethods = (
       Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
     )
     const current = yield* loadSnapshot(repository, "create")
-    const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, current, "create")
-    yield* requireWikiWritePaths(boundary, "create", [input.path])
-    const directoryPage = current.pages.find(
-      (record) =>
-        record.resource.path.toLowerCase() ===
-          (directory === "." ? "readme.md" : `${directory}/readme.md`).toLowerCase() &&
-        record.page.lifecycle === "active"
-    )
-    if (directoryPage === undefined) {
-      return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
-    }
     const origin = input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN
-    // Report Retention writes the one monthly summary that replaces a month of reports.
-    const writesMonthlySummary = isRetentionSummaryWrite(origin, input.path)
-    if (writesMonthlySummary && input.body.length > MONTHLY_SUMMARY_MAX_CHARS) {
-      return yield* wikiError("create", "invalid", summaryTooLong(input.body.length))
-    }
-    if (
-      Object.hasOwn(directoryPage.page.metadata, "producer_automation_id") &&
-      isAutomatedOrigin(origin) &&
-      !writesMonthlySummary
-    ) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        "Automation pages in an owned directory must use report publication"
-      )
-    }
-    const directoryIsSpaceBound = yield* spaces
-      .hasPageBinding(directoryPage.page.pageId, directoryPage.resource.path)
-      .pipe(
-        Effect.mapError((cause) =>
-          wikiError("create", "storage", "Could not check Memory directory ownership", {
-            pageId: directoryPage.page.pageId,
-            cause
-          })
-        )
-      )
-    if (
-      directoryIsSpaceBound &&
-      !authorityOwnsBoundaryPage(boundary, directoryPage.page.pageId, directoryPage.resource.path)
-    ) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        "Pages cannot be created inside a Space-owned directory"
-      )
-    }
-    const targetNames = new Set(pageNamesForPath(input.path).map((name) => normal(name)))
-    const existing = current.pages.find((record) =>
-      pageNamesForPath(record.resource.path).some((name) => targetNames.has(normal(name)))
-    )
-    if (existing !== undefined) {
-      return yield* wikiError(
-        "create",
-        "conflict",
-        `Wiki path or link name already exists: ${input.path}`,
-        {
-          pageId: existing.page.pageId
-        }
-      )
-    }
+    yield* requireCreatable(spaces, current, { path: input.path, authority: input.authority })
     yield* commitWiki(
       repository,
       {
         expectedRevision: current.head,
         actor: input.commit?.actor ?? "memory:capture",
-        origin: input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN,
+        origin,
         reason: input.commit?.reason ?? "create Memory page"
       },
       [createPage(pageId, input.path, content)]
@@ -299,35 +201,6 @@ export const makeWikiMutationMethods = (
     )
   })
 
-  /**
-   * A page that was merged and then brought back is separate by someone's decision. An
-   * automated run that merged it again would undo that decision every time it ran.
-   */
-  const requireNeverUnmerged = Effect.fn("Wiki.requireNeverUnmerged")(function* (
-    current: PageRecord,
-    head: string
-  ): Effect.fn.Return<void, WikiError> {
-    const pageId = current.page.pageId
-    const history = yield* repository
-      .history({ resourceId: pageId, start: head, limit: null })
-      .pipe(Effect.mapError(mapRevisionError("merge", pageId)))
-    for (const commit of history) {
-      const version = commit.changes.find(
-        (change) => (change.after ?? change.before)?.resourceId === pageId
-      )?.after
-      if (version === undefined || version === null || version.state !== "active") continue
-      const earlier = yield* readRecord(repository, "merge", version)
-      if (earlier.page.lifecycle === "redirect") {
-        return yield* wikiError(
-          "merge",
-          "blocked",
-          `${current.resource.path} was merged before and then restored, so it stays its own page. Leave it.`,
-          { pageId }
-        )
-      }
-    }
-  })
-
   const archive = Effect.fn("Wiki.archive")(function* (
     input: WikiArchiveInput
   ): Effect.fn.Return<WikiArchiveResponse, WikiError> {
@@ -387,9 +260,6 @@ export const makeWikiMutationMethods = (
           input.expectedHead
         )
         yield* requireRetirable(spaces, "merge", snapshot, current, input)
-        if (input.commit !== undefined && isAutomatedOrigin(input.commit.origin)) {
-          yield* requireNeverUnmerged(current, input.expectedHead)
-        }
         const target = snapshot.pages.find(
           (record) =>
             record.page.pageId === input.targetPageId && record.page.lifecycle === "active"

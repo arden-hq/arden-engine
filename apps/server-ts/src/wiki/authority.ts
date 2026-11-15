@@ -4,6 +4,7 @@ import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { wikiError, type WikiError, type WikiOperation } from "./errors.js"
+import { isReadme } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
 
 export type WikiLocationAuthority =
@@ -30,7 +31,7 @@ export const canonicalWikiPath = (value: string): string | undefined => {
 }
 
 const wikiBoundaryRoot = (boundary: string): string => {
-  if (posix.basename(boundary) === "readme.md") return posix.dirname(boundary)
+  if (isReadme(boundary)) return posix.dirname(boundary)
   if (boundary.endsWith(".md")) return boundary.slice(0, -3)
   return boundary
 }

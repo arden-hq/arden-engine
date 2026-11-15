@@ -62,6 +62,7 @@ describe("page age", () => {
     const recall = prepareMemorySources({
       pages: [elicit, undated],
       recall: { query: "elicit cohere application status applied", excludedPageIds: new Set() },
+      today: "2026-11-14",
       lastChanged: lastChangedLines(
         new Map([
           [elicit.page.pageId, { createdAt: null, updatedAt: "2026-09-15T01:39:16Z" }],

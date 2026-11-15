@@ -9,6 +9,7 @@ import { PROMPT_TEXT } from "../../prompts/catalog.js"
 import { markdownValue } from "../../prompts/format.js"
 import type { Wiki } from "../../wiki/service.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
+import { pageKind, producingAutomation, recordFolders } from "../../wiki/collections.js"
 import type { HandlerItemRunner } from "../handler-item-run.js"
 import { runItemLoop } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
@@ -136,20 +137,21 @@ export const makeDailySummaryRunner = (services: {
     const existing = snapshot.pages.find(
       (page) => page.resource.path.toLowerCase() === path.toLowerCase()
     )
+    const folders = recordFolders(snapshot.pages)
     if (existing !== undefined)
       return existing.page.lifecycle === "active" &&
-        existing.page.metadata["producer_automation_id"] === DAILY_SUMMARY_AUTOMATION_ID
+        producingAutomation(folders, existing.resource.path) === DAILY_SUMMARY_AUTOMATION_ID
         ? { kind: "settled" }
         : { kind: "settled", note: `${path} is kept by another writer` }
     const startMs = DateTime.toEpochMillis(start)
     const endMs = DateTime.toEpochMillis(end)
     const reports = snapshot.pages.filter((page) => {
-      const producer = page.page.metadata["producer_automation_id"]
+      const kind = pageKind(folders, page.resource.path)
       return (
         page.page.lifecycle === "active" &&
-        typeof producer === "string" &&
-        producer !== DAILY_SUMMARY_AUTOMATION_ID &&
-        !page.resource.path.toLowerCase().endsWith("/readme.md")
+        kind.kind === "record" &&
+        kind.folder.producer.kind === "automation" &&
+        kind.folder.producer.automationId !== DAILY_SUMMARY_AUTOMATION_ID
       )
     })
     const times = yield* services.wiki.pageTimes(snapshot.head)
@@ -189,7 +191,7 @@ export const makeDailySummaryRunner = (services: {
         authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
         producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID
       })
-    else if (contract.page.metadata["producer_automation_id"] !== DAILY_SUMMARY_AUTOMATION_ID)
+    else if (producingAutomation(folders, contract.resource.path) !== DAILY_SUMMARY_AUTOMATION_ID)
       return yield* Effect.fail(
         new Error(
           "Daily collection needs its producer binding configured; preserved the existing daily collection"

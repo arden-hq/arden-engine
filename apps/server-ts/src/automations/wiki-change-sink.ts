@@ -3,17 +3,18 @@ import { Effect, Layer } from "effect"
 import { WikiEventOutbox } from "../persistence/automations/wiki-event-outbox.js"
 import { causedChainDepth } from "../persistence/automations/chain-depth.js"
 import { wikiOriginSource, type WikiCommitOrigin } from "../wiki/commit.js"
-import { isImportedPath } from "../wiki/imported.js"
+import { isImportedPath } from "../wiki/collections.js"
 import { WikiChangeSink, WikiChangeSinkError } from "../wiki/publication.js"
 import { wikiChangedEvent } from "./producers/wiki.js"
 import { MEMORY_CAPTURE_AUTOMATION_ID } from "./handlers/memory-capture.js"
 
 const producerWakeDepth = (origin: WikiCommitOrigin): number =>
-  origin.kind === "automation" ? (origin.chainDepth ?? 0) : 0
+  origin.kind === "automation" || origin.kind === "upkeep" ? (origin.chainDepth ?? 0) : 0
 
-const producingAutomation = (origin: WikiCommitOrigin): string | null => {
+const automationOfOrigin = (origin: WikiCommitOrigin): string | null => {
   switch (origin.kind) {
     case "automation":
+    case "upkeep":
       return origin.automationId
     case "capture":
       return MEMORY_CAPTURE_AUTOMATION_ID
@@ -50,9 +51,9 @@ const automationWikiChangeSink = (
                 savedAt: change.savedAt,
                 source: wikiOriginSource(change.origin),
                 hasSpacePage: change.hasSpacePage,
-                producedBy: producingAutomation(change.origin),
+                producedBy: automationOfOrigin(change.origin),
                 chainDepth: causedChainDepth(
-                  producingAutomation(change.origin),
+                  automationOfOrigin(change.origin),
                   producerWakeDepth(change.origin)
                 )
               })

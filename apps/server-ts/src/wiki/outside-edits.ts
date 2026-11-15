@@ -8,13 +8,12 @@ import {
 import { sha256Hex } from "@arden-hq/std/hash"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { Effect, Option } from "effect"
-import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitOutsideChange, type WikiCommitError, type WikiCommitIdentity } from "./commit.js"
 import { mapRevisionError, WikiError } from "./errors.js"
-import { parseWikiPage } from "./page.js"
+import { isReadme, parseWikiPage } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
 import { requireArchivable, requireUpdatable, type WikiWriter } from "./write-rules.js"
 
@@ -128,7 +127,7 @@ const STAGES = ["update", "archive", "archive_readme"] as const
 
 const stage = (change: WorkingFileChange): (typeof STAGES)[number] => {
   if (change.kind !== "missing") return "update"
-  return posix.basename(change.resource.path).toLowerCase() === "readme.md"
+  return isReadme(change.resource.path)
     ? "archive_readme"
     : "archive"
 }

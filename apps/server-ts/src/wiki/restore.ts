@@ -21,7 +21,7 @@ import {
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { normal, pageNamesForPath } from "./page.js"
+import { isReadme, normal, pageNamesForPath } from "./page.js"
 import { loadSnapshot, notFound, type PageRecord, readRecord, type Snapshot } from "./snapshot.js"
 import { requireRestorable, requireUpdatable } from "./write-rules.js"
 
@@ -332,8 +332,7 @@ export const makeWikiRestoreMethods = (
         )
         yield* requireWikiWritePaths(boundary, "restore", [resource.path])
         const own = posix.dirname(resource.path)
-        const directory =
-          posix.basename(resource.path).toLowerCase() === "readme.md" ? posix.dirname(own) : own
+        const directory = isReadme(resource.path) ? posix.dirname(own) : own
         if (directory !== ".") {
           const readme = `${directory}/readme.md`.toLowerCase()
           const mapped = snapshot.pages.some(

@@ -4,7 +4,7 @@ import { Effect } from "effect"
 
 import { commitWiki, createPage, updatePage, type WikiPageOperation } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
-import { isImportedPath } from "./imported.js"
+import { isImportedPath } from "./collections.js"
 import { formatRedirectPage, normal, pageNamesForPath, reviseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
 

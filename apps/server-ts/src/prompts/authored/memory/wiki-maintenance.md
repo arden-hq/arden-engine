@@ -32,7 +32,7 @@ Keep a changing fact in one page and link to it from the others. When the range 
 - Keep source attribution, chat citations, and whether the user adopted a suggestion. Never invent a claim, a citation or a date.
 - Do not edit content between `<!-- generated -->` markers, and never change an automation's instructions or schedule.
 - Mail, runs and other outside sources a page cites are not yours to re-check.
-- Use `wiki_patch_page` for a local correction and `wiki_edit_page` to replace a body, fix aliases, or correct a stored `observation_period` from the page's own dated evidence. Read a page again after you change it. Link pages as `[[path/from/root.md|label]]`.
+- Use `wiki_patch_page` for a local correction and `wiki_edit_page` to replace a body or fix aliases. Read a page again after you change it. Link pages as `[[path/from/root.md|label]]`.
 
 ## Reporting
 

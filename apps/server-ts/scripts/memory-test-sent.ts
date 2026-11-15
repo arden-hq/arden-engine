@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { Effect, Layer, References, Schema } from "effect"
+import { Clock, Effect, Layer, References, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { it } from "vitest"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { prefetchTurnMemory } from "../src/context/turn-context.js"
@@ -23,6 +24,28 @@ import {
 } from "./memory-test/sent.js"
 
 const SEMANTIC_RECALL = "off: matching by meaning needs the local embedding model"
+
+/**
+ * The time each question is asked at: just after the copy's newest stored message, as if a new
+ * chat began when the copy was taken. Recall counts a report's age from it, so a run on the same
+ * copy sends the same pages on any later day.
+ */
+const askedAt = Effect.fn("MemoryTest.askedAt")(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const [row] = yield* sql<{ readonly newest: string | null }>`
+    SELECT MAX(created_at) AS newest FROM session_messages`
+  const newest = row?.newest ?? null
+  if (newest === null) return yield* Effect.die(new Error("The copy holds no messages"))
+  return Date.parse(newest) + 1
+})
+
+const pinnedClock = (clock: Clock.Clock, at: number): Clock.Clock => ({
+  ...clock,
+  currentTimeMillisUnsafe: () => at,
+  currentTimeMillis: Effect.succeed(at),
+  currentTimeNanosUnsafe: () => BigInt(at) * 1_000_000n,
+  currentTimeNanos: Effect.succeed(BigInt(at) * 1_000_000n)
+})
 
 const required = (name: string): string => {
   const value = process.env[name]?.trim() ?? ""
@@ -74,70 +97,78 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
 
   const ranAt = new Date().toISOString()
   const stamp = ranAt.replaceAll(/[:.]/gu, "-")
-  const results = await runOnReplayCopy(
+  const scoreAll = Effect.gen(function* () {
+    const services = {
+      spaces: yield* SpaceStore,
+      summaries: yield* SummaryStore,
+      work: yield* WorkStore,
+      chat: yield* ChatWriteStore
+    }
+    const runs = yield* RunQueries
+    const turnServices = {
+      wiki: yield* Wiki,
+      sessions: yield* SessionQueries,
+      spaces: services.spaces,
+      embeddings: { search: () => Effect.succeed([]) }
+    }
+    const scored: Array<SentResult> = []
+    for (const question of files.questions) {
+      // A chat that does not exist yet: the question is its first message. Each harness run
+      // gets its own run ids, so the record read back is this run's alone.
+      const sessionId = `memory-test-chat-${question.id}`
+      const runId = `memory-test-run-${stamp}-${question.id}`
+      const memory = yield* openMemoryTurn(turnServices)
+      if (memory === undefined)
+        return yield* Effect.die(new Error("The Memory snapshot failed on the copy"))
+      const { space, memoryContext } = yield* prefetchTurnMemory(services, {
+        sessionId,
+        runId,
+        reader: "owner",
+        spaceId: question.space_id ?? undefined,
+        query: question.question,
+        memory,
+        measure: (_part, effect) => effect
+      })
+      // A setup fault stops the batch: it is not a score.
+      if (memoryContext.record.query === null)
+        return yield* Effect.die(new Error(`Memory recall failed on ${question.id}`))
+      if (question.space_id !== null && space === undefined)
+        return yield* Effect.die(new Error(`The Space of ${question.id} is not on the copy`))
+      const composition = (yield* runs.memoryContext(runId)).at(-1)
+      if (composition === undefined)
+        return yield* Effect.die(new Error(`No record of what ${question.id} was sent`))
+      const paths = new Map<string, string>()
+      for (const source of composition.sources)
+        if (source.kind !== "index" && source.page_id !== null && !paths.has(source.page_id))
+          paths.set(source.page_id, (yield* memory.readContent(source.page_id)).path)
+      const text = [
+        ...memoryContext.core,
+        ...memoryContext.index,
+        ...memoryContext.space,
+        ...memoryContext.recall
+      ]
+        .map((section) => section.text)
+        .join("\n\n")
+      scored.push(scoreSent(question, deliveryOf({ composition, paths, text })))
+    }
+    return scored
+  })
+
+  const { asked, results } = await runOnReplayCopy(
     files.copy,
     Effect.gen(function* () {
-      const services = {
-        spaces: yield* SpaceStore,
-        summaries: yield* SummaryStore,
-        work: yield* WorkStore,
-        chat: yield* ChatWriteStore
-      }
-      const runs = yield* RunQueries
-      const turnServices = {
-        wiki: yield* Wiki,
-        sessions: yield* SessionQueries,
-        spaces: services.spaces,
-        embeddings: { search: () => Effect.succeed([]) }
-      }
-      const scored: Array<SentResult> = []
-      for (const question of files.questions) {
-        // A chat that does not exist yet: the question is its first message. Each harness run
-        // gets its own run ids, so the record read back is this run's alone.
-        const sessionId = `memory-test-chat-${question.id}`
-        const runId = `memory-test-run-${stamp}-${question.id}`
-        const memory = yield* openMemoryTurn(turnServices)
-        if (memory === undefined)
-          return yield* Effect.die(new Error("The Memory snapshot failed on the copy"))
-        const { space, memoryContext } = yield* prefetchTurnMemory(services, {
-          sessionId,
-          runId,
-          reader: "owner",
-          spaceId: question.space_id ?? undefined,
-          query: question.question,
-          memory,
-          measure: (_part, effect) => effect
-        })
-        // A setup fault stops the batch: it is not a score.
-        if (memoryContext.record.query === null)
-          return yield* Effect.die(new Error(`Memory recall failed on ${question.id}`))
-        if (question.space_id !== null && space === undefined)
-          return yield* Effect.die(new Error(`The Space of ${question.id} is not on the copy`))
-        const composition = (yield* runs.memoryContext(runId)).at(-1)
-        if (composition === undefined)
-          return yield* Effect.die(new Error(`No record of what ${question.id} was sent`))
-        const paths = new Map<string, string>()
-        for (const source of composition.sources)
-          if (source.kind !== "index" && source.page_id !== null && !paths.has(source.page_id))
-            paths.set(source.page_id, (yield* memory.readContent(source.page_id)).path)
-        const text = [
-          ...memoryContext.core,
-          ...memoryContext.index,
-          ...memoryContext.space,
-          ...memoryContext.recall
-        ]
-          .map((section) => section.text)
-          .join("\n\n")
-        scored.push(scoreSent(question, deliveryOf({ composition, paths, text })))
-      }
-      return scored
+      const at = yield* askedAt()
+      const scored = yield* scoreAll.pipe(
+        Effect.provideService(Clock.Clock, pinnedClock(yield* Clock.Clock, at))
+      )
+      return { asked: new Date(at).toISOString(), results: scored }
     }).pipe(Effect.provide(wiki), Effect.provideService(References.MinimumLogLevel, "Warn"))
   )
 
   const resultFile = join(files.results, `results-sent-${stamp}.json`)
   writeFileSync(
     resultFile,
-    `${JSON.stringify({ ranAt, copy: files.copy.folder, semanticRecall: SEMANTIC_RECALL, results }, null, 2)}\n`,
+    `${JSON.stringify({ ranAt, askedAt: asked, copy: files.copy.folder, semanticRecall: SEMANTIC_RECALL, results }, null, 2)}\n`,
     { mode: 0o600 }
   )
   // Vitest swallows console output here; a direct write reaches the terminal.
@@ -145,7 +176,7 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
   process.stdout.write(
     [
       "",
-      `Sent: every expected page in what a new chat is sent. Semantic recall ${SEMANTIC_RECALL}.`,
+      `Sent: every expected page in what a new chat is sent at ${asked}. Semantic recall ${SEMANTIC_RECALL}.`,
       renderCountTable(results),
       `Results: ${resultFile}`,
       ...(baselineFile === undefined

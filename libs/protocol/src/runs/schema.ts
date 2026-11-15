@@ -70,6 +70,12 @@ const memoryPlacement = {
   reason: Schema.NullOr(RunMemoryCutReasonSchema)
 }
 
+const pageFields = {
+  page_id: IdentifierSchema,
+  version: IdentifierSchema,
+  ...memoryPlacement
+}
+
 /** One Memory source of a composition: identity and bytes, never text. */
 const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
   withExtras({
@@ -79,11 +85,11 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
     version: Schema.NullOr(IdentifierSchema),
     ...memoryPlacement
   }),
+  withExtras({ kind: Schema.Literal("core"), ...pageFields }),
   withExtras({
-    kind: Schema.Literals(["core", "recalled"] as const),
-    page_id: IdentifierSchema,
-    version: IdentifierSchema,
-    ...memoryPlacement
+    kind: Schema.Literal("recalled"),
+    role: Schema.optionalKey(Schema.Literals(["knowledge", "record", "contract"] as const)),
+    ...pageFields
   }),
   withExtras({
     kind: Schema.Literal("index"),

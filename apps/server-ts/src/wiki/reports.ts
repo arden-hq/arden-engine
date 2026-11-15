@@ -6,10 +6,11 @@ import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { canonicalWikiPath } from "./authority.js"
+import { markedProducer, recordFolders } from "./collections.js"
 import { commitWiki, createPage, updatePage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
-import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
+import { formatWikiPage, isReadme, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
 
 export const WikiReportContentSchema = Schema.Struct({
@@ -51,7 +52,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     canonicalWikiPath(content.path) === undefined ||
     !content.path.endsWith(".md") ||
     directory === "." ||
-    posix.basename(content.path).toLowerCase() === "readme.md"
+    isReadme(content.path)
   ) {
     return yield* wikiError(
       "create",
@@ -60,12 +61,11 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     )
   }
   const snapshot = yield* loadSnapshot(repository, "create")
-  const contract = snapshot.pages.find(
-    (record) =>
-      record.resource.path.toLowerCase() === `${directory}/readme.md`.toLowerCase() &&
-      record.page.lifecycle === "active"
-  )
-  if (contract?.page.metadata[WIKI_REPORT_FIELDS.automationId] !== input.producerAutomationId) {
+  const destination = recordFolders(snapshot.pages).get(normal(directory))?.producer
+  if (
+    destination?.kind !== "automation" ||
+    destination.automationId !== input.producerAutomationId
+  ) {
     return yield* wikiError(
       "create",
       "blocked",
@@ -89,7 +89,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     current !== undefined &&
     (current.resource.path !== content.path ||
       current.page.lifecycle !== "active" ||
-      current.page.metadata[WIKI_REPORT_FIELDS.automationId] !== input.producerAutomationId)
+      markedProducer(current.page) !== input.producerAutomationId)
   ) {
     return yield* wikiError("create", "blocked", "The report path belongs to another record")
   }

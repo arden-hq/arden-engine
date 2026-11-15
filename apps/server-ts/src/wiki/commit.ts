@@ -7,14 +7,19 @@ import type {
   RevisionError
 } from "@arden-hq/revisions/effect"
 import { Effect, Option, Schema } from "effect"
+import { posix } from "node:path"
 
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
-import { aliasesAreHuman, parseWikiPage } from "./page.js"
+import { pageKind, producingAutomation, recordFolders, type RecordFolders } from "./collections.js"
+import { aliasesAreHuman, isReadme, parseWikiPage } from "./page.js"
+import type { PageRecord } from "./snapshot.js"
 
 export type WikiCommitOrigin =
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
+  /** Wiki Maintenance. History records it as its Automation, so a decoded origin is never this. */
+  | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
   | {
       readonly kind: "capture"
       readonly replayKey: string | undefined
@@ -55,6 +60,7 @@ const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
     case "agent":
       return withChat(AGENT_ORIGIN, origin.sessionId)
     case "automation":
+    case "upkeep":
       return `${AUTOMATION_PREFIX}${origin.automationId}${
         origin.chainDepth === undefined || origin.chainDepth === 0
           ? ""
@@ -97,6 +103,7 @@ export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => 
     case "automation":
       return origin.kind
     case "capture":
+    case "upkeep":
       return "automation"
     case "space_page":
     case "system":
@@ -111,13 +118,14 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
       return origin.sessionId
     case "user":
     case "automation":
+    case "upkeep":
     case "space_page":
     case "system":
       return undefined
   }
 }
 
-export const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
+const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
   wikiOriginSource(origin) === "automation"
 
 export type WikiPageOperation = CommitInput["operations"][number]
@@ -166,7 +174,7 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
 })
 
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
-  rule: Schema.Literals(["aliases", "size"] as const),
+  rule: Schema.Literals(["aliases", "size", "records", "retire"] as const),
   message: Schema.String
 }) {}
 
@@ -298,8 +306,7 @@ const limitRefusal = (
 }
 
 const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
-  repository: ManagedFileRepositoryShape,
-  origin: WikiCommitOrigin,
+  { repository, origin }: CommitView,
   operation: WikiPageOperation
 ): Effect.fn.Return<void, WikiCommitError> {
   if (operation._tag === "Archive") return
@@ -332,29 +339,184 @@ const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
 const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" && origin.via === "filesystem"
 
+const isUpkeep = (origin: WikiCommitOrigin): boolean => origin.kind === "upkeep"
+
+/** The record folders at the head a commit is checked against, from the README pages alone. */
+const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
+  repository: ManagedFileRepositoryShape
+): Effect.fn.Return<RecordFolders, RevisionError> {
+  const readmes = (yield* repository.listResources()).filter((resource) => isReadme(resource.path))
+  const pages = yield* Effect.forEach(readmes, (resource) =>
+    repository.readVersion(resource).pipe(
+      Effect.flatMap((bytes) => parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)),
+      Effect.map((page): ReadonlyArray<PageRecord> =>
+        Option.isNone(page) ? [] : [{ resource, page: page.value }]
+      )
+    )
+  )
+  return recordFolders(pages.flat())
+})
+
+const ruleError = (rule: WikiCommitRuleError["rule"], message: string) =>
+  new WikiCommitRuleError({ rule, message })
+
+/** The page's path before this operation, or undefined for a page it creates. */
+const pathBefore = Effect.fn("Wiki.pathBefore")(function* (
+  repository: ManagedFileRepositoryShape,
+  operation: WikiPageOperation
+): Effect.fn.Return<string | undefined, RevisionError> {
+  if (operation._tag === "Create") return undefined
+  return (yield* repository.get(operation.resourceId))?.path
+})
+
+const writesRedirect = (operation: WikiPageOperation): Effect.Effect<boolean> =>
+  operation._tag === "Update"
+    ? parseWikiPage(decoder.decode(operation.content)).pipe(
+        Effect.map((page) => page.lifecycle === "redirect"),
+        Effect.orElseSucceed(() => false)
+      )
+    : Effect.succeed(false)
+
+const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
+  { repository, folders }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  const paths = [
+    yield* pathBefore(repository, operation),
+    "path" in operation ? operation.path : undefined
+  ]
+  for (const path of paths) {
+    if (path === undefined) continue
+    const kind = pageKind(yield* folders, path)
+    if (kind.kind === "knowledge") continue
+    return yield* ruleError(
+      "records",
+      `${path} is ${kind.kind === "record" ? "a record" : "the contract"} of ${kind.folder.directory}/, kept as its producer wrote it. ` +
+        "Wiki Maintenance reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
+    )
+  }
+})
+
+const requireNoMoveIntoRecords = Effect.fn("Wiki.requireNoMoveIntoRecords")(function* (
+  { folders }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  if (operation._tag !== "Move") return
+  const producer = producingAutomation(yield* folders, operation.path)
+  if (producer === undefined) return
+  return yield* ruleError(
+    "records",
+    `${operation.path} is in the record folder of Automation ${producer}, which only it fills, by publishing reports. Nothing was moved.`
+  )
+})
+
+/**
+ * What an automated writer may do to an Automation's record folder: add a page only as its
+ * producer, update a page, and never move, archive or merge one away.
+ */
+const requireAutomatedRecordWrite = Effect.fn("Wiki.requireAutomatedRecordWrite")(function* (
+  { repository, origin, folders }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  if (operation._tag === "Restore") return
+  if (operation._tag === "Create") {
+    const producer = producingAutomation(yield* folders, operation.path)
+    if (
+      producer === undefined ||
+      (origin.kind === "automation" && origin.automationId === producer)
+    )
+      return
+    return yield* ruleError(
+      "records",
+      `${operation.path} is in the record folder of Automation ${producer}; only that Automation adds pages to it, by publishing reports. Nothing was saved.`
+    )
+  }
+  if (operation._tag === "Update" && !(yield* writesRedirect(operation))) return
+  const path = yield* pathBefore(repository, operation)
+  if (path === undefined) return
+  const producer = producingAutomation(yield* folders, path)
+  if (producer === undefined) return
+  return yield* ruleError(
+    "records",
+    `${path} belongs to the record folder of Automation ${producer}. An Automation run does not move, archive or merge away its pages. Nothing was saved.`
+  )
+})
+
+/**
+ * What an automated writer may not retire: a page at the Memory root, or a page that was merged
+ * and then brought back, which is separate by someone's decision that a repeated merge would undo.
+ */
+const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(function* (
+  { repository }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  const merge = yield* writesRedirect(operation)
+  if (operation._tag !== "Archive" && !merge) return
+  const path = yield* pathBefore(repository, operation)
+  if (path === undefined) return
+  if (posix.dirname(path) === ".") {
+    return yield* ruleError(
+      "retire",
+      `${path} is at the Memory root. An Automation run does not archive or merge it. Nothing was saved.`
+    )
+  }
+  if (!merge) return
+  for (const commit of yield* repository.history({
+    resourceId: operation.resourceId,
+    limit: null
+  })) {
+    const version = commit.changes.find(
+      (change) => (change.after ?? change.before)?.resourceId === operation.resourceId
+    )?.after
+    if (version === undefined || version === null || version.state !== "active") continue
+    const earlier = yield* parseWikiPage(
+      decoder.decode(yield* repository.readVersion(version))
+    ).pipe(Effect.option)
+    if (Option.isSome(earlier) && earlier.value.lifecycle === "redirect") {
+      return yield* ruleError(
+        "retire",
+        `${path} was merged before and then restored, so it stays its own page. Leave it.`
+      )
+    }
+  }
+})
+
+interface CommitView {
+  readonly repository: ManagedFileRepositoryShape
+  readonly origin: WikiCommitOrigin
+  /** Read once per commit, and only by a rule that needs it. */
+  readonly folders: Effect.Effect<RecordFolders, RevisionError>
+}
+
+/** Every rule on what a writer may commit, each bound to the writers it holds for. */
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (
-    repository: ManagedFileRepositoryShape,
-    origin: WikiCommitOrigin,
+    view: CommitView,
     operation: WikiPageOperation
   ) => Effect.Effect<void, WikiCommitError>
 }> = [
-  { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
+  { binds: () => true, check: (_view, operation) => requireHumanAliases(operation) },
+  { binds: isUpkeep, check: requireNotRecord },
+  { binds: () => true, check: requireNoMoveIntoRecords },
+  { binds: isAutomatedOrigin, check: requireAutomatedRecordWrite },
+  { binds: isAutomatedOrigin, check: requireAutomatedRetirement },
   { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */
-export const requireCommitRules = (
+export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function* (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,
   operations: ReadonlyArray<WikiPageOperation>
-): Effect.Effect<void, WikiCommitError> =>
-  Effect.forEach(
-    COMMIT_RULES.filter((rule) => rule.binds(origin)),
-    (rule) =>
-      Effect.forEach(operations, (operation) => rule.check(repository, origin, operation), {
-        discard: true
-      }),
-    { discard: true }
-  )
+): Effect.fn.Return<void, WikiCommitError> {
+  const view: CommitView = {
+    repository,
+    origin,
+    folders: yield* Effect.cached(currentRecordFolders(repository))
+  }
+  for (const rule of COMMIT_RULES) {
+    if (!rule.binds(origin)) continue
+    for (const operation of operations) yield* rule.check(view, operation)
+  }
+})

@@ -4,9 +4,8 @@ import { Effect } from "effect"
 
 import { decodeWikiOrigin, LEGACY_MAINTENANCE_ORIGIN, wikiOriginSource } from "./commit.js"
 import { isContentStepOrigin } from "./content-steps.js"
-import { REPORT_RETENTION_AUTOMATION, REPORT_RETENTION_ORIGIN } from "./retire-reports.js"
 import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from "./errors.js"
-import { isImportedPath } from "./imported.js"
+import { pageKind, recordFolders, type RecordFolders } from "./collections.js"
 import { pageWikiLinks } from "./links.js"
 import {
   pageNameIndex,
@@ -65,12 +64,32 @@ const isReviewerCommit = (commit: Commit, reviewerAutomationId: string): boolean
   return origin.kind === "automation" && origin.automationId === reviewerAutomationId
 }
 
-const isReviewableChange = (change: {
+interface PageChange {
   readonly before: { readonly path: string } | null
   readonly after: { readonly path: string } | null
-}): boolean => {
-  const paths = [change.before?.path, change.after?.path].filter((path) => path !== undefined)
-  return paths.some((path) => path.endsWith(".md")) && !paths.some((path) => isImportedPath(path))
+}
+
+const changedPaths = (change: PageChange): ReadonlyArray<string> =>
+  [change.before?.path, change.after?.path].filter((path) => path !== undefined)
+
+const changesPage = (change: PageChange): boolean =>
+  changedPaths(change).some((path) => path.endsWith(".md"))
+
+const isImportRecord = (folders: RecordFolders, path: string): boolean => {
+  const kind = pageKind(folders, path)
+  return kind.kind !== "knowledge" && kind.folder.producer.kind === "import"
+}
+
+/** A change upkeep reviews: to a page, and not to imported notes, which are kept as imported. */
+const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean =>
+  changesPage(change) && !changedPaths(change).some((path) => isImportRecord(folders, path))
+
+/** How the brief names a page upkeep may read but not change. */
+const readOnlyMark = (folders: RecordFolders, path: string): string => {
+  const kind = pageKind(folders, path).kind
+  return kind === "knowledge"
+    ? ""
+    : ` (${kind === "record" ? "record" : "folder contract"}; read only)`
 }
 
 const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(function* (
@@ -159,14 +178,18 @@ const candidatePageIds = (
   ]
 }
 
-const reviewPages = (snapshot: Snapshot, pageIds: ReadonlyArray<string>) => {
+const reviewPages = (
+  snapshot: Snapshot,
+  folders: RecordFolders,
+  pageIds: ReadonlyArray<string>
+) => {
   const records = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
   return pageIds.flatMap((pageId) => {
     const record = records.get(pageId)
     if (
       record === undefined ||
       record.page.lifecycle !== "active" ||
-      isImportedPath(record.resource.path)
+      isImportRecord(folders, record.resource.path)
     )
       return []
     return [record]
@@ -193,6 +216,7 @@ export const makeWikiMaintenanceMethods = (
   let snapshotCache:
     | {
         readonly snapshot: Snapshot
+        readonly folders: RecordFolders
         readonly references: ReturnType<typeof directReferences>
       }
     | undefined
@@ -237,26 +261,20 @@ export const makeWikiMaintenanceMethods = (
         repository.inspectCommit(sourceId).pipe(Effect.mapError(mapRevisionError("list"))),
       { concurrency: 8 }
     )
-    const reviewSources = sources.filter(
+    const candidates = sources.filter(
       (source) =>
         source.origin !== LEGACY_MAINTENANCE_ORIGIN &&
         !isContentStepOrigin(source.origin) &&
-        source.origin !== REPORT_RETENTION_ORIGIN &&
-        !isReviewerCommit(source, REPORT_RETENTION_AUTOMATION) &&
         !isReviewerCommit(source, input.reviewerAutomationId) &&
-        source.changes.some(isReviewableChange)
+        source.changes.some(changesPage)
     )
-    if (reviewSources.length === 0) {
+    if (candidates.length === 0) {
       return {
         kind: "advance",
         head: baseHead,
         sourceHead
       } as const
     }
-
-    const changes = reviewSources.flatMap((source) =>
-      source.changes.filter(isReviewableChange).map((change) => ({ source, change }))
-    )
     if (snapshotCache?.snapshot.head !== sourceHead) {
       const snapshot = yield* loadMaintenanceSnapshot(repository, "list", sourceHead)
       if (
@@ -269,16 +287,33 @@ export const makeWikiMaintenanceMethods = (
           "Wiki changed while preparing Maintenance evidence"
         )
       }
-      snapshotCache = { snapshot, references: directReferences(snapshot) }
+      snapshotCache = {
+        snapshot,
+        folders: recordFolders(snapshot.pages),
+        references: directReferences(snapshot)
+      }
     }
-    const { snapshot, references } = snapshotCache
+    const { snapshot, folders, references } = snapshotCache
+    const reviewable = (change: PageChange) => isReviewableChange(folders, change)
+    const reviewSources = candidates.filter((source) => source.changes.some(reviewable))
+    if (reviewSources.length === 0) {
+      return {
+        kind: "advance",
+        head: baseHead,
+        sourceHead
+      } as const
+    }
+
+    const changes = reviewSources.flatMap((source) =>
+      source.changes.filter(reviewable).map((change) => ({ source, change }))
+    )
     const changedPageIds = new Set(
       changes.flatMap(({ change }) => {
         const pageId = (change.after ?? change.before)?.resourceId
         return pageId === undefined ? [] : [pageId]
       })
     )
-    const pages = reviewPages(snapshot, candidatePageIds(changedPageIds, references))
+    const pages = reviewPages(snapshot, folders, candidatePageIds(changedPageIds, references))
 
     const rangeSection = [
       "## Contiguous revision range under review",
@@ -307,7 +342,7 @@ export const makeWikiMaintenanceMethods = (
         })
         .pipe(Effect.mapError(mapRevisionError("list", resource.resourceId)))
       const section = [
-        `### Revision ${source.commitId}: ${change.action} ${resource.path}`,
+        `### Revision ${source.commitId}: ${change.action} ${resource.path}${readOnlyMark(folders, resource.path)}`,
         "```diff",
         boundedDiff(diff.unifiedDiff),
         "```"
@@ -331,7 +366,10 @@ export const makeWikiMaintenanceMethods = (
         "These paths and links are pinned to the range end above. Live reads can be newer; never overwrite newer evidence. Unlinked summaries can also contradict the changed facts.",
         ...pages
           .slice(0, MAX_RELATED_PAGES)
-          .map((record) => `- ${record.resource.path} — ${record.page.title}`),
+          .map(
+            (record) =>
+              `- ${record.resource.path} — ${record.page.title}${readOnlyMark(folders, record.resource.path)}`
+          ),
         ...(pages.length > MAX_RELATED_PAGES
           ? [
               `(${pages.length - MAX_RELATED_PAGES} more related pages exist; find them with wiki_links)`

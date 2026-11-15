@@ -78,7 +78,7 @@ export type StoredAutomationRunSkip = StoredPrefilterSkip
 
 export type HandlerItemOwnerId = Extract<
   SystemHandlerId,
-  "memory_capture" | "daily_summary" | "wiki_maintenance" | "report_retention"
+  "memory_capture" | "daily_summary" | "wiki_maintenance"
 >
 
 export type AutomationJobHandler =

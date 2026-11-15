@@ -140,7 +140,6 @@ const jobHandler = (
     case "memory_capture":
     case "daily_summary":
     case "wiki_maintenance":
-    case "report_retention":
       return context.handler_item === undefined
         ? { handler: id }
         : { handler: id, handlerItem: context.handler_item }

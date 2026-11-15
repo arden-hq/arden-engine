@@ -1,23 +1,17 @@
 import { Effect } from "effect"
 import { posix } from "node:path"
 
+import { isStandingFactsPage } from "../memory/core-memory.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import {
+  authorityOwnsBoundaryPage,
   requireWikiWritePaths,
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
-import { isAutomatedOrigin, type WikiCommitIdentity, type WikiCommitOrigin } from "./commit.js"
-import { directorySections } from "./collections.js"
+import type { WikiCommitIdentity } from "./commit.js"
 import { wikiError, type WikiError } from "./errors.js"
-import { parseWikiPage, writtenContent } from "./page.js"
-import {
-  isMonthlySummaryPath,
-  KEEP_RULE_FORMS,
-  MONTHLY_SUMMARY_MAX_CHARS,
-  unreadableKeepRule
-} from "./report-retention.js"
-import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
+import { isReadme, normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 
 export interface WikiWriter {
@@ -25,14 +19,6 @@ export interface WikiWriter {
   readonly authority: WikiLocationAuthority
   readonly commit?: WikiCommitIdentity
 }
-
-export const isRetentionSummaryWrite = (origin: WikiCommitOrigin, path: string): boolean =>
-  origin.kind === "automation" &&
-  origin.automationId === REPORT_RETENTION_AUTOMATION &&
-  isMonthlySummaryPath(path)
-
-export const summaryTooLong = (chars: number): string =>
-  `The monthly summary has ${chars} characters; it replaces a month of reports only when it is ${MONTHLY_SUMMARY_MAX_CHARS} or fewer. Nothing was saved. Keep fewer items and shorter links, then save it again.`
 
 /** The content a page update writes, once every rule for replacing this page holds. */
 export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
@@ -48,7 +34,7 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "update")
   yield* requireWikiWritePaths(boundary, "update", [current.resource.path])
-  return yield* requireReplacement("update", current, input)
+  return yield* requireReplacement("update", input)
 })
 
 /**
@@ -63,17 +49,6 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
 ): Effect.fn.Return<string, WikiError> {
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
   yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
-  if (
-    isAutomatedOrigin(input.commit.origin) &&
-    Object.hasOwn(current.page.metadata, "producer_automation_id")
-  ) {
-    return yield* wikiError(
-      "restore",
-      "blocked",
-      "Automation runs cannot restore an automation-owned page",
-      { pageId: input.pageId }
-    )
-  }
   if (input.commit.origin.kind === "capture") {
     const spaceBound = yield* spaces
       .hasPageBinding(current.page.pageId, current.resource.path)
@@ -94,12 +69,11 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
       )
     }
   }
-  return yield* requireReplacement("restore", current, input)
+  return yield* requireReplacement("restore", input)
 })
 
 const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
   operation: "update" | "restore",
-  current: PageRecord,
   input: WikiWriter & { readonly content: string }
 ): Effect.fn.Return<string, WikiError> {
   const replacement = yield* parseWikiPage(input.content, input.pageId).pipe(
@@ -114,28 +88,6 @@ const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
     return yield* wikiError(operation, "invalid", "A page update cannot create a redirect", {
       pageId: input.pageId
     })
-  }
-  if (
-    input.commit !== undefined &&
-    isRetentionSummaryWrite(input.commit.origin, current.resource.path) &&
-    replacement.body.length > MONTHLY_SUMMARY_MAX_CHARS
-  ) {
-    return yield* wikiError(operation, "invalid", summaryTooLong(replacement.body.length), {
-      pageId: input.pageId
-    })
-  }
-  const keepRule =
-    posix.basename(current.resource.path).toLowerCase() === "readme.md" &&
-    Object.hasOwn(replacement.metadata, "producer_automation_id")
-      ? unreadableKeepRule(directorySections(replacement.body).get("Retention"))
-      : undefined
-  if (keepRule !== undefined) {
-    return yield* wikiError(
-      operation,
-      "invalid",
-      `The retention rule "${keepRule}" was not understood, so it would keep every report. Nothing was saved. Write ${KEEP_RULE_FORMS}.`,
-      { pageId: input.pageId }
-    )
   }
   return yield* writtenContent(replacement).pipe(
     Effect.mapError((cause) =>
@@ -159,30 +111,6 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
   yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-  if (
-    input.commit !== undefined &&
-    isAutomatedOrigin(input.commit.origin) &&
-    posix.dirname(current.resource.path) === "."
-  ) {
-    return yield* wikiError(
-      operation,
-      "blocked",
-      "Automation runs cannot retire a page at the Memory root",
-      { pageId: input.pageId }
-    )
-  }
-  if (
-    input.commit !== undefined &&
-    isAutomatedOrigin(input.commit.origin) &&
-    Object.hasOwn(current.page.metadata, "producer_automation_id")
-  ) {
-    return yield* wikiError(
-      operation,
-      "blocked",
-      "Automation runs cannot archive an automation-owned page",
-      { pageId: input.pageId }
-    )
-  }
   const pageIsSpaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
     Effect.mapError((cause) =>
       wikiError(operation, "storage", "Could not check Space page ownership", {
@@ -199,7 +127,7 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
       { pageId: input.pageId }
     )
   }
-  if (posix.basename(current.resource.path).toLowerCase() === "readme.md") {
+  if (isReadme(current.resource.path)) {
     const directory = posix.dirname(current.resource.path)
     const prefix = `${directory}/`
     const child = snapshot.pages.find(
@@ -238,6 +166,79 @@ export const requireArchivable = Effect.fn("Wiki.requireArchivable")(function* (
       "invalid",
       `Page is still the target of redirect ${brokenRedirect.page.pageId}`,
       { pageId: input.pageId }
+    )
+  }
+})
+
+/**
+ * Why a page may not be created at `path`, if it may not: a page is a .md file inside an
+ * existing directory, or a standing-facts page at the root; a README is never created this way.
+ */
+export const createRefusal = (
+  path: string
+): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
+  if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
+  if ((posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) || isReadme(path))
+    return {
+      code: "blocked",
+      message: "Wiki pages can be created only inside an existing Wiki directory"
+    }
+  return undefined
+}
+
+/**
+ * The rules for creating a page at `path`: in a mapped folder the writer may write, and outside a
+ * folder a Space owns unless this run is that Space's.
+ */
+export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
+  spaces: SpaceStore["Service"],
+  snapshot: Snapshot,
+  input: { readonly path: string; readonly authority: WikiLocationAuthority }
+): Effect.fn.Return<void, WikiError> {
+  const refused = createRefusal(input.path)
+  if (refused !== undefined) return yield* wikiError("create", refused.code, refused.message)
+  const directory = posix.dirname(input.path)
+  const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "create")
+  yield* requireWikiWritePaths(boundary, "create", [input.path])
+  const directoryPage = snapshot.pages.find(
+    (record) =>
+      record.resource.path.toLowerCase() ===
+        (directory === "." ? "readme.md" : `${directory}/readme.md`).toLowerCase() &&
+      record.page.lifecycle === "active"
+  )
+  if (directoryPage === undefined) {
+    return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
+  }
+  const directoryIsSpaceBound = yield* spaces
+    .hasPageBinding(directoryPage.page.pageId, directoryPage.resource.path)
+    .pipe(
+      Effect.mapError((cause) =>
+        wikiError("create", "storage", "Could not check Memory directory ownership", {
+          pageId: directoryPage.page.pageId,
+          cause
+        })
+      )
+    )
+  if (
+    directoryIsSpaceBound &&
+    !authorityOwnsBoundaryPage(boundary, directoryPage.page.pageId, directoryPage.resource.path)
+  ) {
+    return yield* wikiError(
+      "create",
+      "blocked",
+      "Pages cannot be created inside a Space-owned directory"
+    )
+  }
+  const targetNames = new Set(pageNamesForPath(input.path).map((name) => normal(name)))
+  const existing = snapshot.pages.find((record) =>
+    pageNamesForPath(record.resource.path).some((name) => targetNames.has(normal(name)))
+  )
+  if (existing !== undefined) {
+    return yield* wikiError(
+      "create",
+      "conflict",
+      `Wiki path or link name already exists: ${input.path}`,
+      { pageId: existing.page.pageId }
     )
   }
 })

@@ -1,6 +1,6 @@
-import { utcDay } from "@arden-hq/std/time"
-import type { RunMemorySource } from "@arden-hq/protocol/runs"
-import { memoryIndex } from "../wiki/collections.js"
+import { parseCalendarDay, utcDay } from "@arden-hq/std/time"
+import type { RunMemoryRecallRole, RunMemorySource } from "@arden-hq/protocol/runs"
+import { memoryIndex, pageKind, recordFolders, type PageKind } from "../wiki/collections.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
 import type { PageRecord } from "../wiki/snapshot.js"
 import type { SemanticMemoryMatch } from "../embedding/wiki-index.js"
@@ -13,6 +13,12 @@ import { chatHref } from "../sessions/chat-href.js"
 const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
 const RESULT_LIMIT = 3
+/**
+ * How many days before the run's date a record may be and still be recalled: enough for "this
+ * week" and "last week" questions. An older record is reached by link, date or search; a
+ * folder's newest record and an undated one are recalled at any age.
+ */
+const RECORD_RECALL_DAYS = 14
 
 /** A Memory source rendered into the room it was given, and the record of what it holds. */
 export interface RenderedMemory {
@@ -133,11 +139,13 @@ const pagePrefix = (
   ].join("\n")
 
 const pageSource = (
-  kind: "core" | "recalled",
+  kind:
+    | { readonly kind: "core" }
+    | { readonly kind: "recalled"; readonly role: RunMemoryRecallRole },
   record: PageRecord,
   placement: Pick<RunMemorySource, "bytes" | "outcome" | "reason">
 ): RunMemorySource => ({
-  kind,
+  ...kind,
   page_id: record.page.pageId,
   version: record.resource.versionId,
   ...placement
@@ -177,7 +185,7 @@ const renderStandingFacts = (
     ),
     sources: blocks.map(({ record, cut, block }) =>
       pageSource(
-        "core",
+        { kind: "core" },
         record,
         cut
           ? { bytes: byteLength(block), outcome: "cut", reason: "standing_page_allowance" }
@@ -240,6 +248,7 @@ const leftOutNotice = (paths: ReadonlyArray<string>): string =>
 
 const renderRecall = (
   selected: ReadonlyArray<RankedMemoryPage>,
+  roleOf: (record: PageRecord) => RunMemoryRecallRole,
   lastChanged: ReadonlyMap<string, string>,
   discussed: ReadonlyMap<string, ReadonlyArray<DiscussedChat>>,
   maxBytes: number
@@ -272,7 +281,11 @@ const renderRecall = (
     if (excerpt === "") {
       leftOut.push(record.resource.path)
       sources.push(
-        pageSource("recalled", record, { bytes: 0, outcome: "dropped", reason: "recall_allowance" })
+        pageSource({ kind: "recalled", role: roleOf(record) }, record, {
+          bytes: 0,
+          outcome: "dropped",
+          reason: "recall_allowance"
+        })
       )
       continue
     }
@@ -284,7 +297,7 @@ const renderRecall = (
       excerpt === body || excerpt === `${body}${PARTIAL_NOTICE}`
     )
     sources.push(
-      pageSource("recalled", record, {
+      pageSource({ kind: "recalled", role: roleOf(record) }, record, {
         bytes: byteLength(block),
         outcome,
         reason: outcome === "cut" ? "recall_allowance" : null
@@ -397,9 +410,55 @@ export interface PreparedMemorySources {
   readonly render: (discussed: ReadonlyMap<string, ReadonlyArray<DiscussedChat>>) => MemorySources
 }
 
+const dayNumber = (day: string): number | undefined => {
+  const parsed = parseCalendarDay(day)
+  return parsed === undefined
+    ? undefined
+    : Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86_400_000
+}
+
+const isActive = (record: PageRecord): boolean =>
+  record.resource.state === "active" && record.page.lifecycle === "active"
+
+const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageKind> => {
+  const folders = recordFolders(active)
+  return new Map(
+    active.map((record) => [record.page.pageId, pageKind(folders, record.resource.path)] as const)
+  )
+}
+
+/**
+ * The records recall may not choose on `today` (`YYYY-MM-DD`): dated more than
+ * `RECORD_RECALL_DAYS` before it, and not their folder's newest. Search by meaning leaves them
+ * out too, so they take none of its places.
+ */
+export const tooOldToRecall = (
+  pages: ReadonlyArray<PageRecord>,
+  today: string
+): ReadonlySet<string> => {
+  const todayNumber = dayNumber(today)
+  if (todayNumber === undefined) return new Set()
+  const kinds = [...pageKinds(pages.filter(isActive))]
+  const newestDay = new Map<string, string>()
+  for (const [, kind] of kinds) {
+    if (kind.kind !== "record" || kind.day === undefined) continue
+    const newest = newestDay.get(kind.folder.directory)
+    if (newest === undefined || kind.day > newest) newestDay.set(kind.folder.directory, kind.day)
+  }
+  return new Set(
+    kinds.flatMap(([pageId, kind]) => {
+      if (kind.kind !== "record" || kind.day === undefined) return []
+      if (newestDay.get(kind.folder.directory) === kind.day) return []
+      const day = dayNumber(kind.day)
+      return day === undefined || todayNumber - day <= RECORD_RECALL_DAYS ? [] : [pageId]
+    })
+  )
+}
+
 export const prepareMemorySources = ({
   pages,
   recall,
+  today,
   semanticMatches = [],
   lastChanged
 }: {
@@ -408,20 +467,27 @@ export const prepareMemorySources = ({
   readonly recall:
     | { readonly query: string; readonly excludedPageIds: ReadonlySet<string> }
     | undefined
+  /** The run's date, `YYYY-MM-DD` in the owner's zone: the day a record's age is counted from. */
+  readonly today: string
   readonly semanticMatches?: ReadonlyArray<SemanticMemoryMatch>
   /** Each page's "Last changed" line, by page id; a page without one is shown without it. */
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemorySources => {
-  const active = pages.filter(
-    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
-  )
+  const active = pages.filter(isActive)
   const standing = active.filter(standingFacts)
+  const kinds = pageKinds(active)
+  const kindOf = (record: PageRecord): PageKind =>
+    kinds.get(record.page.pageId) ?? { kind: "knowledge" }
+  const tooOld = tooOldToRecall(active, today)
   const selected =
     recall === undefined
       ? []
       : rankMemoryPages({
           pages: active.filter(
-            (record) => !standingFacts(record) && !recall.excludedPageIds.has(record.page.pageId)
+            (record) =>
+              !standingFacts(record) &&
+              !recall.excludedPageIds.has(record.page.pageId) &&
+              !tooOld.has(record.page.pageId)
           ),
           queryTerms: wordSearchTerms(recall.query),
           semanticMatches
@@ -434,7 +500,14 @@ export const prepareMemorySources = ({
       recall:
         recall === undefined
           ? undefined
-          : (maxBytes) => renderRecall(selected, lastChanged, discussed, maxBytes)
+          : (maxBytes) =>
+              renderRecall(
+                selected,
+                (record) => kindOf(record).kind,
+                lastChanged,
+                discussed,
+                maxBytes
+              )
     })
   }
 }

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
 import { canonicalWikiPath, type WikiLocationAuthority } from "./authority.js"
+import { IMPORTED_DIRECTORY, isImportedPath } from "./collections.js"
 import {
   commitWiki,
   createPage,
@@ -15,11 +16,6 @@ import { directoryContract, directoryTitle } from "./directories.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
-
-export const IMPORTED_DIRECTORY = "imported"
-
-export const isImportedPath = (path: string): boolean =>
-  path.toLowerCase().startsWith(`${IMPORTED_DIRECTORY}/`)
 
 const HEAD_CONFLICT_RETRIES = 4
 
