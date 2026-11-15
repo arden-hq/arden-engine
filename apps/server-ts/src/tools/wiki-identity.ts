@@ -128,6 +128,14 @@ const automationOrigin = (cause: RunCause & { readonly automationId: string }) =
   captureBatch: null
 })
 
+/** A Memory write by a chat run that is no Automation's: the owner's turn, an in-chat Task step,
+ *  or a helper of either. It carries the depth its run was woken at. */
+export const agentOrigin = (sessionId: string, cause: RunCause): WikiCommitOrigin => ({
+  kind: "agent",
+  sessionId,
+  chainDepth: cause.wakeDepth
+})
+
 const admittedIdentity = async (
   runs: Pick<RunQueries["Service"], "get" | "cause">,
   input: WikiRunIdentityContext
@@ -164,7 +172,7 @@ const admittedIdentity = async (
     throw identityUnavailable("This Run's Automation is no longer recorded.")
   return {
     actor: "Agent",
-    origin: { kind: "agent", sessionId: input.sessionId, chainDepth: cause.wakeDepth },
+    origin: agentOrigin(input.sessionId, cause),
     capture: false,
     captureBatch: null
   }
