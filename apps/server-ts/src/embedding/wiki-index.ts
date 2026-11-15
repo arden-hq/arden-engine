@@ -23,6 +23,7 @@ import {
 } from "./index-plan.js"
 import type { EmbeddingModel } from "./model.js"
 import { EmbeddingModels, type EmbeddingModelEntry } from "./models.js"
+import { isSystemPage } from "../wiki/system-pages.js"
 
 const MIN_QUERY_LENGTH = 12
 const SEARCH_LIMIT = 8
@@ -73,7 +74,10 @@ const indexError = (
 
 const indexedPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
   snapshot.pages.filter(
-    (record) => record.page.lifecycle === "active" && record.page.body.trim() !== ""
+    (record) =>
+      record.page.lifecycle === "active" &&
+      !isSystemPage(record.resource.path) &&
+      record.page.body.trim() !== ""
   )
 
 const pageVersions = (snapshot: Snapshot): ReadonlyMap<string, string> =>

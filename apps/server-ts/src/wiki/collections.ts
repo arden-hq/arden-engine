@@ -5,6 +5,7 @@ import { posix } from "node:path"
 
 import { wikiPageSummary, type ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
   "Purpose",
@@ -67,7 +68,10 @@ export const wikiCollections = (
   pages: ReadonlyArray<PageRecord>
 ): ReadonlyArray<WikiCollection> => {
   const active = pages.filter(
-    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
+    (record) =>
+      record.resource.state === "active" &&
+      record.page.lifecycle === "active" &&
+      !isSystemPage(record.resource.path)
   )
   const directPages = new Map<string, number>()
   for (const page of active) {
@@ -175,6 +179,7 @@ export const memoryIndex = (
         record.resource.state === "active" &&
         record.page.lifecycle === "active" &&
         record.resource.path.startsWith(prefix) &&
+        !isSystemPage(record.resource.path) &&
         options.leaveOut?.(record) !== true
     )
     .map((record) => ({

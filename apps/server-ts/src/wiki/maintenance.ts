@@ -15,6 +15,7 @@ import {
   validateRedirects,
   type Snapshot
 } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 const MAX_CACHED_HISTORY_IDS = 2_048
 const MAX_RANGE_COMMITS = 12
@@ -70,7 +71,10 @@ const isReviewableChange = (change: {
   readonly after: { readonly path: string } | null
 }): boolean => {
   const paths = [change.before?.path, change.after?.path].filter((path) => path !== undefined)
-  return paths.some((path) => path.endsWith(".md")) && !paths.some((path) => isImportedPath(path))
+  return (
+    paths.some((path) => path.endsWith(".md")) &&
+    !paths.some((path) => isImportedPath(path) || isSystemPage(path))
+  )
 }
 
 const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(function* (
@@ -166,7 +170,8 @@ const reviewPages = (snapshot: Snapshot, pageIds: ReadonlyArray<string>) => {
     if (
       record === undefined ||
       record.page.lifecycle !== "active" ||
-      isImportedPath(record.resource.path)
+      isImportedPath(record.resource.path) ||
+      isSystemPage(record.resource.path)
     )
       return []
     return [record]
