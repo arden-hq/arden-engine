@@ -18,6 +18,7 @@ import {
   type SessionTarget,
   type WaitOptions
 } from "./run.js"
+import { modelsCommand, type ModelsOptions } from "./models.js"
 import { execCommand, serveCommand, type ExecOptions, type ServeOptions } from "./serve.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
@@ -33,6 +34,7 @@ type ParsedCommand =
   | { readonly kind: "run"; readonly options: RunOptions }
   | { readonly kind: "wait"; readonly options: WaitOptions }
   | { readonly kind: "sessions"; readonly options: SessionsOptions }
+  | { readonly kind: "models"; readonly options: ModelsOptions }
   | { readonly kind: "serve"; readonly options: ServeOptions }
   | { readonly kind: "exec"; readonly options: ExecOptions }
 
@@ -40,19 +42,21 @@ const HELP = `Usage:
   arden run [prompt] [options]
   arden wait <run-id> [options]
   arden sessions [options]
+  arden models [options]
   arden serve --config <file>
   arden exec --config <file> [prompt] [options]
 
-run, wait and sessions talk to the running Arden app (or --url / ARDEN_URL).
-Chats started there appear in Arden like any other. serve and exec start a
-server of their own from a settings file, with its own data folder.
+run, wait, sessions and models talk to the running Arden app (or --url /
+ARDEN_URL, or ARDEN_DIR=<data folder> for an arden serve). Chats started there
+appear in Arden like any other. serve and exec start a server of their own
+from a settings file, with its own data folder and model provider.
 
 Run options:
   --session <id>          Send to this chat
   --continue              Send to the most recently active chat
   --fork <id>             Send to a copy of this chat; the original stays as it was
   --space <name|id>        Start the new chat in this Space
-  --model <id>            Start the new chat on this model
+  --model <id>            Start the new chat on this model (arden models lists them)
   --recipe <name>         Start from this Recipe (Skill)
   --image <path>          Attach a .png or .jpg image (repeatable)
   --output-schema <file>  A JSON Schema the final answer must match; json
@@ -77,11 +81,26 @@ Serve:
                           stdout, then runs until Ctrl-C or SIGTERM. Reach it
                           with ARDEN_DIR=<its dataDirectory> arden run ...
 
+  A settings file names its data folder and model provider, for example a
+  local llama.cpp server, which needs no key:
+    { "dataDirectory": "/abs/data",
+      "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" } }
+  OpenRouter names the variable that holds its key, and the model:
+    "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1",
+                  "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini"
+  Without a provider the server uses this machine's Codex sign-in (codex login).
+  A settings mistake, a provider that does not answer, or an unset key
+  variable stops the start with exit status 2 and the reason.
+
 Exec options:
   --config <file>         The settings file; the server stops after the Run
   --server-log <file>     Keep the server's log lines in this file
   The Run options above except --url and --detach. --session and --continue
   reach earlier chats of the same data folder.
+
+Models options:
+  --output <format>       text or json (default: text)
+  --url <url>             Arden server URL (or ARDEN_URL)
 
 Sessions options:
   --limit <n>             How many chats (default: 20)
@@ -297,6 +316,12 @@ const parseWait = (args: ReadonlyArray<string>): ParsedCommand => {
   }
 }
 
+const listOutput = (parsed: ParsedArgs): "text" | "json" => {
+  const output = single(parsed, "--output") ?? "text"
+  if (output !== "text" && output !== "json") throw new UsageError("--output must be text or json")
+  return output
+}
+
 const SESSIONS_OPTIONS: ReadonlySet<string> = new Set(["--url", "--limit", "--output"])
 
 const parseSessions = (args: ReadonlyArray<string>): ParsedCommand => {
@@ -304,8 +329,7 @@ const parseSessions = (args: ReadonlyArray<string>): ParsedCommand => {
   if (parsed === undefined) return { kind: "help" }
   const [extra] = parsed.positionals
   if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
-  const output = single(parsed, "--output") ?? "text"
-  if (output !== "text" && output !== "json") throw new UsageError("--output must be text or json")
+  const output = listOutput(parsed)
   const limit = single(parsed, "--limit")
   return {
     kind: "sessions",
@@ -314,6 +338,19 @@ const parseSessions = (args: ReadonlyArray<string>): ParsedCommand => {
       limit: limit === undefined ? 20 : positiveCount(limit, "--limit"),
       output
     }
+  }
+}
+
+const MODELS_OPTIONS: ReadonlySet<string> = new Set(["--url", "--output"])
+
+const parseModels = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, MODELS_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  const [extra] = parsed.positionals
+  if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
+  return {
+    kind: "models",
+    options: { urlArgument: single(parsed, "--url"), output: listOutput(parsed) }
   }
 }
 
@@ -330,6 +367,8 @@ const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
       return parseWait(rest)
     case "sessions":
       return parseSessions(rest)
+    case "models":
+      return parseModels(rest)
     case "serve":
       return parseServe(rest)
     case "exec":
@@ -382,6 +421,8 @@ export const runCli = async (
       return waitCommand(command.options, dependencies)
     case "sessions":
       return sessionsCommand(command.options, dependencies)
+    case "models":
+      return modelsCommand(command.options, dependencies)
     case "serve":
       return serveCommand(command.options, dependencies)
     case "exec":

@@ -325,7 +325,6 @@ describe("arden wait", () => {
 })
 
 describe("arden exec", () => {
-  const DATA = "/tmp/arden-exec-data"
   const started = (events: Array<string>) => ({
     startServer: async (input: {
       readonly config: string
@@ -333,10 +332,9 @@ describe("arden exec", () => {
     }) => {
       events.push(`start ${input.config} ${input.logFile ?? "-"}`)
       return {
-        ready: {
-          url: "http://127.0.0.1:51234/",
-          dataDirectory: DATA,
-          accessFile: `${DATA}/cli-access.json`
+        connection: {
+          url: new URL("http://127.0.0.1:51234/"),
+          headers: { "x-arden-local-capability": CAPABILITY }
         },
         stop: async () => {
           events.push("stop")
@@ -347,14 +345,14 @@ describe("arden exec", () => {
 
   it("starts the configured server, runs the prompt on it and stops it", async () => {
     const events: Array<string> = []
-    const io = testIo({ files: { [`${DATA}/cli-access.json`]: accessFile() } })
+    const io = testIo()
     const code = await runCli(
       ["exec", "--config", "settings.json", "--server-log", "server.log", "--output", "json", "hi"],
       { ...io.dependencies, ...started(events) }
     )
     expect(code).toBe(0)
     expect(events).toEqual(["start settings.json server.log", "stop"])
-    // It reaches the server through that server's own access file.
+    // It reaches the server it started, with that server's own secret.
     expect(io.connections()).toEqual([
       { url: "http://127.0.0.1:51234/", headers: { "x-arden-local-capability": CAPABILITY } }
     ])
@@ -397,7 +395,6 @@ describe("arden exec", () => {
 
     const events: Array<string> = []
     const failing = testIo({
-      files: { [`${DATA}/cli-access.json`]: accessFile() },
       client: {
         ...defaultClient(),
         submit: async () => {
@@ -412,5 +409,112 @@ describe("arden exec", () => {
       })
     ).toBe(1)
     expect(events).toEqual(["start settings.json -", "stop"])
+  })
+})
+
+describe("the model a Run runs on", () => {
+  it("lists the server's models by the ids --model takes", async () => {
+    const text = testIo()
+    expect(await runCli(["models", ...URL_ARGS], text.dependencies)).toBe(0)
+    expect(text.stdout()).toBe("gemma-4  llama.cpp  efforts: none, medium\n")
+
+    const json = testIo()
+    expect(await runCli(["models", ...URL_ARGS, "--output", "json"], json.dependencies)).toBe(0)
+    expect(jsonLines(json.stdout())).toEqual([
+      {
+        version: 1,
+        type: "model_list",
+        providers: [
+          {
+            id: "llama.cpp",
+            name: "llama.cpp",
+            models: [{ id: "gemma-4", name: "gemma-4", reasoningEfforts: ["none", "medium"] }]
+          }
+        ]
+      }
+    ])
+  })
+
+  it("starts a chat on a listed model, and names the listed ones for any other", async () => {
+    const created: Array<unknown> = []
+    const client: CliClient = {
+      ...defaultClient(),
+      createSession: async (input = {}) => {
+        created.push(input)
+        return defaultClient().createSession(input)
+      }
+    }
+    const listed = testIo({ client })
+    expect(
+      await runCli(["run", "hi", ...URL_ARGS, "--model", "gemma-4"], listed.dependencies)
+    ).toBe(0)
+    expect(created).toEqual([{ chat_model: "gemma-4" }])
+
+    const other = testIo({ client })
+    expect(
+      await runCli(
+        ["run", "hi", ...URL_ARGS, "--model", "gpt-5", "--output", "json"],
+        other.dependencies
+      )
+    ).toBe(2)
+    expect(created).toEqual([{ chat_model: "gemma-4" }])
+    expect(jsonLines(other.stdout())).toEqual([
+      {
+        version: 1,
+        type: "command_receipt",
+        command: "run",
+        status: "failed",
+        exit_code: 2,
+        run_id: null,
+        session_id: null,
+        client_id: null,
+        run_status: null,
+        model_id: null,
+        reasoning_effort: null,
+        result: null,
+        error: {
+          code: "invalid_input",
+          message: "This server has no model gpt-5. It lists: gemma-4"
+        },
+        declined: []
+      }
+    ])
+  })
+
+  it("says which model answered, with the server's usage and cost as sent", async () => {
+    const io = testIo()
+    expect(await runCli(["run", "hi", ...URL_ARGS, "--output", "json"], io.dependencies)).toBe(0)
+    expect(jsonLines(io.stdout())).toEqual([
+      {
+        version: 1,
+        type: "command_receipt",
+        command: "run",
+        status: "completed",
+        exit_code: 0,
+        run_id: "run-1",
+        session_id: "session-1",
+        client_id: "client-1",
+        run_status: "completed",
+        model_id: "fixture-model",
+        reasoning_effort: null,
+        result: completedRun().result,
+        error: null,
+        declined: []
+      }
+    ])
+  })
+
+  it("refuses a prompt longer than one message takes before reaching the server", async () => {
+    const io = testIo({ stdin: { kind: "pipe", text: "x".repeat(100_001) } })
+    expect(await runCli(["run", ...URL_ARGS, "--output", "json"], io.dependencies)).toBe(2)
+    expect(io.connections()).toEqual([])
+    expect(jsonLines(io.stdout())).toMatchObject([
+      {
+        error: {
+          code: "invalid_input",
+          message: "The prompt is 100001 characters; one message takes at most 100000"
+        }
+      }
+    ])
   })
 })

@@ -20,6 +20,7 @@ The package is private. It has no release of its own. To test it, run `bun run -
 | `arden run [prompt]` | Send a prompt and wait for the answer. Piped stdin joins the prompt in a `<stdin>` block |
 | `arden wait <run-id>` | Wait for a Run that is already going |
 | `arden sessions` | List recent chats |
+| `arden models` | List the models a new chat may run on: the ids `--model` takes |
 | `arden serve --config <file>` | Start a server of its own from a settings file; runs until stopped |
 | `arden exec --config <file> [prompt]` | Start that server, run one prompt on it, stop it |
 
@@ -30,13 +31,53 @@ Run `arden --help` for every option.
 - The server address is `--url` or `ARDEN_URL`.
 - `serve` and `exec` take a settings file (`apps/server-ts/src/serve/settings.ts` lists every field) and a data folder of their own, never `~/.arden`. Reach a `serve` server with `ARDEN_DIR=<its dataDirectory> arden run ...`.
 - `--output json` and `--output jsonl` print one `command_receipt`. Its `status` is `completed`, `submitted`, `failed`, `cancelled`, `interrupted` or `timed_out`.
-- Exit codes: `0` completed or submitted, `1` failed or cancelled, `2` invalid input, `124` timed out, `130` interrupted.
+- Exit codes: `0` completed or submitted, `1` failed or cancelled, `2` invalid input, `124` timed out, `130` interrupted. For `exec`, `2` also covers a server that would not start on its settings, with the server's reason (see below).
+- The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, `cost`. The server prices no model call yet, so `cost` is 0 on every provider, a local model included; count tokens from `usage`.
+- `--model` takes an id `arden models` lists. Any other is refused before a chat is made (exit 2), with the ids the server has.
+- A prompt longer than one message takes (100,000 characters) is refused before the server is reached (exit 2).
 - `--approval` sets how the Run handles approvals. `--no-wait-approval` declines what needs an approval instead of waiting.
 - Ctrl-C and `--timeout` stop the wait. The Run goes on in the server.
+
+## A local model (llama.cpp) or OpenRouter
+
+A settings file with a `chat-completions` provider runs on any OpenAI Chat Completions server. A local `llama-server` needs no key; the server finds out it is llama.cpp and reads the model's id, window and thinking switch from it. Give it a window of at least 32,768 tokens (`apps/server-ts/README.md` says why).
+
+```bash
+llama-server -m model.gguf --ctx-size 32768 --jinja --port 8080 &
+mkdir -p /tmp/arden-local/work
+cat > /tmp/arden-local/settings.json <<'JSON'
+{ "dataDirectory": "/tmp/arden-local/data", "workspace": "/tmp/arden-local/work",
+  "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" },
+  "approvalMode": "allow", "memory": false, "automations": false, "skillRoots": [] }
+JSON
+arden exec --config /tmp/arden-local/settings.json --output json \
+  'What does `uname -s` print on this machine? Run it and tell me.'
+```
+
+Checked on 2026-11-16 with llama.cpp b12359 and Gemma 4 E2B (Q8_0) on an Apple-silicon Mac, every tool offered (trimmed):
+
+```json
+{"type":"command_receipt","status":"completed","exit_code":0,"model_id":"/…/gemma-4-E2B-it-Q8_0.gguf",
+ "result":{"text":"The output of running `uname -s` is: Darwin","usage":{"prompt":12942,"completion":298,"total":26128,"cache_read":12888,"cache_write":0},"cost":0,"steps":1}}
+```
+
+llama.cpp names a model by its file path unless `llama-server --alias <name>` gives it a name; `arden models` prints the id either way. OpenRouter needs its key variable and a model: `"provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini"`.
+
+What each failure says, checked the same day:
+
+| Case | Exit | Message |
+| --- | --- | --- |
+| `llama-server` not running at start (`exec`, `serve`) | 2 | `Cannot reach http://127.0.0.1:8080/props: fetch failed` |
+| `model` not on the llama.cpp server | 2 | `Model is not on the llama.cpp server: <id> (it lists: <ids>)` |
+| `server: "generic"` without `contextLimit` | 2 | ``Invalid settings: a `chat-completions` provider on a generic server needs `model` and `contextLimit` `` |
+| `apiKeyEnv` names an unset variable | 2 | `Missing environment variable <NAME>` |
+| prompt larger than the model's window | 1 | `context_length_exceeded`: `Your input exceeds this model's context window. …` |
+| `llama-server` stopped after the start | 1 | `provider_unavailable`: `fetch failed` |
+| `--model` the server does not list (`run`) | 2 | `This server has no model <id>. It lists: <ids>` |
 
 ## Layout
 
 - `src/cli.ts` parses arguments.
-- `src/run.ts` holds `run`, `wait` and `sessions`.
-- `src/serve.ts` holds `serve` and `exec`. The command line does not contain the server: it starts the one named by `ARDEN_SERVER_ENTRY`, else the installed `@arden-hq/server`, else the one beside it in this repository.
+- `src/run.ts` holds `run`, `wait` and `sessions`; `src/models.ts` holds `models`.
+- `src/serve.ts` holds `serve` and `exec`. The command line does not contain the server: it starts the one named by `ARDEN_SERVER_ENTRY`, else the installed `@arden-hq/server`, else the one beside it in this repository. `exec` starts it with `@arden-hq/headless`'s `startConfiguredServer`, as the benchmark runner does.
 - `src/main.ts` is the entry.

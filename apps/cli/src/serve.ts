@@ -1,16 +1,13 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { ConfiguredServerError, startConfiguredServer } from "@arden-hq/headless"
+import { errorMessage } from "@arden-hq/std/errors"
+import { spawn } from "node:child_process"
 import { createWriteStream, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-import { errorMessage } from "@arden-hq/std/errors"
-
 import {
-  resolveServer,
   ServerUnavailableError,
   UsageError,
   type CliDependencies,
-  type ServerReady,
-  type StartedServer,
   type StartServer
 } from "./command.js"
 import { runCommand, type RunOptions } from "./run.js"
@@ -35,97 +32,35 @@ const serverEntry = (env: Readonly<Record<string, string | undefined>>): string 
   }
 }
 
-const STOP_TIMEOUT_MS = 10_000
-
-const stopChild = (child: ChildProcess): Promise<void> =>
-  new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) return resolve()
-    const kill = setTimeout(() => child.kill("SIGKILL"), STOP_TIMEOUT_MS)
-    child.once("exit", () => {
-      clearTimeout(kill)
-      resolve()
-    })
-    child.kill("SIGTERM")
-  })
-
-const readyFrom = (line: string): ServerReady | undefined => {
-  let value: unknown
-  try {
-    value = JSON.parse(line)
-  } catch {
-    return undefined
-  }
-  if (typeof value !== "object" || value === null) return undefined
-  const { type, url, dataDirectory, accessFile } = value as Record<string, unknown>
-  return type === "ready" &&
-    typeof url === "string" &&
-    typeof dataDirectory === "string" &&
-    typeof accessFile === "string"
-    ? { url, dataDirectory, accessFile }
-    : undefined
-}
-
 /**
  * Starts a configured server as a child process and waits for its ready line.
  * A start that fails rejects with the server's own last words: its `arden:`
- * line names the settings mistake.
+ * line names the settings mistake, which is the caller's to fix (exit 2).
  */
-const startServer: StartServer = ({ config, logFile, env }) =>
-  new Promise((resolve, reject) => {
-    const entry = serverEntry(env)
-    const child = spawn(process.execPath, [entry, "--config", config], {
+const startServer: StartServer = async ({ config, logFile, env }) => {
+  const log = logFile === undefined ? undefined : createWriteStream(logFile, { flags: "a" })
+  try {
+    const server = await startConfiguredServer({
+      entry: serverEntry(env),
+      config,
       env,
-      stdio: ["ignore", "pipe", "pipe"]
+      ...(log === undefined ? {} : { onLog: (chunk: string) => log.write(chunk) })
     })
-    const log = logFile === undefined ? undefined : createWriteStream(logFile, { flags: "a" })
-    let lastWords = ""
-    child.stderr.setEncoding("utf8")
-    child.stderr.on("data", (chunk: string) => {
-      log?.write(chunk)
-      lastWords = (lastWords + chunk).slice(-4_000)
-    })
-    let pending = ""
-    let settled = false
-    child.stdout.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      if (settled) return
-      pending += chunk
-      const end = pending.indexOf("\n")
-      if (end === -1) return
-      const ready = readyFrom(pending.slice(0, end))
-      settled = true
-      if (ready === undefined) {
-        void stopChild(child)
-        reject(new ServerUnavailableError("The Arden server printed no ready line"))
-        return
+    return {
+      connection: server.connection,
+      stop: async () => {
+        await server.stop()
+        log?.end()
       }
-      resolve({
-        ready,
-        stop: async () => {
-          await stopChild(child)
-          log?.end()
-        }
-      })
-    })
-    child.once("error", (cause) => {
-      if (settled) return
-      settled = true
-      reject(new ServerUnavailableError(`Could not start the Arden server: ${cause.message}`))
-    })
-    child.once("exit", (code) => {
-      log?.end()
-      if (settled) return
-      settled = true
-      const said = lastWords
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.startsWith("arden: "))
-        .at(-1)
-      const message = said?.slice("arden: ".length) ?? `The Arden server exited with code ${code}`
-      // Exit 2 is the server's own word for a settings mistake.
-      reject(code === 2 ? new UsageError(message) : new ServerUnavailableError(message))
-    })
-  })
+    }
+  } catch (cause) {
+    log?.end()
+    if (!(cause instanceof ConfiguredServerError)) throw cause
+    throw cause.reason === "settings"
+      ? new UsageError(cause.message)
+      : new ServerUnavailableError(cause.message)
+  }
+}
 
 export interface ServeOptions {
   readonly config: string
@@ -183,19 +118,14 @@ export const execCommand = async (
   options: ExecOptions,
   dependencies: CliDependencies
 ): Promise<number> => {
-  let server: StartedServer | undefined
+  let server: Awaited<ReturnType<StartServer>> | undefined
   const connect = async () => {
     server = await (dependencies.startServer ?? startServer)({
       config: options.config,
       logFile: options.logFile,
       env: dependencies.env
     })
-    // The server's own access file, read the way `arden run` reads the app's.
-    return resolveServer(undefined, {
-      ...dependencies,
-      connect: undefined,
-      env: { ARDEN_DIR: server.ready.dataDirectory }
-    })
+    return server.connection
   }
   try {
     return await runCommand(options.run, { ...dependencies, connect })

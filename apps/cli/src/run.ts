@@ -6,7 +6,12 @@ import {
   type RunTerminalResult,
   type SubmittedRun
 } from "@arden-hq/headless"
-import type { ChatApprovalMode, ChatImageInput, ChatMessageInput } from "@arden-hq/protocol/chat"
+import {
+  CHAT_MESSAGE_MAX_LENGTH,
+  type ChatApprovalMode,
+  type ChatImageInput,
+  type ChatMessageInput
+} from "@arden-hq/protocol/chat"
 import { extname } from "node:path"
 
 import {
@@ -73,6 +78,12 @@ export interface CommandReceiptV1 {
   readonly session_id: string | null
   readonly client_id: string | null
   readonly run_status: RunDetail["status"] | null
+  /** The model the Run ran on, as the server names it (llama.cpp, OpenRouter: the server's own id). */
+  readonly model_id: RunDetail["model_id"]
+  readonly reasoning_effort: RunDetail["reasoning_effort"]
+  /** The server's terminal result as it sent it. Its `cost` is what the server
+   *  priced, not a bill: a local model costs nothing, and a server that prices
+   *  no call reports 0 (see the CLI README). */
   readonly result: RunTerminalResult | null
   readonly error: CommandReceiptError | null
   readonly declined: ReadonlyArray<DeclinedRequest>
@@ -107,6 +118,8 @@ const failedReceipt = (
     session_id: identity.sessionId,
     client_id: identity.clientId,
     run_status: null,
+    model_id: null,
+    reasoning_effort: null,
     result: null,
     error,
     declined: input.declined ?? []
@@ -123,6 +136,8 @@ const submittedReceipt = (run: SubmittedRun): CommandReceiptV1 => ({
   session_id: run.sessionId,
   client_id: run.clientId,
   run_status: null,
+  model_id: null,
+  reasoning_effort: null,
   result: null,
   error: null,
   declined: []
@@ -146,6 +161,8 @@ const receiptFromRun = (
     session_id: detail.session_id,
     client_id: detail.client_id,
     run_status: detail.status,
+    model_id: detail.model_id,
+    reasoning_effort: detail.reasoning_effort,
     declined
   } as const
   if (detail.status === "completed" && detail.result !== null) {
@@ -392,6 +409,7 @@ const resolveSession = async (
         created: false
       }
     case "new": {
+      if (target.model !== undefined) await requireModel(client, target.model)
       const spaceId =
         target.space === undefined ? undefined : await resolveSpace(client, target.space)
       const created = await client.createSession({
@@ -401,6 +419,21 @@ const resolveSession = async (
       return { sessionId: created.session_id, created: true }
     }
   }
+}
+
+/**
+ * A model the server does not list would make it refuse the new chat with no
+ * reason; this names the models it has. On llama.cpp and OpenRouter the ids
+ * are the server's own (`arden models`).
+ */
+const requireModel = async (client: CliClient, model: string): Promise<void> => {
+  const ids = (await client.listModels()).providers.flatMap((provider) =>
+    provider.models.map((entry) => entry.id)
+  )
+  if (ids.includes(model)) return
+  throw new UsageError(
+    `This server has no model ${model}. ${ids.length === 0 ? "It lists none." : `It lists: ${ids.join(", ")}`}`
+  )
 }
 
 const discardIfEmpty = async (client: CliClient, sessionId: string): Promise<void> => {
@@ -423,7 +456,7 @@ const refusalMessage = (cause: HeadlessHttpError): string => {
   return cause.message
 }
 
-const failureOf = (
+export const failureOf = (
   cause: unknown
 ): { readonly error: CommandReceiptError; readonly exitCode: number } => {
   if (cause instanceof UsageError) {
@@ -467,6 +500,11 @@ export const runCommand = async (
   try {
     prompt = await promptFor(options, dependencies)
     if (prompt.length === 0) throw new UsageError("Prompt must not be empty")
+    // The message contract's own limit, said before a chat is made for it.
+    if (prompt.length > CHAT_MESSAGE_MAX_LENGTH)
+      throw new UsageError(
+        `The prompt is ${prompt.length} characters; one message takes at most ${CHAT_MESSAGE_MAX_LENGTH}`
+      )
     images = await readImages(options.imagePaths, dependencies)
     outputSchema = await readOutputSchema(options.outputSchemaPath, dependencies)
     client = createCliClient(dependencies, await resolveServer(options.urlArgument, dependencies))
@@ -521,7 +559,9 @@ export const runCommand = async (
 
   try {
     if (!(await client.health()).hasProviders) {
-      throw new NoModelError("Arden has no model to answer with. Sign in to one in Arden first.")
+      throw new NoModelError(
+        "Arden has no model to answer with. Sign in to a model provider in Arden, or start a server with a provider in its settings (`arden serve --config`)."
+      )
     }
     const resolved = await resolveSession(client, options.target)
     sessionId = resolved.sessionId

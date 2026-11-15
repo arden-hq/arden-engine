@@ -1,4 +1,9 @@
-import { createHeadlessClient, type HeadlessClient } from "@arden-hq/headless"
+import {
+  createHeadlessClient,
+  type ConfiguredServer,
+  type ConfiguredServerConnection,
+  type HeadlessClient
+} from "@arden-hq/headless"
 import { CLI_ACCESS_FILE, daemonDecoders, LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { resolveArdenDir } from "@arden-hq/std/paths"
 import { join } from "node:path"
@@ -12,25 +17,13 @@ export type CliClient = Pick<
   | "createSession"
   | "deleteSession"
   | "health"
+  | "listModels"
   | "listSpaces"
   | "listSessions"
   | "submit"
   | "wait"
   | "waitForRun"
 >
-
-/** The line a configured server prints on stdout once every setting is in place. */
-export interface ServerReady {
-  readonly url: string
-  readonly dataDirectory: string
-  readonly accessFile: string
-}
-
-export interface StartedServer {
-  readonly ready: ServerReady
-  /** Asks the server to stop and waits until it has. Never throws. */
-  readonly stop: () => Promise<void>
-}
 
 interface StartServerInput {
   readonly config: string
@@ -39,14 +32,13 @@ interface StartServerInput {
   readonly env: Readonly<Record<string, string | undefined>>
 }
 
-export type StartServer = (input: StartServerInput) => Promise<StartedServer>
+export type StartServer = (
+  input: StartServerInput
+) => Promise<Pick<ConfiguredServer, "connection" | "stop">>
 
 export type StdinKind = "terminal" | "pipe" | "file" | "other"
 
-export interface ServerConnection {
-  readonly url: URL
-  readonly headers: Readonly<Record<string, string>>
-}
+export type ServerConnection = ConfiguredServerConnection
 
 export interface CliDependencies {
   readonly env: Readonly<Record<string, string | undefined>>
@@ -123,7 +115,8 @@ const parseServerUrl = (value: string): URL => {
   return url
 }
 
-const NOT_RUNNING = "Arden is not running. Open Arden, or set --url (or ARDEN_URL) to a server."
+const NOT_RUNNING =
+  "Arden is not running. Open Arden, set --url (or ARDEN_URL) to a server, or ARDEN_DIR to the data folder of an `arden serve`."
 
 export const resolveServer = async (
   argument: string | undefined,

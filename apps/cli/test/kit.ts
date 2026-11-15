@@ -138,5 +138,14 @@ export const defaultClient = (): CliClient => ({
   },
   listSpaces: async () => {
     throw new Error("listSpaces is not stubbed")
-  }
+  },
+  listModels: async () => ({
+    providers: [
+      {
+        id: "llama.cpp",
+        name: "llama.cpp",
+        models: [{ id: "gemma-4", name: "gemma-4", reasoningEfforts: ["none", "medium"] }]
+      }
+    ]
+  })
 })
