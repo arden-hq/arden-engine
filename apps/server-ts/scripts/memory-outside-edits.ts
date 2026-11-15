@@ -26,6 +26,13 @@ const report = (title: string, checked: OutsideEditCheck): ReadonlyArray<string>
   ...checked.unreadableFiles.map((item) => `    ${item.path}: ${item.reason}`)
 ]
 
+const settledCheck = Effect.gen(function* () {
+  const memory = yield* Wiki
+  const first = yield* memory.checkOutsideEdits()
+  const deciding = yield* memory.checkOutsideEdits()
+  return { first, deciding }
+})
+
 it("checks the copy's Memory folder for changes made outside Arden", async () => {
   const located = locateReplayCopy()
   if (located.kind === "absent") throw new Error(located.reason)
@@ -39,12 +46,14 @@ it("checks the copy's Memory folder for changes made outside Arden", async () =>
 
   const checks = await runOnReplayCopy(
     copy,
-    Effect.gen(function* () {
-      const memory = yield* Wiki
-      const first = yield* memory.checkOutsideEdits()
-      const second = yield* memory.checkOutsideEdits()
-      return [...report("First check:", first), ...report("Second check, one poll later:", second)]
-    }).pipe(Effect.provide(wiki), quiet)
+    settledCheck.pipe(
+      Effect.map(({ first, deciding }) => [
+        ...report("First check:", first),
+        ...report("Second check, one poll later:", deciding)
+      ]),
+      Effect.provide(wiki),
+      quiet
+    )
   )
   const outside = await runOnReplayCopy(
     copy,
