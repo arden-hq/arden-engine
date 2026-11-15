@@ -35,7 +35,7 @@ const EVIDENCE_CHARS = 16_000
 const EXCERPT_CHARS = 2_000
 const SESSION_PAGE = 100
 const MESSAGE_PAGE = 250
-const DAY_TRIES = 2
+const TRIES_BEFORE_DAY_SKIPPED = 2
 
 const nextDay = (day: string, days = 1): string =>
   DateTime.formatIsoDate(DateTime.add(DateTime.makeUnsafe(`${day}T00:00:00Z`), { days }))
@@ -223,9 +223,9 @@ export const makeDailySummaryRunner = (services: {
         const settled = place.settledDay
         const date = nextDay(settled)
         if (date >= today) return "idle" as const
-        if (place.tries >= DAY_TRIES) {
+        if (place.tries >= TRIES_BEFORE_DAY_SKIPPED) {
           notes.push(
-            `daily/${date}.md was not written: its run did not finish in ${DAY_TRIES} jobs`
+            `daily/${date}.md was not written: its run did not finish in ${TRIES_BEFORE_DAY_SKIPPED} jobs`
           )
           yield* services.position.advance({ from: settled, to: date })
           return "advance" as const
