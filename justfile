@@ -70,6 +70,10 @@ memory-test-answered questions copy *flags:
 memory-outside-edits copy:
     cd apps/server-ts && ARDEN_OUTSIDE_EDITS=1 ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project outside-edits
 
+# Print, on the replay copy in <copy> and with no model, each kind of Memory finding (shared long sentences, pages nothing links to, two dated status lines, log sections, pages over their limit, broken redirects and links, folders without a README, empty pages, shared titles, stray files) with its count and page paths. Prints no page text.
+memory-shape copy:
+    cd apps/server-ts && ARDEN_MEMORY_SHAPE=1 ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project memory-shape
+
 # Register every engine package with `bun link`, so a local app checkout uses this engine.
 link:
     for dir in libs/* apps/server-ts; do (cd "$dir" && bun link); done
