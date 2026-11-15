@@ -54,10 +54,15 @@ const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
     ? { kind: "undo", id: input.undo }
     : { kind: "forget", lines: input.lines ?? [], claim: input.claim ?? "" }
 
-const forgetFailure = (error: WikiError): ToolExecutionError =>
+const isForgetRefusal = (error: WikiError): boolean =>
   error.operation === "forget" && (error.reason === "invalid" || error.reason === "not_found")
-    ? new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
-    : wikiFailure(error)
+
+/** A forget's own refusal already says what to pass instead. */
+const forgetRefusal = (error: WikiError): ToolExecutionError =>
+  new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
+
+const forgetFailure = (error: WikiError): ToolExecutionError =>
+  isForgetRefusal(error) ? forgetRefusal(error) : wikiFailure(error)
 
 const changeDiff = (change: RetractionChange): string =>
   change.pages.map((page) => boundedDiff(page.path, page.before, page.after)).join("\n")
