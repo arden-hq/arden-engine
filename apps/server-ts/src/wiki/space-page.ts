@@ -35,11 +35,17 @@ export interface WikiSpacePageInput {
   readonly home?: "projects" | "areas"
 }
 
-/** An active Space with its page, and the page made for it, if one was made. */
-export interface SpacePageEnsured {
-  readonly space: PersistedSpace
-  readonly created: { readonly pageId: string; readonly path: string } | undefined
-}
+/**
+ * How an active Space has its page: the page it was bound to, that page at the path it now has,
+ * or a page made for it now.
+ */
+export type SpacePageEnsured =
+  | { readonly kind: "kept" | "rebound"; readonly space: PersistedSpace }
+  | {
+      readonly kind: "created"
+      readonly space: PersistedSpace
+      readonly created: { readonly pageId: string; readonly path: string }
+    }
 
 const storageError = (message: string) => (cause: unknown) =>
   wikiError("create", "storage", message, { cause })
@@ -58,7 +64,7 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
     Effect.mapError(storageError("Could not read the Spaces' Memory pages"))
   )).filter((binding) => binding.space_id !== space.space_id)
   const plan = planSpacePage(current.pages, space, others)
-  if (plan.kind === "keep") return { space, created: undefined }
+  if (plan.kind === "keep") return { kind: "kept", space }
   const page =
     plan.kind === "rebind"
       ? plan.page
@@ -71,10 +77,9 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
     .bindPage(space.space_id, page)
     .pipe(Effect.mapError(storageError("Could not bind the Space's page")))
   if (bound === null) return undefined
-  return {
-    space: bound,
-    created: plan.kind === "create" ? { pageId: page.pageId, path: page.pagePath } : undefined
-  }
+  return plan.kind === "rebind"
+    ? { kind: "rebound", space: bound }
+    : { kind: "created", space: bound, created: { pageId: page.pageId, path: page.pagePath } }
 })
 
 /** Logs a Space left without a page; the start check gives it one. */
@@ -86,12 +91,12 @@ export const logNoSpacePage = (spaceId: string, error: WikiError) =>
   })
 
 /**
- * How an archived Space came back: with the page it was bound to, with that page at the path it
- * now has, or with none of its own, because the page is gone or another active Space holds or
- * overlaps it. A Space that comes back with none gets a fresh page now, or at the next start.
+ * How an archived Space came back. A Space whose page is gone, or held or overlapped by another
+ * active Space, gets a fresh page; when none can be made now it comes back pageless, and the
+ * next start gives it one.
  */
 export type SpaceRestore = {
-  readonly kind: "kept" | "rebound" | "none"
+  readonly kind: SpacePageEnsured["kind"] | "pageless"
   readonly space: PersistedSpace
 }
 
@@ -112,11 +117,14 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   }
   const restored = yield* spaces.restore(spaceId, null)
   if (restored === null) return null
-  const withPage = yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
-    Effect.map((ensured) => ensured?.space ?? restored),
-    Effect.catch((error) => logNoSpacePage(spaceId, error).pipe(Effect.as(restored)))
+  return yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
+    Effect.map((ensured): SpaceRestore => ensured ?? { kind: "pageless", space: restored }),
+    Effect.catch((error) =>
+      logNoSpacePage(spaceId, error).pipe(
+        Effect.as<SpaceRestore>({ kind: "pageless", space: restored })
+      )
+    )
   )
-  return { kind: "none", space: withPage }
 })
 
 const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
