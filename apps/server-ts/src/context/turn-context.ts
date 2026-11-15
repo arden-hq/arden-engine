@@ -24,7 +24,12 @@ import type { AgentMode } from "../sessions/agent-mode.js"
 import type { CliTools } from "../cli-tools/service.js"
 import type { SkillCatalog } from "../skills/service.js"
 import type { Wiki } from "../wiki/service.js"
-import { assembleMemoryContext, MEMORY_READS, memoryReaderOf } from "./memory-context.js"
+import {
+  assembleMemoryContext,
+  MEMORY_READS,
+  memoryReaderOf,
+  spacePageSentWhole
+} from "./memory-context.js"
 import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
 import { spaceAsksContext } from "./space-asks.js"
@@ -390,7 +395,10 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
               ? {
                   recall: {
                     query: input.query,
-                    ...(space?.page === undefined ? {} : { excludePageIds: [space.page.pageId] })
+                    ...(space?.page !== undefined &&
+                    spacePageSentWhole({ view: space.view, page: space.page })
+                      ? { excludePageIds: [space.page.pageId] }
+                      : {})
                   }
                 }
               : {})

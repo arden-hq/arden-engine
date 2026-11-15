@@ -126,6 +126,10 @@ export const assembleMemoryContext = ({
 
 const none: RenderedMemory = { text: undefined, sources: [] }
 
+/** Whether the Space's own page reaches the run whole, so recall has nothing to add from it. */
+export const spacePageSentWhole = (space: SpaceMemoryInput): boolean =>
+  space.page !== undefined && renderSpace(space).sources[0]?.outcome === "whole"
+
 const renderSpace = (
   space: SpaceMemoryInput
 ): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
