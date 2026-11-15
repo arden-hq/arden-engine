@@ -1,6 +1,6 @@
 import type { RunMemoryContext, RunMemoryReader, RunMemorySource } from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
-import { STANDING_FACTS_PAGES } from "../memory/core-memory.js"
+import { STANDING_FACTS_PAGES, STANDING_PAGE_LIMIT_CHARS } from "../memory/core-memory.js"
 import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
@@ -29,13 +29,17 @@ export const MEMORY_READS: Readonly<
   worker: { space: false, recall: false }
 }
 
+const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3
+const STANDING_PAGE_HEADING_BYTES = 1_000
+
 /**
  * Every allowance in a run's Memory block, in UTF-8 bytes. Each source renders itself into its
  * own allowance with its own notices and takes no room from another, so the block is at most
  * `MEMORY_BLOCK_MAX_BYTES`.
  */
 export const MEMORY_BUDGET = {
-  standingPage: 28_000,
+  standingPage:
+    STANDING_PAGE_LIMIT_CHARS * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
   /** The standing-facts note and section heading. */
   standingFrame: 1_000,
   index: 10_000,
