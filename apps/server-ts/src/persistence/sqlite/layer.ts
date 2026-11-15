@@ -9,7 +9,6 @@ import { SpaceStore } from "../spaces/store.js"
 import { WorkStore } from "../work/store.js"
 import { TaskProposalStore } from "../proposals/store.js"
 import { FocusChoiceStore } from "../focus-choices/store.js"
-import { InstructionVersionStore } from "../instructions/store.js"
 import { CommunicationStore } from "../continuity/store.js"
 import { ChatWriteStore } from "../chat/store.js"
 import { TodoStore } from "../todos/store.js"
@@ -44,7 +43,6 @@ import { makeCapabilityOfferStore } from "./capability-offers.js"
 import { CapabilityOfferStore } from "../capability-offers/store.js"
 import { ConnectionItemStore } from "../connections/store.js"
 import { makeFocusChoiceStore } from "./focus-choices.js"
-import { makeInstructionVersionStore } from "./instruction-versions.js"
 import { makeCommunicationStore } from "./continuity.js"
 import { makeRunQueries } from "./runs.js"
 import { makeSessionQueries } from "./session-queries.js"
@@ -452,7 +450,6 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(ConnectionItemStore, makeConnectionItemStore(deps)),
     Context.make(CapabilityOfferStore, makeCapabilityOfferStore(deps)),
     Context.make(FocusChoiceStore, makeFocusChoiceStore(deps)),
-    Context.make(InstructionVersionStore, makeInstructionVersionStore(deps)),
     Context.make(CommunicationStore, makeCommunicationStore(deps)),
     Context.make(SessionQueries, makeSessionQueries(deps)),
     Context.make(SessionStore, makeSessionStore(deps)),
