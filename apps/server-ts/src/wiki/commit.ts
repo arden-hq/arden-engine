@@ -545,6 +545,16 @@ const occupiedAfter = (
   return paths
 }
 
+/**
+ * A folder's README and the page at the folder's own path (`x/README.md` and `x.md`) may stand
+ * together: a Space keeps its page at its path while its folder gets a README
+ * (`wiki/directories.ts`), and Memory holds such pairs.
+ */
+const readmeBesideItsPage = (one: string, other: string): boolean => {
+  const [readme, page] = isReadme(one) ? [one, other] : [other, one]
+  return isReadme(readme) && `${posix.dirname(readme)}.md`.toLowerCase() === page.toLowerCase()
+}
+
 const requireNameFree = Effect.fn("Wiki.requireNameFree")(function* (
   { occupied }: CommitView,
   write: ResolvedWrite
@@ -555,6 +565,7 @@ const requireNameFree = Effect.fn("Wiki.requireNameFree")(function* (
   const wanted = namesTakenAt([path])
   for (const [resourceId, other] of yield* occupied) {
     if (resourceId === write.resourceId || !takesName(wanted, other)) continue
+    if (readmeBesideItsPage(path, other)) continue
     return yield* ruleError(
       "names",
       `${path} would take a path or link name that ${other} holds. Nothing was saved. Choose another path.`

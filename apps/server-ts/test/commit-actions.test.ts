@@ -261,22 +261,23 @@ describe("a path or link name taken, at the commit point", () => {
           )
         const seeds = yield* repository.findByPath("topics/seeds.md")
         if (seeds === null) throw new Error("topics/seeds.md is missing")
+        const other = "topics/Seeds.md"
         const readme = "topics/seeds/README.md"
+        const folderReadme = "projects/garden/README.md"
         return {
           "owner create": yield* place(ownerInApp("test"), [
-            createPage(`id:${readme}`, readme, content(readme, "Folder."))
+            createPage(`id:${other}`, other, content(other, "Seeds."))
           ]),
           "agent create": yield* place(AGENT, [
-            createPage(`id:${readme}`, readme, content(readme, "Folder."))
+            createPage(`id:${other}`, other, content(other, "Seeds."))
           ]),
-          "agent move": yield* place(AGENT, [movePage(seeds, "topics.md")]),
+          "agent move": yield* place(AGENT, [movePage(seeds, "projects/Garden.md")]),
           "two creates on one name": yield* place(ownerInApp("test"), [
             createPage("id:topics/beds.md", "topics/beds.md", content("topics/beds.md", "Beds.")),
-            createPage(
-              "id:topics/beds/README.md",
-              "topics/beds/README.md",
-              content("topics/beds/README.md", "Folder.")
-            )
+            createPage("id:topics/Beds.md", "topics/Beds.md", content("topics/Beds.md", "Beds."))
+          ]),
+          "a folder's README beside the page at its folder's path": yield* place(AGENT, [
+            createPage(`id:${folderReadme}`, folderReadme, content(folderReadme, "Folder."))
           ]),
           "a move onto its own other name": yield* place(AGENT, [movePage(seeds, readme)])
         }
@@ -287,6 +288,7 @@ describe("a path or link name taken, at the commit point", () => {
       "agent create": "names",
       "agent move": "names",
       "two creates on one name": "names",
+      "a folder's README beside the page at its folder's path": "saved",
       "a move onto its own other name": "saved"
     })
   })
