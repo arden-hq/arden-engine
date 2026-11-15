@@ -263,12 +263,14 @@ const run = (
   hoursAgo: number,
   metadata: object,
   status = "completed"
-) =>
-  `INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at, ended_at, metadata_json,
+) => {
+  const updatedAt = at(hoursAgo)
+  return `INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at, ended_at, metadata_json,
      assistant_message_id, error_message)
-   VALUES ('${id}', '${session}', '${status}', '${at(hoursAgo + 1)}', '${at(hoursAgo)}',
-     ${status === "running" ? "NULL" : `'${at(hoursAgo)}'`}, '${JSON.stringify({ turn_id: `t-${id}`, ...metadata })}',
+   VALUES ('${id}', '${session}', '${status}', '${at(hoursAgo + 1)}', '${updatedAt}',
+     ${status === "running" ? "NULL" : `'${updatedAt}'`}, '${JSON.stringify({ turn_id: `t-${id}`, ...metadata })}',
      'am-${id}', ${status === "failed" ? "'It broke.'" : "NULL"})`
+}
 
 const chatContext = (session: string, task?: { item_id: string; generation: number }) => ({
   run_context: { origin: { kind: "chat", session_id: session, turn_id: "t" }, task: task ?? null }
