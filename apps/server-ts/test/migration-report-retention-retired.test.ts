@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
-import { reportRetentionRetired } from "../src/persistence/migrations/0166_report_retention_retired.js"
+import { reportRetentionRetired } from "../src/persistence/migrations/0167_report_retention_retired.js"
 import { migrations } from "../src/persistence/migrations/index.js"
 import { pendingMigrationSteps } from "../src/persistence/migrations/runner.js"
 

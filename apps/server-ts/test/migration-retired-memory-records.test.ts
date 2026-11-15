@@ -3,7 +3,7 @@ import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
 import { Schema } from "effect"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
-import { retiredMemoryRecords } from "../src/persistence/migrations/0167_retired_memory_records.js"
+import { retiredMemoryRecords } from "../src/persistence/migrations/0166_retired_memory_records.js"
 import { migrations } from "../src/persistence/migrations/index.js"
 import { SpaceReviewInputSchema } from "../src/persistence/automations/space-review.js"
 
@@ -125,7 +125,7 @@ const reviewInput = (bases: ReadonlyArray<string>) => ({
   prompt: "Made-up prompt"
 })
 
-it("migration 0167 rewrites stored Memory records and the review inputs a server path reads", () => {
+it("migration 0166 rewrites stored Memory records and the review inputs a server path reads", () => {
   const database = migrated()
   const sidecar = database.prepare(`INSERT INTO run_sidecars
     (run_id, session_id, context_manifest_json, source_refs_json, evidence_json, updated_at)
