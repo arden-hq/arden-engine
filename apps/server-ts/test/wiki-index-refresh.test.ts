@@ -127,26 +127,25 @@ it("follows Memory from the poll: once per new head, and again after a failed re
   const indexed = () => Object.fromEntries(stored)
   const versions = (current: Snapshot) =>
     Object.fromEntries(current.pages.map((page) => [page.page.pageId, page.resource.versionId]))
-  const settle = Effect.sleep("30 millis")
 
   const result = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const index = yield* WikiEmbeddingIndex
-        yield* settle
+        yield* index.drained
         const atStart = { indexed: indexed(), refreshes }
         yield* index.schedule(START)
-        yield* settle
+        yield* index.drained
         const sameHead = refreshes
         yield* index.schedule(MOVED)
-        yield* settle
+        yield* index.drained
         const moved = indexed()
         failNext = true
         yield* index.schedule(AGAIN)
-        yield* settle
+        yield* index.drained
         const failed = indexed()
         yield* index.schedule(AGAIN)
-        yield* settle
+        yield* index.drained
         return { atStart, sameHead, moved, failed, again: indexed() }
       }).pipe(Effect.provide(layer))
     )

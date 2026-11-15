@@ -1,5 +1,16 @@
 import type { EmbeddingIndexStatus } from "@arden-hq/protocol/embeddings"
-import { Clock, Context, DateTime, Effect, Layer, Queue, Ref, Schema, Semaphore } from "effect"
+import {
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  Latch,
+  Layer,
+  Queue,
+  Ref,
+  Schema,
+  Semaphore
+} from "effect"
 
 import {
   WikiEmbeddingStore,
@@ -53,6 +64,8 @@ export class WikiEmbeddingIndex extends Context.Service<
     /** Queue a refresh when the snapshot's head differs from the one last queued. The Memory
      *  poll calls it; a search never does. */
     readonly schedule: (snapshot: Snapshot) => Effect.Effect<void>
+    /** Waits until no refresh is queued or running. */
+    readonly drained: Effect.Effect<void>
     readonly status: () => Effect.Effect<EmbeddingIndexStatus, WikiEmbeddingIndexError>
     readonly control: (
       control: EmbeddingControl
@@ -137,6 +150,11 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
   const wiki = yield* Wiki
   const lifecycle = yield* ServerLifecycle
   const queue = yield* Effect.acquireRelease(Queue.sliding<Snapshot>(1), Queue.shutdown)
+  const idle = Latch.makeUnsafe(false)
+  let refreshing = false
+  const openIfIdle = (): void => {
+    if (!refreshing && Queue.sizeUnsafe(queue) === 0) idle.openUnsafe()
+  }
   const lastError = yield* Ref.make<string | undefined>(undefined)
   const sample = yield* Ref.make<RunSample | undefined>(undefined)
   const loadingModel = yield* Ref.make(false)
@@ -358,8 +376,12 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
   const queuedHead = yield* Ref.make<{ readonly head: string | null } | undefined>(undefined)
   const queueRefresh = (snapshot: Snapshot): Effect.Effect<void> =>
     Ref.set(queuedHead, { head: snapshot.head }).pipe(
-      Effect.andThen(Queue.offer(queue, snapshot)),
-      Effect.asVoid
+      Effect.andThen(
+        Effect.sync(() => {
+          idle.closeUnsafe()
+          Queue.offerUnsafe(queue, snapshot)
+        })
+      )
     )
   const schedule = (snapshot: Snapshot): Effect.Effect<void> =>
     Ref.get(queuedHead).pipe(
@@ -488,6 +510,11 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
   yield* lifecycle.background(
     Effect.forever(
       Queue.take(queue).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            refreshing = true
+          })
+        ),
         Effect.flatMap((snapshot) =>
           step(snapshot).pipe(
             Effect.tap(() => Ref.set(lastError, undefined)),
@@ -496,6 +523,12 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
                 Effect.andThen(Ref.set(queuedHead, undefined)),
                 Effect.andThen(Effect.logWarning("Wiki embedding refresh failed", cause))
               )
+            ),
+            Effect.andThen(
+              Effect.sync(() => {
+                refreshing = false
+                openIfIdle()
+              })
             )
           )
         )
@@ -506,12 +539,14 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
     wiki.snapshot().pipe(
       Effect.flatMap(queueRefresh),
       Effect.catchCause((cause) =>
-        Effect.logWarning("Initial Wiki embedding refresh failed", cause)
+        Effect.logWarning("Initial Wiki embedding refresh failed", cause).pipe(
+          Effect.andThen(Effect.sync(openIfIdle))
+        )
       )
     )
   )
 
-  return WikiEmbeddingIndex.of({ schedule, status, control, search })
+  return WikiEmbeddingIndex.of({ schedule, drained: idle.await, status, control, search })
 })
 
 export const wikiEmbeddingIndexLayer: Layer.Layer<
