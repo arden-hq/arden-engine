@@ -35,7 +35,8 @@ export const fitImageWithSips = async (input: {
     | { readonly kind: "file"; readonly file: string }
     | { readonly kind: "bytes"; readonly bytes: Uint8Array }
   readonly format: SipsImageFormat
-  readonly limits: Pick<ImageInputLimits, "patchSize" | "fitSide" | "fitPatches">
+  /** Where absent, the image is only converted, never resized. */
+  readonly limits: Pick<ImageInputLimits, "patchSize" | "fitSide" | "fitPatches"> | undefined
   readonly signal?: AbortSignal | undefined
 }): Promise<SipsFittedImage | undefined> => {
   if (process.platform !== "darwin") return undefined
@@ -50,11 +51,15 @@ export const fitImageWithSips = async (input: {
     if (input.source.kind === "bytes") await writeFile(file, input.source.bytes)
     const source = await sourceSize(file, input.signal)
     if (source === undefined) return undefined
-    const size = fitDimensions(
-      source,
-      { maxSide: input.limits.fitSide, maxPatches: input.limits.fitPatches },
-      input.limits.patchSize
-    )
+    const limits = input.limits
+    const size =
+      limits === undefined
+        ? source
+        : fitDimensions(
+            source,
+            { maxSide: limits.fitSide, maxPatches: limits.fitPatches },
+            limits.patchSize
+          )
     await run(
       "sips",
       [

@@ -517,20 +517,33 @@ describe("Chat Completions request body", () => {
     )
   })
 
-  it("refuses an image on a route without image input, before any request", () => {
-    const { provider: cc, transport } = provider([])
+  it("tells the host a route takes images, with no limits it does not state", async () => {
+    const vision = await provider([], { compat: { imageInput: true } }).provider.capabilities?.(
+      GEMMA
+    )
+    const text = await provider([]).provider.capabilities?.(GEMMA)
+    expect([vision?.imageInput, text?.imageInput]).toEqual([{ limits: undefined }, undefined])
+  })
+
+  it("tells a model without image input that an image was left out, instead of failing every request", async () => {
+    const { provider: cc, transport } = provider([answered("I cannot see it.")])
     const image: ChatMessage = {
       role: "user",
-      content: [{ type: "image", media_type: "image/png", data: "iVBOR" }]
+      content: [
+        { type: "text", text: "What is this?" },
+        { type: "image", media_type: "image/png", data: "iVBOR" }
+      ]
     }
-    expect(() => cc.stream(request({ messages: [image] }))).toThrow(
-      expect.objectContaining({
-        name: "ChatCompletionsProviderError",
-        code: "request_invalid",
-        message: "llama.cpp route does not accept image input"
-      })
-    )
-    expect(transport.requests).toEqual([])
+    await collect(cc.stream(request({ messages: [image] })))
+    expect(sentMessages(transport.requests[0]?.body)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          { type: "text", text: "(image omitted: this model does not take image input)" }
+        ]
+      }
+    ])
   })
 })
 

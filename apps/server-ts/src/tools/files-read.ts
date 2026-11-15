@@ -345,15 +345,15 @@ export const fileReadTools = ({
           throw toolRefusal(binaryRefusal(name, kind.label), "Not a text file")
         }
         if (kind.kind === "image") {
-          const limits = ctx.run.imageInput
-          if (limits === undefined) {
+          const imageInput = ctx.run.imageInput
+          if (imageInput === undefined) {
             throw toolRefusal(imageRefusal(name, kind.format), "Images not supported")
           }
           const image = await imageForModel({
             file: target,
             bytes,
             format: kind.format,
-            limits,
+            limits: imageInput.limits,
             signal: ctx.signal
           })
           if (image === undefined) {

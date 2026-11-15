@@ -58,9 +58,11 @@ describe("modelsFor a chat-completions provider", () => {
     expect(Object.keys(route)).toEqual(["provider", "modelHost"])
     const provider = route.provider
     if (provider === undefined) throw new Error("no provider")
-    // llama.cpp grammar-constrains json_schema output, so helper jobs get native structured output.
+    // llama.cpp grammar-constrains json_schema output, so helper jobs get native structured
+    // output; its projector takes images and states no limits the host could fit them to.
     expect(await resolveModelCapabilities({ provider, model: GEMMA })).toMatchObject({
-      structuredOutput: "native"
+      structuredOutput: "native",
+      imageInput: { limits: undefined }
     })
   })
 

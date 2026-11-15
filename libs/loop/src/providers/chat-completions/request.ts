@@ -382,6 +382,8 @@ const textContent = (message: ChatMessage, label: string): string => {
   )
 }
 
+const IMAGE_OMITTED = "(image omitted: this model does not take image input)"
+
 const userContent = (
   content: string | null | undefined | ReadonlyArray<unknown>,
   compat: ChatCompletionsCompat,
@@ -395,8 +397,11 @@ const userContent = (
     const context = contextBlockText(block)
     if (context !== undefined) return { type: "text", text: context }
     if (isRecord(block) && block.type === "image") {
-      if (!compat.imageInput)
-        throw new ChatCompletionsProviderError(`${label} route does not accept image input`)
+      // A history is not tied to one model: a screenshot, an attachment or a
+      // chat moved over from a vision model reaches a text-only route too.
+      // Failing would fail every later request of the chat, so the model is
+      // told the image was left out (pi-ai `transcript-transform.ts` does the same).
+      if (!compat.imageInput) return { type: "text", text: IMAGE_OMITTED }
       if (
         (block.media_type === "image/png" || block.media_type === "image/jpeg") &&
         typeof block.data === "string" &&

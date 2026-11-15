@@ -4,7 +4,7 @@ import type {
   AgentStreamEvent,
   ChatMessage,
   HeldToolCall,
-  ImageInputLimits,
+  ImageInput,
   Interaction,
   JsonObject,
   ToolResult
@@ -250,5 +250,5 @@ export interface ServerToolRun {
     readonly admit: ChatRunnerInput["admitModelRequest"]
     readonly record: ChatRunnerInput["recordModelUsage"]
   }
-  readonly imageInput?: ImageInputLimits
+  readonly imageInput?: ImageInput
 }

@@ -13,7 +13,7 @@ import type {
   AgentOptions,
   AgentOutputOptions,
   ChatMessage,
-  ImageInputLimits,
+  ImageInput,
   MessageIdMinter,
   ModelRequest,
   ModelRequestMiddleware,
@@ -97,7 +97,7 @@ export interface LoopChatRunnerOptions {
         readonly emitToolOutput: ChatRunnerInput["tools"]["emitToolOutput"]
         readonly declareEffectTarget: ChatRunnerInput["tools"]["declareEffectTarget"]
         readonly modelUsage: NonNullable<ServerToolRun["modelUsage"]>
-        readonly imageInput?: ImageInputLimits
+        readonly imageInput?: ImageInput
       }) => Toolset | PromiseLike<Toolset>)
   readonly config?: Omit<
     AgentConfigInput,

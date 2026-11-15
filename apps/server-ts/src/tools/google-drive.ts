@@ -470,7 +470,7 @@ export const makeDriveTools = ({
         const content = text.slice(offset, end)
         const shown = await documentImagesForModel({
           images: read.images.filter((image) => image.start >= offset && image.start < end),
-          limits: ctx.run.imageInput,
+          imageInput: ctx.run.imageInput,
           signal: ctx.signal
         })
         const excerpt = passage(content)

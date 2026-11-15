@@ -96,7 +96,8 @@ export const makeChatCompletionsProvider = (
     structuredOutput: compat.structuredOutput === "json_schema" ? "native" : "none",
     asyncTools: "message",
     steering: "boundary",
-    toolSearch: "client"
+    toolSearch: "client",
+    ...(compat.imageInput ? { imageInput: { limits: undefined } } : {})
   })
   const fetch = options.fetch ?? globalThis.fetch
   const generateId = options.generateId ?? defaultGenerateId

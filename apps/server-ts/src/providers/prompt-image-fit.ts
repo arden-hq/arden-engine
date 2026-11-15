@@ -32,7 +32,9 @@ export const withPromptImageFit = (
   const cache: ImageCache = new Map()
   const reported = new Set<string>()
   const fit = async (request: ModelProviderRequest): Promise<ModelProviderRequest> => {
+    // A route without stated limits takes an image at its stored size.
     const limits = (await resolveModelCapabilities({ provider, model: request.model })).imageInput
+      ?.limits
     if (limits === undefined) return request
     const result = await fitPromptImages({
       messages: request.messages,

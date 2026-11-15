@@ -200,8 +200,21 @@ export interface ModelCapabilities {
    * conversation; `none` (the default) — the loop declares every tool.
    */
   readonly toolSearch?: "client" | "none"
-  /** The route's image input limits; absent, the host sends images as stored. */
-  readonly imageInput?: ImageInputLimits
+  /** Present when the route takes images; absent, the host sends it none. */
+  readonly imageInput?: ImageInput
+}
+
+/** A route that takes images. */
+export interface ImageInput {
+  /**
+   * How the route measures and bounds an image, where it states that
+   * (OpenAI's patch limits); the host shrinks each image to them. `undefined`
+   * — the route states none (llama.cpp's projector resizes an image itself;
+   * OpenRouter's limits differ by upstream), so the host sends each image at
+   * its stored size, converted only to PNG or JPEG, rather than to limits it
+   * would have to make up.
+   */
+  readonly limits: ImageInputLimits | undefined
 }
 
 /** How a route measures and bounds an input image, in `patchSize`-pixel square patches. */

@@ -42,8 +42,10 @@ export interface ChatCompletionsCompat {
   readonly structuredOutput: "json_schema" | "none"
   /**
    * The route accepts `image_url` parts (a vision model, or llama.cpp with a
-   * multimodal projector). Without it an image block is an error, never
-   * dropped: the model would answer about an image it never saw.
+   * multimodal projector), and reports `imageInput` in its capabilities so
+   * the host offers images. Without it an image block is sent as a note that
+   * says the image was left out, so the model never answers about an image it
+   * did not see, and a chat that holds an image still works on this route.
    */
   readonly imageInput: boolean
   /**

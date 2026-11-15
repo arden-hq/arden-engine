@@ -1,4 +1,4 @@
-import type { ImageInputLimits, ModelContentBlock } from "@arden-hq/loop"
+import type { ImageInput, ModelContentBlock } from "@arden-hq/loop"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -84,18 +84,18 @@ const noteFor = (
 
 export const documentImagesForModel = async (input: {
   readonly images: ReadonlyArray<DocumentImage>
-  readonly limits: ImageInputLimits | undefined
+  readonly imageInput: ImageInput | undefined
   readonly signal: AbortSignal
 }): Promise<DocumentImages> => {
   const pictures = input.images.filter((image) => image.contentUri !== undefined)
   const drawings = input.images.filter((image) => image.contentUri === undefined)
   if (pictures.length === 0) return { content: [], note: noteFor([], drawings) }
-  if (input.limits === undefined)
+  if (input.imageInput === undefined)
     return {
       content: [],
       note: "The model on this chat cannot receive images, so the images marked above are not attached."
     }
-  const limits = input.limits
+  const limits = input.imageInput.limits
   const directory = await mkdtemp(path.join(tmpdir(), "arden-doc-image-"))
   try {
     const outcomes = await Promise.all(

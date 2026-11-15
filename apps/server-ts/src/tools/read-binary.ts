@@ -151,21 +151,30 @@ export const imageRefusal = (name: string, format: ImageFormat): string =>
 export const imageConversionRefusal = (name: string, format: ImageFormat): string =>
   `${name} is a ${FORMAT_NAMES[format]} image that could not be converted for the model here.`
 
+/**
+ * An image as the route takes it: shrunk to the route's `limits`, or, where
+ * the route states none (`ImageInput.limits` undefined), at its stored size,
+ * only converted to PNG or JPEG.
+ */
 export const imageForModel = async (input: {
   readonly file: string
   readonly bytes: Uint8Array
   readonly format: ImageFormat
-  readonly limits: ImageInputLimits
+  readonly limits: ImageInputLimits | undefined
   readonly signal: AbortSignal
 }): Promise<ModelImage | undefined> => {
+  const limits = input.limits
   const fits = (size: ImageSize): boolean =>
-    fitsLimits(
-      size,
-      { maxSide: input.limits.fitSide, maxPatches: input.limits.fitPatches },
-      input.limits.patchSize
-    )
+    limits === undefined ||
+    fitsLimits(size, { maxSide: limits.fitSide, maxPatches: limits.fitPatches }, limits.patchSize)
   const direct = (): ModelImage | undefined => {
-    if (input.format === "png") return fitPng({ bytes: input.bytes, limits: input.limits })
+    if (input.format === "png") {
+      if (limits !== undefined) return fitPng({ bytes: input.bytes, limits })
+      const size = imageSize(input.bytes, "image/png")
+      return size === undefined
+        ? undefined
+        : { mediaType: "image/png", data: Buffer.from(input.bytes), source: size, size }
+    }
     if (input.format !== "jpeg") return undefined
     const size = imageSize(input.bytes, "image/jpeg")
     return size !== undefined && fits(size)
@@ -184,7 +193,7 @@ export const imageForModel = async (input: {
       return undefined
     }))
   return image !== undefined &&
-    patchCount(image.size, input.limits.patchSize) <= input.limits.maxPatches
+    (limits === undefined || patchCount(image.size, limits.patchSize) <= limits.maxPatches)
     ? image
     : undefined
 }

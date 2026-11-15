@@ -353,7 +353,7 @@ export const makeOpenAiCodexRuntime = async (
           structuredOutput: "native",
           // Codex uses client-executed tool_search on this backend (codex-rs tools/src/tool_search.rs).
           toolSearch: "client",
-          imageInput: OPENAI_IMAGE_INPUT
+          imageInput: { limits: OPENAI_IMAGE_INPUT }
         }),
         omitMaxOutputTokens: true,
         cacheScopeHeader: "session-id"

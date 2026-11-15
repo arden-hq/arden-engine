@@ -137,6 +137,7 @@ export type {
   CompletionResponse,
   FinishReason,
   ModelCapabilities,
+  ImageInput,
   ImageInputLimits,
   ModelProvider,
   ModelProviderRequest,
