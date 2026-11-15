@@ -35,7 +35,8 @@ const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 /**
  * The one renderer of a generated page list, in at most `maxBytes` with its notices, and the
- * record of what it holds. A list with nothing to list renders nothing.
+ * record of what it holds. The Memory index is sent with its note when it has nothing to list,
+ * which tells the run that Memory has no other page; a Space list with nothing in it is not sent.
  */
 export const renderIndex = (
   pages: ReadonlyArray<RunPage>,
@@ -48,12 +49,14 @@ export const renderIndex = (
           root: "",
           pages,
           note: MEMORY_INDEX_NOTE,
-          frame: (body: string) => renderPromptSection("Memory index", body)
+          frame: (body: string) => renderPromptSection("Memory index", body),
+          sentEmpty: true
         }
       : {
           ...spacePageList(pages, list.space),
           note: SPACE_LIST_NOTE,
-          frame: (body: string) => renderPromptSection("Space pages", body)
+          frame: (body: string) => renderPromptSection("Space pages", body),
+          sentEmpty: false
         }
   const body = (lines: string, notices: ReadonlyArray<string>) =>
     [shape.note, ...(lines === "" ? [] : [lines]), ...notices].join(SEPARATOR)
@@ -66,7 +69,12 @@ export const renderIndex = (
       isStandingFactsPage({ path: record.resource.path, pageId: record.page.pageId }) ||
       (list.kind === "memory" && list.shownElsewhere.has(record.resource.path))
   })
-  if (index.lines.length === 0 && index.folded.length === 0 && index.unlisted === 0)
+  if (
+    !shape.sentEmpty &&
+    index.lines.length === 0 &&
+    index.folded.length === 0 &&
+    index.unlisted === 0
+  )
     return { text: undefined, sources: [], shown: new Set() }
   const notices = [
     ...(index.folded.length === 0 ? [] : [FOLD_NOTICE]),

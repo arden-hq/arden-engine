@@ -683,6 +683,23 @@ describe("each source in its own allowance", () => {
     expect(recordedBlocks(record, [pasted, ...notes])).toEqual(blocksInPrompt(composed.sections))
   })
 
+  it("sends and records the Memory index with nothing to list, and no Space list with nothing in it", async () => {
+    const composed = await compose({ actor: person, spaceId: "space-1", pages: [core] })
+    expect(sectionBytes(composed, "Memory index")).toBeGreaterThan(0)
+    expect(composed.sections.some((section) => section.key === "Space pages")).toBe(false)
+    expect(composed.writes[0]?.sources.filter((source) => source.kind === "index")).toEqual([
+      {
+        kind: "index",
+        root: "",
+        listed: 0,
+        folded: [],
+        bytes: sectionBytes(composed, "Memory index"),
+        outcome: "whole",
+        reason: null
+      }
+    ])
+  })
+
   it("folds the index to fit its share, with a notice, and counts every page", async () => {
     const pages = [core, ...many("daily", 250, 40), ...many("notes", 20, 40)]
     const composed = await compose({ actor: person, pages })
