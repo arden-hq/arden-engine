@@ -29,7 +29,7 @@ export type WikiCommitOrigin =
   | { readonly kind: "forget"; readonly sessionId: string }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
-  /** Tidy. History stores it as its Automation; `automationWriter` reads it back as upkeep. */
+  /** Tidy, which the system handler registry names when a run's identity is made. */
   | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
   | {
       readonly kind: "capture"
@@ -53,21 +53,13 @@ export const ownerInApp = (
   via: `desktop${string}` = "desktop"
 ): WikiCommitIdentity => ({ actor: "user:desktop", origin: { kind: "user", via }, reason })
 
-/** Tidy's Automation. Its runs commit as upkeep. */
-export const TIDY_AUTOMATION_ID = "builtin-wiki-maintenance"
-const LEGACY_TIDY_ORIGIN = "wiki.maintenance"
-
-/** The writer an Automation's run commits as: Tidy is upkeep, every other Automation itself. */
-export const automationWriter = (
-  automationId: string,
-  chainDepth?: number
-): Extract<WikiCommitOrigin, { readonly kind: "automation" | "upkeep" }> => ({
-  kind: automationId === TIDY_AUTOMATION_ID ? "upkeep" : "automation",
-  automationId,
-  ...(chainDepth === undefined ? {} : { chainDepth })
-})
-
 const AUTOMATION_PREFIX = "wiki.automation."
+const UPKEEP_PREFIX = "wiki.upkeep."
+/** How history spelled Tidy's writes before upkeep was stored as itself. */
+const RETIRED_UPKEEP_ORIGINS: ReadonlyMap<string, string> = new Map([
+  ["wiki.maintenance", "builtin-wiki-maintenance"],
+  ["wiki.automation.builtin-wiki-maintenance", "builtin-wiki-maintenance"]
+])
 const CHAIN_MARK = "~"
 const AGENT_ORIGIN = "wiki.agent"
 const CAPTURE_ORIGIN = "memory.capture"
@@ -91,7 +83,7 @@ const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
       return withChat(AGENT_ORIGIN, origin.sessionId)
     case "automation":
     case "upkeep":
-      return `${AUTOMATION_PREFIX}${origin.automationId}${
+      return `${origin.kind === "upkeep" ? UPKEEP_PREFIX : AUTOMATION_PREFIX}${origin.automationId}${
         origin.chainDepth === undefined || origin.chainDepth === 0
           ? ""
           : `${CHAIN_MARK}${origin.chainDepth}`
@@ -120,17 +112,19 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   if (forgetChat !== null && forgetChat !== undefined)
     return { kind: "forget", sessionId: forgetChat }
   if (origin === "space.page") return { kind: "space_page" }
-  if (origin === LEGACY_TIDY_ORIGIN) return automationWriter(TIDY_AUTOMATION_ID)
-  const named = origin.startsWith(AUTOMATION_PREFIX)
-    ? origin.slice(AUTOMATION_PREFIX.length).trim()
-    : ""
+  const prefix = [UPKEEP_PREFIX, AUTOMATION_PREFIX].find((each) => origin.startsWith(each))
+  const named = prefix === undefined ? "" : origin.slice(prefix.length).trim()
   const chained = /^(.+)~(\d+)$/u.exec(named)
   const automationId = chained?.[1] ?? named
-  if (automationId === "") return { kind: "system", name: origin }
-  return automationWriter(
-    automationId,
-    chained?.[2] === undefined ? undefined : Number(chained[2])
+  const retired = RETIRED_UPKEEP_ORIGINS.get(
+    automationId === "" ? origin : `${prefix ?? ""}${automationId}`
   )
+  if (automationId === "" && retired === undefined) return { kind: "system", name: origin }
+  return {
+    kind: prefix === UPKEEP_PREFIX || retired !== undefined ? "upkeep" : "automation",
+    automationId: retired ?? automationId,
+    ...(chained?.[2] === undefined ? {} : { chainDepth: Number(chained[2]) })
+  }
 }
 
 export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => {

@@ -14,7 +14,7 @@ import {
   type MemoryCaptureBatchIdentity
 } from "../persistence/memory/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY, type WikiLocationAuthority } from "../wiki/authority.js"
-import { automationWriter, type WikiCommitOrigin } from "../wiki/commit.js"
+import type { WikiCommitOrigin } from "../wiki/commit.js"
 
 export interface WikiRunIdentityContext {
   readonly runId: string
@@ -115,7 +115,15 @@ export const readRunCause = (
 
 const automationOrigin = (cause: RunCause & { readonly automationId: string }) => ({
   actor: `Automation ${cause.automationId}`,
-  origin: automationWriter(cause.automationId, cause.wakeDepth),
+  origin: {
+    kind:
+      systemHandlerForAutomation(AutomationId.make(cause.automationId))?.spec.handler ===
+      "wiki_maintenance"
+        ? ("upkeep" as const)
+        : ("automation" as const),
+    automationId: cause.automationId,
+    chainDepth: cause.wakeDepth
+  },
   capture: false,
   captureBatch: null
 })

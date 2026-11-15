@@ -195,7 +195,7 @@ describe("the upkeep writer", () => {
       }
     ).then((identity) => identity.origin)
 
-  it("is Tidy's run, told apart by its Automation id", async () => {
+  it("is Tidy's run, told apart by the system handler registry", async () => {
     expect([await origin("builtin-wiki-maintenance"), await origin("auto-owner")]).toEqual([
       { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 1 },
       { kind: "automation", automationId: "auto-owner", chainDepth: 1 }
@@ -204,15 +204,19 @@ describe("the upkeep writer", () => {
 })
 
 describe("Tidy's stored writes", () => {
-  it("read back as upkeep, the stored origin and the old one alike", () => {
+  it("read back as upkeep, as stored now and in both retired spellings", () => {
     expect([
+      decodeWikiOrigin("wiki.upkeep.builtin-wiki-maintenance~2"),
       decodeWikiOrigin("wiki.automation.builtin-wiki-maintenance~2"),
+      decodeWikiOrigin("wiki.automation.builtin-wiki-maintenance"),
       decodeWikiOrigin("wiki.maintenance"),
-      decodeWikiOrigin("wiki.automation.auto-owner")
+      decodeWikiOrigin("wiki.automation.auto-owner~1")
     ]).toEqual([
       { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 2 },
+      { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 2 },
       { kind: "upkeep", automationId: "builtin-wiki-maintenance" },
-      { kind: "automation", automationId: "auto-owner" }
+      { kind: "upkeep", automationId: "builtin-wiki-maintenance" },
+      { kind: "automation", automationId: "auto-owner", chainDepth: 1 }
     ])
   })
 
@@ -225,7 +229,12 @@ describe("Tidy's stored writes", () => {
           const page = "topics/garden.md"
           yield* commitWiki(
             repository,
-            { actor: "test", origin: { kind: "user", via: "desktop" }, reason: "seed", expectedRevision: null },
+            {
+              actor: "test",
+              origin: { kind: "user", via: "desktop" },
+              reason: "seed",
+              expectedRevision: null
+            },
             [createPage(`id:${page}`, page, content(page, "Garden."))]
           )
           const before = yield* repository.get(`id:${page}`)
@@ -255,7 +264,11 @@ describe("Tidy's stored writes", () => {
               commitId: tidied.commit.commitId,
               expectedVersion: after?.versionId ?? "",
               expectedHead: tidied.commit.commitId,
-              commit: { actor: "user:desktop", origin: { kind: "user", via: "desktop" }, reason: "undo" }
+              commit: {
+                actor: "user:desktop",
+                origin: { kind: "user", via: "desktop" },
+                reason: "undo"
+              }
             })
             .pipe(
               Effect.match({
