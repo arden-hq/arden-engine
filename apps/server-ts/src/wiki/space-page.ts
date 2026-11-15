@@ -7,7 +7,7 @@ import { commitWiki, createPage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
-import { bindingOwnsPath, heldByAnother, planSpacePage } from "./space-index.js"
+import { bindingOwnsPath, overlapsAnother, planSpacePage } from "./space-index.js"
 import { spacePageSlug } from "@arden-hq/protocol/views"
 import type { CreateSpaceInput } from "@arden-hq/protocol/spaces"
 import type { MutationOperationIdentity } from "../persistence/tools/mutation-receipt.js"
@@ -117,7 +117,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   let path = `${home}/${base}.md`
   while (
     pageNamesForPath(path).some((name) => usedNames.has(normal(name))) ||
-    heldByAnother(others, "", path)
+    overlapsAnother(others, path)
   ) {
     suffix += 1
     path = `${home}/${base}-${suffix}.md`

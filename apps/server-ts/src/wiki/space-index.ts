@@ -31,18 +31,20 @@ export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
   canonicalWikiPath(binding.page_path) === undefined ||
   spaceOwnsPath(binding.page_path, path)
 
-/** Whether another active Space holds the page, or its pages and the page's folder overlap. */
+/** Whether another active Space's pages and the pages `path` would head overlap. */
+export const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boolean =>
+  others.some(
+    (other) =>
+      bindingOwnsPath(other, path) ||
+      (other.page_path !== null && spaceOwnsPath(path, other.page_path))
+  )
+
+/** Whether another active Space holds the page, or overlaps the pages it would head. */
 export const heldByAnother = (
   others: ReadonlyArray<SpaceBinding>,
   pageId: string,
   pagePath: string
-): boolean =>
-  others.some(
-    (other) =>
-      other.page_id === pageId ||
-      bindingOwnsPath(other, pagePath) ||
-      (other.page_path !== null && spaceOwnsPath(pagePath, other.page_path))
-  )
+): boolean => others.some((other) => other.page_id === pageId) || overlapsAnother(others, pagePath)
 
 const isBoundPage = (
   bindings: ReadonlyArray<SpaceBinding>,

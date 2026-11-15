@@ -80,8 +80,9 @@ export class SpaceStore extends Context.Service<
       instructions: string
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     /**
-     * Binds an active Space to a page in place of any page it had. An archived Space holding the
-     * page lets it go; an active Space holding or overlapping it refuses.
+     * Binds an active Space to a page in place of any page it had, and an archived Space holding
+     * that page lets it go. Only `ensureWikiSpacePage` calls it, after checking that no other
+     * active Space holds or overlaps the page.
      */
     readonly bindPage: (
       spaceId: string,
@@ -92,10 +93,7 @@ export class SpaceStore extends Context.Service<
       spaceId: string,
       mutation?: MutationOperationIdentity
     ) => Effect.Effect<SpaceArchiveResponse | null, SpaceStoreError>
-    /**
-     * Restores an archived Space. It keeps its binding while no active Space holds or overlaps
-     * that page; otherwise the binding is cleared and the Space's page is made again.
-     */
+    /** Restores an archived Space with the binding it had; `ensureWikiSpacePage` checks it. */
     readonly restore: (spaceId: string) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly detail: (spaceId: string) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
     readonly recordLetterSubject: (

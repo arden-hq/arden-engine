@@ -16,20 +16,6 @@
   },
   {
     "type": "dependency",
-    "from": "apps/server-ts/src/persistence/sqlite/spaces.ts",
-    "to": "apps/server-ts/src/wiki/authority.ts",
-    "unresolvedTo": "../../wiki/authority.js",
-    "dependencyTypes": [
-      "local",
-      "import"
-    ],
-    "rule": {
-      "severity": "error",
-      "name": "server-persistence-not-to-domain"
-    }
-  },
-  {
-    "type": "dependency",
     "from": "apps/server-ts/src/persistence/sqlite/tool-approval-resolve.ts",
     "to": "apps/server-ts/src/storage/local-paths.ts",
     "unresolvedTo": "../../storage/local-paths.js",

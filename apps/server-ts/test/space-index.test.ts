@@ -168,27 +168,6 @@ describe("an archived Space releases its pages", () => {
     )
     expect(outcome).toEqual({ before: ["a"], after: [], archived: null })
   })
-
-  it("restored, keeps its page when it is free and lets it go when another Space took it", async () => {
-    const outcome = await withTempDatabase(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const spaces = yield* SpaceStore
-        yield* insertSpace(sql, "a")
-        yield* insertSpace(sql, "b")
-        yield* insertSpace(sql, "c")
-        yield* spaces.bindPage("a", "page-a", "areas/made-up-a.md")
-        yield* spaces.bindPage("c", "page-c", "areas/made-up-c.md")
-        yield* archiveRow(sql, "a")
-        yield* archiveRow(sql, "c")
-        yield* spaces.bindPage("b", "page-b", "areas/made-up-c/inside.md")
-        const kept = yield* spaces.restore("a")
-        const released = yield* spaces.restore("c")
-        return { kept: kept?.page_path ?? null, released: released?.page_path ?? null }
-      })
-    )
-    expect(outcome).toEqual({ kept: "areas/made-up-a.md", released: null })
-  })
 })
 
 const withSpacesAndWiki = <A, E>(
@@ -280,6 +259,31 @@ describe("every active Space has a page", () => {
       })
     )
     expect(outcome).toEqual({ fresh: true, path: "areas/made-up-garden.md", samePage: false })
+  })
+
+  it("a restored Space keeps a free page, and gets a fresh one when another Space overlaps it", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces, sql }) =>
+      Effect.gen(function* () {
+        const kept = yield* spaces.create({ name: "Made-up kept" })
+        const taken = yield* spaces.create({ name: "Made-up taken" })
+        const other = yield* spaces.create({ name: "Made-up other" })
+        const keptPage = (yield* methods.ensureSpacePage({ spaceId: kept.space_id }))?.space
+        const takenPage = (yield* methods.ensureSpacePage({ spaceId: taken.space_id }))?.space
+        yield* archiveRow(sql, kept.space_id)
+        yield* archiveRow(sql, taken.space_id)
+        yield* spaces.bindPage(other.space_id, "inside", "areas/made-up-taken/inside.md")
+        yield* spaces.restore(kept.space_id)
+        yield* spaces.restore(taken.space_id)
+        const keptAgain = yield* methods.ensureSpacePage({ spaceId: kept.space_id })
+        const takenAgain = yield* methods.ensureSpacePage({ spaceId: taken.space_id })
+        return {
+          kept: keptAgain?.space.page_id === keptPage?.page_id && keptAgain?.created === undefined,
+          fresh: takenAgain?.space.page_id !== takenPage?.page_id,
+          path: takenAgain?.space.page_path
+        }
+      })
+    )
+    expect(outcome).toEqual({ kept: true, fresh: true, path: "areas/made-up-taken-2.md" })
   })
 
   it("gives every active Space without a page one, and counts what it did", async () => {

@@ -83,7 +83,7 @@ interface WikiArchiveInput {
   readonly commit?: WikiCommitIdentity
 }
 
-export interface SpacePageCounts {
+interface SpacePageCounts {
   readonly active: number
   readonly kept: number
   readonly rebound: number
