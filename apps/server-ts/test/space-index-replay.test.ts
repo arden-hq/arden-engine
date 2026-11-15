@@ -5,15 +5,38 @@ import { expect, it } from "vitest"
 
 import { SpaceStore, type SpaceBinding } from "../src/persistence/spaces/store.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
+import type { PageRecord } from "../src/wiki/snapshot.js"
 import {
   bindingOwnsPath,
   planSpacePage,
+  spaceOwnsWikiPath,
   spacePageIndex,
   spacePages
 } from "../src/wiki/space-index.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 
 const located = locateReplayCopy()
+
+/**
+ * The pages an archived Space's binding covers and no active Space's does, that the writers'
+ * ownership check still reports as owned.
+ */
+const heldOnlyByArchived = (
+  spaces: SpaceStore["Service"],
+  files: ReadonlyArray<PageRecord>,
+  archived: ReadonlyArray<SpaceBinding>,
+  active: ReadonlyArray<SpaceBinding>
+) =>
+  Effect.forEach(
+    files.filter(
+      (record) =>
+        archived.some((holder) => bindingOwnsPath(holder, record.resource.path)) &&
+        !active.some(
+          (holder) => holder.page_path !== null && bindingOwnsPath(holder, record.resource.path)
+        )
+    ),
+    (record) => spaceOwnsWikiPath(spaces, record.resource.path)
+  ).pipe(Effect.map((owned) => owned.filter(Boolean).length))
 
 it("replays which pages each Space owns, and which Spaces get a page, on the copy", async (context) => {
   if (located.kind === "absent") return context.skip(located.reason)
@@ -52,7 +75,6 @@ it("replays which pages each Space owns, and which Spaces get a page, on the cop
           holders.some((holder) => bindingOwnsPath(holder, record.resource.path))
         ).length
       const archivedBound = archived.filter((space) => space.page_path !== null)
-      const archivedIds = new Set(archived.map((space) => space.space_id))
       const lists = active.flatMap((space) => {
         const page = live.find((record) => record.page.pageId === space.page_id)
         if (page === undefined) return []
@@ -70,9 +92,7 @@ it("replays which pages each Space owns, and which Spaces get a page, on the cop
         },
         archivedBound: archivedBound.length,
         pagesHeldByArchivedBefore: ownedBy(archivedBound),
-        pagesHeldByArchivedNow: ownedBy(
-          bindings.filter((binding) => archivedIds.has(binding.space_id))
-        ),
+        pagesHeldByArchivedNow: yield* heldOnlyByArchived(spaces, files, archivedBound, active),
         listBytes: lists.map((list) => list.bytes).sort((left, right) => left - right),
         listPages: lists.map((list) => list.pages).sort((left, right) => left - right)
       }
