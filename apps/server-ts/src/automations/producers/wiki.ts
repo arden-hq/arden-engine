@@ -33,22 +33,26 @@ export const wikiChangedEvent = (input: {
 const pollMemoryChanges = Effect.fn("Wiki.pollChanges")(function* () {
   const wiki = yield* Wiki
   const index = yield* WikiEmbeddingIndex
-  yield* wiki
-    .checkOutsideEdits()
-    .pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Memory changes made outside Arden were not checked", cause)
-      )
-    )
-  const published = yield* Effect.exit(wiki.publishChanges())
-  yield* wiki.snapshot().pipe(
-    Effect.flatMap(index.schedule),
-    Effect.catchCause((cause) =>
-      Effect.logWarning("The search index was not told about Memory changes", cause)
-    )
+  yield* logAndContinue(
+    wiki.checkOutsideEdits(),
+    "Memory changes made outside Arden were not checked"
   )
-  return yield* published
+  const publishExit = yield* Effect.exit(wiki.publishChanges())
+  yield* logAndContinue(
+    wiki.snapshot().pipe(Effect.flatMap(index.schedule)),
+    "The search index was not told about Memory changes"
+  )
+  return yield* publishExit
 })
+
+const logAndContinue = <A, E, R>(
+  step: Effect.Effect<A, E, R>,
+  failure: string
+): Effect.Effect<void, never, R> =>
+  step.pipe(
+    Effect.asVoid,
+    Effect.catchCause((cause) => Effect.logWarning(failure, cause))
+  )
 
 export const wikiEventProducer: AutomationEventProducer<"wiki.changed", Wiki | WikiEmbeddingIndex> =
   {
