@@ -1,9 +1,10 @@
 import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError } from "@arden-hq/loop"
+import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
+import type { ServerRunContext } from "./run-context.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { lineOriginOutput } from "./wiki-line-origin.js"
@@ -245,6 +246,31 @@ interface WikiOperationDeps {
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
 }
 
+/**
+ * The page a restore names, the version of it the run has seen, and the saved change to bring
+ * back. A merged page has no body to read; its stored version is the one to restore over.
+ */
+const prepareRestore = async (
+  wiki: Wiki["Service"],
+  input: { readonly path: string; readonly at: string },
+  ctx: ToolContext<ServerRunContext>
+) => {
+  const snapshot = await loadSnapshot(wiki, ctx.signal)
+  const record = pageStoredAt(snapshot, input.path)
+  if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
+  const expectedVersion =
+    record.page.lifecycle === "redirect"
+      ? record.resource.versionId
+      : requireObserved(ctx.run, record)
+  const version = await Effect.runPromise(
+    wiki
+      .changeAt({ path: record.resource.path, pageId: record.page.pageId, at: input.at })
+      .pipe(Effect.mapError((error) => changeFailure(error, record.resource.path))),
+    { signal: ctx.signal }
+  )
+  return { head: snapshot.head, record, expectedVersion, version }
+}
+
 const makeWikiOperationTools = ({
   wiki,
   runs,
@@ -393,7 +419,6 @@ const makeWikiOperationTools = ({
       const snapshot = await loadSnapshot(wiki, ctx.signal)
       const record = pageStoredAt(snapshot, input.path)
       if (record === null) throw pageNotFound(snapshot, input.path)
-      ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
       if (input.line !== undefined)
         return lineOriginOutput({ wiki, sessions }, record, input.line, ctx.signal)
       const history = await Effect.runPromise(
@@ -417,6 +442,10 @@ const makeWikiOperationTools = ({
           }
         ]
       })
+      // The listing names the current version, so a restore can follow it. A version the run read
+      // earlier is kept: a change it has not seen still refuses the restore.
+      if (ctx.run.observations.observed(record.page.pageId) === undefined)
+        ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
       return {
         result:
           entries.length === 0
@@ -451,29 +480,43 @@ const makeWikiOperationTools = ({
       destructive: true,
       target: "reported"
     },
-    execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = pageStoredAt(snapshot, input.path)
-      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      // A merged page has no body to read; its stored version is the one to restore over.
-      const expectedVersion =
-        record.page.lifecycle === "redirect"
-          ? record.resource.versionId
-          : requireObserved(ctx.run, record)
-      const version = await Effect.runPromise(
+    approvalPrompt: async (input, ctx) => {
+      const { head, record, expectedVersion, version } = await prepareRestore(wiki, input, ctx)
+      if (expectedVersion !== record.resource.versionId)
+        throw new ToolExecutionError(
+          `${record.resource.path} changed after this run read it. Read it again, then retry.`,
+          { preview: "Page changed", retryable: false }
+        )
+      const content = await Effect.runPromise(
         wiki
-          .changeAt({ path: record.resource.path, pageId: record.page.pageId, at: input.at })
-          .pipe(Effect.mapError((error) => changeFailure(error, record.resource.path))),
+          .contentToRestore({ pageId: record.page.pageId, commitId: version.commitId, head })
+          .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
       )
+      return {
+        preview: `Restore ${record.resource.path}`,
+        presentation: {
+          title: "Bring back this version of the Memory page?",
+          subject: record.resource.path,
+          fields: [],
+          approve_label: "Restore",
+          reject_label: "Refuse"
+        },
+        ...(content === record.page.content
+          ? {}
+          : { diff: boundedDiff(record.resource.path, record.page.content, content) })
+      }
+    },
+    execute: async (input, ctx, effects) => {
+      const { head, record, expectedVersion, version } = await prepareRestore(wiki, input, ctx)
+      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
       const restored = await Effect.runPromise(
         wiki
           .restoreRevision({
             pageId: record.page.pageId,
             commitId: version.commitId,
             expectedVersion,
-            expectedHead: snapshot.head,
+            expectedHead: head,
             authority: identity.authority,
             commit: {
               actor: identity.actor,

@@ -44,6 +44,12 @@ interface WikiRestoreRevisionInput {
   readonly commit: WikiCommitIdentity
 }
 
+interface WikiRestoreContentInput {
+  readonly pageId: string
+  readonly commitId: string
+  readonly head: string
+}
+
 interface WikiRestoreArchivedInput {
   readonly pageId: string
   readonly expectedVersion: string
@@ -54,6 +60,8 @@ interface WikiRestoreArchivedInput {
 export interface WikiRestoreMethods {
   readonly restore: (input: WikiRestoreInput) => Effect.Effect<WikiPage, WikiError>
   readonly restoreRevision: (input: WikiRestoreRevisionInput) => Effect.Effect<WikiPage, WikiError>
+  /** The page text a restore to `commitId` would write, for the owner to review first. */
+  readonly contentToRestore: (input: WikiRestoreContentInput) => Effect.Effect<string, WikiError>
   readonly restoreArchived: (input: WikiRestoreArchivedInput) => Effect.Effect<WikiPage, WikiError>
 }
 
@@ -158,6 +166,42 @@ export const makeWikiRestoreMethods = (
     )
   })
 
+  const contentToRestore = Effect.fn("Wiki.contentToRestore")(function* (
+    input: WikiRestoreContentInput
+  ) {
+    const pageHistory = yield* repository
+      .history({ resourceId: input.pageId, start: input.head, limit: null })
+      .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+    const selected = pageHistory.find((commit) => commit.commitId === input.commitId)
+    if (selected === undefined) {
+      return yield* wikiError(
+        "restore",
+        "not_found",
+        `Revision is not a reachable page change: ${input.commitId}`,
+        { pageId: input.pageId }
+      )
+    }
+    const changes = selected.changes.filter(
+      (change) => (change.after ?? change.before)?.resourceId === input.pageId
+    )
+    const source = changes.length === 1 ? changes[0]?.after : undefined
+    if (source === undefined || source === null || source.state !== "active") {
+      return yield* wikiError(
+        "restore",
+        "invalid",
+        "Selected revision does not contain one active version of this Wiki page",
+        { pageId: input.pageId }
+      )
+    }
+    const historical = yield* readRecord(repository, "restore", source, "invalid")
+    if (historical.page.lifecycle !== "active") {
+      return yield* wikiError("restore", "invalid", "Selected revision is not an active Wiki page", {
+        pageId: input.pageId
+      })
+    }
+    return yield* restoredContent(historical, input.pageId)
+  })
+
   const restoreRevision = Effect.fn("Wiki.restoreRevision")(function* (
     input: WikiRestoreRevisionInput
   ) {
@@ -212,44 +256,11 @@ export const makeWikiRestoreMethods = (
             )
           }
         }
-        const pageHistory = yield* repository
-          .history({
-            resourceId: input.pageId,
-            start: input.expectedHead,
-            limit: null
-          })
-          .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-        const selected = pageHistory.find((commit) => commit.commitId === input.commitId)
-        if (selected === undefined) {
-          return yield* wikiError(
-            "restore",
-            "not_found",
-            `Revision is not a reachable page change: ${input.commitId}`,
-            { pageId: input.pageId }
-          )
-        }
-        const changes = selected.changes.filter(
-          (change) => (change.after ?? change.before)?.resourceId === input.pageId
-        )
-        const source = changes.length === 1 ? changes[0]?.after : undefined
-        if (source === undefined || source === null || source.state !== "active") {
-          return yield* wikiError(
-            "restore",
-            "invalid",
-            "Selected revision does not contain one active version of this Wiki page",
-            { pageId: input.pageId }
-          )
-        }
-        const historical = yield* readRecord(repository, "restore", source, "invalid")
-        if (historical.page.lifecycle !== "active") {
-          return yield* wikiError(
-            "restore",
-            "invalid",
-            "Selected revision is not an active Wiki page",
-            { pageId: input.pageId }
-          )
-        }
-        const content = yield* restoredContent(historical, input.pageId)
+        const content = yield* contentToRestore({
+          pageId: input.pageId,
+          commitId: input.commitId,
+          head: input.expectedHead
+        })
         const changed = content !== current.page.content
         if (!changed) {
           const latestHead = yield* repository.currentRevision.pipe(
@@ -369,5 +380,5 @@ export const makeWikiRestoreMethods = (
     )
   })
 
-  return { restore, restoreRevision, restoreArchived }
+  return { restore, restoreRevision, contentToRestore, restoreArchived }
 }
