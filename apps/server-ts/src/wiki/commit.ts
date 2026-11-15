@@ -424,7 +424,7 @@ const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
     return yield* ruleError(
       "records",
       `${path} is ${kind.kind === "record" ? "a record" : "the contract"} of ${kind.folder.directory}/, kept as its producer wrote it. ` +
-        "Wiki Maintenance reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
+        "Tidy reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
     )
   }
 })

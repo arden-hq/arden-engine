@@ -73,7 +73,7 @@ const brief = (
     }) as Effect.Effect<string>
   )
 
-describe("Wiki Maintenance and records", () => {
+describe("Tidy and records", () => {
   it("reviews a new report, and names records and contracts as read only", async () => {
     const markdown = await brief((repository) =>
       commit(repository, create("daily/2026-11-12.md", "What happened."))

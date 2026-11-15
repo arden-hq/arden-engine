@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { join, relative } from "node:path"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -76,4 +78,18 @@ it("a reseed keeps a name the owner gave a system job's chat, and renames the jo
     })
   )
   expect(stored).toEqual([{ job: "Tidy", chat: "My upkeep" }])
+})
+
+it("names the job Tidy everywhere a run or the owner reads it", () => {
+  const root = join(import.meta.dirname, "../src")
+  const sources = (directory: string): ReadonlyArray<string> =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) return sources(path)
+      return /\.(?:ts|md)$/u.test(entry.name) ? [path] : []
+    })
+  const naming = sources(root)
+    .filter((path) => /Wiki Maintenance/u.test(readFileSync(path, "utf8")))
+    .map((path) => relative(root, path))
+  expect(naming).toEqual([])
 })
