@@ -157,14 +157,16 @@ describe("prefetchTurnMemory outside a Space", () => {
       ...context.recall
     ]
     expect(sent(none.memoryContext)).toEqual([])
-    expect(none.records).toEqual([{ reader: "owner", revision: null, query: null, sources: [] }])
+    expect(none.records).toEqual([
+      { reader: "owner", revision: null, query: null, budget: expect.any(Object), sources: [] }
+    ])
     const failing = turn(() =>
       Effect.fail(new MemoryError({ operation: "recall", message: "broken", sessionId: "chat-1" }))
     )
     const failed = await prefetch(failing.memory)
     expect(sent(failed.memoryContext)).toEqual([])
     expect(failed.records).toEqual([
-      { reader: "owner", revision: "rev-1", query: null, sources: [] }
+      { reader: "owner", revision: "rev-1", query: null, budget: expect.any(Object), sources: [] }
     ])
   })
 })

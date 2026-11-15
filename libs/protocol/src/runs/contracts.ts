@@ -146,6 +146,23 @@ export type RunMemorySource =
   | RunMemoryIndexSource
 
 /**
+ * The allowances, in UTF-8 bytes, a Memory block was composed under: `standing_page` for each
+ * standing-facts page and `standing_frame` for their note and heading; the Space context in
+ * `space`, with `space_instructions` and `space_page` its shares, and `space_page_list` beside
+ * it; `index` and `recall`.
+ */
+export interface RunMemoryBudget extends JsonRecord {
+  readonly standing_page: number
+  readonly standing_frame: number
+  readonly index: number
+  readonly space: number
+  readonly space_instructions: number
+  readonly space_page: number
+  readonly space_page_list: number
+  readonly recall: number
+}
+
+/**
  * One composition of a Run's Memory block: what every model request was sent from it until
  * the Run composed its context again. All pages were read at Memory `revision` (null when
  * Memory could not be read). `query` is the owner's recent typed text as far as the recall's
@@ -155,6 +172,8 @@ export interface RunMemoryContext extends JsonRecord {
   readonly reader: RunMemoryReader
   readonly revision: string | null
   readonly query: string | null
+  /** Absent in a composition stored before the record named its budget, so not known. */
+  readonly budget?: RunMemoryBudget
   readonly sources: ReadonlyArray<RunMemorySource>
 }
 

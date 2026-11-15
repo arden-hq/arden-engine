@@ -441,6 +441,7 @@ describe("what an owner chat is sent and records", () => {
       reader: "owner",
       revision: "rev-1",
       query: QUERY,
+      budget: expect.any(Object),
       sources: undefined
     })
     expect(record.map(({ bytes: _bytes, ...rest }) => rest)).toEqual([
@@ -757,6 +758,25 @@ describe("the stored record", () => {
       })
     )
     expect(result).toEqual({ kept: [first, steered, none], never: [], rows: ["run-a"] })
+  })
+
+  it("records the budget each composition was made under, every allowance of it", async () => {
+    const composed = await compose({ actor: person, spaceId: "space-1" })
+    const budget = composed.writes[0]?.budget
+    expect(budget).toEqual({
+      standing_page: MEMORY_BUDGET.standingPage,
+      standing_frame: MEMORY_BUDGET.standingFrame,
+      index: MEMORY_BUDGET.index,
+      space: MEMORY_BUDGET.space,
+      space_instructions: MEMORY_BUDGET.spaceInstructions,
+      space_page: MEMORY_BUDGET.spacePage,
+      space_page_list: MEMORY_BUDGET.spacePageList,
+      recall: MEMORY_BUDGET.recall
+    })
+    expect(Object.keys(budget ?? {})).toHaveLength(Object.keys(MEMORY_BUDGET).length)
+    const decode = Schema.decodeUnknownSync(RunMemoryContextSchema)
+    expect(decode(composed.writes[0])).toEqual(composed.writes[0])
+    expect(decode(first)).toEqual(first)
   })
 
   it("never writes a retired value", () => {

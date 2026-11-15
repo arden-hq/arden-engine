@@ -1,4 +1,9 @@
-import type { RunMemoryContext, RunMemoryReader, RunMemorySource } from "@arden-hq/protocol/runs"
+import type {
+  RunMemoryBudget,
+  RunMemoryContext,
+  RunMemoryReader,
+  RunMemorySource
+} from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
 import { corePageBudget, STANDING_FACTS_PAGES } from "../memory/core-memory.js"
 import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
@@ -65,6 +70,17 @@ export const MEMORY_BLOCK_MAX_BYTES =
   MEMORY_BUDGET.spacePageList +
   MEMORY_BUDGET.recall
 
+const RECORDED_BUDGET = {
+  standing_page: MEMORY_BUDGET.standingPage,
+  standing_frame: MEMORY_BUDGET.standingFrame,
+  index: MEMORY_BUDGET.index,
+  space: MEMORY_BUDGET.space,
+  space_instructions: MEMORY_BUDGET.spaceInstructions,
+  space_page: MEMORY_BUDGET.spacePage,
+  space_page_list: MEMORY_BUDGET.spacePageList,
+  recall: MEMORY_BUDGET.recall
+} satisfies RunMemoryBudget
+
 /** A Space's view, and its Memory page at the version read, when it has one. */
 export interface SpaceMemoryInput {
   readonly view: SpaceView
@@ -120,6 +136,7 @@ export const assembleMemoryContext = ({
       reader,
       revision,
       query: recall === undefined ? null : recallQuery(query),
+      budget: RECORDED_BUDGET,
       sources: [
         ...standing.sources,
         ...index.sources,
