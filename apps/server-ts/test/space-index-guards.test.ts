@@ -15,6 +15,20 @@ const where = (pattern: RegExp): ReadonlyArray<string> =>
     .map((file) => relative(".", file.path))
     .sort()
 
+/** The files that call `method` on the Space store, by the names they give it. */
+const callingSpaceStore = (method: string): ReadonlyArray<string> =>
+  sources()
+    .filter((file) => {
+      const names = [...file.text.matchAll(/const (\w+) = yield\* SpaceStore\b/gu)].map(
+        (match) => match[1]
+      )
+      return [...names, "spaces"].some((name) =>
+        new RegExp(`\\b${name}\\s*\\.${method}\\(`, "u").test(file.text)
+      )
+    })
+    .map((file) => file.path)
+    .sort()
+
 describe("only wiki/space-index.ts decides which pages a Space owns", () => {
   it("leaves no second copy of the rule", () => {
     expect(
@@ -40,21 +54,14 @@ describe("only wiki/space-index.ts decides which pages a Space owns", () => {
 })
 
 describe("one create-and-bind gives a Space its page", () => {
-  it("binds and makes Space pages only in wiki/space-page.ts", () => {
+  it("binds, restores and makes Space pages only in wiki/space-page.ts", () => {
     expect(where(/\.bindPage\(/u)).toEqual(["wiki/space-page.ts"])
+    expect(callingSpaceStore("restore")).toEqual(["wiki/space-page.ts"])
     expect(where(/\bcreateSpacePage\(/u)).toEqual(["wiki/space-page.ts"])
   })
 
   it("creates Spaces only through createSpaceWithPage", () => {
-    const creators = sources().filter((file) => {
-      const names = [...file.text.matchAll(/const (\w+) = yield\* SpaceStore\b/gu)].map(
-        (match) => match[1]
-      )
-      return [...names, "spaces"].some((name) =>
-        new RegExp(`\\b${name}\\s*\\.create\\(`, "u").test(file.text)
-      )
-    })
-    expect(creators.map((file) => file.path)).toEqual(["wiki/space-page.ts"])
+    expect(callingSpaceStore("create")).toEqual(["wiki/space-page.ts"])
     expect(where(/\bcreateSpaceWithPage\(/u)).toEqual([
       "assist/session-triage.ts",
       "http/spaces/handlers.ts",

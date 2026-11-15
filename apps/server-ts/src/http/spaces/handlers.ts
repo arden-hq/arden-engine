@@ -11,7 +11,7 @@ import { SummaryStore } from "../../persistence/summaries/store.js"
 import { makeSpaceInstructions } from "../../assist/space-instructions.js"
 import { Wiki } from "../../wiki/service.js"
 import { WikiError } from "../../wiki/errors.js"
-import { createSpaceWithPage, withSpacePage } from "../../wiki/space-page.js"
+import { createSpaceWithPage } from "../../wiki/space-page.js"
 import { ArdenApi } from "../api.js"
 import { ChatStop } from "../../chat/chat-stop.js"
 import {
@@ -116,12 +116,13 @@ export const SpaceHandlers = HttpApiBuilder.group(
         )
       )
       .handle("restore", ({ params }) =>
-        store.restore(params.spaceId).pipe(
-          Effect.mapError(lifecycleError),
-          Effect.flatMap(orNotFound),
-          Effect.flatMap((space) => withSpacePage(wiki, space)),
-          Effect.map(publicSpace)
-        )
+        wiki
+          .restoreSpace(params.spaceId)
+          .pipe(
+            Effect.mapError(lifecycleError),
+            Effect.flatMap(orNotFound),
+            Effect.map(publicSpace)
+          )
       )
       .handle("generateInstructions", ({ params }) =>
         draftInstructions(params.spaceId).pipe(

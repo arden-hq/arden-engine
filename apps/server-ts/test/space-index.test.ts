@@ -115,7 +115,11 @@ describe("what gives an active Space its page", () => {
   ]
 
   it("keeps a page that is still there and free", () => {
-    expect(planSpacePage(pages, binding("a", "areas/garden.md"), [])).toEqual({ kind: "keep" })
+    expect(planSpacePage(pages, binding("a", "areas/garden.md"), [])).toEqual({
+      kind: "keep",
+      pageId: "id-areas/garden.md",
+      pagePath: "areas/garden.md"
+    })
   })
 
   it("binds the page again at the path it was renamed to", () => {
@@ -249,16 +253,14 @@ describe("every active Space has a page", () => {
           },
           [archivePage(current)]
         )
-        yield* spaces.restore(space.space_id)
-        const restored = yield* methods.ensureSpacePage({ spaceId: space.space_id })
+        const restored = yield* methods.restoreSpace(space.space_id)
         return {
-          fresh: restored?.created !== undefined,
-          path: restored?.space.page_path,
-          samePage: restored?.space.page_id === pageId
+          path: restored?.page_path,
+          samePage: restored?.page_id === pageId
         }
       })
     )
-    expect(outcome).toEqual({ fresh: true, path: "areas/made-up-garden.md", samePage: false })
+    expect(outcome).toEqual({ path: "areas/made-up-garden.md", samePage: false })
   })
 
   it("a restored Space keeps a free page, and gets a fresh one when another Space overlaps it", async () => {
@@ -272,18 +274,37 @@ describe("every active Space has a page", () => {
         yield* archiveRow(sql, kept.space_id)
         yield* archiveRow(sql, taken.space_id)
         yield* spaces.bindPage(other.space_id, "inside", "areas/made-up-taken/inside.md")
-        yield* spaces.restore(kept.space_id)
-        yield* spaces.restore(taken.space_id)
-        const keptAgain = yield* methods.ensureSpacePage({ spaceId: kept.space_id })
-        const takenAgain = yield* methods.ensureSpacePage({ spaceId: taken.space_id })
+        const keptAgain = yield* methods.restoreSpace(kept.space_id)
+        const takenAgain = yield* methods.restoreSpace(taken.space_id)
         return {
-          kept: keptAgain?.space.page_id === keptPage?.page_id && keptAgain?.created === undefined,
-          fresh: takenAgain?.space.page_id !== takenPage?.page_id,
-          path: takenAgain?.space.page_path
+          kept: keptAgain?.page_id === keptPage?.page_id,
+          fresh: takenAgain?.page_id !== takenPage?.page_id,
+          path: takenAgain?.page_path
         }
       })
     )
     expect(outcome).toEqual({ kept: true, fresh: true, path: "areas/made-up-taken-2.md" })
+  })
+
+  it("a restored Space whose page is taken and cannot get a fresh one comes back with none", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces, sql }) =>
+      Effect.gen(function* () {
+        const taken = yield* spaces.create({ name: "Made-up taken" })
+        const other = yield* spaces.create({ name: "Made-up other" })
+        yield* methods.ensureSpacePage({ spaceId: taken.space_id })
+        yield* archiveRow(sql, taken.space_id)
+        yield* spaces.bindPage(other.space_id, "areas-directory", "areas/README.md")
+        const restored = yield* methods.restoreSpace(taken.space_id)
+        return {
+          active: restored?.archived_at === null,
+          page: restored?.page_path ?? null,
+          bindings: (yield* spaces.activeBindings()).map((row) => row.space_id)
+        }
+      })
+    )
+    expect(outcome.active).toBe(true)
+    expect(outcome.page).toBeNull()
+    expect(outcome.bindings).toHaveLength(1)
   })
 
   it("gives every active Space without a page one, and counts what it did", async () => {
@@ -305,3 +326,4 @@ describe("every active Space has a page", () => {
     })
   })
 })
+

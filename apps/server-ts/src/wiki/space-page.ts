@@ -1,7 +1,12 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
-import type { PersistedSpace, SpaceBinding, SpaceStore } from "../persistence/spaces/store.js"
+import type {
+  PersistedSpace,
+  SpaceBinding,
+  SpaceStore,
+  SpaceStoreError
+} from "../persistence/spaces/store.js"
 import { DIRECTORY_CONTRACT_HEADINGS, directorySections } from "./collections.js"
 import { commitWiki, createPage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
@@ -59,15 +64,42 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
         })
   const bound = yield* spaces
     .bindPage(space.space_id, page.pageId, page.path)
-    .pipe(
-      Effect.mapError((cause) =>
-        cause.reason === "conflict"
-          ? wikiError("create", "conflict", cause.message, { pageId: page.pageId, cause })
-          : wikiError("create", "storage", "Could not bind the Space's page", { cause })
-      )
-    )
+    .pipe(Effect.mapError(storageError("Could not bind the Space's page")))
   if (bound === null) return undefined
   return { space: bound, created: plan.kind === "create" ? page : undefined }
+})
+
+/** Logs a Space left without a page; the start check gives it one. */
+export const logNoSpacePage = (spaceId: string, error: WikiError) =>
+  Effect.logWarning("A Space has no Memory page; the next start tries again", {
+    spaceId,
+    reason: error.reason,
+    message: error.message
+  })
+
+/**
+ * Restores an archived Space in one write with the page it keeps or is bound to again, or with
+ * none, so it never comes back holding a page another active Space holds or overlaps. A Space
+ * that comes back with none then gets a fresh page, or the start check gives it one.
+ */
+export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
+  repository: ManagedFileRepositoryShape,
+  spaces: SpaceStore["Service"],
+  spaceId: string
+): Effect.fn.Return<PersistedSpace | null, WikiError | SpaceStoreError> {
+  const space = yield* spaces.get(spaceId, true)
+  if (space === null || space.archived_at === null) return null
+  const current = yield* loadSnapshot(repository, "restore")
+  const plan = planSpacePage(current.pages, space, yield* spaces.activeBindings())
+  const restored = yield* spaces.restore(
+    spaceId,
+    plan.kind === "create" ? null : { pageId: plan.pageId, pagePath: plan.pagePath }
+  )
+  if (restored === null || plan.kind !== "create") return restored
+  return yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
+    Effect.map((ensured) => ensured?.space ?? restored),
+    Effect.catch((error) => logNoSpacePage(spaceId, error).pipe(Effect.as(restored)))
+  )
 })
 
 const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
@@ -190,16 +222,10 @@ type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">
  * The Space with its page. A page that cannot be made now is logged and made at the next
  * start, so a Space is never refused for its page.
  */
-export const withSpacePage = (wiki: EnsureSpacePage, space: PersistedSpace) =>
+const withSpacePage = (wiki: EnsureSpacePage, space: PersistedSpace) =>
   wiki.ensureSpacePage({ spaceId: space.space_id }).pipe(
     Effect.map((ensured) => ensured?.space ?? space),
-    Effect.catch((error) =>
-      Effect.logWarning("A Space has no Memory page; the next start tries again", {
-        spaceId: space.space_id,
-        reason: error.reason,
-        message: error.message
-      }).pipe(Effect.as(space))
-    )
+    Effect.catch((error) => logNoSpacePage(space.space_id, error).pipe(Effect.as(space)))
   )
 
 /** The one way a Space is created: the Space, then its page. */

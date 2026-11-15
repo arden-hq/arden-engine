@@ -20,6 +20,12 @@ export interface SpaceBinding {
   readonly page_path: string | null
 }
 
+/** A page a Space is to be bound to. */
+export interface SpacePageBinding {
+  readonly pageId: string
+  readonly pagePath: string
+}
+
 export const spaceChoices = (
   spaces: ReadonlyArray<{ readonly space_id: string; readonly name: string }>
 ): string =>
@@ -94,8 +100,15 @@ export class SpaceStore extends Context.Service<
       spaceId: string,
       mutation?: MutationOperationIdentity
     ) => Effect.Effect<SpaceArchiveResponse | null, SpaceStoreError>
-    /** Restores an archived Space with the binding it had; `ensureWikiSpacePage` checks it. */
-    readonly restore: (spaceId: string) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
+    /**
+     * Restores an archived Space bound to `page`, or to no page, in one write, and an archived
+     * Space holding that page lets it go. Only `wiki/space-page.ts` calls it, after checking that
+     * no other active Space holds or overlaps the page.
+     */
+    readonly restore: (
+      spaceId: string,
+      page: SpacePageBinding | null
+    ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly detail: (spaceId: string) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
     readonly recordLetterSubject: (
       sessionId: string,

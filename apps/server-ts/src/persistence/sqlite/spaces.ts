@@ -19,7 +19,8 @@ import {
   SpaceStoreError,
   KEEP_ONE_SPACE,
   type PersistedSpace,
-  type SpaceBinding
+  type SpaceBinding,
+  type SpacePageBinding
 } from "../spaces/store.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import { renameOwnedJob } from "./job-labels.js"
@@ -420,6 +421,12 @@ export const makeSpaceStore = ({
       )
   })
 
+  const releaseFromArchived = (pageId: string, pagePath: string, now: string) => sql`
+    UPDATE spaces
+    SET page_id = NULL, page_path = NULL, updated_at = ${now}
+    WHERE archived_at IS NOT NULL AND (page_id = ${pageId} OR page_path = ${pagePath})
+  `
+
   const bindPage = Effect.fn("SqliteSpaceStore.bindPage")(function* (
     spaceId: string,
     pageId: string,
@@ -432,11 +439,7 @@ export const makeSpaceStore = ({
           const current = yield* get(spaceId)
           if (current === null) return null
           if (current.page_id === pageId && current.page_path === pagePath) return current
-          yield* sql`
-        UPDATE spaces
-        SET page_id = NULL, page_path = NULL, updated_at = ${now}
-        WHERE archived_at IS NOT NULL AND (page_id = ${pageId} OR page_path = ${pagePath})
-      `
+          yield* releaseFromArchived(pageId, pagePath, now)
           const rows = yield* sql<SpaceRow>`
         UPDATE spaces
         SET page_id = ${pageId}, page_path = ${pagePath}, updated_at = ${now}
@@ -551,7 +554,8 @@ export const makeSpaceStore = ({
   })
 
   const restore = Effect.fn("SqliteSpaceStore.restore")(function* (
-    spaceId: string
+    spaceId: string,
+    page: SpacePageBinding | null
   ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
     const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
       Effect.mapError((cause) =>
@@ -588,13 +592,15 @@ export const makeSpaceStore = ({
           }
           const restored = yield* sql<SpaceRow>`
         UPDATE spaces
-        SET archived_at = NULL, updated_at = ${now}
+        SET archived_at = NULL, page_id = ${page?.pageId ?? null},
+          page_path = ${page?.pagePath ?? null}, updated_at = ${now}
         WHERE space_id = ${validSpaceId} AND archived_at IS NOT NULL
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
                   inference_policy, mark, created_at, updated_at, archived_at
       `
           const next = restored[0]
           if (next === undefined) return null
+          if (page !== null) yield* releaseFromArchived(page.pageId, page.pagePath, now)
           yield* restoreSpaceChats(sql, validSpaceId)
           yield* spaceJobs.queueSpaceWake(validSpaceId, now)
           return yield* decodeRow(next, "restore")

@@ -2,7 +2,7 @@ import { isWithin } from "@arden-hq/std/paths"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
-import type { SpaceBinding, SpaceStore } from "../persistence/spaces/store.js"
+import type { SpaceBinding, SpacePageBinding, SpaceStore } from "../persistence/spaces/store.js"
 import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
 import type { PageRecord } from "./snapshot.js"
@@ -64,25 +64,20 @@ export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
 export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
   spaces.activeBindings().pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
 
-interface SpacePageRef {
-  readonly pageId: string
-  readonly pagePath: string
-}
-
 const isActive = (record: PageRecord): boolean =>
   record.resource.state === "active" && record.page.lifecycle === "active"
 
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
   pages: ReadonlyArray<PageRecord>,
-  space: SpacePageRef
+  space: SpacePageBinding
 ): ReadonlyArray<PageRecord> =>
   pages.filter((record) => isActive(record) && spaceOwnsPath(space.pagePath, record.resource.path))
 
 /** The generated list of the pages a Space owns besides its own page, in at most `maxBytes`. */
 export const spacePageIndex = (
   pages: ReadonlyArray<PageRecord>,
-  space: SpacePageRef,
+  space: SpacePageBinding,
   maxBytes: number
 ): MemoryIndex =>
   memoryIndex(spacePages(pages, space), {
@@ -92,8 +87,8 @@ export const spacePageIndex = (
   })
 
 export type SpacePagePlan =
-  | { readonly kind: "keep" }
-  | { readonly kind: "rebind"; readonly pageId: string; readonly pagePath: string }
+  | ({ readonly kind: "keep" } & SpacePageBinding)
+  | ({ readonly kind: "rebind" } & SpacePageBinding)
   | { readonly kind: "create" }
 
 /**
@@ -112,7 +107,9 @@ export const planSpacePage = (
   const path = record.resource.path
   if (canonicalWikiPath(path) === undefined) return { kind: "create" }
   if (heldByAnother(others, record.page.pageId, path)) return { kind: "create" }
-  return path === space.page_path
-    ? { kind: "keep" }
-    : { kind: "rebind", pageId: record.page.pageId, pagePath: path }
+  return {
+    kind: path === space.page_path ? "keep" : "rebind",
+    pageId: record.page.pageId,
+    pagePath: path
+  }
 }

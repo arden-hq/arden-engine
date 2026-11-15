@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
 import { isStandingFactsPage } from "../memory/core-memory.js"
-import type { PersistedSpace, SpaceStore } from "../persistence/spaces/store.js"
+import type { PersistedSpace, SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
 import {
   authorityOwnsBoundaryPage,
   requireWikiWritePaths,
@@ -23,7 +23,12 @@ import {
 } from "./commit.js"
 import { MONTHLY_SUMMARY_MAX_CHARS } from "./report-retention.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
-import { ensureWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
+import {
+  ensureWikiSpacePage,
+  logNoSpacePage,
+  restoreWikiSpace,
+  type WikiSpacePageInput
+} from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
@@ -104,6 +109,10 @@ export interface WikiMutationMethods {
   >
   /** Gives every active Space a page, and counts what that took. */
   readonly ensureSpacePages: () => Effect.Effect<SpacePageCounts, WikiError>
+  /** Restores an archived Space with its page; see `restoreWikiSpace`. */
+  readonly restoreSpace: (
+    spaceId: string
+  ) => Effect.Effect<PersistedSpace | null, WikiError | SpaceStoreError>
   readonly publishReport: (input: WikiPublishReportInput) => Effect.Effect<
     {
       readonly page: WikiPage
@@ -276,13 +285,7 @@ export const makeWikiMutationMethods = (
     const counts = { active: active.length, kept: 0, rebound: 0, made: 0, failed: 0 }
     for (const space of active) {
       const ensured = yield* ensureOne({ spaceId: space.space_id }).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("A Space has no Memory page; the next start tries again", {
-            spaceId: space.space_id,
-            reason: error.reason,
-            message: error.message
-          }).pipe(Effect.as(null))
-        )
+        Effect.catch((error) => logNoSpacePage(space.space_id, error).pipe(Effect.as(null)))
       )
       if (ensured === null) counts.failed += 1
       else if (ensured === undefined) counts.active -= 1
@@ -292,6 +295,8 @@ export const makeWikiMutationMethods = (
     }
     return counts satisfies SpacePageCounts
   })
+  const restoreSpace = (spaceId: string) =>
+    restoreWikiSpace(repository, spaces, spaceId).pipe(spacePages.withPermits(1))
 
   const publishReport = Effect.fn("Wiki.publishReportAndNotify")(function* (
     input: WikiPublishReportInput
@@ -487,6 +492,7 @@ export const makeWikiMutationMethods = (
     createDirectory,
     ensureSpacePage,
     ensureSpacePages,
+    restoreSpace,
     publishReport,
     update,
     archive,
