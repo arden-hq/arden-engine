@@ -176,7 +176,8 @@ export const commitWiki = (
   const replayKey =
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
-  return requirePageRules(repository, operations).pipe(
+  return requireHumanAliases(operations).pipe(
+    Effect.andThen(requireWithinLimits(repository, operations)),
     Effect.andThen(
       repository.commit({
         actor: options.actor,
@@ -215,47 +216,70 @@ const limitRefusal = (path: string, over: { readonly chars: number; readonly lim
   })
 }
 
-/** The rules every page a commit leaves active must meet, whoever writes it. */
-const requirePageRules = (
+/**
+ * The size limit binds every writer inside Arden; an outside edit is taken in over it. A write
+ * that does not grow a page already over its limit goes through, so the page can be shortened,
+ * renamed or moved in steps.
+ */
+const requireWithinLimits = (
   repository: ManagedFileRepositoryShape,
   operations: ReadonlyArray<WikiPageOperation>
 ): Effect.Effect<void, RevisionError> =>
-  Effect.forEach(operations, (operation) => requirePageRule(repository, operation), {
+  Effect.forEach(operations, (operation) => requireWithinLimit(repository, operation), {
     discard: true
   })
 
-const requirePageRule = Effect.fn("Wiki.requirePageRule")(function* (
+const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
   repository: ManagedFileRepositoryShape,
   operation: WikiPageOperation
 ): Effect.fn.Return<void, RevisionError> {
   if (operation._tag === "Archive") return
-  const given = "content" in operation ? operation.content : undefined
-  if (given !== undefined) yield* requireHumanAliases(operation.resourceId, given)
   const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
   const path = ("path" in operation ? operation.path : undefined) ?? before?.path
-  if (path === undefined || corePageBudget({ path, pageId: operation.resourceId }) === undefined)
-    return
-  const content = given ?? (before === null ? undefined : yield* repository.readVersion(before))
-  if (content === undefined) return
-  const page = yield* parseWikiPage(decoder.decode(content)).pipe(Effect.option)
-  if (Option.isNone(page)) return
-  const over = overPageLimit({ path, pageId: operation.resourceId, body: page.value.body })
-  if (over !== undefined) return yield* limitRefusal(path, over)
+  if (path === undefined) return
+  const given = "content" in operation ? operation.content : undefined
+  const over = yield* bodyOverLimit(repository, path, operation.resourceId, given ?? before)
+  if (over === undefined) return
+  const was =
+    before?.state === "active"
+      ? yield* bodyOverLimit(repository, before.path, operation.resourceId, before)
+      : undefined
+  if (was !== undefined && over.chars <= was.chars) return
+  return yield* limitRefusal(path, over)
+})
+
+const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
+  repository: ManagedFileRepositoryShape,
+  path: string,
+  pageId: string,
+  content: Uint8Array | ResourceVersion | null
+): Effect.fn.Return<{ readonly chars: number; readonly limit: number } | undefined, RevisionError> {
+  if (content === null || corePageBudget({ path, pageId }) === undefined) return undefined
+  const bytes = content instanceof Uint8Array ? content : yield* repository.readVersion(content)
+  const page = yield* parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
+  return Option.isNone(page) ? undefined : overPageLimit({ path, pageId, body: page.value.body })
 })
 
 const requireHumanAliases = (
-  resourceId: string,
-  content: Uint8Array
+  operations: ReadonlyArray<WikiPageOperation>
 ): Effect.Effect<void, InvalidRevisionInputError> =>
-  parseWikiPage(decoder.decode(content)).pipe(
-    Effect.option,
-    Effect.flatMap((page) =>
-      Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
-        ? Effect.void
-        : Effect.fail(
-            new InvalidRevisionInputError({
-              message: `Wiki page ${resourceId} keeps a path or a repeated name as an alias`
-            })
-          )
-    )
+  Effect.forEach(
+    operations,
+    (operation) => {
+      const content = "content" in operation ? operation.content : undefined
+      if (content === undefined) return Effect.void
+      return parseWikiPage(decoder.decode(content)).pipe(
+        Effect.option,
+        Effect.flatMap((page) =>
+          Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
+            ? Effect.void
+            : Effect.fail(
+                new InvalidRevisionInputError({
+                  message: `Wiki page ${operation.resourceId} keeps a path or a repeated name as an alias`
+                })
+              )
+        )
+      )
+    },
+    { discard: true }
   )

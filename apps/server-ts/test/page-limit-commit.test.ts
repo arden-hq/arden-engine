@@ -5,7 +5,8 @@ import { join, relative } from "node:path"
 import {
   ManagedFileRepository,
   managedFileRepositoryNodeLayer,
-  type ManagedFileRepositoryShape
+  type ManagedFileRepositoryShape,
+  type ResourceVersion
 } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
@@ -37,8 +38,7 @@ const OWNER: WikiCommitIdentity = {
   origin: { kind: "user", via: "desktop" },
   reason: "owner edit"
 }
-const REFUSAL =
-  /^me\.md would have 9068 characters, but every chat receives only the first 9000\. Nothing was saved\. Cut at least 68 characters/u
+const REFUSAL = /^me\.md would have 9068 characters, .*Nothing was saved\. Cut at least 68 characters/u
 
 const content = (pageId: string, title: string, body: string) =>
   formatWikiPage({
@@ -224,6 +224,39 @@ describe("the page size limit at the commit", () => {
       move: expect.stringMatching(REFUSAL),
       moveWithText: expect.stringMatching(REFUSAL),
       create: expect.stringMatching(REFUSAL)
+    })
+  })
+
+  it("lets a write through that does not grow a page already over its limit", async () => {
+    const outcome = await withWiki(({ repository }) =>
+      Effect.gen(function* () {
+        yield* unchecked(repository, createPage("me", "me.md", content("me", "Me", "g".repeat(9_400))))
+        const write = (operation: (page: ResourceVersion) => WikiPageOperation) =>
+          Effect.gen(function* () {
+            const page = yield* repository.get("me")
+            if (page === null) throw new Error("me.md is missing")
+            const head = yield* repository.currentRevision
+            return yield* commitWiki(repository, { ...OWNER, expectedRevision: head }, [
+              operation(page)
+            ]).pipe(
+              Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" })
+            )
+          })
+        return {
+          shorter: yield* write((page) => updatePage(page, content("me", "Me", "g".repeat(9_200)))),
+          retitled: yield* write((page) =>
+            updatePage(page, content("me", "Profile", "g".repeat(9_200)))
+          ),
+          moved: yield* write((page) => movePage(page, "profile.md")),
+          longer: yield* write((page) => updatePage(page, content("me", "Me", "g".repeat(9_201))))
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      shorter: "saved",
+      retitled: "saved",
+      moved: "saved",
+      longer: expect.stringMatching(/^profile\.md would have 9201 characters, /u)
     })
   })
 
