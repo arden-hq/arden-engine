@@ -17,7 +17,9 @@ import {
 import type { AutomationRules } from "../automations/model.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
 import { parseLease } from "./automation-lease.js"
-import { givesUp as giveUpRule, skipReason } from "./automation-auto-pause.js"
+import { ITEM_GIVE_UP, giveUpReason, givesUp } from "./automation-auto-pause.js"
+import { recordAutomationEvent } from "./entity-events.js"
+import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { nextId, type Writer } from "./deps.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { iso } from "../../runtime/clock.js"
@@ -64,10 +66,12 @@ const save = Effect.fn("HandlerItem.save")(function* (
 
 export const makeHandlerItems = ({
   writer,
-  rules
+  rules,
+  sessionEvents
 }: {
   readonly writer: Writer
   readonly rules: Pick<AutomationRules["Service"], "itemOwner">
+  readonly sessionEvents: SessionLifecycleEvents["Service"]
 }): AutomationHandlerItems["Service"] => {
   const sql = writer.sql
   const prepareHandlerItem: AutomationHandlerItems["Service"]["prepareHandlerItem"] = Effect.fn(
@@ -167,23 +171,35 @@ export const makeHandlerItems = ({
       )
     )
 
-  const givesUp: AutomationHandlerItems["Service"]["givesUp"] = (lease, runId) => {
-    const { runId: attemptId } = parseLease(lease)
-    return giveUpRule(sql, {
-      automationId: lease.payload.automationId,
-      attemptId,
-      chatRunId: runId
-    }).pipe(
-      Effect.map((cause) => (cause === undefined ? undefined : skipReason(cause))),
-      Effect.mapError((cause) => failure("Could not read the Automation's failed runs", cause))
+  const giveUp: AutomationHandlerItems["Service"]["giveUp"] = Effect.fn("HandlerItem.giveUp")(
+    function* (lease, runId, tell) {
+      const { runId: attemptId } = parseLease(lease)
+      const automationId = lease.payload.automationId
+      const cause = yield* givesUp(sql, { automationId, attemptId, chatRunId: runId })
+      if (cause === undefined) return undefined
+      const text = yield* tell({ then: ITEM_GIVE_UP[cause.kind], reason: giveUpReason(cause) })
+      yield* writer.transact(
+        recordAutomationEvent(sql, {
+          sessionEvents,
+          automationId,
+          attemptId,
+          runId,
+          event: "failed",
+          text
+        })
+      )
+      return text
+    },
+    Effect.mapError((cause) =>
+      cause instanceof Error ? cause : failure("Could not give up on the handler item", cause)
     )
-  }
+  )
 
   return AutomationHandlerItems.of({
     prepareHandlerItem,
     settleHandlerItem: transition("settle"),
     retryHandlerItem: transition("retry"),
-    givesUp
+    giveUp
   })
 }
 

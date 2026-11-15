@@ -19,11 +19,8 @@ interface ItemLoop<K extends HandlerItemKind> {
   readonly kind: K
   readonly next: () => Effect.Effect<HandlerItemDataOf<K> | "idle" | "advance", Error>
   readonly commit: (data: HandlerItemDataOf<K>) => Effect.Effect<void, Error>
-  /**
-   * Moves the position past an item the Automation gave up on (`givesUp`), without its work, and
-   * names that item for the owner. A loop without it keeps the item; the give-up is only told.
-   */
-  readonly skip?: (data: HandlerItemDataOf<K>) => Effect.Effect<string, Error>
+  /** Moves the position past an item the Automation gave up on, without its work, and names it. */
+  readonly skip: (data: HandlerItemDataOf<K>) => Effect.Effect<string, Error>
   readonly summary: (item: HandlerItem | undefined) => string
   readonly cancelled: string
   readonly incomplete: string
@@ -32,7 +29,7 @@ interface ItemLoop<K extends HandlerItemKind> {
 export interface ItemLoopServices {
   readonly handlerItems: Pick<
     AutomationHandlerItems["Service"],
-    "prepareHandlerItem" | "settleHandlerItem" | "givesUp"
+    "prepareHandlerItem" | "settleHandlerItem" | "giveUp"
   >
   readonly runItem: HandlerItemRunner
 }
@@ -59,11 +56,17 @@ export const runItemLoop = <K extends HandlerItemKind>(
       detail: string | null
     ) {
       const data = settled.input.data
-      if (loop.skip === undefined || !isItemKind(loop.kind, data))
-        return finished(detail ?? loop.incomplete)
-      const reason = yield* services.handlerItems.givesUp(job, settled.runId)
-      if (reason === undefined) return finished(detail ?? loop.incomplete)
-      return finished(`${loop.label} skipped ${yield* loop.skip(data)}: ${reason}`)
+      if (!isItemKind(loop.kind, data)) return finished(detail ?? loop.incomplete)
+      const told = yield* services.handlerItems.giveUp(job, settled.runId, (decision) =>
+        decision.then === "skip"
+          ? loop
+              .skip(data)
+              .pipe(Effect.map((item) => `${loop.label} skipped ${item}: ${decision.reason}`))
+          : Effect.succeed(
+              `${loop.label} could not run: ${decision.reason} It tries the same work again on its next run.`
+            )
+      )
+      return finished(told ?? detail ?? loop.incomplete)
     })
     while (true) {
       if (item?.phase === "settled" && item.failure !== null)

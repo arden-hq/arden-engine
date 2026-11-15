@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { givesUp } from "../src/persistence/sqlite/automation-auto-pause.js"
+import { ITEM_GIVE_UP, givesUp } from "../src/persistence/sqlite/automation-auto-pause.js"
 import { outcomeSql } from "../src/persistence/sqlite/automation-run-outcome.js"
 import { countsAsRun } from "../src/persistence/sqlite/automation-skip-record.js"
 import { failureRows } from "../src/persistence/sqlite/inbox-failure-rows.js"
@@ -308,6 +308,24 @@ it("an Automation gives up on its third failed run in a row since it last gave u
           'r-e6', 'Skipped.', 'own', ${at(1)}, 1)`
       expect(yield* givesUpAt(25)).toBeUndefined()
       expect(yield* givesUpAt(26)).toEqual({ kind: "streak" })
+    })
+  )
+})
+
+it("an item job keeps its item when the provider refuses the run", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* seed(sql)
+      yield* sql`UPDATE chat_runs SET error_code = 'provider_auth' WHERE run_id = 'r-e6'`
+      yield* sql`INSERT INTO automation_runs (id, task_id, automation_ref, started_at, ended_at,
+          status, outcome) VALUES (21, 'auto-4', 'ref-auto-4', ${at(1)}, ${at(1)}, 'failed', 'failed')`
+      const cause = yield* givesUp(sql, {
+        automationId: "auto-4",
+        attemptId: 21,
+        chatRunId: "r-e6"
+      })
+      expect(cause && ITEM_GIVE_UP[cause.kind]).toBe("keep")
     })
   )
 })

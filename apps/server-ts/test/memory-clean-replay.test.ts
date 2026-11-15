@@ -152,7 +152,7 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
                     runId: "run-1",
                     failure: null
                   }),
-                givesUp: () => Effect.succeed(undefined)
+                giveUp: () => Effect.succeed(undefined)
               },
               runItem: (_job, item) => {
                 const data = item.input.data

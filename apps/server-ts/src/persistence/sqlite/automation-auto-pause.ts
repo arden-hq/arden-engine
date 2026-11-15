@@ -6,7 +6,7 @@ import { countsAsRun } from "./automation-skip-record.js"
 import { DateTime, Effect } from "effect"
 import { isLastingRunError, providerSentence } from "@arden-hq/protocol/chat"
 import { haltAutomation } from "./automation-halt.js"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlClient, SqlError } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { recordAutomationEvent } from "./entity-events.js"
 import { userAutomationSql } from "./authority-sql.js"
@@ -17,6 +17,16 @@ const FAILURES_BEFORE_GIVING_UP = 3
 export type GiveUpCause =
   | { readonly kind: "streak" }
   | { readonly kind: "lasting"; readonly said: string; readonly next: string }
+
+/**
+ * What an item job does when it gives up, by the kind of failure; a user Automation pauses on
+ * either. A lasting refusal (the provider, the model or the sign-in) says nothing about the item,
+ * so the item is kept and tried again next run; only an item that fails run after run is skipped.
+ */
+export const ITEM_GIVE_UP = { lasting: "keep", streak: "skip" } as const satisfies Record<
+  GiveUpCause["kind"],
+  string
+>
 
 /**
  * The one rule for when an Automation gives up after its run `attemptId` failed: the failure is a
@@ -30,7 +40,7 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
     readonly attemptId: number
     readonly chatRunId: string | null
   }
-) {
+): Effect.fn.Return<GiveUpCause | undefined, SqlError.SqlError> {
   const { automationId } = input
   const lasting = yield* sql<{ readonly error_code: string | null; readonly error: string | null }>`
     SELECT chat.error_code, COALESCE(chat.error_message, attempt.error) AS error
@@ -46,7 +56,7 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
         refused.error_code === "model_unavailable"
           ? "Pick another model for it, then resume it."
           : "Resume it once that's fixed."
-    } satisfies GiveUpCause
+    }
   }
   const before = yield* sql<{ readonly outcome: string }>`
     SELECT outcome FROM (SELECT id, ${outcomeSql(sql, sql`automation_runs`)} AS outcome
@@ -67,41 +77,28 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
     ORDER BY id DESC LIMIT ${FAILURES_BEFORE_GIVING_UP - 1}`
   return before.length === FAILURES_BEFORE_GIVING_UP - 1 &&
     before.every((run) => run.outcome === "failed")
-    ? ({ kind: "streak" } satisfies GiveUpCause)
+    ? { kind: "streak" }
     : undefined
 })
 
-/** Why a job that works through items moved past one, for the line that names it. */
-export const skipReason = (cause: GiveUpCause): string =>
+/** Why a job gave up, for the line that tells the owner. */
+export const giveUpReason = (cause: GiveUpCause): string =>
   cause.kind === "lasting" ? cause.said : `it failed ${FAILURES_BEFORE_GIVING_UP} runs in a row`
 
 /**
- * What giving up does once `givesUp` holds for a failed run: a user Automation is paused; a job
- * that works through items has already moved past the failing item, and its failed event says so.
- * Both are told through `recordAutomationEvent`. Answers whether the Automation was paused.
+ * Pauses a user Automation when `givesUp` holds for its failed run, and tells the owner through
+ * `recordAutomationEvent`. Answers whether the Automation was paused.
  */
-export const giveUp = Effect.fn("AutomationGiveUp.giveUp")(function* (options: {
+export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: SessionLifecycleEvents["Service"]
   readonly automationId: string
   readonly attemptId: number
   readonly chatRunId: string | null
-  readonly then: "pause" | { readonly skipped: string }
 }) {
   const { sql, automationId } = options
   const cause = yield* givesUp(sql, options)
   if (cause === undefined) return false
-  if (options.then !== "pause") {
-    yield* recordAutomationEvent(sql, {
-      sessionEvents: options.sessionEvents,
-      automationId,
-      attemptId: options.attemptId,
-      runId: options.chatRunId,
-      event: "failed",
-      text: options.then.skipped
-    })
-    return false
-  }
   const live = yield* sql`SELECT task_id FROM scheduled_tasks
     WHERE task_id = ${automationId} AND ${userAutomationSql()} AND enabled = 1`
   if (live.length === 0) return false
