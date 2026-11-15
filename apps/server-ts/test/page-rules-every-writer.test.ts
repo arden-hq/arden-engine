@@ -54,7 +54,7 @@ const profile = (body: string) =>
   })
 
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
-  hasPageBinding: () => Effect.succeed(false)
+  activeBindings: () => Effect.succeed([])
 })
 
 const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiPageOperation) =>

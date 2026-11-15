@@ -168,13 +168,13 @@ export const memoryIndex = (
     readonly leaveOut?: (record: PageRecord) => boolean
   }
 ): MemoryIndex => {
-  const prefix = options.root === "" ? "" : `${options.root}/`
+  const prefix = options.root === "" ? "" : `${options.root}/`.toLowerCase()
   const listed = pages
     .filter(
       (record) =>
         record.resource.state === "active" &&
         record.page.lifecycle === "active" &&
-        record.resource.path.startsWith(prefix) &&
+        record.resource.path.toLowerCase().startsWith(prefix) &&
         options.leaveOut?.(record) !== true
     )
     .map((record) => ({

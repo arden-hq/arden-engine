@@ -5,12 +5,13 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import { canonicalWikiPath } from "./authority.js"
+import { canonicalWikiPath } from "./paths.js"
 import { commitWiki, createPage, updatePage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
+import { spaceOwnsWikiPath } from "./space-index.js"
 
 export const WikiReportContentSchema = Schema.Struct({
   path: Schema.NonEmptyString.check(Schema.isMaxLength(4_096)),
@@ -72,13 +73,11 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
       "This Automation does not own the report destination"
     )
   }
-  const spaceOwned = yield* spaces
-    .ownsWikiPath(content.path)
-    .pipe(
-      Effect.mapError((cause) =>
-        wikiError("create", "storage", "Could not check Space ownership", { cause })
-      )
+  const spaceOwned = yield* spaceOwnsWikiPath(spaces, content.path).pipe(
+    Effect.mapError((cause) =>
+      wikiError("create", "storage", "Could not check Space ownership", { cause })
     )
+  )
   if (spaceOwned)
     return yield* wikiError("create", "blocked", "Reports cannot claim a Space-owned path")
   const names = new Set(pageNamesForPath(content.path).map(normal))

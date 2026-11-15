@@ -1,11 +1,11 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import type { WikiArchiveResponse, WikiPage } from "@arden-hq/protocol/wiki"
-import { Effect } from "effect"
+import { Effect, Semaphore } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
 import { isStandingFactsPage } from "../memory/core-memory.js"
-import type { SpaceStore } from "../persistence/spaces/store.js"
+import type { PersistedSpace, SpaceStore } from "../persistence/spaces/store.js"
 import {
   authorityOwnsBoundaryPage,
   requireWikiWritePaths,
@@ -23,7 +23,7 @@ import {
 } from "./commit.js"
 import { MONTHLY_SUMMARY_MAX_CHARS } from "./report-retention.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
-import { createWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
+import { ensureWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
@@ -43,6 +43,7 @@ import {
   requireUpdatable,
   summaryTooLong
 } from "./write-rules.js"
+import { isSpacePage } from "./space-index.js"
 
 const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
   kind: "capture",
@@ -82,12 +83,27 @@ interface WikiArchiveInput {
   readonly commit?: WikiCommitIdentity
 }
 
+export interface SpacePageCounts {
+  readonly active: number
+  readonly kept: number
+  readonly rebound: number
+  readonly made: number
+  readonly failed: number
+}
+
 export interface WikiMutationMethods {
   readonly create: (input: WikiCreateInput) => Effect.Effect<WikiPage, WikiError>
   readonly createDirectory: (
     input: WikiCreateDirectoryInput
   ) => Effect.Effect<WikiCreateDirectoryResult, WikiError>
-  readonly createSpacePage: (input: WikiSpacePageInput) => Effect.Effect<WikiPage, WikiError>
+  readonly ensureSpacePage: (
+    input: WikiSpacePageInput
+  ) => Effect.Effect<
+    { readonly space: PersistedSpace; readonly created: WikiPage | undefined } | undefined,
+    WikiError
+  >
+  /** Gives every active Space a page, and counts what that took. */
+  readonly ensureSpacePages: () => Effect.Effect<SpacePageCounts, WikiError>
   readonly publishReport: (input: WikiPublishReportInput) => Effect.Effect<
     {
       readonly page: WikiPage
@@ -172,16 +188,18 @@ export const makeWikiMutationMethods = (
         "Automation pages in an owned directory must use report publication"
       )
     }
-    const directoryIsSpaceBound = yield* spaces
-      .hasPageBinding(directoryPage.page.pageId, directoryPage.resource.path)
-      .pipe(
-        Effect.mapError((cause) =>
-          wikiError("create", "storage", "Could not check Memory directory ownership", {
-            pageId: directoryPage.page.pageId,
-            cause
-          })
-        )
+    const directoryIsSpaceBound = yield* isSpacePage(
+      spaces,
+      directoryPage.page.pageId,
+      directoryPage.resource.path
+    ).pipe(
+      Effect.mapError((cause) =>
+        wikiError("create", "storage", "Could not check Memory directory ownership", {
+          pageId: directoryPage.page.pageId,
+          cause
+        })
       )
+    )
     if (
       directoryIsSpaceBound &&
       !authorityOwnsBoundaryPage(boundary, directoryPage.page.pageId, directoryPage.resource.path)
@@ -233,12 +251,46 @@ export const makeWikiMutationMethods = (
     return { page, changed: created.changed, adopted: created.adopted }
   })
 
-  const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (input: WikiSpacePageInput) {
-    const pageId = yield* createWikiSpacePage(repository, spaces, input)
-    const page = yield* read(pageId).pipe(
-      Effect.mapError((cause) => new WikiError({ ...cause, operation: "create" }))
-    )
-    return page
+  const spacePages = Semaphore.makeUnsafe(1)
+  const ensureOne = (input: WikiSpacePageInput) =>
+    ensureWikiSpacePage(repository, spaces, input).pipe(spacePages.withPermits(1))
+  const ensureSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (input: WikiSpacePageInput) {
+    const ensured = yield* ensureOne(input)
+    if (ensured === undefined) return undefined
+    const created =
+      ensured.created === undefined
+        ? undefined
+        : yield* read(ensured.created.pageId).pipe(
+            Effect.mapError((cause) => new WikiError({ ...cause, operation: "create" }))
+          )
+    return { space: ensured.space, created }
+  })
+  const ensureSpacePages = Effect.fn("Wiki.ensureSpacePages")(function* () {
+    const active = yield* spaces
+      .list()
+      .pipe(
+        Effect.mapError((cause) =>
+          wikiError("create", "storage", "Could not list the Spaces", { cause })
+        )
+      )
+    const counts = { active: active.length, kept: 0, rebound: 0, made: 0, failed: 0 }
+    for (const space of active) {
+      const ensured = yield* ensureOne({ spaceId: space.space_id }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("A Space has no Memory page; the next start tries again", {
+            spaceId: space.space_id,
+            reason: error.reason,
+            message: error.message
+          }).pipe(Effect.as(null))
+        )
+      )
+      if (ensured === null) counts.failed += 1
+      else if (ensured === undefined) counts.active -= 1
+      else if (ensured.created !== undefined) counts.made += 1
+      else if (ensured.space.page_path !== space.page_path) counts.rebound += 1
+      else counts.kept += 1
+    }
+    return counts satisfies SpacePageCounts
   })
 
   const publishReport = Effect.fn("Wiki.publishReportAndNotify")(function* (
@@ -433,7 +485,8 @@ export const makeWikiMutationMethods = (
   return {
     create,
     createDirectory,
-    createSpacePage,
+    ensureSpacePage,
+    ensureSpacePages,
     publishReport,
     update,
     archive,

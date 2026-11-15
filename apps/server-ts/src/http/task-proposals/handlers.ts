@@ -5,7 +5,7 @@ import { TaskProposalStore, TaskProposalStoreError } from "../../persistence/pro
 import { TaskProposalConflictError } from "../../persistence/proposals/conflict.js"
 import { ProposalConflictResponse } from "./api.js"
 import { SpaceStore } from "../../persistence/spaces/store.js"
-import { wikiPathWithinSpaceBoundary } from "../../wiki/authority.js"
+import { spaceOwnsPath } from "../../wiki/space-index.js"
 import { Wiki } from "../../wiki/service.js"
 import { ArdenApi } from "../api.js"
 import { failStore } from "../errors.js"
@@ -121,7 +121,7 @@ export const TaskProposalHandlers = HttpApiBuilder.group(
             if (
               current === undefined ||
               current.page.lifecycle !== "active" ||
-              !wikiPathWithinSpaceBoundary(boundaryPath, current.resource.path)
+              !spaceOwnsPath(boundaryPath, current.resource.path)
             ) {
               return Effect.fail(
                 new TaskProposalConflictError({

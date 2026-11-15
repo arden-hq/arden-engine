@@ -21,6 +21,8 @@ import {
 } from "../persistence/sessions/triage.js"
 import { type StoredMessageEnvelope, visibleMessageCount } from "../persistence/transcript/model.js"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
+import type { Wiki } from "../wiki/service.js"
+import { createSpaceWithPage } from "../wiki/space-page.js"
 import { conversationLine, newestWithinBudget } from "./conversation.js"
 
 const TRIAGE_MESSAGE_MAX_CHARS = 4_000
@@ -31,6 +33,7 @@ export interface SessionTriageDependencies {
   readonly completion: Pick<StructuredCompletion["Service"], "runTool">
   readonly sessions: Pick<SessionQueries["Service"], "load" | "loadHeaderSnapshot" | "blockingWork">
   readonly spaces: Pick<SpaceStore["Service"], "list" | "create" | "archive">
+  readonly wiki: Pick<Wiki["Service"], "ensureSpacePage">
   readonly store: Pick<
     SessionStore["Service"],
     "moveToSpace" | "saveTriage" | "adoptSpaceConversation" | "releaseSpaceConversation"
@@ -183,7 +186,7 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
       return { space_id: target.space_id, title: target.title, created: false }
     }
     case "create": {
-      const space = yield* dependencies.spaces.create({ name: decision.new_title })
+      const space = yield* createSpaceWithPage(dependencies, { name: decision.new_title })
       yield* Effect.gen(function* () {
         yield* requireMoved(yield* dependencies.store.moveToSpace(sessionId, space.space_id))
         yield* dependencies.store.adoptSpaceConversation(space.space_id, sessionId)

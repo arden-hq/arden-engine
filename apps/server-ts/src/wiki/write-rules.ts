@@ -19,6 +19,7 @@ import {
 } from "./report-retention.js"
 import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
+import { isSpacePage } from "./space-index.js"
 
 export interface WikiWriter {
   readonly pageId: string
@@ -75,16 +76,14 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
     )
   }
   if (input.commit.origin.kind === "capture") {
-    const spaceBound = yield* spaces
-      .hasPageBinding(current.page.pageId, current.resource.path)
-      .pipe(
-        Effect.mapError((cause) =>
-          wikiError("restore", "storage", "Could not check Memory page ownership", {
-            pageId: input.pageId,
-            cause
-          })
-        )
+    const spaceBound = yield* isSpacePage(spaces, current.page.pageId, current.resource.path).pipe(
+      Effect.mapError((cause) =>
+        wikiError("restore", "storage", "Could not check Memory page ownership", {
+          pageId: input.pageId,
+          cause
+        })
       )
+    )
     if (spaceBound) {
       return yield* wikiError(
         "restore",
@@ -183,7 +182,7 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
       { pageId: input.pageId }
     )
   }
-  const pageIsSpaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
+  const pageIsSpaceBound = yield* isSpacePage(spaces, input.pageId, current.resource.path).pipe(
     Effect.mapError((cause) =>
       wikiError(operation, "storage", "Could not check Space page ownership", {
         pageId: input.pageId,

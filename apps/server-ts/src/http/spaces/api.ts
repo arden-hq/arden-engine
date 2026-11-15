@@ -54,11 +54,6 @@ export class SpacesApi extends HttpApiGroup.make("spaces", { topLevel: true }).a
   HttpApiEndpoint.post("createPage", "/spaces/:spaceId/page", {
     params: { spaceId: Schema.NonEmptyString },
     success: SpaceSchema,
-    error: [HttpApiError.ConflictNoContent, ...storeErrors]
-  }),
-  HttpApiEndpoint.delete("detachPage", "/spaces/:spaceId/page", {
-    params: { spaceId: Schema.NonEmptyString },
-    success: SpaceSchema,
     error: storeErrors
   }),
   HttpApiEndpoint.post("restore", "/spaces/:spaceId/restore", {

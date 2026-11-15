@@ -58,7 +58,7 @@ const content = (pageId: string, title: string, body: string) =>
   })
 
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
-  hasPageBinding: () => Effect.succeed(false)
+  activeBindings: () => Effect.succeed([])
 })
 
 const withWiki = async <A>(

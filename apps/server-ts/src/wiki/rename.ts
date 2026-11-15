@@ -27,6 +27,7 @@ import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, rewriteWikiLinkTargets } from "./links.js"
 import { formatRedirectPage, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
+import { isSpacePage } from "./space-index.js"
 
 const ResourceSchema = Schema.Struct({
   resourceId: Schema.NonEmptyString,
@@ -454,7 +455,7 @@ export const makeWikiRenameMethods = (
         )
       }
     }
-    const spaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
+    const spaceBound = yield* isSpacePage(spaces, input.pageId, current.resource.path).pipe(
       Effect.mapError((cause) =>
         wikiError("rename", "storage", "Could not check Space page ownership", {
           pageId: input.pageId,
@@ -540,7 +541,7 @@ export const makeWikiRenameMethods = (
           )
         }
       }
-      const spaceBound = yield* spaces.hasPageBinding(plan.pageId, plan.oldPath).pipe(
+      const spaceBound = yield* isSpacePage(spaces, plan.pageId, plan.oldPath).pipe(
         Effect.mapError((cause) =>
           wikiError("rename", "storage", "Could not check Space page ownership", {
             pageId: plan.pageId,

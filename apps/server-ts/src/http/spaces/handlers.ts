@@ -11,6 +11,7 @@ import { SummaryStore } from "../../persistence/summaries/store.js"
 import { makeSpaceInstructions } from "../../assist/space-instructions.js"
 import { Wiki } from "../../wiki/service.js"
 import { WikiError } from "../../wiki/errors.js"
+import { createSpaceWithPage, withSpacePage } from "../../wiki/space-page.js"
 import { ArdenApi } from "../api.js"
 import { ChatStop } from "../../chat/chat-stop.js"
 import {
@@ -101,42 +102,26 @@ export const SpaceHandlers = HttpApiBuilder.group(
         )
       )
       .handle("create", ({ payload }) =>
-        store.create(payload).pipe(Effect.map(publicSpace), Effect.catch(failStore))
+        createSpaceWithPage({ spaces: store, wiki }, payload).pipe(
+          Effect.map(publicSpace),
+          Effect.catch(failStore)
+        )
       )
       .handle("update", ({ params, payload }) => updateSpace(params.spaceId, payload))
-      .handle(
-        "createPage",
-        Effect.fn("SpaceHandlers.createPage")(function* ({ params }) {
-          const current = yield* store
-            .get(params.spaceId)
-            .pipe(Effect.mapError(lifecycleError), Effect.flatMap(orNotFound))
-          if (current.page_path !== null) return yield* new HttpApiError.Conflict({})
-          const page = yield* wiki
-            .createSpacePage({ spaceId: params.spaceId, title: current.name })
-            .pipe(Effect.mapError(lifecycleError))
-          const bound = yield* store
-            .bindPage(params.spaceId, page.pageId, page.path)
-            .pipe(Effect.mapError(lifecycleError), Effect.flatMap(orNotFound))
-          return publicSpace(bound)
-        })
-      )
-      .handle("detachPage", ({ params }) =>
-        store
-          .detachPage(params.spaceId)
-          .pipe(
-            Effect.mapError(lifecycleError),
-            Effect.flatMap(orNotFound),
-            Effect.map(publicSpace)
-          )
+      .handle("createPage", ({ params }) =>
+        wiki.ensureSpacePage({ spaceId: params.spaceId }).pipe(
+          Effect.mapError(lifecycleError),
+          Effect.flatMap(orNotFound),
+          Effect.map(({ space }) => publicSpace(space))
+        )
       )
       .handle("restore", ({ params }) =>
-        store
-          .restore(params.spaceId)
-          .pipe(
-            Effect.mapError(lifecycleError),
-            Effect.flatMap(orNotFound),
-            Effect.map(publicSpace)
-          )
+        store.restore(params.spaceId).pipe(
+          Effect.mapError(lifecycleError),
+          Effect.flatMap(orNotFound),
+          Effect.flatMap((space) => withSpacePage(wiki, space)),
+          Effect.map(publicSpace)
+        )
       )
       .handle("generateInstructions", ({ params }) =>
         draftInstructions(params.spaceId).pipe(

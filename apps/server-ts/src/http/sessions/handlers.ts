@@ -62,6 +62,7 @@ import type { ChatMessageFailure } from "../../chat/message-errors.js"
 import type { RunQueryError } from "../../persistence/runs/queries.js"
 import type { ScriptStoreError } from "../../persistence/scripts/store.js"
 import type { WorkStoreError } from "../../persistence/work/store.js"
+import { Wiki } from "../../wiki/service.js"
 
 const visualizationToWire = (manifest: ConversationArtifactManifest, turnId?: string) => ({
   runtime_version: manifest.runtime_version,
@@ -220,8 +221,9 @@ export const SessionHandlers = HttpApiBuilder.group(
           })
         )
       )
-    const triage = makeSessionTriage({ completion, sessions, spaces, store })
-    const settleTriage = makeSessionTriageAction({ completion, sessions, spaces, store })
+    const wiki = yield* Wiki
+    const triage = makeSessionTriage({ completion, sessions, spaces, store, wiki })
+    const settleTriage = makeSessionTriageAction({ completion, sessions, spaces, store, wiki })
     const chatStop = yield* ChatStop
     const forkPreparation = makeForkPreparation({
       store,

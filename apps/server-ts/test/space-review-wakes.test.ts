@@ -363,21 +363,19 @@ it("drafted instructions that say the same thing wake nothing", async () => {
   expect(rows).toEqual([])
 })
 
-it("a Space bound to a Memory page cannot be bound to another without detaching first", async () => {
-  const outcome = await withTempDatabase(
+it("binding a Space again to the page it has wakes nothing", async () => {
+  const rows = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
       yield* space(sql, "space-1", true)
       yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
       yield* clearQueue(sql)
-      const refused = yield* spaces
-        .bindPage("space-1", "page-2", "projects/another-made-up-space.md")
-        .pipe(Effect.flip)
-      return { reason: refused.reason, rows: yield* reviewRows(sql, "space-1") }
+      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      return yield* reviewRows(sql, "space-1")
     })
   )
-  expect(outcome).toEqual({ reason: "conflict", rows: [] })
+  expect(rows).toEqual([])
 })
 
 it("Space settings wake the review the same way whether the owner or Arden wrote them", async () => {
@@ -410,7 +408,6 @@ it("binding the Space to another Memory page wakes the review", async () => {
       const spaces = yield* SpaceStore
       yield* space(sql, "space-1", true)
       yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
-      yield* spaces.detachPage("space-1")
       yield* clearQueue(sql)
       yield* spaces.bindPage("space-1", "page-2", "projects/another-made-up-space.md")
       return yield* reviewRows(sql, "space-1")

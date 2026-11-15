@@ -18,13 +18,11 @@ import {
   SpaceStore,
   SpaceStoreError,
   KEEP_ONE_SPACE,
-  type PersistedSpace
+  type PersistedSpace,
+  type SpaceBinding
 } from "../spaces/store.js"
-import {
-  canonicalWikiPath,
-  wikiSpaceBoundariesOverlap,
-  wikiPathWithinSpaceBoundary
-} from "../../wiki/authority.js"
+import { canonicalWikiPath } from "../../wiki/paths.js"
+import { heldByAnother } from "../../wiki/space-index.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import { renameOwnedJob } from "./job-labels.js"
 import { spaceJobId } from "../space-job-id.js"
@@ -51,53 +49,26 @@ export const makeSpaceStore = ({
 }: Pick<PersistenceDeps, "writer" | "sessionEvents" | "reader">): SpaceStore["Service"] => {
   const sql = writer.sql
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
-  const ownsWikiPath = Effect.fn("SqliteSpaceStore.ownsWikiPath")(function* (path: string) {
-    const rows = yield* sql<{
-      readonly page_id: string | null
-      readonly page_path: string | null
-    }>`
-      SELECT page_id, page_path
+  const activeBindingRows = (exceptSpaceId: string | null) =>
+    sql<SpaceBinding>`
+      SELECT space_id, page_id, page_path
       FROM spaces
-      WHERE page_id IS NOT NULL OR page_path IS NOT NULL
-    `.pipe(
+      WHERE archived_at IS NULL
+        AND (page_id IS NOT NULL OR page_path IS NOT NULL)
+        AND (${exceptSpaceId} IS NULL OR space_id <> ${exceptSpaceId})
+    `
+  const activeBindings = Effect.fn("SqliteSpaceStore.activeBindings")(function* () {
+    return yield* activeBindingRows(null).pipe(
       Effect.mapError((cause) =>
         storeError(
           "page_binding",
           "storage",
-          "Could not resolve Space Wiki ownership",
+          "Could not read the Spaces' Memory pages",
           undefined,
           cause
         )
       )
     )
-    return rows.some((row) => {
-      if (row.page_id === null || row.page_path === null) return true
-      if (canonicalWikiPath(row.page_path) === undefined) return true
-      return wikiPathWithinSpaceBoundary(row.page_path, path)
-    })
-  })
-
-  const hasPageBinding = Effect.fn("SqliteSpaceStore.hasPageBinding")(function* (
-    pageId: string,
-    path: string
-  ) {
-    const rows = yield* sql<{ readonly space_id: string }>`
-      SELECT space_id
-      FROM spaces
-      WHERE page_id = ${pageId} OR page_path = ${path}
-      LIMIT 1
-    `.pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          "page_binding",
-          "storage",
-          "Could not check Space page ownership",
-          undefined,
-          cause
-        )
-      )
-    )
-    return rows.length > 0
   })
 
   const { list, listArchived } = makeSpaceLists(sql)
@@ -469,47 +440,20 @@ export const makeSpaceStore = ({
         Effect.gen(function* () {
           const current = yield* get(spaceId)
           if (current === null) return null
-          if (current.page_id !== null || current.page_path !== null) {
-            return yield* storeError("page", "conflict", "Space already has a Memory page", spaceId)
-          }
-          const duplicate = yield* sql<{ readonly space_id: string }>`
-        SELECT space_id FROM spaces
-        WHERE (page_id = ${pageId} OR page_path = ${pagePath})
-          AND space_id != ${spaceId}
-        LIMIT 1
-      `
-          if (duplicate.length > 0) {
+          if (current.page_id === pageId && current.page_path === pagePath) return current
+          if (heldByAnother(yield* activeBindingRows(spaceId), pageId, pagePath)) {
             return yield* storeError(
               "page",
               "conflict",
-              "That Memory page belongs to another Space",
+              "That Memory page belongs to or overlaps another Space’s page.",
               spaceId
             )
           }
-          const activeBindings = yield* sql<{
-            readonly space_id: string
-            readonly page_path: string
-          }>`
-        SELECT space_id, page_path
-        FROM spaces
-        WHERE space_id != ${spaceId}
-          AND archived_at IS NULL
-          AND page_path IS NOT NULL
+          yield* sql`
+        UPDATE spaces
+        SET page_id = NULL, page_path = NULL, updated_at = ${now}
+        WHERE archived_at IS NOT NULL AND (page_id = ${pageId} OR page_path = ${pagePath})
       `
-          if (
-            activeBindings.some(
-              (binding) =>
-                canonicalWikiPath(binding.page_path) === undefined ||
-                wikiSpaceBoundariesOverlap(pagePath, binding.page_path)
-            )
-          ) {
-            return yield* storeError(
-              "page",
-              "conflict",
-              "That Memory page overlaps another Space’s page.",
-              spaceId
-            )
-          }
           const rows = yield* sql<SpaceRow>`
         UPDATE spaces
         SET page_id = ${pageId}, page_path = ${pagePath}, updated_at = ${now}
@@ -526,35 +470,6 @@ export const makeSpaceStore = ({
           cause instanceof SpaceStoreError
             ? cause
             : storeError("page", "storage", "Could not bind Space page", spaceId, cause)
-        )
-      )
-  })
-
-  const detachPage = Effect.fn("SqliteSpaceStore.detachPage")(function* (
-    spaceId: string
-  ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
-    const now = DateTime.formatIso(yield* DateTime.now)
-    return yield* writer
-      .transact(
-        Effect.gen(function* () {
-          const current = yield* get(spaceId)
-          if (current === null) return null
-          const rows = yield* sql<SpaceRow>`
-        UPDATE spaces
-        SET page_id = NULL, page_path = NULL, updated_at = ${now}
-        WHERE space_id = ${spaceId} AND archived_at IS NULL
-        RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, created_at, updated_at, archived_at
-      `
-          yield* spaceJobs.syncSpace(spaceId, now)
-          return rows[0] === undefined ? null : yield* decodeRow(rows[0], "page")
-        })
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          cause instanceof SpaceStoreError
-            ? cause
-            : storeError("page", "storage", "Could not detach Space page", spaceId, cause)
         )
       )
   })
@@ -688,44 +603,15 @@ export const makeSpaceStore = ({
               validSpaceId
             )
           }
-          if (row.page_path !== null) {
-            const pagePath = row.page_path
-            if (canonicalWikiPath(pagePath) === undefined) {
-              return yield* storeError(
-                "restore",
-                "conflict",
-                "This Space’s Memory page can no longer be used, so it cannot be restored.",
-                validSpaceId
-              )
-            }
-            const activeBindings = yield* sql<{
-              readonly space_id: string
-              readonly page_path: string
-            }>`
-          SELECT space_id, page_path
-          FROM spaces
-          WHERE space_id != ${validSpaceId}
-            AND archived_at IS NULL
-            AND page_path IS NOT NULL
-        `
-            if (
-              activeBindings.some(
-                (binding) =>
-                  canonicalWikiPath(binding.page_path) === undefined ||
-                  wikiSpaceBoundariesOverlap(pagePath, binding.page_path)
-              )
-            ) {
-              return yield* storeError(
-                "restore",
-                "conflict",
-                "That Memory page overlaps another Space’s page.",
-                validSpaceId
-              )
-            }
-          }
+          const keeps =
+            row.page_id !== null &&
+            row.page_path !== null &&
+            canonicalWikiPath(row.page_path) !== undefined &&
+            !heldByAnother(yield* activeBindingRows(validSpaceId), row.page_id, row.page_path)
           const restored = yield* sql<SpaceRow>`
         UPDATE spaces
-        SET archived_at = NULL, updated_at = ${now}
+        SET archived_at = NULL, updated_at = ${now},
+            page_id = ${keeps ? row.page_id : null}, page_path = ${keeps ? row.page_path : null}
         WHERE space_id = ${validSpaceId} AND archived_at IS NOT NULL
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
                   inference_policy, mark, created_at, updated_at, archived_at
@@ -755,7 +641,6 @@ export const makeSpaceStore = ({
     update,
     setGeneratedInstructions,
     bindPage,
-    detachPage,
     archive,
     restore,
     detail,
@@ -764,7 +649,6 @@ export const makeSpaceStore = ({
     unlinkedSpaces,
     overview,
     setPinned,
-    hasPageBinding,
-    ownsWikiPath
+    activeBindings
   })
 }

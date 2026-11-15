@@ -3,7 +3,8 @@ import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
-import { canonicalWikiPath, type WikiLocationAuthority } from "./authority.js"
+import type { WikiLocationAuthority } from "./authority.js"
+import { canonicalWikiPath } from "./paths.js"
 import {
   commitWiki,
   createPage,
