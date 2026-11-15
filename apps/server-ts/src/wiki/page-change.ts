@@ -34,9 +34,7 @@ export interface WikiPlan<A> {
   readonly reason?: string
 }
 
-export type WikiPlanner<A, E = never> = (
-  snapshot: Snapshot
-) => Effect.Effect<WikiPlan<A>, WikiError | E>
+type WikiPlanner<A, E = never> = (snapshot: Snapshot) => Effect.Effect<WikiPlan<A>, WikiError | E>
 
 export interface WikiChanges {
   /** Plans from the current pages and saves the plan's writes as one commit; no writes, no commit. */

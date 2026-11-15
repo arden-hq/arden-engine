@@ -1,10 +1,13 @@
 import { cutText } from "@arden-hq/std/text"
 import { countOf } from "@arden-hq/std/count"
-import { ToolExecutionError } from "@arden-hq/loop"
+import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { Array as Arr, Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
-import { writeIdentity } from "./wiki-identity.js"
+import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
+import type { ServerRunContext } from "./run-context.js"
+import type { WikiLocationAuthority } from "../wiki/authority.js"
+import type { WikiCommitIdentity } from "../wiki/commit.js"
 import { captureReplayKey } from "../wiki/capture.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
@@ -20,13 +23,14 @@ import {
 } from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
 import { readTextPage } from "./read-text.js"
-import { recordApplied } from "../execution/tool-effect.js"
+import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
 import {
   MAX_PAGE_SOURCES,
   memorySource,
   pageReceipt,
   pagesReceipt,
-  reportProvenanceLines
+  reportProvenanceLines,
+  requireObserved
 } from "./wiki-records.js"
 import {
   CORE_CONDENSE_ADVICE,
@@ -93,7 +97,7 @@ const CreateParametersSchema = Schema.Struct({
   })
 })
 
-const EditParametersSchema = Schema.Struct({
+const PageEditSchema = Schema.Struct({
   path: WikiPathSchema,
   body: Schema.String.check(Schema.isPattern(/\S/u), Schema.isMaxLength(MAX_WIKI_CONTENT_CHARS))
     .annotate({
@@ -126,11 +130,28 @@ const EditParametersSchema = Schema.Struct({
   )
 )
 
-const CapturePatchSetParametersSchema = Schema.Struct({
-  edits: Schema.NonEmptyArray(EditParametersSchema).check(Schema.isMaxLength(12)).annotate({
-    description: "All already-read page replacements to commit together, from 1 to 12 pages."
+const EditParametersSchema = Schema.Struct({
+  ...PageEditSchema.fields,
+  path: WikiPathSchema.pipe(Schema.optionalKey),
+  edits: Schema.optionalKey(
+    Schema.NonEmptyArray(PageEditSchema).check(Schema.isMaxLength(12)).annotate({
+      description:
+        "Edits of several pages, from 1 to 12, saved together: all or none. Give these instead of path and its fields."
+    })
+  )
+}).check(
+  Schema.makeFilter((input) => {
+    const fields = [input.body, input.aliases, input.observation_period]
+    if (input.edits !== undefined)
+      return input.path === undefined && fields.every((field) => field === undefined)
+        ? undefined
+        : "Give edits, or path and its fields, not both"
+    if (input.path === undefined) return "Give path, or edits"
+    return fields.some((field) => field !== undefined)
+      ? undefined
+      : "Provide body, aliases or observation_period"
   })
-})
+)
 
 export const wikiFailure = (error: WikiError): ToolExecutionError => {
   switch (error.reason) {
@@ -318,6 +339,121 @@ export const pageNotFound = (snapshot: Snapshot, path: string): ToolExecutionErr
     preview: "Wiki page not found",
     retryable: false
   })
+}
+
+interface ChangedPage {
+  readonly pageId: string
+  readonly path: string
+  readonly title: string
+  readonly version: string
+}
+
+/** A page a change saved, and its version before the change. */
+export interface SavedPage<Page extends ChangedPage = ChangedPage> {
+  readonly page: Page
+  readonly before: string
+}
+
+type Found<Paths> = { readonly [K in keyof Paths]: PageRecord }
+
+/** The pages a run named, as it found them, and who it writes as. */
+export interface PagesTarget<Paths> {
+  readonly head: string
+  readonly records: Found<Paths>
+  readonly identity: WikiWriteIdentity
+  /** This run as the writer of a change made for `reason`, as a page service verb takes it. */
+  readonly writer: (reason: string) => {
+    readonly authority: WikiLocationAuthority
+    readonly commit: WikiCommitIdentity
+  }
+  /** Runs a page service call, failing as a tool fails. */
+  readonly run: <A>(effect: Effect.Effect<A, WikiError>) => Promise<A>
+}
+
+export interface WikiToolServices {
+  readonly wiki: Wiki["Service"]
+  readonly runs: Pick<RunQueries["Service"], "get" | "cause">
+}
+
+/** A page as this run found it, saved by a change that did not need to write it. */
+export const keptPage = (record: PageRecord) => ({
+  page: {
+    pageId: record.page.pageId,
+    path: record.resource.path,
+    title: record.page.title,
+    version: record.resource.versionId,
+    aliases: record.page.aliases,
+    lifecycle: record.page.lifecycle
+  },
+  before: record.resource.versionId
+})
+
+const findAll = <const Paths extends Arr.NonEmptyReadonlyArray<string>>(
+  paths: Paths,
+  find: (path: string) => PageRecord
+): Found<Paths> => paths.map(find) as unknown as Found<Paths>
+
+/**
+ * Changes the pages at `paths` as this run: finds each page, saves through `save` as this run's
+ * writer, takes each saved page as the run's read of it, and receipts the pages whose version moved.
+ */
+export const changePages = async <
+  const Paths extends Arr.NonEmptyReadonlyArray<string>,
+  Page extends ChangedPage
+>(
+  { wiki, runs }: WikiToolServices,
+  ctx: ToolContext<ServerRunContext>,
+  effects: CallEffects,
+  request: {
+    readonly paths: Paths
+    /** The page a path names; an active page unless given. */
+    readonly find?: (snapshot: Snapshot, path: string) => PageRecord | null
+    readonly save: (
+      target: PagesTarget<Paths>
+    ) => Promise<Arr.NonEmptyReadonlyArray<SavedPage<Page>>>
+  }
+) => {
+  const snapshot = await loadSnapshot(wiki, ctx.signal)
+  const head = snapshot.head
+  if (head === null) throw pageNotFound(snapshot, request.paths[0])
+  const records = findAll(request.paths, (path) => {
+    const record = (request.find ?? activePage)(snapshot, path)
+    if (record === null) throw pageNotFound(snapshot, path)
+    return record
+  })
+  const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
+  const saved = await request.save({
+    head,
+    records,
+    identity,
+    writer: (reason) => ({
+      authority: identity.authority,
+      commit: { actor: identity.actor, origin: identity.origin, reason }
+    }),
+    run: (effect) =>
+      Effect.runPromise(effect.pipe(Effect.mapError(wikiFailure)), { signal: ctx.signal })
+  })
+  for (const { page } of saved) ctx.run.observations.observe(page.pageId, page.version)
+  const moved = saved.filter(({ page, before }) => page.version !== before)
+  if (moved.length > 0) effects.applied()
+  else effects.unchanged()
+  const [one] = moved
+  return {
+    records,
+    saved,
+    changed: one !== undefined,
+    receipt:
+      moved.length === 1 && one !== undefined
+        ? pageReceipt({ ctx, page: one.page, beforeVersion: one.before })
+        : pagesReceipt(
+            ctx,
+            moved.map(({ page, before }) => ({
+              ...page,
+              beforeVersion: before,
+              afterVersion: page.version
+            }))
+          )
+  }
 }
 
 const makeWikiTools = ({
@@ -508,112 +644,6 @@ const makeWikiTools = ({
   }),
 
   defineServerTool({
-    name: "wiki_apply_patch_set",
-    description: [
-      "Commit complete replacements for several already-read Wiki pages as one atomic Memory Capture revision. Only the Memory Capture worker can use it.",
-      "Include every page this evidence batch needs to change. The whole set conflicts if any page or the Wiki head changed since it was read."
-    ].join(" "),
-    parameters: Schema.toStandardSchemaV1(CapturePatchSetParametersSchema),
-    metadata: {
-      effect: "arden_db",
-      display_name: "Apply Memory Patch Set",
-      kind: "tool",
-      action: "write",
-      approval_preview: "Update several Memory pages together.",
-      source: "_wiki",
-      changes_state: true,
-      target: "reported",
-      concurrency_group: "wiki_write",
-      destructive: false,
-      internal_catalog: true,
-      private_scope: "memory_capture"
-    },
-    execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      if (snapshot.head === null)
-        throw new ToolExecutionError(
-          "The Wiki has no revision to patch. Create the first required page instead.",
-          { preview: "Wiki is empty", retryable: false }
-        )
-      const expectedHead = ctx.run.observations.observedHead()
-      if (expectedHead === undefined) {
-        throw new ToolExecutionError(
-          "Read every target page before applying the Memory patch set.",
-          { preview: "Read required", retryable: false }
-        )
-      }
-      const edits = await Promise.all(
-        Arr.map(input.edits, async (edit) => {
-          const record = activePage(snapshot, edit.path)
-          if (record === null) throw pageNotFound(snapshot, edit.path)
-          const expectedVersion = ctx.run.observations.observed(record.page.pageId)
-          if (expectedVersion === undefined) {
-            throw new ToolExecutionError(
-              `Read ${record.resource.path} before including it in the patch set.`,
-              { preview: "Read required", retryable: false }
-            )
-          }
-          return {
-            pageId: record.page.pageId,
-            path: record.resource.path,
-            expectedVersion,
-            content: await Effect.runPromise(reviseWikiPage(record.page, edit), {
-              signal: ctx.signal
-            })
-          }
-        })
-      )
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      if (identity.captureBatch === null) {
-        throw new ToolExecutionError(
-          "Only the built-in Memory Capture worker can apply a Memory patch set.",
-          { preview: "Memory Capture required", retryable: false }
-        )
-      }
-      const pages = await Effect.runPromise(
-        wiki
-          .update({
-            edits,
-            expectedHead,
-            authority: identity.authority,
-            commit: {
-              actor: identity.actor,
-              origin: identity.origin,
-              reason: `capture Memory patch set for ${edits.map(({ path }) => path).join(", ")}`,
-              replayKey: captureReplayKey(identity.captureBatch, "patch")
-            }
-          })
-          .pipe(Effect.mapError(wikiFailure)),
-        { signal: ctx.signal }
-      )
-      const before = new Map(edits.map((edit) => [edit.pageId, edit.expectedVersion]))
-      const changed = pages.some((page) => page.version !== before.get(page.pageId))
-      if (changed) effects.applied()
-      else effects.unchanged()
-      const receipt = changed
-        ? pagesReceipt(
-            ctx,
-            pages.map((page) => ({
-              pageId: page.pageId,
-              path: page.path,
-              title: page.title,
-              beforeVersion: before.get(page.pageId) ?? page.version,
-              afterVersion: page.version
-            }))
-          )
-        : undefined
-      return {
-        ...(receipt === undefined ? {} : { host: receipt }),
-        result: changed
-          ? `Updated ${pages.map((page) => page.path).join(", ")} in one Memory commit.`
-          : "Every page in the Memory patch set was already current.",
-        preview: changed ? "Memory pages updated" : "Memory pages unchanged",
-        data: { pages: pages.map(writtenPageData), changed }
-      }
-    }
-  }),
-
-  defineServerTool({
     name: "wiki_create_page",
     description: [
       "Create a new wiki page at an exact relative POSIX .md path inside an existing wiki directory.",
@@ -688,8 +718,8 @@ const makeWikiTools = ({
   defineServerTool({
     name: "wiki_edit_page",
     description: [
-      "Replace the Markdown body, aliases and/or observation_period of one existing wiki page.",
-      "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read the page first to base the edit on its",
+      "Replace the Markdown body, aliases and/or observation_period of one existing wiki page, or of up to 12 pages saved together as edits.",
+      "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read each page first to base the edit on its",
       "current content; the edit fails if the wiki changed since that read.",
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting;`,
       `create another page only for a distinct subject or useful reading scope, with a contextual link. ${STANDING_LIMIT_NOTE}`
@@ -700,7 +730,7 @@ const makeWikiTools = ({
       display_name: "Edit Wiki Page",
       kind: "tool",
       action: "write",
-      approval_preview: "Edit one Memory page.",
+      approval_preview: "Edit Memory pages.",
       source: "_wiki",
       scopes: ["memory_capture"],
       changes_state: true,
@@ -709,59 +739,74 @@ const makeWikiTools = ({
       target: "reported"
     },
     execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = activePage(snapshot, input.path)
-      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-      const replacement = await Effect.runPromise(reviseWikiPage(record.page, input), {
-        signal: ctx.signal
-      })
-      if (replacement === record.page.content) {
-        ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
-        effects.unchanged()
-        return {
-          result: `${record.resource.path} already has the requested content, aliases and observation period.`,
-          preview: "Wiki page unchanged",
-          data: { page: pageData(record), changed: false }
-        }
-      }
-      const observedVersion = ctx.run.observations.observed(record.page.pageId)
-      if (observedVersion === undefined) {
-        throw new ToolExecutionError(
-          "Read this wiki page before changing it. Call wiki_read_page for this exact path, then retry the change.",
-          { preview: "Read required", retryable: false }
-        )
-      }
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const [updated] = await recordApplied(
-        effects,
-        Effect.runPromise(
-          wiki
-            .update({
-              edits: [
-                {
-                  pageId: record.page.pageId,
-                  content: replacement,
-                  expectedVersion: observedVersion
-                }
-              ],
-              expectedHead: snapshot.head,
+      const edits = input.edits ?? [{ ...input, path: input.path ?? "" }]
+      const { records, saved, changed, receipt } = await changePages({ wiki, runs }, ctx, effects, {
+        paths: Arr.map(edits, (edit) => edit.path),
+        save: async ({ head, records, identity, writer, run }) => {
+          const revised = await Promise.all(
+            Arr.map(Arr.zip(edits, records), async ([edit, record]) => ({
+              record,
+              content: await Effect.runPromise(reviseWikiPage(record.page, edit), {
+                signal: ctx.signal
+              })
+            }))
+          )
+          // Capture saves a batch's edits once even when its run sends them again: every page
+          // it read goes into that one save, guarded by the head it read.
+          const replayKey =
+            input.edits === undefined || identity.captureBatch === null
+              ? undefined
+              : captureReplayKey(identity.captureBatch, "patch")
+          const sent = revised.filter(
+            ({ record, content }) => replayKey !== undefined || content !== record.page.content
+          )
+          if (!Arr.isArrayNonEmpty(sent)) return Arr.map(revised, ({ record }) => keptPage(record))
+          const expectedHead = replayKey === undefined ? head : ctx.run.observations.observedHead()
+          if (expectedHead === undefined)
+            throw new ToolExecutionError("Read every page before editing them, then retry.", {
+              preview: "Read required",
+              retryable: false
+            })
+          const sentEdits = Arr.map(sent, ({ record, content }) => ({
+            pageId: record.page.pageId,
+            content,
+            expectedVersion: requireObserved(ctx.run, record)
+          }))
+          const pages = await run(
+            wiki.update({
+              edits: sentEdits,
+              expectedHead,
               authority: identity.authority,
               commit: {
-                actor: identity.actor,
-                origin: identity.origin,
-                reason: `edit wiki page ${record.resource.path}`
+                ...writer(
+                  `edit wiki page ${sent.map(({ record }) => record.resource.path).join(", ")}`
+                ).commit,
+                ...(replayKey === undefined ? {} : { replayKey })
               }
             })
-            .pipe(Effect.mapError(wikiFailure)),
-          { signal: ctx.signal }
-        )
-      )
-      ctx.run.observations.observe(updated.pageId, updated.version)
+          )
+          return Arr.map(Arr.zip(pages, sentEdits), ([page, edit]) => ({
+            page,
+            before: edit.expectedVersion
+          }))
+        }
+      })
+      const paths = saved.map(({ page }) => page.path).join(", ")
+      const [first] = records
+      const [only] = saved
       return {
-        result: `Updated ${updated.path}.`,
-        preview: "Wiki page updated",
-        data: { page: writtenPageData(updated), changed: true },
-        host: pageReceipt({ ctx, page: updated, beforeVersion: observedVersion })
+        ...(receipt === undefined ? {} : { host: receipt }),
+        result: changed
+          ? `Updated ${paths}.`
+          : `${paths} already ${saved.length === 1 ? "has" : "have"} the requested content, aliases and observation period.`,
+        preview: changed ? "Wiki page updated" : "Wiki page unchanged",
+        data:
+          input.edits !== undefined
+            ? { pages: saved.map(({ page }) => writtenPageData(page)), changed }
+            : {
+                page: changed && only !== undefined ? writtenPageData(only.page) : pageData(first),
+                changed
+              }
       }
     }
   })
