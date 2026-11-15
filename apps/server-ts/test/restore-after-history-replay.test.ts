@@ -2,16 +2,18 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 
+import { deferredCallOf } from "../src/persistence/tools/deferred.js"
 import { makeObservationRegistry, type ObservationRegistry } from "../src/tools/run-context.js"
 import { namedTool, wikiToolsOver } from "./fixtures/wiki-repository.js"
 import { partialService } from "./kit.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 import type { Wiki } from "../src/wiki/service.js"
 
-// Every wiki_restore_page call on the copy, replayed against today's restore gates with no
-// model and no Memory write: today's parameters, and whether the run had seen the page by then,
-// once under the old rule (a read or a write) and once with a history listing counting too.
-// Pages are keyed by the path each call named. Only counts leave this file.
+// Every wiki_restore_page call on the copy, replayed against today's restore gates with no model
+// and no Memory write. A "read first" failure is the approved follow-up of a card that waited in
+// the chat when it carries the card's call id with ":approved"; that follow-up ran in a new
+// toolset, which had none of its run's reads. Today the card carries them. Pages are keyed by the
+// path each call named. Only counts leave this file.
 
 const located = locateReplayCopy()
 
@@ -26,6 +28,7 @@ const SEES_PAGE = new Set([
 
 interface CallRow {
   readonly run_id: string
+  readonly tool_call_id: string
   readonly tool_name: string
   readonly arguments_json: string
   readonly is_error: number | null
@@ -44,7 +47,7 @@ it("replays every page restore on the copy against today's gates", async (contex
     located.copy,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      return yield* sql<CallRow>`SELECT run_id, tool_name, arguments_json,
+      return yield* sql<CallRow>`SELECT run_id, tool_call_id, tool_name, arguments_json,
           json_extract(result_json, '$.is_error') AS is_error,
           json_extract(result_json, '$.preview') AS preview
         FROM tool_calls
@@ -62,49 +65,53 @@ it("replays every page restore on the copy against today's gates", async (contex
     )
     return validated.issues === undefined
   }
-  const before = new Map<string, ObservationRegistry>()
-  const after = new Map<string, ObservationRegistry>()
-  const registry = (runs: Map<string, ObservationRegistry>, runId: string) => {
+  const runs = new Map<string, ObservationRegistry>()
+  const registry = (runId: string): ObservationRegistry => {
     const existing = runs.get(runId)
     if (existing !== undefined) return existing
     const made = makeObservationRegistry()
     runs.set(runId, made)
     return made
   }
+  /** Whether the run had seen the page when each card was made, keyed by the card's call. */
+  const seenWhenAsked = new Map<string, boolean>()
   const counts = {
     restores: 0,
     awaitedApproval: 0,
     readFirst: 0,
+    readFirstApprovedFollowUps: 0,
+    readFirstWhoseRunHadSeenThePage: 0,
     restored: 0,
-    acceptedByTodaysParameters: 0,
-    readFirstSeenByReadOrWrite: 0,
-    readFirstSeenOnceHistoryCounts: 0
+    acceptedByTodaysParameters: 0
   }
   for (const row of rows) {
     const path = pathOf(row)
     if (row.tool_name === "wiki_restore_page") {
       counts.restores += 1
       if (await decodes(row)) counts.acceptedByTodaysParameters += 1
-      if (row.preview === "Waits on the user's approval") counts.awaitedApproval += 1
+      if (row.preview === "Waits on the user's approval") {
+        counts.awaitedApproval += 1
+        seenWhenAsked.set(
+          `${row.run_id}/${row.tool_call_id}`,
+          path !== undefined && registry(row.run_id).observed(path) !== undefined
+        )
+      }
       if (row.preview === "Wiki page restored") counts.restored += 1
       if (row.preview === "Read required") {
         counts.readFirst += 1
-        if (path !== undefined && registry(before, row.run_id).observed(path) !== undefined)
-          counts.readFirstSeenByReadOrWrite += 1
-        if (path !== undefined && registry(after, row.run_id).observed(path) !== undefined)
-          counts.readFirstSeenOnceHistoryCounts += 1
+        const card = deferredCallOf(row.tool_call_id)
+        if (card !== undefined && seenWhenAsked.has(`${row.run_id}/${card}`)) {
+          counts.readFirstApprovedFollowUps += 1
+          if (seenWhenAsked.get(`${row.run_id}/${card}`) === true)
+            counts.readFirstWhoseRunHadSeenThePage += 1
+        }
       }
     }
     if (path === undefined || row.is_error === 1) continue
-    if (SEES_PAGE.has(row.tool_name)) {
-      registry(before, row.run_id).observe(path, "seen")
-      registry(after, row.run_id).observe(path, "seen")
-    }
-    if (row.tool_name === "wiki_page_history") registry(after, row.run_id).observe(path, "seen")
+    if (SEES_PAGE.has(row.tool_name) || row.tool_name === "wiki_page_history")
+      registry(row.run_id).observe(path, "seen")
   }
   // Vitest swallows console output; a direct write reaches the terminal.
   process.stdout.write(`Restore replay: ${JSON.stringify(counts)}\n`)
-  expect(counts.readFirstSeenOnceHistoryCounts).toBeGreaterThanOrEqual(
-    counts.readFirstSeenByReadOrWrite
-  )
+  expect(counts.readFirstApprovedFollowUps).toBe(counts.readFirst)
 })
