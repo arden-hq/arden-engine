@@ -1,8 +1,6 @@
 export { ManagedFileRepository } from "../repository/service.js"
 export type {
   AdoptableWorkingChange,
-  AdoptWorkingChangeOptions,
-  CommitInput,
   ManagedFileRepositoryOptions,
   ManagedFileRepositoryShape,
   RepositoryError,
@@ -12,7 +10,7 @@ export type {
   WorkingTreeStatus,
   WorkingTreeStatusOptions
 } from "../repository/service.js"
-export type { CommitResult } from "../repository/commit.js"
+export type { AdoptWorkingChangeOptions, CommitInput, CommitResult } from "../repository/commit.js"
 export { managedFileRepositoryNodeLayer } from "../storage/node.js"
 export {
   CorruptRepositoryError,
