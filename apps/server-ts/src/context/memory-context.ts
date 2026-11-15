@@ -44,7 +44,7 @@ export const MEMORY_READS: Readonly<
 
 // Each source of the Memory block has its own allowance, renders itself into it with its own
 // notices, and takes no room from another, so the block is at most their sum.
-// - Standing facts: each page up to its writer limit (core-memory.ts), at most two pages.
+// - Standing facts: each page up to its writer limit (core-memory.ts).
 // - The index: the smallest size tried (4,000 to 10,000) that lists every page outside the
 //   four largest folders on the owner's copy. Over it, folders fold.
 const INDEX_BYTES = 10_000
