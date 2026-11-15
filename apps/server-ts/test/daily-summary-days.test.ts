@@ -309,7 +309,7 @@ it("reads archived chats, past the first page of chats and of messages", async (
   expect(messages[0]).toContain("every owner chat's messages from this day (454)")
 }, 60_000)
 
-it("reads the reports last changed on each day, and only those", async () => {
+it("reads every report last changed on each day, marked or not, and never its own pages", async () => {
   const markdown = await withTempDatabase(
     Effect.gen(function* () {
       yield* (yield* DailySummaryPosition).current("2026-11-10")
@@ -317,11 +317,15 @@ it("reads the reports last changed on each day, and only those", async () => {
         pages: [
           page("reports/README.md", "user-automation", "Contract."),
           page("reports/eleventh.md", "user-automation", "Eleventh report."),
-          page("reports/twelfth.md", "user-automation", "Twelfth report.")
+          page("reports/twelfth.md", "user-automation", "Twelfth report."),
+          page("reports/unmarked.md", "", "A report without its page marker."),
+          page("daily/2026-11-10.md", "builtin-daily-summary", "Its own page.")
         ],
         updatedAt: new Map([
           ["reports/eleventh.md", "2026-11-11T10:00:00.000Z"],
-          ["reports/twelfth.md", "2026-11-12T10:00:00.000Z"]
+          ["reports/twelfth.md", "2026-11-12T10:00:00.000Z"],
+          ["reports/unmarked.md", "2026-11-12T11:00:00.000Z"],
+          ["daily/2026-11-10.md", "2026-11-12T12:00:00.000Z"]
         ])
       })
       yield* runner(job)
@@ -333,7 +337,7 @@ it("reads the reports last changed on each day, and only those", async () => {
   )
   expect(markdown).toEqual([
     { date: "2026-11-11", reports: ["reports/eleventh.md"] },
-    { date: "2026-11-12", reports: ["reports/twelfth.md"] }
+    { date: "2026-11-12", reports: ["reports/twelfth.md", "reports/unmarked.md"] }
   ])
 })
 
