@@ -6,7 +6,7 @@ import type { PageRecord } from "../wiki/snapshot.js"
 import type { SemanticMemoryMatch } from "../embedding/wiki-index.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { DiscussedChat } from "./discussed-in.js"
-import { isStandingFactsPage, STANDING_PAGE_LIMIT_CHARS } from "./core-memory.js"
+import { corePageBudget, isStandingFactsPage } from "./core-memory.js"
 import { FIELD_WEIGHT, lexicalScore, searchTerms } from "./lexical-score.js"
 
 // The word search reads this much of the query: enough for a long question, and the recorded
@@ -164,12 +164,14 @@ const renderStandingFacts = (
     .filter((record) => record.page.body.trim() !== "")
     .map((record) => {
       const body = record.page.body.trim()
+      const limit =
+        corePageBudget({ path: record.resource.path, pageId: record.page.pageId }) ?? body.length
       const shown =
-        body.length <= STANDING_PAGE_LIMIT_CHARS
+        body.length <= limit
           ? body
           : pageExcerpt(
               body,
-              byteLength(body.slice(0, STANDING_PAGE_LIMIT_CHARS)) + byteLength(PARTIAL_NOTICE),
+              byteLength(body.slice(0, limit)) + byteLength(PARTIAL_NOTICE),
               true
             )
       return {

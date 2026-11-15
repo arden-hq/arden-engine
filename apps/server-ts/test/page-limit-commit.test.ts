@@ -27,6 +27,7 @@ import type { WikiError } from "../src/wiki/errors.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { makeOutsideEdits } from "../src/wiki/outside-edits.js"
+import * as coreMemory from "../src/memory/core-memory.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
@@ -331,8 +332,9 @@ const sources = (directory: string): ReadonlyArray<string> =>
 /** Who reads a page's limit, and why. Only the commit refuses a write over it. */
 const LIMIT_READERS = {
   "memory/core-memory.ts": "asks for condensing before a page is full",
+  "memory/retrieval.ts": "cuts a page past its limit when it is sent",
   "tools/wiki.ts": "shows a page's size against its limit when it is read",
-  "wiki/commit.ts": "refuses any write that leaves a page over its limit"
+  "wiki/commit.ts": "refuses any write that grows a page past its limit"
 }
 
 it("reads a page's limit only in its listed readers, so no second refusal can appear", () => {
@@ -341,6 +343,7 @@ it("reads a page's limit only in its listed readers, so no second refusal can ap
     .filter((path) => /\bcorePageBudget\(/u.test(readFileSync(join(SOURCE, path), "utf8")))
   expect(readers).toContain("wiki/commit.ts")
   expect(readers.filter((path) => !(path in LIMIT_READERS))).toEqual([])
+  expect(Object.values(coreMemory).filter((value) => typeof value === "number")).toEqual([])
 })
 
 /**

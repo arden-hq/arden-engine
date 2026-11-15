@@ -5,7 +5,7 @@
 const STANDING_FACTS_PAGES = ["me.md", "profile.md"] as const
 
 /** What the Memory tools say about the standing-facts pages' limit. */
-export const STANDING_LIMIT_NOTE = `${STANDING_FACTS_PAGES.join(" and ")} are root profile pages with a smaller Core Memory limit; a write that leaves one over it is refused.`
+export const STANDING_LIMIT_NOTE = `${STANDING_FACTS_PAGES.join(" and ")} are root profile pages with a size limit; a write that grows one past it is refused.`
 
 export const isStandingFactsPage = (page: {
   readonly path: string
@@ -20,7 +20,7 @@ export const isStandingFactsPage = (page: {
  * The size writers keep each standing-facts page to, and the size each is sent whole up to:
  * the Memory block's allowance for one such page (context/memory-context.ts).
  */
-export const STANDING_PAGE_LIMIT_CHARS = 9_000
+const STANDING_PAGE_LIMIT_CHARS = 9_000
 
 /**
  * A Core Memory page is condensed before it is full, not after. Writes over the budget are
