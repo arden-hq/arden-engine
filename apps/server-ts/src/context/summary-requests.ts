@@ -1,4 +1,9 @@
-import type { ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
+import type {
+  AssistantMessage,
+  ModelProvider,
+  ModelProviderRequest,
+  ProviderMessage
+} from "@arden-hq/loop"
 
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 
@@ -16,6 +21,31 @@ export interface PrefixInput {
   readonly source: ReadonlyArray<StoredMessageEnvelope>
   readonly history: ReadonlyArray<StoredMessageEnvelope>
 }
+
+/**
+ * A provider's answer as the assistant message a replayed request carries.
+ * Every field is carried except the nulls a history message spells as absent,
+ * so replay state the loop adds beside `provider_state` (`origin`, which an
+ * adapter checks before it replays reasoning) reaches the replay unnamed here.
+ */
+export const replayedAssistant = ({
+  content,
+  tool_calls,
+  reasoning_content,
+  provider_tool_calls,
+  output_parts,
+  ...carried
+}: ProviderMessage): AssistantMessage => ({
+  ...carried,
+  role: "assistant",
+  content: content ?? "",
+  tool_calls: tool_calls ?? [],
+  output_parts: output_parts ?? [],
+  ...(reasoning_content === null ? {} : { reasoning_content }),
+  ...(provider_tool_calls === null || provider_tool_calls === undefined
+    ? {}
+    : { provider_tool_calls })
+})
 
 export const replayPrefix = (
   saved: SummaryRequest | undefined,

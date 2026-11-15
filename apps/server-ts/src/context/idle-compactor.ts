@@ -12,7 +12,7 @@ import { UsageStore } from "../persistence/usage/store.js"
 import { planCompaction, type CompactionPlan } from "./planner.js"
 import { HANDOFF_BYTES_PER_TOKEN, handoffContent } from "./handoff.js"
 import { summarizeContext } from "./summarizer.js"
-import { replayPrefix } from "./summary-requests.js"
+import { replayedAssistant, replayPrefix } from "./summary-requests.js"
 import type { IdleCompactionCandidate, IdleCompactionDecision } from "./idle-queue.js"
 
 export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor")(
@@ -132,25 +132,7 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
               maxOutputTokens: controls.summaryMaxTokens,
               cachedRequest: {
                 ...cachedRequest,
-                messages: [
-                  ...cachedRequest.messages,
-                  {
-                    role: "assistant",
-                    content: candidate.response.message.content ?? "",
-                    tool_calls: candidate.response.message.tool_calls ?? [],
-                    output_parts: candidate.response.message.output_parts ?? [],
-                    ...(candidate.response.message.reasoning_content === null
-                      ? {}
-                      : {
-                          reasoning_content: candidate.response.message.reasoning_content
-                        }),
-                    ...(candidate.response.message.provider_state === undefined
-                      ? {}
-                      : {
-                          provider_state: candidate.response.message.provider_state
-                        })
-                  }
-                ]
+                messages: [...cachedRequest.messages, replayedAssistant(candidate.response.message)]
               },
               fallback: "none",
               signal: AbortSignal.any([signal, fiberSignal]),
