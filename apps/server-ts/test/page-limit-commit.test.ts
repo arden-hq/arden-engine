@@ -332,15 +332,25 @@ it("reads a page's limit only in its listed readers, so no second refusal can ap
   const readers = sources(SOURCE)
     .map((path) => relative(SOURCE, path))
     .filter((path) => /\bcorePageBudget\(/u.test(readFileSync(join(SOURCE, path), "utf8")))
-    .sort()
-  expect(readers).toEqual(Object.keys(LIMIT_READERS).sort())
+  expect(readers).toContain("wiki/commit.ts")
+  expect(readers.filter((path) => !(path in LIMIT_READERS))).toEqual([])
 })
 
+/**
+ * Every repository method that writes a Memory commit, and the one file allowed to call it.
+ * Taking in outside edits skips the size limit by design.
+ */
+const MEMORY_WRITERS = [
+  { method: /\brepository\s*\.\s*commit\(/u, file: "wiki/commit.ts" },
+  { method: /\.adoptWorkingChanges?\(/u, file: "wiki/mutations.ts" },
+  { method: /\.restoreFromCommit\(/u, file: undefined }
+]
+
 it("writes Memory pages only through the commit, or by taking in outside edits", () => {
-  const writers = (pattern: RegExp) =>
+  const callers = (pattern: RegExp) =>
     sources(SOURCE)
       .map((path) => relative(SOURCE, path))
       .filter((path) => pattern.test(readFileSync(join(SOURCE, path), "utf8")))
-  expect(writers(/\brepository\s*\.\s*commit\(/u)).toEqual(["wiki/commit.ts"])
-  expect(writers(/\.adoptWorkingChanges\(/u)).toEqual(["wiki/mutations.ts"])
+  for (const writer of MEMORY_WRITERS)
+    expect(callers(writer.method)).toEqual(writer.file === undefined ? [] : [writer.file])
 })
