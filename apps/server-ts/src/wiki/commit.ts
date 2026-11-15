@@ -579,6 +579,13 @@ const pageBody = (bytes: Uint8Array): Effect.Effect<string> => {
   )
 }
 
+/**
+ * Whether a forgotten line binds this writer: every writer but the owner and the Space page
+ * writer, which writes only the Space's name the owner chose and fixed text.
+ */
+const keepsForgottenLines = (origin: WikiCommitOrigin): boolean =>
+  !isOwnerOrigin(origin) && origin.kind !== "space_page"
+
 const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function* (
   { repository, guarded }: CommitView,
   operation: WikiPageOperation
@@ -617,7 +624,7 @@ const COMMIT_RULES: ReadonlyArray<{
   { binds: isAutomatedOrigin, check: requireAutomatedRetirement },
   { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit },
   { binds: () => true, check: requireSystemPageKept },
-  { binds: (origin) => !isOwnerOrigin(origin), check: requireNoRetractedLine }
+  { binds: keepsForgottenLines, check: requireNoRetractedLine }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */

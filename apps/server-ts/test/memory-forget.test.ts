@@ -305,6 +305,28 @@ describe("forgetting a line", () => {
     })
   })
 
+  it("lets a Space be named like a forgotten line, and its page be made", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const heading = content("space", `# ${LINE}\n\n## Open loops\n\n## Related\n`)
+        const make = (commit: WikiCommitIdentity, path: string) =>
+          Effect.gen(function* () {
+            return yield* refusal(
+              commitWiki(memory.repository, { ...commit, expectedRevision: yield* memory.listing.head() }, [
+                createPage(path, path, heading)
+              ])
+            )
+          })
+        return {
+          spacePage: yield* make(identity({ kind: "space_page" }), "areas/space.md"),
+          capture: refusedFor(yield* make(CAPTURE, "areas/other.md"))
+        }
+      })
+    )
+    expect(outcome).toEqual({ spacePage: undefined, capture: "retraction" })
+  })
+
   it("lets the owner put a line back, in the app or in the file, and keeps it there", async () => {
     const outcome = await withMemory((memory) =>
       Effect.gen(function* () {
