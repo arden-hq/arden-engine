@@ -124,6 +124,12 @@ export class GlobalInstructions extends Context.Service<
   }
 >()("@arden-hq/server/context/GlobalInstructions") {}
 
+/** A version the file holds that the history failed to record, and the writer to record it under. */
+interface MissedVersion {
+  readonly digest: string
+  readonly writer: InstructionWriter
+}
+
 const historyError = (cause: InstructionVersionStoreError): GlobalInstructionsError =>
   error("history", "storage", "The standing rules history could not be read", cause)
 
@@ -131,7 +137,14 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
   const lock = yield* Semaphore.make(1)
   const store = yield* InstructionVersionStore
 
-  let missed: { readonly digest: string; readonly writer: InstructionWriter } | undefined
+  let missed: MissedVersion | undefined
+  const recordMissedVersion = (version: MissedVersion, cause: InstructionVersionStoreError) =>
+    Effect.sync(() => {
+      missed = version
+    }).pipe(
+      Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
+    )
+
   const record = (snapshot: GlobalInstructionsSnapshot, writer: InstructionWriter) =>
     store.append({ content: snapshot.content ?? "", digest: snapshot.version, writer }).pipe(
       Effect.tap(() =>
@@ -140,16 +153,10 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
         })
       ),
       Effect.asVoid,
-      Effect.catch((cause) =>
-        Effect.sync(() => {
-          missed = { digest: snapshot.version, writer }
-        }).pipe(
-          Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
-        )
-      )
+      Effect.catch((cause) => recordMissedVersion({ digest: snapshot.version, writer }, cause))
     )
 
-  const adopt = (snapshot: GlobalInstructionsSnapshot) =>
+  const recordUnseenVersion = (snapshot: GlobalInstructionsSnapshot) =>
     store.latest().pipe(
       Effect.matchEffect({
         onFailure: (cause) =>
@@ -162,7 +169,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
       })
     )
 
-  const read = () => lock.withPermit(readSnapshot(file).pipe(Effect.tap(adopt)))
+  const read = () => lock.withPermit(readSnapshot(file).pipe(Effect.tap(recordUnseenVersion)))
 
   const replace = Effect.fn("GlobalInstructions.replace")(function* (input: {
     readonly content: string
@@ -174,7 +181,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
         const content = input.content.trim()
         if (!withinLimit(content)) return yield* error("replace", "invalid", tooLarge)
         const current = yield* readSnapshot(file)
-        yield* adopt(current)
+        yield* recordUnseenVersion(current)
         if (current.content === (content === "" ? undefined : content)) return current
         if (current.version !== input.expectedVersion) {
           return yield* error(
