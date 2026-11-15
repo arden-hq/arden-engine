@@ -249,6 +249,15 @@ const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredMo
  * describes them (read 2026-11-16): `supported_efforts` lists them; `null`
  * means every gateway value; left out, the model offers no effort choice and
  * reasons at its own default. `mandatory` models reject `none`.
+ *
+ * Checked live on 2026-11-16: the gateway takes exactly the seven values of
+ * `OPENROUTER_EFFORTS` and refuses any other with a 400 naming them; a value
+ * a model does not list is mapped to its nearest level, not refused (`max`
+ * on Gemini 3.1 Flash Lite, `minimal` on Claude Haiku 5.5, `medium` on
+ * DeepSeek V4.1 Flash all answered); `none` on a mandatory model (Gemini 3.5
+ * Flash Lite, GLM 5.3 Flash, gpt-oss-20b) is refused with "Reasoning is
+ * mandatory for this endpoint and cannot be disabled." So the listed efforts
+ * are the ones offered, and `none` only where reasoning is optional.
  */
 const openRouterEfforts = (
   reasoning: (typeof OpenRouterModelSchema.Type)["reasoning"] | undefined
@@ -268,7 +277,13 @@ const OPENROUTER_EFFORTS = ["max", "xhigh", "high", "medium", "low", "minimal", 
  * (read 2026-11-16). Anthropic Claude: explicit breakpoints work on every
  * Claude provider (the top-level automatic form only on some). Alibaba:
  * "requires explicit cache breakpoints", on exactly these models; its
- * snapshot endpoints do not cache at all. Every other family the page
+ * snapshot endpoints do not cache at all. Checked live for `qwen/qwen-plus`
+ * on 2026-11-16: with the breakpoints a 35,329-token prompt wrote 35,313
+ * tokens and the repeat read all of them at a tenth of the input price;
+ * without them Alibaba still reused 35,200 implicitly, at a fifth. So the
+ * breakpoints are worth sending there, though not the only way it caches.
+ * `qwen/qwen3-max` and `qwen/qwen3-coder-plus` are no longer in the model
+ * list (2026-11-16) and match nothing until they return. Every other family the page
  * covers caches by prefix on its own: OpenAI, Grok, Moonshot, Groq,
  * DeepSeek, Z.AI, and Gemini 2.5 and newer ("implicit caching ... no
  * `cache_control` breakpoints required"; Gemini's explicit breakpoints are

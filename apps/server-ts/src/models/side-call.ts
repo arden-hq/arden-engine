@@ -73,11 +73,12 @@ export const sideCallEffort = ({
  * models whose reasoning is mandatory without any effort, and a `generic`
  * server may run a thinking model the settings say nothing about.
  *
- * Never more than the model's `outputCap`. OpenRouter documents only that
- * the limit's maximum is "the context length minus the prompt length"
- * (https://openrouter.ai/docs/api-reference/parameters), not whether a
- * limit over a model's `max_completion_tokens` is clamped or refused, so
- * the server is not asked for more than the model writes.
+ * Never more than the model's `outputCap`. OpenRouter clamps a larger limit
+ * rather than refusing it: `max_tokens: 500000` was answered normally by
+ * GPT-4o mini (cap 16,384), Claude Haiku 4.5 (64,000), Gemini 3.1 Flash
+ * Lite (65,536) and DeepSeek V4.1 Flash (393,216) on 2026-11-16. The cap is
+ * still applied here so the limit Arden sends is the limit the model works
+ * under, on any server, not one a router silently lowers.
  */
 export const sideCallOutputLimit = ({
   answerTokens,
