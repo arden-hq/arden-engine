@@ -125,14 +125,16 @@ interface MemoryIndexFold {
 }
 
 /**
- * The generated list of the pages under one folder: every active page has a line, or is
- * counted in a folded folder; none is left out. `folded` is in the order folders were folded;
- * `text` holds the lines in path order.
+ * The generated list of the pages under one folder: every active page has a line, falls under
+ * a folded folder's line, or is `unlisted`, past the size once every folder is folded.
+ * `folded` is in the order folders were folded; `text` holds the lines in path order and names
+ * no count, so a page that joins or leaves a folded folder leaves the text as it was.
  */
 export interface MemoryIndex {
   readonly root: string
   readonly lines: ReadonlyArray<MemoryIndexLine>
   readonly folded: ReadonlyArray<MemoryIndexFold>
+  readonly unlisted: number
   readonly text: string
   readonly bytes: number
 }
@@ -147,10 +149,7 @@ const byteLength = (value: string): number => encoder.encode(value).byteLength
 const indexLine = ({ path, summary }: MemoryIndexLine): string =>
   summary === null ? `- ${path}` : `- ${path}: ${summary}`
 
-const foldLine = ({ folder, pages }: MemoryIndexFold): string =>
-  `- ${folder === "" ? "(top level)" : folder}/ (${countLabel(pages)}, folded)`
-
-const countLabel = (pages: number): string => (pages === 1 ? "1 page" : `${pages} pages`)
+const foldLine = (folder: string): string => `- ${folder === "" ? "(top level)" : folder}/ (folded)`
 
 /** Reads each page's summary line ahead of the first index, so a turn does not wait for it. */
 export const prepareMemoryIndex = (pages: ReadonlyArray<PageRecord>): void => {
@@ -158,10 +157,10 @@ export const prepareMemoryIndex = (pages: ReadonlyArray<PageRecord>): void => {
 }
 
 /**
- * The index of the active pages under `root` ("" for all of Memory), in at most `maxBytes`
- * when that is possible. Over the size it folds the folder with the most direct pages, one at
- * a time, and the root folder last; it stops folding once it fits, or when every folder is
- * folded. Pure: the same pages give the same index.
+ * The index of the active pages under `root` ("" for all of Memory), in at most `maxBytes`.
+ * Over the size it folds the folder with the most direct pages, one at a time, and the root
+ * folder last, until it fits. When every folder that can fold is folded and it still does not
+ * fit, lines are left out from the end. Pure: the same pages give the same index.
  */
 export const memoryIndex = (
   pages: ReadonlyArray<PageRecord>,
@@ -202,7 +201,7 @@ export const memoryIndex = (
       .map(([folder, lines]) => ({
         folder,
         lines,
-        saves: lineBytes(lines) - byteLength(foldLine({ folder, pages: lines.length })) - 1
+        saves: lineBytes(lines) - byteLength(foldLine(folder)) - 1
       }))
       .filter((candidate) => candidate.saves > 0)
       .sort(
@@ -221,9 +220,25 @@ export const memoryIndex = (
     return !foldedFolders.has(folder === "." ? "" : folder)
   })
   const entries = [
-    ...lines.map((line) => ({ key: line.path, text: indexLine(line) })),
-    ...folded.map((fold) => ({ key: `${fold.folder}/`, text: foldLine(fold) }))
+    ...lines.map((line) => ({ key: line.path, text: indexLine(line), line, fold: undefined })),
+    ...folded.map((fold) => ({ key: `${fold.folder}/`, text: foldLine(fold.folder), line: undefined, fold }))
   ].sort((left, right) => left.key.localeCompare(right.key))
-  const text = entries.map((entry) => entry.text).join("\n")
-  return { root: options.root, lines, folded, text, bytes: byteLength(text) }
+  let shown = entries.length
+  let shownBytes = entries.reduce((sum, entry) => sum + byteLength(entry.text) + 1, 0) - 1
+  while (shown > 0 && shownBytes > options.maxBytes) {
+    shown -= 1
+    shownBytes -= byteLength(entries[shown]?.text ?? "") + 1
+  }
+  const kept = entries.slice(0, shown)
+  const text = kept.map((entry) => entry.text).join("\n")
+  return {
+    root: options.root,
+    lines: kept.flatMap((entry) => (entry.line === undefined ? [] : [entry.line])),
+    folded: folded.filter((fold) => kept.some((entry) => entry.fold === fold)),
+    unlisted: entries
+      .slice(shown)
+      .reduce((sum, entry) => sum + (entry.fold === undefined ? 1 : entry.fold.pages), 0),
+    text,
+    bytes: byteLength(text)
+  }
 }

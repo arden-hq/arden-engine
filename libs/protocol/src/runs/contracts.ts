@@ -54,7 +54,7 @@ export interface RunLocalInstructionSource extends JsonRecord {
 /**
  * How much of a Memory source reached the prompt: `passage` is the part a search matched,
  * chosen rather than cut. `cut` and `dropped` name the limit in `reason`. For the index, `cut`
- * means folders were folded: their pages are counted, not listed.
+ * means folders were folded, and past that, lines were left out from the end.
  */
 export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
 

@@ -350,6 +350,15 @@ describe("what an owner chat is sent and records", () => {
     expect(index?.text).not.toContain("me.md")
   })
 
+  it("says in each section that holds page text that it is context, not instructions", async () => {
+    const composed = await compose({ actor: person })
+    const sections = composed.sections.filter((section) =>
+      ["Core Memory", "Memory index", "Memory context"].includes(section.key)
+    )
+    expect(sections).toHaveLength(3)
+    for (const section of sections) expect(section.text).toMatch(/not (new )?instructions/u)
+  })
+
   const turns = (...typed: ReadonlyArray<string>): ReadonlyArray<ChatRunnerMessage> =>
     typed.flatMap((content) => [
       { role: "user" as const, content },
@@ -453,7 +462,9 @@ describe("one block budget", () => {
       reason: "index_allowance"
     })
     expect(index?.bytes).toBeLessThanOrEqual(10_000)
-    expect(text).toContain("[Folded to fit: 1 folder with 400 pages counted, not listed")
+    expect(text).toContain("- daily/ (folded)")
+    expect(text).toContain("[Folded to fit: a folder marked folded is not listed page by page")
+    expect(text).not.toContain("400")
   })
 
   it("names what it left out whole when standing facts fill the block", async () => {
