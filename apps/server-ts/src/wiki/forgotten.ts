@@ -1,18 +1,11 @@
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { countOf } from "@arden-hq/std/count"
 import { DateTime, Effect, type Schema } from "effect"
 import { randomUUID } from "node:crypto"
 
-import {
-  commitWiki,
-  createPage,
-  requireCommitRules,
-  updatePage,
-  type WikiWrite,
-  type WikiWriter
-} from "./commit.js"
+import { createPage, updatePage, type WikiWrite } from "./commit.js"
 import type { WikiLocationAuthority } from "./authority.js"
-import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
+import { wikiError, type WikiError } from "./errors.js"
+import type { WikiChangeWriter, WikiChanges, WikiPlan } from "./page-change.js"
 import { formatWikiPage, reviseWikiPage } from "./page.js"
 import {
   claimKey,
@@ -24,9 +17,8 @@ import {
   RETRACTIONS_KEY,
   storedRetractions
 } from "./retraction.js"
-import { activeRunPages, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
+import { activeRunPages, type PageRecord, type Snapshot } from "./snapshot.js"
 import { FORGOTTEN_PAGE_PATH } from "./code-owned-pages.js"
-import type { SpaceStore } from "../persistence/spaces/store.js"
 
 interface OwnerTurn {
   readonly sessionId: string
@@ -67,17 +59,6 @@ export interface WikiForgetMethods {
   /** Closes an open retraction, so its lines may be written again. */
   readonly undoForget: (input: WikiUndoForgetInput) => Effect.Effect<RetractionChange, WikiError>
 }
-
-interface Plan {
-  readonly change: RetractionChange
-  readonly head: string | null
-  readonly operations: ReadonlyArray<WikiWrite>
-}
-
-const forgetWriter = (turn: OwnerTurn): WikiWriter => ({
-  origin: { kind: "forget", sessionId: turn.sessionId },
-  authority: turn.authority
-})
 
 const FORGOTTEN_TITLE = "Forgotten"
 const FORGOTTEN_INTRO = [
@@ -146,7 +127,7 @@ const withEntriesKeepingUnreadable = (
 const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
   snapshot: Snapshot,
   input: WikiForgetInput
-): Effect.fn.Return<Plan, WikiError> {
+): Effect.fn.Return<WikiPlan<RetractionChange>, WikiError> {
   const claim = input.claim.trim().replace(/\s+/gu, " ")
   if (claim === "" || claim.length > MAX_CLAIM_CHARS)
     return yield* wikiError(
@@ -210,16 +191,16 @@ const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
   }
   const page = withEntriesKeepingUnreadable(current, [...stored, entry])
   return {
-    change: { entry, pages: [...changes, page.change] },
-    head: snapshot.head,
-    operations: [...operations, page.operation]
+    writes: [...operations, page.operation],
+    value: { entry, pages: [...changes, page.change] },
+    reason: `forget entry ${entry.id}`
   }
 })
 
 const undoPlan = Effect.fn("Wiki.undoPlan")(function* (
   snapshot: Snapshot,
   input: WikiUndoForgetInput
-): Effect.fn.Return<Plan, WikiError> {
+): Effect.fn.Return<WikiPlan<RetractionChange>, WikiError> {
   const current = forgottenPage(snapshot)
   const { stored, entries } = storedRetractions(current?.page.metadata ?? {})
   const open = entries.find((entry) => entry.id === input.id)
@@ -243,57 +224,35 @@ const undoPlan = Effect.fn("Wiki.undoPlan")(function* (
     stored.map((existing) => (readRetraction(existing)?.id === input.id ? entry : existing))
   )
   return {
-    change: { entry, pages: [page.change] },
-    head: snapshot.head,
-    operations: [page.operation]
+    writes: [page.operation],
+    value: { entry, pages: [page.change] },
+    reason: `undo forgotten entry ${input.id}`
   }
 })
 
-export const makeWikiForgetMethods = (
-  repository: ManagedFileRepositoryShape,
-  spaces: SpaceStore["Service"]
-): WikiForgetMethods => {
-  const planned = (
-    turn: OwnerTurn,
-    plan: (snapshot: Snapshot) => Effect.Effect<Plan, WikiError>
-  ): Effect.Effect<Plan, WikiError> =>
-    loadSnapshot(repository, "forget").pipe(
-      Effect.flatMap(plan),
-      Effect.tap((planned) =>
-        requireCommitRules({ repository, spaces }, forgetWriter(turn), planned.operations).pipe(
-          Effect.mapError(mapRevisionError("forget"))
-        )
-      )
-    )
-
-  const apply = (turn: OwnerTurn, reason: string, plan: Plan) =>
-    commitWiki(
-      { repository, spaces },
-      {
-        ...forgetWriter(turn),
-        actor: "user:chat",
-        reason,
-        expectedRevision: plan.head
-      },
-      plan.operations
-    ).pipe(Effect.mapError(mapRevisionError("forget")), Effect.as(plan.change))
-
+export const makeWikiForgetMethods = (changes: WikiChanges): WikiForgetMethods => {
+  const writer = (turn: OwnerTurn): WikiChangeWriter => ({
+    operation: "forget",
+    origin: { kind: "forget", sessionId: turn.sessionId },
+    authority: turn.authority,
+    actor: "user:chat",
+    reason: "forget"
+  })
+  const planned = <I extends { readonly turn: OwnerTurn }>(
+    plan: (snapshot: Snapshot, input: I) => Effect.Effect<WikiPlan<RetractionChange>, WikiError>
+  ) => ({
+    preview: (input: I) => changes.preview(writer(input.turn), (snapshot) => plan(snapshot, input)),
+    change: (input: I) =>
+      changes
+        .change(writer(input.turn), (snapshot) => plan(snapshot, input))
+        .pipe(Effect.map(({ value }) => value))
+  })
+  const forget = planned(forgetPlan)
+  const undo = planned(undoPlan)
   return {
-    planForget: (input) =>
-      planned(input.turn, (snapshot) => forgetPlan(snapshot, input)).pipe(
-        Effect.map((plan) => plan.change)
-      ),
-    forget: (input) =>
-      planned(input.turn, (snapshot) => forgetPlan(snapshot, input)).pipe(
-        Effect.flatMap((plan) => apply(input.turn, `forget entry ${plan.change.entry.id}`, plan))
-      ),
-    planUndoForget: (input) =>
-      planned(input.turn, (snapshot) => undoPlan(snapshot, input)).pipe(
-        Effect.map((plan) => plan.change)
-      ),
-    undoForget: (input) =>
-      planned(input.turn, (snapshot) => undoPlan(snapshot, input)).pipe(
-        Effect.flatMap((plan) => apply(input.turn, `undo forgotten entry ${input.id}`, plan))
-      )
+    planForget: forget.preview,
+    forget: forget.change,
+    planUndoForget: undo.preview,
+    undoForget: undo.change
   }
 }

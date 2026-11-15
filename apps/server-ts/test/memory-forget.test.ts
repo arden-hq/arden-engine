@@ -1,7 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq/revisions/effect"
+import {
+  ManagedFileRepository,
+  managedFileRepositoryNodeLayer,
+  type ManagedFileRepositoryShape
+} from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 
@@ -9,6 +13,8 @@ import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store
 import { GLOBAL_WIKI_LOCATION_AUTHORITY as GLOBAL } from "../src/wiki/authority.js"
 import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
 import { makeWikiForgetMethods } from "../src/wiki/forgotten.js"
+import { makeWikiListingMethods } from "../src/wiki/listing.js"
+import { makeWikiChanges } from "../src/wiki/page-change.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { partialService } from "./kit.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
@@ -22,6 +28,8 @@ const TURN = {
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
   activeBindings: () => Effect.succeed([])
 })
+const forgetting = (repository: ManagedFileRepositoryShape, store: SpaceStore["Service"]) =>
+  makeWikiChanges({ repository, spaces: store }, makeWikiListingMethods(repository).read)
 const content = (pageId: string, body: string) =>
   formatWikiPage({
     pageId,
@@ -50,7 +58,7 @@ it("forgetting a line removes every copy on every page in one commit, and no oth
         )
         const commits = () => repository.history({ limit: null }).pipe(Effect.map((h) => h.length))
         const before = yield* commits()
-        yield* makeWikiForgetMethods(repository, spaces).forget({
+        yield* makeWikiForgetMethods(forgetting(repository, spaces)).forget({
           lines: [LINE],
           claim: "Sam does not live in the old town",
           turn: TURN
@@ -117,7 +125,7 @@ it("a forget is refused outside the Space boundary of the run that asks for it",
           createPage("sam", "people/sam.md", content("sam", `${LINE}\nA baker.\n`)),
           createPage("town", "places/town.md", content("town", `${LINE}\nTwo bridges.\n`))
         ])
-        return yield* makeWikiForgetMethods(repository, space)
+        return yield* makeWikiForgetMethods(forgetting(repository, space))
           .forget({
             lines: [LINE],
             claim: "Sam does not live in the old town",

@@ -32,6 +32,7 @@ import { makeWikiHistoryMethods } from "../../src/wiki/history.js"
 import { makeWikiListingMethods } from "../../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../../src/wiki/mutations.js"
 import { formatWikiPage } from "../../src/wiki/page.js"
+import { makeWikiChanges } from "../../src/wiki/page-change.js"
 import { makeWikiRestoreMethods } from "../../src/wiki/restore.js"
 import { Wiki } from "../../src/wiki/service.js"
 import { partialService, recordOf, serverRunContext, sessionHeader } from "../kit.js"
@@ -63,12 +64,13 @@ export const withWikiRepository = async <A>(
     )
     const listing = makeWikiListingMethods(repository)
     const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {})
+    const changes = makeWikiChanges({ repository, spaces }, listing.read)
     const wiki = partialService<Wiki["Service"]>("Wiki", {
       ...listing,
       ...makeWikiHistoryMethods(repository, listing.snapshot),
       ...makeWikiChangeMethods(repository),
-      ...makeWikiRestoreMethods(repository, spaces, listing.read),
-      ...makeWikiMutationMethods(repository, spaces, listing.read)
+      ...makeWikiRestoreMethods(repository, changes),
+      ...makeWikiMutationMethods(changes, spaces)
     })
     const clock = distinctMillisClock()
     const save: WikiRepositoryFixture["save"] = async ({ pageId, path, body, origin, actor }) => {

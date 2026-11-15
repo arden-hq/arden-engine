@@ -28,6 +28,7 @@ import {
   type WikiMaintenancePrepareInput
 } from "./maintenance.js"
 import { makeWikiMutationMethods, type WikiMutationMethods } from "./mutations.js"
+import { makeWikiChanges } from "./page-change.js"
 import { makeOutsideEdits, type OutsideEditCheck, type OutsideEditState } from "./outside-edits.js"
 import { makeWikiPublisher, WikiChangeSink } from "./publication.js"
 import { makeWikiRenameMethods, type WikiRenameMethods } from "./rename.js"
@@ -101,13 +102,14 @@ const make = Effect.fn("Wiki.make")(function* (
         Effect.tap(publishSavedChanges)
       )
 
-  const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
-  const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
+  const changes = makeWikiChanges({ repository, spaces }, listing.read)
+  const mutations = makeWikiMutationMethods(changes, spaces)
+  const restores = makeWikiRestoreMethods(repository, changes)
   const capture = makeWikiCaptureMethods(repository)
-  const rename = makeWikiRenameMethods(repository, spaces, renameStore)
-  const imports = makeWikiImportMethods(repository, spaces)
-  const contentSteps = makeWikiContentStepMethods(repository, spaces)
-  const forgetting = makeWikiForgetMethods(repository, spaces)
+  const rename = makeWikiRenameMethods(repository, spaces, changes, renameStore)
+  const imports = makeWikiImportMethods(changes)
+  const contentSteps = makeWikiContentStepMethods(repository, changes)
+  const forgetting = makeWikiForgetMethods(changes)
 
   yield* diagnostics.startupPhase("wiki_ready")
   return Wiki.of({

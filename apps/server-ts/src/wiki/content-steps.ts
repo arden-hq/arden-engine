@@ -3,12 +3,12 @@ import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect } from "effect"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { commitWiki, createPage, updatePage, type WikiWrite } from "./commit.js"
+import { createPage, updatePage, type WikiWrite } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { isImportedPath } from "./collections.js"
 import { formatRedirectPage, namesTakenAt, normal, reviseWikiPage } from "./page.js"
-import { activeRunPages, loadSnapshot } from "./snapshot.js"
-import type { SpaceStore } from "../persistence/spaces/store.js"
+import { activeRunPages } from "./snapshot.js"
+import type { WikiChanges } from "./page-change.js"
 
 interface ContentStepPage {
   readonly path: string
@@ -56,7 +56,7 @@ const redirectId = (path: string): string => `wiki-redirect:path:${sha256Hex(nor
 
 export const makeWikiContentStepMethods = (
   repository: ManagedFileRepositoryShape,
-  spaces: SpaceStore["Service"]
+  changes: WikiChanges
 ): WikiContentStepMethods => ({
   applyContentStep: Effect.fn("Wiki.applyContentStep")(function* <E>(
     step: WikiContentStep<E>
@@ -66,72 +66,77 @@ export const makeWikiContentStepMethods = (
       .idempotencyReceipt(key)
       .pipe(Effect.mapError(mapRevisionError("read")))
     if (receipt !== null) return { kind: "already_applied" } as const
-    const snapshot = yield* loadSnapshot(repository, "update")
-    const pages = activeRunPages(snapshot.pages).filter(
-      ({ resource }) => !isImportedPath(resource.path)
-    )
-    const taken = namesTakenAt(snapshot.wholeSet.map((record) => record.resource.path))
-    const rewritten = yield* step.rewrite(
-      pages.map(({ page, resource }) => ({
-        path: resource.path,
-        title: page.title,
-        aliases: page.aliases,
-        body: page.body
-      })),
-      taken
-    )
-    const changed: Array<string> = []
-    const operations: Array<WikiWrite> = []
-    for (const [index, record] of pages.entries()) {
-      const next = rewritten.pages[index]
-      if (next === undefined) continue
-      const content = yield* reviseWikiPage(record.page, {
-        body: next.body,
-        aliases: next.aliases
-      }).pipe(
-        Effect.mapError((cause) =>
-          wikiError("update", "invalid", cause.message, { pageId: record.page.pageId, cause })
+    const { value: applied } = yield* changes.change(
+      {
+        operation: "update",
+        actor: "system",
+        origin: { kind: "system", name: `${ORIGIN_PREFIX}${step.name}` },
+        authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+        reason: step.reason
+      },
+      Effect.fn("Wiki.planContentStep")(function* (snapshot) {
+        const pages = activeRunPages(snapshot.pages).filter(
+          ({ resource }) => !isImportedPath(resource.path)
         )
-      )
-      if (content === record.page.content) continue
-      changed.push(record.resource.path)
-      operations.push(updatePage(record.resource, content))
-    }
-    const redirects = rewritten.redirects.flatMap(({ path, to }) => {
-      const target = pages[to]
-      return target === undefined ? [] : [{ path, target }]
-    })
-    for (const { path, target } of redirects) {
-      const pageId = redirectId(path)
-      operations.push(
-        createPage(
-          pageId,
-          path,
-          formatRedirectPage({ pageId, title: target.page.title, redirectTo: target.page.pageId })
+        const taken = namesTakenAt(snapshot.wholeSet.map((record) => record.resource.path))
+        const rewritten = yield* step.rewrite(
+          pages.map(({ page, resource }) => ({
+            path: resource.path,
+            title: page.title,
+            aliases: page.aliases,
+            body: page.body
+          })),
+          taken
         )
-      )
-    }
-    if (operations.length > 0) {
-      yield* commitWiki(
-        { repository, spaces },
-        {
-          actor: "system",
-          origin: { kind: "system", name: `${ORIGIN_PREFIX}${step.name}` },
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          reason: step.reason,
-          expectedRevision: snapshot.head
-        },
-        operations
-      ).pipe(Effect.mapError(mapRevisionError("update")))
-    }
-    if (snapshot.head !== null) {
+        const changed: Array<string> = []
+        const operations: Array<WikiWrite> = []
+        for (const [index, record] of pages.entries()) {
+          const next = rewritten.pages[index]
+          if (next === undefined) continue
+          const content = yield* reviseWikiPage(record.page, {
+            body: next.body,
+            aliases: next.aliases
+          }).pipe(
+            Effect.mapError((cause) =>
+              wikiError("update", "invalid", cause.message, { pageId: record.page.pageId, cause })
+            )
+          )
+          if (content === record.page.content) continue
+          changed.push(record.resource.path)
+          operations.push(updatePage(record.resource, content))
+        }
+        const redirects = rewritten.redirects.flatMap(({ path, to }) => {
+          const target = pages[to]
+          return target === undefined ? [] : [{ path, target }]
+        })
+        for (const { path, target } of redirects) {
+          const pageId = redirectId(path)
+          operations.push(
+            createPage(
+              pageId,
+              path,
+              formatRedirectPage({
+                pageId,
+                title: target.page.title,
+                redirectTo: target.page.pageId
+              })
+            )
+          )
+        }
+        return {
+          writes: operations,
+          value: {
+            head: snapshot.head,
+            changed: [...changed, ...redirects.map(({ path }) => path)]
+          }
+        }
+      })
+    )
+    if (applied.head !== null) {
       yield* repository
         .finalizeIdempotencyReceipt(key, key)
         .pipe(Effect.mapError(mapRevisionError("update")))
     }
-    return {
-      kind: "applied",
-      changedPaths: [...changed, ...redirects.map(({ path }) => path)]
-    } as const
+    return { kind: "applied", changedPaths: applied.changed } as const
   })
 })
