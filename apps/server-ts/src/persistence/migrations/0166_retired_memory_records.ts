@@ -8,8 +8,9 @@ import type { Migration } from "./index.js"
  *   allowance of its kind, and a Space source dropped for a retired reason is gone.
  * - A Space review input that a server path reads (a running review's `automation_runs.input_json`,
  *   `space_review_checkpoints`, and a queued job's `space_review_input`): pages with the
- *   `resident` basis are gone, in `pages` and in `reads.pages`. A finished run's input stays as
- *   it was sent; only replays read it, through `todayReviewInput`.
+ *   `resident` basis are gone, in `pages` and in `reads.pages`. A finished run's input is an
+ *   archive no server path reads, and stays as it was sent; replays read it through
+ *   `todayReviewInput`.
  * A row already in today's shape is left as it is.
  */
 

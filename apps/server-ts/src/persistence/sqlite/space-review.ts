@@ -566,7 +566,8 @@ export const makeSpaceReviewStore = ({
     function* (runId) {
       const rows = yield* sql<{ readonly input: string | null }>`SELECT attempt.input_json AS input
         FROM automation_runs AS attempt
-        WHERE attempt.chat_run_id = ${runId} AND attempt.purpose = 'space_review'`
+        WHERE attempt.chat_run_id = ${runId} AND attempt.purpose = 'space_review'
+          AND attempt.status = 'running'`
       const input = rows[0]?.input
       if (input === null || input === undefined) return undefined
       return (yield* decodeJson(SpaceReviewInputSchema, input)).reads
