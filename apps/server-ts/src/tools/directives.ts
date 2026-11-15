@@ -72,20 +72,6 @@ const approvalDiff = (before: string, after: string): string => {
   return diff
 }
 
-const approvalVersion = (ctx: {
-  readonly approval?: { readonly data?: Readonly<Record<string, unknown>> }
-}): string | null => {
-  const value = ctx.approval?.data?.expected_version
-  if (value === undefined) return null
-  if (typeof value !== "string") {
-    throw new ToolExecutionError("The approved instructions revision is invalid", {
-      preview: "Approval mismatch",
-      retryable: false
-    })
-  }
-  return value
-}
-
 const requireInteractiveSession = async (
   sessions: SessionQueries["Service"],
   run: ServerRunContext,
@@ -185,8 +171,7 @@ const makeRulesChange = ({
     }
     return {
       preview: content.trim() === "" ? "Clear instructions" : "Replace instructions",
-      diff: approvalDiff(current.content ?? "", content.trim()),
-      data: { expected_version: current.version }
+      diff: approvalDiff(current.content ?? "", content.trim())
     }
   }
 
@@ -199,8 +184,7 @@ const makeRulesChange = ({
     await requireInteractiveSession(sessions, ctx.run, ctx.signal)
     const current = await readCurrent(ctx.signal)
     const observed = ctx.run.observations.observed(DIRECTIVES_RESOURCE_ID)
-    const approved = approvalVersion(ctx)
-    const expected = approved ?? observed ?? (current.version === "absent" ? "absent" : null)
+    const expected = observed ?? (current.version === "absent" ? "absent" : null)
     if (expected === null) {
       throw new ToolExecutionError(
         "Read the current instructions before replacing them. Call directives_get, then retry.",

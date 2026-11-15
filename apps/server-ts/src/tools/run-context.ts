@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { Schema } from "effect"
 import type { ReviewPlans } from "./review-plans.js"
 
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
@@ -18,7 +19,18 @@ export interface ObservationRegistry {
   readonly observedHead: () => string | undefined
   readonly observe: (id: string, version: string) => void
   readonly observed: (id: string) => string | undefined
+  /** Everything this run has read, oldest first, to carry into a call it asked approval for. */
+  readonly snapshot: () => ObservationSnapshot
+  /** Takes what a run had read when it asked; what this toolset read itself is kept. */
+  readonly adopt: (snapshot: ObservationSnapshot) => void
 }
+
+export const ObservationSnapshotSchema = Schema.Struct({
+  head: Schema.optionalKey(Schema.String),
+  versions: Schema.Array(Schema.Tuple([Schema.String, Schema.String]))
+})
+
+export type ObservationSnapshot = typeof ObservationSnapshotSchema.Type
 
 /** Names for what a run read that is not a Memory page; a page uses its page id. */
 export const observedKey = {
@@ -36,20 +48,30 @@ const MAX_OBSERVATIONS = 256
 export const makeObservationRegistry = (): ObservationRegistry => {
   const versions = new Map<string, string>()
   let head: string | undefined
+  const observe = (id: string, version: string): void => {
+    versions.delete(id)
+    if (versions.size >= MAX_OBSERVATIONS) {
+      const oldest = versions.keys().next().value
+      if (oldest !== undefined) versions.delete(oldest)
+    }
+    versions.set(id, version)
+  }
   return {
     observeHead: (value: string): void => {
       head = value
     },
     observedHead: (): string | undefined => head,
-    observe: (id: string, version: string): void => {
-      versions.delete(id)
-      if (versions.size >= MAX_OBSERVATIONS) {
-        const oldest = versions.keys().next().value
-        if (oldest !== undefined) versions.delete(oldest)
-      }
-      versions.set(id, version)
-    },
-    observed: (id: string): string | undefined => versions.get(id)
+    observe,
+    observed: (id: string): string | undefined => versions.get(id),
+    snapshot: (): ObservationSnapshot => ({
+      ...(head === undefined ? {} : { head }),
+      versions: [...versions.entries()]
+    }),
+    adopt: (snapshot: ObservationSnapshot): void => {
+      if (head === undefined && snapshot.head !== undefined) head = snapshot.head
+      for (const [id, version] of snapshot.versions)
+        if (!versions.has(id)) observe(id, version)
+    }
   }
 }
 

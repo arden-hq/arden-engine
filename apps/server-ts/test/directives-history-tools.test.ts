@@ -71,7 +71,7 @@ const run = (
 ) => Effect.promise(() => tool.execute(input, ctx))
 
 it("lists each version with its writer, and restores one in the owner's turn", async () => {
-  const { listed, restored, after, diff } = await withRules("Rule one.\n", (tools, file) =>
+  const { listed, restored, after, diff, relisted } = await withRules("Rule one.\n", (tools, file) =>
     Effect.gen(function* () {
       const ctx = context()
       yield* run(named(tools, "directives_get"), {}, ctx)
@@ -83,7 +83,8 @@ it("lists each version with its writer, and restores one in the owner's turn", a
       )
       const restored = yield* run(named(tools, "directives_restore"), { version: 1 }, fresh)
       const after = yield* Effect.promise(() => readFile(file, "utf8"))
-      return { listed, restored, after, diff: prompt?.diff ?? "" }
+      const relisted = yield* run(named(tools, "directives_history"), {}, fresh)
+      return { listed, restored, after, diff: prompt?.diff ?? "", relisted }
     })
   )
   expect(listed).toContain("version 2 (current)")
@@ -92,6 +93,11 @@ it("lists each version with its writer, and restores one in the owner's turn", a
   expect(recordOf(restored)["preview"]).toBe("Instructions replaced")
   expect(diff).toContain("-Rule two.")
   expect(after).toBe("Rule one.\n")
+  expect(textOf(relisted)).toContain("version 3 (current)")
+  expect(textOf(relisted)).toContain("version 1 restored in arden:session/")
+  const versions = recordOf(recordOf(relisted)["data"])["versions"]
+  if (!Array.isArray(versions)) throw new Error("expected listed versions")
+  expect(recordOf(versions[0])).toMatchObject({ version: 3, writer: "restore", restored_from: 1 })
 })
 
 it("refuses a restore outside the owner's own turn", async () => {
