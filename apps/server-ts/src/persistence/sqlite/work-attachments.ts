@@ -4,9 +4,7 @@ import {
   type CreateSpaceTaskAttachmentRequest
 } from "@arden-hq/protocol/effect/spaces/work"
 import { DateTime, Effect, Schema } from "effect"
-import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { WorkStoreError, type TaskAddress, type WorkStore } from "../work/store.js"
-import { makeSpaceJobSql } from "./space-jobs.js"
 import { assertRunTaskAuthority } from "./run-task-authority.js"
 import { resolveTaskItem } from "./task-address.js"
 import { decodeWorkAttachment, workError, type WorkAttachmentRow } from "./work-records.js"
@@ -18,14 +16,11 @@ interface WorkAttachmentContentRow extends WorkAttachmentRow {
 }
 
 export const makeWorkAttachments = ({
-  writer,
-  sessionEvents
+  writer
 }: {
   readonly writer: Writer
-  readonly sessionEvents: SessionLifecycleEvents["Service"]
 }): Pick<WorkStore["Service"], "createAttachment" | "attachment"> => {
   const sql = writer.sql
-  const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const createAttachment = Effect.fn("SqliteWorkStore.createAttachment")(function* (
     address: TaskAddress,
     input: CreateSpaceTaskAttachmentRequest,
@@ -86,11 +81,6 @@ export const makeWorkAttachments = ({
           const row = rows[0]
           if (row === undefined)
             return yield* workError("storage", "Space task attachment insert returned no row")
-          yield* spaceJobs.queueTaskChanged(
-            task.item_id,
-            createdAt,
-            runId === undefined ? { kind: "owner" } : { kind: "run", runId }
-          )
           return yield* decodeWorkAttachment(row)
         })
       )

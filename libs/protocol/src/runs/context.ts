@@ -14,20 +14,8 @@ export const RunOriginSchema = Schema.Union([
     /** Automation runs behind the wake that started this one; absent: 0. */
     chain_depth: Schema.optionalKey(NonNegativeIntSchema)
   }),
-  Schema.Struct({
-    kind: Schema.Literal("task"),
-    item_id: Identity,
-    occurrence_id: Identity,
-    /** Automation runs behind the wake that started this one; absent: 0. */
-    chain_depth: Schema.optionalKey(NonNegativeIntSchema)
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("space"),
-    space_id: Identity,
-    occurrence_id: Identity,
-    /** Automation runs behind the wake that started this one; absent: 0. */
-    chain_depth: Schema.optionalKey(NonNegativeIntSchema)
-  }),
+  Schema.Struct({ kind: Schema.Literal("task"), item_id: Identity, occurrence_id: Identity }),
+  Schema.Struct({ kind: Schema.Literal("space"), space_id: Identity, occurrence_id: Identity }),
   Schema.Struct({ kind: Schema.Literal("unrecorded") })
 ])
 

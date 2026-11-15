@@ -28,7 +28,8 @@ const ACTED = new Set(["finished", "needs_you"])
 // A review that ran a model and ended with one of these advanced the Space's checkpoint.
 const CHECKPOINTED = new Set(["finished", "no_change", "needs_you"])
 // The changes that always have a wake of their own: a chat turn, mail and Space settings. A Task
-// change wakes a review only when the owner made it by hand, which a stored input does not say.
+// change wakes a review only when the owner made it by hand, with no run, which a stored input
+// does not say.
 const WOKEN_BY: ReadonlySet<ReviewChange> = new Set(["chat_turn", "mail", "space_settings"])
 
 const decodeTrigger = Schema.decodeUnknownSync(
@@ -130,7 +131,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           `Reviews that did something: ${counts.acted}; the check starts ${counts.actedStarts}.`,
           ...[...actedSkipped].map(([reason, count]) => `  not started, ${reason}: ${count}`),
           `Rows a chat, mail or settings wake still produces: ${wakes.woken}; the check starts ${wakes.wokenStart}.`,
-          `Rows only a Task change could produce, when the owner made it: ${wakes.taskOnly}.`,
+          `Rows only a Task change could produce, when the owner made it by hand: ${wakes.taskOnly}.`,
           `Rows with no change that wakes a review now: ${wakes.unwoken}; ${wakes.unwokenPagesOnly} with page changes, the rest with none.`,
           `A Task change alone while the Space held something: ${taskAlone.acted} acted, ${taskAlone.notActed} did not.`,
           ""
@@ -141,7 +142,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
       expect(counts.acted).toBe(113)
       expect(counts.actedStarts).toBe(62)
       // Every row a chat, mail or settings wake produces starts; a Task-only row starts only when
-      // the owner made that change; the rows with no waking change start none.
+      // the owner made that change by hand; the rows with no waking change start none.
       expect(wakes).toEqual({
         woken: 341,
         wokenStart: 341,

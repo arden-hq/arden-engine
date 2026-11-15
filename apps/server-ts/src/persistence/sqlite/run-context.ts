@@ -125,21 +125,18 @@ export const scheduledRunOrigin = (options: {
   readonly occurrenceId: string
   readonly chainDepth: number
 }): RunOrigin => {
-  const depth = options.chainDepth === 0 ? {} : { chain_depth: options.chainDepth }
   switch (options.job.purpose) {
     case "task_execution":
       return {
         kind: "task",
         item_id: options.job.owner_task_id,
-        occurrence_id: options.occurrenceId,
-        ...depth
+        occurrence_id: options.occurrenceId
       }
     case "space_review":
       return {
         kind: "space",
         space_id: options.job.owner_space_id,
-        occurrence_id: options.occurrenceId,
-        ...depth
+        occurrence_id: options.occurrenceId
       }
     case "user_automation":
     case "system":
@@ -147,7 +144,7 @@ export const scheduledRunOrigin = (options: {
         kind: "automation",
         automation_id: options.automationId,
         occurrence_id: options.occurrenceId,
-        ...depth
+        ...(options.chainDepth === 0 ? {} : { chain_depth: options.chainDepth })
       }
   }
 }
