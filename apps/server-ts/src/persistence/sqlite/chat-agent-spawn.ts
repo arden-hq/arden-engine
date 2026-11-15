@@ -65,6 +65,7 @@ import { spawnClientId } from "../sessions/lineage.js"
 import { mutationReceiptHost, type MutationOperationIdentity } from "../tools/mutation-receipt.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { insertChatKey } from "./chat-key-message.js"
+import { chatHref } from "../../sessions/chat-href.js"
 
 interface SpawnParentRow extends RunRow {
   readonly public_ref: string
@@ -161,7 +162,7 @@ export const agentSpawnResult = (
 
   return {
     content: [
-      `Started independent ${mode} agent [${sessionRef}](arden:session/${sessionRef}).`,
+      `Started independent ${mode} agent [${sessionRef}](${chatHref({ publicRef: sessionRef })}).`,
       "Continue independent work. Use agent_message with this reference to coordinate or nudge. Its final result is delivered here automatically; do not claim its findings before that notification arrives."
     ].join(" "),
     preview: "Agent started",
@@ -176,7 +177,7 @@ export const agentSpawnResult = (
         resourceRef: `session:${sessionId}`,
         domain: "session",
         title: child.name?.trim() || sessionRef,
-        href: `arden:session/${encodeURIComponent(sessionRef)}`
+        href: chatHref({ publicRef: sessionRef })
       }
     })
   }

@@ -3,6 +3,7 @@ import { Schema } from "effect"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { clipLine, cutBytes, cutText } from "@arden-hq/std/text"
+import { chatHref } from "../sessions/chat-href.js"
 
 export interface SpaceView {
   readonly space_id: string
@@ -388,7 +389,7 @@ const chatLine = (chat: SpaceChatView): string => {
   const link =
     chat.session_ref === undefined
       ? `"${name}" (session_id ${chat.session_id})`
-      : `[${name}](arden:session/${chat.session_ref})`
+      : `[${name}](${chatHref({ publicRef: chat.session_ref })})`
   return chat.summary === undefined ? `- ${link}` : `- ${link} — ${clipLine(chat.summary, 300)}`
 }
 

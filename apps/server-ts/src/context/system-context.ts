@@ -13,6 +13,7 @@ import type { AutomationId } from "../persistence/automations/model.js"
 import type { ChatTaskContext } from "../persistence/work/store.js"
 import type { SessionForkOrigin } from "@arden-hq/protocol/sessions"
 import { currentMillis } from "../runtime/clock.js"
+import { chatHref } from "../sessions/chat-href.js"
 
 const CHAT_TASK_DETAILS_LIMIT = 20_000
 const CHAT_TASK_LINE_LIMIT = 2_000
@@ -35,7 +36,7 @@ export const renderAgentFamilyContext = (
   const current = lineage[0]
   if (!current) throw new Error("Session lineage is empty")
   const parent = lineage[1]
-  const link = (session: SessionHistoryHeader) => `arden:session/${session.publicRef}`
+  const link = (session: SessionHistoryHeader) => chatHref({ publicRef: session.publicRef })
   return renderPromptSection(
     "Agent family",
     [
@@ -62,7 +63,7 @@ export const renderAgentFamilyContext = (
                 child.parentRunId === null || child.parentToolCallId === null
                   ? "assignment reference not recorded"
                   : `spawn ${child.parentRunId}/${child.parentToolCallId}`
-              return `- [${child.name ?? child.publicRef}](arden:session/${child.publicRef}): purpose ${child.purpose === null ? "not recorded" : JSON.stringify(child.purpose)}; ${assignment}; ${current}; ${ending}.`
+              return `- [${child.name ?? child.publicRef}](${chatHref({ publicRef: child.publicRef })}): purpose ${child.purpose === null ? "not recorded" : JSON.stringify(child.purpose)}; ${assignment}; ${current}; ${ending}.`
             })
           ].join("\n"),
       PROMPT_TEXT.agentFamily
@@ -77,7 +78,7 @@ export const renderForkOriginContext = (
     ? undefined
     : renderPromptSection(
         "Fork origin",
-        `${origin.sourceSessionRef === null ? `This conversation was forked from chat ${origin.sourceSessionId}; its public reference was not recorded.` : `This conversation was forked from [${origin.sourceSessionRef}](arden:session/${origin.sourceSessionRef}).`} The captured transcript ends at sequence ${origin.throughSequence}${origin.sourceMessageId === null ? " (the boundary message is unavailable)" : ` (message ${origin.sourceMessageId})`}. This records history only; it does not grant access to the source.`
+        `${origin.sourceSessionRef === null ? `This conversation was forked from chat ${origin.sourceSessionId}; its public reference was not recorded.` : `This conversation was forked from [${origin.sourceSessionRef}](${chatHref({ publicRef: origin.sourceSessionRef })}).`} The captured transcript ends at sequence ${origin.throughSequence}${origin.sourceMessageId === null ? " (the boundary message is unavailable)" : ` (message ${origin.sourceMessageId})`}. This records history only; it does not grant access to the source.`
       )
 
 const jsonText = (value: string, limit: number): string => JSON.stringify(cutText(value, limit))

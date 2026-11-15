@@ -1,6 +1,7 @@
 import type { TaskStateView } from "../persistence/work/task-state.js"
 import { PROMPT_CATALOG } from "./catalog.js"
 import { renderPromptSection } from "./format.js"
+import { chatHref } from "../sessions/chat-href.js"
 
 const recordLine = (value: string): string => `- ${value.trim().replaceAll(/\n\s*/g, "\n  ")}`
 
@@ -12,7 +13,7 @@ const section = (name: string, lines: ReadonlyArray<string>): ReadonlyArray<stri
 const recordText = (state: TaskStateView | undefined): string => {
   if (state === undefined) return "No record yet: this wake writes the first one."
   const { record, sessionRef, laterWakes } = state
-  const where = sessionRef === undefined ? "" : ` in [chat](arden:session/${sessionRef})`
+  const where = sessionRef === undefined ? "" : ` in [chat](${chatHref({ publicRef: sessionRef })})`
   return [
     `Written ${record.written_at}${where}.`,
     ...section("Done", record.done),

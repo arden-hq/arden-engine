@@ -2,27 +2,12 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { expect, it } from "vitest"
 
-// A chat link is built in one place, `chatHref` in tools/call-receipt.ts, and a chat named by its
-// id becomes a link only through `chatLinkOf` there. The files below built links before that
-// owner existed; they may move to it, and no file may join them.
+// A chat link is built in one place, `chatHref` in sessions/chat-href.ts, and read back only
+// there; a chat named by its id becomes a link only through `chatLinkOf` in tools/call-receipt.ts.
 
 const ROOT = join(import.meta.dirname, "../src")
-const OWNER = "tools/call-receipt.ts"
-
-const OLDER_BUILDERS = [
-  "automations/handlers/daily-summary.ts",
-  "automations/home-letter-links.ts",
-  "automations/space-review-input.ts",
-  "context/space-render.ts",
-  "context/system-context.ts",
-  "context/thread.ts",
-  "memory/chat-citations.ts",
-  "memory/retrieval.ts",
-  "persistence/sqlite/chat-agent-spawn.ts",
-  "prompts/task-state.ts",
-  "tools/agent-message.ts",
-  "tools/onboarding.ts"
-]
+const OWNER = "sessions/chat-href.ts"
+const LINKER = "tools/call-receipt.ts"
 
 const sources = (directory: string): ReadonlyArray<string> =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -36,18 +21,29 @@ const files = sources(ROOT).map((path) => ({
   text: readFileSync(path, "utf8")
 }))
 
-it("builds chat links only in the owner and in files that did so before it", () => {
+it("builds and reads chat links only in the owner", () => {
   const building = files
-    .filter(({ path, text }) => path !== OWNER && text.includes("arden:session/${"))
+    .filter(
+      ({ path, text }) =>
+        path !== OWNER && /arden:session\/\$\{|["'`]arden:session\/["'`]/u.test(text)
+    )
     .map(({ path }) => path)
-  expect(building.filter((path) => !OLDER_BUILDERS.includes(path))).toEqual([])
+  expect(building).toEqual([])
 })
 
-it("turns a chat id into a link only through the owner", () => {
+/** Files that load a chat's header and build a link, each from something else. */
+const LINKS_NOT_FROM_HEADERS = {
+  "tools/workflows.ts": "loads headers to check access; links a script's stored chat ref"
+}
+
+it("turns a chat id into a link only through chatLinkOf", () => {
   const looking = files
     .filter(
       ({ path, text }) =>
-        path !== OWNER && text.includes("loadHistoryHeader") && text.includes("arden:session/")
+        path !== LINKER &&
+        !(path in LINKS_NOT_FROM_HEADERS) &&
+        text.includes("loadHistoryHeader") &&
+        text.includes("chatHref(")
     )
     .map(({ path }) => path)
   expect(looking).toEqual([])

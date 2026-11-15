@@ -14,6 +14,7 @@ import { runItemLoop } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import type { DailySummaryPosition } from "../../persistence/daily-summary/store.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
+import { chatHref } from "../../sessions/chat-href.js"
 
 const DAILY_CONTRACT = `## Purpose
 Dated personal chronology and reflection, including summaries of recorded Arden activity.
@@ -108,7 +109,7 @@ export const makeDailySummaryRunner = (services: {
                 : contentText(record.envelope.content)
             if (text.trim().length === 0) continue
             found.push({
-              ref: `arden:session/${session.publicRef} (message ${record.messageId})`,
+              ref: `${chatHref({ publicRef: session.publicRef })} (message ${record.messageId})`,
               text: `${record.role} at ${DateTime.formatIso(record.createdAt)}: ${text}`
             })
           }

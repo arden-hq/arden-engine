@@ -19,7 +19,8 @@ import {
 import { ScriptRunner, statusLine } from "../workflows/script-runner.js"
 import { WORKFLOW_CANCEL_TOOL, WORKFLOW_RETRY_TOOL } from "../persistence/tools/tool-roles.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { appliedReceipt, chatHref } from "./call-receipt.js"
+import { appliedReceipt } from "./call-receipt.js"
+import { chatHref } from "../sessions/chat-href.js"
 import { actsAsPerson, sharedResourceSessions } from "../execution/authority.js"
 import { toolFailure } from "./tool-failure.js"
 

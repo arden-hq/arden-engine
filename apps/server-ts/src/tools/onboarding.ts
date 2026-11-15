@@ -29,6 +29,7 @@ import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
 import { appliedReceipt } from "./call-receipt.js"
 import { pagesReceipt } from "./wiki-records.js"
 import { toolFailure } from "./tool-failure.js"
+import { chatHref } from "../sessions/chat-href.js"
 
 const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 
@@ -285,7 +286,7 @@ const makeOnboardingTools = ({
           resourceRef: `approval_mode:${session.header.sessionId}`,
           domain: "session",
           title: `Approval mode: ${APPROVAL_MODE_LABEL[input.mode]}`,
-          href: `arden:session/${encodeURIComponent(session.header.publicRef)}`
+          href: chatHref({ publicRef: session.header.publicRef })
         })
       }
     }

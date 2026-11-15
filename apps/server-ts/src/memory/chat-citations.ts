@@ -1,3 +1,5 @@
+import { chatHref } from "../sessions/chat-href.js"
+
 export interface CitedChat {
   readonly publicRef: string
   readonly title: string
@@ -40,7 +42,7 @@ export const chatCitation = (
   chat: { readonly publicRef: string; readonly title: string },
   date: string | undefined
 ): string => {
-  const link = `[${linkLabel(chat.title)}](arden:session/${encodeURIComponent(chat.publicRef)})`
+  const link = `[${linkLabel(chat.title)}](${chatHref({ publicRef: chat.publicRef })})`
   return date === undefined ? link : `${link}, ${date}`
 }
 

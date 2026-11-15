@@ -3,6 +3,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { Effect } from "effect"
 import type { HomeAddressBook, HomeAddressNeeds } from "../persistence/home/model.js"
 import type { HomeStore } from "../persistence/home/store.js"
+import { chatHref } from "../sessions/chat-href.js"
 
 interface MarkdownNode {
   readonly type: string
@@ -88,8 +89,7 @@ function evidenceHref(entry: HomeEvidence, book: HomeAddressBook): string | null
   const turn = (sessionId: string, turnId: string | undefined): string | null => {
     const ref = book.sessionRefs.get(sessionId)
     if (ref === undefined) return null
-    const session = `arden:session/${encodeURIComponent(ref)}`
-    return turnId === undefined ? session : `${session}/${encodeURIComponent(turnId)}`
+    return chatHref(turnId === undefined ? { publicRef: ref } : { publicRef: ref, turnId })
   }
   switch (entry.kind) {
     case "task":

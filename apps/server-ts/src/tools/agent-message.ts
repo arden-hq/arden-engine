@@ -6,6 +6,7 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SessionStore } from "../persistence/sessions/store.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
+import { chatHref, chatRefOf } from "../sessions/chat-href.js"
 
 const makeAgentMessageTool = (services: {
   readonly sessions: SessionQueries["Service"]
@@ -48,9 +49,7 @@ const makeAgentMessageTool = (services: {
       destructive: false
     },
     execute: async (input, ctx, effects) => {
-      const ref = input.session_ref.startsWith("arden:session/")
-        ? input.session_ref.slice("arden:session/".length)
-        : input.session_ref
+      const ref = chatRefOf(input.session_ref)
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const matches = yield* services.store.list({ scope: "all", sessionRef: ref, limit: 1 })
@@ -97,7 +96,7 @@ const makeAgentMessageTool = (services: {
         }),
         { signal: ctx.signal }
       )
-      const targetLink = `arden:session/${result.destination.publicRef}`
+      const targetLink = chatHref({ publicRef: result.destination.publicRef })
       const receipt = await recordApplied(
         effects,
         ctx.run.sendMessage({

@@ -8,6 +8,7 @@ import { renderPromptSection } from "../prompts/format.js"
 import type { DiscussedChat } from "./discussed-in.js"
 import { corePageBudget, isStandingFactsPage } from "./core-memory.js"
 import { FIELD_WEIGHT, lexicalScore, searchTerms } from "./lexical-score.js"
+import { chatHref } from "../sessions/chat-href.js"
 
 // The word search reads this much of the query: enough for a long question, and the recorded
 // query stays small.
@@ -118,7 +119,7 @@ const discussedLine = (chats: ReadonlyArray<DiscussedChat> | undefined): Readonl
         `Discussed in: ${chats
           .map(
             (chat) =>
-              `[${chat.name}](arden:session/${chat.publicRef})${detail([chat.otherSpace, chat.savedAt === undefined ? undefined : utcDay(chat.savedAt)])}`
+              `[${chat.name}](${chatHref({ publicRef: chat.publicRef })})${detail([chat.otherSpace, chat.savedAt === undefined ? undefined : utcDay(chat.savedAt)])}`
           )
           .join("; ")}`
       ]

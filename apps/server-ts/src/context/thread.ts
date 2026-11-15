@@ -4,6 +4,7 @@ import { StoredThreadSchema } from "../persistence/sessions/thread.js"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { ThreadRecord } from "../persistence/focus-choices/store.js"
+import { chatHref } from "../sessions/chat-href.js"
 
 export const renderThreadContext = (input: unknown): string | undefined => {
   const decoded = Schema.decodeUnknownOption(StoredThreadSchema)(input)
@@ -16,7 +17,7 @@ export const renderThreadContext = (input: unknown): string | undefined => {
 
 const when = utcStamp
 const link = (chat: { readonly ref: string; readonly name: string }): string =>
-  `[${chat.name}](arden:session/${chat.ref})`
+  `[${chat.name}](${chatHref({ publicRef: chat.ref })})`
 
 const threadLine = (thread: ThreadRecord): string => {
   const name = `"${thread.name}" (thread_id ${thread.threadId})`

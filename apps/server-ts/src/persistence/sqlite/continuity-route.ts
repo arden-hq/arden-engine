@@ -3,6 +3,7 @@ import type { RunContext } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { CommunicationStoreError } from "../continuity/store.js"
+import { chatHref } from "../../sessions/chat-href.js"
 
 export interface SourceRunRow {
   readonly run_id: string
@@ -24,16 +25,13 @@ export const communicationError = (
     ...(cause === undefined ? {} : { cause })
   })
 
-const canonicalHref = (prefix: string, value: string): string =>
-  `${prefix}${encodeURIComponent(value)}`
-
 export const runDoor = Effect.fn(function* (
   sql: SqlClient.SqlClient,
   label: string,
   source: SourceRunRow,
   context: RunContext
 ) {
-  const href = canonicalHref("arden:session/", source.source_ref)
+  const href = chatHref({ publicRef: source.source_ref })
   const owner = context.belongs_to ?? context.origin
   const automationId = owner.kind === "automation" ? owner.automation_id : undefined
   const automation =
