@@ -7,7 +7,7 @@ import { Deferred, Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
-import { SpaceStore } from "../src/persistence/spaces/store.js"
+import { SpaceStore, type SpaceBindingRow } from "../src/persistence/spaces/store.js"
 import { archivePage, movePage, ownerInApp } from "../src/wiki/commit.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
@@ -16,6 +16,7 @@ import type { RunPage } from "../src/wiki/snapshot.js"
 import { commitWiki, type WikiCommitPoint } from "../src/wiki/commit.js"
 import {
   bindingOwnsPath,
+  isSpacePage,
   planSpacePage,
   spaceBinding,
   spaceOwnsPath,
@@ -66,8 +67,14 @@ const page = (
   })
 }
 
-const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding =>
-  spaceBinding({ space_id: spaceId, page_id: path === null ? null : pageId, page_path: path })
+const row = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBindingRow => ({
+  space_id: spaceId,
+  page_id: path === null ? null : pageId,
+  page_path: path
+})
+
+const binding = (spaceId: string, path: string | null, pageId?: string): SpaceBinding =>
+  spaceBinding(row(spaceId, path, pageId))
 
 describe("which pages a Space owns", () => {
   const pages = [
@@ -138,6 +145,17 @@ describe("a half-made binding", () => {
     expect(bindingOwnsPath(bound, "areas/garden/beds.md")).toBe(true)
     expect(bindingOwnsPath(bound, "people/sam.md")).toBe(false)
   })
+
+  it("keeps as its own page only the page its row names by a column that is set", async () => {
+    const own = (row: Parameters<typeof spaceBinding>[0], pageId: string, path: string) =>
+      Effect.runPromise(isSpacePage({ activeBindings: () => Effect.succeed([row]) }, pageId, path))
+    const unread = { space_id: "a", page_id: null, page_path: "../garden.md" }
+    expect(await own(unread, "page-x", "topics/garden.md")).toBe(false)
+    expect(await own(unread, "page-x", "../garden.md")).toBe(true)
+    const byId = { space_id: "a", page_id: "page-a", page_path: "../garden.md" }
+    expect(await own(byId, "page-a", "topics/garden.md")).toBe(true)
+    expect(await own(byId, "page-x", "topics/garden.md")).toBe(false)
+  })
 })
 
 describe("what gives an active Space its page", () => {
@@ -148,30 +166,30 @@ describe("what gives an active Space its page", () => {
   ]
 
   it("keeps a page that is still there and free", () => {
-    expect(planSpacePage(pages, binding("a", "areas/garden.md"), [])).toEqual({
+    expect(planSpacePage(pages, row("a", "areas/garden.md"), [])).toEqual({
       kind: "keep",
       page: { pageId: "id-areas/garden.md", pagePath: "areas/garden.md" }
     })
   })
 
   it("binds the page again at the path it was renamed to", () => {
-    expect(planSpacePage(pages, binding("a", "areas/old-name.md", "renamed"), [])).toEqual({
+    expect(planSpacePage(pages, row("a", "areas/old-name.md", "renamed"), [])).toEqual({
       kind: "rebind",
       page: { pageId: "renamed", pagePath: "areas/moved.md" }
     })
   })
 
   it("makes a fresh page when there is none, it is gone, or another active Space holds it", () => {
-    expect(planSpacePage(pages, binding("a", null), [])).toEqual({ kind: "create" })
-    expect(planSpacePage(pages, binding("a", "areas/gone.md"), [])).toEqual({ kind: "create" })
-    expect(planSpacePage(pages, binding("a", "areas/missing.md"), [])).toEqual({
+    expect(planSpacePage(pages, row("a", null), [])).toEqual({ kind: "create" })
+    expect(planSpacePage(pages, row("a", "areas/gone.md"), [])).toEqual({ kind: "create" })
+    expect(planSpacePage(pages, row("a", "areas/missing.md"), [])).toEqual({
       kind: "create"
     })
     expect(
-      planSpacePage(pages, binding("a", "areas/garden.md"), [binding("b", "areas/garden.md")])
+      planSpacePage(pages, row("a", "areas/garden.md"), [binding("b", "areas/garden.md")])
     ).toEqual({ kind: "create" })
     expect(
-      planSpacePage(pages, binding("a", "areas/garden.md"), [binding("b", "areas/garden/x.md")])
+      planSpacePage(pages, row("a", "areas/garden.md"), [binding("b", "areas/garden/x.md")])
     ).toEqual({ kind: "create" })
   })
 })

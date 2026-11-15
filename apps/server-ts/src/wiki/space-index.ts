@@ -27,7 +27,8 @@ export const spaceOwnsPath = (pagePath: string, path: string): boolean => {
 
 /**
  * Which pages an active Space is bound to. A half-made binding, with a page column missing or a
- * path that does not read, owns every path, so nothing is written where its pages might be.
+ * path that does not read, owns every path, so nothing is written where its pages might be. Its
+ * row is kept apart, so a reader of its page must say what a half-made binding means.
  */
 export type SpaceBinding =
   | {
@@ -36,12 +37,12 @@ export type SpaceBinding =
       readonly page_id: string
       readonly page_path: string
     }
-  | ({ readonly kind: "half_made" } & SpaceBindingRow)
+  | { readonly kind: "half_made"; readonly space_id: string; readonly row: SpaceBindingRow }
 
 export const spaceBinding = (row: SpaceBindingRow): SpaceBinding =>
   row.page_id !== null && row.page_path !== null && canonicalWikiPath(row.page_path) !== undefined
     ? { kind: "bound", space_id: row.space_id, page_id: row.page_id, page_path: row.page_path }
-    : { kind: "half_made", space_id: row.space_id, page_id: row.page_id, page_path: row.page_path }
+    : { kind: "half_made", space_id: row.space_id, row }
 
 export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
   binding.kind === "half_made" || spaceOwnsPath(binding.page_path, path)
@@ -51,7 +52,7 @@ const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boo
   others.some(
     (other) =>
       bindingOwnsPath(other, path) ||
-      (other.page_path !== null && spaceOwnsPath(path, other.page_path))
+      (other.kind === "bound" && spaceOwnsPath(path, other.page_path))
   )
 
 /** Whether another active Space holds the page, or overlaps the pages it would head. */
@@ -59,7 +60,9 @@ export const heldByAnother = (
   others: ReadonlyArray<SpaceBinding>,
   pageId: string,
   pagePath: string
-): boolean => others.some((other) => other.page_id === pageId) || overlapsAnother(others, pagePath)
+): boolean =>
+  others.some((other) => other.kind === "bound" && other.page_id === pageId) ||
+  overlapsAnother(others, pagePath)
 
 export const freeSpacePage = (
   others: ReadonlyArray<SpaceBinding>,
@@ -67,11 +70,25 @@ export const freeSpacePage = (
 ): FreeSpacePage | undefined =>
   heldByAnother(others, page.pageId, page.pagePath) ? undefined : (page as FreeSpacePage)
 
+/**
+ * Whether the page is the binding's own page. A half-made binding keeps the page its row names
+ * by a column that is set; when neither column names one, its own page is not known, and no
+ * page is kept for it.
+ */
+const keepsPage = (binding: SpaceBinding, pageId: string, path: string): boolean => {
+  switch (binding.kind) {
+    case "bound":
+      return binding.page_id === pageId || binding.page_path === path
+    case "half_made":
+      return binding.row.page_id === pageId || binding.row.page_path === path
+  }
+}
+
 const isBoundPage = (
   bindings: ReadonlyArray<SpaceBinding>,
   pageId: string,
   path: string
-): boolean => bindings.some((binding) => binding.page_id === pageId || binding.page_path === path)
+): boolean => bindings.some((binding) => keepsPage(binding, pageId, path))
 
 type ActiveBindings = Pick<SpaceStore["Service"], "activeBindings">
 
