@@ -240,11 +240,6 @@ const indexLine = ({ path, summary }: MemoryIndexLine): string =>
 
 const foldLine = (folder: string): string => `- ${folder === "" ? "(top level)" : folder}/ (folded)`
 
-/** Reads each page's summary line ahead of the first index, so a turn does not wait for it. */
-export const prepareMemoryIndex = (pages: ReadonlyArray<PageRecord>): void => {
-  for (const record of pages) wikiPageSummary(record.page, INDEX_SUMMARY_CHARS)
-}
-
 /**
  * The index of the active pages under `root` ("" for all of Memory), in at most `maxBytes`.
  * Over the size it folds the folder with the most direct pages, one at a time, and the root

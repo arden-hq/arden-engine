@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 import { prefetchTurnMemory } from "../src/context/turn-context.js"
 import { MemoryError } from "../src/memory/capture-batches.js"
-import { renderIndex } from "../src/memory/index-render.js"
+import { renderSpacePageList } from "../src/memory/index-render.js"
 import type { MemorySources } from "../src/memory/retrieval.js"
 import type { MemoryTurn } from "../src/memory/service.js"
 import { partialService } from "./kit.js"
@@ -13,12 +13,6 @@ const SOURCES: MemorySources = {
     text: "## Core Memory",
     sources: [
       { kind: "core", page_id: "me", version: "v1", bytes: 20, outcome: "whole", reason: null }
-    ]
-  }),
-  index: () => ({
-    text: "## Memory index",
-    sources: [
-      { kind: "index", root: "", listed: 1, folded: [], bytes: 40, outcome: "whole", reason: null }
     ]
   }),
   recall: () => ({
@@ -41,7 +35,7 @@ const run = async (sources: MemoryTurn["sources"] | undefined, reader: RunMemory
   const memory: MemoryTurn | undefined = sources && {
     revision: "rev-1",
     readContent: (pageId) => Effect.succeed({ pageId, path: "a.md", version: "v1", content: "" }),
-    spaceList: (space) => (maxBytes) => renderIndex([], { kind: "space", space }, maxBytes),
+    spaceList: (space) => (maxBytes) => renderSpacePageList([], space, maxBytes),
     sources
   }
   const prefetched = await Effect.runPromise(
@@ -68,13 +62,9 @@ const run = async (sources: MemoryTurn["sources"] | undefined, reader: RunMemory
   return { prefetched, records }
 }
 
-it("an owner is sent and recorded core, index and recall; a worker gets no recall", async () => {
+it("an owner is sent and recorded core and recall; a worker gets no recall", async () => {
   const owner = await run(() => Effect.succeed(SOURCES), "owner")
-  expect(owner.records[0]?.sources.map((source) => source.kind)).toEqual([
-    "core",
-    "index",
-    "recalled"
-  ])
+  expect(owner.records[0]?.sources.map((source) => source.kind)).toEqual(["core", "recalled"])
   const worker = await run(() => Effect.succeed({ ...SOURCES, recall: undefined }), "worker")
   expect(worker.prefetched.memoryContext.recall).toEqual([])
   expect(worker.records[0]).toMatchObject({ reader: "worker", query: null })

@@ -7,7 +7,6 @@ import type {
 } from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
 import { corePageBudget, STANDING_FACTS_PAGES } from "../memory/core-memory.js"
-import type { RenderedIndex } from "../memory/index-render.js"
 import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
@@ -27,8 +26,7 @@ export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined => {
   }
 }
 
-/** The Memory sources each reader is sent besides standing facts and the index, which every
- *  reader is sent. */
+/** The Memory sources each reader is sent besides standing facts, which every reader is sent. */
 export const MEMORY_READS: Readonly<
   Record<RunMemoryReader, { readonly space: boolean; readonly recall: boolean }>
 > = {
@@ -51,7 +49,6 @@ const MEMORY_BUDGET = {
     standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
   /** The standing-facts note and section heading. */
   standing_frame: 1_000,
-  index: 10_000,
   space: 10_000,
   space_page_list: 2_000,
   space_instructions: 4_000,
@@ -67,12 +64,11 @@ export interface SpaceMemoryInput {
 export interface SpacePageInput {
   readonly pageId: string
   readonly version: string
-  readonly list: (maxBytes: number) => RenderedIndex
+  readonly list: (maxBytes: number) => RenderedMemory
 }
 
 export interface MemoryContext {
   readonly core: ReadonlyArray<RuntimeSection>
-  readonly index: ReadonlyArray<RuntimeSection>
   readonly space: ReadonlyArray<RuntimeSection>
   readonly recall: ReadonlyArray<RuntimeSection>
   /** What the sections hold, source by source: one composition of the record. */
@@ -102,15 +98,9 @@ export const assembleMemoryContext = ({
   const standing = sources?.standing(MEMORY_BUDGET.standing_page) ?? none
   const spaced = space === undefined ? undefined : renderSpace(space)
   const list = space?.page?.list(MEMORY_BUDGET.space_page_list)
-  const index =
-    sources?.index({
-      maxBytes: MEMORY_BUDGET.index,
-      shownElsewhere: list?.shown ?? new Set()
-    }) ?? none
   const recall = sources?.recall?.(MEMORY_BUDGET.recall)
   return {
     core: textSection("Core Memory", standing.text),
-    index: textSection("Memory index", index.text),
     space:
       space === undefined || spaced === undefined
         ? []
@@ -126,7 +116,6 @@ export const assembleMemoryContext = ({
       budget: MEMORY_BUDGET,
       sources: [
         ...standing.sources,
-        ...index.sources,
         ...(spaced?.sources ?? []),
         ...(list?.sources ?? []),
         ...(recall?.sources ?? [])

@@ -53,8 +53,8 @@ export interface RunLocalInstructionSource extends JsonRecord {
 
 /**
  * How much of a Memory source reached the prompt: `passage` is the part a search matched,
- * chosen rather than cut. `cut` and `dropped` name the limit in `reason`. For the index, `cut`
- * means folders were folded to fit, and past that, lines were left out from the end.
+ * chosen rather than cut. `cut` and `dropped` name the limit in `reason`. For a list of pages,
+ * `cut` means folders were folded to fit, and past that, lines were left out from the end.
  */
 export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
 
@@ -63,7 +63,8 @@ export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
  * run's Memory block and takes none from another:
  * - `standing_page_allowance`: a standing-facts page's: the size its writers keep it to, and a
  *   size in bytes.
- * - `index_allowance`: the index's, or the Space context's share for the list of its pages.
+ * - `index_allowance`: the Space context's share for the list of its pages, or the Memory
+ *   index's in a composition stored before it was removed.
  * - `space_page_allowance`: the Space context's share for its Memory page.
  * - `recall_allowance`: the recalled pages'.
  */
@@ -75,9 +76,8 @@ export type RunMemoryCutReason =
 
 /**
  * The row of the Memory table a Run was sent by: `owner` (a person's chat turn) gets standing
- * facts, the index, its Space and recall; `worker` (a helper, Task worker, Space review or a
- * Run with no recorded actor) gets standing facts and the index. Automations get no Memory and
- * record none.
+ * facts, its Space and recall; `worker` (a helper, Task worker, Space review or a Run with no
+ * recorded actor) gets standing facts only. Automations get no Memory and record none.
  */
 export type RunMemoryReader = "owner" | "worker"
 
@@ -123,10 +123,9 @@ export interface RunMemoryRecalledSource extends RunMemoryPageFields {
 }
 
 /**
- * The generated index of the pages under `root` ("" is all of Memory): `listed` pages had a
- * line each, and each folded folder was counted as one line of `pages`. The Memory index leaves
- * out the pages a Space list in the same block shows by line, so no line is sent twice; those
- * pages are counted in that list's `listed`, and leaving them out is no fold.
+ * The generated list of the pages under `root`: `listed` pages had a line each, and each folded
+ * folder was counted as one line of `pages`. A composition stored before the Memory index was
+ * removed may also hold an index of all of Memory, with `root` "".
  */
 export interface RunMemoryIndexSource extends JsonRecord {
   readonly kind: "index"
@@ -149,12 +148,13 @@ export type RunMemorySource =
  * The allowances, in UTF-8 bytes, a Memory block was composed under: `standing_page` for each
  * standing-facts page and `standing_frame` for their note and heading; the Space context in
  * `space`, with `space_instructions` and `space_page` its shares, and `space_page_list` beside
- * it; `index` and `recall`.
+ * it; `recall`. `index` is the Memory index's allowance, present only in a budget stored before
+ * the Memory index was removed.
  */
 export interface RunMemoryBudget extends JsonRecord {
   readonly standing_page: number
   readonly standing_frame: number
-  readonly index: number
+  readonly index?: number
   readonly space: number
   readonly space_instructions: number
   readonly space_page: number

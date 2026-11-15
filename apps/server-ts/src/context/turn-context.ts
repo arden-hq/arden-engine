@@ -277,7 +277,6 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   return {
     sections: [
       ...(memoryContext?.core ?? []),
-      ...(memoryContext?.index ?? []),
       ...textSection("Fork origin", renderForkOriginContext(context.lineage[0]?.forkOrigin)),
       ...textSection("Communication", communication),
       ...textSection(

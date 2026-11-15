@@ -8,7 +8,6 @@ import type { SemanticMemoryMatch } from "../embedding/wiki-index.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { DiscussedChat } from "./discussed-in.js"
 import { corePageBudget, isStandingFactsPage } from "./core-memory.js"
-import { renderIndex } from "./index-render.js"
 import { FIELD_WEIGHT, lexicalScore, searchTerms } from "./lexical-score.js"
 import { chatHref } from "../sessions/chat-href.js"
 
@@ -33,10 +32,6 @@ export interface RenderedMemory {
 export interface MemorySources {
   /** Standing facts, each page in its writer limit and in `maxPageBytes`. */
   readonly standing: (maxPageBytes: number) => RenderedMemory
-  readonly index: (room: {
-    readonly maxBytes: number
-    readonly shownElsewhere: ReadonlySet<string>
-  }) => RenderedMemory
   /** Undefined when this run has no recall. */
   readonly recall: ((maxBytes: number) => RenderedMemory) | undefined
 }
@@ -467,8 +462,6 @@ export const prepareMemorySources = ({
     recalled: selected.map(({ record }) => record),
     render: (discussed) => ({
       standing: (maxPageBytes) => renderStandingFacts(standing, lastChanged, maxPageBytes),
-      index: ({ maxBytes, shownElsewhere }) =>
-        renderIndex(active, { kind: "memory", shownElsewhere }, maxBytes),
       recall:
         recall === undefined
           ? undefined

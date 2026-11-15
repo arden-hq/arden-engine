@@ -115,7 +115,7 @@ export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras
     withExtras({
       standing_page: PositiveIntSchema,
       standing_frame: PositiveIntSchema,
-      index: PositiveIntSchema,
+      index: Schema.optionalKey(PositiveIntSchema),
       space: PositiveIntSchema,
       space_instructions: PositiveIntSchema,
       space_page: PositiveIntSchema,

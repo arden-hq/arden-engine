@@ -1,6 +1,5 @@
 import { Cause, DateTime, Effect, Fiber, Semaphore, type Scope } from "effect"
 
-import { prepareMemoryIndex } from "../wiki/collections.js"
 import type { Wiki } from "../wiki/service.js"
 import { prepareMemorySearch } from "./retrieval.js"
 
@@ -32,7 +31,6 @@ export const makeMemoryPreparation = Effect.fn("MemoryPreparation.make")(functio
               const current = yield* input.wiki.snapshot()
               for (let offset = 0; offset < current.pages.length; offset += 8) {
                 prepareMemorySearch(current.pages.slice(offset, offset + 8))
-                prepareMemoryIndex(current.pages.slice(offset, offset + 8))
                 yield* Effect.yieldNow
               }
               preparedHead = current.head

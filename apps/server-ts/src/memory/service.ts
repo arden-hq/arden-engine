@@ -12,8 +12,13 @@ import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { renderIndex, type RenderedIndex } from "./index-render.js"
-import { prepareMemorySources, recallCandidates, type MemorySources } from "./retrieval.js"
+import { renderSpacePageList } from "./index-render.js"
+import {
+  prepareMemorySources,
+  recallCandidates,
+  type MemorySources,
+  type RenderedMemory
+} from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -33,8 +38,8 @@ export interface MemoryTurn {
   readonly spaceList: (space: {
     readonly pageId: string
     readonly pagePath: string
-  }) => (maxBytes: number) => RenderedIndex
-  /** What this run may be sent from Memory: standing facts, the index and, if asked, recall. */
+  }) => (maxBytes: number) => RenderedMemory
+  /** What this run may be sent from Memory: standing facts and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
 
@@ -133,8 +138,7 @@ export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
   return {
     revision: current.head,
     readContent: (pageId) => readSnapshotContent(current, pageId),
-    spaceList: (space) => (maxBytes) =>
-      renderIndex(current.pages, { kind: "space", space }, maxBytes),
+    spaceList: (space) => (maxBytes) => renderSpacePageList(current.pages, space, maxBytes),
     sources: (input) => sources(services, input, current)
   } satisfies MemoryTurn
 })

@@ -138,12 +138,7 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
       for (const source of composition.sources)
         if (source.kind !== "index" && source.page_id !== null && !paths.has(source.page_id))
           paths.set(source.page_id, (yield* memory.readContent(source.page_id)).path)
-      const text = [
-        ...memoryContext.core,
-        ...memoryContext.index,
-        ...memoryContext.space,
-        ...memoryContext.recall
-      ]
+      const text = [...memoryContext.core, ...memoryContext.space, ...memoryContext.recall]
         .map((section) => section.text)
         .join("\n\n")
       scored.push(scoreSent(question, deliveryOf({ composition, paths, text })))

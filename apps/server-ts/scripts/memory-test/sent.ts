@@ -16,14 +16,14 @@ export interface Placed {
 }
 
 export interface Delivery {
-  /** Pages whose rendered block reached the chat. A page named only in the index is not
-   * here. */
+  /** Pages whose rendered block reached the chat. A page named only in the Space's list of
+   * pages is not here. */
   readonly pages: ReadonlyArray<Placed>
   /** Pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<Placed>
   /** Everything the chat was sent from Memory and its Space. */
   readonly text: string
-  /** Bytes sent, by route and for the index, as the record counts them. */
+  /** Bytes sent, by route and for the Space's list of pages, as the record counts them. */
   readonly bytes: Readonly<Record<Via | "index", number>>
 }
 
