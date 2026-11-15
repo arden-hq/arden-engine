@@ -91,3 +91,42 @@ export const scriptedProvider = (
     }
   }
 }
+
+/** One SSE `data:` line per frame; a non-string frame is sent as JSON. */
+export const sseResponse = (frames: ReadonlyArray<unknown>): Response => {
+  const encoder = new TextEncoder()
+  const body = frames
+    .map((frame) => `data: ${typeof frame === "string" ? frame : JSON.stringify(frame)}\n\n`)
+    .join("")
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(body))
+        controller.close()
+      }
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } }
+  )
+}
+
+interface RecordedRequest {
+  readonly url: string
+  readonly headers: Record<string, string>
+  readonly body: unknown
+}
+
+/** A `fetch` that answers attempt N with `answers[N]` and records every request. */
+export const scriptedFetch = (answers: ReadonlyArray<() => Response>) => {
+  const requests: Array<RecordedRequest> = []
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const answer = answers[requests.length]
+    requests.push({
+      url: String(input),
+      headers: Object.fromEntries(new Headers(init?.headers)),
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+    })
+    if (answer === undefined) throw new Error("unexpected connection attempt")
+    return answer()
+  }
+  return { fetch, requests }
+}

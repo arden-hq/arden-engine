@@ -1,7 +1,8 @@
 /**
- * The root export surface of @arden-hq/loop. The subpath exports are
- * "./providers/openai-responses" (the bundled provider) and "./provider-kit"
- * (what a provider needs besides these contracts); everything else imports the root.
+ * The root export surface of @arden-hq/loop. The subpath exports are the
+ * bundled providers ("./providers/openai-responses", "./providers/chat-completions")
+ * and "./provider-kit" (what a provider needs besides these contracts);
+ * everything else imports the root.
  */
 
 export { pendingBackgroundCalls } from "./agent/background-tools.js"

@@ -21,6 +21,11 @@
       "types": "./dist/providers/openai-responses/provider.d.ts",
       "import": "./dist/providers/openai-responses/provider.js"
     },
+    "./providers/chat-completions": {
+      "arden-source": "./src/providers/chat-completions/provider.ts",
+      "types": "./dist/providers/chat-completions/provider.d.ts",
+      "import": "./dist/providers/chat-completions/provider.js"
+    },
     "./provider-kit": {
       "arden-source": "./src/providers/kit/index.ts",
       "types": "./dist/providers/kit/index.d.ts",
