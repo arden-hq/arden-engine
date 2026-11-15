@@ -14,6 +14,7 @@ import { currentPlanReading, planLimitsReport } from "../models/plan-limits.js"
 import { WorkerStatus } from "../automations/worker-status.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { runInspectTool } from "./run-inspection.js"
+import { usageMoney } from "./usage-money.js"
 import { currentMillis } from "../runtime/clock.js"
 
 interface Services {
@@ -170,7 +171,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
   defineServerTool({
     name: "usage_report",
     description:
-      "Read Arden's recorded token usage by UTC calendar days, with totals, daily totals, the top 20 groups, the top 12 sessions, and usage for each Automation and other background work. Use through_day for historical or page-selected windows. Includes usage receipts from unfinished/failed runs when available. Tokens are not billed money or subscription quota; cache reads may be cheaper but are not necessarily free. cache_read_percent_of_input is cache-read tokens divided by all recorded input tokens, not a provider cache hit rate. Arden does not record reasoning tokens separately. Use session_read and run_inspect before claiming why usage was high. Empty data means no recorded usage, not proven zero spending.",
+      "Read Arden's recorded token usage by UTC calendar days, with totals, daily totals, the top 20 groups, the top 12 sessions, and usage for each Automation and other background work. Use through_day for historical or page-selected windows. Includes usage receipts from unfinished/failed runs when available. Tokens are not billed money or subscription quota; `money` is the dollars providers reported, only when every recorded call has them; cache reads may be cheaper but are not necessarily free. cache_read_percent_of_input is cache-read tokens divided by all recorded input tokens, not a provider cache hit rate. Arden does not record reasoning tokens separately. Use session_read and run_inspect before claiming why usage was high. Empty data means no recorded usage, not proven zero spending.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         days: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 })).pipe(
@@ -270,10 +271,7 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
               })
             )
           ),
-          money: {
-            state: "unavailable",
-            reason: "This report measures tokens, not billed cost or subscription limits."
-          },
+          money: usageMoney(report.daily),
           totals: {
             ...totals,
             cache_read_percent_of_input:
