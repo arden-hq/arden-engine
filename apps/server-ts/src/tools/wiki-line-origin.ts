@@ -45,6 +45,18 @@ export const lineOriginOutput = async (
         `That text is on ${origin.lines} lines of ${record.resource.path}. Give more of the one line you mean.`,
         { preview: "Line not unique", retryable: false }
       )
+    case "older":
+      return {
+        result: `That line has been on ${record.resource.path} since before its newest ${origin.searched} saved changes, which is as far back as a line is traced. Its origin was not searched further.`,
+        preview: "Line older than the search",
+        host: { source_refs: [pageSource(record, "read")] },
+        data: {
+          source_refs: [pageSource(record, "read")],
+          path: record.resource.path,
+          searched_changes: origin.searched,
+          found: false
+        }
+      }
     case "added": {
       const chat = await chatPhrase(sessions, wikiOriginChat(origin.origin), signal)
       const source = wikiOriginSource(origin.origin)

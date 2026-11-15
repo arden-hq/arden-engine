@@ -74,9 +74,13 @@ type WikiLineOrigin =
     }
   | { readonly kind: "ambiguous"; readonly lines: number }
   | { readonly kind: "absent" }
+  /** The line is older than the newest `searched` changes, which is as far back as a line is traced. */
+  | { readonly kind: "older"; readonly searched: number }
 
 const linesOf = (text: string): ReadonlyArray<string> => text.split("\n").map((line) => line.trim())
 
+// Each change searched costs one stored version read in a single call, so a search over a
+// page's changes stops after this many, and says so.
 const VERSION_SEARCH_COMMITS = 500
 const VERSION_DIFF_CHARS = 65_536
 
@@ -90,7 +94,8 @@ interface WikiPageChat {
 
 export const makeWikiHistoryMethods = (
   repository: ManagedFileRepositoryShape,
-  snapshot: () => Effect.Effect<Snapshot, WikiError>
+  snapshot: () => Effect.Effect<Snapshot, WikiError>,
+  { searchCommits = VERSION_SEARCH_COMMITS }: { readonly searchCommits?: number } = {}
 ): WikiHistoryMethods => {
   const collectHistory = Effect.fn("Wiki.collectHistory")(function* (options: {
     readonly gracePeriodDays: number
@@ -305,7 +310,7 @@ export const makeWikiHistoryMethods = (
     if (wanted === "" || line === undefined) return { kind: "absent" } satisfies WikiLineOrigin
     if (holding.size > 1) return { kind: "ambiguous", lines: holding.size } satisfies WikiLineOrigin
     const commits = yield* repository
-      .history({ resourceId: pageId, start: head, limit: null })
+      .history({ resourceId: pageId, start: head, limit: searchCommits })
       .pipe(Effect.mapError(mapRevisionError("history", pageId)))
     for (const commit of commits) {
       const change = commit.changes.find(
@@ -322,6 +327,8 @@ export const makeWikiHistoryMethods = (
         reason: commit.reason
       } satisfies WikiLineOrigin
     }
+    if (commits.length >= searchCommits)
+      return { kind: "older", searched: commits.length } satisfies WikiLineOrigin
     return yield* wikiError("history", "storage", "Page history does not reach its first version", {
       pageId
     })

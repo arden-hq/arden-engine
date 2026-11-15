@@ -11,6 +11,11 @@ import {
   wikiToolsOver,
   withWikiRepository
 } from "./fixtures/wiki-repository.js"
+import { partialService } from "./kit.js"
+import type { SessionQueries } from "../src/persistence/sessions/queries.js"
+import { loadSnapshot } from "../src/tools/wiki.js"
+import { lineOriginOutput } from "../src/tools/wiki-line-origin.js"
+import { makeWikiHistoryMethods } from "../src/wiki/history.js"
 
 const PATH = "topics/note.md"
 const PAGE = "note"
@@ -124,5 +129,31 @@ describe("where a line came from", () => {
       )
       expect(text).toContain("a chat that no longer exists")
     })
+  })
+})
+
+it("stops tracing a line at the search bound and says so", async () => {
+  await withWikiRepository(async ({ repository, wiki, save }) => {
+    for (let edit = 0; edit <= 3; edit += 1)
+      await save({ pageId: PAGE, path: PATH, body: `Oldest line.\nEdit ${edit}\n`, origin: ownerEdit })
+    const bounded = makeWikiHistoryMethods(repository, () => Effect.die("unused"), {
+      searchCommits: 3
+    })
+    const origin = await Effect.runPromise(bounded.lineOrigin(PAGE, "Oldest line"))
+    expect(origin).toEqual({ kind: "older", searched: 3 })
+    const record = (await loadSnapshot(wiki, new AbortController().signal)).pages.find(
+      (page) => page.resource.path === PATH
+    )
+    if (record === undefined) throw new Error("expected the page")
+    const answer = await lineOriginOutput(
+      {
+        wiki: { ...wiki, lineOrigin: bounded.lineOrigin },
+        sessions: partialService<SessionQueries["Service"]>("SessionQueries", {})
+      },
+      record,
+      "Oldest line",
+      new AbortController().signal
+    )
+    expect(answer.result).toContain("newest 3 saved changes")
   })
 })
