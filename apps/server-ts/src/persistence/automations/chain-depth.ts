@@ -31,4 +31,8 @@ export const causedChainDepth = (
   producerWakeDepth: number | undefined
 ): number => (producerWakeDepth ?? 0) + (producedBy === null ? 0 : 1)
 
-export const chainMayWake = (chainDepth: number): boolean => chainDepth <= CHAIN_LIMIT
+/** The limit stops the owner's Automations, whose triggers and actions code cannot see. A system
+ *  Automation is woken at any depth: it never wakes itself, and none makes an event another
+ *  listens for (pinned in `automation-chain-depth.test.ts`). */
+export const chainMayWake = (chainDepth: number, listener: "user_automation" | "system"): boolean =>
+  listener === "system" || chainDepth <= CHAIN_LIMIT

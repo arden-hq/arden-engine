@@ -16,6 +16,7 @@ import {
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
+import { wikiMaintenanceHandler } from "../src/automations/handlers/wiki-maintenance.js"
 
 const AT = "2026-11-01T00:00:00.000Z"
 const ROUNDS = 6
@@ -223,4 +224,58 @@ it("a Memory write by an in-chat step carries the depth it was woken at to the c
     }).pipe(Effect.provide(automationWikiChangeSinkLayer))
   )
   expect(queued).toEqual({ atOne: 1, atTwo: 0 })
+})
+
+// Tidy keeps a place in Memory history and reads every change from it; it never wakes itself, and
+// each of its changes is one step deeper, so the owner's Automations still stop at the limit.
+it("Tidy is woken by a Memory change at any depth; an owner Automation on wiki.changed stops at the limit", async () => {
+  const queued = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      yield* catalog.seedSystemAutomations([wikiMaintenanceHandler.spec])
+      const listener = yield* catalog.create(
+        {
+          name: "Made-up listener",
+          prompt: "Read the Memory change",
+          history: "fresh",
+          triggers: [{ type: "event", event_type: "wiki.changed" }],
+          idempotency_key: "7d9e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a",
+          idempotency_scope: "global"
+        },
+        "owner"
+      )
+      const sink = yield* WikiChangeSink
+      yield* sink.cursor(null)
+      const woken = (previousRevision: string | null, revision: string, wakeDepth: number) =>
+        Effect.gen(function* () {
+          yield* sql`DELETE FROM automation_event_queue`
+          yield* sink.publish({
+            previousRevision,
+            revision,
+            savedAt: AT,
+            paths: ["notes/made-up.md"],
+            origin: { kind: "automation", automationId: "made-up-other", chainDepth: wakeDepth },
+            hasSpacePage: false
+          })
+          const rows = yield* sql<{ readonly task_id: string }>`
+            SELECT task_id FROM automation_event_queue ORDER BY task_id`
+          return rows.map((row) =>
+            row.task_id === listener.task_id
+              ? "listener"
+              : row.task_id === wikiMaintenanceHandler.spec.automationId
+                ? "tidy"
+                : row.task_id
+          ).sort()
+        })
+      return {
+        atOne: yield* woken(null, "a".repeat(64), 0),
+        atThree: yield* woken("a".repeat(64), "b".repeat(64), 2)
+      }
+    }).pipe(Effect.provide(automationWikiChangeSinkLayer))
+  )
+  expect(queued).toEqual({
+    atOne: ["listener", "tidy"],
+    atThree: ["tidy"]
+  })
 })

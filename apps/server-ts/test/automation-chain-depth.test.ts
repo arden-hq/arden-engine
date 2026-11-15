@@ -39,7 +39,7 @@ const taskChangeBy = (automationId: string, producerWakeDepth: number): Automati
 describe("chain depth", () => {
   it("an event the user or a source caused starts at depth 0 and may wake", () => {
     expect(causedChainDepth(null, 0)).toBe(0)
-    expect(chainMayWake(0)).toBe(true)
+    expect(chainMayWake(0, "user_automation")).toBe(true)
   })
 
   it("a run that is no Automation's passes on the depth it was woken at, adding none", () => {
@@ -81,13 +81,13 @@ describe("chain depth", () => {
   it("A's run may wake B once", () => {
     const fromA = taskChangeBy("a", wakeChainDepth(undefined))
     expect(fromA.chainDepth).toBe(1)
-    expect(chainMayWake(fromA.chainDepth)).toBe(true)
+    expect(chainMayWake(fromA.chainDepth, "user_automation")).toBe(true)
   })
 
   it("B's run, woken by A's event, cannot wake A back", () => {
     const fromB = taskChangeBy("b", wakeChainDepth(wokenBy(taskChangeBy("a", 0))))
     expect(fromB.chainDepth).toBe(2)
-    expect(chainMayWake(fromB.chainDepth)).toBe(false)
+    expect(chainMayWake(fromB.chainDepth, "user_automation")).toBe(false)
   })
 
   it("the deepest cause of a batch sets the run's depth", () => {
