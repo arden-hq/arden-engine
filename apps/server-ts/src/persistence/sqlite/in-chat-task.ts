@@ -8,6 +8,7 @@ import {
   type WorkStore
 } from "../work/store.js"
 import type { Writer } from "./deps.js"
+import { taskWakeDepth } from "./run-cause.js"
 import { workError } from "./work-records.js"
 import { captureRunTask } from "./run-context.js"
 import { hasPendingTaskQuestion } from "./task-question-state.js"
@@ -179,8 +180,10 @@ const readSteps = (
     readonly home_session_id: string
     readonly text: string
     readonly approval_mode: string | null
+    readonly chain_depth: number
   }>`
     SELECT item.item_id, item.home_session_id, item.text,
+      ${taskWakeDepth(sql, sql`item.item_id`)} AS chain_depth,
       (SELECT json_extract(chat.metadata, '$.approval_mode') FROM sessions AS chat
         WHERE chat.session_id = item.home_session_id) AS approval_mode
     FROM space_tasks AS item
@@ -192,7 +195,8 @@ const readSteps = (
         itemId: row.item_id,
         sessionId: row.home_session_id,
         text: row.text,
-        approvalMode: row.approval_mode
+        approvalMode: row.approval_mode,
+        chainDepth: row.chain_depth
       }))
     ),
     Effect.mapError((cause) => workError("storage", "Could not read the chat's Task", cause))

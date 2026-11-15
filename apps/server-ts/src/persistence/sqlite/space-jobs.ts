@@ -6,13 +6,11 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
-import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
-import { wakeChainDepth } from "../automations/chain-depth.js"
 import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { enqueue, type QueueWriter } from "./automation-enqueue.js"
-import { decodeJson, type JsonColumnError } from "./json.js"
-import { readRunCause } from "./run-cause.js"
+import type { JsonColumnError } from "./json.js"
+import { attemptWakeDepth, readRunCause, taskWakeDepth } from "./run-cause.js"
 
 import { spaceJobId, taskJobId } from "../space-job-id.js"
 import { hasPendingTaskApproval, hasPendingTaskQuestion } from "./task-question-state.js"
@@ -155,10 +153,9 @@ export const makeSpaceJobSql = (
       case "owner":
         return NO_RUN
       case "continuation": {
-        const [attempt] = yield* sql<{ readonly chain_depth: number }>`
-          SELECT COALESCE(json_extract(origin, '$.chain_depth'), 0) AS chain_depth
-          FROM automation_runs WHERE task_id = ${taskJobId(itemId)} ORDER BY id DESC LIMIT 1`
-        return woken(null, attempt?.chain_depth ?? 0)
+        const [task] = yield* sql<{ readonly chain_depth: number }>`
+          SELECT ${taskWakeDepth(sql, sql`${itemId}`)} AS chain_depth`
+        return woken(null, task?.chain_depth ?? 0)
       }
     }
   })
@@ -421,9 +418,10 @@ export const makeSpaceJobSql = (
       readonly failed: number
       readonly restart_cut: number
       readonly space_id: string | null
-      readonly trigger_json: string | null
+      readonly chain_depth: number
     }>`
-      SELECT ${outcomeSql(sql, sql`attempt`)} = 'failed' AS failed, attempt.trigger_json,
+      SELECT ${outcomeSql(sql, sql`attempt`)} = 'failed' AS failed,
+        ${attemptWakeDepth(sql, "attempt")} AS chain_depth,
         COALESCE(${restartCutRunSql("chat")}, 0) AS restart_cut,
         job.owner_space_id AS space_id
       FROM automation_runs AS attempt JOIN scheduled_tasks AS job ON job.task_id = attempt.task_id
@@ -438,16 +436,9 @@ export const makeSpaceJobSql = (
     if (spaceId == null || delay === undefined) return
     const state = yield* syncSpace(spaceId, now)
     if (state === null || !state.enabled) return
-    const failedWake = attempts[0]?.trigger_json ?? null
-    const retried = woken(
-      null,
-      failedWake === null
-        ? 0
-        : wakeChainDepth(yield* decodeJson(AutomationTriggerContextSchema, failedWake))
-    )
     yield* queue(
       state,
-      retried,
+      woken(null, attempts[0]?.chain_depth ?? 0),
       {
         queued_at: now,
         event_type: "space.review_retry",

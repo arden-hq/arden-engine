@@ -119,7 +119,8 @@ const startJob = (lease: JobLease, id: string) =>
 
 const completeJob = (
   lease: JobLease,
-  ran: { readonly runId: string; readonly sessionId: string } | null
+  ran: { readonly runId: string; readonly sessionId: string } | null,
+  outcome: "finished" | "no_change" | "failed" = ran === null ? "no_change" : "finished"
 ) =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
@@ -130,9 +131,9 @@ const completeJob = (
           completedAt: Date.now() + 60 * 60_000,
           result: {
             status: "ended",
-            outcome: ran === null ? "no_change" : "finished",
-            result: "Made-up result",
-            error: null,
+            outcome,
+            result: outcome === "failed" ? null : "Made-up result",
+            error: outcome === "failed" ? "Made-up failure" : null,
             chatRunId: ran?.runId ?? null,
             chatSessionId: ran?.sessionId ?? null
           }
@@ -156,6 +157,9 @@ export const runJob = <R>(
 
 /** Ends a claimed job that ran no chat run of its own, as an in-chat Task's wake does. */
 export const endJobWithoutRun = (lease: JobLease) => completeJob(lease, null)
+
+/** Ends a claimed job as failed before it ran a chat run. */
+export const failJob = (lease: JobLease) => completeJob(lease, null, "failed")
 
 /** Claims every waiting job wake, then starts the named jobs' runs, as the runtime does. */
 export const startJobs = (ids: Readonly<Record<string, string>>) =>

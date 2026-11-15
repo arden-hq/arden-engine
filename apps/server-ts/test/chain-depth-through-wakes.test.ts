@@ -4,13 +4,17 @@ import { expect, it } from "vitest"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
+import { spaceJobId } from "../src/persistence/space-job-id.js"
+import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import {
   claimAll,
   endJobWithoutRun,
+  failJob,
   finishChat,
   runJob,
   startChat,
+  startJobs,
   type JobLease
 } from "./fixtures/job-runs.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
@@ -94,6 +98,7 @@ const followerAndTask = <R>(makeTask: Effect.Effect<{ readonly item_id: string }
       }).pipe(Effect.orDie)
     return {
       follower: follower.task_id,
+      task,
       itemId: task.item_id,
       worker: `task:${task.item_id}`,
       edit,
@@ -105,12 +110,13 @@ const followerAndTask = <R>(makeTask: Effect.Effect<{ readonly item_id: string }
  *  the Task, and `worker` runs the Task's worker. */
 const rounds = <R>(
   setup: Effect.Success<ReturnType<typeof followerAndTask>>,
-  worker: (lease: JobLease, round: number) => Effect.Effect<void, unknown, R>
+  worker: (lease: JobLease, round: number) => Effect.Effect<void, unknown, R>,
+  count = ROUNDS
 ) =>
   Effect.gen(function* () {
     let seen = setup.seen
     const ran: Array<ReadonlyArray<string>> = []
-    for (let round = 1; round <= ROUNDS; round += 1) {
+    for (let round = 1; round <= count; round += 1) {
       seen = yield* dispatchTaskChanges(seen)
       const leases = yield* claimAll(`round-${round}`)
       const follower = leases.find((lease) => lease.payload.automationId === setup.follower)
@@ -123,6 +129,23 @@ const rounds = <R>(
       ran.push([...(follower ? ["follower"] : []), ...(task ? ["worker"] : [])])
     }
     return ran
+  })
+
+/** A made-up chat in the Space, and a Task that runs in it. */
+const inChatTask = Effect.gen(function* () {
+  const chat = yield* (yield* SessionStore).create({ name: "Made-up chat", spaceId: "space-1" })
+  const task = yield* (yield* WorkStore).createInChat(chat.sessionId, {
+    request: "Made-up in-chat Task"
+  })
+  return { ...task, sessionId: chat.sessionId }
+})
+
+/** The next step of an in-chat Task, as `continueTask` finds it. */
+const nextStep = (itemId: string) =>
+  Effect.gen(function* () {
+    const step = yield* (yield* WorkStore).nextInChat({ itemId })
+    if (step === undefined) throw new Error("the in-chat Task has no step to take")
+    return step
   })
 
 const followerRuns = (ran: ReadonlyArray<ReadonlyArray<string>>) =>
@@ -156,25 +179,15 @@ it("an owner Automation on task.changed that edits a Task stops at the chain lim
 it("an owner Automation on task.changed that edits an in-chat Task stops at the chain limit", async () => {
   const ran = await withTempDatabase(
     Effect.gen(function* () {
-      let taskChat = ""
-      const setup = yield* followerAndTask(
-        Effect.gen(function* () {
-          taskChat = (yield* (yield* SessionStore).create({
-            name: "Made-up chat",
-            spaceId: "space-1"
-          })).sessionId
-          return yield* (yield* WorkStore).createInChat(taskChat, {
-            request: "Made-up in-chat Task"
-          })
-        })
-      )
+      const setup = yield* followerAndTask(inChatTask)
       yield* setup.edit(undefined, "Edited by hand")
       return yield* rounds(setup, (lease, round) =>
         Effect.gen(function* () {
           yield* endJobWithoutRun(lease)
-          const started = yield* startChat(taskChat, `step-${round}`, {
+          const step = yield* nextStep(setup.itemId)
+          const started = yield* startChat(setup.task.sessionId, `step-${round}`, {
             isMeta: true,
-            continuesTask: { itemId: setup.itemId, chainDepth: lease.payload.chainDepth }
+            continuesTask: { itemId: setup.itemId, chainDepth: step.chainDepth }
           })
           yield* setup.edit(started.runId, `Edited by step ${round}`)
           yield* finishChat(started, `step-${round}`)
@@ -278,4 +291,70 @@ it("Tidy is woken by a Memory change at any depth; an owner Automation on wiki.c
     atOne: ["listener", "tidy"],
     atThree: ["tidy"]
   })
+})
+
+it("a failed Space review is retried at the depth of the wake it answered", async () => {
+  const retried = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
+        VALUES ('space-1', 'Made-up Space', 'made-up space', '{"enabled":true}', ${AT}, ${AT})`
+      const spaces = yield* SpaceStore
+      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      const follower = yield* (yield* AutomationCatalog).create(
+        {
+          name: "Made-up follower",
+          prompt: "Write the Space's instructions",
+          history: "fresh",
+          triggers: [{ type: "event", event_type: "task.changed" }],
+          idempotency_key: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+          idempotency_scope: "global"
+        },
+        "owner"
+      )
+      yield* sql`DELETE FROM automation_event_queue`
+      yield* (yield* AutomationTriggers).dispatchEvent({
+        eventType: "task.changed",
+        eventKey: "1",
+        producedBy: null,
+        chainDepth: 0,
+        context: { task: { change: "changed", item_id: "made-up" } }
+      })
+      const runs = yield* startJobs({ [follower.task_id]: "follower" })
+      yield* spaces.update("space-1", { instructions: "Made-up instructions" }, runs.get(follower.task_id))
+      const review = (yield* claimAll("review")).find(
+        (lease) => lease.payload.automationId === spaceJobId("space-1")
+      )
+      if (review === undefined) throw new Error("the Space review was not woken")
+      yield* failJob(review)
+      const rows = yield* sql<{ readonly context: string }>`
+        SELECT context FROM automation_event_queue WHERE task_id = ${spaceJobId("space-1")}`
+      return rows.map((row) => {
+        const wake = JSON.parse(row.context).trigger_context_snapshot
+        return { event: wake.event_type, depth: wake.chain_depth ?? 0 }
+      })
+    })
+  )
+  expect(retried).toEqual([{ event: "space.review_retry", depth: 1 }])
+})
+
+// A restart hands an idle in-chat Task on through `idleInChat`; a wake hands it on through
+// `nextInChat`. Both give the step the depth of the Task's latest wake, as a due check does.
+it("an in-chat Task step goes on at the depth of the Task's latest wake, after a wake and after a restart", async () => {
+  const depths = await withTempDatabase(
+    Effect.gen(function* () {
+      const setup = yield* followerAndTask(inChatTask)
+      const handedOn = Effect.gen(function* () {
+        const idle = (yield* (yield* WorkStore).idleInChat()).find(
+          (step) => step.itemId === setup.itemId
+        )
+        return { wake: (yield* nextStep(setup.itemId)).chainDepth, restart: idle?.chainDepth }
+      })
+      const created = yield* handedOn
+      yield* setup.edit(undefined, "Edited by hand")
+      yield* rounds(setup, (lease) => endJobWithoutRun(lease), 2)
+      return { created, woken: yield* handedOn }
+    })
+  )
+  expect(depths).toEqual({ created: { wake: 0, restart: 0 }, woken: { wake: 1, restart: 1 } })
 })

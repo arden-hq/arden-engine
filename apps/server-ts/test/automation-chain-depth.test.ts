@@ -1,7 +1,10 @@
+import { readdirSync, readFileSync, statSync } from "node:fs"
+import { join } from "node:path"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 import { automationRunEndedEvent } from "../src/automations/producers/automation-run.js"
+import { SYSTEM_AUTOMATION_SPECS } from "../src/automations/system.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import {
   causedChainDepth,
@@ -118,6 +121,36 @@ describe("chain depth", () => {
     if (first === undefined) throw new Error("expected an event")
     expect(ended(wokenBy(first))?.chainDepth).toBe(2)
   })
+})
+
+const sourceFiles = (dir: string): ReadonlyArray<string> =>
+  readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name)
+    return statSync(path).isDirectory() ? sourceFiles(path) : path.endsWith(".ts") ? [path] : []
+  })
+
+it("a stored run's or attempt's depth is read in SQL in one file", () => {
+  const src = join(import.meta.dirname, "../src")
+  expect(
+    sourceFiles(src)
+      .filter((path) => /json_extract\([^)]*chain_depth/u.test(readFileSync(path, "utf8")))
+      .map((path) => path.slice(src.length + 1))
+  ).toEqual(["persistence/sqlite/run-cause.ts"])
+})
+
+it("the system Automations an event can wake are Tidy on a Memory change and chat summaries on a quiet chat", () => {
+  // Both are woken past the chain limit. Neither makes an event the other listens for: Tidy writes
+  // Memory, chat summaries write a chat's summary. A new one here must show it cannot loop.
+  expect(
+    SYSTEM_AUTOMATION_SPECS.flatMap((spec) =>
+      spec.triggers.flatMap((trigger) =>
+        trigger.type === "event" ? [[spec.handler, trigger.event_type]] : []
+      )
+    ).sort()
+  ).toEqual([
+    ["chat_summaries", "chat.quiet"],
+    ["wiki_maintenance", "wiki.changed"]
+  ])
 })
 
 describe("dispatch", () => {

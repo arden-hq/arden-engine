@@ -47,11 +47,12 @@ import type { HelperJobs } from "./helper-jobs.js"
 import { makeRunPurposeObserver, type RunPurposeObserver } from "./run-purpose-observer.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 
-/** The next in-chat Task step: after a run in the chat ends, or for one Task, handed on by a wake
- *  at `chainDepth` (0 when the owner or a restart hands it on). */
+/** The next in-chat Task step: after a run in the chat ends, at the depth that run's changes
+ *  carry; or for one Task, handed on by a wake, its creation or a restart, at the depth of the
+ *  Task's latest wake. */
 export type TaskContinuationInput = { readonly approvalMode?: ChatApprovalMode } & (
   | { readonly sessionId: string; readonly afterRunId: string }
-  | { readonly itemId: string; readonly sourceId: string; readonly chainDepth: number }
+  | { readonly itemId: string; readonly sourceId: string }
 )
 
 export interface RunHost extends ToolHost {

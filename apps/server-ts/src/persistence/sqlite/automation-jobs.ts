@@ -164,8 +164,6 @@ export const makeAutomationJobs = ({
   "writer" | "sessionEvents" | "rules" | "diagnostics"
 >): AutomationQueue["Service"]["jobs"] => {
   const sql = writer.sql
-  const originChainDepthSql = () =>
-    sql.literal("COALESCE(json_extract(attempt.origin, '$.chain_depth'), 0)")
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const { loadFenced, settleFenced } = makeFencedOccurrences({ writer, sessionEvents, rules })
   const { completeEffect, failEffect, releaseEffect } = makeAutomationJobSettlement({
@@ -496,10 +494,9 @@ export const makeAutomationJobs = ({
               readonly context_mode: AutomationContextMode
               readonly authority: RunAuthorityState | null
               readonly claim_count: number
-              readonly chain_depth: number
             }>`
             SELECT attempt.chat_run_id, attempt.chat_session_id, attempt.context_mode,
-              attempt.claim_count, ${originChainDepthSql()} AS chain_depth,
+              attempt.claim_count,
               ${runAuthorityState(sql, sql`chat.metadata_json`, sql`chat.run_id`)} AS authority
             FROM automation_runs AS attempt LEFT JOIN chat_runs AS chat ON chat.run_id = attempt.chat_run_id
             WHERE attempt.id = ${automationRunId} LIMIT 1
@@ -568,7 +565,6 @@ export const makeAutomationJobs = ({
                 model: candidate.model,
                 chatKind: chatKindOf(candidate),
                 contextMode: runSnapshot.context_mode,
-                chainDepth: runSnapshot.chain_depth,
                 chatRun: yield* readJobChatRun(runSnapshot, "claim", candidate.task_id),
                 occurrence: candidate.source,
                 ...(context.scheduled_for === null ? {} : { scheduledFor: context.scheduled_for }),
@@ -684,10 +680,8 @@ export const makeAutomationJobs = ({
             readonly chat_session_id: string | null
             readonly context_mode: AutomationContextMode
             readonly authority: RunAuthorityState | null
-            readonly chain_depth: number
           }>`
       SELECT attempt.chat_run_id, attempt.chat_session_id, attempt.context_mode,
-        ${originChainDepthSql()} AS chain_depth,
         ${runAuthorityState(sql, sql`chat.metadata_json`, sql`chat.run_id`)} AS authority
       FROM automation_runs AS attempt LEFT JOIN chat_runs AS chat ON chat.run_id = attempt.chat_run_id
       WHERE attempt.id = ${parsed.runId} AND attempt.status = 'running'
@@ -720,7 +714,6 @@ export const makeAutomationJobs = ({
               model: row.model,
               chatKind: chatKindOf(row),
               contextMode: run[0].context_mode,
-              chainDepth: run[0].chain_depth,
               chatRun: yield* readJobChatRun(run[0], "renew", row.task_id),
               occurrence: row.source,
               ...(context.scheduled_for === null ? {} : { scheduledFor: context.scheduled_for }),

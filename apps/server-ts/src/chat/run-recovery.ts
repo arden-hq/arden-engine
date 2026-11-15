@@ -73,12 +73,7 @@ export const startRunRecovery = Effect.fn("ChatMessage.runRecovery")(function* (
       Effect.flatMap((steps) =>
         Effect.forEach(
           steps,
-          (step) =>
-            input.continueTask({
-              itemId: step.itemId,
-              sourceId: `boot:${bootStamp}`,
-              chainDepth: 0
-            }),
+          (step) => input.continueTask({ itemId: step.itemId, sourceId: `boot:${bootStamp}` }),
           { discard: true }
         )
       ),

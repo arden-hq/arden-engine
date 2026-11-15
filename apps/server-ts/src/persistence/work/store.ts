@@ -64,6 +64,8 @@ export interface InChatStep {
   readonly sessionId: string
   readonly text: string
   readonly approvalMode: string | null
+  /** The depth of the Task's latest wake, which a step handed on by a wake or a restart takes. */
+  readonly chainDepth: number
 }
 
 export type SpentScope =

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlClient, Statement } from "effect/unstable/sql"
 import { causedChainDepth } from "../automations/chain-depth.js"
 import type { RunCause } from "../runs/queries.js"
 import { SessionLifecycleEventError } from "../sessions/events.js"
@@ -31,6 +31,22 @@ export const causingWakeDepth = (
           COALESCE(json_extract(root.metadata_json, '$.run_context.origin.chain_depth'), 0))
         ${delegationRoot(run)}), 0)
     )`)
+
+/** The depth of the wake an attempt answered, as its stored origin records it. */
+export const attemptWakeDepth = (
+  sql: SqlClient.SqlClient,
+  attempt: string
+): ReturnType<SqlClient.SqlClient["literal"]> =>
+  sql.literal(`COALESCE(json_extract(${attempt}.origin, '$.chain_depth'), 0)`)
+
+/** The depth a Task's work goes on at, in the background or in its chat: that of the wake its
+ *  latest attempt answered; 0 before any. */
+export const taskWakeDepth = (
+  sql: SqlClient.SqlClient,
+  itemId: Statement.Fragment
+): Statement.Fragment =>
+  sql`COALESCE((SELECT ${attemptWakeDepth(sql, "attempt")} FROM automation_runs AS attempt
+    WHERE attempt.item_id = ${itemId} ORDER BY attempt.id DESC LIMIT 1), 0)`
 
 export const readCause = (sql: SqlClient.SqlClient, runId: string) =>
   sql<{

@@ -573,7 +573,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
             if (step === undefined) return
             const handedOn =
               "itemId" in input
-                ? { sourceId: input.sourceId, chainDepth: input.chainDepth }
+                ? { sourceId: input.sourceId, chainDepth: step.chainDepth }
                 : {
                     sourceId: input.afterRunId,
                     chainDepth: yield* runs
