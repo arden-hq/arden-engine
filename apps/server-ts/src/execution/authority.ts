@@ -150,6 +150,19 @@ export const actsAsPerson = (actor: Actor): boolean =>
 
 export const rootOf = (actor: Actor): RootKind => (actor.kind === "agent" ? actor.root : actor.kind)
 
+/** How many Automation runs stand behind the wake that started a run; a chat turn starts at 0. */
+const originChainDepth = (origin: RunContext["origin"]): number => {
+  switch (origin.kind) {
+    case "automation":
+    case "task":
+    case "space":
+      return origin.chain_depth ?? 0
+    case "chat":
+    case "unrecorded":
+      return 0
+  }
+}
+
 export const deriveAuthority = (facts: AdmissionFacts): RunAuthority => {
   const actor = rootActor(facts)
   const permissionOwner = facts.chatAutomation ?? facts.originAutomation
@@ -172,8 +185,7 @@ export const deriveAuthority = (facts: AdmissionFacts): RunAuthority => {
         actor.kind === "person" || actor.kind === "unrecorded"
           ? null
           : (facts.originAutomation?.automation_id ?? facts.chatAutomation?.automation_id ?? null),
-      chain_depth:
-        facts.context.origin.kind === "automation" ? (facts.context.origin.chain_depth ?? 0) : 0,
+      chain_depth: originChainDepth(facts.context.origin),
       task_item_id: facts.context.task?.item_id ?? null
     },
     reach: {

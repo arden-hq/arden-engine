@@ -112,22 +112,12 @@ export const makeAutomationTriggerFeed = ({
             const cursor = yield* readTriggerCursor("trigger_feed")
             if (record.sequence <= cursor) return
             const nowMs = yield* Clock.currentTimeMillis
-            const journal = record.journal
-            if (journal !== undefined)
-              for (const raised of yield* rules.fromJournal(journal, journalReads)) {
+            if (record.journal !== undefined)
+              for (const raised of yield* rules.fromJournal(record.journal, journalReads))
                 yield* eventDispatch.dispatchInTransaction(
                   raised.event,
                   raised.dueAt === undefined ? {} : { dueAt: raised.dueAt }
                 )
-                if (
-                  raised.event.eventType === "task.changed" &&
-                  journal.event.type === "task_history_added"
-                )
-                  yield* spaceJobs.queueTaskChanged(
-                    { itemId: journal.event.item_id, ...raised.event },
-                    iso(nowMs)
-                  )
-              }
             if (record.kind === "run_completed" && record.sessionId !== null)
               yield* spaceJobs.queueInferenceChat(record.sessionId, iso(nowMs))
             if (record.kind !== "other" && record.sessionId !== null) {

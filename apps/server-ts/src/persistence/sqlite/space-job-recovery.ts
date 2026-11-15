@@ -93,7 +93,7 @@ export const makeSpaceJobRecovery = (options: {
             JOIN scheduled_tasks AS job ON job.task_id = pending.task_id
             WHERE job.owner_task_id = item.item_id)
         ORDER BY item.item_id LIMIT ${CHUNK_SIZE}`
-        for (const row of rows) yield* options.queueTaskWake(row.item_id, now)
+        for (const row of rows) yield* options.queueTaskWake(row.item_id, now, { kind: "clock" })
         const next = rows.at(-1)?.item_id
         return next === undefined ? { stage: "due", after: undefined } : { stage, after: next }
       }

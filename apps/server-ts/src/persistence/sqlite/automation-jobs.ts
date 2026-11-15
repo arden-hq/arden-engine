@@ -259,7 +259,7 @@ export const makeAutomationJobs = ({
       .transact(
         Effect.gen(function* () {
           for (const task of yield* reopenDeferredTasks({ sql, sessionEvents }, nowText))
-            yield* spaceJobs.queueTaskWake(task.item_id, nowText)
+            yield* spaceJobs.queueTaskWake(task.item_id, nowText, { kind: "clock" })
           yield* materializeDue(nowText)
           yield* spaceJobs.materializeDue(nowText)
           yield* dropClosedAsks(sql, nowText)

@@ -7,6 +7,8 @@ import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-si
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { spaceJobId } from "../src/persistence/space-job-id.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
+import { scheduledRunOrigin } from "../src/persistence/sqlite/run-context.js"
+import { WorkStore } from "../src/persistence/work/store.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
@@ -107,75 +109,231 @@ it("nothing on the wiki change path or in event dispatch can reach a Space revie
   expect(read("persistence/sqlite/automation-event-dispatch.ts")).not.toMatch(/space_review/)
 })
 
-it("a Task change wakes its Space review once per burst, but not from the review's own writes", async () => {
+/** A run that is now writing: a Space review, or the worker of one Task, woken at a depth. */
+const seedRun = (
+  sql: SqlClient.SqlClient,
+  run: {
+    readonly id: string
+    readonly automationId: string | null
+    readonly actor?: "person"
+    readonly origin: object
+    readonly task: string | null
+    readonly depth: number
+  }
+) =>
+  sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at, metadata_json,
+      assistant_message_id, authority_json)
+    VALUES (${run.id}, 'session-1', 'running', ${AT}, ${AT},
+      ${JSON.stringify({
+        run_policy: {
+          budget_id: "budget-1",
+          execution: { mode: "inline", observe: false },
+          capabilities: ["all"],
+          auto_approve: false,
+          google_accounts: null,
+          space: null
+        },
+        run_context: {
+          origin: { ...run.origin, ...(run.depth === 0 ? {} : { chain_depth: run.depth }) },
+          task: run.task === null ? null : { item_id: run.task, generation: 0 }
+        }
+      })},
+      ${`assistant-${run.id}`},
+      ${JSON.stringify({
+        ...(run.actor === undefined ? {} : { actor: { kind: run.actor } }),
+        owns: { automation_id: run.automationId, chain_depth: run.depth }
+      })})`
+
+const seedSpaceWithTask = (sql: SqlClient.SqlClient, spaces: SpaceStore["Service"]) =>
+  Effect.gen(function* () {
+    yield* space(sql, "space-1", true)
+    yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+    yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type,
+        space_id)
+      VALUES ('session-1', 'chat~1', ${AT}, ${AT}, 'chat', 'space-1')`
+    yield* sql`INSERT INTO execution_budgets (budget_id) VALUES ('budget-1')`
+    yield* sql`INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner, runs_in,
+        home_session_id, created_at, updated_at)
+      VALUES ('task-1', 'space-1', 'key-1', 'Made-up Task', 'open', 'worker', 'chat', 'session-1',
+        ${AT}, ${AT})`
+    yield* clearQueue(sql)
+  })
+
+const updatedAt = (sql: SqlClient.SqlClient) =>
+  sql<{
+    readonly updated_at: string
+  }>`SELECT updated_at FROM space_tasks WHERE item_id = 'task-1'`.pipe(
+    Effect.map((rows) => rows[0]?.updated_at ?? AT)
+  )
+
+/** The Task worker's waiting wake: who caused it, at what depth, and whether it is the owner's. */
+const workerWake = (sql: SqlClient.SqlClient) =>
+  sql<{ readonly context: string }>`SELECT context FROM automation_event_queue
+    WHERE task_id = 'task:task-1'`.pipe(
+    Effect.map((rows) =>
+      rows.map((row) => {
+        const context = JSON.parse(row.context)
+        const snapshot = context.trigger_context_snapshot
+        return {
+          producedBy: snapshot.produced_by ?? null,
+          depth: snapshot.chain_depth ?? 0,
+          owner: context.person_change_at !== undefined
+        }
+      })
+    )
+  )
+
+/** Feeds the trigger listener every Task history record the journal holds, as the runtime does. */
+const feedTaskHistory = (sql: SqlClient.SqlClient, triggers: AutomationTriggers["Service"]) =>
+  Effect.gen(function* () {
+    const records = yield* sql<{ readonly sequence: number; readonly data_json: string }>`
+      SELECT sequence, data_json FROM journal_records WHERE event_type = 'task_history_added'
+      ORDER BY sequence`
+    for (const record of records)
+      yield* triggers.applyTriggerFeedRecord({
+        sequence: record.sequence,
+        atMs: Date.parse(AT),
+        kind: "other",
+        sessionId: null,
+        journal: { atMs: Date.parse(AT), event: JSON.parse(record.data_json) }
+      })
+  })
+
+it("the owner's own Task changes wake the Space review once per burst; a run's changes wake none", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
+      const work = yield* WorkStore
       const triggers = yield* AutomationTriggers
-      yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
-      // Suggestions on but no Memory page, and suggestions off: neither review can run.
-      yield* space(sql, "space-2", true)
-      yield* space(sql, "space-3", false)
-      for (const spaceId of ["space-1", "space-2", "space-3"])
-        yield* sql`INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner,
-            created_at, updated_at)
-          VALUES (${`task-${spaceId}`}, ${spaceId}, ${`key-${spaceId}`}, 'Made-up Task', 'open',
-            'worker', ${AT}, ${AT})`
-      yield* clearQueue(sql)
-      let sequence = 0
-      const taskEvent = (itemId: string, eventType: string, producedBy: string | null) =>
-        Effect.gen(function* () {
-          const [row] = yield* sql<{ readonly event_id: number }>`
-            INSERT INTO space_task_events (space_id, item_id, run_ref, operation_index, event_type,
-              summary, content_kind, created_at)
-            SELECT space_id, item_id, NULL, NULL, ${eventType}, 'Made-up change', 'summary', ${AT}
-            FROM space_tasks WHERE item_id = ${itemId}
-            RETURNING event_id`
-          if (row === undefined) throw new Error("the Task event was not written")
-          sequence += 1
-          yield* triggers.applyTriggerFeedRecord({
-            sequence,
-            atMs: Date.parse(AT),
-            kind: "other",
-            sessionId: null,
-            journal: {
-              atMs: Date.parse(AT),
-              event: {
-                type: "task_history_added",
-                item_id: itemId,
-                event_id: row.event_id,
-                produced_by: producedBy,
-                chain_depth: producedBy === null ? 0 : 1
-              }
-            }
-          })
-        })
-      // The review's own Task writes, and a retry being scheduled, wake nothing.
-      yield* taskEvent("task-space-1", "updated", spaceJobId("space-1"))
-      yield* taskEvent("task-space-1", "scheduled", null)
-      const ownWrites = yield* reviewRows(sql, "space-1")
-      // A burst of changes from the owner and the Task's worker makes one batched wake.
-      yield* taskEvent("task-space-1", "updated", null)
-      yield* taskEvent("task-space-1", "reported", "task:task-space-1")
-      yield* taskEvent("task-space-1", "done", "task:task-space-1")
-      yield* taskEvent("task-space-2", "done", null)
-      yield* taskEvent("task-space-3", "done", null)
-      return {
-        ownWrites,
-        burst: yield* reviewRows(sql, "space-1"),
-        noPage: yield* reviewRows(sql, "space-2"),
-        off: yield* reviewRows(sql, "space-3")
-      }
+      yield* seedSpaceWithTask(sql, spaces)
+      yield* seedRun(sql, {
+        id: "review-run",
+        automationId: spaceJobId("space-1"),
+        origin: { kind: "space", space_id: "space-1", occurrence_id: "wake-1" },
+        task: null,
+        depth: 0
+      })
+      yield* seedRun(sql, {
+        id: "worker-run",
+        automationId: "task:task-1",
+        origin: { kind: "task", item_id: "task-1", occurrence_id: "wake-2" },
+        task: "task-1",
+        depth: 0
+      })
+      yield* seedRun(sql, {
+        id: "owner-chat-run",
+        automationId: null,
+        actor: "person",
+        origin: { kind: "chat", session_id: "session-1", turn_id: "turn-1" },
+        task: null,
+        depth: 0
+      })
+      const address = { kind: "item", itemId: "task-1" } as const
+      yield* work.update(
+        address,
+        yield* updatedAt(sql),
+        { text: "Edited by the review" },
+        "review-run"
+      )
+      yield* work.update(
+        address,
+        yield* updatedAt(sql),
+        { text: "Edited by the worker" },
+        "worker-run"
+      )
+      yield* feedTaskHistory(sql, triggers)
+      const runMade = yield* reviewRows(sql, "space-1")
+      yield* work.update(address, yield* updatedAt(sql), { text: "Edited by the owner" })
+      yield* work.update(
+        address,
+        yield* updatedAt(sql),
+        { text: "Edited in the owner's chat" },
+        "owner-chat-run"
+      )
+      yield* work.stop(address, yield* updatedAt(sql))
+      yield* work.create({ kind: "space", spaceId: "space-1" }, { key: "key-2", text: "Another" })
+      yield* feedTaskHistory(sql, triggers)
+      return { runMade, owner: yield* reviewRows(sql, "space-1") }
     })
   )
-  expect(outcome.ownWrites).toEqual([])
-  expect(outcome.burst).toEqual([
-    { causes: ["task.changed", "task.changed", "task.changed"], batched: true }
+  expect(outcome.runMade).toEqual([])
+  expect(outcome.owner).toEqual([
+    { causes: ["task.changed", "task.changed", "task.changed", "task.changed"], batched: true }
   ])
-  expect(outcome.noPage).toEqual([])
-  expect(outcome.off).toEqual([])
+})
+
+it("a run's wake for a Task worker carries the run's cause and depth, and stops at the chain limit", async () => {
+  const wakeFrom = (depth: number) =>
+    withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const work = yield* WorkStore
+        yield* seedSpaceWithTask(sql, yield* SpaceStore)
+        yield* seedRun(sql, {
+          id: "review-run",
+          automationId: spaceJobId("space-1"),
+          origin: { kind: "space", space_id: "space-1", occurrence_id: "wake-1" },
+          task: null,
+          depth
+        })
+        // The review moves a Task working in its chat to the background, which wakes its worker.
+        yield* work.update(
+          { kind: "item", itemId: "task-1" },
+          yield* updatedAt(sql),
+          { runs_in: "background" },
+          "review-run"
+        )
+        return yield* workerWake(sql)
+      })
+    )
+  expect(await wakeFrom(0)).toEqual([{ producedBy: spaceJobId("space-1"), depth: 1, owner: false }])
+  expect(await wakeFrom(1)).toEqual([])
+})
+
+it("the depth a run was woken at stays with a review or Task run, so its writes know it", () => {
+  for (const purpose of ["space_review", "task_execution"] as const) {
+    const origin = scheduledRunOrigin({
+      job: { purpose, owner_space_id: "space-1", owner_task_id: "task-1", handler: null },
+      automationId: purpose === "space_review" ? spaceJobId("space-1") : "task:task-1",
+      occurrenceId: "queue:1",
+      chainDepth: 1
+    })
+    expect(origin).toMatchObject({ chain_depth: 1 })
+  }
+})
+
+it("drafted instructions that say the same thing wake nothing", async () => {
+  const rows = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const spaces = yield* SpaceStore
+      yield* space(sql, "space-1", true)
+      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* spaces.setGeneratedInstructions("space-1", "Made-up drafted instructions.")
+      yield* clearQueue(sql)
+      yield* spaces.setGeneratedInstructions("space-1", "Made-up drafted instructions.")
+      return yield* reviewRows(sql, "space-1")
+    })
+  )
+  expect(rows).toEqual([])
+})
+
+it("a Space bound to a Memory page cannot be bound to another without detaching first", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const spaces = yield* SpaceStore
+      yield* space(sql, "space-1", true)
+      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* clearQueue(sql)
+      const refused = yield* spaces
+        .bindPage("space-1", "page-2", "projects/another-made-up-space.md")
+        .pipe(Effect.flip)
+      return { reason: refused.reason, rows: yield* reviewRows(sql, "space-1") }
+    })
+  )
+  expect(outcome).toEqual({ reason: "conflict", rows: [] })
 })
 
 it("Space settings wake the review the same way whether the owner or Arden wrote them", async () => {

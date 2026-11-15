@@ -30,7 +30,7 @@ const context = (snapshot: object, extra: object = {}) =>
     ...extra
   })
 
-it("migration 0162 drops the Memory wakes queued for Space reviews and keeps every other cause", () => {
+it("migration 0162 drops the Memory wakes waiting for Space reviews and nothing else", () => {
   const database = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false })
   for (const statement of baselineStatements) database.exec(statement)
   for (const migration of migrations.filter(
@@ -46,25 +46,17 @@ it("migration 0162 drops the Memory wakes queued for Space reviews and keeps eve
       context, created_at, claimed_at) VALUES (?, ?, ?, ?, ?, '${at}', ?)`)
   const review = "space:space-1"
   row.run(1, review, "event", "wiki.changed:a", context(memory, { triggering_change: "a" }), null)
-  row.run(2, review, "wake", review, context(coalesced(wake, memory, chat)), null)
-  row.run(3, review, "wake", review, context(coalesced(memory, memory)), null)
-  row.run(4, review, "wake", review, context(coalesced(memory, chat)), null)
-  row.run(5, review, "event", "chat.completed:run-1", context(chat), null)
-  row.run(6, review, "event", "wiki.changed:b", context(memory), at)
-  row.run(7, "builtin-wiki-maintenance", "event", "wiki.changed:a", context(memory), null)
+  row.run(2, review, "wake", review, context(coalesced(wake, chat)), null)
+  row.run(3, review, "event", "chat.completed:run-1", context(chat), null)
+  row.run(4, review, "event", "wiki.changed:b", context(memory), at)
+  row.run(5, review, "event", "wiki.changed:c", context(memory, { automation_run_id: 9 }), null)
+  row.run(6, "builtin-wiki-maintenance", "event", "wiki.changed:a", context(memory), null)
   const before = database.prepare("SELECT * FROM automation_event_queue ORDER BY id").all()
 
   memoryWakesLeaveReviews.up(database)
 
+  // Only the review's waiting Memory row goes; a claimed one, one a run names, the review's other
+  // rows and another job's rows stay exactly as they were.
   const after = database.prepare("SELECT * FROM automation_event_queue ORDER BY id").all()
-  expect(after.map((entry) => entry["id"])).toEqual([2, 4, 5, 6, 7])
-  const snapshot = (id: number) =>
-    JSON.parse(String(after.find((entry) => entry["id"] === id)?.["context"]))
-  expect(snapshot(2).trigger_context_snapshot).toEqual(coalesced(wake, chat))
-  expect(snapshot(4).trigger_context_snapshot).toEqual(chat)
-  // A row already claimed by a run, a row with no Memory cause, and another job's rows stay.
-  for (const id of [5, 6, 7])
-    expect(after.find((entry) => entry["id"] === id)).toEqual(
-      before.find((entry) => entry["id"] === id)
-    )
+  expect(after).toEqual(before.filter((entry) => entry["id"] !== 1))
 })

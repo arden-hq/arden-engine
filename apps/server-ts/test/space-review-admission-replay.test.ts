@@ -27,9 +27,9 @@ const UNTIL = "2026-11-14T00:00:00.000Z"
 const ACTED = new Set(["finished", "needs_you"])
 // A review that ran a model and ended with one of these advanced the Space's checkpoint.
 const CHECKPOINTED = new Set(["finished", "no_change", "needs_you"])
-// The changes that have a wake of their own: a chat turn, mail, Space settings and a Task change.
-// A row with none of them, and not asked for, has nothing that would queue it now.
-const WOKEN_BY: ReadonlySet<ReviewChange> = new Set(["chat_turn", "mail", "space_settings", "task"])
+// The changes that always have a wake of their own: a chat turn, mail and Space settings. A Task
+// change wakes a review only when the owner made it by hand, which a stored input does not say.
+const WOKEN_BY: ReadonlySet<ReviewChange> = new Set(["chat_turn", "mail", "space_settings"])
 
 const decodeTrigger = Schema.decodeUnknownSync(
   Schema.fromJsonString(AutomationTriggerContextSchema)
@@ -66,10 +66,11 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
       const counts = { rows: 0, start: 0, acted: 0, actedStarts: 0 }
       const byOutcome = new Map<string, { started: number; skipped: number }>()
       const actedSkipped = new Map<string, number>()
-      // Rows a wake would still produce, and rows with no change that has a wake now.
-      const wakes = { woken: 0, wokenStart: 0, unwoken: 0, unwokenPagesOnly: 0 }
+      // Rows a chat, mail or settings wake still produces; rows only an owner's Task change could
+      // still produce; rows with no change that has a wake now.
+      const wakes = { woken: 0, wokenStart: 0, taskOnly: 0, unwoken: 0, unwokenPagesOnly: 0 }
       // Rows a Task change alone accounts for: a Task changed while the Space held something,
-      // with no chat turn and no mail; the Task wake adds these.
+      // with no chat turn and no mail.
       const taskAlone = { acted: 0, notActed: 0 }
       for (const row of rows) {
         const input = decodeInput(row.input_json)
@@ -85,6 +86,8 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           if (asked || [...verdict.changes].some((change) => WOKEN_BY.has(change))) {
             wakes.woken += 1
             if (starts) wakes.wokenStart += 1
+          } else if (verdict.changes.has("task")) {
+            wakes.taskOnly += 1
           } else {
             wakes.unwoken += 1
             if (verdict.changes.has("memory_page")) wakes.unwokenPagesOnly += 1
@@ -126,7 +129,8 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           ),
           `Reviews that did something: ${counts.acted}; the check starts ${counts.actedStarts}.`,
           ...[...actedSkipped].map(([reason, count]) => `  not started, ${reason}: ${count}`),
-          `Rows a chat, mail, settings or Task wake still produces: ${wakes.woken}; the check starts ${wakes.wokenStart}.`,
+          `Rows a chat, mail or settings wake still produces: ${wakes.woken}; the check starts ${wakes.wokenStart}.`,
+          `Rows only a Task change could produce, when the owner made it: ${wakes.taskOnly}.`,
           `Rows with no change that wakes a review now: ${wakes.unwoken}; ${wakes.unwokenPagesOnly} with page changes, the rest with none.`,
           `A Task change alone while the Space held something: ${taskAlone.acted} acted, ${taskAlone.notActed} did not.`,
           ""
@@ -136,8 +140,15 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
       expect(counts.start).toBe(375)
       expect(counts.acted).toBe(113)
       expect(counts.actedStarts).toBe(62)
-      // Every row the check starts has a wake of its own; the rows with none start none.
-      expect(wakes).toEqual({ woken: 383, wokenStart: 375, unwoken: 910, unwokenPagesOnly: 777 })
+      // Every row a chat, mail or settings wake produces starts; a Task-only row starts only when
+      // the owner made that change; the rows with no waking change start none.
+      expect(wakes).toEqual({
+        woken: 341,
+        wokenStart: 341,
+        taskOnly: 42,
+        unwoken: 910,
+        unwokenPagesOnly: 777
+      })
       expect(taskAlone).toEqual({ acted: 6, notActed: 28 })
       // Every review that acted and would not start was woken by Memory pages alone. One offered
       // work in a Space that held nothing, and the owner rejected it; the rest wrote Task

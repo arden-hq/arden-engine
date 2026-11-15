@@ -86,8 +86,11 @@ export const makeWorkAttachments = ({
           const row = rows[0]
           if (row === undefined)
             return yield* workError("storage", "Space task attachment insert returned no row")
-          if (runId === undefined && task.space_id !== null)
-            yield* spaceJobs.queueSpaceWake(task.space_id, createdAt)
+          yield* spaceJobs.queueTaskChanged(
+            task.item_id,
+            createdAt,
+            runId === undefined ? { kind: "owner" } : { kind: "run", runId }
+          )
           return yield* decodeWorkAttachment(row)
         })
       )

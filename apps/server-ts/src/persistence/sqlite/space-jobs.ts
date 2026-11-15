@@ -28,18 +28,32 @@ import {
 import { taskIsLive, taskMayWake, taskMayWakeSql, taskStands, taskStandsSql } from "./task-wake.js"
 import { restartCutRunSql } from "./status-sets.js"
 import { SPACE_REVIEW_LADDER_MS, ladderStepMs } from "../automations/retry-ladders.js"
-import { chainMayWake } from "../automations/chain-depth.js"
+import { causedChainDepth, chainMayWake } from "../automations/chain-depth.js"
+import { readCause } from "./run-cause.js"
 import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
 
-/** A Task's history gained a row that changes the Task, as the `task.changed` event says. */
-interface TaskChange {
-  readonly itemId: string
-  readonly eventKey: string
-  readonly producedBy: string | null
-  readonly chainDepth: number
+/**
+ * Who made a change, which decides what it may wake:
+ * - `owner`: the owner, by hand, outside any run (the app's Task controls, or accepting an offer).
+ *   It wakes a Space review, and wakes a Task's worker as the owner's change.
+ * - `run`: a run wrote it. Only the owner's own chat turn wakes a review from here; a Task
+ *   worker, a review, Capture or any Automation wakes none, and the next review reads its change
+ *   in the checkpoint diff. A worker wake a run causes is never the owner's: it carries the
+ *   run's Automation and chain depth.
+ * - `clock`: nobody acted now (a booked check came due, a deferred Task reopened, recovery).
+ */
+export type ChangeBy =
+  | { readonly kind: "owner" }
+  | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "clock" }
+
+/** Who made a Task write, from the store's caller: a run, the owner's hand, or neither. */
+export const taskWriteBy = (runId: string | undefined, actor: "user" | "worker"): ChangeBy => {
+  if (runId !== undefined) return { kind: "run", runId }
+  return actor === "user" ? { kind: "owner" } : { kind: "clock" }
 }
 
 interface JobState {
@@ -62,7 +76,7 @@ export interface SpaceJobSql {
   readonly materializeDue: (now: string) => SpaceJobWrite<void>
   readonly syncSpace: (spaceId: string, now: string) => SpaceJobWrite<JobState | null>
   readonly queueSpaceWake: (spaceId: string, now: string) => SpaceJobWrite<void>
-  readonly queueTaskChanged: (change: TaskChange, now: string) => SpaceJobWrite<boolean>
+  readonly queueTaskChanged: (itemId: string, now: string, by: ChangeBy) => SpaceJobWrite<boolean>
   readonly retryReview: (automationId: string, now: string) => SpaceJobWrite<void>
   readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
   readonly linkChat: (
@@ -77,7 +91,7 @@ export interface SpaceJobSql {
     spaceIds: ReadonlyArray<string>
   ) => SpaceJobWrite<ReadonlyArray<string>>
   readonly queueItemsRouted: (spaceId: string, now: string) => SpaceJobWrite<void>
-  readonly queueTaskWake: (itemId: string, now: string, fromPerson?: boolean) => SpaceJobWrite<void>
+  readonly queueTaskWake: (itemId: string, now: string, by: ChangeBy) => SpaceJobWrite<void>
   readonly stopTask: (itemId: string, settlingRunId?: string) => SpaceJobWrite<void>
   readonly context: (
     automationId: string
@@ -326,8 +340,8 @@ export const makeSpaceJobSql = (
     })
   })
 
-  /** The wake for a change to the Space itself: its settings, whoever wrote them, its Memory
-   * page binding, a restore, or a file added to one of its Tasks. */
+  /** The wake for a change to the Space itself: its settings, its Memory page binding, or a
+   * restore. Each comes from the owner's hand in the app. */
   const queueSpaceWake = Effect.fn("SpaceJobSql.queueSpaceWake")(function* (
     spaceId: string,
     now: string
@@ -344,28 +358,28 @@ export const makeSpaceJobSql = (
     })
   })
 
-  /** The wake for a change to one of the Space's Tasks. A change the review wrote itself wakes
-   * nothing, so a review never queues its own next run; a burst of changes folds into the one
+  /** The wake for a change to one of the Space's Tasks. Only a change the owner made wakes the
+   * review; a run's change is context it reads at its next start. A burst folds into the one
    * waiting wake and its batch window. */
   const queueTaskChanged = Effect.fn("SpaceJobSql.queueTaskChanged")(function* (
-    change: TaskChange,
-    now: string
+    itemId: string,
+    now: string,
+    by: ChangeBy
   ) {
+    if (!(yield* madeByOwner(by))) return false
     const tasks = yield* sql<{ readonly space_id: string | null }>`
-      SELECT space_id FROM space_tasks WHERE item_id = ${change.itemId}`
+      SELECT space_id FROM space_tasks WHERE item_id = ${itemId}`
     const spaceId = tasks[0]?.space_id ?? undefined
     if (spaceId === undefined) return false
-    if (change.producedBy === spaceJobId(spaceId) || !chainMayWake(change.chainDepth)) return false
     const state = yield* syncSpace(spaceId, now)
     if (!state?.enabled) return false
     return yield* queue(state, {
       source: "event",
       queued_at: now,
       event_type: "task.changed",
-      event_key: change.eventKey,
-      produced_by: change.producedBy,
-      ...(change.chainDepth === 0 ? {} : { chain_depth: change.chainDepth }),
-      context: { space_id: spaceId, item_id: change.itemId }
+      event_key: `${itemId}@${now}`,
+      produced_by: null,
+      context: { space_id: spaceId, item_id: itemId }
     })
   })
 
@@ -568,20 +582,26 @@ export const makeSpaceJobSql = (
     )
   })
 
+  /** The one way to wake a Task's worker. The owner's change runs past a booked check and an
+   * open question; a run's change carries the run's Automation and depth, and wakes nothing past
+   * the chain limit; the clock's wake keeps to the booked check. */
   const queueTaskWake = Effect.fn("SpaceJobSql.queueTaskWake")(function* (
     itemId: string,
     now: string,
-    fromPerson = false
+    by: ChangeBy
   ) {
     const task = yield* readJobTask(sql, itemId)
     if (task !== null && !taskStands(task)) yield* halt(taskJobId(itemId), "hold")
+    const owner = by.kind === "owner"
     if (
       task === null ||
       !taskMayWake(task) ||
-      (!fromPerson && task.next_attempt_at !== null && task.next_attempt_at > now)
+      (!owner && task.next_attempt_at !== null && task.next_attempt_at > now)
     )
       return
-    const waiting = fromPerson
+    const cause = by.kind === "run" ? yield* runCause(by.runId, taskJobId(itemId)) : undefined
+    if (cause !== undefined && !chainMayWake(cause.depth)) return
+    const waiting = owner
       ? hasPendingTaskApproval(sql, sql`${task.item_id}`)
       : hasPendingTaskQuestion(sql, sql`${task.item_id}`)
     const blocked = yield* sql<{ readonly present: number }>`SELECT ${waiting} AS present`
@@ -595,11 +615,40 @@ export const makeSpaceJobSql = (
         queued_at: now,
         event_type: "task.wake",
         event_key: task.item_id,
-        produced_by: null,
+        produced_by: cause?.producedBy ?? null,
+        ...(cause === undefined || cause.depth === 0 ? {} : { chain_depth: cause.depth }),
         context: { space_id: task.space_id, item_id: task.item_id }
       },
-      fromPerson ? { personChangeAt: now } : {}
+      owner ? { personChangeAt: now } : {}
     )
+  })
+
+  /** Whether the owner made a change: by hand, or in their own chat turn (not a helper agent's
+   * or a Task worker's run inside that chat). */
+  const madeByOwner = Effect.fn("SpaceJobSql.madeByOwner")(function* (by: ChangeBy) {
+    switch (by.kind) {
+      case "owner":
+        return true
+      case "clock":
+        return false
+      case "run": {
+        const runs = yield* sql<{ readonly person: number }>`
+          SELECT json_extract(authority_json, '$.actor.kind') = 'person' AS person
+          FROM chat_runs WHERE run_id = ${by.runId}`
+        return runs[0]?.person === 1
+      }
+    }
+  })
+
+  /** What a run's write stands on: the Automation behind it and that wake's depth plus one. A
+   * job going on with its own work keeps its depth; the owner's chat has no Automation. */
+  const runCause = Effect.fn("SpaceJobSql.runCause")(function* (runId: string, job: string) {
+    const cause = yield* readCause(sql, runId)
+    const producedBy = cause.automationId ?? null
+    return {
+      producedBy,
+      depth: producedBy === job ? cause.wakeDepth : causedChainDepth(producedBy, cause.wakeDepth)
+    }
   })
 
   const stopTask = Effect.fn("SpaceJobSql.stopTask")(function* (

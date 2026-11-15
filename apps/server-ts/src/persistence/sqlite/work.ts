@@ -27,7 +27,7 @@ import { taskJobId } from "../space-job-id.js"
 import { renameOwnedJob } from "./job-labels.js"
 import { WorkStore, WorkStoreError, type TaskAddress } from "../work/store.js"
 import { spaceChoices } from "../spaces/store.js"
-import { makeSpaceJobSql } from "./space-jobs.js"
+import { makeSpaceJobSql, taskWriteBy } from "./space-jobs.js"
 import {
   decodeWorkItem as decodeWorkItemWithSources,
   workItemColumns,
@@ -246,6 +246,7 @@ export const makeWorkStore = ({
             ? yield* assertRunTaskAuthority(sql, runId, row.item_id)
             : undefined
           const ownAttempt = runId ? attemptOf !== undefined : actor === "worker"
+          const changedBy = taskWriteBy(runId, actor)
           const { continuation_context: currentContext, ...publicRow } = row
           const current = yield* decodeWorkItem(publicRow)
           const currentAt = yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(
@@ -474,12 +475,15 @@ export const makeWorkStore = ({
                   workError("storage", "Could not replace the Task's waiting wake", cause)
                 )
               )
+            // The owner booking a later check leaves the wake to that check.
             yield* spaceJobs.queueTaskWake(
               updatedRow.item_id,
               updatedAt,
-              !ownAttempt && !rescheduled
+              rescheduled && changedBy.kind === "owner" ? { kind: "clock" } : changedBy
             )
           }
+          if (publicChanged)
+            yield* spaceJobs.queueTaskChanged(updatedRow.item_id, updatedAt, changedBy)
 
           yield* recordVersions
           if (spent.length === 0) return yield* decodeWorkItem(updatedRow)
