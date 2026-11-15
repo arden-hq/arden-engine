@@ -287,7 +287,7 @@ const limitRefusal = (
   })
 }
 
-const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
+const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,
   operation: WikiPageOperation
@@ -331,7 +331,7 @@ const COMMIT_RULES: ReadonlyArray<{
   ) => Effect.Effect<void, WikiCommitError>
 }> = [
   { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
-  { binds: (origin) => !isOutsideEdit(origin), check: requireWithinLimit }
+  { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */
