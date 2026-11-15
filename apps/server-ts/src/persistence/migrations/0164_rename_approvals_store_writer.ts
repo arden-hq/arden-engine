@@ -42,7 +42,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const renameApprovalsStoreWriter: Migration = {
-  version: 168,
+  version: 164,
   name: "rename_approvals_store_writer",
   foreignKeys: { kind: "enforced" },
   up

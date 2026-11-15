@@ -254,9 +254,10 @@ export const contextSessionSchemaSection = {
       read_seq INTEGER NOT NULL CHECK(read_seq >= -1),
       read_offset INTEGER CHECK(read_offset IS NULL OR (read_offset > 0 AND read_seq >= 0)),
       prepared_json TEXT CHECK(prepared_json IS NULL OR json_valid(prepared_json)),
-      updated_at TEXT NOT NULL
-    , prepared_cut_seq INTEGER
-      CHECK(prepared_cut_seq IS NULL OR (prepared_json IS NOT NULL AND prepared_cut_seq > read_seq))) WITHOUT ROWID`,
+      updated_at TEXT NOT NULL,
+      prepared_cut_seq INTEGER
+        CHECK(prepared_cut_seq IS NULL OR (prepared_json IS NOT NULL AND prepared_cut_seq > read_seq))
+    ) WITHOUT ROWID`,
     `CREATE TABLE memory_capture_backlog (
       session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
       from_seq INTEGER NOT NULL CHECK(from_seq >= 0),

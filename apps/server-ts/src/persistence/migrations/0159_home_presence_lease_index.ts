@@ -9,7 +9,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const homePresenceLeaseIndex: Migration = {
-  version: 161,
+  version: 159,
   name: "home_presence_lease_index",
   foreignKeys: { kind: "enforced" },
   up

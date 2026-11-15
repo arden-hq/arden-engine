@@ -1,8 +1,18 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
+/** A removed message cuts every position kept in its chat back to before it, because new messages
+ * then reuse its number: Memory Capture's position and old backlog ranges, and the chat summary.
+ *
+ * A prepared Capture batch that read past the removed message keeps what it read before it and
+ * records the first message removed in `prepared_cut_seq`: a finished batch advances to the
+ * message before that, and a batch resumed after a restart reads only up to it. A removal at or
+ * before the batch's first message clears the batch, since nothing it read is left. A batch
+ * starts at the position: inside message `read_seq` when an offset is kept, else after it.
+ *
+ * A chat summary that reaches the removed message is deleted, as is every stored summary that
+ * already reaches past its chat's last message. */
 const up = (database: DatabaseSync): void => {
-  database.exec("DROP TRIGGER memory_capture_cut_at_removal")
   database.exec(`CREATE TRIGGER chat_positions_cut_at_removal
       AFTER DELETE ON session_messages
       WHEN EXISTS (SELECT 1 FROM memory_capture_positions WHERE session_id = OLD.session_id)
@@ -24,10 +34,7 @@ const up = (database: DatabaseSync): void => {
         WHERE session_id = OLD.session_id AND from_seq >= OLD.seq;
         UPDATE memory_capture_backlog SET through_seq = OLD.seq - 1
         WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
-        DELETE FROM chat_summaries WHERE session_id = OLD.session_id
-          AND NOT EXISTS (SELECT 1 FROM session_messages
-            WHERE session_id = OLD.session_id AND seq < OLD.seq);
-        UPDATE chat_summaries SET through_sequence = OLD.seq - 1
+        DELETE FROM chat_summaries
         WHERE session_id = OLD.session_id AND through_sequence >= OLD.seq;
       END`)
   database.exec(`DELETE FROM chat_summaries
@@ -35,9 +42,9 @@ const up = (database: DatabaseSync): void => {
       WHERE session_messages.session_id = chat_summaries.session_id), -1)`)
 }
 
-export const chatSummaryCutByRevert: Migration = {
-  version: 164,
-  name: "chat_summary_cut_by_revert",
+export const chatPositionsCutAtRemoval: Migration = {
+  version: 156,
+  name: "chat_positions_cut_at_removal",
   foreignKeys: { kind: "enforced" },
   up
 }

@@ -15,7 +15,7 @@ import { activeRunStatusList } from "./status-sets.js"
 // The transcript owns where a chat ends, so the end is never stored. A trigger on
 // `session_messages` moves a position back when messages it covers are deleted
 // (revert, clear), because new messages then reuse their numbers, and marks where a deletion
-// cut a prepared batch (migration 0158).
+// cut a prepared batch (migration 0156).
 
 const IdentityJson = Schema.fromJsonString(MemoryCaptureBatchIdentitySchema)
 
@@ -178,7 +178,7 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
 
 /**
  * Capture reads an owner chat from after the messages it held when it became one. A new chat
- * holds none, and a trigger starts it at its beginning (migration 0157). An Automation's working
+ * holds none, and a trigger starts it at its beginning (migration 0155). An Automation's working
  * copy that continues as a chat holds copies its source is read for, so it calls this before it
  * becomes an owner chat, and a trigger refuses it otherwise. A chat filled with copies after it
  * is made goes through `copyIntoOwnerChat`, the one place messages are copied between chats.

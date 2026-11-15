@@ -26,7 +26,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const globalInstructionVersions: Migration = {
-  version: 163,
+  version: 161,
   name: "global_instruction_versions",
   foreignKeys: { kind: "enforced" },
   up

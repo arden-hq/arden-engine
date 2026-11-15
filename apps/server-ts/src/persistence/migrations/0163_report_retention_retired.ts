@@ -24,7 +24,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const reportRetentionRetired: Migration = {
-  version: 167,
+  version: 163,
   name: "report_retention_retired",
   foreignKeys: { kind: "enforced" },
   up
