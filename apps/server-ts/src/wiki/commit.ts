@@ -10,9 +10,14 @@ import { Effect, Option, Schema } from "effect"
 
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { aliasesAreHuman, parseWikiPage } from "./page.js"
+import { openRetractions, putBack, retractionRefusal } from "./retraction.js"
+import { isSystemPage } from "./system-pages.js"
 
 export type WikiCommitOrigin =
+  /** The owner, in the app or in the file. */
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
+  /** The owner's own chat turn, forgetting or undoing a retraction after their approval. */
+  | { readonly kind: "forget"; readonly sessionId: string }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
   | {
@@ -43,6 +48,7 @@ const AUTOMATION_PREFIX = "wiki.automation."
 const CHAIN_MARK = "~"
 const AGENT_ORIGIN = "wiki.agent"
 const CAPTURE_ORIGIN = "memory.capture"
+const FORGET_ORIGIN = "memory.forget"
 
 const withChat = (base: string, sessionId: string | undefined): string =>
   sessionId === undefined ? base : `${base}@${sessionId}`
@@ -68,6 +74,8 @@ const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
       }`
     case "capture":
       return withChat(CAPTURE_ORIGIN, origin.sessionId)
+    case "forget":
+      return withChat(FORGET_ORIGIN, origin.sessionId)
     case "space_page":
       return "space.page"
     case "system":
@@ -84,6 +92,9 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   if (agentChat !== null) return { kind: "agent", sessionId: agentChat }
   const captureChat = chatOf(origin, CAPTURE_ORIGIN)
   if (captureChat !== null) return { kind: "capture", replayKey: undefined, sessionId: captureChat }
+  const forgetChat = chatOf(origin, FORGET_ORIGIN)
+  if (forgetChat !== null && forgetChat !== undefined)
+    return { kind: "forget", sessionId: forgetChat }
   if (origin === "space.page") return { kind: "space_page" }
   const named = origin.startsWith(AUTOMATION_PREFIX)
     ? origin.slice(AUTOMATION_PREFIX.length).trim()
@@ -102,6 +113,8 @@ export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => 
     case "agent":
     case "automation":
       return origin.kind
+    case "forget":
+      return "user"
     case "capture":
       return "automation"
     case "space_page":
@@ -114,6 +127,7 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
   switch (origin.kind) {
     case "agent":
     case "capture":
+    case "forget":
       return origin.sessionId
     case "user":
     case "automation":
@@ -125,6 +139,10 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
 
 export const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
   wikiOriginSource(origin) === "automation"
+
+/** Whether the owner made this write: no rule about what the owner may write binds it. */
+const isOwnerOrigin = (origin: WikiCommitOrigin): boolean =>
+  origin.kind === "user" || origin.kind === "forget"
 
 export type WikiPageOperation = CommitInput["operations"][number]
 
@@ -172,7 +190,7 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
 })
 
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
-  rule: Schema.Literals(["aliases", "size"] as const),
+  rule: Schema.Literals(["aliases", "size", "code_owned", "retraction"] as const),
   message: Schema.String
 }) {}
 
@@ -328,16 +346,98 @@ const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
 const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" && origin.via === "filesystem"
 
+const requireNoSystemPage = Effect.fn("Wiki.requireNoSystemPage")(function* (
+  repository: ManagedFileRepositoryShape,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const paths = [before?.path, "path" in operation ? operation.path : undefined]
+  const path = paths.find((candidate) => candidate !== undefined && isSystemPage(candidate))
+  if (path === undefined) return
+  return yield* new WikiCommitRuleError({
+    rule: "code_owned",
+    message: `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
+  })
+})
+
+const pageBody = (bytes: Uint8Array): Effect.Effect<string> => {
+  const text = decoder.decode(bytes)
+  return parseWikiPage(text).pipe(
+    Effect.map((page) => page.body),
+    Effect.orElseSucceed(() => text)
+  )
+}
+
+const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function* (
+  repository: ManagedFileRepositoryShape,
+  operations: ReadonlyArray<WikiPageOperation>
+): Effect.fn.Return<void, WikiCommitError> {
+  const open = yield* openRetractions(repository)
+  if (open.length === 0) return
+  for (const operation of operations) {
+    if (operation._tag === "Archive") continue
+    const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+    const path = ("path" in operation ? operation.path : undefined) ?? before?.path
+    const given = "content" in operation ? operation.content : undefined
+    const source = given ?? (operation._tag === "Restore" ? before : null)
+    if (path === undefined || isSystemPage(path) || source === null) continue
+    const after = yield* pageBody(
+      source instanceof Uint8Array ? source : yield* repository.readVersion(source)
+    )
+    const had =
+      before === null || operation._tag === "Restore" || before.state !== "active"
+        ? undefined
+        : yield* pageBody(yield* repository.readVersion(before))
+    const found = putBack(open, had, after)
+    if (found !== undefined)
+      return yield* new WikiCommitRuleError({
+        rule: "retraction",
+        message: retractionRefusal(path, found.entry)
+      })
+  }
+})
+
+const eachOperation =
+  (
+    check: (
+      repository: ManagedFileRepositoryShape,
+      origin: WikiCommitOrigin,
+      operation: WikiPageOperation
+    ) => Effect.Effect<void, WikiCommitError>
+  ) =>
+  (
+    repository: ManagedFileRepositoryShape,
+    origin: WikiCommitOrigin,
+    operations: ReadonlyArray<WikiPageOperation>
+  ) =>
+    Effect.forEach(operations, (operation) => check(repository, origin, operation), {
+      discard: true
+    })
+
+/** What may be written, by whom. Each row binds the writers it names, at the one commit point. */
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (
     repository: ManagedFileRepositoryShape,
     origin: WikiCommitOrigin,
-    operation: WikiPageOperation
+    operations: ReadonlyArray<WikiPageOperation>
   ) => Effect.Effect<void, WikiCommitError>
 }> = [
-  { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
-  { binds: (origin) => !isOutsideEdit(origin), check: requireWithinLimit }
+  {
+    binds: () => true,
+    check: eachOperation((_repository, _origin, operation) => requireHumanAliases(operation))
+  },
+  { binds: (origin) => !isOutsideEdit(origin), check: eachOperation(requireWithinLimit) },
+  {
+    binds: (origin) => !isOwnerOrigin(origin),
+    check: eachOperation((repository, _origin, operation) =>
+      requireNoSystemPage(repository, operation)
+    )
+  },
+  {
+    binds: (origin) => !isOwnerOrigin(origin),
+    check: (repository, _origin, operations) => requireNoRetractedLine(repository, operations)
+  }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */
@@ -348,9 +448,6 @@ export const requireCommitRules = (
 ): Effect.Effect<void, WikiCommitError> =>
   Effect.forEach(
     COMMIT_RULES.filter((rule) => rule.binds(origin)),
-    (rule) =>
-      Effect.forEach(operations, (operation) => rule.check(repository, origin, operation), {
-        discard: true
-      }),
+    (rule) => rule.check(repository, origin, operations),
     { discard: true }
   )

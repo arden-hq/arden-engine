@@ -103,6 +103,7 @@ import { spaceTools } from "./spaces.js"
 import { wikiReportTools } from "./wiki-reports.js"
 import { wikiCollectionsTools } from "./wiki-collections.js"
 import { wikiOperationTools } from "./wiki-operations.js"
+import { memoryForgetTools } from "./memory-forget.js"
 import { wikiChangeTools } from "./wiki-change.js"
 import { todoTools } from "./todos.js"
 import { googleToolProvider } from "./google-provider.js"
@@ -167,6 +168,7 @@ const builtinTools = Effect.all([
   skillTools,
   wikiTools,
   wikiOperationTools,
+  memoryForgetTools,
   wikiChangeTools,
   wikiCollectionsTools,
   wikiReportTools,

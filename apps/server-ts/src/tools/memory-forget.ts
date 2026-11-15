@@ -1,0 +1,158 @@
+import type { ToolContext } from "@arden-hq/loop"
+import { countOf } from "@arden-hq/std/count"
+import { Effect, Schema } from "effect"
+
+import { SessionQueries } from "../persistence/sessions/queries.js"
+import { chatHref } from "../sessions/chat-href.js"
+import type { RetractionChange } from "../wiki/forgotten.js"
+import { MAX_CLAIM_CHARS } from "../wiki/retraction.js"
+import { Wiki } from "../wiki/service.js"
+import { boundedDiff } from "./bounded-diff.js"
+import { defineServerTool, type ServerTool } from "./define.js"
+import { requireOwnerTurn } from "./owner-turn.js"
+import type { ServerRunContext } from "./run-context.js"
+import { wikiFailure } from "./wiki.js"
+
+/** One approval card lists every line; past this many it stops being readable. */
+const MAX_LINES = 50
+const MAX_LINE_CHARS = 2_000
+
+const ForgetParametersSchema = Schema.Struct({
+  lines: Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(MAX_LINE_CHARS)))
+    .check(Schema.isMinLength(1), Schema.isMaxLength(MAX_LINES))
+    .annotate({
+      description: `Each whole line to forget, as a Memory page holds it, 1 to ${MAX_LINES}. Every copy on every page is removed.`
+    })
+    .pipe(Schema.optionalKey),
+  claim: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CLAIM_CHARS))
+    .pipe(Schema.annotateEncoded({ description: "What the user said is wrong, in one line." }))
+    .pipe(Schema.optionalKey),
+  undo: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+    .annotate({
+      description:
+        "Instead of lines and claim: the number of an entry this tool reported, to undo it."
+    })
+    .pipe(Schema.optionalKey)
+}).check(
+  Schema.makeFilter((input) =>
+    (input.lines !== undefined && input.claim !== undefined) !== (input.undo !== undefined)
+      ? undefined
+      : "Provide lines and claim, or undo alone"
+  )
+)
+
+type ForgetRequest =
+  | { readonly kind: "forget"; readonly lines: ReadonlyArray<string>; readonly claim: string }
+  | { readonly kind: "undo"; readonly id: number }
+
+const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
+  input.undo !== undefined
+    ? { kind: "undo", id: input.undo }
+    : { kind: "forget", lines: input.lines ?? [], claim: input.claim ?? "" }
+
+const changeDiff = (change: RetractionChange): string =>
+  change.pages.map((page) => boundedDiff(page.path, page.before, page.after)).join("\n")
+
+const removedPages = (change: RetractionChange): ReadonlyArray<string> => [
+  ...new Set(change.entry.removed.map((removed) => removed.path))
+]
+
+const makeMemoryForgetTools = ({
+  wiki,
+  sessions
+}: {
+  readonly wiki: Wiki["Service"]
+  readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
+}): ReadonlyArray<ServerTool> => {
+  const ownerTurn = async (ctx: ToolContext<ServerRunContext>) => {
+    const header = await requireOwnerTurn(sessions, ctx.run, ctx.signal, {
+      target: { kind: "memory_forget" },
+      doing: "forgetting Memory",
+      what: "Memory is forgotten only in the user's own turn, after their approval"
+    })
+    return { sessionId: ctx.run.sessionId, chat: chatHref(header) }
+  }
+
+  const plan = async (request: ForgetRequest, ctx: ToolContext<ServerRunContext>) => {
+    const turn = await ownerTurn(ctx)
+    return Effect.runPromise(
+      (request.kind === "forget"
+        ? wiki.planForget({ lines: request.lines, claim: request.claim, turn })
+        : wiki.planUndoForget({ id: request.id, turn })
+      ).pipe(Effect.mapError(wikiFailure)),
+      { signal: ctx.signal }
+    )
+  }
+
+  return [
+    defineServerTool({
+      name: "memory_forget",
+      description: [
+        "Forget lines of Memory the user says are wrong: removes every copy of each line from every page in one change and opens a numbered entry,",
+        "so no later write but the user's own can put those lines back. undo closes an entry.",
+        "Works only during the user's own turn in a chat. Asks by default."
+      ].join(" "),
+      parameters: Schema.toStandardSchemaV1(ForgetParametersSchema),
+      metadata: {
+        effect: "arden_db",
+        display_name: "Forget in Memory",
+        kind: "tool",
+        action: "write",
+        default_approval: "ask",
+        approval_preview: "Forget lines of Memory everywhere they appear.",
+        source: "_wiki",
+        changes_state: true,
+        concurrency_group: "wiki_write",
+        destructive: true,
+        target: "reported"
+      },
+      approvalPrompt: async (input, ctx) => {
+        const request = requestOf(input)
+        const change = await plan(request, ctx)
+        return {
+          preview:
+            request.kind === "forget"
+              ? `Forget ${countOf(change.entry.removed.length, "line")} on ${countOf(removedPages(change).length, "page")}`
+              : `Undo forgotten entry ${request.id}`,
+          presentation: {
+            title:
+              request.kind === "forget" ? "Forget this in Memory?" : "Let this back into Memory?",
+            subject: change.entry.claim,
+            fields: [],
+            approve_label: request.kind === "forget" ? "Forget" : "Undo",
+            reject_label: "Keep as is"
+          },
+          diff: changeDiff(change)
+        }
+      },
+      execute: async (input, ctx, effects) => {
+        const request = requestOf(input)
+        const turn = await ownerTurn(ctx)
+        const change = await Effect.runPromise(
+          (request.kind === "forget"
+            ? wiki.forget({ lines: request.lines, claim: request.claim, turn })
+            : wiki.undoForget({ id: request.id, turn })
+          ).pipe(Effect.mapError(wikiFailure)),
+          { signal: ctx.signal }
+        )
+        effects.applied()
+        const pages = removedPages(change)
+        return request.kind === "forget"
+          ? {
+              result: `Forgot entry ${change.entry.id}: removed ${countOf(change.entry.removed.length, "line")} from ${pages.join(", ")}. A later write that would put one back is refused unless the user makes it; undo ${change.entry.id} lifts the entry.`,
+              preview: "Forgotten",
+              data: { entry: change.entry.id, removed: change.entry.removed.length, pages }
+            }
+          : {
+              result: `Undid entry ${change.entry.id}. Its ${countOf(change.entry.removed.length, "line")} may be written again; none was put back.`,
+              preview: "Forgetting undone",
+              data: { entry: change.entry.id, removed: change.entry.removed.length, pages }
+            }
+      }
+    })
+  ]
+}
+
+export const memoryForgetTools = Effect.gen(function* () {
+  return makeMemoryForgetTools({ wiki: yield* Wiki, sessions: yield* SessionQueries })
+})

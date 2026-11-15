@@ -15,7 +15,8 @@ const WikiOperationSchema = Schema.Literals([
   "restore",
   "diff",
   "links",
-  "rename"
+  "rename",
+  "forget"
 ] as const)
 
 export type WikiOperation = typeof WikiOperationSchema.Type

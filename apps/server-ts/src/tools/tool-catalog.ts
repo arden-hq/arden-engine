@@ -103,7 +103,8 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
     "wiki_restore_page",
     "wiki_create_directory",
     "wiki_configure_reports",
-    "wiki_publish_report"
+    "wiki_publish_report",
+    "memory_forget"
   ],
   email: [
     "email_search",

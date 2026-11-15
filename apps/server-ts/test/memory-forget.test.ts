@@ -1,0 +1,510 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type { ToolContext } from "@arden-hq/loop"
+import {
+  ManagedFileRepository,
+  managedFileRepositoryNodeLayer,
+  type ManagedFileRepositoryShape
+} from "@arden-hq/revisions/effect"
+import { Effect } from "effect"
+import { describe, expect, it } from "vitest"
+
+import { prepareMemorySources } from "../src/memory/retrieval.js"
+import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import { SessionQueries } from "../src/persistence/sessions/queries.js"
+import type { ServerTool } from "../src/tools/define.js"
+import { memoryForgetTools } from "../src/tools/memory-forget.js"
+import type { ServerRunContext } from "../src/tools/run-context.js"
+import { activePages } from "../src/tools/wiki.js"
+import { searchPages } from "../src/tools/wiki-search.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
+import { memoryIndex } from "../src/wiki/collections.js"
+import {
+  commitWiki,
+  createPage,
+  movePage,
+  ownerInApp,
+  updatePage,
+  type WikiCommitIdentity,
+  type WikiCommitOrigin
+} from "../src/wiki/commit.js"
+import { makeWikiContentStepMethods } from "../src/wiki/content-steps.js"
+import type { WikiError } from "../src/wiki/errors.js"
+import { makeWikiForgetMethods } from "../src/wiki/forgotten.js"
+import { makeWikiListingMethods } from "../src/wiki/listing.js"
+import { makeWikiMaintenanceMethods } from "../src/wiki/maintenance.js"
+import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
+import { formatWikiPage } from "../src/wiki/page.js"
+import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
+import { Wiki } from "../src/wiki/service.js"
+import type { Snapshot } from "../src/wiki/snapshot.js"
+import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
+
+const LINE = "Sam lives in the old town by the river."
+const OTHER = "The town has two bridges and one market."
+const TURN = { sessionId: "session-fixture", chat: "arden:session/chat~session-fixture" }
+
+const identity = (origin: WikiCommitOrigin): WikiCommitIdentity => ({
+  actor: "test",
+  origin,
+  reason: "test write"
+})
+const CAPTURE = identity({ kind: "capture", replayKey: undefined, sessionId: "chat-1" })
+const AGENT = identity({ kind: "agent", sessionId: "chat-1" })
+const TIDY = identity({ kind: "automation", automationId: "wiki-maintenance" })
+const AUTOMATION = identity({ kind: "automation", automationId: "owner-automation" })
+const OUTSIDE = identity({ kind: "user", via: "filesystem" })
+
+const content = (pageId: string, body: string) =>
+  formatWikiPage({
+    pageId,
+    title: pageId,
+    aliases: [],
+    lifecycle: "active",
+    redirectTo: null,
+    metadata: {},
+    body
+  })
+
+const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
+  hasPageBinding: () => Effect.succeed(false)
+})
+
+interface Memory {
+  readonly repository: ManagedFileRepositoryShape
+  readonly listing: ReturnType<typeof makeWikiListingMethods>
+  readonly mutations: ReturnType<typeof makeWikiMutationMethods>
+  readonly restores: ReturnType<typeof makeWikiRestoreMethods>
+  readonly forgetting: ReturnType<typeof makeWikiForgetMethods>
+  readonly page: (path: string) => Effect.Effect<Snapshot["pages"][number], unknown>
+  readonly write: (
+    path: string,
+    body: string,
+    commit: WikiCommitIdentity
+  ) => Effect.Effect<WikiError | undefined, unknown>
+}
+
+/** Made-up pages: a root README, two folders, and LINE on two pages. */
+const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>): Promise<A> => {
+  const root = await mkdtemp(join(tmpdir(), "arden-forget-"))
+  try {
+    return await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* ManagedFileRepository
+        yield* commitWiki(repository, { ...ownerInApp("seed"), expectedRevision: null }, [
+          createPage("root", "README.md", content("root", "Pages.")),
+          createPage("people", "people/README.md", content("people", "People.")),
+          createPage("places", "places/README.md", content("places", "Places.")),
+          createPage("sam", "people/sam.md", content("sam", `${LINE}\n- Works at the bakery.\n`)),
+          createPage("town", "places/town.md", content("town", `- ${LINE}\n${OTHER}\n`))
+        ])
+        const listing = makeWikiListingMethods(repository)
+        const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
+        const page = (path: string) =>
+          listing.snapshot().pipe(
+            Effect.flatMap((snapshot) => {
+              const record = snapshot.pages.find((candidate) => candidate.resource.path === path)
+              return record === undefined
+                ? Effect.die(`${path} is missing`)
+                : Effect.succeed(record)
+            })
+          )
+        const write = (path: string, text: string, commit: WikiCommitIdentity) =>
+          Effect.gen(function* () {
+            const record = yield* page(path)
+            return yield* refusal(
+              mutations.update({
+                pageId: record.page.pageId,
+                content: content(record.page.pageId, text),
+                expectedVersion: record.resource.versionId,
+                expectedHead: (yield* listing.head()) ?? "",
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+                commit
+              })
+            )
+          })
+        return yield* body({
+          repository,
+          listing,
+          mutations,
+          restores: makeWikiRestoreMethods(repository, spaces, listing.read),
+          forgetting: makeWikiForgetMethods(repository),
+          page,
+          write
+        })
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root }))
+      ) as Effect.Effect<A>
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+const refusal = <A, E>(effect: Effect.Effect<A, E>) =>
+  Effect.match(effect, {
+    onFailure: (error): E | undefined => error,
+    onSuccess: () => undefined
+  })
+
+const refusedFor = (error: unknown): string | undefined => {
+  const message = recordOf(error)["message"]
+  return typeof message === "string" && message.includes("entry 1 in forgotten.md")
+    ? "retraction"
+    : typeof message === "string"
+      ? message
+      : undefined
+}
+
+const forget = (memory: Memory) =>
+  memory.forgetting.forget({
+    lines: [LINE],
+    claim: "Sam does not live in the old town",
+    turn: TURN
+  })
+
+describe("forgetting a line", () => {
+  it("removes every copy on every page in one commit and opens the entry", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        const before = (yield* memory.repository.history({ limit: null })).length
+        const change = yield* forget(memory)
+        const after = (yield* memory.repository.history({ limit: null })).length
+        const forgotten = yield* memory.page("forgotten.md")
+        return {
+          commits: after - before,
+          sam: (yield* memory.page("people/sam.md")).page.body,
+          town: (yield* memory.page("places/town.md")).page.body,
+          stored: forgotten.page.metadata["retractions"],
+          changed: change.pages.map((page) => page.path)
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      commits: 1,
+      sam: "- Works at the bakery.\n",
+      town: `${OTHER}\n`,
+      stored: [
+        {
+          id: 1,
+          status: "open",
+          said: { chat: TURN.chat, at: expect.any(String) },
+          claim: "Sam does not live in the old town",
+          removed: [
+            { path: "people/sam.md", line: LINE },
+            { path: "places/town.md", line: `- ${LINE}` }
+          ]
+        }
+      ],
+      changed: ["people/sam.md", "places/town.md", "forgotten.md"]
+    })
+  })
+
+  it("refuses a line of fewer than four words, which carries no claim", async () => {
+    const error = await withMemory((memory) =>
+      refusal(
+        memory.forgetting.forget({ lines: ["- Works here."], claim: "Wrong job", turn: TURN })
+      )
+    )
+    expect(error?.message).toBe(
+      "Line 1 has fewer than 4 words, so it carries no claim to guard. Pass whole page lines."
+    )
+  })
+
+  it("refuses every writer but the owner that would put the line back, naming the entry", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        const beforeForget = yield* memory.listing.head()
+        yield* forget(memory)
+        const back = `${OTHER}\n- sam lives in the OLD town by the [[places/town.md|river]].\n`
+        const capture = yield* memory.write("places/town.md", back, CAPTURE)
+        const agentPatch = yield* memory.write("places/town.md", back, AGENT)
+        const tidyMerge = yield* memory.write("places/town.md", back, TIDY)
+        const automation = yield* refusal(
+          memory.mutations.create({
+            path: "places/river.md",
+            title: "River",
+            body: `${LINE}\n`,
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AUTOMATION
+          })
+        )
+        const sam = yield* memory.page("people/sam.md")
+        const restoreTo = (yield* memory.repository.history({
+          resourceId: "sam",
+          start: beforeForget,
+          limit: 1
+        }))[0]?.commitId
+        const restore = yield* refusal(
+          memory.restores.restoreRevision({
+            pageId: "sam",
+            commitId: restoreTo ?? "",
+            expectedVersion: sam.resource.versionId,
+            expectedHead: (yield* memory.listing.head()) ?? "",
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AGENT
+          })
+        )
+        const move = yield* refusal(
+          commitWiki(
+            memory.repository,
+            { ...AGENT, expectedRevision: yield* memory.listing.head() },
+            [movePage(sam.resource, "people/samuel.md", content("sam", `${LINE}\n`))]
+          )
+        )
+        const step = yield* refusal(
+          makeWikiContentStepMethods(memory.repository).applyContentStep({
+            name: "test-step",
+            reason: "test content step",
+            rewrite: (pages) =>
+              Effect.succeed({
+                pages: pages.map((page) =>
+                  page.path === "people/sam.md" ? { ...page, body: `${page.body}${LINE}\n` } : page
+                ),
+                redirects: []
+              })
+          })
+        )
+        return {
+          capture: refusedFor(capture),
+          agentPatch: refusedFor(agentPatch),
+          tidyMerge: refusedFor(tidyMerge),
+          automation: refusedFor(automation),
+          restore: refusedFor(restore),
+          move: refusedFor(move),
+          step: refusedFor(step)
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      capture: "retraction",
+      agentPatch: "retraction",
+      tidyMerge: "retraction",
+      automation: "retraction",
+      restore: "retraction",
+      move: "retraction",
+      step: "retraction"
+    })
+  })
+
+  it("lets the owner put a line back, in the app or in the file, and keeps it there", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const inApp = yield* memory.write(
+          "people/sam.md",
+          `${LINE}\n- Works at the bakery.\n`,
+          ownerInApp("owner edit")
+        )
+        const inFile = yield* memory.write("places/town.md", `${OTHER}\n${LINE}\n`, OUTSIDE)
+        const laterCapture = yield* memory.write(
+          "people/sam.md",
+          `${LINE}\n- Works at the bakery on weekdays.\n`,
+          CAPTURE
+        )
+        return { inApp, inFile, laterCapture }
+      })
+    )
+    expect(outcome).toEqual({ inApp: undefined, inFile: undefined, laterCapture: undefined })
+  })
+
+  it("lets only the owner and Arden's own code write forgotten.md", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const forgotten = yield* memory.page("forgotten.md")
+        const agent = yield* refusal(
+          commitWiki(
+            memory.repository,
+            { ...AGENT, expectedRevision: yield* memory.listing.head() },
+            [updatePage(forgotten.resource, `${forgotten.page.content}\nClosed by an agent.\n`)]
+          )
+        )
+        return recordOf(agent)["message"]
+      })
+    )
+    expect(outcome).toBe(
+      "forgotten.md is kept by Arden for the owner. Nothing was saved; leave it unchanged."
+    )
+  })
+
+  it("keeps an entry the owner wrote that does not read when it adds the next", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const forgotten = yield* memory.page("forgotten.md")
+        const stored = forgotten.page.metadata["retractions"]
+        const handWritten = { note: "written by hand" }
+        yield* commitWiki(
+          memory.repository,
+          { ...OUTSIDE, expectedRevision: yield* memory.listing.head() },
+          [
+            updatePage(
+              forgotten.resource,
+              formatWikiPage({
+                ...forgotten.page,
+                metadata: {
+                  ...forgotten.page.metadata,
+                  retractions: [...(Array.isArray(stored) ? stored : []), handWritten]
+                }
+              })
+            )
+          ]
+        )
+        const ferry = "The ferry runs from the east bank."
+        yield* memory.write("places/town.md", `${OTHER}\n${ferry}\n`, OUTSIDE)
+        const next = yield* memory.forgetting.forget({
+          lines: [ferry],
+          claim: "There is no ferry",
+          turn: TURN
+        })
+        const after = (yield* memory.page("forgotten.md")).page
+        const kept = after.metadata["retractions"]
+        return {
+          next: next.entry.id,
+          kept: Array.isArray(kept) ? kept.length : 0,
+          handWritten:
+            Array.isArray(kept) && kept.some((entry) => recordOf(entry)["note"] !== undefined),
+          noted: after.body.includes("1 entries in this page's frontmatter do not read")
+        }
+      })
+    )
+    expect(outcome).toEqual({ next: 2, kept: 3, handWritten: true, noted: true })
+  })
+
+  it("lets the line be written again once the entry is undone", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const undone = yield* memory.forgetting.undoForget({ id: 1, turn: TURN })
+        const capture = yield* memory.write("places/town.md", `${OTHER}\n${LINE}\n`, CAPTURE)
+        const again = yield* refusal(memory.forgetting.undoForget({ id: 1, turn: TURN }))
+        return { status: undone.entry.status, capture, again: again?.message }
+      })
+    )
+    expect(outcome).toEqual({
+      status: "closed",
+      capture: undefined,
+      again: "No entry 1 is open; nothing is forgotten now."
+    })
+  })
+
+  it("keeps forgotten.md out of recall, search, the index, page lists and upkeep", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        const beforeForget = yield* memory.listing.head()
+        yield* forget(memory)
+        const afterForget = yield* memory.listing.head()
+        yield* memory.forgetting.undoForget({ id: 1, turn: TURN })
+        const snapshot = yield* memory.listing.snapshot()
+        const query = "sam does not live in the old town river forgotten"
+        const prepared = prepareMemorySources({
+          pages: snapshot.pages,
+          recall: { query, excludedPageIds: new Set() },
+          lastChanged: new Map()
+        })
+        const upkeep = makeWikiMaintenanceMethods(memory.repository)
+        const forgetRange = yield* upkeep.prepare({
+          processedHead: beforeForget,
+          reviewerAutomationId: "wiki-maintenance"
+        })
+        const undoRange = yield* upkeep.prepare({
+          processedHead: afterForget,
+          reviewerAutomationId: "wiki-maintenance"
+        })
+        const indexText = prepared.render(new Map()).index(100_000).text ?? ""
+        return {
+          stored: snapshot.pages.some((record) => record.resource.path === "forgotten.md"),
+          recalled: prepared.recalled
+            .map((record) => record.resource.path)
+            .includes("forgotten.md"),
+          searched: searchPages(activePages(snapshot), query, 20)
+            .map((match) => match.record.resource.path)
+            .includes("forgotten.md"),
+          indexed: memoryIndex(snapshot.pages, { root: "", maxBytes: 100_000 })
+            .lines.map((line) => line.path)
+            .includes("forgotten.md"),
+          sentIndex: indexText.includes("forgotten.md"),
+          forgetRange:
+            forgetRange.kind === "review"
+              ? forgetRange.markdown.includes("forgotten.md")
+              : forgetRange.kind,
+          undoRange: undoRange.kind
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      stored: true,
+      recalled: false,
+      searched: false,
+      indexed: false,
+      sentIndex: false,
+      forgetRange: false,
+      undoRange: "advance"
+    })
+  })
+})
+
+describe("memory_forget", () => {
+  const context = (run: ServerRunContext): ToolContext<ServerRunContext> => ({
+    run,
+    signal: new AbortController().signal,
+    toolCallId: "call-fixture",
+    messages: []
+  })
+
+  const withTool = (use: (tool: ServerTool) => Effect.Effect<unknown, unknown>) =>
+    withMemory((memory) =>
+      Effect.gen(function* () {
+        const tools = yield* memoryForgetTools.pipe(
+          Effect.provideService(Wiki, partialService<Wiki["Service"]>("Wiki", memory.forgetting)),
+          Effect.provideService(
+            SessionQueries,
+            partialService<SessionQueries["Service"]>("SessionQueries", {
+              loadHistoryHeader: () => Effect.succeed(sessionHeader())
+            })
+          )
+        )
+        const tool = tools.find((candidate) => candidate.definition.name === "memory_forget")
+        if (tool === undefined) throw new Error("memory_forget is missing")
+        return yield* use(tool)
+      })
+    )
+
+  it("forgets and undoes only in the owner's own turn", async () => {
+    const outcome = await withTool((tool) =>
+      Effect.gen(function* () {
+        const run = (input: Readonly<Record<string, unknown>>, owner: boolean) =>
+          Effect.promise(() =>
+            Promise.resolve(
+              tool.execute(
+                input,
+                context(
+                  serverRunContext(
+                    owner
+                      ? {}
+                      : {
+                          authority: runAuthority({
+                            actor: { kind: "space_review", space_id: "space-1" }
+                          })
+                        }
+                  )
+                )
+              )
+            ).then(
+              () => "done",
+              (error: unknown) =>
+                String(error).includes("user's own turn") ? "refused" : String(error)
+            )
+          )
+        const forgotten = yield* run({ lines: [LINE], claim: "Sam moved away" }, true)
+        const undoByReview = yield* run({ undo: 1 }, false)
+        const undone = yield* run({ undo: 1 }, true)
+        return [forgotten, undoByReview, undone]
+      })
+    )
+    expect(outcome).toEqual(["done", "refused", "done"])
+  })
+})

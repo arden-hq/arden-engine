@@ -19,6 +19,7 @@ const producingAutomation = (origin: WikiCommitOrigin): string | null => {
     case "capture":
       return MEMORY_CAPTURE_AUTOMATION_ID
     case "user":
+    case "forget":
     case "agent":
     case "space_page":
     case "system":

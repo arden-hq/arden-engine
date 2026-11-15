@@ -16,6 +16,7 @@ import {
   type WikiContentStepMethods
 } from "./content-steps.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
+import { makeWikiForgetMethods, type WikiForgetMethods } from "./forgotten.js"
 import { initializeWikiFoundation } from "./foundation.js"
 import { makeWikiChangeMethods, type WikiChangeMethods } from "./change.js"
 import { makeWikiHistoryMethods, type WikiHistoryMethods } from "./history.js"
@@ -50,7 +51,8 @@ type WikiShape = WikiListingMethods &
   WikiChangeMethods &
   WikiRenameMethods &
   WikiReportRetentionMethods &
-  WikiImportMethods & {
+  WikiImportMethods &
+  WikiForgetMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
     readonly checkOutsideEdits: () => Effect.Effect<OutsideEditCheck, WikiError>
     /** Where a page whose file was changed outside Arden stands, as of the last check. */
@@ -111,6 +113,7 @@ const make = Effect.fn("Wiki.make")(function* (
   const imports = makeWikiImportMethods(repository)
   const contentSteps = makeWikiContentStepMethods(repository)
   const reportRetention = makeWikiReportRetentionMethods(repository)
+  const forgetting = makeWikiForgetMethods(repository)
 
   yield* diagnostics.startupPhase("wiki_ready")
   return Wiki.of({
@@ -136,6 +139,10 @@ const make = Effect.fn("Wiki.make")(function* (
     restoreArchived: notifyAfter(restores.restoreArchived),
     applyCapturePatchSet: notifyAfter(capture.applyCapturePatchSet),
     importReferencePages: notifyAfter(imports.importReferencePages),
+    planForget: forgetting.planForget,
+    forget: notifyAfter(forgetting.forget),
+    planUndoForget: forgetting.planUndoForget,
+    undoForget: notifyAfter(forgetting.undoForget),
     applyContentStep: <E>(step: WikiContentStep<E>) =>
       lifecycle.isAccepting()
         ? contentSteps.applyContentStep(step).pipe(
