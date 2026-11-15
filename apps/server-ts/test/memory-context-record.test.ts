@@ -775,7 +775,6 @@ describe("the stored record", () => {
           },
           {
             kind: "recalled",
-            role: "knowledge",
             page_id: "a",
             version: "v",
             bytes: 9,
@@ -784,7 +783,6 @@ describe("the stored record", () => {
           },
           {
             kind: "recalled",
-            role: "knowledge",
             page_id: "b",
             version: "v",
             bytes: 0,
@@ -817,7 +815,6 @@ describe("the stored record", () => {
           },
           {
             kind: "recalled",
-            role: "knowledge",
             page_id: "d",
             version: "v",
             bytes: 0,

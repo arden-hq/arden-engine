@@ -117,7 +117,8 @@ export type RunMemoryRecallRole = "knowledge" | "record" | "contract"
 /** A page the recall chose, at `version`. */
 export interface RunMemoryRecalledSource extends RunMemoryPageFields {
   readonly kind: "recalled"
-  readonly role: RunMemoryRecallRole
+  /** Absent in a composition stored before recall told records apart, so not known. */
+  readonly role?: RunMemoryRecallRole
 }
 
 /**

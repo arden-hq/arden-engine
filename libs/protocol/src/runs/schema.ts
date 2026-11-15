@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Schema } from "effect"
 import { AutomationRunOutcomeSchema } from "../automations/outcome.js"
 import { ChatProjectionEventSchema } from "../chat/schema.js"
 import type { JsonRecord } from "../common/json.js"
@@ -76,9 +76,8 @@ const pageFields = {
   ...memoryPlacement
 }
 
-/** One Memory source of a composition: identity and bytes, never text. A recalled page stored
- *  before recall had roles carries none; recall then sent every page as knowledge. */
-const RunMemorySourceSchema: Schema.Codec<RunMemorySource, unknown> = Schema.Union([
+/** One Memory source of a composition: identity and bytes, never text. */
+const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
   withExtras({
     kind: Schema.Literal("space"),
     space_id: IdentifierSchema,
@@ -89,9 +88,7 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource, unknown> = Schema.Uni
   withExtras({ kind: Schema.Literal("core"), ...pageFields }),
   withExtras({
     kind: Schema.Literal("recalled"),
-    role: Schema.Literals(["knowledge", "record", "contract"] as const).pipe(
-      Schema.withDecodingDefaultKey(Effect.succeed("knowledge" as const))
-    ),
+    role: Schema.optionalKey(Schema.Literals(["knowledge", "record", "contract"] as const)),
     ...pageFields
   }),
   withExtras({
@@ -110,14 +107,14 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource, unknown> = Schema.Uni
 )
 
 /** The one shape of a stored Memory composition; a Run's record is a list of them. */
-export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext, unknown> = withExtras({
+export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras({
   reader: Schema.Literals(["owner", "worker"] as const),
   revision: Schema.NullOr(IdentifierSchema),
   query: Schema.NullOr(Schema.String),
   sources: Schema.Array(RunMemorySourceSchema)
 })
 
-export const RunDetailSchema: Schema.Codec<RunDetail, unknown> = withExtras({
+export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
   version: Schema.Literal(1),
   run_id: IdentifierSchema,
   session_id: IdentifierSchema,
