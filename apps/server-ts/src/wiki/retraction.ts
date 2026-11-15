@@ -99,13 +99,18 @@ export const openRetractions = Effect.fn("Wiki.openRetractions")(function* (
   )
 })
 
+const words = new Intl.Segmenter("und", { granularity: "word" })
+
 /**
  * The form two lines are compared in: the words a person reads (markup off, a link's label
- * kept), spacing folded, lower case. Undefined for a line with no claim.
+ * kept), in lower case, without punctuation or spacing. Words are Unicode word segments, so
+ * text written without spaces has words too. Undefined for a line with no claim.
  */
 export const claimKey = (line: string): string | undefined => {
-  const key = markdownWords(line).replace(/\s+/gu, " ").trim().toLowerCase()
-  return key.split(" ").length >= MIN_CLAIM_WORDS ? key : undefined
+  const found = [...words.segment(markdownWords(line).toLowerCase())].flatMap((segment) =>
+    segment.isWordLike === true ? [segment.segment] : []
+  )
+  return found.length >= MIN_CLAIM_WORDS ? found.join(" ") : undefined
 }
 
 const claimKeys = (body: string): ReadonlySet<string> =>

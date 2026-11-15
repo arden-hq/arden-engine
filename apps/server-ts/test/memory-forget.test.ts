@@ -48,6 +48,7 @@ import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
+import { claimKey } from "../src/wiki/retraction.js"
 import { Wiki } from "../src/wiki/service.js"
 import type { Snapshot } from "../src/wiki/snapshot.js"
 import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
@@ -603,6 +604,21 @@ describe("what forgotten.md holds and where it stays", () => {
   })
 })
 
+describe("comparing lines", () => {
+  it("counts words, not table pipes, and reads text written without spaces", () => {
+    expect({
+      table: claimKey("| Name | Role |"),
+      japanese: claimKey("私は東京に住んでいます。"),
+      noPeriod: claimKey("Sam lives in the old town by the river"),
+      withPeriod: claimKey(`- ${LINE}`)
+    }).toEqual({
+      table: undefined,
+      japanese: "私 は 東京 に 住 んで い ます",
+      noPeriod: "sam lives in the old town by the river",
+      withPeriod: "sam lives in the old town by the river"
+    })
+  })
+})
 
 describe("no run is sent forgotten.md", () => {
   it("leaves it out of the changes a run lists and reads, and out of page history", async () => {
