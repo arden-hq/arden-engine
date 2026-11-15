@@ -24,7 +24,6 @@ import { loadSnapshot } from "./snapshot.js"
 import {
   requireArchivable,
   requireCreatable,
-  requireMergeable,
   requireRetirable,
   requireUpdatable
 } from "./write-rules.js"
@@ -108,11 +107,7 @@ export const makeWikiMutationMethods = (
     )
     const current = yield* loadSnapshot(repository, "create")
     const origin = input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN
-    yield* requireCreatable(spaces, current, {
-      path: input.path,
-      authority: input.authority,
-      origin
-    })
+    yield* requireCreatable(spaces, current, { path: input.path, authority: input.authority })
     yield* commitWiki(
       repository,
       {
@@ -265,10 +260,6 @@ export const makeWikiMutationMethods = (
           input.expectedHead
         )
         yield* requireRetirable(spaces, "merge", snapshot, current, input)
-        yield* requireMergeable(repository, current, {
-          head: input.expectedHead,
-          origin: input.commit?.origin
-        })
         const target = snapshot.pages.find(
           (record) =>
             record.page.pageId === input.targetPageId && record.page.lifecycle === "active"

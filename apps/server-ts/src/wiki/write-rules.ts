@@ -1,4 +1,3 @@
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
@@ -10,11 +9,10 @@ import {
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
-import { producingAutomation, recordFolders } from "./collections.js"
-import { isAutomatedOrigin, type WikiCommitIdentity, type WikiCommitOrigin } from "./commit.js"
-import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
-import { normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
-import { followRedirect, readRecord, type PageRecord, type Snapshot } from "./snapshot.js"
+import type { WikiCommitIdentity } from "./commit.js"
+import { wikiError, type WikiError } from "./errors.js"
+import { isReadme, normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
+import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 
 export interface WikiWriter {
   readonly pageId: string
@@ -51,17 +49,6 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
 ): Effect.fn.Return<string, WikiError> {
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
   yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
-  if (
-    isAutomatedOrigin(input.commit.origin) &&
-    producingAutomation(recordFolders(snapshot.pages), current.resource.path) !== undefined
-  ) {
-    return yield* wikiError(
-      "restore",
-      "blocked",
-      "Automation runs cannot restore an automation-owned page",
-      { pageId: input.pageId }
-    )
-  }
   if (input.commit.origin.kind === "capture") {
     const spaceBound = yield* spaces
       .hasPageBinding(current.page.pageId, current.resource.path)
@@ -124,30 +111,6 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
   yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-  if (
-    input.commit !== undefined &&
-    isAutomatedOrigin(input.commit.origin) &&
-    posix.dirname(current.resource.path) === "."
-  ) {
-    return yield* wikiError(
-      operation,
-      "blocked",
-      "Automation runs cannot retire a page at the Memory root",
-      { pageId: input.pageId }
-    )
-  }
-  if (
-    input.commit !== undefined &&
-    isAutomatedOrigin(input.commit.origin) &&
-    producingAutomation(recordFolders(snapshot.pages), current.resource.path) !== undefined
-  ) {
-    return yield* wikiError(
-      operation,
-      "blocked",
-      "Automation runs cannot archive an automation-owned page",
-      { pageId: input.pageId }
-    )
-  }
   const pageIsSpaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
     Effect.mapError((cause) =>
       wikiError(operation, "storage", "Could not check Space page ownership", {
@@ -164,7 +127,7 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
       { pageId: input.pageId }
     )
   }
-  if (posix.basename(current.resource.path).toLowerCase() === "readme.md") {
+  if (isReadme(current.resource.path)) {
     const directory = posix.dirname(current.resource.path)
     const prefix = `${directory}/`
     const child = snapshot.pages.find(
@@ -217,7 +180,7 @@ export const createRefusal = (
   if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
   if (
     (posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) ||
-    posix.basename(path).toLowerCase() === "readme.md"
+    isReadme(path)
   )
     return {
       code: "blocked",
@@ -227,18 +190,13 @@ export const createRefusal = (
 }
 
 /**
- * The rules for creating a page at `path`: in a mapped folder the writer may write, outside a
- * folder a Space owns unless this run is that Space's, and, for an automated writer, outside an
- * Automation's record folder, which only that Automation fills by publishing.
+ * The rules for creating a page at `path`: in a mapped folder the writer may write, and outside a
+ * folder a Space owns unless this run is that Space's.
  */
 export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
   spaces: SpaceStore["Service"],
   snapshot: Snapshot,
-  input: {
-    readonly path: string
-    readonly authority: WikiLocationAuthority
-    readonly origin: WikiCommitOrigin
-  }
+  input: { readonly path: string; readonly authority: WikiLocationAuthority }
 ): Effect.fn.Return<void, WikiError> {
   const refused = createRefusal(input.path)
   if (refused !== undefined) return yield* wikiError("create", refused.code, refused.message)
@@ -253,16 +211,6 @@ export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
   )
   if (directoryPage === undefined) {
     return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
-  }
-  if (
-    isAutomatedOrigin(input.origin) &&
-    producingAutomation(recordFolders(snapshot.pages), input.path) !== undefined
-  ) {
-    return yield* wikiError(
-      "create",
-      "blocked",
-      "Automation pages in an owned directory must use report publication"
-    )
   }
   const directoryIsSpaceBound = yield* spaces
     .hasPageBinding(directoryPage.page.pageId, directoryPage.resource.path)
@@ -295,76 +243,5 @@ export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
       `Wiki path or link name already exists: ${input.path}`,
       { pageId: existing.page.pageId }
     )
-  }
-})
-
-/**
- * The record rules for a rename: no page moves into an Automation's record folder, which only
- * that Automation fills, and an automated writer neither moves an Automation's page nor rewrites
- * the links in one. `origin` is undefined while the rename is only requested.
- */
-export const requireRenamable = Effect.fn("Wiki.requireRenamable")(function* (
-  snapshot: Snapshot,
-  input: {
-    readonly pageId: string
-    readonly newPath: string
-    readonly rewrittenPageIds: ReadonlyArray<string>
-    readonly origin: WikiCommitOrigin | undefined
-  }
-): Effect.fn.Return<void, WikiError> {
-  const folders = recordFolders(snapshot.pages)
-  if (producingAutomation(folders, input.newPath) !== undefined) {
-    return yield* wikiError(
-      "rename",
-      "blocked",
-      "Publish reports through their producer instead of moving pages into its directory",
-      { pageId: input.pageId }
-    )
-  }
-  if (input.origin === undefined || !isAutomatedOrigin(input.origin)) return
-  const touched = new Set([input.pageId, ...input.rewrittenPageIds])
-  const produced = snapshot.pages.find(
-    (record) =>
-      touched.has(record.page.pageId) &&
-      producingAutomation(folders, record.resource.path) !== undefined
-  )
-  if (produced !== undefined) {
-    return yield* wikiError(
-      "rename",
-      "blocked",
-      "Automation runs cannot move produced pages or rewrite producer-owned reports",
-      { pageId: produced.page.pageId }
-    )
-  }
-})
-
-/**
- * A page that was merged and then brought back is separate by someone's decision. An
- * automated run that merged it again would undo that decision every time it ran.
- */
-export const requireMergeable = Effect.fn("Wiki.requireMergeable")(function* (
-  repository: ManagedFileRepositoryShape,
-  current: PageRecord,
-  input: { readonly head: string; readonly origin: WikiCommitOrigin | undefined }
-): Effect.fn.Return<void, WikiError> {
-  if (input.origin === undefined || !isAutomatedOrigin(input.origin)) return
-  const pageId = current.page.pageId
-  const history = yield* repository
-    .history({ resourceId: pageId, start: input.head, limit: null })
-    .pipe(Effect.mapError(mapRevisionError("merge", pageId)))
-  for (const commit of history) {
-    const version = commit.changes.find(
-      (change) => (change.after ?? change.before)?.resourceId === pageId
-    )?.after
-    if (version === undefined || version === null || version.state !== "active") continue
-    const earlier = yield* readRecord(repository, "merge", version)
-    if (earlier.page.lifecycle === "redirect") {
-      return yield* wikiError(
-        "merge",
-        "blocked",
-        `${current.resource.path} was merged before and then restored, so it stays its own page. Leave it.`,
-        { pageId }
-      )
-    }
   }
 })

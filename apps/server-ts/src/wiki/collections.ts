@@ -5,7 +5,7 @@ import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
-import { normal, wikiPageSummary, type ParsedWikiPage } from "./page.js"
+import { isReadme, normal, wikiPageSummary, type ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
@@ -75,8 +75,6 @@ export type PageKind =
 
 /** The record folders of Memory, by directory as `normal` spells it. */
 export type RecordFolders = ReadonlyMap<string, RecordFolder>
-
-const isReadme = (path: string): boolean => posix.basename(path).toLowerCase() === "readme.md"
 
 /** The Automation a page names as its producer: on a contract, the folder's; on a record, its. */
 export const markedProducer = (page: ParsedWikiPage): string | undefined => {

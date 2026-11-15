@@ -11,7 +11,7 @@ import { MEMORY_CAPTURE_AUTOMATION_ID } from "./handlers/memory-capture.js"
 const producerWakeDepth = (origin: WikiCommitOrigin): number =>
   origin.kind === "automation" || origin.kind === "upkeep" ? (origin.chainDepth ?? 0) : 0
 
-const producingAutomation = (origin: WikiCommitOrigin): string | null => {
+const automationOfOrigin = (origin: WikiCommitOrigin): string | null => {
   switch (origin.kind) {
     case "automation":
     case "upkeep":
@@ -51,9 +51,9 @@ const automationWikiChangeSink = (
                 savedAt: change.savedAt,
                 source: wikiOriginSource(change.origin),
                 hasSpacePage: change.hasSpacePage,
-                producedBy: producingAutomation(change.origin),
+                producedBy: automationOfOrigin(change.origin),
                 chainDepth: causedChainDepth(
-                  producingAutomation(change.origin),
+                  automationOfOrigin(change.origin),
                   producerWakeDepth(change.origin)
                 )
               })

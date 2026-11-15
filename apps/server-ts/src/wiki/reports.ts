@@ -10,7 +10,7 @@ import { markedProducer, recordFolders } from "./collections.js"
 import { commitWiki, createPage, updatePage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
-import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
+import { formatWikiPage, isReadme, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
 
 export const WikiReportContentSchema = Schema.Struct({
@@ -52,7 +52,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     canonicalWikiPath(content.path) === undefined ||
     !content.path.endsWith(".md") ||
     directory === "." ||
-    posix.basename(content.path).toLowerCase() === "readme.md"
+    isReadme(content.path)
   ) {
     return yield* wikiError(
       "create",

@@ -80,6 +80,7 @@ const ruleReason = (
     case "size":
       return "invalid"
     case "records":
+    case "retire":
       return "blocked"
   }
 }
