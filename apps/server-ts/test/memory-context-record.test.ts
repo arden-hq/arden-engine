@@ -575,8 +575,14 @@ describe("one owner for each limit and rule", () => {
     expect(files.filter((file) => file.endsWith("continuity-budget.ts"))).toEqual([])
   })
 
+  // The seed README tells the model where profile facts go; it states no limit or rule.
   it("only core-memory.ts names the standing-facts pages", () => {
-    expect(offenders(/["'](me|profile)(\.md)?["']/u, ["memory/core-memory.ts"])).toEqual([])
+    expect(
+      offenders(/["'`](me|profile)["'`]|\b(me|profile)\.md\b/u, [
+        "memory/core-memory.ts",
+        "wiki/foundation.ts"
+      ])
+    ).toEqual([])
   })
 })
 

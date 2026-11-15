@@ -1,14 +1,16 @@
 /**
- * Standing facts: the owner's profile and standing preferences, sent whole to every run that
- * reads Memory. The one rule that names their pages.
+ * Standing facts: the owner's profile and standing preferences, at the root of Memory and sent
+ * to every run that reads it. The one place that names their pages.
  */
+export const STANDING_FACTS_PAGES = ["me.md", "profile.md"] as const
+
 export const isStandingFactsPage = (page: {
   readonly path: string
   readonly pageId: string
 }): boolean => {
   const path = page.path.toLocaleLowerCase()
   const pageId = page.pageId.toLocaleLowerCase()
-  return path === "me.md" || path === "profile.md" || pageId === "me" || pageId === "profile"
+  return STANDING_FACTS_PAGES.some((name) => path === name || `${pageId}.md` === name)
 }
 
 /**

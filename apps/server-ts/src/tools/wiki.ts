@@ -29,9 +29,12 @@ import {
   CORE_CONDENSE_ADVICE,
   coreCondenseTarget,
   coreNeedsCondensing,
-  corePageBudget
+  corePageBudget,
+  STANDING_FACTS_PAGES
 } from "../memory/core-memory.js"
 import { requireWithinCoreBudget } from "./wiki-records.js"
+
+const STANDING_LIMIT_NOTE = `${STANDING_FACTS_PAGES.join(" and ")} have a smaller Core Memory limit; a longer body is refused.`
 
 const MAX_PAGE_LINES = 4_000
 export const MAX_WIKI_CONTENT_CHARS = 40_000
@@ -76,7 +79,7 @@ const ReadParametersSchema = Schema.Struct({
 const CreateParametersSchema = Schema.Struct({
   path: Schema.NonEmptyString.check(Schema.isMinLength(4), Schema.isMaxLength(4_096)).annotate({
     description:
-      "Relative POSIX .md path inside an existing wiki directory, or me.md for the root profile."
+      `Relative POSIX .md path inside an existing wiki directory, or ${STANDING_FACTS_PAGES.join(" or ")} for the root profile.`
   }),
   title: Schema.NonEmptyString.check(Schema.isMaxLength(4_096)).annotate({
     description: "Human-readable page title."
@@ -663,7 +666,8 @@ const makeWikiTools = ({
     name: "wiki_create_page",
     description: [
       "Create a new wiki page at an exact relative POSIX .md path inside an existing wiki directory.",
-      "Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists, unless that page already has exactly this title and body; then nothing changes. me.md has a smaller Core Memory limit; a longer body is refused."
+      "Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists, unless that page already has exactly this title and body; then nothing changes.",
+      STANDING_LIMIT_NOTE
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
     metadata: {
@@ -744,7 +748,8 @@ const makeWikiTools = ({
       "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read the page first to base the edit on its",
       "current content; the edit fails if the wiki changed since that read.",
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting;`,
-      "create another page only for a distinct subject or useful reading scope, with a contextual link. me.md has a smaller Core Memory limit; a longer body is refused."
+      "create another page only for a distinct subject or useful reading scope, with a contextual link.",
+      STANDING_LIMIT_NOTE
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EditParametersSchema),
     metadata: {

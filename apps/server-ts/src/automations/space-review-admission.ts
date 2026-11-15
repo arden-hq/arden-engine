@@ -10,7 +10,6 @@ import { UNFINISHED_TASK_STATUSES } from "../persistence/sqlite/task-status-sql.
  * - `chat_turn`: an owner chat turn the review has not seen (`reads.chats`).
  * - `mail`: a routed mail or GitHub item new since the last review.
  * - `memory_page`: a page the review reads for this Space changed, or a source left it.
- *   Resident pages (`me.md`, `readme.md`, `profile.md`) are context for every Space, not this one's.
  *   It never starts a review; a page-only verdict is `nothing_to_act_on`.
  * - `task`: a Task of the Space was added, removed or changed in any field.
  * - `space_settings`: the Space instructions or inference policy changed, or there is no

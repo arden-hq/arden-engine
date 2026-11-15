@@ -119,6 +119,28 @@ export interface WikiMutationMethods {
   ) => Effect.Effect<WikiPage, WikiError>
 }
 
+/**
+ * Why a page may not be created at `path`, if it may not: a page is a .md file inside an
+ * existing directory, or a standing-facts page at the root; a README and the health page are
+ * never created this way.
+ */
+export const createRefusal = (
+  path: string
+): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
+  if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
+  if (path.toLowerCase() === "health.md")
+    return { code: "blocked", message: "Wiki health is backend-managed" }
+  if (
+    (posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) ||
+    posix.basename(path).toLowerCase() === "readme.md"
+  )
+    return {
+      code: "blocked",
+      message: "Wiki pages can be created only inside an existing Wiki directory"
+    }
+  return undefined
+}
+
 export const makeWikiMutationMethods = (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
@@ -190,23 +212,9 @@ export const makeWikiMutationMethods = (
   })
 
   const create = Effect.fn("Wiki.create")(function* (input: WikiCreateInput) {
-    if (!input.path.endsWith(".md")) {
-      return yield* wikiError("create", "invalid", "Wiki page paths must end in .md")
-    }
-    if (input.path.toLowerCase() === "health.md") {
-      return yield* wikiError("create", "blocked", "Wiki health is backend-managed")
-    }
+    const refused = createRefusal(input.path)
+    if (refused !== undefined) return yield* wikiError("create", refused.code, refused.message)
     const directory = posix.dirname(input.path)
-    if (
-      (directory === "." && !isStandingFactsPage({ path: input.path, pageId: "" })) ||
-      posix.basename(input.path).toLowerCase() === "readme.md"
-    ) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        "Wiki pages can be created only inside an existing Wiki directory"
-      )
-    }
     const pageId = randomUUID()
     const content = formatWikiPage({
       pageId,

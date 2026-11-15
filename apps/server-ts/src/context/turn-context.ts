@@ -164,7 +164,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
           sessionId: input.sessionId,
           runId: input.runId,
           reader,
-          spaceId: MEMORY_READS[reader].space ? (origin.header?.spaceId ?? undefined) : undefined,
+          spaceId: origin.header?.spaceId ?? undefined,
           query: recallText(humanTextsNewestFirst(input.messages)),
           memory,
           measure
@@ -364,7 +364,7 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     readonly sessionId: string
     readonly runId: string
     readonly reader: RunMemoryReader
-    /** The chat's Space when the reader is sent it; undefined otherwise. */
+    /** The chat's Space, if it has one; the reader decides whether it is sent. */
     readonly spaceId: string | undefined
     /** The owner's recent typed text, newest first. */
     readonly query: string
