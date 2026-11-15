@@ -483,7 +483,7 @@ const makeWikiTools = ({
         ...(coreBudget === undefined
           ? []
           : [
-              `Page size: ${chars} characters. Every chat receives only the first ${coreBudget} characters of this page (Core Memory).`,
+              `Page size: ${chars} characters. Every run that reads Memory is sent this page whole (Core Memory), so it is limited to ${coreBudget} characters.`,
               ...(overBudget
                 ? [
                     `The page is full or nearly full, and a write over that size is refused. ` +
@@ -744,7 +744,7 @@ const makeWikiTools = ({
       "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read the page first to base the edit on its",
       "current content; the edit fails if the wiki changed since that read.",
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting;`,
-      "create another page only for a distinct subject or useful reading scope, with a contextual link. The root README.md and me.md have smaller Core Memory limits; a longer body is refused."
+      "create another page only for a distinct subject or useful reading scope, with a contextual link. me.md has a smaller Core Memory limit; a longer body is refused."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EditParametersSchema),
     metadata: {

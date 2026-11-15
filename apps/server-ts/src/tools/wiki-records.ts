@@ -111,7 +111,7 @@ export const requireWithinCoreBudget = (page: {
   if (budget === undefined || page.body.length <= budget) return
   const target = coreCondenseTarget(budget)
   throw new ToolExecutionError(
-    `${page.path} would have ${page.body.length} characters, but every chat receives only the first ${budget}. ` +
+    `${page.path} would have ${page.body.length} characters, but it is sent whole to every run and is limited to ${budget}. ` +
       `Nothing was saved. Cut at least ${page.body.length - budget} characters; aim for ${target} or fewer ` +
       `(${page.body.length - target} less) so later updates fit. Trimming a few words will not do it. ` +
       `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`,
