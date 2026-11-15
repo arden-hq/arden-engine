@@ -26,20 +26,13 @@ export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined => {
   }
 }
 
-/** The Memory sources each reader is sent. */
+/** The Memory sources each reader is sent besides standing facts and the index, which every
+ *  reader is sent. */
 export const MEMORY_READS: Readonly<
-  Record<
-    RunMemoryReader,
-    {
-      readonly standing: boolean
-      readonly index: boolean
-      readonly space: boolean
-      readonly recall: boolean
-    }
-  >
+  Record<RunMemoryReader, { readonly space: boolean; readonly recall: boolean }>
 > = {
-  owner: { standing: true, index: true, space: true, recall: true },
-  worker: { standing: true, index: true, space: false, recall: false }
+  owner: { space: true, recall: true },
+  worker: { space: false, recall: false }
 }
 
 // Each source of the Memory block has its own allowance, renders itself into it with its own
