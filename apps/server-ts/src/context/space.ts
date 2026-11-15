@@ -86,7 +86,14 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
           name: session.name ?? "Untitled",
           summary: summarized.get(session.session_id)?.summary
         })),
-        page: page === undefined ? undefined : { path: page.path, content: page.content },
+        page:
+          page === undefined || memory === undefined
+            ? undefined
+            : {
+                path: page.path,
+                content: page.content,
+                index: memory.spaceIndex({ pageId: page.pageId, pagePath: page.path })
+              },
         questions: questions.questions.map((question) => ({
           question_id: question.question_id,
           prompt: question.content.prompt,

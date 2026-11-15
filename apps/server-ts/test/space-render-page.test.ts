@@ -1,5 +1,6 @@
 import { expect, it } from "vitest"
 import { renderSpaceContext, type SpaceView } from "../src/context/space-render.js"
+import { spacePageIndex } from "../src/wiki/space-index.js"
 
 const view = (page: SpaceView["page"]): SpaceView => ({
   space_id: "space-garden",
@@ -12,11 +13,16 @@ const view = (page: SpaceView["page"]): SpaceView => ({
   tasks: []
 })
 
-const shares = { maxBytes: 10_000, instructionsBytes: 4_000, pageBytes: 4_000 }
+const shares = { maxBytes: 10_000, instructionsBytes: 4_000, pageBytes: 4_000, pagesBytes: 2_000 }
+const index = (path: string) => spacePageIndex([], { pageId: "garden", pagePath: path }, 2_000)
 
 it("says how much of the Space memory page a chat is sent: whole, in part, or none", () => {
-  const short = { path: "projects/garden.md", content: "Seeds ordered." }
-  const long = { path: "projects/garden.md", content: "A line about the garden.\n".repeat(400) }
+  const short = {
+    path: "projects/garden.md",
+    content: "Seeds ordered.",
+    index: () => index("projects/garden.md")
+  }
+  const long = { ...short, content: "A line about the garden.\n".repeat(400) }
   expect(renderSpaceContext(view(short), shares).page).toBe("whole")
   const partial = renderSpaceContext(view(long), shares)
   expect(partial.page).toBe("cut")

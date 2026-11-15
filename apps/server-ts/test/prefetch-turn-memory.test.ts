@@ -6,17 +6,44 @@ import { MemoryError } from "../src/memory/capture-batches.js"
 import type { MemoryTurn } from "../src/memory/service.js"
 import type { MemorySources } from "../src/memory/retrieval.js"
 import type { ChatWriteStore } from "../src/persistence/chat/store.js"
-import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store.js"
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
+import { MEMORY_READS } from "../src/context/memory-context.js"
+import { spacePageIndex } from "../src/wiki/space-index.js"
 import { partialService } from "./kit.js"
 
-const prefetch = (memory: MemoryTurn | undefined, reader: RunMemoryReader = "owner") => {
+const SPACE: PersistedSpace = {
+  inference: { enabled: false },
+  space_id: "space-1",
+  name: "Garden",
+  instructions: null,
+  instructions_source: null,
+  page_path: "areas/garden.md",
+  mark: null,
+  created_at: "2026-11-01T00:00:00Z",
+  updated_at: "2026-11-01T00:00:00Z",
+  archived_at: null,
+  page_id: "garden"
+}
+
+const prefetch = (
+  memory: MemoryTurn | undefined,
+  reader: RunMemoryReader = "owner",
+  spaceId: string | undefined = undefined
+) => {
   const records: Array<RunMemoryContext> = []
   const services = {
-    spaces: partialService<SpaceStore["Service"]>("SpaceStore", {}),
-    summaries: partialService<SummaryStore["Service"]>("SummaryStore", {}),
-    work: partialService<WorkStore["Service"]>("WorkStore", {}),
+    spaces: partialService<SpaceStore["Service"]>("SpaceStore", {
+      get: () => Effect.succeed(SPACE),
+      detail: () => Effect.succeed(null)
+    }),
+    summaries: partialService<SummaryStore["Service"]>("SummaryStore", {
+      spaceChats: () => Effect.succeed([])
+    }),
+    work: partialService<WorkStore["Service"]>("WorkStore", {
+      questions: () => Effect.succeed({ questions: [], next_cursor: null })
+    }),
     chat: {
       recordMemoryContext: (input) => Effect.sync(() => void records.push(input.context))
     } satisfies Pick<ChatWriteStore["Service"], "recordMemoryContext">
@@ -26,7 +53,7 @@ const prefetch = (memory: MemoryTurn | undefined, reader: RunMemoryReader = "own
       sessionId: "chat-1",
       runId: "run-1",
       reader,
-      spaceId: undefined,
+      spaceId,
       query: "Where does the garden plan stand?",
       memory,
       measure: (_part, effect) => effect
@@ -78,7 +105,9 @@ const turn = (
     asked,
     memory: {
       revision: "rev-1",
-      readContent: () => Effect.die(new Error("no Space page in this test")),
+      readContent: (pageId) =>
+        Effect.succeed({ pageId, path: "areas/garden.md", version: "v1", content: "Beds." }),
+      spaceIndex: (space) => (maxBytes) => spacePageIndex([], space, maxBytes),
       sources: (input) => {
         asked.push(input)
         return sources(input)
@@ -137,5 +166,20 @@ describe("prefetchTurnMemory outside a Space", () => {
     expect(failed.records).toEqual([
       { reader: "owner", revision: "rev-1", query: null, sources: [] }
     ])
+  })
+})
+
+describe("the Space block follows MEMORY_READS", () => {
+  it.each(["owner", "worker"] as const)("for a %s run in a Space", async (reader) => {
+    const { memory } = turn(() => Effect.succeed({ ...SOURCES, recall: undefined }))
+    const prefetched = await prefetch(memory, reader, "space-1")
+    const kinds = prefetched.records[0]?.sources.map((source) => source.kind) ?? []
+    expect(prefetched.memoryContext.space.length > 0).toBe(MEMORY_READS[reader].space)
+    expect(kinds.includes("space")).toBe(MEMORY_READS[reader].space)
+  })
+
+  it("sends it to the owner's own chats only: a helper's fork, a Task worker's and a Space review's prompts carry the Space already", () => {
+    expect(MEMORY_READS.owner.space).toBe(true)
+    expect(MEMORY_READS.worker.space).toBe(false)
   })
 })
