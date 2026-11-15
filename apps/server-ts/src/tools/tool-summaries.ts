@@ -95,6 +95,8 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
 
   directives_get: "Reads your standing instructions.",
   directives_set: "Changes your standing instructions.",
+  directives_history: "Lists past versions of your standing instructions.",
+  directives_restore: "Brings back an earlier version of your standing instructions.",
 
   google_accounts_list: "Lists the Google accounts you connected.",
   google_client_import: "Sets up your Google sign-in.",

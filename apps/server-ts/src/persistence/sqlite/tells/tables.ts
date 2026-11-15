@@ -57,6 +57,8 @@ const journal = "The event journal itself."
 const ownSetting =
   "A setting the owner changes on one screen, which applies the response; nothing else writes it."
 const internal = "Internal bookkeeping that no screen shows."
+const ruleVersions =
+  "Past versions of the standing rules, read by the rules tools; the rules file is the live copy."
 const files = "File lifecycle bookkeeping that no screen shows."
 const pipeline =
   "The connections pipeline: what reaches the owner is a proposal or a Task, told by theirs."
@@ -281,5 +283,6 @@ export const tableTells = {
   permission_changes: { silent: history },
   question_decisions: { silent: history },
   tool_approval_decisions: { silent: history },
-  space_overview_revisions: { silent: history }
+  space_overview_revisions: { silent: history },
+  global_instruction_versions: { silent: ruleVersions }
 } as const satisfies Record<SchemaTable, TableTell>
