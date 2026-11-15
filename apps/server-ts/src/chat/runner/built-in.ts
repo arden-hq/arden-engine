@@ -41,6 +41,7 @@ import { SpaceStore } from "../../persistence/spaces/store.js"
 import { SummaryStore } from "../../persistence/summaries/store.js"
 import { RunQueries } from "../../persistence/runs/queries.js"
 import { SessionQueries } from "../../persistence/sessions/queries.js"
+import { TranscriptQueries } from "../../persistence/transcript/queries.js"
 import { IntelligenceSettingsStore } from "../../persistence/settings/store.js"
 import { TodoStore } from "../../persistence/todos/store.js"
 import { FocusChoiceStore } from "../../persistence/focus-choices/store.js"
@@ -93,6 +94,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
   const experiments = yield* ContextExperiments
   const dataRoot = yield* DataRoot
   const chat = yield* ChatWriteStore
+  const transcript = yield* TranscriptQueries
   const services: TurnContextServices = {
     sessions: yield* SessionQueries,
     runs: yield* RunQueries,
@@ -274,6 +276,8 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
           ),
           { signal }
         ),
+      ownerWords: ({ sessionId, messageIds, signal }) =>
+        Effect.runPromise(transcript.ownerWordsIn(sessionId, messageIds), { signal }),
       systemContext: (input) =>
         Effect.runPromise(
           sessionOrigin(input.sessionId, input.automationId).pipe(

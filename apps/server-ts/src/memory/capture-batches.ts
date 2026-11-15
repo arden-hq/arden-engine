@@ -1,5 +1,5 @@
 import type { RunOrigin } from "@arden-hq/protocol/runs"
-import { DateTime, Effect, Option, Schema } from "effect"
+import { DateTime, Effect, Schema } from "effect"
 
 import type {
   MemoryCaptureBatch,
@@ -36,10 +36,6 @@ export interface CaptureExcerpt {
   readonly evidence: CaptureEvidenceKind
 }
 
-const SyntheticInteractionSchema = Schema.Struct({
-  from: Schema.Struct({ type: Schema.Literals(["agent", "workflow"] as const) })
-})
-
 export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError", {
   operation: Schema.Literals(["recall", "capture"] as const),
   message: Schema.String,
@@ -62,7 +58,10 @@ export const makeMemoryCaptureBatches = (input: {
   >
   readonly captures: MemoryCaptureStore["Service"]
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
-  readonly transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns">
+  readonly transcript: Pick<
+    TranscriptQueries["Service"],
+    "page" | "originsForTurns" | "ownerWordsIn"
+  >
 }): MemoryCaptureBatches => {
   const { wiki, captures, sessions, transcript } = input
 
@@ -381,7 +380,7 @@ export interface CaptureRead {
  * Capture's work and the backlog count both batch through this, so they agree on the limits.
  */
 export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
-  transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns">,
+  transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns" | "ownerWordsIn">,
   input: {
     readonly sessionId: string
     readonly start: MemoryCapturePosition
@@ -404,7 +403,13 @@ export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   const origins = yield* transcript
     .originsForTurns(input.sessionId, turnIds)
     .pipe(Effect.mapError(failed("Could not read Memory source provenance")))
-  const selected = selectExcerpts(records, origins, input.start, input.stop)
+  const owned = yield* transcript
+    .ownerWordsIn(
+      input.sessionId,
+      records.flatMap((record) => (record.role === "user" ? [record.messageId] : []))
+    )
+    .pipe(Effect.mapError(failed("Could not read Memory source provenance")))
+  const selected = selectExcerpts(records, origins, owned, input.start, input.stop)
   if (selected === undefined) return undefined
   return {
     ...selected,
@@ -418,10 +423,11 @@ export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
 
 const evidenceKind = (
   record: TranscriptMessageRecord,
-  origin: RunOrigin | undefined
+  origin: RunOrigin | undefined,
+  owned: ReadonlySet<string>
 ): CaptureEvidenceKind => {
-  if (origin === undefined || origin.kind === "unrecorded") return { kind: "unknown" }
-  switch (origin.kind) {
+  if (owned.has(record.messageId)) return { kind: "human" }
+  switch (origin?.kind) {
     case "automation":
       return {
         kind: "automation",
@@ -432,15 +438,11 @@ const evidenceKind = (
       return { kind: "task", itemId: origin.item_id, occurrenceId: origin.occurrence_id }
     case "space":
       return { kind: "space", spaceId: origin.space_id, occurrenceId: origin.occurrence_id }
-    case "chat": {
-      const synthetic =
-        record.envelope.is_meta === true ||
-        record.envelope.automation !== undefined ||
-        Option.isSome(
-          Schema.decodeUnknownOption(SyntheticInteractionSchema)(record.envelope.interaction)
-        )
-      return synthetic ? { kind: "unknown" } : { kind: "human" }
-    }
+    case "chat":
+      return record.role === "assistant" ? { kind: "human" } : { kind: "unknown" }
+    case "unrecorded":
+    case undefined:
+      return { kind: "unknown" }
   }
 }
 
@@ -452,6 +454,7 @@ const evidenceKind = (
 const selectExcerpts = (
   records: ReadonlyArray<TranscriptMessageRecord>,
   origins: ReadonlyMap<string, RunOrigin>,
+  owned: ReadonlySet<string>,
   start: MemoryCapturePosition,
   stop: MemoryCapturePosition | undefined
 ):
@@ -490,7 +493,11 @@ const selectExcerpts = (
       content: content.slice(startOffset, endOffset),
       startOffset,
       endOffset,
-      evidence: evidenceKind(record, origins.get(record.envelope.turn_id ?? record.messageId))
+      evidence: evidenceKind(
+        record,
+        origins.get(record.envelope.turn_id ?? record.messageId),
+        owned
+      )
     })
     characters += endOffset - startOffset
     if (endOffset < content.length) {

@@ -114,6 +114,13 @@ export interface LoopChatRunnerOptions {
     readonly sessionId: string
     readonly signal: AbortSignal
   }) => PromiseLike<string | undefined>
+  /** Which of `messageIds` are the owner's own words (`TranscriptQueries.ownerWordsIn`); the
+   *  owner's instructions are recited only from those. */
+  readonly ownerWords?: (input: {
+    readonly sessionId: string
+    readonly messageIds: ReadonlyArray<string>
+    readonly signal: AbortSignal
+  }) => PromiseLike<ReadonlySet<string>>
   /** Per-user-turn context. The first record restates it whole; later ones
    *  append only what changed (`context/runtime-update.ts`). */
   readonly systemContext?: (input: {
@@ -362,11 +369,23 @@ const makeTodoReminderMiddleware =
   }
 
 const ownerInstructionsMiddleware =
-  (input: ChatRunnerInput): ModelRequestMiddleware =>
+  (
+    load: NonNullable<LoopChatRunnerOptions["ownerWords"]>,
+    input: ChatRunnerInput
+  ): ModelRequestMiddleware =>
   async (request, next) => {
     const prepared = await next(request)
     if (!ownerInstructionsDue(prepared.messages)) return prepared
-    const recital = renderOwnerInstructions(prepared.messages)
+    const owned = await load({
+      sessionId: input.sessionId,
+      messageIds: prepared.messages.flatMap((message) =>
+        message.role === "user" && typeof message.message_id === "string"
+          ? [message.message_id]
+          : []
+      ),
+      signal: input.signal
+    })
+    const recital = renderOwnerInstructions(prepared.messages, owned)
     if (recital === undefined) return prepared
     const messages: ReadonlyArray<ChatMessage> = [
       ...prepared.messages,
@@ -571,6 +590,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
     const compact = config.compact
     const localTime = config.localTime
     const todoReminder = config.todoReminder
+    const ownerWords = config.ownerWords
     const maxSteps = config.config?.maxIterations
     const preloadTools = await config.preloadTools?.({
       sessionId: input.sessionId,
@@ -588,7 +608,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
           projectIdleGapMiddleware,
           projectAnswerBlocksMiddleware,
           labelToolResultsMiddleware,
-          ownerInstructionsMiddleware(input),
+          ...(ownerWords === undefined ? [] : [ownerInstructionsMiddleware(ownerWords, input)]),
           ...(todoReminder === undefined ? [] : [makeTodoReminderMiddleware(todoReminder, input)]),
           ...(localTime === undefined
             ? []

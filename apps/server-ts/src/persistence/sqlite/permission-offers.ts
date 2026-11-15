@@ -19,19 +19,10 @@ import {
 } from "./permission-rules.js"
 import { ruleOfSetting, type PermissionRulesError } from "../permissions/rules.js"
 import { decodeJson } from "./json.js"
+import { ownerWordsSql } from "./transcript-owner-messages.js"
 import { workError } from "./work-records.js"
 
 const OfferChoicesSchema = Schema.Array(OfferChoiceSchema)
-
-export const ownerWordsSql = (
-  sql: SqlClient.SqlClient,
-  message: Statement.Fragment
-): Statement.Fragment => sql`${message}.role = 'user'
-  AND (COALESCE(json_extract(${message}.message_json, '$.is_meta'), 0) = 0
-    OR json_extract(${message}.message_json, '$.question_answer') IS NOT NULL)
-  AND json_extract(${message}.message_json, '$.interaction') IS NULL
-  AND json_extract(${message}.message_json, '$.from_chat') IS NULL
-  AND json_extract(${message}.message_json, '$.sent_from') IS NULL`
 
 const deliveredSql = (sql: SqlClient.SqlClient, message: Statement.Fragment): Statement.Fragment =>
   sql`(json_extract(${message}.message_json, '$.interaction') IS NOT NULL

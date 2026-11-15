@@ -20,6 +20,7 @@ import {
 import { decodeJson, decodeWith, encodeJson } from "./json.js"
 import { appendSessionTurn, currentSessionTurnId } from "./turns.js"
 import { ActiveContextError, loadActiveContext, replaceActiveContext } from "./active-context.js"
+import { makeOwnerWordsIn } from "./transcript-owner-messages.js"
 import type { PersistenceDeps } from "./deps.js"
 import { assertIdleCompaction } from "./compaction-idle.js"
 import { ActiveRunStatusSchema } from "@arden-hq/protocol/effect/chat"
@@ -378,6 +379,15 @@ export const makeContextCompactionStore = ({
       Effect.gen(function* () {
         const loaded = yield* load(reader, valid, "snapshot")
         const run = loaded.run
+        const messages = yield* loadMessages(reader, valid, "snapshot")
+        const ownerWords = yield* makeOwnerWordsIn(reader)(
+          valid.sessionId,
+          messages.flatMap((message) => (message.role === "user" ? [message.message_id] : []))
+        ).pipe(
+          Effect.mapError((cause) =>
+            error("snapshot", "storage", "Could not read the owner's words", { ...valid, cause })
+          )
+        )
         return {
           sessionId: loaded.row.session_id,
           sessionRef: loaded.row.public_ref,
@@ -385,7 +395,8 @@ export const makeContextCompactionStore = ({
           runId: run?.run_id ?? null,
           modelId: run?.model_id ?? loaded.row.chat_model,
           reasoningEffort: run?.reasoning_effort ?? null,
-          messages: yield* loadMessages(reader, valid, "snapshot"),
+          messages,
+          ownerWords,
           contextVersion: contextVersion(loaded.row),
           metadata: loaded.metadata,
           contextGeneration: loaded.row.context_generation

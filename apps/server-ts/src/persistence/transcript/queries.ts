@@ -102,6 +102,11 @@ export class TranscriptQueries extends Context.Service<
       readonly sequence: number
       readonly limit: number
     }) => Effect.Effect<ReadonlyArray<TranscriptMessageRecord>, TranscriptQueryFailure>
+    /** Which of `messageIds` are the owner's own words; the one test for that. */
+    readonly ownerWordsIn: (
+      sessionId: string,
+      messageIds: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlySet<string>, TranscriptQueryFailure>
     readonly resolveReference: (
       sessionId: string,
       messageOrClientId: string

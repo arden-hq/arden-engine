@@ -166,7 +166,7 @@ const hasExactStoredCallCount = (value: unknown, parsedCount: number): boolean =
 
 const isRuntimeContext = (message: StoredMessageEnvelope): boolean => message.role === "developer"
 
-const serializeMessage = (message: StoredMessageEnvelope): string => {
+const serializeMessage = (message: StoredMessageEnvelope, owned: ReadonlySet<string>): string => {
   if (isRuntimeContext(message)) return ""
   const body = (
     message.role === "assistant"
@@ -177,7 +177,10 @@ const serializeMessage = (message: StoredMessageEnvelope): string => {
     .join("\n")
   if (body.length === 0) return ""
   const name = message.role === "tool" && typeof message.name === "string" ? ` ${message.name}` : ""
-  const role = message.role === "user" && ownerText(message).length === 0 ? "context" : message.role
+  const role =
+    message.role === "user" && !(owned.has(message.message_id) && ownerText(message).length > 0)
+      ? "context"
+      : message.role
   return `${role}${name}: ${body}`
 }
 
@@ -282,6 +285,7 @@ const closeToolUnits = (
 
 export const planCompaction = (
   messages: ReadonlyArray<StoredMessageEnvelope>,
+  ownerWords: ReadonlySet<string>,
   keepRatio = DEFAULT_COMPACTION_KEEP_RATIO,
   keepCallIds: ReadonlySet<string> = new Set()
 ): CompactionPlan | null => {
@@ -341,7 +345,7 @@ export const planCompaction = (
   const priorSummary = handoff === undefined || handoff.length === 0 ? undefined : handoff
   const sourceText = source
     .filter((_, index) => index !== priorIndex)
-    .map(serializeMessage)
+    .map((message) => serializeMessage(message, ownerWords))
     .filter(Boolean)
     .join("\n\n")
   const first = source[0]

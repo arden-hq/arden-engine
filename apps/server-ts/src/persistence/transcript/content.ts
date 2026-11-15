@@ -4,6 +4,7 @@ import { answerBlockText } from "@arden-hq/answer-ui"
 import { answerBlockTitle, replaceAnswerBlocks } from "@arden-hq/protocol/chat"
 import { cutText } from "@arden-hq/std/text"
 import type { StoredMessageEnvelope } from "./model.js"
+import { ownerText } from "./owner-words.js"
 
 export { isHumanMessage } from "@arden-hq/loop"
 
@@ -129,9 +130,16 @@ const plainLine = (line: string): string =>
         .join(" ")
     : line.replace(/\*\*(.+?)\*\*/g, "$1")
 
-/** The text Memory Capture reads of a message, or null when it reads none. */
+/**
+ * The text Memory Capture reads of a message, or null when it reads none. An answer to Arden's
+ * question reads as what the owner said, with Arden's prompt marked as Arden's.
+ */
 export const capturedText = (message: StoredMessageEnvelope): string | null => {
   if (message.superseded === true) return null
-  const text = compactAnswerBlocks(authoredText(message.content)).trim()
+  const text = (
+    message.question_answer === undefined
+      ? compactAnswerBlocks(authoredText(message.content))
+      : ownerText(message)
+  ).trim()
   return text.length === 0 ? null : text
 }

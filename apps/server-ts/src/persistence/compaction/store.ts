@@ -27,6 +27,8 @@ export interface ContextCompactionSnapshot {
   readonly modelId: string | null
   readonly reasoningEffort: string | null
   readonly messages: ReadonlyArray<StoredMessageEnvelope>
+  /** Which user messages in `messages` are the owner's own words. */
+  readonly ownerWords: ReadonlySet<string>
   readonly contextVersion: string
   readonly metadata: JsonObject
   readonly contextGeneration: number
