@@ -14,5 +14,11 @@ export const resumeAutomation = Effect.fn("AutomationResume.resume")(function* (
     WHERE task_id = ${automationId}`
   yield* endAutoPause(sql, automationId)
   yield* restartMeasuredTriggers(sql, automationId)
-  yield* sql`DELETE FROM monitor_state WHERE namespace = ${automationId}`
+  yield* restartAutomationPositions(sql, automationId)
 })
+
+/** The `monitor_state` row of a position an Automation keeps; resuming the Automation restarts it. */
+export const automationPositionNamespace = (automationId: string): string => automationId
+
+const restartAutomationPositions = (sql: SqlClient.SqlClient, automationId: string) =>
+  sql`DELETE FROM monitor_state WHERE namespace = ${automationPositionNamespace(automationId)}`
