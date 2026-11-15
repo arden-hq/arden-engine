@@ -334,3 +334,21 @@ export const wikiPageExcerpt = (body: string, limit = 240): string | null => {
   if (text.length === 0) return null
   return cutText(text, limit)
 }
+
+const summaries = new WeakMap<ParsedWikiPage, string | null>()
+
+/**
+ * A page's one-line summary: its `summary` field, else the first sentence of its text; cut to
+ * `limit` characters. Null when the page has neither.
+ */
+export const wikiPageSummary = (page: ParsedWikiPage, limit: number): string | null => {
+  const field = page.metadata["summary"]
+  if (typeof field === "string" && foldSpace(field) !== "") return cutText(foldSpace(field), limit)
+  if (!summaries.has(page)) {
+    const text = wikiPageExcerpt(page.body, Number.MAX_SAFE_INTEGER)
+    const end = text === null ? -1 : text.search(/[.!?](?=\s|$)/u)
+    summaries.set(page, text === null || end < 0 ? text : text.slice(0, end + 1))
+  }
+  const sentence = summaries.get(page) ?? null
+  return sentence === null ? null : cutText(sentence, limit, { atWord: true })
+}
