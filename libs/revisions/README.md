@@ -40,9 +40,9 @@ Effect.runPromise(program.pipe(Effect.provide(managedFileRepositoryNodeLayer({ w
 - Every operation except `Create` names the `expectedVersion` it replaces. A stale version fails with `RevisionConflictError`.
 - `expectedHead` guards the whole repository. Leave it out for no check.
 - Every commit has an `idempotencyKey`. The same key with the same request returns the first commit with `replayed: true`. The same key with a different request fails with `IdempotencyConflictError`.
-- `workingTreeStatus` reports every active file that differs from history (changed, missing, or unreadable with the reason) and every untracked file, with the content of the untracked files the caller asks for. One file or folder never fails the scan: what cannot be read is reported with the reason.
+- `workingTreeStatus` reports every active file that differs from history (changed, missing, or unreadable with the reason) and every untracked file, with the content of the untracked files the caller asks for. One file or folder never fails the scan: what cannot be read is reported with the reason. A file is read only when its listed identity, size or time changed since a scan last found it matching history, and every 60th scan reads every file.
 - `adoptWorkingChange` records one outside change as one revision: an update for a changed file, an archive for a missing one. It is guarded by that resource's version and by the head the caller decided on, and fails if either moved or the file changed again after the scan.
-- A commit checks only the files it writes. Another file may differ from history until it is taken in; a commit never overwrites it.
+- A commit checks only the files it writes. Another file may differ from history until it is taken in; a commit never overwrites it. A file it would write that differs from history fails the commit with `WorkingFileChangedError`, naming the path.
 - Reads use the current revision. Pass `at` to read an older one.
 - `listResources` and `findByPath` hide archived resources unless you pass `includeArchived`.
 
