@@ -5,6 +5,7 @@ import {
   discoverLlamaCpp,
   discoverOpenRouter,
   DiscoveryError,
+  UnreachableError,
   type DiscoveryInput
 } from "../src/providers/chat-completions/discovery.js"
 
@@ -86,7 +87,7 @@ describe("detectServer", () => {
           throw new TypeError("fetch failed")
         }
       })
-    ).rejects.toThrow(new DiscoveryError("Cannot reach http://127.0.0.1:1/props: fetch failed"))
+    ).rejects.toThrow(new UnreachableError("cannot reach http://127.0.0.1:1/props: fetch failed"))
   })
 })
 
