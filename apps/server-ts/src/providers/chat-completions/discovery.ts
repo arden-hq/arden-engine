@@ -1,5 +1,5 @@
 import type { ChatCompletionsCompat } from "@arden-hq/loop/providers/chat-completions"
-import { errorMessage } from "@arden-hq/std/errors"
+import { unreachableMessage } from "@arden-hq/loop/provider-kit"
 import { Option, Schema } from "effect"
 
 /**
@@ -33,6 +33,18 @@ export class DiscoveryError extends Error {
   }
 }
 
+/**
+ * Nothing answered at an address: the server is not running, or not there.
+ * Not a `DiscoveryError`, whose answer rules the settings out: here the
+ * settings may be right.
+ */
+export class UnreachableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "UnreachableError"
+  }
+}
+
 export interface DiscoveryInput {
   /** The provider's `baseUrl` without a trailing slash; model requests go to
    *  `${baseUrl}/chat/completions`. */
@@ -50,8 +62,8 @@ export interface DiscoveryInput {
  * OpenRouter is known by its host. llama.cpp is known by `GET /props` carrying
  * `build_info`: Ollama and LM Studio answer `/v1/models` but not `/props`
  * (hermes-agent's fingerprint, `local_runtime/detect.py`). An unreachable
- * server is an error here, not `generic`, so a stopped server is reported as
- * stopped instead of as missing settings.
+ * server is an `UnreachableError` here, not `generic`, so a stopped server is
+ * reported as stopped instead of as missing settings.
  */
 export const detectServer = async (input: DiscoveryInput): Promise<ChatCompletionsServer> => {
   if (new URL(input.baseUrl).hostname === "openrouter.ai") return "openrouter"
@@ -331,7 +343,7 @@ const getJson = async (
     const text = await response.text()
     return { status: response.status, body: Option.getOrUndefined(decodeJsonText(text)) }
   } catch (cause) {
-    throw new DiscoveryError(`Cannot reach ${url}: ${errorMessage(cause)}`, { cause })
+    throw new UnreachableError(unreachableMessage(url, cause), { cause })
   }
 }
 

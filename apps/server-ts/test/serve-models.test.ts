@@ -1,7 +1,7 @@
 import { resolveModelCapabilities } from "@arden-hq/loop"
 import { readFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
-import { modelsFor } from "../src/serve/models.js"
+import { modelsFor, ProviderUnreachableError } from "../src/serve/models.js"
 import { parseSettings, SettingsError } from "../src/serve/settings.js"
 
 const GEMMA = "ggml-org/gemma-4-E2B-it-GGUF:Q8_0"
@@ -174,7 +174,7 @@ describe("modelsFor a chat-completions provider", () => {
     )
   })
 
-  it("reports a missing key variable and a stopped server as settings mistakes", async () => {
+  it("reports a missing key variable as a settings mistake, a stopped server as unreachable", async () => {
     await expect(
       modelsFor(
         settings({
@@ -196,9 +196,15 @@ describe("modelsFor a chat-completions provider", () => {
       modelsFor(settings({ provider: { kind: "chat-completions", baseUrl: `${LLAMA}/v1` } }), {
         env: {},
         fetch: async () => {
-          throw new TypeError("fetch failed")
+          throw new TypeError("fetch failed", {
+            cause: new Error("connect ECONNREFUSED 127.0.0.1:9931")
+          })
         }
       })
-    ).rejects.toThrow(`Cannot reach ${LLAMA}/props: fetch failed`)
+    ).rejects.toThrow(
+      new ProviderUnreachableError(
+        `The model server at ${LLAMA}/v1 (\`provider.baseUrl\`) did not answer: cannot reach ${LLAMA}/props: fetch failed (connect ECONNREFUSED 127.0.0.1:9931)`
+      )
+    )
   })
 })

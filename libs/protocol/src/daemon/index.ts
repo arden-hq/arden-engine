@@ -1,5 +1,9 @@
 import { decoderFor } from "../common/boundary.js"
-import { CliAccessSchema, OperationalEventMessageSchema } from "./schema.js"
+import {
+  CliAccessSchema,
+  ConfiguredServerReadySchema,
+  OperationalEventMessageSchema
+} from "./schema.js"
 
 export * from "./contracts.js"
 
@@ -7,5 +11,9 @@ export * from "./contracts.js"
  * owns the Effect runtime used to build and execute its schemas. */
 export const daemonDecoders = {
   operationalEventMessage: decoderFor(OperationalEventMessageSchema, "Invalid operational event"),
-  cliAccess: decoderFor(CliAccessSchema, "Invalid Arden CLI access file")
+  cliAccess: decoderFor(CliAccessSchema, "Invalid Arden CLI access file"),
+  configuredServerReady: decoderFor(
+    ConfiguredServerReadySchema,
+    "Invalid configured server ready line"
+  )
 } as const

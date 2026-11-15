@@ -31,7 +31,16 @@ Run `arden --help` for every option.
 - The server address is `--url` or `ARDEN_URL`.
 - `serve` and `exec` take a settings file (`apps/server-ts/src/serve/settings.ts` lists every field) and a data folder of their own, never `~/.arden`. Reach a `serve` server with `ARDEN_DIR=<its dataDirectory> arden run ...`.
 - `--output json` and `--output jsonl` print one `command_receipt`. Its `status` is `completed`, `submitted`, `failed`, `cancelled`, `interrupted` or `timed_out`.
-- Exit codes: `0` completed or submitted, `1` failed or cancelled, `2` invalid input, `124` timed out, `130` interrupted. For `exec`, `2` also covers a server that would not start on its settings, with the server's reason (see below).
+- Exit codes, for every command, `serve` and `exec` included:
+
+  | Code | Meaning | Receipt `error.code` |
+  | --- | --- | --- |
+  | `0` | completed or submitted | |
+  | `1` | failed or cancelled; for `serve` and `exec`, a server that would not start for another reason | the Run's code, `server_unavailable` |
+  | `2` | invalid input; for `serve` and `exec`, a settings file the server would not start on, with its reason | `invalid_input` |
+  | `3` | `serve` and `exec`: the model server named by `provider.baseUrl` did not answer at start (not running, or not at that address) | `provider_unavailable` |
+  | `124` | timed out | |
+  | `130` | interrupted | |
 - The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, `cost`. The server prices no model call yet, so `cost` is 0 on every provider, a local model included; count tokens from `usage`.
 - `--model` takes an id `arden models` lists. Any other is refused before a chat is made (exit 2), with the ids the server has.
 - A prompt longer than one message takes (100,000 characters) is refused before the server is reached (exit 2).

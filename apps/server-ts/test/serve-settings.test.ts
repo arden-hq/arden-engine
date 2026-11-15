@@ -7,7 +7,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, it } from "vitest"
 import { offeredTools } from "../src/serve/apply.js"
-import { serverOptionsFor, startConfigured } from "../src/serve/serve.js"
+import { readyLine, serverOptionsFor, startConfigured } from "../src/serve/serve.js"
 import { parseSettings, SettingsError } from "../src/serve/settings.js"
 import { startServerWithLocalAccess } from "../src/server.js"
 
@@ -177,6 +177,20 @@ it("a configured server starts with its settings in place and publishes its acce
   )
   try {
     expect(configured.applied.offeredTools).toEqual(["exec_command"])
+    // The ready line says what a new chat runs on, in the shape its readers decode.
+    expect(daemonDecoders.configuredServerReady(readyLine(configured))).toEqual({
+      type: "ready",
+      url: configured.server.url.href,
+      dataDirectory,
+      accessFile: join(dataDirectory, "cli-access.json"),
+      usageFile: join(dataDirectory, "usage.json"),
+      offeredTools: ["exec_command"],
+      toolsWithoutRule: configured.applied.toolsWithoutRule,
+      mcpServers: [],
+      provider: "responses",
+      model: "test-model",
+      contextWindow: 100_000
+    })
     const access = daemonDecoders.cliAccess(
       JSON.parse(await readFile(configured.accessFile, "utf8"))
     )

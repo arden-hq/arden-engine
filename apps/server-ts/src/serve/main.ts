@@ -1,11 +1,15 @@
+import { CONFIGURED_SERVER_EXIT } from "@arden-hq/protocol/daemon"
 import { errorMessage } from "@arden-hq/std/errors"
+import { ProviderUnreachableError } from "./models.js"
 import { readSettings, SettingsError } from "./settings.js"
-import { startConfigured, type StartedServer, type StartServer } from "./serve.js"
+import { readyLine, startConfigured, type StartedServer, type StartServer } from "./serve.js"
 
 /**
  * The process behind `--config <file>`. On stdout it prints one JSON line when
- * the server is ready, then nothing; it runs until SIGINT or SIGTERM. A
- * settings mistake exits 2 with the reason on stderr, any other failure 1.
+ * the server is ready (`readyLine`), then nothing; it runs until SIGINT or
+ * SIGTERM. A start that fails writes the reason on stderr and exits with
+ * `CONFIGURED_SERVER_EXIT`: a settings mistake, a model server that did not
+ * answer; any other failure exits 1.
  */
 export const runConfigured = async (
   file: string | undefined,
@@ -39,18 +43,15 @@ export const runConfigured = async (
       )
     }
     if (wanted) return stop()
-    process.stdout.write(
-      `${JSON.stringify({
-        type: "ready",
-        url: configured.server.url.href,
-        dataDirectory: settings.dataDirectory,
-        accessFile: configured.accessFile,
-        usageFile: configured.usageFile,
-        ...configured.applied
-      })}\n`
-    )
+    process.stdout.write(`${JSON.stringify(readyLine(configured))}\n`)
   } catch (cause) {
     process.stderr.write(`arden: ${errorMessage(cause)}\n`)
-    process.exit(cause instanceof SettingsError ? 2 : 1)
+    process.exit(exitCodeOf(cause))
   }
+}
+
+const exitCodeOf = (cause: unknown): number => {
+  if (cause instanceof SettingsError) return CONFIGURED_SERVER_EXIT.settings
+  if (cause instanceof ProviderUnreachableError) return CONFIGURED_SERVER_EXIT.providerUnreachable
+  return 1
 }

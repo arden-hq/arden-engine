@@ -5,6 +5,7 @@ import { createWriteStream, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
 import {
+  ProviderUnavailableError,
   ServerUnavailableError,
   UsageError,
   type CliDependencies,
@@ -35,7 +36,8 @@ const serverEntry = (env: Readonly<Record<string, string | undefined>>): string 
 /**
  * Starts a configured server as a child process and waits for its ready line.
  * A start that fails rejects with the server's own last words: its `arden:`
- * line names the settings mistake, which is the caller's to fix (exit 2).
+ * line names the settings mistake (exit 2) or the model server that did not
+ * answer (exit 3).
  */
 const startServer: StartServer = async ({ config, logFile, env }) => {
   const log = logFile === undefined ? undefined : createWriteStream(logFile, { flags: "a" })
@@ -56,9 +58,14 @@ const startServer: StartServer = async ({ config, logFile, env }) => {
   } catch (cause) {
     log?.end()
     if (!(cause instanceof ConfiguredServerError)) throw cause
-    throw cause.reason === "settings"
-      ? new UsageError(cause.message)
-      : new ServerUnavailableError(cause.message)
+    switch (cause.reason) {
+      case "settings":
+        throw new UsageError(cause.message)
+      case "provider":
+        throw new ProviderUnavailableError(cause.message)
+      case "start":
+        throw new ServerUnavailableError(cause.message)
+    }
   }
 }
 

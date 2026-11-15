@@ -1,27 +1,12 @@
-import { daemonDecoders, LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
+import {
+  CONFIGURED_SERVER_EXIT,
+  daemonDecoders,
+  LOCAL_CAPABILITY_HEADER,
+  type ConfiguredServerReady
+} from "@arden-hq/protocol/daemon"
 import { errorMessage } from "@arden-hq/std/errors"
-import { isRecord } from "@arden-hq/std/json"
 import { spawn, type ChildProcess } from "node:child_process"
 import { readFile } from "node:fs/promises"
-
-/**
- * The one JSON line a configured server (`main.js --config <file>`) prints on
- * stdout once every setting is in place. The server writes it in
- * `apps/server-ts/src/serve/main.ts`; this is its reader's side.
- */
-export interface ConfiguredServerReady {
-  readonly url: string
-  readonly dataDirectory: string
-  /** Holds the server URL and the owner's secret (`cli-access.json`). */
-  readonly accessFile: string
-  /** The data folder's model requests and tokens, rewritten after every request. */
-  readonly usageFile: string
-  /** The tools the settings offer; undefined when they offer every tool. */
-  readonly offeredTools: ReadonlyArray<string> | undefined
-  /** Tools that always ask on a card, so the settings could give them no rule. */
-  readonly toolsWithoutRule: ReadonlyArray<string>
-  readonly mcpServers: ReadonlyArray<string>
-}
 
 /** Where a started server answers, with the secret every request carries. */
 export interface ConfiguredServerConnection {
@@ -36,21 +21,36 @@ export interface ConfiguredServer {
   readonly stop: () => Promise<void>
 }
 
+export type { ConfiguredServerReady }
+
 /**
- * Why a configured server did not start. `settings`: the server exited with
- * code 2, its word for a settings file the caller can fix (a field, a missing
- * key variable, a model its provider does not list, a provider it could not
- * reach). `start`: anything else. The message is the server's own last
- * `arden:` line when it printed one.
+ * Why a configured server did not start, read from its exit code
+ * (`CONFIGURED_SERVER_EXIT`). `settings`: a settings file the caller can fix
+ * (a field, a missing key variable, a model its provider does not list).
+ * `provider`: the model server named by `provider.baseUrl` did not answer; the
+ * file may be right, and starting the model server is the fix. `start`:
+ * anything else. The message is the server's own last `arden:` line when it
+ * printed one.
  */
 export class ConfiguredServerError extends Error {
   override readonly name = "ConfiguredServerError"
 
   constructor(
-    readonly reason: "settings" | "start",
+    readonly reason: "settings" | "provider" | "start",
     message: string
   ) {
     super(message)
+  }
+}
+
+const reasonOf = (code: number | null): ConfiguredServerError["reason"] => {
+  switch (code) {
+    case CONFIGURED_SERVER_EXIT.settings:
+      return "settings"
+    case CONFIGURED_SERVER_EXIT.providerUnreachable:
+      return "provider"
+    default:
+      return "start"
   }
 }
 
@@ -139,8 +139,7 @@ export const startConfiguredServer = (
         .at(-1)
       fail(
         new ConfiguredServerError(
-          // Exit 2 is the server's own word for a settings mistake.
-          code === 2 ? "settings" : "start",
+          reasonOf(code),
           said?.slice("arden: ".length) ?? `The Arden server exited with code ${code}`
         )
       )
@@ -164,36 +163,11 @@ const connectionOf = async (ready: ConfiguredServerReady): Promise<ConfiguredSer
   return { url: new URL(ready.url), headers: { [LOCAL_CAPABILITY_HEADER]: access.capability } }
 }
 
-const isStrings = (value: unknown): value is ReadonlyArray<string> =>
-  Array.isArray(value) && value.every((entry) => typeof entry === "string")
-
+/** The ready line, or undefined when the first line is not one. */
 const readyFrom = (line: string): ConfiguredServerReady | undefined => {
-  let value: unknown
   try {
-    value = JSON.parse(line)
+    return daemonDecoders.configuredServerReady(JSON.parse(line))
   } catch {
     return undefined
-  }
-  if (!isRecord(value) || value["type"] !== "ready") return undefined
-  const { url, dataDirectory, accessFile, usageFile, offeredTools, toolsWithoutRule, mcpServers } =
-    value
-  if (
-    typeof url !== "string" ||
-    typeof dataDirectory !== "string" ||
-    typeof accessFile !== "string" ||
-    typeof usageFile !== "string" ||
-    (offeredTools !== undefined && !isStrings(offeredTools)) ||
-    !isStrings(toolsWithoutRule) ||
-    !isStrings(mcpServers)
-  )
-    return undefined
-  return {
-    url,
-    dataDirectory,
-    accessFile,
-    usageFile,
-    offeredTools,
-    toolsWithoutRule,
-    mcpServers
   }
 }

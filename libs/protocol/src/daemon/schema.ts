@@ -1,5 +1,10 @@
 import { Schema } from "effect"
-import { daemonHandshake, type CliAccess, type OperationalEventMessage } from "./contracts.js"
+import {
+  daemonHandshake,
+  type CliAccess,
+  type ConfiguredServerReady,
+  type OperationalEventMessage
+} from "./contracts.js"
 import {
   IsoDateTimeStringSchema,
   NonNegativeIntSchema,
@@ -167,4 +172,21 @@ export const CliAccessSchema: Schema.Codec<CliAccess> = Schema.Struct({
   serverUrl: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
   capability: Schema.String.check(Schema.isMinLength(32), Schema.isMaxLength(512)),
   pid: PositiveIntSchema
+})
+
+const PathSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096))
+const NamesSchema = Schema.Array(Schema.String.check(Schema.isMinLength(1)))
+
+export const ConfiguredServerReadySchema: Schema.Codec<ConfiguredServerReady> = Schema.Struct({
+  type: Schema.Literal("ready"),
+  url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
+  dataDirectory: PathSchema,
+  accessFile: PathSchema,
+  usageFile: PathSchema,
+  offeredTools: Schema.optionalKey(NamesSchema),
+  toolsWithoutRule: NamesSchema,
+  mcpServers: NamesSchema,
+  provider: IdentifierSchema,
+  model: IdentifierSchema,
+  contextWindow: PositiveIntSchema
 })

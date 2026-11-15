@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { runCli, type CliClient, type CliDependencies } from "../src/index.js"
 import type { StdinKind } from "../src/command.js"
@@ -409,6 +412,68 @@ describe("arden exec", () => {
       })
     ).toBe(1)
     expect(events).toEqual(["start settings.json -", "stop"])
+  })
+})
+
+describe("arden exec on a server that does not start", () => {
+  let directory = ""
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), "arden-cli-exec-"))
+  })
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  // A real process stands in for the server's `main.js --config`, exiting as the server does.
+  it("tells a settings mistake, a model server that is down and a failed start apart", async () => {
+    const receipts: Array<unknown> = []
+    for (const [code, said] of [
+      [2, "Missing environment variable KEY, named by `provider.apiKeyEnv`"],
+      [3, "The model server at http://127.0.0.1:9/v1 (`provider.baseUrl`) did not answer"],
+      [1, "Database is locked"]
+    ] as const) {
+      const entry = join(directory, `exit-${code}.mjs`)
+      await writeFile(
+        entry,
+        `console.error(${JSON.stringify(`arden: ${said}`)}); process.exit(${code})`
+      )
+      const io = testIo({ env: { ARDEN_SERVER_ENTRY: entry } })
+      const exitCode = await runCli(
+        ["exec", "--config", "settings.json", "--output", "json", "hi"],
+        io.dependencies
+      )
+      const [receipt] = jsonLines(io.stdout())
+      receipts.push({ exitCode, receipt })
+    }
+    expect(receipts).toMatchObject([
+      {
+        exitCode: 2,
+        receipt: {
+          exit_code: 2,
+          error: {
+            code: "invalid_input",
+            message: "Missing environment variable KEY, named by `provider.apiKeyEnv`"
+          }
+        }
+      },
+      {
+        exitCode: 3,
+        receipt: {
+          exit_code: 3,
+          error: {
+            code: "provider_unavailable",
+            message: "The model server at http://127.0.0.1:9/v1 (`provider.baseUrl`) did not answer"
+          }
+        }
+      },
+      {
+        exitCode: 1,
+        receipt: {
+          exit_code: 1,
+          error: { code: "server_unavailable", message: "Database is locked" }
+        }
+      }
+    ])
   })
 })
 

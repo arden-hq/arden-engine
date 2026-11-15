@@ -7,6 +7,7 @@ import {
   discoverLlamaCpp,
   discoverOpenRouter,
   DiscoveryError,
+  UnreachableError,
   type ChatCompletionsServer,
   type DiscoveredModel,
   type DiscoveryInput
@@ -21,6 +22,28 @@ import {
 import { requireServerFields, SettingsError, type Settings } from "./settings.js"
 
 const COMPACTION_SHARE = 0.8
+
+/**
+ * The model server named by `provider.baseUrl` did not answer at start: it is
+ * not running, or not at that address. Not a `SettingsError`: the file may be
+ * right. A configured server exits with `CONFIGURED_SERVER_EXIT.providerUnreachable`.
+ */
+export class ProviderUnreachableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ProviderUnreachableError"
+  }
+}
+
+/** Discovery's failures in the settings' words: which field to fix, or which server to start. */
+const discoveryFailure = (baseUrl: string, cause: unknown): unknown => {
+  if (cause instanceof UnreachableError)
+    return new ProviderUnreachableError(
+      `The model server at ${baseUrl} (\`provider.baseUrl\`) did not answer: ${cause.message}`
+    )
+  if (cause instanceof DiscoveryError) return new SettingsError(cause.message)
+  return cause
+}
 
 /** How long start may wait for a Chat Completions server to describe its models. */
 const DISCOVERY_TIMEOUT_MS = 15_000
@@ -154,8 +177,7 @@ const discoverModels = async (
         }))
     }
   } catch (cause) {
-    if (cause instanceof DiscoveryError) throw new SettingsError(cause.message)
-    throw cause
+    throw discoveryFailure(input.baseUrl, cause)
   }
 }
 
@@ -257,8 +279,7 @@ const detected = async (input: DiscoveryInput): Promise<ChatCompletionsServer> =
   try {
     return await detectServer(input)
   } catch (cause) {
-    if (cause instanceof DiscoveryError) throw new SettingsError(cause.message)
-    throw cause
+    throw discoveryFailure(input.baseUrl, cause)
   }
 }
 

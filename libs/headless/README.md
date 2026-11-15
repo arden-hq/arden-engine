@@ -20,7 +20,7 @@ const detail = await client.wait(run)
 - Answers: `answerApproval` and `answerConnection` reply to a paused run.
 - Models: `listModels` returns the models a new chat may run on, grouped by provider; `createSession({ chat_model })` takes one of their ids.
 - Other: `health`, `listSpaces`.
-- A server of your own: `startConfiguredServer({ entry, config, env })` starts `main.js --config <settings file>` as a child process and resolves with its ready line, a `connection` (URL and the secret from its access file) and `stop`. A start that fails rejects with `ConfiguredServerError`: `reason: "settings"` when the server exited with code 2 (a settings mistake, an unset key variable, a provider that does not answer), `"start"` otherwise; the message is the server's own.
+- A server of your own: `startConfiguredServer({ entry, config, env })` starts `main.js --config <settings file>` as a child process and resolves with its ready line (`ConfiguredServerReady` from `@arden-hq/protocol/daemon`, which also says the `provider`, `model` and `contextWindow` a new chat runs on), a `connection` (URL and the secret from its access file) and `stop`. A start that fails rejects with `ConfiguredServerError`, its `reason` read from the server's exit code (`CONFIGURED_SERVER_EXIT`): `"settings"` (exit 2: a settings mistake, an unset key variable, a model the provider does not list), `"provider"` (exit 3: the model server at `provider.baseUrl` did not answer), `"start"` otherwise; the message is the server's own.
 - Errors: `HeadlessHttpError`, `HeadlessProtocolError`, `HeadlessTimeoutError`, `HeadlessEventHandlerError`, `ConfiguredServerError`.
 
 ## Drive a configured server

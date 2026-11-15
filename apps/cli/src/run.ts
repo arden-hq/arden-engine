@@ -12,12 +12,14 @@ import {
   type ChatImageInput,
   type ChatMessageInput
 } from "@arden-hq/protocol/chat"
+import { CONFIGURED_SERVER_EXIT } from "@arden-hq/protocol/daemon"
 import { extname } from "node:path"
 
 import {
   createCliClient,
   NoModelError,
   resolveServer,
+  ProviderUnavailableError,
   ServerUnavailableError,
   UsageError,
   type CliClient,
@@ -464,6 +466,13 @@ export const failureOf = (
   }
   if (cause instanceof ServerUnavailableError) {
     return { error: { code: "server_unavailable", message: cause.message }, exitCode: 1 }
+  }
+  if (cause instanceof ProviderUnavailableError) {
+    // The configured server's own exit code for it, so `exec` and `serve` agree.
+    return {
+      error: { code: "provider_unavailable", message: cause.message },
+      exitCode: CONFIGURED_SERVER_EXIT.providerUnreachable
+    }
   }
   if (cause instanceof NoModelError) {
     return { error: { code: "no_model", message: cause.message }, exitCode: 1 }

@@ -1,10 +1,11 @@
-import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
+import { LOCAL_CAPABILITY_HEADER, type ConfiguredServerReady } from "@arden-hq/protocol/daemon"
 import { randomBytes } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import type { HostedServerOptions } from "../config/options.js"
 import { ownerDataDirectory } from "../config/service.js"
 import type { LocalAccess } from "../http/middleware/local-only.js"
+import type { ModelHost } from "../models/host.js"
 import { cliAccessPath, publishCliAccess, withdrawCliAccess } from "../runtime/cli-access.js"
 import { applySettings, type AppliedSettings, type ServerRequest } from "./apply.js"
 import { meteredProvider } from "./meter.js"
@@ -55,8 +56,18 @@ export type StartServer<Server extends StartedServer> = (
   options: HostedServerOptions & { readonly localAccess: LocalAccess }
 ) => Promise<Server>
 
+/** What a new chat runs on: the model list's chat model when the server started. */
+export interface StartedOn {
+  readonly provider: string
+  readonly model: string
+  readonly contextWindow: number
+}
+
 export interface ConfiguredServer<Server extends StartedServer = StartedServer> {
   readonly server: Server
+  /** The data folder, resolved. */
+  readonly dataDirectory: string
+  readonly startedOn: StartedOn
   /** Owner-level requests, for the process that started the server. */
   readonly request: ServerRequest
   readonly applied: AppliedSettings
@@ -86,6 +97,7 @@ export const startConfigured = async <Server extends StartedServer>(
   const options = serverOptionsFor(settings)
   const usageFile = join(dataDirectory, USAGE_FILE)
   const route = await modelsFor(settings, { env, fetch: globalThis.fetch })
+  const startedOn = chatModelOf(await route.modelHost)
   const models =
     route.provider === undefined
       ? route
@@ -135,6 +147,8 @@ export const startConfigured = async <Server extends StartedServer>(
     })
     return {
       server,
+      dataDirectory,
+      startedOn,
       request,
       applied,
       accessFile,
@@ -149,3 +163,26 @@ export const startConfigured = async <Server extends StartedServer>(
     throw cause
   }
 }
+
+const chatModelOf = (host: ModelHost | undefined): StartedOn => {
+  const id = host?.defaults.chatModelId ?? undefined
+  const model = host?.models.find((entry) => entry.id === id)
+  // `modelsFor` always lists the chat model first and names it the default.
+  if (model === undefined) throw new Error("The model list names no chat model")
+  return { provider: model.provider.id, model: model.id, contextWindow: model.context.hardLimit }
+}
+
+/** The line a configured server prints on stdout once ready (`ConfiguredServerReady`). */
+export const readyLine = (configured: ConfiguredServer): ConfiguredServerReady => ({
+  type: "ready",
+  url: configured.server.url.href,
+  dataDirectory: configured.dataDirectory,
+  accessFile: configured.accessFile,
+  usageFile: configured.usageFile,
+  ...(configured.applied.offeredTools === undefined
+    ? {}
+    : { offeredTools: configured.applied.offeredTools }),
+  toolsWithoutRule: configured.applied.toolsWithoutRule,
+  mcpServers: configured.applied.mcpServers,
+  ...configured.startedOn
+})

@@ -70,6 +70,11 @@ export class ServerUnavailableError extends Error {
   override readonly name = "ServerUnavailableError"
 }
 
+/** The model server a configured server needs did not answer when it started. */
+export class ProviderUnavailableError extends Error {
+  override readonly name = "ProviderUnavailableError"
+}
+
 export const createCliClient = (
   dependencies: CliDependencies,
   connection: ServerConnection

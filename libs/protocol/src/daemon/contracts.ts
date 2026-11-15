@@ -205,3 +205,39 @@ export interface CliAccess extends JsonRecord {
   readonly capability: string
   readonly pid: number
 }
+
+/**
+ * How a configured server (`main.js --config <file>`) that did not start says
+ * why, by its exit code; any other failure exits 1. `settings`: a settings
+ * file the caller can fix (a field, an unset key variable, a model its
+ * provider does not list). `providerUnreachable`: the model server named by
+ * `provider.baseUrl` did not answer, so the file may be right and the model
+ * server is not running.
+ */
+export const CONFIGURED_SERVER_EXIT = { settings: 2, providerUnreachable: 3 } as const
+
+/**
+ * The one JSON line a configured server prints on stdout once every setting
+ * is in place. The server writes it (`apps/server-ts/src/serve/main.ts`);
+ * `@arden-hq/headless` reads it.
+ */
+export interface ConfiguredServerReady extends JsonRecord {
+  readonly type: "ready"
+  readonly url: string
+  readonly dataDirectory: string
+  /** Holds the server URL and the owner's secret (`cli-access.json`). */
+  readonly accessFile: string
+  /** The data folder's model requests and tokens, rewritten after every request. */
+  readonly usageFile: string
+  /** The tools the settings offer; absent when they offer every tool. */
+  readonly offeredTools?: ReadonlyArray<string>
+  /** Tools that always ask on a card, so the settings could give them no rule. */
+  readonly toolsWithoutRule: ReadonlyArray<string>
+  readonly mcpServers: ReadonlyArray<string>
+  /** The provider a new chat runs on, by the id the model list gives it (`llama.cpp`, `openrouter`, `chat-completions`, `responses`, `openai`). */
+  readonly provider: string
+  /** The model a new chat runs on, by the id `--model` and `chat_model` take. */
+  readonly model: string
+  /** That model's context window in tokens, after `contextLimit`. */
+  readonly contextWindow: number
+}
