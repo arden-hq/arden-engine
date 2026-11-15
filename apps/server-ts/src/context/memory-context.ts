@@ -51,6 +51,8 @@ export const MEMORY_BUDGET = {
   standingFrame: 1_000,
   index: 10_000,
   space: 10_000,
+  /** The list of the Space's other pages, beside the rest of the Space context. */
+  spacePages: 2_000,
   spaceInstructions: 4_000,
   spacePage: 4_000,
   recall: 7_000
@@ -61,6 +63,7 @@ export const MEMORY_BLOCK_MAX_BYTES =
   MEMORY_BUDGET.standingFrame +
   MEMORY_BUDGET.index +
   MEMORY_BUDGET.space +
+  MEMORY_BUDGET.spacePages +
   MEMORY_BUDGET.recall
 
 /** A Space's view, and its Memory page at the version read, when it has one. */
@@ -135,18 +138,37 @@ const renderSpace = (
   const rendered = renderSpaceContext(space.view, {
     maxBytes: MEMORY_BUDGET.space,
     instructionsBytes: MEMORY_BUDGET.spaceInstructions,
-    pageBytes: MEMORY_BUDGET.spacePage
+    pageBytes: MEMORY_BUDGET.spacePage,
+    pagesBytes: MEMORY_BUDGET.spacePages
   })
+  const list = rendered.list
+  const listBytes = list === undefined ? 0 : byteLength(list.text)
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
     page_id: space.page?.pageId ?? null,
     version: space.page?.version ?? null,
-    bytes: byteLength(rendered.text)
+    bytes: byteLength(rendered.text) - (list === undefined ? 0 : listBytes + 2)
   }
   const source: RunMemorySource =
     rendered.page === "cut" || rendered.page === "dropped"
       ? { ...identity, outcome: rendered.page, reason: "space_page_allowance" }
       : { ...identity, outcome: "whole", reason: null }
-  return { text: rendered.text, sources: [source] }
+  if (list === undefined) return { text: rendered.text, sources: [source] }
+  const index = {
+    kind: "index" as const,
+    root: list.index.root,
+    listed: list.index.lines.length,
+    folded: list.index.folded,
+    bytes: listBytes
+  }
+  return {
+    text: rendered.text,
+    sources: [
+      source,
+      list.index.folded.length === 0 && list.index.unlisted === 0
+        ? { ...index, outcome: "whole", reason: null }
+        : { ...index, outcome: "cut", reason: "index_allowance" }
+    ]
+  }
 }

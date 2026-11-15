@@ -1,11 +1,9 @@
-import { isWithin } from "@arden-hq/std/paths"
 import { Effect } from "effect"
-import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { wikiError, type WikiError, type WikiOperation } from "./errors.js"
-import { isReadme } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
+import { heldByAnother, spaceOwnsPath } from "./space-index.js"
 
 export type WikiLocationAuthority =
   | { readonly _tag: "Global" }
@@ -20,37 +18,6 @@ export interface WikiWriteBoundary {
   readonly pageId: string
   readonly pagePath: string
 }
-
-export const canonicalWikiPath = (value: string): string | undefined => {
-  if (value.length === 0 || value.startsWith("/") || value.includes("\\")) return undefined
-  const normalized = posix.normalize(value)
-  if (normalized === "." || normalized.split("/")[0] === ".." || normalized !== value) {
-    return undefined
-  }
-  return normalized
-}
-
-const wikiBoundaryRoot = (boundary: string): string => {
-  if (isReadme(boundary)) return posix.dirname(boundary)
-  if (boundary.endsWith(".md")) return boundary.slice(0, -3)
-  return boundary
-}
-
-export const wikiPathWithinSpaceBoundary = (boundaryPath: string, targetPath: string): boolean => {
-  const canonicalBoundary = canonicalWikiPath(boundaryPath)
-  const canonicalTarget = canonicalWikiPath(targetPath)
-  if (canonicalBoundary === undefined || canonicalTarget === undefined) return false
-
-  const boundary = canonicalBoundary.toLowerCase()
-  const target = canonicalTarget.toLowerCase()
-  if (target === boundary) return true
-
-  return isWithin(`/${wikiBoundaryRoot(boundary)}`, `/${target}`)
-}
-
-export const wikiSpaceBoundariesOverlap = (firstPath: string, secondPath: string): boolean =>
-  wikiPathWithinSpaceBoundary(firstPath, secondPath) ||
-  wikiPathWithinSpaceBoundary(secondPath, firstPath)
 
 export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(function* (
   spaces: SpaceStore["Service"],
@@ -83,21 +50,15 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
     })
   }
 
-  const activeSpaces = yield* spaces.list().pipe(
+  const bindings = yield* spaces.activeBindings().pipe(
     Effect.mapError((cause) =>
       wikiError(operation, "storage", "Could not validate active Space Wiki boundaries", {
         cause
       })
     )
   )
-  const unsafeBinding = activeSpaces.find((candidate) => {
-    if (candidate.space_id === space.space_id) return false
-    if ((candidate.page_id === null) !== (candidate.page_path === null)) return true
-    if (candidate.page_path === null) return false
-    if (canonicalWikiPath(candidate.page_path) === undefined) return true
-    return wikiSpaceBoundariesOverlap(boundaryPage.resource.path, candidate.page_path)
-  })
-  if (unsafeBinding !== undefined) {
+  const others = bindings.filter((binding) => binding.space_id !== space.space_id)
+  if (heldByAnother(others, boundaryPage.page.pageId, boundaryPage.resource.path)) {
     return yield* wikiError(
       operation,
       "blocked",
@@ -118,7 +79,7 @@ export const requireWikiWritePaths = Effect.fn("Wiki.requireWritePaths")(functio
   paths: ReadonlyArray<string>
 ): Effect.fn.Return<void, WikiError> {
   if (boundary === undefined) return
-  const denied = paths.find((path) => !wikiPathWithinSpaceBoundary(boundary.pagePath, path))
+  const denied = paths.find((path) => !spaceOwnsPath(boundary.pagePath, path))
   if (denied === undefined) return
 
   return yield* wikiError(

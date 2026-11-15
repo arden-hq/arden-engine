@@ -29,6 +29,7 @@ import {
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
+import { isSpacePage, spaceOwnsWikiPath } from "./space-index.js"
 
 const DIRECTORY_CONTRACT_HEADING = "## Directory contract"
 const MAX_DIRECTORY_PATH_CHARS = 4_096
@@ -125,13 +126,11 @@ export const makeWikiDirectoryMethods = (
     const readmePath = `${directory}/README.md`
     const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "create")
     if (boundary === undefined) {
-      const spaceOwned = yield* spaces
-        .ownsWikiPath(readmePath)
-        .pipe(
-          Effect.mapError((cause) =>
-            wikiError("create", "storage", "Could not validate Space Wiki ownership", { cause })
-          )
+      const spaceOwned = yield* spaceOwnsWikiPath(spaces, readmePath).pipe(
+        Effect.mapError((cause) =>
+          wikiError("create", "storage", "Could not validate Space Wiki ownership", { cause })
         )
+      )
       if (spaceOwned) {
         return yield* wikiError(
           "create",
@@ -266,16 +265,18 @@ export const makeWikiDirectoryMethods = (
     }
     const reason = input.commit?.reason ?? `create Wiki directory ${directory}`
     if (occupant !== undefined && !ownsLeafBoundary) {
-      const spaceBound = yield* spaces
-        .hasPageBinding(occupant.page.pageId, occupant.resource.path)
-        .pipe(
-          Effect.mapError((cause) =>
-            wikiError("create", "storage", "Could not check Space page ownership", {
-              pageId: occupant.page.pageId,
-              cause
-            })
-          )
+      const spaceBound = yield* isSpacePage(
+        spaces,
+        occupant.page.pageId,
+        occupant.resource.path
+      ).pipe(
+        Effect.mapError((cause) =>
+          wikiError("create", "storage", "Could not check Space page ownership", {
+            pageId: occupant.page.pageId,
+            cause
+          })
         )
+      )
       if (spaceBound) {
         return yield* wikiError(
           "create",

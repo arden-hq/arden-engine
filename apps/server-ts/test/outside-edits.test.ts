@@ -62,7 +62,7 @@ const PAGES: ReadonlyArray<readonly [pageId: string, path: string, content: stri
 ]
 
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
-  hasPageBinding: () => Effect.succeed(false)
+  activeBindings: () => Effect.succeed([])
 })
 
 interface Memory {

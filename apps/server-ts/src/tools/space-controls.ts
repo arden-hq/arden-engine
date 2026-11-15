@@ -1,6 +1,6 @@
 import { boundary } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
-import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
+import type { ToolContext } from "@arden-hq/loop"
 import { UpdateSpaceInputSchema } from "@arden-hq/protocol/effect/spaces"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -9,6 +9,7 @@ import { RunQueries } from "../persistence/runs/queries.js"
 import { runMayAct } from "../persistence/runs/liveness.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { Wiki } from "../wiki/service.js"
+import { createSpaceWithPage } from "../wiki/space-page.js"
 import type { ServerRunContext } from "./run-context.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { pageReceipt } from "./wiki-records.js"
@@ -135,6 +136,13 @@ const makeSpaceControlTools = (services: Services): ReadonlyArray<ServerTool> =>
   })
 ]
 
+const spacePageHome = Schema.optionalKey(
+  Schema.Literals(["projects", "areas"]).annotate({
+    description:
+      "Where the Space's Memory page goes: projects for a finite outcome; areas for ongoing responsibility or general Space context (default)."
+  })
+)
+
 const makeSpaceSetupTools = (
   services: Pick<Services, "spaces" | "runs"> & {
     readonly wiki: Wiki["Service"]
@@ -148,7 +156,8 @@ const makeSpaceSetupTools = (
       Schema.Struct({
         name: Schema.NonEmptyString.annotate({
           description: "Readable name for the Space requested by the user."
-        })
+        }),
+        home: spacePageHome
       })
     ),
     metadata: {
@@ -167,9 +176,14 @@ const makeSpaceSetupTools = (
       const space = await recordApplied(
         effects,
         Effect.runPromise(
-          services.spaces
-            .create({ name: input.name }, { runId: ctx.run.runId, toolCallId: ctx.toolCallId })
-            .pipe(Effect.mapError((cause) => failure(cause))),
+          createSpaceWithPage(
+            services,
+            { name: input.name },
+            {
+              mutation: { runId: ctx.run.runId, toolCallId: ctx.toolCallId },
+              ...(input.home === undefined ? {} : { home: input.home })
+            }
+          ).pipe(Effect.mapError((cause) => failure(cause))),
           { signal: ctx.signal }
         )
       )
@@ -183,18 +197,12 @@ const makeSpaceSetupTools = (
   defineServerTool({
     name: "space_page_create",
     description:
-      "Create and attach a Space's Memory page at the user's request. Choose projects for a finite outcome, areas for ongoing responsibilities; the default is ongoing Space context in areas. If a page is already attached, changes nothing. Returns the Space with its page_path. To add context, read the page with space_page_read, then use space_page_write. Ordinary Chat only.",
+      "Create and attach a Space's Memory page at the user's request. If a page is already attached, changes nothing. Returns the Space with its page_path. To add context, read the page with space_page_read, then use space_page_write. Ordinary Chat only.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         space_id: Schema.NonEmptyString.annotate({
           description: "Exact Space identity returned by space_list; never its display name."
-        }),
-        home: Schema.optionalKey(
-          Schema.Literals(["projects", "areas"]).annotate({
-            description:
-              "projects for a finite outcome; areas for ongoing responsibility or general Space context (default)."
-          })
-        )
+        })
       })
     ),
     metadata: {
@@ -210,32 +218,16 @@ const makeSpaceSetupTools = (
     },
     execute: async (input, ctx, effects) => {
       await requireChat(services, ctx)
-      const { space, page } = await Effect.runPromise(
-        Effect.gen(function* () {
-          const current = yield* services.spaces.get(input.space_id)
-          if (!current) return yield* Effect.fail(refusal("Space is unavailable"))
-          if (current.page_path !== null) {
-            effects.unchanged()
-            return { space: current, page: undefined }
-          }
-          const created = yield* services.wiki.createSpacePage({
-            spaceId: current.space_id,
-            title: current.name,
-            home: input.home ?? "areas"
-          })
-          effects.applied()
-          const bound = yield* services.spaces.bindPage(
-            current.space_id,
-            created.pageId,
-            created.path
-          )
-          if (!bound) return yield* Effect.fail(refusal("Space is unavailable"))
-          return { space: bound, page: created }
-        }).pipe(
-          Effect.mapError((cause) => (cause instanceof ToolExecutionError ? cause : failure(cause)))
-        ),
+      const ensured = await Effect.runPromise(
+        services.wiki
+          .ensureSpacePage({ spaceId: input.space_id })
+          .pipe(Effect.mapError((cause) => failure(cause))),
         { signal: ctx.signal }
       )
+      if (!ensured) throw refusal("Space is unavailable")
+      const { space, created: page } = ensured
+      if (page === undefined) effects.unchanged()
+      else effects.applied()
       return {
         result: JSON.stringify(publicSpace(space)),
         preview: `${space.name} Memory ready`,

@@ -117,7 +117,10 @@ const make = Effect.fn("Wiki.make")(function* (
     prepareMaintenance: makeWikiMaintenanceMethods(repository).prepare,
     create: notifyAfter(mutations.create),
     createDirectory: notifyAfter(mutations.createDirectory),
-    createSpacePage: notifyAfter(mutations.createSpacePage),
+    ensureSpacePage: notifyAfter(mutations.ensureSpacePage),
+    ensureSpacePages: notifyAfter(mutations.ensureSpacePages),
+    restoreSpace: (spaceId) =>
+      mutations.restoreSpace(spaceId).pipe(Effect.tap(publishSavedChanges)),
     publishReport: notifyAfter(mutations.publishReport),
     update: notifyAfter(mutations.update),
     archive: notifyAfter(mutations.archive),

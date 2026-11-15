@@ -5,7 +5,7 @@ import type {
   SpaceReviewReads
 } from "../persistence/automations/space-review.js"
 import { renderSpaceReviewPrompt } from "../prompts/space-jobs.js"
-import { wikiPathWithinSpaceBoundary } from "../wiki/authority.js"
+import { spaceOwnsPath } from "../wiki/space-index.js"
 import { pageWikiLinks } from "../wiki/links.js"
 import { memoryHref, readChangeCall } from "../lib/memory-link.js"
 import { pageNameIndex, resolveWikiLinkTarget, type Snapshot } from "../wiki/snapshot.js"
@@ -34,8 +34,7 @@ const spaceReviewInput = (
     (record) =>
       record.page.pageId === options.pageId ||
       options.memorySources.includes(record.page.pageId) ||
-      (options.pagePath !== null &&
-        wikiPathWithinSpaceBoundary(options.pagePath, record.resource.path))
+      (options.pagePath !== null && spaceOwnsPath(options.pagePath, record.resource.path))
   )
   const selected = new Set<string>()
   const provenance = new Map<
@@ -45,8 +44,7 @@ const spaceReviewInput = (
   for (const record of roots) {
     const owned =
       record.page.pageId === options.pageId ||
-      (options.pagePath !== null &&
-        wikiPathWithinSpaceBoundary(options.pagePath, record.resource.path))
+      (options.pagePath !== null && spaceOwnsPath(options.pagePath, record.resource.path))
     provenance.set(record.page.pageId, {
       basis: owned ? "owned" : "source",
       rootPageId: owned ? (options.pageId ?? record.page.pageId) : record.page.pageId

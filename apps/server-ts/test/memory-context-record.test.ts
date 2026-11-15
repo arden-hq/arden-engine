@@ -29,6 +29,7 @@ import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import type { Wiki } from "../src/wiki/service.js"
+import { spacePageIndex } from "../src/wiki/space-index.js"
 import type { CliTools } from "../src/cli-tools/service.js"
 import type { FocusChoiceStore } from "../src/persistence/focus-choices/store.js"
 import type { AnswerBlockStore } from "../src/persistence/answer-blocks/store.js"
@@ -160,6 +161,7 @@ const compose = async ({
         version: spacePage.resource.versionId,
         content: spaceBody
       }),
+    spaceIndex: (space) => (maxBytes) => spacePageIndex(pages, space, maxBytes),
     sources: (input) =>
       Effect.sync(() => {
         if (input.recall !== undefined) searches.push(input.recall.query)
@@ -337,6 +339,58 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "cut",
       reason: "space_page_allowance"
     })
+  })
+
+  it("lists the Space's other pages in the Space block, recorded as the index of its folder", async () => {
+    const beds = page("spaces/garden/beds.md", "Beds", "Raised beds.")
+    const seeds = page("spaces/garden/seeds/list.md", "Seeds", "Seed list.")
+    const composed = await compose({
+      actor: person,
+      spaceId: "space-1",
+      pages: [...PAGES, beds, seeds]
+    })
+    const text = composed.sections.find((section) => section.key === "Current Space")?.text
+    expect(text).toContain("- spaces/garden/beds.md")
+    expect(text).toContain("- spaces/garden/seeds/list.md")
+    const record = composed.writes[0]?.sources ?? []
+    expect(record.find((source) => source.kind === "space")).toMatchObject({ outcome: "whole" })
+    const list = record.find((source) => source.kind === "index" && source.root !== "")
+    expect(list).toMatchObject({
+      root: "spaces/garden",
+      listed: 2,
+      folded: [],
+      outcome: "whole",
+      reason: null
+    })
+    const space = record.find((source) => source.kind === "space")
+    expect((space?.bytes ?? 0) + (list?.bytes ?? 0) + 2).toBe(bytes(text ?? ""))
+  })
+
+  it("folds a long list of the Space's pages in its own allowance, with a notice", async () => {
+    const many = Array.from({ length: 120 }, (_, index) =>
+      page(`spaces/garden/beds/bed-${index}.md`, `Bed ${index}`, "A raised bed in the garden.")
+    )
+    const plain = await compose({ actor: person, spaceId: "space-1" })
+    const composed = await compose({
+      actor: person,
+      spaceId: "space-1",
+      pages: [...PAGES, ...many]
+    })
+    const text = composed.sections.find((section) => section.key === "Current Space")?.text ?? ""
+    expect(text).toContain("spaces/garden/beds/ (folded)")
+    expect(text).toContain("[Folded to fit")
+    const record = composed.writes[0]?.sources ?? []
+    expect(record.find((source) => source.kind === "index" && source.root !== "")).toMatchObject({
+      root: "spaces/garden",
+      listed: 0,
+      folded: [{ folder: "spaces/garden/beds", pages: 120 }],
+      outcome: "cut",
+      reason: "index_allowance"
+    })
+    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePages)
+    expect(record.find((source) => source.kind === "space")).toEqual(
+      plain.writes[0]?.sources.find((source) => source.kind === "space")
+    )
   })
 
   it("never recalls the Space page a second time", async () => {

@@ -9,7 +9,9 @@ import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { lastChangedLines } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import type { PageTimes } from "../wiki/timestamps.js"
+import type { MemoryIndex } from "../wiki/collections.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
+import { spacePageIndex } from "../wiki/space-index.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
@@ -29,6 +31,11 @@ export interface MemoryTurn {
   /** The Memory revision every read in this turn is made at. */
   readonly revision: string | null
   readonly readContent: (pageId: string) => ReturnType<typeof readSnapshotContent>
+  /** The generated list of a Space's pages besides its own, in at most `maxBytes`. */
+  readonly spaceIndex: (space: {
+    readonly pageId: string
+    readonly pagePath: string
+  }) => (maxBytes: number) => MemoryIndex
   /** What this run may be sent from Memory: standing facts, the index and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
@@ -137,6 +144,7 @@ export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
   return {
     revision: current.head,
     readContent: (pageId) => readSnapshotContent(current, pageId),
+    spaceIndex: (space) => (maxBytes) => spacePageIndex(current.pages, space, maxBytes),
     sources: (input) => sources(services, input, current)
   } satisfies MemoryTurn
 })

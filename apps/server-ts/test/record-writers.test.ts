@@ -24,7 +24,7 @@ import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatRedirectPage, formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRenameMethods } from "../src/wiki/rename.js"
-import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store.js"
 import type { WikiRenameStore } from "../src/persistence/wiki/rename-store.js"
 import { partialService } from "./kit.js"
 
@@ -64,9 +64,13 @@ const SEED: ReadonlyArray<readonly [string, string, string?]> = [
   ["topics/seeds.md", "Seeds."]
 ]
 
+const pagelessSpace = (spaceId: string) =>
+  ({ space_id: spaceId, name: spaceId, page_id: null, page_path: null }) as unknown as PersistedSpace
+
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
-  hasPageBinding: () => Effect.succeed(false),
-  ownsWikiPath: () => Effect.succeed(false)
+  activeBindings: () => Effect.succeed([]),
+  get: (spaceId) => Effect.succeed(pagelessSpace(spaceId)),
+  bindPage: (spaceId) => Effect.succeed(pagelessSpace(spaceId))
 })
 
 const withMemory = <A>(
@@ -295,10 +299,10 @@ describe("the record folder checks of Memory's own writes", () => {
           const wiki = mutations(repository)
           return {
             projects: yield* refusal(
-              wiki.createSpacePage({ home: "projects", spaceId: "space-1", title: "Kitchen" })
+              wiki.ensureSpacePage({ home: "projects", spaceId: "space-1" })
             ),
             areas: yield* refusal(
-              wiki.createSpacePage({ home: "areas", spaceId: "space-2", title: "Garden" })
+              wiki.ensureSpacePage({ home: "areas", spaceId: "space-2" })
             )
           }
         }),

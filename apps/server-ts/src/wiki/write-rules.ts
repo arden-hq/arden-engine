@@ -13,6 +13,7 @@ import type { WikiCommitIdentity } from "./commit.js"
 import { wikiError, type WikiError } from "./errors.js"
 import { isReadme, normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
+import { isSpacePage } from "./space-index.js"
 
 export interface WikiWriter {
   readonly pageId: string
@@ -50,16 +51,14 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
   yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
   if (input.commit.origin.kind === "capture") {
-    const spaceBound = yield* spaces
-      .hasPageBinding(current.page.pageId, current.resource.path)
-      .pipe(
-        Effect.mapError((cause) =>
-          wikiError("restore", "storage", "Could not check Memory page ownership", {
-            pageId: input.pageId,
-            cause
-          })
-        )
+    const spaceBound = yield* isSpacePage(spaces, current.page.pageId, current.resource.path).pipe(
+      Effect.mapError((cause) =>
+        wikiError("restore", "storage", "Could not check Memory page ownership", {
+          pageId: input.pageId,
+          cause
+        })
       )
+    )
     if (spaceBound) {
       return yield* wikiError(
         "restore",
@@ -111,7 +110,7 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
   yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-  const pageIsSpaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
+  const pageIsSpaceBound = yield* isSpacePage(spaces, input.pageId, current.resource.path).pipe(
     Effect.mapError((cause) =>
       wikiError(operation, "storage", "Could not check Space page ownership", {
         pageId: input.pageId,
@@ -209,16 +208,18 @@ export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
   if (directoryPage === undefined) {
     return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
   }
-  const directoryIsSpaceBound = yield* spaces
-    .hasPageBinding(directoryPage.page.pageId, directoryPage.resource.path)
-    .pipe(
-      Effect.mapError((cause) =>
-        wikiError("create", "storage", "Could not check Memory directory ownership", {
-          pageId: directoryPage.page.pageId,
-          cause
-        })
-      )
+  const directoryIsSpaceBound = yield* isSpacePage(
+    spaces,
+    directoryPage.page.pageId,
+    directoryPage.resource.path
+  ).pipe(
+    Effect.mapError((cause) =>
+      wikiError("create", "storage", "Could not check Memory directory ownership", {
+        pageId: directoryPage.page.pageId,
+        cause
+      })
     )
+  )
   if (
     directoryIsSpaceBound &&
     !authorityOwnsBoundaryPage(boundary, directoryPage.page.pageId, directoryPage.resource.path)

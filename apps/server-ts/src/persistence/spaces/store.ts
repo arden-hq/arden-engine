@@ -13,6 +13,19 @@ import { Context, Effect, Schema } from "effect"
 
 export type PersistedSpace = Space & { readonly page_id: string | null }
 
+/** Which page a Space is bound to. Only an active Space's binding owns pages. */
+export interface SpaceBinding {
+  readonly space_id: string
+  readonly page_id: string | null
+  readonly page_path: string | null
+}
+
+/** A page a Space is to be bound to. */
+export interface SpacePageBinding {
+  readonly pageId: string
+  readonly pagePath: string
+}
+
 export const spaceChoices = (
   spaces: ReadonlyArray<{ readonly space_id: string; readonly name: string }>
 ): string =>
@@ -72,17 +85,30 @@ export class SpaceStore extends Context.Service<
       spaceId: string,
       instructions: string
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
+    /**
+     * Binds an active Space to a page in place of any page it had, and an archived Space holding
+     * that page lets it go. It readies the Space's review but wakes none. Only
+     * `wiki/space-page.ts` calls it, after checking that no other active Space holds or overlaps
+     * the page.
+     */
     readonly bindPage: (
       spaceId: string,
       pageId: string,
       pagePath: string
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
-    readonly detachPage: (spaceId: string) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly archive: (
       spaceId: string,
       mutation?: MutationOperationIdentity
     ) => Effect.Effect<SpaceArchiveResponse | null, SpaceStoreError>
-    readonly restore: (spaceId: string) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
+    /**
+     * Restores an archived Space bound to `page`, or to no page, in one write, and an archived
+     * Space holding that page lets it go. Only `wiki/space-page.ts` calls it, after checking that
+     * no other active Space holds or overlaps the page.
+     */
+    readonly restore: (
+      spaceId: string,
+      page: SpacePageBinding | null
+    ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly detail: (spaceId: string) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
     readonly recordLetterSubject: (
       sessionId: string,
@@ -101,10 +127,7 @@ export class SpaceStore extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<string>, SpaceStoreError>
     readonly overview: () => Effect.Effect<SpacesOverview, SpaceStoreError>
     readonly setPinned: (spaceIds: ReadonlyArray<string>) => Effect.Effect<void, SpaceStoreError>
-    readonly hasPageBinding: (
-      pageId: string,
-      path: string
-    ) => Effect.Effect<boolean, SpaceStoreError>
-    readonly ownsWikiPath: (path: string) => Effect.Effect<boolean, SpaceStoreError>
+    /** The bindings of the active Spaces that have one, whole or half-made. */
+    readonly activeBindings: () => Effect.Effect<ReadonlyArray<SpaceBinding>, SpaceStoreError>
   }
 >()("@arden-hq/server/persistence/spaces/SpaceStore") {}

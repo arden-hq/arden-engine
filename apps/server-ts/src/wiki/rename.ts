@@ -34,6 +34,7 @@ import {
   reviseWikiPage
 } from "./page.js"
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
+import { isSpacePage } from "./space-index.js"
 
 /**
  * Who renames when the owner accepts in the app. A request is checked against the rules that bind
@@ -448,7 +449,7 @@ export const makeWikiRenameMethods = (
         )
       }
     }
-    const spaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
+    const spaceBound = yield* isSpacePage(spaces, input.pageId, current.resource.path).pipe(
       Effect.mapError((cause) =>
         wikiError("rename", "storage", "Could not check Space page ownership", {
           pageId: input.pageId,
@@ -506,7 +507,7 @@ export const makeWikiRenameMethods = (
       const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
       const paths = yield* planMutationPaths(plan, snapshot.pages)
       yield* requireWikiWritePaths(boundary, "rename", paths)
-      const spaceBound = yield* spaces.hasPageBinding(plan.pageId, plan.oldPath).pipe(
+      const spaceBound = yield* isSpacePage(spaces, plan.pageId, plan.oldPath).pipe(
         Effect.mapError((cause) =>
           wikiError("rename", "storage", "Could not check Space page ownership", {
             pageId: plan.pageId,

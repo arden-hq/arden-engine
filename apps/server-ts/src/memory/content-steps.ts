@@ -79,7 +79,7 @@ const chatCitationLinks = (
 })
 
 export const startMemoryContentSteps = Effect.fn("Memory.startContentSteps")(function* (input: {
-  readonly wiki: Pick<Wiki["Service"], "applyContentStep">
+  readonly wiki: Pick<Wiki["Service"], "applyContentStep" | "ensureSpacePages">
   readonly sessions: Sessions
   readonly transcript: Transcript
 }) {
@@ -88,6 +88,18 @@ export const startMemoryContentSteps = Effect.fn("Memory.startContentSteps")(fun
     runMemoryContentSteps(input).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Memory content steps wait for the next start", cause)
+      ),
+      Effect.andThen(
+        input.wiki.ensureSpacePages().pipe(
+          Effect.tap((counts) =>
+            counts.made + counts.rebound + counts.failed === 0
+              ? Effect.void
+              : Effect.logInfo("Space Memory pages checked", counts)
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Space Memory pages wait for the next start", cause)
+          )
+        )
       )
     )
   )
