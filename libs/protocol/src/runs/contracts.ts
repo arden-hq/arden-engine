@@ -61,16 +61,15 @@ export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
 /**
  * The allowance that cut or dropped a Memory source. Each source has its own allowance in the
  * run's Memory block and takes none from another:
- * - `standing_page_allowance`: a standing-facts page's, the size its writers keep it to.
+ * - `standing_page_allowance`: a standing-facts page's: the size its writers keep it to, and a
+ *   size in bytes.
  * - `index_allowance`: the index's.
- * - `space_allowance`: the Space context's.
  * - `space_page_allowance`: the Space context's share for its Memory page.
  * - `recall_allowance`: the recalled pages'.
  */
 export type RunMemoryCutReason =
   | "standing_page_allowance"
   | "index_allowance"
-  | "space_allowance"
   | "space_page_allowance"
   | "recall_allowance"
 

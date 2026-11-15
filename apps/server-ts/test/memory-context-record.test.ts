@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest"
 
 import type { ChatRunnerMessage } from "../src/chat/runner-contract.js"
 import { makeContextExperiments } from "../src/context/experiments.js"
+import { MEMORY_BLOCK_MAX_BYTES, MEMORY_BUDGET } from "../src/context/memory-context.js"
 import type { RuntimeSection } from "../src/context/runtime-update.js"
 import {
   composeTurnContext,
@@ -480,6 +481,54 @@ describe("each source in its own allowance", () => {
     )
   })
 
+  it("sends a Space context whose instructions pass their share, cut with a notice", async () => {
+    const composed = await compose({
+      actor: person,
+      spaceId: "space-1",
+      instructions: "果林の記録を毎日更新する。".repeat(400)
+    })
+    const space = composed.sections.find((section) => section.key === "Current Space")?.text ?? ""
+    expect(space).toContain("Space instructions:")
+    expect(space).toContain("[Cut to fit: the rest of the Space instructions is left out.]")
+    expect(bytes(space)).toBeLessThanOrEqual(MEMORY_BUDGET.space)
+    expect(composed.writes[0]?.sources.find((source) => source.kind === "space")).toEqual(
+      expect.objectContaining({ bytes: bytes(space), outcome: "whole", reason: null })
+    )
+  })
+
+  const threeByteAtLimit = (path: string) =>
+    page(path, path, `${"果".repeat(99)}\n`.repeat(90).trim())
+
+  it("sends a standing-facts page at its writer limit whole, even in three-byte text", async () => {
+    const wide = threeByteAtLimit("me.md")
+    expect(wide.page.body.trim().length).toBe(8_999)
+    const composed = await compose({ actor: person, pages: [wide, ...many("notes", 3, 9_000)] })
+    const coreSource = composed.writes[0]?.sources.find((source) => source.kind === "core")
+    expect(coreSource).toEqual(expect.objectContaining({ outcome: "whole", reason: null }))
+    expect(coreSource?.bytes).toBeGreaterThan(26_000)
+    expect(coreSource?.bytes).toBeLessThanOrEqual(MEMORY_BUDGET.standingPage)
+  })
+
+  it("keeps the whole block within the sum of its allowances", async () => {
+    const composed = await compose({
+      actor: person,
+      spaceId: "space-1",
+      instructions: "果林".repeat(3_000),
+      pages: [
+        threeByteAtLimit("me.md"),
+        threeByteAtLimit("profile.md"),
+        ...many("daily", 300, 9_000)
+      ]
+    })
+    const total = composed.sections
+      .filter((section) =>
+        ["Core Memory", "Memory index", "Current Space", "Memory context"].includes(section.key)
+      )
+      .reduce((sum, section) => sum + bytes(section.text), 0)
+    expect(total).toBeGreaterThan(2 * 26_000)
+    expect(total).toBeLessThanOrEqual(MEMORY_BLOCK_MAX_BYTES)
+  })
+
   it("cuts a standing-facts page past its writer limit at a boundary, with a notice", async () => {
     const pasted = page("me.md", "Me", "Prefers short replies.\n\n".repeat(1_700))
     const notes = many("notes", 3, 9_000)
@@ -769,15 +818,6 @@ describe("the stored record", () => {
             bytes: 0,
             outcome: "dropped",
             reason: "index_allowance"
-          },
-          {
-            kind: "space",
-            space_id: "s",
-            page_id: null,
-            version: null,
-            bytes: 0,
-            outcome: "dropped",
-            reason: "space_allowance"
           },
           {
             kind: "recalled",

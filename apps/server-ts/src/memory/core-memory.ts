@@ -2,7 +2,7 @@
  * Standing facts: the owner's profile and standing preferences, at the root of Memory and sent
  * to every run that reads it. The one place that names their pages.
  */
-const STANDING_FACTS_PAGES = ["me.md", "profile.md"] as const
+export const STANDING_FACTS_PAGES = ["me.md", "profile.md"] as const
 
 /** What the Memory tools say about the standing-facts pages' limit. */
 export const STANDING_LIMIT_NOTE = `${STANDING_FACTS_PAGES.join(" and ")} are root profile pages with a size limit; a write that grows one past it is refused.`
@@ -16,10 +16,7 @@ export const isStandingFactsPage = (page: {
   return STANDING_FACTS_PAGES.some((name) => path === name || `${pageId}.md` === name)
 }
 
-/**
- * The size writers keep each standing-facts page to, and the size each is sent whole up to:
- * the Memory block's allowance for one such page (context/memory-context.ts).
- */
+/** The size writers keep each standing-facts page to, and the size each is sent whole up to. */
 const STANDING_PAGE_LIMIT_CHARS = 9_000
 
 /**

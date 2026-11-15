@@ -61,7 +61,6 @@ const RunMemoryOutcomeSchema = Schema.Literals(["whole", "passage", "cut", "drop
 const RunMemoryCutReasonSchema = Schema.Literals([
   "standing_page_allowance",
   "index_allowance",
-  "space_allowance",
   "space_page_allowance",
   "recall_allowance"
 ] as const)

@@ -37,12 +37,12 @@ const prefetch = (memory: MemoryTurn | undefined, reader: RunMemoryReader = "own
 }
 
 const SOURCES: MemorySources = {
-  standing: {
+  standing: () => ({
     text: "## Core Memory\n\n### Me\nPage: me.md\nPrefers short replies.",
     sources: [
       { kind: "core", page_id: "me", version: "v1", bytes: 20, outcome: "whole", reason: null }
     ]
-  },
+  }),
   index: () => ({
     text: "## Memory index\n\n- projects/garden.md: The garden.",
     sources: [

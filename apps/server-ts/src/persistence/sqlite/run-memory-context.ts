@@ -13,9 +13,9 @@ const decodeRecord = Schema.decodeUnknownEffect(Schema.Array(RunMemoryContextSch
 
 // Records written before each Memory source had its own allowance (by the memory test and
 // unreleased builds only) hold retired values: `collection` sources, retired cut reasons and
-// no `reader`. They are read as the record says now: collection lines left out, each retired
-// reason as the allowance of its source's kind, and `owner`, since only owner chats were
-// recorded before `reader`.
+// no `reader`. They are read as the record says now: collection lines and Space contexts with a
+// retired reason left out, each other retired reason as the allowance of its source's kind, and
+// `owner`, since only owner chats were recorded before `reader`.
 const RETIRED_REASONS: ReadonlySet<unknown> = new Set([
   "block_budget",
   "core_page_budget",
@@ -24,12 +24,13 @@ const RETIRED_REASONS: ReadonlySet<unknown> = new Set([
 const ALLOWANCE_OF: Readonly<Record<string, string>> = {
   core: "standing_page_allowance",
   index: "index_allowance",
-  space: "space_allowance",
   recalled: "recall_allowance"
 }
 const currentSource = (source: unknown): ReadonlyArray<unknown> => {
   if (typeof source !== "object" || source === null) return [source]
   if ("kind" in source && source.kind === "collection") return []
+  if ("kind" in source && source.kind === "space" && "reason" in source && RETIRED_REASONS.has(source.reason))
+    return []
   if ("reason" in source && RETIRED_REASONS.has(source.reason) && "kind" in source)
     return [{ ...source, reason: ALLOWANCE_OF[String(source.kind)] ?? source.reason }]
   return [source]

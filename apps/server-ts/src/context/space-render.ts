@@ -2,7 +2,7 @@ import { isTaskUnfinished, taskActivityWords, type SpaceTask } from "@arden-hq/p
 import { Schema } from "effect"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
-import { clipLine, cutText } from "@arden-hq/std/text"
+import { clipLine, cutBytes, cutText } from "@arden-hq/std/text"
 
 export interface SpaceView {
   readonly space_id: string
@@ -54,12 +54,26 @@ const MORE_LINE_BYTES = 120
 const encoder = new TextEncoder()
 const byteLength = (value: string): number => encoder.encode(value).byteLength
 
-/** The Space context in at most `maxBytes`, the room the Memory block gives it. */
+const INSTRUCTIONS_CUT = "\n[Cut to fit: the rest of the Space instructions is left out.]"
+
+/**
+ * The Space context in at most `maxBytes`, the room the Memory block gives it, with at most
+ * `instructionsBytes` for its instructions and `pageBytes` for its Memory page. The instructions
+ * are cut to the room the rest of the head leaves, so the context is never left out whole.
+ */
 export const renderSpaceContext = (
   view: SpaceView,
-  { maxBytes }: { readonly maxBytes: number }
+  {
+    maxBytes,
+    instructionsBytes,
+    pageBytes
+  }: {
+    readonly maxBytes: number
+    readonly instructionsBytes: number
+    readonly pageBytes: number
+  }
 ): { readonly text: string; readonly page: SpacePageShown | undefined } => {
-  const head = [
+  const intro = [
     "## Current Space",
     "",
     `Space "${view.name}" (space_id ${view.space_id}). ${
@@ -69,12 +83,24 @@ export const renderSpaceContext = (
     }`,
     ...(view.isConversation || view.conversation === undefined
       ? []
-      : [`The Space's own conversation: ${chatLine(view.conversation).slice(2)}`]),
-    ...(view.instructions === undefined
-      ? []
-      : ["", "Space instructions:", cutText(view.instructions, 4_000)])
+      : [`The Space's own conversation: ${chatLine(view.conversation).slice(2)}`])
   ].join("\n")
   const navigation = PROMPT_TEXT.spaceNavigation
+  const instructionsTitle = "\n\nSpace instructions:\n"
+  const head =
+    view.instructions === undefined
+      ? intro
+      : `${intro}${instructionsTitle}${cutBytes(
+          view.instructions,
+          Math.max(
+            0,
+            Math.min(
+              instructionsBytes,
+              maxBytes - byteLength(intro) - byteLength(instructionsTitle) - byteLength(navigation) - 4
+            )
+          ),
+          { suffix: INSTRUCTIONS_CUT }
+        )}`
   let remaining = maxBytes - byteLength(head) - byteLength(navigation) - 4
   const blocks: Array<string> = []
   const place = (block: string | undefined): void => {
@@ -116,7 +142,7 @@ export const renderSpaceContext = (
   const page =
     view.page === undefined
       ? undefined
-      : pageBlock(view.page, Math.min(remaining, SPACE_PAGE_MAX_BYTES))
+      : pageBlock(view.page, Math.min(remaining, pageBytes))
   place(page?.text)
   return {
     text: [head, ...blocks, navigation].join("\n\n"),

@@ -12,14 +12,16 @@ const view = (page: SpaceView["page"]): SpaceView => ({
   tasks: []
 })
 
+const shares = { maxBytes: 10_000, instructionsBytes: 4_000, pageBytes: 4_000 }
+
 it("says how much of the Space memory page a chat is sent: whole, in part, or none", () => {
   const short = { path: "projects/garden.md", content: "Seeds ordered." }
   const long = { path: "projects/garden.md", content: "A line about the garden.\n".repeat(400) }
-  expect(renderSpaceContext(view(short), { maxBytes: 10_000 }).page).toBe("whole")
-  const partial = renderSpaceContext(view(long), { maxBytes: 10_000 })
+  expect(renderSpaceContext(view(short), shares).page).toBe("whole")
+  const partial = renderSpaceContext(view(long), shares)
   expect(partial.page).toBe("cut")
   expect(partial.text).toContain("The page continues")
-  expect(renderSpaceContext(view(undefined), { maxBytes: 10_000 }).page).toBe(undefined)
+  expect(renderSpaceContext(view(undefined), shares).page).toBe(undefined)
   // No room left for the page at all.
-  expect(renderSpaceContext(view(short), { maxBytes: 200 }).page).toBe("dropped")
+  expect(renderSpaceContext(view(short), { ...shares, maxBytes: 200 }).page).toBe("dropped")
 })
