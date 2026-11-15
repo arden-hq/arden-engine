@@ -4,15 +4,13 @@ import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { wikiChangedEvent } from "../src/automations/producers/wiki.js"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
-import { AutomationId } from "../src/persistence/automations/model.js"
-import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
-import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { spaceJobId } from "../src/persistence/space-job-id.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
+import { startChat, startJobs } from "./fixtures/job-runs.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 const REVISION = "a".repeat(64)
@@ -109,103 +107,6 @@ it("nothing on the wiki change path or in event dispatch can reach a Space revie
   expect(read("persistence/sqlite/automation-event-dispatch.ts")).not.toMatch(/space_review/)
 })
 
-const message = (id: string, isMeta: boolean) => ({
-  message_id: id,
-  client_id: id,
-  role: "user" as const,
-  content: "Made-up words",
-  created_at: new Date().toISOString(),
-  ...(isMeta ? { is_meta: true } : {})
-})
-
-/** Starts a chat run through admission, as the app or the runtime does. */
-const startChat = (
-  sessionId: string,
-  id: string,
-  options: {
-    readonly isMeta?: boolean
-    readonly continuesTask?: string
-    readonly automation?: {
-      readonly automationId: string
-      readonly attemptId: number
-      readonly lease: { readonly id: number; readonly token: string }
-    }
-  } = {}
-) =>
-  Effect.gen(function* () {
-    const chat = yield* ChatWriteStore
-    const started = yield* chat.start({
-      sessionId,
-      clientId: id,
-      requestHash: `${id}-hash`,
-      assistantMessageId: `${id}-answer`,
-      message: {
-        ...message(id, options.isMeta ?? false),
-        ...(options.automation === undefined
-          ? {}
-          : {
-              content: "Made-up prompt",
-              automation: {
-                task_id: options.automation.automationId,
-                name: "Made-up job",
-                prompt: "Made-up prompt",
-                context_mode: "fresh" as const
-              }
-            })
-      },
-      ...(options.continuesTask === undefined
-        ? {}
-        : { continuesTask: { itemId: options.continuesTask } }),
-      ...(options.automation === undefined
-        ? {}
-        : {
-            automation: {
-              automationId: AutomationId.make(options.automation.automationId),
-              attemptId: options.automation.attemptId,
-              name: "Made-up job"
-            },
-            automationLease: options.automation.lease,
-            automationPrompt: "Made-up prompt",
-            automationContextMode: "fresh" as const
-          })
-    })
-    return started.runId
-  })
-
-/** Claims every waiting job wake, then starts the named jobs' runs, as the runtime does. */
-const startJobs = (ids: Readonly<Record<string, string>>) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const queue = yield* AutomationQueue
-    const leases = yield* Effect.promise(async () =>
-      queue.jobs.claim({
-        workerId: "wakes",
-        now: Date.now() + 60 * 60_000,
-        limit: 10,
-        leaseDurationMs: 60_000
-      })
-    )
-    const runs = new Map<string, string>()
-    for (const [automationId, id] of Object.entries(ids)) {
-      const lease = leases.find((entry) => entry.payload.automationId === automationId)
-      if (lease === undefined) throw new Error(`${automationId} was not claimed`)
-      const [job] = yield* sql<{ readonly thread_id: string }>`
-        SELECT thread_id FROM scheduled_tasks WHERE task_id = ${automationId}`
-      if (job === undefined) throw new Error(`${automationId} has no chat`)
-      runs.set(
-        automationId,
-        yield* startChat(job.thread_id, id, {
-          automation: {
-            automationId,
-            attemptId: lease.payload.automationRunId,
-            lease: { id: lease.id, token: lease.token }
-          }
-        })
-      )
-    }
-    return runs
-  })
-
 const updatedAt = (sql: SqlClient.SqlClient, itemId: string) =>
   sql<{
     readonly updated_at: string
@@ -238,12 +139,12 @@ it("only a Task change made by hand wakes the Space review; no run's change does
       })
       const reviewRun = jobs.get(spaceJobId("space-1"))
       const workerRun = jobs.get(`task:${background.item_id}`)
-      const ownerRun = yield* startChat(yield* chat(), "owner-turn")
-      const stepRun = yield* startChat(taskChat, "task-step", {
+      const ownerRun = (yield* startChat(yield* chat(), "owner-turn")).runId
+      const stepRun = (yield* startChat(taskChat, "task-step", {
         isMeta: true,
-        continuesTask: inChat.item_id
-      })
-      const resultRun = yield* startChat(yield* chat(), "result", { isMeta: true })
+        continuesTask: { itemId: inChat.item_id, chainDepth: 0 }
+      })).runId
+      const resultRun = (yield* startChat(yield* chat(), "result", { isMeta: true })).runId
       yield* clearQueue(sql)
       const edit = (itemId: string, text: string, runId?: string, actor?: "user") =>
         Effect.gen(function* () {

@@ -47,10 +47,12 @@ import type { HelperJobs } from "./helper-jobs.js"
 import { makeRunPurposeObserver, type RunPurposeObserver } from "./run-purpose-observer.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 
-export type TaskContinuationInput = {
-  readonly approvalMode?: ChatApprovalMode
-  readonly sourceId: string
-} & ({ readonly sessionId: string } | { readonly itemId: string })
+/** The next in-chat Task step: after a run in the chat ends, or for one Task, handed on by a wake
+ *  at `chainDepth` (0 when the owner or a restart hands it on). */
+export type TaskContinuationInput = { readonly approvalMode?: ChatApprovalMode } & (
+  | { readonly sessionId: string; readonly afterRunId: string }
+  | { readonly itemId: string; readonly sourceId: string; readonly chainDepth: number }
+)
 
 export interface RunHost extends ToolHost {
   readonly scheduleRunPurpose: HelperJobs["scheduleRunPurpose"]
@@ -482,7 +484,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
     if (input.automation === null) {
       yield* host.continueTask({
         sessionId: input.sessionId,
-        sourceId: input.runId,
+        afterRunId: input.runId,
         approvalMode: input.approvalMode
       })
     }

@@ -9,8 +9,20 @@ import { WikiChangeSink, WikiChangeSinkError } from "../wiki/publication.js"
 import { wikiChangedEvent } from "./producers/wiki.js"
 import { MEMORY_CAPTURE_AUTOMATION_ID } from "./handlers/memory-capture.js"
 
-const producerWakeDepth = (origin: WikiCommitOrigin): number =>
-  origin.kind === "automation" || origin.kind === "upkeep" ? (origin.chainDepth ?? 0) : 0
+const producerWakeDepth = (origin: WikiCommitOrigin): number => {
+  switch (origin.kind) {
+    case "automation":
+    case "upkeep":
+    case "agent":
+      return origin.chainDepth ?? 0
+    case "capture":
+    case "user":
+    case "forget":
+    case "space_page":
+    case "system":
+      return 0
+  }
+}
 
 const automationOfOrigin = (origin: WikiCommitOrigin): string | null => {
   switch (origin.kind) {

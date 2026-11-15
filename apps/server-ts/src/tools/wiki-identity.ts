@@ -164,7 +164,7 @@ const admittedIdentity = async (
     throw identityUnavailable("This Run's Automation is no longer recorded.")
   return {
     actor: "Agent",
-    origin: { kind: "agent", sessionId: input.sessionId },
+    origin: { kind: "agent", sessionId: input.sessionId, chainDepth: cause.wakeDepth },
     capture: false,
     captureBatch: null
   }

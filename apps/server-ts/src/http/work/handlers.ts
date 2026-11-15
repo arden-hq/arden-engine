@@ -108,7 +108,11 @@ export const WorkHandlers = HttpApiBuilder.group(
       .handle("createChatTask", ({ params, payload }) =>
         store.createInChat(params.sessionId, payload).pipe(
           Effect.tap((task) =>
-            chat.continueTask({ itemId: task.item_id, sourceId: `start:${task.updated_at}` })
+            chat.continueTask({
+              itemId: task.item_id,
+              sourceId: `start:${task.updated_at}`,
+              chainDepth: 0
+            })
           ),
           Effect.catch(failStore)
         )

@@ -28,7 +28,7 @@ import { renameOwnedJob } from "./job-labels.js"
 import { WorkStore, WorkStoreError, type TaskAddress } from "../work/store.js"
 import { spaceChoices } from "../spaces/store.js"
 import { REVIEWED_TASK_FIELDS } from "../automations/space-review.js"
-import { makeSpaceJobSql } from "./space-jobs.js"
+import { makeSpaceJobSql, taskWaker } from "./space-jobs.js"
 import {
   decodeWorkItem as decodeWorkItemWithSources,
   workItemColumns,
@@ -478,6 +478,7 @@ export const makeWorkStore = ({
             yield* spaceJobs.queueTaskWake(
               updatedRow.item_id,
               updatedAt,
+              taskWaker(runId),
               !ownAttempt && !rescheduled
             )
           }

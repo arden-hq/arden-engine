@@ -6,10 +6,13 @@ import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import {
   causedChainDepth,
   chainMayWake,
+  originChainDepth,
   wakeChainDepth
 } from "../src/persistence/automations/chain-depth.js"
 import type { AutomationTriggerEvent } from "../src/persistence/automations/model.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
+import { scheduledRunOrigin } from "../src/persistence/sqlite/run-context.js"
+import { decodeWikiOrigin } from "../src/wiki/commit.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 const AT = "2026-10-12T09:00:00.000Z"
@@ -37,6 +40,42 @@ describe("chain depth", () => {
   it("an event the user or a source caused starts at depth 0 and may wake", () => {
     expect(causedChainDepth(null, 0)).toBe(0)
     expect(chainMayWake(0)).toBe(true)
+  })
+
+  it("a run that is no Automation's passes on the depth it was woken at, adding none", () => {
+    expect(causedChainDepth(null, 2)).toBe(2)
+    expect(causedChainDepth("a", 2)).toBe(3)
+  })
+
+  it("every job's run records the depth of the wake it answers in its origin", () => {
+    const origin = (job: Parameters<typeof scheduledRunOrigin>[0]["job"], chainDepth: number) =>
+      scheduledRunOrigin({ job, automationId: "job-1", occurrenceId: "queue:1@t", chainDepth })
+    const jobs = [
+      { purpose: "user_automation", owner_space_id: null, owner_task_id: null },
+      { purpose: "system", owner_space_id: null, owner_task_id: null },
+      { purpose: "task_execution", owner_space_id: "space-1", owner_task_id: "task-1" },
+      { purpose: "space_review", owner_space_id: "space-1", owner_task_id: null }
+    ] as const
+    expect(
+      jobs.map((job) => [
+        originChainDepth(origin(job, 2)),
+        Object.hasOwn(origin(job, 0), "chain_depth")
+      ])
+    ).toEqual(jobs.map(() => [2, false]))
+  })
+
+  it("a Memory write by a chat run keeps the depth it was woken at", () => {
+    expect(decodeWikiOrigin("wiki.agent@chat-1~2")).toEqual({
+      kind: "agent",
+      sessionId: "chat-1",
+      chainDepth: 2
+    })
+    expect(decodeWikiOrigin("wiki.agent@chat-1")).toEqual({ kind: "agent", sessionId: "chat-1" })
+    expect(decodeWikiOrigin("wiki.automation.a~1")).toEqual({
+      kind: "automation",
+      automationId: "a",
+      chainDepth: 1
+    })
   })
 
   it("A's run may wake B once", () => {

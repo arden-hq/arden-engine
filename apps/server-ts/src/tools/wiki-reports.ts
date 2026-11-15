@@ -75,6 +75,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
           retryable: false
         })
       }
+      const cause = await readRunCause(services.runs, { ...ctx.run, signal: ctx.signal })
       const automation = await resolveAutomation(
         services.automations,
         input.automation_ref,
@@ -91,7 +92,11 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
               authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
               commit: {
                 actor: "Agent",
-                origin: { kind: "agent", sessionId: ctx.run.sessionId },
+                origin: {
+                  kind: "agent",
+                  sessionId: ctx.run.sessionId,
+                  chainDepth: cause.wakeDepth
+                },
                 reason: `Configure reports for ${automation.name}`
               }
             })

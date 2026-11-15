@@ -43,7 +43,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly announce?: true
   readonly fromChat?: ChatHandoffSource
   readonly forwardedFrom?: HistoryMessage["forwarded_from"]
-  readonly continuesTask?: { readonly itemId: string }
+  readonly continuesTask?: { readonly itemId: string; readonly chainDepth: number }
   readonly capture?: ChatCaptureInput["via"]
   readonly fromQueue?: true
 }
@@ -69,6 +69,7 @@ export const taskContinuation = (input: {
   readonly sessionId: string
   readonly sourceId: string
   readonly itemId: string
+  readonly chainDepth: number
   readonly text: string
   readonly approvalMode?: ChatApprovalMode | undefined
 }): ChatSendInput => {
@@ -95,7 +96,7 @@ export const taskContinuation = (input: {
       causedBy: { type: "message", id: input.sourceId }
     },
     isMeta: true,
-    continuesTask: { itemId: input.itemId }
+    continuesTask: { itemId: input.itemId, chainDepth: input.chainDepth }
   }
 }
 

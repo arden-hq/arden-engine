@@ -537,7 +537,10 @@ export const makeChatAdmission = ({
         else if (delivery?.kind === "answer") runContext = delivery.context
         else if (valid.continuesTask !== undefined)
           runContext = {
-            origin: chatOrigin,
+            origin:
+              valid.continuesTask.chainDepth === 0
+                ? chatOrigin
+                : { ...chatOrigin, chain_depth: valid.continuesTask.chainDepth },
             task: yield* bindInChatTask(sql, {
               itemId: valid.continuesTask.itemId,
               sessionId: valid.sessionId

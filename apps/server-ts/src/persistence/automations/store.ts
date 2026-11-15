@@ -28,6 +28,8 @@ interface AutomationJobPayloadFields<Prompt> {
   readonly model: string | null
   readonly chatKind: "own" | "yours"
   readonly contextMode: AutomationContextMode
+  /** The depth of the wake this job answers, as its run's origin records it. */
+  readonly chainDepth: number
   readonly chatRun: {
     readonly runId: string
     readonly sessionId: string

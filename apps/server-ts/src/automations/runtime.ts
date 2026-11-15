@@ -197,10 +197,18 @@ export class AutomationRuntime extends Context.Service<
         if (!(yield* work.runsInChat(itemId))) {
           const settlement = yield* executeChat(job)
           if (yield* work.runsInChat(itemId))
-            yield* chat.continueTask({ itemId, sourceId: `handoff:${job.payload.automationRunId}` })
+            yield* chat.continueTask({
+              itemId,
+              sourceId: `handoff:${job.payload.automationRunId}`,
+              chainDepth: job.payload.chainDepth
+            })
           return settlement
         }
-        yield* chat.continueTask({ itemId, sourceId: `wake:${job.payload.automationRunId}` })
+        yield* chat.continueTask({
+          itemId,
+          sourceId: `wake:${job.payload.automationRunId}`,
+          chainDepth: job.payload.chainDepth
+        })
         return jobResult.withoutRun("no_change", "Arden works on it in its chat.")
       })
       const run = (job: AutomationJobLease) => {

@@ -95,7 +95,7 @@ it("denies one exact visible approval and admits its reason once", async () => {
         { key: "reply-task", text: "Protect the original files", runs_in: "chat" }
       )
       const run = yield* chat.start({
-        continuesTask: { itemId: task.item_id },
+        continuesTask: { itemId: task.item_id, chainDepth: 0 },
         sessionId: session.sessionId,
         clientId: "start",
         requestHash: "start",

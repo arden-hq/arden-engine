@@ -15,7 +15,7 @@ import {
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { WorkStore, WorkStoreError, type CreateTaskInput, type TaskScope } from "../work/store.js"
-import { makeSpaceJobSql } from "./space-jobs.js"
+import { makeSpaceJobSql, taskWaker } from "./space-jobs.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import {
   decodeWorkItem as decodeWithSources,
@@ -214,7 +214,7 @@ export const makeWorkCaptureSql = (options: {
         yield* ensureTaskBudget(sql, row.item_id, row.token_budget)
       yield* taskEvent(row.space_id, row.item_id, "created", row.text, now, runId)
 
-      yield* spaceJobs.queueTaskWake(row.item_id, now)
+      yield* spaceJobs.queueTaskWake(row.item_id, now, taskWaker(runId))
       if (runId === undefined && actor === "user")
         yield* spaceJobs.queueTaskChangedByHand(row.item_id, now)
 
