@@ -230,7 +230,9 @@ const compose = async ({
     permissions: partialService<ToolApprovalPolicy>("ToolApprovalPolicy", {
       live: () => Effect.fail("no permission rules in this test" as never)
     }),
-    rules: partialService<PermissionRules["Service"]>("PermissionRules", {}),
+    rules: partialService<PermissionRules["Service"]>("PermissionRules", {
+      inLists: () => Effect.die("no permission rules in this test")
+    }),
     dataDir: "/nonexistent-data-dir"
   }
   const origin: SessionOrigin = {
