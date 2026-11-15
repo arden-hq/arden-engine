@@ -53,7 +53,7 @@ export const renderIndex = (
       : {
           ...spacePageList(pages, list.space),
           note: SPACE_LIST_NOTE,
-          frame: (body: string) => body
+          frame: (body: string) => renderPromptSection("Space pages", body)
         }
   const body = (lines: string, notices: ReadonlyArray<string>) =>
     [shape.note, ...(lines === "" ? [] : [lines]), ...notices].join(SEPARATOR)

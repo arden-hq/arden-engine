@@ -4,7 +4,6 @@ import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { clipLine, cutBytes, cutText } from "@arden-hq/std/text"
 import { chatHref } from "../sessions/chat-href.js"
-import type { RenderedIndex } from "../memory/index-render.js"
 
 export interface SpaceView {
   readonly space_id: string
@@ -13,14 +12,7 @@ export interface SpaceView {
   readonly isConversation: boolean
   readonly conversation?: SpaceChatView | undefined
   readonly chats: ReadonlyArray<SpaceChatView>
-  readonly page:
-    | {
-        readonly path: string
-        readonly content: string
-        /** The generated list of the Space's other pages, in at most `maxBytes`. */
-        readonly list: (maxBytes: number) => RenderedIndex
-      }
-    | undefined
+  readonly page: { readonly path: string; readonly content: string } | undefined
   readonly questions: ReadonlyArray<SpaceQuestionView>
   readonly tasks: ReadonlyArray<SpaceTaskView>
 }
@@ -70,18 +62,15 @@ export const renderSpaceContext = (
   {
     maxBytes,
     instructionsBytes,
-    pageBytes,
-    pageListBytes
+    pageBytes
   }: {
     readonly maxBytes: number
     readonly instructionsBytes: number
     readonly pageBytes: number
-    readonly pageListBytes: number
   }
 ): {
   readonly text: string
   readonly page: SpacePageShown | undefined
-  readonly list: RenderedIndex | undefined
 } => {
   const intro = [
     "## Current Space",
@@ -147,12 +136,9 @@ export const renderSpaceContext = (
   const page =
     view.page === undefined ? undefined : pageBlock(view.page, Math.min(remaining, pageBytes))
   place(page?.text)
-  const list = view.page?.list(pageListBytes - 2)
-  const listText = list?.text
   return {
-    text: [head, ...blocks, ...(listText === undefined ? [] : [listText]), navigation].join("\n\n"),
-    page: spacePageShown(view.page, page),
-    list: listText === undefined ? undefined : list
+    text: [head, ...blocks, navigation].join("\n\n"),
+    page: spacePageShown(view.page, page)
   }
 }
 

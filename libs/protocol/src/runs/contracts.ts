@@ -82,9 +82,9 @@ export type RunMemoryCutReason =
 export type RunMemoryReader = "owner" | "worker"
 
 /**
- * The Space context: `bytes` is all of it but the list of its other pages, which is recorded
- * as an index whose `root` is the Space's folder. `page_id` names its Memory page when it has
- * one, and `outcome` says how much of that page the Space context held.
+ * The Space context, in `bytes`. The list of the Space's other pages is a section of its own,
+ * recorded as an index whose `root` is the Space's folder. `page_id` names its Memory page when
+ * it has one, and `outcome` says how much of that page the Space context held.
  */
 export interface RunMemorySpaceSource extends JsonRecord {
   readonly kind: "space"
@@ -124,9 +124,9 @@ export interface RunMemoryRecalledSource extends RunMemoryPageFields {
 
 /**
  * The generated index of the pages under `root` ("" is all of Memory): `listed` pages had a
- * line each, and each folded folder was counted as one line of `pages`. The Memory index folds
- * whole the folder of a Space list the run is also sent, so no line is sent twice; that fold
- * alone leaves it `whole`.
+ * line each, and each folded folder was counted as one line of `pages`. The Memory index leaves
+ * out the pages a Space list in the same block shows by line, so no line is sent twice; those
+ * pages are counted in that list's `listed`, and leaving them out is no fold.
  */
 export interface RunMemoryIndexSource extends JsonRecord {
   readonly kind: "index"

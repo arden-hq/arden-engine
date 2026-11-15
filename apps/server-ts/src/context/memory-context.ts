@@ -6,6 +6,7 @@ import type {
 } from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
 import { corePageBudget, STANDING_FACTS_PAGES } from "../memory/core-memory.js"
+import type { RenderedIndex } from "../memory/index-render.js"
 import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
@@ -70,10 +71,18 @@ export const MEMORY_BLOCK_MAX_BYTES =
   MEMORY_BUDGET.space_page_list +
   MEMORY_BUDGET.recall
 
-/** A Space's view, and its Memory page at the version read, when it has one. */
+/** A Space's view, and its Memory page at the version read with the list of the Space's other
+ *  pages, when it has one. */
 export interface SpaceMemoryInput {
   readonly view: SpaceView
-  readonly page: { readonly pageId: string; readonly version: string } | undefined
+  readonly page: SpacePageInput | undefined
+}
+
+export interface SpacePageInput {
+  readonly pageId: string
+  readonly version: string
+  /** The generated list of the Space's other pages, in at most `maxBytes`. */
+  readonly list: (maxBytes: number) => RenderedIndex
 }
 
 export interface MemoryContext {
@@ -110,10 +119,11 @@ export const assembleMemoryContext = ({
 }): MemoryContext => {
   const standing = sources?.standing(MEMORY_BUDGET.standing_page) ?? none
   const spaced = space === undefined ? undefined : renderSpace(space)
+  const list = space?.page?.list(MEMORY_BUDGET.space_page_list)
   const index =
     sources?.index({
       maxBytes: MEMORY_BUDGET.index,
-      shownElsewhere: spaced?.shown ?? new Set()
+      shownElsewhere: list?.shown ?? new Set()
     }) ?? none
   const recall = sources?.recall?.(MEMORY_BUDGET.recall)
   return {
@@ -122,7 +132,10 @@ export const assembleMemoryContext = ({
     space:
       space === undefined || spaced === undefined
         ? []
-        : [{ kind: "space", key: "Current Space", text: spaced.text, space: space.view }],
+        : [
+            { kind: "space", key: "Current Space", text: spaced.text, space: space.view },
+            ...textSection("Space pages", list?.text)
+          ],
     recall: textSection("Memory recall", recall?.text, "turn"),
     record: {
       reader,
@@ -133,6 +146,7 @@ export const assembleMemoryContext = ({
         ...standing.sources,
         ...index.sources,
         ...(spaced?.sources ?? []),
+        ...(list?.sources ?? []),
         ...(recall?.sources ?? [])
       ]
     }
@@ -143,35 +157,22 @@ const none: RenderedMemory = { text: undefined, sources: [] }
 
 const renderSpace = (
   space: SpaceMemoryInput
-): {
-  readonly text: string
-  readonly sources: ReadonlyArray<RunMemorySource>
-  /** The paths of the pages the Space context lists by line. */
-  readonly shown: ReadonlySet<string>
-} => {
+): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
   const rendered = renderSpaceContext(space.view, {
     maxBytes: MEMORY_BUDGET.space,
     instructionsBytes: MEMORY_BUDGET.space_instructions,
-    pageBytes: MEMORY_BUDGET.space_page,
-    pageListBytes: MEMORY_BUDGET.space_page_list
+    pageBytes: MEMORY_BUDGET.space_page
   })
-  const list = rendered.list?.sources ?? []
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
     page_id: space.page?.pageId ?? null,
     version: space.page?.version ?? null,
-    bytes:
-      byteLength(rendered.text) -
-      list.reduce((sum, source) => sum + source.bytes + byteLength("\n\n"), 0)
+    bytes: byteLength(rendered.text)
   }
   const source: RunMemorySource =
     rendered.page === "cut" || rendered.page === "dropped"
       ? { ...identity, outcome: rendered.page, reason: "space_page_allowance" }
       : { ...identity, outcome: "whole", reason: null }
-  return {
-    text: rendered.text,
-    sources: [source, ...list],
-    shown: rendered.list?.shown ?? new Set()
-  }
+  return { text: rendered.text, sources: [source] }
 }

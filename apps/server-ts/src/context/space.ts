@@ -4,6 +4,7 @@ import type { SummaryStore } from "../persistence/summaries/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
 import type { MemoryTurn } from "../memory/service.js"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
+import type { SpacePageInput } from "./memory-context.js"
 import type { SpaceView } from "./space-render.js"
 import { cutText } from "@arden-hq/std/text"
 import { renderPromptSection } from "../prompts/format.js"
@@ -23,7 +24,7 @@ interface SpaceConversationContextSnapshot {
   readonly view: SpaceView
   readonly threads: string
   /** The Space's Memory page, at the version this run read. */
-  readonly page?: { readonly pageId: string; readonly version: string }
+  readonly page?: SpacePageInput
 }
 
 interface SpaceConversationContextInput {
@@ -86,14 +87,7 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
           name: session.name ?? "Untitled",
           summary: summarized.get(session.session_id)?.summary
         })),
-        page:
-          page === undefined || memory === undefined
-            ? undefined
-            : {
-                path: page.path,
-                content: page.content,
-                list: memory.spaceList({ pageId: page.pageId, pagePath: page.path })
-              },
+        page: page === undefined ? undefined : { path: page.path, content: page.content },
         questions: questions.questions.map((question) => ({
           question_id: question.question_id,
           prompt: question.content.prompt,
@@ -111,7 +105,15 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
       },
       authority: SPACE_CONTEXT_AUTHORITY,
       threads: SPACE_THREADS,
-      ...(page === undefined ? {} : { page: { pageId: page.pageId, version: page.version } })
+      ...(page === undefined || memory === undefined
+        ? {}
+        : {
+            page: {
+              pageId: page.pageId,
+              version: page.version,
+              list: memory.spaceList({ pageId: page.pageId, pagePath: page.path })
+            }
+          })
     } satisfies SpaceConversationContextSnapshot
   },
   Effect.catchCause((cause) =>

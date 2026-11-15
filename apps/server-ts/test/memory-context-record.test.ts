@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest"
 import type { ChatRunnerMessage } from "../src/chat/runner-contract.js"
 import { makeContextExperiments } from "../src/context/experiments.js"
 import { MEMORY_BLOCK_MAX_BYTES, MEMORY_BUDGET } from "../src/context/memory-context.js"
-import type { RuntimeSection } from "../src/context/runtime-update.js"
+import { runtimeUpdate, type RuntimeSection } from "../src/context/runtime-update.js"
 import {
   composeTurnContext,
   type SessionOrigin,
@@ -81,7 +81,13 @@ const PAGES = [core, orchard, ledger, spacePage]
 const encoder = new TextEncoder()
 const bytes = (value: string): number => encoder.encode(value).byteLength
 
-const MEMORY_KEYS = ["Core Memory", "Memory index", "Current Space", "Memory context"]
+const MEMORY_KEYS = [
+  "Core Memory",
+  "Memory index",
+  "Current Space",
+  "Space pages",
+  "Memory context"
+]
 const memoryKeys = (sections: ReadonlyArray<RuntimeSection>) =>
   sections.map((section) => section.key).filter((key) => MEMORY_KEYS.includes(key))
 
@@ -346,7 +352,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     })
   })
 
-  it("lists the Space's other pages in the Space block, recorded as the index of its folder", async () => {
+  it("lists the Space's other pages in their own section, recorded as the index of its folder", async () => {
     const beds = page("spaces/garden/beds.md", "Beds", "Raised beds.")
     const seeds = page("spaces/garden/seeds/list.md", "Seeds", "Seed list.")
     const composed = await compose({
@@ -354,7 +360,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       spaceId: "space-1",
       pages: [...PAGES, beds, seeds]
     })
-    const text = composed.sections.find((section) => section.key === "Current Space")?.text
+    const text = composed.sections.find((section) => section.key === "Space pages")?.text
     expect(text).toContain("- spaces/garden/beds.md")
     expect(text).toContain("- spaces/garden/seeds/list.md")
     const record = composed.writes[0]?.sources ?? []
@@ -367,8 +373,10 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "whole",
       reason: null
     })
-    const space = record.find((source) => source.kind === "space")
-    expect((space?.bytes ?? 0) + (list?.bytes ?? 0) + 2).toBe(bytes(text ?? ""))
+    expect(list?.bytes).toBe(bytes(text ?? ""))
+    expect(record.find((source) => source.kind === "space")?.bytes).toBe(
+      bytes(composed.sections.find((section) => section.key === "Current Space")?.text ?? "")
+    )
   })
 
   const listLines = (text: string | undefined) =>
@@ -380,7 +388,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     const pages = [...PAGES, beds, seeds]
     const owner = await compose({ actor: person, spaceId: "space-1", pages })
     const index = owner.sections.find((section) => section.key === "Memory index")?.text
-    const space = owner.sections.find((section) => section.key === "Current Space")?.text
+    const space = owner.sections.find((section) => section.key === "Space pages")?.text
     expect([...listLines(index)].filter((line) => listLines(space).has(line))).toEqual([])
     expect(index).not.toContain("spaces/garden/beds.md")
     expect(index).not.toContain("(folded)")
@@ -407,7 +415,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     )
     const owner = await compose({ actor: person, spaceId: "space-1", pages: [...PAGES, ...beds] })
     const index = owner.sections.find((section) => section.key === "Memory index")?.text
-    const space = owner.sections.find((section) => section.key === "Current Space")?.text
+    const space = owner.sections.find((section) => section.key === "Space pages")?.text
     expect(space).toContain("- spaces/garden/ (folded)")
     expect([...listLines(index)].filter((line) => listLines(space).has(line))).toEqual([])
     for (const bed of beds) expect(index).toContain(`- ${bed.resource.path}`)
@@ -426,7 +434,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       spaceId: "space-1",
       pages: [...PAGES, ...many]
     })
-    const text = composed.sections.find((section) => section.key === "Current Space")?.text ?? ""
+    const text = composed.sections.find((section) => section.key === "Space pages")?.text ?? ""
     expect(text).toContain("spaces/garden/beds/ (folded)")
     expect(text).toContain("[Folded to fit: a folder marked folded")
     const record = composed.writes[0]?.sources ?? []
@@ -437,10 +445,37 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "cut",
       reason: "index_allowance"
     })
-    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.space_page_list)
+    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space_page_list)
     expect(record.find((source) => source.kind === "space")).toEqual(
       plain.writes[0]?.sources.find((source) => source.kind === "space")
     )
+  })
+
+  it("sends a page that reaches the Space's folder between two turns in the second turn's update", async () => {
+    const beds = page("spaces/garden/beds.md", "Beds", "Raised beds.")
+    const seeds = page("spaces/garden/seeds.md", "Seeds", "Seed list.")
+    const shed = page("notes/shed.md", "Shed", "The shed.")
+    const moved = { ...shed, resource: { ...shed.resource, path: "spaces/garden/shed.md" } }
+    const turns = async (before: ReadonlyArray<RunPage>, after: ReadonlyArray<RunPage>) => {
+      const first = await compose({ actor: person, spaceId: "space-1", pages: before })
+      const full = runtimeUpdate({
+        presented: undefined,
+        current: { sections: first.sections, endNote: undefined },
+        endNoteDue: false
+      })
+      const second = await compose({ actor: person, spaceId: "space-1", pages: after })
+      return runtimeUpdate({
+        presented: full?.state,
+        current: { sections: second.sections, endNote: undefined },
+        endNoteDue: false
+      })?.text
+    }
+    expect(await turns([...PAGES, beds], [...PAGES, beds, seeds])).toContain(
+      "- spaces/garden/seeds.md"
+    )
+    const update = await turns([...PAGES, beds, shed], [...PAGES, beds, moved])
+    expect(update).toContain("- spaces/garden/shed.md")
+    expect(update).not.toContain("- notes/shed.md")
   })
 
   it("never recalls the Space page a second time", async () => {
@@ -702,7 +737,7 @@ describe("one owner for each limit and rule", () => {
 
   it("only the assembler builds Memory sections or gives a source its room", () => {
     expect(
-      offenders(/"(Core Memory|Memory recall|Memory index|Current Space)"[^\n]*\)/u, [
+      offenders(/"(Core Memory|Memory recall|Memory index|Current Space|Space pages)"[^\n]*\)/u, [
         "context/memory-context.ts",
         "memory/index-render.ts",
         "memory/retrieval.ts"
