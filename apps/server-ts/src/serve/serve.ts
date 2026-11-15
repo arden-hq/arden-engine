@@ -85,7 +85,7 @@ export const startConfigured = async <Server extends StartedServer>(
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
   const options = serverOptionsFor(settings)
   const usageFile = join(dataDirectory, USAGE_FILE)
-  const route = await modelsFor(settings, env)
+  const route = await modelsFor(settings, { env, fetch: globalThis.fetch })
   const models =
     route.provider === undefined
       ? route

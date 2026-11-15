@@ -46,6 +46,26 @@ node apps/server-ts/dist/main.js --config settings.json   # or: arden serve --co
 }
 ```
 
+- **Providers.** `responses` is any OpenAI Responses endpoint (`baseUrl`, `apiKeyEnv`; needs `model` and `contextLimit`). `chat-completions` is any OpenAI Chat Completions endpoint: llama.cpp's `llama-server`, OpenRouter, or another. `apiKeyEnv` is optional (a local server has no key). `server` (`llama.cpp`, `openrouter`, `generic`) is detected at start when absent: `openrouter.ai` by its host, llama.cpp by `GET /props`. llama.cpp and OpenRouter report each model's context window, reasoning efforts and request shape; `contextLimit` may only lower that window. A llama.cpp server with one model needs no `model`; OpenRouter needs `model`; a generic server needs `model` and `contextLimit`. `codex` and `codex-login` use a Codex account.
+
+  ```json
+  { "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" } }
+  { "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini" }
+  ```
+
+  A Chat Completions route declares every offered tool to the model (it has no tool search), so Arden's full tool set is a prompt of about 56,000 tokens (measured on llama.cpp b12359 with Gemma 4). A model with a smaller window fails with `context_length_exceeded`; offer fewer tools with `tools` (with only `exec_command` the first request is about 6,400 tokens). To check a local model end to end:
+
+  ```bash
+  llama-server -m model.gguf --ctx-size 32768 --port 8080 &
+  cat > /tmp/arden-cc/settings.json <<EOF
+  { "dataDirectory": "/tmp/arden-cc/data", "workspace": "/tmp/arden-cc/work",
+    "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" },
+    "tools": ["exec_command"], "approvalMode": "allow", "memory": false, "automations": false, "skillRoots": [] }
+  EOF
+  node apps/server-ts/dist/main.js --config /tmp/arden-cc/settings.json &   # prints the ready line
+  ARDEN_DIR=/tmp/arden-cc/data node apps/cli/dist/main.js run --output json "Run \`echo ok\` with exec_command and say what it printed."
+  sqlite3 /tmp/arden-cc/data/arden.db "select json_extract(message_json, '$.origin') from session_messages where role = 'assistant'"
+  ```
 - **Settings.** Only `dataDirectory` is required, and it may not be `~/.arden`. `src/serve/settings.ts` lists every field with its meaning: provider and models, step and request limits, tools, sub-agents, approval mode, whether a person follows the chats (`userFacing`), compaction, Memory, Automations, MCP servers, Skills, the command sandbox. A key is never in the file; the file names the environment variable that holds it. A mistake exits with code 2 and one line that names the field.
 - **Ready line.** When every setting is in place the server prints one JSON line on stdout: `type: "ready"`, `url`, `dataDirectory`, `accessFile`, `usageFile`, `offeredTools`, `toolsWithoutRule`, `mcpServers`. Nothing else goes to stdout; the log goes to stderr.
 - **Access.** `accessFile` (`cli-access.json` in the data folder) holds the server URL and a secret. Send the secret as the `x-arden-local-capability` header. It is the owner's secret: whoever started the server reaches every route. `arden run`, `arden wait` and `arden sessions` find the file with `ARDEN_DIR=<dataDirectory>`.

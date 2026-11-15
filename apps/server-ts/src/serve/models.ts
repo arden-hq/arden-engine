@@ -1,5 +1,16 @@
+import { resolveModelCapabilities, type ModelProvider } from "@arden-hq/loop"
+import { makeChatCompletionsProvider } from "@arden-hq/loop/providers/chat-completions"
 import type { ModelProviderOptions } from "../config/options.js"
 import type { ModelDefinition, ModelHost } from "../models/host.js"
+import {
+  detectServer,
+  discoverLlamaCpp,
+  discoverOpenRouter,
+  DiscoveryError,
+  type ChatCompletionsServer,
+  type DiscoveredModel,
+  type DiscoveryInput
+} from "../providers/chat-completions/discovery.js"
 import { codexCliCredentials, CodexLoginError } from "../providers/openai-codex/cli-login.js"
 import { makeOpenAiCodexRuntime } from "../providers/openai-codex/runtime.js"
 import {
@@ -7,11 +18,17 @@ import {
   type OpenAiCredentialSnapshot,
   type OpenAiCredentialSource
 } from "../providers/openai-responses/provider.js"
-import { SettingsError, type Settings } from "./settings.js"
+import { requireServerFields, SettingsError, type Settings } from "./settings.js"
 
 const COMPACTION_SHARE = 0.8
 
+/** How long start may wait for a Chat Completions server to describe its models. */
+const DISCOVERY_TIMEOUT_MS = 15_000
+
 const inherit = { modelId: null, reasoningEffort: null }
+
+type Provider = NonNullable<Settings["provider"]>
+type ChatCompletionsProvider = Extract<Provider, { readonly kind: "chat-completions" }>
 
 const fromEnv = (env: NodeJS.ProcessEnv, name: string): string => {
   const value = env[name]
@@ -48,6 +65,26 @@ const hostOf = (
   }
 }
 
+const contextOf = (limit: number): ModelDefinition["context"] => ({
+  hardLimit: limit,
+  compactionTrigger: Math.floor(limit * COMPACTION_SHARE)
+})
+
+/**
+ * The chat model's window: the provider's own, lowered by `contextLimit`.
+ * Raising it would only move the overflow from the settings to a request.
+ */
+const loweredLimit = (settings: Settings, own: number): number => {
+  const limit = settings.contextLimit
+  if (limit !== undefined && limit > own)
+    throw new SettingsError(`contextLimit ${limit} is above the model's own ${own}`)
+  return limit ?? own
+}
+
+/** What the settings say a model without a catalog can do: the effort they name, if any. */
+const declaredEfforts = (settings: Settings): ReadonlyArray<string> =>
+  settings.reasoningEffort === undefined ? [] : [settings.reasoningEffort]
+
 const responsesModels = (settings: Settings): ModelHost => {
   // parseSettings requires both for this provider.
   const limit = settings.contextLimit as number
@@ -55,8 +92,8 @@ const responsesModels = (settings: Settings): ModelHost => {
     id,
     name: id,
     provider: { id: "responses", name: "Responses API" },
-    reasoningEfforts: settings.reasoningEffort === undefined ? [] : [settings.reasoningEffort],
-    context: { hardLimit: limit, compactionTrigger: Math.floor(limit * COMPACTION_SHARE) }
+    reasoningEfforts: declaredEfforts(settings),
+    context: contextOf(limit)
   })
   return hostOf(settings, entry(settings.model as string), (settings.extraModels ?? []).map(entry))
 }
@@ -71,29 +108,166 @@ const codexModels = (settings: Settings, live: ModelHost): ModelHost => {
     return model
   }
   const chat = find(settings.model)
-  const limit = settings.contextLimit
-  if (limit !== undefined && limit > chat.context.hardLimit)
-    throw new SettingsError(
-      `contextLimit ${limit} is above the model's own ${chat.context.hardLimit}`
-    )
   return hostOf(
     settings,
-    limit === undefined
-      ? chat
-      : {
-          ...chat,
-          context: { hardLimit: limit, compactionTrigger: Math.floor(limit * COMPACTION_SHARE) }
-        },
+    { ...chat, context: contextOf(loweredLimit(settings, chat.context.hardLimit)) },
     (settings.extraModels ?? []).map(find)
   )
+}
+
+/** How each Chat Completions server names itself in the model list. */
+const CHAT_COMPLETIONS_HOSTS: Record<ChatCompletionsServer, ModelDefinition["provider"]> = {
+  "llama.cpp": { id: "llama.cpp", name: "llama.cpp" },
+  openrouter: { id: "openrouter", name: "OpenRouter" },
+  generic: { id: "chat-completions", name: "Chat Completions" }
+}
+
+/**
+ * The settings' models as their server reports them, `model` first. A generic
+ * server reports nothing, so its models are what the settings say.
+ */
+const discoverModels = async (
+  settings: Settings,
+  server: ChatCompletionsServer,
+  input: DiscoveryInput
+): Promise<ReadonlyArray<DiscoveredModel>> => {
+  const wanted =
+    settings.model === undefined ? undefined : [settings.model, ...(settings.extraModels ?? [])]
+  try {
+    switch (server) {
+      case "llama.cpp":
+        return await discoverLlamaCpp(input, wanted)
+      case "openrouter":
+        // requireServerFields: OpenRouter needs `model`.
+        return await discoverOpenRouter(input, wanted ?? [])
+      case "generic":
+        return (wanted ?? []).map((id) => ({
+          id,
+          contextLimit: settings.contextLimit,
+          reasoningEfforts: declaredEfforts(settings),
+          compat: {}
+        }))
+    }
+  } catch (cause) {
+    if (cause instanceof DiscoveryError) throw new SettingsError(cause.message)
+    throw cause
+  }
+}
+
+const chatCompletionsDefinition = (
+  settings: Settings,
+  server: ChatCompletionsServer,
+  model: DiscoveredModel,
+  isChat: boolean
+): ModelDefinition => {
+  const host = CHAT_COMPLETIONS_HOSTS[server]
+  // `contextLimit` is the chat model's, as for Codex: it lowers what the
+  // server reports, or stands alone where the server reports nothing.
+  const window = (own: number | undefined): number | undefined => {
+    if (!isChat) return own
+    if (own === undefined) return settings.contextLimit
+    return loweredLimit(settings, own)
+  }
+  const limit = window(model.contextLimit)
+  if (limit === undefined)
+    throw new SettingsError(
+      `${host.name} does not report the context window of ${model.id}; set \`contextLimit\``
+    )
+  return {
+    id: model.id,
+    name: model.id,
+    provider: host,
+    reasoningEfforts: model.reasoningEfforts,
+    context: contextOf(limit)
+  }
+}
+
+/**
+ * One adapter per model, picked by the request's model. The adapter shapes
+ * every request by one `compat`, and models behind one server differ: a
+ * router's vision model beside a text one, OpenRouter's Claude (cache
+ * breakpoints) beside a model without reasoning.
+ */
+const providerPerModel = (providers: ReadonlyMap<string, ModelProvider>): ModelProvider => {
+  const pick = (model: string): ModelProvider => {
+    const provider = providers.get(model)
+    if (provider === undefined) throw new Error(`No Chat Completions route for model ${model}`)
+    return provider
+  }
+  return {
+    protocolVersion: 1,
+    capabilities: (model) => resolveModelCapabilities({ provider: pick(model), model }),
+    stream: (request) => pick(request.model).stream(request)
+  }
+}
+
+const chatCompletionsRoute = async (
+  settings: Settings,
+  provider: ChatCompletionsProvider,
+  { env, fetch }: ModelsForOptions
+): Promise<ModelProviderOptions> => {
+  const baseUrl = provider.baseUrl.replace(/\/+$/, "")
+  const key = provider.apiKeyEnv === undefined ? undefined : fromEnv(env, provider.apiKeyEnv)
+  const headers: Record<string, string> =
+    key === undefined ? {} : { authorization: `Bearer ${key}` }
+  const input: DiscoveryInput = {
+    baseUrl,
+    fetch,
+    headers,
+    signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)
+  }
+  const server = provider.server ?? (await detected(input))
+  requireServerFields(settings, server)
+  const [chat, ...extra] = await discoverModels(settings, server, input)
+  if (chat === undefined) throw new Error("Discovery answered no model")
+  const providerId = CHAT_COMPLETIONS_HOSTS[server].id
+  return {
+    provider: providerPerModel(
+      new Map(
+        [chat, ...extra].map((model) => [
+          model.id,
+          makeChatCompletionsProvider({
+            providerId,
+            baseUrl,
+            fetch,
+            ...(key === undefined ? {} : { auth: { headers: async () => headers } }),
+            compat: model.compat
+          })
+        ])
+      )
+    ),
+    modelHost: hostOf(
+      settings,
+      chatCompletionsDefinition(settings, server, chat, true),
+      extra.map((model) => chatCompletionsDefinition(settings, server, model, false))
+    )
+  }
+}
+
+const detected = async (input: DiscoveryInput): Promise<ChatCompletionsServer> => {
+  try {
+    return await detectServer(input)
+  } catch (cause) {
+    if (cause instanceof DiscoveryError) throw new SettingsError(cause.message)
+    throw cause
+  }
+}
+
+export interface ModelsForOptions {
+  /** Where the provider's `apiKeyEnv` and Codex variables are read. */
+  readonly env: NodeJS.ProcessEnv
+  /** Transport for discovery and model requests of a `chat-completions` provider. */
+  readonly fetch: typeof globalThis.fetch
 }
 
 /** The provider and model list a configured server starts with. */
 export const modelsFor = async (
   settings: Settings,
-  env: NodeJS.ProcessEnv
+  options: ModelsForOptions
 ): Promise<ModelProviderOptions> => {
   const provider = settings.provider ?? { kind: "codex-login" as const }
+  if (provider.kind === "chat-completions") return chatCompletionsRoute(settings, provider, options)
+  const env = options.env
   if (provider.kind === "responses") {
     const credential = { accessToken: fromEnv(env, provider.apiKeyEnv) }
     return {

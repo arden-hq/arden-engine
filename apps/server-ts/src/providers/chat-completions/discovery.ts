@@ -1,3 +1,4 @@
+import type { ChatCompletionsCompat } from "@arden-hq/loop/providers/chat-completions"
 import { errorMessage } from "@arden-hq/std/errors"
 import { Option, Schema } from "effect"
 
@@ -8,25 +9,14 @@ import { Option, Schema } from "effect"
 export const CHAT_COMPLETIONS_SERVERS = ["llama.cpp", "openrouter", "generic"] as const
 export type ChatCompletionsServer = (typeof CHAT_COMPLETIONS_SERVERS)[number]
 
-/** How requests to one model are shaped; the adapter's `compat` option. */
-export interface ModelCompat {
-  readonly maxTokensField: "max_completion_tokens" | "max_tokens"
-  readonly systemRole: "system" | "developer"
-  readonly reasoningEffort: "reasoning_effort" | "openrouter" | "none"
-  readonly usageInStream: boolean
-  readonly structuredOutput: "json_schema" | "none"
-  readonly imageInput: boolean
-  readonly parallelToolCalls: boolean
-  readonly cacheControl: "anthropic" | "none"
-}
-
 /** One model as its server reports it. */
 export interface DiscoveredModel {
   readonly id: string
   /** The server's own window in tokens; undefined when it does not say. */
   readonly contextLimit: number | undefined
   readonly reasoningEfforts: ReadonlyArray<string>
-  readonly compat: ModelCompat
+  /** How its requests are shaped; a field left out takes the adapter's default. */
+  readonly compat: Partial<ChatCompletionsCompat>
 }
 
 /** The server cannot be asked, or its answer rules the settings out. */
