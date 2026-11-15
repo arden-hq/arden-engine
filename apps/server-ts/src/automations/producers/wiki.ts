@@ -33,6 +33,8 @@ export const wikiChangedEvent = (input: {
 /**
  * The one-minute Memory poll: take in changes made outside Arden, announce every new commit, then
  * let the search index catch up with the head. Nothing on a chat turn reads the files themselves.
+ * Each step runs whether or not the one before it failed; a failed announcement still fails the
+ * poll, so it is reported and retried.
  */
 const pollMemoryChanges = Effect.fn("Wiki.pollChanges")(function* () {
   const wiki = yield* Wiki
@@ -44,8 +46,14 @@ const pollMemoryChanges = Effect.fn("Wiki.pollChanges")(function* () {
         Effect.logWarning("Memory changes made outside Arden were not checked", cause)
       )
     )
-  yield* wiki.publishChanges()
-  yield* index.schedule(yield* wiki.snapshot())
+  const published = yield* Effect.exit(wiki.publishChanges())
+  yield* wiki.snapshot().pipe(
+    Effect.flatMap(index.schedule),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("The search index was not told about Memory changes", cause)
+    )
+  )
+  return yield* published
 })
 
 export const wikiEventProducer: AutomationEventProducer<"wiki.changed", Wiki | WikiEmbeddingIndex> =
