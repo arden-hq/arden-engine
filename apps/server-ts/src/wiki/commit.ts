@@ -204,7 +204,14 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
 })
 
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
-  rule: Schema.Literals(["aliases", "size", "records", "retire", "code_owned", "retraction"] as const),
+  rule: Schema.Literals([
+    "aliases",
+    "size",
+    "records",
+    "retire",
+    "code_owned",
+    "retraction"
+  ] as const),
   message: Schema.String
 }) {}
 

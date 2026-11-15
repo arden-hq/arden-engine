@@ -117,9 +117,7 @@ const STAGES = ["update", "archive", "archive_readme"] as const
 
 const stage = (change: WorkingFileChange): (typeof STAGES)[number] => {
   if (change.kind !== "missing") return "update"
-  return isReadme(change.resource.path)
-    ? "archive_readme"
-    : "archive"
+  return isReadme(change.resource.path) ? "archive_readme" : "archive"
 }
 
 const depth = (change: WorkingFileChange): number => change.resource.path.split("/").length

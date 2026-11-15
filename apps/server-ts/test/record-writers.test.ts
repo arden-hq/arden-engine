@@ -66,7 +66,12 @@ const SEED: ReadonlyArray<readonly [string, string, string?]> = [
 ]
 
 const pagelessSpace = (spaceId: string) =>
-  ({ space_id: spaceId, name: spaceId, page_id: null, page_path: null }) as unknown as PersistedSpace
+  ({
+    space_id: spaceId,
+    name: spaceId,
+    page_id: null,
+    page_path: null
+  }) as unknown as PersistedSpace
 
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
   activeBindings: () => Effect.succeed([]),
@@ -157,11 +162,7 @@ describe("the record rules for writers, at the commit point", () => {
           capture: yield* write(repository, CAPTURE, created("daily/2026-11-13.md")),
           producer: yield* write(repository, PRODUCER, created("daily/2026-11-14.md")),
           owner: yield* write(repository, OWNER, created("daily/2026-11-15.md")),
-          knowledge: yield* write(
-            repository,
-            OTHER_AUTOMATION,
-            created("topics/new.md")
-          )
+          knowledge: yield* write(repository, OTHER_AUTOMATION, created("topics/new.md"))
         }
       })
     )
@@ -301,9 +302,7 @@ describe("the record folder checks of Memory's own writes", () => {
             projects: yield* refusal(
               wiki.ensureSpacePage({ home: "projects", spaceId: "space-1" })
             ),
-            areas: yield* refusal(
-              wiki.ensureSpacePage({ home: "areas", spaceId: "space-2" })
-            )
+            areas: yield* refusal(wiki.ensureSpacePage({ home: "areas", spaceId: "space-2" }))
           }
         }),
       [
