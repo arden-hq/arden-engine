@@ -10,7 +10,9 @@ import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 const DAY = 86_400_000
-const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString()
+// One clock reading for the file: two times asked for the same moment must be equal.
+const NOW = Date.now()
+const ago = (days: number) => new Date(NOW - days * DAY).toISOString()
 const event = (type: string, runId?: string) => ({
   type,
   data: { type },

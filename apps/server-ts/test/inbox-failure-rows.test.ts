@@ -19,7 +19,9 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 // and the new one on the same rows and expects the same Inbox entries.
 
 const DAY = 86_400_000
-const at = (days: number) => new Date(Date.now() - days * DAY).toISOString()
+// One clock reading for the file: two times asked for the same moment must be equal.
+const NOW = Date.now()
+const at = (days: number) => new Date(NOW - days * DAY).toISOString()
 const PREFIX = "automation-failed:"
 
 /** The failures read before migration 151. */
