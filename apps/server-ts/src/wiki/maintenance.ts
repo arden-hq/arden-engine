@@ -169,7 +169,7 @@ const reviewPages = (snapshot: Snapshot, pageIds: ReadonlyArray<string>) => {
       isImportedPath(record.resource.path)
     )
       return []
-    return [{ record, readOnly: record.resource.path.toLowerCase() === "health.md" }]
+    return [record]
   })
 }
 
@@ -331,10 +331,7 @@ export const makeWikiMaintenanceMethods = (
         "These paths and links are pinned to the range end above. Live reads can be newer; never overwrite newer evidence. Unlinked summaries can also contradict the changed facts.",
         ...pages
           .slice(0, MAX_RELATED_PAGES)
-          .map(
-            ({ record, readOnly }) =>
-              `- ${record.resource.path} — ${record.page.title}${readOnly ? " [read-only evidence]" : ""}`
-          ),
+          .map((record) => `- ${record.resource.path} — ${record.page.title}`),
         ...(pages.length > MAX_RELATED_PAGES
           ? [
               `(${pages.length - MAX_RELATED_PAGES} more related pages exist; find them with wiki_links)`

@@ -73,10 +73,7 @@ const indexError = (
 
 const indexedPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
   snapshot.pages.filter(
-    (record) =>
-      record.page.lifecycle === "active" &&
-      record.page.pageId !== "health" &&
-      record.page.body.trim() !== ""
+    (record) => record.page.lifecycle === "active" && record.page.body.trim() !== ""
   )
 
 const pageVersions = (snapshot: Snapshot): ReadonlyMap<string, string> =>

@@ -150,7 +150,9 @@ export const makeWikiListingMethods = (
       .pipe(Effect.mapError(mapRevisionError("list")))
     return {
       repositoryHead: current.head,
-      pages: selected.map((record) => summary(record, current.head, times.get(record.page.pageId))),
+      pages: selected.flatMap((record) =>
+        current.head === null ? [] : [summary(record, current.head, times.get(record.page.pageId))]
+      ),
       nextCursor:
         shown.length > limit && last !== undefined
           ? encodeWikiListCursor(current.head, last, includeRedirects)
@@ -222,11 +224,11 @@ export const makeWikiListingMethods = (
 
   const read = Effect.fn("Wiki.read")(function* (pageId: string) {
     const current = yield* snapshot()
-    const record = yield* readSnapshotPage(current, pageId)
+    const { record, head } = yield* readSnapshotPage(current, pageId)
     const times = yield* pageTimestamps
-      .forPages(current.head, new Set([pageId]))
+      .forPages(head, new Set([pageId]))
       .pipe(Effect.mapError(mapRevisionError("read", pageId)))
-    return detail(record, current.head, times.get(pageId))
+    return detail(record, head, times.get(pageId))
   })
 
   const pageTimes = Effect.fn("Wiki.pageTimes")(function* (at: string | null) {

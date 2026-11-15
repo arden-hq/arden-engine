@@ -1,3 +1,6 @@
+import { Effect } from "effect"
+
+import type { SessionQueries } from "../persistence/sessions/queries.js"
 import {
   mutationReceiptHost,
   type MakeMutationReceiptInput
@@ -26,6 +29,23 @@ const isNamedList = (
   resource: NamedResource | ReadonlyArray<NamedResource>
 ): resource is ReadonlyArray<NamedResource> => Array.isArray(resource)
 
+/** The link to a chat, or to one turn of it. */
+export const chatHref = (chat: { readonly publicRef: string; readonly turnId?: string }): string =>
+  `arden:session/${encodeURIComponent(chat.publicRef)}${chat.turnId === undefined ? "" : `/${encodeURIComponent(chat.turnId)}`}`
+
+/** The link to the chat with this id, or undefined when that chat no longer exists. */
+export const chatLinkOf = async (
+  sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">,
+  sessionId: string,
+  signal: AbortSignal
+): Promise<string | undefined> => {
+  const header = await Effect.runPromise(
+    sessions.loadHistoryHeader(sessionId).pipe(Effect.orElseSucceed(() => null)),
+    { signal }
+  )
+  return header === null ? undefined : chatHref(header)
+}
+
 export const chatTarget = (
   chat: { readonly sessionId: string; readonly publicRef: string; readonly turnId?: string },
   title: string
@@ -34,7 +54,7 @@ export const chatTarget = (
   resourceRef: `session:${chat.sessionId}`,
   domain: "session",
   title,
-  href: `arden:session/${encodeURIComponent(chat.publicRef)}${chat.turnId === undefined ? "" : `/${encodeURIComponent(chat.turnId)}`}`
+  href: chatHref(chat)
 })
 
 export const inChatTarget = (input: {
@@ -46,7 +66,5 @@ export const inChatTarget = (input: {
   resourceRef: input.resourceRef,
   domain: "session",
   title: input.title,
-  ...(input.chat === undefined
-    ? {}
-    : { href: `arden:session/${encodeURIComponent(input.chat.publicRef)}` })
+  ...(input.chat === undefined ? {} : { href: chatHref(input.chat) })
 })

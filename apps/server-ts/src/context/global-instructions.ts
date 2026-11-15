@@ -4,6 +4,12 @@ import { lstat, readFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import { isErrnoCode } from "../fs/private-store.js"
+import {
+  type InstructionVersion,
+  InstructionVersionStore,
+  type InstructionVersionStoreError,
+  type InstructionWriter
+} from "../persistence/instructions/store.js"
 import { PROMPT_CATALOG } from "../prompts/catalog.js"
 import { baseSystemPrompt } from "../models/instructions.js"
 import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
@@ -19,7 +25,14 @@ import {
 import { sha256Hex } from "@arden-hq/std/hash"
 
 const GLOBAL_INSTRUCTIONS_FILE = "AGENTS.md"
-const MAX_BYTES = 128 * 1024
+/** The most rules text, in bytes, the rules may hold. */
+export const MAX_RULES_BYTES = 128 * 1024
+/** The rules as the file stores them: the text and one closing newline. */
+const storedText = (content: string): string => (content === "" ? "" : `${content}\n`)
+/** One limit for reading and writing, so every version the history records can be restored. */
+const withinLimit = (content: string): boolean =>
+  Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
+const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
 
 interface GlobalInstructionsSnapshot {
   readonly content: string | undefined
@@ -30,7 +43,7 @@ interface GlobalInstructionsSnapshot {
 export class GlobalInstructionsError extends Schema.TaggedError<GlobalInstructionsError>()(
   "GlobalInstructionsError",
   {
-    operation: Schema.Literals(["read", "replace"] as const),
+    operation: Schema.Literals(["read", "replace", "history"] as const),
     reason: Schema.Literals(["invalid", "conflict", "storage"] as const),
     message: Schema.String,
     cause: Schema.optionalKey(Schema.Defect())
@@ -64,13 +77,11 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
   if (status === undefined) {
     return { content: undefined, version: "absent", bytes: 0 } satisfies GlobalInstructionsSnapshot
   }
-  if (!status.isFile() || status.isSymbolicLink() || status.size > MAX_BYTES) {
-    return yield* error(
-      "read",
-      "invalid",
-      `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file under ${formatBytes(MAX_BYTES)}`
-    )
+  if (!status.isFile() || status.isSymbolicLink()) {
+    return yield* error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file`)
   }
+  // The file may hold the closing newline beyond the limit; a larger one is not read at all.
+  if (status.size > MAX_RULES_BYTES + 1) return yield* error("read", "invalid", tooLarge)
   const bytes = yield* Effect.tryPromise({
     try: () => readFile(filename),
     catch: (cause) => error("read", "storage", "Global instructions could not be read", cause)
@@ -81,6 +92,7 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
       error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not valid UTF-8`, cause)
   })
   const content = text.trim()
+  if (!withinLimit(content)) return yield* error("read", "invalid", tooLarge)
   return {
     content: content === "" ? undefined : content,
     version: sha256Hex(bytes),
@@ -93,30 +105,80 @@ export class GlobalInstructions extends Context.Service<
   {
     readonly file: string
     readonly read: () => Effect.Effect<GlobalInstructionsSnapshot, GlobalInstructionsError>
+    /** Replaces the rules and records the new version under `writer`. */
     readonly replace: (input: {
       readonly content: string
       readonly expectedVersion: string
+      readonly writer: Extract<InstructionWriter, { readonly kind: "chat" | "restore" }>
     }) => Effect.Effect<GlobalInstructionsSnapshot, GlobalInstructionsError>
+    /** Newest first, with how many versions exist in all. */
+    readonly versions: (input: {
+      readonly limit: number
+    }) => Effect.Effect<
+      { readonly versions: ReadonlyArray<InstructionVersion>; readonly total: number },
+      GlobalInstructionsError
+    >
+    readonly version: (
+      version: number
+    ) => Effect.Effect<InstructionVersion | undefined, GlobalInstructionsError>
   }
 >()("@arden-hq/server/context/GlobalInstructions") {}
 
+const historyError = (cause: InstructionVersionStoreError): GlobalInstructionsError =>
+  error("history", "storage", "The standing rules history could not be read", cause)
+
 const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
   const lock = yield* Semaphore.make(1)
+  const store = yield* InstructionVersionStore
 
-  const read = () => lock.withPermit(readSnapshot(file))
+  // The file is the live copy and wins: a history that cannot be written never stops the rules
+  // from loading or changing. The writer of a version it missed is kept until the next read
+  // records it; after a restart, that version is recorded as an outside edit.
+  let missed: { readonly digest: string; readonly writer: InstructionWriter } | undefined
+  const record = (snapshot: GlobalInstructionsSnapshot, writer: InstructionWriter) =>
+    store.append({ content: snapshot.content ?? "", digest: snapshot.version, writer }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          missed = undefined
+        })
+      ),
+      Effect.asVoid,
+      Effect.catch((cause) =>
+        Effect.sync(() => {
+          missed = { digest: snapshot.version, writer }
+        }).pipe(
+          Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
+        )
+      )
+    )
+
+  /** Records a version the history does not have yet: the first one, a missed one, or an outside edit. */
+  const adopt = (snapshot: GlobalInstructionsSnapshot) =>
+    store.latest().pipe(
+      Effect.matchEffect({
+        onFailure: (cause) =>
+          Effect.logWarning("The standing rules history could not be read", { cause }),
+        onSuccess: (latest) => {
+          if (latest?.digest === snapshot.version) return Effect.void
+          if (missed?.digest === snapshot.version) return record(snapshot, missed.writer)
+          return record(snapshot, latest === undefined ? { kind: "seed" } : { kind: "outside" })
+        }
+      })
+    )
+
+  const read = () => lock.withPermit(readSnapshot(file).pipe(Effect.tap(adopt)))
 
   const replace = Effect.fn("GlobalInstructions.replace")(function* (input: {
     readonly content: string
     readonly expectedVersion: string
+    readonly writer: Extract<InstructionWriter, { readonly kind: "chat" | "restore" }>
   }) {
     return yield* lock.withPermit(
       Effect.gen(function* () {
         const content = input.content.trim()
-        const text = content === "" ? "" : `${content}\n`
-        if (Buffer.byteLength(text, "utf8") > MAX_BYTES) {
-          return yield* error("replace", "invalid", "Global instructions are too large")
-        }
+        if (!withinLimit(content)) return yield* error("replace", "invalid", tooLarge)
         const current = yield* readSnapshot(file)
+        yield* adopt(current)
         if (current.content === (content === "" ? undefined : content)) return current
         if (current.version !== input.expectedVersion) {
           return yield* error(
@@ -126,7 +188,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
           )
         }
         const written = yield* Effect.tryPromise({
-          try: () => atomicCompareAndSwap(file, text, input.expectedVersion),
+          try: () => atomicCompareAndSwap(file, storedText(content), input.expectedVersion),
           catch: (cause) =>
             cause instanceof LocalRevisionConflict
               ? error(
@@ -137,16 +199,24 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
                 )
               : error("replace", "storage", "Global instructions could not be replaced", cause)
         })
-        return {
+        const snapshot = {
           content: content === "" ? undefined : content,
           version: written.revision,
           bytes: written.bytes
         } satisfies GlobalInstructionsSnapshot
+        yield* record(snapshot, input.writer)
+        return snapshot
       })
     )
   })
 
-  return GlobalInstructions.of({ file, read, replace })
+  return GlobalInstructions.of({
+    file,
+    read,
+    replace,
+    versions: (input) => store.list(input).pipe(Effect.mapError(historyError)),
+    version: (version) => store.get(version).pipe(Effect.mapError(historyError))
+  })
 })
 
 const LEGACY_FILE = "directives.json"
@@ -174,7 +244,10 @@ const moveDirectivesJson = async (file: string): Promise<DirectivesMove> => {
   }
 }
 
-export const globalInstructionsLayer = (file: string): Layer.Layer<GlobalInstructions> =>
+/** The rules service. Its first start records the rules as they are as version one. */
+export const globalInstructionsLayer = (
+  file: string
+): Layer.Layer<GlobalInstructions, never, InstructionVersionStore> =>
   Layer.effect(
     GlobalInstructions,
     Effect.gen(function* () {
@@ -186,7 +259,15 @@ export const globalInstructionsLayer = (file: string): Layer.Layer<GlobalInstruc
           `${LEGACY_FILE} could not be moved to ${GLOBAL_INSTRUCTIONS_FILE} and stays where it is`
         )
       }
-      return yield* make(file)
+      const instructions = yield* make(file)
+      yield* instructions
+        .read()
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("The standing rules could not be read at start", { cause })
+          )
+        )
+      return instructions
     })
   )
 

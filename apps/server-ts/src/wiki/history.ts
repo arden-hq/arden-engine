@@ -17,7 +17,7 @@ import type {
 import { diffLines } from "diff"
 import { Effect } from "effect"
 
-import { decodeWikiOrigin, wikiOriginChat } from "./commit.js"
+import { decodeWikiOrigin, type WikiCommitOrigin, wikiOriginChat } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, type WikiLinkToken } from "./links.js"
 import {
@@ -55,8 +55,32 @@ export interface WikiHistoryMethods {
   readonly pageChats: (
     pageIds: ReadonlyArray<string>
   ) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<WikiPageChat>>, WikiError>
+  readonly lineOrigin: (pageId: string, text: string) => Effect.Effect<WikiLineOrigin, WikiError>
 }
 
+/**
+ * Which saved change put a line of the page's current text there: the newest change whose
+ * earlier version lacks the line. A line removed and later put back names the change that put it
+ * back. `ambiguous` counts the different current lines that hold the text.
+ */
+type WikiLineOrigin =
+  | {
+      readonly kind: "added"
+      readonly line: string
+      readonly timestamp: string
+      readonly actor: string
+      readonly origin: WikiCommitOrigin
+      readonly reason: string
+    }
+  | { readonly kind: "ambiguous"; readonly lines: number }
+  | { readonly kind: "absent" }
+  /** The line is older than the newest `searched` changes, which is as far back as a line is traced. */
+  | { readonly kind: "older"; readonly searched: number }
+
+const linesOf = (text: string): ReadonlyArray<string> => text.split("\n").map((line) => line.trim())
+
+// Each change searched costs one stored version read in a single call, so a search over a
+// page's changes stops after this many, and says so.
 const VERSION_SEARCH_COMMITS = 500
 const VERSION_DIFF_CHARS = 65_536
 
@@ -70,7 +94,8 @@ interface WikiPageChat {
 
 export const makeWikiHistoryMethods = (
   repository: ManagedFileRepositoryShape,
-  snapshot: () => Effect.Effect<Snapshot, WikiError>
+  snapshot: () => Effect.Effect<Snapshot, WikiError>,
+  { searchCommits = VERSION_SEARCH_COMMITS }: { readonly searchCommits?: number } = {}
 ): WikiHistoryMethods => {
   const collectHistory = Effect.fn("Wiki.collectHistory")(function* (options: {
     readonly gracePeriodDays: number
@@ -186,7 +211,7 @@ export const makeWikiHistoryMethods = (
     const current = yield* snapshot()
     const byId = new Map(current.pages.map((record) => [record.page.pageId, record] as const))
     const record = byId.get(pageId)
-    if (record === undefined || record.page.lifecycle !== "active") {
+    if (record === undefined || record.page.lifecycle !== "active" || current.head === null) {
       return yield* notFound("links", pageId)
     }
     const names = pageNameIndex(current.pages)
@@ -263,9 +288,56 @@ export const makeWikiHistoryMethods = (
     return result
   })
 
+  const lineOrigin = Effect.fn("Wiki.lineOrigin")(function* (pageId: string, text: string) {
+    const head = yield* repository.currentRevision.pipe(
+      Effect.mapError(mapRevisionError("history", pageId))
+    )
+    if (head === null) return yield* notFound("history", pageId)
+    const resource = yield* repository
+      .get(pageId, { at: head })
+      .pipe(Effect.mapError(mapRevisionError("history", pageId)))
+    if (resource === null || resource.state !== "active") return yield* notFound("history", pageId)
+    const readLines = (version: ResourceVersion | null) =>
+      version === null
+        ? Effect.succeed<ReadonlyArray<string>>([])
+        : repository.readVersion(version).pipe(
+            Effect.map((bytes) => linesOf(new TextDecoder().decode(bytes))),
+            Effect.mapError(mapRevisionError("history", pageId))
+          )
+    const wanted = text.trim()
+    const holding = new Set((yield* readLines(resource)).filter((line) => line.includes(wanted)))
+    const [line] = holding
+    if (wanted === "" || line === undefined) return { kind: "absent" } satisfies WikiLineOrigin
+    if (holding.size > 1) return { kind: "ambiguous", lines: holding.size } satisfies WikiLineOrigin
+    const commits = yield* repository
+      .history({ resourceId: pageId, start: head, limit: searchCommits })
+      .pipe(Effect.mapError(mapRevisionError("history", pageId)))
+    for (const commit of commits) {
+      const change = commit.changes.find(
+        (item) => (item.after ?? item.before)?.resourceId === pageId
+      )
+      if (change === undefined) continue
+      if ((yield* readLines(live(change.before))).includes(line)) continue
+      return {
+        kind: "added",
+        line,
+        timestamp: commit.timestamp,
+        actor: commit.actor,
+        origin: decodeWikiOrigin(commit.origin),
+        reason: commit.reason
+      } satisfies WikiLineOrigin
+    }
+    if (commits.length >= searchCommits)
+      return { kind: "older", searched: commits.length } satisfies WikiLineOrigin
+    return yield* wikiError("history", "storage", "Page history does not reach its first version", {
+      pageId
+    })
+  })
+
   return {
     collectHistory,
     history,
+    lineOrigin,
     diff,
     versionDiff,
     links,

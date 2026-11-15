@@ -50,11 +50,6 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
       pageId: input.pageId
     })
   }
-  if (current.resource.path.toLowerCase() === "health.md") {
-    return yield* wikiError("update", "blocked", "Wiki health is backend-managed", {
-      pageId: input.pageId
-    })
-  }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "update")
   yield* requireWikiWritePaths(boundary, "update", [current.resource.path])
   const replacement = yield* parseWikiPage(input.content, input.pageId).pipe(

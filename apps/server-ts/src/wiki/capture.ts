@@ -115,11 +115,6 @@ export const makeWikiCaptureMethods = (
                 }
               )
             }
-            if (current.resource.path.toLowerCase() === "health.md") {
-              return yield* wikiError("update", "blocked", "Wiki health is backend-managed", {
-                pageId: edit.pageId
-              })
-            }
             const replacement = yield* parseWikiPage(edit.content, edit.pageId).pipe(
               Effect.mapError((cause) =>
                 wikiError("update", "invalid", cause.message, {

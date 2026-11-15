@@ -50,6 +50,8 @@ export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")
       WHERE permission_kind = 'rule' AND source_session_id = ${sessionId})`
   yield* sql`DELETE FROM question_decisions WHERE session_id = ${sessionId}`
   yield* sql`DELETE FROM tool_approval_decisions WHERE session_id = ${sessionId}`
+  yield* sql`UPDATE global_instruction_versions SET session_id = NULL, run_id = NULL
+    WHERE session_id = ${sessionId}`
   yield* sql`DELETE FROM permission_changes
     WHERE source_session_id = ${sessionId} OR principal = ${`chat:${sessionId}`}`
   yield* sql`UPDATE chat_runs SET last_seq = NULL, client_id = NULL,

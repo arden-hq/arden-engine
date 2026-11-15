@@ -63,7 +63,7 @@ export const pageFields = {
   redirect_to: Schema.NullOr(boundedText(4_096)),
   metadata: WikiMetadataSchema,
   version: WikiRevisionIdSchema,
-  repository_head: Schema.NullOr(WikiRevisionIdSchema),
+  repository_head: WikiRevisionIdSchema,
   created_at: Schema.NullOr(IsoDateTimeStringSchema),
   updated_at: Schema.NullOr(IsoDateTimeStringSchema)
 } as const

@@ -167,7 +167,9 @@ const composeServer = (
     Layer.provide(storage)
   )
   const skills = skillCatalogLayer(root.skills, { extraRoots: config.sharedSkillRoots })
-  const globalInstructions = globalInstructionsLayer(root.globalInstructions)
+  const globalInstructions = globalInstructionsLayer(root.globalInstructions).pipe(
+    Layer.provide(storage)
+  )
   const cliTools = cliToolsLayer({ warm: config.data.kind === "disk" }).pipe(Layer.provide(skills))
   const modelsRoot = join(root.dir, "models")
   const llama = llamaServerLayer({

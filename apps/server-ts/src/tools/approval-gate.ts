@@ -28,7 +28,7 @@ import { impactOf, shellCommandOf, siteOf, type ServerToolMetadataInput } from "
 import { defaultImpact } from "../execution/impact.js"
 import { TOOL_SUMMARIES } from "./tool-summaries.js"
 import { NOT_RUN_HOST } from "../persistence/tools/mutation-receipt.js"
-import type { ServerRunContext } from "./run-context.js"
+import { ObservationSnapshotSchema, type ServerRunContext } from "./run-context.js"
 
 type ApprovalFact =
   | {
@@ -77,7 +77,7 @@ export const makeApprovalGate =
     const { definition, input } = call
     const live = await services.policy.live(call.ctx.run)
     const mode = live.noApproval ? narrowerApprovalMode(live.mode, "ask") : live.mode
-    const ctx = { ...call.ctx, run: { ...call.ctx.run, approvalMode: mode } }
+    const ctx = withAdoptedReads({ ...call.ctx, run: { ...call.ctx.run, approvalMode: mode } })
     const refused = async (cause: unknown): Promise<never> => {
       const result =
         live.noApproval &&
@@ -195,10 +195,12 @@ export const makeApprovalGate =
         const note = cardNote(decision.reason, review?.why)
         const noted = note === undefined ? prompt : withWhy(prompt, note)
         const rule = review?.verdict === "ask" ? helperRule(review.why) : undefined
-        const card =
+        const card = withRunReads(
           definition.name === COMMAND_TOOL && rule !== undefined
             ? withHelperRule(noted, rule)
-            : noted
+            : noted,
+          ctx.run
+        )
         if (decision.presentation.delivery === "chat") {
           const kept = await services.policy
             .defer({
@@ -291,6 +293,34 @@ const withWhy = (prompt: ToolApprovalPrompt, note: string): ToolApprovalPrompt =
   typeof prompt.presentation === "object" && prompt.presentation !== null
     ? { ...prompt, presentation: { ...prompt.presentation, why: note } }
     : prompt
+
+/** Approval data key for what the run had read when it asked; the tool never sees it. */
+const RUN_READS = "run_reads"
+
+const withRunReads = (prompt: ToolApprovalPrompt, run: ServerRunContext): ToolApprovalPrompt => ({
+  ...prompt,
+  data: { ...prompt.data, [RUN_READS]: run.observations.snapshot() }
+})
+
+/**
+ * An approved call runs in a new toolset (a resumed run, or a card's follow-up), so it takes
+ * what its run had read when it asked, as if the run had waited.
+ */
+const withAdoptedReads = <
+  C extends { readonly run: ServerRunContext; readonly approval?: ToolApprovalContext }
+>(
+  ctx: C
+): C => {
+  if (ctx.approval?.data === undefined || !Object.hasOwn(ctx.approval.data, RUN_READS)) return ctx
+  const { data, ...approval } = ctx.approval
+  const { [RUN_READS]: carried, ...own } = data
+  const reads = Schema.decodeUnknownOption(ObservationSnapshotSchema)(carried)
+  if (Option.isSome(reads)) ctx.run.observations.adopt(reads.value)
+  return {
+    ...ctx,
+    approval: Object.keys(own).length === 0 ? approval : { ...approval, data: own }
+  }
+}
 
 const helperApproval = (prompt: ToolApprovalPrompt): ToolApprovalContext => ({
   approved: true,

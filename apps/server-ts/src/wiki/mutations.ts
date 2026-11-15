@@ -104,15 +104,12 @@ export interface WikiMutationMethods {
 
 /**
  * Why a page may not be created at `path`, if it may not: a page is a .md file inside an
- * existing directory, or a standing-facts page at the root; a README and the health page are
- * never created this way.
+ * existing directory, or a standing-facts page at the root; a README is never created this way.
  */
 export const createRefusal = (
   path: string
 ): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
   if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
-  if (path.toLowerCase() === "health.md")
-    return { code: "blocked", message: "Wiki health is backend-managed" }
   if (
     (posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) ||
     posix.basename(path).toLowerCase() === "readme.md"

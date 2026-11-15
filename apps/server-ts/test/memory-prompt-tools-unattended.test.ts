@@ -6,6 +6,7 @@ import { WikiEmbeddingIndex } from "../src/embedding/wiki-index.js"
 import { decide } from "../src/execution/decide.js"
 import { defaultImpact } from "../src/execution/impact.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
+import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { PROMPT_TEXT } from "../src/prompts/catalog.js"
 import { toolFacts } from "../src/tools/approval-decision.js"
 import type { ServerTool } from "../src/tools/define.js"
@@ -24,6 +25,10 @@ const tools = Effect.runSync(
     Effect.map((groups) => groups.flat()),
     Effect.provideService(Wiki, partialService<Wiki["Service"]>("Wiki", {})),
     Effect.provideService(RunQueries, partialService<RunQueries["Service"]>("RunQueries", {})),
+    Effect.provideService(
+      SessionQueries,
+      partialService<SessionQueries["Service"]>("SessionQueries", {})
+    ),
     Effect.provideService(
       WikiEmbeddingIndex,
       partialService<WikiEmbeddingIndex["Service"]>("WikiEmbeddingIndex", {})

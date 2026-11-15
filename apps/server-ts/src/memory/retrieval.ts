@@ -444,10 +444,7 @@ export const prepareMemorySources = ({
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemorySources => {
   const active = pages.filter(
-    (record) =>
-      record.resource.state === "active" &&
-      record.page.lifecycle === "active" &&
-      record.page.pageId !== "health"
+    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
   )
   const standing = active.filter(standingFacts)
   const selected =

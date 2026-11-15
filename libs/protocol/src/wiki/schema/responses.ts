@@ -31,24 +31,12 @@ import {
 export const WikiPageSummarySchema = withExtras({
   ...pageFields,
   content: Schema.optionalKey(Schema.String)
-}).check(
-  Schema.makeFilter((page) =>
-    page.repository_head !== null || (page.page_id === "health" && page.path === "health.md")
-      ? undefined
-      : { path: ["repository_head"], issue: "can be null only for the derived health page" }
-  )
-)
+})
 
 export const WikiPageSchema = withExtras({
   ...pageFields,
   content: Schema.String
-}).check(
-  Schema.makeFilter((page) =>
-    page.repository_head !== null || (page.page_id === "health" && page.path === "health.md")
-      ? undefined
-      : { path: ["repository_head"], issue: "can be null only for the derived health page" }
-  )
-)
+})
 
 export const WikiPagePageSchema = withExtras({
   repository_head: Schema.NullOr(WikiRevisionIdSchema),
@@ -138,17 +126,11 @@ const WikiPageChatSchema = withExtras({
 
 export const WikiPageLinksSchema = withExtras({
   page_id: WikiPageIdSchema,
-  repository_head: Schema.NullOr(WikiRevisionIdSchema),
+  repository_head: WikiRevisionIdSchema,
   outgoing: Schema.Array(WikiLinkSchema),
   backlinks: Schema.Array(WikiLinkSchema),
   came_from: Schema.optionalKey(Schema.Array(WikiPageChatSchema))
-}).check(
-  Schema.makeFilter((report) =>
-    report.repository_head !== null || report.page_id === "health"
-      ? undefined
-      : { path: ["repository_head"], issue: "can be null only for the derived health page" }
-  )
-)
+})
 
 export const WikiRenameApprovalStatusSchema = Schema.Literals([
   "pending",

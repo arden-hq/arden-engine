@@ -19,7 +19,7 @@ import {
 import { ScriptRunner, statusLine } from "../workflows/script-runner.js"
 import { WORKFLOW_CANCEL_TOOL, WORKFLOW_RETRY_TOOL } from "../persistence/tools/tool-roles.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { appliedReceipt } from "./call-receipt.js"
+import { appliedReceipt, chatHref } from "./call-receipt.js"
 import { actsAsPerson, sharedResourceSessions } from "../execution/authority.js"
 import { toolFailure } from "./tool-failure.js"
 
@@ -132,7 +132,7 @@ const workflowResource = (record: ScriptRecord, state: string) => ({
   resourceRef: `workflow:${record.ref}`,
   domain: "other" as const,
   title: `Workflow ${state}`,
-  href: `arden:session/${encodeURIComponent(record.originSessionRef)}`
+  href: chatHref({ publicRef: record.originSessionRef })
 })
 
 const formatScript = (detail: ScriptDetail, result: string | undefined): string => {

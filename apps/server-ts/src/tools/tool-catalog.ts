@@ -165,6 +165,8 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
   arden_settings: [
     "directives_get",
     "directives_set",
+    "directives_history",
+    "directives_restore",
     "usage_limits",
     "model_catalog",
     "skill_list",
@@ -280,7 +282,8 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   skill_update: inputs(["name", "skill"]),
   wiki_edit_page: inputs(["path", "wiki_search", "wiki_read_page"]),
   wiki_patch_page: inputs(["path", "wiki_search"], ["old_text", "wiki_read_page"]),
-  wiki_page_history: inputs(["path", "wiki_search"]),
+  wiki_page_history: inputs(["path", "wiki_search"], ["line", "wiki_read_page"]),
+  directives_restore: inputs(["version", "directives_history"]),
   wiki_links: inputs(["path", "wiki_search"]),
   wiki_archive_page: inputs(["path", "wiki_search"]),
   wiki_merge_page: inputs(["path", "wiki_search"], ["into", "wiki_search"]),
