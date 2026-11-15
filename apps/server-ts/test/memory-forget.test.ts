@@ -8,11 +8,13 @@ import {
   managedFileRepositoryNodeLayer,
   type ManagedFileRepositoryShape
 } from "@arden-hq/revisions/effect"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 
+import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { toolFacts } from "../src/tools/approval-decision.js"
 import { prepareMemorySources } from "../src/memory/retrieval.js"
+import { WikiEventOutbox } from "../src/persistence/automations/wiki-event-outbox.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type {
@@ -48,6 +50,7 @@ import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMaintenanceMethods } from "../src/wiki/maintenance.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage } from "../src/wiki/page.js"
+import { WikiChangeSink } from "../src/wiki/publication.js"
 import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import { claimKey } from "../src/wiki/retraction.js"
@@ -697,6 +700,79 @@ describe("no run is sent forgotten.md", () => {
       listed: [2, 5],
       listedSystem: false,
       history: true
+    })
+  })
+
+  it("leaves it out of content steps, upkeep's review pages and change announcements", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const stepped: Array<string> = []
+        yield* makeWikiContentStepMethods(memory.repository).applyContentStep({
+          name: "test-step",
+          reason: "test content step",
+          rewrite: (pages) =>
+            Effect.sync(() => {
+              stepped.push(...pages.map((page) => page.path))
+              return { pages, redirects: [] }
+            })
+        })
+        const beforeLink = yield* memory.listing.head()
+        yield* memory.write(
+          "places/town.md",
+          `${OTHER}\nSee [[forgotten.md]] for what was taken out.\n`,
+          ownerInApp("x")
+        )
+        const review = yield* makeWikiMaintenanceMethods(memory.repository).prepare({
+          processedHead: beforeLink,
+          reviewerAutomationId: "wiki-maintenance"
+        })
+        const announced: Array<unknown> = []
+        yield* Effect.gen(function* () {
+          const sink = yield* WikiChangeSink
+          for (const paths of [["forgotten.md"], ["forgotten.md", "people/sam.md"]])
+            yield* sink.publish({
+              previousRevision: null,
+              revision: "a".repeat(64),
+              savedAt: "2026-11-15T00:00:00.000Z",
+              paths,
+              origin: { kind: "forget", sessionId: TURN.sessionId },
+              hasSpacePage: false
+            })
+        }).pipe(
+          Effect.provide(
+            automationWikiChangeSinkLayer.pipe(
+              Layer.provide(
+                Layer.succeed(
+                  WikiEventOutbox,
+                  partialService<WikiEventOutbox["Service"]>("WikiEventOutbox", {
+                    publishWikiChange: (input) =>
+                      Effect.sync(() => {
+                        announced.push(
+                          input.event === undefined
+                            ? undefined
+                            : recordOf(recordOf(input.event.context)["change"])["paths"]
+                        )
+                        return null
+                      })
+                  })
+                )
+              )
+            )
+          )
+        )
+        return {
+          stepped: stepped.includes("forgotten.md"),
+          reviewed:
+            review.kind === "review" ? review.markdown.includes("- forgotten.md — ") : review.kind,
+          announced
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      stepped: false,
+      reviewed: false,
+      announced: [undefined, ["people/sam.md"]]
     })
   })
 

@@ -68,10 +68,7 @@ export const wikiCollections = (
   pages: ReadonlyArray<PageRecord>
 ): ReadonlyArray<WikiCollection> => {
   const active = pages.filter(
-    (record) =>
-      record.resource.state === "active" &&
-      record.page.lifecycle === "active" &&
-      !isSystemPage(record.resource.path)
+    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
   )
   const directPages = new Map<string, number>()
   for (const page of active) {

@@ -46,13 +46,16 @@ const snapshot = (head: string, pages: ReadonlyArray<readonly [string, string]>)
 })
 
 const START = snapshot("1", [["a", "a"]])
+// forgotten.md is the code-owned page of what the owner asked to forget; nothing embeds it.
 const MOVED = snapshot("2", [
   ["a", "b"],
-  ["c", "c"]
+  ["c", "c"],
+  ["forgotten", "e"]
 ])
 const AGAIN = snapshot("3", [
   ["a", "b"],
-  ["c", "d"]
+  ["c", "d"],
+  ["forgotten", "f"]
 ])
 
 it("follows Memory from the poll: once per new head, and again after a failed refresh", async () => {
@@ -126,7 +129,11 @@ it("follows Memory from the poll: once per new head, and again after a failed re
   )
   const indexed = () => Object.fromEntries(stored)
   const versions = (current: Snapshot) =>
-    Object.fromEntries(current.pages.map((page) => [page.page.pageId, page.resource.versionId]))
+    Object.fromEntries(
+      current.pages
+        .filter((page) => page.page.pageId !== "forgotten")
+        .map((page) => [page.page.pageId, page.resource.versionId])
+    )
   const settle = Effect.sleep("30 millis")
 
   const result = await Effect.runPromise(
