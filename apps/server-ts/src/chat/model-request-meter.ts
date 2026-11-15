@@ -1,5 +1,6 @@
 import type { CompletionResponse, ModelProvider, ModelRequestMiddleware } from "@arden-hq/loop"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
+import type { RunUsage } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 
@@ -19,17 +20,20 @@ interface ModelRequestMeter {
   ) => Promise<A>
 }
 
-export const responseUsage = (response: CompletionResponse) => {
+/** One response's usage as a Run records it, with the cost its provider reported, if any. */
+export const responseUsage = (response: CompletionResponse): RunUsage => {
   const prompt = response.usage.prompt_tokens ?? 0
   const completion = response.usage.completion_tokens ?? 0
   const cache_read = response.usage.cache_read_tokens ?? 0
   const cache_write = response.usage.cache_write_tokens ?? 0
+  const cost = response.usage.cost
   return {
     prompt,
     completion,
     cache_read,
     cache_write,
-    total: prompt + completion + cache_read + cache_write
+    total: prompt + completion + cache_read + cache_write,
+    ...(cost === undefined ? {} : { cost })
   }
 }
 

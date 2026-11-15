@@ -58,13 +58,20 @@ const count = (value: number | undefined): number => value ?? 0
 export const usageInputTokens = (usage: Partial<Usage>): number =>
   count(usage.prompt_tokens) + count(usage.cache_read_tokens) + count(usage.cache_write_tokens)
 
+/**
+ * The sum of two reported costs (`Usage.cost`): unknown when either is. Every
+ * total of reported costs, in the loop and its hosts, adds through this.
+ */
+export const addCost = (left: number | undefined, right: number | undefined): number | undefined =>
+  left === undefined || right === undefined ? undefined : left + right
+
 /** Adds a response's usage; a response without a reported cost leaves the total's unknown. */
 export const addUsage = (left: Usage, right: Partial<Usage>): Usage => ({
   prompt_tokens: count(left.prompt_tokens) + count(right.prompt_tokens),
   completion_tokens: count(left.completion_tokens) + count(right.completion_tokens),
   cache_read_tokens: count(left.cache_read_tokens) + count(right.cache_read_tokens),
   cache_write_tokens: count(left.cache_write_tokens) + count(right.cache_write_tokens),
-  cost: left.cost === undefined || right.cost === undefined ? undefined : left.cost + right.cost
+  cost: addCost(left.cost, right.cost)
 })
 
 export interface TextContentDelta {

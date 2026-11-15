@@ -10,6 +10,7 @@ import type {
   ToolResult
 } from "@arden-hq/loop"
 import type { HistoryChange } from "@arden-hq/loop"
+import type { RunUsage } from "@arden-hq/protocol/runs"
 import type { RunPolicy } from "../execution/policy.js"
 import type { RunAuthority } from "../execution/authority.js"
 import type { EffectTarget, EffectTargetOrigin, ToolEffect } from "../execution/tool-effect.js"
@@ -215,13 +216,7 @@ export interface ChatRunnerInput {
   /** Durable provider-response usage; retries reuse the sample identity. */
   readonly recordModelUsage: (input: {
     readonly sampleId: string
-    readonly usage: {
-      readonly prompt: number
-      readonly completion: number
-      readonly total: number
-      readonly cache_read: number
-      readonly cache_write: number
-    }
+    readonly usage: RunUsage
   }) => Promise<void>
   /** Execute and recover tools through the server's durable owner. */
   readonly tools: ChatRunnerTools

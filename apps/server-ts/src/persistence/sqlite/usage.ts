@@ -9,6 +9,7 @@ import { DateTime, Effect, Option } from "effect"
 
 import { UsageStore, UsageStoreError, type StoredSessionUsage } from "../usage/store.js"
 import { backgroundUsage } from "./usage-background.js"
+import { DAILY_COST_SUM } from "./run-usage.js"
 import type { PersistenceDeps } from "./deps.js"
 
 const error = (
@@ -44,6 +45,7 @@ interface DailyRow {
   readonly cache_read: number
   readonly cache_write: number
   readonly runs: number
+  readonly cost: number | null
 }
 
 interface TopSessionRow {
@@ -57,6 +59,7 @@ interface TopSessionRow {
   readonly cache_read: number
   readonly cache_write: number
   readonly runs: number
+  readonly cost: number | null
   readonly average_last_input: number | null
 }
 
@@ -81,6 +84,7 @@ interface ModelCallRow {
   readonly cache_read: number | null
   readonly cache_write: number | null
   readonly total: number | null
+  readonly cost: number | null
   readonly admitted_at: string | null
   readonly responded_at: string | null
 }
@@ -97,8 +101,20 @@ const callUsage = (row: ModelCallRow): RunUsage | null =>
         completion: row.completion,
         cache_read: row.cache_read,
         cache_write: row.cache_write,
-        total: row.total
+        total: row.total,
+        ...withCost(row.cost)
       }
+
+/** A reported cost read back from SQLite, where NULL is unknown; absent from the answer then. */
+const withCost = (cost: number | null): { readonly cost?: number } =>
+  cost === null ? {} : { cost }
+
+/**
+ * The sum of `column` over a group, or NULL when any row's cost is unknown
+ * (`RunUsage.cost`): a partial sum is never reported as the spend.
+ */
+const knownCostSum = (column: string): string =>
+  `CASE WHEN count(*) = count(${column}) THEN coalesce(sum(${column}), 0) END`
 
 const utcDay = (now: DateTime.Utc, back: number): string =>
   utcDayOf(DateTime.toEpochMillis(DateTime.subtract(now, { days: back })))
@@ -116,7 +132,7 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         sql`
       INSERT INTO usage_daily (
         day, space_id, origin, session_type, model_id, kind,
-        total_tokens, output_tokens, cache_read_tokens, cache_write_tokens, runs
+        total_tokens, output_tokens, cache_read_tokens, cache_write_tokens, runs, cost
       )
       SELECT
         date(r.started_at),
@@ -134,7 +150,8 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         sum(json_extract(r.metadata_json, '$.accounted_usage.completion')),
         sum(json_extract(r.metadata_json, '$.accounted_usage.cache_read')),
         sum(json_extract(r.metadata_json, '$.accounted_usage.cache_write')),
-        count(*)
+        count(*),
+        ${sql.literal(knownCostSum("json_extract(r.metadata_json, '$.accounted_usage.cost')"))}
       FROM chat_runs r
       JOIN sessions s ON s.session_id = r.session_id
       WHERE json_extract(r.metadata_json, '$.accounted_usage') IS NOT NULL
@@ -175,7 +192,8 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         u.output_tokens AS output,
         u.cache_read_tokens AS cache_read,
         u.cache_write_tokens AS cache_write,
-        u.runs
+        u.runs,
+        u.cost
       FROM usage_daily u
       LEFT JOIN spaces d ON d.space_id = u.space_id
       WHERE u.day >= ${since} AND u.day < ${until}
@@ -194,6 +212,7 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         sum(json_extract(r.metadata_json, '$.accounted_usage.cache_read')) AS cache_read,
         sum(json_extract(r.metadata_json, '$.accounted_usage.cache_write')) AS cache_write,
         count(*) AS runs,
+        ${sql.literal(knownCostSum("json_extract(r.metadata_json, '$.accounted_usage.cost')"))} AS cost,
         cast(avg(json_extract(r.metadata_json, '$.terminal_result.last_input_tokens')) AS INTEGER)
           AS average_last_input
       FROM chat_runs r
@@ -225,6 +244,7 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         output: row.output,
         cache_read: row.cache_read,
         cache_write: row.cache_write,
+        ...withCost(row.cost),
         runs: row.runs
       })),
       top_sessions: topSessions.map((row) => ({
@@ -237,6 +257,7 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         output: row.output,
         cache_read: row.cache_read,
         cache_write: row.cache_write,
+        ...withCost(row.cost),
         runs: row.runs,
         average_last_input: row.average_last_input
       })),
@@ -280,6 +301,7 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         json_extract(usage_json, '$.cache_read') AS cache_read,
         json_extract(usage_json, '$.cache_write') AS cache_write,
         json_extract(usage_json, '$.total') AS total,
+        json_extract(usage_json, '$.cost') AS cost,
         admitted_at,
         responded_at
       FROM run_model_usage
@@ -323,12 +345,13 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         sql`
       INSERT INTO usage_daily (
         day, space_id, origin, session_type, model_id, kind,
-        total_tokens, output_tokens, cache_read_tokens, cache_write_tokens, runs
+        total_tokens, output_tokens, cache_read_tokens, cache_write_tokens, runs, cost
       )
       SELECT ${day}, coalesce(s.space_id, ${spaceId}),
         CASE WHEN s.origin_automation_id IS NOT NULL THEN 'automation' ELSE 'user' END,
         coalesce(s.session_type, ''), ${input.modelId}, ${input.kind},
-        ${usage.total}, ${usage.completion}, ${usage.cache_read}, ${usage.cache_write}, 1
+        ${usage.total}, ${usage.completion}, ${usage.cache_read}, ${usage.cache_write}, 1,
+        ${usage.cost ?? null}
       FROM (SELECT 1) AS call LEFT JOIN sessions s ON s.session_id = ${sessionId}
       WHERE true
       ON CONFLICT (day, space_id, origin, session_type, model_id, kind) DO UPDATE SET
@@ -336,7 +359,8 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
         output_tokens = output_tokens + excluded.output_tokens,
         cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
         cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
-        runs = runs + excluded.runs
+        runs = runs + excluded.runs,
+        ${sql.literal(DAILY_COST_SUM)}
     `
       )
       .pipe(Effect.mapError(storage("record", "Could not record model-call usage")))

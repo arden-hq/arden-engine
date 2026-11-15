@@ -26,6 +26,7 @@ export const contextOperationsSchemaSection = {
       cache_write_tokens INTEGER NOT NULL DEFAULT 0 CHECK(cache_write_tokens >= 0),
       runs INTEGER NOT NULL DEFAULT 0 CHECK(runs >= 0),
       PRIMARY KEY (day, space_id, origin, session_type, model_id, kind)
-    )`
+    )`,
+    "ALTER TABLE usage_daily ADD COLUMN cost REAL CHECK(cost IS NULL OR cost >= 0)"
   ]
 } as const satisfies OperationalSchemaSection

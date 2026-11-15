@@ -1,4 +1,4 @@
-import type { CompletionResponse } from "@arden-hq/loop"
+import { addCost, type CompletionResponse } from "@arden-hq/loop"
 import { Effect } from "effect"
 import type { ModelCallUsage, UsageStore, UsageTokens } from "../persistence/usage/store.js"
 
@@ -10,12 +10,14 @@ const addResponse = (
   const completion = (tally?.completion ?? 0) + usage.completion_tokens
   const cache_read = (tally?.cache_read ?? 0) + (usage.cache_read_tokens ?? 0)
   const cache_write = (tally?.cache_write ?? 0) + (usage.cache_write_tokens ?? 0)
+  const cost = tally === undefined ? usage.cost : addCost(tally.cost, usage.cost)
   return {
     prompt,
     completion,
     cache_read,
     cache_write,
-    total: prompt + completion + cache_read + cache_write
+    total: prompt + completion + cache_read + cache_write,
+    ...(cost === undefined ? {} : { cost })
   }
 }
 

@@ -39,7 +39,7 @@ export {
 } from "./errors.js"
 export type { AgentError, ProviderErrorCode, ToolFailure } from "./errors.js"
 
-export { ToolChoice, usageInputTokens } from "./contracts/provider.js"
+export { addCost, ToolChoice, usageInputTokens } from "./contracts/provider.js"
 export { decodeMessage } from "./internal/validate.js"
 export { makeRunBudget } from "./agent/budget.js"
 

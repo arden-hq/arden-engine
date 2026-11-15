@@ -1,4 +1,4 @@
-import type { ModelProvider } from "@arden-hq/loop"
+import { addCost, type ModelProvider } from "@arden-hq/loop"
 import { writeAtomicSync } from "@arden-hq/std/atomic-file"
 import { readFileSync } from "node:fs"
 
@@ -95,9 +95,7 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
             usage.completionTokens += count(used["completion_tokens"])
             usage.cacheReadTokens += count(used["cache_read_tokens"])
             usage.cacheWriteTokens += count(used["cache_write_tokens"])
-            const cost = dollars(used["cost"])
-            usage.costUsd =
-              usage.costUsd === null || cost === undefined ? null : usage.costUsd + cost
+            usage.costUsd = addCost(usage.costUsd ?? undefined, dollars(used["cost"])) ?? null
           }
           yield item
         }

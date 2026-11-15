@@ -3,8 +3,8 @@ import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import type { ChatApprovalMode, ChatRunErrorCode } from "@arden-hq/protocol/chat"
 import type { JsonObject } from "../persistence/json.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import type { RunTerminalResult } from "@arden-hq/protocol/runs"
-import { decodeMessage, providerErrorCode } from "@arden-hq/loop"
+import type { RunTerminalResult, RunUsage } from "@arden-hq/protocol/runs"
+import { addCost, decodeMessage, providerErrorCode } from "@arden-hq/loop"
 import type { AgentEvent, Result as LoopResult } from "@arden-hq/loop"
 import { Cause, Effect, Result, Schema, Stream } from "effect"
 import { ChatEventStore } from "../persistence/events/store.js"
@@ -69,7 +69,8 @@ interface RunTotals {
   readonly completion: number
   readonly cacheRead: number
   readonly cacheWrite: number
-  readonly cost: number
+  /** Reported dollars across every leg, unknown once one leg's provider reported none. */
+  readonly cost: number | undefined
   readonly durationMs: number
   readonly toolTimeMs: number
   readonly steps: number
@@ -414,14 +415,8 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
     const terminalResult = {
       text: result.text,
       data: structuredData,
-      usage: {
-        prompt: totals.prompt,
-        completion: totals.completion,
-        total: usage.total,
-        cache_read: totals.cacheRead,
-        cache_write: totals.cacheWrite
-      },
-      cost: totals.cost,
+      usage,
+      ...(totals.cost === undefined ? {} : { cost: totals.cost }),
       duration_ms: totals.durationMs,
       tool_time_ms: totals.toolTimeMs,
       steps: totals.steps,
@@ -619,19 +614,21 @@ const accumulateRunTotals = (previous: RunTotals | undefined, result: LoopResult
   completion: (previous?.completion ?? 0) + result.usage.completion_tokens,
   cacheRead: (previous?.cacheRead ?? 0) + result.usage.cache_read_tokens,
   cacheWrite: (previous?.cacheWrite ?? 0) + result.usage.cache_write_tokens,
-  cost: (previous?.cost ?? 0) + result.cost,
+  // The provider-reported cost, not `result.cost`: the server sets no
+  // `costCalculator`, and a calculator's number cannot say "not reported".
+  cost: previous === undefined ? result.usage.cost : addCost(previous.cost, result.usage.cost),
   durationMs: (previous?.durationMs ?? 0) + result.duration_ms,
   toolTimeMs: (previous?.toolTimeMs ?? 0) + result.tool_time_ms,
   steps: (previous?.steps ?? 0) + result.steps
 })
 
-const runTotalsUsage = (totals: RunTotals) => ({
+const runTotalsUsage = (totals: RunTotals): RunUsage => ({
   prompt: totals.prompt,
   completion: totals.completion,
   total: totals.prompt + totals.completion + totals.cacheRead + totals.cacheWrite,
   cache_read: totals.cacheRead,
   cache_write: totals.cacheWrite,
-  cost: totals.cost
+  ...(totals.cost === undefined ? {} : { cost: totals.cost })
 })
 
 interface PersistedRunFailure {

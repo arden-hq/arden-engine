@@ -12,7 +12,7 @@ export interface ApprovedScan {
 
 export const APPROVED_SCANS: ReadonlyArray<ApprovedScan> = [
   {
-    id: "85b930dd4659",
+    id: "d1d2fb8184ea",
     table: "chat_runs",
     reason: "First fill of the usage rollup from every run. Runs only while usage_daily is empty."
   },
