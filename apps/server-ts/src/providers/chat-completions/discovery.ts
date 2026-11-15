@@ -105,12 +105,16 @@ export const discoverLlamaCpp = async (
       const loaded = decodeProps(own.body)
       if (own.status === 200 && Option.isSome(loaded))
         return llamaModel(id, loaded.value, undefined)
-      // A listed model the router answers 400 for is not loaded ("model is
-      // not loaded"): its window is the `--ctx-size` the router will start
-      // its child with.
-      if (own.status === 400)
+      // b12359 answers an unloaded model with 400 `{"error":{"code":400,
+      // "message":"model is not loaded","type":"invalid_request_error"}}`
+      // (checked live on 2026-11-16); its window is then the `--ctx-size`
+      // the router will start its child with. Any other answer is an error.
+      const message = Option.getOrUndefined(decodeErrorMessage(own.body))
+      if (own.status === 400 && message === NOT_LOADED)
         return llamaModel(id, undefined, ctxSizeArgument(listing.status?.args ?? []))
-      throw new DiscoveryError(`${root}/props for ${id} answered HTTP ${own.status}`)
+      throw new DiscoveryError(
+        `${root}/props for ${id} answered HTTP ${own.status}${message === undefined ? "" : `: ${message}`}`
+      )
     })
   )
 }
@@ -280,6 +284,25 @@ const explicitCache = (id: string): boolean =>
 const serverRoot = (baseUrl: string): string => baseUrl.replace(/\/v1$/, "")
 
 /** The `--ctx-size` value in a router child's arguments, as `/v1/models` lists them. */
+const NOT_LOADED = "model is not loaded"
+
+const decodeErrorMessage = (body: unknown): Option.Option<string> =>
+  Option.map(decodeErrorBody(body), (decoded) => decoded.error.message)
+
+const decodeErrorBody = Schema.decodeUnknownOption(
+  Schema.Struct({ error: Schema.Struct({ message: Schema.String }) })
+)
+
+/**
+ * The window an unloaded router model's child will start with. The router
+ * writes these arguments itself, always as `--ctx-size N`, however the
+ * owner spelled it: on b12359 `-c 8192` on the router's command line and
+ * `c = 4096` or `ctx-size = 3072` in a `--models-preset` file all came out
+ * as `--ctx-size`, `N` (checked live on 2026-11-16), so `-c N` and
+ * `--ctx-size=N` never reach this list. A window set through the
+ * environment (`LLAMA_ARG_CTX_SIZE`) reaches the child but not the list, so
+ * it cannot be seen here: the window stays unknown and `contextLimit` names it.
+ */
 const ctxSizeArgument = (args: ReadonlyArray<string>): number | undefined => {
   const at = args.indexOf("--ctx-size")
   return at === -1 ? undefined : Number(args[at + 1])

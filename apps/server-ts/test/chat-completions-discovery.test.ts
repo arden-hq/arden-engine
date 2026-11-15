@@ -128,6 +128,24 @@ describe("discoverLlamaCpp", () => {
     )
   })
 
+  it("reports a router's other 400 as the error it is, not as an unloaded model", async () => {
+    const llama = server({
+      "http://127.0.0.1:9951/props": ok(await fixture("llama-router-props.json")),
+      "http://127.0.0.1:9951/v1/models": ok(await fixture("llama-router-models-unloaded.json")),
+      "http://127.0.0.1:9951/props?model=gemma-8k&autoload=false": {
+        status: 400,
+        body: {
+          error: { code: 400, message: "model 'gemma-8k' not found", type: "invalid_request_error" }
+        }
+      }
+    })
+    await expect(
+      discoverLlamaCpp(llama.input("http://127.0.0.1:9951/v1"), ["gemma-8k"])
+    ).rejects.toThrow(
+      "http://127.0.0.1:9951/props for gemma-8k answered HTTP 400: model 'gemma-8k' not found"
+    )
+  })
+
   it("leaves the window unknown when no source gives one", async () => {
     // The router also lists a model from the download cache, started with no `--ctx-size`.
     const llama = server({
