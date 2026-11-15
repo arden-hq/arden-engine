@@ -9,9 +9,7 @@ import {
   WikiPageListQuerySchema,
   WikiPagePageSchema,
   WikiPageSchema,
-  WikiRenameApprovalListResponseSchema,
-  WikiRenameApprovalSchema,
-  WikiRenameRejectRequestSchema,
+  WikiRenamePlanSchema,
   WikiRenameRequestSchema,
   WikiRevisionConflictEnvelopeSchema,
   WikiResourceDiffPageSchema,
@@ -30,8 +28,6 @@ const WikiConflictSchema = Schema.Union([
 ]).pipe(HttpApiSchema.status("Conflict"))
 
 const wikiWriteErrors = [WikiConflictSchema, ...storeErrors] as const
-
-const WikiRenameApprovalIdSchema = Schema.NonEmptyString.check(Schema.isMaxLength(512))
 
 export class WikiApi extends HttpApiGroup.make("wiki", { topLevel: true }).add(
   HttpApiEndpoint.get("list", "/admin/wiki/pages", {
@@ -91,24 +87,14 @@ export class WikiApi extends HttpApiGroup.make("wiki", { topLevel: true }).add(
     success: WikiPageLinksSchema,
     error: storeErrors
   }),
-  HttpApiEndpoint.get("listRenameApprovals", "/admin/wiki/rename-approvals", {
-    success: WikiRenameApprovalListResponseSchema,
-    error: storeErrors
-  }),
-  HttpApiEndpoint.post("requestRename", "/admin/wiki/rename-approvals", {
+  HttpApiEndpoint.post("planRename", "/admin/wiki/rename/preview", {
     payload: WikiRenameRequestSchema,
-    success: WikiRenameApprovalSchema,
+    success: WikiRenamePlanSchema,
     error: wikiWriteErrors
   }),
-  HttpApiEndpoint.post("acceptRename", "/admin/wiki/rename-approvals/:approvalId/accept", {
-    params: { approvalId: WikiRenameApprovalIdSchema },
-    success: WikiRenameApprovalSchema,
-    error: wikiWriteErrors
-  }),
-  HttpApiEndpoint.post("rejectRename", "/admin/wiki/rename-approvals/:approvalId/reject", {
-    params: { approvalId: WikiRenameApprovalIdSchema },
-    payload: Schema.UndefinedOr(WikiRenameRejectRequestSchema),
-    success: WikiRenameApprovalSchema,
+  HttpApiEndpoint.post("rename", "/admin/wiki/rename", {
+    payload: WikiRenameRequestSchema,
+    success: WikiRenamePlanSchema,
     error: wikiWriteErrors
   })
 ) {}

@@ -45,10 +45,6 @@ export const WikiRenameRequestContextSchema = Schema.Struct({
   input: RenameWikiPageInputSchema
 })
 
-export const WikiRenameRejectInputSchema = Schema.Struct({
-  resolution: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(4_000))))
-})
-
 export const WikiCreateRequestSchema = Schema.Struct({
   path: WikiPathSchema,
   title: WikiTitleSchema,
@@ -76,10 +72,6 @@ export const WikiRenameRequestSchema = Schema.Struct({
   new_title: WikiTitleSchema,
   expected_version: WikiRevisionIdSchema,
   expected_head: WikiRevisionIdSchema
-})
-
-export const WikiRenameRejectRequestSchema = Schema.Struct({
-  resolution: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(4_000))))
 })
 
 /** Encode the public create input into the server's revision-aware request body. */
@@ -137,14 +129,6 @@ export const encodeRenameWikiRequestEffect = (value: unknown) =>
     })),
     Effect.flatMap((request) =>
       Schema.decodeUnknownEffect(WikiRenameRequestSchema)(request, strict)
-    ),
-    Effect.map(JSON.stringify)
-  )
-
-export const encodeRejectWikiRenameRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(WikiRenameRejectInputSchema)(value, strict).pipe(
-    Effect.flatMap((request) =>
-      Schema.decodeUnknownEffect(WikiRenameRejectRequestSchema)(request, strict)
     ),
     Effect.map(JSON.stringify)
   )

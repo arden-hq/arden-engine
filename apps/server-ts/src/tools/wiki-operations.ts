@@ -560,8 +560,8 @@ const makeWikiOperationTools = ({
         save: async ({ head, records: [record], writer, run }) => {
           if (record.resource.path === input.new_path) return [keptPage(record)]
           const expectedVersion = requireObserved(ctx.run, record)
-          const requested = await run(
-            wiki.requestRename({
+          const renamed = await run(
+            wiki.rename({
               pageId: record.page.pageId,
               newPath: input.new_path,
               newTitle: record.page.title,
@@ -570,15 +570,7 @@ const makeWikiOperationTools = ({
               ...writer(`move wiki page ${record.resource.path} to ${input.new_path}`)
             })
           )
-          const accepted = await run(wiki.acceptRename({ approvalId: requested.approvalId }))
-          if (accepted.status !== "accepted") {
-            throw new ToolExecutionError(
-              accepted.resolution ??
-                "The Wiki changed before the move could be committed. Read the page and retry.",
-              { preview: "Wiki move not applied", retryable: true }
-            )
-          }
-          rewritten = { links: accepted.linkCount, pages: accepted.pageCount }
+          rewritten = { links: renamed.linkCount, pages: renamed.pageCount }
           return [{ page: await run(wiki.read(record.page.pageId)), before: expectedVersion }]
         }
       })

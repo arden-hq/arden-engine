@@ -1,4 +1,3 @@
-import { nonRelativePathSegment } from "../../common/routes.js"
 import { Effect, Schema } from "effect"
 import { NonNegativeIntSchema, PositiveIntSchema } from "../../common/schema.js"
 import { strict, trimmedText, WikiPageIdSchema, WikiRevisionIdSchema } from "./shared.js"
@@ -37,8 +36,6 @@ export const WikiVersionDiffRouteOptionsSchema = Schema.Struct({
   before: WikiRevisionIdSchema,
   after: WikiRevisionIdSchema
 })
-
-export const WikiRenameDecisionSchema = Schema.Literals(["accept", "reject"] as const)
 
 /** HTTP query codecs. Plain client options remain camel-case above. */
 export const WikiPageListQuerySchema = Schema.Struct({
@@ -173,17 +170,4 @@ export const encodeWikiVersionDiffPathEffect = (value: unknown) =>
 export const encodeWikiLinksPathEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(WikiPageIdSchema)(value, strict).pipe(
     Effect.map((pageId) => `${encodePagePath(pageId)}/links`)
-  )
-
-export const encodeWikiRenameDecisionPathEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(
-    Schema.Struct({
-      approvalId: trimmedText(512).check(nonRelativePathSegment),
-      decision: WikiRenameDecisionSchema
-    })
-  )(value, strict).pipe(
-    Effect.map(
-      ({ approvalId, decision }) =>
-        `/admin/wiki/rename-approvals/${encodeURIComponent(approvalId)}/${decision}`
-    )
   )

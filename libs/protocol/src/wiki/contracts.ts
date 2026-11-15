@@ -166,19 +166,14 @@ export interface WikiPageLinks extends JsonRecord {
   readonly cameFrom: ReadonlyArray<WikiPageChat>
 }
 
-export type WikiRenameApprovalStatus = "pending" | "applying" | "accepted" | "rejected"
-
-export interface WikiRenameApproval extends JsonRecord {
-  readonly approvalId: string
+/** The pages and links a rename changes. */
+export interface WikiRenamePlan extends JsonRecord {
   readonly oldPath: string
   readonly newPath: string
   readonly oldTitle: string
   readonly newTitle: string
   readonly linkCount: number
   readonly pageCount: number
-  readonly status: WikiRenameApprovalStatus
-  readonly createdAt: string
-  readonly resolution: string | null
 }
 
 /** Structured detail returned for a stale Wiki write. */
