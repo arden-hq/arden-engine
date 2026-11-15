@@ -105,7 +105,7 @@ The provider owns prompt caching, replay state and transport retry. The host own
 One implementation per concern, in the kit, so every adapter behaves the same:
 
 - `streamSse` is the connection loop: auth headers per attempt, one forced refresh on a 401 before anything was emitted, the error body read into the failure, the idle timeout, and the bounded retry announced by `ProviderStreamRetry`. An adapter supplies the URL, the body and an event mapper.
-- `classifyRejection` maps a refusal to a `ProviderErrorCode`. It holds the one table of context-overflow and model-unavailable wordings for every server we talk to.
+- `classifyRejection` maps a refusal to a `ProviderErrorCode`. It holds the one table of context-overflow and model-unavailable wordings for every server we talk to. An overflow is decided by a structured class first, then HTTP 413, then the server's own message on a 400; a status that names its class (auth, throttle, unavailable) is never an overflow by prose, and a router's relayed upstream payload is never read.
 - `orderToolHistory` puts each tool output right after its call, holds context back while calls are pending, and closes an interrupted call with a "not recorded" output.
 - `contextBlockText` is how a `context` block reads to a model on any wire.
 - `answerToolSearch` answers a client tool search: it reads the arguments (malformed ones get a correction the model can act on), runs `ToolSearch.search`, and writes the result text and `loaded_tool_names` the history keeps. `TOOL_SEARCH_TOOL_NAME` is the search's name on every wire.

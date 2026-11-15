@@ -48,7 +48,7 @@ export const errorFrameFailure = (label: string, chunk: unknown): ProviderError 
   const error = isRecord(chunk) && isRecord(chunk.error) ? chunk.error : {}
   const status = typeof error.code === "number" ? error.code : undefined
   const fields = rejectionFields(chunk)
-  const code = classifyRejection({ status, ...fields, text: JSON.stringify(error) }, DECLARED_CODES)
+  const code = classifyRejection({ status, ...fields }, DECLARED_CODES)
   const named = fields.code ?? (status === undefined ? undefined : String(status))
   const head = named === undefined ? `${label} stream failed` : `${label} stream failed (${named})`
   const said = fields.message === undefined ? "" : clipLine(fields.message, MAX_STATUS_DETAIL_CHARS)
