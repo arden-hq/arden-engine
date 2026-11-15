@@ -1,6 +1,8 @@
 // Classifies every Memory page on the replay copy as knowledge, record or contract, and replays
-// past successful writes from `tool_calls` through today's commit rules. It prints and asserts
-// counts only, and skips unless ARDEN_REPLAY_COPY names a copy:
+// past successful writes from `tool_calls` through today's commit rules, each as the operation
+// its tool commits: a create, an update, a move, an archive, or a merge's redirect. Space and
+// directory ownership checks, and a rename's link rewrites in other pages, are not replayed. It
+// prints and asserts counts only, and skips unless ARDEN_REPLAY_COPY names a copy:
 //   ARDEN_REPLAY_COPY=<folder> npx vitest run test/records-replay.test.ts
 import { join } from "node:path"
 import {
@@ -16,11 +18,15 @@ import { systemHandlerForAutomation } from "../src/automations/system.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { markedProducer, pageKind, recordFolders } from "../src/wiki/collections.js"
 import {
+  archivePage,
   createPage,
+  movePage,
   requireCommitRules,
   updatePage,
-  type WikiCommitOrigin
+  type WikiCommitOrigin,
+  type WikiPageOperation
 } from "../src/wiki/commit.js"
+import { formatRedirectPage } from "../src/wiki/page.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 
@@ -90,6 +96,41 @@ const commitOrigin = (writer: Writer, automationId: string | null): WikiCommitOr
   }
 }
 
+type Replayed = "create" | "update" | "move" | "archive" | "merge"
+
+/** The operation a past call commits on the page now at `path`, or undefined if it is gone. */
+const replayedOperation = Effect.fn("replayedOperation")(function* (
+  repository: ManagedFileRepositoryShape,
+  tool: (typeof WRITES)[number],
+  path: string,
+  newPath: string | undefined
+) {
+  if (tool === "wiki_create_page")
+    return { replayed: "create" as const, operation: createPage("replay", path, "") }
+  const current = yield* repository.findByPath(path)
+  if (current === null) return undefined
+  const text = new TextDecoder().decode(yield* repository.readVersion(current))
+  const replayed: { readonly replayed: Replayed; readonly operation: WikiPageOperation } =
+    tool === "wiki_move_page" && newPath !== undefined
+      ? { replayed: "move", operation: movePage(current, newPath) }
+      : tool === "wiki_archive_page"
+        ? { replayed: "archive", operation: archivePage(current) }
+        : tool === "wiki_merge_page"
+          ? {
+              replayed: "merge",
+              operation: updatePage(
+                current,
+                formatRedirectPage({
+                  pageId: current.resourceId,
+                  title: path,
+                  redirectTo: "replay-target"
+                })
+              )
+            }
+          : { replayed: "update", operation: updatePage(current, text) }
+  return replayed
+})
+
 const withCopyMemory = <A, E>(
   wiki: string,
   body: (repository: ManagedFileRepositoryShape) => Effect.Effect<A, E>
@@ -108,7 +149,7 @@ const withCopyMemory = <A, E>(
     )
   )
 
-it("classifies every page on the copy, and refuses only upkeep's past writes to records", async (context) => {
+it("classifies every page on the copy, and refuses upkeep's every write to records and others' only by kind", async (context) => {
   if (located.kind === "absent") return context.skip(located.reason)
   const copy = located.copy
 
@@ -117,7 +158,7 @@ it("classifies every page on the copy, and refuses only upkeep's past writes to 
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       return yield* sql<{
-        readonly tool_name: string
+        readonly tool_name: (typeof WRITES)[number]
         readonly arguments_json: string
         readonly origin_kind: string | null
         readonly automation_id: string | null
@@ -161,27 +202,40 @@ it("classifies every page on the copy, and refuses only upkeep's past writes to 
 
       const writes = new Map<
         Writer,
-        { toRecords: number; refused: number; refusedElsewhere: number }
+        {
+          toRecords: number
+          refused: Partial<Record<Replayed, number>>
+          refusedElsewhere: number
+          updatesRefused: number
+          gone: number
+        }
       >()
       for (const call of calls) {
         const writer = writerOf(call.origin_kind, call.automation_id)
         const args = Schema.decodeUnknownSync(Schema.fromJsonString(Paths))(call.arguments_json)
-        const paths = [args.path, args.new_path, ...(args.edits ?? []).map((edit) => edit.path)]
+        const paths = [args.path, ...(args.edits ?? []).map((edit) => edit.path)]
         for (const path of paths) {
           if (path === undefined) continue
-          const toRecord = pageKind(folders, path).kind !== "knowledge"
-          const current = yield* repository.findByPath(path)
-          const operation =
-            current === null
-              ? createPage("replay", path, "")
-              : updatePage(
-                  current,
-                  new TextDecoder().decode(yield* repository.readVersion(current))
-                )
+          const counts = writes.get(writer) ?? {
+            toRecords: 0,
+            refused: {},
+            refusedElsewhere: 0,
+            updatesRefused: 0,
+            gone: 0
+          }
+          writes.set(writer, counts)
+          const replay = yield* replayedOperation(repository, call.tool_name, path, args.new_path)
+          if (replay === undefined) {
+            counts.gone += 1
+            continue
+          }
+          const toRecord = [path, args.new_path].some(
+            (touched) => touched !== undefined && pageKind(folders, touched).kind !== "knowledge"
+          )
           const refused = yield* requireCommitRules(
             repository,
             commitOrigin(writer, call.automation_id),
-            [operation]
+            [replay.operation]
           ).pipe(
             Effect.match({
               onFailure: (error) =>
@@ -189,12 +243,11 @@ it("classifies every page on the copy, and refuses only upkeep's past writes to 
               onSuccess: () => false
             })
           )
-          const counts = writes.get(writer) ?? { toRecords: 0, refused: 0, refusedElsewhere: 0 }
-          writes.set(writer, {
-            toRecords: counts.toRecords + Number(toRecord),
-            refused: counts.refused + Number(refused && toRecord),
-            refusedElsewhere: counts.refusedElsewhere + Number(refused && !toRecord)
-          })
+          counts.toRecords += Number(toRecord)
+          if (refused && toRecord)
+            counts.refused[replay.replayed] = (counts.refused[replay.replayed] ?? 0) + 1
+          counts.refusedElsewhere += Number(refused && !toRecord)
+          counts.updatesRefused += Number(refused && replay.replayed === "update")
         }
       }
       return { pages, writes: Object.fromEntries([...writes].sort()) }
@@ -207,7 +260,9 @@ it("classifies every page on the copy, and refuses only upkeep's past writes to 
   )
   expect(outcome.pages.markedOutsideFolders).toBe(0)
   for (const [writer, counts] of Object.entries(outcome.writes)) {
+    const refused = Object.values(counts.refused).reduce((sum, count) => sum + count, 0)
     expect(counts.refusedElsewhere, writer).toBe(0)
-    expect(counts.refused, writer).toBe(writer === "upkeep" ? counts.toRecords : 0)
+    if (writer === "upkeep") expect(refused, writer).toBe(counts.toRecords)
+    else expect(counts.updatesRefused, writer).toBe(0)
   }
 }, 600_000)
