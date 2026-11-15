@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest"
 import { buildSpaceReviewInput } from "../src/automations/space-review-input.js"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { toolFacts } from "../src/tools/approval-decision.js"
-import { prepareMemorySources } from "../src/memory/retrieval.js"
+import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import { WikiEventOutbox } from "../src/persistence/automations/wiki-event-outbox.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
@@ -442,8 +442,12 @@ describe("forgetting a line", () => {
         const query = "sam does not live in the old town river forgotten"
         const prepared = prepareMemorySources({
           pages: snapshot.pages,
-          recall: { query, excludedPageIds: new Set() },
-          today: "2026-11-15",
+          recall: recallCandidates({
+            pages: snapshot.pages,
+            query: query,
+            today: "2026-11-15",
+            sentElsewhere: new Set()
+          }),
           lastChanged: new Map()
         })
         const upkeep = makeWikiMaintenanceMethods(memory.repository)

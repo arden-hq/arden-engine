@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 
-import { prepareMemorySources } from "../src/memory/retrieval.js"
+import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import {
   changedAgo,
   lastChangedLine,
@@ -61,8 +61,12 @@ describe("page age", () => {
     const undated = page("areas/career/applications/cohere.md", "Cohere", "Status: Applied.")
     const recall = prepareMemorySources({
       pages: [elicit, undated],
-      recall: { query: "elicit cohere application status applied", excludedPageIds: new Set() },
-      today: "2026-11-14",
+      recall: recallCandidates({
+        pages: [elicit, undated],
+        query: "elicit cohere application status applied",
+        today: "2026-11-14",
+        sentElsewhere: new Set()
+      }),
       lastChanged: lastChangedLines(
         new Map([
           [elicit.page.pageId, { createdAt: null, updatedAt: "2026-09-15T01:39:16Z" }],

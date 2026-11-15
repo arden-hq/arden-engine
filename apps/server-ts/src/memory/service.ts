@@ -15,7 +15,7 @@ import { spacePageIndex } from "../wiki/space-index.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { prepareMemorySources, tooOldToRecall, type MemorySources } from "./retrieval.js"
+import { prepareMemorySources, recallCandidates, type MemorySources } from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -76,21 +76,21 @@ const sources = Effect.fn("Memory.sources")(function* (
         })
     )
   )
+  const now = DateTime.toEpochMillis(yield* DateTime.now)
   const recall =
     valid.recall === undefined
       ? undefined
-      : { query: valid.recall.query, excludedPageIds: new Set(valid.recall.excludePageIds ?? []) }
-  const now = DateTime.toEpochMillis(yield* DateTime.now)
-  const today = localDayOf(now, machineTimeZone())
+      : recallCandidates({
+          pages: current.pages,
+          query: valid.recall.query,
+          today: localDayOf(now, machineTimeZone()),
+          sentElsewhere: new Set(valid.recall.excludePageIds ?? [])
+        })
   const semantic =
     recall === undefined
       ? []
       : yield* embeddings
-          .search(
-            current,
-            recall.query,
-            new Set([...recall.excludedPageIds, ...tooOldToRecall(current.pages, today)])
-          )
+          .search(current, recall.query, recall.excluded)
           .pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
@@ -109,7 +109,6 @@ const sources = Effect.fn("Memory.sources")(function* (
     lastChanged: lastChangedLines(times, now),
     pages: current.pages,
     recall,
-    today,
     semanticMatches: semantic
   })
   const chats = yield* discussedIn({

@@ -16,7 +16,7 @@ import {
   type TurnContextServices
 } from "../src/context/turn-context.js"
 import { unrecordedAuthority, type Actor, type RunAuthority } from "../src/execution/authority.js"
-import { prepareMemorySources, recallQuery } from "../src/memory/retrieval.js"
+import { prepareMemorySources, recallCandidates, recallQuery } from "../src/memory/retrieval.js"
 import type { Memory, MemoryTurn } from "../src/memory/service.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
@@ -170,11 +170,12 @@ const compose = async ({
           recall:
             input.recall === undefined
               ? undefined
-              : {
+              : recallCandidates({
+                  pages,
                   query: input.recall.query,
-                  excludedPageIds: new Set(input.recall.excludePageIds ?? [])
-                },
-          today: "2026-11-14",
+                  today: "2026-11-14",
+                  sentElsewhere: new Set(input.recall.excludePageIds ?? [])
+                }),
           lastChanged: new Map()
         }).render(new Map())
       })
