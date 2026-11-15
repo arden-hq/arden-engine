@@ -194,21 +194,23 @@ export const makeWikiMutationMethods = (
   })
 
   const update = Effect.fn("Wiki.update")(function* (input: WikiUpdateInput) {
-    const [{ pageId }] = input.edits
+    const page: { readonly pageId?: string } =
+      input.edits.length === 1 ? { pageId: input.edits[0].pageId } : {}
     return yield* withConflictDetail(
       repository,
       Effect.gen(function* () {
         if (new Set(input.edits.map((edit) => edit.pageId)).size !== input.edits.length) {
-          return yield* wikiError("update", "invalid", "An update names a page twice", { pageId })
+          return yield* wikiError("update", "invalid", "An update names a page twice")
         }
         const snapshot = yield* loadSnapshot(repository, "update")
-        // A replayable write read before its head moved may have landed already; its receipt decides.
+        // A replayable write read before its head moved may have landed already; its receipt decides
+        // whatever is not already current.
         const replay = input.commit.replayKey !== undefined && snapshot.head !== input.expectedHead
         const edits = yield* Effect.forEach(
           input.edits,
           Effect.fn("Wiki.updateWrite")(function* (edit: WikiPageEdit) {
             const current = replay
-              ? undefined
+              ? snapshot.wholeSet.find((record) => record.page.pageId === edit.pageId)
               : yield* requireCurrent(
                   "update",
                   snapshot,
@@ -228,15 +230,13 @@ export const makeWikiMutationMethods = (
             { repository, spaces },
             { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
             writes
-          ).pipe(Effect.mapError(mapRevisionError("update", pageId)))
+          ).pipe(Effect.mapError(mapRevisionError("update", page.pageId)))
         } else {
           const latestHead = yield* repository.currentRevision.pipe(
-            Effect.mapError(mapRevisionError("update", pageId))
+            Effect.mapError(mapRevisionError("update", page.pageId))
           )
           if (latestHead !== snapshot.head) {
-            return yield* wikiError("update", "conflict", "Wiki changed during the update", {
-              pageId
-            })
+            return yield* wikiError("update", "conflict", "Wiki changed during the update", page)
           }
         }
         return yield* Effect.forEach(

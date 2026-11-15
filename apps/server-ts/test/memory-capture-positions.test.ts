@@ -129,6 +129,45 @@ it("saves a Capture patch set once on replay, and none of it when one page confl
   })
 })
 
+it("replays a Capture patch set whose first save left out an unchanged page", async () => {
+  await withWikiRepository(async ({ repository, wiki, save }) => {
+    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
+    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
+    const head = () => Effect.runPromise(repository.currentRevision)
+    const [read, [a, b]] = [
+      await head(),
+      await Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
+    ]
+    const patch = () =>
+      Effect.runPromise(
+        captureUpdate(wiki, read, [
+          { pageId: "a", content: a.content.replace("A1", "A2"), expectedVersion: a.version },
+          { pageId: "b", content: b.content, expectedVersion: b.version }
+        ])
+      )
+    const landed = await patch().then(head)
+    expect(await patch().then(head)).toBe(landed)
+  })
+})
+
+it("names no single page in a conflict of a patch set", async () => {
+  await withWikiRepository(async ({ wiki, save }) => {
+    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
+    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
+    const [a, b] = await Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
+    await save({ pageId: "b", path: "b.md", body: "B9\n", origin: ownerEdit })
+    const error = await Effect.runPromise(
+      Effect.flip(
+        captureUpdate(wiki, a.repositoryHead, [
+          { pageId: "a", content: a.content.replace("A1", "A2"), expectedVersion: a.version },
+          { pageId: "b", content: b.content.replace("B1", "B2"), expectedVersion: b.version }
+        ])
+      )
+    )
+    expect([error.reason, error.pageId]).toEqual(["conflict", undefined])
+  })
+})
+
 const CAPTURE_RUN = {
   run_context: {
     origin: { kind: "automation", automation_id: "builtin-memory-capture", occurrence_id: "o" },
