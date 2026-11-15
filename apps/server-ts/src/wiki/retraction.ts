@@ -117,20 +117,30 @@ export const claimKey = (line: string): string | undefined => {
 const claimKeys = (body: string): ReadonlySet<string> =>
   new Set(body.split("\n").flatMap((line) => claimKey(line) ?? []))
 
-/** The first open retraction a page change would put a line of back, with that line. */
+/** Each guarded line, in its compared form, with the open retraction that guards it. */
+export const guardedLines = (
+  open: ReadonlyArray<OpenRetraction>
+): ReadonlyMap<string, OpenRetraction> =>
+  new Map(
+    open.flatMap((entry) =>
+      entry.removed.flatMap(({ line }) => {
+        const key = claimKey(line)
+        return key === undefined ? [] : [[key, entry] as const]
+      })
+    )
+  )
+
+/** The open retraction a page change would put a line of back, if any. */
 export const putBack = (
-  open: ReadonlyArray<OpenRetraction>,
+  guarded: ReadonlyMap<string, OpenRetraction>,
   before: string | undefined,
   after: string
-): { readonly entry: OpenRetraction; readonly line: string } | undefined => {
+): OpenRetraction | undefined => {
+  if (guarded.size === 0) return undefined
   const had = before === undefined ? new Set<string>() : claimKeys(before)
-  const added = [...claimKeys(after)].filter((key) => !had.has(key))
-  for (const entry of open) {
-    const removed = entry.removed.find(({ line }) => {
-      const key = claimKey(line)
-      return key !== undefined && added.includes(key)
-    })
-    if (removed !== undefined) return { entry, line: removed.line }
+  for (const key of claimKeys(after)) {
+    const entry = had.has(key) ? undefined : guarded.get(key)
+    if (entry !== undefined) return entry
   }
   return undefined
 }

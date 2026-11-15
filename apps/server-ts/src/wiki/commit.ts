@@ -10,7 +10,7 @@ import { Effect, Option, Schema } from "effect"
 
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { aliasesAreHuman, parseWikiPage } from "./page.js"
-import { openRetractions, putBack, retractionRefusal } from "./retraction.js"
+import { guardedLines, openRetractions, putBack, retractionRefusal } from "./retraction.js"
 import { isSystemPage } from "./system-pages.js"
 
 export type WikiCommitOrigin =
@@ -372,8 +372,8 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
   repository: ManagedFileRepositoryShape,
   operations: ReadonlyArray<WikiPageOperation>
 ): Effect.fn.Return<void, WikiCommitError> {
-  const open = yield* openRetractions(repository)
-  if (open.length === 0) return
+  const guarded = guardedLines(yield* openRetractions(repository))
+  if (guarded.size === 0) return
   for (const operation of operations) {
     if (operation._tag === "Archive") continue
     const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
@@ -388,11 +388,11 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
       before === null || operation._tag === "Restore" || before.state !== "active"
         ? undefined
         : yield* pageBody(yield* repository.readVersion(before))
-    const found = putBack(open, had, after)
-    if (found !== undefined)
+    const entry = putBack(guarded, had, after)
+    if (entry !== undefined)
       return yield* new WikiCommitRuleError({
         rule: "retraction",
-        message: retractionRefusal(path, found.entry)
+        message: retractionRefusal(path, entry)
       })
   }
 })
