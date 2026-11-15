@@ -142,8 +142,7 @@ const absorbBatch = Effect.fn("AutomationEventBatch.absorbBatch")(function* (opt
 
 /** Wiki Maintenance reads every commit since its own head, so a Memory change
  * only wakes it. One claim takes every waiting change the fold rule allows into
- * its run instead of one run per change. Its timer and requests by hand stay
- * queued. */
+ * its run instead of one run per change. Requests by hand stay queued. */
 const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges")(
   function* (options: {
     readonly sql: SqlClient.SqlClient
