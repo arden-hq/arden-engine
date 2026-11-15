@@ -1,0 +1,23 @@
+{
+  "name": "llama-cpp-replace-model-before-running",
+  "provider": "chat-completions",
+  "server": "llama.cpp",
+  "baseUrl": "http://127.0.0.1:8080/v1",
+  "model": "REPLACE_WITH_MODEL_ID",
+  "reasoningEffort": null,
+  "contextLimit": 32768,
+  "timeoutMs": 1800000,
+  "maxModelRequests": 100,
+  "tools": [
+    "spawn_agent",
+    "exec_command",
+    "write_stdin",
+    "file_read",
+    "file_list",
+    "file_find",
+    "file_search_text",
+    "file_write",
+    "file_edit"
+  ],
+  "memory": false
+}

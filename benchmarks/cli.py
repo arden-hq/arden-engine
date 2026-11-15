@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from datasets import SUITES, case_for, official_prediction, read_rows
-from mcp_env import mcp_environment
+from profile_env import profile_environment
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -150,15 +150,8 @@ def invoke_candidate(profile, job, directory, image=None, keep_home=False):
         if key in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT")
     }
     config = json.loads(Path(profile).read_text())
-    if config["apiKeyEnv"] not in os.environ:
-        raise ValueError(f"Missing {config['apiKeyEnv']}")
-    environment[config["apiKeyEnv"]] = os.environ[config["apiKeyEnv"]]
-    if config.get("accountIdEnv"):
-        if config["accountIdEnv"] not in os.environ:
-            raise ValueError(f"Missing {config['accountIdEnv']}")
-        environment[config["accountIdEnv"]] = os.environ[config["accountIdEnv"]]
-    mcp_values = mcp_environment(config, os.environ.get)
-    environment.update(mcp_values)
+    forwarded = profile_environment(config, os.environ.get)
+    environment.update(forwarded)
     environment["ARDEN_DIR"] = str(directory / "state")
     if keep_home and "HOME" in os.environ:
         # A benchmark's own sandbox: its home holds what the task set up there.
@@ -189,10 +182,7 @@ def invoke_candidate(profile, job, directory, image=None, keep_home=False):
             f"type=bind,src={directory},dst=/trial",
             "--mount",
             f"type=bind,src={Path(profile).resolve()},dst=/profile.json,readonly",
-            "--env",
-            config["apiKeyEnv"],
-            *(["--env", config["accountIdEnv"]] if config.get("accountIdEnv") else []),
-            *(part for source in mcp_values for part in ("--env", source)),
+            *(part for source in forwarded for part in ("--env", source)),
             "--env",
             "ARDEN_DIR=/trial/state",
             "--env",

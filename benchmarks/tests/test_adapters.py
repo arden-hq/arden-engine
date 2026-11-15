@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datasets import case_for, official_prediction
 import cli
 from cli import export_predictions, write_json
+from profile_env import profile_environment
 
 
 class Adapters(unittest.TestCase):
@@ -242,6 +243,39 @@ class HarborReport(unittest.TestCase):
             self.assertEqual(report["reward_mean"], 1.0)
             self.assertEqual(report["reward_mean_ungraded_as_zero"], 0.5)
             self.assertEqual(report["rows"][0]["seconds"], 60)
+
+
+class ForwardedVariables(unittest.TestCase):
+    host = {
+        "OPENROUTER_API_KEY": "or-not-a-secret",
+        "CODEX_ACCOUNT": "account-1",
+        "SEARCH_KEY": "search-1",
+        "UNRELATED": "must-not-pass",
+    }
+
+    def test_a_trial_forwards_only_the_variables_its_profile_names(self):
+        self.assertEqual(
+            profile_environment(
+                {
+                    "provider": "codex",
+                    "apiKeyEnv": "OPENROUTER_API_KEY",
+                    "accountIdEnv": "CODEX_ACCOUNT",
+                    "mcpServers": [{"name": "search", "environment": {"KEY": "SEARCH_KEY"}}],
+                },
+                self.host.get,
+            ),
+            {
+                "OPENROUTER_API_KEY": "or-not-a-secret",
+                "CODEX_ACCOUNT": "account-1",
+                "SEARCH_KEY": "search-1",
+            },
+        )
+
+    def test_a_local_server_has_no_key_and_a_named_key_must_be_set(self):
+        local = {"provider": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1"}
+        self.assertEqual(profile_environment(local, self.host.get), {})
+        with self.assertRaisesRegex(ValueError, "^Missing UNSET_KEY for apiKeyEnv$"):
+            profile_environment({**local, "apiKeyEnv": "UNSET_KEY"}, self.host.get)
 
 
 class RunnerProcess(unittest.TestCase):

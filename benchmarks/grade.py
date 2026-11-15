@@ -234,8 +234,9 @@ def main():
             "judge_profile_sha256": digest(args.provider_profile.read_bytes())
             if args.provider_profile
             else None,
-            "judge_transport_notes": "Arden Responses transport; empty system instructions; profile reasoning; no temperature override"
-            if args.provider_profile
+            # judge.mjs builds the provider the profile names: Responses, Codex or Chat Completions.
+            "judge_transport_notes": f"Arden {judge_profile.get('provider', 'responses')} transport; empty system instructions; profile reasoning; no temperature override"
+            if judge_profile
             else None,
             "judge_environment": {
                 key: os.environ[key]

@@ -9,7 +9,7 @@ from pathlib import Path
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.agents.installed.node_install import nvm_node_install_snippet
 
-from ..mcp_env import mcp_environment
+from ..profile_env import profile_environment
 from .openclaw_transcript import to_jsonl
 
 OPENCLAW_TRANSCRIPT = "/root/.openclaw/agents/main/sessions/chat.jsonl"
@@ -148,17 +148,9 @@ class Arden(BaseInstalledAgent):
             prompt = Path(temporary) / "prompt.txt"
             prompt.write_text(self.render_instruction(instruction))
             await environment.upload_file(prompt, "/opt/arden-prompt.txt")
-        credential = self._get_env(self.profile["apiKeyEnv"])
-        if not credential:
-            raise ValueError(f"Missing {self.profile['apiKeyEnv']}")
-        credentials = {self.profile["apiKeyEnv"]: credential}
-        if account_env := self.profile.get("accountIdEnv"):
-            account = self._get_env(account_env)
-            if not account:
-                raise ValueError(f"Missing {account_env}")
-            credentials[account_env] = account
-        # Variables a benchmark-owned MCP server reads; exec_command never sees host variables.
-        credentials.update(mcp_environment(self.profile, self._get_env))
+        # The provider's key (none for a local llama.cpp), a Codex account id,
+        # and what benchmark-owned MCP servers read; exec_command never sees them.
+        credentials = profile_environment(self.profile, self._get_env)
         # Harbor names the task's Skills folder; a task may name one and ship none.
         skills = ""
         if getattr(self, "skills_dir", None):

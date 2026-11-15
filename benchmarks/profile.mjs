@@ -1,5 +1,7 @@
 import { Schema } from "effect"
 import { readFile } from "node:fs/promises"
+import { CHAT_COMPLETIONS_SERVERS } from "../apps/server-ts/dist/providers/chat-completions/discovery.js"
+import { parseSettings } from "../apps/server-ts/dist/serve/settings.js"
 
 const positive = Schema.Int.check(Schema.isGreaterThan(0))
 const names = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique())
@@ -9,9 +11,14 @@ export const ProfileSchema = Schema.Struct({
   provider: Schema.optionalKey(Schema.Literals(["responses", "codex", "chat-completions"])),
   accountIdEnv: Schema.optionalKey(Schema.NonEmptyString),
   /** A `chat-completions` provider's server, when detection should not decide (see the server README). */
-  server: Schema.optionalKey(Schema.Literals(["llama.cpp", "openrouter", "generic"])),
+  server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS)),
   baseUrl: Schema.NonEmptyString,
-  apiKeyEnv: Schema.NonEmptyString,
+  /**
+   * The variable that holds the key; a trial forwards only the variables a
+   * profile names. A `chat-completions` provider on a local server (llama.cpp)
+   * has no key and leaves it out; every other provider needs it.
+   */
+  apiKeyEnv: Schema.optionalKey(Schema.NonEmptyString),
   model: Schema.NonEmptyString,
   reasoningEffort: Schema.NullOr(Schema.NonEmptyString),
   contextLimit: positive,
@@ -60,20 +67,21 @@ export const ProfileSchema = Schema.Struct({
 export async function readProfile(filename) {
   const raw = JSON.parse(await readFile(filename, "utf8"))
   const profile = Schema.decodeUnknownSync(ProfileSchema)(raw, { onExcessProperty: "error" })
-  const url = new URL(profile.baseUrl)
-  if (
-    url.protocol !== "https:" &&
-    !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))
-  ) {
-    throw new Error("Provider URL must use HTTPS or loopback HTTP")
+  if (profile.server !== undefined && profile.provider !== "chat-completions")
+    throw new Error("`server` belongs to a chat-completions provider")
+  // The server's own rules, before a trial starts it: HTTPS or loopback HTTP
+  // for `baseUrl`, the fields each provider needs (a key variable for all but
+  // `chat-completions`). The data folder is a placeholder; the trial names its own.
+  try {
+    parseSettings({ dataDirectory: "/profile-check", ...modelSettings(profile) })
+  } catch (error) {
+    throw new Error(`Profile ${filename}: ${error.message}`, { cause: error })
   }
-  if (url.username || url.password || url.search || url.hash)
-    throw new Error("Provider URL must not contain credentials, query, or fragment")
+  // Every route is appended to the base URL, so a query would end up mid-path.
+  if (new URL(profile.baseUrl).search) throw new Error("Provider URL must not contain a query")
   if ((profile.tools === undefined) === (profile.blockedTools === undefined))
     throw new Error("Profile needs exactly one of `tools` and `blockedTools`")
   if (profile.model === "REPLACE_WITH_MODEL_ID") throw new Error("Choose a model before running")
-  if (profile.server !== undefined && profile.provider !== "chat-completions")
-    throw new Error("`server` belongs to a chat-completions provider")
   return profile
 }
 /**
@@ -101,7 +109,7 @@ function providerSettings(profile) {
       return {
         kind: "chat-completions",
         baseUrl: profile.baseUrl,
-        apiKeyEnv: profile.apiKeyEnv,
+        ...(profile.apiKeyEnv ? { apiKeyEnv: profile.apiKeyEnv } : {}),
         ...(profile.server ? { server: profile.server } : {})
       }
     case "responses":

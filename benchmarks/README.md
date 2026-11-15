@@ -36,14 +36,37 @@ account ID. The runner validates model availability, reasoning effort, and
 context limit against the account's live catalog. It does not refresh tokens;
 expired authentication requires a fresh token before a new attempt. Never copy
 the authentication file or refresh token into an image or candidate workspace.
-For OpenRouter or another Chat Completions server, set
-`provider: "chat-completions"`, its `baseUrl` (for example
-`https://openrouter.ai/api/v1`), and optionally `server` (`llama.cpp`,
-`openrouter` or `generic`) when detection should not decide; the server
-README's `chat-completions` section says what each one reads. `apiKeyEnv` is
-still required: a trial forwards only the credential the profile names. This
-route has no hosted `web_search`, so it suits the coding and memory profiles,
-not Research.
+For llama.cpp, OpenRouter or another Chat Completions server, set
+`provider: "chat-completions"`, its `baseUrl`, and optionally `server`
+(`llama.cpp`, `openrouter` or `generic`) when detection should not decide; the
+server README's `chat-completions` section says what each one reads.
+`llama-cpp.json` and `openrouter.json` are the coding profile on each. A local
+llama.cpp server has no key, so its profile names no `apiKeyEnv`; OpenRouter's
+names `OPENROUTER_API_KEY`. A trial forwards only the variables the profile
+names (`profile_env.py`). On llama.cpp `model` is the server's own id: the
+GGUF path, or the name `llama-server --alias` gives it. Profiles are checked
+with the server's own settings rules before a trial starts. This route has no
+hosted `web_search`, so it suits the coding and memory profiles, not Research.
+
+A llama.cpp server on this machine runs a trial without Docker, with `single`
+(below, under Harbor) as the batch driver's container would. Checked on
+2026-11-16 with llama.cpp b12359 and Gemma 4 E2B: a one-file task, 4 model
+requests, 62 s, `answer.txt` holding `42`, the judge (`judge.mjs`) answering
+on the same profile:
+
+```bash
+llama-server -m model.gguf --alias gemma --ctx-size 32768 --jinja --port 8080 &
+cp benchmarks/profiles/llama-cpp.json benchmarks/profiles/local-llama.json   # model: "gemma"
+python3 benchmarks/cli.py single --profile benchmarks/profiles/local-llama.json \
+  --prompt-file prompt.txt --workspace /tmp/task --output /tmp/trial --id smoke --allow-model-calls
+# /tmp/trial/observations/result.json: "status": "completed"
+# /tmp/trial/observations/usage.json:  "modelRequests": 4, "promptTokens": 9732, "completionTokens": 882
+```
+
+In a container (`run`, Harbor) the host's `127.0.0.1` is the container's own.
+The server takes plain HTTP only to this machine's loopback address, so
+`http://host.docker.internal:8080/v1` is refused; reach a host llama.cpp from a
+container only over HTTPS, or run the trial with `single` on the host.
 
 The package contains built runtime files, workspace manifests, and the lockfile.
 It excludes the checkout, personal state, datasets, and credentials. Linux
@@ -337,7 +360,8 @@ The bridge normalizes that label and records
 not a byte-for-byte official run. Question formatting, grading prompt, and
 aggregation remain upstream-owned. Other suites use their native scorers.
 
-For BrowseComp grading through Codex, add `--provider-profile` with the same
+For BrowseComp grading through Arden's own provider (any profile kind: Codex,
+Responses, Chat Completions), add `--provider-profile` with the same
 profile file and set `--judge` to its exact model ID. This uses Arden's provider
 transport with the upstream grading prompt, empty system instructions, and the
 profile's reasoning setting. It does not apply upstream temperature/max-token

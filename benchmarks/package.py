@@ -41,7 +41,7 @@ def package(destination):
             "profile.mjs",
             "cli.py",
             "datasets.py",
-            "mcp_env.py",
+            "profile_env.py",
             "install.sh",
         )
     )

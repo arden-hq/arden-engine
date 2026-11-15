@@ -4,9 +4,8 @@ import { DatabaseSync } from "node:sqlite"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Schema } from "effect"
 import { fileURLToPath } from "node:url"
-import { spawn } from "node:child_process"
 import { readProfile, modelHost, modelSettings } from "./profile.mjs"
-import { createHeadlessClient } from "../libs/headless/dist/index.js"
+import { createHeadlessClient, startConfiguredServer } from "../libs/headless/dist/index.js"
 import { contextRoutes } from "../libs/protocol/dist/context/index.js"
 import { permissionRoutes } from "../libs/protocol/dist/permissions/index.js"
 import { toolRoutes } from "../libs/protocol/dist/tools/index.js"
@@ -74,8 +73,6 @@ async function main() {
   } catch (error) {
     if (error.code !== "ENOENT") throw error
   }
-  const token = process.env[profile.apiKeyEnv]
-  if (!token) throw new Error(`Missing credential environment variable ${profile.apiKeyEnv}`)
   await mkdir(output, { recursive: true, mode: 0o700 })
   await save(join(output, "profile.json"), profile)
   const models = modelHost(profile)
@@ -121,42 +118,24 @@ async function main() {
   const signal = AbortSignal.any([deadline, interrupted.signal])
   // Arden runs as its own process, started from the settings file and reached
   // over HTTP with the secret in its access file, as any outside driver would.
+  // The server reads the provider's key variable itself, and a start that
+  // fails rejects with the server's own reason (a missing variable, a
+  // provider that does not answer), which result.json keeps.
   const start = async () => {
-    const child = spawn(process.execPath, [SERVER_ENTRY, "--config", settingsFile], {
-      stdio: ["ignore", "pipe", "inherit"]
+    const started = await startConfiguredServer({
+      entry: SERVER_ENTRY,
+      config: settingsFile,
+      env: process.env,
+      onLog: (chunk) => process.stderr.write(chunk),
+      signal
     })
-    const stop = () =>
-      new Promise((resolve) => {
-        if (child.exitCode !== null || child.signalCode !== null) return resolve()
-        const kill = setTimeout(() => child.kill("SIGKILL"), 10_000)
-        child.once("exit", () => {
-          clearTimeout(kill)
-          resolve()
-        })
-        child.kill("SIGTERM")
-      })
-    const ready = await new Promise((resolve, reject) => {
-      let line = ""
-      child.stdout.setEncoding("utf8")
-      child.stdout.on("data", (chunk) => {
-        line += chunk
-        if (line.includes("\n")) resolve(JSON.parse(line.slice(0, line.indexOf("\n"))))
-      })
-      child.once("error", reject)
-      child.once("exit", (code) => reject(new Error(`Arden did not start (exit ${code})`)))
-      signal.addEventListener("abort", () => reject(signal.reason), { once: true })
-    }).catch(async (error) => {
-      await stop()
-      throw error
-    })
-    const access = JSON.parse(await readFile(ready.accessFile, "utf8"))
-    const headers = { "x-arden-local-capability": access.capability }
+    const { ready, connection, stop } = started
     return {
       ready,
-      headers,
+      headers: connection.headers,
       stop,
-      fetch: (path, init) => fetch(new URL(path, ready.url), init),
-      client: createHeadlessClient({ baseUrl: ready.url, headers })
+      fetch: (path, init) => fetch(new URL(path, connection.url), init),
+      client: createHeadlessClient({ baseUrl: connection.url, headers: connection.headers })
     }
   }
   let server = await start().catch(async (error) => {
