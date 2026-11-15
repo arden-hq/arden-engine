@@ -99,22 +99,14 @@ export const workingHash = (
 ): Effect.Effect<string | null, RepositoryError> =>
   storage.readWorking(path, true, true).pipe(Effect.map(contentHash))
 
+/** Write each row's new content; `validateWorkingTree` then checks every row together. */
 export const installRows = Effect.fn("RevisionTransaction.installRows")(function* (
   storage: RevisionStorageShape,
-  transaction: Transaction,
-  expectPreinstalled = false
+  transaction: Transaction
 ): Effect.fn.Return<void, RepositoryError> {
   for (const [index, row] of transaction.rows.entries()) {
     const expected = row.newBlob
     const current = yield* workingHash(storage, row.path)
-    if (expectPreinstalled) {
-      if (current !== expected) {
-        return yield* new RevisionConflictError({
-          message: `adopted working file changed during transaction: ${row.path}`
-        })
-      }
-      continue
-    }
     const baseline = row.oldBlob
     const displacement = artifact(transaction.transactionId, "displaced", index)
     const displaced = (yield* storage.readMetadata(displacement, true)) !== null
@@ -163,14 +155,8 @@ export const installRows = Effect.fn("RevisionTransaction.installRows")(function
       return yield* new CorruptRepositoryError({
         message: `transaction artifact is invalid: ${row.path}`
       })
-    if ((yield* workingHash(storage, row.path)) !== expected) {
+    if ((yield* workingHash(storage, row.path)) !== expected)
       yield* storage.writeWorking(row.path, content, true)
-      if ((yield* workingHash(storage, row.path)) !== expected) {
-        return yield* new RevisionConflictError({
-          message: `working file changed during install: ${row.path}`
-        })
-      }
-    }
   }
 })
 
@@ -368,7 +354,7 @@ export const recoverTransactions = Effect.fn("recoverRevisionTransactions")(func
         })
       }
       const materialize = Effect.gen(function* () {
-        yield* installRows(storage, transaction, adopting)
+        if (!adopting) yield* installRows(storage, transaction)
         yield* validateWorkingTree(storage, transaction)
       })
       const ready = yield* materialize.pipe(

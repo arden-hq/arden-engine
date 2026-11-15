@@ -7,8 +7,10 @@ export type {
   ManagedFileRepositoryShape,
   RepositoryError,
   RepositoryOpenPhase,
+  UntrackedFile,
   WorkingFileChange,
-  WorkingTreeStatus
+  WorkingTreeStatus,
+  WorkingTreeStatusOptions
 } from "../repository/service.js"
 export type { CommitResult } from "../repository/commit.js"
 export { managedFileRepositoryNodeLayer } from "../storage/node.js"

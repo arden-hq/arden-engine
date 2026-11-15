@@ -1,9 +1,9 @@
-import { Effect, FileSystem, Option, Path } from "effect"
+import { Effect, FileSystem, Option, Path, Result } from "effect"
 import * as PlatformError from "effect/PlatformError"
 
 import { normalizeRelativePath } from "../domain/model.js"
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
-import type { StorageError } from "./service.js"
+import type { StorageError, WorkingEntry } from "./service.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 export const storageFailure = (operation: string, cause: unknown): RevisionStorageError =>
@@ -228,7 +228,7 @@ export const removeTree = Effect.fn("RevisionStorage.removeTree")(function* (
 })
 
 /** Atomic writes stage their bytes in a folder with this name prefix beside the target. */
-export const ATOMIC_TEMPORARY_PREFIX = ".arden-"
+const ATOMIC_TEMPORARY_PREFIX = ".arden-"
 
 export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
   fs: FileSystem.FileSystem,
@@ -288,3 +288,55 @@ export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
     yield* fs.remove(temporaryDirectory, { recursive: true, force: true }).pipe(Effect.ignore)
   }
 })
+
+const listWorkingEntry = Effect.fn("RevisionStorage.listWorkingEntry")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  historyRoot: string,
+  entry: string,
+  relative: string
+): Effect.fn.Return<ReadonlyArray<WorkingEntry>, StorageError> {
+  const linked = yield* entryIsSymlink(fs, entry).pipe(
+    Effect.mapError((cause) => storageFailure("inspect working entry", cause))
+  )
+  if (linked) return [{ kind: "file", path: relative }]
+  const info = yield* fs
+    .stat(entry)
+    .pipe(Effect.mapError((cause) => storageFailure("stat working entry", cause)))
+  if (info.type !== "Directory") return [{ kind: "file", path: relative }]
+  return yield* listWorkingFolder(fs, path, historyRoot, entry, `${relative}/`)
+})
+
+const listWorkingFolder = Effect.fn("RevisionStorage.listWorkingFolder")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  historyRoot: string,
+  directory: string,
+  prefix: string
+): Effect.fn.Return<ReadonlyArray<WorkingEntry>, StorageError> {
+  const names = yield* fs
+    .readDirectory(directory)
+    .pipe(Effect.mapError((cause) => storageFailure("list working folder", cause)))
+  const entries: Array<WorkingEntry> = []
+  for (const name of names) {
+    const entry = path.join(directory, name)
+    if (entry === historyRoot || name.startsWith(ATOMIC_TEMPORARY_PREFIX)) continue
+    const relative = `${prefix}${name}`
+    const listed = yield* Effect.result(listWorkingEntry(fs, path, historyRoot, entry, relative))
+    if (Result.isSuccess(listed)) entries.push(...listed.success)
+    else if (!(listed.failure._tag === "RevisionStorageError" && isMissing(listed.failure.cause)))
+      entries.push({ kind: "unreadable", path: relative, reason: listed.failure.message })
+  }
+  return entries
+})
+
+/** Every entry under the working root outside history. A folder that cannot be listed or an
+ *  entry that cannot be inspected is reported; an entry removed while the listing runs is left
+ *  out. Only the root itself failing fails the listing. */
+export const listWorkingTree = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  workingRoot: string,
+  historyRoot: string
+): Effect.Effect<ReadonlyArray<WorkingEntry>, StorageError> =>
+  listWorkingFolder(fs, path, historyRoot, workingRoot, "")

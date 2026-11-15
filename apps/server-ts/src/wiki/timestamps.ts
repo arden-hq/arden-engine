@@ -6,26 +6,9 @@ import {
 } from "@arden-hq/revisions/effect"
 import { Deferred, Effect, Exit } from "effect"
 
-import { decodeWikiOrigin } from "./commit.js"
-
-/** The newest change to a page made outside Arden and taken in from its file. */
-interface OutsideChange {
-  readonly at: string
-  readonly action: string
-  readonly revision: string
-}
-
 export interface PageTimes {
   readonly createdAt: string | null
   readonly updatedAt: string | null
-  readonly outside: OutsideChange | null
-}
-
-const NO_TIMES: PageTimes = { createdAt: null, updatedAt: null, outside: null }
-
-const isOutside = (commit: Commit): boolean => {
-  const origin = decodeWikiOrigin(commit.origin)
-  return origin.kind === "user" && origin.via === "filesystem"
 }
 
 type TimestampRepository = Pick<ManagedFileRepositoryShape, "inspectCommit">
@@ -41,7 +24,7 @@ const deriveTimestamps = Effect.fn("Wiki.deriveTimestamps")(function* (
   head: string,
   base: DerivedTimes | undefined
 ): Effect.fn.Return<CompleteTimestampMap, RevisionError> {
-  const mutable = new Map<string, { -readonly [K in keyof PageTimes]: PageTimes[K] }>()
+  const mutable = new Map<string, { createdAt: string | null; updatedAt: string | null }>()
   const seen = new Set<string>()
   let cursor: string | null = head
   while (cursor !== null) {
@@ -56,11 +39,9 @@ const deriveTimestamps = Effect.fn("Wiki.deriveTimestamps")(function* (
     for (const change of commit.changes) {
       const version = change.after ?? change.before
       if (version === null) continue
-      const times = mutable.get(version.resourceId) ?? { ...NO_TIMES }
+      const times = mutable.get(version.resourceId) ?? { createdAt: null, updatedAt: null }
       times.updatedAt ??= commit.timestamp
       if (change.action === "create") times.createdAt = commit.timestamp
-      if (isOutside(commit))
-        times.outside ??= { at: commit.timestamp, action: change.action, revision: commit.commitId }
       mutable.set(version.resourceId, times)
     }
     cursor = commit.parentId
@@ -76,8 +57,7 @@ const extendTimes = (
   for (const [pageId, times] of newer) {
     merged.set(pageId, {
       createdAt: older.get(pageId)?.createdAt ?? times.createdAt,
-      updatedAt: times.updatedAt ?? older.get(pageId)?.updatedAt ?? null,
-      outside: times.outside ?? older.get(pageId)?.outside ?? null
+      updatedAt: times.updatedAt ?? older.get(pageId)?.updatedAt ?? null
     })
   }
   return merged
@@ -107,7 +87,12 @@ export class WikiPageTimestampCache {
     return this.forHead(head).pipe(
       Effect.map(
         (complete) =>
-          new Map([...pageIds].map((pageId) => [pageId, complete.get(pageId) ?? NO_TIMES]))
+          new Map(
+            [...pageIds].map((pageId) => [
+              pageId,
+              complete.get(pageId) ?? { createdAt: null, updatedAt: null }
+            ])
+          )
       )
     )
   }

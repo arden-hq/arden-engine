@@ -43,7 +43,9 @@ export interface CommitResult {
 
 /**
  * One commit under the repository lock: prepare, materialize, publish. With `adopting`, the
- * commit records an outside change to that one resource that is already in the working tree.
+ * commit records an outside change to that one resource that is already in the working tree, so
+ * nothing is installed and only the final check runs. A touched file may already hold the new
+ * content, as when a file put back by hand is restored.
  */
 export const commit = Effect.fn("RevisionRepository.commit")(function* (
   storage: RevisionStorageShape,
@@ -97,14 +99,14 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
     }
     const adoptedPath = adopting === undefined ? undefined : before.get(adopting)?.path
     for (const row of applied.rows) {
-      const outside = adoptedPath === row.path
-      const expected = outside ? row.newBlob : row.oldBlob
-      if ((yield* workingHash(storage, row.path)) !== expected) {
-        return yield* new RevisionConflictError({
-          message: outside
-            ? `working file changed after the scan: ${row.path}`
-            : `working file changed: ${row.path}`
-        })
+      const current = yield* workingHash(storage, row.path)
+      if (adoptedPath === row.path) {
+        if (current !== row.newBlob)
+          return yield* new RevisionConflictError({
+            message: `working file changed after the scan: ${row.path}`
+          })
+      } else if (current !== row.oldBlob && current !== row.newBlob) {
+        return yield* new RevisionConflictError({ message: `working file changed: ${row.path}` })
       }
     }
     for (const [blobId, content] of applied.payloads)
@@ -181,7 +183,7 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
           : new RevisionConflictError({ message: "current ref changed before materialization" })
       )
     )
-    yield* installRows(storage, transaction, adopting !== undefined)
+    if (adopting === undefined) yield* installRows(storage, transaction)
     yield* validateWorkingTree(storage, transaction)
     if (checkpoint !== undefined) yield* checkpoint("before_ref")
     yield* storage.compareAndSwapRef(oldHead, newHead)

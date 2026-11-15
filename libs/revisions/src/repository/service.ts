@@ -107,17 +107,31 @@ export type WorkingFileChange =
 /** A change the repository can take in: an update or an archive of one resource. */
 export type AdoptableWorkingChange = Exclude<WorkingFileChange, { readonly kind: "unreadable" }>
 
+/** A file under the working root that no active resource names: `read` when the caller asked
+ *  for its content, `listed` when not, `unreadable` when it or its folder could not be read. */
+export type UntrackedFile =
+  | { readonly kind: "listed"; readonly path: string }
+  | { readonly kind: "read"; readonly path: string; readonly content: Uint8Array }
+  | { readonly kind: "unreadable"; readonly path: string; readonly reason: string }
+
 export interface WorkingTreeStatus {
   readonly revision: string | null
   readonly changes: ReadonlyArray<WorkingFileChange>
-  /** Files under the working root that no active resource names, sorted. */
-  readonly untracked: ReadonlyArray<string>
+  /** Sorted by path. */
+  readonly untracked: ReadonlyArray<UntrackedFile>
+}
+
+export interface WorkingTreeStatusOptions {
+  /** Which untracked files to read, under the same lock as the scan. */
+  readonly readUntracked?: (path: string) => boolean
 }
 
 export interface AdoptWorkingChangeOptions {
   readonly actor: string
   readonly origin: string
   readonly reason: string
+  /** The head the caller decided on; the adoption fails when the head has moved since. */
+  readonly expectedHead: string | null
 }
 
 export interface ManagedFileRepositoryShape {
@@ -158,10 +172,12 @@ export interface ManagedFileRepositoryShape {
     requestIdentity: string
   ) => Effect.Effect<{ readonly requestHash: string; readonly commitId: string }, RepositoryError>
   /** Every active resource whose file differs from history, and every untracked file. One
-   *  file never fails the scan: a file that cannot be read is reported with the reason. */
-  readonly workingTreeStatus: Effect.Effect<WorkingTreeStatus, RepositoryError>
-  /** Record one outside change as one commit, guarded by that resource's version. Fails when the
-   *  file changed again after the scan. */
+   *  file or folder never fails the scan: what cannot be read is reported with the reason. */
+  readonly workingTreeStatus: (
+    options?: WorkingTreeStatusOptions
+  ) => Effect.Effect<WorkingTreeStatus, RepositoryError>
+  /** Record one outside change as one commit, guarded by that resource's version and by the head
+   *  the caller decided on. Fails when either moved or the file changed again after the scan. */
   readonly adoptWorkingChange: (
     change: AdoptableWorkingChange,
     options: AdoptWorkingChangeOptions
@@ -437,32 +453,56 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
           return yield* storage.withLock(critical)
         })
       ),
-    workingTreeStatus: withLockQueue(
-      withRepositoryLock(
-        Effect.gen(function* () {
-          yield* recoverTransactions(storage)
-          const revision = yield* readPublishedHead
-          const resources = yield* currentMap(storage, revision)
-          const active = [...resources.values()]
-            .filter((resource) => resource.state === "active")
-            .sort((left, right) => compareCodePoints(left.resourceId, right.resourceId))
-          const changes: WorkingFileChange[] = []
-          for (const resource of active) {
-            const read = yield* Effect.result(storage.readWorking(resource.path, true, true))
-            if (Result.isFailure(read)) {
-              changes.push({ kind: "unreadable", resource, reason: read.failure.message })
-            } else if (read.success === null) {
-              changes.push({ kind: "missing", resource })
-            } else if (sha256Hex(read.success) !== resource.blobId) {
-              changes.push({ kind: "changed", resource, content: new Uint8Array(read.success) })
+    workingTreeStatus: (statusOptions = {}) =>
+      withLockQueue(
+        withRepositoryLock(
+          Effect.gen(function* () {
+            yield* recoverTransactions(storage)
+            const revision = yield* readPublishedHead
+            const resources = yield* currentMap(storage, revision)
+            const active = [...resources.values()]
+              .filter((resource) => resource.state === "active")
+              .sort((left, right) => compareCodePoints(left.resourceId, right.resourceId))
+            const changes: WorkingFileChange[] = []
+            for (const resource of active) {
+              const read = yield* Effect.result(storage.readWorking(resource.path, true, true))
+              if (Result.isFailure(read)) {
+                changes.push({ kind: "unreadable", resource, reason: read.failure.message })
+              } else if (read.success === null) {
+                changes.push({ kind: "missing", resource })
+              } else if (sha256Hex(read.success) !== resource.blobId) {
+                changes.push({ kind: "changed", resource, content: new Uint8Array(read.success) })
+              }
             }
-          }
-          const tracked = new Set(active.map((resource) => resource.path))
-          const untracked = (yield* storage.listWorkingFiles).filter((path) => !tracked.has(path))
-          return { revision, changes, untracked }
-        })
-      )
-    ),
+            const tracked = new Set(active.map((resource) => resource.path))
+            const untracked: UntrackedFile[] = []
+            for (const entry of yield* storage.listWorkingFiles) {
+              if (tracked.has(entry.path)) continue
+              if (
+                entry.kind === "unreadable" ||
+                statusOptions.readUntracked?.(entry.path) !== true
+              ) {
+                untracked.push(entry.kind === "file" ? { kind: "listed", path: entry.path } : entry)
+                continue
+              }
+              const read = yield* Effect.result(storage.readWorking(entry.path, true, true))
+              if (Result.isFailure(read))
+                untracked.push({
+                  kind: "unreadable",
+                  path: entry.path,
+                  reason: read.failure.message
+                })
+              else if (read.success !== null)
+                untracked.push({
+                  kind: "read",
+                  path: entry.path,
+                  content: new Uint8Array(read.success)
+                })
+            }
+            return { revision, changes, untracked }
+          })
+        )
+      ),
     adoptWorkingChange: (change, input) =>
       withLockQueue(
         decodeChangeSet({
@@ -482,7 +522,10 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
           ],
           actor: input.actor,
           origin: input.origin,
-          reason: input.reason
+          reason: input.reason,
+          ...(input.expectedHead === null
+            ? { expectedHead: null, enforceExpectedHead: true }
+            : { expectedHead: input.expectedHead })
         }).pipe(
           Effect.flatMap((changeSet) =>
             commit(storage, head, changeSet, options.checkpoint, change.resource.resourceId)
@@ -638,7 +681,7 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
     idempotencyReceipt: (idempotencyKey) => open(repository.idempotencyReceipt(idempotencyKey)),
     finalizeIdempotencyReceipt: (idempotencyKey, requestIdentity) =>
       open(repository.finalizeIdempotencyReceipt(idempotencyKey, requestIdentity)),
-    workingTreeStatus: open(repository.workingTreeStatus),
+    workingTreeStatus: (options) => open(repository.workingTreeStatus(options)),
     adoptWorkingChange: (change, input) => open(repository.adoptWorkingChange(change, input)),
     history: (input) => open(repository.history(input)),
     prepareHistory: () => open(repository.prepareHistory()),
