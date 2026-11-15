@@ -57,9 +57,11 @@ it("shows a run every page but the code-owned ones, and keeps the whole set apar
   ])
 })
 
-it("reads the whole set only in consistency checks and the owner's routes", () => {
+it("reads the whole set only in consistency checks, the owner's routes and diagnostics", () => {
   expect(filesMatching(/\.wholeSet\b/u, [ROOTS.src, ROOTS.scripts])).toEqual([
+    "scripts/memory-shape.ts",
     "src/automations/handlers/daily-summary.ts",
+    "src/tools/session-actions.ts",
     "src/wiki/conflict.ts",
     "src/wiki/content-steps.ts",
     "src/wiki/directories.ts",

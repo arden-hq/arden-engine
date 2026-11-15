@@ -16,7 +16,7 @@ import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-si
 import { toolFacts } from "../src/tools/approval-decision.js"
 import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import { WikiEventOutbox } from "../src/persistence/automations/wiki-event-outbox.js"
-import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type {
   WikiRenameApprovalRecord,
@@ -24,6 +24,12 @@ import type {
 } from "../src/persistence/wiki/rename-store.js"
 import type { ServerTool } from "../src/tools/define.js"
 import { memoryForgetTools } from "../src/tools/memory-forget.js"
+import { sessionActionTools } from "../src/tools/session-actions.js"
+import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
+import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
+import { SessionStore } from "../src/persistence/sessions/store.js"
+import { ToolExecutionStore } from "../src/persistence/tools/store.js"
+import { WorkStore } from "../src/persistence/work/store.js"
 import type { ServerRunContext } from "../src/tools/run-context.js"
 import { makeWikiPageHistoryTools } from "../src/tools/wiki-page-history.js"
 import { searchPages } from "../src/tools/wiki-search.js"
@@ -457,7 +463,7 @@ describe("forgetting a line", () => {
         const undoRange = yield* upkeep.prepare({
           processedHead: afterForget
         })
-        const indexText = prepared.render(new Map()).index(100_000).text ?? ""
+        const indexText = prepared.render(new Map()).index({ maxBytes: 100_000, shownElsewhere: new Set() }).text ?? ""
         const linking = yield* memory.page("places/town.md")
         yield* memory.write("places/town.md", `${OTHER}\nSee [[forgotten]].\n`, ownerInApp("link"))
         const review = buildSpaceReviewInput(yield* memory.listing.snapshot())({
@@ -547,6 +553,50 @@ const renameStore = (): WikiRenameStore["Service"] => {
 const LINKED = "Sam works with [[places/town.md|Town]] council every week."
 
 describe("what forgotten.md holds and where it stays", () => {
+  it("offers the owner forgotten.md as a place to open", async () => {
+    const opened = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const events: Array<unknown> = []
+        const tools = yield* sessionActionTools.pipe(
+          Effect.provideService(SessionStore, partialService("SessionStore", {})),
+          Effect.provideService(SessionQueries, partialService("SessionQueries", {})),
+          Effect.provideService(AutomationCatalog, partialService("AutomationCatalog", {})),
+          Effect.provideService(SpaceStore, partialService("SpaceStore", {})),
+          Effect.provideService(WorkStore, partialService("WorkStore", {})),
+          Effect.provideService(
+            Wiki,
+            partialService<Wiki["Service"]>("Wiki", { snapshot: memory.listing.snapshot })
+          ),
+          Effect.provideService(
+            SessionLifecycleEvents,
+            partialService<SessionLifecycleEvents["Service"]>("SessionLifecycleEvents", {
+              appendEvent: (event) => Effect.sync(() => void events.push(event))
+            })
+          ),
+          Effect.provideService(ToolExecutionStore, partialService("ToolExecutionStore", {}))
+        )
+        const open = tools.find((tool) => tool.definition.name === "app_open")
+        if (open === undefined) throw new Error("app_open is missing")
+        yield* Effect.promise(() =>
+          Promise.resolve(
+            open.execute(
+              { destination: { kind: "memory", path: "forgotten.md" }, label: "Forgotten" },
+              {
+                run: serverRunContext(),
+                signal: new AbortController().signal,
+                toolCallId: "call-fixture",
+                messages: []
+              }
+            )
+          )
+        )
+        return events.map((event) => recordOf(event)["destination"])
+      })
+    )
+    expect(opened).toEqual([{ kind: "memory", path: "forgotten.md" }])
+  })
+
   it("shows the owner forgotten.md, and keeps its name taken for a folder or a rename", async () => {
     const outcome = await withMemory((memory) =>
       Effect.gen(function* () {
