@@ -29,7 +29,7 @@ export type WikiCommitOrigin =
   | { readonly kind: "forget"; readonly sessionId: string }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
-  /** Wiki Maintenance. History records it as its Automation, so a decoded origin is never this. */
+  /** Tidy. History stores it as its Automation; `automationWriter` reads it back as upkeep. */
   | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
   | {
       readonly kind: "capture"
@@ -53,7 +53,19 @@ export const ownerInApp = (
   via: `desktop${string}` = "desktop"
 ): WikiCommitIdentity => ({ actor: "user:desktop", origin: { kind: "user", via }, reason })
 
-export const LEGACY_MAINTENANCE_ORIGIN = "wiki.maintenance"
+/** Tidy's Automation. Its runs commit as upkeep. */
+export const TIDY_AUTOMATION_ID = "builtin-wiki-maintenance"
+const LEGACY_TIDY_ORIGIN = "wiki.maintenance"
+
+/** The writer an Automation's run commits as: Tidy is upkeep, every other Automation itself. */
+export const automationWriter = (
+  automationId: string,
+  chainDepth?: number
+): Extract<WikiCommitOrigin, { readonly kind: "automation" | "upkeep" }> => ({
+  kind: automationId === TIDY_AUTOMATION_ID ? "upkeep" : "automation",
+  automationId,
+  ...(chainDepth === undefined ? {} : { chainDepth })
+})
 
 const AUTOMATION_PREFIX = "wiki.automation."
 const CHAIN_MARK = "~"
@@ -108,15 +120,17 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   if (forgetChat !== null && forgetChat !== undefined)
     return { kind: "forget", sessionId: forgetChat }
   if (origin === "space.page") return { kind: "space_page" }
+  if (origin === LEGACY_TIDY_ORIGIN) return automationWriter(TIDY_AUTOMATION_ID)
   const named = origin.startsWith(AUTOMATION_PREFIX)
     ? origin.slice(AUTOMATION_PREFIX.length).trim()
     : ""
   const chained = /^(.+)~(\d+)$/u.exec(named)
   const automationId = chained?.[1] ?? named
   if (automationId === "") return { kind: "system", name: origin }
-  return chained?.[2] === undefined
-    ? { kind: "automation", automationId }
-    : { kind: "automation", automationId, chainDepth: Number(chained[2]) }
+  return automationWriter(
+    automationId,
+    chained?.[2] === undefined ? undefined : Number(chained[2])
+  )
 }
 
 export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => {

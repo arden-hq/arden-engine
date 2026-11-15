@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { TIDY_AUTOMATION_ID } from "../../wiki/commit.js"
 import type { Wiki } from "../../wiki/service.js"
 import type { WikiMaintenanceStore } from "../../persistence/wiki-maintenance/store.js"
 import { AutomationId } from "../../persistence/automations/model.js"
@@ -9,7 +10,7 @@ import { runItemLoop } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
 
-const WIKI_MAINTENANCE_AUTOMATION_ID = AutomationId.make("builtin-wiki-maintenance")
+const WIKI_MAINTENANCE_AUTOMATION_ID = AutomationId.make(TIDY_AUTOMATION_ID)
 
 const makeWikiMaintenanceRunner = (services: {
   readonly wiki: Pick<Wiki["Service"], "prepareMaintenance">
@@ -25,10 +26,7 @@ const makeWikiMaintenanceRunner = (services: {
     kind: "wiki",
     next: Effect.fn("WikiMaintenance.next")(function* () {
       const processedHead = yield* services.maintenance.processedHead()
-      const prepared = yield* services.wiki.prepareMaintenance({
-        processedHead,
-        reviewerAutomationId: WIKI_MAINTENANCE_AUTOMATION_ID
-      })
+      const prepared = yield* services.wiki.prepareMaintenance({ processedHead })
       if (prepared.kind === "idle") return "idle" as const
       if (prepared.kind === "advance") {
         yield* services.maintenance.compareAndSet({

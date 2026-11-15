@@ -61,8 +61,7 @@ const brief = (
         const processedHead = yield* repository.currentRevision
         yield* changes(repository)
         const prepared = yield* makeWikiMaintenanceMethods(repository).prepare({
-          processedHead,
-          reviewerAutomationId: "builtin-wiki-maintenance"
+          processedHead
         })
         return prepared.kind === "review" ? prepared.markdown : prepared.kind
       }).pipe(

@@ -2,7 +2,7 @@ import { cutBytes } from "@arden-hq/std/text"
 import type { Commit, ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 
-import { decodeWikiOrigin, LEGACY_MAINTENANCE_ORIGIN, wikiOriginSource } from "./commit.js"
+import { decodeWikiOrigin, wikiOriginSource } from "./commit.js"
 import { isContentStepOrigin } from "./content-steps.js"
 import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from "./errors.js"
 import { pageKind, recordFolders, type RecordFolders } from "./collections.js"
@@ -44,7 +44,6 @@ export type WikiMaintenancePreparation =
 
 export interface WikiMaintenancePrepareInput {
   readonly processedHead: string | null
-  readonly reviewerAutomationId: string
 }
 
 export interface WikiMaintenanceMethods {
@@ -60,10 +59,8 @@ const sourceCategory = (commit: Commit): string => {
   return source === "automation" ? "scheduled automation" : source
 }
 
-const isReviewerCommit = (commit: Commit, reviewerAutomationId: string): boolean => {
-  const origin = decodeWikiOrigin(commit.origin)
-  return origin.kind === "automation" && origin.automationId === reviewerAutomationId
-}
+const isUpkeepCommit = (commit: Commit): boolean =>
+  decodeWikiOrigin(commit.origin).kind === "upkeep"
 
 interface PageChange {
   readonly before: { readonly path: string } | null
@@ -269,9 +266,8 @@ export const makeWikiMaintenanceMethods = (
     )
     const candidates = sources.filter(
       (source) =>
-        source.origin !== LEGACY_MAINTENANCE_ORIGIN &&
+        !isUpkeepCommit(source) &&
         !isContentStepOrigin(source.origin) &&
-        !isReviewerCommit(source, input.reviewerAutomationId) &&
         source.changes.some(changesPage)
     )
     if (candidates.length === 0) {

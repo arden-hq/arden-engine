@@ -12,11 +12,15 @@ import { describe, expect, it } from "vitest"
 import {
   commitWiki,
   createPage,
+  decodeWikiOrigin,
   movePage,
   updatePage,
   type WikiCommitOrigin
 } from "../src/wiki/commit.js"
+import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { formatWikiPage } from "../src/wiki/page.js"
+import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
+import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import type { ChatRunRecord } from "../src/persistence/runs/model.js"
 import type { RunQueries } from "../src/persistence/runs/queries.js"
 import { writeIdentity } from "../src/tools/wiki-identity.js"
@@ -191,10 +195,81 @@ describe("the upkeep writer", () => {
       }
     ).then((identity) => identity.origin)
 
-  it("is Wiki Maintenance's run, told apart by the system handler registry", async () => {
+  it("is Tidy's run, told apart by its Automation id", async () => {
     expect([await origin("builtin-wiki-maintenance"), await origin("auto-owner")]).toEqual([
       { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 1 },
       { kind: "automation", automationId: "auto-owner", chainDepth: 1 }
     ])
+  })
+})
+
+describe("Tidy's stored writes", () => {
+  it("read back as upkeep, the stored origin and the old one alike", () => {
+    expect([
+      decodeWikiOrigin("wiki.automation.builtin-wiki-maintenance~2"),
+      decodeWikiOrigin("wiki.maintenance"),
+      decodeWikiOrigin("wiki.automation.auto-owner")
+    ]).toEqual([
+      { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 2 },
+      { kind: "upkeep", automationId: "builtin-wiki-maintenance" },
+      { kind: "automation", automationId: "auto-owner" }
+    ])
+  })
+
+  it("can be undone by the owner from the app", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "arden-tidy-undo-")))
+        return yield* Effect.gen(function* () {
+          const repository = yield* ManagedFileRepository
+          const page = "topics/garden.md"
+          yield* commitWiki(
+            repository,
+            { actor: "test", origin: { kind: "user", via: "desktop" }, reason: "seed", expectedRevision: null },
+            [createPage(`id:${page}`, page, content(page, "Garden."))]
+          )
+          const before = yield* repository.get(`id:${page}`)
+          if (before === null) return yield* Effect.die(`${page} is missing`)
+          const tidied = yield* commitWiki(
+            repository,
+            {
+              actor: "Automation builtin-wiki-maintenance",
+              origin: UPKEEP,
+              reason: "tidy",
+              expectedRevision: yield* repository.currentRevision
+            },
+            [updatePage(before, content(page, "Garden, tidied."))]
+          )
+          const after = yield* repository.get(`id:${page}`)
+          const listing = makeWikiListingMethods(repository)
+          const restores = makeWikiRestoreMethods(
+            repository,
+            partialService<SpaceStore["Service"]>("SpaceStore", {
+              activeBindings: () => Effect.succeed([])
+            }),
+            listing.read
+          )
+          return yield* restores
+            .restore({
+              pageId: `id:${page}`,
+              commitId: tidied.commit.commitId,
+              expectedVersion: after?.versionId ?? "",
+              expectedHead: tidied.commit.commitId,
+              commit: { actor: "user:desktop", origin: { kind: "user", via: "desktop" }, reason: "undo" }
+            })
+            .pipe(
+              Effect.match({
+                onFailure: (error) => error.message,
+                onSuccess: (restored) => restored.content.includes("Garden, tidied.")
+              })
+            )
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root })),
+          Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))
+        )
+      })
+    )
+    expect(outcome).toBe(false)
   })
 })

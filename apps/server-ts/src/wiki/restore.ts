@@ -12,7 +12,7 @@ import {
 } from "./authority.js"
 import {
   commitWiki,
-  LEGACY_MAINTENANCE_ORIGIN,
+  decodeWikiOrigin,
   requireCommitRules,
   restorePage,
   type WikiCommitIdentity,
@@ -105,7 +105,7 @@ export const makeWikiRestoreMethods = (
             { pageId: input.pageId }
           )
         }
-        if (maintenance.origin !== LEGACY_MAINTENANCE_ORIGIN) {
+        if (decodeWikiOrigin(maintenance.origin).kind !== "upkeep") {
           return yield* wikiError("restore", "invalid", "Commit is not a Tidy change", {
             pageId: input.pageId
           })

@@ -30,7 +30,6 @@ const writerOf = (origin: WikiCommitOrigin): string => {
     case "capture":
       return "capture"
     case "automation":
-      if (origin.automationId === "builtin-wiki-maintenance") return "upkeep"
       if (origin.automationId === "builtin-wiki-decomposition") return "decomposition"
       if (origin.automationId.startsWith("builtin-")) return "built-in job"
       return /^(?:task|area|desk|proj):/u.test(origin.automationId)
@@ -41,7 +40,6 @@ const writerOf = (origin: WikiCommitOrigin): string => {
     case "space_page":
       return "Space page"
     case "system":
-      if (origin.name === "wiki.maintenance") return "upkeep"
       if (origin.name.startsWith("memory.content-step.")) return "content step"
       return /migration/u.test(origin.name) ? "migration" : "system"
   }

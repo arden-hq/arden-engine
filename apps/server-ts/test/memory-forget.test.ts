@@ -446,12 +446,10 @@ describe("forgetting a line", () => {
         })
         const upkeep = makeWikiMaintenanceMethods(memory.repository)
         const forgetRange = yield* upkeep.prepare({
-          processedHead: beforeForget,
-          reviewerAutomationId: "wiki-maintenance"
+          processedHead: beforeForget
         })
         const undoRange = yield* upkeep.prepare({
-          processedHead: afterForget,
-          reviewerAutomationId: "wiki-maintenance"
+          processedHead: afterForget
         })
         const indexText = prepared.render(new Map()).index(100_000).text ?? ""
         return {
@@ -747,8 +745,7 @@ describe("no run is sent forgotten.md", () => {
           ownerInApp("x")
         )
         const review = yield* makeWikiMaintenanceMethods(memory.repository).prepare({
-          processedHead: beforeLink,
-          reviewerAutomationId: "wiki-maintenance"
+          processedHead: beforeLink
         })
         const announced: Array<unknown> = []
         yield* Effect.gen(function* () {
