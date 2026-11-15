@@ -221,7 +221,12 @@ export const memoryIndex = (
   })
   const entries = [
     ...lines.map((line) => ({ key: line.path, text: indexLine(line), line, fold: undefined })),
-    ...folded.map((fold) => ({ key: `${fold.folder}/`, text: foldLine(fold.folder), line: undefined, fold }))
+    ...folded.map((fold) => ({
+      key: `${fold.folder}/`,
+      text: foldLine(fold.folder),
+      line: undefined,
+      fold
+    }))
   ].sort((left, right) => left.key.localeCompare(right.key))
   let shown = entries.length
   let shownBytes = entries.reduce((sum, entry) => sum + byteLength(entry.text) + 1, 0) - 1

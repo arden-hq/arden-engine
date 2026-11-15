@@ -326,9 +326,9 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
   it("never recalls a standing-facts page, which is sent whole already", async () => {
     const matching = page("profile.md", "Profile", QUERY)
     const composed = await compose({ actor: person, pages: [matching, orchard, ledger] })
-    expect(composed.writes[0]?.sources.filter((source) => source.page_id === "id-profile.md")).toEqual([
-      expect.objectContaining({ kind: "core" })
-    ])
+    expect(
+      composed.writes[0]?.sources.filter((source) => source.page_id === "id-profile.md")
+    ).toEqual([expect.objectContaining({ kind: "core" })])
   })
 
   it("records a Space page its share cut as cut", async () => {
@@ -530,7 +530,10 @@ describe("each source in its own allowance", () => {
     const singles = Array.from({ length: 700 }, (_, index) =>
       page(`folder-${String(index).padStart(3, "0")}/only.md`, "Only", "")
     )
-    const composed = await compose({ actor: { kind: "task_worker", item_id: "t", space_id: "s" }, pages: [core, ...singles] })
+    const composed = await compose({
+      actor: { kind: "task_worker", item_id: "t", space_id: "s" },
+      pages: [core, ...singles]
+    })
     const index = composed.writes[0]?.sources.find((source) => source.kind === "index")
     const text = composed.sections.find((section) => section.key === "Memory index")?.text ?? ""
     expect(index).toMatchObject({ outcome: "cut", reason: "index_allowance" })
@@ -540,9 +543,9 @@ describe("each source in its own allowance", () => {
 
   it("recalls three pages at most", async () => {
     const composed = await compose({ actor: person, pages: [core, ...many("notes", 6, 300)] })
-    expect(
-      composed.writes[0]?.sources.filter((source) => source.kind === "recalled")
-    ).toHaveLength(3)
+    expect(composed.writes[0]?.sources.filter((source) => source.kind === "recalled")).toHaveLength(
+      3
+    )
   })
 })
 
@@ -674,10 +677,40 @@ describe("the stored record", () => {
         revision: "rev-0",
         query: null,
         sources: [
-          { kind: "core", page_id: "me", version: "v", bytes: 0, outcome: "dropped", reason: "block_budget" },
-          { kind: "index", root: "", listed: 0, folded: [], bytes: 0, outcome: "dropped", reason: "block_budget" },
-          { kind: "space", space_id: "s", page_id: null, version: null, bytes: 0, outcome: "dropped", reason: "block_budget" },
-          { kind: "recalled", page_id: "d", version: "v", bytes: 0, outcome: "dropped", reason: "block_budget" }
+          {
+            kind: "core",
+            page_id: "me",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          },
+          {
+            kind: "index",
+            root: "",
+            listed: 0,
+            folded: [],
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          },
+          {
+            kind: "space",
+            space_id: "s",
+            page_id: null,
+            version: null,
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          },
+          {
+            kind: "recalled",
+            page_id: "d",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "block_budget"
+          }
         ]
       }
     ]
@@ -730,10 +763,40 @@ describe("the stored record", () => {
         revision: "rev-0",
         query: null,
         sources: [
-          { kind: "core", page_id: "me", version: "v", bytes: 0, outcome: "dropped", reason: "standing_page_allowance" },
-          { kind: "index", root: "", listed: 0, folded: [], bytes: 0, outcome: "dropped", reason: "index_allowance" },
-          { kind: "space", space_id: "s", page_id: null, version: null, bytes: 0, outcome: "dropped", reason: "space_allowance" },
-          { kind: "recalled", page_id: "d", version: "v", bytes: 0, outcome: "dropped", reason: "recall_allowance" }
+          {
+            kind: "core",
+            page_id: "me",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "standing_page_allowance"
+          },
+          {
+            kind: "index",
+            root: "",
+            listed: 0,
+            folded: [],
+            bytes: 0,
+            outcome: "dropped",
+            reason: "index_allowance"
+          },
+          {
+            kind: "space",
+            space_id: "s",
+            page_id: null,
+            version: null,
+            bytes: 0,
+            outcome: "dropped",
+            reason: "space_allowance"
+          },
+          {
+            kind: "recalled",
+            page_id: "d",
+            version: "v",
+            bytes: 0,
+            outcome: "dropped",
+            reason: "recall_allowance"
+          }
         ]
       },
       first

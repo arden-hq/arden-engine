@@ -319,9 +319,9 @@ describe("against a baseline", () => {
   })
 
   it("passes pages sent as fully or more, and a question the baseline did not have", () => {
-    expect(regressionsFrom([score("missing", "missing")], [score(RENDERED_IN_PART, WHOLE)])).toEqual(
-      []
-    )
+    expect(
+      regressionsFrom([score("missing", "missing")], [score(RENDERED_IN_PART, WHOLE)])
+    ).toEqual([])
     expect(regressionsFrom([score(WHOLE, WHOLE)], [score(WHOLE, WHOLE)])).toEqual([])
     expect(regressionsFrom([], [score("missing", "missing")])).toEqual([])
   })

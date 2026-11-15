@@ -73,7 +73,11 @@ it("records a matched passage cut for room as cut, and names a page with no room
       pages,
       recall: { query: "garden seeds kitchen plan", excludedPageIds: new Set() },
       semanticMatches: [
-        { pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan, step by step.\n".repeat(400), score: 0.9 }
+        {
+          pageId: "id:projects/kitchen.md",
+          chunkText: "The kitchen plan, step by step.\n".repeat(400),
+          score: 0.9
+        }
       ],
       lastChanged: new Map()
     })
@@ -87,7 +91,9 @@ it("records a matched passage cut for room as cut, and names a page with no room
   const whole = prepareMemorySources({
     pages,
     recall: { query: "kitchen plan", excludedPageIds: new Set() },
-    semanticMatches: [{ pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan.", score: 0.9 }],
+    semanticMatches: [
+      { pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan.", score: 0.9 }
+    ],
     lastChanged: new Map()
   })
     .render(new Map())

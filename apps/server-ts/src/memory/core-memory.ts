@@ -2,7 +2,10 @@
  * Standing facts: the owner's profile and standing preferences, at the root of Memory and sent
  * to every run that reads it. The one place that names their pages.
  */
-export const STANDING_FACTS_PAGES = ["me.md", "profile.md"] as const
+const STANDING_FACTS_PAGES = ["me.md", "profile.md"] as const
+
+/** What the Memory tools say about the standing-facts pages' limit. */
+export const STANDING_LIMIT_NOTE = `${STANDING_FACTS_PAGES.join(" and ")} are root profile pages with a smaller Core Memory limit; a write that leaves one over it is refused.`
 
 export const isStandingFactsPage = (page: {
   readonly path: string
