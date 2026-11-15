@@ -151,11 +151,8 @@ const refusal = <A, E>(effect: Effect.Effect<A, E>) =>
 
 const refusedFor = (error: unknown): string | undefined => {
   const message = recordOf(error)["message"]
-  return typeof message === "string" && message.includes("entry 1 in forgotten.md")
-    ? "retraction"
-    : typeof message === "string"
-      ? message
-      : undefined
+  if (typeof message !== "string") return undefined
+  return message.includes("entry 1 in forgotten.md") ? "retraction" : message
 }
 
 const forget = (memory: Memory) =>

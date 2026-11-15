@@ -84,27 +84,26 @@ const FORGOTTEN_INTRO =
 const renderForgotten = (stored: ReadonlyArray<Schema.Json>): string => {
   const entries = storedRetractions({ [RETRACTIONS_KEY]: [...stored] }).entries
   const unreadable = stored.length - entries.length
-  return (
-    [
-      FORGOTTEN_INTRO,
-      ...(unreadable === 0
-        ? []
-        : [
-            `${unreadable} entries in this page's frontmatter do not read, so their lines are not guarded.`
-          ]),
-      ...entries.map((entry) =>
-        [
-          `## ${entry.id}. ${entry.claim}`,
-          "",
-          entry.status === "open"
-            ? `Open. Asked in ${entry.said.chat} on ${entry.said.at}.`
-            : `Undone in ${entry.closed.chat} on ${entry.closed.at}. Asked in ${entry.said.chat} on ${entry.said.at}.`,
-          "",
-          ...entry.removed.map((removed) => `- \`${removed.path}\`: ${removed.line}`)
-        ].join("\n")
-      )
-    ].join("\n\n") + "\n"
-  )
+  const sections = [
+    FORGOTTEN_INTRO,
+    ...(unreadable === 0
+      ? []
+      : [
+          `${unreadable} entries in this page's frontmatter do not read, so their lines are not guarded.`
+        ]),
+    ...entries.map((entry) =>
+      [
+        `## ${entry.id}. ${entry.claim}`,
+        "",
+        entry.status === "open"
+          ? `Open. Asked in ${entry.said.chat} on ${entry.said.at}.`
+          : `Undone in ${entry.closed.chat} on ${entry.closed.at}. Asked in ${entry.said.chat} on ${entry.said.at}.`,
+        "",
+        ...entry.removed.map((removed) => `- \`${removed.path}\`: ${removed.line}`)
+      ].join("\n")
+    )
+  ]
+  return `${sections.join("\n\n")}\n`
 }
 
 const forgottenPage = (snapshot: Snapshot): PageRecord | undefined =>

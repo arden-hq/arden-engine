@@ -1,4 +1,5 @@
 import type { ManagedFileRepositoryShape, RevisionError } from "@arden-hq/revisions/effect"
+import { markdownWords } from "@arden-hq/protocol/chat"
 import { Effect, Option, Schema } from "effect"
 
 import { parseWikiPage } from "./page.js"
@@ -98,20 +99,13 @@ export const openRetractions = Effect.fn("Wiki.openRetractions")(function* (
   )
 })
 
-const EDGE_MARKS = /^[\s\-*#>]+|[\s\-*#>]+$/gu
-
 /**
- * The form two lines are compared in: link targets dropped for their text, spacing folded,
- * list and heading marks trimmed, lower case. Undefined for a line with no claim.
+ * The form two lines are compared in: the words a person reads (markup off, a link's label
+ * kept), spacing folded, lower case. Undefined for a line with no claim.
  */
 export const claimKey = (line: string): string | undefined => {
-  const key = line
-    .replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/gu, "$1")
-    .replace(/\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/\s+/gu, " ")
-    .replace(EDGE_MARKS, "")
-    .toLowerCase()
-  return key.split(" ").filter((word) => word !== "").length >= MIN_CLAIM_WORDS ? key : undefined
+  const key = markdownWords(line).replace(/\s+/gu, " ").trim().toLowerCase()
+  return key.split(" ").length >= MIN_CLAIM_WORDS ? key : undefined
 }
 
 const claimKeys = (body: string): ReadonlySet<string> =>
