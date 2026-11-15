@@ -2,16 +2,25 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 
-/** Renames a job. Its chat follows while it still carries the job's previous name; a name the
- *  owner gave the chat stays. */
-export const renameOwnedJob = Effect.fn("JobLabels.rename")(function* (
+/** Renames a job's open chats of its own that still carry the job's name, before the job takes
+ *  `name`; a name the owner gave a chat stays. Every writer of a job's name calls it first. */
+export const chatsFollowJobName = Effect.fn("JobLabels.chatsFollow")(function* (
   sql: SqlClient.SqlClient,
   automationId: string,
   name: string
 ): Effect.fn.Return<void, SqlError> {
   yield* sql`UPDATE sessions SET name = ${name}
-    WHERE origin_automation_id = ${automationId} AND name IS NOT ${name}
-      AND session_id = (SELECT thread_id FROM scheduled_tasks WHERE task_id = ${automationId})
+    WHERE origin_automation_id = ${automationId} AND session_type = 'channel'
+      AND archived_at IS NULL AND name IS NOT ${name}
       AND name IS (SELECT name FROM scheduled_tasks WHERE task_id = ${automationId})`
+})
+
+/** Renames a job, and its chats that carry its name. */
+export const renameOwnedJob = Effect.fn("JobLabels.rename")(function* (
+  sql: SqlClient.SqlClient,
+  automationId: string,
+  name: string
+): Effect.fn.Return<void, SqlError> {
+  yield* chatsFollowJobName(sql, automationId, name)
   yield* sql`UPDATE scheduled_tasks SET name = ${name} WHERE task_id = ${automationId} AND name IS NOT ${name}`
 })
