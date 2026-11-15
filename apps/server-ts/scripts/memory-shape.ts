@@ -4,6 +4,7 @@ import { Effect, References } from "effect"
 import { it } from "vitest"
 import { FINDING_KINDS, FINDINGS, memoryFindings } from "../src/wiki/page-shape.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
+import { UNTRACKED_PAGES } from "../src/wiki/untracked.js"
 import { locateReplayCopy, runOnReplayCopy } from "../test/fixtures/replay-copy.js"
 
 it("prints the findings on the copy's Memory, paths and counts only", async () => {
@@ -19,9 +20,7 @@ it("prints the findings on the copy's Memory, paths and counts only", async () =
     Effect.gen(function* () {
       const repository = yield* ManagedFileRepository
       const snapshot = yield* loadSnapshot(repository, "list")
-      const status = yield* repository.workingTreeStatus({
-        readUntracked: (path) => path.endsWith(".md")
-      })
+      const status = yield* repository.workingTreeStatus(UNTRACKED_PAGES)
       return {
         pages: snapshot.pages.length,
         untracked: status.untracked.length,

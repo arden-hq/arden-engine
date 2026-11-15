@@ -2,7 +2,7 @@ import type { UntrackedFile } from "@arden-hq/revisions/effect"
 import { compareCodePoints } from "@arden-hq/std/json"
 import { isWithin } from "@arden-hq/std/paths"
 import { foldSpace } from "@arden-hq/std/text"
-import { Effect, Option } from "effect"
+import { Effect } from "effect"
 import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
@@ -11,13 +11,14 @@ import { hasText, wikiCollections } from "./collections.js"
 import { overPageLimit } from "./commit.js"
 import { IMPORTED_DIRECTORY } from "./imported.js"
 import { pageWikiLinks } from "./links.js"
-import { normal, parseWikiPage, textSentences, visibleText } from "./page.js"
+import { normal, textSentences, visibleText } from "./page.js"
 import {
   followRedirect,
   pageNameIndex,
   resolveWikiLinkTarget,
   type PageRecord
 } from "./snapshot.js"
+import { untrackedFiles, untrackedPageIds } from "./untracked.js"
 
 /** Memory as it stands: the pages in history and the other files in the Memory folder. */
 export interface MemoryFolder {
@@ -38,7 +39,8 @@ export const FINDINGS = {
   empty_page: "pages with no text but headings",
   broken_link: "pages with a link that opens no page",
   shared_title: "active pages that share a title",
-  stray_file: "files in the Memory folder that are not Memory pages"
+  stray_file:
+    "files in the Memory folder that history does not hold, as the outside-edit check lists them"
 } as const
 
 export type FindingKind = keyof typeof FINDINGS
@@ -133,18 +135,6 @@ const groupsOf = (entries: ReadonlyArray<readonly [key: string, path: string]>) 
   return [...groups.values()].map(sorted).filter((paths) => paths.length > 1)
 }
 
-const decoder = new TextDecoder("utf-8", { fatal: true })
-
-const untrackedPageId = (file: UntrackedFile): string | undefined => {
-  if (file.kind !== "read") return undefined
-  try {
-    const parsed = Effect.runSync(Effect.option(parseWikiPage(decoder.decode(file.content))))
-    return Option.isSome(parsed) ? parsed.value.pageId : undefined
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * What a reader of Memory would want tidied, computed from the folder as it stands and never
  * stored. Content findings cover knowledge pages; records are dated reports kept as they are.
@@ -178,15 +168,13 @@ export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => 
       pageFolders.add(path)
   }
 
-  const untrackedIds = folder.untracked.flatMap((file) => {
-    const pageId = untrackedPageId(file)
-    return pageId === undefined ? [] : [[pageId, file.path] as const]
-  })
   const duplicateIds = groupsOf([
     ...pages.map((record) => [record.page.pageId, record.resource.path] as const),
-    ...untrackedIds
+    ...Effect.runSync(untrackedPageIds(folder.untracked)).map(
+      ({ pageId, path }) => [pageId, path] as const
+    )
   ])
-  const copies = new Set(duplicateIds.flat())
+  const other = untrackedFiles(folder.untracked)
 
   const each = (paths: Iterable<string>) => sorted(paths).map((path) => [path])
   const found: Record<FindingKind, ReadonlyArray<ReadonlyArray<string>>> = {
@@ -231,7 +219,11 @@ export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => 
     shared_title: groupsOf(
       active.map((record) => [normal(record.page.title), record.resource.path] as const)
     ),
-    stray_file: each(folder.untracked.map((file) => file.path).filter((path) => !copies.has(path)))
+    stray_file: each([
+      ...other.notInMemory,
+      ...other.otherFiles,
+      ...other.unreadableFiles.map((file) => file.path)
+    ])
   }
   return FINDING_KINDS.flatMap((kind) =>
     [...found[kind]]

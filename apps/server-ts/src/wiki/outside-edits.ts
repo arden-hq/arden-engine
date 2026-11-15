@@ -7,15 +7,21 @@ import {
 } from "@arden-hq/revisions/effect"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { compareCodePoints } from "@arden-hq/std/json"
-import { Effect, Option } from "effect"
+import { Effect } from "effect"
 import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitOutsideChange, type WikiCommitError, type WikiCommitIdentity } from "./commit.js"
 import { mapRevisionError, WikiError } from "./errors.js"
-import { parseWikiPage } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
+import {
+  UNTRACKED_PAGES,
+  untrackedFiles,
+  untrackedPageIds,
+  utf8,
+  type UntrackedFiles
+} from "./untracked.js"
 import { requireArchivable, requireUpdatable, type WikiWriter } from "./write-rules.js"
 
 /**
@@ -54,7 +60,7 @@ export type OutsideEditState =
   | { readonly kind: "set_aside"; readonly path: string; readonly detail: string }
   | { readonly kind: "settling"; readonly path: string }
 
-export interface OutsideEditCheck {
+export interface OutsideEditCheck extends UntrackedFiles {
   /** One commit each, oldest first. */
   readonly takenIn: ReadonlyArray<{
     readonly path: string
@@ -66,11 +72,6 @@ export interface OutsideEditCheck {
   readonly settling: ReadonlyArray<string>
   /** Changed again, or Memory changed, while it was being taken in; the next check decides. */
   readonly changedDuringCheck: ReadonlyArray<string>
-  readonly notInMemory: ReadonlyArray<string>
-  /** Untracked files that are not `.md`: Arden's rules make only `.md` files pages. */
-  readonly otherFiles: ReadonlyArray<string>
-  /** Untracked files or folders that could not be read, with the reason. */
-  readonly unreadableFiles: ReadonlyArray<{ readonly path: string; readonly reason: string }>
 }
 
 export const MAX_MISSING_ARCHIVED = 20
@@ -101,18 +102,6 @@ const refusal = (cause: WikiError): string | undefined => {
   }
 }
 
-const decoder = new TextDecoder("utf-8", { fatal: true })
-
-const utf8 = (bytes: Uint8Array): string | undefined => {
-  try {
-    return decoder.decode(bytes)
-  } catch {
-    return undefined
-  }
-}
-
-const isPagePath = (path: string): boolean => path.endsWith(".md")
-
 const stateOf = (change: WorkingFileChange): string => {
   switch (change.kind) {
     case "changed":
@@ -139,16 +128,14 @@ const byOrder = (left: WorkingFileChange, right: WorkingFileChange): number =>
 const untrackedPages = Effect.fn("Wiki.untrackedPages")(function* (
   files: ReadonlyArray<UntrackedFile>
 ) {
-  const byPageId = new Map<string, string>()
-  const byBlob = new Map<string, string>()
-  for (const file of files) {
-    if (file.kind !== "read") continue
-    byBlob.set(sha256Hex(file.content), file.path)
-    const text = utf8(file.content)
-    if (text === undefined) continue
-    const parsed = yield* Effect.option(parseWikiPage(text))
-    if (Option.isSome(parsed)) byPageId.set(parsed.value.pageId, file.path)
-  }
+  const byPageId = new Map(
+    (yield* untrackedPageIds(files)).map(({ pageId, path }) => [pageId, path] as const)
+  )
+  const byBlob = new Map(
+    files.flatMap((file) =>
+      file.kind === "read" ? [[sha256Hex(file.content), file.path] as const] : []
+    )
+  )
   return { byPageId, byBlob }
 })
 
@@ -216,18 +203,13 @@ export const makeOutsideEdits = (input: {
     WikiError
   > {
     const status = yield* repository
-      .workingTreeStatus({ readUntracked: isPagePath })
+      .workingTreeStatus(UNTRACKED_PAGES)
       .pipe(Effect.mapError(mapRevisionError("observe")))
     const before = seenBefore
     seenBefore = new Map(
       status.changes.map((change) => [change.resource.resourceId, stateOf(change)])
     )
-    const readable = status.untracked.filter((file) => file.kind !== "unreadable")
-    const notInMemory = readable.map((file) => file.path).filter(isPagePath)
-    const otherFiles = readable.map((file) => file.path).filter((path) => !isPagePath(path))
-    const unreadableFiles = status.untracked.flatMap((file) =>
-      file.kind === "unreadable" ? [{ path: file.path, reason: file.reason }] : []
-    )
+    const { notInMemory, otherFiles, unreadableFiles } = untrackedFiles(status.untracked)
     const takenIn: Array<OutsideEditCheck["takenIn"][number]> = []
     const setAside: Array<SetAside> = []
     const settling: Array<string> = []

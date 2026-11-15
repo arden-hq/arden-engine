@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 import { formatRedirectPage, formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import { FINDING_KINDS, memoryFindings, type FindingKind } from "../src/wiki/page-shape.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
+import { untrackedFiles } from "../src/wiki/untracked.js"
 
 const HASH = "0".repeat(64)
 
@@ -189,6 +190,52 @@ describe("memoryFindings", () => {
     ])
   })
 
+  it("lists the other files exactly as the outside-edit check does, a page's copy too", () => {
+    const copy = formatWikiPage({
+      pageId: "id:notes/a.md",
+      title: "A copy",
+      aliases: [],
+      lifecycle: "active",
+      redirectTo: null,
+      metadata: {},
+      body: "A copy."
+    })
+    const untracked: ReadonlyArray<UntrackedFile> = [
+      { kind: "read", path: "notes/a copy.md", content: bytes(copy) },
+      { kind: "listed", path: "notes/list.txt" },
+      { kind: "unreadable", path: "notes/locked.md", reason: "made-up reason" }
+    ]
+    const files = untrackedFiles(untracked)
+    expect(found(base(page("notes/a.md", "A note.")), "stray_file", untracked).flat()).toEqual(
+      [
+        ...files.notInMemory,
+        ...files.otherFiles,
+        ...files.unreadableFiles.map((file) => file.path)
+      ].sort()
+    )
+    expect(files.notInMemory).toEqual(["notes/a copy.md"])
+  })
+
+  it("gives imported pages no content findings: they are records", () => {
+    const pages = [
+      ...base(),
+      page("imported/README.md", "Imported notes."),
+      page("imported/a.md", `${LONG}\n\nStatus on 2026-10-01.\n\nState on 2026-10-02.`),
+      page("imported/b.md", `${LONG}\n\n## Timeline\n\nMade up.`)
+    ]
+    for (const kind of ["duplicate_sentence", "orphan", "two_status", "log_section"] as const)
+      expect(found(pages, kind)).toEqual([])
+  })
+
+  it("counts a redirect as no page: not empty, not an orphan, no shared title", () => {
+    const pages = base(
+      page("notes/a.md", "A.", { title: "notes/old.md" }),
+      redirect("notes/old.md", "id:notes/a.md")
+    )
+    for (const kind of ["empty_page", "orphan", "shared_title"] as const)
+      expect(found(pages, kind)).toEqual([])
+  })
+
   it("carries paths only, in the order of its kinds", () => {
     const findings = memoryFindings({
       pages: base(page("notes/a.md", `${LONG} ${linked("nowhere.md")}`), page("loose/b.md", "")),
@@ -223,5 +270,30 @@ describe("one owner", () => {
       statusLines: offenders(/status\|state/iu),
       findings: offenders(/\bmemoryFindings\b/u)
     }).toEqual({ kinds: [], logHeadings: [], statusLines: [], findings: [] })
+  })
+
+  it("only untracked.ts decides which other files are pages and which page ids they carry", () => {
+    const scripts = join(import.meta.dirname, "../scripts")
+    const sources = [...files(root), ...files(scripts)]
+      .map((file) => join(root, file))
+      .filter((path) => path !== join(root, "wiki/untracked.ts"))
+    const outside = (test: (source: string) => boolean) =>
+      sources.filter((path) => test(readFileSync(path, "utf8"))).map((path) => relative(root, path))
+    expect({
+      readUntracked: outside((source) => /\breadUntracked\b/u.test(source)),
+      untrackedPageIds: outside(
+        (source) => /\bUntrackedFile\b/u.test(source) && /\bparseWikiPage\b/u.test(source)
+      )
+    }).toEqual({ readUntracked: [], untrackedPageIds: [] })
+  })
+
+  it("decides knowledge or record through the one record predicate once it exists", () => {
+    const collections = readFileSync(join(root, "wiki/collections.ts"), "utf8")
+    if (!/export const pageKind\b/u.test(collections)) return
+    const shape = readFileSync(join(root, "wiki/page-shape.ts"), "utf8")
+    expect({
+      ownPredicate: /const recordFolders\b/u.test(shape),
+      usesPageKind: /\bpageKind\(/u.test(shape)
+    }).toEqual({ ownPredicate: false, usesPageKind: true })
   })
 })
