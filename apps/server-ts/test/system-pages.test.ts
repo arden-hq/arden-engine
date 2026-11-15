@@ -26,7 +26,7 @@ it("names a code-owned page only in the one predicate", () => {
 it("decides what a run sees of code-owned pages in the run view alone", () => {
   const deciding = SOURCE_ROOTS.flatMap((root) =>
     sources(root)
-      .filter((path) => /\bisSystemPage\(/u.test(readFileSync(path, "utf8")))
+      .filter((path) => /\bisCodeOwnedPage\(/u.test(readFileSync(path, "utf8")))
       .map((path) => relative(root, path))
   ).sort()
   expect(deciding).toEqual([

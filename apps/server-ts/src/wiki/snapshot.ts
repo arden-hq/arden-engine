@@ -15,7 +15,7 @@ import {
   type ParsedWikiPage,
   wikiPageExcerpt
 } from "./page.js"
-import { isSystemPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./system-pages.js"
 import type { PageTimes } from "./timestamps.js"
 
 export interface PageRecord {
@@ -29,7 +29,7 @@ export interface Snapshot {
 }
 
 export const runPages = (pages: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> =>
-  pages.filter((record) => !isSystemPage(record.resource.path))
+  pages.filter((record) => !isCodeOwnedPage(record.resource.path))
 
 /** The run pages a run may find, read or write: active in history and in lifecycle. */
 export const activeRunPages = (pages: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> =>

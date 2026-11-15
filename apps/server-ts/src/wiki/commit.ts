@@ -20,7 +20,7 @@ import {
   type OpenRetraction
 } from "./retraction.js"
 import type { PageRecord } from "./snapshot.js"
-import { isSystemPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./system-pages.js"
 
 export type WikiCommitOrigin =
   /** The owner, in the app or in the file. */
@@ -544,7 +544,7 @@ const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* 
 ): Effect.fn.Return<void, WikiCommitError> {
   const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
   const paths = [before?.path, "path" in operation ? operation.path : undefined]
-  const path = paths.find((candidate) => candidate !== undefined && isSystemPage(candidate))
+  const path = paths.find((candidate) => candidate !== undefined && isCodeOwnedPage(candidate))
   if (path === undefined) return
   if (!isOwnerOrigin(origin))
     return yield* ruleError(
@@ -581,7 +581,7 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
   const path = ("path" in operation ? operation.path : undefined) ?? before?.path
   const given = "content" in operation ? operation.content : undefined
   const source = given ?? (operation._tag === "Restore" ? before : null)
-  if (path === undefined || isSystemPage(path) || source === null) return
+  if (path === undefined || isCodeOwnedPage(path) || source === null) return
   const after = yield* pageBody(
     source instanceof Uint8Array ? source : yield* repository.readVersion(source)
   )

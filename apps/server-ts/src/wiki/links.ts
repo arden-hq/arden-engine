@@ -3,7 +3,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { WikiPageFormatError } from "./errors.js"
 import type { ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
-import { isSystemPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./system-pages.js"
 
 interface MarkdownPosition {
   readonly start: { readonly offset?: number | undefined }
@@ -128,7 +128,7 @@ const scanned = new WeakMap<ParsedWikiPage, ReadonlyArray<WikiLinkToken>>()
 
 /** The links a Memory page holds. A code-owned page quotes lines rather than linking, so it holds none. */
 export const pageWikiLinks = (record: PageRecord): ReadonlyArray<WikiLinkToken> => {
-  if (isSystemPage(record.resource.path)) return []
+  if (isCodeOwnedPage(record.resource.path)) return []
   const page = record.page
   const cached = scanned.get(page)
   if (cached !== undefined) return cached
