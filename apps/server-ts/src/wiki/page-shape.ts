@@ -1,0 +1,241 @@
+import type { UntrackedFile } from "@arden-hq/revisions/effect"
+import { compareCodePoints } from "@arden-hq/std/json"
+import { isWithin } from "@arden-hq/std/paths"
+import { foldSpace } from "@arden-hq/std/text"
+import { Effect, Option } from "effect"
+import type { Nodes } from "mdast"
+import { fromMarkdown } from "mdast-util-from-markdown"
+import { posix } from "node:path"
+
+import { hasText, wikiCollections } from "./collections.js"
+import { overPageLimit } from "./commit.js"
+import { IMPORTED_DIRECTORY } from "./imported.js"
+import { pageWikiLinks } from "./links.js"
+import { normal, parseWikiPage, textSentences, visibleText } from "./page.js"
+import {
+  followRedirect,
+  pageNameIndex,
+  resolveWikiLinkTarget,
+  type PageRecord
+} from "./snapshot.js"
+
+/** Memory as it stands: the pages in history and the other files in the Memory folder. */
+export interface MemoryFolder {
+  readonly pages: ReadonlyArray<PageRecord>
+  readonly untracked: ReadonlyArray<UntrackedFile>
+}
+
+/** Each kind of finding, in report order, with what it names. */
+export const FINDINGS = {
+  duplicate_sentence: "knowledge pages that share one long sentence (one finding per sentence)",
+  orphan: "knowledge pages no other page links to",
+  two_status: "knowledge pages with more than one dated status line",
+  log_section: "knowledge pages with a section headed as a log",
+  over_limit: "pages over their size limit",
+  duplicate_id: "files that carry the same page id",
+  broken_redirect: "redirects that do not end at an active page",
+  no_readme: "folders that hold pages but no README",
+  empty_page: "pages with no text but headings",
+  broken_link: "pages with a link that opens no page",
+  shared_title: "active pages that share a title",
+  stray_file: "files in the Memory folder that are not Memory pages"
+} as const
+
+export type FindingKind = keyof typeof FINDINGS
+export const FINDING_KINDS = Object.keys(FINDINGS) as ReadonlyArray<FindingKind>
+
+/** One finding: its kind and the paths it names, never page text. */
+export interface Finding {
+  readonly kind: FindingKind
+  readonly paths: ReadonlyArray<string>
+}
+
+interface PageShape {
+  readonly record: PageRecord
+  readonly kind: "knowledge" | "record"
+  readonly datedStatusLines: number
+  readonly logSections: number
+  readonly sentenceKeys: ReadonlySet<string>
+  readonly empty: boolean
+}
+
+const LONG_SENTENCE_CHARS = 60
+const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?"
+const DATE = new RegExp(
+  `\\b(?:\\d{4}-\\d{2}-\\d{2}|${MONTH} \\d{1,2}\\b|\\d{1,2} ${MONTH}(?![A-Za-z]))`,
+  "u"
+)
+const STATUS_WORD = /\b(?:status|state)\b/iu
+const LOG_HEADING = /\b(?:timeline|history|log|changelog|updates|progress)\b/iu
+
+const isActive = (record: PageRecord): boolean =>
+  record.resource.state === "active" && record.page.lifecycle === "active"
+
+const folderOf = (path: string): string => {
+  const folder = posix.dirname(path)
+  return folder === "." ? "" : folder
+}
+
+const isReadme = (path: string): boolean => posix.basename(path).toLowerCase() === "readme.md"
+
+/** Folders whose pages are records: a folder whose contract names a producer, and imports. */
+const recordFolders = (pages: ReadonlyArray<PageRecord>): ReadonlyArray<string> => [
+  IMPORTED_DIRECTORY,
+  ...wikiCollections(pages).flatMap((collection) =>
+    collection.producer === undefined ? [] : [collection.directory]
+  )
+]
+
+const isRecordPath = (folders: ReadonlyArray<string>, path: string): boolean =>
+  folders.some((folder) => isWithin(`/${folder}`, `/${path}`))
+
+/** The lines a reader sees in each paragraph, outside code, and the text of each heading. */
+const readableParts = (body: string) => {
+  const lines: Array<string> = []
+  const headings: Array<string> = []
+  const visit = (node: Nodes): void => {
+    if (node.type === "heading") headings.push(visibleText(node))
+    else if (node.type === "paragraph") lines.push(...visibleText(node).split("\n"))
+    else if ("children" in node) for (const child of node.children) visit(child)
+  }
+  const tree = fromMarkdown(body)
+  visit(tree)
+  return {
+    lines,
+    headings,
+    empty: !tree.children.some((node) => node.type !== "heading" && hasText(node))
+  }
+}
+
+const pageShape = (record: PageRecord, folders: ReadonlyArray<string>): PageShape => {
+  const parts = readableParts(record.page.body)
+  return {
+    record,
+    kind: isRecordPath(folders, record.resource.path) ? "record" : "knowledge",
+    datedStatusLines: parts.lines.filter((line) => STATUS_WORD.test(line) && DATE.test(line))
+      .length,
+    logSections: parts.headings.filter((heading) => LOG_HEADING.test(heading)).length,
+    sentenceKeys: new Set(
+      parts.lines
+        .flatMap((line) => textSentences(foldSpace(line)))
+        .filter((sentence) => sentence.length >= LONG_SENTENCE_CHARS)
+    ),
+    empty: parts.empty
+  }
+}
+
+const sorted = (paths: Iterable<string>): ReadonlyArray<string> =>
+  [...new Set(paths)].sort(compareCodePoints)
+
+const groupsOf = (entries: ReadonlyArray<readonly [key: string, path: string]>) => {
+  const groups = new Map<string, Array<string>>()
+  for (const [key, path] of entries) groups.set(key, [...(groups.get(key) ?? []), path])
+  return [...groups.values()].map(sorted).filter((paths) => paths.length > 1)
+}
+
+const decoder = new TextDecoder("utf-8", { fatal: true })
+
+const untrackedPageId = (file: UntrackedFile): string | undefined => {
+  if (file.kind !== "read") return undefined
+  try {
+    const parsed = Effect.runSync(Effect.option(parseWikiPage(decoder.decode(file.content))))
+    return Option.isSome(parsed) ? parsed.value.pageId : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * What a reader of Memory would want tidied, computed from the folder as it stands and never
+ * stored. Content findings cover knowledge pages; records are dated reports kept as they are.
+ */
+export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => {
+  const pages = folder.pages.filter((record) => record.resource.state === "active")
+  const active = pages.filter(isActive)
+  const folders = recordFolders(pages)
+  const shapes = active.map((record) => pageShape(record, folders))
+  const knowledge = shapes.filter((shape) => shape.kind === "knowledge")
+  const pathOf = (shape: PageShape) => shape.record.resource.path
+
+  const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
+  const names = pageNameIndex(pages)
+  const inbound = new Map<string, number>()
+  const brokenLinks = new Set<string>()
+  for (const source of active) {
+    for (const token of pageWikiLinks(source.page)) {
+      const target = resolveWikiLinkTarget(byId, names, source.page.pageId, token)
+      if (target === null) brokenLinks.add(source.resource.path)
+      else if (target !== source.page.pageId) inbound.set(target, (inbound.get(target) ?? 0) + 1)
+    }
+  }
+
+  const readmeFolders = new Set(
+    active.filter((record) => isReadme(record.resource.path)).map((r) => folderOf(r.resource.path))
+  )
+  const pageFolders = new Set<string>()
+  for (const record of active) {
+    for (let path = folderOf(record.resource.path); path !== ""; path = folderOf(path))
+      pageFolders.add(path)
+  }
+
+  const untrackedIds = folder.untracked.flatMap((file) => {
+    const pageId = untrackedPageId(file)
+    return pageId === undefined ? [] : [[pageId, file.path] as const]
+  })
+  const duplicateIds = groupsOf([
+    ...pages.map((record) => [record.page.pageId, record.resource.path] as const),
+    ...untrackedIds
+  ])
+  const copies = new Set(duplicateIds.flat())
+
+  const each = (paths: Iterable<string>) => sorted(paths).map((path) => [path])
+  const found: Record<FindingKind, ReadonlyArray<ReadonlyArray<string>>> = {
+    duplicate_sentence: groupsOf(
+      knowledge.flatMap((shape) =>
+        [...shape.sentenceKeys].map((key) => [key, pathOf(shape)] as const)
+      )
+    ),
+    orphan: each(
+      knowledge
+        .filter((shape) => pathOf(shape).toLowerCase() !== "readme.md")
+        .filter((shape) => (inbound.get(shape.record.page.pageId) ?? 0) === 0)
+        .map(pathOf)
+    ),
+    two_status: each(knowledge.filter((shape) => shape.datedStatusLines > 1).map(pathOf)),
+    log_section: each(knowledge.filter((shape) => shape.logSections > 0).map(pathOf)),
+    over_limit: each(
+      active
+        .filter(
+          (record) =>
+            overPageLimit({
+              path: record.resource.path,
+              pageId: record.page.pageId,
+              body: record.page.body
+            }) !== undefined
+        )
+        .map((record) => record.resource.path)
+    ),
+    duplicate_id: duplicateIds,
+    broken_redirect: each(
+      pages
+        .filter(
+          (record) =>
+            record.page.lifecycle === "redirect" &&
+            followRedirect(byId, record.page.pageId) === null
+        )
+        .map((record) => record.resource.path)
+    ),
+    no_readme: each([...pageFolders].filter((path) => !readmeFolders.has(path))),
+    empty_page: each(shapes.filter((shape) => shape.empty).map(pathOf)),
+    broken_link: each(brokenLinks),
+    shared_title: groupsOf(
+      active.map((record) => [normal(record.page.title), record.resource.path] as const)
+    ),
+    stray_file: each(folder.untracked.map((file) => file.path).filter((path) => !copies.has(path)))
+  }
+  return FINDING_KINDS.flatMap((kind) =>
+    [...found[kind]]
+      .sort((left, right) => compareCodePoints(left.join("\n"), right.join("\n")))
+      .map((paths) => ({ kind, paths }))
+  )
+}

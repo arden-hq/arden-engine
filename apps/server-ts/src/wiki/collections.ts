@@ -14,7 +14,7 @@ export const DIRECTORY_CONTRACT_HEADINGS = [
   "Retention"
 ] as const
 
-const hasText = (node: Nodes): boolean => {
+export const hasText = (node: Nodes): boolean => {
   if (node.type === "html" || node.type === "definition") return false
   if ("value" in node) return node.value.trim().length > 0
   return "children" in node && node.children.some(hasText)
