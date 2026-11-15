@@ -50,14 +50,10 @@ export const makeWikiMaintenanceStore = ({
   const initialize = (processedHead: string | null) =>
     writer
       .transact(position.start(sql, processedHead))
-      .pipe(
-        Effect.mapError(mapStorage("initialize", "Could not initialize Wiki Maintenance watermark"))
-      )
+      .pipe(Effect.mapError(mapStorage("initialize", "Could not initialize the Tidy position")))
 
   const processedHead = () =>
-    position
-      .read(sql)
-      .pipe(Effect.mapError(mapStorage("read", "Could not read Wiki Maintenance watermark")))
+    position.read(sql).pipe(Effect.mapError(mapStorage("read", "Could not read the Tidy position")))
 
   const compareAndSet = (input: WikiMaintenanceCompareAndSetInput) =>
     writer
@@ -71,18 +67,14 @@ export const makeWikiMaintenanceStore = ({
                     error(
                       "compare_and_set",
                       "conflict",
-                      "Wiki Maintenance watermark changed before advance"
+                      "The Tidy position changed before it could advance"
                     )
                   )
                 : Effect.succeed(input.next)
             )
           )
       )
-      .pipe(
-        Effect.mapError(
-          mapStorage("compare_and_set", "Could not complete Wiki Maintenance watermark advance")
-        )
-      )
+      .pipe(Effect.mapError(mapStorage("compare_and_set", "Could not advance the Tidy position")))
 
   return WikiMaintenanceStore.of({ initialize, processedHead, compareAndSet })
 }

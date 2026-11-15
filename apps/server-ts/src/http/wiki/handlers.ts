@@ -203,7 +203,7 @@ export const WikiHandlers = HttpApiBuilder.group(
             commitId: params.commitId,
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
-            commit: ownerInApp(`restore Maintenance commit ${params.commitId}`, "desktop.restore")
+            commit: ownerInApp(`restore Tidy commit ${params.commitId}`, "desktop.restore")
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )

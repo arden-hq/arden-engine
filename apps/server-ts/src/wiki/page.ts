@@ -315,7 +315,8 @@ type MarkdownNode = {
   readonly children?: ReadonlyArray<MarkdownNode> | undefined
 }
 
-const visibleText = (node: MarkdownNode): string => {
+/** The text a reader sees in a Markdown node: text, inline code and image descriptions. */
+export const visibleText = (node: MarkdownNode): string => {
   if (node.type === "text" || node.type === "inlineCode") return node.value ?? ""
   if (node.type === "image") return node.alt ?? ""
   return node.children?.map(visibleText).join("") ?? ""
@@ -339,6 +340,10 @@ export const wikiPageExcerpt = (body: string, limit = 240): string | null => {
   return cutText(text, limit)
 }
 
+/** The sentences of space-folded text: each ends at `.`, `!` or `?` before a space or the end. */
+export const textSentences = (text: string): ReadonlyArray<string> =>
+  text.split(/(?<=[.!?])\s+/u).filter((sentence) => sentence.length > 0)
+
 const summaries = new WeakMap<ParsedWikiPage, string | null>()
 
 /**
@@ -350,8 +355,7 @@ export const wikiPageSummary = (page: ParsedWikiPage, limit: number): string | n
   if (typeof field === "string" && foldSpace(field) !== "") return cutText(foldSpace(field), limit)
   if (!summaries.has(page)) {
     const text = wikiPageExcerpt(page.body, Number.MAX_SAFE_INTEGER)
-    const end = text === null ? -1 : text.search(/[.!?](?=\s|$)/u)
-    summaries.set(page, text === null || end < 0 ? text : text.slice(0, end + 1))
+    summaries.set(page, text === null ? null : (textSentences(text)[0] ?? null))
   }
   const sentence = summaries.get(page) ?? null
   return sentence === null ? null : cutText(sentence, limit, { atWord: true })

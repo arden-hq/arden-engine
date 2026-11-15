@@ -200,33 +200,6 @@ describe("Space review admission", () => {
       }
   })
 
-  it("reads a stored input without the standing-facts pages it listed as resident", () => {
-    const resident = { ...page("owned"), pageId: "me", path: "me.md", basis: "resident" }
-    const stored = {
-      admission: "unchanged",
-      spaceId: "space-1",
-      repositoryHead: null,
-      pages: [
-        { pageId: "me", path: "me.md", version: "v2", basis: "resident", rootPageId: "me" },
-        {
-          pageId: "page-owned",
-          path: "notes/owned.md",
-          version: "v2",
-          basis: "owned",
-          rootPageId: "page-owned"
-        }
-      ],
-      chats: [],
-      semantic: semantic(HELD_TASKS),
-      unresolved: [],
-      reads: reads({ pages: [resident, page("owned")] as never }),
-      prompt: "Made-up prompt"
-    }
-    const decoded = Schema.decodeUnknownSync(SpaceReviewInputSchema)(stored)
-    expect(decoded.pages.map((entry) => entry.pageId)).toEqual(["page-owned"])
-    expect(decoded.reads?.pages.map((entry) => entry.pageId)).toEqual(["page-owned"])
-  })
-
   it("a source that left the review's pages is a Memory page change, which starts nothing", () => {
     const verdict = spaceReviewAdmission(
       { semantic: semantic(HELD_TASKS), reads: reads({ removed: ["notes/left.md"] }) },

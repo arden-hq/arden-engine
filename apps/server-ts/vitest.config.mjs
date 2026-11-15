@@ -55,6 +55,11 @@ const outsideEditsProject =
       ]
     : []
 
+const memoryShapeProject =
+  process.env.ARDEN_MEMORY_SHAPE === "1"
+    ? [{ extends: true, test: { name: "memory-shape", include: ["scripts/memory-shape.ts"] } }]
+    : []
+
 // The SQLite threads write here every table scan the tests cause; the check
 // in test/sql-scans/global.ts reads it after the run.
 const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
@@ -86,7 +91,8 @@ export default mergeConfig(
         ...speedProject,
         ...backlogProject,
         ...memoryTestProject,
-        ...outsideEditsProject
+        ...outsideEditsProject,
+        ...memoryShapeProject
       ]
     }
   })

@@ -58,6 +58,7 @@ import { globalInstructionVersions } from "./0163_global_instruction_versions.js
 import { chatSummaryCutByRevert } from "./0164_chat_summary_cut_by_revert.js"
 import { chatSummaryRemovedByRevert } from "./0165_chat_summary_removed_by_revert.js"
 import { reportRetentionRetired } from "./0166_report_retention_retired.js"
+import { retiredMemoryRecords } from "./0167_retired_memory_records.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -359,7 +360,8 @@ export const migrations: ReadonlyArray<Migration> = [
   globalInstructionVersions,
   chatSummaryCutByRevert,
   chatSummaryRemovedByRevert,
-  reportRetentionRetired
+  reportRetentionRetired,
+  retiredMemoryRecords
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

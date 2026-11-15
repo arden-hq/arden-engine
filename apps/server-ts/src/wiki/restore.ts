@@ -101,12 +101,12 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "not_found",
-            `Maintenance commit is not a reachable page change: ${input.commitId}`,
+            `Tidy commit is not a reachable page change: ${input.commitId}`,
             { pageId: input.pageId }
           )
         }
         if (maintenance.origin !== LEGACY_MAINTENANCE_ORIGIN) {
-          return yield* wikiError("restore", "invalid", "Commit is not a Wiki Maintenance change", {
+          return yield* wikiError("restore", "invalid", "Commit is not a Tidy change", {
             pageId: input.pageId
           })
         }
@@ -124,7 +124,7 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "invalid",
-            "Maintenance commit must contain exactly one page update",
+            "A Tidy commit must contain exactly one page update",
             { pageId: input.pageId }
           )
         }
@@ -135,7 +135,7 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "conflict",
-            `Wiki page changed after Maintenance commit ${input.commitId}`,
+            `Memory page changed after Tidy commit ${input.commitId}`,
             { pageId: input.pageId }
           )
         }
@@ -144,7 +144,7 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "invalid",
-            "Maintenance change did not replace an active page",
+            "The Tidy change did not replace an active page",
             {
               pageId: input.pageId
             }
