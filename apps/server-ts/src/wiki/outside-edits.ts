@@ -60,7 +60,7 @@ export interface OutsideEditCheck {
   readonly otherFiles: ReadonlyArray<string>
 }
 
-export const OUTSIDE_EDIT_IDENTITY = {
+const OUTSIDE_EDIT_IDENTITY = {
   actor: "user:external",
   origin: { kind: "user", via: "filesystem" },
   reason: "take in a change made outside Arden"

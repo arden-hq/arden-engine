@@ -9,7 +9,7 @@ import { Deferred, Effect, Exit } from "effect"
 import { decodeWikiOrigin } from "./commit.js"
 
 /** The newest change to a page made outside Arden and taken in from its file. */
-export interface OutsideChange {
+interface OutsideChange {
   readonly at: string
   readonly action: string
   readonly revision: string
