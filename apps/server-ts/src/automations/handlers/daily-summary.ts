@@ -1,13 +1,8 @@
-import { machineTimeZone } from "@arden-hq/std/time"
+import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
 import { DateTime, Effect, Predicate } from "effect"
 import type { SessionStore } from "../../persistence/sessions/store.js"
 import type { TranscriptQueries } from "../../persistence/transcript/queries.js"
 import { ownerText } from "../../persistence/transcript/owner-words.js"
-import {
-  jobHandlerItem,
-  type AutomationJobLease,
-  type AutomationJobResult
-} from "../../persistence/automations/store.js"
 import { AutomationId } from "../../persistence/automations/model.js"
 import type { AutomationHandlerItems } from "../../persistence/automations/handler-items.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
@@ -15,7 +10,9 @@ import { markdownValue } from "../../prompts/format.js"
 import type { Wiki } from "../../wiki/service.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
 import type { HandlerItemRunner } from "../handler-item-run.js"
-import { jobResult, type AutomationRunner } from "../runner.js"
+import { runItemLoop } from "../item-loop.js"
+import type { AutomationRunner } from "../runner.js"
+import type { DailySummaryPosition } from "../../persistence/daily-summary/store.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
 
 const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summary")
@@ -34,195 +31,220 @@ Keep dated notes until the user requests removal; revision history preserves edi
 YYYY-MM-DD.md uses the machine's local calendar date. Read its observation period, source references, and coverage gaps.
 `
 
-const makeDailySummaryRunner = (services: {
-  readonly wiki: Pick<Wiki["Service"], "snapshot" | "listChanges" | "createDirectory">
+/** What one model run is handed for a day, at most; the rest is counted in the page input. */
+const EVIDENCE_EXCERPTS = 30
+const EVIDENCE_CHARS = 16_000
+const EXCERPT_CHARS = 2_000
+const SESSION_PAGE = 100
+const MESSAGE_PAGE = 250
+
+const nextDay = (day: string, days = 1): string =>
+  DateTime.formatIsoDate(DateTime.add(DateTime.makeUnsafe(`${day}T00:00:00Z`), { days }))
+
+const dayStart = (day: string, timezone: string): DateTime.Zoned =>
+  DateTime.makeZonedUnsafe(`${day}T00:00:00`, { timeZone: timezone, adjustForTimeZone: true })
+
+/** The day before the last ended day: where the position starts, so the first start after an
+ * update writes only the page the old timer would have written. */
+export const dailyStartPosition = (nowMs: number, timezone: string): string =>
+  nextDay(localDayOf(nowMs, timezone), -2)
+
+type DayPreparation =
+  | { readonly kind: "settled"; readonly note?: string }
+  | { readonly kind: "write"; readonly markdown: string }
+
+export const makeDailySummaryRunner = (services: {
+  readonly wiki: Pick<Wiki["Service"], "snapshot" | "pageTimes" | "createDirectory">
   readonly sessions: Pick<SessionStore["Service"], "list">
   readonly transcripts: Pick<TranscriptQueries["Service"], "conversationPage">
+  readonly position: DailySummaryPosition["Service"]
   readonly handlerItems: Pick<
     AutomationHandlerItems["Service"],
     "prepareHandlerItem" | "settleHandlerItem"
   >
   readonly runItem: HandlerItemRunner
   readonly timezone?: string
-}): AutomationRunner =>
-  Effect.fn("DailySummaryRunner")(function* (
-    job: AutomationJobLease
-  ): Effect.fn.Return<AutomationJobResult, Error> {
-    let item = jobHandlerItem(job.payload)
-    const sessionId = item?.input.sessionId ?? job.payload.sessionId
-    if (sessionId === null) throw new Error("Daily summary has no Chat session")
-    const result = (
-      outcome: "finished" | "no_change" | "failed",
-      detail: string,
-      error: string | null = null
-    ): AutomationJobResult => {
-      const run = {
-        chatRunId: item?.runId ?? item?.previousRunId ?? null,
-        chatSessionId: sessionId
-      }
-      return outcome === "failed"
-        ? jobResult.failed(error, detail, run)
-        : jobResult.completed(outcome, detail, run)
-    }
-    if (item?.phase === "settled")
-      return result(
-        item.failure === null ? "finished" : "failed",
-        "Daily summary already settled",
-        item.failure
-      )
-    if (item === undefined) {
-      const timezone = services.timezone ?? machineTimeZone()
-      const end = DateTime.makeUnsafe(job.leasedAt).pipe(
-        DateTime.setZoneNamedUnsafe(timezone),
-        DateTime.startOf("day")
-      )
-      const start = DateTime.subtract(end, { days: 1 })
-      const date = DateTime.formatIsoDate(start)
-      const path = `daily/${date}.md`
-      const snapshot = yield* services.wiki.snapshot()
-      const existing = snapshot.pages.find(
-        (page) => page.resource.path.toLowerCase() === path.toLowerCase()
-      )
-      if (existing !== undefined) {
-        if (
-          existing.page.lifecycle === "active" &&
-          existing.page.metadata["producer_automation_id"] === DAILY_SUMMARY_AUTOMATION_ID
-        )
-          return result("no_change", `Daily summary already exists: ${path}`)
-        return result(
-          "failed",
-          `Daily summary destination is occupied: ${path}`,
-          "Preserved an existing record owned by another writer"
-        )
-      }
-      const startMs = DateTime.toEpochMillis(start)
-      const endMs = DateTime.toEpochMillis(end)
-      const evidence: Array<string> = []
-      const sources: Array<string> = []
-      let remaining = 16_000
-      const append = (ref: string, body: string) => {
-        if (remaining <= 0 || sources.length >= 30) return
-        const text = body.slice(0, Math.min(2_000, remaining))
-        if (text.trim().length === 0) return
-        evidence.push(`${ref}\n${text}`)
-        sources.push(ref)
-        remaining -= text.length
-      }
+}): AutomationRunner => {
+  const timezone = services.timezone ?? machineTimeZone()
+
+  /** Owner messages created in [start, end), from every owner chat, archived ones included. */
+  const dayMessages = Effect.fn("DailySummary.dayMessages")(function* (
+    startMs: number,
+    endMs: number
+  ) {
+    const messages: Array<{ readonly ref: string; readonly text: string }> = []
+    let cursor: { readonly at: string; readonly sessionId: string } | undefined
+    while (true) {
       const sessions = yield* services.sessions.list({
         scope: "primary",
         sort: "activity",
-        limit: 20
+        includeArchived: true,
+        limit: SESSION_PAGE,
+        ...(cursor === undefined ? {} : { cursor })
       })
       for (const session of sessions) {
-        const page = yield* services.transcripts.conversationPage({
-          _tag: "Latest",
-          sessionId: session.sessionId,
-          limit: 80
-        })
-        for (const record of page.records) {
-          const time = DateTime.toEpochMillis(record.createdAt)
-          if (
-            time < startMs ||
-            time >= endMs ||
-            (record.role !== "user" && record.role !== "assistant")
+        if (Date.parse(session.lastActivity) < startMs) return messages
+        const found: Array<{ readonly ref: string; readonly text: string }> = []
+        let before: number | undefined
+        while (true) {
+          const page = yield* services.transcripts.conversationPage(
+            before === undefined
+              ? { _tag: "Latest", sessionId: session.sessionId, limit: MESSAGE_PAGE }
+              : {
+                  _tag: "Before",
+                  sessionId: session.sessionId,
+                  limit: MESSAGE_PAGE,
+                  sequence: before
+                }
           )
-            continue
-          const text =
-            record.envelope.question_answer !== undefined
-              ? ownerText(record.envelope)
-              : contentText(record.envelope.content)
-          if (text.trim().length === 0) continue
-          append(
-            `arden:session/${session.publicRef} (message ${record.messageId})`,
-            `${record.role} at ${DateTime.formatIso(record.createdAt)}: ${text}`
-          )
-        }
-      }
-      const changes = yield* services.wiki.listChanges({
-        since: DateTime.formatIso(start),
-        offset: 0,
-        limit: 100
-      })
-      const latestChange = new Map<string, number>()
-      for (const entry of changes.entries) {
-        const timestamp = DateTime.toEpochMillis(DateTime.makeUnsafe(entry.timestamp))
-        for (const change of entry.changes) {
-          for (const changedPath of [change.path, change.beforePath, change.afterPath]) {
-            if (changedPath === null) continue
-            const previous = latestChange.get(changedPath)
-            if (previous === undefined || timestamp > previous)
-              latestChange.set(changedPath, timestamp)
+          for (const record of [...page.records].reverse()) {
+            const time = DateTime.toEpochMillis(record.createdAt)
+            if (time >= endMs || (record.role !== "user" && record.role !== "assistant")) continue
+            if (time < startMs) continue
+            const text =
+              record.envelope.question_answer !== undefined
+                ? ownerText(record.envelope)
+                : contentText(record.envelope.content)
+            if (text.trim().length === 0) continue
+            found.push({
+              ref: `arden:session/${session.publicRef} (message ${record.messageId})`,
+              text: `${record.role} at ${DateTime.formatIso(record.createdAt)}: ${text}`
+            })
           }
+          const first = page.records[0]
+          if (
+            first === undefined ||
+            !page.hasMoreBefore ||
+            DateTime.toEpochMillis(first.createdAt) < startMs
+          )
+            break
+          before = first.sequence
         }
+        messages.push(...found.reverse())
       }
-      const paths = new Set(
-        [...latestChange]
-          .filter(([, time]) => time >= startMs && time < endMs)
-          .map(([changedPath]) => changedPath)
-      )
-      for (const page of snapshot.pages
-        .filter(
-          (page) =>
-            paths.has(page.resource.path) &&
-            page.page.lifecycle === "active" &&
-            typeof page.page.metadata["producer_automation_id"] === "string" &&
-            page.page.metadata["producer_automation_id"] !== DAILY_SUMMARY_AUTOMATION_ID &&
-            !page.resource.path.toLowerCase().endsWith("/readme.md")
-        )
-        .slice(0, 6)) {
-        append(
-          `arden:memory/${page.resource.path}`,
-          `Report ${page.page.title}; version ${page.resource.versionId}; observation period: ${String(page.page.metadata["observation_period"] ?? "unspecified")}\n${page.page.body}`
-        )
-      }
-      if (evidence.length === 0)
-        return jobResult.withoutRun(
-          "no_input",
-          "No evidence found within the bounded daily scan; no note created"
-        )
-      const contract = snapshot.pages.find(
-        (page) => page.resource.path === "daily/README.md" && page.page.lifecycle === "active"
-      )
-      if (contract === undefined)
-        yield* services.wiki.createDirectory({
-          path: "daily",
-          body: DAILY_CONTRACT,
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID
-        })
-      else if (contract.page.metadata["producer_automation_id"] !== DAILY_SUMMARY_AUTOMATION_ID)
-        return result(
-          "failed",
-          "Daily collection needs its producer binding configured",
-          "Preserved the existing daily collection"
-        )
-      item = yield* services.handlerItems.prepareHandlerItem(job, {
-        sessionId,
-        name: job.payload.name,
-        instructions: job.payload.prompt,
-        data: {
-          kind: "daily",
-          date,
-          timezone,
-          markdown: `Destination: ${path}\nObservation period for wiki_publish_report: ${JSON.stringify({ start: DateTime.formatIso(start), end: DateTime.formatIso(end) })} (end exclusive), ${timezone}\nSource refs:\n${markdownValue(sources)}\nCoverage: bounded scan of up to 20 current primary Chats, latest 80 messages each, 100 recent Wiki commits and 6 reports; at most 30 excerpts / 16000 characters. Archived Chats, unavailable records, and reports revised after this day are not covered. This is not proof of all activity. Report edit dates do not establish event dates.\n\n${evidence.join("\n\n")}`
-        }
-      })
+      const last = sessions.at(-1)
+      if (last === undefined || sessions.length < SESSION_PAGE) return messages
+      cursor = { at: last.lastActivity, sessionId: last.sessionId }
     }
-    if (item.input.data.kind !== "daily")
-      throw new Error("Daily summary received another handler's item")
-    const outcome = yield* services.runItem(job, item)
-    item = yield* services.handlerItems.settleHandlerItem(job, outcome.item)
-    if (outcome.state !== "done" && outcome.state !== "nothing_to_do")
-      return result(
-        "failed",
-        outcome.result ?? "Daily summary did not complete",
-        outcome.detail ?? outcome.state
-      )
-    return result(
-      outcome.state === "done" ? "finished" : "no_change",
-      outcome.result ?? "Daily summary completed"
-    )
   })
+
+  const prepareDay = Effect.fn("DailySummary.prepareDay")(function* (
+    date: string
+  ): Effect.fn.Return<DayPreparation, Error> {
+    const start = dayStart(date, timezone)
+    const end = dayStart(nextDay(date), timezone)
+    const path = `daily/${date}.md`
+    const snapshot = yield* services.wiki.snapshot()
+    const existing = snapshot.pages.find(
+      (page) => page.resource.path.toLowerCase() === path.toLowerCase()
+    )
+    if (existing !== undefined)
+      return existing.page.lifecycle === "active" &&
+        existing.page.metadata["producer_automation_id"] === DAILY_SUMMARY_AUTOMATION_ID
+        ? { kind: "settled" }
+        : { kind: "settled", note: `${path} is kept by another writer` }
+    const startMs = DateTime.toEpochMillis(start)
+    const endMs = DateTime.toEpochMillis(end)
+    const reports = snapshot.pages.filter((page) => {
+      const producer = page.page.metadata["producer_automation_id"]
+      return (
+        page.page.lifecycle === "active" &&
+        typeof producer === "string" &&
+        producer !== DAILY_SUMMARY_AUTOMATION_ID &&
+        !page.resource.path.toLowerCase().endsWith("/readme.md")
+      )
+    })
+    const times = yield* services.wiki.pageTimes(snapshot.head)
+    const dayReports = reports.filter((page) => {
+      const updated = times.get(page.page.pageId)?.updatedAt
+      if (updated === null || updated === undefined) return false
+      const at = Date.parse(updated)
+      return at >= startMs && at < endMs
+    })
+    const candidates = [
+      ...(yield* dayMessages(startMs, endMs)),
+      ...dayReports.map((page) => ({
+        ref: `arden:memory/${page.resource.path}`,
+        text: `Report ${page.page.title}; version ${page.resource.versionId}; observation period: ${String(page.page.metadata["observation_period"] ?? "unspecified")}\n${page.page.body}`
+      }))
+    ]
+    if (candidates.length === 0) return { kind: "settled" }
+    const evidence: Array<string> = []
+    const sources: Array<string> = []
+    let remaining = EVIDENCE_CHARS
+    let shortened = 0
+    for (const candidate of candidates) {
+      if (remaining <= 0 || sources.length >= EVIDENCE_EXCERPTS) break
+      const text = candidate.text.slice(0, Math.min(EXCERPT_CHARS, remaining))
+      if (text.length < candidate.text.length) shortened += 1
+      evidence.push(`${candidate.ref}\n${text}`)
+      sources.push(candidate.ref)
+      remaining -= text.length
+    }
+    const contract = snapshot.pages.find(
+      (page) => page.resource.path === "daily/README.md" && page.page.lifecycle === "active"
+    )
+    if (contract === undefined)
+      yield* services.wiki.createDirectory({
+        path: "daily",
+        body: DAILY_CONTRACT,
+        authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+        producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID
+      })
+    else if (contract.page.metadata["producer_automation_id"] !== DAILY_SUMMARY_AUTOMATION_ID)
+      return yield* Effect.fail(
+        new Error(
+          "Daily collection needs its producer binding configured; preserved the existing daily collection"
+        )
+      )
+    const messages = candidates.length - dayReports.length
+    const keptMessages = Math.min(sources.length, messages)
+    const keptReports = sources.length - keptMessages
+    const coverage = [
+      `Coverage: every owner chat's messages from this day (${messages}) and every report last changed on this day (${dayReports.length}).`,
+      `One run reads at most ${EVIDENCE_EXCERPTS} excerpts and ${EVIDENCE_CHARS} characters, ${EXCERPT_CHARS} per excerpt.`,
+      sources.length === candidates.length && shortened === 0
+        ? "Nothing was left out."
+        : `Left out by that limit: ${messages - keptMessages} messages and ${dayReports.length - keptReports} reports; ${shortened} excerpts shortened.`,
+      "Reports changed again after this day and unavailable records are not covered. This is not proof of all activity. Report edit dates do not establish event dates."
+    ].join(" ")
+    return {
+      kind: "write",
+      markdown: `Destination: ${path}\nObservation period for wiki_publish_report: ${JSON.stringify({ start: DateTime.formatIso(start), end: DateTime.formatIso(end) })} (end exclusive), ${timezone}\nSource refs:\n${markdownValue(sources)}\n${coverage}\n\n${evidence.join("\n\n")}`
+    }
+  })
+
+  return (job) => {
+    const today = localDayOf(job.leasedAt, timezone)
+    const notes: Array<string> = []
+    return runItemLoop(services, {
+      label: "Daily summary",
+      kind: "daily",
+      next: Effect.fn("DailySummary.next")(function* () {
+        const settled = yield* services.position.settled()
+        const date = nextDay(settled)
+        if (date >= today) return "idle" as const
+        const prepared = yield* prepareDay(date)
+        if (prepared.kind === "settled") {
+          if (prepared.note !== undefined) notes.push(prepared.note)
+          yield* services.position.advance({ from: settled, to: date })
+          return "advance" as const
+        }
+        return { kind: "daily" as const, date, timezone, markdown: prepared.markdown }
+      }),
+      commit: (data) => services.position.advance({ from: nextDay(data.date, -1), to: data.date }),
+      summary: (item) =>
+        [
+          item === undefined
+            ? "daily summary: no ended day needed a run"
+            : `daily summary: ${item.reviewed} day run(s) finished, ${item.skipped} did not`,
+          ...notes
+        ].join("; "),
+      cancelled: "Daily summary cancelled",
+      incomplete: "Daily summary stopped before a day was written; that day is tried again next run"
+    })(job)
+  }
+}
 
 const contentText = (content: unknown): string =>
   typeof content === "string"
@@ -258,6 +280,7 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
       wiki: services.wiki,
       sessions: services.sessions,
       transcripts: services.transcripts,
+      position: services.dailyPosition,
       handlerItems: services.handlerItems,
       runItem: services.runItem
     })

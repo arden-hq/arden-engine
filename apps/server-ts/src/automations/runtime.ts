@@ -1,3 +1,4 @@
+import { machineTimeZone } from "@arden-hq/std/time"
 import { backoffDelayMs } from "@arden-hq/std/retry"
 import { HomeStore } from "../persistence/home/store.js"
 import { HomeLetterInputs } from "../persistence/automations/home-letter-inputs.js"
@@ -49,6 +50,8 @@ import {
   type SessionLifecycleDelivery
 } from "../persistence/sessions/events.js"
 import { WikiMaintenanceStore } from "../persistence/wiki-maintenance/store.js"
+import { DailySummaryPosition } from "../persistence/daily-summary/store.js"
+import { dailyStartPosition } from "./handlers/daily-summary.js"
 import { Wiki } from "../wiki/service.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 import type { AutomationId } from "../persistence/automations/model.js"
@@ -84,6 +87,7 @@ export class AutomationRuntime extends Context.Service<
     | SessionLifecycleEvents
     | Wiki
     | WikiMaintenanceStore
+    | DailySummaryPosition
     | StoragePolicyStore
     | HomeStore
     | IntelligenceSettingsStore
@@ -120,6 +124,7 @@ export class AutomationRuntime extends Context.Service<
       const sessionEvents = yield* SessionLifecycleEvents
       const wiki = yield* Wiki
       const wikiMaintenance = yield* WikiMaintenanceStore
+      const dailyPosition = yield* DailySummaryPosition
       const sessions = yield* SessionStore
       const transcripts = yield* TranscriptQueries
       const summaries = yield* SummaryStore
@@ -158,6 +163,7 @@ export class AutomationRuntime extends Context.Service<
         memory,
         wiki,
         wikiMaintenance,
+        dailyPosition,
         retentionPolicy,
         sessions,
         summaries,
@@ -279,6 +285,9 @@ export class AutomationRuntime extends Context.Service<
           yield* diagnostics.startupPhase("automation_seeds_ready")
           const maintenanceBaseline = yield* wiki.head()
           yield* wikiMaintenance.initialize(maintenanceBaseline)
+          yield* dailyPosition.initialize(
+            dailyStartPosition(yield* Clock.currentTimeMillis, machineTimeZone())
+          )
           yield* diagnostics.startupPhase("automation_wiki_ready")
           yield* store.reconcileSpaceJobs()
           yield* diagnostics.startupPhase("automation_space_jobs_ready")
