@@ -425,7 +425,7 @@ const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageK
   )
 }
 
-export const tooOldToRecall = (
+export const recordsPastRecallAge = (
   pages: ReadonlyArray<PageRecord>,
   today: string
 ): ReadonlySet<string> => {
@@ -471,7 +471,7 @@ export const prepareMemorySources = ({
   const kinds = pageKinds(active)
   const kindOf = (record: PageRecord): PageKind =>
     kinds.get(record.page.pageId) ?? { kind: "knowledge" }
-  const tooOld = tooOldToRecall(active, today)
+  const pastRecallAge = recordsPastRecallAge(active, today)
   const selected =
     recall === undefined
       ? []
@@ -480,7 +480,7 @@ export const prepareMemorySources = ({
             (record) =>
               !standingFacts(record) &&
               !recall.excludedPageIds.has(record.page.pageId) &&
-              !tooOld.has(record.page.pageId)
+              !pastRecallAge.has(record.page.pageId)
           ),
           queryTerms: wordSearchTerms(recall.query),
           semanticMatches

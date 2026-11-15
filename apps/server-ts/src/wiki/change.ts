@@ -3,7 +3,7 @@ import { Effect } from "effect"
 
 import { decodeWikiOrigin, wikiOriginSource, type WikiCommitSource } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
-import { isSystemPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./system-pages.js"
 
 const CHANGE_DIFF_CHARS = 12_000
 const MIN_PAGE_CHARS = 400
@@ -96,7 +96,7 @@ const touches =
       : (change.after ?? change.before)?.resourceId === name.pageId
 
 /** Whether a run is shown a saved change at this path: never a code-owned page's. */
-export const shownPathToRuns = (path: string): boolean => !isSystemPage(path)
+export const shownPathToRuns = (path: string): boolean => !isCodeOwnedPage(path)
 
 /** Whether a run is shown a saved change: never one to a code-owned page. */
 export const shownToRuns = (change: {

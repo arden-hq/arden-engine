@@ -17,6 +17,7 @@ import {
   ensureWikiSpacePage,
   logNoSpacePage,
   restoreWikiSpace,
+  type SpaceRestore,
   type WikiSpacePageInput
 } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
@@ -84,10 +85,9 @@ export interface WikiMutationMethods {
   >
   /** Gives every active Space a page, and counts what that took. */
   readonly ensureSpacePages: () => Effect.Effect<SpacePageCounts, WikiError>
-  /** Restores an archived Space with its page; see `restoreWikiSpace`. */
   readonly restoreSpace: (
     spaceId: string
-  ) => Effect.Effect<PersistedSpace | null, WikiError | SpaceStoreError>
+  ) => Effect.Effect<SpaceRestore | null, WikiError | SpaceStoreError>
   readonly publishReport: (input: WikiPublishReportInput) => Effect.Effect<
     {
       readonly page: WikiPage
@@ -150,7 +150,7 @@ export const makeWikiMutationMethods = (
     const ensured = yield* ensureOne(input)
     if (ensured === undefined) return undefined
     const created =
-      ensured.created === undefined
+      ensured.kind !== "created"
         ? undefined
         : yield* read(ensured.created.pageId).pipe(
             Effect.mapError((cause) => new WikiError({ ...cause, operation: "create" }))
@@ -172,9 +172,8 @@ export const makeWikiMutationMethods = (
       )
       if (ensured === null) counts.failed += 1
       else if (ensured === undefined) counts.active -= 1
-      else if (ensured.created !== undefined) counts.made += 1
-      else if (ensured.space.page_path !== space.page_path) counts.rebound += 1
-      else counts.kept += 1
+      else if (ensured.kind === "created") counts.made += 1
+      else counts[ensured.kind] += 1
     }
     return counts satisfies SpacePageCounts
   })

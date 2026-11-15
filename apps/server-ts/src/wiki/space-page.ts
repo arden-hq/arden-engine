@@ -2,8 +2,8 @@ import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import type {
+  FreeSpacePage,
   PersistedSpace,
-  SpaceBinding,
   SpaceStore,
   SpaceStoreError
 } from "../persistence/spaces/store.js"
@@ -17,7 +17,13 @@ import { commitWiki, createPage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
-import { bindingOwnsPath, overlapsAnother, planSpacePage } from "./space-index.js"
+import {
+  activeSpaceBindings,
+  bindingOwnsPath,
+  freeSpacePage,
+  planSpacePage,
+  type SpaceBinding
+} from "./space-index.js"
 import { spacePageSlug } from "@arden-hq/protocol/views"
 import type { CreateSpaceInput } from "@arden-hq/protocol/spaces"
 import type { MutationOperationIdentity } from "../persistence/tools/mutation-receipt.js"
@@ -29,11 +35,17 @@ export interface WikiSpacePageInput {
   readonly home?: "projects" | "areas"
 }
 
-/** An active Space with its page, and the page made for it, if one was made. */
-export interface SpacePageEnsured {
-  readonly space: PersistedSpace
-  readonly created: { readonly pageId: string; readonly path: string } | undefined
-}
+/**
+ * How an active Space has its page: the page it was bound to, that page at the path it now has,
+ * or a page made for it now.
+ */
+export type SpacePageEnsured =
+  | { readonly kind: "kept" | "rebound"; readonly space: PersistedSpace }
+  | {
+      readonly kind: "created"
+      readonly space: PersistedSpace
+      readonly created: { readonly pageId: string; readonly path: string }
+    }
 
 const storageError = (message: string) => (cause: unknown) =>
   wikiError("create", "storage", message, { cause })
@@ -48,26 +60,26 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
     .pipe(Effect.mapError(storageError("Could not read the Space")))
   if (space === null) return undefined
   const current = yield* loadSnapshot(repository, "create")
-  const others = (yield* spaces
-    .activeBindings()
-    .pipe(Effect.mapError(storageError("Could not read the Spaces' Memory pages")))).filter(
-    (binding) => binding.space_id !== space.space_id
-  )
+  const others = (yield* activeSpaceBindings(spaces).pipe(
+    Effect.mapError(storageError("Could not read the Spaces' Memory pages"))
+  )).filter((binding) => binding.space_id !== space.space_id)
   const plan = planSpacePage(current.pages, space, others)
-  if (plan.kind === "keep") return { space, created: undefined }
+  if (plan.kind === "keep") return { kind: "kept", space }
   const page =
     plan.kind === "rebind"
-      ? { pageId: plan.pageId, path: plan.pagePath }
+      ? plan.page
       : yield* createSpacePage(repository, current, others, {
           spaceId: space.space_id,
           title: space.name,
           home: input.home ?? "areas"
         })
   const bound = yield* spaces
-    .bindPage(space.space_id, page.pageId, page.path)
+    .bindPage(space.space_id, page)
     .pipe(Effect.mapError(storageError("Could not bind the Space's page")))
   if (bound === null) return undefined
-  return { space: bound, created: plan.kind === "create" ? page : undefined }
+  return plan.kind === "rebind"
+    ? { kind: "rebound", space: bound }
+    : { kind: "created", space: bound, created: { pageId: page.pageId, path: page.pagePath } }
 })
 
 /** Logs a Space left without a page; the start check gives it one. */
@@ -78,23 +90,40 @@ export const logNoSpacePage = (spaceId: string, error: WikiError) =>
     message: error.message
   })
 
+/**
+ * How an archived Space came back. A Space whose page is gone, or held or overlapped by another
+ * active Space, gets a fresh page; when none can be made now it comes back pageless, and the
+ * next start gives it one.
+ */
+export type SpaceRestore = {
+  readonly kind: SpacePageEnsured["kind"] | "pageless"
+  readonly space: PersistedSpace
+}
+
 export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
   spaceId: string
-): Effect.fn.Return<PersistedSpace | null, WikiError | SpaceStoreError> {
+): Effect.fn.Return<SpaceRestore | null, WikiError | SpaceStoreError> {
   const space = yield* spaces.get(spaceId, true)
   if (space === null || space.archived_at === null) return null
   const current = yield* loadSnapshot(repository, "restore")
-  const plan = planSpacePage(current.pages, space, yield* spaces.activeBindings())
-  const restored = yield* spaces.restore(
-    spaceId,
-    plan.kind === "create" ? null : { pageId: plan.pageId, pagePath: plan.pagePath }
-  )
-  if (restored === null || plan.kind !== "create") return restored
+  const plan = planSpacePage(current.pages, space, yield* activeSpaceBindings(spaces))
+  if (plan.kind !== "create") {
+    const restored = yield* spaces.restore(spaceId, plan.page)
+    return restored === null
+      ? null
+      : { kind: plan.kind === "keep" ? "kept" : "rebound", space: restored }
+  }
+  const restored = yield* spaces.restore(spaceId, null)
+  if (restored === null) return null
   return yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
-    Effect.map((ensured) => ensured?.space ?? restored),
-    Effect.catch((error) => logNoSpacePage(spaceId, error).pipe(Effect.as(restored)))
+    Effect.map((ensured): SpaceRestore => ensured ?? { kind: "pageless", space: restored }),
+    Effect.catch((error) =>
+      logNoSpacePage(spaceId, error).pipe(
+        Effect.as<SpaceRestore>({ kind: "pageless", space: restored })
+      )
+    )
   )
 })
 
@@ -103,7 +132,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   current: Snapshot,
   others: ReadonlyArray<SpaceBinding>,
   input: { readonly spaceId: string; readonly title: string; readonly home: "projects" | "areas" }
-): Effect.fn.Return<{ readonly pageId: string; readonly path: string }, WikiError> {
+): Effect.fn.Return<FreeSpacePage, WikiError> {
   const title = input.title.trim()
   if (title.length === 0) {
     return yield* wikiError("create", "invalid", "Space page title must not be empty")
@@ -138,15 +167,15 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   const usedNames = new Set(
     current.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
   )
+  const pageId = randomUUID()
   const base = spacePageSlug(title)
   let suffix = 1
   let path = `${home}/${base}.md`
-  while (
-    pageNamesForPath(path).some((name) => usedNames.has(normal(name))) ||
-    overlapsAnother(others, path)
-  ) {
+  let free = freeSpacePage(others, { pageId, pagePath: path })
+  while (pageNamesForPath(path).some((name) => usedNames.has(normal(name))) || free === undefined) {
     suffix += 1
     path = `${home}/${base}-${suffix}.md`
+    free = freeSpacePage(others, { pageId, pagePath: path })
   }
   const directoryId = randomUUID()
   const directoryContent = formatWikiPage({
@@ -179,7 +208,6 @@ Finite outcomes belong in projects; reusable references belong in resources. Lin
 Keep useful context; archive obsolete pages deliberately and preserve evidence.
 `
   })
-  const pageId = randomUUID()
   const content = formatWikiPage({
     pageId,
     title,
@@ -207,12 +235,12 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
       createPage(pageId, path, content)
     ]
   ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
-  return { pageId, path }
+  return free
 })
 
 type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">
 
-const withSpacePage = (
+const withSpacePageOrDeferred = (
   wiki: EnsureSpacePage,
   space: PersistedSpace,
   home: WikiSpacePageInput["home"]
@@ -235,5 +263,5 @@ export const createSpaceWithPage = Effect.fn("Spaces.createWithPage")(function* 
   } = {}
 ) {
   const space = yield* services.spaces.create(input, options.mutation)
-  return yield* withSpacePage(services.wiki, space, options.home)
+  return yield* withSpacePageOrDeferred(services.wiki, space, options.home)
 })

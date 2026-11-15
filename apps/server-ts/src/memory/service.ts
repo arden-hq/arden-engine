@@ -15,7 +15,7 @@ import { spacePageIndex } from "../wiki/space-index.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { prepareMemorySources, tooOldToRecall, type MemorySources } from "./retrieval.js"
+import { prepareMemorySources, recordsPastRecallAge, type MemorySources } from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -89,7 +89,7 @@ const sources = Effect.fn("Memory.sources")(function* (
           .search(
             current,
             recall.query,
-            new Set([...recall.excludedPageIds, ...tooOldToRecall(current.pages, today)])
+            new Set([...recall.excludedPageIds, ...recordsPastRecallAge(current.pages, today)])
           )
           .pipe(
             Effect.catchCause((cause) =>

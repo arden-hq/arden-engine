@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { wikiError, type WikiError, type WikiOperation } from "./errors.js"
 import type { Snapshot } from "./snapshot.js"
-import { heldByAnother, spaceOwnsPath } from "./space-index.js"
+import { activeSpaceBindings, heldByAnother, spaceOwnsPath } from "./space-index.js"
 
 export type WikiLocationAuthority =
   | { readonly _tag: "Global" }
@@ -50,7 +50,7 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
     })
   }
 
-  const bindings = yield* spaces.activeBindings().pipe(
+  const bindings = yield* activeSpaceBindings(spaces).pipe(
     Effect.mapError((cause) =>
       wikiError(operation, "storage", "Could not validate active Space Wiki boundaries", {
         cause

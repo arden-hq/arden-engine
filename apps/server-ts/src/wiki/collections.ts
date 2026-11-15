@@ -62,6 +62,12 @@ interface RecordFolder {
   readonly producer: RecordProducer
 }
 
+/** `imported/` is a record folder by its name, README or not. */
+const IMPORTED_FOLDER: RecordFolder = {
+  directory: IMPORTED_DIRECTORY,
+  producer: { kind: "import" }
+}
+
 export type PageKind =
   | { readonly kind: "knowledge" }
   | { readonly kind: "contract"; readonly folder: RecordFolder }
@@ -77,15 +83,13 @@ export const markedProducer = (page: ParsedWikiPage): string | undefined => {
 }
 
 const folderProducer = (readmePath: string, page: ParsedWikiPage): RecordProducer | undefined => {
-  if (isImportedPath(readmePath)) return { kind: "import" }
+  if (isImportedPath(readmePath)) return IMPORTED_FOLDER.producer
   const automationId = markedProducer(page)
   return automationId === undefined ? undefined : { kind: "automation", automationId }
 }
 
 export const recordFolders = (pages: ReadonlyArray<PageRecord>): RecordFolders => {
-  const folders = new Map<string, RecordFolder>([
-    [normal(IMPORTED_DIRECTORY), { directory: IMPORTED_DIRECTORY, producer: { kind: "import" } }]
-  ])
+  const folders = new Map<string, RecordFolder>([[normal(IMPORTED_DIRECTORY), IMPORTED_FOLDER]])
   for (const record of pages) {
     const path = record.resource.path
     if (
@@ -109,21 +113,33 @@ const dayOfName = (path: string): string | undefined => {
   return day !== undefined && parseCalendarDay(day) !== undefined ? day : undefined
 }
 
-export const pageKind = (folders: RecordFolders, path: string): PageKind => {
-  const directory = posix.dirname(path)
-  const own = folders.get(normal(directory))
-  if (own !== undefined && isReadme(path)) return { kind: "contract", folder: own }
-  for (let at = directory; at !== "." && at !== "/"; at = posix.dirname(at)) {
-    const folder = folders.get(normal(at))
-    if (folder === undefined) continue
-    return {
-      kind: "record",
-      folder,
-      day: folder.producer.kind === "automation" ? dayOfName(path) : undefined
-    }
-  }
-  return { kind: "knowledge" }
+const KNOWLEDGE_PAGE: PageKind = { kind: "knowledge" }
+
+/** A record folder's own README is its contract. */
+const folderContract = (folders: RecordFolders, path: string): PageKind | undefined => {
+  const own = folders.get(normal(posix.dirname(path)))
+  return own !== undefined && isReadme(path) ? { kind: "contract", folder: own } : undefined
 }
+
+/**
+ * Every other page in a record folder, at any depth, is a record. A report's day is the date its
+ * file name starts with; imported notes have none.
+ */
+const recordPage = (folders: RecordFolders, path: string): PageKind | undefined => {
+  for (let at = posix.dirname(path); at !== "." && at !== "/"; at = posix.dirname(at)) {
+    const folder = folders.get(normal(at))
+    if (folder !== undefined)
+      return {
+        kind: "record",
+        folder,
+        day: folder.producer.kind === "automation" ? dayOfName(path) : undefined
+      }
+  }
+  return undefined
+}
+
+export const pageKind = (folders: RecordFolders, path: string): PageKind =>
+  folderContract(folders, path) ?? recordPage(folders, path) ?? KNOWLEDGE_PAGE
 
 /** The Automation whose folder holds this page, as a record or as the contract; undefined otherwise. */
 export const producingAutomation = (folders: RecordFolders, path: string): string | undefined => {

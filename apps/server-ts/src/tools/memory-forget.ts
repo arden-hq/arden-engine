@@ -54,10 +54,15 @@ const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
     ? { kind: "undo", id: input.undo }
     : { kind: "forget", lines: input.lines ?? [], claim: input.claim ?? "" }
 
-const forgetFailure = (error: WikiError): ToolExecutionError =>
+const isForgetRefusal = (error: WikiError): boolean =>
   error.operation === "forget" && (error.reason === "invalid" || error.reason === "not_found")
-    ? new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
-    : wikiFailure(error)
+
+/** A forget's own refusal already says what to pass instead. */
+const forgetRefusal = (error: WikiError): ToolExecutionError =>
+  new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
+
+const forgetFailure = (error: WikiError): ToolExecutionError =>
+  isForgetRefusal(error) ? forgetRefusal(error) : wikiFailure(error)
 
 const changeDiff = (change: RetractionChange): string =>
   change.pages.map((page) => boundedDiff(page.path, page.before, page.after)).join("\n")
@@ -87,11 +92,16 @@ const makeMemoryForgetTools = ({
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
 }): ReadonlyArray<ServerTool> => {
   const ownerTurn = async (ctx: ToolContext<ServerRunContext>) => {
-    await requireOwnerTurn(sessions, ctx.run, ctx.signal, {
-      target: { kind: "memory_forget" },
-      doing: "forgetting Memory",
-      what: "Memory is forgotten only in the user's own turn, after their approval"
-    })
+    await requireOwnerTurn(
+      sessions,
+      ctx.run,
+      ctx.signal,
+      { kind: "memory_forget" },
+      {
+        unverifiedBefore: "forgetting Memory",
+        notOwnerTurn: "Memory is forgotten only in the user's own turn, after their approval"
+      }
+    )
     const chat = await chatLinkOf(sessions, ctx.run.sessionId, ctx.signal)
     if (chat === undefined)
       throw new ToolExecutionError("This chat no longer exists, so nothing was forgotten.", {

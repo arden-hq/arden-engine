@@ -38,7 +38,7 @@ const todayComposition = (composition: unknown): unknown => {
 const todayRecord = (record: unknown): unknown =>
   Array.isArray(record) ? record.map(todayComposition) : record
 
-const rewriteRecords = (database: DatabaseSync): void => {
+const rewriteRunMemoryRecords = (database: DatabaseSync): void => {
   const update = database.prepare(
     "UPDATE run_sidecars SET context_manifest_json = ? WHERE run_id = ?"
   )
@@ -74,8 +74,8 @@ const todayQueuedContext = (context: unknown): unknown =>
     ? { ...context, space_review_input: todayReviewInput(context["space_review_input"]) }
     : context
 
-const RESIDENT = `'%"basis":"resident"%'`
-const REVIEW_INPUTS = [
+const RESIDENT_PAGE_LIKE = `'%"basis":"resident"%'`
+const LIVE_REVIEW_INPUTS = [
   {
     table: "automation_runs",
     key: "id",
@@ -99,11 +99,11 @@ const REVIEW_INPUTS = [
   }
 ] as const
 
-const dropResident = (database: DatabaseSync, input: (typeof REVIEW_INPUTS)[number]): void => {
+const dropResident = (database: DatabaseSync, input: (typeof LIVE_REVIEW_INPUTS)[number]): void => {
   const { table, key, column } = input
   const keys = database
     .prepare(
-      `SELECT ${key} AS key FROM ${table} WHERE ${input.where} AND ${column} LIKE ${RESIDENT}`
+      `SELECT ${key} AS key FROM ${table} WHERE ${input.where} AND ${column} LIKE ${RESIDENT_PAGE_LIKE}`
     )
     .all()
   const read = database.prepare(`SELECT ${column} AS stored FROM ${table} WHERE ${key} = ?`)
@@ -117,14 +117,18 @@ const dropResident = (database: DatabaseSync, input: (typeof REVIEW_INPUTS)[numb
 
 const IMMUTABLE_RUN = "automation_runs_immutable_context"
 
-const up = (database: DatabaseSync): void => {
-  rewriteRecords(database)
+const rewriteLiveReviewInputs = (database: DatabaseSync): void => {
   const trigger = database
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
     .get(IMMUTABLE_RUN)?.["sql"]
   if (typeof trigger === "string") database.exec(`DROP TRIGGER ${IMMUTABLE_RUN}`)
-  for (const input of REVIEW_INPUTS) dropResident(database, input)
+  for (const input of LIVE_REVIEW_INPUTS) dropResident(database, input)
   if (typeof trigger === "string") database.exec(trigger)
+}
+
+const up = (database: DatabaseSync): void => {
+  rewriteRunMemoryRecords(database)
+  rewriteLiveReviewInputs(database)
 }
 
 export const retiredMemoryRecords: Migration = {

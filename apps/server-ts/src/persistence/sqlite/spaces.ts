@@ -18,9 +18,9 @@ import {
   SpaceStore,
   SpaceStoreError,
   KEEP_ONE_SPACE,
+  type FreeSpacePage,
   type PersistedSpace,
-  type SpaceBinding,
-  type SpacePageBinding
+  type SpaceBindingRow
 } from "../spaces/store.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import { renameOwnedJob } from "./job-labels.js"
@@ -49,7 +49,7 @@ export const makeSpaceStore = ({
   const sql = writer.sql
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const activeBindings = Effect.fn("SqliteSpaceStore.activeBindings")(function* () {
-    return yield* sql<SpaceBinding>`
+    return yield* sql<SpaceBindingRow>`
       SELECT space_id, page_id, page_path
       FROM spaces
       WHERE archived_at IS NULL AND (page_id IS NOT NULL OR page_path IS NOT NULL)
@@ -266,7 +266,8 @@ export const makeSpaceStore = ({
           if (next === undefined) return null
           if (current.name !== name)
             yield* renameOwnedJob(sql, spaceJobId(validSpaceId), `${name} worker`)
-          if (valid.instructions !== undefined) yield* spaceJobs.queueSpaceWake(validSpaceId, now)
+          if (valid.instructions !== undefined)
+            yield* spaceJobs.queueOwnerSpaceChangeWake(validSpaceId, now)
           else yield* spaceJobs.syncSpace(validSpaceId, now)
           const generations = yield* sql<{ readonly policy_generation: number }>`
         SELECT policy_generation FROM spaces WHERE space_id = ${validSpaceId}`
@@ -324,7 +325,7 @@ export const makeSpaceStore = ({
       `
             const next = updated[0]
             if (next === undefined) return yield* get(validSpaceId)
-            yield* spaceJobs.queueSpaceWake(validSpaceId, now)
+            yield* spaceJobs.queueOwnerSpaceChangeWake(validSpaceId, now)
             return yield* decodeRow(next, "update")
           })
         )
@@ -430,8 +431,7 @@ export const makeSpaceStore = ({
 
   const bindPage = Effect.fn("SqliteSpaceStore.bindPage")(function* (
     spaceId: string,
-    pageId: string,
-    pagePath: string
+    { pageId, pagePath }: FreeSpacePage
   ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
     const now = DateTime.formatIso(yield* DateTime.now)
     return yield* writer
@@ -556,7 +556,7 @@ export const makeSpaceStore = ({
 
   const restore = Effect.fn("SqliteSpaceStore.restore")(function* (
     spaceId: string,
-    page: SpacePageBinding | null
+    page: FreeSpacePage | null
   ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
     const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
       Effect.mapError((cause) =>
@@ -603,7 +603,7 @@ export const makeSpaceStore = ({
           const next = restored[0]
           if (next === undefined) return null
           yield* restoreSpaceChats(sql, validSpaceId)
-          yield* spaceJobs.queueSpaceWake(validSpaceId, now)
+          yield* spaceJobs.queueOwnerSpaceChangeWake(validSpaceId, now)
           return yield* decodeRow(next, "restore")
         })
       )

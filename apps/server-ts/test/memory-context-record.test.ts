@@ -387,7 +387,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "cut",
       reason: "index_allowance"
     })
-    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePages)
+    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePageList)
     expect(record.find((source) => source.kind === "space")).toEqual(
       plain.writes[0]?.sources.find((source) => source.kind === "space")
     )

@@ -7,18 +7,21 @@ import { Deferred, Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
-import { SpaceStore, type SpaceBinding } from "../src/persistence/spaces/store.js"
-import { archivePage } from "../src/wiki/commit.js"
+import { SpaceStore } from "../src/persistence/spaces/store.js"
+import { archivePage, movePage, ownerInApp } from "../src/wiki/commit.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import { commitWiki } from "../src/wiki/commit.js"
 import {
+  bindingOwnsPath,
   planSpacePage,
+  spaceBinding,
   spaceOwnsPath,
   spacePageIndex,
-  spacePages
+  spacePages,
+  type SpaceBinding
 } from "../src/wiki/space-index.js"
 import { startMemoryContentSteps } from "../src/memory/content-steps.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
@@ -31,6 +34,7 @@ import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
 import { partialService, serverRunContext } from "./kit.js"
+import { freePage } from "./fixtures/free-space-page.js"
 
 const page = (
   path: string,
@@ -62,11 +66,8 @@ const page = (
   }
 }
 
-const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding => ({
-  space_id: spaceId,
-  page_id: path === null ? null : pageId,
-  page_path: path
-})
+const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding =>
+  spaceBinding({ space_id: spaceId, page_id: path === null ? null : pageId, page_path: path })
 
 describe("which pages a Space owns", () => {
   const pages = [
@@ -118,6 +119,30 @@ describe("which pages a Space owns", () => {
   })
 })
 
+describe("a half-made binding", () => {
+  it("is any binding whose page column is missing or whose path does not read", () => {
+    const kinds = [
+      { space_id: "a", page_id: "page-a", page_path: "areas/garden.md" },
+      { space_id: "a", page_id: "page-a", page_path: null },
+      { space_id: "a", page_id: null, page_path: "areas/garden.md" },
+      { space_id: "a", page_id: "page-a", page_path: "../garden.md" },
+      { space_id: "a", page_id: "page-a", page_path: "areas//garden.md" }
+    ].map((row) => spaceBinding(row).kind)
+    expect(kinds).toEqual(["bound", "half_made", "half_made", "half_made", "half_made"])
+  })
+
+  it("owns every path, so nothing is written where its pages might be", () => {
+    const halfMade = [
+      spaceBinding({ space_id: "a", page_id: "page-a", page_path: null }),
+      spaceBinding({ space_id: "a", page_id: "page-a", page_path: "../garden.md" })
+    ]
+    const bound = binding("b", "areas/garden.md")
+    expect(halfMade.map((one) => bindingOwnsPath(one, "people/sam.md"))).toEqual([true, true])
+    expect(bindingOwnsPath(bound, "areas/garden/beds.md")).toBe(true)
+    expect(bindingOwnsPath(bound, "people/sam.md")).toBe(false)
+  })
+})
+
 describe("what gives an active Space its page", () => {
   const pages = [
     page("areas/garden.md"),
@@ -128,16 +153,14 @@ describe("what gives an active Space its page", () => {
   it("keeps a page that is still there and free", () => {
     expect(planSpacePage(pages, binding("a", "areas/garden.md"), [])).toEqual({
       kind: "keep",
-      pageId: "id-areas/garden.md",
-      pagePath: "areas/garden.md"
+      page: { pageId: "id-areas/garden.md", pagePath: "areas/garden.md" }
     })
   })
 
   it("binds the page again at the path it was renamed to", () => {
     expect(planSpacePage(pages, binding("a", "areas/old-name.md", "renamed"), [])).toEqual({
       kind: "rebind",
-      pageId: "renamed",
-      pagePath: "areas/moved.md"
+      page: { pageId: "renamed", pagePath: "areas/moved.md" }
     })
   })
 
@@ -164,6 +187,17 @@ const insertSpace = (sql: SqlClient.SqlClient, spaceId: string) =>
 const archiveRow = (sql: SqlClient.SqlClient, spaceId: string) =>
   sql`UPDATE spaces SET archived_at = ${AT} WHERE space_id = ${spaceId}`
 
+const renamePage = (repository: ManagedFileRepository["Service"], pageId: string, path: string) =>
+  Effect.gen(function* () {
+    const current = yield* repository.get(pageId)
+    if (current === null) return yield* Effect.die(new Error("the Space page is missing"))
+    yield* commitWiki(
+      repository,
+      { ...ownerInApp("rename a Space page"), expectedRevision: yield* repository.currentRevision },
+      [movePage(current, path)]
+    )
+  })
+
 describe("an archived Space releases its pages", () => {
   it("owns nothing, and another Space may take its page", async () => {
     const outcome = await withTempDatabase(
@@ -172,11 +206,11 @@ describe("an archived Space releases its pages", () => {
         const spaces = yield* SpaceStore
         yield* insertSpace(sql, "a")
         yield* insertSpace(sql, "b")
-        yield* spaces.bindPage("a", "page-a", "areas/made-up-a.md")
+        yield* spaces.bindPage("a", freePage("page-a", "areas/made-up-a.md"))
         const before = (yield* spaces.activeBindings()).map((row) => row.space_id)
         yield* archiveRow(sql, "a")
         const after = (yield* spaces.activeBindings()).map((row) => row.space_id)
-        yield* spaces.bindPage("b", "page-a", "areas/made-up-a.md")
+        yield* spaces.bindPage("b", freePage("page-a", "areas/made-up-a.md"))
         const archived = yield* spaces.get("a", true)
         return { before, after, archived: archived?.page_path ?? null }
       })
@@ -191,14 +225,11 @@ describe("an archived Space releases its pages", () => {
         const spaces = yield* SpaceStore
         yield* insertSpace(sql, "a")
         yield* insertSpace(sql, "b")
-        yield* spaces.bindPage("a", "page-a", "areas/made-up-a.md")
-        yield* spaces.bindPage("b", "page-b", "areas/made-up-b.md")
+        yield* spaces.bindPage("a", freePage("page-a", "areas/made-up-a.md"))
+        yield* spaces.bindPage("b", freePage("page-b", "areas/made-up-b.md"))
         yield* archiveRow(sql, "a")
         yield* archiveRow(sql, "b")
-        const restored = yield* spaces.restore("a", {
-          pageId: "page-a",
-          pagePath: "areas/made-up-b.md"
-        })
+        const restored = yield* spaces.restore("a", freePage("page-a", "areas/made-up-b.md"))
         const stale = yield* spaces.get("b", true)
         return { restored: restored?.page_path ?? null, stale: stale?.page_path ?? null }
       })
@@ -288,12 +319,32 @@ describe("every active Space has a page", () => {
         )
         const restored = yield* methods.restoreSpace(space.space_id)
         return {
-          path: restored?.page_path,
-          samePage: restored?.page_id === pageId
+          kind: restored?.kind,
+          path: restored?.space.page_path,
+          samePage: restored?.space.page_id === pageId
         }
       })
     )
-    expect(outcome).toEqual({ path: "areas/made-up-garden.md", samePage: false })
+    expect(outcome).toEqual({ kind: "created", path: "areas/made-up-garden.md", samePage: false })
+  })
+
+  it("a restored Space whose page was renamed meanwhile is bound to it at its new path", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces, sql, repository }) =>
+      Effect.gen(function* () {
+        const space = yield* spaces.create({ name: "Made-up garden" })
+        const first = yield* methods.ensureSpacePage({ spaceId: space.space_id })
+        const pageId = first?.space.page_id ?? ""
+        yield* archiveRow(sql, space.space_id)
+        yield* renamePage(repository, pageId, "areas/made-up-renamed.md")
+        const restored = yield* methods.restoreSpace(space.space_id)
+        return {
+          kind: restored?.kind,
+          path: restored?.space.page_path,
+          samePage: restored?.space.page_id === pageId
+        }
+      })
+    )
+    expect(outcome).toEqual({ kind: "rebound", path: "areas/made-up-renamed.md", samePage: true })
   })
 
   it("a restored Space keeps a free page, and gets a fresh one when another Space overlaps it", async () => {
@@ -306,35 +357,43 @@ describe("every active Space has a page", () => {
         const takenPage = (yield* methods.ensureSpacePage({ spaceId: taken.space_id }))?.space
         yield* archiveRow(sql, kept.space_id)
         yield* archiveRow(sql, taken.space_id)
-        yield* spaces.bindPage(other.space_id, "inside", "areas/made-up-taken/inside.md")
+        yield* spaces.bindPage(other.space_id, freePage("inside", "areas/made-up-taken/inside.md"))
         const keptAgain = yield* methods.restoreSpace(kept.space_id)
         const takenAgain = yield* methods.restoreSpace(taken.space_id)
         return {
-          kept: keptAgain?.page_id === keptPage?.page_id,
-          fresh: takenAgain?.page_id !== takenPage?.page_id,
-          path: takenAgain?.page_path
+          kinds: [keptAgain?.kind, takenAgain?.kind],
+          kept: keptAgain?.space.page_id === keptPage?.page_id,
+          fresh: takenAgain?.space.page_id !== takenPage?.page_id,
+          path: takenAgain?.space.page_path
         }
       })
     )
-    expect(outcome).toEqual({ kept: true, fresh: true, path: "areas/made-up-taken-2.md" })
+    expect(outcome).toEqual({
+      kinds: ["kept", "created"],
+      kept: true,
+      fresh: true,
+      path: "areas/made-up-taken-2.md"
+    })
   })
 
-  it("a restored Space whose page is taken and cannot get a fresh one comes back with none", async () => {
+  it("a restored Space whose page is taken and cannot get a fresh one comes back pageless", async () => {
     const outcome = await withSpacesAndWiki((methods, { spaces, sql }) =>
       Effect.gen(function* () {
         const taken = yield* spaces.create({ name: "Made-up taken" })
         const other = yield* spaces.create({ name: "Made-up other" })
         yield* methods.ensureSpacePage({ spaceId: taken.space_id })
         yield* archiveRow(sql, taken.space_id)
-        yield* spaces.bindPage(other.space_id, "areas-directory", "areas/README.md")
+        yield* spaces.bindPage(other.space_id, freePage("areas-directory", "areas/README.md"))
         const restored = yield* methods.restoreSpace(taken.space_id)
         return {
-          active: restored?.archived_at === null,
-          page: restored?.page_path ?? null,
+          kind: restored?.kind,
+          active: restored?.space.archived_at === null,
+          page: restored?.space.page_path ?? null,
           bindings: (yield* spaces.activeBindings()).map((row) => row.space_id)
         }
       })
     )
+    expect(outcome.kind).toBe("pageless")
     expect(outcome.active).toBe(true)
     expect(outcome.page).toBeNull()
     expect(outcome.bindings).toHaveLength(1)
@@ -357,6 +416,36 @@ describe("every active Space has a page", () => {
       again: { active: 2, kept: 2, rebound: 0, made: 0, failed: 0 },
       bound: 2
     })
+  })
+
+  it("counts a Space whose page was renamed as bound again, not kept", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces, repository }) =>
+      Effect.gen(function* () {
+        const space = yield* spaces.create({ name: "Made-up garden" })
+        const first = yield* methods.ensureSpacePage({ spaceId: space.space_id })
+        yield* renamePage(repository, first?.space.page_id ?? "", "areas/made-up-renamed.md")
+        const counts = yield* methods.ensureSpacePages()
+        const path = (yield* spaces.get(space.space_id))?.page_path
+        return { counts, path }
+      })
+    )
+    expect(outcome).toEqual({
+      counts: { active: 1, kept: 0, rebound: 1, made: 0, failed: 0 },
+      path: "areas/made-up-renamed.md"
+    })
+  })
+
+  it("puts a fresh page beside, not inside, another active Space's folder", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces }) =>
+      Effect.gen(function* () {
+        const other = yield* spaces.create({ name: "Made-up other" })
+        yield* spaces.bindPage(other.space_id, freePage("inside", "areas/made-up-garden/inside.md"))
+        const space = yield* spaces.create({ name: "Made-up garden" })
+        const ensured = yield* methods.ensureSpacePage({ spaceId: space.space_id })
+        return ensured?.space.page_path
+      })
+    )
+    expect(outcome).toBe("areas/made-up-garden-2.md")
   })
 })
 
@@ -515,14 +604,14 @@ describe("a Space worker's chat name", () => {
         const spaces = yield* SpaceStore
         const followed = yield* spaces.create({ name: "Made-up one" })
         const kept = yield* spaces.create({ name: "Made-up two" })
-        yield* spaces.bindPage(followed.space_id, "page-one", "areas/made-up-one.md")
-        yield* spaces.bindPage(kept.space_id, "page-two", "areas/made-up-two.md")
+        yield* spaces.bindPage(followed.space_id, freePage("page-one", "areas/made-up-one.md"))
+        yield* spaces.bindPage(kept.space_id, freePage("page-two", "areas/made-up-two.md"))
         yield* sql`UPDATE sessions SET name = 'My own name'
           WHERE session_id = (SELECT thread_id FROM scheduled_tasks
             WHERE task_id = ${spaceJobId(kept.space_id)})`
         yield* spaces.update(followed.space_id, { name: "Made-up first" })
         yield* spaces.update(kept.space_id, { name: "Made-up second" })
-        yield* spaces.bindPage(kept.space_id, "page-two", "areas/made-up-second.md")
+        yield* spaces.bindPage(kept.space_id, freePage("page-two", "areas/made-up-second.md"))
         yield* spaces.update(kept.space_id, { name: "Made-up second" })
         return {
           followed: yield* chatName(sql, followed.space_id),

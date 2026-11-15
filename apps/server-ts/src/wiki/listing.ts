@@ -161,6 +161,29 @@ export const makeWikiListingMethods = (
     }
   })
 
+  const shownIn = (limit: number) =>
+    repository.history({ limit }).pipe(
+      Effect.mapError(mapRevisionError("list")),
+      Effect.map((read) => ({
+        complete: read.length < limit,
+        commits: read.flatMap((commit) => {
+          const changes = commit.changes.filter(shownToRuns)
+          return changes.length === 0 ? [] : [{ ...commit, changes }]
+        })
+      }))
+    )
+
+  /** The newest `wanted` commits with a change a run sees, or fewer when history ends first. */
+  const readUntilShown = Effect.fn("Wiki.readUntilShown")(function* (wanted: number) {
+    let limit = wanted
+    let read = yield* shownIn(limit)
+    while (!read.complete && read.commits.length < wanted) {
+      limit += wanted - read.commits.length
+      read = yield* shownIn(limit)
+    }
+    return read.commits
+  })
+
   const listChanges = Effect.fn("Wiki.listChanges")(function* (input: WikiListChangesInput) {
     if (
       !Number.isSafeInteger(input.offset) ||
@@ -181,25 +204,7 @@ export const makeWikiListingMethods = (
     if (Option.isNone(sinceDateTime)) {
       return yield* wikiError("list", "invalid", "Invalid Wiki change timestamp")
     }
-    const wanted = input.offset + input.limit + 1
-    const shown = (limit: number) =>
-      repository.history({ limit }).pipe(
-        Effect.mapError(mapRevisionError("list")),
-        Effect.map((read) => ({
-          complete: read.length < limit,
-          commits: read.flatMap((commit) => {
-            const changes = commit.changes.filter(shownToRuns)
-            return changes.length === 0 ? [] : [{ ...commit, changes }]
-          })
-        }))
-      )
-    let limit = wanted
-    let read = yield* shown(limit)
-    while (!read.complete && read.commits.length < wanted) {
-      limit += wanted - read.commits.length
-      read = yield* shown(limit)
-    }
-    const commits = read.commits
+    const commits = yield* readUntilShown(input.offset + input.limit + 1)
     const recent: Array<(typeof commits)[number]> = []
     for (const commit of commits) {
       const timestamp = DateTime.make(commit.timestamp)

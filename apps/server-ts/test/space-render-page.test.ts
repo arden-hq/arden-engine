@@ -17,7 +17,12 @@ const view = (page: SpaceView["page"]): SpaceView => ({
   tasks: []
 })
 
-const shares = { maxBytes: 10_000, instructionsBytes: 4_000, pageBytes: 4_000, pagesBytes: 2_000 }
+const shares = {
+  maxBytes: 10_000,
+  instructionsBytes: 4_000,
+  pageBytes: 4_000,
+  pageListBytes: 2_000
+}
 const index = (path: string) => spacePageIndex([], { pageId: "garden", pagePath: path }, 2_000)
 
 it("says how much of the Space memory page a chat is sent: whole, in part, or none", () => {
@@ -80,6 +85,6 @@ it("keeps the list of the Space's pages within its own allowance, and says when 
   expect(list?.text).toContain(FOLD_NOTICE)
   expect(list?.text).toContain(CUT_NOTICE)
   expect(new TextEncoder().encode(`\n\n${list?.text ?? ""}`).byteLength).toBeLessThanOrEqual(
-    shares.pagesBytes
+    shares.pageListBytes
   )
 })

@@ -116,7 +116,7 @@ const forgottenPage = (snapshot: Snapshot): PageRecord | undefined =>
     (record) => record.resource.path === FORGOTTEN_PAGE_PATH && record.page.lifecycle === "active"
   )
 
-const withEntries = (
+const withEntriesKeepingUnreadable = (
   current: PageRecord | undefined,
   stored: ReadonlyArray<Schema.Json>
 ): { readonly operation: WikiPageOperation; readonly change: PageChange } => {
@@ -205,7 +205,7 @@ const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
     claim,
     removed
   }
-  const page = withEntries(current, [...stored, entry])
+  const page = withEntriesKeepingUnreadable(current, [...stored, entry])
   return {
     change: { entry, pages: [...changes, page.change] },
     head: snapshot.head,
@@ -235,7 +235,7 @@ const undoPlan = Effect.fn("Wiki.undoPlan")(function* (
     status: "closed",
     closed: { chat: input.turn.chat, at: DateTime.formatIso(yield* DateTime.now) }
   }
-  const page = withEntries(
+  const page = withEntriesKeepingUnreadable(
     current,
     stored.map((existing) => (readRetraction(existing)?.id === input.id ? entry : existing))
   )

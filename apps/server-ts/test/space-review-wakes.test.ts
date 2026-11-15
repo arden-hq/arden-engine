@@ -14,6 +14,7 @@ import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { freePage } from "./fixtures/free-space-page.js"
 
 const REVISION = "a".repeat(64)
 const AT = "2026-11-01T00:00:00.000Z"
@@ -50,7 +51,7 @@ it("a Memory save queues no Space review, through the wiki change path or a disp
       const spaces = yield* SpaceStore
       const triggers = yield* AutomationTriggers
       yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up-space.md"))
       // A review job stored before Memory stopped waking reviews still subscribes to it.
       yield* sql`UPDATE scheduled_tasks
         SET triggers = '[{"type":"event","event_type":"wiki.changed","id":"t1"}]', trigger_last_id = 1
@@ -105,7 +106,9 @@ it("nothing on the wiki change path or in event dispatch can reach a Space revie
     ...readdirSync(new URL("wiki/", src)).map((file) => `wiki/${file}`)
   ]
   for (const file of wikiPath.filter((name) => name.endsWith(".ts")))
-    expect(read(file), file).not.toMatch(/space-jobs|queueSpaceWake|spaceJobId|space_review/)
+    expect(read(file), file).not.toMatch(
+      /space-jobs|queueOwnerSpaceChangeWake|spaceJobId|space_review/
+    )
   expect(read("persistence/sqlite/automation-event-dispatch.ts")).not.toMatch(/space_review/)
 })
 
@@ -221,7 +224,7 @@ it("only a Task change made by hand wakes the Space review; no run's change does
       const sessions = yield* SessionStore
       const work = yield* WorkStore
       yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up-space.md"))
       const chat = () =>
         sessions
           .create({ name: "Made-up chat", spaceId: "space-1" })
@@ -287,7 +290,10 @@ it("the owner's own Task changes fold into one batched wake; a field the check d
       const sql = yield* SqlClient.SqlClient
       const work = yield* WorkStore
       yield* space(sql, "space-1", true)
-      yield* (yield* SpaceStore).bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* (yield* SpaceStore).bindPage(
+        "space-1",
+        freePage("page-1", "projects/made-up-space.md")
+      )
       yield* clearQueue(sql)
       const task = yield* work.create(
         { kind: "space", spaceId: "space-1" },
@@ -321,7 +327,10 @@ it("a Task change made by hand touches no other Task's worker job", async () => 
       const sql = yield* SqlClient.SqlClient
       const work = yield* WorkStore
       yield* space(sql, "space-1", true)
-      yield* (yield* SpaceStore).bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* (yield* SpaceStore).bindPage(
+        "space-1",
+        freePage("page-1", "projects/made-up-space.md")
+      )
       const held = yield* work.create(
         { kind: "space", spaceId: "space-1" },
         { key: "a", text: "A" }
@@ -350,7 +359,7 @@ it("drafted instructions that say the same thing wake nothing", async () => {
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
       yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up-space.md"))
       yield* spaces.setGeneratedInstructions("space-1", "Made-up drafted instructions.")
       yield* clearQueue(sql)
       yield* spaces.setGeneratedInstructions("space-1", "Made-up drafted instructions.")
@@ -366,7 +375,7 @@ it("Space settings wake the review the same way whether the owner or Arden wrote
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
       yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up-space.md"))
       yield* space(sql, "space-2", true)
       yield* clearQueue(sql)
       yield* spaces.setGeneratedInstructions("space-1", "Made-up drafted instructions.")
@@ -389,9 +398,9 @@ it("binding a page readies the Space review but wakes nothing, first time or aga
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
       yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
+      yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up-space.md"))
       const first = yield* reviewRows(sql, "space-1")
-      yield* spaces.bindPage("space-1", "page-2", "projects/another-made-up-space.md")
+      yield* spaces.bindPage("space-1", freePage("page-2", "projects/another-made-up-space.md"))
       const [job] = yield* sql<{ readonly enabled: number }>`
         SELECT enabled FROM scheduled_tasks WHERE task_id = ${spaceJobId("space-1")}`
       return { first, again: yield* reviewRows(sql, "space-1"), enabled: job?.enabled }
