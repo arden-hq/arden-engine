@@ -39,7 +39,8 @@ const OWNER: WikiCommitIdentity = {
   origin: { kind: "user", via: "desktop" },
   reason: "owner edit"
 }
-const REFUSAL = /^me\.md would have 9068 characters, .*Nothing was saved\. Cut at least 68 characters/u
+const REFUSAL =
+  /^me\.md would have 9068 characters, .*Nothing was saved\. Cut at least 68 characters/u
 
 const content = (pageId: string, title: string, body: string) =>
   formatWikiPage({
@@ -231,7 +232,10 @@ describe("the page size limit at the commit", () => {
   it("lets a write through that does not grow a page already over its limit", async () => {
     const outcome = await withWiki(({ repository }) =>
       Effect.gen(function* () {
-        yield* unchecked(repository, createPage("me", "me.md", content("me", "Me", "g".repeat(9_400))))
+        yield* unchecked(
+          repository,
+          createPage("me", "me.md", content("me", "Me", "g".repeat(9_400)))
+        )
         const write = (operation: (page: ResourceVersion) => WikiPageOperation) =>
           Effect.gen(function* () {
             const page = yield* repository.get("me")
@@ -239,9 +243,7 @@ describe("the page size limit at the commit", () => {
             const head = yield* repository.currentRevision
             return yield* commitWiki(repository, { ...OWNER, expectedRevision: head }, [
               operation(page)
-            ]).pipe(
-              Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" })
-            )
+            ]).pipe(Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" }))
           })
         return {
           shorter: yield* write((page) => updatePage(page, content("me", "Me", "g".repeat(9_200)))),
@@ -272,7 +274,7 @@ describe("the page size limit at the commit", () => {
         }).pipe(
           Effect.scoped,
           Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root }))
-        ) as Effect.Effect<ReadonlyArray<string>>
+        ) as unknown as Effect.Effect<ReadonlyArray<string>>
       )
       expect(pages).toContain("README.md")
     } finally {

@@ -127,7 +127,7 @@ it("cuts every per-chat message position in the one removal trigger", async () =
       new RegExp(`\\b${name}\\b`, "u").test(found.body)
     )
   })
-  const cutTables = new Set(cut.map((column) => column.split(".")[0]))
+  const cutTables = new Set(cut.map((column) => column.split(".")[0] ?? column))
   expect(
     found.others.filter((body) => [...cutTables].some((table) => body.includes(table)))
   ).toEqual([])

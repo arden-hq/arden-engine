@@ -141,7 +141,12 @@ const dailyRunner = Effect.fn("dailyRunner")(function* (
           runId: null
         } satisfies HandlerItem),
       settleHandlerItem: (_job, item) =>
-        Effect.succeed({ ...item, phase: "settled", runId: "run-1", failure: null })
+        Effect.succeed<HandlerItem>({
+          ...(item as HandlerItem),
+          phase: "settled",
+          runId: "run-1",
+          failure: null
+        })
     },
     runItem: (_job, item) => {
       const data = item.input.data
@@ -250,9 +255,10 @@ it("keeps the stored position across restarts, and moves it only from where it i
       const first = yield* position.current("2026-11-08")
       yield* position.advance({ from: "2026-11-08", to: "2026-11-09" })
       const restarted = yield* position.current("2026-11-11")
-      const stale = yield* position
-        .advance({ from: "2026-11-05", to: "2026-11-12" })
-        .pipe(Effect.flip, Effect.map((error) => error.reason))
+      const stale = yield* position.advance({ from: "2026-11-05", to: "2026-11-12" }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.reason)
+      )
       return { first: first.settledDay, restarted: restarted.settledDay, stale }
     })
   )
@@ -286,7 +292,11 @@ it("reads archived chats, past the first page of chats and of messages", async (
       yield* sessions.archive(archived)
       const long = (yield* sessions.create({})).sessionId
       for (let index = 0; index < 126; index += 1)
-        yield* turn(long, `long-${index}`, `2026-11-12T02:${String(index % 60).padStart(2, "0")}:00.000Z`)
+        yield* turn(
+          long,
+          `long-${index}`,
+          `2026-11-12T02:${String(index % 60).padStart(2, "0")}:00.000Z`
+        )
       for (let index = 0; index < 100; index += 1)
         yield* turn(
           (yield* sessions.create({})).sessionId,
@@ -352,7 +362,9 @@ it("settles a day unwritten once its run has failed in two jobs, and says so", a
   expect(outcome).toEqual({
     ran: ["2026-11-11", "2026-11-11", "2026-11-12"],
     outcome: ["failed", "failed", "finished"],
-    note: expect.stringContaining("daily/2026-11-11.md was not written: its run did not finish in 2 jobs"),
+    note: expect.stringContaining(
+      "daily/2026-11-11.md was not written: its run did not finish in 2 jobs"
+    ),
     settled: "2026-11-12"
   })
 })

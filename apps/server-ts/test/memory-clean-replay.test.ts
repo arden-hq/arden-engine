@@ -115,8 +115,8 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
               sessions: yield* SessionStore,
               transcripts: yield* TranscriptQueries,
               position: {
-                initialize: (day) => Effect.succeed(day),
-                settled: () => Effect.succeed(settled),
+                current: () => Effect.succeed({ settledDay: settled, tries: 0 }),
+                tried: () => Effect.void,
                 advance: ({ to }) =>
                   Effect.sync(() => {
                     settled = to
@@ -135,7 +135,12 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
                     runId: null
                   } satisfies HandlerItem),
                 settleHandlerItem: (_job, item) =>
-                  Effect.succeed({ ...item, phase: "settled", runId: "run-1", failure: null })
+                  Effect.succeed<HandlerItem>({
+                    ...(item as HandlerItem),
+                    phase: "settled",
+                    runId: "run-1",
+                    failure: null
+                  })
               },
               runItem: (_job, item) => {
                 const data = item.input.data
