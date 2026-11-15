@@ -222,21 +222,28 @@ type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">
  * The Space with its page. A page that cannot be made now is logged and made at the next
  * start, so a Space is never refused for its page.
  */
-const withSpacePage = (wiki: EnsureSpacePage, space: PersistedSpace) =>
-  wiki.ensureSpacePage({ spaceId: space.space_id }).pipe(
+const withSpacePage = (
+  wiki: EnsureSpacePage,
+  space: PersistedSpace,
+  home: WikiSpacePageInput["home"]
+) =>
+  wiki.ensureSpacePage({ spaceId: space.space_id, ...(home === undefined ? {} : { home }) }).pipe(
     Effect.map((ensured) => ensured?.space ?? space),
     Effect.catch((error) => logNoSpacePage(space.space_id, error).pipe(Effect.as(space)))
   )
 
-/** The one way a Space is created: the Space, then its page. */
+/** The one way a Space is created: the Space, then its page in `home`. */
 export const createSpaceWithPage = Effect.fn("Spaces.createWithPage")(function* (
   services: {
     readonly spaces: Pick<SpaceStore["Service"], "create">
     readonly wiki: EnsureSpacePage
   },
   input: CreateSpaceInput,
-  mutation?: MutationOperationIdentity
+  options: {
+    readonly mutation?: MutationOperationIdentity
+    readonly home?: WikiSpacePageInput["home"]
+  } = {}
 ) {
-  const space = yield* services.spaces.create(input, mutation)
-  return yield* withSpacePage(services.wiki, space)
+  const space = yield* services.spaces.create(input, options.mutation)
+  return yield* withSpacePage(services.wiki, space, options.home)
 })

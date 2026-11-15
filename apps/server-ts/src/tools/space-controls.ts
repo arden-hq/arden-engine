@@ -136,6 +136,13 @@ const makeSpaceControlTools = (services: Services): ReadonlyArray<ServerTool> =>
   })
 ]
 
+const spacePageHome = Schema.optionalKey(
+  Schema.Literals(["projects", "areas"]).annotate({
+    description:
+      "Where the Space's Memory page goes: projects for a finite outcome; areas for ongoing responsibility or general Space context (default)."
+  })
+)
+
 const makeSpaceSetupTools = (
   services: Pick<Services, "spaces" | "runs"> & {
     readonly wiki: Wiki["Service"]
@@ -149,7 +156,8 @@ const makeSpaceSetupTools = (
       Schema.Struct({
         name: Schema.NonEmptyString.annotate({
           description: "Readable name for the Space requested by the user."
-        })
+        }),
+        home: spacePageHome
       })
     ),
     metadata: {
@@ -171,7 +179,10 @@ const makeSpaceSetupTools = (
           createSpaceWithPage(
             services,
             { name: input.name },
-            { runId: ctx.run.runId, toolCallId: ctx.toolCallId }
+            {
+              mutation: { runId: ctx.run.runId, toolCallId: ctx.toolCallId },
+              ...(input.home === undefined ? {} : { home: input.home })
+            }
           ).pipe(Effect.mapError((cause) => failure(cause))),
           { signal: ctx.signal }
         )
@@ -186,18 +197,12 @@ const makeSpaceSetupTools = (
   defineServerTool({
     name: "space_page_create",
     description:
-      "Create and attach a Space's Memory page at the user's request. Choose projects for a finite outcome, areas for ongoing responsibilities; the default is ongoing Space context in areas. If a page is already attached, changes nothing. Returns the Space with its page_path. To add context, read the page with space_page_read, then use space_page_write. Ordinary Chat only.",
+      "Create and attach a Space's Memory page at the user's request. If a page is already attached, changes nothing. Returns the Space with its page_path. To add context, read the page with space_page_read, then use space_page_write. Ordinary Chat only.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         space_id: Schema.NonEmptyString.annotate({
           description: "Exact Space identity returned by space_list; never its display name."
-        }),
-        home: Schema.optionalKey(
-          Schema.Literals(["projects", "areas"]).annotate({
-            description:
-              "projects for a finite outcome; areas for ongoing responsibility or general Space context (default)."
-          })
-        )
+        })
       })
     ),
     metadata: {
@@ -215,7 +220,7 @@ const makeSpaceSetupTools = (
       await requireChat(services, ctx)
       const ensured = await Effect.runPromise(
         services.wiki
-          .ensureSpacePage({ spaceId: input.space_id, home: input.home ?? "areas" })
+          .ensureSpacePage({ spaceId: input.space_id })
           .pipe(Effect.mapError((cause) => failure(cause))),
         { signal: ctx.signal }
       )

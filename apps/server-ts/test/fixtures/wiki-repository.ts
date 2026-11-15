@@ -100,7 +100,7 @@ export const captureChat = (sessionId: string): WikiCommitOrigin => ({
 export const ownerEdit: WikiCommitOrigin = { kind: "user", via: "filesystem" }
 
 const at = DateTime.makeUnsafe("2026-11-01T10:00:00Z")
-const runRecord: ChatRunRecord = {
+export const runRecord: ChatRunRecord = {
   runId: "run-fixture",
   sessionId: "session-fixture",
   turnId: "turn",

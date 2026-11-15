@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq/revisions/effect"
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
@@ -19,7 +19,17 @@ import {
   spacePageIndex,
   spacePages
 } from "../src/wiki/space-index.js"
+import { startMemoryContentSteps } from "../src/memory/content-steps.js"
+import { RunQueries } from "../src/persistence/runs/queries.js"
+import { spaceJobId } from "../src/persistence/space-job-id.js"
+import { WorkStore } from "../src/persistence/work/store.js"
+import { spaceControlTools } from "../src/tools/space-controls.js"
+import { wikiError } from "../src/wiki/errors.js"
+import { Wiki } from "../src/wiki/service.js"
+import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
+import { partialService, serverRunContext } from "./kit.js"
 
 const page = (
   path: string,
@@ -327,3 +337,143 @@ describe("every active Space has a page", () => {
   })
 })
 
+const reviewWakes = (sql: SqlClient.SqlClient, spaceId: string) =>
+  sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM automation_event_queue
+    WHERE task_id = ${spaceJobId(spaceId)}`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
+
+describe("a Space is created with its page", () => {
+  it("ends with its page where `home` says, and starts no Space review", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces, sql, listing }) =>
+      Effect.gen(function* () {
+        const created = yield* createSpaceWithPage(
+          { spaces, wiki: methods },
+          { name: "Made-up trip" },
+          { home: "projects" }
+        )
+        const page = yield* listing.read(created.page_id ?? "")
+        const [job] = yield* sql<{ readonly enabled: number }>`
+          SELECT enabled FROM scheduled_tasks WHERE task_id = ${spaceJobId(created.space_id)}`
+        return {
+          path: created.page_path,
+          stored: (yield* spaces.get(created.space_id))?.page_path,
+          page: page.path,
+          reviewReady: job?.enabled,
+          wakes: yield* reviewWakes(sql, created.space_id)
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      path: "projects/made-up-trip.md",
+      stored: "projects/made-up-trip.md",
+      page: "projects/made-up-trip.md",
+      reviewReady: 1,
+      wakes: 0
+    })
+  })
+
+  it("keeps the Space when its page cannot be made now", async () => {
+    const outcome = await withTempDatabase(
+      Effect.gen(function* () {
+        const spaces = yield* SpaceStore
+        const created = yield* createSpaceWithPage(
+          {
+            spaces,
+            wiki: {
+              ensureSpacePage: () => Effect.fail(wikiError("create", "storage", "made-up failure"))
+            }
+          },
+          { name: "Made-up trip" }
+        )
+        const stored = yield* spaces.get(created.space_id)
+        return { stored: stored?.name, page: stored?.page_path ?? null }
+      })
+    )
+    expect(outcome).toEqual({ stored: "Made-up trip", page: null })
+  })
+
+  it("two calls at once make one page", async () => {
+    const outcome = await withSpacesAndWiki((methods, { spaces }) =>
+      Effect.gen(function* () {
+        const space = yield* spaces.create({ name: "Made-up garden" })
+        const both = yield* Effect.all(
+          [
+            methods.ensureSpacePage({ spaceId: space.space_id }),
+            methods.ensureSpacePage({ spaceId: space.space_id })
+          ],
+          { concurrency: "unbounded" }
+        )
+        return {
+          made: both.filter((ensured) => ensured?.created !== undefined).length,
+          samePage: both[0]?.space.page_id === both[1]?.space.page_id
+        }
+      })
+    )
+    expect(outcome).toEqual({ made: 1, samePage: true })
+  })
+
+  it("space_create passes the page's home through", async () => {
+    const asked: Array<WikiSpacePageInput> = []
+    await withTempDatabase(
+      Effect.gen(function* () {
+        const tools = yield* spaceControlTools.pipe(
+          Effect.provideService(
+            Wiki,
+            partialService<Wiki["Service"]>("Wiki", {
+              ensureSpacePage: (input) =>
+                Effect.sync(() => {
+                  asked.push(input)
+                  return undefined
+                })
+            })
+          ),
+          Effect.provideService(
+            RunQueries,
+            partialService<RunQueries["Service"]>("RunQueries", {
+              get: () => Effect.succeed(runRecord),
+              liveness: () => Effect.succeed("turn")
+            })
+          ),
+          Effect.provideService(WorkStore, partialService<WorkStore["Service"]>("WorkStore", {}))
+        )
+        const output = yield* Effect.promise(() =>
+          namedTool(tools, "space_create").execute(
+            { name: "Made-up trip", home: "projects" },
+            toolContext(
+              serverRunContext({ sessionId: runRecord.sessionId, runId: runRecord.runId })
+            )
+          )
+        )
+        expect(output.is_error).not.toBe(true)
+      })
+    )
+    expect(asked.map((input) => input.home)).toEqual(["projects"])
+  })
+})
+
+describe("the start check", () => {
+  it("gives Spaces their pages after the content steps, even when those fail", async () => {
+    const calls: Array<string> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const checked = yield* Deferred.make<void>()
+        yield* startMemoryContentSteps({
+          wiki: {
+            applyContentStep: () =>
+              Effect.sync(() => calls.push("content step")).pipe(
+                Effect.andThen(Effect.fail(wikiError("update", "storage", "made-up failure")))
+              ),
+            ensureSpacePages: () =>
+              Effect.sync(() => calls.push("space pages")).pipe(
+                Effect.andThen(Deferred.succeed(checked, undefined)),
+                Effect.as({ active: 0, kept: 0, rebound: 0, made: 0, failed: 0 })
+              )
+          },
+          sessions: partialService("Sessions", {}),
+          transcript: partialService("Transcript", {})
+        })
+        yield* Deferred.await(checked).pipe(Effect.timeout("5 seconds"))
+      }).pipe(Effect.scoped)
+    )
+    expect(calls).toEqual(["content step", "space pages"])
+  })
+})
