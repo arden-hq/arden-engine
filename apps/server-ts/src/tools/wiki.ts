@@ -10,7 +10,7 @@ import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
 import { nameKeys, namesTakenAt, normal, reviseWikiPage } from "../wiki/page.js"
-import { PAGE_AGE_RULE } from "../wiki/page-age.js"
+import { loadPageAges, PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import {
   activeRunPages,
@@ -19,7 +19,6 @@ import {
   type Snapshot
 } from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
-import { loadPageAges } from "./wiki-page-age.js"
 import { readTextPage } from "./read-text.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import {
@@ -454,7 +453,9 @@ const makeWikiTools = ({
         coreBudget === undefined
           ? chars >= WIKI_PAGE_BUDGET_CHARS
           : coreNeedsCondensing(chars, coreBudget)
-      const lastChanged = (await loadPageAges(wiki, snapshot, ctx.signal)).line(record.page.pageId)
+      const lastChanged = (
+        await Effect.runPromise(loadPageAges(wiki, snapshot.head), { signal: ctx.signal })
+      ).lines.get(record.page.pageId)
       const outside = wiki.outsideEditState(record.resource.path)
       const isReadme = input.path === "README.md" || input.path.endsWith("/README.md")
       const directory = input.path.slice(0, Math.max(0, input.path.length - "/README.md".length))

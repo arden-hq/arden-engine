@@ -235,7 +235,6 @@ export interface MemoryIndex {
 
 const INDEX_SUMMARY_CHARS = 120
 
-
 const indexLine = ({ path, summary }: MemoryIndexLine): string =>
   summary === null ? `- ${path}` : `- ${path}: ${summary}`
 

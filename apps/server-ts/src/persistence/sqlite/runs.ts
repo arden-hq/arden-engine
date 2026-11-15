@@ -1,6 +1,6 @@
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { readRunAuthority } from "./run-authority.js"
-import { readMemoryContext } from "./run-memory-context.js"
+import { readMemoryContext } from "./run-sidecar-mutations.js"
 import { readCause } from "./run-cause.js"
 import { readChatWork } from "./chat-work.js"
 import { makeRunProgressQuery, makeWaitingToolCallsQuery } from "./run-progress.js"

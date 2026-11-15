@@ -44,7 +44,6 @@ export interface MemorySources {
 const normalized = (value: string): string =>
   value.toLocaleLowerCase().split(/\s+/u).filter(Boolean).join(" ")
 
-
 const bytePrefix = (text: string, maxBytes: number): string => {
   if (byteLength(text) <= maxBytes) return text
   let low = 0

@@ -79,7 +79,6 @@ export interface MemoryContext {
   readonly record: RunMemoryComposition
 }
 
-
 /**
  * The one place a run's Memory block is composed: every source renders itself into its own
  * allowance with its own notices, and is recorded from what it rendered.

@@ -27,7 +27,7 @@ import {
   writtenPageData
 } from "./wiki.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { loadPageAges } from "./wiki-page-age.js"
+import { loadPageAges } from "../wiki/page-age.js"
 import { makeWikiRetireTools } from "./wiki-retire.js"
 import { MergedWikiPathSchema, makeWikiPageHistoryTools } from "./wiki-page-history.js"
 import {
@@ -239,7 +239,9 @@ const makeWikiOperationTools = ({
         input.limit,
         semantic
       )
-      const ages = await loadPageAges(wiki, snapshot, ctx.signal)
+      const ages = await Effect.runPromise(loadPageAges(wiki, snapshot.head), {
+        signal: ctx.signal
+      })
       const changed = (record: PageRecord): string => {
         const ago = ages.ago(record.page.pageId)
         return ago === undefined ? "" : ` (changed ${ago})`

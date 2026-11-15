@@ -26,7 +26,6 @@ export interface RenderedIndex extends RenderedMemory {
   readonly shown: ReadonlySet<string>
 }
 
-
 export const renderIndex = (
   pages: ReadonlyArray<RunPage>,
   list: IndexList,

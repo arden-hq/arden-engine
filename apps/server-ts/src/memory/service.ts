@@ -6,9 +6,8 @@ import { MemoryCaptureStore, type MemoryCaptureBatch } from "../persistence/memo
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
-import { lastChangedLines } from "../wiki/page-age.js"
+import { loadPageAges } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
-import type { PageTimes } from "../wiki/timestamps.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
@@ -95,17 +94,9 @@ const sources = Effect.fn("Memory.sources")(function* (
               Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
             )
           )
-  const times = yield* wiki
-    .pageTimes(current.head)
-    .pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Memory page times unavailable", cause).pipe(
-          Effect.as(new Map<string, PageTimes>())
-        )
-      )
-    )
+  const ages = yield* loadPageAges(wiki, current.head)
   const prepared = prepareMemorySources({
-    lastChanged: lastChangedLines(times, now),
+    lastChanged: ages.lines,
     pages: current.pages,
     recall,
     semanticMatches: semantic

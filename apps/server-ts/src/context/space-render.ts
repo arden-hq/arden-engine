@@ -52,7 +52,6 @@ const TRACKED_SETTLED_TASKS = 30
 const TRACKED_CHATS = 50
 const MORE_LINE_BYTES = 120
 
-
 const INSTRUCTIONS_CUT = "\n[Cut to fit: the rest of the Space instructions is left out.]"
 
 export const renderSpaceContext = (
