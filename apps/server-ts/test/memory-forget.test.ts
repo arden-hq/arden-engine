@@ -11,6 +11,7 @@ import {
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 
+import { toolFacts } from "../src/tools/approval-decision.js"
 import { prepareMemorySources } from "../src/memory/retrieval.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
@@ -752,5 +753,30 @@ describe("memory_forget", () => {
       "done",
       "Line 1 has fewer than 4 words, so it carries no claim to guard. Pass whole page lines."
     ])
+  })
+
+  it("always asks, and the card says how many pages each line is on", async () => {
+    const outcome = await withTool((tool) =>
+      Effect.gen(function* () {
+        const counted = yield* Effect.promise(() =>
+          Promise.resolve(
+            tool.definition.approvalPrompt?.(
+              { lines: [LINE], claim: "Sam moved away" },
+              context(serverRunContext())
+            )
+          ).then((prompt) => recordOf(recordOf(prompt)["presentation"])["fields"])
+        )
+        return { alwaysAsks: toolFacts(tool.definition).always_ask, counted }
+      })
+    )
+    expect(outcome).toEqual({
+      alwaysAsks: true,
+      counted: [
+        {
+          label: "Pages per line",
+          value: `${LINE}: 2 pages`
+        }
+      ]
+    })
   })
 })

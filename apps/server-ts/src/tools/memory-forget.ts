@@ -1,11 +1,12 @@
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { countOf } from "@arden-hq/std/count"
+import { clipLine } from "@arden-hq/std/text"
 import { Effect, Schema } from "effect"
 
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import type { WikiError } from "../wiki/errors.js"
 import type { RetractionChange } from "../wiki/forgotten.js"
-import { MAX_CLAIM_CHARS } from "../wiki/retraction.js"
+import { claimKey, MAX_CLAIM_CHARS } from "../wiki/retraction.js"
 import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
 import { chatLinkOf } from "./call-receipt.js"
@@ -16,6 +17,8 @@ import { wikiFailure } from "./wiki.js"
 
 /** One approval card lists every line; past this many it stops being readable. */
 const MAX_LINES = 50
+/** Each line's start in the card's page counts; its whole text is in the diff. */
+const LINE_PREVIEW_CHARS = 60
 const MAX_LINE_CHARS = 2_000
 
 const ForgetParametersSchema = Schema.Struct({
@@ -64,6 +67,20 @@ const removedPages = (change: RetractionChange): ReadonlyArray<string> => [
   ...new Set(change.entry.removed.map((removed) => removed.path))
 ]
 
+/** How many pages lose each line, so a line many pages share is plain before approval. */
+const pagesPerLine = (lines: ReadonlyArray<string>, change: RetractionChange): string =>
+  lines
+    .map((line) => {
+      const key = claimKey(line)
+      const pages = new Set(
+        change.entry.removed.flatMap((removed) =>
+          claimKey(removed.line) === key ? [removed.path] : []
+        )
+      )
+      return `${clipLine(line, LINE_PREVIEW_CHARS)}: ${countOf(pages.size, "page")}`
+    })
+    .join("\n")
+
 const makeMemoryForgetTools = ({
   wiki,
   sessions
@@ -103,7 +120,7 @@ const makeMemoryForgetTools = ({
       description: [
         "Forget lines of Memory the user says are wrong: removes every copy of each line from every page in one change and opens a numbered entry,",
         "so no later write but the user's own can put those lines back. undo closes an entry.",
-        "Works only during the user's own turn in a chat. Asks by default."
+        "Works only during the user's own turn in a chat, and always asks the user first."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(ForgetParametersSchema),
       metadata: {
@@ -112,6 +129,7 @@ const makeMemoryForgetTools = ({
         kind: "tool",
         action: "write",
         default_approval: "ask",
+        always_ask: true,
         approval_preview: "Forget lines of Memory everywhere they appear.",
         source: "_wiki",
         changes_state: true,
@@ -131,7 +149,10 @@ const makeMemoryForgetTools = ({
             title:
               request.kind === "forget" ? "Forget this in Memory?" : "Let this back into Memory?",
             subject: change.entry.claim,
-            fields: [],
+            fields:
+              request.kind === "forget"
+                ? [{ label: "Pages per line", value: pagesPerLine(request.lines, change) }]
+                : [],
             approve_label: request.kind === "forget" ? "Forget" : "Undo",
             reject_label: "Keep as is"
           },
