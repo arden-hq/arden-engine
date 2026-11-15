@@ -129,7 +129,7 @@ An adapter reads both to decide what it sends back on a later request:
 
 `makeChatCompletionsProvider({ providerId, baseUrl, auth?, compat? })` posts to `${baseUrl}/chat/completions`. Servers differ only through the `compat` flags (`ChatCompletionsCompat`; each flag's comment says what it changes and which server needs it), never through a branch on `providerId`. Typical settings:
 
-- llama.cpp `llama-server`: `{ structuredOutput: "json_schema", parallelToolCalls: true }`, plus `imageInput: true` with a multimodal projector. No `auth`.
+- llama.cpp `llama-server`: `{ structuredOutput: "json_schema", parallelToolCalls: true, toolChoiceNone: "unenforced" }`, plus `imageInput: true` with a multimodal projector. No `auth`. `toolChoiceNone`: llama.cpp keeps rendering the tools under `tool_choice: "none"` and returns a call as raw template text, so the adapter asks with `auto` and refuses a call the request did not allow, on every server.
 - OpenRouter: `{ reasoningEffort: "openrouter", structuredOutput: "json_schema" }`, plus `cacheControl: "anthropic"` for the models that need explicit cache breakpoints (Claude and Alibaba's Qwen models; the value names the syntax); routing preferences go in `extraBody: { provider: … }`.
 
 The provider emits only `Completed`, so the loop runs a turn's tool calls as one batch. A system or developer message inside the conversation is sent in place, in the route's one instruction role.
@@ -143,7 +143,7 @@ The live check drives the real loop against a server; it is not part of `bun run
 ```bash
 CHAT_COMPLETIONS_BASE_URL=http://127.0.0.1:9931/v1 \
 CHAT_COMPLETIONS_MODEL=ggml-org/gemma-4-E2B-it-GGUF:Q8_0 \
-CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"parallelToolCalls":true}' \
+CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"parallelToolCalls":true,"toolChoiceNone":"unenforced"}' \
 bun --conditions=arden-source libs/loop/test/live/chat-completions.live.ts
 ```
 

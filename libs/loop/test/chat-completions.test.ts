@@ -338,6 +338,46 @@ describe("Chat Completions call identity", () => {
   })
 })
 
+describe("a request that allows no tool call", () => {
+  /** What llama.cpp b12359 streams for a call under `tool_choice: "none"`: the template's raw text. */
+  const rawCall = '<|tool_call>call:weather{city:<|"|>Paris<|"|>}<tool_call|>'
+  const callChunks = () =>
+    sseResponse([
+      llamaChunk({
+        tool_calls: [
+          { index: 0, id: "w1", function: { name: "weather", arguments: '{"city":"P"}' } }
+        ]
+      }),
+      llamaChunk({}, "tool_calls"),
+      "[DONE]"
+    ])
+
+  it("asks a server that only stops parsing calls for parsed ones, and refuses a call", async () => {
+    // Live on b12359: with `tool_choice: "none"` the tools are still rendered (64 prompt
+    // tokens against 20 without them) and a call came back as `rawCall` in `content`.
+    expect(rawCall).toContain("<|tool_call>")
+    const { provider: cc, transport } = provider([callChunks], {
+      compat: { toolChoiceNone: "unenforced" }
+    })
+    await expect(
+      collect(cc.stream(request({ tools: [weather], toolChoice: "none" })))
+    ).rejects.toThrow("llama.cpp model called weather although the request allowed no tool call")
+    expect(recordOf(transport.requests[0]?.body).tool_choice).toBeUndefined()
+  })
+
+  it("sends `none` where the server enforces it, and still refuses a call it lets through", async () => {
+    const { provider: cc, transport } = provider([callChunks, answered("Sunny.")])
+    await expect(
+      collect(cc.stream(request({ tools: [weather], toolChoice: "none" })))
+    ).rejects.toThrow("llama.cpp model called weather although the request allowed no tool call")
+    expect(recordOf(transport.requests[0]?.body).tool_choice).toBe("none")
+    expect(
+      completionOf(await collect(cc.stream(request({ tools: [weather], toolChoice: "none" }))))
+        .message.content
+    ).toBe("Sunny.")
+  })
+})
+
 describe("Chat Completions request body", () => {
   it("orders a multi-turn tool history: outputs follow calls, context waits, an interrupted call is closed", async () => {
     const { provider: cc, transport } = provider([answered("Ok.")])

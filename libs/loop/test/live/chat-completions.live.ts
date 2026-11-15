@@ -4,7 +4,7 @@
  *
  *   CHAT_COMPLETIONS_BASE_URL=http://127.0.0.1:9931/v1 \
  *   CHAT_COMPLETIONS_MODEL=ggml-org/gemma-4-E2B-it-GGUF:Q8_0 \
- *   CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"parallelToolCalls":true}' \
+ *   CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"parallelToolCalls":true,"toolChoiceNone":"unenforced"}' \
  *   bun --conditions=arden-source libs/loop/test/live/chat-completions.live.ts
  *
  * Optional: CHAT_COMPLETIONS_PROVIDER (origin provider id, default

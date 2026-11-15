@@ -64,6 +64,17 @@ export interface ChatCompletionsCompat {
    * servers cache by prefix on their own.
    */
   readonly cacheControl: "anthropic" | "none"
+  /**
+   * What `tool_choice: "none"` does on this server. `enforced` — the model
+   * cannot call a tool (OpenAI's meaning, which OpenRouter passes on).
+   * `unenforced` — the server only stops parsing calls: llama.cpp b12359
+   * still renders the tools and a model that calls one anyway answers with
+   * the template's raw call text as `content` and finish `stop` (checked
+   * live: `<|tool_call>call:weather{…}<tool_call|>` from Gemma 4), which a
+   * caller would take for the answer. There the adapter asks with `auto`, so
+   * such a call arrives parsed, and refuses it as on any other server.
+   */
+  readonly toolChoiceNone: "enforced" | "unenforced"
 }
 
 export const DEFAULT_COMPAT: ChatCompletionsCompat = Object.freeze({
@@ -74,7 +85,8 @@ export const DEFAULT_COMPAT: ChatCompletionsCompat = Object.freeze({
   structuredOutput: "none",
   imageInput: false,
   parallelToolCalls: false,
-  cacheControl: "none"
+  cacheControl: "none",
+  toolChoiceNone: "enforced"
 })
 
 /** The top-level body keys this compat can write; `extraBody` may not set them. */

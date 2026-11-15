@@ -70,6 +70,8 @@ export const makeChunkMapper = (options: {
   readonly label: string
   readonly generateId: () => string
   readonly toolSearch: ToolSearch | undefined
+  /** False for a `toolChoice: "none"` request: any call the model makes is refused. */
+  readonly callsAllowed: boolean
 }): SseEventMapper => {
   let text = ""
   let reasoning = ""
@@ -241,6 +243,11 @@ export const makeChunkMapper = (options: {
         { index, id: call.id, name: call.name, arguments: call.arguments, search: call.search }
       ]
     })
+    const refused = options.callsAllowed ? undefined : kept[0]
+    if (refused !== undefined)
+      throw new SemanticResponseError(
+        `${options.label} model called ${refused.name} although the request allowed no tool call`
+      )
     const runtime = kept.filter((call) => !call.search)
     const toolCalls = runtime.map((call): ToolCall => ({
       id: call.id,

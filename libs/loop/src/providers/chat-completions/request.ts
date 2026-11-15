@@ -122,7 +122,9 @@ const buildPayload = (
     stream: true,
     ...(compat.usageInStream ? { stream_options: { include_usage: true } } : {}),
     ...(tools.length === 0 ? {} : { tools }),
-    ...(tools.length === 0 || request.toolChoice === "auto"
+    ...(tools.length === 0 ||
+    request.toolChoice === "auto" ||
+    (request.toolChoice === "none" && compat.toolChoiceNone === "unenforced")
       ? {}
       : { tool_choice: request.toolChoice }),
     ...(tools.length > 0 && compat.parallelToolCalls ? { parallel_tool_calls: true } : {}),

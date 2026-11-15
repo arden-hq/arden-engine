@@ -188,7 +188,10 @@ const llamaModel = (
       structuredOutput: "json_schema",
       imageInput: props?.modalities?.vision === true,
       parallelToolCalls: caps?.supports_parallel_tool_calls === true,
-      cacheControl: "none"
+      cacheControl: "none",
+      // b12359 renders the tools under `tool_choice: "none"` and returns a
+      // call as raw template text (see `ChatCompletionsCompat.toolChoiceNone`).
+      toolChoiceNone: "unenforced"
     }
   }
 }

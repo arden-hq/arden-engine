@@ -55,7 +55,8 @@ const conservative = {
   structuredOutput: "json_schema",
   imageInput: false,
   parallelToolCalls: false,
-  cacheControl: "none"
+  cacheControl: "none",
+  toolChoiceNone: "unenforced"
 }
 
 describe("detectServer", () => {

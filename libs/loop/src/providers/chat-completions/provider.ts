@@ -121,7 +121,8 @@ export const makeChatCompletionsProvider = (
           providerId: options.providerId,
           label,
           generateId,
-          toolSearch: request.toolSearch
+          toolSearch: request.toolSearch,
+          callsAllowed: request.toolChoice !== "none"
         })
     })
   }
