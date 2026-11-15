@@ -30,10 +30,14 @@ const inherit = { modelId: null, reasoningEffort: null }
 type Provider = NonNullable<Settings["provider"]>
 type ChatCompletionsProvider = Extract<Provider, { readonly kind: "chat-completions" }>
 
-const fromEnv = (env: NodeJS.ProcessEnv, name: string): string => {
+/** The settings fields that name an environment variable. */
+type EnvField = "apiKeyEnv" | "accessTokenEnv" | "accountIdEnv"
+
+/** The variable `provider[field]` names; its absence names the field, which is what to fix. */
+const fromEnv = (env: NodeJS.ProcessEnv, field: EnvField, name: string): string => {
   const value = env[name]
   if (value === undefined || value.length === 0)
-    throw new SettingsError(`Missing environment variable ${name}`)
+    throw new SettingsError(`Missing environment variable ${name}, named by \`provider.${field}\``)
   return value
 }
 
@@ -211,7 +215,8 @@ const chatCompletionsRoute = async (
   { env, fetch }: ModelsForOptions
 ): Promise<ModelProviderOptions> => {
   const baseUrl = provider.baseUrl.replace(/\/+$/, "")
-  const key = provider.apiKeyEnv === undefined ? undefined : fromEnv(env, provider.apiKeyEnv)
+  const key =
+    provider.apiKeyEnv === undefined ? undefined : fromEnv(env, "apiKeyEnv", provider.apiKeyEnv)
   const headers: Record<string, string> =
     key === undefined ? {} : { authorization: `Bearer ${key}` }
   const input: DiscoveryInput = {
@@ -273,7 +278,7 @@ export const modelsFor = async (
   if (provider.kind === "chat-completions") return chatCompletionsRoute(settings, provider, options)
   const env = options.env
   if (provider.kind === "responses") {
-    const credential = { accessToken: fromEnv(env, provider.apiKeyEnv) }
+    const credential = { accessToken: fromEnv(env, "apiKeyEnv", provider.apiKeyEnv) }
     return {
       provider: makeOpenAiResponsesProvider({
         baseUrl: provider.baseUrl,
@@ -286,9 +291,11 @@ export const modelsFor = async (
   let initialCredential: OpenAiCredentialSnapshot
   if (provider.kind === "codex") {
     const account =
-      provider.accountIdEnv === undefined ? undefined : fromEnv(env, provider.accountIdEnv)
+      provider.accountIdEnv === undefined
+        ? undefined
+        : fromEnv(env, "accountIdEnv", provider.accountIdEnv)
     initialCredential = {
-      accessToken: fromEnv(env, provider.accessTokenEnv),
+      accessToken: fromEnv(env, "accessTokenEnv", provider.accessTokenEnv),
       ...(account === undefined ? {} : { headers: { "chatgpt-account-id": account } })
     }
     const fixed = initialCredential

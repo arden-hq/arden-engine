@@ -2,7 +2,7 @@ import { resolveModelCapabilities } from "@arden-hq/loop"
 import { readFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
 import { modelsFor } from "../src/serve/models.js"
-import { parseSettings } from "../src/serve/settings.js"
+import { parseSettings, SettingsError } from "../src/serve/settings.js"
 
 const GEMMA = "ggml-org/gemma-4-E2B-it-GGUF:Q8_0"
 const LLAMA = "http://127.0.0.1:9931"
@@ -187,7 +187,11 @@ describe("modelsFor a chat-completions provider", () => {
         }),
         { env: {}, fetch: serving({}) }
       )
-    ).rejects.toThrow("Missing environment variable OPENROUTER_KEY")
+    ).rejects.toThrow(
+      new SettingsError(
+        "Missing environment variable OPENROUTER_KEY, named by `provider.apiKeyEnv`"
+      )
+    )
     await expect(
       modelsFor(settings({ provider: { kind: "chat-completions", baseUrl: `${LLAMA}/v1` } }), {
         env: {},
