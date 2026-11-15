@@ -22,7 +22,8 @@ import { commitWiki, createPage, movePage, updatePage, type WikiCommitIdentity }
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
-import { isSpacePage, spaceOwnsWikiPath } from "./space-index.js"
+import { spaceOwnsWikiPath } from "./space-index.js"
+import { requireNoSpacePage } from "./write-rules.js"
 
 const DIRECTORY_CONTRACT_HEADING = "## Directory contract"
 const MAX_DIRECTORY_PATH_CHARS = 4_096
@@ -188,7 +189,7 @@ export const makeWikiDirectoryMethods = (
           )
         }
         yield* commitWiki(
-          repository,
+          { repository, spaces },
           {
             ...input.commit,
             reason: "Bind report destination",
@@ -251,26 +252,12 @@ export const makeWikiDirectoryMethods = (
 
     const { actor, origin, reason } = input.commit
     if (occupant !== undefined && !ownsLeafBoundary) {
-      const spaceBound = yield* isSpacePage(
+      yield* requireNoSpacePage(
         spaces,
-        occupant.page.pageId,
-        occupant.resource.path
-      ).pipe(
-        Effect.mapError((cause) =>
-          wikiError("create", "storage", "Could not check Space page ownership", {
-            pageId: occupant.page.pageId,
-            cause
-          })
-        )
+        "create",
+        { pageId: occupant.page.pageId, path: occupant.resource.path },
+        "A Space owns this Wiki page, so it cannot be opened as a directory"
       )
-      if (spaceBound) {
-        return yield* wikiError(
-          "create",
-          "blocked",
-          "A Space owns this Wiki page, so it cannot be opened as a directory",
-          { pageId: occupant.page.pageId }
-        )
-      }
       const content = yield* reviseWikiPage(occupant.page, {
         body: adoptedDirectoryBody(occupant.page.body, contract)
       }).pipe(
@@ -281,9 +268,11 @@ export const makeWikiDirectoryMethods = (
           })
         )
       )
-      yield* commitWiki(repository, { actor, origin, reason, expectedRevision: snapshot.head }, [
-        movePage(occupant.resource, readmePath, content)
-      ]).pipe(Effect.mapError(mapRevisionError("create", occupant.page.pageId)))
+      yield* commitWiki(
+        { repository, spaces },
+        { actor, origin, reason, expectedRevision: snapshot.head },
+        [movePage(occupant.resource, readmePath, content)]
+      ).pipe(Effect.mapError(mapRevisionError("create", occupant.page.pageId)))
       return { pageId: occupant.page.pageId, changed: true, adopted: true }
     }
 
@@ -303,9 +292,11 @@ export const makeWikiDirectoryMethods = (
     yield* parseWikiPage(content, pageId).pipe(
       Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
     )
-    yield* commitWiki(repository, { actor, origin, reason, expectedRevision: snapshot.head }, [
-      createPage(pageId, readmePath, content)
-    ]).pipe(Effect.mapError(mapRevisionError("create", pageId)))
+    yield* commitWiki(
+      { repository, spaces },
+      { actor, origin, reason, expectedRevision: snapshot.head },
+      [createPage(pageId, readmePath, content)]
+    ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
     return { pageId, changed: true, adopted: false }
   })
 

@@ -9,6 +9,7 @@ import {
   archivePage,
   commitWiki,
   createPage,
+  mergePage,
   type WikiCommitIdentity,
   updatePage
 } from "./commit.js"
@@ -22,7 +23,7 @@ import {
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { formatRedirectPage, formatWikiPage, parseWikiPage } from "./page.js"
+import { formatWikiPage, parseWikiPage } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
 import { loadSnapshot } from "./snapshot.js"
 import {
@@ -123,7 +124,7 @@ export const makeWikiMutationMethods = (
     )
     const current = yield* loadSnapshot(repository, "create")
     yield* requireCreatable(spaces, current, { path: input.path, authority: input.authority })
-    yield* commitWiki(repository, { ...input.commit, expectedRevision: current.head }, [
+    yield* commitWiki({ repository, spaces }, { ...input.commit, expectedRevision: current.head }, [
       createPage(pageId, input.path, content)
     ]).pipe(Effect.mapError(mapRevisionError("create", pageId)))
     const page = yield* read(pageId).pipe(
@@ -213,9 +214,11 @@ export const makeWikiMutationMethods = (
             })
           }
         } else {
-          yield* commitWiki(repository, { ...input.commit, expectedRevision: input.expectedHead }, [
-            updatePage(current.resource, content)
-          ]).pipe(Effect.mapError(mapRevisionError("update", input.pageId)))
+          yield* commitWiki(
+            { repository, spaces },
+            { ...input.commit, expectedRevision: input.expectedHead },
+            [updatePage(current.resource, content)]
+          ).pipe(Effect.mapError(mapRevisionError("update", input.pageId)))
         }
         const page = yield* read(input.pageId).pipe(
           Effect.mapError((cause) =>
@@ -248,7 +251,7 @@ export const makeWikiMutationMethods = (
         )
         yield* requireArchivable(spaces, snapshot, current, input)
         const committed = yield* commitWiki(
-          repository,
+          { repository, spaces },
           { ...input.commit, expectedRevision: input.expectedHead },
           [archivePage(current.resource)]
         ).pipe(Effect.mapError(mapRevisionError("archive", input.pageId)))
@@ -298,16 +301,17 @@ export const makeWikiMutationMethods = (
             { pageId: input.pageId }
           )
         }
-        yield* commitWiki(repository, { ...input.commit, expectedRevision: input.expectedHead }, [
-          updatePage(
-            current.resource,
-            formatRedirectPage({
+        yield* commitWiki(
+          { repository, spaces },
+          { ...input.commit, expectedRevision: input.expectedHead },
+          [
+            mergePage(current.resource, {
               pageId: current.page.pageId,
               title: current.page.title,
               redirectTo: target.page.pageId
             })
-          )
-        ]).pipe(Effect.mapError(mapRevisionError("merge", input.pageId)))
+          ]
+        ).pipe(Effect.mapError(mapRevisionError("merge", input.pageId)))
         return yield* read(target.page.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "merge" }))
         )

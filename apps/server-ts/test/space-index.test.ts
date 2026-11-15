@@ -29,7 +29,7 @@ import { wikiError } from "../src/wiki/errors.js"
 import { Wiki } from "../src/wiki/service.js"
 import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
+import { withoutSpaces, namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
 import { partialService, serverRunContext } from "./kit.js"
 
 const page = (
@@ -277,7 +277,7 @@ describe("every active Space has a page", () => {
         const current = yield* repository.get(pageId)
         if (current === null) return yield* Effect.die(new Error("the Space page is missing"))
         yield* commitWiki(
-          repository,
+          withoutSpaces(repository),
           {
             expectedRevision: head,
             actor: "user:desktop",

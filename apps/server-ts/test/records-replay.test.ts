@@ -18,11 +18,12 @@ import {
   requireCommitRules,
   updatePage,
   type WikiCommitOrigin,
-  type WikiPageOperation
+  type WikiWrite
 } from "../src/wiki/commit.js"
 import { formatRedirectPage } from "../src/wiki/page.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const located = locateReplayCopy()
 
@@ -103,7 +104,7 @@ const replayedOperation = Effect.fn("replayedOperation")(function* (
   const current = yield* repository.findByPath(path)
   if (current === null) return undefined
   const text = new TextDecoder().decode(yield* repository.readVersion(current))
-  const replay = (replayed: Replayed, operation: WikiPageOperation) => ({ replayed, operation })
+  const replay = (replayed: Replayed, operation: WikiWrite) => ({ replayed, operation })
   switch (tool) {
     case "wiki_move_page":
       return newPath === undefined ? undefined : replay("move", movePage(current, newPath))
@@ -231,7 +232,7 @@ it("classifies every page on the copy, and refuses upkeep's every write to recor
             (touched) => touched !== undefined && pageKind(folders, touched).kind !== "knowledge"
           )
           const refused = yield* requireCommitRules(
-            repository,
+            withoutSpaces(repository),
             commitOrigin(writer, call.automation_id),
             [replay.operation]
           ).pipe(

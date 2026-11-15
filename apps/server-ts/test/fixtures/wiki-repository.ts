@@ -20,7 +20,13 @@ import type { ServerTool } from "../../src/tools/define.js"
 import type { ServerRunContext } from "../../src/tools/run-context.js"
 import { wikiOperationTools } from "../../src/tools/wiki-operations.js"
 import { makeWikiChangeMethods } from "../../src/wiki/change.js"
-import { commitWiki, createPage, updatePage, type WikiCommitOrigin } from "../../src/wiki/commit.js"
+import {
+  commitWiki,
+  createPage,
+  updatePage,
+  type WikiCommitOrigin,
+  type WikiCommitPoint
+} from "../../src/wiki/commit.js"
 import { makeWikiHistoryMethods } from "../../src/wiki/history.js"
 import { makeWikiListingMethods } from "../../src/wiki/listing.js"
 import { formatWikiPage } from "../../src/wiki/page.js"
@@ -77,7 +83,7 @@ export const withWikiRepository = async <A>(
           const head = yield* repository.currentRevision
           const current = yield* repository.get(pageId)
           yield* commitWiki(
-            repository,
+            withoutSpaces(repository),
             { actor: actor ?? "Agent", origin, reason: `save ${path}`, expectedRevision: head },
             [current === null ? createPage(pageId, path, content) : updatePage(current, content)]
           )
@@ -109,6 +115,12 @@ const distinctMillisClock = (): Clock.Clock => {
     sleep: (duration) => real.sleep(duration)
   }
 }
+
+/** The commit point of a Memory with no Space. */
+export const withoutSpaces = (repository: ManagedFileRepositoryShape): WikiCommitPoint => ({
+  repository,
+  spaces: { activeBindings: () => Effect.succeed([]) }
+})
 
 export const agentChat = (sessionId: string): WikiCommitOrigin => ({ kind: "agent", sessionId })
 export const captureChat = (sessionId: string): WikiCommitOrigin => ({

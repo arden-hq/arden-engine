@@ -56,6 +56,12 @@ export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
     .activeBindings()
     .pipe(Effect.map((bindings) => bindings.some((binding) => bindingOwnsPath(binding, path))))
 
+/** The same bindings, read at most once, when first asked for. */
+export const bindingsReadOnce = (spaces: ActiveBindings): Effect.Effect<ActiveBindings> =>
+  Effect.cached(Effect.suspend(() => spaces.activeBindings())).pipe(
+    Effect.map((bindings) => ({ activeBindings: () => bindings }))
+  )
+
 /** Whether the page is an active Space's own page. */
 export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
   spaces.activeBindings().pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))

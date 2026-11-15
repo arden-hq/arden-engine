@@ -7,7 +7,7 @@ import { posix } from "node:path"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { markedProducer, recordFolders } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
-import { commitWiki, createPage, updatePage } from "./commit.js"
+import { commitWiki, publishReport } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
 import { formatWikiPage, isReadme, normal, pageNamesForPath, parseWikiPage } from "./page.js"
@@ -125,7 +125,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { cause }))
   )
   yield* commitWiki(
-    repository,
+    { repository, spaces },
     {
       expectedRevision: snapshot.head,
       actor: `Automation ${input.producerAutomationId}`,
@@ -136,11 +136,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
       },
       reason: `Publish report ${content.path}`
     },
-    [
-      current === undefined
-        ? createPage(pageId, content.path, formatted)
-        : updatePage(current.resource, formatted)
-    ]
+    [publishReport(current?.resource ?? { resourceId: pageId, path: content.path }, formatted)]
   ).pipe(Effect.mapError(mapRevisionError("create")))
   return { pageId, changed: true }
 })

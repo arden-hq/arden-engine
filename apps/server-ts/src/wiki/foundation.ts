@@ -1,7 +1,4 @@
-import type {
-  ManagedFileRepositoryOptions,
-  ManagedFileRepositoryShape
-} from "@arden-hq/revisions/effect"
+import type { ManagedFileRepositoryOptions } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { readdir } from "node:fs/promises"
@@ -9,12 +6,12 @@ import { resolve } from "node:path"
 
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 
-import { commitWiki, createPage } from "./commit.js"
+import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage } from "./page.js"
 
 export const initializeWikiFoundation = Effect.fn("Wiki.initializeFoundation")(function* (
-  repository: ManagedFileRepositoryShape,
+  { repository, spaces }: WikiCommitPoint,
   options: Pick<ManagedFileRepositoryOptions, "workingRoot" | "historyRoot">
 ): Effect.fn.Return<void, WikiError> {
   const head = yield* repository.currentRevision.pipe(Effect.mapError(mapRevisionError("open")))
@@ -55,7 +52,7 @@ checkpoints stay in application storage. Add specialist directories only when a 
     }
   ]
   yield* commitWiki(
-    repository,
+    { repository, spaces },
     {
       actor: "system",
       origin: { kind: "system", name: "wiki.foundation" },

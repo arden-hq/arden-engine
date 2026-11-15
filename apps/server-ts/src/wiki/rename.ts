@@ -5,9 +5,9 @@ import {
   movePage,
   ownerInApp,
   requireCommitRules,
-  updatePage,
+  rewriteLinks,
   type WikiCommitIdentity,
-  type WikiPageOperation
+  type WikiWrite
 } from "./commit.js"
 import type { WikiRenameApproval } from "@arden-hq/protocol/wiki"
 import { Effect, Predicate, Schema } from "effect"
@@ -35,7 +35,7 @@ import {
   reviseWikiPage
 } from "./page.js"
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
-import { isSpacePage } from "./space-index.js"
+import { requireNoSpacePage } from "./write-rules.js"
 
 /** Who renames when the owner asks for and accepts a rename in the app. */
 export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
@@ -71,10 +71,10 @@ const RenamePlanSchema = Schema.Struct({
 
 type RenamePlan = typeof RenamePlanSchema.Type
 
-const planOperations = (plan: RenamePlan): ReadonlyArray<WikiPageOperation> => [
+const planOperations = (plan: RenamePlan): ReadonlyArray<WikiWrite> => [
   movePage(plan.source, plan.newPath, plan.movedContent),
   createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),
-  ...plan.rewrites.map((rewrite) => updatePage(rewrite.resource, rewrite.content))
+  ...plan.rewrites.map((rewrite) => rewriteLinks(rewrite.resource, rewrite.content))
 ]
 type PlannedResource = RenamePlan["source"]
 
@@ -453,24 +453,10 @@ export const makeWikiRenameMethods = (
         )
       }
     }
-    const spaceBound = yield* isSpacePage(spaces, input.pageId, current.resource.path).pipe(
-      Effect.mapError((cause) =>
-        wikiError("rename", "storage", "Could not check Space page ownership", {
-          pageId: input.pageId,
-          cause
-        })
-      )
-    )
-    if (spaceBound) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "A Space owns this Wiki page; move or archive the Space first",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
+    yield* requireNoSpacePage(spaces, "rename", {
+      pageId: input.pageId,
+      path: current.resource.path
+    })
     if (snapshot.head === null) {
       return yield* wikiError("rename", "corrupt", "A stored Wiki page has no repository head", {
         pageId: input.pageId
@@ -488,9 +474,11 @@ export const makeWikiRenameMethods = (
     const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
     const paths = yield* planMutationPaths(plan, snapshot.pages)
     yield* requireWikiWritePaths(boundary, "rename", paths)
-    yield* requireCommitRules(repository, input.commit.origin, planOperations(plan)).pipe(
-      Effect.mapError(mapRevisionError("rename", input.pageId))
-    )
+    yield* requireCommitRules(
+      { repository, spaces },
+      input.commit.origin,
+      planOperations(plan)
+    ).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
     const approval = yield* store
       .createOrGet({
         approvalId: randomUUID(),
@@ -514,32 +502,19 @@ export const makeWikiRenameMethods = (
       const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
       const paths = yield* planMutationPaths(plan, snapshot.pages)
       yield* requireWikiWritePaths(boundary, "rename", paths)
-      const spaceBound = yield* isSpacePage(spaces, plan.pageId, plan.oldPath).pipe(
-        Effect.mapError((cause) =>
-          wikiError("rename", "storage", "Could not check Space page ownership", {
-            pageId: plan.pageId,
-            cause
-          })
+      const applying = approval
+      yield* requireNoSpacePage(spaces, "rename", { pageId: plan.pageId, path: plan.oldPath }).pipe(
+        Effect.tapError((error) =>
+          applying.status === "applying" && error.reason === "blocked"
+            ? store
+                .releaseApply(
+                  applying.approvalId,
+                  "A Space took ownership before the rename was committed"
+                )
+                .pipe(Effect.mapError(mapStoreError))
+            : Effect.void
         )
       )
-      if (spaceBound) {
-        if (approval.status === "applying") {
-          yield* store
-            .releaseApply(
-              approval.approvalId,
-              "A Space took ownership before the rename was committed"
-            )
-            .pipe(Effect.mapError(mapStoreError))
-        }
-        return yield* wikiError(
-          "rename",
-          "blocked",
-          "A Space owns this Wiki page; move or archive the Space first",
-          {
-            pageId: plan.pageId
-          }
-        )
-      }
     }
     if (approval.status === "pending") {
       approval = yield* store.beginApply(input.approvalId).pipe(Effect.mapError(mapStoreError))
@@ -550,7 +525,7 @@ export const makeWikiRenameMethods = (
     }
 
     const outcome = yield* commitWiki(
-      repository,
+      { repository, spaces },
       {
         idempotencyKey: `wiki-rename:${approval.approvalId}`,
         ...input.commit,

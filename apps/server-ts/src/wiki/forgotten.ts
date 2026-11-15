@@ -9,7 +9,7 @@ import {
   requireCommitRules,
   updatePage,
   type WikiCommitOrigin,
-  type WikiPageOperation
+  type WikiWrite
 } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, reviseWikiPage } from "./page.js"
@@ -25,6 +25,7 @@ import {
 } from "./retraction.js"
 import { activeRunPages, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
 import { FORGOTTEN_PAGE_PATH } from "./system-pages.js"
+import type { SpaceStore } from "../persistence/spaces/store.js"
 
 interface OwnerTurn {
   readonly sessionId: string
@@ -68,7 +69,7 @@ export interface WikiForgetMethods {
 interface Plan {
   readonly change: RetractionChange
   readonly head: string | null
-  readonly operations: ReadonlyArray<WikiPageOperation>
+  readonly operations: ReadonlyArray<WikiWrite>
 }
 
 const forgetOrigin = (turn: OwnerTurn): WikiCommitOrigin => ({
@@ -119,7 +120,7 @@ const forgottenPage = (snapshot: Snapshot): PageRecord | undefined =>
 const withEntries = (
   current: PageRecord | undefined,
   stored: ReadonlyArray<Schema.Json>
-): { readonly operation: WikiPageOperation; readonly change: PageChange } => {
+): { readonly operation: WikiWrite; readonly change: PageChange } => {
   const body = renderForgotten(stored)
   const page = {
     pageId: current?.page.pageId ?? randomUUID(),
@@ -163,7 +164,7 @@ const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
   const pages = activeRunPages(snapshot.pages)
   const removed: Array<{ readonly path: string; readonly line: string }> = []
   const changes: Array<PageChange> = []
-  const operations: Array<WikiPageOperation> = []
+  const operations: Array<WikiWrite> = []
   for (const record of pages) {
     const lines = record.page.body.split("\n")
     const kept = lines.filter((line) => !wanted.has(claimKey(line) ?? ""))
@@ -247,7 +248,8 @@ const undoPlan = Effect.fn("Wiki.undoPlan")(function* (
 })
 
 export const makeWikiForgetMethods = (
-  repository: ManagedFileRepositoryShape
+  repository: ManagedFileRepositoryShape,
+  spaces: SpaceStore["Service"]
 ): WikiForgetMethods => {
   const planned = (
     turn: OwnerTurn,
@@ -256,7 +258,7 @@ export const makeWikiForgetMethods = (
     loadSnapshot(repository, "forget").pipe(
       Effect.flatMap(plan),
       Effect.tap((planned) =>
-        requireCommitRules(repository, forgetOrigin(turn), planned.operations).pipe(
+        requireCommitRules({ repository, spaces }, forgetOrigin(turn), planned.operations).pipe(
           Effect.mapError(mapRevisionError("forget"))
         )
       )
@@ -264,7 +266,7 @@ export const makeWikiForgetMethods = (
 
   const apply = (turn: OwnerTurn, reason: string, plan: Plan) =>
     commitWiki(
-      repository,
+      { repository, spaces },
       {
         actor: "user:chat",
         origin: forgetOrigin(turn),

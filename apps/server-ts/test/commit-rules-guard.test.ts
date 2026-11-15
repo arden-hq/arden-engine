@@ -18,3 +18,24 @@ it("makes the upkeep writer only through its constructor", () => {
   expect(naming(/kind: "upkeep"/u)).toEqual(["wiki/commit.ts"])
   expect(naming(/\bupkeepOrigin\(/u)).toEqual(["tools/wiki-identity.ts", "wiki/commit.ts"])
 })
+
+it("decides what a writer may do only at the commit point", () => {
+  const wiki = (paths: ReadonlyArray<string>) => paths.filter((path) => path.startsWith("wiki/"))
+  expect(wiki(naming(/\.origin\.kind\b/u))).toEqual(["wiki/commit.ts"])
+  expect(naming(/from "\.\/commit\.js"/u)).not.toContain("wiki/write-rules.ts")
+})
+
+it("tells a merge, a version restore, a report and a link rewrite only by the action its one caller states", () => {
+  expect(naming(/\bmergePage\(/u)).toEqual(["wiki/mutations.ts"])
+  expect(naming(/\brestoreVersion\(/u)).toEqual(["wiki/restore.ts"])
+  expect(naming(/(?<!\.)\bpublishReport\(/u)).toEqual(["wiki/reports.ts"])
+  expect(naming(/\brewriteLinks\(/u)).toEqual(["wiki/rename.ts"])
+})
+
+it("refuses a write to a Space's own page in one place", () => {
+  expect(naming(/\bisSpacePage\(/u)).toEqual([
+    "wiki/commit.ts",
+    "wiki/publication.ts",
+    "wiki/write-rules.ts"
+  ])
+})

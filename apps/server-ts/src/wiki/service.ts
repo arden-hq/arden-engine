@@ -79,7 +79,7 @@ const make = Effect.fn("Wiki.make")(function* (
     })
   ).pipe(Effect.map(Context.get(ManagedFileRepository)), Effect.mapError(mapRevisionError("open")))
   yield* diagnostics.startupPhase("wiki_repository_opened")
-  yield* initializeWikiFoundation(repository, options)
+  yield* initializeWikiFoundation({ repository, spaces }, options)
   yield* diagnostics.startupPhase("wiki_foundation_ready")
 
   const publishChanges = yield* makeWikiPublisher(repository, changeSink, spaces)
@@ -105,9 +105,9 @@ const make = Effect.fn("Wiki.make")(function* (
   const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
   const capture = makeWikiCaptureMethods(repository, spaces, listing.read)
   const rename = makeWikiRenameMethods(repository, spaces, renameStore)
-  const imports = makeWikiImportMethods(repository)
-  const contentSteps = makeWikiContentStepMethods(repository)
-  const forgetting = makeWikiForgetMethods(repository)
+  const imports = makeWikiImportMethods(repository, spaces)
+  const contentSteps = makeWikiContentStepMethods(repository, spaces)
+  const forgetting = makeWikiForgetMethods(repository, spaces)
 
   yield* diagnostics.startupPhase("wiki_ready")
   return Wiki.of({

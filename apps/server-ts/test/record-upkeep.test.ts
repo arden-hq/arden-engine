@@ -25,6 +25,7 @@ import type { ChatRunRecord } from "../src/persistence/runs/model.js"
 import type { RunQueries } from "../src/persistence/runs/queries.js"
 import { writeIdentity } from "../src/tools/wiki-identity.js"
 import { partialService, runAuthority } from "./kit.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const content = (path: string, body: string, producer?: string): string =>
   formatWikiPage({
@@ -65,7 +66,7 @@ describe("upkeep never edits a record or a folder contract", () => {
         (yield* repository.listResources()).map((resource) => [resource.path, resource] as const)
       )
       return yield* commitWiki(
-        repository,
+        withoutSpaces(repository),
         {
           actor: origin.kind,
           origin,
@@ -93,7 +94,7 @@ describe("upkeep never edits a record or a folder contract", () => {
           actor: "test",
           origin: "test.seed",
           reason: "seed",
-          operations: [createPage(`id:${path}`, path, content(path, body, producer))],
+          operations: [createPage(`id:${path}`, path, content(path, body, producer)).operation],
           expectedHead: yield* repository.currentRevision
         })
     })
@@ -226,7 +227,7 @@ describe("Tidy's stored writes", () => {
           const repository = yield* ManagedFileRepository
           const page = "topics/garden.md"
           yield* commitWiki(
-            repository,
+            withoutSpaces(repository),
             {
               actor: "test",
               origin: { kind: "user", via: "desktop" },
@@ -238,7 +239,7 @@ describe("Tidy's stored writes", () => {
           const before = yield* repository.get(`id:${page}`)
           if (before === null) return yield* Effect.die(`${page} is missing`)
           const tidied = yield* commitWiki(
-            repository,
+            withoutSpaces(repository),
             {
               actor: "Automation builtin-wiki-maintenance",
               origin: UPKEEP,

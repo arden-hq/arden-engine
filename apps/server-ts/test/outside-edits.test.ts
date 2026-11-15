@@ -26,6 +26,7 @@ import { wikiFailure } from "../src/tools/wiki.js"
 import { wikiError, type WikiError } from "../src/wiki/errors.js"
 import { loadSnapshot, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const roots: string[] = []
 
@@ -90,7 +91,7 @@ const withMemory = async <A>(
     Effect.gen(function* () {
       const repository = yield* ManagedFileRepository
       yield* commitWiki(
-        repository,
+        withoutSpaces(repository),
         {
           actor: "test",
           origin: { kind: "system", name: "test" },
@@ -457,7 +458,7 @@ describe("an outside change meets the rules an app edit meets", () => {
               const source = current.pages.find((record) => record.page.pageId === "folder-page")
               if (loads !== 2 || source === undefined) return Effect.void
               return commitWiki(
-                repository,
+                withoutSpaces(repository),
                 {
                   actor: "test",
                   origin: { kind: "system", name: "test" },

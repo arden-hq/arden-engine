@@ -11,12 +11,13 @@ import {
   createPage,
   updatePage,
   type WikiCommitIdentity,
-  type WikiPageOperation
+  type WikiWrite
 } from "./commit.js"
 import { directoryContract, directoryTitle } from "./directories.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
+import type { SpaceStore } from "../persistence/spaces/store.js"
 
 const HEAD_CONFLICT_RETRIES = 4
 
@@ -53,14 +54,15 @@ export interface WikiImportMethods {
 }
 
 export const makeWikiImportMethods = (
-  repository: ManagedFileRepositoryShape
+  repository: ManagedFileRepositoryShape,
+  spaces: SpaceStore["Service"]
 ): WikiImportMethods => {
   const attempt = Effect.fn("Wiki.importAttempt")(function* (input: WikiImportInput) {
     const snapshot = yield* loadSnapshot(repository, "create")
     const plan = yield* planImport(snapshot, input)
     if (plan.operations.length === 0) return { ...plan.result, committed: [] }
     const written = yield* commitWiki(
-      repository,
+      { repository, spaces },
       { ...input.commit, expectedRevision: snapshot.head },
       plan.operations
     ).pipe(Effect.mapError(mapRevisionError("create")))
@@ -138,7 +140,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
   const names = new Set(
     snapshot.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
   )
-  const operations: Array<WikiPageOperation> = []
+  const operations: Array<WikiWrite> = []
   const created: Array<string> = []
   const updated: Array<string> = []
   const unchanged: Array<string> = []

@@ -14,9 +14,9 @@ import {
   commitWiki,
   decodeWikiOrigin,
   requireCommitRules,
-  restorePage,
-  type WikiCommitIdentity,
-  updatePage
+  restoreArchivedPage,
+  restoreVersion,
+  type WikiCommitIdentity
 } from "./commit.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
@@ -154,12 +154,13 @@ export const makeWikiRestoreMethods = (
         const content = yield* requireUpdatable(spaces, snapshot, current, {
           pageId: input.pageId,
           authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          commit: identity,
           content: beforeRecord.page.content
         })
-        yield* commitWiki(repository, { ...identity, expectedRevision: input.expectedHead }, [
-          updatePage(current.resource, content)
-        ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+        yield* commitWiki(
+          { repository, spaces },
+          { ...identity, expectedRevision: input.expectedHead },
+          [restoreVersion(current.resource, content)]
+        ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         const page = yield* read(input.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
         )
@@ -218,11 +219,10 @@ export const makeWikiRestoreMethods = (
     const content = yield* requireRestorable(spaces, snapshot, current, {
       pageId: input.pageId,
       authority: input.authority,
-      commit: input.commit,
       content: historical.page.content
     })
-    yield* requireCommitRules(repository, input.commit.origin, [
-      updatePage(current.resource, content)
+    yield* requireCommitRules({ repository, spaces }, input.commit.origin, [
+      restoreVersion(current.resource, content)
     ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
     return content
   })
@@ -269,12 +269,12 @@ export const makeWikiRestoreMethods = (
           }
         } else {
           yield* commitWiki(
-            repository,
+            { repository, spaces },
             {
               expectedRevision: input.expectedHead,
               ...input.commit
             },
-            [updatePage(current.resource, content)]
+            [restoreVersion(current.resource, content)]
           ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         }
         const page = yield* read(input.pageId).pipe(
@@ -358,9 +358,11 @@ export const makeWikiRestoreMethods = (
             { pageId: input.pageId }
           )
         }
-        yield* commitWiki(repository, { ...input.commit, expectedRevision: input.expectedHead }, [
-          restorePage(resource)
-        ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+        yield* commitWiki(
+          { repository, spaces },
+          { ...input.commit, expectedRevision: input.expectedHead },
+          [restoreArchivedPage(resource)]
+        ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         return yield* read(input.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
         )
