@@ -635,6 +635,20 @@ const requireCaptureLeavesSpacePages = Effect.fn("Wiki.requireCaptureLeavesSpace
   )
 })
 
+/** Only a merge turns a page into a redirect; the owner may still do it by hand in the file. */
+const requireRedirectOnlyByMerge = Effect.fn("Wiki.requireRedirectOnlyByMerge")(function* (
+  _view: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  if (write.before === null || write.given === undefined || write.action === "merge") return
+  const page = yield* parseWikiPage(decoder.decode(write.given)).pipe(Effect.option)
+  if (Option.isNone(page) || page.value.lifecycle !== "redirect") return
+  return yield* ruleError(
+    "retire",
+    `${write.before.path} would become a redirect, which only a merge makes. Nothing was saved.`
+  )
+})
+
 const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
   origin: WikiCommitOrigin,
   write: ResolvedWrite
@@ -717,6 +731,7 @@ const COMMIT_RULES: ReadonlyArray<{
   readonly check: (view: CommitView, write: ResolvedWrite) => Effect.Effect<void, WikiCommitError>
 }> = [
   { binds: isCaptureWriter, check: requireCaptureLeavesSpacePages },
+  { binds: (origin) => !isOwnerOrigin(origin), check: requireRedirectOnlyByMerge },
   { binds: () => true, check: (_view, write) => requireHumanAliases(write) },
   { binds: isUpkeep, check: requireNotRecord },
   { binds: () => true, check: requireNoMoveIntoRecords },

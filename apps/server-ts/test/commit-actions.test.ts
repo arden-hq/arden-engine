@@ -4,7 +4,8 @@ import { join } from "node:path"
 import {
   ManagedFileRepository,
   managedFileRepositoryNodeLayer,
-  type ManagedFileRepositoryShape
+  type ManagedFileRepositoryShape,
+  type ResourceVersion
 } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
@@ -14,12 +15,15 @@ import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import {
   commitWiki,
   createPage,
+  mergePage,
   ownerInApp,
   updatePage,
-  type WikiCommitIdentity
+  type WikiCommitError,
+  type WikiCommitIdentity,
+  type WikiWrite
 } from "../src/wiki/commit.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
-import { formatWikiPage } from "../src/wiki/page.js"
+import { formatRedirectPage, formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import { partialService } from "./kit.js"
 
@@ -47,6 +51,46 @@ const CAPTURE: WikiCommitIdentity = {
   origin: { kind: "capture", replayKey: undefined, sessionId: "chat-1" },
   reason: "test"
 }
+
+const AGENT: WikiCommitIdentity = {
+  actor: "Agent",
+  origin: { kind: "agent", sessionId: "chat-1" },
+  reason: "test"
+}
+
+const OWNER_IN_FILE: WikiCommitIdentity = {
+  actor: "user:filesystem",
+  origin: { kind: "user", via: "filesystem" },
+  reason: "test"
+}
+
+const commitOutcome = (
+  repository: ManagedFileRepositoryShape,
+  identity: WikiCommitIdentity,
+  write: (page: ResourceVersion) => WikiWrite,
+  path: string
+) =>
+  Effect.gen(function* () {
+    const page = yield* repository.findByPath(path)
+    if (page === null) throw new Error(`${path} is missing`)
+    return yield* commitWiki(
+      { repository, spaces },
+      { ...identity, expectedRevision: yield* repository.currentRevision },
+      [write(page)]
+    ).pipe(
+      Effect.match({
+        onFailure: (error: WikiCommitError) =>
+          error._tag === "WikiCommitRuleError" ? error.rule : error._tag,
+        onSuccess: () => "saved"
+      })
+    )
+  })
+
+const redirectTo = (page: { readonly resourceId: string; readonly path: string }) => ({
+  pageId: page.resourceId,
+  title: page.path,
+  redirectTo: `id:${SPACE_PAGE}`
+})
 
 const withMemory = <A>(
   body: (repository: ManagedFileRepositoryShape) => Effect.Effect<A, unknown>
@@ -129,5 +173,27 @@ describe("an action the commit point reads from its caller", () => {
       captureOtherPage: "saved",
       ownerSpacePage: "saved"
     })
+  })
+})
+
+describe("what only one action may do, whatever the writer's call", () => {
+  it("lets only a merge turn a page into a redirect, except the owner's own hand merge in the file", async () => {
+    const outcome = await withMemory((repository) =>
+      Effect.gen(function* () {
+        const asEdit = (page: ResourceVersion) =>
+          updatePage(page, formatRedirectPage(redirectTo(page)))
+        return {
+          agentEdit: yield* commitOutcome(repository, AGENT, asEdit, "topics/seeds.md"),
+          agentMerge: yield* commitOutcome(
+            repository,
+            AGENT,
+            (page) => mergePage(page, redirectTo(page)),
+            "topics/seeds.md"
+          ),
+          ownerInFile: yield* commitOutcome(repository, OWNER_IN_FILE, asEdit, "topics/README.md")
+        }
+      })
+    )
+    expect(outcome).toEqual({ agentEdit: "retire", agentMerge: "saved", ownerInFile: "saved" })
   })
 })

@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { makeWikiCaptureMethods } from "../src/wiki/capture.js"
-import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
+import { commitWiki, createPage, mergePage, ownerInApp } from "../src/wiki/commit.js"
 import {
   makeOutsideEdits,
   MAX_MISSING_ARCHIVED,
@@ -467,14 +467,11 @@ describe("an outside change meets the rules an app edit meets", () => {
                   expectedRevision: current.head
                 },
                 [
-                  updatePage(
-                    source.resource,
-                    formatRedirectPage({
-                      pageId: "folder-page",
-                      title: "Inner",
-                      redirectTo: "kept"
-                    })
-                  )
+                  mergePage(source.resource, {
+                    pageId: "folder-page",
+                    title: "Inner",
+                    redirectTo: "kept"
+                  })
                 ]
               ).pipe(Effect.mapError((cause) => wikiError("observe", "storage", cause.message)))
             })
