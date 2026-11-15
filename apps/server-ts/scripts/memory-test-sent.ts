@@ -2,13 +2,13 @@
 // question file, open a new chat on the replay copy with the question as its first message (in
 // the question's Space, if it names one) and run the product's own prefetch, the code a real
 // new chat runs, which records on the copy what the run was sent. The score reads that record:
-// which pages were sent, the bytes, what the budget cut, and whether every expected page was
-// sent. Writes the results beside the question file, never in the
-// repository, and prints counts by kind only.
+// which pages were sent, the bytes, what was left out for room, and whether every expected
+// page was sent. Writes the results beside the question file, never in the repository, and
+// prints counts by kind only.
 //
 // Run it with `just memory-test-sent <question file> <replay folder> [--baseline <results file>]`.
-// With a baseline it fails when any question is sent less fully than there: sent to not sent,
-// or whole to in part. It runs under vitest,
+// With a baseline it fails when any expected page is sent less fully than there: whole to in
+// part, or whole or in part to not sent. It runs under vitest,
 // which resolves the engine's TypeScript sources, and opens the copy only through
 // test/fixtures/replay-copy.ts: no server, no scheduler, no model, and `fetch` refuses.
 //
@@ -52,7 +52,7 @@ const BaselineFile = Schema.fromJsonString(
     results: Schema.Array(
       Schema.Struct({
         id: Schema.String,
-        sent: Schema.Boolean,
+        missing: Schema.Array(Schema.String),
         inPart: Schema.Array(Schema.String)
       })
     )
@@ -169,14 +169,15 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
       ...(baselineFile === undefined
         ? []
         : [
-            `Against ${baselineFile}: ${regressions.length === 0 ? "no question is sent less fully." : `${regressions.length} sent less fully:`}`,
+            `Against ${baselineFile}: ${regressions.length === 0 ? "no expected page is sent less fully." : `${regressions.length} expected pages sent less fully:`}`,
             ...regressions.map(
-              (regression) => `  ${regression.id}: ${regression.was} to ${regression.now}`
+              (regression) =>
+                `  ${regression.id} ${regression.path}: ${regression.was} to ${regression.now}`
             )
           ]),
       ""
     ].join("\n")
   )
   if (regressions.length > 0)
-    throw new Error(`${regressions.length} questions are sent less fully than the baseline`)
+    throw new Error(`${regressions.length} expected pages are sent less fully than the baseline`)
 }, 3_600_000)

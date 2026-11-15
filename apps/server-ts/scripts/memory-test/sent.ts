@@ -173,30 +173,39 @@ export const renderCountTable = (results: ReadonlyArray<SentResult>): string => 
   return [line(header), ...body.map(line)].join("\n")
 }
 
-/** How fully a question was sent: every expected page whole, some in part, or not sent. */
-const level = (result: Pick<SentResult, "sent" | "inPart">): 0 | 1 | 2 => {
-  if (!result.sent) return 0
-  return result.inPart.length > 0 ? 1 : 2
-}
 const LEVEL_NAMES = ["not sent", "sent in part", "sent whole"] as const
+
+/** How fully a page was sent, read from its question's result. */
+const pageLevel = (result: Pick<SentResult, "missing" | "inPart">, path: string): 0 | 1 | 2 => {
+  if (result.missing.includes(path)) return 0
+  return result.inPart.includes(path) ? 1 : 2
+}
 
 export interface Regression {
   readonly id: string
+  readonly path: string
   readonly was: (typeof LEVEL_NAMES)[number]
   readonly now: (typeof LEVEL_NAMES)[number]
 }
 
-/** Questions sent less fully than in a baseline run: sent to not sent, or whole to in part. */
+/**
+ * Expected pages sent less fully than in a baseline run, page by page: whole to in part, or
+ * whole or in part to not sent. A page missing or in part now was expected then too.
+ */
 export const regressionsFrom = (
-  baseline: ReadonlyArray<Pick<SentResult, "id" | "sent" | "inPart">>,
+  baseline: ReadonlyArray<Pick<SentResult, "id" | "missing" | "inPart">>,
   results: ReadonlyArray<SentResult>
 ): ReadonlyArray<Regression> => {
-  const before = new Map(baseline.map((result) => [result.id, level(result)] as const))
+  const before = new Map(baseline.map((result) => [result.id, result] as const))
   return results.flatMap((result) => {
     const was = before.get(result.id)
-    const now = level(result)
-    return was === undefined || now >= was
-      ? []
-      : [{ id: result.id, was: LEVEL_NAMES[was], now: LEVEL_NAMES[now] }]
+    if (was === undefined) return []
+    return [...result.missing, ...result.inPart].flatMap((path) => {
+      const then = pageLevel(was, path)
+      const now = pageLevel(result, path)
+      return now >= then
+        ? []
+        : [{ id: result.id, path, was: LEVEL_NAMES[then], now: LEVEL_NAMES[now] }]
+    })
   })
 }

@@ -283,29 +283,47 @@ describe("sent score", () => {
 })
 
 describe("against a baseline", () => {
-  const ask = () => question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] })
-  const whole = scoreSent(ask(), recorded({ recalled: ["projects/garden.md"] }))
-  const inPart = scoreSent(
-    ask(),
-    recorded({ recalled: [["projects/garden.md", RENDERED_IN_PART]] })
-  )
-  const notSent = scoreSent(ask(), recorded({ recalled: ["projects/kitchen.md"] }))
+  const GARDEN = "projects/garden.md"
+  const KITCHEN = "projects/kitchen.md"
+  const ask = () => question({ kind: "where_it_stands", expected_pages: [GARDEN, KITCHEN] })
+  const score = (
+    garden: Placement | "missing",
+    kitchen: Placement | "missing"
+  ): ReturnType<typeof scoreSent> =>
+    scoreSent(
+      ask(),
+      recorded({
+        recalled: [
+          ...(garden === "missing" ? [] : [[GARDEN, garden] as const]),
+          ...(kitchen === "missing" ? [] : [[KITCHEN, kitchen] as const])
+        ]
+      })
+    )
 
-  it("fails a question sent less fully: sent to not sent, or whole to in part", () => {
-    expect(regressionsFrom([whole], [inPart])).toEqual([
-      { id: "q-test", was: "sent whole", now: "sent in part" }
+  it("fails each expected page sent less fully: whole to in part, in part or whole to not sent", () => {
+    expect(regressionsFrom([score(WHOLE, WHOLE)], [score(RENDERED_IN_PART, WHOLE)])).toEqual([
+      { id: "q-test", path: GARDEN, was: "sent whole", now: "sent in part" }
     ])
-    expect(regressionsFrom([inPart], [notSent])).toEqual([
-      { id: "q-test", was: "sent in part", now: "not sent" }
+    expect(regressionsFrom([score(RENDERED_IN_PART, WHOLE)], [score("missing", WHOLE)])).toEqual([
+      { id: "q-test", path: GARDEN, was: "sent in part", now: "not sent" }
     ])
-    expect(regressionsFrom([whole], [notSent])).toHaveLength(1)
   })
 
-  it("passes a question sent as fully or more, and one the baseline did not have", () => {
-    expect(regressionsFrom([notSent], [inPart])).toEqual([])
-    expect(regressionsFrom([inPart], [whole])).toEqual([])
-    expect(regressionsFrom([whole], [whole])).toEqual([])
-    expect(regressionsFrom([], [notSent])).toEqual([])
+  it("fails a page that gets worse while its question stays at the same level", () => {
+    expect(regressionsFrom([score("missing", WHOLE)], [score("missing", "missing")])).toEqual([
+      { id: "q-test", path: KITCHEN, was: "sent whole", now: "not sent" }
+    ])
+    expect(
+      regressionsFrom([score(RENDERED_IN_PART, WHOLE)], [score(RENDERED_IN_PART, PASSAGE)])
+    ).toEqual([{ id: "q-test", path: KITCHEN, was: "sent whole", now: "sent in part" }])
+  })
+
+  it("passes pages sent as fully or more, and a question the baseline did not have", () => {
+    expect(regressionsFrom([score("missing", "missing")], [score(RENDERED_IN_PART, WHOLE)])).toEqual(
+      []
+    )
+    expect(regressionsFrom([score(WHOLE, WHOLE)], [score(WHOLE, WHOLE)])).toEqual([])
+    expect(regressionsFrom([], [score("missing", "missing")])).toEqual([])
   })
 })
 
