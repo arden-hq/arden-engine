@@ -1,5 +1,6 @@
 import type { ManagedFileRepositoryShape, RevisionError } from "@arden-hq/revisions/effect"
 import { markdownWords } from "@arden-hq/protocol/chat"
+import { countOf } from "@arden-hq/std/count"
 import { Effect, Option, Schema } from "effect"
 
 import { parseWikiPage } from "./page.js"
@@ -75,7 +76,7 @@ const retractionsOf = (
   return skipped === 0
     ? Effect.succeed(entries)
     : Effect.logWarning(
-        `${FORGOTTEN_PAGE_PATH}: ${skipped} entries do not read and are not guarded`
+        `${FORGOTTEN_PAGE_PATH}: ${countOf(skipped, "entry")} that do not read are not guarded`
       ).pipe(Effect.as(entries))
 }
 

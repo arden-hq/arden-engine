@@ -1,4 +1,5 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
+import { countOf } from "@arden-hq/std/count"
 import { DateTime, Effect, type Schema } from "effect"
 import { randomUUID } from "node:crypto"
 
@@ -78,8 +79,14 @@ const forgetOrigin = (turn: OwnerTurn): WikiCommitOrigin => ({
 })
 
 const FORGOTTEN_TITLE = "Forgotten"
-const FORGOTTEN_INTRO =
-  "Lines you asked Arden to forget. Arden refuses any write but yours that would put one back. Ask in a chat to undo an entry."
+const FORGOTTEN_INTRO = [
+  "Lines you asked Arden to forget. Arden refuses any write but yours that would put one back; ask in a chat to undo an entry.",
+  "The lines stay listed here and stay in each page's history.",
+  "Arden rewrites this page from its entries on each forget or undo, so change an entry in the frontmatter, not in this text."
+].join(" ")
+
+const said = (turn: { readonly chat: string; readonly at: string }): string =>
+  `in [a chat](${turn.chat}) on ${turn.at.slice(0, 10)}`
 
 const renderForgotten = (stored: ReadonlyArray<Schema.Json>): string => {
   const entries = storedRetractions({ [RETRACTIONS_KEY]: [...stored] }).entries
@@ -89,15 +96,15 @@ const renderForgotten = (stored: ReadonlyArray<Schema.Json>): string => {
     ...(unreadable === 0
       ? []
       : [
-          `${unreadable} entries in this page's frontmatter do not read, so their lines are not guarded.`
+          `${countOf(unreadable, "entry")} in this page's frontmatter ${unreadable === 1 ? "does not read, so its" : "do not read, so their"} lines are not guarded.`
         ]),
     ...entries.map((entry) =>
       [
         `## ${entry.id}. ${entry.claim}`,
         "",
         entry.status === "open"
-          ? `Open. Asked in ${entry.said.chat} on ${entry.said.at}.`
-          : `Undone in ${entry.closed.chat} on ${entry.closed.at}. Asked in ${entry.said.chat} on ${entry.said.at}.`,
+          ? `Open. Asked ${said(entry.said)}.`
+          : `Undone ${said(entry.closed)}. Asked ${said(entry.said)}.`,
         "",
         ...entry.removed.map((removed) => `- \`${removed.path}\`: ${removed.line}`)
       ].join("\n")

@@ -380,7 +380,7 @@ describe("forgetting a line", () => {
           kept: Array.isArray(kept) ? kept.length : 0,
           handWritten:
             Array.isArray(kept) && kept.some((entry) => recordOf(entry)["note"] !== undefined),
-          noted: after.body.includes("1 entries in this page's frontmatter do not read")
+          noted: after.body.includes("1 entry in this page's frontmatter does not read")
         }
       })
     )
@@ -525,6 +525,20 @@ describe("what forgotten.md holds and where it stays", () => {
       })
     )
     expect(outcome).toEqual({ backlinks: [], status: "accepted", resolution: null })
+  })
+
+  it("shows each entry's chat as a link and its date, and says the page is rebuilt", async () => {
+    const body = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        return (yield* memory.page("forgotten.md")).page.body
+      })
+    )
+    expect(body).toMatch(
+      new RegExp(`Open\\. Asked in \\[a chat\\]\\(${TURN.chat}\\) on \\d{4}-\\d{2}-\\d{2}\\.`, "u")
+    )
+    expect(body).toContain("Arden rewrites this page from its entries")
+    expect(body).toContain("stay in each page's history")
   })
 
   it("keeps forgotten.md at its path for every writer, the owner too", async () => {
