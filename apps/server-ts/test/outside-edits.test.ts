@@ -269,6 +269,29 @@ describe("changes made outside Arden", () => {
     expect(result.setAside).toEqual([])
   })
 
+  it("archives a nested folder deleted outside deepest first, each README after its pages", async () => {
+    const result = await withMemory(
+      ({ root, settle }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() => rm(join(root, "old"), { recursive: true }))
+          return shape(yield* settle())
+        }),
+      {
+        extra: [
+          ["sub-readme", "old/sub/README.md", page("sub-readme")],
+          ["sub-page", "old/sub/deep.md", page("sub-page")]
+        ]
+      }
+    )
+    expect(result.takenIn).toEqual([
+      ["old/sub/deep.md", "archive"],
+      ["old/inner.md", "archive"],
+      ["old/sub/README.md", "archive"],
+      ["old/README.md", "archive"]
+    ])
+    expect(result.setAside).toEqual([])
+  })
+
   it("never rewrites a file it set aside", async () => {
     const written = await withMemory(({ root, check }) =>
       Effect.gen(function* () {
