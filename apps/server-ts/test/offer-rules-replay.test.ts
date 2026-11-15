@@ -343,4 +343,4 @@ it("replays the offer rules over the real history: counts only", async (context)
   expect(replay.undecodable).toBe(0)
   // (b) With the owner away, only offers that already waited past the age expire.
   expect(expiry.expired).toBe(expiry.due)
-}, 600_000)
+})

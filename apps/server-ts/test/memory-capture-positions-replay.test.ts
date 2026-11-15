@@ -80,7 +80,7 @@ it("reads every owner turn from its position, and keeps every old unread turn co
     since: replayed.expected.since,
     listed: replayed.chats
   })
-}, 1_800_000)
+})
 
 const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
   const [first] = yield* sql<{ readonly at: string; readonly marks: number }>`

@@ -1,9 +1,4 @@
-import { join } from "node:path"
-import {
-  ManagedFileRepository,
-  managedFileRepositoryNodeLayer,
-  type ManagedFileRepositoryShape
-} from "@arden-hq/revisions/effect"
+import { type ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -23,7 +18,7 @@ import {
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { formatRedirectPage } from "../src/wiki/page.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
-import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
+import { locateReplayCopy, onCopyMemory, runOnReplayCopy } from "./fixtures/replay-copy.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const located = locateReplayCopy()
@@ -131,24 +126,6 @@ const replayedOperation = Effect.fn("replayedOperation")(function* (
   }
 })
 
-const withCopyMemory = <A, E>(
-  wiki: string,
-  body: (repository: ManagedFileRepositoryShape) => Effect.Effect<A, E>
-): Promise<A> =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      return yield* body(yield* ManagedFileRepository)
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        managedFileRepositoryNodeLayer({
-          workingRoot: join(wiki, "pages"),
-          historyRoot: join(wiki, ".wiki-history")
-        })
-      )
-    )
-  )
-
 it("classifies every page on the copy, and refuses upkeep's every write to records and others' only by kind", async (context) => {
   if (located.kind === "absent") return context.skip(located.reason)
   const copy = located.copy
@@ -172,7 +149,7 @@ it("classifies every page on the copy, and refuses upkeep's every write to recor
     })
   )
 
-  const outcome = await withCopyMemory(copy.wiki, (repository) =>
+  const outcome = await onCopyMemory(copy, (repository) =>
     Effect.gen(function* () {
       const snapshot = yield* loadSnapshot(repository, "list")
       const active = snapshot.pages.filter(
@@ -268,4 +245,4 @@ it("classifies every page on the copy, and refuses upkeep's every write to recor
     if (writer === "upkeep") expect(refused, writer).toBe(counts.toRecords)
     else expect(counts.updatesRefused, writer).toBe(0)
   }
-}, 600_000)
+})

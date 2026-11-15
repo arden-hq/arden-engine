@@ -213,4 +213,4 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
   expect(database.summaries?.ahead).toBe(0)
   expect(database.maintenance).toEqual({ types: ["event"], nextRunAt: null })
   expect(daily.settled).toBe("2026-11-12")
-}, 1_800_000)
+})
