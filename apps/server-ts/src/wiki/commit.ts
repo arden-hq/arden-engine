@@ -85,7 +85,7 @@ const chatOf = (origin: string, base: string): string | undefined | null => {
     : null
 }
 
-const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
+export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
   switch (origin.kind) {
     case "user":
       return origin.via

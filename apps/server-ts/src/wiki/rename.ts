@@ -2,6 +2,8 @@ import type { ManagedFileRepositoryShape, ResourceVersion } from "@arden-hq/revi
 import {
   commitWiki,
   createPage,
+  decodeWikiOrigin,
+  encodeWikiOrigin,
   movePage,
   ownerInApp,
   requireCommitRules,
@@ -71,6 +73,53 @@ const RenamePlanSchema = Schema.Struct({
 
 type RenamePlan = typeof RenamePlanSchema.Type
 
+/** Who asked for a rename and where they may write; the accepted rename commits as them. The
+ *  origin is kept as history records it. */
+const RenameWriterSchema = Schema.Struct({
+  actor: Schema.NonEmptyString,
+  origin: Schema.NonEmptyString,
+  reason: Schema.String,
+  authority: Schema.Union([
+    Schema.Struct({ _tag: Schema.Literal("Global") }),
+    Schema.Struct({ _tag: Schema.Literal("Space"), spaceId: Schema.NonEmptyString })
+  ])
+})
+
+interface RenameWriter {
+  readonly authority: WikiLocationAuthority
+  readonly commit: WikiCommitIdentity
+}
+
+const storedWriter = (writer: RenameWriter): typeof RenameWriterSchema.Type => ({
+  actor: writer.commit.actor,
+  origin: encodeWikiOrigin(writer.commit.origin),
+  reason: writer.commit.reason,
+  authority: writer.authority
+})
+
+const decodeWriter = Effect.fn("WikiRename.decodeWriter")(function* (
+  approval: WikiRenameApprovalRecord
+): Effect.fn.Return<RenameWriter, WikiError> {
+  if (approval.writer === undefined)
+    return yield* wikiError("rename", "corrupt", "This Wiki rename approval keeps no writer", {
+      pageId: approval.pageId
+    })
+  const writer = yield* Schema.decodeUnknownEffect(RenameWriterSchema)(approval.writer, {
+    onExcessProperty: "error"
+  }).pipe(
+    Effect.mapError((cause) =>
+      wikiError("rename", "corrupt", "Stored Wiki rename writer is invalid", {
+        pageId: approval.pageId,
+        cause
+      })
+    )
+  )
+  return {
+    authority: writer.authority,
+    commit: { actor: writer.actor, origin: decodeWikiOrigin(writer.origin), reason: writer.reason }
+  }
+})
+
 const planOperations = (plan: RenamePlan): ReadonlyArray<WikiWrite> => [
   movePage(plan.source, plan.newPath, plan.movedContent),
   createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),
@@ -92,8 +141,6 @@ interface WikiRenameRequestInput {
 
 interface WikiRenameAcceptInput {
   readonly approvalId: string
-  readonly authority: WikiLocationAuthority
-  readonly commit: WikiCommitIdentity
 }
 
 export interface WikiRenameMethods {
@@ -483,7 +530,8 @@ export const makeWikiRenameMethods = (
       .createOrGet({
         approvalId: randomUUID(),
         pageId: input.pageId,
-        plan
+        plan,
+        writer: storedWriter(input)
       })
       .pipe(Effect.mapError(mapStoreError))
     return yield* approvalView(approval)
@@ -495,11 +543,12 @@ export const makeWikiRenameMethods = (
     if (approval.status === "accepted" || approval.status === "rejected") {
       return yield* approvalView(approval)
     }
+    const writer = yield* decodeWriter(approval)
     const alreadyApplied =
       approval.status === "applying" ? yield* planAlreadyApplied(repository, plan) : false
     if (approval.status === "pending" || !alreadyApplied) {
       const snapshot = yield* loadSnapshot(repository, "rename")
-      const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
+      const boundary = yield* resolveWikiWriteBoundary(spaces, writer.authority, snapshot, "rename")
       const paths = yield* planMutationPaths(plan, snapshot.pages)
       yield* requireWikiWritePaths(boundary, "rename", paths)
       const applying = approval
@@ -528,7 +577,7 @@ export const makeWikiRenameMethods = (
       { repository, spaces },
       {
         idempotencyKey: `wiki-rename:${approval.approvalId}`,
-        ...input.commit,
+        ...writer.commit,
         expectedRevision: plan.baseHead
       },
       planOperations(plan)

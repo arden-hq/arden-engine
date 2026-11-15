@@ -9,22 +9,28 @@ export const WikiRenameApprovalStatusSchema = Schema.Literals([
   "rejected"
 ] as const)
 
-type WikiRenameApprovalStatus = (typeof WikiRenameApprovalStatusSchema)["Type"]
-
-export interface WikiRenameApprovalRecord {
+interface WikiRenameApprovalFields {
   readonly approvalId: string
   readonly pageId: string
   readonly plan: JsonObject
-  readonly status: WikiRenameApprovalStatus
   readonly createdAt: string
   readonly commitId: string | null
   readonly resolution: string | null
 }
 
+/** An approval and the writer that asked for it, which an accepted rename commits as. Only an
+ *  approval closed before writers were kept has none. */
+export type WikiRenameApprovalRecord = WikiRenameApprovalFields &
+  (
+    | { readonly status: "pending" | "applying"; readonly writer: JsonObject }
+    | { readonly status: "accepted" | "rejected"; readonly writer: JsonObject | undefined }
+  )
+
 export interface CreateWikiRenameApprovalInput {
   readonly approvalId: string
   readonly pageId: string
   readonly plan: JsonObject
+  readonly writer: JsonObject
 }
 
 export type WikiRenameStoreOperation =

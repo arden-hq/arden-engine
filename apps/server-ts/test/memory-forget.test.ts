@@ -516,11 +516,17 @@ describe("forgetting a line", () => {
 
 const renameStore = (): WikiRenameStore["Service"] => {
   const rows = new Map<string, WikiRenameApprovalRecord>()
-  const set = (approvalId: string, change: Partial<WikiRenameApprovalRecord>) =>
+  const set = (
+    approvalId: string,
+    change:
+      | { readonly status: "pending"; readonly resolution: string | null }
+      | { readonly status: "applying" }
+      | { readonly status: "accepted"; readonly commitId: string }
+  ) =>
     Effect.suspend(() => {
       const row = rows.get(approvalId)
-      if (row === undefined) return Effect.die(`${approvalId} is missing`)
-      const next = { ...row, ...change }
+      if (row?.writer === undefined) return Effect.die(`${approvalId} is missing`)
+      const next: WikiRenameApprovalRecord = { ...row, ...change, writer: row.writer }
       rows.set(approvalId, next)
       return Effect.succeed(next)
     })
@@ -571,11 +577,7 @@ describe("what forgotten.md holds and where it stays", () => {
           authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
           commit: AGENT
         })
-        const accepted = yield* renames.acceptRename({
-          approvalId: requested.approvalId,
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          commit: AGENT
-        })
+        const accepted = yield* renames.acceptRename({ approvalId: requested.approvalId })
         return { backlinks, status: accepted.status, resolution: accepted.resolution }
       })
     )
