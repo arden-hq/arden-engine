@@ -129,6 +129,23 @@ it("skips a batch into the backlog, rests it a day, and then reads it again", as
   expect(read).toEqual({ skipped: ["skip-a", "skip-b"], resting: [], next: ["skip-a", "skip-b"] })
 })
 
+it("counts the owner's turns as theirs in a branch of a branch", async () => {
+  const owned = await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const chat = (yield* sessions.create({})).sessionId
+      yield* turn(chat, "typed-a")
+      const branch = yield* sessions.branch(chat, {})
+      if (branch === undefined) throw new Error("No branch")
+      yield* sessions.completeBranchPreparation({ childSessionId: branch.sessionId })
+      const twig = yield* sessions.branch(branch.sessionId, {})
+      if (twig === undefined) throw new Error("No branch of the branch")
+      return yield* (yield* TranscriptQueries).ownerWordsIn(twig.sessionId, ["typed-a"])
+    })
+  )
+  expect([...owned]).toEqual(["typed-a"])
+})
+
 const captureUpdate = (
   wiki: Wiki["Service"],
   expectedHead: string | null,

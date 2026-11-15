@@ -10,9 +10,9 @@ import type { TranscriptRow } from "./transcript-tool-result.js"
 
 /**
  * The one test for "the owner's own words", over the `session_messages` row `m`: a user
- * message with none of the marks other writers leave, proven by what is stored beside it. A
- * message the owner typed belongs to a turn whose run started from the chat, here or in the chat
- * a branch copied it from. An answer to Arden's question names a question that holds a
+ * message with none of the marks other writers leave, proven by a run of its chat, or of a chat
+ * it was copied from through branches. A message the owner typed belongs to a turn whose run
+ * started from the chat. An answer to Arden's question names a question of such a run that holds a
  * resolution, which only the owner writes: the question routes and a typed reply.
  */
 export const ownerWordsSql = (
@@ -25,18 +25,22 @@ export const ownerWordsSql = (
   AND json_extract(${m}.message_json, '$.forked_from') IS NULL
   AND json_extract(${m}.message_json, '$.sent_from') IS NULL
   AND json_extract(${m}.message_json, '$.automation') IS NULL
-  AND CASE WHEN json_extract(${m}.message_json, '$.is_meta') = 1
-    THEN EXISTS (SELECT 1 FROM run_questions AS question
-      WHERE question.question_id = json_extract(${m}.message_json, '$.question_answer.question_id')
-        AND question.resolution IS NOT NULL)
-    ELSE EXISTS (SELECT 1 FROM chat_runs AS run
-      WHERE run.session_id IN (${m}.session_id, (SELECT json_extract(branch.metadata,
-          '$.fork_origin.sourceSessionId') FROM sessions AS branch
-          WHERE branch.session_id = ${m}.session_id))
-        AND json_extract(run.metadata_json, '$.turn_id')
-          = COALESCE(json_extract(${m}.message_json, '$.turn_id'), ${m}.message_id)
-        AND json_extract(run.metadata_json, '$.run_context.origin.kind') = 'chat')
-  END)`
+  AND EXISTS (
+    WITH RECURSIVE chats(session_id) AS (
+      SELECT ${m}.session_id
+      UNION SELECT json_extract(branch.metadata, '$.fork_origin.sourceSessionId')
+      FROM sessions AS branch JOIN chats ON branch.session_id = chats.session_id)
+    SELECT 1 FROM chat_runs AS run
+    WHERE run.session_id IN (SELECT session_id FROM chats)
+      AND CASE WHEN json_extract(${m}.message_json, '$.is_meta') = 1
+        THEN EXISTS (SELECT 1 FROM run_questions AS question
+          WHERE question.run_id = run.run_id AND question.resolution IS NOT NULL
+            AND question.question_id
+              = json_extract(${m}.message_json, '$.question_answer.question_id'))
+        ELSE json_extract(run.metadata_json, '$.turn_id')
+            = COALESCE(json_extract(${m}.message_json, '$.turn_id'), ${m}.message_id)
+          AND json_extract(run.metadata_json, '$.run_context.origin.kind') = 'chat'
+      END))`
 
 const failure = (sessionId: string, message: string) => (cause: unknown) =>
   new TranscriptQueryError({ operation: "page", sessionId, message, cause })
