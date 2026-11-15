@@ -80,9 +80,9 @@ export const loadForRun = (
   )
 
 const rulesText = (load: GlobalInstructionsLoad): string | undefined => {
-  const rules =
-    load.kind === "read" ? load.page?.page.body : load.kind === "file" ? load.text : undefined
-  return rules?.trim() === "" ? undefined : rules?.trim()
+  if (load.kind === "failed") return undefined
+  const rules = (load.kind === "file" ? load.text : load.page?.page.body)?.trim()
+  return rules === "" ? undefined : rules
 }
 
 export const globalInstructionManifest = (
