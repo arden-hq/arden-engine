@@ -10,7 +10,13 @@ import {
   type AutomationJobOutcome,
   type AutomationJobSettlement
 } from "../persistence/automations/store.js"
-import { awaitEnded, jobResult, startAutomationRun, type AutomationRunner } from "./runner.js"
+import {
+  awaitEnded,
+  jobResult,
+  startAutomationRun,
+  type AutomationRunner,
+  type AwaitAutomationRun
+} from "./runner.js"
 import { ChatMessageConflictError } from "../chat/message-errors.js"
 import { TRANSIENT_RUN_ERROR_CODES } from "@arden-hq/protocol/chat"
 import { JOB_RETRY_LADDER_MS } from "../persistence/automations/retry-ladders.js"
@@ -40,6 +46,40 @@ export const retried = Effect.fn("Automation.retried")(function* <
     observed = next
   }
   return observed
+})
+
+/**
+ * Starts a handler's one run in `run.sessionId`, or takes the run the job recorded, and waits for
+ * its end by the failure rule; each retry is a new run in the same session.
+ */
+export const runByRule = Effect.fn("Automation.runByRule")(function* (
+  services: {
+    readonly chat: Pick<ChatMessage["Service"], "startAutomation">
+    readonly awaitRun: AwaitAutomationRun
+  },
+  job: AutomationJobLease,
+  run: { readonly sessionId: string; readonly prompt: string; readonly name: string }
+) {
+  const clientId = `automation-run-${job.payload.automationRunId}`
+  const start = Effect.fn("Automation.runByRule.start")(function* (tries: number) {
+    const receipt = yield* startAutomationRun(services.chat, job, {
+      ...run,
+      clientId: tries === 1 ? clientId : `${clientId}-retry-${tries - 1}`
+    })
+    if (receipt.runId === null) throw new Error(`${run.name} has no Run identity`)
+    return receipt.runId
+  })
+  const ended = (runId: string) =>
+    services.awaitRun(runId).pipe(Effect.map((observed) => ({ ...observed, runId })))
+  const first = yield* ended(job.payload.chatRun?.runId ?? (yield* start(1)))
+  return yield* retried(first, 1, (tries) =>
+    start(tries).pipe(
+      Effect.option,
+      Effect.flatMap((runId) =>
+        runId._tag === "None" ? Effect.succeed(undefined) : ended(runId.value)
+      )
+    )
+  )
 })
 
 export const makeAutomationJobRunner = (services: {

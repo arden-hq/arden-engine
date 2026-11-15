@@ -11,12 +11,8 @@ import type { HomeStore } from "../../persistence/home/store.js"
 import { HOME_LETTER_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import { HOME_LETTER_PROMPT, HOME_LETTER_RULES, homeLetterInput } from "../home-letter-prompt.js"
 import { withHomeLetterTool } from "../home-letter-tool.js"
-import {
-  jobResult,
-  startAutomationRun,
-  type AutomationRunner,
-  type AwaitAutomationRun
-} from "../runner.js"
+import { runByRule } from "../job-run.js"
+import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler } from "../system-handler.js"
 
 const UNREADY = {
@@ -51,19 +47,13 @@ const makeHomeLetterRunner = (services: {
     }
     const sessionId =
       job.payload.chatRun?.sessionId ?? (yield* services.queue.prepareRunSession(job))
-    let runId = job.payload.chatRun?.runId ?? null
-    if (runId === null) {
-      const receipt = yield* startAutomationRun(services.chat, job, {
-        sessionId,
-        clientId: `automation-run-${job.payload.automationRunId}`,
-        prompt: input.prompt,
-        name: job.payload.name
-      })
-      if (receipt.runId === null) throw new Error("Home Worker has no Run identity")
-      runId = receipt.runId
-    }
+    const observed = yield* runByRule(services, job, {
+      sessionId,
+      prompt: input.prompt,
+      name: job.payload.name
+    })
+    const runId = observed.runId
     const run = { chatRunId: runId, chatSessionId: sessionId }
-    const observed = yield* services.awaitRun(runId)
     if (observed.status !== "completed")
       return jobResult.failed(observed.error, observed.result, run)
     const decoded: unknown = JSON.parse(observed.result ?? "null")
