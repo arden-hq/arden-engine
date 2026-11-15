@@ -83,7 +83,7 @@ describe("Tidy and records", () => {
     expect(markdown).toMatch(/^- topics\/garden\.md — topics\/garden\.md$/mu)
   })
 
-  it("leaves imported notes out of review by the folder they are in, not by their path", async () => {
+  it("leaves imported notes out of review by their path, with or without the folder's README", async () => {
     const imported = await brief((repository) =>
       commit(repository, create("imported/notes.md", "An imported note."))
     )
@@ -96,7 +96,7 @@ describe("Tidy and records", () => {
       })
     )
     expect(imported).toBe("advance")
-    expect(unfoldered).toMatch(/: create imported\/notes\.md$/mu)
+    expect(unfoldered).not.toMatch(/imported\/notes\.md/u)
   })
 
   it("is not told to change a field only records carry", () => {
