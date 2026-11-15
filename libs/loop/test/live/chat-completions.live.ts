@@ -18,10 +18,12 @@ import { errorMessage } from "@arden-hq/std/errors"
 
 import { isAbortError } from "../../src/abort.js"
 import type { ChatMessage, StandardSchemaV1 } from "../../src/contracts/messages.js"
-import type { ModelProvider } from "../../src/contracts/provider.js"
-import type { ToolEntry, Toolset } from "../../src/contracts/tools.js"
+import type { ModelProvider, ModelProviderRequest } from "../../src/contracts/provider.js"
+import type { ToolDeclaration, ToolEntry, Toolset } from "../../src/contracts/tools.js"
+import { renderInteraction } from "../../src/agent/interactions.js"
 import { makeAgent, providerErrorCode } from "../../src/index.js"
 import { makeChatCompletionsProvider } from "../../src/providers/chat-completions/provider.js"
+import { makeToolSearch } from "../../src/tools/search.js"
 
 const required = (name: string): string => {
   const value = process.env[name]
@@ -39,9 +41,40 @@ const overflowWords = Number(process.env.CHAT_COMPLETIONS_OVERFLOW_WORDS ?? "600
 const skipped = new Set((process.env.CHAT_COMPLETIONS_SKIP ?? "").split(",").filter(Boolean))
 const compat: unknown = JSON.parse(process.env.CHAT_COMPLETIONS_COMPAT ?? "{}")
 
+/** llama.cpp's own prompt accounting per request (`timings` on the usage chunk), when it sends one. */
+interface Timing {
+  readonly prompt_n: number
+  readonly cache_n: number
+}
+const timings: Array<Promise<Timing | undefined>> = []
+
+/** `fetch` that also reads the stream's last `timings` object, without touching what the provider reads. */
+const timedFetch: typeof globalThis.fetch = async (input, init) => {
+  const response = await globalThis.fetch(input, init)
+  if (response.body === null) return response
+  const [mine, theirs] = response.body.tee()
+  timings.push(
+    new Response(mine).text().then(
+      (text) => {
+        let found: Timing | undefined
+        for (const line of text.split("\n")) {
+          if (!line.startsWith("data: {")) continue
+          const chunk: unknown = JSON.parse(line.slice(6))
+          if (typeof chunk === "object" && chunk !== null && "timings" in chunk)
+            found = chunk.timings as Timing
+        }
+        return found
+      },
+      () => undefined
+    )
+  )
+  return new Response(theirs, response)
+}
+
 const chatCompletions = makeChatCompletionsProvider({
   providerId,
   baseUrl,
+  fetch: timedFetch,
   ...(apiKey === undefined
     ? {}
     : { auth: { headers: async () => ({ authorization: `Bearer ${apiKey}` }) } }),
@@ -92,6 +125,72 @@ const noTools: Toolset = {
   execute: () => {
     throw new Error("no tools in this case")
   }
+}
+
+/**
+ * A deferred catalog of 40 tools in 8 groups, plus one tool only it can
+ * answer with: `order_status` returns a tracking code the model cannot guess.
+ */
+const TRACKING = "DHL-7Q2X"
+const CATALOG: ReadonlyArray<ToolEntry> = [
+  ...["mail", "calendar", "files", "notes", "contacts", "music", "photos", "travel"].flatMap(
+    (group) =>
+      ["list", "create", "update", "delete", "search"].map((verb): ToolEntry => ({
+        description: `${verb[0]?.toUpperCase()}${verb.slice(1)} ${group} items for the person. Returns a short confirmation or the matching ${group} items.`,
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: `The ${group} item id` },
+            text: { type: "string", description: "Free text for the item" }
+          },
+          additionalProperties: false
+        },
+        meta: { name: `${group}_${verb}`, deferred: true, group }
+      }))
+  ),
+  {
+    description: "Look up the shipping status of a customer order by its order number.",
+    parameters: {
+      type: "object",
+      properties: { order: { type: "string", description: "The order number" } },
+      required: ["order"],
+      additionalProperties: false
+    },
+    meta: { name: "order_status", deferred: true, group: "shop" }
+  }
+]
+
+const catalogToolset = (calls: Array<string>): Toolset => {
+  const loaded = new Set<string>()
+  return {
+    entries: () => [weatherEntry, ...CATALOG],
+    loadedNames: () => new Set(loaded),
+    load: (names) => {
+      for (const name of names) loaded.add(name)
+    },
+    execute: (request) => {
+      calls.push(`${request.name} ${JSON.stringify(request.args)}`)
+      if (request.name !== "order_status") return { content: "Done.", preview: "Done." }
+      const content = `Order ${String(request.args.order)}: shipped, tracking code ${TRACKING}.`
+      return { content, preview: "shipped" }
+    }
+  }
+}
+
+const declarationOf = (entry: ToolEntry): ToolDeclaration => ({
+  name: entry.meta.name,
+  description: entry.description,
+  parameters: entry.parameters,
+  ...(entry.meta.group === undefined ? {} : { group: entry.meta.group })
+})
+
+/** The whole prompt one request costs, cached or not. */
+const promptTokens = async (request: ModelProviderRequest): Promise<number> => {
+  for await (const item of await chatCompletions.stream(request)) {
+    if (item._tag === "Completed")
+      return (item.usage.prompt_tokens ?? 0) + (item.usage.cache_read_tokens ?? 0)
+  }
+  throw new Error("no completion")
 }
 
 const agentWith = (toolset: Toolset) =>
@@ -266,6 +365,72 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
         return `${code}: ${errorMessage(error instanceof Error ? error.cause : error)}`
       }
       throw new Error("the over-long prompt was accepted")
+    }
+  ],
+  [
+    "tool-search",
+    async () => {
+      const calls: Array<string> = []
+      timings.length = 0
+      const result = await agentWith(catalogToolset(calls)).run([
+        {
+          role: "user",
+          content: "What is the shipping status of my order 4471? I need the tracking code."
+        }
+      ])
+      const searched = assistants(result.messages).flatMap((message) =>
+        (message.provider_tool_calls ?? []).filter((call) => call.name === "tool_search")
+      )
+      check(searched.length > 0, "the model never searched")
+      check(
+        searched.some((call) => call.loaded_tool_names?.includes("order_status") === true),
+        `order_status never loaded: ${JSON.stringify(searched)}`
+      )
+      check(
+        calls.some((call) => call.startsWith("order_status")),
+        `order_status never ran: ${JSON.stringify(calls)}`
+      )
+      check(
+        result.text.includes(TRACKING),
+        `answer did not use the result: ${JSON.stringify(result.text)}`
+      )
+      const steps = (await Promise.all(timings)).map((timing, index) =>
+        timing === undefined
+          ? `#${index + 1} ?`
+          : `#${index + 1} prompt_n=${timing.prompt_n} cache_n=${timing.cache_n}`
+      )
+      const deferred = CATALOG.map(declarationOf)
+      const base = {
+        model,
+        messages: result.messages.slice(0, 1),
+        renderInteraction,
+        toolChoice: "auto" as const,
+        maxOutputTokens: 1
+      }
+      const without = await promptTokens({
+        ...base,
+        tools: [declarationOf(weatherEntry), ...deferred],
+        deferredTools: []
+      })
+      const withSearch = await promptTokens({
+        ...base,
+        tools: [declarationOf(weatherEntry)],
+        deferredTools: deferred,
+        toolSearch: makeToolSearch({
+          catalog: CATALOG.map((entry) => ({
+            declaration: declarationOf(entry),
+            meta: entry.meta
+          })),
+          loaded: new Set()
+        })
+      })
+      return [
+        `searches=${JSON.stringify(searched.map((call) => call.arguments))}`,
+        `calls=${JSON.stringify(calls)}`,
+        `text=${JSON.stringify(result.text)}`,
+        `steps: ${steps.join(", ")}`,
+        `prompt tokens for ${CATALOG.length + 1} tools: without search ${without}, with search ${withSearch}`
+      ].join("\n  ")
     }
   ],
   [
