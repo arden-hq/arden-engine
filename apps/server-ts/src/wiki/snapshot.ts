@@ -17,7 +17,7 @@ import {
   type ParsedWikiPage,
   wikiPageExcerpt
 } from "./page.js"
-import { isCodeOwnedPage } from "./code-owned-pages.js"
+import { codeOwnedPage, isCodeOwnedPage } from "./code-owned-pages.js"
 import type { PageTimes } from "./timestamps.js"
 
 export interface PageRecord {
@@ -100,7 +100,11 @@ export const readRecord = Effect.fn("Wiki.readRecord")(function* (
             cause
           })
   })
-  const page = yield* parseWikiPage(content, resource.resourceId).pipe(
+  const page = yield* parseWikiPage(
+    content,
+    resource.resourceId,
+    codeOwnedPage(resource.path)?.plainTitle
+  ).pipe(
     Effect.mapError((cause) =>
       invalidReason === "corrupt"
         ? corruptPage(operation, resource, cause)

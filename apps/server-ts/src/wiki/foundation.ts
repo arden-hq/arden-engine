@@ -7,7 +7,7 @@ import { resolve } from "node:path"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { RULES_PAGE_PATH } from "./code-owned-pages.js"
+import { RULES_PAGE_PATH, RULES_PAGE_TITLE } from "./code-owned-pages.js"
 import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage } from "./page.js"
@@ -103,7 +103,7 @@ export const createRulesPage = Effect.fn("Wiki.createRulesPage")(function* (
         RULES_PAGE_PATH,
         formatWikiPage({
           pageId,
-          title: "Global instructions",
+          title: RULES_PAGE_TITLE,
           aliases: [],
           lifecycle: "active",
           redirectTo: null,

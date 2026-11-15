@@ -5,11 +5,20 @@ export const FORGOTTEN_PAGE_PATH = "forgotten.md"
 
 /** The owner's standing rules, sent whole to every chat. A Local folder `AGENTS.md` is more specific. */
 export const RULES_PAGE_PATH = "AGENTS.md"
+export const RULES_PAGE_TITLE = "Global instructions"
 
-/** Each page Arden keeps for the owner: the writer that makes it, and what it is. */
+/**
+ * Each page Arden keeps for the owner: the writer that makes it, and what it is. A page whose body
+ * holds all of it has `plainTitle`: a file of it with no frontmatter reads as its body.
+ * `forgotten.md` keeps its entries in frontmatter, so a file of it without one does not read.
+ */
 const CODE_OWNED_PAGES: ReadonlyMap<
   string,
-  { readonly madeBy: WikiCommitOrigin["kind"]; readonly holds: string }
+  {
+    readonly madeBy: WikiCommitOrigin["kind"]
+    readonly holds: string
+    readonly plainTitle?: string
+  }
 > = new Map([
   [
     FORGOTTEN_PAGE_PATH,
@@ -23,7 +32,8 @@ const CODE_OWNED_PAGES: ReadonlyMap<
     RULES_PAGE_PATH.toLowerCase(),
     {
       madeBy: "user",
-      holds: "holds the owner's standing rules, sent whole to every chat. Change the rules in it."
+      holds: "holds the owner's standing rules, sent whole to every chat. Change the rules in it.",
+      plainTitle: RULES_PAGE_TITLE
     }
   ]
 ])

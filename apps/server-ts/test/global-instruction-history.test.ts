@@ -16,7 +16,7 @@ const OWNER_TURN: WikiCommitOrigin = { kind: "rules", sessionId: "session-1" }
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
 const by = (origin: WikiCommitOrigin) => ({ actor: "user:chat", origin, reason: "rules" })
 
-it("keeps each writer of the rules in page history, takes in an outside edit, and restores", async () => {
+it("keeps each writer of the rules in page history, takes in outside edits, plain or not, and restores", async () => {
   await withWikiRepository(async ({ repository, workingRoot, wiki }) => {
     const current = async () => {
       const snapshot = await run(wiki.snapshot())
@@ -54,5 +54,9 @@ it("keeps each writer of the rules in page history, takes in an outside edit, an
     const [chat, inFile] = ["memory.rules@session-1", "filesystem"]
     expect(origins).toEqual([chat, inFile, chat, inFile])
     expect((await current()).page.body).toBe("Rule one.\n")
+    await writeFile(file, "A rule written as plain Markdown.\n")
+    await run(outside.check())
+    expect((await run(outside.check())).takenIn.map((item) => item.path)).toEqual(["AGENTS.md"])
+    expect((await current()).page.body).toBe("A rule written as plain Markdown.\n")
   })
 })
