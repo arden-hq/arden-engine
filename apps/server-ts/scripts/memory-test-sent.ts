@@ -25,12 +25,19 @@ import {
 
 const SEMANTIC_RECALL = "off: matching by meaning needs the local embedding model"
 
-const askedAt = Effect.fn("MemoryTest.askedAt")(function* () {
+/** A fault in the copy or the harness: it stops the batch and is never a score. */
+class SetupFault extends Schema.TaggedError<SetupFault>()("SetupFault", {
+  message: Schema.String
+}) {}
+
+const setupFault = (message: string) => Effect.fail(new SetupFault({ message }))
+
+const afterNewestStoredMessage = Effect.fn("MemoryTest.afterNewestStoredMessage")(function* () {
   const sql = yield* SqlClient.SqlClient
   const [row] = yield* sql<{ readonly newest: string | null }>`
     SELECT MAX(created_at) AS newest FROM session_messages`
   const newest = row?.newest ?? null
-  if (newest === null) return yield* Effect.die(new Error("The copy holds no messages"))
+  if (newest === null) return yield* setupFault("The copy holds no messages")
   return Date.parse(newest) + 1
 })
 
@@ -111,8 +118,7 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
       const sessionId = `memory-test-chat-${question.id}`
       const runId = `memory-test-run-${stamp}-${question.id}`
       const memory = yield* openMemoryTurn(turnServices)
-      if (memory === undefined)
-        return yield* Effect.die(new Error("The Memory snapshot failed on the copy"))
+      if (memory === undefined) return yield* setupFault("The Memory snapshot failed on the copy")
       const { space, memoryContext } = yield* prefetchTurnMemory(services, {
         sessionId,
         runId,
@@ -123,12 +129,12 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
         measure: (_part, effect) => effect
       })
       if (memoryContext.record.query === null)
-        return yield* Effect.die(new Error(`Memory recall failed on ${question.id}`))
+        return yield* setupFault(`Memory recall failed on ${question.id}`)
       if (question.space_id !== null && space === undefined)
-        return yield* Effect.die(new Error(`The Space of ${question.id} is not on the copy`))
+        return yield* setupFault(`The Space of ${question.id} is not on the copy`)
       const composition = (yield* runs.memoryContext(runId)).at(-1)
       if (composition === undefined)
-        return yield* Effect.die(new Error(`No record of what ${question.id} was sent`))
+        return yield* setupFault(`No record of what ${question.id} was sent`)
       const paths = new Map<string, string>()
       for (const source of composition.sources)
         if (source.kind !== "index" && source.page_id !== null && !paths.has(source.page_id))
@@ -149,7 +155,7 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
   const { asked, results } = await runOnReplayCopy(
     files.copy,
     Effect.gen(function* () {
-      const at = yield* askedAt()
+      const at = yield* afterNewestStoredMessage()
       const scored = yield* scoreAll.pipe(
         Effect.provideService(Clock.Clock, pinnedClock(yield* Clock.Clock, at))
       )
