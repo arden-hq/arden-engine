@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { toolFailure } from "./tool-failure.js"
-import { activePages, loadSnapshot, runPages, wikiFailure } from "./wiki.js"
+import { loadSnapshot, wikiFailure } from "./wiki.js"
 import { MAX_PAGE_SOURCES, pageSource } from "./wiki-records.js"
 import { memoryPathOf, readChangeCall } from "../lib/memory-link.js"
 import { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
@@ -12,6 +12,7 @@ import type { WikiChangeRead, WikiPageChangesRead } from "../wiki/change.js"
 import type { WikiCommitSource } from "../wiki/commit.js"
 import type { WikiError } from "../wiki/errors.js"
 import { Wiki } from "../wiki/service.js"
+import { activeRunPages, runPages } from "../wiki/snapshot.js"
 
 /** How a tool input names the time of a saved change. */
 export const ChangeTimeSchema = Schema.NonEmptyString.check(Schema.isMaxLength(64)).annotate({
@@ -184,7 +185,7 @@ const makeWikiChangeTools = ({
     execute: async (input, ctx) => {
       const path = memoryPathOf(input.page)
       const snapshot = await loadSnapshot(wiki, ctx.signal).catch(() => undefined)
-      const pageId = (snapshot === undefined ? [] : runPages(snapshot)).find(
+      const pageId = (snapshot === undefined ? [] : runPages(snapshot.pages)).find(
         (record) => record.resource.path === path
       )?.page.pageId
       // A Space review was told which pages changed since its previous review;
@@ -236,7 +237,7 @@ const makeWikiChangeTools = ({
         { signal: ctx.signal }
       )
       const current = new Map(
-        (snapshot === undefined ? [] : activePages(snapshot)).map(
+        (snapshot === undefined ? [] : activeRunPages(snapshot.pages)).map(
           (record) => [record.resource.path, record] as const
         )
       )

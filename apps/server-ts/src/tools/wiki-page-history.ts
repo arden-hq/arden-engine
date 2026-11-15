@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect"
 
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
+import { runPages, type PageRecord, type Snapshot } from "../wiki/snapshot.js"
 import type { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -14,7 +14,6 @@ import {
   loadSnapshot,
   pageNotFound,
   readablePage,
-  runPages,
   wikiFailure,
   writtenPageData
 } from "./wiki.js"
@@ -58,7 +57,7 @@ const RestoreParametersSchema = Schema.Struct({
 })
 
 const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
-  runPages(snapshot).find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
+  runPages(snapshot.pages).find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
 
 type MergedPage = PageRecord & { readonly page: { readonly lifecycle: "redirect" } }
 

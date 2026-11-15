@@ -95,10 +95,16 @@ const touches =
       ? change.before?.path === name.path || change.after?.path === name.path
       : (change.after ?? change.before)?.resourceId === name.pageId
 
-/** Whether a run is shown this side of a saved change: never a code-owned page's. */
-export const shownToRuns = (change: ResourceChange): boolean =>
-  ![change.before?.path, change.after?.path].some(
-    (path) => path !== undefined && isSystemPage(path)
+/** Whether a run is shown a saved change at this path: never a code-owned page's. */
+export const shownPathToRuns = (path: string): boolean => !isSystemPage(path)
+
+/** Whether a run is shown a saved change: never one to a code-owned page. */
+export const shownToRuns = (change: {
+  readonly before: { readonly path: string } | null
+  readonly after: { readonly path: string } | null
+}): boolean =>
+  [change.before?.path, change.after?.path].every(
+    (path) => path === undefined || shownPathToRuns(path)
   )
 
 const pathOf = (change: ResourceChange): string => (change.after ?? change.before)?.path ?? ""

@@ -6,8 +6,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
 import { isReadme, normal, wikiPageSummary, type ParsedWikiPage } from "./page.js"
-import type { PageRecord } from "./snapshot.js"
-import { isSystemPage } from "./system-pages.js"
+import { activeRunPages, type PageRecord } from "./snapshot.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
   "Purpose",
@@ -263,13 +262,10 @@ export const memoryIndex = (
   }
 ): MemoryIndex => {
   const prefix = options.root === "" ? "" : `${options.root}/`.toLowerCase()
-  const listed = pages
+  const listed = activeRunPages(pages)
     .filter(
       (record) =>
-        record.resource.state === "active" &&
-        record.page.lifecycle === "active" &&
         record.resource.path.toLowerCase().startsWith(prefix) &&
-        !isSystemPage(record.resource.path) &&
         options.leaveOut?.(record) !== true
     )
     .map((record) => ({

@@ -6,7 +6,7 @@ import type { SpaceBinding, SpacePageBinding, SpaceStore } from "../persistence/
 import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
-import type { PageRecord } from "./snapshot.js"
+import { activeRunPages, type PageRecord } from "./snapshot.js"
 
 /** The folder a Space's page heads: `x.md` and `x/README.md` both head `x/`. */
 const spaceFolder = (pagePath: string): string => {
@@ -65,15 +65,12 @@ export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
 export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
   spaces.activeBindings().pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
 
-const isActive = (record: PageRecord): boolean =>
-  record.resource.state === "active" && record.page.lifecycle === "active"
-
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
   pages: ReadonlyArray<PageRecord>,
   space: SpacePageBinding
 ): ReadonlyArray<PageRecord> =>
-  pages.filter((record) => isActive(record) && spaceOwnsPath(space.pagePath, record.resource.path))
+  activeRunPages(pages).filter((record) => spaceOwnsPath(space.pagePath, record.resource.path))
 
 /** The generated list of the pages a Space owns besides its own page, in at most `maxBytes`. */
 export const spacePageIndex = (
@@ -103,8 +100,10 @@ export const planSpacePage = (
   others: ReadonlyArray<SpaceBinding>
 ): SpacePagePlan => {
   const record =
-    space.page_id === null ? undefined : pages.find((page) => page.page.pageId === space.page_id)
-  if (record === undefined || !isActive(record)) return { kind: "create" }
+    space.page_id === null
+      ? undefined
+      : activeRunPages(pages).find((page) => page.page.pageId === space.page_id)
+  if (record === undefined) return { kind: "create" }
   const path = record.resource.path
   if (canonicalWikiPath(path) === undefined) return { kind: "create" }
   if (heldByAnother(others, record.page.pageId, path)) return { kind: "create" }

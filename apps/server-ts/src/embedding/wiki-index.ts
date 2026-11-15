@@ -20,7 +20,7 @@ import {
 import { EmbeddingSettingsStore } from "../persistence/settings/store.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { Wiki } from "../wiki/service.js"
-import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
+import { activeRunPages, type PageRecord, type Snapshot } from "../wiki/snapshot.js"
 import {
   applyControl,
   coveredPages,
@@ -34,7 +34,6 @@ import {
 } from "./index-plan.js"
 import type { EmbeddingModel } from "./model.js"
 import { EmbeddingModels, type EmbeddingModelEntry } from "./models.js"
-import { isSystemPage } from "../wiki/system-pages.js"
 
 const MIN_QUERY_LENGTH = 12
 const SEARCH_LIMIT = 8
@@ -86,12 +85,7 @@ const indexError = (
 ) => new WikiEmbeddingIndexError({ operation, message, cause })
 
 const indexedPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
-  snapshot.pages.filter(
-    (record) =>
-      record.page.lifecycle === "active" &&
-      !isSystemPage(record.resource.path) &&
-      record.page.body.trim() !== ""
-  )
+  activeRunPages(snapshot.pages).filter((record) => record.page.body.trim() !== "")
 
 const pageVersions = (snapshot: Snapshot): ReadonlyMap<string, string> =>
   new Map(

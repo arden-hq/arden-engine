@@ -22,3 +22,17 @@ it("names a code-owned page only in the one predicate", () => {
   )
   expect(naming).toEqual(["wiki/system-pages.ts"])
 })
+
+it("decides what a run sees of code-owned pages in the run view alone", () => {
+  const deciding = SOURCE_ROOTS.flatMap((root) =>
+    sources(root)
+      .filter((path) => /\bisSystemPage\(/u.test(readFileSync(path, "utf8")))
+      .map((path) => relative(root, path))
+  ).sort()
+  expect(deciding).toEqual([
+    "wiki/change.ts",
+    "wiki/commit.ts",
+    "wiki/links.ts",
+    "wiki/snapshot.ts"
+  ])
+})

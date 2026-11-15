@@ -11,9 +11,11 @@ import { overPageLimit } from "./commit.js"
 import { pageWikiLinks } from "./links.js"
 import { isReadme, normal, textSentences, visibleText } from "./page.js"
 import {
+  activeRunPages,
   followRedirect,
   pageNameIndex,
   resolveWikiLinkTarget,
+  runPages,
   type PageRecord
 } from "./snapshot.js"
 import { untrackedFiles, untrackedPageIds } from "./untracked.js"
@@ -67,9 +69,6 @@ const DATE = new RegExp(
 )
 const STATUS_WORD = /\b(?:status|state)\b/iu
 const LOG_HEADING = /\b(?:timeline|history|log|changelog|updates|progress)\b/iu
-
-const isActive = (record: PageRecord): boolean =>
-  record.resource.state === "active" && record.page.lifecycle === "active"
 
 const folderOf = (path: string): string => {
   const folder = posix.dirname(path)
@@ -125,8 +124,8 @@ const groupsOf = (entries: ReadonlyArray<readonly [key: string, path: string]>) 
  * stored. Content findings cover knowledge pages; records are dated reports kept as they are.
  */
 export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => {
-  const pages = folder.pages.filter((record) => record.resource.state === "active")
-  const active = pages.filter(isActive)
+  const pages = runPages(folder.pages).filter((record) => record.resource.state === "active")
+  const active = activeRunPages(pages)
   const folders = recordFolders(pages)
   const shapes = active.map((record) => pageShape(record, folders))
   const knowledge = shapes.filter((shape) => shape.kind === "knowledge")

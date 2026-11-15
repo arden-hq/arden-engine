@@ -11,6 +11,7 @@ import {
 import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 
+import { buildSpaceReviewInput } from "../src/automations/space-review-input.js"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { toolFacts } from "../src/tools/approval-decision.js"
 import { prepareMemorySources } from "../src/memory/retrieval.js"
@@ -24,7 +25,6 @@ import type {
 import type { ServerTool } from "../src/tools/define.js"
 import { memoryForgetTools } from "../src/tools/memory-forget.js"
 import type { ServerRunContext } from "../src/tools/run-context.js"
-import { activePages } from "../src/tools/wiki.js"
 import { makeWikiPageHistoryTools } from "../src/tools/wiki-page-history.js"
 import { searchPages } from "../src/tools/wiki-search.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
@@ -50,12 +50,13 @@ import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMaintenanceMethods } from "../src/wiki/maintenance.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage } from "../src/wiki/page.js"
+import { memoryFindings } from "../src/wiki/page-shape.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import { claimKey } from "../src/wiki/retraction.js"
 import { Wiki } from "../src/wiki/service.js"
-import type { Snapshot } from "../src/wiki/snapshot.js"
+import { activeRunPages, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
 
 const LINE = "Sam lives in the old town by the river."
@@ -452,12 +453,33 @@ describe("forgetting a line", () => {
           processedHead: afterForget
         })
         const indexText = prepared.render(new Map()).index(100_000).text ?? ""
+        const linking = yield* memory.page("places/town.md")
+        yield* memory.write("places/town.md", `${OTHER}\nSee [[forgotten]].\n`, ownerInApp("link"))
+        const review = buildSpaceReviewInput(yield* memory.listing.snapshot())({
+          spaceId: "space-1",
+          pageId: linking.page.pageId,
+          pagePath: linking.resource.path,
+          memorySources: [],
+          semantic: JSON.stringify({
+            space: JSON.stringify({ instructions: null, inference_policy: null }),
+            tasks: []
+          }),
+          chats: [],
+          items: [],
+          openProposals: [],
+          space: undefined,
+          asked: false
+        })
         return {
+          findings: memoryFindings({ pages: snapshot.pages, untracked: [] }).filter((finding) =>
+            finding.paths.includes("forgotten.md")
+          ),
+          reviewed: review.pages.some((page) => page.path === "forgotten.md"),
           stored: snapshot.pages.some((record) => record.resource.path === "forgotten.md"),
           recalled: prepared.recalled
             .map((record) => record.resource.path)
             .includes("forgotten.md"),
-          searched: searchPages(activePages(snapshot), query, 20)
+          searched: searchPages(activeRunPages(snapshot.pages), query, 20)
             .map((match) => match.record.resource.path)
             .includes("forgotten.md"),
           indexed: memoryIndex(snapshot.pages, { root: "", maxBytes: 100_000 })
@@ -473,6 +495,8 @@ describe("forgetting a line", () => {
       })
     )
     expect(outcome).toEqual({
+      findings: [],
+      reviewed: false,
       stored: true,
       recalled: false,
       searched: false,

@@ -2,14 +2,13 @@ import { parseCalendarDay, utcDay } from "@arden-hq/std/time"
 import type { RunMemoryRecallRole, RunMemorySource } from "@arden-hq/protocol/runs"
 import { memoryIndex, pageKind, recordFolders, type PageKind } from "../wiki/collections.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
-import type { PageRecord } from "../wiki/snapshot.js"
+import { activeRunPages, type PageRecord } from "../wiki/snapshot.js"
 import type { SemanticMemoryMatch } from "../embedding/wiki-index.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { DiscussedChat } from "./discussed-in.js"
 import { corePageBudget, isStandingFactsPage } from "./core-memory.js"
 import { FIELD_WEIGHT, lexicalScore, searchTerms } from "./lexical-score.js"
 import { chatHref } from "../sessions/chat-href.js"
-import { isSystemPage } from "../wiki/system-pages.js"
 
 const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
@@ -419,9 +418,6 @@ const dayNumber = (day: string): number | undefined => {
     : Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86_400_000
 }
 
-const isActive = (record: PageRecord): boolean =>
-  record.resource.state === "active" && record.page.lifecycle === "active"
-
 const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageKind> => {
   const folders = recordFolders(active)
   return new Map(
@@ -440,7 +436,7 @@ export const tooOldToRecall = (
 ): ReadonlySet<string> => {
   const todayNumber = dayNumber(today)
   if (todayNumber === undefined) return new Set()
-  const kinds = [...pageKinds(pages.filter(isActive))]
+  const kinds = [...pageKinds(activeRunPages(pages))]
   const newestDay = new Map<string, string>()
   for (const [, kind] of kinds) {
     if (kind.kind !== "record" || kind.day === undefined) continue
@@ -475,7 +471,7 @@ export const prepareMemorySources = ({
   /** Each page's "Last changed" line, by page id; a page without one is shown without it. */
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemorySources => {
-  const active = pages.filter((record) => isActive(record) && !isSystemPage(record.resource.path))
+  const active = activeRunPages(pages)
   const standing = active.filter(standingFacts)
   const kinds = pageKinds(active)
   const kindOf = (record: PageRecord): PageKind =>

@@ -12,14 +12,13 @@ import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
 import { STANDING_LIMIT_NOTE } from "../memory/core-memory.js"
-import type { PageRecord } from "../wiki/snapshot.js"
+import { activeRunPages, type PageRecord } from "../wiki/snapshot.js"
 import {
   MAX_WIKI_CONTENT_CHARS,
   WIKI_PAGE_BUDGET_CHARS,
   WikiPathSchema,
   activePage,
   readablePage,
-  activePages,
   captureReplayOrigin,
   loadSnapshot,
   pageData,
@@ -234,7 +233,7 @@ const makeWikiOperationTools = ({
         embeddings.search(snapshot, input.query).pipe(Effect.catchCause(() => Effect.succeed([]))),
         { signal: ctx.signal }
       )
-      const matches = searchPages(activePages(snapshot), input.query, input.limit, semantic)
+      const matches = searchPages(activeRunPages(snapshot.pages), input.query, input.limit, semantic)
       const ages = await loadPageAges(wiki, snapshot, ctx.signal)
       const changed = (record: PageRecord): string => {
         const ago = ages.ago(record.page.pageId)

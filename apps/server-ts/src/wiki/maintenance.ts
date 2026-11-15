@@ -8,13 +8,14 @@ import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from 
 import { pageKind, recordFolders, type RecordFolders } from "./collections.js"
 import { pageWikiLinks } from "./links.js"
 import {
+  activeRunPages,
   pageNameIndex,
   readRecord,
   resolveWikiLinkTarget,
   validateRedirects,
   type Snapshot
 } from "./snapshot.js"
-import { isSystemPage } from "./system-pages.js"
+import { shownToRuns } from "./change.js"
 
 const MAX_CACHED_HISTORY_IDS = 2_048
 const MAX_RANGE_COMMITS = 12
@@ -84,7 +85,8 @@ const isImportRecord = (folders: RecordFolders, path: string): boolean => {
  */
 const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean =>
   changesPage(change) &&
-  !changedPaths(change).some((path) => isImportRecord(folders, path) || isSystemPage(path))
+  shownToRuns(change) &&
+  !changedPaths(change).some((path) => isImportRecord(folders, path))
 
 /** How the brief names a page upkeep may read but not change. */
 const readOnlyMark = (folders: RecordFolders, path: string): string => {
@@ -185,16 +187,12 @@ const reviewPages = (
   folders: RecordFolders,
   pageIds: ReadonlyArray<string>
 ) => {
-  const records = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
+  const records = new Map(
+    activeRunPages(snapshot.pages).map((record) => [record.page.pageId, record] as const)
+  )
   return pageIds.flatMap((pageId) => {
     const record = records.get(pageId)
-    if (
-      record === undefined ||
-      record.page.lifecycle !== "active" ||
-      isImportRecord(folders, record.resource.path) ||
-      isSystemPage(record.resource.path)
-    )
-      return []
+    if (record === undefined || isImportRecord(folders, record.resource.path)) return []
     return [record]
   })
 }

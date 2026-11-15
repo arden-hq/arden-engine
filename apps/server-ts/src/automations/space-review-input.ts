@@ -8,7 +8,12 @@ import { renderSpaceReviewPrompt } from "../prompts/space-jobs.js"
 import { spaceOwnsPath } from "../wiki/space-index.js"
 import { pageWikiLinks } from "../wiki/links.js"
 import { memoryHref, readChangeCall } from "../lib/memory-link.js"
-import { pageNameIndex, resolveWikiLinkTarget, type Snapshot } from "../wiki/snapshot.js"
+import {
+  pageNameIndex,
+  resolveWikiLinkTarget,
+  runPages,
+  type Snapshot
+} from "../wiki/snapshot.js"
 import { spaceReviewAdmission } from "./space-review-admission.js"
 import { chatHref } from "../sessions/chat-href.js"
 
@@ -28,9 +33,10 @@ export const buildSpaceReviewInput =
 const spaceReviewInput = (
   options: SpaceReviewEvidence & { readonly snapshot: Snapshot; readonly prompt: string }
 ): SpaceReviewInput => {
-  const byId = new Map(options.snapshot.pages.map((record) => [record.page.pageId, record]))
-  const names = pageNameIndex(options.snapshot.pages)
-  const roots = options.snapshot.pages.filter(
+  const shown = runPages(options.snapshot.pages)
+  const byId = new Map(shown.map((record) => [record.page.pageId, record]))
+  const names = pageNameIndex(shown)
+  const roots = shown.filter(
     (record) =>
       record.page.pageId === options.pageId ||
       options.memorySources.includes(record.page.pageId) ||

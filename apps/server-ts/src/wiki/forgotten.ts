@@ -23,8 +23,8 @@ import {
   RETRACTIONS_KEY,
   storedRetractions
 } from "./retraction.js"
-import { loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
-import { FORGOTTEN_PAGE_PATH, isSystemPage } from "./system-pages.js"
+import { activeRunPages, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
+import { FORGOTTEN_PAGE_PATH } from "./system-pages.js"
 
 /** The owner's turn that asks: its chat and the chat's link. */
 interface OwnerTurn {
@@ -163,12 +163,7 @@ const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
       `Line ${short + 1} has fewer than ${MIN_CLAIM_WORDS} words, so it carries no claim to guard. Pass whole page lines.`
     )
   const wanted = new Set(keys.flatMap((key) => key ?? []))
-  const pages = snapshot.pages.filter(
-    (record) =>
-      record.resource.state === "active" &&
-      record.page.lifecycle === "active" &&
-      !isSystemPage(record.resource.path)
-  )
+  const pages = activeRunPages(snapshot.pages)
   const removed: Array<{ readonly path: string; readonly line: string }> = []
   const changes: Array<PageChange> = []
   const operations: Array<WikiPageOperation> = []

@@ -12,7 +12,12 @@ import { outsideEditNotice } from "../wiki/outside-edits.js"
 import { normal, pageNamesForPath, reviseWikiPage } from "../wiki/page.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
-import { redirectTargetAt, type PageRecord, type Snapshot } from "../wiki/snapshot.js"
+import {
+  activeRunPages,
+  redirectTargetAt,
+  type PageRecord,
+  type Snapshot
+} from "../wiki/snapshot.js"
 import { bodyFields } from "./code-mode-result.js"
 import { loadPageAges } from "./wiki-page-age.js"
 import { readTextPage } from "./read-text.js"
@@ -32,7 +37,6 @@ import {
   corePageBudget,
   STANDING_LIMIT_NOTE
 } from "../memory/core-memory.js"
-import { isSystemPage } from "../wiki/system-pages.js"
 
 const MAX_PAGE_LINES = 4_000
 export const MAX_WIKI_CONTENT_CHARS = 40_000
@@ -204,16 +208,8 @@ const parseDirectory = (value: string): string | null => {
   return directory
 }
 
-/** Every page a run may name, whatever its lifecycle: never a code-owned one. */
-export const runPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
-  snapshot.pages.filter((record) => !isSystemPage(record.resource.path))
-
-/** The active pages a run may find, read or write by path. */
-export const activePages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
-  runPages(snapshot).filter((record) => record.page.lifecycle === "active")
-
 export const activePage = (snapshot: Snapshot, path: string): PageRecord | null => {
-  const pages = activePages(snapshot)
+  const pages = activeRunPages(snapshot.pages)
   const direct = pages.find((record) => record.resource.path === path)
   if (direct !== undefined) return direct
   const wanted = normal(path)
@@ -329,7 +325,7 @@ export const loadSnapshot = (wiki: Wiki["Service"], signal: AbortSignal): Promis
 
 const pagesWithPathAlias = (snapshot: Snapshot, path: string): ReadonlyArray<string> => {
   const wanted = new Set(pageNamesForPath(path).map(normal))
-  return activePages(snapshot)
+  return activeRunPages(snapshot.pages)
     .filter((record) => record.page.aliases.some((alias) => wanted.has(normal(alias))))
     .map((record) => record.resource.path)
 }
@@ -387,7 +383,7 @@ const makeWikiTools = ({
         )
       }
       const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const entries = listingEntries(activePages(snapshot), directory)
+      const entries = listingEntries(activeRunPages(snapshot.pages), directory)
       if (directory !== "" && entries.length === 0) {
         throw new ToolExecutionError(
           `No active wiki directory exists at '${directory}'. List its parent directory, or create the first page under this directory.`,
@@ -467,7 +463,7 @@ const makeWikiTools = ({
       const isReadme = input.path === "README.md" || input.path.endsWith("/README.md")
       const directory = input.path.slice(0, Math.max(0, input.path.length - "/README.md".length))
       const children = isReadme
-        ? listingEntries(activePages(snapshot), directory).filter(
+        ? listingEntries(activeRunPages(snapshot.pages), directory).filter(
             (entry) => entry.path !== input.path
           )
         : []
