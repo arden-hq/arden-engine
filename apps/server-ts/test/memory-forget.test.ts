@@ -28,6 +28,8 @@ import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { makeWikiChangeMethods } from "../src/wiki/change.js"
 import { memoryIndex } from "../src/wiki/collections.js"
 import {
+  archivePage,
+  commitOutsideChange,
   commitWiki,
   createPage,
   movePage,
@@ -520,6 +522,84 @@ describe("what forgotten.md holds and where it stays", () => {
       })
     )
     expect(outcome).toEqual({ backlinks: [], status: "accepted", resolution: null })
+  })
+
+  it("keeps forgotten.md at its path for every writer, the owner too", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        const head = () => memory.listing.head()
+        const madeByHand = yield* refusal(
+          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
+            createPage("by-hand", "forgotten.md", content("by-hand", "Made by hand."))
+          ])
+        )
+        yield* forget(memory)
+        const forgotten = yield* memory.page("forgotten.md")
+        const moved = yield* refusal(
+          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
+            movePage(forgotten.resource, "forgotten-things.md")
+          ])
+        )
+        const archived = yield* refusal(
+          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
+            archivePage(forgotten.resource)
+          ])
+        )
+        const redirected = yield* refusal(
+          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
+            updatePage(
+              forgotten.resource,
+              formatWikiPage({
+                pageId: forgotten.page.pageId,
+                title: "Forgotten",
+                aliases: [],
+                lifecycle: "redirect",
+                redirectTo: "town",
+                metadata: {},
+                body: ""
+              })
+            )
+          ])
+        )
+        const edited = yield* refusal(
+          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
+            updatePage(forgotten.resource, `${forgotten.page.content}\nA note of mine.\n`)
+          ])
+        )
+        yield* Effect.promise(() => rm(join(memory.root, "forgotten.md")))
+        const kept = yield* memory.page("forgotten.md")
+        const deleted = yield* refusal(
+          commitOutsideChange(
+            memory.repository,
+            { ...OUTSIDE, expectedRevision: yield* head() },
+            { kind: "missing", resource: kept.resource }
+          )
+        )
+        const capture = yield* memory.write("places/town.md", `${OTHER}\n${LINE}\n`, CAPTURE)
+        const message = (error: unknown) => recordOf(error)["message"]
+        return {
+          madeByHand: message(madeByHand),
+          moved: message(moved),
+          archived: message(archived),
+          redirected: message(redirected),
+          edited,
+          deleted: message(deleted),
+          capture: refusedFor(capture)
+        }
+      })
+    )
+    const kept =
+      "forgotten.md is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. " +
+      "Nothing was saved. To let a line back, undo its entry in a chat or delete the entry from the page."
+    expect(outcome).toEqual({
+      madeByHand: kept,
+      moved: kept,
+      archived: kept,
+      redirected: kept,
+      edited: undefined,
+      deleted: kept,
+      capture: "retraction"
+    })
   })
 })
 

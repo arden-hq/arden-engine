@@ -236,20 +236,16 @@ export const commitOutsideChange = (
   options: WikiCommitIdentity & { readonly expectedRevision: string | null },
   change: AdoptableWorkingChange
 ): Effect.Effect<CommitResult, WikiCommitError> =>
-  requireCommitRules(
-    repository,
-    options.origin,
+  requireCommitRules(repository, options.origin, [
     change.kind === "changed"
-      ? [
-          {
-            _tag: "Update",
-            resourceId: change.resource.resourceId,
-            expectedVersion: change.resource.versionId,
-            content: change.content
-          }
-        ]
-      : []
-  ).pipe(
+      ? {
+          _tag: "Update",
+          resourceId: change.resource.resourceId,
+          expectedVersion: change.resource.versionId,
+          content: change.content
+        }
+      : archivePage(change.resource)
+  ]).pipe(
     Effect.andThen(
       repository.adoptWorkingChange(change, {
         actor: options.actor,
@@ -300,14 +296,13 @@ const limitRefusal = (
   const target = coreCondenseTarget(over.limit)
   return new WikiCommitRuleError({
     rule: "size",
-    message:
-      origin.kind === "user"
-        ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
-          `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
-        : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
-          `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
-          `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
-          `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
+    message: origin.kind === "user"
+      ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
+        `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
+      : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
+        `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
+        `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
+        `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
   })
 }
 
@@ -346,17 +341,54 @@ const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
 const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" && origin.via === "filesystem"
 
-const requireNoSystemPage = Effect.fn("Wiki.requireNoSystemPage")(function* (
+/** Whether `operation` keeps a code-owned page where code finds it: active, at its path. */
+const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
+  origin: WikiCommitOrigin,
+  operation: WikiPageOperation,
+  before: ResourceVersion | null
+): Effect.fn.Return<boolean> {
+  switch (operation._tag) {
+    case "Create":
+      return origin.kind === "forget"
+    case "Archive":
+      return false
+    case "Update":
+    case "Move":
+    case "Restore": {
+      const path = "path" in operation ? operation.path : undefined
+      if (path !== undefined && path !== before?.path) return false
+      const content = "content" in operation ? operation.content : undefined
+      if (content === undefined) return true
+      const page = yield* parseWikiPage(decoder.decode(content)).pipe(Effect.option)
+      return Option.isNone(page) || page.value.lifecycle === "active"
+    }
+  }
+})
+
+/**
+ * A code-owned page is written only by the owner, and stays where code finds it: only Arden's
+ * own forget makes it, and no writer moves, renames, merges or archives it.
+ */
+const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* (
   repository: ManagedFileRepositoryShape,
+  origin: WikiCommitOrigin,
   operation: WikiPageOperation
 ): Effect.fn.Return<void, WikiCommitError> {
   const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
   const paths = [before?.path, "path" in operation ? operation.path : undefined]
   const path = paths.find((candidate) => candidate !== undefined && isSystemPage(candidate))
   if (path === undefined) return
+  if (!isOwnerOrigin(origin))
+    return yield* new WikiCommitRuleError({
+      rule: "code_owned",
+      message: `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
+    })
+  if (yield* keepsSystemPage(origin, operation, before)) return
   return yield* new WikiCommitRuleError({
     rule: "code_owned",
-    message: `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
+    message:
+      `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
+      "Nothing was saved. To let a line back, undo its entry in a chat or delete the entry from the page."
   })
 })
 
@@ -428,12 +460,7 @@ const COMMIT_RULES: ReadonlyArray<{
     check: eachOperation((_repository, _origin, operation) => requireHumanAliases(operation))
   },
   { binds: (origin) => !isOutsideEdit(origin), check: eachOperation(requireWithinLimit) },
-  {
-    binds: (origin) => !isOwnerOrigin(origin),
-    check: eachOperation((repository, _origin, operation) =>
-      requireNoSystemPage(repository, operation)
-    )
-  },
+  { binds: () => true, check: eachOperation(requireSystemPageKept) },
   {
     binds: (origin) => !isOwnerOrigin(origin),
     check: (repository, _origin, operations) => requireNoRetractedLine(repository, operations)
