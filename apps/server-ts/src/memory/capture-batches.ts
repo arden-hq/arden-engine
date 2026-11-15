@@ -159,6 +159,139 @@ export const makeMemoryCaptureBatches = (input: {
     }
   })
 
+  const offer = Effect.fn("Memory.offerCaptureBatch")(function* (
+    identity: MemoryCaptureBatchIdentity,
+    excerpts: ReadonlyArray<CaptureExcerpt>
+  ): Effect.fn.Return<MemoryCaptureBatch, MemoryError> {
+    const header = yield* sessions
+      .loadHistoryHeader(identity.sessionId)
+      .pipe(
+        Effect.mapError(
+          captureError("Could not read the Memory capture Session reference", identity.sessionId)
+        )
+      )
+    if (header === null) {
+      return yield* new MemoryError({
+        operation: "capture",
+        message: "Memory capture Session was not found",
+        sessionId: identity.sessionId
+      })
+    }
+    const crowded = yield* wiki.snapshot().pipe(
+      Effect.map((current) =>
+        crowdedCorePages(
+          current.pages
+            .filter((record) => record.page.lifecycle === "active")
+            .map((record) => ({
+              path: record.resource.path,
+              pageId: record.page.pageId,
+              chars: record.page.body.length
+            }))
+        )
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Core Memory size check failed", cause).pipe(Effect.as([]))
+      )
+    )
+    return {
+      identity,
+      markdown: [
+        renderTranscript(header, excerpts, DateTime.toDate(yield* DateTime.now)),
+        ...(crowded.length === 0
+          ? []
+          : [
+              "",
+              "## Core Memory to condense",
+              "",
+              ...crowded.map(
+                (page) =>
+                  `- ${page.path}: ${page.chars} characters; it is sent to every run, whole up to ${page.budget}. ` +
+                  `Bring it to ${page.target} or fewer.`
+              )
+            ])
+      ].join("\n")
+    }
+  })
+
+  /**
+   * The backlog: old messages no Capture run was shown, read once each after the chats have no
+   * new work, at most `ARDEN_CAPTURE_CATCH_UP` batches per server start, none when it is unset.
+   * Its progress is the receipts of the batches it finished, and a range shrinks as far as every
+   * batch from its start was finished. A batch with nothing to review stops that: its messages
+   * stay in the backlog, and this server start passes the range from then on.
+   */
+  let catchUp = Number(process.env.ARDEN_CAPTURE_CATCH_UP ?? 0)
+  const passed = new Set<string>()
+  const nextBacklogBatch = Effect.fn("Memory.nextBacklogBatch")(function* (): Effect.fn.Return<
+    MemoryCaptureBatch | null,
+    MemoryError
+  > {
+    if (!(catchUp > 0)) return null
+    const ranges = yield* captures.listBacklog().pipe(
+      Effect.mapError(
+        (cause) =>
+          new MemoryError({
+            operation: "capture",
+            message: "Could not list the Memory capture backlog",
+            cause
+          })
+      )
+    )
+    for (const range of ranges) {
+      const { sessionId, throughSeq } = range
+      if (passed.has(`${sessionId} ${range.fromSeq}`)) continue
+      const failed = captureError("Could not record the Memory capture backlog", sessionId)
+      let fromSeq = range.fromSeq
+      let start: MemoryCapturePosition =
+        fromSeq === 0 ? { _tag: "Beginning" } : { _tag: "AfterSequence", sequence: fromSeq - 1 }
+      let finished = true
+      for (;;) {
+        const read: CaptureRead | undefined = yield* readCaptureBatch(transcript, {
+          sessionId,
+          start,
+          stop: undefined,
+          last: throughSeq
+        })
+        if (read === undefined) break
+        const identity = { sessionId, start, end: read.end, endMessageId: read.endMessageId }
+        if (read.reviewable) {
+          const done = yield* wiki
+            .hasFinalizedCaptureBatch(identity)
+            .pipe(
+              Effect.mapError(
+                captureError("Could not inspect the Memory capture receipt", sessionId)
+              )
+            )
+          if (!done) {
+            catchUp -= 1
+            return yield* offer(identity, read.excerpts)
+          }
+        }
+        finished &&= read.reviewable
+        if (finished && read.end._tag === "AfterSequence") {
+          yield* captures
+            .readBacklog({ sessionId, fromSeq, throughSeq: read.end.sequence })
+            .pipe(Effect.mapError(failed))
+          fromSeq = read.end.sequence + 1
+        }
+        start = read.end
+      }
+      if (finished)
+        yield* captures
+          .readBacklog({ sessionId, fromSeq, throughSeq })
+          .pipe(Effect.mapError(failed))
+      else {
+        passed.add(`${sessionId} ${fromSeq}`)
+        yield* Effect.logInfo("Memory capture backlog range left with nothing to review", {
+          sessionId,
+          fromSeq,
+          throughSeq
+        })
+      }
+    }
+    return null
+  })
+
   const nextCaptureBatch = Effect.fn("Memory.nextCaptureBatch")(function* (): Effect.fn.Return<
     MemoryCaptureBatch | null,
     MemoryError
@@ -175,7 +308,7 @@ export const makeMemoryCaptureBatches = (input: {
         )
       )
       const work = listed[0]
-      if (work === undefined) return null
+      if (work === undefined) return yield* nextBacklogBatch()
       if (work.prepared !== undefined) {
         const committed = yield* wiki
           .hasFinalizedCaptureBatch(work.prepared)
@@ -206,54 +339,7 @@ export const makeMemoryCaptureBatches = (input: {
           )
         if (prepared === "superseded") continue
       }
-      const header = yield* sessions
-        .loadHistoryHeader(work.sessionId)
-        .pipe(
-          Effect.mapError(
-            captureError("Could not read the Memory capture Session reference", work.sessionId)
-          )
-        )
-      if (header === null) {
-        return yield* new MemoryError({
-          operation: "capture",
-          message: "Memory capture Session was not found",
-          sessionId: work.sessionId
-        })
-      }
-      const crowded = yield* wiki.snapshot().pipe(
-        Effect.map((current) =>
-          crowdedCorePages(
-            current.pages
-              .filter((record) => record.page.lifecycle === "active")
-              .map((record) => ({
-                path: record.resource.path,
-                pageId: record.page.pageId,
-                chars: record.page.body.length
-              }))
-          )
-        ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Core Memory size check failed", cause).pipe(Effect.as([]))
-        )
-      )
-      return {
-        identity: read.identity,
-        markdown: [
-          renderTranscript(header, read.excerpts, DateTime.toDate(yield* DateTime.now)),
-          ...(crowded.length === 0
-            ? []
-            : [
-                "",
-                "## Core Memory to condense",
-                "",
-                ...crowded.map(
-                  (page) =>
-                    `- ${page.path}: ${page.chars} characters; it is sent to every run, whole up to ${page.budget}. ` +
-                    `Bring it to ${page.target} or fewer.`
-                )
-              ])
-        ].join("\n")
-      }
+      return yield* offer(read.identity, read.excerpts)
     }
   })
 
