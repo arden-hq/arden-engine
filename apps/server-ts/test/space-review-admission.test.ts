@@ -18,7 +18,7 @@ const EXPECTED: Record<ReviewChange, Record<ReviewHold, boolean>> = {
   chat_turn: { nothing: true, unfinished_tasks: true, open_offers: true },
   mail: { nothing: true, unfinished_tasks: true, open_offers: true },
   space_settings: { nothing: true, unfinished_tasks: true, open_offers: true },
-  memory_page: { nothing: false, unfinished_tasks: true, open_offers: true },
+  memory_page: { nothing: false, unfinished_tasks: false, open_offers: false },
   task: { nothing: false, unfinished_tasks: true, open_offers: true }
 }
 
@@ -170,21 +170,35 @@ describe("Space review admission", () => {
     ).toBe(false)
   })
 
-  it("pages only, with nothing held, never starts, for every page basis and a removed source", () => {
-    for (const patch of [
-      { pages: [page("owned")] },
-      { pages: [page("source")] },
-      { pages: [page("linked")] },
-      { pages: [page("resident")] },
-      { removed: ["notes/left.md"] }
-    ])
-      expect(
-        spaceReviewAdmission(
-          { semantic: semantic([]), reads: reads(patch) },
-          { semantic: semantic([]) },
+  it("Memory page changes alone never start, whatever the Space holds", () => {
+    const holding: Record<
+      ReviewHold,
+      { tasks: ReadonlyArray<MadeTask>; proposals: Array<string> }
+    > = {
+      nothing: { tasks: [], proposals: [] },
+      unfinished_tasks: { tasks: HELD_TASKS, proposals: [] },
+      open_offers: { tasks: [], proposals: ["An offer"] }
+    }
+    for (const [hold, held] of Object.entries(holding))
+      for (const patch of [
+        { pages: [page("owned")] },
+        { pages: [page("source")] },
+        { pages: [page("linked")] },
+        { pages: [page("resident")] },
+        { removed: ["notes/left.md"] },
+        { pages: [page("owned"), page("source"), page("linked")], removed: ["notes/left.md"] }
+      ]) {
+        const verdict = spaceReviewAdmission(
+          {
+            semantic: semantic(held.tasks),
+            reads: reads({ ...patch, proposals: held.proposals })
+          },
+          { semantic: semantic(held.tasks) },
           false
-        ).admission
-      ).not.toBe("changed")
+        )
+        expect([...verdict.holds]).toEqual([hold])
+        expect(verdict.admission).not.toBe("changed")
+      }
   })
 
   it("a resident page is shared context and is no change to the Space", () => {
@@ -196,14 +210,14 @@ describe("Space review admission", () => {
     expect(verdict.admission).toBe("unchanged")
   })
 
-  it("a source that left the review's pages is a Memory page change", () => {
+  it("a source that left the review's pages is a Memory page change, which starts nothing", () => {
     const verdict = spaceReviewAdmission(
       { semantic: semantic(HELD_TASKS), reads: reads({ removed: ["notes/left.md"] }) },
       { semantic: semantic(HELD_TASKS) },
       false
     )
     expect([...verdict.changes]).toEqual(["memory_page"])
-    expect(verdict.admission).toBe("changed")
+    expect(verdict.admission).toBe("nothing_to_act_on")
   })
 
   it("a deferred Task is held; a done or cancelled one is not", () => {

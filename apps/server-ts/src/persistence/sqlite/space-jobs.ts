@@ -163,7 +163,6 @@ export const makeSpaceJobSql = (
     readonly name: string
     readonly prompt: string
     readonly enabled: boolean
-    readonly inference?: boolean
     readonly ownerTaskId?: string
     readonly now: string
   }) {
@@ -178,7 +177,7 @@ export const makeSpaceJobSql = (
         tool_scope, triggers_source, next_run_at, purpose, owner_space_id, owner_task_id
       ) VALUES (
         ${input.automationId}, ${internalRef(input.automationId)}, ${input.name},
-        'Internal Space execution', ${input.prompt}, 'fresh', ${input.inference ? '[{"type":"event","event_type":"wiki.changed","id":"t1"}]' : "[]"}, ${input.inference ? 1 : 0}, ${input.enabled ? 1 : 0},
+        'Internal Space execution', ${input.prompt}, 'fresh', '[]', 0, ${input.enabled ? 1 : 0},
         ${input.now}, ${autoApprove}, 1, ${sessionId},
         'space', 'space_runtime', NULL,
         ${input.ownerTaskId === undefined ? "space_review" : "task_execution"}, ${input.spaceId}, ${input.ownerTaskId ?? null}
@@ -255,7 +254,6 @@ export const makeSpaceJobSql = (
       name: `${current.name} worker`,
       prompt: `Review ${appLink(current.name, `arden:space/${encodeURIComponent(current.space_id)}`)}.`,
       enabled: jobEnabled(current),
-      inference: current.inference_enabled === 1,
       now
     })
   })
