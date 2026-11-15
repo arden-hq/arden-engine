@@ -25,8 +25,9 @@ import { statusFailureCode as responsesStatusCode } from "../src/providers/opena
 /**
  * Real rejection bodies, each with the class the host must see. A status that
  * names its class (401/403 auth, 429 throttle, 5xx unavailable) is never an
- * overflow by prose; overflow prose is read only from the server's own message
- * field, never from the body around it or a router's relayed upstream payload.
+ * overflow by prose; overflow prose is read only from a message field (the
+ * server's own, or the upstream's inside a router's relayed payload, parsed as
+ * that upstream's error body), never from the text around it.
  */
 const REJECTIONS: ReadonlyArray<
   readonly [name: string, status: number, body: string | undefined, expected: ProviderErrorCode]
@@ -97,10 +98,80 @@ const REJECTIONS: ReadonlyArray<
     '{"error":{"message":"prompt is too long: 201234 tokens > 200000 maximum","code":400,"metadata":{"provider_name":"Anthropic"}}}',
     "context_length_exceeded"
   ],
+  // The next five: OpenRouter, live on 2026-11-16 (`user_id` and `previous_errors` cut).
   [
     "Anthropic overflow only in OpenRouter's relayed payload",
     400,
-    '{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"prompt is too long: 201234 tokens > 200000 maximum\\"}}","provider_name":"Anthropic"}}}',
+    JSON.stringify({
+      error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+          raw: '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 600023 tokens > 200000 maximum"},"request_id":"req_vrtx_011Ch5YakJbXmpFiana6sm4X"}',
+          provider_name: "Google",
+          is_byok: false
+        }
+      }
+    }),
+    "context_length_exceeded"
+  ],
+  [
+    "OpenAI overflow relayed by OpenRouter with the upstream code",
+    400,
+    JSON.stringify({
+      error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+          raw: '{\n  "error": {\n    "message": "This model\'s maximum context length is 128000 tokens. However, your messages resulted in 400006 tokens. Please reduce the length of the messages.",\n    "type": "invalid_request_error",\n    "param": "messages",\n    "code": "context_length_exceeded"\n  }\n}',
+          provider_name: "OpenAI",
+          is_byok: false,
+          provider_error_code: "context_length_exceeded"
+        }
+      }
+    }),
+    "context_length_exceeded"
+  ],
+  [
+    "OpenRouter unknown model ID",
+    400,
+    '{"error":{"message":"openai/no-such-model-xyz is not a valid model ID","code":400}}',
+    "model_unavailable"
+  ],
+  [
+    "OpenRouter unknown key",
+    401,
+    '{"error":{"message":"User not found.","code":401}}',
+    "provider_auth"
+  ],
+  [
+    "OpenRouter free model throttled upstream",
+    429,
+    JSON.stringify({
+      error: {
+        message: "Provider returned error",
+        code: 429,
+        metadata: {
+          raw: "google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly, or add your own provider key to use your own limits: https://openrouter.ai/workspaces/default/byok",
+          provider_name: "Google AI Studio",
+          is_byok: false,
+          provider_error_code: "429",
+          limit_source: "upstream_provider_shared_pool"
+        }
+      }
+    }),
+    "rate_limited"
+  ],
+  [
+    "upstream throttle relayed as a 400 that mentions the context window",
+    400,
+    JSON.stringify({
+      error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: { raw: '{"error":{"message":"Rate limit on the context window pool"}}' }
+      }
+    }),
     "provider_error"
   ],
   [

@@ -12,16 +12,33 @@ export const MAX_STATUS_DETAIL_CHARS = 600
  * What a provider said when it refused a request: the HTTP status (absent for
  * an error frame inside a stream that carries none), the `error.code` and
  * `error.type` of an OpenAI-style body, OpenRouter's typed class
- * (`error.metadata.error_type`), and `message`, the server's own sentence.
- * The body around the message is deliberately not kept: a router relays its
- * upstream's whole payload there (OpenRouter's `metadata.raw`), and a throttle
- * relayed as "Daily token limit exceeded" must not read as an overflow.
+ * (`error.metadata.error_type`), `message`, the server's own sentence, and
+ * `upstream`, the error a router relayed from the model's own provider.
+ * Nothing else of the body is kept: prose is read only from a message field,
+ * never from the text around it.
  */
 export interface Rejection {
   readonly status: number | undefined
   readonly code: string | undefined
   readonly type: string | undefined
   readonly errorType: string | undefined
+  readonly message: string | undefined
+  readonly upstream: UpstreamRejection | undefined
+}
+
+/**
+ * The upstream's own error behind a router's generic "Provider returned
+ * error". OpenRouter relays the upstream body verbatim as the string
+ * `error.metadata.raw` (https://openrouter.ai/docs/api-reference/errors), and
+ * may name the upstream's code beside it: `provider_code` in the docs,
+ * `provider_error_code` in every live body (2026-11-16). `raw` is parsed as
+ * that upstream's own error body: Anthropic `{type:"error",error:{type,
+ * message}}`, OpenAI `{error:{message,type,code}}`, Bedrock `{message}`. Raw
+ * text that is not JSON (a throttle notice) gives no fields.
+ */
+export interface UpstreamRejection {
+  readonly code: string | undefined
+  readonly type: string | undefined
   readonly message: string | undefined
 }
 
@@ -71,30 +88,37 @@ const OVERFLOW_STATUSES: ReadonlySet<number> = new Set([400, 413])
  * the ChatGPT sign-in may not use with a bare `{"detail": "The '<model>'
  * model is not supported when using Codex with a ChatGPT account."}`, the
  * Platform API says "The model `<model>` does not exist or you do not have
- * access to it.", and llama.cpp says "model '<model>' not found". Only the
+ * access to it.", llama.cpp says "model '<model>' not found", and OpenRouter
+ * "<model> is not a valid model ID" (live, 2026-11-16). Only the
  * provider's own sentence is read, never the request echo around it, and only
  * on the statuses a refused model comes with (400, 403, 404).
  */
 const MODEL_UNAVAILABLE_PROSE =
-  /\bmodel\b.{0,80}?\b(?:is not supported|does not exist|is not available|not found)\b/i
+  /\bmodel\b.{0,80}?\b(?:is not supported|does not exist|is not available|not found)\b|\bis not a valid model id\b/i
 
 /**
  * Whether a rejection is a context overflow, decided by the strongest evidence
  * present, in order: a structured class the server sets (OpenAI's and
  * OpenRouter's `context_length_exceeded`, llama.cpp's
- * `exceed_context_size_error`), HTTP 413, then the server's own message on a
- * status an overflow comes with.
+ * `exceed_context_size_error`) or the relayed upstream's code, HTTP 413, then
+ * a message on a status an overflow comes with: the server's own, else the
+ * upstream's. OpenRouter relays an Anthropic overflow only as the upstream's
+ * message, "prompt is too long: 600023 tokens > 200000 maximum" (live,
+ * 2026-11-16).
  */
 export const isContextOverflow = (rejection: Rejection): boolean => {
   if (rejection.code === "context_length_exceeded") return true
   if (rejection.type === "exceed_context_size_error") return true
   if (rejection.errorType === "context_length_exceeded") return true
+  if (rejection.upstream?.code === "context_length_exceeded") return true
   if (rejection.status === 413) return true
   if (rejection.status === undefined || !OVERFLOW_STATUSES.has(rejection.status)) return false
-  const message = rejection.message
-  if (message === undefined) return false
-  if (NOT_OVERFLOW_PROSE.some((pattern) => pattern.test(message))) return false
-  return CONTEXT_OVERFLOW_PROSE.some((pattern) => pattern.test(message))
+  return [rejection.message, rejection.upstream?.message].some(
+    (message) =>
+      message !== undefined &&
+      !NOT_OVERFLOW_PROSE.some((pattern) => pattern.test(message)) &&
+      CONTEXT_OVERFLOW_PROSE.some((pattern) => pattern.test(message))
+  )
 }
 
 const stringOf = (value: unknown): string | undefined =>
@@ -102,8 +126,9 @@ const stringOf = (value: unknown): string | undefined =>
 
 /**
  * The fields of a decoded rejection body: `error.code`, `error.type`,
- * OpenRouter's `error.metadata.error_type`, and the message — `error.message`,
- * Ollama's bare `error` string, or FastAPI-style `detail`.
+ * OpenRouter's `error.metadata.error_type`, the message — `error.message`,
+ * Ollama's bare `error` string, or FastAPI-style `detail` — and the relayed
+ * upstream error.
  */
 export const rejectionFields = (body: unknown): Omit<Rejection, "status"> => {
   const record = isRecord(body) ? body : undefined
@@ -113,8 +138,26 @@ export const rejectionFields = (body: unknown): Omit<Rejection, "status"> => {
     code: stringOf(error?.code),
     type: stringOf(error?.type),
     errorType: stringOf(metadata?.error_type),
-    message: stringOf(error?.message) ?? stringOf(record?.error) ?? stringOf(record?.detail)
+    message: stringOf(error?.message) ?? stringOf(record?.error) ?? stringOf(record?.detail),
+    upstream: metadata === undefined ? undefined : upstreamRejection(metadata)
   }
+}
+
+const upstreamRejection = (
+  metadata: Readonly<Record<string, unknown>>
+): UpstreamRejection | undefined => {
+  const raw = parseJson(stringOf(metadata.raw))
+  const body = isRecord(raw) ? raw : undefined
+  const error = isRecord(body?.error) ? body.error : undefined
+  const upstream: UpstreamRejection = {
+    code:
+      stringOf(metadata.provider_error_code) ??
+      stringOf(metadata.provider_code) ??
+      stringOf(error?.code),
+    type: stringOf(error?.type),
+    message: stringOf(error?.message) ?? stringOf(body?.message)
+  }
+  return Object.values(upstream).every((value) => value === undefined) ? undefined : upstream
 }
 
 /** A rejection read from an HTTP status and the body text, JSON or not. */
