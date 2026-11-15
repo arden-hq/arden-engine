@@ -3,7 +3,7 @@ import { Effect } from "effect"
 
 import { decodeWikiOrigin, wikiOriginSource, type WikiCommitSource } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
-import { isCodeOwnedPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./code-owned-pages.js"
 
 const CHANGE_DIFF_CHARS = 12_000
 const MIN_PAGE_CHARS = 400

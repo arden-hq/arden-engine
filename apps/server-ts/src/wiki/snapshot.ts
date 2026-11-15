@@ -15,7 +15,7 @@ import {
   type ParsedWikiPage,
   wikiPageExcerpt
 } from "./page.js"
-import { isCodeOwnedPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./code-owned-pages.js"
 import type { PageTimes } from "./timestamps.js"
 
 export interface PageRecord {

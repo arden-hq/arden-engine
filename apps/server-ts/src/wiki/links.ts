@@ -3,7 +3,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { WikiPageFormatError } from "./errors.js"
 import type { ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
-import { isCodeOwnedPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./code-owned-pages.js"
 
 interface MarkdownPosition {
   readonly start: { readonly offset?: number | undefined }

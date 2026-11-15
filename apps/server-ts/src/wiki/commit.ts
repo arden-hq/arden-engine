@@ -22,7 +22,7 @@ import {
 } from "./retraction.js"
 import type { PageRecord } from "./snapshot.js"
 import { spacePageCheck } from "./space-index.js"
-import { isCodeOwnedPage } from "./system-pages.js"
+import { isCodeOwnedPage } from "./code-owned-pages.js"
 
 export type WikiCommitOrigin =
   /** The owner, in the app or in the file. */
@@ -668,7 +668,7 @@ const requireRedirectOnlyByMerge = Effect.fn("Wiki.requireRedirectOnlyByMerge")(
   )
 })
 
-const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
+const keepsCodeOwnedPage = Effect.fn("Wiki.keepsCodeOwnedPage")(function* (
   origin: WikiCommitOrigin,
   write: ResolvedWrite
 ): Effect.fn.Return<boolean> {
@@ -694,7 +694,7 @@ const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
   return Option.isNone(page) || page.value.lifecycle === "active"
 })
 
-const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* (
+const requireCodeOwnedPageKept = Effect.fn("Wiki.requireCodeOwnedPageKept")(function* (
   { origin }: CommitView,
   write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
@@ -707,7 +707,7 @@ const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* 
       "code_owned",
       `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
     )
-  if (yield* keepsSystemPage(origin, write)) return
+  if (yield* keepsCodeOwnedPage(origin, write)) return
   return yield* ruleError(
     "code_owned",
     `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
@@ -757,7 +757,7 @@ const COMMIT_RULES: ReadonlyArray<{
   { binds: isAutomatedOrigin, check: requireAutomatedRecordWrite },
   { binds: isAutomatedOrigin, check: requireAutomatedRetirement },
   { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit },
-  { binds: () => true, check: requireSystemPageKept },
+  { binds: () => true, check: requireCodeOwnedPageKept },
   { binds: keepsForgottenLines, check: requireNoRetractedLine }
 ]
 

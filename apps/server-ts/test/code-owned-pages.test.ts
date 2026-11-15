@@ -20,7 +20,7 @@ it("names a code-owned page only in the one predicate", () => {
       .filter((path) => /forgotten\.md/u.test(readFileSync(path, "utf8")))
       .map((path) => relative(root, path))
   )
-  expect(naming).toEqual(["wiki/system-pages.ts"])
+  expect(naming).toEqual(["wiki/code-owned-pages.ts"])
 })
 
 it("decides what a run sees of code-owned pages in the run view alone", () => {

@@ -24,7 +24,7 @@ import {
   storedRetractions
 } from "./retraction.js"
 import { activeRunPages, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
-import { FORGOTTEN_PAGE_PATH } from "./system-pages.js"
+import { FORGOTTEN_PAGE_PATH } from "./code-owned-pages.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 
 interface OwnerTurn {

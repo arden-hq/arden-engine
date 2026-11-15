@@ -4,7 +4,7 @@ import { countOf } from "@arden-hq/std/count"
 import { Effect, Option, Schema } from "effect"
 
 import { parseWikiPage } from "./page.js"
-import { FORGOTTEN_PAGE_PATH } from "./system-pages.js"
+import { FORGOTTEN_PAGE_PATH } from "./code-owned-pages.js"
 
 /**
  * A line of fewer words carries no claim of its own (a heading, a label, a date), so it is
