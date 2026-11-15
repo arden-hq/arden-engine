@@ -4,12 +4,7 @@ import { Effect } from "effect"
 import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import {
-  GLOBAL_WIKI_LOCATION_AUTHORITY,
-  requireWikiWritePaths,
-  resolveWikiWriteBoundary,
-  type WikiLocationAuthority
-} from "./authority.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY, type WikiLocationAuthority } from "./authority.js"
 import {
   commitWiki,
   decodeWikiOrigin,
@@ -21,16 +16,15 @@ import {
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { isReadme } from "./page.js"
+import { isReadme, replacementContent } from "./page.js"
 import {
+  directoryReadme,
   loadSnapshot,
   nameTakenBy,
   notFound,
   type PageRecord,
-  readRecord,
-  type Snapshot
+  readRecord
 } from "./snapshot.js"
-import { requireRestorable, requireUpdatable } from "./write-rules.js"
 
 interface WikiRestoreInput {
   readonly pageId: string
@@ -157,15 +151,14 @@ export const makeWikiRestoreMethods = (
             }
           )
         }
-        const identity = input.commit
-        const content = yield* requireUpdatable(spaces, snapshot, current, {
-          pageId: input.pageId,
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          content: beforeRecord.page.content
-        })
+        const content = yield* replacementContent("update", input.pageId, beforeRecord.page.content)
         yield* commitWiki(
           { repository, spaces },
-          { ...identity, expectedRevision: input.expectedHead },
+          {
+            ...input.commit,
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            expectedRevision: input.expectedHead
+          },
           [restoreVersion(current.resource, content)]
         ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         const page = yield* read(input.pageId).pipe(
@@ -218,19 +211,16 @@ export const makeWikiRestoreMethods = (
   })
 
   const restorableContent = Effect.fn("Wiki.restorableContent")(function* (
-    snapshot: Snapshot,
     current: PageRecord,
     input: WikiRestoreContentInput
   ) {
     const historical = yield* historicalVersion(input)
-    const content = yield* requireRestorable(spaces, snapshot, current, {
-      pageId: input.pageId,
-      authority: input.authority,
-      content: historical.page.content
-    })
-    yield* requireCommitRules({ repository, spaces }, input.commit.origin, [
-      restoreVersion(current.resource, content)
-    ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+    const content = yield* replacementContent("restore", input.pageId, historical.page.content)
+    yield* requireCommitRules(
+      { repository, spaces },
+      { origin: input.commit.origin, authority: input.authority },
+      [restoreVersion(current.resource, content)]
+    ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
     return content
   })
 
@@ -240,7 +230,7 @@ export const makeWikiRestoreMethods = (
     const snapshot = yield* loadSnapshot(repository, "restore")
     const current = snapshot.wholeSet.find((record) => record.page.pageId === input.pageId)
     if (current === undefined) return yield* notFound("restore", input.pageId)
-    return yield* restorableContent(snapshot, current, input)
+    return yield* restorableContent(current, input)
   })
 
   const restoreRevision = Effect.fn("Wiki.restoreRevision")(function* (
@@ -257,7 +247,7 @@ export const makeWikiRestoreMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        const content = yield* restorableContent(snapshot, current, {
+        const content = yield* restorableContent(current, {
           pageId: input.pageId,
           commitId: input.commitId,
           head: input.expectedHead,
@@ -279,6 +269,7 @@ export const makeWikiRestoreMethods = (
             { repository, spaces },
             {
               expectedRevision: input.expectedHead,
+              authority: input.authority,
               ...input.commit
             },
             [restoreVersion(current.resource, content)]
@@ -329,29 +320,15 @@ export const makeWikiRestoreMethods = (
             }
           )
         }
-        const boundary = yield* resolveWikiWriteBoundary(
-          spaces,
-          input.authority,
-          snapshot,
-          "restore"
-        )
-        yield* requireWikiWritePaths(boundary, "restore", [resource.path])
         const own = posix.dirname(resource.path)
         const directory = isReadme(resource.path) ? posix.dirname(own) : own
-        if (directory !== ".") {
-          const readme = `${directory}/readme.md`.toLowerCase()
-          const mapped = snapshot.wholeSet.some(
-            (record) =>
-              record.resource.path.toLowerCase() === readme && record.page.lifecycle === "active"
+        if (directory !== "." && directoryReadme(snapshot.wholeSet, directory) === undefined) {
+          return yield* wikiError(
+            "restore",
+            "blocked",
+            `Restore the Wiki directory ${directory} first`,
+            { pageId: input.pageId }
           )
-          if (!mapped) {
-            return yield* wikiError(
-              "restore",
-              "blocked",
-              `Restore the Wiki directory ${directory} first`,
-              { pageId: input.pageId }
-            )
-          }
         }
         const taken = nameTakenBy(snapshot, resource.path)
         if (taken !== undefined) {
@@ -364,7 +341,7 @@ export const makeWikiRestoreMethods = (
         }
         yield* commitWiki(
           { repository, spaces },
-          { ...input.commit, expectedRevision: input.expectedHead },
+          { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
           [restoreArchivedPage(resource)]
         ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         return yield* read(input.pageId).pipe(

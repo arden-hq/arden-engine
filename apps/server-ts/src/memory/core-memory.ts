@@ -1,3 +1,7 @@
+import { posix } from "node:path"
+
+import { isReadme } from "../wiki/page.js"
+
 /**
  * Standing facts: the owner's profile and standing preferences, at the root of Memory and sent
  * to every run that reads it. The one place that names their pages.
@@ -14,6 +18,19 @@ export const isStandingFactsPage = (page: {
   const path = page.path.toLocaleLowerCase()
   const pageId = page.pageId.toLocaleLowerCase()
   return STANDING_FACTS_PAGES.some((name) => path === name || `${pageId}.md` === name)
+}
+
+/** Why a new page may not be made at `path`: only standing facts live at the Memory root. */
+export const createRefusal = (
+  path: string
+): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
+  if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
+  if ((posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) || isReadme(path))
+    return {
+      code: "blocked",
+      message: "Wiki pages can be created only inside an existing Wiki directory"
+    }
+  return undefined
 }
 
 const STANDING_PAGE_LIMIT_CHARS = 9_000
@@ -44,6 +61,35 @@ export const coreNeedsCondensing = (chars: number, budget: number): boolean =>
 export const CORE_CONDENSE_ADVICE =
   "Condense wording first, then move project-specific, dated or rarely needed detail " +
   "to the page that owns it, leaving a short link. Keep every general fact and preference."
+
+/** How far a page body is over its limit, or undefined when it fits or has none. */
+export const overPageLimit = (page: {
+  readonly path: string
+  readonly pageId: string
+  readonly body: string
+}): { readonly chars: number; readonly limit: number } | undefined => {
+  const limit = corePageBudget(page)
+  return limit === undefined || page.body.length <= limit
+    ? undefined
+    : { chars: page.body.length, limit }
+}
+
+/** Why a write that grows a page past its limit is refused: the owner hears the limit, a run
+ *  how to condense. */
+export const pageLimitRefusal = (
+  byOwner: boolean,
+  path: string,
+  over: { readonly chars: number; readonly limit: number }
+): string => {
+  const target = coreCondenseTarget(over.limit)
+  return byOwner
+    ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
+        `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
+    : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
+        `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
+        `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
+        `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
+}
 
 export const crowdedCorePages = (
   pages: ReadonlyArray<{

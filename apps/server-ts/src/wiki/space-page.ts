@@ -13,6 +13,7 @@ import {
   pageKind,
   recordFolders
 } from "./collections.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, namesTakenAt, parseWikiPage, takesName } from "./page.js"
@@ -211,6 +212,7 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
       expectedRevision: current.head,
       actor: "user:space",
       origin: { kind: "space_page" },
+      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
       reason: `attach Memory page to Space ${input.spaceId}`
     },
     [

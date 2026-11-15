@@ -2,6 +2,7 @@ import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect } from "effect"
 
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitWiki, createPage, updatePage, type WikiWrite } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { isImportedPath } from "./collections.js"
@@ -116,6 +117,7 @@ export const makeWikiContentStepMethods = (
         {
           actor: "system",
           origin: { kind: "system", name: `${ORIGIN_PREFIX}${step.name}` },
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
           reason: step.reason,
           expectedRevision: snapshot.head
         },

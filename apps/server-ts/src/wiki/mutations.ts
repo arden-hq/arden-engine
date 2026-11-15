@@ -8,8 +8,8 @@ import type { WikiLocationAuthority } from "./authority.js"
 import {
   archivePage,
   commitWiki,
-  createPage,
   mergePage,
+  newPage,
   type WikiCommitIdentity,
   updatePage
 } from "./commit.js"
@@ -24,15 +24,9 @@ import {
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { formatWikiPage, parseWikiPage } from "./page.js"
+import { formatWikiPage, parseWikiPage, replacementContent } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
 import { loadSnapshot } from "./snapshot.js"
-import {
-  requireArchivable,
-  requireCreatable,
-  requireRetirable,
-  requireUpdatable
-} from "./write-rules.js"
 
 interface WikiUpdateInput {
   readonly pageId: string
@@ -122,11 +116,16 @@ export const makeWikiMutationMethods = (
     yield* parseWikiPage(content, pageId).pipe(
       Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
     )
-    const current = yield* loadSnapshot(repository, "create")
-    yield* requireCreatable(spaces, current, { path: input.path, authority: input.authority })
-    yield* commitWiki({ repository, spaces }, { ...input.commit, expectedRevision: current.head }, [
-      createPage(pageId, input.path, content)
-    ]).pipe(Effect.mapError(mapRevisionError("create", pageId)))
+    yield* repository.currentRevision.pipe(
+      Effect.flatMap((head) =>
+        commitWiki(
+          { repository, spaces },
+          { ...input.commit, authority: input.authority, expectedRevision: head },
+          [newPage(pageId, input.path, content)]
+        )
+      ),
+      Effect.mapError(mapRevisionError("create", pageId))
+    )
     const page = yield* read(pageId).pipe(
       Effect.mapError((cause) => new WikiError({ ...cause, operation: "create" }))
     )
@@ -201,7 +200,7 @@ export const makeWikiMutationMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        const content = yield* requireUpdatable(spaces, snapshot, current, input)
+        const content = yield* replacementContent("update", input.pageId, input.content)
         const changed = content !== current.page.content
         if (!changed) {
           const latestHead = yield* repository.currentRevision.pipe(
@@ -215,7 +214,7 @@ export const makeWikiMutationMethods = (
         } else {
           yield* commitWiki(
             { repository, spaces },
-            { ...input.commit, expectedRevision: input.expectedHead },
+            { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
             [updatePage(current.resource, content)]
           ).pipe(Effect.mapError(mapRevisionError("update", input.pageId)))
         }
@@ -248,10 +247,9 @@ export const makeWikiMutationMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        yield* requireArchivable(spaces, snapshot, current, input)
         const committed = yield* commitWiki(
           { repository, spaces },
-          { ...input.commit, expectedRevision: input.expectedHead },
+          { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
           [archivePage(current.resource)]
         ).pipe(Effect.mapError(mapRevisionError("archive", input.pageId)))
         const archived = committed.commit.changes.find(
@@ -287,7 +285,6 @@ export const makeWikiMutationMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        yield* requireRetirable(spaces, "merge", snapshot, current, input)
         const target = snapshot.wholeSet.find(
           (record) =>
             record.page.pageId === input.targetPageId && record.page.lifecycle === "active"
@@ -302,7 +299,7 @@ export const makeWikiMutationMethods = (
         }
         yield* commitWiki(
           { repository, spaces },
-          { ...input.commit, expectedRevision: input.expectedHead },
+          { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
           [
             mergePage(current.resource, {
               pageId: current.page.pageId,

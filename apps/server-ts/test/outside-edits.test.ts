@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { commitWiki, createPage } from "../src/wiki/commit.js"
 import {
   makeOutsideEdits,
@@ -48,6 +49,7 @@ const withMemory = async <A>(
           {
             actor: "test",
             origin: { kind: "system", name: "test" },
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
             reason: "seed",
             expectedRevision: null
           },

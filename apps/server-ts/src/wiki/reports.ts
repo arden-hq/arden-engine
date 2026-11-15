@@ -7,6 +7,7 @@ import { posix } from "node:path"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { markedProducer, recordFolders } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitWiki, publishReport } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
@@ -131,6 +132,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
         automationId: input.producerAutomationId,
         ...(input.producerChainDepth === undefined ? {} : { chainDepth: input.producerChainDepth })
       },
+      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
       reason: `Publish report ${content.path}`
     },
     [publishReport(current?.resource ?? { resourceId: pageId, path: content.path }, formatted)]

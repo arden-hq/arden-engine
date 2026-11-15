@@ -9,8 +9,8 @@ import { commitWiki, updatePage, type WikiCommitIdentity } from "./commit.js"
 import { withConflictDetail } from "./conflict.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
+import { replacementContent } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
-import { requireUpdatable } from "./write-rules.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 // Version 2 names the batch by its chat, its start and end positions and the message at its
@@ -106,11 +106,7 @@ export const makeWikiCaptureMethods = (
                 }
               )
             }
-            const content = yield* requireUpdatable(spaces, snapshot, current, {
-              pageId: edit.pageId,
-              authority: input.authority,
-              content: edit.content
-            })
+            const content = yield* replacementContent("update", edit.pageId, edit.content)
             return { current, expectedVersion: edit.expectedVersion, content }
           })
         )
@@ -124,6 +120,7 @@ export const makeWikiCaptureMethods = (
             {
               actor: input.commit.actor,
               origin,
+              authority: input.authority,
               reason: input.commit.reason,
               expectedRevision: input.expectedHead
             },

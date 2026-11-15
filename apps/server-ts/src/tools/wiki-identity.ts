@@ -72,7 +72,7 @@ export const readWikiRun = async (
   return { record, context }
 }
 
-const memoryLocation = (memory: MemoryAuthority): WikiLocationAuthority => {
+export const memoryLocation = (memory: MemoryAuthority): WikiLocationAuthority => {
   switch (memory._tag) {
     case "Global":
     case "Capture":

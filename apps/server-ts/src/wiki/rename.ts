@@ -505,12 +505,9 @@ export const makeWikiRenameMethods = (
       input.newPath,
       input.newTitle
     )
-    const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
-    const paths = yield* planMutationPaths(plan, snapshot.wholeSet)
-    yield* requireWikiWritePaths(boundary, "rename", paths)
     yield* requireCommitRules(
       { repository, spaces },
-      input.commit.origin,
+      { origin: input.commit.origin, authority: input.authority },
       planOperations(plan)
     ).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
     const approval = yield* store
@@ -552,6 +549,7 @@ export const makeWikiRenameMethods = (
       {
         idempotencyKey: `wiki-rename:${approval.approvalId}`,
         ...writer.commit,
+        authority: writer.authority,
         expectedRevision: plan.baseHead
       },
       planOperations(plan)

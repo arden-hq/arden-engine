@@ -63,7 +63,7 @@ export const makeWikiImportMethods = (
     if (plan.operations.length === 0) return { ...plan.result, committed: [] }
     const written = yield* commitWiki(
       { repository, spaces },
-      { ...input.commit, expectedRevision: snapshot.head },
+      { ...input.commit, authority: input.authority, expectedRevision: snapshot.head },
       plan.operations
     ).pipe(Effect.mapError(mapRevisionError("create")))
     return {

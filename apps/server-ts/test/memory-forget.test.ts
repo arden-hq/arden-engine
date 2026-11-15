@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY as GLOBAL } from "../src/wiki/authority.js"
 import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
 import { makeWikiForgetMethods } from "../src/wiki/forgotten.js"
 import { formatWikiPage } from "../src/wiki/page.js"
@@ -13,7 +14,11 @@ import { partialService } from "./kit.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const LINE = "Sam lives in the old town by the river."
-const TURN = { sessionId: "session-fixture", chat: "arden:session/chat~session-fixture" }
+const TURN = {
+  sessionId: "session-fixture",
+  chat: "arden:session/chat~session-fixture",
+  authority: GLOBAL
+}
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
   activeBindings: () => Effect.succeed([])
 })
@@ -35,10 +40,14 @@ it("forgetting a line removes every copy on every page in one commit, and no oth
       Effect.gen(function* () {
         const repository = yield* ManagedFileRepository
         const memory = withoutSpaces(repository)
-        yield* commitWiki(memory, { ...ownerInApp("seed"), expectedRevision: null }, [
-          createPage("sam", "people/sam.md", content("sam", `${LINE}\n- Works at the bakery.\n`)),
-          createPage("town", "places/town.md", content("town", `- ${LINE}\nTwo bridges.\n`))
-        ])
+        yield* commitWiki(
+          memory,
+          { ...ownerInApp("seed"), authority: GLOBAL, expectedRevision: null },
+          [
+            createPage("sam", "people/sam.md", content("sam", `${LINE}\n- Works at the bakery.\n`)),
+            createPage("town", "places/town.md", content("town", `- ${LINE}\nTwo bridges.\n`))
+          ]
+        )
         const commits = () => repository.history({ limit: null }).pipe(Effect.map((h) => h.length))
         const before = yield* commits()
         yield* makeWikiForgetMethods(repository, spaces).forget({
@@ -61,6 +70,7 @@ it("forgetting a line removes every copy on every page in one commit, and no oth
             {
               actor: "test",
               origin: { kind: "agent", sessionId: "chat-1" },
+              authority: GLOBAL,
               reason: "put back",
               expectedRevision: yield* repository.currentRevision
             },

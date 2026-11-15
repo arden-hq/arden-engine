@@ -5,6 +5,7 @@ import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
@@ -39,7 +40,11 @@ it("refuses a write that grows a page past its size limit, but not one that leav
             if (page === null) throw new Error("me.md is missing")
             return yield* commitWiki(
               withoutSpaces(repository),
-              { ...ownerInApp("test"), expectedRevision: yield* repository.currentRevision },
+              {
+                ...ownerInApp("test"),
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+                expectedRevision: yield* repository.currentRevision
+              },
               [updatePage(page, content(title, size))]
             ).pipe(Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" }))
           })

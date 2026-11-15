@@ -20,6 +20,7 @@ import {
   type WikiCommitOrigin,
   type WikiWrite
 } from "../src/wiki/commit.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { formatRedirectPage } from "../src/wiki/page.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
@@ -233,7 +234,10 @@ it("classifies every page on the copy, and refuses upkeep's every write to recor
           )
           const refused = yield* requireCommitRules(
             withoutSpaces(repository),
-            commitOrigin(writer, call.automation_id),
+            {
+              origin: commitOrigin(writer, call.automation_id),
+              authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            },
             [replay.operation]
           ).pipe(
             Effect.match({

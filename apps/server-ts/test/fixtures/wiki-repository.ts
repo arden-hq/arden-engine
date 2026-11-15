@@ -20,6 +20,7 @@ import type { ServerTool } from "../../src/tools/define.js"
 import type { ServerRunContext } from "../../src/tools/run-context.js"
 import { wikiOperationTools } from "../../src/tools/wiki-operations.js"
 import { makeWikiChangeMethods } from "../../src/wiki/change.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../src/wiki/authority.js"
 import {
   commitWiki,
   createPage,
@@ -84,7 +85,13 @@ export const withWikiRepository = async <A>(
           const current = yield* repository.get(pageId)
           yield* commitWiki(
             withoutSpaces(repository),
-            { actor: actor ?? "Agent", origin, reason: `save ${path}`, expectedRevision: head },
+            {
+              actor: actor ?? "Agent",
+              origin,
+              authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+              reason: `save ${path}`,
+              expectedRevision: head
+            },
             [current === null ? createPage(pageId, path, content) : updatePage(current, content)]
           )
         }).pipe(Effect.provideService(Clock.Clock, clock))
@@ -118,7 +125,7 @@ const distinctMillisClock = (): Clock.Clock => {
 
 export const withoutSpaces = (repository: ManagedFileRepositoryShape): WikiCommitPoint => ({
   repository,
-  spaces: { activeBindings: () => Effect.succeed([]) }
+  spaces: { activeBindings: () => Effect.succeed([]), get: () => Effect.succeed(null) }
 })
 
 export const agentChat = (sessionId: string): WikiCommitOrigin => ({ kind: "agent", sessionId })

@@ -8,9 +8,10 @@ import {
   createPage,
   requireCommitRules,
   updatePage,
-  type WikiCommitOrigin,
-  type WikiWrite
+  type WikiWrite,
+  type WikiWriter
 } from "./commit.js"
+import type { WikiLocationAuthority } from "./authority.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, reviseWikiPage } from "./page.js"
 import {
@@ -30,6 +31,7 @@ import type { SpaceStore } from "../persistence/spaces/store.js"
 interface OwnerTurn {
   readonly sessionId: string
   readonly chat: string
+  readonly authority: WikiLocationAuthority
 }
 
 interface WikiForgetInput {
@@ -72,9 +74,9 @@ interface Plan {
   readonly operations: ReadonlyArray<WikiWrite>
 }
 
-const forgetOrigin = (turn: OwnerTurn): WikiCommitOrigin => ({
-  kind: "forget",
-  sessionId: turn.sessionId
+const forgetWriter = (turn: OwnerTurn): WikiWriter => ({
+  origin: { kind: "forget", sessionId: turn.sessionId },
+  authority: turn.authority
 })
 
 const FORGOTTEN_TITLE = "Forgotten"
@@ -258,7 +260,7 @@ export const makeWikiForgetMethods = (
     loadSnapshot(repository, "forget").pipe(
       Effect.flatMap(plan),
       Effect.tap((planned) =>
-        requireCommitRules({ repository, spaces }, forgetOrigin(turn), planned.operations).pipe(
+        requireCommitRules({ repository, spaces }, forgetWriter(turn), planned.operations).pipe(
           Effect.mapError(mapRevisionError("forget"))
         )
       )
@@ -268,8 +270,8 @@ export const makeWikiForgetMethods = (
     commitWiki(
       { repository, spaces },
       {
+        ...forgetWriter(turn),
         actor: "user:chat",
-        origin: forgetOrigin(turn),
         reason,
         expectedRevision: plan.head
       },

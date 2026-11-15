@@ -12,6 +12,7 @@ import {
   updatePage,
   type WikiCommitOrigin
 } from "../src/wiki/commit.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
@@ -62,6 +63,7 @@ it("upkeep never edits, creates or moves into a record or folder contract; other
               withoutSpaces(repository),
               {
                 ...{ actor: origin.kind, origin, reason: "test" },
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
                 expectedRevision: yield* repository.currentRevision
               },
               [operation]

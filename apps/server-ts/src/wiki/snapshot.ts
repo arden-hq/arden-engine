@@ -178,24 +178,41 @@ export const resolveWikiLinkTarget = (
   return candidate === undefined ? null : followRedirect(pages, candidate)
 }
 
+/** The active README that maps `directory`; "." is the Memory root. */
+export const directoryReadme = (
+  pages: ReadonlyArray<PageRecord>,
+  directory: string
+): PageRecord | undefined => {
+  const readme = (directory === "." ? "readme.md" : `${directory}/readme.md`).toLowerCase()
+  return pages.find(
+    (record) => record.resource.path.toLowerCase() === readme && record.page.lifecycle === "active"
+  )
+}
+
+/** A redirect among `pages` whose target is missing or loops back. */
+export const brokenRedirect = (pages: ReadonlyArray<PageRecord>): PageRecord | undefined => {
+  const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
+  return pages.find(
+    (record) =>
+      record.page.lifecycle === "redirect" && followRedirect(byId, record.page.pageId) === null
+  )
+}
+
 export const validateRedirects = (
   operation: WikiOperation,
   pages: ReadonlyArray<PageRecord>
 ): Effect.Effect<void, WikiError> => {
-  const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
-  for (const record of pages) {
-    if (record.page.lifecycle === "redirect" && followRedirect(byId, record.page.pageId) === null) {
-      return Effect.fail(
+  const broken = brokenRedirect(pages)
+  return broken === undefined
+    ? Effect.void
+    : Effect.fail(
         wikiError(
           operation,
           "corrupt",
-          `Redirect ${record.page.pageId} has a missing target or cycle`,
-          { pageId: record.page.pageId }
+          `Redirect ${broken.page.pageId} has a missing target or cycle`,
+          { pageId: broken.page.pageId }
         )
       )
-    }
-  }
-  return Effect.void
 }
 
 const recordKey = (resource: ResourceVersion): string =>

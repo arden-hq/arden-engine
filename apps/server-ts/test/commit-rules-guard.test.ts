@@ -19,14 +19,19 @@ it("makes the upkeep writer only through its constructor", () => {
   expect(naming(/\bupkeepOrigin\(/u)).toEqual(["tools/wiki-identity.ts", "wiki/commit.ts"])
 })
 
-it("reads a writer's kind only at the commit point (its Space boundary is still checked in each write path)", () => {
+it("reads a writer's kind only at the commit point, and checks its Space boundary there", () => {
   const wiki = (paths: ReadonlyArray<string>) => paths.filter((path) => path.startsWith("wiki/"))
   expect(wiki(naming(/\.origin\.kind\b/u))).toEqual(["wiki/commit.ts"])
-  expect(naming(/from "\.\/commit\.js"/u)).not.toContain("wiki/write-rules.ts")
+  expect(naming(/\brequireWikiWritePaths\(/u)).toEqual([
+    "wiki/commit.ts",
+    "wiki/directories.ts",
+    "wiki/rename.ts"
+  ])
 })
 
 it("tells a merge, a version restore and a report only by the action its one caller states", () => {
   expect(naming(/\bmergePage\(/u)).toEqual(["wiki/mutations.ts"])
+  expect(naming(/\bnewPage\(/u)).toEqual(["wiki/mutations.ts"])
   expect(naming(/\brestoreVersion\(/u)).toEqual(["wiki/restore.ts"])
   expect(naming(/(?<!\.)\bpublishReport\(/u)).toEqual(["wiki/reports.ts"])
 })
@@ -34,12 +39,8 @@ it("tells a merge, a version restore and a report only by the action its one cal
 it("keeps a Space's own page at the commit point, and reads ownership elsewhere only to place a new page", () => {
   expect(naming(/\b(isSpacePage|spacePageCheck)\(/u)).toEqual([
     "wiki/commit.ts",
-    "wiki/publication.ts",
-    "wiki/write-rules.ts"
+    "wiki/publication.ts"
   ])
-  const writeRules = readFileSync(join(SOURCE, "wiki/write-rules.ts"), "utf8")
-  expect(writeRules.match(/\bisSpacePage\(/gu)).toHaveLength(1)
-  expect(writeRules).toMatch(/requireCreatable[\s\S]*\bisSpacePage\(/u)
   expect(naming(/Move or archive the Space first/iu)).toEqual(["wiki/commit.ts"])
 })
 

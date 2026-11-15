@@ -9,16 +9,30 @@ import type {
 import { Effect, Option, Schema } from "effect"
 import { posix } from "node:path"
 
-import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
+import {
+  corePageBudget,
+  createRefusal,
+  overPageLimit,
+  pageLimitRefusal
+} from "../memory/core-memory.js"
 import type { SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
+import {
+  requireNewPagePlace,
+  requireWikiWritePaths,
+  resolveWikiWriteBoundary,
+  type WikiLocationAuthority,
+  type WikiWriteBoundary
+} from "./authority.js"
 import { pageKind, producingAutomation, recordFolders, type RecordFolders } from "./collections.js"
+import { wikiError, type WikiError } from "./errors.js"
 import {
   aliasesAreHuman,
   formatRedirectPage,
   isReadme,
   namesTakenAt,
   parseWikiPage,
-  takesName
+  takesName,
+  type ParsedWikiPage
 } from "./page.js"
 import {
   guardedLines,
@@ -27,7 +41,7 @@ import {
   retractionRefusal,
   type OpenRetraction
 } from "./retraction.js"
-import type { PageRecord } from "./snapshot.js"
+import { brokenRedirect, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
 import { spacePageCheck } from "./space-index.js"
 import { isCodeOwnedPage } from "./code-owned-pages.js"
 
@@ -57,6 +71,12 @@ export interface WikiCommitIdentity {
   readonly actor: string
   readonly origin: WikiCommitOrigin
   readonly reason: string
+}
+
+/** Who writes, and where in Memory they may write. */
+export interface WikiWriter {
+  readonly origin: WikiCommitOrigin
+  readonly authority: WikiLocationAuthority
 }
 
 /** Tidy, the upkeep Automation; the system handler registry decides which Automation that is. */
@@ -203,7 +223,7 @@ type Operation<Tag extends WikiPageOperation["_tag"]> = Extract<
 >
 
 export type WikiWrite =
-  | { readonly action: "create"; readonly operation: Operation<"Create"> }
+  | { readonly action: "create" | "new_page"; readonly operation: Operation<"Create"> }
   | { readonly action: "publish"; readonly operation: Operation<"Create" | "Update"> }
   | {
       readonly action: "edit" | "restore_version" | "merge"
@@ -236,6 +256,12 @@ const updated = (page: PageVersion, content: string): Operation<"Update"> => ({
 
 export const createPage = (resourceId: string, path: string, content: string): WikiWrite => ({
   action: "create",
+  operation: created(resourceId, path, content)
+})
+
+/** A page a writer asks for by path, as against one Arden places itself. */
+export const newPage = (resourceId: string, path: string, content: string): WikiWrite => ({
+  action: "new_page",
   operation: created(resourceId, path, content)
 })
 
@@ -304,19 +330,20 @@ class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("Wik
   message: Schema.String
 }) {}
 
-export type WikiCommitError = RevisionError | SpaceStoreError | WikiCommitRuleError
+export type WikiCommitError = RevisionError | SpaceStoreError | WikiCommitRuleError | WikiError
 
 export interface WikiCommitPoint {
   readonly repository: ManagedFileRepositoryShape
-  readonly spaces: Pick<SpaceStore["Service"], "activeBindings">
+  readonly spaces: Pick<SpaceStore["Service"], "activeBindings" | "get">
 }
 
 export const commitWiki = (
   point: WikiCommitPoint,
-  options: WikiCommitIdentity & {
-    readonly expectedRevision: string | null
-    readonly idempotencyKey?: string
-  },
+  options: WikiCommitIdentity &
+    WikiWriter & {
+      readonly expectedRevision: string | null
+      readonly idempotencyKey?: string
+    },
   writes: ReadonlyArray<WikiWrite>
 ): Effect.Effect<CommitResult, WikiCommitError> => {
   const replayKey =
@@ -332,7 +359,7 @@ export const commitWiki = (
       : { expectedHead: options.expectedRevision }),
     ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
   })
-  const checked = requireCommitRules(point, options.origin, writes).pipe(Effect.andThen(commit))
+  const checked = requireCommitRules(point, options, writes).pipe(Effect.andThen(commit))
   return replayKey === undefined
     ? checked
     : replayOrCommit(point.repository, replayKey, { checked, landed: commit })
@@ -356,10 +383,10 @@ const replayOrCommit = (
  */
 export const commitOutsideChange = (
   point: WikiCommitPoint,
-  options: WikiCommitIdentity & { readonly expectedRevision: string | null },
+  options: WikiCommitIdentity & WikiWriter & { readonly expectedRevision: string | null },
   change: AdoptableWorkingChange
 ): Effect.Effect<CommitResult, WikiCommitError> =>
-  requireCommitRules(point, options.origin, [
+  requireCommitRules(point, options, [
     change.kind === "changed"
       ? {
           action: "edit",
@@ -388,8 +415,18 @@ interface ResolvedWrite {
   readonly before: ResourceVersion | null
   readonly path: { readonly before: string | undefined; readonly after: string | undefined }
   readonly given: Uint8Array | undefined
+  /** The page `given` reads as, if it reads as one. */
+  readonly page: Option.Option<ParsedWikiPage>
   readonly beforeContent: Effect.Effect<Uint8Array | null, RevisionError>
+  readonly pageBefore: Effect.Effect<Option.Option<ParsedWikiPage>, RevisionError>
 }
+
+const readPage = (
+  bytes: Uint8Array | null | undefined
+): Effect.Effect<Option.Option<ParsedWikiPage>> =>
+  bytes === null || bytes === undefined
+    ? Effect.succeed(Option.none())
+    : parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
 
 const resolveWrite = Effect.fn("Wiki.resolveWrite")(function* (
   repository: ManagedFileRepositoryShape,
@@ -397,6 +434,10 @@ const resolveWrite = Effect.fn("Wiki.resolveWrite")(function* (
 ): Effect.fn.Return<ResolvedWrite, RevisionError> {
   const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
   const moved = "path" in operation ? operation.path : undefined
+  const given = "content" in operation ? operation.content : undefined
+  const beforeContent = yield* Effect.cached(
+    before === null ? Effect.succeed(null) : repository.readVersion(before)
+  )
   return {
     action,
     resourceId: operation.resourceId,
@@ -405,10 +446,10 @@ const resolveWrite = Effect.fn("Wiki.resolveWrite")(function* (
       before: before?.path,
       after: operation._tag === "Archive" ? undefined : (moved ?? before?.path)
     },
-    given: "content" in operation ? operation.content : undefined,
-    beforeContent: yield* Effect.cached(
-      before === null ? Effect.succeed(null) : repository.readVersion(before)
-    )
+    given,
+    page: yield* readPage(given),
+    beforeContent,
+    pageBefore: yield* Effect.cached(beforeContent.pipe(Effect.flatMap(readPage)))
   }
 })
 
@@ -419,82 +460,33 @@ interface CommitView {
   readonly occupied: Effect.Effect<ReadonlyMap<string, string>, RevisionError>
   readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
   readonly spaceOwns: (pageId: string, path: string) => Effect.Effect<boolean, SpaceStoreError>
+  readonly snapshot: Effect.Effect<Snapshot, WikiError>
+  readonly boundary: Effect.Effect<WikiWriteBoundary | undefined, WikiError>
 }
 
-const requireHumanAliases = (write: ResolvedWrite): Effect.Effect<void, WikiCommitRuleError> => {
-  if (write.given === undefined) return Effect.void
-  return parseWikiPage(decoder.decode(write.given)).pipe(
-    Effect.option,
-    Effect.flatMap((page) =>
-      Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
-        ? Effect.void
-        : Effect.fail(
-            new WikiCommitRuleError({
-              rule: "aliases",
-              message: `Wiki page ${write.resourceId} keeps a path or a repeated name as an alias`
-            })
-          )
-    )
-  )
-}
-
-/** How far a page body is over its limit, or undefined when it fits or has none. */
-export const overPageLimit = (page: {
-  readonly path: string
-  readonly pageId: string
-  readonly body: string
-}): { readonly chars: number; readonly limit: number } | undefined => {
-  const limit = corePageBudget(page)
-  return limit === undefined || page.body.length <= limit
-    ? undefined
-    : { chars: page.body.length, limit }
-}
-
-const limitRefusal = (
-  origin: WikiCommitOrigin,
-  path: string,
-  over: { readonly chars: number; readonly limit: number }
-): WikiCommitRuleError => {
-  const target = coreCondenseTarget(over.limit)
-  return new WikiCommitRuleError({
-    rule: "size",
-    message: isOwnerOrigin(origin)
-      ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
-        `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
-      : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
-        `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
-        `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
-        `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
-  })
-}
+const requireHumanAliases = ({ page, resourceId }: ResolvedWrite) =>
+  Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
+    ? Effect.void
+    : ruleError("aliases", `Wiki page ${resourceId} keeps a path or a repeated name as an alias`)
 
 const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
   { origin }: CommitView,
   write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
   const path = write.path.after
-  if (path === undefined) return
-  const written = write.given === undefined ? write.beforeContent : Effect.succeed(write.given)
-  const over = yield* bodyOverLimit(path, write.resourceId, written)
+  if (path === undefined || corePageBudget({ path, pageId: write.resourceId }) === undefined) return
+  const overAt = (at: string, page: Option.Option<ParsedWikiPage>) =>
+    Option.isNone(page)
+      ? undefined
+      : overPageLimit({ path: at, pageId: write.resourceId, body: page.value.body })
+  const over = overAt(path, write.given === undefined ? yield* write.pageBefore : write.page)
   if (over === undefined) return
   const was =
     write.before?.state === "active"
-      ? yield* bodyOverLimit(write.before.path, write.resourceId, write.beforeContent)
+      ? overAt(write.before.path, yield* write.pageBefore)
       : undefined
   if (was !== undefined && over.chars <= was.chars) return
-  return yield* limitRefusal(origin, path, over)
-})
-
-const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
-  path: string,
-  pageId: string,
-  content: Effect.Effect<Uint8Array | null, RevisionError>
-): Effect.fn.Return<{ readonly chars: number; readonly limit: number } | undefined, RevisionError> {
-  if (corePageBudget({ path, pageId }) === undefined) return undefined
-  const bytes = yield* content
-  if (bytes === null) return undefined
-  const page = yield* parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
-  return Option.isNone(page) ? undefined : overPageLimit({ path, pageId, body: page.value.body })
+  return yield* ruleError("size", pageLimitRefusal(isOwnerOrigin(origin), path, over))
 })
 
 const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
@@ -508,14 +500,14 @@ const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
 ): Effect.fn.Return<RecordFolders, RevisionError> {
   const readmes = (yield* active).filter((resource) => isReadme(resource.path))
   const pages = yield* Effect.forEach(readmes, (resource) =>
-    repository.readVersion(resource).pipe(
-      Effect.flatMap((bytes) => parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)),
-      Effect.map((page): ReadonlyArray<PageRecord> =>
-        Option.isNone(page) ? [] : [{ resource, page: page.value }]
+    repository
+      .readVersion(resource)
+      .pipe(
+        Effect.flatMap(readPage),
+        Effect.map(Option.map((page): PageRecord => ({ resource, page })))
       )
-    )
   )
-  return recordFolders(pages.flat())
+  return recordFolders(pages.flatMap(Option.toArray))
 })
 
 const ruleError = (rule: WikiCommitRuleError["rule"], message: string) =>
@@ -598,6 +590,7 @@ const requireAutomatedRecordWrite = Effect.fn("Wiki.requireAutomatedRecordWrite"
     case "restore_archived":
       return
     case "create":
+    case "new_page":
     case "publish": {
       if (write.before !== null || write.path.after === undefined) return
       const producer = producingAutomation(yield* folders, write.path.after)
@@ -680,8 +673,8 @@ const requireRedirectOnlyByMerge = Effect.fn("Wiki.requireRedirectOnlyByMerge")(
   _view: CommitView,
   write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  if (write.before === null || write.given === undefined || write.action === "merge") return
-  const page = yield* parseWikiPage(decoder.decode(write.given)).pipe(Effect.option)
+  const { page } = write
+  if (write.before === null || write.action === "merge") return
   if (Option.isNone(page) || page.value.lifecycle !== "redirect") return
   return yield* ruleError(
     "retire",
@@ -689,12 +682,10 @@ const requireRedirectOnlyByMerge = Effect.fn("Wiki.requireRedirectOnlyByMerge")(
   )
 })
 
-const keepsCodeOwnedPage = Effect.fn("Wiki.keepsCodeOwnedPage")(function* (
-  origin: WikiCommitOrigin,
-  write: ResolvedWrite
-): Effect.fn.Return<boolean> {
+const keepsCodeOwnedPage = (origin: WikiCommitOrigin, write: ResolvedWrite): boolean => {
   switch (write.action) {
     case "create":
+    case "new_page":
     case "publish":
       if (write.before === null) return origin.kind === "forget"
       break
@@ -709,10 +700,8 @@ const keepsCodeOwnedPage = Effect.fn("Wiki.keepsCodeOwnedPage")(function* (
     case "restore_archived":
       break
   }
-  if (write.given === undefined) return true
-  const page = yield* parseWikiPage(decoder.decode(write.given)).pipe(Effect.option)
-  return Option.isNone(page) || page.value.lifecycle === "active"
-})
+  return Option.isNone(write.page) || write.page.value.lifecycle === "active"
+}
 
 const requireCodeOwnedPageKept = Effect.fn("Wiki.requireCodeOwnedPageKept")(function* (
   { origin }: CommitView,
@@ -727,7 +716,7 @@ const requireCodeOwnedPageKept = Effect.fn("Wiki.requireCodeOwnedPageKept")(func
       "code_owned",
       `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
     )
-  if (yield* keepsCodeOwnedPage(origin, write)) return
+  if (keepsCodeOwnedPage(origin, write)) return
   return yield* ruleError(
     "code_owned",
     `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
@@ -764,10 +753,89 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
   if (entry !== undefined) return yield* ruleError("retraction", retractionRefusal(path, entry))
 })
 
+const requireNewPagePath = (_view: CommitView, write: ResolvedWrite) => {
+  const path = write.action === "new_page" ? write.path.after : undefined
+  const refused = path === undefined ? undefined : createRefusal(path)
+  return refused === undefined ? Effect.void : wikiError("create", refused.code, refused.message)
+}
+
+const requireActivePage = Effect.fn("Wiki.requireActivePage")(function* (
+  _view: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  if (write.action !== "edit" && write.action !== "archive" && write.action !== "merge") return
+  const page = yield* write.pageBefore
+  if (Option.isNone(page) || page.value.lifecycle === "active") return
+  const options = { pageId: write.resourceId }
+  return yield* write.action === "edit"
+    ? wikiError("update", "invalid", "Only active Wiki pages can be updated", options)
+    : wikiError(write.action, "invalid", "Only active Wiki pages can be retired", options)
+})
+
+const requireWithinBoundary = Effect.fn("Wiki.requireWithinBoundary")(function* (
+  { boundary }: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  const paths = [write.path.before, write.path.after].filter((path) => path !== undefined)
+  yield* requireWikiWritePaths(yield* boundary, "update", paths)
+})
+
+const requirePlacedNewPage = Effect.fn("Wiki.requirePlacedNewPage")(function* (
+  { snapshot, boundary, spaceOwns }: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  const path = write.path.after
+  if (write.action !== "new_page" || path === undefined) return
+  yield* requireNewPagePlace(yield* snapshot, yield* boundary, spaceOwns, path)
+})
+
+const requireDirectoryEmptied = Effect.fn("Wiki.requireDirectoryEmptied")(function* (
+  { snapshot, occupied }: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  const path = write.path.before
+  if (write.action !== "archive" && write.action !== "merge") return
+  if (path === undefined || !isReadme(path)) return
+  const directory = posix.dirname(path)
+  const after = yield* occupied
+  const child = (yield* snapshot).wholeSet.find(
+    (record) =>
+      record.page.pageId !== write.resourceId &&
+      record.page.lifecycle === "active" &&
+      after.get(record.page.pageId)?.startsWith(`${directory}/`) === true
+  )
+  if (child !== undefined)
+    return yield* wikiError(write.action, "blocked", `Active Wiki pages remain in ${directory}`, {
+      pageId: write.resourceId
+    })
+})
+
+const requireRedirectTargetKept = Effect.fn("Wiki.requireRedirectTargetKept")(function* (
+  { snapshot }: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  if (write.action !== "archive") return
+  const pages = (yield* snapshot).wholeSet
+  const broken = brokenRedirect(pages.filter((record) => record.page.pageId !== write.resourceId))
+  if (broken !== undefined)
+    return yield* wikiError(
+      "archive",
+      "invalid",
+      `Page is still the target of redirect ${broken.page.pageId}`,
+      { pageId: write.resourceId }
+    )
+})
+
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (view: CommitView, write: ResolvedWrite) => Effect.Effect<void, WikiCommitError>
 }> = [
+  { binds: () => true, check: requireNewPagePath },
+  { binds: () => true, check: requireActivePage },
+  { binds: () => true, check: requireWithinBoundary },
+  { binds: () => true, check: requirePlacedNewPage },
+  { binds: () => true, check: requireDirectoryEmptied },
+  { binds: () => true, check: requireRedirectTargetKept },
   { binds: () => true, check: requireSpacePageKept },
   { binds: () => true, check: requireNameFree },
   { binds: (origin) => !isOwnerOrigin(origin), check: requireRedirectOnlyByMerge },
@@ -784,11 +852,12 @@ const COMMIT_RULES: ReadonlyArray<{
 /** Fails with the first rule that refuses one of `writes` for this writer. */
 export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function* (
   { repository, spaces }: WikiCommitPoint,
-  origin: WikiCommitOrigin,
+  { origin, authority }: WikiWriter,
   writes: ReadonlyArray<WikiWrite>
 ): Effect.fn.Return<void, WikiCommitError> {
   const resolved = yield* Effect.forEach(writes, (write) => resolveWrite(repository, write))
   const active = yield* Effect.cached(repository.listResources())
+  const snapshot = yield* Effect.cached(loadSnapshot(repository, "update"))
   const view: CommitView = {
     repository,
     origin,
@@ -797,7 +866,15 @@ export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function*
       active.pipe(Effect.map((list) => occupiedAfter(list, resolved)))
     ),
     guarded: yield* Effect.cached(openRetractions(repository).pipe(Effect.map(guardedLines))),
-    spaceOwns: yield* spacePageCheck(spaces)
+    spaceOwns: yield* spacePageCheck(spaces),
+    snapshot,
+    boundary: yield* Effect.cached(
+      authority._tag === "Global"
+        ? Effect.succeed(undefined)
+        : snapshot.pipe(
+            Effect.flatMap((pages) => resolveWikiWriteBoundary(spaces, authority, pages, "update"))
+          )
+    )
   }
   for (const rule of COMMIT_RULES) {
     if (!rule.binds(origin)) continue

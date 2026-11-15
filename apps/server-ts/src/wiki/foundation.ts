@@ -6,6 +6,7 @@ import { resolve } from "node:path"
 
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage } from "./page.js"
@@ -56,6 +57,7 @@ checkpoints stay in application storage. Add specialist directories only when a 
     {
       actor: "system",
       origin: { kind: "system", name: "wiki.foundation" },
+      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
       reason: "Initialize personal Memory",
       expectedRevision: null
     },

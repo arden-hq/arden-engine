@@ -97,6 +97,8 @@ export const mapRevisionError =
       cause
     }
     switch (cause._tag) {
+      case "WikiError":
+        return new WikiError({ ...cause, message: cause.message, operation })
       case "RevisionConflictError":
         return wikiError(operation, "conflict", cause.message, options)
       case "WorkingFileChangedError":

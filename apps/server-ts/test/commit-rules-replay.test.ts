@@ -22,6 +22,7 @@ import {
   updatePage,
   type WikiWrite
 } from "../src/wiki/commit.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { parseWikiPage } from "../src/wiki/page.js"
 import { locateReplayCopy } from "./fixtures/replay-copy.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
@@ -110,7 +111,7 @@ const outcomeOf = Effect.fn("outcomeOf")(function* (
   const origin = decodeWikiOrigin(commit.origin)
   const outcome = yield* requireCommitRules(
     withoutSpaces(pinnedAt(repository, commit.parentId)),
-    origin,
+    { origin, authority: GLOBAL_WIKI_LOCATION_AUTHORITY },
     writes
   ).pipe(
     Effect.match({

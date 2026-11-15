@@ -21,7 +21,7 @@ import {
 import { commitWiki, createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, parseWikiPage, reviseWikiPage } from "./page.js"
-import { loadSnapshot, nameTakenBy } from "./snapshot.js"
+import { directoryReadme, loadSnapshot, nameTakenBy } from "./snapshot.js"
 import { spaceOwnsWikiPath } from "./space-index.js"
 
 const DIRECTORY_CONTRACT_HEADING = "## Directory contract"
@@ -143,14 +143,7 @@ export const makeWikiDirectoryMethods = (
       )
     }
     const parent = posix.dirname(directory)
-    if (
-      parent !== "." &&
-      !snapshot.wholeSet.some(
-        (record) =>
-          record.resource.path.toLowerCase() === `${parent}/readme.md`.toLowerCase() &&
-          record.page.lifecycle === "active"
-      )
-    ) {
+    if (parent !== "." && directoryReadme(snapshot.wholeSet, parent) === undefined) {
       return yield* wikiError(
         "create",
         "blocked",
@@ -191,6 +184,7 @@ export const makeWikiDirectoryMethods = (
           { repository, spaces },
           {
             ...input.commit,
+            authority: input.authority,
             reason: "Bind report destination",
             expectedRevision: snapshot.head
           },
@@ -258,7 +252,7 @@ export const makeWikiDirectoryMethods = (
       )
       yield* commitWiki(
         { repository, spaces },
-        { actor, origin, reason, expectedRevision: snapshot.head },
+        { actor, origin, reason, authority: input.authority, expectedRevision: snapshot.head },
         [movePage(occupant.resource, readmePath, content)]
       ).pipe(Effect.mapError(mapRevisionError("create", occupant.page.pageId)))
       return { pageId: occupant.page.pageId, changed: true, adopted: true }
@@ -282,7 +276,7 @@ export const makeWikiDirectoryMethods = (
     )
     yield* commitWiki(
       { repository, spaces },
-      { actor, origin, reason, expectedRevision: snapshot.head },
+      { actor, origin, reason, authority: input.authority, expectedRevision: snapshot.head },
       [createPage(pageId, readmePath, content)]
     ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
     return { pageId, changed: true, adopted: false }

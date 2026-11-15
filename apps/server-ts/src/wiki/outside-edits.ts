@@ -11,9 +11,14 @@ import { Effect } from "effect"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { commitOutsideChange, type WikiCommitError, type WikiCommitIdentity } from "./commit.js"
+import {
+  commitOutsideChange,
+  type WikiCommitError,
+  type WikiCommitIdentity,
+  type WikiWriter
+} from "./commit.js"
 import { mapRevisionError, WikiError } from "./errors.js"
-import { isReadme } from "./page.js"
+import { isReadme, replacementContent } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
 import {
   UNTRACKED_PAGES,
@@ -22,7 +27,6 @@ import {
   utf8,
   type UntrackedFiles
 } from "./untracked.js"
-import { requireArchivable, requireUpdatable, type WikiWriter } from "./write-rules.js"
 
 /**
  * What Memory does with one file that differs from its history. Nothing is decided about a file
@@ -79,13 +83,9 @@ export const MAX_MISSING_ARCHIVED = 20
 const OUTSIDE_EDIT_IDENTITY = {
   actor: "user:external",
   origin: { kind: "user", via: "filesystem" },
+  authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
   reason: "take in a change made outside Arden"
-} as const satisfies WikiCommitIdentity
-
-const writer = (pageId: string): WikiWriter => ({
-  pageId,
-  authority: GLOBAL_WIKI_LOCATION_AUTHORITY
-})
+} as const satisfies WikiCommitIdentity & WikiWriter
 
 const refusal = (cause: WikiError): string | undefined => {
   switch (cause.reason) {
@@ -174,9 +174,7 @@ export const makeOutsideEdits = (input: {
       case "changed": {
         const content = utf8(change.content)
         if (content === undefined) return setAside("unreadable", "The file is not UTF-8 text")
-        const refused = yield* allowed(
-          requireUpdatable(spaces, pages, record, { ...writer(record.page.pageId), content })
-        )
+        const refused = yield* allowed(replacementContent("update", record.page.pageId, content))
         return refused === undefined ? { kind: "take_in", change } : setAside("refused", refused)
       }
       case "missing": {
@@ -191,10 +189,7 @@ export const makeOutsideEdits = (input: {
             "many_missing",
             `${found.manyMissing} pages are missing at once, more than the ${MAX_MISSING_ARCHIVED} one check archives; archive them in the app if that was meant`
           )
-        const refused = yield* allowed(
-          requireArchivable(spaces, pages, record, writer(record.page.pageId))
-        )
-        return refused === undefined ? { kind: "take_in", change } : setAside("refused", refused)
+        return { kind: "take_in", change }
       }
     }
   })
@@ -336,6 +331,8 @@ const adoptionFailure = (cause: WikiCommitError): "again" | "refused" | "fail" =
     case "RevisionConflictError":
     case "WorkingFileChangedError":
       return "again"
+    case "WikiError":
+      return refusal(cause) === undefined ? "fail" : "refused"
     case "WikiCommitRuleError":
     case "InvalidRevisionInputError":
     case "NoChangesError":

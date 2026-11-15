@@ -6,7 +6,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
 import { formatObservationPeriod, type ObservationPeriod } from "./observation-period.js"
-import { WikiPageFormatError } from "./errors.js"
+import { type WikiError, wikiError, WikiPageFormatError, type WikiOperation } from "./errors.js"
 
 const FrontmatterSchema = Schema.StructWithRest(
   Schema.Struct({
@@ -315,7 +315,21 @@ export const reviseWikiPage = Effect.fn("WikiPage.revise")(function* (
   return `---\n${document.toString({ lineWidth: 0 }).trimEnd()}\n---\n${body}`
 })
 
-export const writtenContent = (page: ParsedWikiPage) => reviseWikiPage(page, {})
+/** `content` as an update writes it, once it reads as an active page. */
+export const replacementContent = Effect.fn("WikiPage.replacementContent")(function* (
+  operation: WikiOperation,
+  pageId: string,
+  content: string
+): Effect.fn.Return<string, WikiError> {
+  const invalid = (cause: WikiPageFormatError) =>
+    wikiError(operation, "invalid", cause.message, { pageId, cause })
+  const replacement = yield* parseWikiPage(content, pageId).pipe(Effect.mapError(invalid))
+  if (replacement.lifecycle !== "active")
+    return yield* wikiError(operation, "invalid", "A page update cannot create a redirect", {
+      pageId
+    })
+  return yield* reviseWikiPage(replacement, {}).pipe(Effect.mapError(invalid))
+})
 
 type MarkdownNode = {
   readonly type: string

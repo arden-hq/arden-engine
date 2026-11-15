@@ -16,6 +16,7 @@ import {
   type WikiCommitIdentity,
   type WikiWrite
 } from "../src/wiki/commit.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { partialService } from "./kit.js"
 
@@ -53,7 +54,11 @@ it("keeps a Space's own page where it is, and refuses any page a name another pa
           Effect.gen(function* () {
             return yield* commitWiki(
               { repository, spaces },
-              { ...identity, expectedRevision: yield* repository.currentRevision },
+              {
+                ...identity,
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+                expectedRevision: yield* repository.currentRevision
+              },
               writes
             )
           }).pipe(

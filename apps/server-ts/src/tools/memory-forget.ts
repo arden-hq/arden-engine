@@ -14,6 +14,7 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { requireOwnerTurn } from "./owner-turn.js"
 import type { ServerRunContext } from "./run-context.js"
 import { wikiFailure } from "./wiki.js"
+import { memoryLocation } from "./wiki-identity.js"
 
 /** One approval card lists every line; past this many it stops being readable. */
 const MAX_LINES = 50
@@ -107,7 +108,11 @@ const makeMemoryForgetTools = ({
         preview: "Session unavailable",
         retryable: false
       })
-    return { sessionId: ctx.run.sessionId, chat }
+    return {
+      sessionId: ctx.run.sessionId,
+      chat,
+      authority: memoryLocation(ctx.run.authority.memory)
+    }
   }
 
   const plan = async (request: ForgetRequest, ctx: ToolContext<ServerRunContext>) => {

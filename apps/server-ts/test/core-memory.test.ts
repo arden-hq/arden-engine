@@ -1,6 +1,5 @@
 import { expect, it } from "vitest"
-import { coreCondenseTarget, crowdedCorePages } from "../src/memory/core-memory.js"
-import { createRefusal } from "../src/wiki/write-rules.js"
+import { coreCondenseTarget, createRefusal, crowdedCorePages } from "../src/memory/core-memory.js"
 const profile = (chars: number) => ({ path: "me.md", pageId: "me", chars })
 it("asks for condensing before the profile is full, and leaves room after one condense", () => {
   expect(crowdedCorePages([profile(8_100)])).toEqual([])

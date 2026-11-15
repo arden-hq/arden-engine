@@ -1,8 +1,10 @@
 import { Effect } from "effect"
 
-import type { SpaceStore } from "../persistence/spaces/store.js"
+import { posix } from "node:path"
+
+import type { SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
 import { wikiError, type WikiError, type WikiOperation } from "./errors.js"
-import type { Snapshot } from "./snapshot.js"
+import { directoryReadme, nameTakenBy, type Snapshot } from "./snapshot.js"
 import { activeSpaceBindings, heldByAnother, spaceOwnsPath } from "./space-index.js"
 
 export type WikiLocationAuthority =
@@ -20,7 +22,7 @@ export interface WikiWriteBoundary {
 }
 
 export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(function* (
-  spaces: SpaceStore["Service"],
+  spaces: Pick<SpaceStore["Service"], "get" | "activeBindings">,
   authority: WikiLocationAuthority,
   snapshot: Snapshot,
   operation: WikiOperation
@@ -87,6 +89,39 @@ export const requireWikiWritePaths = Effect.fn("Wiki.requireWritePaths")(functio
     "blocked",
     `Space runs may write only within ${boundary.pagePath}`
   )
+})
+
+/** A new page at `path` goes in a mapped directory that is not another Space's, under a free name. */
+export const requireNewPagePlace = Effect.fn("Wiki.requireNewPagePlace")(function* (
+  snapshot: Snapshot,
+  boundary: WikiWriteBoundary | undefined,
+  spaceOwns: (pageId: string, path: string) => Effect.Effect<boolean, SpaceStoreError>,
+  path: string
+): Effect.fn.Return<void, WikiError | SpaceStoreError> {
+  const directory = posix.dirname(path)
+  const readme = directoryReadme(snapshot.wholeSet, directory)
+  if (readme === undefined)
+    return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
+  const { pageId } = readme.page
+  if (
+    (yield* spaceOwns(pageId, readme.resource.path)) &&
+    !authorityOwnsBoundaryPage(boundary, pageId, readme.resource.path)
+  )
+    return yield* wikiError(
+      "create",
+      "blocked",
+      "Pages cannot be created inside a Space-owned directory"
+    )
+  const existing = nameTakenBy(snapshot, path)
+  if (existing !== undefined)
+    return yield* wikiError(
+      "create",
+      "conflict",
+      `Wiki path or link name already exists: ${path}`,
+      {
+        pageId: existing.page.pageId
+      }
+    )
 })
 
 export const authorityOwnsBoundaryPage = (
