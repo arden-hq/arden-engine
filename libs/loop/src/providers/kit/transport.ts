@@ -1,4 +1,4 @@
-import { errorMessage } from "@arden-hq/std/errors"
+import { errorMessage, redactedFailureText } from "@arden-hq/std/errors"
 import { retryAfterHints } from "@arden-hq/std/retry"
 
 import type { ModelStreamItem } from "../../contracts/provider.js"
@@ -220,7 +220,7 @@ const connect = async (
     })
   } catch (cause) {
     if (signal.aborted) throw cause
-    throw new RetryableProviderError(errorMessage(cause, `${request.label} request failed`))
+    throw new RetryableProviderError(`${request.label}: ${unreachableMessage(request.url, cause)}`)
   }
   if (!response.ok) {
     const { retryAfter, retryAfterMs } = retryAfterHints(response.headers)
@@ -237,6 +237,37 @@ const connect = async (
   if (response.body === null)
     throw new RetryableProviderError(`${request.label} returned an empty response body`)
   return response.body
+}
+
+/**
+ * Why `url` could not be reached, for a person: `cannot reach <address>:
+ * <cause>`. The address keeps scheme, host, port and path only: a user name,
+ * password, query or fragment may carry a key, so none is shown (nor the raw
+ * URL inside a cause's text). The cause is the whole chain, since Node's fetch
+ * says only `fetch failed` and puts the reason (`connect ECONNREFUSED
+ * 127.0.0.1:8080`, `getaddrinfo ENOTFOUND …`) in its `cause`.
+ */
+export const unreachableMessage = (url: string, cause: unknown): string => {
+  const address = URL.canParse(url) ? safeAddress(new URL(url)) : "the server"
+  const reasons = causeChain(cause).map((reason) => reason.replaceAll(url, address))
+  const [first = "the connection failed", ...rest] = reasons
+  return redactedFailureText(
+    `cannot reach ${address}: ${first}${rest.length === 0 ? "" : ` (${rest.join("; ")})`}`
+  )
+}
+
+const safeAddress = (url: URL): string => `${url.origin}${url.pathname}`
+
+/** The distinct messages along a cause chain, outermost first; at most four, a chain can loop. */
+const causeChain = (cause: unknown): ReadonlyArray<string> => {
+  const messages: Array<string> = []
+  let current: unknown = cause
+  for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth += 1) {
+    const message = errorMessage(current).trim()
+    if (message.length > 0 && !messages.includes(message)) messages.push(message)
+    current = current instanceof Error ? current.cause : undefined
+  }
+  return messages
 }
 
 const readErrorDetail = async (

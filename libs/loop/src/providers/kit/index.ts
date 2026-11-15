@@ -56,5 +56,6 @@ export {
   type ProviderErrorClass,
   type SseEventMapper,
   type SseRequest,
-  streamSse
+  streamSse,
+  unreachableMessage
 } from "./transport.js"

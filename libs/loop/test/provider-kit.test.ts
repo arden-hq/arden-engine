@@ -10,7 +10,11 @@ import {
   ProviderStatusError,
   type ToolHistoryWire
 } from "../src/providers/kit/index.js"
+import type { ModelProvider, ModelProviderRequest } from "../src/contracts/provider.js"
 import type { ProviderErrorCode } from "../src/errors.js"
+import { ProviderError } from "../src/providers/kit/errors.js"
+import { makeChatCompletionsProvider } from "../src/providers/chat-completions/provider.js"
+import { makeOpenAiResponsesProvider } from "../src/providers/openai-responses/provider.js"
 import {
   errorFrameFailure,
   statusFailureCode as chatCompletionsStatusCode
@@ -298,4 +302,63 @@ it("keeps shared provider machinery in the kit only", () => {
       })
     )
   expect(copies).toEqual([])
+})
+
+describe("a connection that fails", () => {
+  /** What undici throws when nothing listens: `fetch failed`, the reason in its cause. */
+  const refused = (): TypeError =>
+    new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), {
+        code: "ECONNREFUSED"
+      })
+    })
+  const request = {
+    messages: [{ role: "user", content: "Hi" }],
+    renderInteraction: () => "",
+    model: "m",
+    tools: [],
+    deferredTools: [],
+    toolChoice: "auto"
+  } satisfies ModelProviderRequest
+  const failure = async (provider: ModelProvider): Promise<unknown> => {
+    try {
+      for await (const _ of await provider.stream(request)) void _
+    } catch (cause) {
+      return cause
+    }
+    throw new Error("The request did not fail")
+  }
+
+  it("names the address and the cause on both wires, without credentials or a query", async () => {
+    const fetch = async (): Promise<Response> => {
+      throw refused()
+    }
+    const chat = await failure(
+      makeChatCompletionsProvider({
+        providerId: "llama.cpp",
+        baseUrl: "http://127.0.0.1:8080/v1?secret=q",
+        auth: { headers: async () => ({ authorization: "Bearer sk-hidden" }) },
+        fetch,
+        maxAttempts: 1
+      })
+    )
+    const responses = await failure(
+      makeOpenAiResponsesProvider({
+        baseUrl: "http://user:pw@127.0.0.1:8080/v1",
+        auth: { headers: async () => ({ authorization: "Bearer sk-hidden" }) },
+        fetch,
+        maxAttempts: 1
+      })
+    )
+    expect([chat, responses].map((cause) => [cause instanceof ProviderError, cause])).toEqual([
+      [true, expect.objectContaining({ code: "provider_unavailable" })],
+      [true, expect.objectContaining({ code: "provider_unavailable" })]
+    ])
+    // A query is cut with everything after it: the path appended to such a base URL lands inside
+    // it (the settings refuse one for that reason).
+    expect([chat, responses].map((cause) => (cause instanceof Error ? cause.message : cause))).toEqual([
+      "llama.cpp: cannot reach http://127.0.0.1:8080/v1: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)",
+      "OpenAI: cannot reach http://127.0.0.1:8080/v1/responses: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)"
+    ])
+  })
 })
