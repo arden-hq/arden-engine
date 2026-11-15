@@ -297,7 +297,8 @@ const makeBrowserTools = ({
           sessionId: ctx.run.sessionId,
           runId: ctx.run.runId,
           toolCallId: ctx.toolCallId,
-          signal: ctx.signal
+          signal: ctx.signal,
+          imageInput: ctx.run.imageInput
         })
     }),
     defineServerTool({

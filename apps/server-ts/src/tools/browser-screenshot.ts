@@ -1,9 +1,9 @@
-import { ToolExecutionError, type ToolResultOutput } from "@arden-hq/loop"
+import { ToolExecutionError, type ImageInput, type ToolResultOutput } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 
 import { ScreenshotCaptureSchema, type ConversationArtifacts } from "../artifacts/conversation.js"
 import type { BrowserOutput } from "../browser/service.js"
-import { OPENAI_IMAGE_INPUT, fitPng } from "../lib/prompt-image.js"
+import { fitPng } from "../lib/prompt-image.js"
 import { toolFailure } from "./tool-failure.js"
 
 const visualizationReference = (manifest: {
@@ -26,6 +26,9 @@ export const preserveBrowserScreenshot = async (input: {
   readonly runId: string
   readonly toolCallId: string
   readonly signal: AbortSignal
+  /** The run's route (`ModelCapabilities.imageInput`): the model's copy is fitted to the limits
+   *  it states, and sent as captured where it states none, as `file_read` sends an image. */
+  readonly imageInput: ImageInput | undefined
 }): Promise<ToolResultOutput> => {
   const capture = Schema.decodeUnknownExit(ScreenshotCaptureSchema)(input.output.data)
   const image = input.output.modelContent?.find((block) => block.type === "image")
@@ -62,7 +65,8 @@ export const preserveBrowserScreenshot = async (input: {
       ),
     { signal: input.signal }
   )
-  const fitted = fitPng({ bytes, limits: OPENAI_IMAGE_INPUT })
+  const limits = input.imageInput?.limits
+  const fitted = limits === undefined ? undefined : fitPng({ bytes, limits })
   const modelImage =
     fitted === undefined ? image : { ...image, data: fitted.data.toString("base64") }
   return {
