@@ -24,8 +24,6 @@ export type PositionAdvance = "advanced" | "already_there" | "moved"
 const Revision = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 const Move = Schema.Struct({ expected: Schema.NullOr(Revision), next: Revision })
 const State = Schema.fromJsonString(Schema.Record(Schema.String, Schema.NullOr(Revision)))
-/** A mark stored databases may still hold; the place reads past it and the next move drops it. */
-const STALE_MARK = "refusedTo"
 
 type PositionError = MemoryHistoryPositionError | SqlError.SqlError
 
@@ -56,10 +54,7 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
       )
     )
     const revision = state[field]
-    if (
-      revision === undefined ||
-      Object.keys(state).some((key) => key !== field && key !== STALE_MARK)
-    ) {
+    if (revision === undefined || Object.keys(state).length !== 1) {
       return yield* new MemoryHistoryPositionError({
         reason: "corrupt",
         message: `The ${reader} place in Memory history is corrupt`
