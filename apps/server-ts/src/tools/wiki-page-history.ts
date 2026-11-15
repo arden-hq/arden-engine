@@ -144,8 +144,7 @@ export const makeWikiPageHistoryTools = ({
           }
         ]
       })
-      if (ctx.run.observations.observed(record.page.pageId) === undefined)
-        ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
+      ctx.run.observations.observeIfUnseen(record.page.pageId, record.resource.versionId)
       return {
         result:
           entries.length === 0
