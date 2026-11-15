@@ -27,7 +27,11 @@ import {
   type WikiMaintenancePrepareInput
 } from "./maintenance.js"
 import { makeWikiMutationMethods, type WikiMutationMethods } from "./mutations.js"
-import { makeOutsideEdits, type OutsideEditCheck } from "./outside-edits.js"
+import {
+  makeOutsideEdits,
+  type OutsideEditCheck,
+  type OutsideEditState
+} from "./outside-edits.js"
 import { makeWikiPublisher, WikiChangeSink } from "./publication.js"
 import {
   makeWikiReportRetentionMethods,
@@ -53,6 +57,8 @@ type WikiShape = WikiListingMethods &
   WikiImportMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
     readonly checkOutsideEdits: () => Effect.Effect<OutsideEditCheck, WikiError>
+    /** Where a page whose file was changed outside Arden stands, as of the last check. */
+    readonly outsideEditState: (path: string) => OutsideEditState | undefined
     readonly prepareMaintenance: (
       input: WikiMaintenancePrepareInput
     ) => Effect.Effect<WikiMaintenancePreparation, WikiError>
@@ -90,15 +96,18 @@ const make = Effect.fn("Wiki.make")(function* (
         Effect.logWarning("Saved Wiki changes await event publication", cause)
       )
     )
+  const listing = makeWikiListingMethods(repository)
+  const outsideEdits = makeOutsideEdits({ repository, spaces, snapshot: listing.snapshot })
   const notifyAfter =
     <Args extends readonly unknown[], Result>(
       operation: (...args: Args) => Effect.Effect<Result, WikiError>
     ) =>
     (...args: Args) =>
-      operation(...args).pipe(Effect.tap(publishSavedChanges))
+      operation(...args).pipe(
+        Effect.mapError(outsideEdits.explain),
+        Effect.tap(publishSavedChanges)
+      )
 
-  const listing = makeWikiListingMethods(repository)
-  const outsideEdits = makeOutsideEdits({ repository, spaces, snapshot: listing.snapshot })
   const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
   const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
   const capture = makeWikiCaptureMethods(repository, spaces, listing.read)
@@ -114,6 +123,7 @@ const make = Effect.fn("Wiki.make")(function* (
     ...makeWikiChangeMethods(repository),
     publishChanges,
     checkOutsideEdits: outsideEdits.check,
+    outsideEditState: outsideEdits.state,
     prepareMaintenance: makeWikiMaintenanceMethods(repository).prepare,
     stepReportRetention: notifyAfter(reportRetention.stepReportRetention),
     retireReportPart: notifyAfter(reportRetention.retireReportPart),
@@ -132,7 +142,14 @@ const make = Effect.fn("Wiki.make")(function* (
     importReferencePages: notifyAfter(imports.importReferencePages),
     applyContentStep: <E>(step: WikiContentStep<E>) =>
       lifecycle.isAccepting()
-        ? contentSteps.applyContentStep(step).pipe(Effect.tap(publishSavedChanges))
+        ? contentSteps
+            .applyContentStep(step)
+            .pipe(
+              Effect.mapError((error) =>
+                error instanceof WikiError ? outsideEdits.explain(error) : error
+              ),
+              Effect.tap(publishSavedChanges)
+            )
         : wikiError(
             "update",
             "blocked",

@@ -8,6 +8,7 @@ import { writeIdentity } from "./wiki-identity.js"
 import type { WikiCommitOrigin } from "../wiki/commit.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
+import { outsideEditNotice } from "../wiki/outside-edits.js"
 import { normal, pageNamesForPath, reviseWikiPage } from "../wiki/page.js"
 import { monthlySummaryPathOf } from "../wiki/report-retention.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
@@ -465,6 +466,7 @@ const makeWikiTools = ({
           ? chars >= WIKI_PAGE_BUDGET_CHARS
           : coreNeedsCondensing(chars, coreBudget)
       const lastChanged = (await loadPageAges(wiki, snapshot, ctx.signal)).line(record.page.pageId)
+      const outside = wiki.outsideEditState(record.resource.path)
       const isReadme = input.path === "README.md" || input.path.endsWith("/README.md")
       const directory = input.path.slice(0, Math.max(0, input.path.length - "/README.md".length))
       const children = isReadme
@@ -479,6 +481,7 @@ const makeWikiTools = ({
           : [`${input.path} now redirects here, to ${record.resource.path}.`]),
         `page_ref: ${record.page.pageId}`,
         ...(lastChanged === undefined ? [] : [lastChanged]),
+        ...(outside === undefined ? [] : [outsideEditNotice(outside)]),
         ...reportProvenanceLines(record),
         ...(coreBudget === undefined
           ? []
@@ -486,7 +489,7 @@ const makeWikiTools = ({
               `Page size: ${chars} characters. Every run that reads Memory is sent this page whole (Core Memory), so it is limited to ${coreBudget} characters.`,
               ...(overBudget
                 ? [
-                    `The page is full or nearly full, and a write over that size is refused. ` +
+                    `The page is full or nearly full, and a write that grows it past that size is refused. ` +
                       `Bring it to ${coreCondenseTarget(coreBudget)} characters or fewer. ${CORE_CONDENSE_ADVICE}`
                   ]
                 : [])

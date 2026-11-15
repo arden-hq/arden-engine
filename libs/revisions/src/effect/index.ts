@@ -21,6 +21,7 @@ export {
   NoChangesError,
   RepositoryClosedError,
   RevisionConflictError,
+  WorkingFileChangedError,
   RevisionContentLimitError,
   RevisionStorageError,
   UnsafePathError

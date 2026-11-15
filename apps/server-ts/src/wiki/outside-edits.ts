@@ -1,8 +1,9 @@
-import type {
-  AdoptableWorkingChange,
-  ManagedFileRepositoryShape,
-  UntrackedFile,
-  WorkingFileChange
+import {
+  type AdoptableWorkingChange,
+  type ManagedFileRepositoryShape,
+  type UntrackedFile,
+  type WorkingFileChange,
+  WorkingFileChangedError
 } from "@arden-hq/revisions/effect"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { compareCodePoints } from "@arden-hq/std/json"
@@ -12,7 +13,7 @@ import { posix } from "node:path"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { commitOutsideChange, type WikiCommitError, type WikiCommitIdentity } from "./commit.js"
-import { mapRevisionError, type WikiError } from "./errors.js"
+import { mapRevisionError, WikiError } from "./errors.js"
 import { parseWikiPage } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
 import { requireArchivable, requireUpdatable, type WikiWriter } from "./write-rules.js"
@@ -43,6 +44,15 @@ export type OutsideEdit =
     }
 
 export type SetAside = Extract<OutsideEdit, { readonly kind: "set_aside" }>
+
+/**
+ * Where a page whose file differs from its history stands, as of the last check: `set_aside`
+ * until the file is fixed or put back, or `settling` until the next check decides it. Every write
+ * to such a page is refused until the check takes the change in.
+ */
+export type OutsideEditState =
+  | { readonly kind: "set_aside"; readonly path: string; readonly detail: string }
+  | { readonly kind: "settling"; readonly path: string }
 
 export interface OutsideEditCheck {
   /** One commit each, oldest first. */
@@ -216,6 +226,8 @@ export const makeOutsideEdits = (input: {
 
   /** Each page's state at the check before, by page id. */
   let seenBefore = new Map<string, string>()
+  /** The pages the last check left out, by path. */
+  let leftOutByPath = new Map<string, OutsideEditState>()
 
   const scanAndTakeIn = Effect.fn("Wiki.scanAndTakeIn")(function* (): Effect.fn.Return<
     OutsideEditCheck,
@@ -302,6 +314,14 @@ export const makeOutsideEdits = (input: {
   /** Takes in what the rules allow; logs the files left out each time that list changes. */
   const check = Effect.fn("Wiki.checkOutsideEdits")(function* () {
     const result = yield* scanAndTakeIn()
+    leftOutByPath = new Map<string, OutsideEditState>([
+      ...[...result.settling, ...result.changedDuringCheck].map(
+        (path) => [path, { kind: "settling", path }] as const
+      ),
+      ...result.setAside.map(
+        (item) => [item.path, { kind: "set_aside", path: item.path, detail: item.detail }] as const
+      )
+    ])
     const leftOut = {
       setAside: result.setAside.map((item) => `${item.path}: ${item.detail}`),
       notInMemory: result.notInMemory,
@@ -329,12 +349,29 @@ export const makeOutsideEdits = (input: {
       })
     )
 
-  return { check }
+  /** Where `path` stands, when the last check left it out. */
+  const state = (path: string): OutsideEditState | undefined => leftOutByPath.get(path)
+
+  /** A write refused because its file differs from history, told where that page stands. */
+  const explain = (error: WikiError): WikiError => {
+    const cause = error.cause
+    if (!(cause instanceof WorkingFileChangedError)) return error
+    return new WikiError({ ...error, message: outsideEditRefusal(cause.path, state(cause.path)) })
+  }
+
+  return { check, state, explain }
 }
+
+/** The refusal a writer gets for a page whose file was changed outside Arden. */
+export const outsideEditRefusal = (path: string, state: OutsideEditState | undefined): string =>
+  state?.kind === "set_aside"
+    ? `${path} was changed outside Arden and Memory set that change aside: ${state.detail}. Nothing was saved. Arden cannot write this page until its file is fixed or put back.`
+    : `${path} was changed outside Arden and Memory has not taken that change in yet. Nothing was saved. Memory checks the files every minute and takes a change in once it stays the same for one check.`
 
 const adoptionFailure = (cause: WikiCommitError): "again" | "refused" | "fail" => {
   switch (cause._tag) {
     case "RevisionConflictError":
+    case "WorkingFileChangedError":
       return "again"
     case "WikiCommitRuleError":
     case "InvalidRevisionInputError":
@@ -349,3 +386,9 @@ const adoptionFailure = (cause: WikiCommitError): "again" | "refused" | "fail" =
       return "fail"
   }
 }
+
+/** What a read of such a page says about it. */
+export const outsideEditNotice = (state: OutsideEditState): string =>
+  state.kind === "set_aside"
+    ? `This page's file was changed outside Arden and Memory set that change aside: ${state.detail}. This version stays in Memory, and writes to the page are refused until the file is fixed or put back.`
+    : "This page's file was changed outside Arden; Memory takes the change in at its next check, and writes to the page are refused until then."

@@ -15,7 +15,7 @@ import { join } from "node:path"
 import { Effect, Exit } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { RevisionStorageError } from "../src/domain/errors.js"
+import { RevisionStorageError, WorkingFileChangedError } from "../src/domain/errors.js"
 import { encodeUtf8 } from "../src/domain/format.js"
 import { ChangeSet, Create, Update } from "../src/domain/model.js"
 import {
@@ -202,10 +202,10 @@ describe("a commit checks only the files it touches", () => {
     const root = await seeded()
     await writeFile(join(root, "a.md"), "edited")
     const before = await historyFiles(root)
-    const exit = await useRepository(root, (repository) =>
+    const refusal = await useRepository(root, (repository) =>
       Effect.gen(function* () {
         const a = yield* requireVersion(repository, "a")
-        return yield* Effect.exit(
+        return yield* Effect.flip(
           repository.commit(
             new ChangeSet({
               operations: [
@@ -224,7 +224,8 @@ describe("a commit checks only the files it touches", () => {
         )
       })
     )
-    expect(Exit.isFailure(exit)).toBe(true)
+    expect(refusal).toBeInstanceOf(WorkingFileChangedError)
+    expect(refusal).toMatchObject({ path: "a.md" })
     expect(await readFile(join(root, "a.md"), "utf8")).toBe("edited")
     expect(await historyFiles(root)).toBe(before)
   })

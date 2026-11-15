@@ -8,6 +8,12 @@ export class RevisionConflictError extends Schema.TaggedError<RevisionConflictEr
   }
 ) {}
 
+/** A file a commit would write differs from its history: it was changed outside the repository. */
+export class WorkingFileChangedError extends Schema.TaggedError<WorkingFileChangedError>()(
+  "WorkingFileChangedError",
+  { path: Schema.String, message: Schema.String }
+) {}
+
 /** An idempotency key was reused for a different request. */
 export class IdempotencyConflictError extends Schema.TaggedError<IdempotencyConflictError>()(
   "IdempotencyConflictError",
@@ -65,6 +71,7 @@ export class RepositoryClosedError extends Schema.TaggedError<RepositoryClosedEr
 
 export type RevisionError =
   | RevisionConflictError
+  | WorkingFileChangedError
   | IdempotencyConflictError
   | CorruptRepositoryError
   | RevisionContentLimitError

@@ -80,6 +80,13 @@ export const mapRevisionError =
     switch (cause._tag) {
       case "RevisionConflictError":
         return wikiError(operation, "conflict", cause.message, options)
+      case "WorkingFileChangedError":
+        return wikiError(
+          operation,
+          "blocked",
+          `${cause.path} was changed outside Arden and Memory has not taken that change in. Nothing was saved.`,
+          options
+        )
       case "CorruptRepositoryError":
         return wikiError(operation, "corrupt", cause.message, options)
       case "WikiCommitRuleError":

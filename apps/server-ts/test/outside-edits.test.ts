@@ -19,6 +19,10 @@ import {
   type OutsideEditCheck
 } from "../src/wiki/outside-edits.js"
 import { formatRedirectPage, formatWikiPage } from "../src/wiki/page.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
+import { makeWikiListingMethods } from "../src/wiki/listing.js"
+import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
+import { wikiFailure } from "../src/tools/wiki.js"
 import { wikiError, type WikiError } from "../src/wiki/errors.js"
 import { loadSnapshot, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
@@ -71,6 +75,7 @@ interface Memory {
   readonly settle: () => Effect.Effect<OutsideEditCheck, unknown>
   readonly commits: () => Effect.Effect<number, unknown>
   readonly snapshot: () => Effect.Effect<Snapshot, unknown>
+  readonly outside: ReturnType<typeof makeOutsideEdits>
 }
 
 const withMemory = async <A>(
@@ -111,7 +116,8 @@ const withMemory = async <A>(
         check: outside.check,
         settle: () => outside.check().pipe(Effect.andThen(outside.check())),
         commits,
-        snapshot: () => loadSnapshot(repository, "list")
+        snapshot: () => loadSnapshot(repository, "list"),
+        outside
       })
     }).pipe(Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root })))
   )
@@ -498,6 +504,71 @@ const naming = (pattern: RegExp): ReadonlyArray<string> =>
   sources(SOURCE)
     .map((path) => relative(SOURCE, path))
     .filter((path) => pattern.test(readFileSync(join(SOURCE, path), "utf8")))
+
+describe("a write to a page whose file changed outside", () => {
+  it("is refused once, not as a conflict to retry, with where the page stands", async () => {
+    const outcome = await withMemory(({ root, repository, settle, outside, snapshot }) =>
+      Effect.gen(function* () {
+        const mutations = makeWikiMutationMethods(repository, spaces, makeWikiListingMethods(repository).read)
+        const write = (pageId: string) =>
+          Effect.gen(function* () {
+            const pages = yield* snapshot()
+            const record = pages.pages.find((candidate) => candidate.page.pageId === pageId)
+            if (record === undefined || pages.head === null) throw new Error(`${pageId} is missing`)
+            return yield* mutations
+              .update({
+                pageId,
+                content: page(pageId, "Written by Arden.\n"),
+                expectedVersion: record.resource.versionId,
+                expectedHead: pages.head,
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+              })
+              .pipe(
+                Effect.mapError(outside.explain),
+                Effect.match({
+                  onFailure: (error) => ({
+                    reason: error.reason,
+                    message: error.message,
+                    retryable: wikiFailure(error).retryable
+                  }),
+                  onSuccess: () => "saved"
+                })
+              )
+          })
+        yield* Effect.promise(async () => {
+          await writeFile(join(root, "notes/broken.md"), "---\npage_id: [\n---\nbody\n")
+          await writeFile(join(root, "notes/edited.md"), page("edited", "Changed outside.\n"))
+        })
+        const waiting = yield* write("edited")
+        yield* settle()
+        return {
+          waiting,
+          setAside: yield* write("broken"),
+          readNotice: outside.state("notes/broken.md")?.kind,
+          other: yield* write("kept")
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      waiting: {
+        reason: "blocked",
+        message: expect.stringMatching(
+          /^notes\/edited\.md was changed outside Arden and Memory has not taken that change in yet\. Nothing was saved\./u
+        ),
+        retryable: false
+      },
+      setAside: {
+        reason: "blocked",
+        message: expect.stringMatching(
+          /^notes\/broken\.md was changed outside Arden and Memory set that change aside: .+\. Arden cannot write this page until its file is fixed or put back\.$/u
+        ),
+        retryable: false
+      },
+      readNotice: "set_aside",
+      other: "saved"
+    })
+  })
+})
 
 describe("one owner for reading files against Memory history", () => {
   it("scans only in wiki/outside-edits.ts, and takes in only through the commit point", () => {

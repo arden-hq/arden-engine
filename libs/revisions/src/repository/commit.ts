@@ -13,7 +13,8 @@ import {
   IdempotencyConflictError,
   InvalidRevisionInputError,
   RevisionConflictError,
-  type RevisionError
+  type RevisionError,
+  WorkingFileChangedError
 } from "../domain/errors.js"
 import {
   buildTreeObjects,
@@ -106,7 +107,10 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
             message: `working file changed after the scan: ${row.path}`
           })
       } else if (current !== row.oldBlob && current !== row.newBlob) {
-        return yield* new RevisionConflictError({ message: `working file changed: ${row.path}` })
+        return yield* new WorkingFileChangedError({
+          path: row.path,
+          message: `${row.path} differs from its history: it was changed outside the repository`
+        })
       }
     }
     for (const [blobId, content] of applied.payloads)
