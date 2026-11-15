@@ -108,6 +108,8 @@ One implementation per concern, in the kit, so every adapter behaves the same:
 - `classifyRejection` maps a refusal to a `ProviderErrorCode`. It holds the one table of context-overflow and model-unavailable wordings for every server we talk to.
 - `orderToolHistory` puts each tool output right after its call, holds context back while calls are pending, and closes an interrupted call with a "not recorded" output.
 - `contextBlockText` is how a `context` block reads to a model on any wire.
+- `answerToolSearch` answers a client tool search: it reads the arguments (malformed ones get a correction the model can act on), runs `ToolSearch.search`, and writes the result text and `loaded_tool_names` the history keeps. `TOOL_SEARCH_TOOL_NAME` is the search's name on every wire.
+- `loadedToolNames` (in the contracts, shared with the loop) is which deferred tools a history has loaded, read only from provider-neutral fields: `provider_tool_calls[].loaded_tool_names` and `developer` records' `loaded_tools` / `removed_tools`.
 
 `test/provider-kit.test.ts` fails when an adapter grows its own copy of one of these.
 
@@ -119,6 +121,7 @@ An adapter reads both to decide what it sends back on a later request:
 
 - Chat Completions sends a stored `provider_state["chat-completions"].reasoning_details` back only when the turn's origin matches this provider id, this wire and the request's model (`sameOrigin`). Encrypted reasoning and signatures are bound to the issuer and model that wrote them; every reference agent drops them on a mismatch. Plain reasoning text is never sent back in `content`.
 - Responses still replays its own `provider_state` whatever the origin. Whether OpenAI accepts encrypted reasoning across models is an open question; the stamp is there for when it is decided.
+- A tool search crosses wires through its provider-neutral record. Chat Completions replays any search (its own or one Responses answered) as a call to `tool_search` plus a `tool` message with the stored `result`. Responses replays a search another wire answered as native `tool_search_call` / `tool_search_output` items, the tools looked up by `loaded_tool_names`; a turn Responses wrote itself without its stored items is still refused, since it cannot be rebuilt. Other provider calls (a hosted web search) have no form on the other wire; their results reached the model as the turn's text.
 
 ### Chat Completions
 
@@ -128,6 +131,10 @@ An adapter reads both to decide what it sends back on a later request:
 - OpenRouter: `{ reasoningEffort: "openrouter", structuredOutput: "json_schema" }`, plus `cacheControl: "anthropic"` for Claude models; routing preferences go in `extraBody: { provider: … }`.
 
 The provider emits only `Completed`, so the loop runs a turn's tool calls as one batch. A system or developer message inside the conversation is sent in place, in the route's one instruction role.
+
+Tool search runs on the client (`toolSearch: "client"`). The wire has no search item, so the adapter declares the search as an ordinary function tool beside the core tools, plus every deferred tool the history has loaded (`loadedToolNames`), appended in load order. When the model calls it, the adapter answers with `answerToolSearch`, streams the call as a `ProviderToolCall`, records it in `provider_tool_calls`, and marks the response `continuation` (the model waits for the result, as with Responses' `end_turn: false`). Ordinary calls in the same response stay runtime calls.
+
+The cost on llama.cpp: the chat template renders tools before the conversation, and the server reuses its KV cache only up to the first differing token, so a load re-reads the conversation so far plus the new declaration; a step without a load reuses everything. Measured with gemma-4-E2B Q8_0 on b12359, 41 deferred tools: 3,143 prompt tokens with every tool declared, 525 with search; the step after loading one tool read 159 new tokens (669 cached), the next step 51 (825 cached). Arden's own tool set at 16k context: about 14,100 tokens with search (system and runtime messages 4,700, 22 core tools 8,350, the search tool 1,080 of which the catalog listing about 840) against about 56,000 without.
 
 The live check drives the real loop against a server; it is not part of `bun run test`:
 
