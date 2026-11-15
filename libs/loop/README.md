@@ -128,7 +128,7 @@ An adapter reads both to decide what it sends back on a later request:
 `makeChatCompletionsProvider({ providerId, baseUrl, auth?, compat? })` posts to `${baseUrl}/chat/completions`. Servers differ only through the `compat` flags (`ChatCompletionsCompat`; each flag's comment says what it changes and which server needs it), never through a branch on `providerId`. Typical settings:
 
 - llama.cpp `llama-server`: `{ structuredOutput: "json_schema", parallelToolCalls: true }`, plus `imageInput: true` with a multimodal projector. No `auth`.
-- OpenRouter: `{ reasoningEffort: "openrouter", structuredOutput: "json_schema" }`, plus `cacheControl: "anthropic"` for Claude models; routing preferences go in `extraBody: { provider: … }`.
+- OpenRouter: `{ reasoningEffort: "openrouter", structuredOutput: "json_schema" }`, plus `cacheControl: "anthropic"` for the models that need explicit cache breakpoints (Claude and Alibaba's Qwen models; the value names the syntax); routing preferences go in `extraBody: { provider: … }`.
 
 The provider emits only `Completed`, so the loop runs a turn's tool calls as one batch. A system or developer message inside the conversation is sent in place, in the route's one instruction role.
 

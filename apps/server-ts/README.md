@@ -53,7 +53,7 @@ node apps/server-ts/dist/main.js --config settings.json   # or: arden serve --co
   { "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini" }
   ```
 
-  A Chat Completions route declares every offered tool to the model (it has no tool search), so Arden's full tool set is a prompt of about 56,000 tokens (measured on llama.cpp b12359 with Gemma 4). A model with a smaller window fails with `context_length_exceeded`; offer fewer tools with `tools` (with only `exec_command` the first request is about 6,400 tokens). To check a local model end to end:
+  A Chat Completions route searches tools on the client, as the Responses route does: the model is offered the core tools and one search tool, and a found tool is declared from the next request on. Measured on llama.cpp b12359 with Gemma 4 on 2026-11-16, the first request is about 14,100 tokens: 8,400 for the 22 core tools, 4,600 for the system prompt and runtime context, 1,100 for the search tool. With `toolSearch: false` every tool is declared and the request is about 56,000 tokens. A window near the request size compacts after every step, so give a local model at least 32,768 tokens, or offer fewer tools with `tools`. A model with a smaller window than the request fails with `context_length_exceeded`. To check a local model end to end:
 
   ```bash
   llama-server -m model.gguf --ctx-size 32768 --port 8080 &
