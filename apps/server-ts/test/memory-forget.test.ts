@@ -687,6 +687,40 @@ describe("comparing lines", () => {
 })
 
 describe("no run is sent forgotten.md", () => {
+  it("reads further back when the newest commits change only forgotten.md", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        for (const note of [1, 2, 3]) {
+          const forgotten = yield* memory.page("forgotten.md")
+          yield* commitWiki(
+            memory.repository,
+            { ...OUTSIDE, expectedRevision: yield* memory.listing.head() },
+            [
+              updatePage(
+                forgotten.resource,
+                formatWikiPage({
+                  ...forgotten.page,
+                  metadata: { ...forgotten.page.metadata, note }
+                })
+              )
+            ]
+          )
+        }
+        const listed = yield* memory.listing.listChanges({
+          since: "2000-01-01T00:00:00.000Z",
+          offset: 0,
+          limit: 1
+        })
+        return {
+          listed: listed.entries.map((entry) => entry.changes.map((change) => change.path)),
+          hasMore: listed.hasMore
+        }
+      })
+    )
+    expect(outcome).toEqual({ listed: [["people/sam.md", "places/town.md"]], hasMore: true })
+  })
+
   it("leaves it out of the changes a run lists and reads, and out of page history", async () => {
     const outcome = await withMemory((memory) =>
       Effect.gen(function* () {
@@ -934,6 +968,25 @@ describe("memory_forget", () => {
       "done",
       "Line 1 has fewer than 4 words, so it carries no claim to guard. Pass whole page lines."
     ])
+  })
+
+  it("marks its own refusals as not worth retrying unchanged", async () => {
+    const outcome = await withTool((tool) =>
+      Effect.gen(function* () {
+        const retryable = (input: Readonly<Record<string, unknown>>) =>
+          Effect.promise(() =>
+            Promise.resolve(tool.execute(input, context(serverRunContext()))).then(
+              () => "done",
+              (error: unknown) => recordOf(error)["retryable"]
+            )
+          )
+        return [
+          yield* retryable({ lines: ["- Works here."], claim: "Wrong job" }),
+          yield* retryable({ undo: 9 })
+        ]
+      })
+    )
+    expect(outcome).toEqual([false, false])
   })
 
   it("always asks, and the card says how many pages each line is on", async () => {
