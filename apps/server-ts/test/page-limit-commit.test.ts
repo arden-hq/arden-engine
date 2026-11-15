@@ -26,6 +26,7 @@ import {
 import type { WikiError } from "../src/wiki/errors.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
+import { makeOutsideEdits } from "../src/wiki/outside-edits.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
@@ -283,7 +284,7 @@ describe("the page size limit at the commit", () => {
   })
 
   it("takes in an outside edit over the limit, and names it as over", async () => {
-    const outcome = await withWiki(({ root, listing, mutations }) =>
+    const outcome = await withWiki(({ root, repository, listing, mutations }) =>
       Effect.gen(function* () {
         const me = yield* mutations.create({
           path: "me.md",
@@ -297,7 +298,12 @@ describe("the page size limit at the commit", () => {
         yield* Effect.promise(() =>
           writeFile(file, text.replace("Short profile.", "g".repeat(9_068)))
         )
-        yield* mutations.observe()
+        const outside = makeOutsideEdits({ repository, spaces, snapshot: listing.snapshot })
+        yield* outside.check()
+        const settled = yield* outside.check()
+        expect(settled.takenIn.map((item) => [item.path, item.action])).toEqual([
+          ["me.md", "update"]
+        ])
         const record = (yield* listing.snapshot()).pages.find(
           (page) => page.page.pageId === me.pageId
         )
@@ -325,7 +331,6 @@ const sources = (directory: string): ReadonlyArray<string> =>
 /** Who reads a page's limit, and why. Only the commit refuses a write over it. */
 const LIMIT_READERS = {
   "memory/core-memory.ts": "asks for condensing before a page is full",
-  "memory/retrieval.ts": "sends each limited page to every run, up to its limit",
   "tools/wiki.ts": "shows a page's size against its limit when it is read",
   "wiki/commit.ts": "refuses any write that leaves a page over its limit"
 }
@@ -344,7 +349,7 @@ it("reads a page's limit only in its listed readers, so no second refusal can ap
  */
 const MEMORY_WRITERS = [
   { method: /\brepository\s*\.\s*commit\(/u, file: "wiki/commit.ts" },
-  { method: /\.adoptWorkingChanges?\(/u, file: "wiki/mutations.ts" },
+  { method: /\.adoptWorkingChanges?\(/u, file: "wiki/commit.ts" },
   { method: /\.restoreFromCommit\(/u, file: undefined }
 ]
 
