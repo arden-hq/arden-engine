@@ -172,6 +172,7 @@ const compose = async ({
                   query: input.recall.query,
                   excludedPageIds: new Set(input.recall.excludePageIds ?? [])
                 },
+          today: "2026-11-14",
           lastChanged: new Map()
         }).render(new Map())
       })
@@ -369,6 +370,7 @@ describe("what an owner chat is sent and records", () => {
       { kind: "index", root: "", listed: 3, folded: [], outcome: "whole", reason: null },
       ...[ledger, orchard, spacePage].map((page) => ({
         kind: "recalled",
+        role: "knowledge",
         page_id: page.page.pageId,
         version: page.resource.versionId,
         outcome: "whole",
@@ -622,6 +624,7 @@ describe("one owner for each limit and rule", () => {
 describe("the stored record", () => {
   const source = (pageId: string): RunMemorySource => ({
     kind: "recalled",
+    role: "knowledge",
     page_id: pageId,
     version: "version-1",
     bytes: 120,
@@ -772,6 +775,7 @@ describe("the stored record", () => {
           },
           {
             kind: "recalled",
+            role: "knowledge",
             page_id: "a",
             version: "v",
             bytes: 9,
@@ -780,6 +784,7 @@ describe("the stored record", () => {
           },
           {
             kind: "recalled",
+            role: "knowledge",
             page_id: "b",
             version: "v",
             bytes: 0,
@@ -812,6 +817,7 @@ describe("the stored record", () => {
           },
           {
             kind: "recalled",
+            role: "knowledge",
             page_id: "d",
             version: "v",
             bytes: 0,

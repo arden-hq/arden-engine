@@ -1,3 +1,4 @@
+import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
@@ -96,6 +97,7 @@ const sources = Effect.fn("Memory.sources")(function* (
     lastChanged: lastChangedLines(times, now),
     pages: current.pages,
     recall,
+    today: localDayOf(now, machineTimeZone()),
     semanticMatches: semantic
   })
   const chats = yield* discussedIn({

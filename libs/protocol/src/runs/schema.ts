@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { AutomationRunOutcomeSchema } from "../automations/outcome.js"
 import { ChatProjectionEventSchema } from "../chat/schema.js"
 import type { JsonRecord } from "../common/json.js"
@@ -70,8 +70,15 @@ const memoryPlacement = {
   reason: Schema.NullOr(RunMemoryCutReasonSchema)
 }
 
-/** One Memory source of a composition: identity and bytes, never text. */
-const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
+const pageFields = {
+  page_id: IdentifierSchema,
+  version: IdentifierSchema,
+  ...memoryPlacement
+}
+
+/** One Memory source of a composition: identity and bytes, never text. A recalled page stored
+ *  before recall had roles carries none; recall then sent every page as knowledge. */
+const RunMemorySourceSchema: Schema.Codec<RunMemorySource, unknown> = Schema.Union([
   withExtras({
     kind: Schema.Literal("space"),
     space_id: IdentifierSchema,
@@ -79,11 +86,13 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
     version: Schema.NullOr(IdentifierSchema),
     ...memoryPlacement
   }),
+  withExtras({ kind: Schema.Literal("core"), ...pageFields }),
   withExtras({
-    kind: Schema.Literals(["core", "recalled"] as const),
-    page_id: IdentifierSchema,
-    version: IdentifierSchema,
-    ...memoryPlacement
+    kind: Schema.Literal("recalled"),
+    role: Schema.Literals(["knowledge", "record", "contract"] as const).pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed("knowledge" as const))
+    ),
+    ...pageFields
   }),
   withExtras({
     kind: Schema.Literal("index"),
@@ -101,14 +110,14 @@ const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
 )
 
 /** The one shape of a stored Memory composition; a Run's record is a list of them. */
-export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras({
+export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext, unknown> = withExtras({
   reader: Schema.Literals(["owner", "worker"] as const),
   revision: Schema.NullOr(IdentifierSchema),
   query: Schema.NullOr(Schema.String),
   sources: Schema.Array(RunMemorySourceSchema)
 })
 
-export const RunDetailSchema: Schema.Codec<RunDetail> = withExtras({
+export const RunDetailSchema: Schema.Codec<RunDetail, unknown> = withExtras({
   version: Schema.Literal(1),
   run_id: IdentifierSchema,
   session_id: IdentifierSchema,

@@ -44,6 +44,7 @@ it("recall fits its room in bytes, cuts a page whole lines at a time, and record
       )
     ],
     recall: { query: "garden seeds kitchen plan", excludedPageIds: new Set() },
+    today: "2026-11-14",
     lastChanged: new Map()
   })
     .render(new Map())
@@ -72,6 +73,7 @@ it("records a matched passage cut for room as cut, and names a page with no room
     prepareMemorySources({
       pages,
       recall: { query: "garden seeds kitchen plan", excludedPageIds: new Set() },
+      today: "2026-11-14",
       semanticMatches: [
         {
           pageId: "id:projects/kitchen.md",
@@ -91,6 +93,7 @@ it("records a matched passage cut for room as cut, and names a page with no room
   const whole = prepareMemorySources({
     pages,
     recall: { query: "kitchen plan", excludedPageIds: new Set() },
+    today: "2026-11-14",
     semanticMatches: [
       { pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan.", score: 0.9 }
     ],

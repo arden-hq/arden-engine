@@ -95,14 +95,29 @@ export interface RunMemorySpaceSource extends JsonRecord {
   readonly reason: RunMemoryCutReason | null
 }
 
-/** One Memory page, at `version`: a standing-facts page (`core`) or a recalled one. */
-export interface RunMemoryPageSource extends JsonRecord {
-  readonly kind: "core" | "recalled"
+interface RunMemoryPageFields extends JsonRecord {
   readonly page_id: string
   readonly version: string
   readonly bytes: number
   readonly outcome: RunMemoryOutcome
   readonly reason: RunMemoryCutReason | null
+}
+
+/** A standing-facts page, at `version`. */
+export interface RunMemoryCoreSource extends RunMemoryPageFields {
+  readonly kind: "core"
+}
+
+/**
+ * What a recalled page is: `knowledge`, kept current by chats and upkeep; a `record`, a dated
+ * report or an import, kept as its producer wrote it; or the `contract` of a record folder.
+ */
+export type RunMemoryRecallRole = "knowledge" | "record" | "contract"
+
+/** A page the recall chose, at `version`. */
+export interface RunMemoryRecalledSource extends RunMemoryPageFields {
+  readonly kind: "recalled"
+  readonly role: RunMemoryRecallRole
 }
 
 /**
@@ -120,7 +135,11 @@ export interface RunMemoryIndexSource extends JsonRecord {
 }
 
 /** One Memory source a Run was sent before the model ran: identity and bytes, never text. */
-export type RunMemorySource = RunMemorySpaceSource | RunMemoryPageSource | RunMemoryIndexSource
+export type RunMemorySource =
+  | RunMemorySpaceSource
+  | RunMemoryCoreSource
+  | RunMemoryRecalledSource
+  | RunMemoryIndexSource
 
 /**
  * One composition of a Run's Memory block: what every model request was sent from it until
