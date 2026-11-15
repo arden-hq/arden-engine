@@ -31,6 +31,12 @@ export interface WikiCommitIdentity {
   readonly reason: string
 }
 
+/** The owner, changing Memory in the app. */
+export const ownerInApp = (
+  reason: string,
+  via: `desktop${string}` = "desktop"
+): WikiCommitIdentity => ({ actor: "user:desktop", origin: { kind: "user", via }, reason })
+
 export const LEGACY_MAINTENANCE_ORIGIN = "wiki.maintenance"
 
 const AUTOMATION_PREFIX = "wiki.automation."

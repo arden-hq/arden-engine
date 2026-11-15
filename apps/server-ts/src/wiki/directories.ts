@@ -11,14 +11,7 @@ import {
   type WikiLocationAuthority
 } from "./authority.js"
 import { DIRECTORY_CONTRACT_HEADINGS, directorySections } from "./collections.js"
-import {
-  commitWiki,
-  createPage,
-  movePage,
-  updatePage,
-  type WikiCommitIdentity,
-  type WikiCommitOrigin
-} from "./commit.js"
+import { commitWiki, createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
@@ -32,7 +25,7 @@ export interface WikiCreateDirectoryInput {
   readonly body: string
   readonly authority: WikiLocationAuthority
   readonly producerAutomationId?: string
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 interface WikiDirectoryWriteResult {
@@ -201,8 +194,7 @@ export const makeWikiDirectoryMethods = (
         yield* commitWiki(
           repository,
           {
-            actor: input.commit?.actor ?? "Agent",
-            origin: input.commit?.origin ?? { kind: "agent", sessionId: undefined },
+            ...input.commit,
             reason: "Bind report destination",
             expectedRevision: snapshot.head
           },
@@ -258,13 +250,7 @@ export const makeWikiDirectoryMethods = (
       )
     }
 
-    const actor = input.commit?.actor ?? "memory:capture"
-    const origin: WikiCommitOrigin = input.commit?.origin ?? {
-      kind: "capture",
-      replayKey: undefined,
-      sessionId: undefined
-    }
-    const reason = input.commit?.reason ?? `create Wiki directory ${directory}`
+    const { actor, origin, reason } = input.commit
     if (occupant !== undefined && !ownsLeafBoundary) {
       if (Object.hasOwn(occupant.page.metadata, "producer_automation_id")) {
         return yield* wikiError(

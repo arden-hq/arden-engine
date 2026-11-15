@@ -187,7 +187,12 @@ export const makeDailySummaryRunner = (services: {
         path: "daily",
         body: DAILY_CONTRACT,
         authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-        producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID
+        producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID,
+        commit: {
+          actor: `Automation ${DAILY_SUMMARY_AUTOMATION_ID}`,
+          origin: { kind: "automation", automationId: DAILY_SUMMARY_AUTOMATION_ID },
+          reason: "create Wiki directory daily"
+        }
       })
     else if (contract.page.metadata["producer_automation_id"] !== DAILY_SUMMARY_AUTOMATION_ID)
       return yield* Effect.fail(

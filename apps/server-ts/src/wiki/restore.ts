@@ -13,6 +13,7 @@ import {
 import {
   commitWiki,
   LEGACY_MAINTENANCE_ORIGIN,
+  ownerInApp,
   requireCommitRules,
   restorePage,
   type WikiCommitIdentity,
@@ -148,11 +149,10 @@ export const makeWikiRestoreMethods = (
             }
           )
         }
-        const identity = {
-          actor: "user:desktop",
-          origin: { kind: "user", via: "desktop.restore" },
-          reason: `restore Maintenance commit ${input.commitId}`
-        } as const
+        const identity = ownerInApp(
+          `restore Maintenance commit ${input.commitId}`,
+          "desktop.restore"
+        )
         const content = yield* requireUpdatable(spaces, snapshot, current, {
           pageId: input.pageId,
           authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
@@ -363,12 +363,7 @@ export const makeWikiRestoreMethods = (
         }
         yield* commitWiki(
           repository,
-          {
-            expectedRevision: input.expectedHead,
-            actor: "user:desktop",
-            origin: { kind: "user", via: "desktop" },
-            reason: "restore archived wiki page"
-          },
+          { ...ownerInApp("restore archived wiki page"), expectedRevision: input.expectedHead },
           [restorePage(resource)]
         ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         return yield* read(input.pageId).pipe(

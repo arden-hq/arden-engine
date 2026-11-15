@@ -23,7 +23,7 @@ import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 export interface WikiWriter {
   readonly pageId: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 export const isRetentionSummaryWrite = (origin: WikiCommitOrigin, path: string): boolean =>
@@ -59,7 +59,7 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
   spaces: SpaceStore["Service"],
   snapshot: Snapshot,
   current: PageRecord,
-  input: WikiWriter & { readonly content: string; readonly commit: WikiCommitIdentity }
+  input: WikiWriter & { readonly content: string }
 ): Effect.fn.Return<string, WikiError> {
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
   yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
@@ -116,7 +116,6 @@ const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
     })
   }
   if (
-    input.commit !== undefined &&
     isRetentionSummaryWrite(input.commit.origin, current.resource.path) &&
     replacement.body.length > MONTHLY_SUMMARY_MAX_CHARS
   ) {
@@ -159,11 +158,7 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
   yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-  if (
-    input.commit !== undefined &&
-    isAutomatedOrigin(input.commit.origin) &&
-    posix.dirname(current.resource.path) === "."
-  ) {
+  if (isAutomatedOrigin(input.commit.origin) && posix.dirname(current.resource.path) === ".") {
     return yield* wikiError(
       operation,
       "blocked",
@@ -172,7 +167,6 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
     )
   }
   if (
-    input.commit !== undefined &&
     isAutomatedOrigin(input.commit.origin) &&
     Object.hasOwn(current.page.metadata, "producer_automation_id")
   ) {

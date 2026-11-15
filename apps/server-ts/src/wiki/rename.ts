@@ -72,7 +72,7 @@ interface WikiRenameRequestInput {
 interface WikiRenameAcceptInput {
   readonly approvalId: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 export interface WikiRenameMethods {
@@ -522,7 +522,7 @@ export const makeWikiRenameMethods = (
           }
         )
       }
-      if (input.commit !== undefined && isAutomatedOrigin(input.commit.origin)) {
+      if (isAutomatedOrigin(input.commit.origin)) {
         const rewrites = new Set(plan.rewrites.map((rewrite) => rewrite.resource.resourceId))
         const protectedPage = snapshot.pages.find(
           (record) =>
@@ -579,9 +579,7 @@ export const makeWikiRenameMethods = (
       repository,
       {
         idempotencyKey: `wiki-rename:${approval.approvalId}`,
-        actor: input.commit?.actor ?? "user:desktop",
-        origin: input.commit?.origin ?? { kind: "user", via: "desktop.rename" },
-        reason: input.commit?.reason ?? "rename wiki page",
+        ...input.commit,
         expectedRevision: plan.baseHead
       },
       [
