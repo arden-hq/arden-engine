@@ -3,7 +3,9 @@ import { Context, Effect, FileSystem, Layer, Option, Path, Semaphore } from "eff
 
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
 import {
+  ATOMIC_TEMPORARY_PREFIX,
   atomicWrite,
+  directoriesPresent,
   ensureDirectory,
   entryIsSymlink,
   inspectRegular,
@@ -149,6 +151,8 @@ export interface RevisionStorageShape {
     allowMissing?: boolean,
     requireStandalone?: boolean
   ) => Effect.Effect<Uint8Array | null, StorageError>
+  /** Every file and symlink under the working root, as sorted relative paths, outside history. */
+  readonly listWorkingFiles: Effect.Effect<ReadonlyArray<string>, StorageError>
   readonly writeWorking: (
     relativePath: string,
     content: Uint8Array,
@@ -316,8 +320,38 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
   ) {
     const file = yield* workingPath(value)
     const parts = yield* relativeParts(value)
-    yield* ensureDirectory(fs, path, workingRoot, parts.slice(0, -1))
+    if (!(yield* directoriesPresent(fs, path, workingRoot, parts.slice(0, -1)))) {
+      return allowMissing
+        ? null
+        : yield* new RevisionStorageError({ message: `file is missing: ${file}` })
+    }
     return yield* readRegular(file, allowMissing, standalone)
+  })
+  const listWorkingFiles = Effect.fn("RevisionStorage.listWorkingFiles")(function* (
+    directory: string,
+    prefix: string
+  ): Effect.fn.Return<ReadonlyArray<string>, StorageError> {
+    const names = yield* fs
+      .readDirectory(directory)
+      .pipe(Effect.mapError((cause) => storageFailure("list working folder", cause)))
+    const files: Array<string> = []
+    for (const name of [...names].sort(compareCodePoints)) {
+      const entry = path.join(directory, name)
+      if (entry === historyRoot || name.startsWith(ATOMIC_TEMPORARY_PREFIX)) continue
+      const relative = `${prefix}${name}`
+      const linked = yield* entryIsSymlink(fs, entry).pipe(
+        Effect.mapError((cause) => storageFailure("inspect working entry", cause))
+      )
+      const info = linked
+        ? undefined
+        : yield* fs
+            .stat(entry)
+            .pipe(Effect.mapError((cause) => storageFailure("stat working entry", cause)))
+      if (info?.type === "Directory")
+        files.push(...(yield* listWorkingFiles(entry, `${relative}/`)))
+      else files.push(relative)
+    }
+    return files
   })
   const writeWorkingAsync = Effect.fn("RevisionStorage.writeWorkingAsync")(function* (
     value: string,
@@ -735,6 +769,9 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
     ),
     readWorking: (value, allowMissing = false, standalone = true) =>
       readWorkingAsync(value, allowMissing, standalone),
+    listWorkingFiles: listWorkingFiles(workingRoot, "").pipe(
+      Effect.map((files) => [...files].sort(compareCodePoints))
+    ),
     writeWorking: (value, content, noReplace = false) =>
       writeWorkingAsync(value, content, noReplace),
     removeWorking: Effect.fn("RevisionStorage.removeWorking")(function* (value, missingOk = false) {

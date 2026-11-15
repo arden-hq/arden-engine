@@ -5,6 +5,7 @@ import {
   Context,
   Effect,
   Layer,
+  Result,
   Schema,
   Semaphore,
   type FileSystem,
@@ -18,9 +19,6 @@ import {
   Commit,
   Restore,
   ResourceVersion,
-  Update,
-  WorkingTreeAdoption,
-  WorkingTreeChange,
   normalizeRelativePath
 } from "../domain/model.js"
 import {
@@ -96,12 +94,27 @@ export type CommitInput = Omit<typeof ChangeSet.Encoded, "idempotencyKey"> & {
   readonly idempotencyKey?: string
 }
 
-export interface WorkingTreeChangesPreview {
+/** One active resource whose working file differs from history. */
+export type WorkingFileChange =
+  | {
+      readonly kind: "changed"
+      readonly resource: ResourceVersion
+      readonly content: Uint8Array
+    }
+  | { readonly kind: "missing"; readonly resource: ResourceVersion }
+  | { readonly kind: "unreadable"; readonly resource: ResourceVersion; readonly reason: string }
+
+/** A change the repository can take in: an update or an archive of one resource. */
+export type AdoptableWorkingChange = Exclude<WorkingFileChange, { readonly kind: "unreadable" }>
+
+export interface WorkingTreeStatus {
   readonly revision: string | null
-  readonly changes: readonly WorkingTreeChange[]
+  readonly changes: ReadonlyArray<WorkingFileChange>
+  /** Files under the working root that no active resource names, sorted. */
+  readonly untracked: ReadonlyArray<string>
 }
 
-export interface AdoptWorkingChangesOptions {
+export interface AdoptWorkingChangeOptions {
   readonly actor: string
   readonly origin: string
   readonly reason: string
@@ -144,10 +157,14 @@ export interface ManagedFileRepositoryShape {
     idempotencyKey: string,
     requestIdentity: string
   ) => Effect.Effect<{ readonly requestHash: string; readonly commitId: string }, RepositoryError>
-  readonly previewWorkingChanges: Effect.Effect<WorkingTreeChangesPreview, RepositoryError>
-  readonly adoptWorkingChanges: (
-    preview: WorkingTreeChangesPreview,
-    options: AdoptWorkingChangesOptions
+  /** Every active resource whose file differs from history, and every untracked file. One
+   *  file never fails the scan: a file that cannot be read is reported with the reason. */
+  readonly workingTreeStatus: Effect.Effect<WorkingTreeStatus, RepositoryError>
+  /** Record one outside change as one commit, guarded by that resource's version. Fails when the
+   *  file changed again after the scan. */
+  readonly adoptWorkingChange: (
+    change: AdoptableWorkingChange,
+    options: AdoptWorkingChangeOptions
   ) => Effect.Effect<CommitResult, RepositoryError>
   readonly history: (options?: {
     readonly resourceId?: string | null
@@ -214,26 +231,6 @@ const decodeChangeSet = Effect.fn("decodeChangeSet")(function* (
     ...request,
     idempotencyKey: request.idempotencyKey ?? randomUUID()
   }).pipe(Effect.mapError((cause) => new InvalidRevisionInputError({ message: cause.message })))
-})
-
-const decodeWorkingTreeAdoption = Effect.fn("decodeWorkingTreeAdoption")(function* (
-  value: unknown
-): Effect.fn.Return<WorkingTreeAdoption, InvalidRevisionInputError> {
-  const adoption = yield* Schema.decodeUnknownEffect(WorkingTreeAdoption)(value).pipe(
-    Effect.mapError(
-      () => new InvalidRevisionInputError({ message: "working-tree adoption has an invalid shape" })
-    )
-  )
-  return new WorkingTreeAdoption({
-    ...adoption,
-    changes: adoption.changes.map(
-      (change) =>
-        new WorkingTreeChange({
-          ...change,
-          content: new Uint8Array(change.content)
-        })
-    )
-  })
 })
 
 const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
@@ -440,80 +437,57 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
           return yield* storage.withLock(critical)
         })
       ),
-    previewWorkingChanges: withLockQueue(
+    workingTreeStatus: withLockQueue(
       withRepositoryLock(
         Effect.gen(function* () {
           yield* recoverTransactions(storage)
           const revision = yield* readPublishedHead
           const resources = yield* currentMap(storage, revision)
-          const changes: WorkingTreeChange[] = []
-          for (const resource of [...resources.values()].sort((left, right) =>
-            compareCodePoints(left.resourceId, right.resourceId)
-          )) {
-            if (resource.state !== "active") continue
-            const content = yield* storage.readWorking(resource.path, true, true)
-            if (content === null) {
-              return yield* new RevisionConflictError({
-                message: `managed working file is missing: ${resource.path}`
-              })
+          const active = [...resources.values()]
+            .filter((resource) => resource.state === "active")
+            .sort((left, right) => compareCodePoints(left.resourceId, right.resourceId))
+          const changes: WorkingFileChange[] = []
+          for (const resource of active) {
+            const read = yield* Effect.result(storage.readWorking(resource.path, true, true))
+            if (Result.isFailure(read)) {
+              changes.push({ kind: "unreadable", resource, reason: read.failure.message })
+            } else if (read.success === null) {
+              changes.push({ kind: "missing", resource })
+            } else if (sha256Hex(read.success) !== resource.blobId) {
+              changes.push({ kind: "changed", resource, content: new Uint8Array(read.success) })
             }
-            if (sha256Hex(content) === resource.blobId) continue
-            changes.push(
-              new WorkingTreeChange({
-                resourceId: resource.resourceId,
-                path: resource.path,
-                expectedVersion: resource.versionId,
-                content: new Uint8Array(content)
-              })
-            )
           }
-          return { revision, changes }
+          const tracked = new Set(active.map((resource) => resource.path))
+          const untracked = (yield* storage.listWorkingFiles).filter((path) => !tracked.has(path))
+          return { revision, changes, untracked }
         })
       )
     ),
-    adoptWorkingChanges: (preview, input) =>
+    adoptWorkingChange: (change, input) =>
       withLockQueue(
-        Effect.gen(function* () {
-          const adoption = yield* decodeWorkingTreeAdoption({
-            expectedHead: preview.revision,
-            changes: preview.changes,
-            actor: input.actor,
-            origin: input.origin,
-            reason: input.reason,
-            idempotencyKey: randomUUID()
-          })
-          const expectedPaths = new Map<string, string>()
-          const operations: Update[] = []
-          for (const change of adoption.changes) {
-            const path = yield* normalizeRelativePath(change.path)
-            if (expectedPaths.has(change.resourceId)) {
-              return yield* new InvalidRevisionInputError({
-                message: `working-tree adoption repeats resource: ${change.resourceId}`
-              })
-            }
-            expectedPaths.set(change.resourceId, path)
-            operations.push(
-              new Update({
-                resourceId: change.resourceId,
-                expectedVersion: change.expectedVersion,
-                content: new Uint8Array(change.content)
-              })
-            )
-          }
-          const base = {
-            operations,
-            actor: adoption.actor,
-            origin: adoption.origin,
-            reason: adoption.reason,
-            idempotencyKey: adoption.idempotencyKey,
-            expectedHead: adoption.expectedHead
-          }
-          const changeSet =
-            adoption.expectedHead === null
-              ? new ChangeSet({ ...base, enforceExpectedHead: true })
-              : new ChangeSet(base)
-          return yield* commit(storage, head, changeSet, options.checkpoint, expectedPaths)
-        })
+        decodeChangeSet({
+          operations: [
+            change.kind === "changed"
+              ? {
+                  _tag: "Update",
+                  resourceId: change.resource.resourceId,
+                  expectedVersion: change.resource.versionId,
+                  content: change.content
+                }
+              : {
+                  _tag: "Archive",
+                  resourceId: change.resource.resourceId,
+                  expectedVersion: change.resource.versionId
+                }
+          ],
+          actor: input.actor,
+          origin: input.origin,
+          reason: input.reason
+        }).pipe(
+          Effect.flatMap((changeSet) =>
+            commit(storage, head, changeSet, options.checkpoint, change.resource.resourceId)
+          )
+        )
       ),
     prepareHistory: Effect.fn("RevisionRepository.prepareHistory")(function* () {
       const cache: RevisionReadCache = { trees: new Map(), commits: new Map(), parsed }
@@ -664,8 +638,8 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
     idempotencyReceipt: (idempotencyKey) => open(repository.idempotencyReceipt(idempotencyKey)),
     finalizeIdempotencyReceipt: (idempotencyKey, requestIdentity) =>
       open(repository.finalizeIdempotencyReceipt(idempotencyKey, requestIdentity)),
-    previewWorkingChanges: open(repository.previewWorkingChanges),
-    adoptWorkingChanges: (preview, input) => open(repository.adoptWorkingChanges(preview, input)),
+    workingTreeStatus: open(repository.workingTreeStatus),
+    adoptWorkingChange: (change, input) => open(repository.adoptWorkingChange(change, input)),
     history: (input) => open(repository.history(input)),
     prepareHistory: () => open(repository.prepareHistory()),
     diff: (base, target, input) => open(repository.diff(base, target, input)),

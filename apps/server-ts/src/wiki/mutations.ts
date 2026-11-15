@@ -15,20 +15,12 @@ import {
   archivePage,
   commitWiki,
   createPage,
-  encodeWikiOrigin,
   isAutomatedOrigin,
   type WikiCommitIdentity,
   type WikiCommitOrigin,
   updatePage
 } from "./commit.js"
-import {
-  isMonthlySummaryPath,
-  KEEP_RULE_FORMS,
-  MONTHLY_SUMMARY_MAX_CHARS,
-  unreadableKeepRule
-} from "./report-retention.js"
-import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
-import { directorySections } from "./collections.js"
+import { MONTHLY_SUMMARY_MAX_CHARS } from "./report-retention.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { createWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
@@ -39,17 +31,17 @@ import {
   formatWikiPage,
   normal,
   pageNamesForPath,
-  parseWikiPage,
-  writtenContent
+  parseWikiPage
 } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
+import { loadSnapshot, readRecord, type PageRecord } from "./snapshot.js"
 import {
-  followRedirect,
-  loadSnapshot,
-  readRecord,
-  type PageRecord,
-  type Snapshot
-} from "./snapshot.js"
+  isRetentionSummaryWrite,
+  requireArchivable,
+  requireRetirable,
+  requireUpdatable,
+  summaryTooLong
+} from "./write-rules.js"
 
 const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
   kind: "capture",
@@ -57,14 +49,6 @@ const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
   sessionId: undefined
 }
 const DESKTOP_ORIGIN: WikiCommitOrigin = { kind: "user", via: "desktop" }
-
-const isRetentionSummaryWrite = (origin: WikiCommitOrigin, path: string): boolean =>
-  origin.kind === "automation" &&
-  origin.automationId === REPORT_RETENTION_AUTOMATION &&
-  isMonthlySummaryPath(path)
-
-const summaryTooLong = (chars: number): string =>
-  `The monthly summary has ${chars} characters; it replaces a month of reports only when it is ${MONTHLY_SUMMARY_MAX_CHARS} or fewer. Nothing was saved. Keep fewer items and shorter links, then save it again.`
 
 interface WikiUpdateInput {
   readonly pageId: string
@@ -98,7 +82,6 @@ interface WikiArchiveInput {
 }
 
 export interface WikiMutationMethods {
-  readonly observe: () => Effect.Effect<string | null, WikiError>
   readonly create: (input: WikiCreateInput) => Effect.Effect<WikiPage, WikiError>
   readonly createDirectory: (
     input: WikiCreateDirectoryInput
@@ -123,71 +106,6 @@ export const makeWikiMutationMethods = (
   spaces: SpaceStore["Service"],
   read: WikiListingMethods["read"]
 ): WikiMutationMethods => {
-  const observe = Effect.fn("Wiki.observe")(function* () {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const preview = yield* repository.previewWorkingChanges.pipe(
-        Effect.mapError(mapRevisionError("observe"))
-      )
-      if (preview.changes.length === 0) return preview.revision
-      const current = yield* loadSnapshot(repository, "observe")
-      if (current.head !== preview.revision) continue
-      const byId = new Map(current.pages.map((record) => [record.page.pageId, record] as const))
-      for (const change of preview.changes) {
-        const record = byId.get(change.resourceId)
-        if (
-          record === undefined ||
-          record.resource.path !== change.path ||
-          record.resource.versionId !== change.expectedVersion ||
-          record.page.lifecycle !== "active"
-        ) {
-          return yield* wikiError(
-            "observe",
-            "conflict",
-            `External Wiki edit does not match an active tracked page: ${change.path}`,
-            { pageId: change.resourceId }
-          )
-        }
-        const content = yield* Effect.try({
-          try: () => new TextDecoder("utf-8", { fatal: true }).decode(change.content),
-          catch: (cause) =>
-            wikiError("observe", "invalid", "External Wiki edit must be valid UTF-8", {
-              pageId: change.resourceId,
-              cause
-            })
-        })
-        const parsed = yield* parseWikiPage(content, change.resourceId).pipe(
-          Effect.mapError((cause) =>
-            wikiError("observe", "invalid", cause.message, {
-              pageId: change.resourceId,
-              cause
-            })
-          )
-        )
-        if (parsed.lifecycle !== "active") {
-          return yield* wikiError(
-            "observe",
-            "invalid",
-            "External Wiki edits cannot change page lifecycle",
-            { pageId: change.resourceId }
-          )
-        }
-      }
-      const adopted = yield* repository
-        .adoptWorkingChanges(preview, {
-          actor: "user:external",
-          origin: encodeWikiOrigin({ kind: "user", via: "filesystem" }),
-          reason: "adopt external Wiki edits"
-        })
-        .pipe(Effect.mapError(mapRevisionError("observe")))
-      return adopted.commit.commitId
-    }
-    return yield* wikiError(
-      "observe",
-      "conflict",
-      "Wiki changed while external edits were observed"
-    )
-  })
-
   const create = Effect.fn("Wiki.create")(function* (input: WikiCreateInput) {
     if (!input.path.endsWith(".md")) {
       return yield* wikiError("create", "invalid", "Wiki page paths must end in .md")
@@ -337,63 +255,7 @@ export const makeWikiMutationMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        if (current.page.lifecycle !== "active") {
-          return yield* wikiError("update", "invalid", "Only active Wiki pages can be updated", {
-            pageId: input.pageId
-          })
-        }
-        if (current.resource.path.toLowerCase() === "health.md") {
-          return yield* wikiError("update", "blocked", "Wiki health is backend-managed", {
-            pageId: input.pageId
-          })
-        }
-        const boundary = yield* resolveWikiWriteBoundary(
-          spaces,
-          input.authority,
-          snapshot,
-          "update"
-        )
-        yield* requireWikiWritePaths(boundary, "update", [current.resource.path])
-        const replacement = yield* parseWikiPage(input.content, input.pageId).pipe(
-          Effect.mapError((cause) =>
-            wikiError("update", "invalid", cause.message, {
-              pageId: input.pageId,
-              cause
-            })
-          )
-        )
-        if (replacement.lifecycle !== "active") {
-          return yield* wikiError("update", "invalid", "A page update cannot create a redirect", {
-            pageId: input.pageId
-          })
-        }
-        if (
-          input.commit !== undefined &&
-          isRetentionSummaryWrite(input.commit.origin, current.resource.path) &&
-          replacement.body.length > MONTHLY_SUMMARY_MAX_CHARS
-        ) {
-          return yield* wikiError("update", "invalid", summaryTooLong(replacement.body.length), {
-            pageId: input.pageId
-          })
-        }
-        const keepRule =
-          posix.basename(current.resource.path).toLowerCase() === "readme.md" &&
-          Object.hasOwn(replacement.metadata, "producer_automation_id")
-            ? unreadableKeepRule(directorySections(replacement.body).get("Retention"))
-            : undefined
-        if (keepRule !== undefined) {
-          return yield* wikiError(
-            "update",
-            "invalid",
-            `The retention rule "${keepRule}" was not understood, so it would keep every report. Nothing was saved. Write ${KEEP_RULE_FORMS}.`,
-            { pageId: input.pageId }
-          )
-        }
-        const content = yield* writtenContent(replacement).pipe(
-          Effect.mapError((cause) =>
-            wikiError("update", "invalid", cause.message, { pageId: input.pageId, cause })
-          )
-        )
+        const content = yield* requireUpdatable(spaces, snapshot, current, input)
         const changed = content !== current.page.content
         if (!changed) {
           const latestHead = yield* repository.currentRevision.pipe(
@@ -429,76 +291,6 @@ export const makeWikiMutationMethods = (
         return page
       })
     )
-  })
-
-  const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
-    operation: "archive" | "merge",
-    snapshot: Snapshot,
-    current: PageRecord,
-    input: WikiArchiveInput
-  ): Effect.fn.Return<void, WikiError> {
-    if (current.page.lifecycle !== "active") {
-      return yield* wikiError(operation, "invalid", "Only active Wiki pages can be retired", {
-        pageId: input.pageId
-      })
-    }
-    const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
-    yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-    if (
-      input.commit !== undefined &&
-      isAutomatedOrigin(input.commit.origin) &&
-      posix.dirname(current.resource.path) === "."
-    ) {
-      return yield* wikiError(
-        operation,
-        "blocked",
-        "Automation runs cannot retire a page at the Memory root",
-        { pageId: input.pageId }
-      )
-    }
-    if (
-      input.commit !== undefined &&
-      isAutomatedOrigin(input.commit.origin) &&
-      Object.hasOwn(current.page.metadata, "producer_automation_id")
-    ) {
-      return yield* wikiError(
-        operation,
-        "blocked",
-        "Automation runs cannot archive an automation-owned page",
-        { pageId: input.pageId }
-      )
-    }
-    const pageIsSpaceBound = yield* spaces.hasPageBinding(input.pageId, current.resource.path).pipe(
-      Effect.mapError((cause) =>
-        wikiError(operation, "storage", "Could not check Space page ownership", {
-          pageId: input.pageId,
-          cause
-        })
-      )
-    )
-    if (pageIsSpaceBound) {
-      return yield* wikiError(
-        operation,
-        "blocked",
-        "A Space owns this Wiki page; move or archive the Space first",
-        { pageId: input.pageId }
-      )
-    }
-    if (posix.basename(current.resource.path).toLowerCase() === "readme.md") {
-      const directory = posix.dirname(current.resource.path)
-      const prefix = `${directory}/`
-      const child = snapshot.pages.find(
-        (record) =>
-          record.page.pageId !== input.pageId &&
-          record.page.lifecycle === "active" &&
-          record.resource.path.startsWith(prefix)
-      )
-      if (child !== undefined) {
-        return yield* wikiError(operation, "blocked", `Active Wiki pages remain in ${directory}`, {
-          pageId: input.pageId
-        })
-      }
-    }
   })
 
   /**
@@ -544,24 +336,7 @@ export const makeWikiMutationMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        yield* requireRetirable("archive", snapshot, current, input)
-        const remaining = snapshot.pages.filter((record) => record.page.pageId !== input.pageId)
-        const remainingById = new Map(
-          remaining.map((record) => [record.page.pageId, record] as const)
-        )
-        const brokenRedirect = remaining.find(
-          (record) =>
-            record.page.lifecycle === "redirect" &&
-            followRedirect(remainingById, record.page.pageId) === null
-        )
-        if (brokenRedirect !== undefined) {
-          return yield* wikiError(
-            "archive",
-            "invalid",
-            `Page is still the target of redirect ${brokenRedirect.page.pageId}`,
-            { pageId: input.pageId }
-          )
-        }
+        yield* requireArchivable(spaces, snapshot, current, input)
         const committed = yield* commitWiki(
           repository,
           {
@@ -605,7 +380,7 @@ export const makeWikiMutationMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        yield* requireRetirable("merge", snapshot, current, input)
+        yield* requireRetirable(spaces, "merge", snapshot, current, input)
         if (input.commit !== undefined && isAutomatedOrigin(input.commit.origin)) {
           yield* requireNeverUnmerged(current, input.expectedHead)
         }
@@ -650,7 +425,6 @@ export const makeWikiMutationMethods = (
   })
 
   return {
-    observe,
     create,
     createDirectory,
     createSpacePage,

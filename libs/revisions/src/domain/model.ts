@@ -24,28 +24,6 @@ export class ResourceVersion extends Schema.Class<ResourceVersion>(
   versionId: Hash
 }) {}
 
-/** Exact bytes observed for one externally changed active resource. */
-export class WorkingTreeChange extends Schema.Class<WorkingTreeChange>(
-  "arden/revisions/WorkingTreeChange"
-)({
-  resourceId: NonEmptyText,
-  path: NonEmptyText,
-  expectedVersion: Hash,
-  content: Schema.Uint8Array
-}) {}
-
-/** A guarded request to publish already-materialized working-tree changes. */
-export class WorkingTreeAdoption extends Schema.Class<WorkingTreeAdoption>(
-  "arden/revisions/WorkingTreeAdoption"
-)({
-  expectedHead: Schema.NullOr(Hash),
-  changes: Schema.Array(WorkingTreeChange).check(Schema.isMinLength(1)),
-  actor: NonEmptyText,
-  origin: NonEmptyText,
-  reason: NonEmptyText,
-  idempotencyKey: NonEmptyText
-}) {}
-
 /** A newly created resource. */
 export class Create extends Schema.TaggedClass<Create>()("Create", {
   resourceId: NonEmptyText,

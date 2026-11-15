@@ -175,7 +175,7 @@ export const commitWiki = (
   const replayKey =
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
-  return requireHumanAliases(operations).pipe(
+  return requireCommitRules(operations).pipe(
     Effect.andThen(
       repository.commit({
         actor: options.actor,
@@ -191,7 +191,8 @@ export const commitWiki = (
   )
 }
 
-const requireHumanAliases = (
+/** The rules every Memory write meets at the commit point, outside edits included. */
+export const requireCommitRules = (
   operations: ReadonlyArray<WikiPageOperation>
 ): Effect.Effect<void, InvalidRevisionInputError> =>
   Effect.forEach(

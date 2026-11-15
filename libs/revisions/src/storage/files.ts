@@ -53,12 +53,29 @@ export const entryIsSymlink = (
     )
   )
 
-export const ensureDirectory = Effect.fn("RevisionStorage.ensureDirectory")(function* (
+export const ensureDirectory = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   root: string,
   parts: ReadonlyArray<string>
-): Effect.fn.Return<void, StorageError> {
+): Effect.Effect<void, StorageError> =>
+  walkDirectories(fs, path, root, parts, "create").pipe(Effect.asVoid)
+
+/** Whether every directory on the way exists, without creating any. */
+export const directoriesPresent = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  root: string,
+  parts: ReadonlyArray<string>
+): Effect.Effect<boolean, StorageError> => walkDirectories(fs, path, root, parts, "check")
+
+const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  root: string,
+  parts: ReadonlyArray<string>,
+  missing: "create" | "check"
+): Effect.fn.Return<boolean, StorageError> {
   const rootInfo = yield* fs
     .stat(root)
     .pipe(Effect.mapError((cause) => storageFailure("stat repository root", cause)))
@@ -74,6 +91,7 @@ export const ensureDirectory = Effect.fn("RevisionStorage.ensureDirectory")(func
     const exists = yield* fs
       .exists(current)
       .pipe(Effect.mapError((cause) => storageFailure("check repository directory", cause)))
+    if (!exists && missing === "check") return false
     if (!exists) {
       yield* fs
         .makeDirectory(current, { mode: 0o700 })
@@ -97,6 +115,7 @@ export const ensureDirectory = Effect.fn("RevisionStorage.ensureDirectory")(func
       })
     }
   }
+  return true
 })
 
 /** Only a caller that allows a missing file gets `null` back. */
@@ -208,6 +227,9 @@ export const removeTree = Effect.fn("RevisionStorage.removeTree")(function* (
     .pipe(Effect.mapError((cause) => storageFailure("remove directory", cause)))
 })
 
+/** Atomic writes stage their bytes in a folder with this name prefix beside the target. */
+export const ATOMIC_TEMPORARY_PREFIX = ".arden-"
+
 export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
   fs: FileSystem.FileSystem,
   path: Path.Path,
@@ -221,7 +243,7 @@ export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
   if (existing !== null && noReplace)
     return yield* new RevisionConflictError({ message: `target already exists: ${target}` })
   const temporary = yield* fs
-    .makeTempFile({ directory: parent, prefix: ".arden-", suffix: ".tmp" })
+    .makeTempFile({ directory: parent, prefix: ATOMIC_TEMPORARY_PREFIX, suffix: ".tmp" })
     .pipe(Effect.mapError((cause) => storageFailure("create atomic temporary file", cause)))
   const temporaryDirectory = path.dirname(temporary)
   let installed = false

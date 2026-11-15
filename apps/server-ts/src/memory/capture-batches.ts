@@ -17,9 +17,7 @@ import type {
   TranscriptMessageRecord
 } from "../persistence/transcript/model.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
-import type { WikiError } from "../wiki/errors.js"
 import type { Wiki } from "../wiki/service.js"
-import type { Snapshot } from "../wiki/snapshot.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
 import { crowdedCorePages } from "./core-memory.js"
 
@@ -60,13 +58,15 @@ export interface MemoryCaptureBatches {
 
 /** Hands Memory Capture one batch of chat evidence at a time and records what it read. */
 export const makeMemoryCaptureBatches = (input: {
-  readonly wiki: Pick<Wiki["Service"], "hasFinalizedCaptureBatch" | "finalizeCaptureBatch">
-  readonly snapshot: () => Effect.Effect<Snapshot, WikiError>
+  readonly wiki: Pick<
+    Wiki["Service"],
+    "hasFinalizedCaptureBatch" | "finalizeCaptureBatch" | "snapshot"
+  >
   readonly captures: MemoryCaptureStore["Service"]
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
   readonly transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns">
 }): MemoryCaptureBatches => {
-  const { wiki, snapshot, captures, sessions, transcript } = input
+  const { wiki, captures, sessions, transcript } = input
 
   const evidenceLabel = (
     chat: SessionHistoryHeader,
@@ -220,7 +220,7 @@ export const makeMemoryCaptureBatches = (input: {
           sessionId: work.sessionId
         })
       }
-      const crowded = yield* snapshot().pipe(
+      const crowded = yield* wiki.snapshot().pipe(
         Effect.map((current) =>
           crowdedCorePages(
             current.pages

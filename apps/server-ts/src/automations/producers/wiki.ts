@@ -1,3 +1,5 @@
+import { Effect } from "effect"
+
 import type { AutomationTriggerEvent } from "../../persistence/automations/model.js"
 import type { WikiCommitSource } from "../../wiki/commit.js"
 import { Wiki } from "../../wiki/service.js"
@@ -27,11 +29,24 @@ export const wikiChangedEvent = (input: {
   }
 })
 
+/**
+ * The one-minute Memory poll: take in changes made outside Arden, then announce every new commit.
+ * Nothing on a chat turn reads the files themselves.
+ */
+const pollMemoryChanges = Effect.fn("Wiki.pollChanges")(function* () {
+  const wiki = yield* Wiki
+  yield* wiki
+    .checkOutsideEdits()
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Memory changes made outside Arden were not checked", cause)
+      )
+    )
+  yield* wiki.publishChanges()
+})
+
 export const wikiEventProducer: AutomationEventProducer<"wiki.changed", Wiki> = {
   eventType: "wiki.changed",
-  source: {
-    kind: "always",
-    poll: Wiki.use((wiki) => wiki.publishChanges())
-  },
+  source: { kind: "always", poll: pollMemoryChanges() },
   failureMessage: "Wiki event publication remains pending"
 }

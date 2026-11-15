@@ -27,6 +27,7 @@ import {
   type WikiMaintenancePrepareInput
 } from "./maintenance.js"
 import { makeWikiMutationMethods, type WikiMutationMethods } from "./mutations.js"
+import { makeOutsideEdits, type OutsideEditCheck } from "./outside-edits.js"
 import { makeWikiPublisher, WikiChangeSink } from "./publication.js"
 import {
   makeWikiReportRetentionMethods,
@@ -51,6 +52,7 @@ type WikiShape = WikiListingMethods &
   WikiReportRetentionMethods &
   WikiImportMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
+    readonly checkOutsideEdits: () => Effect.Effect<OutsideEditCheck, WikiError>
     readonly prepareMaintenance: (
       input: WikiMaintenancePrepareInput
     ) => Effect.Effect<WikiMaintenancePreparation, WikiError>
@@ -96,6 +98,7 @@ const make = Effect.fn("Wiki.make")(function* (
       operation(...args).pipe(Effect.tap(publishSavedChanges))
 
   const listing = makeWikiListingMethods(repository)
+  const outsideEdits = makeOutsideEdits({ repository, spaces, snapshot: listing.snapshot })
   const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
   const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
   const capture = makeWikiCaptureMethods(repository, spaces, listing.read)
@@ -110,10 +113,10 @@ const make = Effect.fn("Wiki.make")(function* (
     ...makeWikiHistoryMethods(repository, listing.snapshot),
     ...makeWikiChangeMethods(repository),
     publishChanges,
+    checkOutsideEdits: outsideEdits.check,
     prepareMaintenance: makeWikiMaintenanceMethods(repository).prepare,
     stepReportRetention: notifyAfter(reportRetention.stepReportRetention),
     retireReportPart: notifyAfter(reportRetention.retireReportPart),
-    observe: notifyAfter(mutations.observe),
     create: notifyAfter(mutations.create),
     createDirectory: notifyAfter(mutations.createDirectory),
     createSpacePage: notifyAfter(mutations.createSpacePage),
