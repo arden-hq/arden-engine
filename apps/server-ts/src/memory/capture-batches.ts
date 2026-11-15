@@ -213,7 +213,7 @@ export const makeMemoryCaptureBatches = (input: {
   })
 
   /**
-   * The backlog: old messages no Capture run was shown, read once each after the chats have no
+   * The backlog: messages behind a chat's position that Capture did not read, read once each after the chats have no
    * new work, at most `ARDEN_CAPTURE_CATCH_UP` batches per server start, none when it is unset.
    * Its progress is the receipts of the batches it finished, and a range shrinks as far as every
    * batch from its start was finished. A batch with nothing to review, or one skipped since this
