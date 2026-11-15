@@ -6,7 +6,7 @@ import { migrations } from "../src/persistence/migrations/index.js"
 
 const at = "2026-11-01T00:00:00.000Z"
 
-it("migration 0164 cuts each stored chat summary back to its chat, and the trigger cuts later ones", () => {
+it("migration 0164 removes each stored chat summary ahead of its chat, and the trigger removes later ones", () => {
   const database = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false })
   for (const statement of baselineStatements) database.exec(statement)
   for (const migration of migrations.filter(
@@ -22,6 +22,9 @@ it("migration 0164 cuts each stored chat summary back to its chat, and the trigg
   summary.run("ahead", 9)
   summary.run("behind", 1)
   summary.run("empty", 4)
+  summary.run("before", 0)
+  message.run("before", "before-0", 0)
+  message.run("before", "before-1", 1)
 
   chatSummaryCutByRevert.up(database)
   const stored = () =>
@@ -31,18 +34,18 @@ it("migration 0164 cuts each stored chat summary back to its chat, and the trigg
       .map((row) => [row["session_id"], row["through_sequence"]])
   const repaired = stored()
 
-  database.exec("DELETE FROM session_messages WHERE session_id = 'ahead' AND seq = 2")
-  const reverted = stored()
-  database.exec("DELETE FROM session_messages WHERE session_id = 'behind'")
-  expect({ repaired, reverted, cleared: stored() }).toEqual({
+  database.exec("DELETE FROM session_messages WHERE session_id = 'before' AND seq = 1")
+  const pastItsRange = stored()
+  database.exec("DELETE FROM session_messages WHERE session_id = 'behind' AND seq = 1")
+  expect({ repaired, pastItsRange, reverted: stored() }).toEqual({
     repaired: [
-      ["ahead", 2],
+      ["before", 0],
       ["behind", 1]
     ],
-    reverted: [
-      ["ahead", 1],
+    pastItsRange: [
+      ["before", 0],
       ["behind", 1]
     ],
-    cleared: [["ahead", 1]]
+    reverted: [["before", 0]]
   })
 })

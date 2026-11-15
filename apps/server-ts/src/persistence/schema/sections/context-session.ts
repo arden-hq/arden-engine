@@ -290,10 +290,7 @@ export const contextSessionSchemaSection = {
         WHERE session_id = OLD.session_id AND from_seq >= OLD.seq;
         UPDATE memory_capture_backlog SET through_seq = OLD.seq - 1
         WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
-        DELETE FROM chat_summaries WHERE session_id = OLD.session_id
-          AND NOT EXISTS (SELECT 1 FROM session_messages
-            WHERE session_id = OLD.session_id AND seq < OLD.seq);
-        UPDATE chat_summaries SET through_sequence = OLD.seq - 1
+        DELETE FROM chat_summaries
         WHERE session_id = OLD.session_id AND through_sequence >= OLD.seq;
       END`,
     `CREATE TRIGGER memory_capture_owner_chat_starts

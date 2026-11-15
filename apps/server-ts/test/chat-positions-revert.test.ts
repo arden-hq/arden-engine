@@ -48,7 +48,7 @@ const summary = (sessionId: string, title: string, throughSequence: number) => (
   runId: null
 })
 
-it("a revert cuts the chat summary back, so a newer summary of the chat is saved", async () => {
+it("a revert removes the chat summary it cuts into, so no removed turn stays summarized", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
       const sessions = yield* SessionStore
@@ -59,7 +59,7 @@ it("a revert cuts the chat summary back, so a newer summary of the chat is saved
       yield* turn(chat, "third")
       yield* summaries.setChat(summary(chat, "Three turns", 5))
       yield* sessions.revert({ sessionId: chat, turns: 2 })
-      const cut = (yield* summaries.chat(chat))?.throughSequence
+      const cut = yield* summaries.chat(chat)
       yield* turn(chat, "again")
       const newer = yield* summaries.setChat(summary(chat, "Two turns", 3))
       const older = yield* summaries.setChat(summary(chat, "One turn", 1))
@@ -69,7 +69,13 @@ it("a revert cuts the chat summary back, so a newer summary of the chat is saved
     })
   )
   // A summary that reaches less far than the stored one is refused, and says so.
-  expect(outcome).toEqual({ cut: 1, newer: true, older: false, saved: "Two turns", emptied: null })
+  expect(outcome).toEqual({
+    cut: null,
+    newer: true,
+    older: false,
+    saved: "Two turns",
+    emptied: null
+  })
 })
 
 /**
