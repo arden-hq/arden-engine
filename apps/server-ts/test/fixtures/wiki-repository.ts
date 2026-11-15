@@ -91,7 +91,6 @@ export const withWikiRepository = async <A>(
   }
 }
 
-/** Real time, but each reading at least a millisecond after the one before, so every saved version has its own time. */
 const distinctMillisClock = (): Clock.Clock => {
   const real = Effect.runSync(Clock.clockWith(Effect.succeed))
   let last = 0

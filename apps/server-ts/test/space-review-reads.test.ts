@@ -5,7 +5,6 @@ import { expect, it } from "vitest"
 import { SpaceReviewStore } from "../src/persistence/automations/space-review-store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// A made-up review input in the shape retired by migration 0166: one page has the `resident` basis.
 const page = { pageId: "p1", path: "p1.md", version: "v1", basis: "resident" }
 const retiredInput = {
   admission: "changed",

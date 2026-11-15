@@ -335,7 +335,6 @@ export const makeSpaceJobSql = (
     })
   })
 
-  /** A change to the Space itself made by the owner: its settings, or a restore. */
   const queueSpaceWake = Effect.fn("SpaceJobSql.queueSpaceWake")(function* (
     spaceId: string,
     now: string

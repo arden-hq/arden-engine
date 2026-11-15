@@ -169,10 +169,6 @@ export const requireArchivable = Effect.fn("Wiki.requireArchivable")(function* (
   }
 })
 
-/**
- * Why a page may not be created at `path`, if it may not: a page is a .md file inside an
- * existing directory, or a standing-facts page at the root; a README is never created this way.
- */
 export const createRefusal = (
   path: string
 ): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
@@ -185,10 +181,6 @@ export const createRefusal = (
   return undefined
 }
 
-/**
- * The rules for creating a page at `path`: in a mapped folder the writer may write, and outside a
- * folder a Space owns unless this run is that Space's.
- */
 export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
   spaces: SpaceStore["Service"],
   snapshot: Snapshot,

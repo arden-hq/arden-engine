@@ -425,11 +425,6 @@ const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageK
   )
 }
 
-/**
- * The records recall may not choose on `today` (`YYYY-MM-DD`): dated more than
- * `RECORD_RECALL_DAYS` before it, and not their folder's newest. Search by meaning leaves them
- * out too, so they take none of its places.
- */
 export const tooOldToRecall = (
   pages: ReadonlyArray<PageRecord>,
   today: string

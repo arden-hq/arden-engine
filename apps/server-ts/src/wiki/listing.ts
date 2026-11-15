@@ -182,8 +182,6 @@ export const makeWikiListingMethods = (
       return yield* wikiError("list", "invalid", "Invalid Wiki change timestamp")
     }
     const wanted = input.offset + input.limit + 1
-    // A commit that changed only a code-owned page is no change a run sees, so read further
-    // back until enough remain.
     const shown = (limit: number) =>
       repository.history({ limit }).pipe(
         Effect.mapError(mapRevisionError("list")),

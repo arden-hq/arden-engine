@@ -47,7 +47,6 @@ const snapshot = (head: string, pages: ReadonlyArray<readonly [string, string]>)
 })
 
 const START = snapshot("1", [["a", "a"]])
-// forgotten.md is the code-owned page of what the owner asked to forget; nothing embeds it.
 const MOVED = snapshot("2", [
   ["a", "b"],
   ["c", "c"],

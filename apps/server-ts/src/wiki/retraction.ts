@@ -64,10 +64,6 @@ export const storedRetractions = (
   }
 }
 
-/**
- * The retractions a page's metadata holds. An entry that does not read is skipped with a
- * warning: only the owner can write such an entry, and owner edits are never refused.
- */
 const retractionsOf = (
   metadata: Readonly<Record<string, Schema.Json>>
 ): Effect.Effect<ReadonlyArray<Retraction>> => {
@@ -102,11 +98,6 @@ export const openRetractions = Effect.fn("Wiki.openRetractions")(function* (
 
 const words = new Intl.Segmenter("und", { granularity: "word" })
 
-/**
- * The form two lines are compared in: the words a person reads (markup off, a link's label
- * kept), in lower case, without punctuation or spacing. Words are Unicode word segments, so
- * text written without spaces has words too. Undefined for a line with no claim.
- */
 export const claimKey = (line: string): string | undefined => {
   const found = [...words.segment(markdownWords(line).toLowerCase())].flatMap((segment) =>
     segment.isWordLike === true ? [segment.segment] : []

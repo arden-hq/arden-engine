@@ -1,9 +1,3 @@
-// Classifies every Memory page on the replay copy as knowledge, record or contract, and replays
-// past successful writes from `tool_calls` through today's commit rules, each as the operation
-// its tool commits: a create, an update, a move, an archive, or a merge's redirect. Space and
-// directory ownership checks, and a rename's link rewrites in other pages, are not replayed. It
-// prints and asserts counts only, and skips unless ARDEN_REPLAY_COPY names a copy:
-//   ARDEN_REPLAY_COPY=<folder> npx vitest run test/records-replay.test.ts
 import { join } from "node:path"
 import {
   ManagedFileRepository,
@@ -98,7 +92,6 @@ const commitOrigin = (writer: Writer, automationId: string | null): WikiCommitOr
 
 type Replayed = "create" | "update" | "move" | "archive" | "merge"
 
-/** The operation a past call commits on the page now at `path`, or undefined if it is gone. */
 const replayedOperation = Effect.fn("replayedOperation")(function* (
   repository: ManagedFileRepositoryShape,
   tool: (typeof WRITES)[number],

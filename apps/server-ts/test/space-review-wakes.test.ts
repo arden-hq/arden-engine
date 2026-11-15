@@ -15,9 +15,6 @@ import { WorkStore } from "../src/persistence/work/store.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Which change wakes a Space review: a Memory save and a page binding never; Space settings and
-// a Task change made by hand do.
-
 const REVISION = "a".repeat(64)
 const AT = "2026-11-01T00:00:00.000Z"
 

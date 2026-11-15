@@ -26,7 +26,6 @@ import {
 import { activeRunPages, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
 import { FORGOTTEN_PAGE_PATH } from "./system-pages.js"
 
-/** The owner's turn that asks: its chat and the chat's link. */
 interface OwnerTurn {
   readonly sessionId: string
   readonly chat: string
@@ -43,7 +42,6 @@ interface WikiUndoForgetInput {
   readonly turn: OwnerTurn
 }
 
-/** One page a forget or an undo changes, with its body before and after. */
 interface PageChange {
   readonly path: string
   readonly before: string
@@ -118,7 +116,6 @@ const forgottenPage = (snapshot: Snapshot): PageRecord | undefined =>
     (record) => record.resource.path === FORGOTTEN_PAGE_PATH && record.page.lifecycle === "active"
   )
 
-/** The forgotten page storing `stored`, entries the owner wrote that do not read kept as they are. */
 const withEntries = (
   current: PageRecord | undefined,
   stored: ReadonlyArray<Schema.Json>

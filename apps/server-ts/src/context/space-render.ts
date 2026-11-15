@@ -72,12 +72,6 @@ export interface SpacePageList {
   readonly index: MemoryIndex
 }
 
-/**
- * The Space context in at most `maxBytes`, the room the Memory block gives it, with at most
- * `instructionsBytes` for its instructions and `pageBytes` for its Memory page, and the list of
- * its other pages in its own `pagesBytes`. The instructions are cut to the room the rest of the
- * head leaves, so the context is never left out whole.
- */
 export const renderSpaceContext = (
   view: SpaceView,
   {

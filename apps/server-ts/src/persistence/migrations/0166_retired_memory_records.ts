@@ -1,19 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/**
- * Rewrites two stored records that carried retired values, once, so they are read as stored:
- * - A run's Memory record (`run_sidecars.context_manifest_json`): a composition without a
- *   reader was the owner's; `collection` sources are gone; a retired reason becomes the
- *   allowance of its kind, and a Space source dropped for a retired reason is gone.
- * - A Space review input that a server path reads (a running review's `automation_runs.input_json`,
- *   `space_review_checkpoints`, and a queued job's `space_review_input`): pages with the
- *   `resident` basis are gone, in `pages` and in `reads.pages`. A finished run's input is an
- *   archive no server path reads, and stays as it was sent; replays read it through
- *   `todayReviewInput`.
- * A row already in today's shape is left as it is.
- */
-
 const RETIRED_REASONS: ReadonlySet<unknown> = new Set([
   "block_budget",
   "core_page_budget",
@@ -87,7 +74,6 @@ const todayQueuedContext = (context: unknown): unknown =>
     ? { ...context, space_review_input: todayReviewInput(context["space_review_input"]) }
     : context
 
-// Review inputs are large: SQLite picks the rows that name a resident page, and each is parsed once.
 const RESIDENT = `'%"basis":"resident"%'`
 const REVIEW_INPUTS = [
   {

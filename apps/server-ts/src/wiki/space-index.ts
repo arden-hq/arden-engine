@@ -8,7 +8,6 @@ import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
 import { activeRunPages, type PageRecord } from "./snapshot.js"
 
-/** The folder a Space's page heads: `x.md` and `x/README.md` both head `x/`. */
 const spaceFolder = (pagePath: string): string => {
   if (isReadme(pagePath)) return posix.dirname(pagePath)
   return pagePath.toLowerCase().endsWith(".md") ? pagePath.slice(0, -3) : pagePath
@@ -22,10 +21,6 @@ export const spaceOwnsPath = (pagePath: string, path: string): boolean => {
   return target === boundary || isWithin(`/${spaceFolder(boundary)}`, `/${target}`)
 }
 
-/**
- * Whether an active Space's binding owns `path`. A half-made or unreadable binding owns every
- * path, so nothing is written where that Space's pages might be.
- */
 export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
   binding.page_id === null ||
   binding.page_path === null ||
@@ -89,11 +84,6 @@ export type SpacePagePlan =
   | ({ readonly kind: "rebind" } & SpacePageBinding)
   | { readonly kind: "create" }
 
-/**
- * What gives an active Space its page: keep the one it is bound to, bind that page again at
- * the path it now has, or make a fresh one when it is gone or another active Space holds or
- * overlaps it. `others` are the other active Spaces' bindings.
- */
 export const planSpacePage = (
   pages: ReadonlyArray<PageRecord>,
   space: SpaceBinding,

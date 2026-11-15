@@ -3,7 +3,6 @@ import { Effect, Option } from "effect"
 
 import { parseWikiPage } from "./page.js"
 
-/** A file in the Memory folder could be a page only when it is a `.md` file. */
 const isPagePath = (path: string): boolean => path.endsWith(".md")
 
 /** The status scan reads the untracked files that could be pages. */

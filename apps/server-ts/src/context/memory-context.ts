@@ -51,7 +51,6 @@ export const MEMORY_BUDGET = {
   standingFrame: 1_000,
   index: 10_000,
   space: 10_000,
-  /** The list of the Space's other pages, beside the rest of the Space context. */
   spacePages: 2_000,
   spaceInstructions: 4_000,
   spacePage: 4_000,

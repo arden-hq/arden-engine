@@ -79,16 +79,11 @@ const isImportRecord = (folders: RecordFolders, path: string): boolean => {
   return kind.kind !== "knowledge" && kind.folder.producer.kind === "import"
 }
 
-/**
- * A change upkeep reviews: to a page, and not to imported notes, which are kept as imported, or to
- * a code-owned page.
- */
 const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean =>
   changesPage(change) &&
   shownToRuns(change) &&
   !changedPaths(change).some((path) => isImportRecord(folders, path))
 
-/** How the brief names a page upkeep may read but not change. */
 const readOnlyMark = (folders: RecordFolders, path: string): string => {
   const kind = pageKind(folders, path).kind
   return kind === "knowledge"

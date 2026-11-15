@@ -53,7 +53,6 @@ export const IMPORTED_DIRECTORY = "imported"
 export const isImportedPath = (path: string): boolean =>
   path.toLowerCase().startsWith(`${IMPORTED_DIRECTORY}/`)
 
-/** Who writes a record folder: one Automation publishing reports, or the import of notes. */
 type RecordProducer =
   | { readonly kind: "automation"; readonly automationId: string }
   | { readonly kind: "import" }
@@ -63,11 +62,6 @@ interface RecordFolder {
   readonly producer: RecordProducer
 }
 
-/**
- * What a page is. Knowledge is kept current by chats and upkeep. A record is kept as its
- * producer wrote it: every page in a record folder, at any depth, but the folder's README,
- * which is its contract. A record's `day` is the date its file name starts with, if any.
- */
 export type PageKind =
   | { readonly kind: "knowledge" }
   | { readonly kind: "contract"; readonly folder: RecordFolder }
@@ -88,10 +82,6 @@ const folderProducer = (readmePath: string, page: ParsedWikiPage): RecordProduce
   return automationId === undefined ? undefined : { kind: "automation", automationId }
 }
 
-/**
- * The record folders of Memory: every folder whose active README names its producing Automation,
- * and `imported/`, which holds imported notes by its name, README or not.
- */
 export const recordFolders = (pages: ReadonlyArray<PageRecord>): RecordFolders => {
   const folders = new Map<string, RecordFolder>([
     [normal(IMPORTED_DIRECTORY), { directory: IMPORTED_DIRECTORY, producer: { kind: "import" } }]

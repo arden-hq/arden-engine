@@ -15,7 +15,6 @@ const where = (pattern: RegExp): ReadonlyArray<string> =>
     .map((file) => relative(".", file.path))
     .sort()
 
-/** The files that call `method` on the Space store, by the names they give it. */
 const callingSpaceStore = (method: string): ReadonlyArray<string> =>
   sources()
     .filter((file) => {

@@ -75,7 +75,6 @@ const folderOf = (path: string): string => {
   return folder === "." ? "" : folder
 }
 
-/** The lines a reader sees in each paragraph, outside code, and the text of each heading. */
 const readableParts = (body: string) => {
   const lines: Array<string> = []
   const headings: Array<string> = []
@@ -119,10 +118,6 @@ const groupsOf = (entries: ReadonlyArray<readonly [key: string, path: string]>) 
   return [...groups.values()].map(sorted).filter((paths) => paths.length > 1)
 }
 
-/**
- * What a reader of Memory would want tidied, computed from the folder as it stands and never
- * stored. Content findings cover knowledge pages; records are dated reports kept as they are.
- */
 export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => {
   const pages = runPages(folder.pages).filter((record) => record.resource.state === "active")
   const active = activeRunPages(pages)

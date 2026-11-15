@@ -29,8 +29,6 @@ import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store
 import type { WikiRenameStore } from "../src/persistence/wiki/rename-store.js"
 import { partialService } from "./kit.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const CONTRACT = [
   "## Purpose",
   "Made-up pages.",
@@ -113,7 +111,6 @@ const page = (pages: Pages, path: string) => {
   return resource
 }
 
-/** Commits one operation as `origin` and says which rule refused it, or "saved". */
 const write = (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,

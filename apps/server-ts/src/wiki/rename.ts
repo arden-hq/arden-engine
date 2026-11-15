@@ -71,7 +71,6 @@ const RenamePlanSchema = Schema.Struct({
 
 type RenamePlan = typeof RenamePlanSchema.Type
 
-/** Every page write a rename makes, in one commit. */
 const planOperations = (plan: RenamePlan): ReadonlyArray<WikiPageOperation> => [
   movePage(plan.source, plan.newPath, plan.movedContent),
   createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),

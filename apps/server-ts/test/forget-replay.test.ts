@@ -19,7 +19,6 @@ const copy = locateReplayCopy()
 
 const decoder = new TextDecoder()
 
-/** A writer kind for counts; no automation id or chat is reported. */
 const writerOf = (origin: WikiCommitOrigin): string => {
   switch (origin.kind) {
     case "user":
@@ -59,15 +58,10 @@ interface Replay {
   readonly refusedByAction: Readonly<Record<string, number>>
   readonly pages: number
   readonly lines: number
-  /** As the spec counts it: each return of a line after its last removal, by any writer. */
   readonly firstReturns: number
   readonly returnsByWriter: Readonly<Record<string, number>>
 }
 
-/**
- * Replays the Memory history with retractions planted when lines were removed, through the
- * commit rule's own comparison (`putBack`), and counts the later writes it would refuse.
- */
 it.skipIf(copy.kind === "absent")(
   "replays Memory history with removed lines planted as retractions",
   { timeout: 1_200_000 },

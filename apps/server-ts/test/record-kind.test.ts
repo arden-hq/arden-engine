@@ -5,8 +5,6 @@ import { pageKind, recordFolders } from "../src/wiki/collections.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const HASH = "0".repeat(64)
 
 const content = (path: string, body: string, producer?: string): string =>

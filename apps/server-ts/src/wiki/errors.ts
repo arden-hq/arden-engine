@@ -71,8 +71,6 @@ export const wikiError = (
     ...(options?.cause === undefined ? {} : { cause: options.cause })
   })
 
-/** A refused write is `invalid` when what was written breaks a rule, `blocked` when this writer
- *  may not make it. */
 const ruleReason = (
   rule: Extract<WikiCommitError, { readonly _tag: "WikiCommitRuleError" }>["rule"]
 ): "invalid" | "blocked" => {

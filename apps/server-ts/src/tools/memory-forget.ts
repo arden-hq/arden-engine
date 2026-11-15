@@ -54,7 +54,6 @@ const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
     ? { kind: "undo", id: input.undo }
     : { kind: "forget", lines: input.lines ?? [], claim: input.claim ?? "" }
 
-/** A forget's own refusals already say what to pass instead; other failures read as any write's. */
 const forgetFailure = (error: WikiError): ToolExecutionError =>
   error.operation === "forget" && (error.reason === "invalid" || error.reason === "not_found")
     ? new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
@@ -67,7 +66,6 @@ const removedPages = (change: RetractionChange): ReadonlyArray<string> => [
   ...new Set(change.entry.removed.map((removed) => removed.path))
 ]
 
-/** How many pages lose each line, so a line many pages share is plain before approval. */
 const pagesPerLine = (lines: ReadonlyArray<string>, change: RetractionChange): string =>
   lines
     .map((line) => {

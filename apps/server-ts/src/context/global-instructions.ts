@@ -124,7 +124,6 @@ export class GlobalInstructions extends Context.Service<
   }
 >()("@arden-hq/server/context/GlobalInstructions") {}
 
-/** A version the file holds that the history failed to record, and the writer to record it under. */
 interface MissedVersion {
   readonly digest: string
   readonly writer: InstructionWriter

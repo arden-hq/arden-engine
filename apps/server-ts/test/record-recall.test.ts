@@ -10,8 +10,6 @@ import type { Wiki } from "../src/wiki/service.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const HASH = "0".repeat(64)
 
 const content = (path: string, body: string, producer?: string): string =>

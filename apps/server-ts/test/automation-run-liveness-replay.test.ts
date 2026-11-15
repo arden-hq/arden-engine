@@ -6,11 +6,6 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Run liveness over the real history, with no model. The copy is opened the way
-// the server opens it, migrations included. Then Tidy's waiting
-// rows, and every running run of the jobs that produced them, are claimed once
-// in an empty database. Only counts leave this file.
-
 const located = locateReplayCopy()
 const MAINTENANCE = wikiMaintenanceHandler.spec.automationId
 

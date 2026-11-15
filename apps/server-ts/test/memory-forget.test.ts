@@ -104,7 +104,6 @@ interface Memory {
   ) => Effect.Effect<WikiError | undefined, unknown>
 }
 
-/** Made-up pages: a root README, two folders, and LINE on two pages. */
 const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>): Promise<A> => {
   const root = await mkdtemp(join(tmpdir(), "arden-forget-"))
   try {

@@ -25,11 +25,6 @@ import {
 
 const SEMANTIC_RECALL = "off: matching by meaning needs the local embedding model"
 
-/**
- * The time each question is asked at: just after the copy's newest stored message, as if a new
- * chat began when the copy was taken. Recall counts a report's age from it, so a run on the same
- * copy sends the same pages on any later day.
- */
 const askedAt = Effect.fn("MemoryTest.askedAt")(function* () {
   const sql = yield* SqlClient.SqlClient
   const [row] = yield* sql<{ readonly newest: string | null }>`
@@ -113,8 +108,6 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
     }
     const scored: Array<SentResult> = []
     for (const question of files.questions) {
-      // A chat that does not exist yet: the question is its first message. Each harness run
-      // gets its own run ids, so the record read back is this run's alone.
       const sessionId = `memory-test-chat-${question.id}`
       const runId = `memory-test-run-${stamp}-${question.id}`
       const memory = yield* openMemoryTurn(turnServices)
@@ -129,7 +122,6 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
         memory,
         measure: (_part, effect) => effect
       })
-      // A setup fault stops the batch: it is not a score.
       if (memoryContext.record.query === null)
         return yield* Effect.die(new Error(`Memory recall failed on ${question.id}`))
       if (question.space_id !== null && space === undefined)

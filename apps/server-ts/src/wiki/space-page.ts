@@ -38,10 +38,6 @@ export interface SpacePageEnsured {
 const storageError = (message: string) => (cause: unknown) =>
   wikiError("create", "storage", message, { cause })
 
-/**
- * The one way a Space gets its page: keeps the page it has, binds it again where it was
- * renamed to, or makes and binds a fresh one. Undefined when the Space is not active.
- */
 export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
@@ -82,11 +78,6 @@ export const logNoSpacePage = (spaceId: string, error: WikiError) =>
     message: error.message
   })
 
-/**
- * Restores an archived Space in one write with the page it keeps or is bound to again, or with
- * none, so it never comes back holding a page another active Space holds or overlaps. A Space
- * that comes back with none then gets a fresh page, or the start check gives it one.
- */
 export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
@@ -221,10 +212,6 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
 
 type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">
 
-/**
- * The Space with its page. A page that cannot be made now is logged and made at the next
- * start, so a Space is never refused for its page.
- */
 const withSpacePage = (
   wiki: EnsureSpacePage,
   space: PersistedSpace,

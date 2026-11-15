@@ -28,10 +28,6 @@ export interface Snapshot {
   readonly pages: ReadonlyArray<PageRecord>
 }
 
-/**
- * Every page a run or a Memory job may see, whatever its lifecycle: never a code-owned page.
- * Only the owner's routes, the commit point and the forget store read a snapshot's pages whole.
- */
 export const runPages = (pages: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> =>
   pages.filter((record) => !isSystemPage(record.resource.path))
 

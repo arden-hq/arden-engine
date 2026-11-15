@@ -29,7 +29,6 @@ export type WikiCommitOrigin =
   | { readonly kind: "forget"; readonly sessionId: string }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
-  /** Tidy, which the system handler registry names when a run's identity is made. */
   | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
   | {
       readonly kind: "capture"
@@ -55,7 +54,6 @@ export const ownerInApp = (
 
 const AUTOMATION_PREFIX = "wiki.automation."
 const UPKEEP_PREFIX = "wiki.upkeep."
-/** How history spelled Tidy's writes before upkeep was stored as itself. */
 const RETIRED_UPKEEP_ORIGINS: ReadonlyMap<string, string> = new Map([
   ["wiki.maintenance", "builtin-wiki-maintenance"],
   ["wiki.automation.builtin-wiki-maintenance", "builtin-wiki-maintenance"]
@@ -162,7 +160,6 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
 const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
   wikiOriginSource(origin) === "automation"
 
-/** Whether the owner made this write: no rule about what the owner may write binds it. */
 const isOwnerOrigin = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" || origin.kind === "forget"
 
@@ -381,7 +378,6 @@ const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
 
 const isUpkeep = (origin: WikiCommitOrigin): boolean => origin.kind === "upkeep"
 
-/** The record folders at the head a commit is checked against, from the README pages alone. */
 const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
   repository: ManagedFileRepositoryShape
 ): Effect.fn.Return<RecordFolders, RevisionError> {
@@ -400,7 +396,6 @@ const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
 const ruleError = (rule: WikiCommitRuleError["rule"], message: string) =>
   new WikiCommitRuleError({ rule, message })
 
-/** The page's path before this operation, or undefined for a page it creates. */
 const pathBefore = Effect.fn("Wiki.pathBefore")(function* (
   repository: ManagedFileRepositoryShape,
   operation: WikiPageOperation
@@ -450,10 +445,6 @@ const requireNoMoveIntoRecords = Effect.fn("Wiki.requireNoMoveIntoRecords")(func
   )
 })
 
-/**
- * What an automated writer may do to an Automation's record folder: add a page only as its
- * producer, update a page, and never move, archive or merge one away.
- */
 const requireAutomatedRecordWrite = Effect.fn("Wiki.requireAutomatedRecordWrite")(function* (
   { repository, origin, folders }: CommitView,
   operation: WikiPageOperation
@@ -482,10 +473,6 @@ const requireAutomatedRecordWrite = Effect.fn("Wiki.requireAutomatedRecordWrite"
   )
 })
 
-/**
- * What an automated writer may not retire: a page at the Memory root, or a page that was merged
- * and then brought back, which is separate by someone's decision that a repeated merge would undo.
- */
 const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(function* (
   { repository }: CommitView,
   operation: WikiPageOperation
@@ -521,7 +508,6 @@ const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(
   }
 })
 
-/** Whether `operation` keeps a code-owned page where code finds it: active, at its path. */
 const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
   origin: WikiCommitOrigin,
   operation: WikiPageOperation,
@@ -548,16 +534,10 @@ const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
 interface CommitView {
   readonly repository: ManagedFileRepositoryShape
   readonly origin: WikiCommitOrigin
-  /** Read once per commit, and only by a rule that needs it. */
   readonly folders: Effect.Effect<RecordFolders, RevisionError>
-  /** The lines the owner asked to forget; read once per commit, and only by a rule that needs them. */
   readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
 }
 
-/**
- * A code-owned page is written only by the owner, and stays where code finds it: only Arden's
- * own forget makes it, and no writer moves, renames, merges or archives it.
- */
 const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* (
   { repository, origin }: CommitView,
   operation: WikiPageOperation
@@ -587,10 +567,6 @@ const pageBody = (bytes: Uint8Array): Effect.Effect<string> => {
   )
 }
 
-/**
- * Whether a forgotten line binds this writer: every writer but the owner and the Space page
- * writer, which writes only the Space's name the owner chose and fixed text.
- */
 const keepsForgottenLines = (origin: WikiCommitOrigin): boolean =>
   !isOwnerOrigin(origin) && origin.kind !== "space_page"
 
@@ -617,7 +593,6 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
   if (entry !== undefined) return yield* ruleError("retraction", retractionRefusal(path, entry))
 })
 
-/** Every rule on what a writer may commit, each bound to the writers it holds for. */
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (

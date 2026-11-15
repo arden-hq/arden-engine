@@ -11,10 +11,6 @@ import { withoutTools } from "../../execution/toolset-middleware.js"
 
 export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-capture")
 
-/**
- * Tools of the Memory tool scope that only Tidy holds: it checks notes against the
- * chats they cite and merges pages. Every other handler in the scope hides them.
- */
 const MAINTENANCE_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "session_read",
   "session_search_transcripts",
@@ -69,7 +65,6 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     rearmOnSeed: true
   },
   item: handlerItemText("memory", (data) => data.batch.markdown),
-  // Capture judges the batch it was handed. Reading other chats is Tidy's job.
   tools: (base) => withoutTools(base, MAINTENANCE_ONLY_TOOLS),
   run: (services) =>
     makeMemoryCaptureRunner({

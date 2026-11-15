@@ -1,9 +1,3 @@
-// Opens the replay copy named by ARDEN_REPLAY_COPY with today's migrations, then decodes every
-// stored run Memory record and every Space review input a server path reads with today's
-// schemas, which no longer translate retired values. Finished runs' inputs keep the shape they
-// were sent in and decode through the replays' history decoder. Skips when the variable is
-// unset; prints and asserts counts.
-
 import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"

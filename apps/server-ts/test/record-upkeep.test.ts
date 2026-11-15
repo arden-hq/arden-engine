@@ -26,8 +26,6 @@ import type { RunQueries } from "../src/persistence/runs/queries.js"
 import { writeIdentity } from "../src/tools/wiki-identity.js"
 import { partialService, runAuthority } from "./kit.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const content = (path: string, body: string, producer?: string): string =>
   formatWikiPage({
     pageId: `id:${path}`,

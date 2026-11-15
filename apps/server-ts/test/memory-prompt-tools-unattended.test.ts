@@ -16,10 +16,6 @@ import { wikiOperationTools } from "../src/tools/wiki-operations.js"
 import { Wiki } from "../src/wiki/service.js"
 import { partialService, runAuthority } from "./kit.js"
 
-// Memory Capture and Tidy run with nobody watching. A write tool
-// their prompts name must run there whatever the job's own approval setting,
-// or the run stalls on an ask nobody answers.
-
 const tools = Effect.runSync(
   Effect.all([wikiTools, wikiOperationTools]).pipe(
     Effect.map((groups) => groups.flat()),

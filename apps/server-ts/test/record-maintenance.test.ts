@@ -14,8 +14,6 @@ import { archivePage, createPage, type WikiPageOperation } from "../src/wiki/com
 import { makeWikiMaintenanceMethods } from "../src/wiki/maintenance.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const content = (path: string, body: string, producer?: string): string =>
   formatWikiPage({
     pageId: `id:${path}`,
@@ -41,7 +39,6 @@ const commit = (repository: ManagedFileRepositoryShape, operation: WikiPageOpera
     })).commit.commitId
   })
 
-/** The Maintenance brief for the changes made by `changes` after the seed. */
 const brief = (
   changes: (repository: ManagedFileRepositoryShape) => Effect.Effect<unknown, unknown>
 ): Promise<string> =>

@@ -17,10 +17,6 @@ import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 
 const located = locateReplayCopy()
 
-/**
- * The pages an archived Space's binding covers and no active Space's does, that the writers'
- * ownership check still reports as owned.
- */
 const heldOnlyByArchived = (
   spaces: SpaceStore["Service"],
   files: ReadonlyArray<PageRecord>,

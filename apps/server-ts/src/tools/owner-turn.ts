@@ -6,10 +6,6 @@ import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { refusalError } from "./refusal.js"
 import type { ServerRunContext } from "./run-context.js"
 
-/**
- * Refuses unless the run is the owner's own turn in a chat that exists: no automation, helper or
- * other agent acts for the owner here. `doing` and `what` word the refusals.
- */
 export const requireOwnerTurn = async (
   sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">,
   run: ServerRunContext,
