@@ -1,9 +1,11 @@
 import { createToolset } from "@arden-hq/loop"
 import { Effect } from "effect"
-import { expect, it } from "vitest"
+import { SqlClient } from "effect/unstable/sql"
+import { expect, it, vi } from "vitest"
 import { makeMemoryCaptureBatches } from "../src/memory/capture-batches.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { MemoryCaptureStore } from "../src/persistence/memory/store.js"
+import { startCaptureAfterCopies } from "../src/persistence/sqlite/memory-capture-positions.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
@@ -89,6 +91,27 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
     second: ["revert-c"],
     third: ["revert-d"]
   })
+})
+
+it("reads a backlog range once, after new work, and removes it as it is read", async () => {
+  vi.stubEnv("ARDEN_CAPTURE_CATCH_UP", "5")
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const drainer = yield* drain()
+      const chat = (yield* (yield* SessionStore).create({})).sessionId
+      yield* turn(chat, "old-a")
+      yield* turn(chat, "old-b")
+      yield* startCaptureAfterCopies(sql, chat)
+      yield* sql`INSERT INTO memory_capture_backlog VALUES (${chat}, 0, 3)`
+      yield* turn(chat, "new-c")
+      const first = yield* drainer
+      const left = yield* sql`SELECT 1 FROM memory_capture_backlog`
+      return { first, left: left.length, again: yield* drainer }
+    })
+  )
+  vi.unstubAllEnvs()
+  expect(read).toEqual({ first: ["new-c", "old-a", "old-b"], left: 0, again: [] })
 })
 
 const captureUpdate = (

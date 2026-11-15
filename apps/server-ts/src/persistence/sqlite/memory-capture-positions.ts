@@ -3,6 +3,7 @@ import type { SqlClient } from "effect/unstable/sql"
 
 import {
   MemoryCaptureBatchIdentitySchema,
+  type MemoryCaptureBacklogRange,
   type MemoryCaptureBatchIdentity,
   type MemoryCaptureMove,
   type MemoryCapturePosition,
@@ -174,6 +175,42 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
     WHERE session_id = ${batch.sessionId}
   `
   return "moved"
+})
+
+export const listCaptureBacklog = Effect.fn("MemoryCapturePositions.listBacklog")(function* (
+  sql: SqlClient.SqlClient
+) {
+  const rows = yield* sql<{
+    readonly session_id: string
+    readonly from_seq: number
+    readonly through_seq: number
+  }>`
+    SELECT backlog.session_id, backlog.from_seq, backlog.through_seq
+    FROM memory_capture_backlog AS backlog
+    LEFT JOIN session_messages AS message ON message.session_id = backlog.session_id
+      AND message.seq = backlog.from_seq
+    ORDER BY message.created_at, backlog.session_id, backlog.from_seq
+  `
+  return rows.map((row): MemoryCaptureBacklogRange => ({
+    sessionId: row.session_id,
+    fromSeq: row.from_seq,
+    throughSeq: row.through_seq
+  }))
+})
+
+export const readCaptureBacklog = Effect.fn("MemoryCapturePositions.readBacklog")(function* (
+  sql: SqlClient.SqlClient,
+  read: MemoryCaptureBacklogRange
+) {
+  yield* sql`
+    DELETE FROM memory_capture_backlog
+    WHERE session_id = ${read.sessionId} AND from_seq = ${read.fromSeq}
+      AND through_seq <= ${read.throughSeq}
+  `
+  yield* sql`
+    UPDATE memory_capture_backlog SET from_seq = ${read.throughSeq + 1}
+    WHERE session_id = ${read.sessionId} AND from_seq = ${read.fromSeq}
+  `
 })
 
 /**

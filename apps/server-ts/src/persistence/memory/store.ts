@@ -41,6 +41,13 @@ export interface MemoryCaptureWork {
   readonly prepared: MemoryCaptureBatchIdentity | undefined
 }
 
+/** Old messages of a chat, `fromSeq` through `throughSeq`, that no Capture run was shown. */
+export interface MemoryCaptureBacklogRange {
+  readonly sessionId: string
+  readonly fromSeq: number
+  readonly throughSeq: number
+}
+
 export const MemoryCaptureBatchSchema = Schema.Struct({
   identity: MemoryCaptureBatchIdentitySchema,
   markdown: Schema.NonEmptyString
@@ -77,5 +84,17 @@ export class MemoryCaptureStore extends Context.Service<
     readonly advance: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
+    /** Backlog ranges, the one whose first message is oldest first. */
+    readonly listBacklog: () => Effect.Effect<
+      ReadonlyArray<MemoryCaptureBacklogRange>,
+      MemoryCaptureStoreError
+    >
+    /**
+     * Removes `fromSeq` through `throughSeq` from the range that starts at `fromSeq`, if it
+     * still starts there.
+     */
+    readonly readBacklog: (
+      read: MemoryCaptureBacklogRange
+    ) => Effect.Effect<void, MemoryCaptureStoreError>
   }
 >()("@arden-hq/server/persistence/memory/MemoryCaptureStore") {}

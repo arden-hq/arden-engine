@@ -6,7 +6,13 @@ import {
   MemoryCaptureStoreError,
   type MemoryCaptureBatchIdentity
 } from "../memory/store.js"
-import { advanceCapture, listCaptureWork, prepareCapture } from "./memory-capture-positions.js"
+import {
+  advanceCapture,
+  listCaptureBacklog,
+  listCaptureWork,
+  prepareCapture,
+  readCaptureBacklog
+} from "./memory-capture-positions.js"
 import type { PersistenceDeps } from "./deps.js"
 
 const failed =
@@ -46,6 +52,18 @@ export const makeMemoryCaptureStore = ({
   return MemoryCaptureStore.of({
     listWork,
     prepare: move("prepare", prepareCapture, "Could not prepare a Memory capture batch"),
-    advance: move("advance", advanceCapture, "Could not advance Memory capture")
+    advance: move("advance", advanceCapture, "Could not advance Memory capture"),
+    listBacklog: () =>
+      listCaptureBacklog(writer.sql).pipe(
+        Effect.mapError(failed("list", "Could not list the Memory capture backlog"))
+      ),
+    readBacklog: (read) =>
+      writer
+        .transact(readCaptureBacklog(writer.sql, read))
+        .pipe(
+          Effect.mapError(
+            failed("advance", "Could not record a read backlog range", read.sessionId)
+          )
+        )
   })
 }
