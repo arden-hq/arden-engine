@@ -4,6 +4,7 @@ import {
   WikiMaintenanceStore,
   WikiMaintenanceStoreError,
   type WikiMaintenanceCompareAndSetInput,
+  type WikiMaintenanceRefusal,
   type WikiMaintenanceStoreOperation
 } from "../wiki-maintenance/store.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -76,5 +77,30 @@ export const makeWikiMaintenanceStore = ({
       )
       .pipe(Effect.mapError(mapStorage("compare_and_set", "Could not advance the Tidy position")))
 
-  return WikiMaintenanceStore.of({ initialize, processedHead, compareAndSet })
+  const refusal = () =>
+    position.readRefusal(sql).pipe(
+      Effect.map(({ revision, refusedTo }) =>
+        refusedTo === undefined ? undefined : { from: revision, to: refusedTo }
+      ),
+      Effect.mapError(mapStorage("read", "Could not read the Tidy position"))
+    )
+
+  const refuse = (input: WikiMaintenanceRefusal) =>
+    writer
+      .transact(
+        position
+          .refuse(sql, { at: input.from, to: input.to })
+          .pipe(
+            Effect.flatMap((marked) =>
+              marked === "moved"
+                ? Effect.fail(
+                    error("refuse", "conflict", "The Tidy position changed before it was marked")
+                  )
+                : Effect.void
+            )
+          )
+      )
+      .pipe(Effect.mapError(mapStorage("refuse", "Could not mark the Tidy range refused")))
+
+  return WikiMaintenanceStore.of({ initialize, processedHead, compareAndSet, refusal, refuse })
 }

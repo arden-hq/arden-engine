@@ -20,10 +20,13 @@ interface ItemLoop<K extends HandlerItemKind> {
   readonly next: () => Effect.Effect<HandlerItemDataOf<K> | "idle" | "advance", Error>
   readonly commit: (data: HandlerItemDataOf<K>) => Effect.Effect<void, Error>
   /**
-   * Called when the model reports it cannot do an item. "continue" moves on to `next` instead
-   * of ending the job, for a handler that has another way to finish the item.
+   * Called when the model reports it cannot do an item, with its reason. "continue" moves on to
+   * `next` instead of ending the job, for a handler that has another way to finish the item.
    */
-  readonly blocked?: (data: HandlerItemDataOf<K>) => Effect.Effect<"stop" | "continue", Error>
+  readonly blocked?: (
+    data: HandlerItemDataOf<K>,
+    reason: string | null
+  ) => Effect.Effect<"stop" | "continue", Error>
   readonly summary: (item: HandlerItem | undefined) => string
   readonly cancelled: string
   readonly incomplete: string
@@ -83,7 +86,7 @@ export const runItemLoop = <K extends HandlerItemKind>(
         if (
           outcome.state === "blocked" &&
           loop.blocked !== undefined &&
-          (yield* loop.blocked(data)) === "continue"
+          (yield* loop.blocked(data, outcome.detail)) === "continue"
         ) {
           handled = item.id
           continue

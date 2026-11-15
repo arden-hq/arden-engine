@@ -24,6 +24,8 @@ export type PositionAdvance = "advanced" | "already_there" | "moved"
 const Revision = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 const Move = Schema.Struct({ expected: Schema.NullOr(Revision), next: Revision })
 const State = Schema.fromJsonString(Schema.Record(Schema.String, Schema.NullOr(Revision)))
+/** The head of a range the reader was refused on once, from where it stands; it goes when it moves. */
+const REFUSED = "refusedTo"
 
 type PositionError = MemoryHistoryPositionError | SqlError.SqlError
 
@@ -33,7 +35,14 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
 
   const readRow = Effect.fn("MemoryHistoryPosition.readRow")(function* (
     sql: SqlClient.SqlClient
-  ): Effect.fn.Return<{ readonly raw: string; readonly revision: string | null }, PositionError> {
+  ): Effect.fn.Return<
+    {
+      readonly raw: string
+      readonly revision: string | null
+      readonly refusedTo: string | undefined
+    },
+    PositionError
+  > {
     const rows = yield* sql<{ readonly state: string }>`
       SELECT state FROM monitor_state WHERE namespace = ${namespace} LIMIT 1`
     const raw = rows[0]?.state
@@ -53,15 +62,19 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
           })
       )
     )
-    const keys = Object.keys(state)
     const revision = state[field]
-    if (keys.length !== 1 || revision === undefined) {
+    const refusedTo = state[REFUSED]
+    if (
+      revision === undefined ||
+      refusedTo === null ||
+      Object.keys(state).some((key) => key !== field && key !== REFUSED)
+    ) {
       return yield* new MemoryHistoryPositionError({
         reason: "corrupt",
         message: `The ${reader} place in Memory history is corrupt`
       })
     }
-    return { raw, revision }
+    return { raw, revision, refusedTo }
   })
 
   const start = Effect.fn("MemoryHistoryPosition.start")(function* (
@@ -78,6 +91,41 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
 
   const read = (sql: SqlClient.SqlClient): Effect.Effect<string | null, PositionError> =>
     readRow(sql).pipe(Effect.map((row) => row.revision))
+
+  /** Where the reader stands, and the head of the range from there it was refused on once. */
+  const readRefusal = (
+    sql: SqlClient.SqlClient
+  ): Effect.Effect<
+    { readonly revision: string | null; readonly refusedTo: string | undefined },
+    PositionError
+  > =>
+    readRow(sql).pipe(Effect.map((row) => ({ revision: row.revision, refusedTo: row.refusedTo })))
+
+  /** Marks the range from `at` to `to` refused once. "moved" when the reader no longer stands at `at`. */
+  const refuse = Effect.fn("MemoryHistoryPosition.refuse")(function* (
+    sql: SqlClient.SqlClient,
+    input: { readonly at: string | null; readonly to: string }
+  ): Effect.fn.Return<"refused" | "moved", PositionError, UnitOfWork> {
+    yield* Schema.decodeUnknownEffect(Move)({ expected: input.at, next: input.to }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new MemoryHistoryPositionError({
+            reason: "invalid",
+            message: `The ${reader} place can be refused only between Memory commits`,
+            cause
+          })
+      )
+    )
+    const current = yield* readRow(sql)
+    if (current.revision !== input.at) return "moved"
+    const now = DateTime.formatIso(yield* DateTime.now)
+    const marked = yield* sql<{ readonly namespace: string }>`
+        UPDATE monitor_state
+        SET state = ${JSON.stringify({ [field]: input.at, [REFUSED]: input.to })}, updated_at = ${now}
+        WHERE namespace = ${namespace} AND state = ${current.raw}
+        RETURNING namespace`
+    return marked.length === 0 ? "moved" : "refused"
+  })
 
   const advance = Effect.fn("MemoryHistoryPosition.advance")(function* (
     sql: SqlClient.SqlClient,
@@ -104,5 +152,5 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
     return moved.length === 0 ? "moved" : "advanced"
   })
 
-  return { start, read, advance }
+  return { start, read, readRefusal, refuse, advance }
 }
