@@ -33,18 +33,18 @@ export const notFound = (operation: WikiOperation, pageId: string): WikiError =>
 export const readSnapshotPage = Effect.fn("Wiki.readSnapshotPage")(function* (
   snapshot: Snapshot,
   pageId: string
-): Effect.fn.Return<PageRecord, WikiError> {
+): Effect.fn.Return<{ readonly record: PageRecord; readonly head: string }, WikiError> {
   const record = snapshot.pages.find((candidate) => candidate.page.pageId === pageId)
-  if (record === undefined) return yield* notFound("read", pageId)
-  return record
+  if (record === undefined || snapshot.head === null) return yield* notFound("read", pageId)
+  return { record, head: snapshot.head }
 })
 
 export const readSnapshotContent = Effect.fn("Wiki.readSnapshotContent")(function* (
   snapshot: Snapshot,
   pageId: string
 ): Effect.fn.Return<Pick<WikiPage, "pageId" | "path" | "version" | "content">, WikiError> {
-  const record = yield* readSnapshotPage(snapshot, pageId)
-  const page = detail(record, snapshot.head)
+  const { record, head } = yield* readSnapshotPage(snapshot, pageId)
+  const page = detail(record, head)
   return { pageId: page.pageId, path: page.path, version: page.version, content: page.content }
 })
 
@@ -230,11 +230,7 @@ export const mapHistory = (commit: Commit) => ({
   }))
 })
 
-export const summary = (
-  record: PageRecord,
-  head: string | null,
-  times?: PageTimes
-): WikiPageSummary => ({
+export const summary = (record: PageRecord, head: string, times?: PageTimes): WikiPageSummary => ({
   pageId: record.page.pageId,
   path: record.resource.path,
   resourceState: record.resource.state,
@@ -250,7 +246,7 @@ export const summary = (
   updatedAt: times?.updatedAt ?? null
 })
 
-export const detail = (record: PageRecord, head: string | null, times?: PageTimes): WikiPage => ({
+export const detail = (record: PageRecord, head: string, times?: PageTimes): WikiPage => ({
   ...summary(record, head, times),
   content: record.page.content
 })

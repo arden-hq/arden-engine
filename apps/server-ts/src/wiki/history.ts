@@ -186,7 +186,7 @@ export const makeWikiHistoryMethods = (
     const current = yield* snapshot()
     const byId = new Map(current.pages.map((record) => [record.page.pageId, record] as const))
     const record = byId.get(pageId)
-    if (record === undefined || record.page.lifecycle !== "active") {
+    if (record === undefined || record.page.lifecycle !== "active" || current.head === null) {
       return yield* notFound("links", pageId)
     }
     const names = pageNameIndex(current.pages)

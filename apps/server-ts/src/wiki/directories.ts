@@ -114,10 +114,6 @@ export const makeWikiDirectoryMethods = (
         `Wiki directory contracts require exact headings: ${DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}`).join(", ")}`
       )
     }
-    if (directory.toLowerCase() === "health") {
-      return yield* wikiError("create", "blocked", "Wiki health is backend-managed")
-    }
-
     const snapshot = yield* loadSnapshot(repository, "create")
     const readmePath = `${directory}/README.md`
     const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "create")

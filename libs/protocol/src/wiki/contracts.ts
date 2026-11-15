@@ -59,8 +59,7 @@ export interface WikiPageSummary extends JsonRecord {
   readonly redirectTo: string | null
   readonly metadata: Readonly<Record<string, JsonValue>>
   readonly version: string
-  /** Null only for the derived health page before the first repository commit. */
-  readonly repositoryHead: string | null
+  readonly repositoryHead: string
   readonly createdAt: string | null
   readonly updatedAt: string | null
 }
@@ -70,7 +69,7 @@ export interface WikiPage extends WikiPageSummary {
 }
 
 export interface WikiPagePage extends JsonRecord {
-  /** Null is valid for an empty or derived-only repository snapshot. */
+  /** Null for an empty repository. */
   readonly repositoryHead: string | null
   readonly pages: ReadonlyArray<WikiPageSummary>
   readonly nextCursor: string | null
@@ -160,7 +159,7 @@ export interface WikiPageChat extends JsonRecord {
 
 export interface WikiPageLinks extends JsonRecord {
   readonly pageId: string
-  readonly repositoryHead: string | null
+  readonly repositoryHead: string
   readonly outgoing: ReadonlyArray<WikiLink>
   readonly backlinks: ReadonlyArray<WikiLink>
   /** The chats the page came from, newest save first. */

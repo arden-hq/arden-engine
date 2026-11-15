@@ -192,9 +192,6 @@ export const makeWikiMutationMethods = (
     if (!input.path.endsWith(".md")) {
       return yield* wikiError("create", "invalid", "Wiki page paths must end in .md")
     }
-    if (input.path.toLowerCase() === "health.md") {
-      return yield* wikiError("create", "blocked", "Wiki health is backend-managed")
-    }
     const directory = posix.dirname(input.path)
     if (
       (directory === "." && input.path !== "me.md") ||
@@ -339,11 +336,6 @@ export const makeWikiMutationMethods = (
         )
         if (current.page.lifecycle !== "active") {
           return yield* wikiError("update", "invalid", "Only active Wiki pages can be updated", {
-            pageId: input.pageId
-          })
-        }
-        if (current.resource.path.toLowerCase() === "health.md") {
-          return yield* wikiError("update", "blocked", "Wiki health is backend-managed", {
             pageId: input.pageId
           })
         }

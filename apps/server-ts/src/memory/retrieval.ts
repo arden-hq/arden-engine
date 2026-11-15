@@ -289,9 +289,7 @@ export const prepareMemoryRecall = ({
   /** Each page's "Last changed" line, by page id; a page without one is shown without it. */
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemoryRecall => {
-  const active = pages.filter(
-    (record) => record.page.lifecycle === "active" && record.page.pageId !== "health"
-  )
+  const active = pages.filter((record) => record.page.lifecycle === "active")
   const residentPages = active.filter(resident).map((record) => ({ record }))
   const readable = active.filter((record) => !excludedPageIds.has(record.page.pageId))
   const queryText = normalized(recallQuery(query))
