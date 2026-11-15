@@ -1,12 +1,7 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
-import type {
-  PersistedSpace,
-  SpaceBinding,
-  SpaceStore,
-  SpaceStoreError
-} from "../persistence/spaces/store.js"
+import type { PersistedSpace, SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
 import {
   DIRECTORY_CONTRACT_HEADINGS,
   directorySections,
@@ -17,7 +12,13 @@ import { commitWiki, createPage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
-import { bindingOwnsPath, overlapsAnother, planSpacePage } from "./space-index.js"
+import {
+  activeSpaceBindings,
+  bindingOwnsPath,
+  overlapsAnother,
+  planSpacePage,
+  type SpaceBinding
+} from "./space-index.js"
 import { spacePageSlug } from "@arden-hq/protocol/views"
 import type { CreateSpaceInput } from "@arden-hq/protocol/spaces"
 import type { MutationOperationIdentity } from "../persistence/tools/mutation-receipt.js"
@@ -48,11 +49,9 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
     .pipe(Effect.mapError(storageError("Could not read the Space")))
   if (space === null) return undefined
   const current = yield* loadSnapshot(repository, "create")
-  const others = (yield* spaces
-    .activeBindings()
-    .pipe(Effect.mapError(storageError("Could not read the Spaces' Memory pages")))).filter(
-    (binding) => binding.space_id !== space.space_id
-  )
+  const others = (yield* activeSpaceBindings(spaces).pipe(
+    Effect.mapError(storageError("Could not read the Spaces' Memory pages"))
+  )).filter((binding) => binding.space_id !== space.space_id)
   const plan = planSpacePage(current.pages, space, others)
   if (plan.kind === "keep") return { space, created: undefined }
   const page =
@@ -86,7 +85,7 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   const space = yield* spaces.get(spaceId, true)
   if (space === null || space.archived_at === null) return null
   const current = yield* loadSnapshot(repository, "restore")
-  const plan = planSpacePage(current.pages, space, yield* spaces.activeBindings())
+  const plan = planSpacePage(current.pages, space, yield* activeSpaceBindings(spaces))
   const restored = yield* spaces.restore(
     spaceId,
     plan.kind === "create" ? null : { pageId: plan.pageId, pagePath: plan.pagePath }

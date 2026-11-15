@@ -3,12 +3,13 @@ import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 
-import { SpaceStore, type SpaceBinding } from "../src/persistence/spaces/store.js"
+import { SpaceStore, type SpaceBindingRow } from "../src/persistence/spaces/store.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import {
   bindingOwnsPath,
   planSpacePage,
+  spaceBinding,
   spaceOwnsWikiPath,
   spacePageIndex,
   spacePages
@@ -20,15 +21,16 @@ const located = locateReplayCopy()
 const heldOnlyByArchived = (
   spaces: SpaceStore["Service"],
   files: ReadonlyArray<PageRecord>,
-  archived: ReadonlyArray<SpaceBinding>,
-  active: ReadonlyArray<SpaceBinding>
+  archived: ReadonlyArray<SpaceBindingRow>,
+  active: ReadonlyArray<SpaceBindingRow>
 ) =>
   Effect.forEach(
     files.filter(
       (record) =>
-        archived.some((holder) => bindingOwnsPath(holder, record.resource.path)) &&
+        archived.some((holder) => bindingOwnsPath(spaceBinding(holder), record.resource.path)) &&
         !active.some(
-          (holder) => holder.page_path !== null && bindingOwnsPath(holder, record.resource.path)
+          (holder) =>
+            holder.page_path !== null && bindingOwnsPath(spaceBinding(holder), record.resource.path)
         )
     ),
     (record) => spaceOwnsWikiPath(spaces, record.resource.path)
@@ -62,13 +64,13 @@ it("replays which pages each Space owns, and which Spaces get a page, on the cop
         planSpacePage(
           snapshot.pages,
           space,
-          bindings.filter((binding) => binding.space_id !== space.space_id)
+          bindings.filter((binding) => binding.space_id !== space.space_id).map(spaceBinding)
         )
       )
       const files = snapshot.pages.filter((record) => record.resource.state === "active")
-      const ownedBy = (holders: ReadonlyArray<SpaceBinding>) =>
+      const ownedBy = (holders: ReadonlyArray<SpaceBindingRow>) =>
         files.filter((record) =>
-          holders.some((holder) => bindingOwnsPath(holder, record.resource.path))
+          holders.some((holder) => bindingOwnsPath(spaceBinding(holder), record.resource.path))
         ).length
       const archivedBound = archived.filter((space) => space.page_path !== null)
       const lists = active.flatMap((space) => {

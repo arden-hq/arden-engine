@@ -13,8 +13,8 @@ import { Context, Effect, Schema } from "effect"
 
 export type PersistedSpace = Space & { readonly page_id: string | null }
 
-/** Which page a Space is bound to. Only an active Space's binding owns pages. */
-export interface SpaceBinding {
+/** The page columns of a Space's row, as stored. */
+export interface SpaceBindingRow {
   readonly space_id: string
   readonly page_id: string | null
   readonly page_path: string | null
@@ -116,7 +116,7 @@ export class SpaceStore extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<string>, SpaceStoreError>
     readonly overview: () => Effect.Effect<SpacesOverview, SpaceStoreError>
     readonly setPinned: (spaceIds: ReadonlyArray<string>) => Effect.Effect<void, SpaceStoreError>
-    /** The bindings of the active Spaces that have one, whole or half-made. */
-    readonly activeBindings: () => Effect.Effect<ReadonlyArray<SpaceBinding>, SpaceStoreError>
+    /** The page columns of the active Spaces that have one or both set. */
+    readonly activeBindings: () => Effect.Effect<ReadonlyArray<SpaceBindingRow>, SpaceStoreError>
   }
 >()("@arden-hq/server/persistence/spaces/SpaceStore") {}

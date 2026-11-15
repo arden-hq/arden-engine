@@ -2,7 +2,7 @@ import { isWithin } from "@arden-hq/std/paths"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
-import type { SpaceBinding, SpacePageBinding, SpaceStore } from "../persistence/spaces/store.js"
+import type { SpaceBindingRow, SpacePageBinding, SpaceStore } from "../persistence/spaces/store.js"
 import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
@@ -21,11 +21,26 @@ export const spaceOwnsPath = (pagePath: string, path: string): boolean => {
   return target === boundary || isWithin(`/${spaceFolder(boundary)}`, `/${target}`)
 }
 
+/**
+ * Which pages an active Space is bound to. A half-made binding, with a page column missing or a
+ * path that does not read, owns every path, so nothing is written where its pages might be.
+ */
+export type SpaceBinding =
+  | {
+      readonly kind: "bound"
+      readonly space_id: string
+      readonly page_id: string
+      readonly page_path: string
+    }
+  | ({ readonly kind: "half_made" } & SpaceBindingRow)
+
+export const spaceBinding = (row: SpaceBindingRow): SpaceBinding =>
+  row.page_id !== null && row.page_path !== null && canonicalWikiPath(row.page_path) !== undefined
+    ? { kind: "bound", space_id: row.space_id, page_id: row.page_id, page_path: row.page_path }
+    : { kind: "half_made", space_id: row.space_id, page_id: row.page_id, page_path: row.page_path }
+
 export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
-  binding.page_id === null ||
-  binding.page_path === null ||
-  canonicalWikiPath(binding.page_path) === undefined ||
-  spaceOwnsPath(binding.page_path, path)
+  binding.kind === "half_made" || spaceOwnsPath(binding.page_path, path)
 
 /** Whether another active Space's pages and the pages `path` would head overlap. */
 export const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boolean =>
@@ -43,22 +58,26 @@ export const heldByAnother = (
 ): boolean => others.some((other) => other.page_id === pageId) || overlapsAnother(others, pagePath)
 
 const isBoundPage = (
-  bindings: ReadonlyArray<SpaceBinding>,
+  bindings: ReadonlyArray<SpaceBindingRow>,
   pageId: string,
   path: string
 ): boolean => bindings.some((binding) => binding.page_id === pageId || binding.page_path === path)
 
 type ActiveBindings = Pick<SpaceStore["Service"], "activeBindings">
 
-/** Whether an active Space owns `path`. An archived Space owns nothing. */
+/** The active Spaces' bindings. An archived Space owns nothing. */
+export const activeSpaceBindings = (spaces: ActiveBindings) =>
+  spaces.activeBindings().pipe(Effect.map((rows) => rows.map(spaceBinding)))
+
+/** Whether an active Space owns `path`. */
 export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
-  spaces
-    .activeBindings()
-    .pipe(Effect.map((bindings) => bindings.some((binding) => bindingOwnsPath(binding, path))))
+  activeSpaceBindings(spaces).pipe(
+    Effect.map((bindings) => bindings.some((binding) => bindingOwnsPath(binding, path)))
+  )
 
 /** Whether the page is an active Space's own page. */
 export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
-  spaces.activeBindings().pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
+  spaces.activeBindings().pipe(Effect.map((rows) => isBoundPage(rows, pageId, path)))
 
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
@@ -86,7 +105,7 @@ export type SpacePagePlan =
 
 export const planSpacePage = (
   pages: ReadonlyArray<PageRecord>,
-  space: SpaceBinding,
+  space: SpaceBindingRow,
   others: ReadonlyArray<SpaceBinding>
 ): SpacePagePlan => {
   const record =

@@ -38,11 +38,7 @@ describe("only wiki/space-index.ts decides which pages a Space owns", () => {
   })
 
   it("reads the active bindings only to apply its rules", () => {
-    expect(where(/\.activeBindings\(\)/u)).toEqual([
-      "wiki/authority.ts",
-      "wiki/space-index.ts",
-      "wiki/space-page.ts"
-    ])
+    expect(where(/\.activeBindings\(\)/u)).toEqual(["wiki/space-index.ts"])
   })
 
   it("filters Space rows by their page in one store file only", () => {

@@ -19,7 +19,7 @@ import {
   SpaceStoreError,
   KEEP_ONE_SPACE,
   type PersistedSpace,
-  type SpaceBinding,
+  type SpaceBindingRow,
   type SpacePageBinding
 } from "../spaces/store.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
@@ -49,7 +49,7 @@ export const makeSpaceStore = ({
   const sql = writer.sql
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const activeBindings = Effect.fn("SqliteSpaceStore.activeBindings")(function* () {
-    return yield* sql<SpaceBinding>`
+    return yield* sql<SpaceBindingRow>`
       SELECT space_id, page_id, page_path
       FROM spaces
       WHERE archived_at IS NULL AND (page_id IS NOT NULL OR page_path IS NOT NULL)

@@ -7,7 +7,7 @@ import { Deferred, Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
-import { SpaceStore, type SpaceBinding } from "../src/persistence/spaces/store.js"
+import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { archivePage } from "../src/wiki/commit.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
@@ -16,9 +16,11 @@ import type { PageRecord } from "../src/wiki/snapshot.js"
 import { commitWiki } from "../src/wiki/commit.js"
 import {
   planSpacePage,
+  spaceBinding,
   spaceOwnsPath,
   spacePageIndex,
-  spacePages
+  spacePages,
+  type SpaceBinding
 } from "../src/wiki/space-index.js"
 import { startMemoryContentSteps } from "../src/memory/content-steps.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
@@ -62,11 +64,8 @@ const page = (
   }
 }
 
-const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding => ({
-  space_id: spaceId,
-  page_id: path === null ? null : pageId,
-  page_path: path
-})
+const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding =>
+  spaceBinding({ space_id: spaceId, page_id: path === null ? null : pageId, page_path: path })
 
 describe("which pages a Space owns", () => {
   const pages = [
