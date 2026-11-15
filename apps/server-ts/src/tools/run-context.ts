@@ -30,7 +30,7 @@ export const ObservationSnapshotSchema = Schema.Struct({
   versions: Schema.Array(Schema.Tuple([Schema.String, Schema.String]))
 })
 
-export type ObservationSnapshot = typeof ObservationSnapshotSchema.Type
+type ObservationSnapshot = typeof ObservationSnapshotSchema.Type
 
 /** Names for what a run read that is not a Memory page; a page uses its page id. */
 export const observedKey = {
@@ -69,8 +69,7 @@ export const makeObservationRegistry = (): ObservationRegistry => {
     }),
     adopt: (snapshot: ObservationSnapshot): void => {
       if (head === undefined && snapshot.head !== undefined) head = snapshot.head
-      for (const [id, version] of snapshot.versions)
-        if (!versions.has(id)) observe(id, version)
+      for (const [id, version] of snapshot.versions) if (!versions.has(id)) observe(id, version)
     }
   }
 }

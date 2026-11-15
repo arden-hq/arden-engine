@@ -69,7 +69,11 @@ const writerColumns = (writer: InstructionWriter) => {
     case "outside":
       return { session: null, run: null, from: null }
     case "chat":
-      return { session: writer.chat?.sessionId ?? null, run: writer.chat?.runId ?? null, from: null }
+      return {
+        session: writer.chat?.sessionId ?? null,
+        run: writer.chat?.runId ?? null,
+        from: null
+      }
     case "restore":
       return {
         session: writer.chat?.sessionId ?? null,

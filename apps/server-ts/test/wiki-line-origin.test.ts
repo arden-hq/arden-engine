@@ -135,7 +135,12 @@ describe("where a line came from", () => {
 it("stops tracing a line at the search bound and says so", async () => {
   await withWikiRepository(async ({ repository, wiki, save }) => {
     for (let edit = 0; edit <= 3; edit += 1)
-      await save({ pageId: PAGE, path: PATH, body: `Oldest line.\nEdit ${edit}\n`, origin: ownerEdit })
+      await save({
+        pageId: PAGE,
+        path: PATH,
+        body: `Oldest line.\nEdit ${edit}\n`,
+        origin: ownerEdit
+      })
     const bounded = makeWikiHistoryMethods(repository, () => Effect.die("unused"), {
       searchCommits: 3
     })

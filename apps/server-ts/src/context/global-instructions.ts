@@ -30,7 +30,8 @@ export const MAX_RULES_BYTES = 128 * 1024
 /** The rules as the file stores them: the text and one closing newline. */
 const storedText = (content: string): string => (content === "" ? "" : `${content}\n`)
 /** One limit for reading and writing, so every version the history records can be restored. */
-const withinLimit = (content: string): boolean => Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
+const withinLimit = (content: string): boolean =>
+  Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
 const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
 
 interface GlobalInstructionsSnapshot {

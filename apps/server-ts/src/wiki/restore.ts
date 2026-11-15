@@ -195,9 +195,14 @@ export const makeWikiRestoreMethods = (
     }
     const historical = yield* readRecord(repository, "restore", source, "invalid")
     if (historical.page.lifecycle !== "active") {
-      return yield* wikiError("restore", "invalid", "Selected revision is not an active Wiki page", {
-        pageId: input.pageId
-      })
+      return yield* wikiError(
+        "restore",
+        "invalid",
+        "Selected revision is not an active Wiki page",
+        {
+          pageId: input.pageId
+        }
+      )
     }
     return yield* restoredContent(historical, input.pageId)
   })

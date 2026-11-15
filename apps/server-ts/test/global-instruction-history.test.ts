@@ -3,6 +3,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { errorMessage } from "@arden-hq/std/errors"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { expect, it } from "vitest"
 
@@ -36,7 +37,7 @@ const withRulesFolder = async <A>(use: (folder: string) => Promise<A>): Promise<
 }
 
 const causes = (error: unknown): string =>
-  error instanceof Error ? `${error.message} ${causes(error.cause)}` : String(error)
+  error instanceof Error ? `${errorMessage(error)} ${causes(error.cause)}` : errorMessage(error)
 
 /** Starts the rules service over `file`, the way the server does at each start. */
 const started = <A, E, R>(file: string, body: Effect.Effect<A, E, R | GlobalInstructions>) =>

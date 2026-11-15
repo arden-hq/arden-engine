@@ -71,21 +71,23 @@ const run = (
 ) => Effect.promise(() => tool.execute(input, ctx))
 
 it("lists each version with its writer, and restores one in the owner's turn", async () => {
-  const { listed, restored, after, diff, relisted } = await withRules("Rule one.\n", (tools, file) =>
-    Effect.gen(function* () {
-      const ctx = context()
-      yield* run(named(tools, "directives_get"), {}, ctx)
-      yield* run(named(tools, "directives_set"), { directives: "Rule one.\nRule two." }, ctx)
-      const fresh = context()
-      const listed = textOf(yield* run(named(tools, "directives_history"), {}, fresh))
-      const prompt = yield* Effect.promise(async () =>
-        named(tools, "directives_restore").definition.approvalPrompt?.({ version: 1 }, fresh)
-      )
-      const restored = yield* run(named(tools, "directives_restore"), { version: 1 }, fresh)
-      const after = yield* Effect.promise(() => readFile(file, "utf8"))
-      const relisted = yield* run(named(tools, "directives_history"), {}, fresh)
-      return { listed, restored, after, diff: prompt?.diff ?? "", relisted }
-    })
+  const { listed, restored, after, diff, relisted } = await withRules(
+    "Rule one.\n",
+    (tools, file) =>
+      Effect.gen(function* () {
+        const ctx = context()
+        yield* run(named(tools, "directives_get"), {}, ctx)
+        yield* run(named(tools, "directives_set"), { directives: "Rule one.\nRule two." }, ctx)
+        const fresh = context()
+        const listed = textOf(yield* run(named(tools, "directives_history"), {}, fresh))
+        const prompt = yield* Effect.promise(async () =>
+          named(tools, "directives_restore").definition.approvalPrompt?.({ version: 1 }, fresh)
+        )
+        const restored = yield* run(named(tools, "directives_restore"), { version: 1 }, fresh)
+        const after = yield* Effect.promise(() => readFile(file, "utf8"))
+        const relisted = yield* run(named(tools, "directives_history"), {}, fresh)
+        return { listed, restored, after, diff: prompt?.diff ?? "", relisted }
+      })
   )
   expect(listed).toContain("version 2 (current)")
   expect(listed).toContain("changed in arden:session/")

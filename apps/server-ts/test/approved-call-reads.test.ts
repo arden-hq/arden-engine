@@ -68,7 +68,11 @@ describe("an approved call in a new toolset", () => {
       name: "edit_note",
       args: {},
       toolCallId: "call-1",
-      approval: { approved: true, feedback: null, ...(card.data === undefined ? {} : { data: card.data }) }
+      approval: {
+        approved: true,
+        feedback: null,
+        ...(card.data === undefined ? {} : { data: card.data })
+      }
     })
     expect(resumed.content).toBe("changed from v1")
     expect(recordOf(resumed.data)["approval_data"]).toEqual({ own: "kept" })
@@ -84,7 +88,11 @@ describe("an approved call in a new toolset", () => {
       name: "edit_note",
       args: {},
       toolCallId: "call-1",
-      approval: { approved: true, feedback: null, ...(card.data === undefined ? {} : { data: card.data }) }
+      approval: {
+        approved: true,
+        feedback: null,
+        ...(card.data === undefined ? {} : { data: card.data })
+      }
     })
     expect(resumed.content).toBe("changed from v2")
   })

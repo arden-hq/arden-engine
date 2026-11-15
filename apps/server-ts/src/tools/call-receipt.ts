@@ -66,7 +66,5 @@ export const inChatTarget = (input: {
   resourceRef: input.resourceRef,
   domain: "session",
   title: input.title,
-  ...(input.chat === undefined
-    ? {}
-    : { href: chatHref(input.chat) })
+  ...(input.chat === undefined ? {} : { href: chatHref(input.chat) })
 })
