@@ -1,11 +1,12 @@
 import { cutText } from "@arden-hq/std/text"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { writeIdentity } from "./wiki-identity.js"
 import type { WikiCommitOrigin } from "../wiki/commit.js"
+import { captureReplayKey } from "../wiki/capture.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
@@ -128,11 +129,9 @@ const EditParametersSchema = Schema.Struct({
 )
 
 const CapturePatchSetParametersSchema = Schema.Struct({
-  edits: Schema.Array(EditParametersSchema)
-    .check(Schema.isMinLength(1), Schema.isMaxLength(12))
-    .annotate({
-      description: "All already-read page replacements to commit together, from 1 to 12 pages."
-    })
+  edits: Schema.NonEmptyArray(EditParametersSchema).check(Schema.isMaxLength(12)).annotate({
+    description: "All already-read page replacements to commit together, from 1 to 12 pages."
+  })
 })
 
 export const captureReplayOrigin = (
@@ -558,12 +557,6 @@ const makeWikiTools = ({
           "The Wiki has no revision to patch. Create the first required page instead.",
           { preview: "Wiki is empty", retryable: false }
         )
-      if (new Set(input.edits.map((edit) => edit.path)).size !== input.edits.length) {
-        throw new ToolExecutionError("A Memory patch set cannot repeat a page path.", {
-          preview: "Repeated Wiki page",
-          retryable: false
-        })
-      }
       const expectedHead = ctx.run.observations.observedHead()
       if (expectedHead === undefined) {
         throw new ToolExecutionError(
@@ -572,7 +565,7 @@ const makeWikiTools = ({
         )
       }
       const edits = await Promise.all(
-        input.edits.map(async (edit) => {
+        Arr.map(input.edits, async (edit) => {
           const record = activePage(snapshot, edit.path)
           if (record === null) throw pageNotFound(snapshot, edit.path)
           const expectedVersion = ctx.run.observations.observed(record.page.pageId)
@@ -583,7 +576,8 @@ const makeWikiTools = ({
             )
           }
           return {
-            record,
+            pageId: record.page.pageId,
+            path: record.resource.path,
             expectedVersion,
             content: await Effect.runPromise(reviseWikiPage(record.page, edit), {
               signal: ctx.signal
@@ -598,32 +592,33 @@ const makeWikiTools = ({
           { preview: "Memory Capture required", retryable: false }
         )
       }
-      const applied = await Effect.runPromise(
+      const pages = await Effect.runPromise(
         wiki
-          .applyCapturePatchSet({
-            edits: edits.map(({ record, expectedVersion, content }) => ({
-              pageId: record.page.pageId,
-              expectedVersion,
-              content
-            })),
+          .update({
+            edits,
             expectedHead,
             authority: identity.authority,
-            batch: identity.captureBatch,
             commit: {
               actor: identity.actor,
-              reason: `capture Memory patch set for ${edits.map(({ record }) => record.resource.path).join(", ")}`
+              origin: {
+                kind: "capture",
+                sessionId: identity.captureBatch.sessionId,
+                replayKey: captureReplayKey(identity.captureBatch, "patch")
+              },
+              reason: `capture Memory patch set for ${edits.map(({ path }) => path).join(", ")}`
             }
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
       )
-      if (applied.changed) effects.applied()
+      const before = new Map(edits.map((edit) => [edit.pageId, edit.expectedVersion]))
+      const changed = pages.some((page) => page.version !== before.get(page.pageId))
+      if (changed) effects.applied()
       else effects.unchanged()
-      const before = new Map(edits.map((edit) => [edit.record.page.pageId, edit.expectedVersion]))
-      const receipt = applied.changed
+      const receipt = changed
         ? pagesReceipt(
             ctx,
-            applied.pages.map((page) => ({
+            pages.map((page) => ({
               pageId: page.pageId,
               path: page.path,
               title: page.title,
@@ -634,14 +629,11 @@ const makeWikiTools = ({
         : undefined
       return {
         ...(receipt === undefined ? {} : { host: receipt }),
-        result: applied.changed
-          ? `Updated ${applied.pages.map((page) => page.path).join(", ")} in one Memory commit.`
+        result: changed
+          ? `Updated ${pages.map((page) => page.path).join(", ")} in one Memory commit.`
           : "Every page in the Memory patch set was already current.",
-        preview: applied.changed ? "Memory pages updated" : "Memory pages unchanged",
-        data: {
-          pages: applied.pages.map(writtenPageData),
-          changed: applied.changed
-        }
+        preview: changed ? "Memory pages updated" : "Memory pages unchanged",
+        data: { pages: pages.map(writtenPageData), changed }
       }
     }
   }),
@@ -770,14 +762,18 @@ const makeWikiTools = ({
         )
       }
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const updated = await recordApplied(
+      const [updated] = await recordApplied(
         effects,
         Effect.runPromise(
           wiki
             .update({
-              pageId: record.page.pageId,
-              content: replacement,
-              expectedVersion: observedVersion,
+              edits: [
+                {
+                  pageId: record.page.pageId,
+                  content: replacement,
+                  expectedVersion: observedVersion
+                }
+              ],
               expectedHead: snapshot.head,
               authority: identity.authority,
               commit: {

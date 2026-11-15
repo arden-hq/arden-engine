@@ -132,14 +132,21 @@ export const WikiHandlers = HttpApiBuilder.group(
       .handle("update", ({ params, payload }) =>
         wiki
           .update({
-            pageId: params.pageId,
-            content: payload.content,
-            expectedVersion: payload.expected_version,
+            edits: [
+              {
+                pageId: params.pageId,
+                content: payload.content,
+                expectedVersion: payload.expected_version
+              }
+            ],
             expectedHead: payload.expected_head,
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
             commit: ownerInApp("update wiki page")
           })
-          .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
+          .pipe(
+            Effect.map(([page]) => pageDetail(page)),
+            Effect.mapError(writeError)
+          )
       )
       .handle("archive", ({ params, payload }) =>
         wiki

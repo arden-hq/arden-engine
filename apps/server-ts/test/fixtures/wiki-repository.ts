@@ -30,12 +30,13 @@ import {
 } from "../../src/wiki/commit.js"
 import { makeWikiHistoryMethods } from "../../src/wiki/history.js"
 import { makeWikiListingMethods } from "../../src/wiki/listing.js"
+import { makeWikiMutationMethods } from "../../src/wiki/mutations.js"
 import { formatWikiPage } from "../../src/wiki/page.js"
 import { makeWikiRestoreMethods } from "../../src/wiki/restore.js"
 import { Wiki } from "../../src/wiki/service.js"
 import { partialService, recordOf, serverRunContext, sessionHeader } from "../kit.js"
 
-/** The real Wiki read, history, change and restore methods over a fresh repository on disk. */
+/** The real Wiki read, history, change, update and restore methods over a fresh repository on disk. */
 export interface WikiRepositoryFixture {
   readonly repository: ManagedFileRepositoryShape
   readonly wiki: Wiki["Service"]
@@ -66,7 +67,8 @@ export const withWikiRepository = async <A>(
       ...listing,
       ...makeWikiHistoryMethods(repository, listing.snapshot),
       ...makeWikiChangeMethods(repository),
-      ...makeWikiRestoreMethods(repository, spaces, listing.read)
+      ...makeWikiRestoreMethods(repository, spaces, listing.read),
+      ...makeWikiMutationMethods(repository, spaces, listing.read)
     })
     const clock = distinctMillisClock()
     const save: WikiRepositoryFixture["save"] = async ({ pageId, path, body, origin, actor }) => {

@@ -103,7 +103,7 @@ const make = Effect.fn("Wiki.make")(function* (
 
   const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
   const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
-  const capture = makeWikiCaptureMethods(repository, spaces, listing.read)
+  const capture = makeWikiCaptureMethods(repository)
   const rename = makeWikiRenameMethods(repository, spaces, renameStore)
   const imports = makeWikiImportMethods(repository, spaces)
   const contentSteps = makeWikiContentStepMethods(repository, spaces)
@@ -132,7 +132,6 @@ const make = Effect.fn("Wiki.make")(function* (
     restoreRevision: notifyAfter(restores.restoreRevision),
     contentToRestore: restores.contentToRestore,
     restoreArchived: notifyAfter(restores.restoreArchived),
-    applyCapturePatchSet: notifyAfter(capture.applyCapturePatchSet),
     importReferencePages: notifyAfter(imports.importReferencePages),
     planForget: forgetting.planForget,
     forget: notifyAfter(forgetting.forget),

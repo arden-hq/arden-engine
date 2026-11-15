@@ -1,6 +1,6 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import type { WikiArchiveResponse, WikiPage } from "@arden-hq/protocol/wiki"
-import { Effect, Semaphore } from "effect"
+import { type Array as Arr, Effect, Semaphore } from "effect"
 import { randomUUID } from "node:crypto"
 
 import type { PersistedSpace, SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
@@ -28,10 +28,15 @@ import { formatWikiPage, parseWikiPage, replacementContent } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
 import { loadSnapshot } from "./snapshot.js"
 
-interface WikiUpdateInput {
+interface WikiPageEdit {
   readonly pageId: string
   readonly content: string
   readonly expectedVersion: string
+}
+
+interface WikiUpdateInput {
+  /** Saved in one commit: every page or none. */
+  readonly edits: Arr.NonEmptyReadonlyArray<WikiPageEdit>
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
   readonly commit: WikiCommitIdentity
@@ -90,7 +95,7 @@ export interface WikiMutationMethods {
     },
     WikiError
   >
-  readonly update: (input: WikiUpdateInput) => Effect.Effect<WikiPage, WikiError>
+  readonly update: (input: WikiUpdateInput) => Effect.Effect<Arr.NonEmptyArray<WikiPage>, WikiError>
   readonly archive: (input: WikiArchiveInput) => Effect.Effect<WikiArchiveResponse, WikiError>
   readonly mergeInto: (
     input: WikiArchiveInput & { readonly targetPageId: string }
@@ -189,46 +194,70 @@ export const makeWikiMutationMethods = (
   })
 
   const update = Effect.fn("Wiki.update")(function* (input: WikiUpdateInput) {
+    const [{ pageId }] = input.edits
     return yield* withConflictDetail(
       repository,
       Effect.gen(function* () {
+        if (new Set(input.edits.map((edit) => edit.pageId)).size !== input.edits.length) {
+          return yield* wikiError("update", "invalid", "An update names a page twice", { pageId })
+        }
         const snapshot = yield* loadSnapshot(repository, "update")
-        const current = yield* requireCurrent(
-          "update",
-          snapshot,
-          input.pageId,
-          input.expectedVersion,
-          input.expectedHead
+        const { origin } = input.commit
+        // A replayable write read before its head moved may have landed already; its receipt decides.
+        const replay =
+          origin.kind === "capture" &&
+          origin.replayKey !== undefined &&
+          snapshot.head !== input.expectedHead
+        const edits = yield* Effect.forEach(
+          input.edits,
+          Effect.fn("Wiki.updateWrite")(function* (edit: WikiPageEdit) {
+            const current = replay
+              ? undefined
+              : yield* requireCurrent(
+                  "update",
+                  snapshot,
+                  edit.pageId,
+                  edit.expectedVersion,
+                  input.expectedHead
+                )
+            const content = yield* replacementContent("update", edit.pageId, edit.content)
+            return content === current?.page.content
+              ? []
+              : [updatePage({ resourceId: edit.pageId, versionId: edit.expectedVersion }, content)]
+          })
         )
-        const content = yield* replacementContent("update", input.pageId, input.content)
-        const changed = content !== current.page.content
-        if (!changed) {
-          const latestHead = yield* repository.currentRevision.pipe(
-            Effect.mapError(mapRevisionError("update", input.pageId))
-          )
-          if (latestHead !== snapshot.head) {
-            return yield* wikiError("update", "conflict", "Wiki changed during the update", {
-              pageId: input.pageId
-            })
-          }
-        } else {
+        const writes = edits.flat()
+        if (writes.length > 0) {
           yield* commitWiki(
             { repository, spaces },
             { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
-            [updatePage(current.resource, content)]
-          ).pipe(Effect.mapError(mapRevisionError("update", input.pageId)))
-        }
-        const page = yield* read(input.pageId).pipe(
-          Effect.mapError((cause) =>
-            cause.reason === "not_found"
-              ? wikiError("update", "corrupt", "Updated Wiki page disappeared", {
-                  pageId: input.pageId,
-                  cause
-                })
-              : new WikiError({ ...cause, operation: "update" })
+            writes
+          ).pipe(Effect.mapError(mapRevisionError("update", pageId)))
+        } else {
+          const latestHead = yield* repository.currentRevision.pipe(
+            Effect.mapError(mapRevisionError("update", pageId))
           )
+          if (latestHead !== snapshot.head) {
+            return yield* wikiError("update", "conflict", "Wiki changed during the update", {
+              pageId
+            })
+          }
+        }
+        return yield* Effect.forEach(
+          input.edits,
+          (edit) =>
+            read(edit.pageId).pipe(
+              Effect.mapError((cause) =>
+                cause.reason === "not_found"
+                  ? wikiError("update", "corrupt", "Updated Wiki page disappeared", {
+                      pageId: edit.pageId,
+                      cause
+                    })
+                  : new WikiError({ ...cause, operation: "update" })
+              )
+            ),
+          { concurrency: 8 }
         )
-        return page
       })
     )
   })

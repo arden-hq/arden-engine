@@ -7,7 +7,9 @@ import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { snapshotOf } from "../src/wiki/snapshot.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { ownerEdit, withWikiRepository } from "./fixtures/wiki-repository.js"
 
 const AT = "2026-11-14T09:00:00.000Z"
 
@@ -83,5 +85,35 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
     first: ["revert-a", "revert-b"],
     second: ["revert-c"],
     third: ["revert-d"]
+  })
+})
+
+it("saves a Capture patch set once on replay, and none of it when one page conflicts", async () => {
+  await withWikiRepository(async ({ repository, wiki, save }) => {
+    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
+    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
+    const head = () => Effect.runPromise(repository.currentRevision)
+    const pages = () => Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
+    const [read, [a, b]] = [await head(), await pages()]
+    const patch = (expectedHead: string | null, versionOfA = a.version, mark = "X2") =>
+      Effect.runPromise(
+        wiki.update({
+          edits: [
+            { pageId: "a", content: a.content.replace("A1", mark), expectedVersion: versionOfA },
+            { pageId: "b", content: b.content.replace("B1", mark), expectedVersion: b.version }
+          ],
+          expectedHead: expectedHead ?? "",
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+          commit: {
+            actor: "memory:capture",
+            origin: { kind: "capture", sessionId: "s", replayKey: "batch" },
+            reason: "capture"
+          }
+        })
+      )
+    const landed = await patch(read).then(head)
+    expect(await patch(read).then(head)).toBe(landed)
+    await expect(patch(landed, (await pages())[0].version, "X3")).rejects.toThrow()
+    expect((await pages()).map((page) => page.content.includes("X2"))).toEqual([true, true])
   })
 })

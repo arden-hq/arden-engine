@@ -251,12 +251,10 @@ const updateSpacePage = async (
   }
   const identity = await writeIdentity(services.runs, { ...ctx.run, signal: ctx.signal })
   const expectedVersion = requireObserved(ctx.run, target.page)
-  const updated = await Effect.runPromise(
+  const [updated] = await Effect.runPromise(
     services.wiki
       .update({
-        pageId: target.page.page.pageId,
-        content: replacement,
-        expectedVersion,
+        edits: [{ pageId: target.page.page.pageId, content: replacement, expectedVersion }],
         expectedHead: target.snapshot.head,
         authority: identity.authority,
         commit: {

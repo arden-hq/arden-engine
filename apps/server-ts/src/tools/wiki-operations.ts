@@ -510,14 +510,18 @@ const makeWikiOperationTools = ({
         }
       }
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const updated = await recordApplied(
+      const [updated] = await recordApplied(
         effects,
         Effect.runPromise(
           wiki
             .update({
-              pageId: record.page.pageId,
-              content: formatWikiPage({ ...record.page, body }),
-              expectedVersion: record.resource.versionId,
+              edits: [
+                {
+                  pageId: record.page.pageId,
+                  content: formatWikiPage({ ...record.page, body }),
+                  expectedVersion: record.resource.versionId
+                }
+              ],
               expectedHead: head,
               authority: identity.authority,
               commit: {
