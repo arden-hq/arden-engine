@@ -91,6 +91,7 @@ export type {
   JsonValue,
   MaybePromise,
   MessageIdMinter,
+  MessageOrigin,
   Metadata,
   ModelContentBlock,
   ModelMessage,

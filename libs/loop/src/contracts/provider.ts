@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   Interaction,
   MaybePromise,
+  MessageOrigin,
   ProviderState,
   ProviderToolCall,
   ToolCall,
@@ -107,6 +108,7 @@ export interface ProviderMessage {
   /** Native output order normalized by the provider adapter. */
   readonly output_parts?: ReadonlyArray<AssistantOutputPart> | null
   readonly provider_state?: ProviderState
+  readonly origin?: MessageOrigin
 }
 
 /** The terminal item of one provider response. */

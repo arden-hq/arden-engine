@@ -4,6 +4,7 @@ import type {
   AssistantOutputPart,
   ChatMessage,
   ContentBlock,
+  MessageOrigin,
   ProviderState,
   ProviderToolCall,
   ToolCall
@@ -34,6 +35,12 @@ const checkMessageId = (message: Record<string, unknown>): void => {
 }
 
 const isBlockArray = (value: unknown): boolean => Array.isArray(value) && value.every(isRecord)
+
+const isMessageOrigin = (value: unknown): value is MessageOrigin =>
+  isRecord(value) &&
+  typeof value.provider === "string" &&
+  typeof value.api === "string" &&
+  typeof value.model === "string"
 
 const checkInteraction = (value: unknown): void => {
   if (!isRecord(value)) fail("messages", "interaction must be an object")
@@ -169,6 +176,9 @@ const checkMessage = (value: unknown): void => {
         (!Array.isArray(message.output_parts) || !message.output_parts.every(isAssistantOutputPart))
       ) {
         fail("messages", "output_parts must contain valid ordered assistant parts")
+      }
+      if ("origin" in message && !isMessageOrigin(message.origin)) {
+        fail("messages", "origin must name a provider, api and model")
       }
       return
     }
@@ -430,6 +440,9 @@ const checkCompletion = (value: Record<string, unknown>): CompletionResponse => 
   if (message.provider_state !== undefined && !isRecord(message.provider_state)) {
     invalidItem("provider_state must be an object")
   }
+  if (message.origin !== undefined && !isMessageOrigin(message.origin)) {
+    invalidItem("origin must name a provider, api and model")
+  }
   if (value.finish_reason !== null && !finishReasons.has(value.finish_reason)) {
     invalidItem(`unknown finish_reason: ${String(value.finish_reason)}`)
   }
@@ -445,7 +458,8 @@ const checkCompletion = (value: Record<string, unknown>): CompletionResponse => 
       ...(outputParts === undefined ? {} : { output_parts: outputParts }),
       ...(message.provider_state === undefined
         ? {}
-        : { provider_state: message.provider_state as ProviderState })
+        : { provider_state: message.provider_state as ProviderState }),
+      ...(isMessageOrigin(message.origin) ? { origin: message.origin } : {})
     },
     finish_reason: value.finish_reason as CompletionResponse["finish_reason"],
     usage: usage as CompletionResponse["usage"],

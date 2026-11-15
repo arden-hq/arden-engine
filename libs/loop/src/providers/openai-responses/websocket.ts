@@ -44,6 +44,7 @@ export const openResponsesSession = (options: {
   readonly connect: ConnectResponsesWebSocket
   readonly headers: (signal: AbortSignal, forceRefresh: boolean) => Promise<Record<string, string>>
   readonly baseUrl: string
+  readonly providerId: string
   readonly modelPrefix: string
   readonly defaultInstructions?: string
   readonly omitMaxOutputTokens?: boolean
@@ -129,7 +130,11 @@ export const openResponsesSession = (options: {
     let terminalRaw: RawResponseEvent | undefined
     let progressed = false
     let refreshHeaders = forceRefresh
-    const map = makeEventMapper(request.model, request.toolSearch)
+    const map = makeEventMapper({
+      requestedModel: request.model,
+      toolSearch: request.toolSearch,
+      providerId: options.providerId
+    })
     let pollWork = Promise.resolve()
     const poll = () => {
       if (

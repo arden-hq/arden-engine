@@ -1,10 +1,19 @@
 import { clipLine } from "@arden-hq/std/text"
-import type { AssistantOutputPart, JsonValue, ToolCall } from "../../contracts/messages.js"
+import type {
+  AssistantOutputPart,
+  JsonValue,
+  MessageOrigin,
+  ToolCall
+} from "../../contracts/messages.js"
 import type { CompletionResponse, FinishReason, ModelStreamItem } from "../../contracts/provider.js"
 import type { ToolSearch } from "../../contracts/tools.js"
 import { OpenAiCitationFilter, stripOpenAiCitations } from "./citations.js"
-import { RetryableProviderError, SemanticResponseError } from "../kit/index.js"
-import { MAX_STATUS_DETAIL_CHARS, TERMINAL_RESPONSE_CODES } from "./errors.js"
+import {
+  MAX_STATUS_DETAIL_CHARS,
+  RetryableProviderError,
+  SemanticResponseError
+} from "../kit/index.js"
+import { TERMINAL_RESPONSE_CODES } from "./errors.js"
 import {
   asRecord,
   messageItemText,
@@ -107,11 +116,15 @@ const outputParts = (response: ResponseShape): ReadonlyArray<AssistantOutputPart
 const replayItems = (output: ReadonlyArray<OutputItem | ToolSearchOutputInputItem>): JsonValue =>
   output as unknown as JsonValue
 
+/** This wire's name in a message origin. */
+const API = "openai-responses"
+
 const completion = (
   response: ResponseShape,
   requestedModel: string,
   finishReason: FinishReason,
-  toolSearch: ToolSearch | undefined
+  toolSearch: ToolSearch | undefined,
+  origin: MessageOrigin
 ): CompletionResponse => {
   const calls = toolCalls(response)
   const searches = answerToolSearches(response.output, toolSearch)
@@ -128,7 +141,8 @@ const completion = (
       reasoning_content: reasoningText(response),
       ...(providerCalls.length === 0 ? {} : { provider_tool_calls: providerCalls }),
       output_parts: outputParts(response),
-      provider_state: { [PROVIDER_STATE_KEY]: replayItems(searches.items) }
+      provider_state: { [PROVIDER_STATE_KEY]: replayItems(searches.items) },
+      origin
     },
     finish_reason: finishReason === "stop" && calls.length > 0 ? "tool_calls" : finishReason,
     usage: {
@@ -186,10 +200,23 @@ export const responseFailureMessage = (event: RawResponseEvent): string => {
   return message === undefined || message.length === 0 ? label : `${label}: ${message}`
 }
 
-export const makeEventMapper = (
-  requestedModel: string,
-  toolSearch?: ToolSearch
-): ((event: RawResponseEvent) => ReadonlyArray<ModelStreamItem>) => {
+/**
+ * Maps one response's events. `providerId` names who serves this wire in the
+ * origin stamp; the stamped model is the one the response reports, else the
+ * requested one. This adapter replays its own `provider_state` whatever the
+ * origin: whether OpenAI accepts encrypted reasoning across models is open.
+ */
+export const makeEventMapper = ({
+  requestedModel,
+  toolSearch,
+  providerId
+}: {
+  readonly requestedModel: string
+  readonly toolSearch: ToolSearch | undefined
+  readonly providerId: string
+}): ((event: RawResponseEvent) => ReadonlyArray<ModelStreamItem>) => {
+  let answeredBy = requestedModel
+  const origin = (): MessageOrigin => ({ provider: providerId, api: API, model: answeredBy })
   const items: Array<OutputItem> = []
   const functionCallsByIndex = new Map<number, string>()
   const citationFilter = new OpenAiCitationFilter()
@@ -269,13 +296,20 @@ export const makeEventMapper = (
       return [
         {
           _tag: "OutputItemReady",
-          message: completion({ output: [item], usage: null }, requestedModel, "stop", toolSearch)
-            .message
+          message: completion(
+            { output: [item], usage: null },
+            requestedModel,
+            "stop",
+            toolSearch,
+            origin()
+          ).message
         }
       ]
     })
 
   return (event: RawResponseEvent): ReadonlyArray<ModelStreamItem> => {
+    const reported = stringValue(asRecord(event.response)?.model)
+    if (reported !== null && reported.length > 0) answeredBy = reported
     switch (event.type) {
       case "response.output_text.delta":
       case "response.refusal.delta": {
@@ -388,7 +422,7 @@ export const makeEventMapper = (
         return [
           ...readyItems(response.output),
           {
-            ...completion(response, requestedModel, "stop", toolSearch),
+            ...completion(response, requestedModel, "stop", toolSearch, origin()),
             ...(asRecord(event.response)?.end_turn === false ? { continuation: true } : {})
           }
         ]
@@ -408,12 +442,14 @@ export const makeEventMapper = (
           }
           return [
             ...readyItems(completed.output),
-            completion(completed, requestedModel, "length", toolSearch)
+            completion(completed, requestedModel, "length", toolSearch, origin())
           ]
         }
         if (reason === "content_filter") {
           citationFilter.finish()
-          return [completion(terminal(response), requestedModel, "content_filter", toolSearch)]
+          return [
+            completion(terminal(response), requestedModel, "content_filter", toolSearch, origin())
+          ]
         }
         throw new SemanticResponseError("OpenAI returned an incomplete response")
       }

@@ -243,6 +243,7 @@ export const assistantMessage = (
         }),
     output_parts: [...outputParts],
     ...(message.provider_state === undefined ? {} : { provider_state: message.provider_state }),
+    ...(message.origin === undefined ? {} : { origin: message.origin }),
     ...(streamedTextId === null ? {} : { client_id: streamedTextId })
   }
 }

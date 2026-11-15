@@ -1,8 +1,14 @@
 import type { ChatMessage } from "../../contracts/messages.js"
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
 import type { ModelProviderRequest } from "../../contracts/provider.js"
+import {
+  contextBlockText,
+  MISSING_TOOL_OUTPUT,
+  orderToolHistory,
+  type ToolHistoryBatch,
+  type ToolHistoryWire
+} from "../kit/index.js"
 import { OpenAiResponsesProviderError } from "./errors.js"
-import { validateFunctionCallHistory, type InputBatch } from "./history.js"
 import { asRecord, WEB_SEARCH_TOOL_NAME, type InputItem } from "./items.js"
 import { responseItems } from "./stored-items.js"
 import {
@@ -104,28 +110,8 @@ const userContent = (message: ChatMessage): string | ReadonlyArray<InputItem> =>
     if (block?.type === "text" && typeof block.text === "string") {
       return { type: "input_text", text: block.text }
     }
-    if (
-      block?.type === "context" &&
-      typeof block.content_type === "string" &&
-      (block.content === undefined || block.content === null || typeof block.content === "string")
-    ) {
-      const metadata =
-        block.metadata === undefined || block.metadata === null ? {} : asRecord(block.metadata)
-      if (metadata === null || Object.values(metadata).some((value) => typeof value !== "string")) {
-        throw new OpenAiResponsesProviderError("OpenAI Responses received unsupported user content")
-      }
-      const attrs = Object.entries(metadata)
-        .map(([key, value]) => `${key}="${value as string}"`)
-        .join(" ")
-      const tag = `${block.content_type}${attrs.length === 0 ? "" : ` ${attrs}`}`
-      return {
-        type: "input_text",
-        text:
-          typeof block.content === "string" && block.content.length > 0
-            ? `<${tag}>\n${block.content}\n</${block.content_type}>`
-            : `<${tag} />`
-      }
-    }
+    const context = contextBlockText(block)
+    if (context !== undefined) return { type: "input_text", text: context }
     if (
       block?.type === "image" &&
       (block.media_type === "image/png" || block.media_type === "image/jpeg") &&
@@ -148,7 +134,7 @@ const convertMessages = (
   asyncTools: ReadonlySet<string>
 ): { readonly instructions?: string; readonly input: ReadonlyArray<InputItem> } => {
   const instructions: Array<string> = []
-  const batches: Array<InputBatch> = []
+  const batches: Array<ToolHistoryBatch<InputItem>> = []
 
   for (const message of messages) {
     if (message.role === "system") {
@@ -266,12 +252,27 @@ const convertMessages = (
     })
   }
 
-  const input = validateFunctionCallHistory(batches)
+  const input = orderToolHistory(batches, FUNCTION_CALL_HISTORY)
   const joined = instructions.join("\n\n")
   return {
     ...(joined.length === 0 ? {} : { instructions: joined }),
     input
   }
+}
+
+/** Responses items open calls with `function_call` and answer them with `function_call_output`. */
+const FUNCTION_CALL_HISTORY: ToolHistoryWire<InputItem> = {
+  name: "OpenAI tool history",
+  calls: (item) =>
+    item.type === "function_call" ? [{ id: item.call_id, async: item.async === true }] : [],
+  answers: (item) => (item.type === "function_call_output" ? { id: item.call_id } : undefined),
+  missingOutput: (callId) => ({
+    type: "function_call_output",
+    call_id: callId,
+    output: MISSING_TOOL_OUTPUT,
+    status: "completed"
+  }),
+  fail: (message) => new OpenAiResponsesProviderError(message)
 }
 
 /**

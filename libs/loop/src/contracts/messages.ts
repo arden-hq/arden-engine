@@ -232,6 +232,8 @@ export interface AssistantMessage extends MessageFields {
   readonly output_parts?: ReadonlyArray<AssistantOutputPart>
   /** Opaque replay state, keyed by the provider that wrote it. */
   readonly provider_state?: ProviderState
+  /** Who produced this turn; adapters read it to decide whether `provider_state` replays. */
+  readonly origin?: MessageOrigin
 }
 
 export interface ToolResultMessage extends MessageFields {
@@ -260,6 +262,19 @@ export interface ProviderToolCall {
   readonly loaded_tool_names?: ReadonlyArray<string>
   /** Bounded provider evidence projected onto tool lifecycle events. */
   readonly source_refs?: ReadonlyArray<JsonObject>
+}
+
+/**
+ * Who produced an assistant turn: `provider` names who served it (`"openai"`,
+ * `"openrouter"`, `"llama.cpp"`), `api` the wire (`"openai-responses"`,
+ * `"chat-completions"`), `model` the model that actually answered, as the
+ * server reported it (a router can answer with another model than requested).
+ * The loop persists it untouched beside `provider_state`.
+ */
+export interface MessageOrigin {
+  readonly provider: string
+  readonly api: string
+  readonly model: string
 }
 
 /**
