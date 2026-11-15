@@ -182,6 +182,28 @@ describe("an archived Space releases its pages", () => {
     )
     expect(outcome).toEqual({ before: ["a"], after: [], archived: null })
   })
+
+  it("lets a restored Space take a page another archived Space still names", async () => {
+    const outcome = await withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const spaces = yield* SpaceStore
+        yield* insertSpace(sql, "a")
+        yield* insertSpace(sql, "b")
+        yield* spaces.bindPage("a", "page-a", "areas/made-up-a.md")
+        yield* spaces.bindPage("b", "page-b", "areas/made-up-b.md")
+        yield* archiveRow(sql, "a")
+        yield* archiveRow(sql, "b")
+        const restored = yield* spaces.restore("a", {
+          pageId: "page-a",
+          pagePath: "areas/made-up-b.md"
+        })
+        const stale = yield* spaces.get("b", true)
+        return { restored: restored?.page_path ?? null, stale: stale?.page_path ?? null }
+      })
+    )
+    expect(outcome).toEqual({ restored: "areas/made-up-b.md", stale: null })
+  })
 })
 
 const withSpacesAndWiki = <A, E>(

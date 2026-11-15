@@ -421,6 +421,7 @@ export const makeSpaceStore = ({
       )
   })
 
+  /** Runs before a bind: the unique page indexes are checked at each statement. */
   const releaseFromArchived = (pageId: string, pagePath: string, now: string) => sql`
     UPDATE spaces
     SET page_id = NULL, page_path = NULL, updated_at = ${now}
@@ -590,6 +591,7 @@ export const makeSpaceStore = ({
               validSpaceId
             )
           }
+          if (page !== null) yield* releaseFromArchived(page.pageId, page.pagePath, now)
           const restored = yield* sql<SpaceRow>`
         UPDATE spaces
         SET archived_at = NULL, page_id = ${page?.pageId ?? null},
@@ -600,7 +602,6 @@ export const makeSpaceStore = ({
       `
           const next = restored[0]
           if (next === undefined) return null
-          if (page !== null) yield* releaseFromArchived(page.pageId, page.pagePath, now)
           yield* restoreSpaceChats(sql, validSpaceId)
           yield* spaceJobs.queueSpaceWake(validSpaceId, now)
           return yield* decodeRow(next, "restore")
