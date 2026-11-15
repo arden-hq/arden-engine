@@ -1,12 +1,12 @@
 import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
-import { chatSummaryCutByRevert } from "../src/persistence/migrations/0166_chat_summary_cut_by_revert.js"
+import { chatSummaryCutByRevert } from "../src/persistence/migrations/0163_chat_summary_cut_by_revert.js"
 import { migrations } from "../src/persistence/migrations/index.js"
 
 const at = "2026-11-01T00:00:00.000Z"
 
-it("migration 0166 cuts each stored chat summary back to its chat, and the trigger cuts later ones", () => {
+it("migration 0163 cuts each stored chat summary back to its chat, and the trigger cuts later ones", () => {
   const database = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false })
   for (const statement of baselineStatements) database.exec(statement)
   for (const migration of migrations.filter(

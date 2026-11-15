@@ -251,7 +251,7 @@ export const contextSessionSchemaSection = {
       WHERE session_type = 'channel' AND archived_at IS NULL`,
     // How far Memory Capture has read each owner chat, and old unread ranges it never reads
     // (migrations 0155, 0157, 0158). Removing a message cuts every stored position into its
-    // chat, these and the chat summary's, because later messages reuse its number (0166).
+    // chat, these and the chat summary's, because later messages reuse its number (0163).
     `CREATE TABLE memory_capture_positions (
       session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
       read_seq INTEGER NOT NULL CHECK(read_seq >= -1),

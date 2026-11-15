@@ -49,7 +49,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const chatSummaryCutByRevert: Migration = {
-  version: 166,
+  version: 163,
   name: "chat_summary_cut_by_revert",
   foreignKeys: { kind: "enforced" },
   up
