@@ -20,8 +20,8 @@ import {
 import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 
-// The rules every writer of an existing page meets, whether it writes through Arden or edits the
-// file outside it. Each takes the writer's place and identity; none writes.
+// The rules every writer of an existing page meets, whether it writes through Arden, captures,
+// restores or edits the file outside it. Each takes the writer's place and identity; none writes.
 
 /** Who writes, and where they may write. No commit identity is the owner in the app. */
 export interface WikiWriter {
@@ -52,16 +52,71 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "update")
   yield* requireWikiWritePaths(boundary, "update", [current.resource.path])
+  return yield* requireReplacement("update", current, input)
+})
+
+/**
+ * The content a restore of an earlier version writes: an update's rules, except that a merged
+ * page, a redirect at its old path, may be brought back, which is how a merge is undone.
+ */
+export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
+  spaces: SpaceStore["Service"],
+  snapshot: Snapshot,
+  current: PageRecord,
+  input: WikiWriter & { readonly content: string; readonly commit: WikiCommitIdentity }
+): Effect.fn.Return<string, WikiError> {
+  const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
+  yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
+  if (
+    isAutomatedOrigin(input.commit.origin) &&
+    Object.hasOwn(current.page.metadata, "producer_automation_id")
+  ) {
+    return yield* wikiError(
+      "restore",
+      "blocked",
+      "Automation runs cannot restore an automation-owned page",
+      { pageId: input.pageId }
+    )
+  }
+  if (input.commit.origin.kind === "capture") {
+    const spaceBound = yield* spaces
+      .hasPageBinding(current.page.pageId, current.resource.path)
+      .pipe(
+        Effect.mapError((cause) =>
+          wikiError("restore", "storage", "Could not check Memory page ownership", {
+            pageId: input.pageId,
+            cause
+          })
+        )
+      )
+    if (spaceBound) {
+      return yield* wikiError(
+        "restore",
+        "blocked",
+        "Automatic Memory cannot restore a Space-owned page",
+        { pageId: input.pageId }
+      )
+    }
+  }
+  return yield* requireReplacement("restore", current, input)
+})
+
+/** The rules for the text that replaces a page, whoever writes it; the content it writes. */
+const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
+  operation: "update" | "restore",
+  current: PageRecord,
+  input: WikiWriter & { readonly content: string }
+): Effect.fn.Return<string, WikiError> {
   const replacement = yield* parseWikiPage(input.content, input.pageId).pipe(
     Effect.mapError((cause) =>
-      wikiError("update", "invalid", cause.message, {
+      wikiError(operation, "invalid", cause.message, {
         pageId: input.pageId,
         cause
       })
     )
   )
   if (replacement.lifecycle !== "active") {
-    return yield* wikiError("update", "invalid", "A page update cannot create a redirect", {
+    return yield* wikiError(operation, "invalid", "A page update cannot create a redirect", {
       pageId: input.pageId
     })
   }
@@ -70,7 +125,7 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
     isRetentionSummaryWrite(input.commit.origin, current.resource.path) &&
     replacement.body.length > MONTHLY_SUMMARY_MAX_CHARS
   ) {
-    return yield* wikiError("update", "invalid", summaryTooLong(replacement.body.length), {
+    return yield* wikiError(operation, "invalid", summaryTooLong(replacement.body.length), {
       pageId: input.pageId
     })
   }
@@ -81,7 +136,7 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
       : undefined
   if (keepRule !== undefined) {
     return yield* wikiError(
-      "update",
+      operation,
       "invalid",
       `The retention rule "${keepRule}" was not understood, so it would keep every report. Nothing was saved. Write ${KEEP_RULE_FORMS}.`,
       { pageId: input.pageId }
@@ -89,7 +144,7 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
   }
   return yield* writtenContent(replacement).pipe(
     Effect.mapError((cause) =>
-      wikiError("update", "invalid", cause.message, { pageId: input.pageId, cause })
+      wikiError(operation, "invalid", cause.message, { pageId: input.pageId, cause })
     )
   )
 })

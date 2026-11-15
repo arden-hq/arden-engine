@@ -18,7 +18,8 @@ import {
   writtenPageData
 } from "./wiki.js"
 import { changeFailure, ChangeTimeSchema } from "./wiki-change.js"
-import { writeIdentity } from "./wiki-identity.js"
+import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
+import type { WikiCommitIdentity } from "../wiki/commit.js"
 import { lineOriginOutput } from "./wiki-line-origin.js"
 import { pageReceipt, pageSource, requireObserved } from "./wiki-records.js"
 
@@ -86,6 +87,16 @@ const prepareRestore = async (
   )
   return { head: snapshot.head, record, expectedVersion, version }
 }
+
+const restoreCommit = (
+  identity: Pick<WikiWriteIdentity, "actor" | "origin">,
+  path: string,
+  savedAt: string
+): WikiCommitIdentity => ({
+  actor: identity.actor,
+  origin: identity.origin,
+  reason: `restore wiki page ${path} to its version saved ${savedAt}`
+})
 
 /** A page's saved history, where one of its lines came from, and bringing back an earlier version. */
 export const makeWikiPageHistoryTools = ({
@@ -186,9 +197,16 @@ export const makeWikiPageHistoryTools = ({
           `${record.resource.path} changed after this run read it. Read it again, then retry.`,
           { preview: "Page changed", retryable: false }
         )
+      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
       const content = await Effect.runPromise(
         wiki
-          .contentToRestore({ pageId: record.page.pageId, commitId: version.commitId, head })
+          .contentToRestore({
+            pageId: record.page.pageId,
+            commitId: version.commitId,
+            head,
+            authority: identity.authority,
+            commit: restoreCommit(identity, record.resource.path, version.timestamp)
+          })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
       )
@@ -217,11 +235,7 @@ export const makeWikiPageHistoryTools = ({
             expectedVersion,
             expectedHead: head,
             authority: identity.authority,
-            commit: {
-              actor: identity.actor,
-              origin: identity.origin,
-              reason: `restore wiki page ${record.resource.path} to its version saved ${version.timestamp}`
-            }
+            commit: restoreCommit(identity, record.resource.path, version.timestamp)
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }

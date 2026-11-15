@@ -4,17 +4,13 @@ import { Effect } from "effect"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { MemoryCaptureBatchIdentity } from "../persistence/memory/store.js"
-import {
-  requireWikiWritePaths,
-  resolveWikiWriteBoundary,
-  type WikiLocationAuthority
-} from "./authority.js"
+import type { WikiLocationAuthority } from "./authority.js"
 import { commitWiki, updatePage, type WikiCommitIdentity } from "./commit.js"
 import { withConflictDetail } from "./conflict.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { parseWikiPage, writtenContent } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
+import { requireUpdatable } from "./write-rules.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 // Version 2 names the batch by its chat, its start and end positions and the message at its
@@ -85,6 +81,11 @@ export const makeWikiCaptureMethods = (
         if (new Set(input.edits.map((edit) => edit.pageId)).size !== input.edits.length) {
           return yield* wikiError("update", "invalid", "A capture patch set repeats a page")
         }
+        const origin = {
+          kind: "capture",
+          replayKey: memoryCapturePatchReceiptKey(input.batch),
+          sessionId: input.batch.sessionId
+        } as const
         const snapshot = yield* loadSnapshot(repository, "update")
         const byId = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
         const replacements = yield* Effect.forEach(
@@ -105,52 +106,14 @@ export const makeWikiCaptureMethods = (
                 }
               )
             }
-            if (current.page.lifecycle !== "active") {
-              return yield* wikiError(
-                "update",
-                "invalid",
-                "Only active Wiki pages can be updated",
-                {
-                  pageId: edit.pageId
-                }
-              )
-            }
-            const replacement = yield* parseWikiPage(edit.content, edit.pageId).pipe(
-              Effect.mapError((cause) =>
-                wikiError("update", "invalid", cause.message, {
-                  pageId: edit.pageId,
-                  cause
-                })
-              )
-            )
-            if (replacement.lifecycle !== "active") {
-              return yield* wikiError(
-                "update",
-                "invalid",
-                "A capture patch cannot create a redirect",
-                {
-                  pageId: edit.pageId
-                }
-              )
-            }
-            const content = yield* writtenContent(replacement).pipe(
-              Effect.mapError((cause) =>
-                wikiError("update", "invalid", cause.message, { pageId: edit.pageId, cause })
-              )
-            )
+            const content = yield* requireUpdatable(spaces, snapshot, current, {
+              pageId: edit.pageId,
+              authority: input.authority,
+              commit: { ...input.commit, origin },
+              content: edit.content
+            })
             return { current, expectedVersion: edit.expectedVersion, content }
           })
-        )
-        const boundary = yield* resolveWikiWriteBoundary(
-          spaces,
-          input.authority,
-          snapshot,
-          "update"
-        )
-        yield* requireWikiWritePaths(
-          boundary,
-          "update",
-          replacements.map(({ current }) => current.resource.path)
         )
         const changed =
           snapshot.head === input.expectedHead
@@ -161,11 +124,7 @@ export const makeWikiCaptureMethods = (
             repository,
             {
               actor: input.commit.actor,
-              origin: {
-                kind: "capture",
-                replayKey: memoryCapturePatchReceiptKey(input.batch),
-                sessionId: input.batch.sessionId
-              },
+              origin,
               reason: input.commit.reason,
               expectedRevision: input.expectedHead
             },

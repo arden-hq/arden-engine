@@ -5,14 +5,15 @@ import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import {
+  GLOBAL_WIKI_LOCATION_AUTHORITY,
   requireWikiWritePaths,
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
 import {
   commitWiki,
-  isAutomatedOrigin,
   LEGACY_MAINTENANCE_ORIGIN,
+  requireCommitRules,
   restorePage,
   type WikiCommitIdentity,
   updatePage
@@ -20,13 +21,9 @@ import {
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { normal, pageNamesForPath, writtenContent } from "./page.js"
-import { loadSnapshot, notFound, type PageRecord, readRecord } from "./snapshot.js"
-
-const restoredContent = (record: PageRecord, pageId: string) =>
-  writtenContent(record.page).pipe(
-    Effect.mapError((cause) => wikiError("restore", "invalid", cause.message, { pageId, cause }))
-  )
+import { normal, pageNamesForPath } from "./page.js"
+import { loadSnapshot, notFound, type PageRecord, readRecord, type Snapshot } from "./snapshot.js"
+import { requireRestorable, requireUpdatable } from "./write-rules.js"
 
 interface WikiRestoreInput {
   readonly pageId: string
@@ -48,6 +45,8 @@ interface WikiRestoreContentInput {
   readonly pageId: string
   readonly commitId: string
   readonly head: string
+  readonly authority: WikiLocationAuthority
+  readonly commit: WikiCommitIdentity
 }
 
 interface WikiRestoreArchivedInput {
@@ -60,7 +59,8 @@ interface WikiRestoreArchivedInput {
 export interface WikiRestoreMethods {
   readonly restore: (input: WikiRestoreInput) => Effect.Effect<WikiPage, WikiError>
   readonly restoreRevision: (input: WikiRestoreRevisionInput) => Effect.Effect<WikiPage, WikiError>
-  /** The page text a restore to `commitId` would write, for the owner to review first. */
+  /** The page text a restore to `commitId` would write, for the owner to review first. It is
+   *  refused by every rule the restore itself would meet. */
   readonly contentToRestore: (input: WikiRestoreContentInput) => Effect.Effect<string, WikiError>
   readonly restoreArchived: (input: WikiRestoreArchivedInput) => Effect.Effect<WikiPage, WikiError>
 }
@@ -148,16 +148,20 @@ export const makeWikiRestoreMethods = (
             }
           )
         }
-        yield* commitWiki(
-          repository,
-          {
-            expectedRevision: input.expectedHead,
-            actor: "user:desktop",
-            origin: { kind: "user", via: "desktop.restore" },
-            reason: `restore Maintenance commit ${input.commitId}`
-          },
-          [updatePage(current.resource, yield* restoredContent(beforeRecord, input.pageId))]
-        ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+        const identity = {
+          actor: "user:desktop",
+          origin: { kind: "user", via: "desktop.restore" },
+          reason: `restore Maintenance commit ${input.commitId}`
+        } as const
+        const content = yield* requireUpdatable(spaces, snapshot, current, {
+          pageId: input.pageId,
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+          commit: identity,
+          content: beforeRecord.page.content
+        })
+        yield* commitWiki(repository, { ...identity, expectedRevision: input.expectedHead }, [
+          updatePage(current.resource, content)
+        ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         const page = yield* read(input.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
         )
@@ -166,8 +170,8 @@ export const makeWikiRestoreMethods = (
     )
   })
 
-  const contentToRestore = Effect.fn("Wiki.contentToRestore")(function* (
-    input: WikiRestoreContentInput
+  const historicalVersion = Effect.fn("Wiki.historicalVersion")(function* (
+    input: Pick<WikiRestoreContentInput, "pageId" | "commitId" | "head">
   ) {
     const pageHistory = yield* repository
       .history({ resourceId: input.pageId, start: input.head, limit: null })
@@ -204,7 +208,35 @@ export const makeWikiRestoreMethods = (
         }
       )
     }
-    return yield* restoredContent(historical, input.pageId)
+    return historical
+  })
+
+  /** The content a restore writes, once every rule for it holds, the commit's included. */
+  const restorableContent = Effect.fn("Wiki.restorableContent")(function* (
+    snapshot: Snapshot,
+    current: PageRecord,
+    input: WikiRestoreContentInput
+  ) {
+    const historical = yield* historicalVersion(input)
+    const content = yield* requireRestorable(spaces, snapshot, current, {
+      pageId: input.pageId,
+      authority: input.authority,
+      commit: input.commit,
+      content: historical.page.content
+    })
+    yield* requireCommitRules(repository, input.commit.origin, [
+      updatePage(current.resource, content)
+    ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+    return content
+  })
+
+  const contentToRestore = Effect.fn("Wiki.contentToRestore")(function* (
+    input: WikiRestoreContentInput
+  ) {
+    const snapshot = yield* loadSnapshot(repository, "restore")
+    const current = snapshot.pages.find((record) => record.page.pageId === input.pageId)
+    if (current === undefined) return yield* notFound("restore", input.pageId)
+    return yield* restorableContent(snapshot, current, input)
   })
 
   const restoreRevision = Effect.fn("Wiki.restoreRevision")(function* (
@@ -221,50 +253,12 @@ export const makeWikiRestoreMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        // A merged page is a redirect at its old path. Restoring an earlier revision over it
-        // brings the page back, which is how a merge is undone.
-        const boundary = yield* resolveWikiWriteBoundary(
-          spaces,
-          input.authority,
-          snapshot,
-          "restore"
-        )
-        yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
-        if (
-          isAutomatedOrigin(input.commit.origin) &&
-          Object.hasOwn(current.page.metadata, "producer_automation_id")
-        ) {
-          return yield* wikiError(
-            "restore",
-            "blocked",
-            "Automation runs cannot restore an automation-owned page",
-            { pageId: input.pageId }
-          )
-        }
-        if (input.commit.origin.kind === "capture") {
-          const spaceBound = yield* spaces
-            .hasPageBinding(current.page.pageId, current.resource.path)
-            .pipe(
-              Effect.mapError((cause) =>
-                wikiError("restore", "storage", "Could not check Memory page ownership", {
-                  pageId: input.pageId,
-                  cause
-                })
-              )
-            )
-          if (spaceBound) {
-            return yield* wikiError(
-              "restore",
-              "blocked",
-              "Automatic Memory cannot restore a Space-owned page",
-              { pageId: input.pageId }
-            )
-          }
-        }
-        const content = yield* contentToRestore({
+        const content = yield* restorableContent(snapshot, current, {
           pageId: input.pageId,
           commitId: input.commitId,
-          head: input.expectedHead
+          head: input.expectedHead,
+          authority: input.authority,
+          commit: input.commit
         })
         const changed = content !== current.page.content
         if (!changed) {
