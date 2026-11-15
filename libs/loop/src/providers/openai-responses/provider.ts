@@ -159,8 +159,14 @@ export const makeOpenAiResponsesProvider = (
   const modelPrefix = options.modelPrefix ?? ""
   const defaultInstructions = options.defaultInstructions
   const connectWebSocket = options.connectWebSocket
-  const capabilities: NonNullable<ModelProvider["capabilities"]> =
+  const declared: NonNullable<ModelProvider["capabilities"]> =
     options.capabilities ?? (() => DEFAULT_CAPABILITIES)
+  // Whether the limit is sent is this provider's own option, so it is
+  // reported from that option rather than declared a second time.
+  const capabilities: NonNullable<ModelProvider["capabilities"]> =
+    options.omitMaxOutputTokens === true
+      ? async (model) => ({ ...(await declared(model)), outputLimit: "omitted" })
+      : declared
   const stream = (request: ModelProviderRequest) => {
     const payloadRequest =
       options.omitMaxOutputTokens === true

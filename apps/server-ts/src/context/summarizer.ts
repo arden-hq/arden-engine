@@ -1,4 +1,5 @@
 import {
+  resolveModelCapabilities,
   ToolChoice,
   type ChatMessage,
   type CompletionResponse,
@@ -6,7 +7,7 @@ import {
   type ModelProviderRequest
 } from "@arden-hq/loop"
 import { withUntrustedDataRule } from "../models/instructions.js"
-import { sideCallOutputLimit } from "../models/side-call.js"
+import { outputLimitDelivery, sideCallOutputLimit } from "../models/side-call.js"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { HANDOFF_BYTES_PER_TOKEN, handoffContent } from "./handoff.js"
 
@@ -51,6 +52,8 @@ export interface SummarizeContextInput {
   readonly priorSummary?: string
   readonly contextWindow: number
   readonly maxOutputTokens: number
+  /** The model's `context.outputCap`. */
+  readonly outputCap: number | undefined
   readonly signal?: AbortSignal
   readonly onResponse: (response: CompletionResponse) => void
   readonly cachedRequest?: ModelProviderRequest | undefined
@@ -58,20 +61,28 @@ export interface SummarizeContextInput {
 }
 
 export const summarizeContext = async (input: SummarizeContextInput): Promise<string> => {
+  // The handoff's own size: at most a quarter of the window, and never more
+  // than the model writes.
   const maxOutputTokens = Math.min(
     input.maxOutputTokens,
-    Math.max(1, Math.floor(input.contextWindow / 4))
+    Math.max(1, Math.floor(input.contextWindow / 4)),
+    input.outputCap ?? Number.POSITIVE_INFINITY
   )
-  // `maxOutputTokens` is the handoff's own size; the request's limit also
-  // leaves room for thinking, within the quarter of the window the summary
-  // already reserves. The effort stays the chat's (see `sideCallEffort`).
-  const requestTokens = Math.min(
-    sideCallOutputLimit({
-      answerTokens: maxOutputTokens,
-      effort: input.reasoningEffort ?? undefined
-    }),
-    Math.max(maxOutputTokens, Math.floor(input.contextWindow / 4))
-  )
+  // The request's limit leaves room for thinking on top of the handoff (the
+  // effort stays the chat's, see `sideCallEffort`). The source gives way to
+  // what is actually sent: the whole limit where the route sends it, only
+  // the handoff where it does not (Codex), as before the thinking room.
+  const requestTokens = sideCallOutputLimit({
+    answerTokens: maxOutputTokens,
+    effort: input.reasoningEffort ?? undefined,
+    outputCap: input.outputCap
+  })
+  const capabilities = await resolveModelCapabilities({
+    provider: input.provider,
+    model: input.model
+  })
+  const reservedTokens =
+    outputLimitDelivery(capabilities) === "sent" ? requestTokens : maxOutputTokens
   const maxBytes = maxOutputTokens * HANDOFF_BYTES_PER_TOKEN
   const summaryBytes = maxBytes - Buffer.byteLength(handoffContent({ ...input, summary: "" }))
   if (summaryBytes <= 0) throw new Error("Compaction budget cannot fit its recovery reference")
@@ -82,7 +93,12 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
       { role: "system", content: withUntrustedDataRule(PROMPT_TEXT.compaction) },
       {
         role: "user",
-        content: fitSource(input.sourceText, input.priorSummary, input.contextWindow, requestTokens)
+        content: fitSource(
+          input.sourceText,
+          input.priorSummary,
+          input.contextWindow,
+          reservedTokens
+        )
       }
     ],
     tools: [],

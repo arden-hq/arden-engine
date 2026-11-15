@@ -10,6 +10,7 @@ import {
   type ChatMessage,
   type AgentConfigInput,
   type CompletionResponse,
+  type ModelCapabilities,
   type Result,
   type Tool,
   type Toolset
@@ -19,7 +20,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { STRUCTURED_OUTPUT_DIALECTS } from "./structured-output.js"
 import { ModelStore } from "../persistence/models/store.js"
 import { ModelCatalog } from "./catalog.js"
-import { sideCallEffort, sideCallOutputLimit } from "./side-call.js"
+import { outputLimitDelivery, sideCallEffort, sideCallOutputLimit } from "./side-call.js"
 import { type ModelCallUsage, UsageStore } from "../persistence/usage/store.js"
 import { meteredModelCall } from "./call-usage.js"
 import { ModelProviderService, type ModelRoute } from "./provider.js"
@@ -110,12 +111,16 @@ interface ResolvedAssignment {
   readonly model: string
   /** The model's declared efforts, which decide how its side calls think. */
   readonly efforts: ReadonlyArray<string>
+  /** The model's `context.outputCap`. */
+  readonly outputCap: number | undefined
+  /** The route's capabilities for the model. */
+  readonly capabilities: ModelCapabilities
   readonly route: ModelRoute
 }
 
 /** One agent per side call, its effort and output limit chosen in `side-call.ts`. */
 const agentFor = (
-  { assignment, model, efforts, route }: ResolvedAssignment,
+  { assignment, model, efforts, outputCap, capabilities, route }: ResolvedAssignment,
   {
     maxOutputTokens,
     toolChoice,
@@ -136,7 +141,13 @@ const agentFor = (
 ): Agent => {
   const assigned = assignment.reasoningEffort ?? undefined
   const reasoningEffort =
-    worker === undefined ? sideCallEffort({ assigned, declared: efforts }) : assigned
+    worker === undefined
+      ? sideCallEffort({
+          assigned,
+          declared: efforts,
+          delivery: outputLimitDelivery(capabilities)
+        })
+      : assigned
   return makeAgent(
     {
       model,
@@ -151,7 +162,8 @@ const agentFor = (
           }),
       maxOutputTokens: sideCallOutputLimit({
         answerTokens: maxOutputTokens,
-        effort: reasoningEffort
+        effort: reasoningEffort,
+        outputCap
       }),
       toolChoice,
       ...(reasoningEffort === undefined ? {} : { reasoningEffort })
@@ -228,11 +240,23 @@ export class StructuredCompletion extends Context.Service<
             message: `The ${label} model ${assignment.modelId} is not in the model list`
           })
         }
+        const model = assignment.modelId
+        const capabilities = yield* Effect.tryPromise({
+          try: () => resolveModelCapabilities({ provider: route.provider, model }),
+          catch: (cause) =>
+            new StructuredCompletionError({
+              reason: "provider",
+              message: `Could not resolve the ${label} model capabilities`,
+              cause
+            })
+        })
         return {
           assignment,
           label,
-          model: assignment.modelId,
+          model,
           efforts: definition.reasoningEfforts,
+          outputCap: definition.context.outputCap,
+          capabilities,
           route
         }
       })
@@ -263,16 +287,7 @@ export class StructuredCompletion extends Context.Service<
         S extends Schema.ConstraintDecoder<unknown>
       >(input: StructuredCompletionInput<S>) {
         const resolved = yield* resolveAssignment(input.role)
-        const { label, model, route } = resolved
-        const capabilities = yield* Effect.tryPromise({
-          try: () => resolveModelCapabilities({ provider: route.provider, model }),
-          catch: (cause) =>
-            new StructuredCompletionError({
-              reason: "provider",
-              message: `Could not resolve the ${label} model capabilities`,
-              cause
-            })
-        })
+        const { label, model, route, capabilities } = resolved
         const unavailableMessage = (effectiveModel: string): string =>
           `The ${label} model (${effectiveModel}) does not support constrained structured output. Choose a model with structured output support in model settings.`
         if (capabilities.structuredOutput === "none") {

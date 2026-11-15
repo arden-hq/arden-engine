@@ -144,6 +144,7 @@ const discoverModels = async (
         return (wanted ?? []).map((id) => ({
           id,
           contextLimit: settings.contextLimit,
+          outputCap: undefined,
           reasoningEfforts: declaredEfforts(settings),
           compat: {}
         }))
@@ -178,7 +179,10 @@ const chatCompletionsDefinition = (
     name: model.id,
     provider: host,
     reasoningEfforts: model.reasoningEfforts,
-    context: contextOf(limit)
+    context: {
+      ...contextOf(limit),
+      ...(model.outputCap === undefined ? {} : { outputCap: model.outputCap })
+    }
   }
 }
 

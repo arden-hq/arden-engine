@@ -124,14 +124,14 @@ describe("modelsFor a chat-completions provider", () => {
           name: "deepseek/deepseek-v4.1-flash-1017",
           provider: openRouter,
           reasoningEfforts: ["max", "high", "low", "none"],
-          context: { hardLimit: 1_048_576, compactionTrigger: 838_860 }
+          context: { hardLimit: 1_048_576, compactionTrigger: 838_860, outputCap: 384_000 }
         },
         {
           id: "anthropic/claude-haiku-4.5",
           name: "anthropic/claude-haiku-4.5",
           provider: openRouter,
           reasoningEfforts: [],
-          context: { hardLimit: 200_000, compactionTrigger: 160_000 }
+          context: { hardLimit: 200_000, compactionTrigger: 160_000, outputCap: 64_000 }
         }
       ],
       defaults: {

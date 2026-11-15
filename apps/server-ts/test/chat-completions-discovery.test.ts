@@ -212,6 +212,7 @@ describe("discoverOpenRouter", () => {
       {
         id: "anthropic/claude-haiku-4.5",
         contextLimit: 200_000,
+        outputCap: 64_000,
         reasoningEfforts: [],
         compat: {
           maxTokensField: "max_tokens",
@@ -228,6 +229,7 @@ describe("discoverOpenRouter", () => {
         // The main provider's window is a quarter of the model's.
         id: "nvidia/nemotron-3.5-super-vl",
         contextLimit: 262_144,
+        outputCap: 235_929,
         reasoningEfforts: [],
         compat: {
           maxTokensField: "max_tokens",
@@ -243,6 +245,7 @@ describe("discoverOpenRouter", () => {
       {
         id: "deepseek/deepseek-v4.1-flash-1017",
         contextLimit: 1_048_576,
+        outputCap: 384_000,
         reasoningEfforts: ["max", "high", "low", "none"],
         compat: {
           maxTokensField: "max_tokens",
@@ -258,6 +261,7 @@ describe("discoverOpenRouter", () => {
       {
         id: "openai/gpt-4o-mini",
         contextLimit: 128_000,
+        outputCap: 16_384,
         reasoningEfforts: [],
         compat: {
           maxTokensField: "max_tokens",

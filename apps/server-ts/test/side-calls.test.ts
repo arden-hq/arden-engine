@@ -1,6 +1,7 @@
-import type { ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
+import type { ModelCapabilities, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
 import type { ModelAssignment } from "@arden-hq/protocol/models"
 import { Effect, Layer, Schema } from "effect"
+import { makeOpenAiResponsesProvider } from "@arden-hq/loop/providers/openai-responses"
 import { describe, expect, it } from "vitest"
 import { summarizeContext } from "../src/context/summarizer.js"
 import { ModelCatalog } from "../src/models/catalog.js"
@@ -13,12 +14,19 @@ import { ModelStore } from "../src/persistence/models/store.js"
 import { UsageStore } from "../src/persistence/usage/store.js"
 import { partialService } from "./kit.js"
 
-/** A provider that answers every request with `answer` and records what it was asked. */
-const recording = (answer: string) => {
+/**
+ * A provider that answers every request with `answer` and records what it was
+ * asked. `outputLimit: "omitted"` is a route that never sends the limit (Codex).
+ */
+const recording = (answer: string, outputLimit: ModelCapabilities["outputLimit"] = undefined) => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
     protocolVersion: 1,
-    capabilities: () => ({ hostedTools: [], structuredOutput: "native" }),
+    capabilities: () => ({
+      hostedTools: [],
+      structuredOutput: "native",
+      ...(outputLimit === undefined ? {} : { outputLimit })
+    }),
     stream: (request) => {
       requests.push(request)
       return [
@@ -40,14 +48,18 @@ const recording = (answer: string) => {
   return { requests, provider }
 }
 
-const host = (reasoningEfforts: ReadonlyArray<string>): ModelHost => ({
+const host = (reasoningEfforts: ReadonlyArray<string>, outputCap?: number): ModelHost => ({
   models: [
     {
       id: "m",
       name: "m",
       provider: { id: "p", name: "P" },
       reasoningEfforts,
-      context: { hardLimit: 32_768, compactionTrigger: 26_214 }
+      context: {
+        hardLimit: 32_768,
+        compactionTrigger: 26_214,
+        ...(outputCap === undefined ? {} : { outputCap })
+      }
     }
   ],
   defaults: {
@@ -63,12 +75,26 @@ const host = (reasoningEfforts: ReadonlyArray<string>): ModelHost => ({
 /** What a helper side call put on the provider request, for a model and its assignment. */
 const helperRequest = async (
   call: (completion: StructuredCompletion["Service"]) => Effect.Effect<unknown, unknown>,
-  { efforts, assigned }: { efforts: ReadonlyArray<string>; assigned: string | null }
+  {
+    efforts,
+    assigned,
+    outputCap,
+    outputLimit,
+    route
+  }: {
+    efforts: ReadonlyArray<string>
+    assigned: string | null
+    outputCap?: number
+    outputLimit?: ModelCapabilities["outputLimit"]
+    /** A real provider in place of the recording one; its requests are not returned. */
+    route?: ModelProvider
+  }
 ) => {
-  const model = recording('{"title":"Lisbon trip"}')
+  const model = recording('{"title":"Lisbon trip"}', outputLimit)
+  const provider = route ?? model.provider
   const assignment: ModelAssignment = { modelId: "m", reasoningEffort: assigned }
   const layer = StructuredCompletion.layer.pipe(
-    Layer.provide(ModelProviderService.layer({ provider: model.provider })),
+    Layer.provide(ModelProviderService.layer({ provider })),
     Layer.provide(
       Layer.succeed(
         ModelStore,
@@ -81,7 +107,7 @@ const helperRequest = async (
       Layer.succeed(
         ModelCatalog,
         partialService<ModelCatalog["Service"]>("ModelCatalog", {
-          installed: () => makeSettingsRuntime(host(efforts))
+          installed: () => makeSettingsRuntime(host(efforts, outputCap))
         })
       )
     ),
@@ -99,6 +125,7 @@ const helperRequest = async (
       yield* Effect.exit(call(completion))
     }).pipe(Effect.provide(layer))
   )
+  if (route !== undefined) return undefined
   const [request] = model.requests
   if (request === undefined) throw new Error("no model request")
   return { maxOutputTokens: request.maxOutputTokens, reasoningEffort: request.reasoningEffort }
@@ -177,23 +204,121 @@ describe("a side call's effort and output limit", () => {
     })
   })
 
-  it("sizes a compaction summary for thinking within its quarter of the window", async () => {
-    const limitFor = async (reasoningEffort: string | null, contextWindow: number) => {
-      const model = recording("Handoff: planning a trip to Lisbon.")
+  it("keeps a route that sends no output limit at the model's own effort", async () => {
+    // Codex never sends the limit (`omitMaxOutputTokens`), so thinking cannot cut the answer
+    // short there and an unset helper effort stays the server's default, as before side calls
+    // chose efforts, even for a model that lists `none`.
+    expect(
+      await helperRequest(name, {
+        efforts: ["none", "low"],
+        assigned: null,
+        outputLimit: "omitted"
+      })
+    ).toEqual({ maxOutputTokens: 80 + REASONING_ALLOWANCE_TOKENS, reasoningEffort: undefined })
+  })
+
+  it("sends a Codex helper request as before: no effort, no output limit", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const completed = {
+      type: "response.completed",
+      response: {
+        id: "r1",
+        output: [
+          {
+            id: "m1",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Lisbon trip" }]
+          }
+        ]
+      }
+    }
+    // The Codex runtime's provider options (`openai-codex/runtime.ts`), on a model whose
+    // catalog entry lists `none` and whose helper effort is unset.
+    const codex = makeOpenAiResponsesProvider({
+      auth: { headers: async () => ({}) },
+      capabilities: () => ({ hostedTools: [], structuredOutput: "native", toolSearch: "client" }),
+      omitMaxOutputTokens: true,
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(`data: ${JSON.stringify(completed)}\n\n`, {
+          headers: { "content-type": "text/event-stream" }
+        })
+      }
+    })
+    await helperRequest(name, { efforts: ["none", "low", "medium"], assigned: null, route: codex })
+    expect(bodies.map((body) => [body.reasoning, body.max_output_tokens])).toEqual([
+      [undefined, undefined]
+    ])
+  })
+
+  it("never asks for more output than the model's own cap", async () => {
+    // OpenRouter's `top_provider.max_completion_tokens`.
+    expect(await helperRequest(name, { efforts: [], assigned: null, outputCap: 1_024 })).toEqual({
+      maxOutputTokens: 1_024,
+      reasoningEffort: undefined
+    })
+  })
+
+  describe("a compaction summary", () => {
+    const summary = async (input: {
+      readonly reasoningEffort: string | null
+      readonly contextWindow: number
+      readonly outputCap?: number
+      readonly outputLimit?: ModelCapabilities["outputLimit"]
+    }) => {
+      const model = recording("Handoff: planning a trip to Lisbon.", input.outputLimit)
       await summarizeContext({
         provider: model.provider,
         model: "m",
-        reasoningEffort,
+        reasoningEffort: input.reasoningEffort,
         sessionRef: "chat-1",
-        sourceText: "user: plan a trip to Lisbon",
-        contextWindow,
+        sourceText: "x".repeat(200_000),
+        contextWindow: input.contextWindow,
         maxOutputTokens: 1_500,
+        outputCap: input.outputCap,
         onResponse: () => undefined
       })
-      return model.requests.map((request) => request.maxOutputTokens)
+      return model.requests.map((request) => {
+        const source = request.messages[1]?.content
+        return {
+          limit: request.maxOutputTokens,
+          sourceChars: typeof source === "string" ? source.length : undefined
+        }
+      })
     }
-    expect(await limitFor("none", 131_072)).toEqual([1_500])
-    expect(await limitFor(null, 131_072)).toEqual([1_500 + REASONING_ALLOWANCE_TOKENS])
-    expect(await limitFor("high", 16_384)).toEqual([4_096])
+
+    it("leaves room for thinking on top of the handoff, however small the window", async () => {
+      expect(await summary({ reasoningEffort: "none", contextWindow: 131_072 })).toEqual([
+        { limit: 1_500, sourceChars: 131_072 - 1_500 - 2_000 }
+      ])
+      expect(await summary({ reasoningEffort: null, contextWindow: 131_072 })).toEqual([
+        {
+          limit: 1_500 + REASONING_ALLOWANCE_TOKENS,
+          sourceChars: 131_072 - 1_500 - REASONING_ALLOWANCE_TOKENS - 2_000
+        }
+      ])
+      // On an 8k window the thinking room no longer has to fit in the handoff's quarter.
+      expect(await summary({ reasoningEffort: "high", contextWindow: 8_192 })).toEqual([
+        {
+          limit: 1_500 + REASONING_ALLOWANCE_TOKENS,
+          sourceChars: 8_192 - 1_500 - REASONING_ALLOWANCE_TOKENS - 2_000
+        }
+      ])
+    })
+
+    it("stays within the model's output cap", async () => {
+      expect(
+        await summary({ reasoningEffort: "high", contextWindow: 131_072, outputCap: 1_000 })
+      ).toEqual([{ limit: 1_000, sourceChars: 131_072 - 1_000 - 2_000 }])
+    })
+
+    it("reserves only the handoff for a route that sends no limit", async () => {
+      expect(
+        await summary({ reasoningEffort: "high", contextWindow: 131_072, outputLimit: "omitted" })
+      ).toEqual([
+        { limit: 1_500 + REASONING_ALLOWANCE_TOKENS, sourceChars: 131_072 - 1_500 - 2_000 }
+      ])
+    })
   })
 })

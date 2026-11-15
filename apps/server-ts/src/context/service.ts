@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { ModelCatalog } from "../models/catalog.js"
 import { ServerConfig } from "../config/service.js"
 import { Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import { ModelStore, ModelStoreError } from "../persistence/models/store.js"
@@ -234,6 +235,7 @@ export class ContextCompaction extends Context.Service<
       const modelProvider = yield* ModelProviderService
       const store = yield* ContextCompactionStore
       const models = yield* ModelStore
+      const catalog = yield* ModelCatalog
       const intelligence = yield* IntelligenceSettingsStore
       const events = yield* ChatEventStore
       const usage = yield* UsageStore
@@ -298,6 +300,7 @@ export class ContextCompaction extends Context.Service<
                   ...(plan.priorSummary === undefined ? {} : { priorSummary: plan.priorSummary }),
                   contextWindow: budget.hard_limit,
                   maxOutputTokens,
+                  outputCap: catalog.installed().models.get(modelId)?.context.outputCap,
                   ...(signal === undefined ? {} : { signal }),
                   onResponse,
                   cachedRequest: requests.prefix({

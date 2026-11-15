@@ -7,7 +7,13 @@ const PositiveIntSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 const ModelContextLimitsSchema = Schema.Struct({
   hardLimit: PositiveIntSchema,
-  compactionTrigger: PositiveIntSchema
+  compactionTrigger: PositiveIntSchema,
+  /**
+   * The most tokens the model writes in one response, where its server
+   * reports it (OpenRouter `top_provider.max_completion_tokens`); absent when
+   * none is known. Side calls never ask for more (`side-call.ts`).
+   */
+  outputCap: Schema.optionalKey(PositiveIntSchema)
 }).check(
   Schema.makeFilter((limits) =>
     limits.compactionTrigger <= limits.hardLimit

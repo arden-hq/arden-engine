@@ -14,6 +14,12 @@ export interface DiscoveredModel {
   readonly id: string
   /** The server's own window in tokens; undefined when it does not say. */
   readonly contextLimit: number | undefined
+  /**
+   * The most tokens the model writes in one response, where the server says
+   * (OpenRouter `top_provider.max_completion_tokens`); llama.cpp has no cap
+   * of its own beyond the window, so undefined there.
+   */
+  readonly outputCap: number | undefined
   readonly reasoningEfforts: ReadonlyArray<string>
   /** How its requests are shaped; a field left out takes the adapter's default. */
   readonly compat: Partial<ChatCompletionsCompat>
@@ -164,6 +170,7 @@ const llamaModel = (
   return {
     id,
     contextLimit,
+    outputCap: undefined,
     reasoningEfforts: efforts,
     compat: {
       // llama.cpp honors both fields (checked on b12359); `max_tokens` is its
@@ -194,6 +201,7 @@ const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredMo
     // The model's window, or its main provider's when that one is smaller:
     // OpenRouter routes to that provider first.
     contextLimit: smallest([model.context_length, model.top_provider?.context_length]),
+    outputCap: positive(model.top_provider?.max_completion_tokens),
     reasoningEfforts: reasoning ? openRouterEfforts(model.reasoning ?? undefined) : [],
     compat: {
       // 450 of 467 models list `max_tokens`, 91 `max_completion_tokens`
@@ -345,7 +353,10 @@ const OpenRouterModelSchema = Schema.Struct({
   id: Schema.String,
   context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   top_provider: Schema.optionalKey(
-    Schema.Struct({ context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)) })
+    Schema.Struct({
+      context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+      max_completion_tokens: Schema.optionalKey(Schema.NullOr(Schema.Number))
+    })
   ),
   supported_parameters: Schema.optionalKey(Schema.Array(Schema.String)),
   architecture: Schema.optionalKey(

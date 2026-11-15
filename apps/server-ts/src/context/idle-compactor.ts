@@ -1,4 +1,5 @@
 import { Clock, Effect, Exit } from "effect"
+import { ModelCatalog } from "../models/catalog.js"
 import { ModelProviderService } from "../models/provider.js"
 import { quotaDecision, quotaLimits, currentPlanReading } from "../models/plan-limits.js"
 import { meteredModelCall } from "../models/call-usage.js"
@@ -26,6 +27,7 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
   }) {
     const provider = yield* ModelProviderService
     const models = yield* ModelStore
+    const catalog = yield* ModelCatalog
     const store = yield* ContextCompactionStore
     const intelligence = yield* IntelligenceSettingsStore
     const limits = yield* LimitSettingsStore
@@ -130,6 +132,7 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
               sourceText: plan.sourceText,
               contextWindow: budget.hard_limit,
               maxOutputTokens: controls.summaryMaxTokens,
+              outputCap: catalog.installed().models.get(modelId)?.context.outputCap,
               cachedRequest: {
                 ...cachedRequest,
                 messages: [...cachedRequest.messages, replayedAssistant(candidate.response.message)]

@@ -200,6 +200,13 @@ export interface ModelCapabilities {
    * conversation; `none` (the default) — the loop declares every tool.
    */
   readonly toolSearch?: "client" | "none"
+  /**
+   * Whether the route sends `ModelRequest.maxOutputTokens` to the server.
+   * `omitted` — it never does (the Codex backend refuses the field), so the
+   * server's own limit applies and a request's limit cannot cut an answer
+   * short; absent or `sent` — it does.
+   */
+  readonly outputLimit?: "sent" | "omitted"
   /** Present when the route takes images; absent, the host sends it none. */
   readonly imageInput?: ImageInput
 }
