@@ -15,14 +15,14 @@ import {
   followRedirect,
   pageNameIndex,
   resolveWikiLinkTarget,
-  runPages,
-  type PageRecord
+  type PageRecord,
+  type RunPage
 } from "./snapshot.js"
 import { untrackedFiles, untrackedPageIds } from "./untracked.js"
 
 /** Memory as it stands: the pages in history and the other files in the Memory folder. */
 export interface MemoryFolder {
-  readonly pages: ReadonlyArray<PageRecord>
+  readonly pages: ReadonlyArray<RunPage>
   readonly untracked: ReadonlyArray<UntrackedFile>
 }
 
@@ -119,7 +119,7 @@ const groupsOf = (entries: ReadonlyArray<readonly [key: string, path: string]>) 
 }
 
 export const memoryFindings = (folder: MemoryFolder): ReadonlyArray<Finding> => {
-  const pages = runPages(folder.pages).filter((record) => record.resource.state === "active")
+  const pages = folder.pages.filter((record) => record.resource.state === "active")
   const active = activeRunPages(pages)
   const folders = recordFolders(pages)
   const shapes = active.map((record) => pageShape(record, folders))

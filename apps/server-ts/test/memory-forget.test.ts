@@ -122,7 +122,7 @@ const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>
         const page = (path: string) =>
           listing.snapshot().pipe(
             Effect.flatMap((snapshot) => {
-              const record = snapshot.pages.find((candidate) => candidate.resource.path === path)
+              const record = snapshot.wholeSet.find((candidate) => candidate.resource.path === path)
               return record === undefined
                 ? Effect.die(`${path} is missing`)
                 : Effect.succeed(record)
@@ -476,7 +476,7 @@ describe("forgetting a line", () => {
             finding.paths.includes("forgotten.md")
           ),
           reviewed: review.pages.some((page) => page.path === "forgotten.md"),
-          stored: snapshot.pages.some((record) => record.resource.path === "forgotten.md"),
+          stored: snapshot.wholeSet.some((record) => record.resource.path === "forgotten.md"),
           recalled: prepared.recalled
             .map((record) => record.resource.path)
             .includes("forgotten.md"),

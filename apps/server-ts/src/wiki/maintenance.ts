@@ -11,6 +11,7 @@ import {
   activeRunPages,
   pageNameIndex,
   readRecord,
+  snapshotOf,
   resolveWikiLinkTarget,
   validateRedirects,
   type Snapshot
@@ -130,7 +131,7 @@ const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(functi
   )
   pages.sort((left, right) => left.page.pageId.localeCompare(right.page.pageId))
   yield* validateRedirects(operation, pages)
-  return { head, pages }
+  return snapshotOf(head, pages)
 })
 
 const directReferences = (

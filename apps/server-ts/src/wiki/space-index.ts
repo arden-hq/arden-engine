@@ -6,7 +6,7 @@ import type { SpaceBinding, SpacePageBinding, SpaceStore } from "../persistence/
 import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
-import { activeRunPages, type PageRecord } from "./snapshot.js"
+import { activeRunPages, type RunPage } from "./snapshot.js"
 
 const spaceFolder = (pagePath: string): string => {
   if (isReadme(pagePath)) return posix.dirname(pagePath)
@@ -62,14 +62,14 @@ export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string
 
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   space: SpacePageBinding
-): ReadonlyArray<PageRecord> =>
+): ReadonlyArray<RunPage> =>
   activeRunPages(pages).filter((record) => spaceOwnsPath(space.pagePath, record.resource.path))
 
 /** The generated list of the pages a Space owns besides its own page, in at most `maxBytes`. */
 export const spacePageIndex = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   space: SpacePageBinding,
   maxBytes: number
 ): MemoryIndex =>
@@ -85,7 +85,7 @@ export type SpacePagePlan =
   | { readonly kind: "create" }
 
 export const planSpacePage = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   space: SpaceBinding,
   others: ReadonlyArray<SpaceBinding>
 ): SpacePagePlan => {

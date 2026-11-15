@@ -23,19 +23,30 @@ export interface PageRecord {
   readonly page: ParsedWikiPage
 }
 
+declare const shownToRuns: unique symbol
+
+/** A page a run may be shown. Only `snapshotOf` makes one, and never of a code-owned page. */
+export type RunPage = PageRecord & { readonly [shownToRuns]: true }
+
 export interface Snapshot {
   readonly head: string | null
-  readonly pages: ReadonlyArray<PageRecord>
+  /** The pages a run may be shown: every page but the code-owned ones. */
+  readonly pages: ReadonlyArray<RunPage>
+  /** Every page, code-owned ones included: for consistency checks and the owner's routes. */
+  readonly wholeSet: ReadonlyArray<PageRecord>
 }
 
-export const runPages = (pages: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> =>
-  pages.filter((record) => !isSystemPage(record.resource.path))
+const isShownToRuns = (record: PageRecord): record is RunPage => !isSystemPage(record.resource.path)
+
+export const snapshotOf = (head: string | null, wholeSet: ReadonlyArray<PageRecord>): Snapshot => ({
+  head,
+  pages: wholeSet.filter(isShownToRuns),
+  wholeSet
+})
 
 /** The run pages a run may find, read or write: active in history and in lifecycle. */
-export const activeRunPages = (pages: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> =>
-  runPages(pages).filter(
-    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
-  )
+export const activeRunPages = (pages: ReadonlyArray<RunPage>): ReadonlyArray<RunPage> =>
+  pages.filter((record) => record.resource.state === "active" && record.page.lifecycle === "active")
 
 export const notFound = (operation: WikiOperation, pageId: string): WikiError =>
   wikiError(operation, "not_found", `Unknown Wiki page: ${pageId}`, { pageId })
@@ -44,7 +55,7 @@ export const readSnapshotPage = Effect.fn("Wiki.readSnapshotPage")(function* (
   snapshot: Snapshot,
   pageId: string
 ): Effect.fn.Return<{ readonly record: PageRecord; readonly head: string }, WikiError> {
-  const record = snapshot.pages.find((candidate) => candidate.page.pageId === pageId)
+  const record = snapshot.wholeSet.find((candidate) => candidate.page.pageId === pageId)
   if (record === undefined || snapshot.head === null) return yield* notFound("read", pageId)
   return { record, head: snapshot.head }
 })
@@ -53,8 +64,9 @@ export const readSnapshotContent = Effect.fn("Wiki.readSnapshotContent")(functio
   snapshot: Snapshot,
   pageId: string
 ): Effect.fn.Return<Pick<WikiPage, "pageId" | "path" | "version" | "content">, WikiError> {
-  const { record, head } = yield* readSnapshotPage(snapshot, pageId)
-  const page = detail(record, head)
+  const record = snapshot.pages.find((candidate) => candidate.page.pageId === pageId)
+  if (record === undefined || snapshot.head === null) return yield* notFound("read", pageId)
+  const page = detail(record, snapshot.head)
   return { pageId: page.pageId, path: page.path, version: page.version, content: page.content }
 })
 
@@ -132,7 +144,7 @@ export const followRedirect = (
   return null
 }
 
-export const redirectTargetAt = (snapshot: Snapshot, path: string): PageRecord | null => {
+export const redirectTargetAt = (snapshot: Snapshot, path: string): RunPage | null => {
   const wanted = normal(path)
   const redirect = snapshot.pages.find(
     (record) =>
@@ -191,7 +203,7 @@ export const loadSnapshot = Effect.fn("Wiki.loadSnapshot")(function* (
     .listResources({ at: head })
     .pipe(Effect.mapError(mapRevisionError(operation)))
   const parsed = new Map(
-    (previous?.pages ?? []).map((record) => [recordKey(record.resource), record.page] as const)
+    (previous?.wholeSet ?? []).map((record) => [recordKey(record.resource), record.page] as const)
   )
   const pages = yield* Effect.forEach(
     resources.filter((resource) => resource.path.endsWith(".md")),
@@ -205,7 +217,7 @@ export const loadSnapshot = Effect.fn("Wiki.loadSnapshot")(function* (
   )
   pages.sort((left, right) => left.page.pageId.localeCompare(right.page.pageId))
   yield* validateRedirects(operation, pages)
-  return { head, pages }
+  return snapshotOf(head, pages)
 })
 
 const excerpts = new WeakMap<ParsedWikiPage, string | null>()

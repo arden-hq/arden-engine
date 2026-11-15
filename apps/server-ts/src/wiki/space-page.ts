@@ -110,11 +110,11 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   }
   const home = input.home
   const directoryPath = `${home}/README.md`
-  const directory = current.pages.find(
+  const directory = current.wholeSet.find(
     (record) => record.resource.path.toLowerCase() === directoryPath.toLowerCase()
   )
   const directoryNames = new Set(pageNamesForPath(directoryPath).map(normal))
-  const conflictingDirectory = current.pages.some(
+  const conflictingDirectory = current.wholeSet.some(
     (record) =>
       record !== directory &&
       pageNamesForPath(record.resource.path).some((name) => directoryNames.has(normal(name)))
@@ -124,7 +124,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   if (
     conflictingDirectory ||
     spaceOwned ||
-    pageKind(recordFolders(current.pages), directoryPath).kind !== "knowledge" ||
+    pageKind(recordFolders(current.wholeSet), directoryPath).kind !== "knowledge" ||
     (directory !== undefined &&
       (directory.page.lifecycle !== "active" ||
         DIRECTORY_CONTRACT_HEADINGS.some((heading) => !sections?.get(heading))))
@@ -136,7 +136,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
     )
   }
   const usedNames = new Set(
-    current.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
+    current.wholeSet.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
   )
   const base = spacePageSlug(title)
   let suffix = 1

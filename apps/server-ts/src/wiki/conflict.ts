@@ -11,7 +11,7 @@ export const requireCurrent = (
   expectedVersion: string,
   expectedHead: string
 ): Effect.Effect<PageRecord, WikiError> => {
-  const record = snapshot.pages.find((candidate) => candidate.page.pageId === pageId)
+  const record = snapshot.wholeSet.find((candidate) => candidate.page.pageId === pageId)
   if (record === undefined) return Effect.fail(notFound(operation, pageId))
   if (snapshot.head !== expectedHead || record.resource.versionId !== expectedVersion) {
     return Effect.fail(wikiError(operation, "conflict", "Wiki page changed", { pageId }))

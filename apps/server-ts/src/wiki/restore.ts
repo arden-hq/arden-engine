@@ -231,7 +231,7 @@ export const makeWikiRestoreMethods = (
     input: WikiRestoreContentInput
   ) {
     const snapshot = yield* loadSnapshot(repository, "restore")
-    const current = snapshot.pages.find((record) => record.page.pageId === input.pageId)
+    const current = snapshot.wholeSet.find((record) => record.page.pageId === input.pageId)
     if (current === undefined) return yield* notFound("restore", input.pageId)
     return yield* restorableContent(snapshot, current, input)
   })
@@ -333,7 +333,7 @@ export const makeWikiRestoreMethods = (
         const directory = isReadme(resource.path) ? posix.dirname(own) : own
         if (directory !== ".") {
           const readme = `${directory}/readme.md`.toLowerCase()
-          const mapped = snapshot.pages.some(
+          const mapped = snapshot.wholeSet.some(
             (record) =>
               record.resource.path.toLowerCase() === readme && record.page.lifecycle === "active"
           )
@@ -347,7 +347,7 @@ export const makeWikiRestoreMethods = (
           }
         }
         const names = new Set(pageNamesForPath(resource.path).map(normal))
-        const taken = snapshot.pages.find((record) =>
+        const taken = snapshot.wholeSet.find((record) =>
           pageNamesForPath(record.resource.path).some((name) => names.has(normal(name)))
         )
         if (taken !== undefined) {

@@ -1,3 +1,4 @@
+import { snapshotOf } from "../src/wiki/snapshot.js"
 import { Effect, Exit } from "effect"
 import { expect, it } from "vitest"
 
@@ -15,7 +16,7 @@ it("checks outside changes, then announces commits, then lets search catch up, e
         Effect.andThen(Effect.fail(wikiError("observe", "storage", "the scan could not run")))
       ),
     publishChanges: () => Effect.sync(() => calls.push("publish")).pipe(Effect.as({ queued: 0 })),
-    snapshot: () => Effect.succeed({ head: "head-1", pages: [] })
+    snapshot: () => Effect.succeed(snapshotOf("head-1", []))
   })
   const index = partialService<WikiEmbeddingIndex["Service"]>("WikiEmbeddingIndex", {
     schedule: (snapshot) => Effect.sync(() => void calls.push(`index ${snapshot.head}`))
@@ -50,7 +51,7 @@ it("lets search catch up even when announcing the commits fails, and still repor
       Effect.sync(() => calls.push("publish")).pipe(
         Effect.andThen(Effect.fail(wikiError("list", "storage", "the cursor could not move")))
       ),
-    snapshot: () => Effect.succeed({ head: "head-2", pages: [] })
+    snapshot: () => Effect.succeed(snapshotOf("head-2", []))
   })
   const index = partialService<WikiEmbeddingIndex["Service"]>("WikiEmbeddingIndex", {
     schedule: (snapshot) => Effect.sync(() => void calls.push(`index ${snapshot.head}`))

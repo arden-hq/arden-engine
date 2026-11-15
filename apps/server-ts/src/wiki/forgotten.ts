@@ -112,7 +112,7 @@ const renderForgotten = (stored: ReadonlyArray<Schema.Json>): string => {
 }
 
 const forgottenPage = (snapshot: Snapshot): PageRecord | undefined =>
-  snapshot.pages.find(
+  snapshot.wholeSet.find(
     (record) => record.resource.path === FORGOTTEN_PAGE_PATH && record.page.lifecycle === "active"
   )
 

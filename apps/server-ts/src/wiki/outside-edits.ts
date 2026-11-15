@@ -167,7 +167,7 @@ export const makeOutsideEdits = (input: {
       reason,
       detail
     })
-    const record = pages.pages.find((page) => page.page.pageId === resource.resourceId)
+    const record = pages.wholeSet.find((page) => page.page.pageId === resource.resourceId)
     if (record === undefined) return setAside("refused", "The file is not a Memory page")
     switch (change.kind) {
       case "unreadable":

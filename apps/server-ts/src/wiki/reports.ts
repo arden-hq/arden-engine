@@ -81,7 +81,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
   if (spaceOwned)
     return yield* wikiError("create", "blocked", "Reports cannot claim a Space-owned path")
   const names = new Set(pageNamesForPath(content.path).map(normal))
-  const current = snapshot.pages.find((record) =>
+  const current = snapshot.wholeSet.find((record) =>
     pageNamesForPath(record.resource.path).some((name) => names.has(normal(name)))
   )
   if (

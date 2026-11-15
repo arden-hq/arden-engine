@@ -7,7 +7,7 @@ import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { Wiki } from "../src/wiki/service.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import { snapshotOf, type PageRecord } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
 
 const HASH = "0".repeat(64)
@@ -82,7 +82,7 @@ describe("recall of records", () => {
     const turn = await Effect.runPromise(
       openMemoryTurn({
         wiki: partialService<Wiki["Service"]>("Wiki", {
-          snapshot: () => Effect.succeed({ head: "head", pages }),
+          snapshot: () => Effect.succeed(snapshotOf("head", pages)),
           pageTimes: () => Effect.succeed(new Map())
         }),
         embeddings: {

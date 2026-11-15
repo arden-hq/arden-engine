@@ -1,3 +1,4 @@
+import { snapshotOf } from "../src/wiki/snapshot.js"
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { Effect } from "effect"
@@ -426,7 +427,7 @@ it("offers from the finished owner turn that started the Space review", async ()
       if (lease === undefined) throw new Error("the Space review was not claimed")
       const input = yield* reviews.prepareSpaceReview(
         lease,
-        buildSpaceReviewInput({ head: null, pages: [] })
+        buildSpaceReviewInput(snapshotOf(null, []))
       )
       const [policy] = yield* sql<{ readonly generation: number }>`
         SELECT policy_generation AS generation FROM spaces WHERE space_id = 'space-1'`

@@ -129,7 +129,7 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   if (isReadme(current.resource.path)) {
     const directory = posix.dirname(current.resource.path)
     const prefix = `${directory}/`
-    const child = snapshot.pages.find(
+    const child = snapshot.wholeSet.find(
       (record) =>
         record.page.pageId !== input.pageId &&
         record.page.lifecycle === "active" &&
@@ -152,7 +152,7 @@ export const requireArchivable = Effect.fn("Wiki.requireArchivable")(function* (
   input: WikiWriter
 ): Effect.fn.Return<void, WikiError> {
   yield* requireRetirable(spaces, "archive", snapshot, current, input)
-  const remaining = snapshot.pages.filter((record) => record.page.pageId !== input.pageId)
+  const remaining = snapshot.wholeSet.filter((record) => record.page.pageId !== input.pageId)
   const remainingById = new Map(remaining.map((record) => [record.page.pageId, record] as const))
   const brokenRedirect = remaining.find(
     (record) =>
@@ -191,7 +191,7 @@ export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
   const directory = posix.dirname(input.path)
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "create")
   yield* requireWikiWritePaths(boundary, "create", [input.path])
-  const directoryPage = snapshot.pages.find(
+  const directoryPage = snapshot.wholeSet.find(
     (record) =>
       record.resource.path.toLowerCase() ===
         (directory === "." ? "readme.md" : `${directory}/readme.md`).toLowerCase() &&
@@ -223,7 +223,7 @@ export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
     )
   }
   const targetNames = new Set(pageNamesForPath(input.path).map((name) => normal(name)))
-  const existing = snapshot.pages.find((record) =>
+  const existing = snapshot.wholeSet.find((record) =>
     pageNamesForPath(record.resource.path).some((name) => targetNames.has(normal(name)))
   )
   if (existing !== undefined) {

@@ -12,7 +12,7 @@ import type { WikiChangeRead, WikiPageChangesRead } from "../wiki/change.js"
 import type { WikiCommitSource } from "../wiki/commit.js"
 import type { WikiError } from "../wiki/errors.js"
 import { Wiki } from "../wiki/service.js"
-import { activeRunPages, runPages } from "../wiki/snapshot.js"
+import { activeRunPages } from "../wiki/snapshot.js"
 
 /** How a tool input names the time of a saved change. */
 export const ChangeTimeSchema = Schema.NonEmptyString.check(Schema.isMaxLength(64)).annotate({
@@ -185,9 +185,8 @@ const makeWikiChangeTools = ({
     execute: async (input, ctx) => {
       const path = memoryPathOf(input.page)
       const snapshot = await loadSnapshot(wiki, ctx.signal).catch(() => undefined)
-      const pageId = (snapshot === undefined ? [] : runPages(snapshot.pages)).find(
-        (record) => record.resource.path === path
-      )?.page.pageId
+      const pageId = (snapshot?.pages ?? []).find((record) => record.resource.path === path)?.page
+        .pageId
       // A Space review was told which pages changed since its previous review;
       // it reads all of that change, not only the page's last save.
       const reads =
