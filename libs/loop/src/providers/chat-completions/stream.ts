@@ -99,7 +99,8 @@ export const makeChunkMapper = (options: {
   }
 
   const callDelta = (value: unknown): ReadonlyArray<ModelStreamItem> => {
-    if (!isRecord(value)) return []
+    if (!isRecord(value))
+      throw new SemanticResponseError(`${options.label} returned an invalid tool call delta`)
     const fn = isRecord(value.function) ? value.function : {}
     const id = typeof value.id === "string" && value.id.length > 0 ? value.id : undefined
     const index = callIndex(value.index, id)
@@ -148,7 +149,8 @@ export const makeChunkMapper = (options: {
   // `text` and `summary` fragments append, every other key overwrites (prime
   // `handle_chunk`). The merged entries are opaque replay state.
   const mergeDetail = (value: unknown): void => {
-    if (!isRecord(value)) return
+    if (!isRecord(value))
+      throw new SemanticResponseError(`${options.label} returned an invalid reasoning detail`)
     const index =
       typeof value.index === "number" && Number.isSafeInteger(value.index)
         ? value.index
