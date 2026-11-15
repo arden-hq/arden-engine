@@ -13,7 +13,7 @@ const message = (id: string, isMeta: boolean) => ({
   ...(isMeta ? { is_meta: true } : {})
 })
 
-export const startChat = (
+const startChat = (
   sessionId: string,
   id: string,
   options: {
@@ -65,24 +65,7 @@ export const startChat = (
     return started
   })
 
-export const finishChat = (started: Effect.Success<ReturnType<typeof startChat>>, id: string) =>
-  Effect.gen(function* () {
-    const chat = yield* ChatWriteStore
-    yield* chat.finish({
-      runId: started.runId,
-      messages: [
-        ...started.activeMessages,
-        {
-          message_id: `${id}-answer`,
-          role: "assistant",
-          content: "Made-up answer",
-          created_at: new Date().toISOString()
-        }
-      ]
-    })
-  })
-
-export const claimAll = (workerId: string) =>
+const claimAll = (workerId: string) =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* Effect.promise(async () =>
@@ -95,7 +78,7 @@ export const claimAll = (workerId: string) =>
     )
   })
 
-export type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
+type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
 const startJob = (lease: JobLease, id: string) =>
   Effect.gen(function* () {
@@ -113,47 +96,6 @@ const startJob = (lease: JobLease, id: string) =>
     })
     return { run, sessionId: job.thread_id }
   })
-
-const completeJob = (
-  lease: JobLease,
-  ran: { readonly runId: string; readonly sessionId: string } | null,
-  outcome: "finished" | "no_change" | "failed" = ran === null ? "no_change" : "finished"
-) =>
-  Effect.gen(function* () {
-    const queue = yield* AutomationQueue
-    yield* Effect.promise(async () =>
-      Promise.resolve(
-        queue.jobs.complete({
-          ...lease,
-          completedAt: Date.now() + 60 * 60_000,
-          result: {
-            status: "ended",
-            outcome,
-            result: outcome === "failed" ? null : "Made-up result",
-            error: outcome === "failed" ? "Made-up failure" : null,
-            chatRunId: ran?.runId ?? null,
-            chatSessionId: ran?.sessionId ?? null
-          }
-        })
-      )
-    )
-  })
-
-export const runJob = <R>(
-  lease: JobLease,
-  id: string,
-  act: (runId: string) => Effect.Effect<void, unknown, R>
-) =>
-  Effect.gen(function* () {
-    const started = yield* startJob(lease, id)
-    yield* act(started.run.runId)
-    yield* finishChat(started.run, id)
-    yield* completeJob(lease, { runId: started.run.runId, sessionId: started.sessionId })
-  })
-
-export const endJobWithoutRun = (lease: JobLease) => completeJob(lease, null)
-
-export const failJob = (lease: JobLease) => completeJob(lease, null, "failed")
 
 export const startJobs = (ids: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {

@@ -68,7 +68,7 @@ export const openProposalStatusList = statusList(["offered", "held"])
 /** An offer the owner said no to, or left unanswered until it expired: final either way. The Space
  * review lists these as refused, and a later propose of the same Task key in the same place gets
  * the stored offer back unchanged, whatever records it cites. */
-export const REFUSED_PROPOSAL_STATUSES = ["rejected", "expired"] as const
+const REFUSED_PROPOSAL_STATUSES = ["rejected", "expired"] as const
 export const refusedProposalStatusList = statusList(REFUSED_PROPOSAL_STATUSES)
 export const answeredProposalStatusList = statusList(["accepted", "rejected"])
 export const endedUnsuccessfullyAutomationRunStatusList = statusList([

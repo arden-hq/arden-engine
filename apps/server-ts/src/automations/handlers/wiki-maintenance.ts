@@ -12,7 +12,7 @@ import { handlerItemText, type SystemAutomationHandler } from "../system-handler
 
 const WIKI_MAINTENANCE_AUTOMATION_ID = AutomationId.make("builtin-wiki-maintenance")
 
-export const makeWikiMaintenanceRunner = (services: {
+const makeWikiMaintenanceRunner = (services: {
   readonly wiki: Pick<Wiki["Service"], "prepareMaintenance">
   readonly maintenance: WikiMaintenanceStore["Service"]
   readonly handlerItems: Pick<

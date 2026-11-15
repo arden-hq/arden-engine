@@ -45,7 +45,7 @@ const standingPageLimitChars = Math.max(
 const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3
 const STANDING_PAGE_HEADING_BYTES = 1_000
 
-export const MEMORY_BUDGET = {
+const MEMORY_BUDGET = {
   standing_page:
     standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
   /** The standing-facts note and section heading. */
@@ -57,14 +57,6 @@ export const MEMORY_BUDGET = {
   space_page: 4_000,
   recall: 7_000
 } as const satisfies RunMemoryBudget
-
-export const MEMORY_BLOCK_MAX_BYTES =
-  STANDING_FACTS_PAGES.length * MEMORY_BUDGET.standing_page +
-  MEMORY_BUDGET.standing_frame +
-  MEMORY_BUDGET.index +
-  MEMORY_BUDGET.space +
-  MEMORY_BUDGET.space_page_list +
-  MEMORY_BUDGET.recall
 
 export interface SpaceMemoryInput {
   readonly view: SpaceView

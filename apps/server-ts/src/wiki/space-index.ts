@@ -104,7 +104,7 @@ export const spacePageCheck = (spaces: ActiveBindings) =>
   )
 
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
-export const spacePages = (
+const spacePages = (
   pages: ReadonlyArray<RunPage>,
   space: SpacePageBinding
 ): ReadonlyArray<RunPage> =>

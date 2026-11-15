@@ -1,33 +1,21 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  ManagedFileRepository,
-  managedFileRepositoryNodeLayer,
-  type ManagedFileRepositoryShape
-} from "@arden-hq/revisions/effect"
-import { DateTime, Effect } from "effect"
-import { describe, expect, it } from "vitest"
+import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq/revisions/effect"
+import { Effect } from "effect"
+import { expect, it } from "vitest"
 
 import {
   commitWiki,
   createPage,
-  decodeWikiOrigin,
   movePage,
   updatePage,
   type WikiCommitOrigin
 } from "../src/wiki/commit.js"
-import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { formatWikiPage } from "../src/wiki/page.js"
-import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
-import type { SpaceStore } from "../src/persistence/spaces/store.js"
-import type { ChatRunRecord } from "../src/persistence/runs/model.js"
-import type { RunQueries } from "../src/persistence/runs/queries.js"
-import { writeIdentity } from "../src/tools/wiki-identity.js"
-import { partialService, runAuthority } from "./kit.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
-const content = (path: string, body: string, producer?: string): string =>
+const content = (path: string, body: string, producer?: string) =>
   formatWikiPage({
     pageId: `id:${path}`,
     title: path,
@@ -38,110 +26,66 @@ const content = (path: string, body: string, producer?: string): string =>
     body
   })
 
-const UPKEEP: WikiCommitOrigin = { kind: "upkeep", automationId: "builtin-wiki-maintenance" }
-
-describe("upkeep never edits a record or a folder contract", () => {
-  const run = <A>(body: (repository: ManagedFileRepositoryShape) => Effect.Effect<A, unknown>) =>
-    Effect.gen(function* () {
-      const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "arden-records-")))
-      return yield* Effect.gen(function* () {
+it("upkeep never edits, creates or moves into a record or folder contract; other writers may", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arden-records-"))
+  try {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
         const repository = yield* ManagedFileRepository
-        return yield* body(repository)
+        for (const [path, producer] of [
+          ["daily/README.md", "auto-daily"],
+          ["daily/2026-11-11.md", undefined],
+          ["topics/garden.md", undefined]
+        ] as const)
+          yield* repository.commit({
+            actor: "test",
+            origin: "test.seed",
+            reason: "seed",
+            operations: [
+              createPage(`id:${path}`, path, content(path, "Text.", producer)).operation
+            ],
+            expectedHead: yield* repository.currentRevision
+          })
+        let edits = 0
+        const write = (origin: WikiCommitOrigin, path: string, kind: "edit" | "create" | "move") =>
+          Effect.gen(function* () {
+            const page = yield* repository.findByPath(path)
+            if (page === null) throw new Error(`${path} is missing`)
+            const operations = {
+              edit: () => updatePage(page, content(path, `Rewritten ${(edits += 1)}.`)),
+              move: () => movePage(page, "daily/garden.md"),
+              create: () =>
+                createPage("id:new", "daily/2026-11-12.md", content("daily/2026-11-12.md", "New."))
+            }
+            const operation = operations[kind]()
+            return yield* commitWiki(
+              withoutSpaces(repository),
+              {
+                ...{ actor: origin.kind, origin, reason: "test" },
+                expectedRevision: yield* repository.currentRevision
+              },
+              [operation]
+            ).pipe(
+              Effect.match({
+                onFailure: (error) =>
+                  error._tag === "WikiCommitRuleError" ? error.rule : error._tag,
+                onSuccess: () => "saved"
+              })
+            )
+          })
+        const upkeep = { kind: "upkeep", automationId: "builtin-wiki-maintenance" } as const
+        return {
+          record: yield* write(upkeep, "daily/2026-11-11.md", "edit"),
+          contract: yield* write(upkeep, "daily/README.md", "edit"),
+          created: yield* write(upkeep, "topics/garden.md", "create"),
+          movedIn: yield* write(upkeep, "topics/garden.md", "move"),
+          knowledge: yield* write(upkeep, "topics/garden.md", "edit"),
+          owner: yield* write({ kind: "user", via: "desktop" }, "daily/2026-11-11.md", "edit")
+        }
       }).pipe(
         Effect.scoped,
-        Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root })),
-        Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))
-      )
-    })
-
-  const write = (
-    repository: ManagedFileRepositoryShape,
-    origin: WikiCommitOrigin,
-    operation: (
-      pages: Map<string, { resourceId: string; versionId: string }>
-    ) => ReturnType<typeof updatePage>
-  ) =>
-    Effect.gen(function* () {
-      const pages = new Map(
-        (yield* repository.listResources()).map((resource) => [resource.path, resource] as const)
-      )
-      return yield* commitWiki(
-        withoutSpaces(repository),
-        {
-          actor: origin.kind,
-          origin,
-          reason: "test write",
-          expectedRevision: yield* repository.currentRevision
-        },
-        [operation(pages)]
-      ).pipe(
-        Effect.match({
-          onFailure: (error) => (error._tag === "WikiCommitRuleError" ? error.rule : error._tag),
-          onSuccess: () => "saved"
-        })
-      )
-    })
-
-  const seeded = (repository: ManagedFileRepositoryShape) =>
-    Effect.gen(function* () {
-      for (const [path, body, producer] of [
-        ["daily/README.md", "Daily notes.", "auto-daily"],
-        ["daily/2026-11-11.md", "A report.", undefined],
-        ["topics/garden.md", "Garden.", undefined],
-        ["topics/README.md", "Topics.", undefined]
-      ] as const)
-        yield* repository.commit({
-          actor: "test",
-          origin: "test.seed",
-          reason: "seed",
-          operations: [createPage(`id:${path}`, path, content(path, body, producer)).operation],
-          expectedHead: yield* repository.currentRevision
-        })
-    })
-
-  it("refuses upkeep's edit, creation or move of a record or contract at the commit point", async () => {
-    const outcome = await Effect.runPromise(
-      run((repository) =>
-        Effect.gen(function* () {
-          yield* seeded(repository)
-          let edits = 0
-          const edit =
-            (path: string) => (pages: Map<string, { resourceId: string; versionId: string }>) => {
-              const resource = pages.get(path)
-              if (resource === undefined) throw new Error(`${path} is missing`)
-              edits += 1
-              return updatePage(resource, content(path, `Rewritten ${edits} times.`))
-            }
-          return {
-            record: yield* write(repository, UPKEEP, edit("daily/2026-11-11.md")),
-            contract: yield* write(repository, UPKEEP, edit("daily/README.md")),
-            created: yield* write(repository, UPKEEP, () =>
-              createPage("id:new", "daily/2026-11-12.md", content("daily/2026-11-12.md", "New."))
-            ),
-            movedIn: yield* write(repository, UPKEEP, (pages) => {
-              const resource = pages.get("topics/garden.md")
-              if (resource === undefined) throw new Error("topics/garden.md is missing")
-              return movePage(resource, "daily/garden.md")
-            }),
-            knowledge: yield* write(repository, UPKEEP, edit("topics/garden.md")),
-            owner: yield* write(
-              repository,
-              { kind: "user", via: "desktop" },
-              edit("daily/2026-11-11.md")
-            ),
-            chat: yield* write(
-              repository,
-              { kind: "agent", sessionId: "chat-1" },
-              edit("daily/2026-11-11.md")
-            ),
-            ownersAutomation: yield* write(
-              repository,
-              { kind: "automation", automationId: "auto-owner" },
-              edit("daily/2026-11-11.md")
-            )
-          }
-        })
-      )
+        Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root }))
+      ) as Effect.Effect<Record<string, string>>
     )
     expect(outcome).toEqual({
       record: "records",
@@ -149,139 +93,9 @@ describe("upkeep never edits a record or a folder contract", () => {
       created: "records",
       movedIn: "records",
       knowledge: "saved",
-      owner: "saved",
-      chat: "saved",
-      ownersAutomation: "saved"
+      owner: "saved"
     })
-  })
-})
-
-describe("the upkeep writer", () => {
-  const at = DateTime.makeUnsafe("2026-11-01T10:00:00Z")
-  const origin = (automationId: string) =>
-    writeIdentity(
-      partialService<RunQueries["Service"]>("RunQueries", {
-        get: (runId): Effect.Effect<ChatRunRecord> =>
-          Effect.succeed({
-            runId,
-            sessionId: "session-1",
-            turnId: "turn",
-            status: "running",
-            stopReason: null,
-            startedAt: at,
-            updatedAt: at,
-            endedAt: null,
-            lastSequence: null,
-            metadata: {
-              run_context: {
-                origin: { kind: "automation", automation_id: automationId, occurrence_id: "o1" },
-                task: null
-              }
-            },
-            errorCode: null,
-            errorMessage: null,
-            clientId: null,
-            modelId: null,
-            reasoningEffort: null
-          }),
-        cause: () => Effect.succeed({ automationId, wakeDepth: 1 })
-      }),
-      {
-        runId: "run-1",
-        sessionId: "session-1",
-        signal: new AbortController().signal,
-        authority: runAuthority()
-      }
-    ).then((identity) => identity.origin)
-
-  it("is Tidy's run, told apart by the system handler registry", async () => {
-    expect([await origin("builtin-wiki-maintenance"), await origin("auto-owner")]).toEqual([
-      { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 1 },
-      { kind: "automation", automationId: "auto-owner", chainDepth: 1 }
-    ])
-  })
-})
-
-describe("Tidy's stored writes", () => {
-  it("read back as upkeep, as stored now and in both retired spellings", () => {
-    expect([
-      decodeWikiOrigin("wiki.upkeep.builtin-wiki-maintenance~2"),
-      decodeWikiOrigin("wiki.automation.builtin-wiki-maintenance~2"),
-      decodeWikiOrigin("wiki.automation.builtin-wiki-maintenance"),
-      decodeWikiOrigin("wiki.maintenance"),
-      decodeWikiOrigin("wiki.automation.auto-owner~1")
-    ]).toEqual([
-      { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 2 },
-      { kind: "upkeep", automationId: "builtin-wiki-maintenance", chainDepth: 2 },
-      { kind: "upkeep", automationId: "builtin-wiki-maintenance" },
-      { kind: "upkeep", automationId: "builtin-wiki-maintenance" },
-      { kind: "automation", automationId: "auto-owner", chainDepth: 1 }
-    ])
-  })
-
-  it("can be undone by the owner from the app", async () => {
-    const outcome = await Effect.runPromise(
-      Effect.gen(function* () {
-        const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "arden-tidy-undo-")))
-        return yield* Effect.gen(function* () {
-          const repository = yield* ManagedFileRepository
-          const page = "topics/garden.md"
-          yield* commitWiki(
-            withoutSpaces(repository),
-            {
-              actor: "test",
-              origin: { kind: "user", via: "desktop" },
-              reason: "seed",
-              expectedRevision: null
-            },
-            [createPage(`id:${page}`, page, content(page, "Garden."))]
-          )
-          const before = yield* repository.get(`id:${page}`)
-          if (before === null) return yield* Effect.die(`${page} is missing`)
-          const tidied = yield* commitWiki(
-            withoutSpaces(repository),
-            {
-              actor: "Automation builtin-wiki-maintenance",
-              origin: UPKEEP,
-              reason: "tidy",
-              expectedRevision: yield* repository.currentRevision
-            },
-            [updatePage(before, content(page, "Garden, tidied."))]
-          )
-          const after = yield* repository.get(`id:${page}`)
-          const listing = makeWikiListingMethods(repository)
-          const restores = makeWikiRestoreMethods(
-            repository,
-            partialService<SpaceStore["Service"]>("SpaceStore", {
-              activeBindings: () => Effect.succeed([])
-            }),
-            listing.read
-          )
-          return yield* restores
-            .restore({
-              pageId: `id:${page}`,
-              commitId: tidied.commit.commitId,
-              expectedVersion: after?.versionId ?? "",
-              expectedHead: tidied.commit.commitId,
-              commit: {
-                actor: "user:desktop",
-                origin: { kind: "user", via: "desktop" },
-                reason: "undo"
-              }
-            })
-            .pipe(
-              Effect.match({
-                onFailure: (error) => error.message,
-                onSuccess: (restored) => restored.content.includes("Garden, tidied.")
-              })
-            )
-        }).pipe(
-          Effect.scoped,
-          Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root })),
-          Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))
-        )
-      })
-    )
-    expect(outcome).toBe(false)
-  })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

@@ -46,7 +46,7 @@ const dayStart = (day: string, timezone: string): DateTime.Zoned =>
 
 /** The day before the last ended day: where the position starts, so the first job after an
  * update, or after the owner resumes Daily Summary, writes only the last ended day's page. */
-export const dailyStartPosition = (nowMs: number, timezone: string): string =>
+const dailyStartPosition = (nowMs: number, timezone: string): string =>
   nextDay(localDayOf(nowMs, timezone), -2)
 
 type DayPreparation =

@@ -122,15 +122,10 @@ export const withoutSpaces = (repository: ManagedFileRepositoryShape): WikiCommi
 })
 
 export const agentChat = (sessionId: string): WikiCommitOrigin => ({ kind: "agent", sessionId })
-export const captureChat = (sessionId: string): WikiCommitOrigin => ({
-  kind: "capture",
-  replayKey: undefined,
-  sessionId
-})
 export const ownerEdit: WikiCommitOrigin = { kind: "user", via: "filesystem" }
 
 const at = DateTime.makeUnsafe("2026-11-01T10:00:00Z")
-export const runRecord: ChatRunRecord = {
+const runRecord: ChatRunRecord = {
   runId: "run-fixture",
   sessionId: "session-fixture",
   turnId: "turn",
@@ -182,25 +177,10 @@ export const wikiToolsOver = (wiki: Wiki["Service"]): ReadonlyArray<ServerTool> 
     )
   )
 
-export const toolContext = (
-  run: ServerRunContext = serverRunContext()
-): ToolContext<ServerRunContext> => ({
-  run,
-  signal: new AbortController().signal,
-  toolCallId: "call-fixture",
-  messages: []
-})
-
 export const namedTool = (tools: ReadonlyArray<ServerTool>, name: string): ServerTool => {
   const tool = tools.find((candidate) => candidate.definition.name === name)
   if (tool === undefined) throw new Error(`Missing tool ${name}`)
   return tool
-}
-
-export const resultText = (output: unknown): string => {
-  const result = recordOf(output)["content"]
-  if (typeof result !== "string") throw new Error("expected a text result")
-  return result
 }
 
 export const historyTimes = (output: unknown): ReadonlyArray<string> => {
