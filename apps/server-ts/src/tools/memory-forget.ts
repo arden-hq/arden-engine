@@ -1,13 +1,13 @@
-import type { ToolContext } from "@arden-hq/loop"
+import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { countOf } from "@arden-hq/std/count"
 import { Effect, Schema } from "effect"
 
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { chatHref } from "../sessions/chat-href.js"
 import type { RetractionChange } from "../wiki/forgotten.js"
 import { MAX_CLAIM_CHARS } from "../wiki/retraction.js"
 import { Wiki } from "../wiki/service.js"
 import { boundedDiff } from "./bounded-diff.js"
+import { chatLinkOf } from "./call-receipt.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { requireOwnerTurn } from "./owner-turn.js"
 import type { ServerRunContext } from "./run-context.js"
@@ -65,12 +65,18 @@ const makeMemoryForgetTools = ({
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
 }): ReadonlyArray<ServerTool> => {
   const ownerTurn = async (ctx: ToolContext<ServerRunContext>) => {
-    const header = await requireOwnerTurn(sessions, ctx.run, ctx.signal, {
+    await requireOwnerTurn(sessions, ctx.run, ctx.signal, {
       target: { kind: "memory_forget" },
       doing: "forgetting Memory",
       what: "Memory is forgotten only in the user's own turn, after their approval"
     })
-    return { sessionId: ctx.run.sessionId, chat: chatHref(header) }
+    const chat = await chatLinkOf(sessions, ctx.run.sessionId, ctx.signal)
+    if (chat === undefined)
+      throw new ToolExecutionError("This chat no longer exists, so nothing was forgotten.", {
+        preview: "Session unavailable",
+        retryable: false
+      })
+    return { sessionId: ctx.run.sessionId, chat }
   }
 
   const plan = async (request: ForgetRequest, ctx: ToolContext<ServerRunContext>) => {

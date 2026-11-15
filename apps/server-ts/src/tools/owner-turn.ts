@@ -2,13 +2,12 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect } from "effect"
 
 import { boundary, type Target } from "../execution/decide.js"
-import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { refusalError } from "./refusal.js"
 import type { ServerRunContext } from "./run-context.js"
 
 /**
- * The chat of the run, once it is shown to be the owner's own turn: no automation, helper or
+ * Refuses unless the run is the owner's own turn in a chat that exists: no automation, helper or
  * other agent acts for the owner here. `doing` and `what` word the refusals.
  */
 export const requireOwnerTurn = async (
@@ -20,7 +19,7 @@ export const requireOwnerTurn = async (
     readonly doing: string
     readonly what: string
   }
-): Promise<SessionHistoryHeader> => {
+): Promise<void> => {
   const unverified = (retryable: boolean) =>
     new ToolExecutionError(`The current Session could not be verified before ${owned.doing}.`, {
       preview: "Session unavailable",
@@ -38,5 +37,4 @@ export const requireOwnerTurn = async (
       rule: "boundary",
       instead: verdict.kind === "deny" ? verdict.instead : []
     })
-  return header
 }
