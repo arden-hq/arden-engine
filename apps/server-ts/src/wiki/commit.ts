@@ -798,6 +798,11 @@ const requireDirectoryEmptied = Effect.fn("Wiki.requireDirectoryEmptied")(functi
   if (path === undefined || !isReadme(path)) return
   const directory = posix.dirname(path)
   const after = yield* occupied
+  const remapped = [...after].some(
+    ([resourceId, other]) =>
+      resourceId !== write.resourceId && isReadme(other) && posix.dirname(other) === directory
+  )
+  if (remapped) return
   const child = (yield* snapshot).wholeSet.find(
     (record) =>
       record.page.pageId !== write.resourceId &&
