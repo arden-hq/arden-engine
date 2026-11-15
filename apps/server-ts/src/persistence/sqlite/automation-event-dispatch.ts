@@ -1,4 +1,4 @@
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect } from "effect"
 import { SqlError } from "effect/unstable/sql"
 import { renderEvent } from "../automations/event-text.js"
 import {
@@ -10,7 +10,7 @@ import { chainMayWake } from "../automations/chain-depth.js"
 import { AutomationStoreError } from "../automations/store.js"
 import type { AutomationTriggers } from "../automations/triggers.js"
 import { WikiEventOutbox } from "../automations/wiki-event-outbox.js"
-import { decodeJson, type JsonColumnError } from "./json.js"
+import type { JsonColumnError } from "./json.js"
 import type { SessionLifecycleEventError } from "../sessions/events.js"
 import { listenerTriggers } from "./automation-schedule.js"
 import { enqueue } from "./automation-enqueue.js"
@@ -19,10 +19,9 @@ import type { QueueContext } from "./automation-queue-context.js"
 import type { PersistenceDeps } from "./deps.js"
 import { touchCause } from "./effect-targets.js"
 import type { UnitOfWork } from "../unit-of-work.js"
+import { memoryHistoryPosition } from "./memory-history-position.js"
 import { iso } from "../../runtime/clock.js"
 
-const Revision = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
-const Cursor = Schema.Struct({ revision: Schema.NullOr(Revision) })
 const storeError = (
   operation: "dispatch_event",
   reason: AutomationStoreError["reason"],
@@ -139,30 +138,12 @@ export const makeAutomationEventDispatch = ({
   ) {
     return yield* writer.transact(dispatchInTransaction(event)).pipe(Effect.mapError(failure))
   })
+  const publication = memoryHistoryPosition("publication")
   const wikiPublicationCursor = Effect.fn("Automation.wikiPublicationCursor")(function* (
     initialRevision: string | null
   ) {
-    const initial = yield* Schema.decodeUnknownEffect(Cursor)({ revision: initialRevision }).pipe(
-      Effect.mapError(failure)
-    )
     return yield* writer
-      .transact(
-        Effect.gen(function* () {
-          yield* sql`INSERT INTO monitor_state (namespace, state, updated_at)
-        VALUES ('wiki_publication', ${JSON.stringify(initial)}, ${iso(yield* Clock.currentTimeMillis)})
-        ON CONFLICT(namespace) DO NOTHING`
-          const rows = yield* sql<{
-            readonly state: string
-          }>`SELECT state FROM monitor_state WHERE namespace = 'wiki_publication'`
-          if (rows[0] === undefined)
-            return yield* storeError(
-              "dispatch_event",
-              "corrupt",
-              "Wiki publication cursor is missing"
-            )
-          return (yield* decodeJson(Cursor, rows[0].state)).revision
-        })
-      )
+      .transact(publication.start(sql, initialRevision))
       .pipe(Effect.mapError(failure))
   })
   const publishWikiChange = Effect.fn("Automation.publishWikiChange")(function* (input: {
@@ -170,20 +151,14 @@ export const makeAutomationEventDispatch = ({
     readonly revision: string
     readonly event: AutomationTriggerEvent | undefined
   }) {
-    const expected = yield* Schema.decodeUnknownEffect(Cursor)({
-      revision: input.previousRevision
-    }).pipe(Effect.mapError(failure))
-    const next = yield* Schema.decodeUnknownEffect(Revision)(input.revision).pipe(
-      Effect.mapError(failure)
-    )
     return yield* writer
       .transact(
         Effect.gen(function* () {
-          const advanced = yield* sql<{ readonly namespace: string }>`UPDATE monitor_state
-        SET state = ${JSON.stringify({ revision: next })}, updated_at = ${iso(yield* Clock.currentTimeMillis)}
-        WHERE namespace = 'wiki_publication' AND state = ${JSON.stringify(expected)}
-        RETURNING namespace`
-          if (advanced.length === 0) return null
+          const moved = yield* publication.advance(sql, {
+            expected: input.previousRevision,
+            next: input.revision
+          })
+          if (moved !== "advanced") return null
           return input.event === undefined
             ? { queued: 0 }
             : yield* dispatchInTransaction(input.event)
