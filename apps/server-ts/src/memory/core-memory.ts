@@ -16,7 +16,7 @@ export const isStandingFactsPage = (page: {
   return STANDING_FACTS_PAGES.some((name) => path === name || `${pageId}.md` === name)
 }
 
-export const STANDING_PAGE_LIMIT_CHARS = 9_000
+const STANDING_PAGE_LIMIT_CHARS = 9_000
 
 /**
  * A Core Memory page is condensed before it is full, not after. Writes over the budget are

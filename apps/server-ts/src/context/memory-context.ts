@@ -1,6 +1,6 @@
 import type { RunMemoryContext, RunMemoryReader, RunMemorySource } from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
-import { STANDING_FACTS_PAGES, STANDING_PAGE_LIMIT_CHARS } from "../memory/core-memory.js"
+import { corePageBudget, STANDING_FACTS_PAGES } from "../memory/core-memory.js"
 import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
@@ -29,6 +29,13 @@ export const MEMORY_READS: Readonly<
   worker: { space: false, recall: false }
 }
 
+const standingPageLimitChars = Math.max(
+  ...STANDING_FACTS_PAGES.map((path) => {
+    const limit = corePageBudget({ path, pageId: path })
+    if (limit === undefined) throw new Error(`Standing-facts page ${path} has no writer limit`)
+    return limit
+  })
+)
 const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3
 const STANDING_PAGE_HEADING_BYTES = 1_000
 
@@ -39,7 +46,7 @@ const STANDING_PAGE_HEADING_BYTES = 1_000
  */
 export const MEMORY_BUDGET = {
   standingPage:
-    STANDING_PAGE_LIMIT_CHARS * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
+    standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
   /** The standing-facts note and section heading. */
   standingFrame: 1_000,
   index: 10_000,

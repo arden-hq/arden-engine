@@ -394,6 +394,7 @@ const sources = (directory: string): ReadonlyArray<string> =>
   })
 
 const LIMIT_READERS = {
+  "context/memory-context.ts": "sizes the standing-facts allowance to hold a page at its limit",
   "memory/core-memory.ts": "asks for condensing before a page is full",
   "memory/retrieval.ts": "cuts a page past its limit when it is sent",
   "tools/wiki.ts": "shows a page's size against its limit when it is read",
