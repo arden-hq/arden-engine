@@ -263,11 +263,7 @@ export const makeWikiMaintenanceMethods = (
         (yield* repository.currentRevision.pipe(Effect.mapError(mapRevisionError("list")))) !==
         baseHead
       ) {
-        return yield* wikiError(
-          "list",
-          "conflict",
-          "Wiki changed while preparing Maintenance evidence"
-        )
+        return yield* wikiError("list", "conflict", "Memory changed while Tidy was reading it")
       }
       snapshotCache = { snapshot, references: directReferences(snapshot) }
     }
@@ -344,11 +340,7 @@ export const makeWikiMaintenanceMethods = (
       (yield* repository.currentRevision.pipe(Effect.mapError(mapRevisionError("list")))) !==
       baseHead
     ) {
-      return yield* wikiError(
-        "list",
-        "conflict",
-        "Wiki changed while preparing Maintenance evidence"
-      )
+      return yield* wikiError("list", "conflict", "Memory changed while Tidy was reading it")
     }
 
     return {

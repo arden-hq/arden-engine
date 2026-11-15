@@ -122,7 +122,7 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "invalid",
-            "Maintenance commit must contain exactly one page update",
+            "A Tidy commit must contain exactly one page update",
             { pageId: input.pageId }
           )
         }
@@ -133,7 +133,7 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "conflict",
-            `Wiki page changed after Maintenance commit ${input.commitId}`,
+            `Memory page changed after Tidy commit ${input.commitId}`,
             { pageId: input.pageId }
           )
         }
@@ -142,7 +142,7 @@ export const makeWikiRestoreMethods = (
           return yield* wikiError(
             "restore",
             "invalid",
-            "Maintenance change did not replace an active page",
+            "The Tidy change did not replace an active page",
             {
               pageId: input.pageId
             }
@@ -151,7 +151,7 @@ export const makeWikiRestoreMethods = (
         const identity = {
           actor: "user:desktop",
           origin: { kind: "user", via: "desktop.restore" },
-          reason: `restore Maintenance commit ${input.commitId}`
+          reason: `restore Tidy commit ${input.commitId}`
         } as const
         const content = yield* requireUpdatable(spaces, snapshot, current, {
           pageId: input.pageId,

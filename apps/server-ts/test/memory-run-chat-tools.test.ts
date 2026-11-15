@@ -51,7 +51,7 @@ describe("Maintenance-only tools in Memory runs", () => {
     expect(await advertised(toolset)).toEqual(["wiki_read_page"])
   })
 
-  it("Wiki Maintenance keeps them: it checks notes against chats and merges duplicates", async () => {
+  it("Tidy keeps them: it checks notes against chats and merges duplicates", async () => {
     const toolset = wikiMaintenanceHandler.tools?.(base()) ?? base()
     expect(await advertised(toolset)).toEqual(NAMES)
   })

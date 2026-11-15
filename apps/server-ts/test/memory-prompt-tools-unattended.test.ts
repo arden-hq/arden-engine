@@ -16,7 +16,7 @@ import { wikiOperationTools } from "../src/tools/wiki-operations.js"
 import { Wiki } from "../src/wiki/service.js"
 import { partialService, runAuthority } from "./kit.js"
 
-// Memory Capture and Wiki Maintenance run with nobody watching. A write tool
+// Memory Capture and Tidy run with nobody watching. A write tool
 // their prompts name must run there whatever the job's own approval setting,
 // or the run stalls on an ask nobody answers.
 
@@ -82,7 +82,7 @@ const writesNamedIn = (prompt: string) =>
 
 describe("Memory run prompts name only tools that run unattended", () => {
   it.each([
-    ["Wiki Maintenance", PROMPT_TEXT.wikiMaintenance],
+    ["Tidy", PROMPT_TEXT.wikiMaintenance],
     ["Memory Capture", PROMPT_TEXT.memoryCapture]
   ])("%s can use every write tool its prompt names", (_, prompt) => {
     const named = writesNamedIn(prompt)
@@ -100,7 +100,7 @@ describe("Memory run prompts name only tools that run unattended", () => {
     )
   })
 
-  it("Wiki Maintenance patches pages and Memory Capture creates directories without an ask", () => {
+  it("Tidy patches pages and Memory Capture creates directories without an ask", () => {
     const byName = (name: string) => {
       const tool = tools.find((candidate) => candidate.definition.name === name)
       if (tool === undefined) throw new Error(`Missing ${name}`)
