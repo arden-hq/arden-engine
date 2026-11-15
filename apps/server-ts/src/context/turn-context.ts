@@ -3,12 +3,13 @@ import { ContextExperiments } from "./experiments.js"
 import type { ToolApprovalPolicy } from "../tools/approval-policy.js"
 import type { PermissionRules } from "../persistence/permissions/rules.js"
 import { Effect, Exit } from "effect"
-import { latestHumanText } from "../persistence/transcript/content.js"
+import { humanTextsNewestFirst } from "../persistence/transcript/content.js"
 import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 
 import type { ChatRunnerMessage } from "../chat/runner-contract.js"
 import type { Memory, MemoryTurn } from "../memory/service.js"
+import type { RunMemoryReader } from "@arden-hq/protocol/runs"
 import type { AutomationOriginPolicy } from "../persistence/automations/catalog.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
@@ -23,7 +24,7 @@ import type { AgentMode } from "../sessions/agent-mode.js"
 import type { CliTools } from "../cli-tools/service.js"
 import type { SkillCatalog } from "../skills/service.js"
 import type { Wiki } from "../wiki/service.js"
-import { assembleMemoryContext } from "./memory-context.js"
+import { assembleMemoryContext, MEMORY_READS, memoryReaderOf } from "./memory-context.js"
 import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
 import { spaceAsksContext } from "./space-asks.js"
@@ -31,10 +32,11 @@ import { renderThreadLocations } from "./thread.js"
 import type { FocusChoiceStore } from "../persistence/focus-choices/store.js"
 import type { AnswerBlockStore } from "../persistence/answer-blocks/store.js"
 import { latestAnswer, renderAnswerBlockNote } from "./answer-block-note.js"
-import { renderSpaceContext } from "./space-render.js"
 import { textSection, type RuntimeContext, type RuntimeSection } from "./runtime-update.js"
 import { effectiveAccessContext, renderAuthority } from "./effective-access.js"
 import { boundAuthority } from "../chat/run-authority.js"
+import type { RunAuthority } from "../execution/authority.js"
+import { recallText } from "../memory/retrieval.js"
 import {
   renderAgentFamilyContext,
   renderCliToolsContext,
@@ -122,9 +124,10 @@ export const composeTurnContext = Effect.fn("Context.composeTurnContext")(functi
 ) {
   const experiments = services.experiments ?? (yield* ContextExperiments)
   const selection = experiments.begin(input.sessionId, input.runId, origin.source === "personal")
+  const authority = yield* boundAuthority(services.runs, input)
   const compose = (memory: MemoryTurn | undefined) =>
-    composePreparedTurnContext(services, origin, input, memory, experiments, selection)
-  if (origin.source !== "personal" || (!selection.memory && !selection.space))
+    composePreparedTurnContext(services, origin, input, authority, memory, experiments, selection)
+  if (memoryReaderOf(authority.actor) === undefined || (!selection.memory && !selection.space))
     return yield* compose(undefined)
   const finish = experiments.start(input.runId, selection.memory ? "memory" : "space")
   return yield* services.memory
@@ -143,6 +146,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   services: TurnContextServices,
   origin: SessionOrigin,
   input: TurnContextInput,
+  authority: RunAuthority,
   memory: MemoryTurn | undefined,
   experiments: typeof ContextExperiments.Service,
   selection: ReturnType<typeof experiments.begin>
@@ -152,15 +156,19 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     effect: Effect.Effect<A, E, R>,
     skipped: A
   ) => experiments.measure(input.runId, part, selection[part], effect, skipped)
-  const { space, memoryContext } = yield* prefetchTurnMemory(services, {
-    sessionId: input.sessionId,
-    runId: input.runId,
-    spaceId: origin.source === "personal" ? (origin.header?.spaceId ?? undefined) : undefined,
-    query: latestHumanText(input.messages) ?? "",
-    memory,
-    measure
-  })
-  const authority = yield* boundAuthority(services.runs, input)
+  const reader = memoryReaderOf(authority.actor)
+  const { space, memoryContext } =
+    reader === undefined
+      ? { space: undefined, memoryContext: undefined }
+      : yield* prefetchTurnMemory(services, {
+          sessionId: input.sessionId,
+          runId: input.runId,
+          reader,
+          spaceId: MEMORY_READS[reader].space ? (origin.header?.spaceId ?? undefined) : undefined,
+          query: recallText(humanTextsNewestFirst(input.messages)),
+          memory,
+          measure
+        })
   const context = yield* Effect.all({
     task: services.work.continuationContext(input.runId),
     lineage: sessionLineage(services.sessions, input.sessionId),
@@ -269,7 +277,8 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   const stateTask = context.chatTask?.task ?? context.task
   return {
     sections: [
-      ...memoryContext.core,
+      ...(memoryContext?.core ?? []),
+      ...(memoryContext?.index ?? []),
       ...textSection("Fork origin", renderForkOriginContext(context.lineage[0]?.forkOrigin)),
       ...textSection("Communication", communication),
       ...textSection(
@@ -317,9 +326,9 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
       ...textSection("Skills", context.skills),
       ...preparedSkills,
       ...textSection("Space context authority", space?.authority),
-      ...memoryContext.space,
+      ...(memoryContext?.space ?? []),
       ...textSection("Asked on this Space", context.spaceAsks),
-      ...memoryContext.recall,
+      ...(memoryContext?.recall ?? []),
       ...textSection("Answer block values", context.answerBlocks, "turn"),
       ...textSection(
         "Starting context",
@@ -344,57 +353,61 @@ type TurnMeasure = <A, E, R>(
 ) => Effect.Effect<A, E, R>
 
 /**
- * What a chat turn is sent from Memory and its Space: the Space snapshot, Memory recall (Core
- * Memory and the recalled pages) for the turn's text, and the continuity budget over them,
- * as prompt sections. The run's record of what it was sent is written here, from the same
- * sections. The memory test calls this same function on a replay copy and reads that record,
- * so it measures what a chat is really sent.
+ * What a run is sent from Memory and its Space, as prompt sections: the reader's sources from
+ * one Memory turn, composed into one block from one budget. The run's record of what it was
+ * sent is written here, from the same sections. The memory test calls this same function on a
+ * replay copy and reads that record, so it measures what a chat is really sent.
  */
 export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(function* (
   services: Pick<TurnContextServices, "spaces" | "summaries" | "work" | "chat">,
   input: {
     readonly sessionId: string
     readonly runId: string
-    /** The chat's Space; undefined for a chat outside one and for every run not in a personal chat. */
+    readonly reader: RunMemoryReader
+    /** The chat's Space when the reader is sent it; undefined otherwise. */
     readonly spaceId: string | undefined
-    /** The latest text the user typed. */
+    /** The owner's recent typed text, newest first. */
     readonly query: string
     readonly memory: MemoryTurn | undefined
     readonly measure: TurnMeasure
   }
 ) {
-  const space = yield* input.measure(
-    "space",
-    spaceConversationContextSnapshot({
-      spaceId: input.spaceId,
-      sessionId: input.sessionId,
-      spaces: services.spaces,
-      summaries: services.summaries,
-      memory: input.memory,
-      work: services.work
-    }),
-    undefined
-  )
-  const spaceRender = space === undefined ? undefined : renderSpaceContext(space.view)
-  const deliveredPageId =
-    space?.page !== undefined && spaceRender?.page === "whole" && space.view.page?.content !== ""
-      ? space.page.pageId
-      : undefined
-  const recall = yield* input
+  const reads = MEMORY_READS[input.reader]
+  const space = reads.space
+    ? yield* input.measure(
+        "space",
+        spaceConversationContextSnapshot({
+          spaceId: input.spaceId,
+          sessionId: input.sessionId,
+          spaces: services.spaces,
+          summaries: services.summaries,
+          memory: input.memory,
+          work: services.work
+        }),
+        undefined
+      )
+    : undefined
+  const sources = yield* input
     .measure(
       "memory",
       input.memory === undefined
         ? Effect.succeed(undefined)
-        : input.memory.recall({
+        : input.memory.sources({
             sessionId: input.sessionId,
-            query: input.query,
-            ...(deliveredPageId === undefined ? {} : { excludePageIds: [deliveredPageId] })
+            ...(reads.recall
+              ? {
+                  recall: {
+                    query: input.query,
+                    ...(space?.page === undefined ? {} : { excludePageIds: [space.page.pageId] })
+                  }
+                }
+              : {})
           }),
       undefined
     )
     .pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("Memory recall failed", {
+        Effect.logWarning("Memory sources failed", {
           sessionId: input.sessionId,
           runId: input.runId,
           cause
@@ -402,26 +415,17 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
       )
     )
   const memoryContext = assembleMemoryContext({
-    space:
-      space === undefined || spaceRender === undefined
-        ? undefined
-        : {
-            view: space.view,
-            text: spaceRender.text,
-            page:
-              space.page === undefined || spaceRender.page === undefined
-                ? undefined
-                : { ...space.page, shown: spaceRender.page }
-          },
-    recall,
+    reader: input.reader,
+    sources,
+    space: space === undefined ? undefined : { view: space.view, page: space.page },
     revision: input.memory?.revision ?? null,
     query: input.query
   })
-  yield* Effect.logInfo("Continuity context composed", {
+  yield* Effect.logInfo("Memory block composed", {
     sessionId: input.sessionId,
     runId: input.runId,
-    excludedRecallPages: deliveredPageId === undefined ? 0 : 1,
-    ...memoryContext.telemetry
+    reader: input.reader,
+    sources: memoryContext.record.sources.length
   })
   yield* services.chat
     .recordMemoryContext({

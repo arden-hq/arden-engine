@@ -104,9 +104,8 @@ it("measures the product's own prefetch, and no second copy of it exists", () =>
     "src/memory/service.ts"
   ])
   expect(callers("assembleMemoryContext")).toEqual(["src/context/turn-context.ts"])
-  expect(callers("budgetContinuityContext")).toEqual(["src/context/memory-context.ts"])
   expect(callers("spaceConversationContextSnapshot")).toEqual(["src/context/turn-context.ts"])
-  expect(callers("prepareMemoryRecall")).toEqual(["src/memory/service.ts"])
+  expect(callers("prepareMemorySources")).toEqual(["src/memory/service.ts"])
 })
 
 it("scores from the run's record of what it was sent, and derives it nowhere else", () => {

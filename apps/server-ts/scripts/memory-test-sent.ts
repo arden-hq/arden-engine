@@ -11,7 +11,7 @@
 // test/fixtures/replay-copy.ts: no server, no scheduler, no model, and `fetch` refuses.
 //
 // Semantic recall is off: matching by meaning embeds the question with the local embedding
-// model, which is a model call. Recall here is by words, Core Memory and the Space page.
+// model, which is a model call. Recall here is by words.
 
 import { existsSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -81,6 +81,7 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
         const { space, memoryContext } = yield* prefetchTurnMemory(services, {
           sessionId,
           runId,
+          reader: "owner",
           spaceId: question.space_id ?? undefined,
           query: question.question,
           memory,
@@ -96,9 +97,14 @@ it("scores whether a new chat is sent the pages that answer each question", asyn
           return yield* Effect.die(new Error(`No record of what ${question.id} was sent`))
         const paths = new Map<string, string>()
         for (const source of composition.sources)
-          if (source.page_id !== null && !paths.has(source.page_id))
+          if (source.kind !== "index" && source.page_id !== null && !paths.has(source.page_id))
             paths.set(source.page_id, (yield* memory.readContent(source.page_id)).path)
-        const text = [...memoryContext.core, ...memoryContext.space, ...memoryContext.recall]
+        const text = [
+          ...memoryContext.core,
+          ...memoryContext.index,
+          ...memoryContext.space,
+          ...memoryContext.recall
+        ]
           .map((section) => section.text)
           .join("\n\n")
         scored.push(scoreSent(question, deliveryOf({ composition, paths, text })))

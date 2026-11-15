@@ -53,19 +53,30 @@ export interface RunLocalInstructionSource extends JsonRecord {
 
 /**
  * How much of a Memory source reached the prompt: `passage` is the part a search matched,
- * chosen rather than cut. `cut` and `dropped` name the limit in `reason`.
+ * chosen rather than cut. `cut` and `dropped` name the limit in `reason`. For the index, `cut`
+ * means folders were folded: their pages are counted, not listed.
  */
 export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
 
-export type RunMemoryCutReason =
-  | "core_page_budget"
-  | "recall_allowance"
-  | "space_page_allowance"
-  | "continuity_budget"
+/**
+ * The limit that cut or dropped a Memory source:
+ * - `block_budget`: the run's one Memory block had no more room for it.
+ * - `index_allowance`: the index's share of the block.
+ * - `space_page_allowance`: the Space context's share for its Memory page.
+ */
+export type RunMemoryCutReason = "block_budget" | "index_allowance" | "space_page_allowance"
 
 /**
- * The Space context, sent whole: `bytes` is all of it. `page_id` names its Memory page when it
- * has one, and `outcome` says how much of that page the Space context held.
+ * The row of the Memory table a Run was sent by: `owner` (a person's chat turn) gets standing
+ * facts, the index, its Space and recall; `worker` (a helper, Task worker, Space review or a
+ * Run with no recorded actor) gets standing facts and the index. Automations get no Memory and
+ * record none.
+ */
+export type RunMemoryReader = "owner" | "worker"
+
+/**
+ * The Space context: `bytes` is all of it. `page_id` names its Memory page when it has one,
+ * and `outcome` says how much of that page the Space context held.
  */
 export interface RunMemorySpaceSource extends JsonRecord {
   readonly kind: "space"
@@ -77,9 +88,9 @@ export interface RunMemorySpaceSource extends JsonRecord {
   readonly reason: RunMemoryCutReason | null
 }
 
-/** One Memory page, at `version`. */
+/** One Memory page, at `version`: a standing-facts page (`core`) or a recalled one. */
 export interface RunMemoryPageSource extends JsonRecord {
-  readonly kind: "core" | "recalled" | "collection"
+  readonly kind: "core" | "recalled"
   readonly page_id: string
   readonly version: string
   readonly bytes: number
@@ -87,16 +98,31 @@ export interface RunMemoryPageSource extends JsonRecord {
   readonly reason: RunMemoryCutReason | null
 }
 
+/**
+ * The generated index of the pages under `root` ("" is all of Memory): `listed` pages had a
+ * line each, and each folded folder was counted as one line of `pages`.
+ */
+export interface RunMemoryIndexSource extends JsonRecord {
+  readonly kind: "index"
+  readonly root: string
+  readonly listed: number
+  readonly folded: ReadonlyArray<{ readonly folder: string; readonly pages: number }>
+  readonly bytes: number
+  readonly outcome: RunMemoryOutcome
+  readonly reason: RunMemoryCutReason | null
+}
+
 /** One Memory source a Run was sent before the model ran: identity and bytes, never text. */
-export type RunMemorySource = RunMemorySpaceSource | RunMemoryPageSource
+export type RunMemorySource = RunMemorySpaceSource | RunMemoryPageSource | RunMemoryIndexSource
 
 /**
- * One composition of a Run's Memory context: what every model request was sent from it until
+ * One composition of a Run's Memory block: what every model request was sent from it until
  * the Run composed its context again. All pages were read at Memory `revision` (null when
- * Memory could not be read). `query` is the latest owner text as far as the recall's word
- * search reads it (the meaning search embeds all of it); null when no recall ran.
+ * Memory could not be read). `query` is the owner's recent typed text as far as the recall's
+ * word search reads it (the meaning search embeds all of it); null when no recall ran.
  */
 export interface RunMemoryContext extends JsonRecord {
+  readonly reader: RunMemoryReader
   readonly revision: string | null
   readonly query: string | null
   readonly sources: ReadonlyArray<RunMemorySource>

@@ -5,7 +5,7 @@
 import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
 import { QUESTION_KINDS, type Question, type QuestionKind } from "./questions.js"
 
-/** Core Memory is sent outside the budget; recall and the Space page share the budget. */
+/** The route a page reached the chat by: standing facts, recall or the Space context. */
 export type Via = "core" | "recall" | "space"
 
 export interface Placed {
@@ -16,18 +16,18 @@ export interface Placed {
 }
 
 export interface Delivery {
-  /** Pages whose rendered block reached the chat. A page named only in a collection line is
-   * not here. */
+  /** Pages whose rendered block reached the chat. A page named only in the index is not
+   * here. */
   readonly pages: ReadonlyArray<Placed>
-  /** Pages whose rendered block the continuity budget cut, in part or whole. */
+  /** Pages the Memory block had no room for. */
   readonly cut: ReadonlyArray<Placed>
   /** Everything the chat was sent from Memory and its Space. */
   readonly text: string
-  /** Bytes sent, by route, as the record counts them. */
-  readonly bytes: Readonly<Record<Via, number>>
+  /** Bytes sent, by route and for the index, as the record counts them. */
+  readonly bytes: Readonly<Record<Via | "index", number>>
 }
 
-const viaOf = (source: RunMemorySource): Via | undefined => {
+const viaOf = (source: Exclude<RunMemorySource, { readonly kind: "index" }>): Via => {
   switch (source.kind) {
     case "core":
       return "core"
@@ -35,14 +35,12 @@ const viaOf = (source: RunMemorySource): Via | undefined => {
       return "recall"
     case "space":
       return "space"
-    case "collection":
-      return undefined
   }
 }
 
 /**
  * What a new chat was sent, read from one composition of its run's record. A page reached the
- * chat unless its renderer found no room for it or the continuity budget cut its block.
+ * chat unless its renderer or the block found no room for it.
  */
 export const deliveryOf = ({
   composition,
@@ -57,17 +55,20 @@ export const deliveryOf = ({
 }): Delivery => {
   const pages: Array<Placed> = []
   const cut: Array<Placed> = []
-  const bytes: Record<Via, number> = { core: 0, recall: 0, space: 0 }
+  const bytes: Record<Via | "index", number> = { core: 0, recall: 0, space: 0, index: 0 }
   for (const source of composition.sources) {
+    if (source.kind === "index") {
+      bytes.index += source.bytes
+      continue
+    }
     const via = viaOf(source)
-    if (via === undefined) continue
     bytes[via] += source.bytes
     if (source.page_id === null) continue
     const path = paths.get(source.page_id)
     if (path === undefined) throw new Error("A recorded Memory page has no path on the copy")
     const placed = { path, via, whole: source.outcome === "whole" }
-    if (source.reason === "continuity_budget") cut.push(placed)
-    else if (source.outcome !== "dropped") pages.push(placed)
+    if (source.outcome !== "dropped") pages.push(placed)
+    else if (source.reason === "block_budget") cut.push(placed)
   }
   return { pages, cut, text, bytes }
 }
@@ -79,7 +80,7 @@ export interface SentResult {
   readonly sent: boolean
   /** Expected pages that did not reach the chat. */
   readonly missing: ReadonlyArray<string>
-  /** Expected pages the budget cut. */
+  /** Expected pages the Memory block had no room for. */
   readonly cut: ReadonlyArray<string>
   /** Expected pages that reached the chat only in part, cut short by their renderer. Whether
    * the answer lies in the part sent is not checked: the answered score judges that. */
@@ -129,7 +130,7 @@ export interface KindCount {
   readonly sent: number
   /** Of the questions sent, those where an expected page reached the chat only in part. */
   readonly inPart: number
-  /** Of the questions not sent, those where the budget cut an expected page. */
+  /** Of the questions not sent, those where the block had no room for an expected page. */
   readonly cut: number
 }
 
@@ -155,7 +156,7 @@ export const countByKind = (
 /** The printed table: counts only, never a question or an answer. */
 export const renderCountTable = (results: ReadonlyArray<SentResult>): string => {
   const rows = countByKind(results)
-  const header = ["kind", "questions", "sent", "sent in part", "not sent", "cut by budget"]
+  const header = ["kind", "questions", "sent", "sent in part", "not sent", "no room in block"]
   const body = rows.map((row) => [
     row.kind,
     String(row.questions),

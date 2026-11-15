@@ -1,20 +1,19 @@
-import type { RunMemoryContext } from "@arden-hq/protocol/runs"
+import type { RunMemoryContext, RunMemoryReader } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { prefetchTurnMemory } from "../src/context/turn-context.js"
-import { LIVE_CONTINUITY_CONTEXT_MAX_BYTES } from "../src/context/continuity-budget.js"
 import { MemoryError } from "../src/memory/capture-batches.js"
 import type { MemoryTurn } from "../src/memory/service.js"
-import type { MemoryRecall } from "../src/memory/retrieval.js"
+import type { MemorySources } from "../src/memory/retrieval.js"
 import type { ChatWriteStore } from "../src/persistence/chat/store.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import { partialService } from "./kit.js"
 
-// A chat outside a Space reads no Space store; the recall, the budget and the record are what
+// A chat outside a Space reads no Space store; the sources, the block and the record are what
 // change.
-const prefetch = (memory: MemoryTurn | undefined) => {
+const prefetch = (memory: MemoryTurn | undefined, reader: RunMemoryReader = "owner") => {
   const records: Array<RunMemoryContext> = []
   const services = {
     spaces: partialService<SpaceStore["Service"]>("SpaceStore", {}),
@@ -28,6 +27,7 @@ const prefetch = (memory: MemoryTurn | undefined) => {
     prefetchTurnMemory(services, {
       sessionId: "chat-1",
       runId: "run-1",
+      reader,
       spaceId: undefined,
       query: "Where does the garden plan stand?",
       memory,
@@ -36,33 +36,44 @@ const prefetch = (memory: MemoryTurn | undefined) => {
   ).then((prefetched) => ({ ...prefetched, records }))
 }
 
-const RECALLED_BLOCK = "Page: projects/garden.md\nThe seeds are ordered."
-
-const recalled = (text: string): MemoryRecall => ({
-  core: "## Core Memory\nPage: me.md",
-  text,
-  sources: [
-    {
-      role: "core",
-      pageId: "me",
-      path: "me.md",
-      title: "Me",
-      version: "v1",
-      placement: { shown: "whole", block: "Page: me.md" }
-    },
-    {
-      role: "recalled",
-      pageId: "garden",
-      path: "projects/garden.md",
-      title: "Garden",
-      version: "v1",
-      placement: { shown: "whole", block: RECALLED_BLOCK }
-    }
-  ]
-})
+const SOURCES: MemorySources = {
+  standing: {
+    text: "## Core Memory\n\n### Me\nPage: me.md\nPrefers short replies.",
+    sources: [
+      { kind: "core", page_id: "me", version: "v1", bytes: 20, outcome: "whole", reason: null }
+    ]
+  },
+  index: () => ({
+    text: "## Memory index\n\n- projects/garden.md: The garden.",
+    sources: [
+      {
+        kind: "index",
+        root: "",
+        listed: 1,
+        folded: [],
+        bytes: 40,
+        outcome: "whole",
+        reason: null
+      }
+    ]
+  }),
+  recall: () => ({
+    text: "## Memory context\n\nNote.\n\n## Relevant Memory\n\n### Garden\nPage: projects/garden.md",
+    sources: [
+      {
+        kind: "recalled",
+        page_id: "garden",
+        version: "v1",
+        bytes: 30,
+        outcome: "whole",
+        reason: null
+      }
+    ]
+  })
+}
 
 const turn = (
-  recall: MemoryTurn["recall"]
+  sources: MemoryTurn["sources"]
 ): { readonly memory: MemoryTurn; readonly asked: Array<unknown> } => {
   const asked: Array<unknown> = []
   return {
@@ -70,51 +81,63 @@ const turn = (
     memory: {
       revision: "rev-1",
       readContent: () => Effect.die(new Error("no Space page in this test")),
-      recall: (input) => {
+      sources: (input) => {
         asked.push(input)
-        return recall(input)
+        return sources(input)
       }
     }
   }
 }
 
 describe("prefetchTurnMemory outside a Space", () => {
-  it("sends Core Memory whole and the recalled pages through the budget, and records both", async () => {
-    const { memory, asked } = turn(() =>
-      Effect.succeed(recalled(`## Relevant Memory\n${RECALLED_BLOCK}`))
-    )
+  it("sends an owner standing facts, the index and recall in one block, and records them", async () => {
+    const { memory, asked } = turn(() => Effect.succeed(SOURCES))
     const prefetched = await prefetch(memory)
-    expect(asked).toEqual([{ sessionId: "chat-1", query: "Where does the garden plan stand?" }])
+    expect(asked).toEqual([
+      { sessionId: "chat-1", recall: { query: "Where does the garden plan stand?" } }
+    ])
     expect(prefetched.space).toBeUndefined()
     expect(prefetched.memoryContext.core[0]?.text).toContain("Page: me.md")
-    expect(prefetched.memoryContext.recall[0]?.text).toContain(RECALLED_BLOCK)
+    expect(prefetched.memoryContext.index[0]?.text).toContain("projects/garden.md")
+    expect(prefetched.memoryContext.recall[0]?.text).toContain("Page: projects/garden.md")
     expect(prefetched.records).toEqual([prefetched.memoryContext.record])
-    expect(prefetched.records[0]?.sources).toMatchObject([
-      { kind: "core", page_id: "me", outcome: "whole" },
-      { kind: "recalled", page_id: "garden", outcome: "whole" }
+    expect(prefetched.records[0]).toMatchObject({
+      reader: "owner",
+      revision: "rev-1",
+      query: "Where does the garden plan stand?"
+    })
+    expect(prefetched.records[0]?.sources.map((source) => source.kind)).toEqual([
+      "core",
+      "index",
+      "recalled"
     ])
   })
 
-  it("cuts recalled text over the budget, and records the page it cut", async () => {
-    const long = `## Relevant Memory\n${"x".repeat(LIVE_CONTINUITY_CONTEXT_MAX_BYTES)}\n${RECALLED_BLOCK}`
-    const prefetched = await prefetch(turn(() => Effect.succeed(recalled(long))).memory)
-    expect(prefetched.memoryContext.telemetry.truncatedBytes).toBeGreaterThan(0)
-    expect(prefetched.records[0]?.sources[1]).toMatchObject({
-      kind: "recalled",
-      outcome: "dropped",
-      reason: "continuity_budget"
-    })
+  it("asks no recall for a worker, and records what it was sent", async () => {
+    const { memory, asked } = turn(() => Effect.succeed({ ...SOURCES, recall: undefined }))
+    const prefetched = await prefetch(memory, "worker")
+    expect(asked).toEqual([{ sessionId: "chat-1" }])
+    expect(prefetched.memoryContext.recall).toEqual([])
+    expect(prefetched.records[0]).toMatchObject({ reader: "worker", query: null })
+    expect(prefetched.records[0]?.sources.map((source) => source.kind)).toEqual(["core", "index"])
   })
 
-  it("sends and records nothing from Memory when the turn has none, or when recall fails", async () => {
+  it("sends and records nothing from Memory when the turn has none, or when it fails", async () => {
     const none = await prefetch(undefined)
-    expect([...none.memoryContext.core, ...none.memoryContext.recall]).toEqual([])
-    expect(none.records).toEqual([{ revision: null, query: null, sources: [] }])
+    const sent = (context: typeof none.memoryContext) => [
+      ...context.core,
+      ...context.index,
+      ...context.recall
+    ]
+    expect(sent(none.memoryContext)).toEqual([])
+    expect(none.records).toEqual([{ reader: "owner", revision: null, query: null, sources: [] }])
     const failing = turn(() =>
       Effect.fail(new MemoryError({ operation: "recall", message: "broken", sessionId: "chat-1" }))
     )
     const failed = await prefetch(failing.memory)
-    expect([...failed.memoryContext.core, ...failed.memoryContext.recall]).toEqual([])
-    expect(failed.records).toEqual([{ revision: "rev-1", query: null, sources: [] }])
+    expect(sent(failed.memoryContext)).toEqual([])
+    expect(failed.records).toEqual([
+      { reader: "owner", revision: "rev-1", query: null, sources: [] }
+    ])
   })
 })

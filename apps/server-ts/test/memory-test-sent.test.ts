@@ -13,11 +13,10 @@ import {
 type Placement = Pick<RunMemorySource, "outcome" | "reason">
 
 const WHOLE: Placement = { outcome: "whole", reason: null }
-/** Cut short by its own renderer, before any budget. */
-const RENDERED_IN_PART: Placement = { outcome: "cut", reason: "recall_allowance" }
+/** Cut short at a boundary, with a notice, to fit the room the block gave recall. */
+const RENDERED_IN_PART: Placement = { outcome: "cut", reason: "block_budget" }
 const PASSAGE: Placement = { outcome: "passage", reason: null }
-const BUDGET_DROPPED: Placement = { outcome: "dropped", reason: "continuity_budget" }
-const BUDGET_CUT: Placement = { outcome: "cut", reason: "continuity_budget" }
+const NO_ROOM: Placement = { outcome: "dropped", reason: "block_budget" }
 
 const pageId = (path: string) => `page-${path.replaceAll(/[/.]/gu, "-")}`
 
@@ -25,12 +24,12 @@ const pageId = (path: string) => `page-${path.replaceAll(/[/.]/gu, "-")}`
 const recorded = (input: {
   readonly core?: ReadonlyArray<string>
   readonly recalled?: ReadonlyArray<readonly [string, Placement] | string>
-  readonly listed?: ReadonlyArray<string>
+  readonly indexed?: number
   readonly space?: { readonly path: string; readonly outcome: "whole" | "cut" | "dropped" }
   readonly text?: string
 }) => {
   const page = (
-    kind: "core" | "recalled" | "collection",
+    kind: "core" | "recalled",
     path: string,
     placement: Placement
   ): RunMemorySource => ({
@@ -58,14 +57,29 @@ const recorded = (input: {
     ...(input.recalled ?? []).map((entry) =>
       typeof entry === "string" ? page("recalled", entry, WHOLE) : page("recalled", ...entry)
     ),
-    ...(input.listed ?? []).map((path) => page("collection", path, WHOLE))
+    ...(input.indexed === undefined
+      ? []
+      : [
+          {
+            kind: "index" as const,
+            root: "",
+            listed: input.indexed,
+            folded: [],
+            bytes: 500,
+            ...WHOLE
+          }
+        ])
   ]
-  const composition: RunMemoryContext = { revision: "rev-1", query: "a question", sources }
+  const composition: RunMemoryContext = {
+    reader: "owner",
+    revision: "rev-1",
+    query: "a question",
+    sources
+  }
   const paths = new Map(
     [
       ...(input.core ?? []),
       ...(input.recalled ?? []).map((entry) => (typeof entry === "string" ? entry : entry[0])),
-      ...(input.listed ?? []),
       ...(input.space === undefined ? [] : [input.space.path])
     ].map((path) => [pageId(path), path] as const)
   )
@@ -132,7 +146,7 @@ describe("sent score", () => {
       { path: "me.md", via: "core", whole: true },
       { path: "people/gardener.md", via: "recall", whole: true }
     ])
-    expect(delivery.bytes).toEqual({ core: 40, recall: 40, space: 300 })
+    expect(delivery.bytes).toEqual({ core: 40, recall: 40, space: 300, index: 0 })
   })
 
   it("is not sent when one expected page is missing, and names it", () => {
@@ -143,27 +157,27 @@ describe("sent score", () => {
     expect(result).toMatchObject({ sent: false, missing: ["people/gardener.md"], cut: [] })
   })
 
-  it("does not count a page named only in a collection line", () => {
+  it("does not count a page named only in the index", () => {
+    const delivery = recorded({ indexed: 12 })
     const result = scoreSent(
       question({ kind: "people", expected_pages: ["people/gardener.md"] }),
-      recorded({ listed: ["people/gardener.md"] })
+      delivery
     )
     expect(result).toMatchObject({ sent: false, missing: ["people/gardener.md"] })
+    expect(delivery.bytes.index).toBe(500)
   })
 
-  it("names an expected page the continuity budget dropped or cut mid-body", () => {
-    for (const placement of [BUDGET_DROPPED, BUDGET_CUT]) {
-      const result = scoreSent(
-        question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
-        recorded({ recalled: ["projects/kitchen.md", ["projects/garden.md", placement]] })
-      )
-      expect(result).toMatchObject({
-        sent: false,
-        missing: ["projects/garden.md"],
-        cut: ["projects/garden.md"],
-        pages: [{ path: "projects/kitchen.md", via: "recall", whole: true }]
-      })
-    }
+  it("names an expected page the Memory block had no room for", () => {
+    const result = scoreSent(
+      question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
+      recorded({ recalled: ["projects/kitchen.md", ["projects/garden.md", NO_ROOM]] })
+    )
+    expect(result).toMatchObject({
+      sent: false,
+      missing: ["projects/garden.md"],
+      cut: ["projects/garden.md"],
+      pages: [{ path: "projects/kitchen.md", via: "recall", whole: true }]
+    })
   })
 
   it("counts a Space page its allowance dropped as not sent, and not cut by the budget", () => {
@@ -220,6 +234,7 @@ describe("sent score", () => {
     expect(() =>
       deliveryOf({
         composition: {
+          reader: "owner",
           revision: "rev-1",
           query: "a question",
           sources: [{ kind: "core", page_id: "page-x", version: "v1", ...WHOLE, bytes: 4 }]
