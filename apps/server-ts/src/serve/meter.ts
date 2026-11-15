@@ -9,6 +9,12 @@ interface Usage {
   completionTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  /**
+   * US dollars the providers reported for these requests (`Usage.cost`), or
+   * null once any request's provider reported none (llama.cpp, Codex): a
+   * total with an unknown part is never shown as the spend.
+   */
+  costUsd: number | null
   /** True once a request was refused because `maxModelRequests` was reached. */
   budgetExhausted: boolean
 }
@@ -19,11 +25,15 @@ const empty = (): Usage => ({
   completionTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
+  costUsd: 0,
   budgetExhausted: false
 })
 
 const count = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0
+
+const dollars = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
 
 /** The counts an earlier start left in `file`, so a restart goes on counting. */
 const readUsage = (file: string): Usage => {
@@ -35,6 +45,8 @@ const readUsage = (file: string): Usage => {
       completionTokens: count(value.completionTokens),
       cacheReadTokens: count(value.cacheReadTokens),
       cacheWriteTokens: count(value.cacheWriteTokens),
+      // A file from before costs were kept has none: its requests' cost is unknown.
+      costUsd: dollars(value.costUsd) ?? null,
       budgetExhausted: value.budgetExhausted === true
     }
   } catch {
@@ -83,6 +95,9 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
             usage.completionTokens += count(used["completion_tokens"])
             usage.cacheReadTokens += count(used["cache_read_tokens"])
             usage.cacheWriteTokens += count(used["cache_write_tokens"])
+            const cost = dollars(used["cost"])
+            usage.costUsd =
+              usage.costUsd === null || cost === undefined ? null : usage.costUsd + cost
           }
           yield item
         }

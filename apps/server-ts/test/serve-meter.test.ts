@@ -47,6 +47,7 @@ it("counts every model request into the usage file and refuses past the limit, a
       completionTokens: 2,
       cacheReadTokens: 3,
       cacheWriteTokens: 0,
+      costUsd: null,
       budgetExhausted: false
     })
     // A second start on the same folder goes on counting.
@@ -61,6 +62,54 @@ it("counts every model request into the usage file and refuses past the limit, a
     // Tool search is turned off only when the settings say so.
     expect((await first.capabilities?.("m"))?.toolSearch).toBe("none")
     expect((await second.capabilities?.("m"))?.toolSearch).toBe("client")
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it("sums the cost providers report into the usage file, and says null once a request reported none", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arden-meter-"))
+  const file = join(root, "usage.json")
+  const read = async (): Promise<unknown> => JSON.parse(await readFile(file, "utf8"))
+  const costing = (costs: ReadonlyArray<number | undefined>): ModelProvider => {
+    let next = 0
+    return {
+      ...route(),
+      stream: async function* () {
+        const cost = costs[next]
+        next += 1
+        yield { usage: { ...usageItem.usage, ...(cost === undefined ? {} : { cost }) } }
+      }
+    } as unknown as ModelProvider
+  }
+  try {
+    const priced = meteredProvider(costing([0.0004, 0.0001]), {
+      file,
+      maxModelRequests: undefined,
+      toolSearch: undefined
+    })
+    expect(await read()).toMatchObject({ costUsd: 0 })
+    await drain(priced)
+    await drain(priced)
+    expect(await read()).toMatchObject({ modelRequests: 2, costUsd: 0.0004 + 0.0001 })
+    // A restart goes on summing; one request without a cost makes the total unknown for good.
+    const mixed = meteredProvider(costing([0.0002, undefined, 0.0003]), {
+      file,
+      maxModelRequests: undefined,
+      toolSearch: undefined
+    })
+    await drain(mixed)
+    expect(await read()).toMatchObject({ modelRequests: 3, costUsd: 0.0004 + 0.0001 + 0.0002 })
+    await drain(mixed)
+    await drain(mixed)
+    expect(await read()).toMatchObject({ modelRequests: 5, costUsd: null })
+    const restarted = meteredProvider(costing([0.0001]), {
+      file,
+      maxModelRequests: undefined,
+      toolSearch: undefined
+    })
+    await drain(restarted)
+    expect(await read()).toMatchObject({ modelRequests: 6, costUsd: null })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
