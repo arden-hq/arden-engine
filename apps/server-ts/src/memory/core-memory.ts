@@ -11,9 +11,11 @@ export const isStandingFactsPage = (page: {
   return path === "me.md" || path === "profile.md" || pageId === "me" || pageId === "profile"
 }
 
-// Every run that reads Memory is sent each standing-facts page whole, so writers keep each
-// one to this size: a fourth of the Memory block (36,000 bytes).
-const STANDING_PAGE_LIMIT_CHARS = 9_000
+/**
+ * The size writers keep each standing-facts page to, and the size each is sent whole up to:
+ * the Memory block's allowance for one such page (context/memory-context.ts).
+ */
+export const STANDING_PAGE_LIMIT_CHARS = 9_000
 
 /**
  * A Core Memory page is condensed before it is full, not after. Writes over the budget are

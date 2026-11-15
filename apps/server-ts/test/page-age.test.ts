@@ -71,7 +71,7 @@ describe("page age", () => {
       )
     })
       .render(new Map())
-      .recall?.({ bytes: 30_000, reason: "block_budget" })
+      .recall?.(30_000)
     const text = recall?.text ?? ""
     const block = (title: string): string => text.split(`### ${title}`)[1]?.split("###")[0] ?? ""
     expect(text).toContain(PAGE_AGE_RULE)

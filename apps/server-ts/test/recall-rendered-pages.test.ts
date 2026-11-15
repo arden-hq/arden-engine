@@ -33,7 +33,7 @@ const encoder = new TextEncoder()
 const bytes = (value: string): number => encoder.encode(value).byteLength
 
 it("recall fits its room in bytes, cuts a page whole lines at a time, and records each block", () => {
-  const room = { bytes: 7_000, reason: "block_budget" as const }
+  const room = 7_000
   const recall = prepareMemorySources({
     pages: [
       page("projects/garden.md", "Garden", "The garden seeds are ordered."),
@@ -49,11 +49,11 @@ it("recall fits its room in bytes, cuts a page whole lines at a time, and record
     .render(new Map())
     .recall?.(room)
   const text = recall?.text ?? ""
-  expect(bytes(text)).toBeLessThanOrEqual(room.bytes)
+  expect(bytes(text)).toBeLessThanOrEqual(room)
   expect(
     (recall?.sources ?? []).map((source) => [source.page_id, source.outcome, source.reason])
   ).toEqual([
-    ["id:projects/kitchen.md", "cut", "block_budget"],
+    ["id:projects/kitchen.md", "cut", "recall_allowance"],
     ["id:projects/garden.md", "whole", null]
   ])
   expect(text).toContain("café, crème brûlée.\n\n[Partial page; use wiki_read_page")
@@ -61,4 +61,42 @@ it("recall fits its room in bytes, cuts a page whole lines at a time, and record
   expect(blocks.map((block) => bytes(block.replace(/\n*$/u, "")))).toEqual(
     (recall?.sources ?? []).map((source) => source.bytes)
   )
+})
+
+it("records a matched passage cut for room as cut, and names a page with no room as left out", () => {
+  const pages = [
+    page("projects/garden.md", "Garden", "The garden seeds are ordered."),
+    page("projects/kitchen.md", "Kitchen", "The kitchen plan.")
+  ]
+  const render = (room: number) =>
+    prepareMemorySources({
+      pages,
+      recall: { query: "garden seeds kitchen plan", excludedPageIds: new Set() },
+      semanticMatches: [
+        { pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan, step by step.\n".repeat(400), score: 0.9 }
+      ],
+      lastChanged: new Map()
+    })
+      .render(new Map())
+      .recall?.(room)
+  const roomy = render(7_000)
+  expect(roomy?.sources.map((source) => [source.page_id, source.outcome, source.reason])).toEqual([
+    ["id:projects/kitchen.md", "cut", "recall_allowance"],
+    ["id:projects/garden.md", "whole", null]
+  ])
+  const whole = prepareMemorySources({
+    pages,
+    recall: { query: "kitchen plan", excludedPageIds: new Set() },
+    semanticMatches: [{ pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan.", score: 0.9 }],
+    lastChanged: new Map()
+  })
+    .render(new Map())
+    .recall?.(7_000)
+  expect(whole?.sources[0]).toMatchObject({ outcome: "passage", reason: null })
+  const tight = render(600)
+  expect(tight?.sources.map((source) => [source.outcome, source.reason])).toContainEqual([
+    "dropped",
+    "recall_allowance"
+  ])
+  expect(tight?.text).toContain("left out for lack of room")
 })

@@ -59,9 +59,11 @@ export const RunLocalInstructionSourceSchema = withExtras({
 
 const RunMemoryOutcomeSchema = Schema.Literals(["whole", "passage", "cut", "dropped"] as const)
 const RunMemoryCutReasonSchema = Schema.Literals([
-  "block_budget",
+  "standing_page_allowance",
   "index_allowance",
-  "space_page_allowance"
+  "space_allowance",
+  "space_page_allowance",
+  "recall_allowance"
 ] as const)
 const memoryPlacement = {
   bytes: NonNegativeIntSchema,

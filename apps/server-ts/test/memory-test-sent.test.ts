@@ -14,10 +14,10 @@ import {
 type Placement = Pick<RunMemorySource, "outcome" | "reason">
 
 const WHOLE: Placement = { outcome: "whole", reason: null }
-/** Cut short at a boundary, with a notice, to fit the room the block gave recall. */
-const RENDERED_IN_PART: Placement = { outcome: "cut", reason: "block_budget" }
+/** Cut short at a boundary, with a notice, to fit the recall's allowance. */
+const RENDERED_IN_PART: Placement = { outcome: "cut", reason: "recall_allowance" }
 const PASSAGE: Placement = { outcome: "passage", reason: null }
-const NO_ROOM: Placement = { outcome: "dropped", reason: "block_budget" }
+const NO_ROOM: Placement = { outcome: "dropped", reason: "recall_allowance" }
 
 const pageId = (path: string) => `page-${path.replaceAll(/[/.]/gu, "-")}`
 
@@ -168,7 +168,7 @@ describe("sent score", () => {
     expect(delivery.bytes.index).toBe(500)
   })
 
-  it("names an expected page the Memory block had no room for", () => {
+  it("names an expected page left out for room", () => {
     const result = scoreSent(
       question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
       recorded({ recalled: ["projects/kitchen.md", ["projects/garden.md", NO_ROOM]] })
@@ -181,12 +181,16 @@ describe("sent score", () => {
     })
   })
 
-  it("counts a Space page its allowance dropped as not sent, and not cut by the budget", () => {
+  it("counts a Space page its allowance dropped as not sent, left out for room", () => {
     const result = scoreSent(
       question({ kind: "where_it_stands", expected_pages: ["projects/garden.md"] }),
       recorded({ space: { path: "projects/garden.md", outcome: "dropped" } })
     )
-    expect(result).toMatchObject({ sent: false, missing: ["projects/garden.md"], cut: [] })
+    expect(result).toMatchObject({
+      sent: false,
+      missing: ["projects/garden.md"],
+      cut: ["projects/garden.md"]
+    })
   })
 
   it("says when an expected page reached the chat in part, for recall and Space alike", () => {

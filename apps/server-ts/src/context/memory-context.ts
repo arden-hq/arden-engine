@@ -1,16 +1,6 @@
-import type {
-  RunMemoryContext,
-  RunMemoryCutReason,
-  RunMemoryReader,
-  RunMemorySource
-} from "@arden-hq/protocol/runs"
+import type { RunMemoryContext, RunMemoryReader, RunMemorySource } from "@arden-hq/protocol/runs"
 import type { Actor } from "../execution/authority.js"
-import {
-  recallQuery,
-  type MemoryRoom,
-  type MemorySources,
-  type RenderedMemory
-} from "../memory/retrieval.js"
+import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
 
@@ -52,19 +42,17 @@ export const MEMORY_READS: Readonly<
   worker: { standing: true, index: true, space: false, recall: false }
 }
 
-// The Memory block is one budget in bytes. Sources take their allowance in this order, each
-// at most what the block has left; recall gets the rest.
-// - The block: the sum of the shares below, so no source gets less than before the one block.
-const BLOCK_BYTES = 36_000
-// - Standing facts are sent whole, first: writers keep each page to 9,000 characters
-//   (core-memory.ts), the share this sum counts for them.
+// Each source of the Memory block has its own allowance, renders itself into it with its own
+// notices, and takes no room from another, so the block is at most their sum.
+// - Standing facts: each page up to its writer limit (core-memory.ts), at most two pages.
 // - The index: the smallest size tried (4,000 to 10,000) that lists every page outside the
-//   four largest folders on the owner's copy. Over it, folders fold and are counted.
+//   four largest folders on the owner's copy. Over it, folders fold.
 const INDEX_BYTES = 10_000
 // - The Space context: its size before the one block.
 const SPACE_BYTES = 10_000
-// - Recall: the rest, at least 7,000 when standing facts keep to their share: 6,000 for
-//   pages, as before the one block, and 1,000 for its headings and notices.
+// - Recall: its size before the one block, 6,000 for pages, and 1,000 for its note, headings
+//   and notices.
+const RECALL_BYTES = 7_000
 
 /** A Space's view, and its Memory page at the version read, when it has one. */
 export interface SpaceMemoryInput {
@@ -85,9 +73,8 @@ const encoder = new TextEncoder()
 const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 /**
- * The one place a run's Memory block is composed: every source gets its allowance in priority
- * order from one budget, renders itself into that room with its own notices, and is recorded
- * from what it rendered. Nothing is cut after rendering.
+ * The one place a run's Memory block is composed: every source renders itself into its own
+ * allowance with its own notices, and is recorded from what it rendered.
  */
 export const assembleMemoryContext = ({
   reader,
@@ -105,25 +92,10 @@ export const assembleMemoryContext = ({
   /** The text the recall searched with. */
   readonly query: string
 }): MemoryContext => {
-  let left = BLOCK_BYTES
-  const room = (allowance: number, own: RunMemoryCutReason): MemoryRoom =>
-    allowance <= left
-      ? { bytes: allowance, reason: own }
-      : { bytes: Math.max(0, left), reason: "block_budget" }
-  const take = (rendered: RenderedMemory): RenderedMemory => {
-    left -= rendered.text === undefined ? 0 : byteLength(rendered.text) + 2
-    return rendered
-  }
-  const standing = take(sources?.standing ?? none)
-  const index = take(sources?.index(room(INDEX_BYTES, "index_allowance")) ?? none)
-  const spaced =
-    space === undefined
-      ? undefined
-      : take(renderSpace(space, room(SPACE_BYTES, "space_page_allowance")))
-  const recall =
-    sources?.recall === undefined
-      ? undefined
-      : take(sources.recall({ bytes: Math.max(0, left), reason: "block_budget" }))
+  const standing = sources?.standing ?? none
+  const index = sources?.index(INDEX_BYTES) ?? none
+  const spaced = space === undefined ? undefined : renderSpace(space)
+  const recall = sources?.recall?.(RECALL_BYTES)
   return {
     core: textSection("Core Memory", standing.text),
     index: textSection("Memory index", index.text),
@@ -131,14 +103,7 @@ export const assembleMemoryContext = ({
       space === undefined || spaced?.text === undefined
         ? []
         : [{ kind: "space", key: "Current Space", text: spaced.text, space: space.view }],
-    recall: [
-      ...textSection("Memory recall", recall?.text, "turn"),
-      ...textSection(
-        "Memory left out",
-        leftOutNotice([...index.sources, ...(spaced?.sources ?? [])]),
-        "turn"
-      )
-    ],
+    recall: textSection("Memory recall", recall?.text, "turn"),
     record: {
       reader,
       revision,
@@ -155,29 +120,12 @@ export const assembleMemoryContext = ({
 
 const none: RenderedMemory = { text: undefined, sources: [] }
 
-const LEFT_OUT_NAMES: Readonly<Record<RunMemorySource["kind"], string>> = {
-  core: "a standing-facts page",
-  index: "the Memory index",
-  space: "the Current Space context",
-  recalled: "a recalled page"
-}
-
-/** Names each whole source the block had no room for; recall names its own pages. */
-const leftOutNotice = (sources: ReadonlyArray<RunMemorySource>): string | undefined => {
-  const names = sources
-    .filter((source) => source.outcome === "dropped" && source.reason === "block_budget")
-    .map((source) => LEFT_OUT_NAMES[source.kind])
-  return names.length === 0
-    ? undefined
-    : `## Memory left out\n\n[No room left in the Memory block for ${names.join(" or ")}. Use wiki_search and wiki_read_page.]`
-}
-
 /**
- * The Space context in its room. Its own renderer fits it and says what it cut; a context with
- * no room even for its head is left out whole.
+ * The Space context in its allowance. Its own renderer fits it and says what it cut; a context
+ * with no room even for its head is left out whole.
  */
-const renderSpace = (space: SpaceMemoryInput, room: MemoryRoom): RenderedMemory => {
-  const rendered = renderSpaceContext(space.view, { maxBytes: room.bytes })
+const renderSpace = (space: SpaceMemoryInput): RenderedMemory => {
+  const rendered = renderSpaceContext(space.view, { maxBytes: SPACE_BYTES })
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
@@ -185,14 +133,14 @@ const renderSpace = (space: SpaceMemoryInput, room: MemoryRoom): RenderedMemory 
     version: space.page?.version ?? null
   }
   const bytes = byteLength(rendered.text)
-  if (bytes > room.bytes)
+  if (bytes > SPACE_BYTES)
     return {
       text: undefined,
-      sources: [{ ...identity, bytes: 0, outcome: "dropped", reason: "block_budget" }]
+      sources: [{ ...identity, bytes: 0, outcome: "dropped", reason: "space_allowance" }]
     }
   const source: RunMemorySource =
     rendered.page === "cut" || rendered.page === "dropped"
-      ? { ...identity, bytes, outcome: rendered.page, reason: room.reason }
+      ? { ...identity, bytes, outcome: rendered.page, reason: "space_page_allowance" }
       : { ...identity, bytes, outcome: "whole", reason: null }
   return { text: rendered.text, sources: [source] }
 }

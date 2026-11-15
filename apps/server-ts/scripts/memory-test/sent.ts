@@ -19,7 +19,7 @@ export interface Delivery {
   /** Pages whose rendered block reached the chat. A page named only in the index is not
    * here. */
   readonly pages: ReadonlyArray<Placed>
-  /** Pages the Memory block had no room for. */
+  /** Pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<Placed>
   /** Everything the chat was sent from Memory and its Space. */
   readonly text: string
@@ -40,7 +40,7 @@ const viaOf = (source: Exclude<RunMemorySource, { readonly kind: "index" }>): Vi
 
 /**
  * What a new chat was sent, read from one composition of its run's record. A page reached the
- * chat unless its renderer or the block found no room for it.
+ * chat unless its source's allowance had no room for it.
  */
 export const deliveryOf = ({
   composition,
@@ -68,7 +68,7 @@ export const deliveryOf = ({
     if (path === undefined) throw new Error("A recorded Memory page has no path on the copy")
     const placed = { path, via, whole: source.outcome === "whole" }
     if (source.outcome !== "dropped") pages.push(placed)
-    else if (source.reason === "block_budget") cut.push(placed)
+    else cut.push(placed)
   }
   return { pages, cut, text, bytes }
 }
@@ -80,7 +80,7 @@ export interface SentResult {
   readonly sent: boolean
   /** Expected pages that did not reach the chat. */
   readonly missing: ReadonlyArray<string>
-  /** Expected pages the Memory block had no room for. */
+  /** Expected pages left out for lack of room in their source's allowance. */
   readonly cut: ReadonlyArray<string>
   /** Expected pages that reached the chat only in part, cut short by their renderer. Whether
    * the answer lies in the part sent is not checked: the answered score judges that. */
@@ -130,7 +130,7 @@ export interface KindCount {
   readonly sent: number
   /** Of the questions sent, those where an expected page reached the chat only in part. */
   readonly inPart: number
-  /** Of the questions not sent, those where the block had no room for an expected page. */
+  /** Of the questions not sent, those where an expected page was left out for room. */
   readonly cut: number
 }
 
@@ -156,7 +156,7 @@ export const countByKind = (
 /** The printed table: counts only, never a question or an answer. */
 export const renderCountTable = (results: ReadonlyArray<SentResult>): string => {
   const rows = countByKind(results)
-  const header = ["kind", "questions", "sent", "sent in part", "not sent", "no room in block"]
+  const header = ["kind", "questions", "sent", "sent in part", "not sent", "left out for room"]
   const body = rows.map((row) => [
     row.kind,
     String(row.questions),
