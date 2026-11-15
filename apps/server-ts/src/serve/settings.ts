@@ -1,6 +1,6 @@
 import { APPROVAL_MODES } from "@arden-hq/protocol/permissions"
 import { errorMessage } from "@arden-hq/std/errors"
-import { serverUrlIssue, type ServerUrlIssue } from "@arden-hq/std/url"
+import { baseUrlIssue, type BaseUrlIssue } from "@arden-hq/std/url"
 import { Schema } from "effect"
 import { readFile } from "node:fs/promises"
 import { isAbsolute } from "node:path"
@@ -161,10 +161,11 @@ export class SettingsError extends Error {
   }
 }
 
-const BASE_URL_ISSUES: Record<ServerUrlIssue, string> = {
+const BASE_URL_ISSUES: Record<BaseUrlIssue, string> = {
   invalid: "is not a URL",
   credentials: "must not contain credentials",
-  fragment: "must not contain a fragment",
+  fragment: "must not contain a fragment: a request path is appended to it",
+  query: "must not contain a query: a request path is appended to it",
   insecure: "must use HTTPS or loopback HTTP"
 }
 
@@ -200,7 +201,7 @@ export const parseSettings = (value: unknown): Settings => {
   const provider = settings.provider
   if (provider !== undefined && "baseUrl" in provider) {
     // A key, and a conversation, go only to an HTTPS endpoint or to this machine.
-    const issue = serverUrlIssue(provider.baseUrl)
+    const issue = baseUrlIssue(provider.baseUrl)
     if (issue !== undefined)
       throw new SettingsError(`Invalid settings: \`provider.baseUrl\` ${BASE_URL_ISSUES[issue]}`)
   }

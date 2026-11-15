@@ -31,6 +31,22 @@ export const serverUrlIssue = (
     : "insecure"
 }
 
+/** Why an address is not a base URL Arden may append request paths to. */
+export type BaseUrlIssue = ServerUrlIssue | "query"
+
+/**
+ * Why `raw` is not a base URL Arden may send requests under, or undefined
+ * when it is one: a server address (`serverUrlIssue`) without a query or a
+ * fragment, even an empty one (`…/v1?`, `…/v1#`), since every request path is
+ * appended to it (`${baseUrl}/chat/completions`) and would land inside them.
+ */
+export const baseUrlIssue = (raw: string): BaseUrlIssue | undefined => {
+  const issue = serverUrlIssue(raw)
+  if (issue !== undefined) return issue
+  if (raw.includes("#")) return "fragment"
+  return raw.includes("?") ? "query" : undefined
+}
+
 export const isSecureServerUrl = (
   raw: string,
   options?: { readonly http?: "loopback" | "never" }

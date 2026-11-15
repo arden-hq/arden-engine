@@ -79,6 +79,26 @@ it("a chat-completions provider needs only what its server does not report", () 
   ).toThrow(/HTTPS or loopback/)
 })
 
+it("a provider base URL with a query or fragment is refused: every request path is appended to it", () => {
+  const settings = (baseUrl: string) => ({
+    dataDirectory: "/tmp/arden-settings",
+    provider: { kind: "chat-completions", baseUrl }
+  })
+  expect(() => parseSettings(settings("http://127.0.0.1:8080/v1?key=secret"))).toThrow(
+    /^Invalid settings: `provider.baseUrl` must not contain a query: a request path is appended to it$/
+  )
+  expect(() => parseSettings(settings("http://127.0.0.1:8080/v1?"))).toThrow(/must not contain a query/)
+  expect(() => parseSettings(settings("http://127.0.0.1:8080/v1#models"))).toThrow(
+    /must not contain a fragment/
+  )
+  expect(() => parseSettings(settings("http://127.0.0.1:8080/v1#"))).toThrow(
+    /must not contain a fragment/
+  )
+  expect(parseSettings(settings("http://127.0.0.1:8080/v1"))).toEqual(
+    settings("http://127.0.0.1:8080/v1")
+  )
+})
+
 it("the offered tools are the allow-list, or the catalog minus the block-list", () => {
   expect(offeredTools({}, catalog)).toBeUndefined()
   expect([...(offeredTools({ tools: ["exec_command"] }, catalog) ?? [])]).toEqual(["exec_command"])
