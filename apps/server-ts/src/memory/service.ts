@@ -13,7 +13,7 @@ import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { prepareMemorySources, type MemorySources } from "./retrieval.js"
+import { prepareMemorySources, tooOldToRecall, type MemorySources } from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -73,17 +73,22 @@ const sources = Effect.fn("Memory.sources")(function* (
     valid.recall === undefined
       ? undefined
       : { query: valid.recall.query, excludedPageIds: new Set(valid.recall.excludePageIds ?? []) }
+  const now = DateTime.toEpochMillis(yield* DateTime.now)
+  const today = localDayOf(now, machineTimeZone())
   const semantic =
     recall === undefined
       ? []
       : yield* embeddings
-          .search(current, recall.query, recall.excludedPageIds)
+          .search(
+            current,
+            recall.query,
+            new Set([...recall.excludedPageIds, ...tooOldToRecall(current.pages, today)])
+          )
           .pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
             )
           )
-  const now = DateTime.toEpochMillis(yield* DateTime.now)
   const times = yield* wiki
     .pageTimes(current.head)
     .pipe(
@@ -97,7 +102,7 @@ const sources = Effect.fn("Memory.sources")(function* (
     lastChanged: lastChangedLines(times, now),
     pages: current.pages,
     recall,
-    today: localDayOf(now, machineTimeZone()),
+    today,
     semanticMatches: semantic
   })
   const chats = yield* discussedIn({

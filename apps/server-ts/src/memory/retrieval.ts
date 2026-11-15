@@ -417,16 +417,42 @@ const dayNumber = (day: string): number | undefined => {
     : Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86_400_000
 }
 
-/** Whether recall may choose a page of this kind on `today`, given each folder's newest day. */
-const recallable = (
-  kind: PageKind,
-  newestDay: ReadonlyMap<string, string>,
-  today: number | undefined
-): boolean => {
-  if (kind.kind !== "record" || kind.day === undefined || today === undefined) return true
-  if (newestDay.get(kind.folder.directory) === kind.day) return true
-  const day = dayNumber(kind.day)
-  return day === undefined || today - day <= RECORD_RECALL_DAYS
+const isActive = (record: PageRecord): boolean =>
+  record.resource.state === "active" && record.page.lifecycle === "active"
+
+const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageKind> => {
+  const folders = recordFolders(active)
+  return new Map(
+    active.map((record) => [record.page.pageId, pageKind(folders, record.resource.path)] as const)
+  )
+}
+
+/**
+ * The records recall may not choose on `today` (`YYYY-MM-DD`): dated more than
+ * `RECORD_RECALL_DAYS` before it, and not their folder's newest. Search by meaning leaves them
+ * out too, so they take none of its places.
+ */
+export const tooOldToRecall = (
+  pages: ReadonlyArray<PageRecord>,
+  today: string
+): ReadonlySet<string> => {
+  const todayNumber = dayNumber(today)
+  if (todayNumber === undefined) return new Set()
+  const kinds = [...pageKinds(pages.filter(isActive))]
+  const newestDay = new Map<string, string>()
+  for (const [, kind] of kinds) {
+    if (kind.kind !== "record" || kind.day === undefined) continue
+    const newest = newestDay.get(kind.folder.directory)
+    if (newest === undefined || kind.day > newest) newestDay.set(kind.folder.directory, kind.day)
+  }
+  return new Set(
+    kinds.flatMap(([pageId, kind]) => {
+      if (kind.kind !== "record" || kind.day === undefined) return []
+      if (newestDay.get(kind.folder.directory) === kind.day) return []
+      const day = dayNumber(kind.day)
+      return day === undefined || todayNumber - day <= RECORD_RECALL_DAYS ? [] : [pageId]
+    })
+  )
 }
 
 export const prepareMemorySources = ({
@@ -447,23 +473,12 @@ export const prepareMemorySources = ({
   /** Each page's "Last changed" line, by page id; a page without one is shown without it. */
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemorySources => {
-  const active = pages.filter(
-    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
-  )
+  const active = pages.filter(isActive)
   const standing = active.filter(standingFacts)
-  const folders = recordFolders(active)
-  const kinds = new Map(
-    active.map((record) => [record.page.pageId, pageKind(folders, record.resource.path)] as const)
-  )
+  const kinds = pageKinds(active)
   const kindOf = (record: PageRecord): PageKind =>
     kinds.get(record.page.pageId) ?? { kind: "knowledge" }
-  const newestDay = new Map<string, string>()
-  for (const kind of kinds.values()) {
-    if (kind.kind !== "record" || kind.day === undefined) continue
-    const newest = newestDay.get(kind.folder.directory)
-    if (newest === undefined || kind.day > newest) newestDay.set(kind.folder.directory, kind.day)
-  }
-  const todayNumber = dayNumber(today)
+  const tooOld = tooOldToRecall(active, today)
   const selected =
     recall === undefined
       ? []
@@ -472,7 +487,7 @@ export const prepareMemorySources = ({
             (record) =>
               !standingFacts(record) &&
               !recall.excludedPageIds.has(record.page.pageId) &&
-              recallable(kindOf(record), newestDay, todayNumber)
+              !tooOld.has(record.page.pageId)
           ),
           queryTerms: wordSearchTerms(recall.query),
           semanticMatches
