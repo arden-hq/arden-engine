@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Logger } from "effect"
 import { expect, it } from "vitest"
 
 import { EmbeddingModel } from "../src/embedding/model.js"
@@ -9,6 +9,7 @@ import {
   WikiEmbeddingStoreError
 } from "../src/persistence/memory/embedding-store.js"
 import { EmbeddingSettingsStore } from "../src/persistence/settings/store.js"
+import { wikiError } from "../src/wiki/errors.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import { Wiki } from "../src/wiki/service.js"
 import type { PageRecord, Snapshot } from "../src/wiki/snapshot.js"
@@ -55,19 +56,31 @@ const AGAIN = snapshot("3", [
   ["c", "d"]
 ])
 
-it("follows Memory from the poll: once per new head, and again after a failed refresh", async () => {
-  const stored = new Map<string, string>()
-  let refreshes = 0
-  let failNext = false
-  const model = EmbeddingModel.of({
-    modelId: "fake",
+const SERVING = [
+  {
     indexVersion: "fake-1",
+    modelId: "fake",
     dimensions: 2,
-    batchSize: 8,
-    chunkDocument: (document) => Effect.succeed([{ text: document.body, excerpt: document.body }]),
-    embed: (texts) => Effect.succeed(texts.map(() => new Float32Array([1, 0])))
-  })
-  const layer = wikiEmbeddingIndexLayer.pipe(
+    role: "serving" as const,
+    startedAt: "2026-11-15T00:00:00.000Z"
+  }
+]
+
+const model = EmbeddingModel.of({
+  modelId: "fake",
+  indexVersion: "fake-1",
+  dimensions: 2,
+  batchSize: 8,
+  chunkDocument: (document) => Effect.succeed([{ text: document.body, excerpt: document.body }]),
+  embed: (texts) => Effect.succeed(texts.map(() => new Float32Array([1, 0])))
+})
+
+const indexLayer = (memory: {
+  readonly stored: Map<string, string>
+  readonly indexes: WikiEmbeddingStore["Service"]["indexes"]
+  readonly snapshot: Wiki["Service"]["snapshot"]
+}) =>
+  wikiEmbeddingIndexLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(
@@ -82,33 +95,16 @@ it("follows Memory from the poll: once per new head, and again after a failed re
         Layer.succeed(
           WikiEmbeddingStore,
           partialService<WikiEmbeddingStore["Service"]>("WikiEmbeddingStore", {
-            indexes: () =>
-              Effect.suspend(() => {
-                refreshes += 1
-                if (!failNext)
-                  return Effect.succeed([
-                    {
-                      indexVersion: "fake-1",
-                      modelId: "fake",
-                      dimensions: 2,
-                      role: "serving" as const,
-                      startedAt: "2026-11-15T00:00:00.000Z"
-                    }
-                  ])
-                failNext = false
-                return Effect.fail(
-                  new WikiEmbeddingStoreError({ operation: "indexes", message: "made to fail" })
-                )
-              }),
+            indexes: memory.indexes,
             drop: () => Effect.void,
             pages: () =>
               Effect.sync(() =>
-                [...stored].map(([pageId, pageVersion]) => ({ pageId, pageVersion }))
+                [...memory.stored].map(([pageId, pageVersion]) => ({ pageId, pageVersion }))
               ),
             deletePages: (_, pageIds) =>
-              Effect.sync(() => pageIds.forEach((pageId) => stored.delete(pageId))),
+              Effect.sync(() => pageIds.forEach((pageId) => memory.stored.delete(pageId))),
             replacePage: (write) =>
-              Effect.sync(() => void stored.set(write.pageId, write.pageVersion))
+              Effect.sync(() => void memory.stored.set(write.pageId, write.pageVersion))
           })
         ),
         Layer.succeed(
@@ -117,35 +113,51 @@ it("follows Memory from the poll: once per new head, and again after a failed re
             settings: () => Effect.succeed({ modelId: "fake", keepIndex: true, paused: false })
           })
         ),
-        Layer.succeed(
-          Wiki,
-          partialService<Wiki["Service"]>("Wiki", { snapshot: () => Effect.succeed(START) })
-        )
+        Layer.succeed(Wiki, partialService<Wiki["Service"]>("Wiki", { snapshot: memory.snapshot }))
       )
     )
   )
+
+const versions = (current: Snapshot) =>
+  Object.fromEntries(current.pages.map((page) => [page.page.pageId, page.resource.versionId]))
+
+it("follows Memory from the poll: once per new head, and again after a failed refresh", async () => {
+  const stored = new Map<string, string>()
+  let refreshes = 0
+  let failNext = false
+  const layer = indexLayer({
+    stored,
+    indexes: () =>
+      Effect.suspend(() => {
+        refreshes += 1
+        if (!failNext) return Effect.succeed(SERVING)
+        failNext = false
+        return Effect.fail(
+          new WikiEmbeddingStoreError({ operation: "indexes", message: "made to fail" })
+        )
+      }),
+    snapshot: () => Effect.succeed(START)
+  })
   const indexed = () => Object.fromEntries(stored)
-  const versions = (current: Snapshot) =>
-    Object.fromEntries(current.pages.map((page) => [page.page.pageId, page.resource.versionId]))
 
   const result = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const index = yield* WikiEmbeddingIndex
-        yield* index.drained
+        yield* index.drained()
         const atStart = { indexed: indexed(), refreshes }
         yield* index.schedule(START)
-        yield* index.drained
+        yield* index.drained()
         const sameHead = refreshes
         yield* index.schedule(MOVED)
-        yield* index.drained
+        yield* index.drained()
         const moved = indexed()
         failNext = true
         yield* index.schedule(AGAIN)
-        yield* index.drained
+        yield* index.drained()
         const failed = indexed()
         yield* index.schedule(AGAIN)
-        yield* index.drained
+        yield* index.drained()
         return { atStart, sameHead, moved, failed, again: indexed() }
       }).pipe(Effect.provide(layer))
     )
@@ -157,4 +169,47 @@ it("follows Memory from the poll: once per new head, and again after a failed re
     failed: versions(MOVED),
     again: versions(AGAIN)
   })
+})
+
+it("stays busy while a refresh runs, even when the first read of Memory fails meanwhile", async () => {
+  const stored = new Map<string, string>()
+  const firstRead = Deferred.makeUnsafe<void>()
+  const firstReadFailed = Deferred.makeUnsafe<void>()
+  const refreshStarted = Deferred.makeUnsafe<void>()
+  const refreshMayFinish = Deferred.makeUnsafe<void>()
+  const layer = indexLayer({
+    stored,
+    indexes: () =>
+      Deferred.succeed(refreshStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(refreshMayFinish)),
+        Effect.as(SERVING)
+      ),
+    snapshot: () =>
+      Deferred.await(firstRead).pipe(
+        Effect.andThen(Effect.fail(wikiError("list", "storage", "made to fail")))
+      )
+  })
+  const noticeFirstReadFailed = Logger.make((options) => {
+    if (String(options.message).includes("Initial Wiki embedding refresh failed"))
+      Deferred.doneUnsafe(firstReadFailed, Exit.void)
+  })
+
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const index = yield* WikiEmbeddingIndex
+        yield* index.schedule(MOVED)
+        yield* Deferred.await(refreshStarted)
+        const waiting = yield* Effect.forkChild(index.drained())
+        yield* Deferred.succeed(firstRead, undefined)
+        yield* Deferred.await(firstReadFailed)
+        for (let turn = 0; turn < 10; turn += 1) yield* Effect.yieldNow
+        const drainedWhileRefreshing = waiting.pollUnsafe() !== undefined
+        yield* Deferred.succeed(refreshMayFinish, undefined)
+        yield* Fiber.join(waiting)
+        return { drainedWhileRefreshing, indexed: Object.fromEntries(stored) }
+      }).pipe(Effect.provide(layer))
+    ).pipe(Effect.provide(Logger.layer([noticeFirstReadFailed])))
+  )
+  expect(result).toEqual({ drainedWhileRefreshing: false, indexed: versions(MOVED) })
 })

@@ -65,7 +65,7 @@ export class WikiEmbeddingIndex extends Context.Service<
      *  poll calls it; a search never does. */
     readonly schedule: (snapshot: Snapshot) => Effect.Effect<void>
     /** Waits until no refresh is queued or running. */
-    readonly drained: Effect.Effect<void>
+    readonly drained: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<EmbeddingIndexStatus, WikiEmbeddingIndexError>
     readonly control: (
       control: EmbeddingControl
@@ -546,7 +546,7 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
     )
   )
 
-  return WikiEmbeddingIndex.of({ schedule, drained: idle.await, status, control, search })
+  return WikiEmbeddingIndex.of({ schedule, drained: () => idle.await, status, control, search })
 })
 
 export const wikiEmbeddingIndexLayer: Layer.Layer<
