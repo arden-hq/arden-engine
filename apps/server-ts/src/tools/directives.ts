@@ -80,11 +80,16 @@ const requireInteractiveSession = (
   run: ServerRunContext,
   signal: AbortSignal
 ) =>
-  requireOwnerTurn(sessions, run, signal, {
-    target: { kind: "directives" },
-    doing: "changing global instructions",
-    what: "Global instructions change only in the user's own turn, after their approval"
-  })
+  requireOwnerTurn(
+    sessions,
+    run,
+    signal,
+    { kind: "directives" },
+    {
+      unverifiedBefore: "changing global instructions",
+      notOwnerTurn: "Global instructions change only in the user's own turn, after their approval"
+    }
+  )
 
 const directivesOutcome = (
   changed: boolean,

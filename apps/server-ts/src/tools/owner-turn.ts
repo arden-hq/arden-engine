@@ -6,30 +6,34 @@ import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { refusalError } from "./refusal.js"
 import type { ServerRunContext } from "./run-context.js"
 
+interface OwnerTurnRefusalWording {
+  /** Completes "The current Session could not be verified before …". */
+  readonly unverifiedBefore: string
+  /** The rule a run that is not the owner's own turn is refused by. */
+  readonly notOwnerTurn: string
+}
+
 export const requireOwnerTurn = async (
   sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">,
   run: ServerRunContext,
   signal: AbortSignal,
-  owned: {
-    readonly target: Extract<Target, { readonly kind: "directives" | "memory_forget" }>
-    readonly doing: string
-    readonly what: string
-  }
+  target: Extract<Target, { readonly kind: "directives" | "memory_forget" }>,
+  refusalWording: OwnerTurnRefusalWording
 ): Promise<void> => {
   const unverified = (retryable: boolean) =>
-    new ToolExecutionError(`The current Session could not be verified before ${owned.doing}.`, {
-      preview: "Session unavailable",
-      retryable
-    })
+    new ToolExecutionError(
+      `The current Session could not be verified before ${refusalWording.unverifiedBefore}.`,
+      { preview: "Session unavailable", retryable }
+    )
   const header = await Effect.runPromise(
     sessions.loadHistoryHeader(run.sessionId).pipe(Effect.mapError(() => unverified(true))),
     { signal }
   )
   if (header === null) throw unverified(false)
-  const verdict = boundary(run.authority, owned.target)
+  const verdict = boundary(run.authority, target)
   if (verdict.kind !== "allow")
     throw refusalError({
-      what: owned.what,
+      what: refusalWording.notOwnerTurn,
       rule: "boundary",
       instead: verdict.kind === "deny" ? verdict.instead : []
     })

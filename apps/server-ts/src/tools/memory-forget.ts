@@ -92,11 +92,16 @@ const makeMemoryForgetTools = ({
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
 }): ReadonlyArray<ServerTool> => {
   const ownerTurn = async (ctx: ToolContext<ServerRunContext>) => {
-    await requireOwnerTurn(sessions, ctx.run, ctx.signal, {
-      target: { kind: "memory_forget" },
-      doing: "forgetting Memory",
-      what: "Memory is forgotten only in the user's own turn, after their approval"
-    })
+    await requireOwnerTurn(
+      sessions,
+      ctx.run,
+      ctx.signal,
+      { kind: "memory_forget" },
+      {
+        unverifiedBefore: "forgetting Memory",
+        notOwnerTurn: "Memory is forgotten only in the user's own turn, after their approval"
+      }
+    )
     const chat = await chatLinkOf(sessions, ctx.run.sessionId, ctx.signal)
     if (chat === undefined)
       throw new ToolExecutionError("This chat no longer exists, so nothing was forgotten.", {
