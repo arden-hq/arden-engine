@@ -41,7 +41,7 @@ const makeWikiMaintenanceRunner = (services: {
   return (job) => {
     const notes: Array<string> = []
     return runItemLoop(services, {
-      label: "Tidy",
+      label: "Wiki Maintenance",
       kind: "wiki",
       next: Effect.fn("WikiMaintenance.next")(function* () {
         const processedHead = yield* services.maintenance.processedHead()
@@ -67,12 +67,12 @@ const makeWikiMaintenanceRunner = (services: {
       summary: (item) =>
         [
           item === undefined
-            ? "tidy: idle"
-            : `tidy: reviewed ${item.reviewed}, skipped ${item.skipped}`,
+            ? "wiki maintenance: idle"
+            : `wiki maintenance: reviewed ${item.reviewed}, skipped ${item.skipped}`,
           ...notes
         ].join("; "),
-      cancelled: "Tidy cancelled",
-      incomplete: "Tidy review incomplete"
+      cancelled: "Wiki maintenance cancelled",
+      incomplete: "Wiki Maintenance review incomplete"
     })(job)
   }
 }
@@ -80,7 +80,7 @@ const makeWikiMaintenanceRunner = (services: {
 export const wikiMaintenanceHandler: SystemAutomationHandler<"wiki_maintenance"> = {
   spec: {
     automationId: WIKI_MAINTENANCE_AUTOMATION_ID,
-    name: "Tidy",
+    name: "Wiki Maintenance",
     description: "Reconcile cross-page Wiki consistency after each Wiki commit.",
     prompt: PROMPT_TEXT.wikiMaintenance,
     handler: "wiki_maintenance",
