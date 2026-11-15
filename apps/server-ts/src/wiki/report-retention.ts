@@ -3,6 +3,7 @@ import { posix } from "node:path"
 import { directorySections } from "./collections.js"
 import { pageWikiLinks } from "./links.js"
 import { pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 /**
  * How long a report directory keeps its dated reports. Read from one line in the directory
@@ -121,12 +122,13 @@ const linkedFromOutside = (
   for (const record of pages) {
     if (
       !isActive(record) ||
+      isSystemPage(record.resource.path) ||
       record.resource.path.toLowerCase().startsWith(prefix) ||
       reportDay(record.resource.path) !== undefined ||
       isMonthlySummaryPath(record.resource.path)
     )
       continue
-    for (const token of pageWikiLinks(record.page)) {
+    for (const token of pageWikiLinks(record)) {
       const target = resolveWikiLinkTarget(byId, names, record.page.pageId, token)
       if (target !== null) linked.add(target)
     }

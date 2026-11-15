@@ -219,10 +219,10 @@ export const makeWikiHistoryMethods = (
         targetPageId
       }
     }
-    const outgoing = pageWikiLinks(record.page).map((token) => reference(pageId, token))
+    const outgoing = pageWikiLinks(record).map((token) => reference(pageId, token))
     const backlinks: WikiLink[] = []
     for (const source of current.pages) {
-      for (const token of pageWikiLinks(source.page)) {
+      for (const token of pageWikiLinks(source)) {
         const item = reference(source.page.pageId, token)
         if (item.targetPageId === pageId) backlinks.push(item)
       }

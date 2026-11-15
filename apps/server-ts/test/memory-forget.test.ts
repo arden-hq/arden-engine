@@ -14,6 +14,10 @@ import { describe, expect, it } from "vitest"
 import { prepareMemorySources } from "../src/memory/retrieval.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
+import type {
+  WikiRenameApprovalRecord,
+  WikiRenameStore
+} from "../src/persistence/wiki/rename-store.js"
 import type { ServerTool } from "../src/tools/define.js"
 import { memoryForgetTools } from "../src/tools/memory-forget.js"
 import type { ServerRunContext } from "../src/tools/run-context.js"
@@ -33,10 +37,12 @@ import {
 import { makeWikiContentStepMethods } from "../src/wiki/content-steps.js"
 import type { WikiError } from "../src/wiki/errors.js"
 import { makeWikiForgetMethods } from "../src/wiki/forgotten.js"
+import { makeWikiHistoryMethods } from "../src/wiki/history.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMaintenanceMethods } from "../src/wiki/maintenance.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage } from "../src/wiki/page.js"
+import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import { Wiki } from "../src/wiki/service.js"
 import type { Snapshot } from "../src/wiki/snapshot.js"
@@ -73,6 +79,7 @@ const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
 })
 
 interface Memory {
+  readonly root: string
   readonly repository: ManagedFileRepositoryShape
   readonly listing: ReturnType<typeof makeWikiListingMethods>
   readonly mutations: ReturnType<typeof makeWikiMutationMethods>
@@ -126,6 +133,7 @@ const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>
             )
           })
         return yield* body({
+          root,
           repository,
           listing,
           mutations,
@@ -444,6 +452,76 @@ describe("forgetting a line", () => {
     })
   })
 })
+
+const renameStore = (): WikiRenameStore["Service"] => {
+  const rows = new Map<string, WikiRenameApprovalRecord>()
+  const set = (approvalId: string, change: Partial<WikiRenameApprovalRecord>) =>
+    Effect.suspend(() => {
+      const row = rows.get(approvalId)
+      if (row === undefined) return Effect.die(`${approvalId} is missing`)
+      const next = { ...row, ...change }
+      rows.set(approvalId, next)
+      return Effect.succeed(next)
+    })
+  return partialService<WikiRenameStore["Service"]>("WikiRenameStore", {
+    createOrGet: (input) =>
+      Effect.sync(() => {
+        const row: WikiRenameApprovalRecord = {
+          ...input,
+          status: "pending",
+          createdAt: "2026-11-15T00:00:00.000Z",
+          commitId: null,
+          resolution: null
+        }
+        rows.set(input.approvalId, row)
+        return row
+      }),
+    get: (approvalId) => Effect.sync(() => rows.get(approvalId) ?? null),
+    beginApply: (approvalId) => set(approvalId, { status: "applying" }),
+    finishApply: (approvalId, commitId) => set(approvalId, { status: "accepted", commitId }),
+    releaseApply: (approvalId, resolution) =>
+      set(approvalId, { status: "pending", resolution: resolution ?? null })
+  })
+}
+
+const LINKED = "Sam works with [[places/town.md|Town]] council every week."
+
+describe("what forgotten.md holds and where it stays", () => {
+  it("holds no link, so a run can still rename a page a forgotten line linked to", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* memory.write("people/sam.md", `${LINKED}\n- Works at the bakery.\n`, ownerInApp("x"))
+        yield* memory.forgetting.forget({
+          lines: [LINKED],
+          claim: "Not on the council",
+          turn: TURN
+        })
+        const history = makeWikiHistoryMethods(memory.repository, memory.listing.snapshot)
+        const backlinks = (yield* history.links("town")).backlinks.map((link) => link.sourcePageId)
+        yield* memory.forgetting.undoForget({ id: 1, turn: TURN })
+        const renames = makeWikiRenameMethods(memory.repository, spaces, renameStore())
+        const town = yield* memory.page("places/town.md")
+        const requested = yield* renames.requestRename({
+          pageId: "town",
+          newPath: "places/city.md",
+          newTitle: "City",
+          expectedVersion: town.resource.versionId,
+          expectedHead: (yield* memory.listing.head()) ?? "",
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+        })
+        const accepted = yield* renames.acceptRename({
+          approvalId: requested.approvalId,
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+          commit: AGENT
+        })
+        return { backlinks, status: accepted.status, resolution: accepted.resolution }
+      })
+    )
+    expect(outcome).toEqual({ backlinks: [], status: "accepted", resolution: null })
+  })
+})
+
+
 
 describe("memory_forget", () => {
   const context = (run: ServerRunContext): ToolContext<ServerRunContext> => ({

@@ -130,7 +130,7 @@ const directReferences = (
       (record) =>
         [
           record.page.pageId,
-          pageWikiLinks(record.page).map((token) => ({
+          pageWikiLinks(record).map((token) => ({
             targetPageId: resolveWikiLinkTarget(byId, names, record.page.pageId, token)
           }))
         ] as const

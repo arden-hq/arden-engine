@@ -185,7 +185,7 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
   for (const record of pages) {
     if (record.page.lifecycle !== "active") continue
     const replacements = new Map()
-    for (const token of pageWikiLinks(record.page)) {
+    for (const token of pageWikiLinks(record)) {
       if (
         token.page !== null &&
         resolveWikiLinkTarget(byId, names, record.page.pageId, token) === source.page.pageId
