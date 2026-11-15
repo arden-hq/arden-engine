@@ -54,9 +54,15 @@ const currentNextRunAt = (input: {
 }): string | null => {
   if (!input.enabled) return null
   if (input.row.triggers_source === "manual") return input.row.next_run_at
-  if (input.row.next_run_at !== null && !input.spec.rearmOnSeed) return input.row.next_run_at
   const parsed = input.row.last_run_at === null ? input.nowMs : Date.parse(input.row.last_run_at)
-  return scheduledAt(input.rules, input.schedule, Number.isFinite(parsed) ? parsed : input.nowMs)
+  const next = scheduledAt(
+    input.rules,
+    input.schedule,
+    Number.isFinite(parsed) ? parsed : input.nowMs
+  )
+  // A schedule that lost its time trigger keeps no run that was due under it.
+  if (next === null) return null
+  return input.row.next_run_at !== null && !input.spec.rearmOnSeed ? input.row.next_run_at : next
 }
 
 export const specSchedule = Effect.fn("SqliteAutomationStore.specSchedule")(function* (
