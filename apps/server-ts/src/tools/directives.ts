@@ -14,7 +14,7 @@ import {
 } from "../context/global-instructions.js"
 import type { InstructionChat, InstructionWriter } from "../persistence/instructions/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { appliedReceipt } from "./call-receipt.js"
+import { appliedReceipt, chatLinkOf } from "./call-receipt.js"
 import type { CallEffects } from "../execution/tool-effect.js"
 import { toolFailure } from "./tool-failure.js"
 
@@ -259,16 +259,8 @@ const makeDirectivesTools = ({
   }
   const chatLinks = async (sessionIds: ReadonlySet<string>, signal: AbortSignal) => {
     const links = new Map<string, string | undefined>()
-    for (const sessionId of sessionIds) {
-      const header = await Effect.runPromise(
-        sessions.loadHistoryHeader(sessionId).pipe(Effect.orElseSucceed(() => null)),
-        { signal }
-      )
-      links.set(
-        sessionId,
-        header === null ? undefined : `arden:session/${encodeURIComponent(header.publicRef)}`
-      )
-    }
+    for (const sessionId of sessionIds)
+      links.set(sessionId, await chatLinkOf(sessions, sessionId, signal))
     return links
   }
 

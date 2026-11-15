@@ -6,21 +6,10 @@ import { wikiOriginChat, wikiOriginSource } from "../wiki/commit.js"
 import type { Wiki } from "../wiki/service.js"
 import type { PageRecord } from "../wiki/snapshot.js"
 import { wikiFailure } from "./wiki.js"
+import { chatLinkOf } from "./call-receipt.js"
 import { pageSource } from "./wiki-records.js"
 
 type Sessions = Pick<SessionQueries["Service"], "loadHistoryHeader">
-
-const chatLink = async (
-  sessions: Sessions,
-  sessionId: string,
-  signal: AbortSignal
-): Promise<string | undefined> => {
-  const header = await Effect.runPromise(
-    sessions.loadHistoryHeader(sessionId).pipe(Effect.orElseSucceed(() => null)),
-    { signal }
-  )
-  return header === null ? undefined : `arden:session/${encodeURIComponent(header.publicRef)}`
-}
 
 const chatPhrase = async (
   sessions: Sessions,
@@ -28,7 +17,7 @@ const chatPhrase = async (
   signal: AbortSignal
 ): Promise<{ readonly phrase: string; readonly link: string | null }> => {
   if (sessionId === undefined) return { phrase: "", link: null }
-  const link = await chatLink(sessions, sessionId, signal)
+  const link = await chatLinkOf(sessions, sessionId, signal)
   return link === undefined
     ? { phrase: " in a chat that no longer exists", link: null }
     : { phrase: ` in ${link}`, link }
