@@ -57,7 +57,8 @@ const RestoreParametersSchema = Schema.Struct({
 })
 
 const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
-  runPages(snapshot.pages).find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
+  runPages(snapshot.pages).find((record) => record.resource.path === path) ??
+  readablePage(snapshot, path)
 
 type MergedPage = PageRecord & { readonly page: { readonly lifecycle: "redirect" } }
 

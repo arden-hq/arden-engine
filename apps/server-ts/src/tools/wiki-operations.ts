@@ -233,7 +233,12 @@ const makeWikiOperationTools = ({
         embeddings.search(snapshot, input.query).pipe(Effect.catchCause(() => Effect.succeed([]))),
         { signal: ctx.signal }
       )
-      const matches = searchPages(activeRunPages(snapshot.pages), input.query, input.limit, semantic)
+      const matches = searchPages(
+        activeRunPages(snapshot.pages),
+        input.query,
+        input.limit,
+        semantic
+      )
       const ages = await loadPageAges(wiki, snapshot, ctx.signal)
       const changed = (record: PageRecord): string => {
         const ago = ages.ago(record.page.pageId)

@@ -541,9 +541,7 @@ it("renames a job's chat only through renameOwnedJob, besides the owner's own ed
   const root = join(import.meta.dirname, "../src/persistence/sqlite")
   const naming = readdirSync(root)
     .filter((name) => name.endsWith(".ts"))
-    .filter((name) =>
-      /UPDATE sessions\s+SET name\b/u.test(readFileSync(join(root, name), "utf8"))
-    )
+    .filter((name) => /UPDATE sessions\s+SET name\b/u.test(readFileSync(join(root, name), "utf8")))
     .sort()
   expect(naming).toEqual(["automation-catalog-edit.ts", "job-labels.ts", "session-lifecycle.ts"])
 })

@@ -98,7 +98,12 @@ describe("imported notes", () => {
     }
     expect([
       kinds([page("topics/garden.md")]),
-      kinds([{ ...page("imported/README.md"), resource: { ...page("imported/README.md").resource, state: "archived" } }])
+      kinds([
+        {
+          ...page("imported/README.md"),
+          resource: { ...page("imported/README.md").resource, state: "archived" }
+        }
+      ])
     ]).toEqual([
       ["record", "record"],
       ["record", "record"]

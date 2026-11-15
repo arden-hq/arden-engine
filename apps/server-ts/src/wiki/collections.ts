@@ -271,8 +271,7 @@ export const memoryIndex = (
   const listed = activeRunPages(pages)
     .filter(
       (record) =>
-        record.resource.path.toLowerCase().startsWith(prefix) &&
-        options.leaveOut?.(record) !== true
+        record.resource.path.toLowerCase().startsWith(prefix) && options.leaveOut?.(record) !== true
     )
     .map((record) => ({
       path: record.resource.path,

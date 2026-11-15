@@ -8,12 +8,7 @@ import { renderSpaceReviewPrompt } from "../prompts/space-jobs.js"
 import { spaceOwnsPath } from "../wiki/space-index.js"
 import { pageWikiLinks } from "../wiki/links.js"
 import { memoryHref, readChangeCall } from "../lib/memory-link.js"
-import {
-  pageNameIndex,
-  resolveWikiLinkTarget,
-  runPages,
-  type Snapshot
-} from "../wiki/snapshot.js"
+import { pageNameIndex, resolveWikiLinkTarget, runPages, type Snapshot } from "../wiki/snapshot.js"
 import { spaceReviewAdmission } from "./space-review-admission.js"
 import { chatHref } from "../sessions/chat-href.js"
 

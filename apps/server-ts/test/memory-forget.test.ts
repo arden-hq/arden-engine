@@ -314,9 +314,11 @@ describe("forgetting a line", () => {
         const make = (commit: WikiCommitIdentity, path: string) =>
           Effect.gen(function* () {
             return yield* refusal(
-              commitWiki(memory.repository, { ...commit, expectedRevision: yield* memory.listing.head() }, [
-                createPage(path, path, heading)
-              ])
+              commitWiki(
+                memory.repository,
+                { ...commit, expectedRevision: yield* memory.listing.head() },
+                [createPage(path, path, heading)]
+              )
             )
           })
         return {
