@@ -11,7 +11,7 @@ import { withoutTools } from "../../execution/toolset-middleware.js"
 
 export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-capture")
 
-const MAINTENANCE_ONLY_TOOLS: ReadonlySet<string> = new Set([
+const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "session_read",
   "session_search_transcripts",
   "wiki_merge_page"
@@ -65,7 +65,7 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     rearmOnSeed: true
   },
   item: handlerItemText("memory", (data) => data.batch.markdown),
-  tools: (base) => withoutTools(base, MAINTENANCE_ONLY_TOOLS),
+  tools: (base) => withoutTools(base, TIDY_ONLY_TOOLS),
   run: (services) =>
     makeMemoryCaptureRunner({
       memory: services.memory,
