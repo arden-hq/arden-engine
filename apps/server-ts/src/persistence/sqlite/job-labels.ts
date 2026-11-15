@@ -2,8 +2,9 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 
-/** Renames a job's open chats of its own that still carry the job's name, before the job takes
- *  `name`; a name the owner gave a chat stays. Every writer of a job's name calls it first. */
+/** Renames every chat of a job's own that still carries the job's name, open or archived, before
+ *  the job takes `name`; a name the owner gave a chat stays. Every writer of a job's name calls
+ *  it first. */
 export const chatsFollowJobName = Effect.fn("JobLabels.chatsFollow")(function* (
   sql: SqlClient.SqlClient,
   automationId: string,
@@ -11,7 +12,7 @@ export const chatsFollowJobName = Effect.fn("JobLabels.chatsFollow")(function* (
 ): Effect.fn.Return<void, SqlError> {
   yield* sql`UPDATE sessions SET name = ${name}
     WHERE origin_automation_id = ${automationId} AND session_type = 'channel'
-      AND archived_at IS NULL AND name IS NOT ${name}
+      AND name IS NOT ${name}
       AND name IS (SELECT name FROM scheduled_tasks WHERE task_id = ${automationId})`
 })
 

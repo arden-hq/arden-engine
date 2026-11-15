@@ -3,7 +3,11 @@ import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
+import { taskJobId } from "../src/persistence/space-job-id.js"
+import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+
+const AT = "2026-11-01T00:00:00.000Z"
 
 const ownChats = (sql: SqlClient.SqlClient, automationId: string) =>
   sql<{ readonly name: string | null }>`
@@ -41,4 +45,56 @@ it("an owner Automation's edit renames its chats that carry its old name and kee
     })
   )
   expect(outcome).toEqual({ followed: ["Made-up first"], kept: ["My own name"] })
+})
+
+it("a renamed Task's chats follow while they carry its old name, open or archived; a name the owner gave stays", async () => {
+  const names = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
+        VALUES ('space-1', 'Made-up Space', 'made-up space', '{"enabled":false}', ${AT}, ${AT})`
+      const work = yield* WorkStore
+      const task = yield* work.create(
+        { kind: "space", spaceId: "space-1" },
+        { key: "made-up", text: "Made-up Task" }
+      )
+      const job = taskJobId(task.item_id)
+      const [named] = yield* sql<{ readonly name: string }>`
+        SELECT name FROM scheduled_tasks WHERE task_id = ${job}`
+      if (named === undefined) throw new Error("the Task has no job")
+      const ownChat = (id: string, name: string, archived: boolean) =>
+        sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, name,
+            session_type, origin_automation_id, archived_at)
+          VALUES (${id}, ${`chat~${id}`}, ${AT}, ${AT}, ${name}, 'channel', ${job},
+            ${archived ? AT : null})`
+      yield* ownChat("open", named.name, false)
+      yield* ownChat("archived", named.name, true)
+      yield* ownChat("owner-named", "My own name", false)
+      const [current] = yield* sql<{ readonly updated_at: string }>`
+        SELECT updated_at FROM space_tasks WHERE item_id = ${task.item_id}`
+      yield* work.update(
+        { kind: "item", itemId: task.item_id },
+        current?.updated_at ?? AT,
+        { text: "Made-up Task renamed" }
+      )
+      const [renamed] = yield* sql<{ readonly name: string }>`
+        SELECT name FROM scheduled_tasks WHERE task_id = ${job}`
+      const chats = yield* sql<{ readonly name: string; readonly archived: number }>`
+        SELECT name, archived_at IS NOT NULL AS archived FROM sessions
+        WHERE origin_automation_id = ${job} AND session_type = 'channel'`
+      return chats
+        .map((chat) => ({
+          name: chat.name === renamed?.name ? "the Task's new name" : chat.name,
+          archived: chat.archived === 1
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name) || Number(a.archived) - Number(b.archived))
+    })
+  )
+  // The job's thread, made with the Task, and the two own chats that carry its name follow.
+  expect(names).toEqual([
+    { name: "My own name", archived: false },
+    { name: "the Task's new name", archived: false },
+    { name: "the Task's new name", archived: false },
+    { name: "the Task's new name", archived: true }
+  ])
 })
