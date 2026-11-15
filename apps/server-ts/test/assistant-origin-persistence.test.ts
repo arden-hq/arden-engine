@@ -7,7 +7,12 @@ import { replayedAssistant } from "../src/context/summary-requests.js"
 import { decodeJson, encodeJson } from "../src/persistence/sqlite/json.js"
 import { StoredMessageEnvelopeSchema } from "../src/persistence/transcript/model.js"
 
-const origin = { provider: "llama.cpp", api: "chat-completions", model: "gemma-32k" }
+const origin = {
+  provider: "llama.cpp",
+  api: "chat-completions",
+  model: "gemma-32k",
+  requested_model: "gemma-32k"
+}
 const providerState = { "chat-completions": { reasoning: "kept" } }
 
 it("an assistant record keeps its origin and provider state through the transcript and back", async () => {
