@@ -23,7 +23,8 @@ export {
   MAX_STATUS_DETAIL_CHARS,
   ProviderStatusError,
   type Rejection,
-  rejectionFields
+  rejectionFields,
+  type UpstreamRejection
 } from "./rejection.js"
 export {
   backoffSleep,
