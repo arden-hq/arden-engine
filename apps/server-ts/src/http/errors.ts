@@ -4,6 +4,7 @@ import type { StructuredCompletionError } from "../models/structured-completion.
 import { SpaceStoreError } from "../persistence/spaces/store.js"
 import type { StoreReason } from "../persistence/errors.js"
 import { SessionStoreError } from "../persistence/sessions/store.js"
+import { ModelStoreError } from "../persistence/models/store.js"
 import type { WikiError } from "../wiki/errors.js"
 
 export class StoreConflict extends Schema.Error<StoreConflict>("StoreConflict")(
@@ -49,8 +50,16 @@ export const storeErrorToHttp = <R extends StoreReason>(error: {
   readonly message: string
 }): StoreReasonHttp[R] => statuses[error.reason](ownerWorded(error) ? error.message : undefined)
 
+/**
+ * Stores whose `invalid` and `conflict` messages are written for the person
+ * who sent the request, so a refusal carries them as `detail`. A model the
+ * server does not list is one (`Model <id> is not available`): without it a
+ * client saw a bare 422 `{}` for `chat_model`.
+ */
 const ownerWorded = (error: object): boolean =>
-  error instanceof SessionStoreError || error instanceof SpaceStoreError
+  error instanceof SessionStoreError ||
+  error instanceof SpaceStoreError ||
+  error instanceof ModelStoreError
 
 interface StoreFailure<R extends StoreReason = StoreReason> {
   readonly reason: R
