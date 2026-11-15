@@ -34,25 +34,42 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
       const commits = yield* repository.history({ limit: null })
       const refused = new Map<string, number>()
       let limitedWrites = 0
+      let takenIn = 0
       for (const commit of commits)
         for (const change of commit.changes) {
           const after = change.after
           if (after === null || after.state !== "active") continue
           if (corePageBudget({ path: after.path, pageId: after.resourceId }) === undefined) continue
           limitedWrites += 1
-          const text = new TextDecoder().decode(yield* repository.readVersion(after))
-          const page = yield* parseWikiPage(text).pipe(Effect.option)
-          if (Option.isNone(page)) continue
-          const over = overPageLimit({
-            path: after.path,
-            pageId: after.resourceId,
-            body: page.value.body
-          })
+          const overOf = (version: typeof after) =>
+            Effect.gen(function* () {
+              const text = new TextDecoder().decode(yield* repository.readVersion(version))
+              const page = yield* parseWikiPage(text).pipe(Effect.option)
+              return Option.isNone(page)
+                ? undefined
+                : overPageLimit({
+                    path: version.path,
+                    pageId: version.resourceId,
+                    body: page.value.body
+                  })
+            })
+          const over = yield* overOf(after)
           if (over === undefined) continue
+          const was = change.before?.state === "active" ? yield* overOf(change.before) : undefined
+          if (was !== undefined && over.chars <= was.chars) continue
+          if (commit.origin === "filesystem") {
+            takenIn += 1
+            continue
+          }
           const key = `${after.path} ${commit.origin.split(/[@.~]/u)[0] ?? ""}`
           refused.set(key, (refused.get(key) ?? 0) + 1)
         }
-      return { commits: commits.length, limitedWrites, refused: Object.fromEntries(refused) }
+      return {
+        commits: commits.length,
+        limitedWrites,
+        takenIn,
+        refused: Object.fromEntries(refused)
+      }
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -190,7 +207,8 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
 
   process.stdout.write(
     `Replay: ${history.commits} commits, ${history.limitedWrites} writes to a limited page, ` +
-      `refused at the commit now: ${JSON.stringify(history.refused)}. ` +
+      `refused at the commit now: ${JSON.stringify(history.refused)}, outside edits taken in over ` +
+      `the limit: ${history.takenIn}. ` +
       `Chat summaries ${database.summaries?.summaries}, ahead of their chat after the update ` +
       `${database.summaries?.ahead}. Maintenance after reseed: triggers ${database.maintenance.types.join(",")}, ` +
       `next timer run ${database.maintenance.nextRunAt}. Daily from 9 September: settled through ` +
