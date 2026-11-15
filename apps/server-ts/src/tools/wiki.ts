@@ -32,6 +32,7 @@ import {
   corePageBudget,
   STANDING_LIMIT_NOTE
 } from "../memory/core-memory.js"
+import { isSystemPage } from "../wiki/system-pages.js"
 
 const MAX_PAGE_LINES = 4_000
 export const MAX_WIKI_CONTENT_CHARS = 40_000
@@ -203,8 +204,13 @@ const parseDirectory = (value: string): string | null => {
   return directory
 }
 
+/** Every page a run may name, whatever its lifecycle: never a code-owned one. */
+export const runPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
+  snapshot.pages.filter((record) => !isSystemPage(record.resource.path))
+
+/** The active pages a run may find, read or write by path. */
 export const activePages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
-  snapshot.pages.filter((record) => record.page.lifecycle === "active")
+  runPages(snapshot).filter((record) => record.page.lifecycle === "active")
 
 export const activePage = (snapshot: Snapshot, path: string): PageRecord | null => {
   const pages = activePages(snapshot)

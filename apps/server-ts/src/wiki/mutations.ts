@@ -10,7 +10,6 @@ import {
   commitWiki,
   createPage,
   type WikiCommitIdentity,
-  type WikiCommitOrigin,
   updatePage
 } from "./commit.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
@@ -33,20 +32,13 @@ import {
   requireUpdatable
 } from "./write-rules.js"
 
-const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
-  kind: "capture",
-  replayKey: undefined,
-  sessionId: undefined
-}
-const DESKTOP_ORIGIN: WikiCommitOrigin = { kind: "user", via: "desktop" }
-
 interface WikiUpdateInput {
   readonly pageId: string
   readonly content: string
   readonly expectedVersion: string
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 interface WikiCreateInput {
@@ -54,7 +46,7 @@ interface WikiCreateInput {
   readonly title: string
   readonly body: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 interface WikiCreateDirectoryResult {
@@ -68,7 +60,7 @@ interface WikiArchiveInput {
   readonly expectedVersion: string
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 interface SpacePageCounts {
@@ -130,18 +122,10 @@ export const makeWikiMutationMethods = (
       Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
     )
     const current = yield* loadSnapshot(repository, "create")
-    const origin = input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN
     yield* requireCreatable(spaces, current, { path: input.path, authority: input.authority })
-    yield* commitWiki(
-      repository,
-      {
-        expectedRevision: current.head,
-        actor: input.commit?.actor ?? "memory:capture",
-        origin,
-        reason: input.commit?.reason ?? "create Memory page"
-      },
-      [createPage(pageId, input.path, content)]
-    ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
+    yield* commitWiki(repository, { ...input.commit, expectedRevision: current.head }, [
+      createPage(pageId, input.path, content)
+    ]).pipe(Effect.mapError(mapRevisionError("create", pageId)))
     const page = yield* read(pageId).pipe(
       Effect.mapError((cause) => new WikiError({ ...cause, operation: "create" }))
     )
@@ -229,16 +213,9 @@ export const makeWikiMutationMethods = (
             })
           }
         } else {
-          yield* commitWiki(
-            repository,
-            {
-              actor: input.commit?.actor ?? "user:desktop",
-              origin: input.commit?.origin ?? DESKTOP_ORIGIN,
-              reason: input.commit?.reason ?? "update wiki page",
-              expectedRevision: input.expectedHead
-            },
-            [updatePage(current.resource, content)]
-          ).pipe(Effect.mapError(mapRevisionError("update", input.pageId)))
+          yield* commitWiki(repository, { ...input.commit, expectedRevision: input.expectedHead }, [
+            updatePage(current.resource, content)
+          ]).pipe(Effect.mapError(mapRevisionError("update", input.pageId)))
         }
         const page = yield* read(input.pageId).pipe(
           Effect.mapError((cause) =>
@@ -272,12 +249,7 @@ export const makeWikiMutationMethods = (
         yield* requireArchivable(spaces, snapshot, current, input)
         const committed = yield* commitWiki(
           repository,
-          {
-            actor: input.commit?.actor ?? "user:desktop",
-            origin: input.commit?.origin ?? DESKTOP_ORIGIN,
-            reason: input.commit?.reason ?? "archive wiki page",
-            expectedRevision: input.expectedHead
-          },
+          { ...input.commit, expectedRevision: input.expectedHead },
           [archivePage(current.resource)]
         ).pipe(Effect.mapError(mapRevisionError("archive", input.pageId)))
         const archived = committed.commit.changes.find(
@@ -326,27 +298,16 @@ export const makeWikiMutationMethods = (
             { pageId: input.pageId }
           )
         }
-        yield* commitWiki(
-          repository,
-          {
-            actor: input.commit?.actor ?? "user:desktop",
-            origin: input.commit?.origin ?? DESKTOP_ORIGIN,
-            reason:
-              input.commit?.reason ??
-              `merge wiki page ${current.resource.path} into ${target.resource.path}`,
-            expectedRevision: input.expectedHead
-          },
-          [
-            updatePage(
-              current.resource,
-              formatRedirectPage({
-                pageId: current.page.pageId,
-                title: current.page.title,
-                redirectTo: target.page.pageId
-              })
-            )
-          ]
-        ).pipe(Effect.mapError(mapRevisionError("merge", input.pageId)))
+        yield* commitWiki(repository, { ...input.commit, expectedRevision: input.expectedHead }, [
+          updatePage(
+            current.resource,
+            formatRedirectPage({
+              pageId: current.page.pageId,
+              title: current.page.title,
+              redirectTo: target.page.pageId
+            })
+          )
+        ]).pipe(Effect.mapError(mapRevisionError("merge", input.pageId)))
         return yield* read(target.page.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "merge" }))
         )

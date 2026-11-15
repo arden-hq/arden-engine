@@ -244,7 +244,7 @@ describe("every active Space has a page", () => {
   })
 
   it("a restored Space whose page was archived meanwhile gets a fresh page", async () => {
-    const outcome = await withSpacesAndWiki((methods, { spaces, sql, repository, listing }) =>
+    const outcome = await withSpacesAndWiki((methods, { spaces, sql, repository }) =>
       Effect.gen(function* () {
         const space = yield* spaces.create({ name: "Made-up garden" })
         const first = yield* methods.ensureSpacePage({ spaceId: space.space_id })

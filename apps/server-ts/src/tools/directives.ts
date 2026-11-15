@@ -1,6 +1,4 @@
 import type { ServerRunContext } from "./run-context.js"
-import { boundary } from "../execution/decide.js"
-import { refusalError } from "./refusal.js"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { countOf, formatBytes } from "@arden-hq/std/count"
 import { createTwoFilesPatch } from "diff"
@@ -17,6 +15,7 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { appliedReceipt, chatLinkOf } from "./call-receipt.js"
 import type { CallEffects } from "../execution/tool-effect.js"
 import { toolFailure } from "./tool-failure.js"
+import { requireOwnerTurn } from "./owner-turn.js"
 
 const DIRECTIVES_RESOURCE_ID = "directives"
 const MAX_DIFF_BYTES = 64 * 1024
@@ -76,39 +75,16 @@ const approvalDiff = (before: string, after: string): string => {
   return diff
 }
 
-const requireInteractiveSession = async (
+const requireInteractiveSession = (
   sessions: SessionQueries["Service"],
   run: ServerRunContext,
   signal: AbortSignal
-): Promise<void> => {
-  const sessionId = run.sessionId
-  const header = await Effect.runPromise(
-    sessions
-      .loadHistoryHeader(sessionId)
-      .pipe(
-        Effect.mapError(
-          () =>
-            new ToolExecutionError(
-              "The current Session could not be verified before changing global instructions.",
-              { preview: "Session unavailable", retryable: true }
-            )
-        )
-      ),
-    { signal }
-  )
-  if (header === null)
-    throw new ToolExecutionError(
-      "The current Session could not be verified before changing global instructions.",
-      { preview: "Session unavailable", retryable: false }
-    )
-  const verdict = boundary(run.authority, { kind: "directives" })
-  if (verdict.kind !== "allow")
-    throw refusalError({
-      what: "Global instructions change only in the user's own turn, after their approval",
-      rule: "boundary",
-      instead: verdict.kind === "deny" ? verdict.instead : []
-    })
-}
+) =>
+  requireOwnerTurn(sessions, run, signal, {
+    target: { kind: "directives" },
+    doing: "changing global instructions",
+    what: "Global instructions change only in the user's own turn, after their approval"
+  })
 
 const directivesOutcome = (
   changed: boolean,

@@ -7,6 +7,7 @@ import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { isImportedPath } from "./collections.js"
 import { formatRedirectPage, normal, pageNamesForPath, reviseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 interface ContentStepPage {
   readonly path: string
@@ -65,7 +66,10 @@ export const makeWikiContentStepMethods = (
     if (receipt !== null) return { kind: "already_applied" } as const
     const snapshot = yield* loadSnapshot(repository, "update")
     const pages = snapshot.pages.filter(
-      ({ page, resource }) => page.lifecycle === "active" && !isImportedPath(resource.path)
+      ({ page, resource }) =>
+        page.lifecycle === "active" &&
+        !isImportedPath(resource.path) &&
+        !isSystemPage(resource.path)
     )
     const taken = new Set(
       snapshot.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))

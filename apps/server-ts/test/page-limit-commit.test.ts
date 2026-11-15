@@ -182,7 +182,8 @@ describe("the page size limit at the commit", () => {
             pageId: me.pageId,
             expectedVersion: archived.versionId,
             expectedHead: (yield* listing.head()) ?? "",
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: OWNER
           })
         )
         return {

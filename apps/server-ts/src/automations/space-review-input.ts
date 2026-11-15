@@ -58,7 +58,7 @@ const spaceReviewInput = (
     const origin = provenance.get(id)
     if (selected.has(id) || record === undefined || origin === undefined) continue
     selected.add(id)
-    for (const token of pageWikiLinks(record.page)) {
+    for (const token of pageWikiLinks(record)) {
       const target = resolveWikiLinkTarget(byId, names, id, token)
       if (target === null) unresolved.add(`${record.resource.path}: ${token.raw}`)
       else if (!selected.has(target)) {

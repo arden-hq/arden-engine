@@ -12,10 +12,21 @@ import { posix } from "node:path"
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { pageKind, producingAutomation, recordFolders, type RecordFolders } from "./collections.js"
 import { aliasesAreHuman, isReadme, parseWikiPage } from "./page.js"
+import {
+  guardedLines,
+  openRetractions,
+  putBack,
+  retractionRefusal,
+  type OpenRetraction
+} from "./retraction.js"
 import type { PageRecord } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 export type WikiCommitOrigin =
+  /** The owner, in the app or in the file. */
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
+  /** The owner's own chat turn, forgetting or undoing a retraction after their approval. */
+  | { readonly kind: "forget"; readonly sessionId: string }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
   /** Wiki Maintenance. History records it as its Automation, so a decoded origin is never this. */
@@ -36,12 +47,19 @@ export interface WikiCommitIdentity {
   readonly reason: string
 }
 
+/** The owner, changing Memory in the app. */
+export const ownerInApp = (
+  reason: string,
+  via: `desktop${string}` = "desktop"
+): WikiCommitIdentity => ({ actor: "user:desktop", origin: { kind: "user", via }, reason })
+
 export const LEGACY_MAINTENANCE_ORIGIN = "wiki.maintenance"
 
 const AUTOMATION_PREFIX = "wiki.automation."
 const CHAIN_MARK = "~"
 const AGENT_ORIGIN = "wiki.agent"
 const CAPTURE_ORIGIN = "memory.capture"
+const FORGET_ORIGIN = "memory.forget"
 
 const withChat = (base: string, sessionId: string | undefined): string =>
   sessionId === undefined ? base : `${base}@${sessionId}`
@@ -68,6 +86,8 @@ const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
       }`
     case "capture":
       return withChat(CAPTURE_ORIGIN, origin.sessionId)
+    case "forget":
+      return withChat(FORGET_ORIGIN, origin.sessionId)
     case "space_page":
       return "space.page"
     case "system":
@@ -84,6 +104,9 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   if (agentChat !== null) return { kind: "agent", sessionId: agentChat }
   const captureChat = chatOf(origin, CAPTURE_ORIGIN)
   if (captureChat !== null) return { kind: "capture", replayKey: undefined, sessionId: captureChat }
+  const forgetChat = chatOf(origin, FORGET_ORIGIN)
+  if (forgetChat !== null && forgetChat !== undefined)
+    return { kind: "forget", sessionId: forgetChat }
   if (origin === "space.page") return { kind: "space_page" }
   const named = origin.startsWith(AUTOMATION_PREFIX)
     ? origin.slice(AUTOMATION_PREFIX.length).trim()
@@ -102,6 +125,8 @@ export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => 
     case "agent":
     case "automation":
       return origin.kind
+    case "forget":
+      return "user"
     case "capture":
     case "upkeep":
       return "automation"
@@ -115,6 +140,7 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
   switch (origin.kind) {
     case "agent":
     case "capture":
+    case "forget":
       return origin.sessionId
     case "user":
     case "automation":
@@ -127,6 +153,10 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
 
 const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
   wikiOriginSource(origin) === "automation"
+
+/** Whether the owner made this write: no rule about what the owner may write binds it. */
+const isOwnerOrigin = (origin: WikiCommitOrigin): boolean =>
+  origin.kind === "user" || origin.kind === "forget"
 
 export type WikiPageOperation = CommitInput["operations"][number]
 
@@ -174,7 +204,7 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
 })
 
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
-  rule: Schema.Literals(["aliases", "size", "records", "retire"] as const),
+  rule: Schema.Literals(["aliases", "size", "records", "retire", "code_owned", "retraction"] as const),
   message: Schema.String
 }) {}
 
@@ -230,20 +260,16 @@ export const commitOutsideChange = (
   options: WikiCommitIdentity & { readonly expectedRevision: string | null },
   change: AdoptableWorkingChange
 ): Effect.Effect<CommitResult, WikiCommitError> =>
-  requireCommitRules(
-    repository,
-    options.origin,
+  requireCommitRules(repository, options.origin, [
     change.kind === "changed"
-      ? [
-          {
-            _tag: "Update",
-            resourceId: change.resource.resourceId,
-            expectedVersion: change.resource.versionId,
-            content: change.content
-          }
-        ]
-      : []
-  ).pipe(
+      ? {
+          _tag: "Update",
+          resourceId: change.resource.resourceId,
+          expectedVersion: change.resource.versionId,
+          content: change.content
+        }
+      : archivePage(change.resource)
+  ]).pipe(
     Effect.andThen(
       repository.adoptWorkingChange(change, {
         actor: options.actor,
@@ -294,14 +320,13 @@ const limitRefusal = (
   const target = coreCondenseTarget(over.limit)
   return new WikiCommitRuleError({
     rule: "size",
-    message:
-      origin.kind === "user"
-        ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
-          `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
-        : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
-          `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
-          `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
-          `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
+    message: isOwnerOrigin(origin)
+      ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
+        `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
+      : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
+        `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
+        `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
+        `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
   })
 }
 
@@ -481,12 +506,94 @@ const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(
   }
 })
 
+/** Whether `operation` keeps a code-owned page where code finds it: active, at its path. */
+const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
+  origin: WikiCommitOrigin,
+  operation: WikiPageOperation,
+  before: ResourceVersion | null
+): Effect.fn.Return<boolean> {
+  switch (operation._tag) {
+    case "Create":
+      return origin.kind === "forget"
+    case "Archive":
+      return false
+    case "Update":
+    case "Move":
+    case "Restore": {
+      const path = "path" in operation ? operation.path : undefined
+      if (path !== undefined && path !== before?.path) return false
+      const content = "content" in operation ? operation.content : undefined
+      if (content === undefined) return true
+      const page = yield* parseWikiPage(decoder.decode(content)).pipe(Effect.option)
+      return Option.isNone(page) || page.value.lifecycle === "active"
+    }
+  }
+})
+
 interface CommitView {
   readonly repository: ManagedFileRepositoryShape
   readonly origin: WikiCommitOrigin
   /** Read once per commit, and only by a rule that needs it. */
   readonly folders: Effect.Effect<RecordFolders, RevisionError>
+  /** The lines the owner asked to forget; read once per commit, and only by a rule that needs them. */
+  readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
 }
+
+/**
+ * A code-owned page is written only by the owner, and stays where code finds it: only Arden's
+ * own forget makes it, and no writer moves, renames, merges or archives it.
+ */
+const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* (
+  { repository, origin }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const paths = [before?.path, "path" in operation ? operation.path : undefined]
+  const path = paths.find((candidate) => candidate !== undefined && isSystemPage(candidate))
+  if (path === undefined) return
+  if (!isOwnerOrigin(origin))
+    return yield* ruleError(
+      "code_owned",
+      `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
+    )
+  if (yield* keepsSystemPage(origin, operation, before)) return
+  return yield* ruleError(
+    "code_owned",
+    `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
+      "Nothing was saved. To let a line back, undo its entry in a chat or delete the entry from the page."
+  )
+})
+
+const pageBody = (bytes: Uint8Array): Effect.Effect<string> => {
+  const text = decoder.decode(bytes)
+  return parseWikiPage(text).pipe(
+    Effect.map((page) => page.body),
+    Effect.orElseSucceed(() => text)
+  )
+}
+
+const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function* (
+  { repository, guarded }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  if (operation._tag === "Archive") return
+  const lines = yield* guarded
+  if (lines.size === 0) return
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
+  const given = "content" in operation ? operation.content : undefined
+  const source = given ?? (operation._tag === "Restore" ? before : null)
+  if (path === undefined || isSystemPage(path) || source === null) return
+  const after = yield* pageBody(
+    source instanceof Uint8Array ? source : yield* repository.readVersion(source)
+  )
+  const had =
+    before === null || operation._tag === "Restore" || before.state !== "active"
+      ? undefined
+      : yield* pageBody(yield* repository.readVersion(before))
+  const entry = putBack(lines, had, after)
+  if (entry !== undefined) return yield* ruleError("retraction", retractionRefusal(path, entry))
+})
 
 /** Every rule on what a writer may commit, each bound to the writers it holds for. */
 const COMMIT_RULES: ReadonlyArray<{
@@ -501,7 +608,9 @@ const COMMIT_RULES: ReadonlyArray<{
   { binds: () => true, check: requireNoMoveIntoRecords },
   { binds: isAutomatedOrigin, check: requireAutomatedRecordWrite },
   { binds: isAutomatedOrigin, check: requireAutomatedRetirement },
-  { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit }
+  { binds: (origin) => !isOutsideEdit(origin), check: refuseGrowthOverLimit },
+  { binds: () => true, check: requireSystemPageKept },
+  { binds: (origin) => !isOwnerOrigin(origin), check: requireNoRetractedLine }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */
@@ -513,7 +622,8 @@ export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function*
   const view: CommitView = {
     repository,
     origin,
-    folders: yield* Effect.cached(currentRecordFolders(repository))
+    folders: yield* Effect.cached(currentRecordFolders(repository)),
+    guarded: yield* Effect.cached(openRetractions(repository).pipe(Effect.map(guardedLines)))
   }
   for (const rule of COMMIT_RULES) {
     if (!rule.binds(origin)) continue

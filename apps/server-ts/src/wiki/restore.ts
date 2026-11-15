@@ -30,6 +30,7 @@ interface WikiRestoreInput {
   readonly commitId: string
   readonly expectedVersion: string
   readonly expectedHead: string
+  readonly commit: WikiCommitIdentity
 }
 
 interface WikiRestoreRevisionInput {
@@ -54,6 +55,7 @@ interface WikiRestoreArchivedInput {
   readonly expectedVersion: string
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
+  readonly commit: WikiCommitIdentity
 }
 
 export interface WikiRestoreMethods {
@@ -148,11 +150,7 @@ export const makeWikiRestoreMethods = (
             }
           )
         }
-        const identity = {
-          actor: "user:desktop",
-          origin: { kind: "user", via: "desktop.restore" },
-          reason: `restore Maintenance commit ${input.commitId}`
-        } as const
+        const identity = input.commit
         const content = yield* requireUpdatable(spaces, snapshot, current, {
           pageId: input.pageId,
           authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
@@ -360,16 +358,9 @@ export const makeWikiRestoreMethods = (
             { pageId: input.pageId }
           )
         }
-        yield* commitWiki(
-          repository,
-          {
-            expectedRevision: input.expectedHead,
-            actor: "user:desktop",
-            origin: { kind: "user", via: "desktop" },
-            reason: "restore archived wiki page"
-          },
-          [restorePage(resource)]
-        ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+        yield* commitWiki(repository, { ...input.commit, expectedRevision: input.expectedHead }, [
+          restorePage(resource)
+        ]).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         return yield* read(input.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
         )

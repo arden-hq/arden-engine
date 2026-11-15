@@ -166,6 +166,7 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   wiki_links: "Lists one memory page's links and backlinks.",
   wiki_create_directory: "Adds a folder to memory.",
   wiki_patch_page: "Changes part of a memory page.",
+  memory_forget: "Forgets lines of your memory everywhere they appear, or undoes that.",
   wiki_archive_page: "Archives a memory page.",
   wiki_merge_page: "Merges a memory page into another.",
   wiki_move_page: "Moves or renames a memory page.",

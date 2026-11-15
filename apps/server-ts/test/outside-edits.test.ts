@@ -12,7 +12,7 @@ import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
-import { commitWiki, createPage, updatePage } from "../src/wiki/commit.js"
+import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
 import {
   makeOutsideEdits,
   MAX_MISSING_ARCHIVED,
@@ -541,7 +541,8 @@ describe("a write to a page whose file changed outside", () => {
                 content: page(pageId, "Written by Arden.\n"),
                 expectedVersion: record.resource.versionId,
                 expectedHead: pages.head,
-                authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+                commit: ownerInApp("update wiki page")
               })
               .pipe(
                 Effect.mapError(outside.explain),

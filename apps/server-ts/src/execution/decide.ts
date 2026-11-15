@@ -55,6 +55,7 @@ export type Target =
     }
   | { readonly kind: "space_control" }
   | { readonly kind: "directives" }
+  | { readonly kind: "memory_forget" }
   | { readonly kind: "chat_browse"; readonly scope: "space" | "all_spaces" }
   | {
       readonly kind: "chat"
@@ -470,6 +471,7 @@ export const boundary = (authority: RunAuthority, target: Target): BoundaryVerdi
       return firstAnswer(SPACE_WORK_RULES, { authority, target }) ?? JOB_REACH
     case "space_control":
     case "directives":
+    case "memory_forget":
       return personOnlyControl(authority)
     case "chat_browse":
       return (

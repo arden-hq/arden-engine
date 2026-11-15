@@ -14,6 +14,7 @@ import {
   validateRedirects,
   type Snapshot
 } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 const MAX_CACHED_HISTORY_IDS = 2_048
 const MAX_RANGE_COMMITS = 12
@@ -80,9 +81,13 @@ const isImportRecord = (folders: RecordFolders, path: string): boolean => {
   return kind.kind !== "knowledge" && kind.folder.producer.kind === "import"
 }
 
-/** A change upkeep reviews: to a page, and not to imported notes, which are kept as imported. */
+/**
+ * A change upkeep reviews: to a page, and not to imported notes, which are kept as imported, or to
+ * a code-owned page.
+ */
 const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean =>
-  changesPage(change) && !changedPaths(change).some((path) => isImportRecord(folders, path))
+  changesPage(change) &&
+  !changedPaths(change).some((path) => isImportRecord(folders, path) || isSystemPage(path))
 
 /** How the brief names a page upkeep may read but not change. */
 const readOnlyMark = (folders: RecordFolders, path: string): string => {
@@ -145,7 +150,7 @@ const directReferences = (
       (record) =>
         [
           record.page.pageId,
-          pageWikiLinks(record.page).map((token) => ({
+          pageWikiLinks(record).map((token) => ({
             targetPageId: resolveWikiLinkTarget(byId, names, record.page.pageId, token)
           }))
         ] as const
@@ -189,7 +194,8 @@ const reviewPages = (
     if (
       record === undefined ||
       record.page.lifecycle !== "active" ||
-      isImportRecord(folders, record.resource.path)
+      isImportRecord(folders, record.resource.path) ||
+      isSystemPage(record.resource.path)
     )
       return []
     return [record]

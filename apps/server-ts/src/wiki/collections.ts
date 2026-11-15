@@ -7,6 +7,7 @@ import { posix } from "node:path"
 
 import { isReadme, normal, wikiPageSummary, type ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
+import { isSystemPage } from "./system-pages.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
   "Purpose",
@@ -268,6 +269,7 @@ export const memoryIndex = (
         record.resource.state === "active" &&
         record.page.lifecycle === "active" &&
         record.resource.path.toLowerCase().startsWith(prefix) &&
+        !isSystemPage(record.resource.path) &&
         options.leaveOut?.(record) !== true
     )
     .map((record) => ({

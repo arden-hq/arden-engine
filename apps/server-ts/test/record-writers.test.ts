@@ -15,6 +15,7 @@ import {
   commitWiki,
   createPage,
   movePage,
+  ownerInApp,
   updatePage,
   type WikiCommitOrigin,
   type WikiPageOperation
@@ -144,23 +145,22 @@ const redirect = (path: string, to: string) =>
 
 describe("the record rules for writers, at the commit point", () => {
   it("lets only a folder's producer add a page to it, among automated writers", async () => {
-    const created = (origin: WikiCommitOrigin, path: string) => () =>
-      createPage(`id:${path}`, path, content(path, "New."))
+    const created = (path: string) => () => createPage(`id:${path}`, path, content(path, "New."))
     const outcome = await withMemory((repository) =>
       Effect.gen(function* () {
         return {
           otherAutomation: yield* write(
             repository,
             OTHER_AUTOMATION,
-            created(OTHER_AUTOMATION, "daily/2026-11-12.md")
+            created("daily/2026-11-12.md")
           ),
-          capture: yield* write(repository, CAPTURE, created(CAPTURE, "daily/2026-11-13.md")),
-          producer: yield* write(repository, PRODUCER, created(PRODUCER, "daily/2026-11-14.md")),
-          owner: yield* write(repository, OWNER, created(OWNER, "daily/2026-11-15.md")),
+          capture: yield* write(repository, CAPTURE, created("daily/2026-11-13.md")),
+          producer: yield* write(repository, PRODUCER, created("daily/2026-11-14.md")),
+          owner: yield* write(repository, OWNER, created("daily/2026-11-15.md")),
           knowledge: yield* write(
             repository,
             OTHER_AUTOMATION,
-            created(OTHER_AUTOMATION, "topics/new.md")
+            created("topics/new.md")
           )
         }
       })
@@ -329,7 +329,8 @@ describe("the record folder checks of Memory's own writes", () => {
             wiki.createDirectory({
               path,
               body: CONTRACT,
-              authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+              authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+              commit: ownerInApp("create wiki directory")
             })
           )
         return {

@@ -15,7 +15,8 @@ const WikiOperationSchema = Schema.Literals([
   "restore",
   "diff",
   "links",
-  "rename"
+  "rename",
+  "forget"
 ] as const)
 
 export type WikiOperation = typeof WikiOperationSchema.Type
@@ -78,9 +79,11 @@ const ruleReason = (
   switch (rule) {
     case "aliases":
     case "size":
+    case "retraction":
       return "invalid"
     case "records":
     case "retire":
+    case "code_owned":
       return "blocked"
   }
 }

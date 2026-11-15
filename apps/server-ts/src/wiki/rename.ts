@@ -3,10 +3,10 @@ import {
   commitWiki,
   createPage,
   movePage,
+  ownerInApp,
   requireCommitRules,
   updatePage,
-  type WikiCommitIdentity,
-  type WikiCommitOrigin
+  type WikiCommitIdentity
 } from "./commit.js"
 import type { WikiRenameApproval } from "@arden-hq/protocol/wiki"
 import { Effect, Predicate, Schema } from "effect"
@@ -40,7 +40,7 @@ import { isSpacePage } from "./space-index.js"
  * Who renames when the owner accepts in the app. A request is checked against the rules that bind
  * this writer, so a rename even the owner may not make is refused before anyone approves it.
  */
-const RENAME_ORIGIN: WikiCommitOrigin = { kind: "user", via: "desktop.rename" }
+export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
 
 const ResourceSchema = Schema.Struct({
   resourceId: Schema.NonEmptyString,
@@ -86,7 +86,7 @@ interface WikiRenameRequestInput {
 interface WikiRenameAcceptInput {
   readonly approvalId: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 export interface WikiRenameMethods {
@@ -199,7 +199,7 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
   for (const record of pages) {
     if (record.page.lifecycle !== "active") continue
     const replacements = new Map()
-    for (const token of pageWikiLinks(record.page)) {
+    for (const token of pageWikiLinks(record)) {
       if (
         token.page !== null &&
         resolveWikiLinkTarget(byId, names, record.page.pageId, token) === source.page.pageId
@@ -392,7 +392,7 @@ export const makeWikiRenameMethods = (
         pageId: input.pageId
       })
     }
-    yield* requireCommitRules(repository, RENAME_ORIGIN, [
+    yield* requireCommitRules(repository, OWNER_RENAME.origin, [
       movePage(current.resource, input.newPath)
     ]).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
     const targetNames = new Set(
@@ -546,9 +546,7 @@ export const makeWikiRenameMethods = (
       repository,
       {
         idempotencyKey: `wiki-rename:${approval.approvalId}`,
-        actor: input.commit?.actor ?? "user:desktop",
-        origin: input.commit?.origin ?? RENAME_ORIGIN,
-        reason: input.commit?.reason ?? "rename wiki page",
+        ...input.commit,
         expectedRevision: plan.baseHead
       },
       [

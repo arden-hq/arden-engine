@@ -9,6 +9,7 @@ import type { DiscussedChat } from "./discussed-in.js"
 import { corePageBudget, isStandingFactsPage } from "./core-memory.js"
 import { FIELD_WEIGHT, lexicalScore, searchTerms } from "./lexical-score.js"
 import { chatHref } from "../sessions/chat-href.js"
+import { isSystemPage } from "../wiki/system-pages.js"
 
 const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
@@ -474,7 +475,7 @@ export const prepareMemorySources = ({
   /** Each page's "Last changed" line, by page id; a page without one is shown without it. */
   readonly lastChanged: ReadonlyMap<string, string>
 }): PreparedMemorySources => {
-  const active = pages.filter(isActive)
+  const active = pages.filter((record) => isActive(record) && !isSystemPage(record.resource.path))
   const standing = active.filter(standingFacts)
   const kinds = pageKinds(active)
   const kindOf = (record: PageRecord): PageKind =>

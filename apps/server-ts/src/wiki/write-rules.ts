@@ -18,7 +18,7 @@ import { isSpacePage } from "./space-index.js"
 export interface WikiWriter {
   readonly pageId: string
   readonly authority: WikiLocationAuthority
-  readonly commit?: WikiCommitIdentity
+  readonly commit: WikiCommitIdentity
 }
 
 /** The content a page update writes, once every rule for replacing this page holds. */
@@ -46,7 +46,7 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
   spaces: SpaceStore["Service"],
   snapshot: Snapshot,
   current: PageRecord,
-  input: WikiWriter & { readonly content: string; readonly commit: WikiCommitIdentity }
+  input: WikiWriter & { readonly content: string }
 ): Effect.fn.Return<string, WikiError> {
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
   yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])

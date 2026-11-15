@@ -13,6 +13,8 @@ import { SpaceStore } from "../../persistence/spaces/store.js"
 import { SummaryStore } from "../../persistence/summaries/store.js"
 import { SessionQueries } from "../../persistence/sessions/queries.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
+import { ownerInApp } from "../../wiki/commit.js"
+import { OWNER_RENAME } from "../../wiki/rename.js"
 import { WikiError } from "../../wiki/errors.js"
 import { Wiki } from "../../wiki/service.js"
 import { ArdenApi } from "../api.js"
@@ -134,7 +136,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             content: payload.content,
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: ownerInApp("update wiki page")
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )
@@ -144,7 +147,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             pageId: params.pageId,
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: ownerInApp("archive wiki page")
           })
           .pipe(
             Effect.map((archived) => ({
@@ -163,7 +167,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             pageId: params.pageId,
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: ownerInApp("restore archived wiki page")
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )
@@ -197,7 +202,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             pageId: params.pageId,
             commitId: params.commitId,
             expectedVersion: payload.expected_version,
-            expectedHead: payload.expected_head
+            expectedHead: payload.expected_head,
+            commit: ownerInApp(`restore Maintenance commit ${params.commitId}`, "desktop.restore")
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )
@@ -303,7 +309,8 @@ export const WikiHandlers = HttpApiBuilder.group(
         wiki
           .acceptRename({
             approvalId: params.approvalId,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: OWNER_RENAME
           })
           .pipe(Effect.map(renameApproval), Effect.mapError(writeError))
       )
