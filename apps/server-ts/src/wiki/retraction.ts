@@ -64,7 +64,7 @@ export const storedRetractions = (
   }
 }
 
-const retractionsOf = (
+const readableRetractions = (
   metadata: Readonly<Record<string, Schema.Json>>
 ): Effect.Effect<ReadonlyArray<Retraction>> => {
   const { stored, entries } = storedRetractions(metadata)
@@ -91,19 +91,22 @@ export const openRetractions = Effect.fn("Wiki.openRetractions")(function* (
     yield* Effect.logWarning(`${FORGOTTEN_PAGE_PATH} does not read; no line is guarded`)
     return []
   }
-  return (yield* retractionsOf(page.value.metadata)).filter(
+  return (yield* readableRetractions(page.value.metadata)).filter(
     (entry): entry is OpenRetraction => entry.status === "open"
   )
 })
 
 const words = new Intl.Segmenter("und", { granularity: "word" })
 
-export const claimKey = (line: string): string | undefined => {
-  const found = [...words.segment(markdownWords(line).toLowerCase())].flatMap((segment) =>
+const readerWords = (line: string): ReadonlyArray<string> =>
+  [...words.segment(markdownWords(line).toLowerCase())].flatMap((segment) =>
     segment.isWordLike === true ? [segment.segment] : []
   )
-  return found.length >= MIN_CLAIM_WORDS ? found.join(" ") : undefined
-}
+
+const compareForm = (readWords: ReadonlyArray<string>): string | undefined =>
+  readWords.length >= MIN_CLAIM_WORDS ? readWords.join(" ") : undefined
+
+export const claimKey = (line: string): string | undefined => compareForm(readerWords(line))
 
 const claimKeys = (body: string): ReadonlySet<string> =>
   new Set(body.split("\n").flatMap((line) => claimKey(line) ?? []))
