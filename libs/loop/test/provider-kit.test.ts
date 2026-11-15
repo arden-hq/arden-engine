@@ -1,3 +1,4 @@
+import { errorMessage } from "@arden-hq/std/errors"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -356,9 +357,7 @@ describe("a connection that fails", () => {
     ])
     // A query is cut with everything after it: the path appended to such a base URL lands inside
     // it (the settings refuse one for that reason).
-    expect(
-      [chat, responses].map((cause) => (cause instanceof Error ? cause.message : cause))
-    ).toEqual([
+    expect([chat, responses].map((cause) => errorMessage(cause))).toEqual([
       "llama.cpp: cannot reach http://127.0.0.1:8080/v1: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)",
       "OpenAI: cannot reach http://127.0.0.1:8080/v1/responses: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)"
     ])

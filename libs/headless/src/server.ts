@@ -43,15 +43,11 @@ export class ConfiguredServerError extends Error {
   }
 }
 
+/** The server's exit code in a caller's words; any code but its own two (a crash, a signal) is a failed start. */
 const reasonOf = (code: number | null): ConfiguredServerError["reason"] => {
-  switch (code) {
-    case CONFIGURED_SERVER_EXIT.settings:
-      return "settings"
-    case CONFIGURED_SERVER_EXIT.providerUnreachable:
-      return "provider"
-    default:
-      return "start"
-  }
+  if (code === CONFIGURED_SERVER_EXIT.settings) return "settings"
+  if (code === CONFIGURED_SERVER_EXIT.providerUnreachable) return "provider"
+  return "start"
 }
 
 export interface StartConfiguredServerOptions {
