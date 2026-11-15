@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -123,18 +123,14 @@ describe("chain depth", () => {
   })
 })
 
-const sourceFiles = (dir: string): ReadonlyArray<string> =>
-  readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name)
-    return statSync(path).isDirectory() ? sourceFiles(path) : path.endsWith(".ts") ? [path] : []
-  })
-
 it("a stored run's or attempt's depth is read in SQL in one file", () => {
   const src = join(import.meta.dirname, "../src")
   expect(
-    sourceFiles(src)
-      .filter((path) => /json_extract\([^)]*chain_depth/u.test(readFileSync(path, "utf8")))
-      .map((path) => path.slice(src.length + 1))
+    readdirSync(src, { recursive: true, encoding: "utf8" })
+      .filter((path) => path.endsWith(".ts"))
+      .filter((path) =>
+        /json_extract\([^)]*chain_depth/u.test(readFileSync(join(src, path), "utf8"))
+      )
   ).toEqual(["persistence/sqlite/run-cause.ts"])
 })
 

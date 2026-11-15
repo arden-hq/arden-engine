@@ -72,11 +72,9 @@ it("a renamed Task's chats follow while they carry its old name, open or archive
       yield* ownChat("owner-named", "My own name", false)
       const [current] = yield* sql<{ readonly updated_at: string }>`
         SELECT updated_at FROM space_tasks WHERE item_id = ${task.item_id}`
-      yield* work.update(
-        { kind: "item", itemId: task.item_id },
-        current?.updated_at ?? AT,
-        { text: "Made-up Task renamed" }
-      )
+      yield* work.update({ kind: "item", itemId: task.item_id }, current?.updated_at ?? AT, {
+        text: "Made-up Task renamed"
+      })
       const [renamed] = yield* sql<{ readonly name: string }>`
         SELECT name FROM scheduled_tasks WHERE task_id = ${job}`
       const chats = yield* sql<{ readonly name: string; readonly archived: number }>`

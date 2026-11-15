@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -122,17 +122,11 @@ it("an in-chat Task step's Memory write carries the depth its step was woken at;
   ])
 })
 
-const sourceFiles = (dir: string): ReadonlyArray<string> =>
-  readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name)
-    return statSync(path).isDirectory() ? sourceFiles(path) : path.endsWith(".ts") ? [path] : []
-  })
-
 it("a chat run's Memory write origin is built in one place, which reads the run's wake depth", () => {
   const src = join(import.meta.dirname, "../src")
-  const builders = sourceFiles(src)
-    .filter((path) => /kind: "agent",\s*sessionId/u.test(readFileSync(path, "utf8")))
-    .map((path) => path.slice(src.length + 1))
+  const builders = readdirSync(src, { recursive: true, encoding: "utf8" })
+    .filter((path) => path.endsWith(".ts"))
+    .filter((path) => /kind: "agent",\s*sessionId/u.test(readFileSync(join(src, path), "utf8")))
     .sort()
   expect(builders).toEqual(["tools/wiki-identity.ts", "wiki/commit.ts"])
 })

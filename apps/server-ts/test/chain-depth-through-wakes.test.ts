@@ -273,13 +273,11 @@ it("Tidy is woken by a Memory change at any depth; an owner Automation on wiki.c
           })
           const rows = yield* sql<{ readonly task_id: string }>`
             SELECT task_id FROM automation_event_queue ORDER BY task_id`
-          return rows.map((row) =>
-            row.task_id === listener.task_id
-              ? "listener"
-              : row.task_id === wikiMaintenanceHandler.spec.automationId
-                ? "tidy"
-                : row.task_id
-          ).sort()
+          const named = new Map([
+            [listener.task_id, "listener"],
+            [wikiMaintenanceHandler.spec.automationId, "tidy"]
+          ])
+          return rows.map((row) => named.get(row.task_id) ?? row.task_id).sort()
         })
       return {
         atOne: yield* woken(null, "a".repeat(64), 0),
@@ -321,7 +319,11 @@ it("a failed Space review is retried at the depth of the wake it answered", asyn
         context: { task: { change: "changed", item_id: "made-up" } }
       })
       const runs = yield* startJobs({ [follower.task_id]: "follower" })
-      yield* spaces.update("space-1", { instructions: "Made-up instructions" }, runs.get(follower.task_id))
+      yield* spaces.update(
+        "space-1",
+        { instructions: "Made-up instructions" },
+        runs.get(follower.task_id)
+      )
       const review = (yield* claimAll("review")).find(
         (lease) => lease.payload.automationId === spaceJobId("space-1")
       )
