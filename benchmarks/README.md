@@ -36,6 +36,14 @@ account ID. The runner validates model availability, reasoning effort, and
 context limit against the account's live catalog. It does not refresh tokens;
 expired authentication requires a fresh token before a new attempt. Never copy
 the authentication file or refresh token into an image or candidate workspace.
+For OpenRouter or another Chat Completions server, set
+`provider: "chat-completions"`, its `baseUrl` (for example
+`https://openrouter.ai/api/v1`), and optionally `server` (`llama.cpp`,
+`openrouter` or `generic`) when detection should not decide; the server
+README's `chat-completions` section says what each one reads. `apiKeyEnv` is
+still required: a trial forwards only the credential the profile names. This
+route has no hosted `web_search`, so it suits the coding and memory profiles,
+not Research.
 
 The package contains built runtime files, workspace manifests, and the lockfile.
 It excludes the checkout, personal state, datasets, and credentials. Linux
@@ -347,7 +355,7 @@ is not benchmark correctness, and there is no blended five-suite score.
 
 ```bash
 python3 -m unittest discover -s benchmarks/tests -p 'test_*.py'
-node --test benchmarks/tests/candidate.test.mjs benchmarks/tests/history.test.mjs
+node --test benchmarks/tests/candidate.test.mjs benchmarks/tests/history.test.mjs benchmarks/tests/profile.test.mjs
 ```
 
 Build first (`bun run build:libs && bun run build:server`); the runner imports

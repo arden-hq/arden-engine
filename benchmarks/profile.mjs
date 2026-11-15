@@ -5,8 +5,11 @@ const positive = Schema.Int.check(Schema.isGreaterThan(0))
 const names = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique())
 export const ProfileSchema = Schema.Struct({
   name: Schema.NonEmptyString,
-  provider: Schema.optionalKey(Schema.Literals(["responses", "codex"])),
+  /** Arden's provider kind; absent is `responses`. */
+  provider: Schema.optionalKey(Schema.Literals(["responses", "codex", "chat-completions"])),
   accountIdEnv: Schema.optionalKey(Schema.NonEmptyString),
+  /** A `chat-completions` provider's server, when detection should not decide (see the server README). */
+  server: Schema.optionalKey(Schema.Literals(["llama.cpp", "openrouter", "generic"])),
   baseUrl: Schema.NonEmptyString,
   apiKeyEnv: Schema.NonEmptyString,
   model: Schema.NonEmptyString,
@@ -69,6 +72,8 @@ export async function readProfile(filename) {
   if ((profile.tools === undefined) === (profile.blockedTools === undefined))
     throw new Error("Profile needs exactly one of `tools` and `blockedTools`")
   if (profile.model === "REPLACE_WITH_MODEL_ID") throw new Error("Choose a model before running")
+  if (profile.server !== undefined && profile.provider !== "chat-completions")
+    throw new Error("`server` belongs to a chat-completions provider")
   return profile
 }
 /**
@@ -77,20 +82,40 @@ export async function readProfile(filename) {
  */
 export function modelSettings(profile) {
   return {
-    provider:
-      profile.provider === "codex"
-        ? {
-            kind: "codex",
-            accessTokenEnv: profile.apiKeyEnv,
-            ...(profile.accountIdEnv ? { accountIdEnv: profile.accountIdEnv } : {})
-          }
-        : { kind: "responses", baseUrl: profile.baseUrl, apiKeyEnv: profile.apiKeyEnv },
+    provider: providerSettings(profile),
     model: profile.model,
     ...(profile.reasoningEffort === null ? {} : { reasoningEffort: profile.reasoningEffort }),
     contextLimit: profile.contextLimit,
     ...(profile.extraModels ? { extraModels: profile.extraModels } : {})
   }
 }
+function providerSettings(profile) {
+  switch (profile.provider ?? "responses") {
+    case "codex":
+      return {
+        kind: "codex",
+        accessTokenEnv: profile.apiKeyEnv,
+        ...(profile.accountIdEnv ? { accountIdEnv: profile.accountIdEnv } : {})
+      }
+    case "chat-completions":
+      return {
+        kind: "chat-completions",
+        baseUrl: profile.baseUrl,
+        apiKeyEnv: profile.apiKeyEnv,
+        ...(profile.server ? { server: profile.server } : {})
+      }
+    case "responses":
+      return { kind: "responses", baseUrl: profile.baseUrl, apiKeyEnv: profile.apiKeyEnv }
+  }
+}
+
+/** How the model list names each provider kind before the server starts. */
+const HOSTS = {
+  responses: { id: "benchmark-responses", name: "Benchmark Responses" },
+  codex: { id: "openai-codex", name: "OpenAI Codex" },
+  "chat-completions": { id: "benchmark-chat-completions", name: "Benchmark Chat Completions" }
+}
+
 /** The model list history import writes its chats under, before the server starts. */
 export function modelHost(profile) {
   const inherit = { modelId: null, reasoningEffort: null }
@@ -99,10 +124,7 @@ export function modelHost(profile) {
       {
         id: profile.model,
         name: profile.model,
-        provider:
-          profile.provider === "codex"
-            ? { id: "openai-codex", name: "OpenAI Codex" }
-            : { id: "benchmark-responses", name: "Benchmark Responses" },
+        provider: HOSTS[profile.provider ?? "responses"],
         reasoningEfforts: profile.reasoningEffort === null ? [] : [profile.reasoningEffort],
         context: {
           hardLimit: profile.contextLimit,

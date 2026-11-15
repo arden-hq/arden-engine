@@ -10,7 +10,7 @@ const messages = JSON.parse(input)
 // Arden itself would build from the profile, and starts no server.
 const { provider } = await modelsFor(
   parseSettings({ dataDirectory: "/judge-starts-no-server", ...modelSettings(profile) }),
-  process.env
+  { env: process.env, fetch: globalThis.fetch }
 )
 let completion
 for await (const item of provider.stream({
