@@ -14,12 +14,7 @@ import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import { commitWiki } from "../src/wiki/commit.js"
-import {
-  planSpacePage,
-  spaceOwnsPath,
-  spacePageIndex,
-  spacePages
-} from "../src/wiki/space-index.js"
+import { planSpacePage, spaceOwnsPath, spacePageList, spacePages } from "../src/wiki/space-index.js"
 import { startMemoryContentSteps } from "../src/memory/content-steps.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { spaceJobId } from "../src/persistence/space-job-id.js"
@@ -97,24 +92,21 @@ describe("which pages a Space owns", () => {
   })
 
   it("lists every other page the Space owns, leaving out its own page, folder case aside", () => {
-    const index = spacePageIndex(
-      [...pages, page("areas/Garden/notes.md")],
-      { pageId: "id-areas/garden.md", pagePath: "areas/garden.md" },
-      10_000
-    )
-    expect(index.root).toBe("areas/garden")
-    expect(index.lines.map((line) => line.path).sort()).toEqual([
+    const list = spacePageList([...pages, page("areas/Garden/notes.md")], {
+      pageId: "id-areas/garden.md",
+      pagePath: "areas/garden.md"
+    })
+    expect(list.root).toBe("areas/garden")
+    expect(list.pages.map((record) => record.resource.path).sort()).toEqual([
       "areas/Garden/notes.md",
       "areas/garden/beds.md",
       "areas/garden/seeds/list.md"
     ])
-    expect(index.unlisted).toBe(0)
-    const own = spacePageIndex(
-      pages,
-      { pageId: "id-areas/kitchen/README.md", pagePath: "areas/kitchen/README.md" },
-      10_000
-    )
-    expect(own.lines.map((line) => line.path)).toEqual(["areas/kitchen/pans.md"])
+    const own = spacePageList(pages, {
+      pageId: "id-areas/kitchen/README.md",
+      pagePath: "areas/kitchen/README.md"
+    })
+    expect(own.pages.map((record) => record.resource.path)).toEqual(["areas/kitchen/pans.md"])
   })
 })
 

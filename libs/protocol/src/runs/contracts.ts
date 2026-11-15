@@ -54,7 +54,7 @@ export interface RunLocalInstructionSource extends JsonRecord {
 /**
  * How much of a Memory source reached the prompt: `passage` is the part a search matched,
  * chosen rather than cut. `cut` and `dropped` name the limit in `reason`. For the index, `cut`
- * means folders were folded, and past that, lines were left out from the end.
+ * means folders were folded to fit, and past that, lines were left out from the end.
  */
 export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
 
@@ -124,7 +124,9 @@ export interface RunMemoryRecalledSource extends RunMemoryPageFields {
 
 /**
  * The generated index of the pages under `root` ("" is all of Memory): `listed` pages had a
- * line each, and each folded folder was counted as one line of `pages`.
+ * line each, and each folded folder was counted as one line of `pages`. The Memory index folds
+ * whole the folder of a Space list the run is also sent, so no line is sent twice; that fold
+ * alone leaves it `whole`.
  */
 export interface RunMemoryIndexSource extends JsonRecord {
   readonly kind: "index"

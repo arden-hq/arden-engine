@@ -211,13 +211,15 @@ interface MemoryIndexFold {
 /**
  * The generated list of the pages under one folder: every active page has a line, falls under
  * a folded folder's line, or is `unlisted`, past the size once every folder is folded.
- * `folded` is in the order folders were folded; `text` holds the lines in path order and names
- * no count, so a page that joins or leaves a folded folder leaves the text as it was.
+ * `folded` is in the order folders were folded to fit; `elsewhere` is the folder another list
+ * the run is sent holds, folded whole. `text` holds the lines in path order and names no count,
+ * so a page that joins or leaves a folded folder leaves the text as it was.
  */
 export interface MemoryIndex {
   readonly root: string
   readonly lines: ReadonlyArray<MemoryIndexLine>
   readonly folded: ReadonlyArray<MemoryIndexFold>
+  readonly elsewhere: MemoryIndexFold | undefined
   readonly unlisted: number
   readonly text: string
   readonly bytes: number
@@ -251,14 +253,24 @@ export const memoryIndex = (
     readonly maxBytes: number
     /** Pages the caller sends another way; they are neither listed nor counted. */
     readonly leaveOut?: (record: PageRecord) => boolean
+    /** A folder whose pages another list the run is sent holds: folded whole, and counted. */
+    readonly listedElsewhere?: string | undefined
   }
 ): MemoryIndex => {
-  const prefix = options.root === "" ? "" : `${options.root}/`.toLowerCase()
-  const listed = activeRunPages(pages)
-    .filter(
-      (record) =>
-        record.resource.path.toLowerCase().startsWith(prefix) && options.leaveOut?.(record) !== true
-    )
+  const under = (folder: string) => (record: PageRecord) =>
+    folder === "" || record.resource.path.toLowerCase().startsWith(`${folder}/`.toLowerCase())
+  const inRoot = activeRunPages(pages).filter(
+    (record) => under(options.root)(record) && options.leaveOut?.(record) !== true
+  )
+  const heldElsewhere = new Set(
+    options.listedElsewhere === undefined ? [] : inRoot.filter(under(options.listedElsewhere))
+  )
+  const elsewhere =
+    options.listedElsewhere === undefined || heldElsewhere.size === 0
+      ? undefined
+      : { folder: options.listedElsewhere, pages: heldElsewhere.size }
+  const listed = inRoot
+    .filter((record) => !heldElsewhere.has(record))
     .map((record) => ({
       path: record.resource.path,
       summary: wikiPageSummary(record.page, INDEX_SUMMARY_CHARS)
@@ -273,7 +285,8 @@ export const memoryIndex = (
   const lineBytes = (lines: ReadonlyArray<MemoryIndexLine>): number =>
     lines.reduce((sum, line) => sum + byteLength(indexLine(line)) + 1, 0)
   const folded: Array<MemoryIndexFold> = []
-  let bytes = lineBytes(listed)
+  let bytes =
+    lineBytes(listed) + (elsewhere === undefined ? 0 : byteLength(foldLine(elsewhere.folder)) + 1)
   while (bytes > options.maxBytes) {
     const next = [...byFolder]
       .filter(([folder]) => !folded.some((fold) => fold.folder === folder))
@@ -300,7 +313,7 @@ export const memoryIndex = (
   })
   const entries = [
     ...lines.map((line) => ({ key: line.path, text: indexLine(line), line, fold: undefined })),
-    ...folded.map((fold) => ({
+    ...[...folded, ...(elsewhere === undefined ? [] : [elsewhere])].map((fold) => ({
       key: `${fold.folder}/`,
       text: foldLine(fold.folder),
       line: undefined,
@@ -319,6 +332,7 @@ export const memoryIndex = (
     root: options.root,
     lines: kept.flatMap((entry) => (entry.line === undefined ? [] : [entry.line])),
     folded: folded.filter((fold) => kept.some((entry) => entry.fold === fold)),
+    elsewhere: kept.some((entry) => entry.fold === elsewhere) ? elsewhere : undefined,
     unlisted: entries
       .slice(shown)
       .reduce((sum, entry) => sum + (entry.fold === undefined ? 1 : entry.fold.pages), 0),

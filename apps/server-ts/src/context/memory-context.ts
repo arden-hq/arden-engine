@@ -51,7 +51,7 @@ export const MEMORY_BUDGET = {
   standingFrame: 1_000,
   index: 10_000,
   space: 10_000,
-  spacePages: 2_000,
+  spacePageList: 2_000,
   spaceInstructions: 4_000,
   spacePage: 4_000,
   recall: 7_000
@@ -62,7 +62,7 @@ export const MEMORY_BLOCK_MAX_BYTES =
   MEMORY_BUDGET.standingFrame +
   MEMORY_BUDGET.index +
   MEMORY_BUDGET.space +
-  MEMORY_BUDGET.spacePages +
+  MEMORY_BUDGET.spacePageList +
   MEMORY_BUDGET.recall
 
 /** A Space's view, and its Memory page at the version read, when it has one. */
@@ -104,8 +104,9 @@ export const assembleMemoryContext = ({
   readonly query: string
 }): MemoryContext => {
   const standing = sources?.standing(MEMORY_BUDGET.standingPage) ?? none
-  const index = sources?.index(MEMORY_BUDGET.index) ?? none
   const spaced = space === undefined ? undefined : renderSpace(space)
+  const index =
+    sources?.index({ maxBytes: MEMORY_BUDGET.index, listedElsewhere: spaced?.listRoot }) ?? none
   const recall = sources?.recall?.(MEMORY_BUDGET.recall)
   return {
     core: textSection("Core Memory", standing.text),
@@ -133,41 +134,35 @@ const none: RenderedMemory = { text: undefined, sources: [] }
 
 const renderSpace = (
   space: SpaceMemoryInput
-): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
+): {
+  readonly text: string
+  readonly sources: ReadonlyArray<RunMemorySource>
+  /** The folder whose pages the Space context lists, when it lists any. */
+  readonly listRoot: string | undefined
+} => {
   const rendered = renderSpaceContext(space.view, {
     maxBytes: MEMORY_BUDGET.space,
     instructionsBytes: MEMORY_BUDGET.spaceInstructions,
     pageBytes: MEMORY_BUDGET.spacePage,
-    pagesBytes: MEMORY_BUDGET.spacePages
+    pageListBytes: MEMORY_BUDGET.spacePageList
   })
-  const list = rendered.list
-  const listBytes = list === undefined ? 0 : byteLength(list.text)
+  const list = rendered.list?.sources ?? []
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
     page_id: space.page?.pageId ?? null,
     version: space.page?.version ?? null,
-    bytes: byteLength(rendered.text) - (list === undefined ? 0 : listBytes + 2)
+    bytes:
+      byteLength(rendered.text) -
+      list.reduce((sum, source) => sum + source.bytes + byteLength("\n\n"), 0)
   }
   const source: RunMemorySource =
     rendered.page === "cut" || rendered.page === "dropped"
       ? { ...identity, outcome: rendered.page, reason: "space_page_allowance" }
       : { ...identity, outcome: "whole", reason: null }
-  if (list === undefined) return { text: rendered.text, sources: [source] }
-  const index = {
-    kind: "index" as const,
-    root: list.index.root,
-    listed: list.index.lines.length,
-    folded: list.index.folded,
-    bytes: listBytes
-  }
   return {
     text: rendered.text,
-    sources: [
-      source,
-      list.index.folded.length === 0 && list.index.unlisted === 0
-        ? { ...index, outcome: "whole", reason: null }
-        : { ...index, outcome: "cut", reason: "index_allowance" }
-    ]
+    sources: [source, ...list],
+    listRoot: list.find((listed) => listed.kind === "index")?.root
   }
 }

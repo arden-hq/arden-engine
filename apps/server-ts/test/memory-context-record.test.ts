@@ -16,6 +16,7 @@ import {
   type TurnContextServices
 } from "../src/context/turn-context.js"
 import { unrecordedAuthority, type Actor, type RunAuthority } from "../src/execution/authority.js"
+import { renderIndex } from "../src/memory/index-render.js"
 import { prepareMemorySources, recallCandidates, recallQuery } from "../src/memory/retrieval.js"
 import type { Memory, MemoryTurn } from "../src/memory/service.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
@@ -29,7 +30,6 @@ import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import type { Wiki } from "../src/wiki/service.js"
-import { spacePageIndex } from "../src/wiki/space-index.js"
 import type { CliTools } from "../src/cli-tools/service.js"
 import type { FocusChoiceStore } from "../src/persistence/focus-choices/store.js"
 import type { AnswerBlockStore } from "../src/persistence/answer-blocks/store.js"
@@ -161,7 +161,7 @@ const compose = async ({
         version: spacePage.resource.versionId,
         content: spaceBody
       }),
-    spaceIndex: (space) => (maxBytes) => spacePageIndex(pages, space, maxBytes),
+    spaceList: (space) => (maxBytes) => renderIndex(pages, { kind: "space", space }, maxBytes),
     sources: (input) =>
       Effect.sync(() => {
         if (input.recall !== undefined) searches.push(input.recall.query)
@@ -367,6 +367,35 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     expect((space?.bytes ?? 0) + (list?.bytes ?? 0) + 2).toBe(bytes(text ?? ""))
   })
 
+  it("folds the Space's folder in the Memory index when the Space list is sent, so no line is sent twice", async () => {
+    const beds = page("spaces/garden/beds.md", "Beds", "Raised beds.")
+    const seeds = page("spaces/garden/seeds/list.md", "Seeds", "Seed list.")
+    const pages = [...PAGES, beds, seeds]
+    const lines = (text: string | undefined) =>
+      new Set((text ?? "").split("\n").filter((line) => line.startsWith("- ")))
+    const owner = await compose({ actor: person, spaceId: "space-1", pages })
+    const index = owner.sections.find((section) => section.key === "Memory index")?.text
+    const space = owner.sections.find((section) => section.key === "Current Space")?.text
+    expect([...lines(index)].filter((line) => lines(space).has(line))).toEqual([])
+    expect(index).toContain("- spaces/garden/ (folded)")
+    expect(index).not.toContain("spaces/garden/beds.md")
+    expect(
+      owner.writes[0]?.sources.find((source) => source.kind === "index" && source.root === "")
+    ).toMatchObject({
+      folded: [{ folder: "spaces/garden", pages: 2 }],
+      outcome: "whole",
+      reason: null
+    })
+    const worker = await compose({
+      actor: { kind: "task_worker", item_id: "t", space_id: "space-1" },
+      spaceId: "space-1",
+      pages
+    })
+    const workerIndex = worker.sections.find((section) => section.key === "Memory index")?.text
+    expect(workerIndex).toContain("- spaces/garden/beds.md")
+    expect(workerIndex).not.toContain("(folded)")
+  })
+
   it("folds a long list of the Space's pages in its own allowance, with a notice", async () => {
     const many = Array.from({ length: 120 }, (_, index) =>
       page(`spaces/garden/beds/bed-${index}.md`, `Bed ${index}`, "A raised bed in the garden.")
@@ -379,7 +408,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     })
     const text = composed.sections.find((section) => section.key === "Current Space")?.text ?? ""
     expect(text).toContain("spaces/garden/beds/ (folded)")
-    expect(text).toContain("[Folded to fit")
+    expect(text).toContain("[Folded: a folder marked folded")
     const record = composed.writes[0]?.sources ?? []
     expect(record.find((source) => source.kind === "index" && source.root !== "")).toMatchObject({
       root: "spaces/garden",
@@ -388,7 +417,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "cut",
       reason: "index_allowance"
     })
-    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePages)
+    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePageList)
     expect(record.find((source) => source.kind === "space")).toEqual(
       plain.writes[0]?.sources.find((source) => source.kind === "space")
     )
@@ -612,7 +641,7 @@ describe("each source in its own allowance", () => {
     })
     expect(index?.bytes).toBeLessThanOrEqual(10_000)
     expect(text).toContain("- daily/ (folded)")
-    expect(text).toContain("[Folded to fit: a folder marked folded is not listed page by page")
+    expect(text).toContain("[Folded: a folder marked folded is not listed page by page")
     expect(text).not.toContain("250")
   })
 
@@ -654,6 +683,7 @@ describe("one owner for each limit and rule", () => {
     expect(
       offenders(/"(Core Memory|Memory recall|Memory index|Current Space)"[^\n]*\)/u, [
         "context/memory-context.ts",
+        "memory/index-render.ts",
         "memory/retrieval.ts"
       ])
     ).toEqual([])
@@ -664,6 +694,15 @@ describe("one owner for each limit and rule", () => {
       offenders(/\.(index|recall)\??\.?\(\s*[\d_A-Z]/u, ["context/memory-context.ts"])
     ).toEqual([])
     expect(files.filter((file) => file.endsWith("continuity-budget.ts"))).toEqual([])
+  })
+
+  it("renders every generated page list, the Memory index and a Space's, in one renderer", () => {
+    expect(
+      offenders(/\bmemoryIndex\(/u, ["memory/index-render.ts", "wiki/collections.ts"])
+    ).toEqual([])
+    expect(offenders(/\[(Folded|Cut to fit: the last lines)/u, ["memory/index-render.ts"])).toEqual(
+      []
+    )
   })
 
   it("only core-memory.ts names the standing-facts pages", () => {

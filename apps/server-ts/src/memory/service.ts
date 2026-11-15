@@ -9,13 +9,17 @@ import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { lastChangedLines } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import type { PageTimes } from "../wiki/timestamps.js"
-import type { MemoryIndex } from "../wiki/collections.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
-import { spacePageIndex } from "../wiki/space-index.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { prepareMemorySources, recallCandidates, type MemorySources } from "./retrieval.js"
+import { renderIndex } from "./index-render.js"
+import {
+  prepareMemorySources,
+  recallCandidates,
+  type MemorySources,
+  type RenderedMemory
+} from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -32,10 +36,10 @@ export interface MemoryTurn {
   readonly revision: string | null
   readonly readContent: (pageId: string) => ReturnType<typeof readSnapshotContent>
   /** The generated list of a Space's pages besides its own, in at most `maxBytes`. */
-  readonly spaceIndex: (space: {
+  readonly spaceList: (space: {
     readonly pageId: string
     readonly pagePath: string
-  }) => (maxBytes: number) => MemoryIndex
+  }) => (maxBytes: number) => RenderedMemory
   /** What this run may be sent from Memory: standing facts, the index and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
@@ -143,7 +147,8 @@ export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
   return {
     revision: current.head,
     readContent: (pageId) => readSnapshotContent(current, pageId),
-    spaceIndex: (space) => (maxBytes) => spacePageIndex(current.pages, space, maxBytes),
+    spaceList: (space) => (maxBytes) =>
+      renderIndex(current.pages, { kind: "space", space }, maxBytes),
     sources: (input) => sources(services, input, current)
   } satisfies MemoryTurn
 })

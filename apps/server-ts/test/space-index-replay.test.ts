@@ -4,14 +4,14 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 
 import { SpaceStore, type SpaceBinding } from "../src/persistence/spaces/store.js"
+import { memoryIndex } from "../src/wiki/collections.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import {
   bindingOwnsPath,
   planSpacePage,
   spaceOwnsWikiPath,
-  spacePageIndex,
-  spacePages
+  spacePageList
 } from "../src/wiki/space-index.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 
@@ -75,8 +75,12 @@ it("replays which pages each Space owns, and which Spaces get a page, on the cop
         const page = live.find((record) => record.page.pageId === space.page_id)
         if (page === undefined) return []
         const ref = { pageId: page.page.pageId, pagePath: page.resource.path }
-        const whole = spacePageIndex(live, ref, Number.MAX_SAFE_INTEGER)
-        return [{ pages: spacePages(live, ref).length - 1, bytes: whole.bytes }]
+        const list = spacePageList(live, ref)
+        const whole = memoryIndex(list.pages, {
+          root: list.root,
+          maxBytes: Number.MAX_SAFE_INTEGER
+        })
+        return [{ pages: list.pages.length, bytes: whole.bytes }]
       })
       return {
         active: active.length,

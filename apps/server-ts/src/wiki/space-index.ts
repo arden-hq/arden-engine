@@ -3,7 +3,6 @@ import { Effect } from "effect"
 import { posix } from "node:path"
 
 import type { SpaceBinding, SpacePageBinding, SpaceStore } from "../persistence/spaces/store.js"
-import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
 import { activeRunPages, type RunPage } from "./snapshot.js"
@@ -67,17 +66,14 @@ export const spacePages = (
 ): ReadonlyArray<RunPage> =>
   activeRunPages(pages).filter((record) => spaceOwnsPath(space.pagePath, record.resource.path))
 
-/** The generated list of the pages a Space owns besides its own page, in at most `maxBytes`. */
-export const spacePageIndex = (
+/** What a Space's list of its other pages holds: the pages under the folder it heads, but its own. */
+export const spacePageList = (
   pages: ReadonlyArray<RunPage>,
-  space: SpacePageBinding,
-  maxBytes: number
-): MemoryIndex =>
-  memoryIndex(spacePages(pages, space), {
-    root: spaceFolder(space.pagePath),
-    maxBytes,
-    leaveOut: (record) => record.page.pageId === space.pageId
-  })
+  space: SpacePageBinding
+): { readonly root: string; readonly pages: ReadonlyArray<RunPage> } => ({
+  root: spaceFolder(space.pagePath),
+  pages: spacePages(pages, space).filter((record) => record.page.pageId !== space.pageId)
+})
 
 export type SpacePagePlan =
   | ({ readonly kind: "keep" } & SpacePageBinding)
