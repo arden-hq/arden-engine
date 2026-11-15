@@ -69,6 +69,8 @@ A provider can emit `OutputItemReady` for each complete part of the answer. The 
 
 If a transport retry happens after saved output, the loop does not replay it. The turn ends at the saved parts. The loop emits `ModelResponseReset`. The next step continues from their tool results.
 
+A call announced while streaming that the final answer does not contain (the output limit cut it off) is retracted with a `ModelResponseReset` that names only that call, on every wire.
+
 ## Background tools and steering
 
 Every tool call has a foreground budget. It is `foregroundBudgetMs` of execution time. The default is 10000. `Infinity` turns it off. The time counts from when the effect starts. Waiting for a permit, a lock or an approval does not count.

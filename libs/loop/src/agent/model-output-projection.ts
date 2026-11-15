@@ -88,6 +88,29 @@ export class ModelOutputProjection {
     })
   }
 
+  /**
+   * Forgets the streamed tool-call parts of `ids` (calls the final answer
+   * dropped), keeping every later part's index, and the text ids keyed by
+   * it, in step.
+   */
+  dropToolCalls(ids: ReadonlySet<string>): void {
+    const moved = new Map<number, number>()
+    const kept = this.parts.filter((part, index) => {
+      if (part.type === "tool_call" && ids.has(part.tool_call_id)) return false
+      moved.set(index, moved.size)
+      return true
+    })
+    this.parts = kept
+    const textIds = [...this.textMessageIdsByPartIndex]
+    this.textMessageIdsByPartIndex.clear()
+    for (const [index, id] of textIds) {
+      const to = moved.get(index)
+      if (to !== undefined) this.textMessageIdsByPartIndex.set(to, id)
+    }
+    const open = this.open
+    if (open?.partIndex !== undefined) this.open = { ...open, partIndex: moved.get(open.partIndex) }
+  }
+
   async completePart(part: ReadablePart, index: number): Promise<void> {
     const streamed = this.parts[index]
     if (streamed !== undefined) {

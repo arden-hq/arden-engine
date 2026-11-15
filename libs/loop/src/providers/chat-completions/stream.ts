@@ -229,14 +229,17 @@ export const makeChunkMapper = (options: {
   const terminal = (): ReadonlyArray<ModelStreamItem> => {
     const reason = finishReason(finish ?? "stop", options.label)
     const kept = [...calls].flatMap(([index, call]) => {
+      // A call the output limit cut off (before its name, or with arguments
+      // that are not JSON yet) never runs; the loop retracts it if it was
+      // announced. Every other finish hands the arguments on as written: the
+      // loop answers malformed ones with a correction the model can act on.
+      if (reason === "length" && (call.name === undefined || !isCompleteJson(call.arguments)))
+        return []
       if (call.name === undefined)
         throw new SemanticResponseError(`${options.label} returned a tool call without a name`)
-      // A call the output limit cut off has arguments that are not JSON yet;
-      // it never runs. Every other finish hands the arguments on as written:
-      // the loop answers malformed ones with a correction the model can act on.
-      return reason === "length" && !isCompleteJson(call.arguments)
-        ? []
-        : [{ index, id: call.id, name: call.name, arguments: call.arguments, search: call.search }]
+      return [
+        { index, id: call.id, name: call.name, arguments: call.arguments, search: call.search }
+      ]
     })
     const runtime = kept.filter((call) => !call.search)
     const toolCalls = runtime.map((call): ToolCall => ({

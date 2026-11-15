@@ -148,6 +148,49 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
     })
   }
 
+  /**
+   * Retracts every call that was announced while streaming but is not in the
+   * final answer, so no call stays shown as started forever. An adapter drops
+   * a call the output limit cut off (Responses on `max_output_tokens`, Chat
+   * Completions on `length`); this is the one place that tells the host, for
+   * both, with a `ModelResponseReset` naming only those calls.
+   */
+  const retractDroppedCalls = async (message: CompletionResponse["message"]): Promise<void> => {
+    const final = new Set([
+      ...(message.tool_calls ?? []).map((call) => call.id),
+      ...(message.provider_tool_calls ?? []).map((call) => call.id),
+      ...readyCalls.persistedIds,
+      ...readyCalls.providerCalls.keys()
+    ])
+    const dropped = new Set(
+      [...streamedToolInputIds, ...streamedProviderToolIds].filter((id) => !final.has(id))
+    )
+    if (dropped.size === 0) return
+    await input.emit({
+      _tag: "ModelResponseReset",
+      depth: 0,
+      parent_id: null,
+      message_ids: [],
+      tool_call_ids: [...dropped].sort()
+    })
+    projection.dropToolCalls(dropped)
+    streamedToolInputIds = new Set([...streamedToolInputIds].filter((id) => !dropped.has(id)))
+    streamedProviderToolIds = new Set([...streamedProviderToolIds].filter((id) => !dropped.has(id)))
+    streamedToolInputs = new Map(
+      [...streamedToolInputs].filter(
+        ([, state]) => state.toolId === null || !dropped.has(state.toolId)
+      )
+    )
+    toolStarts = new Map(
+      [...toolStarts].filter(
+        ([key]) =>
+          ![...dropped].some(
+            (id) => key === startKey("runtime", id) || key === startKey("provider", id)
+          )
+      )
+    )
+  }
+
   const toolInput = (index: number): StreamedToolInput => {
     const existing = streamedToolInputs.get(index)
     if (existing !== undefined) return existing
@@ -480,6 +523,7 @@ export const runModelTurn = async (input: ModelTurnInput): Promise<ModelTurnOutp
   }
 
   readyCalls.validate(validResponse.message)
+  await retractDroppedCalls(validResponse.message)
   const message = validResponse.message
   const canonicalOutputParts =
     message.output_parts ?? fallbackOutputParts(validResponse, projection.parts)
