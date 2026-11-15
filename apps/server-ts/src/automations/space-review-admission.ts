@@ -11,10 +11,7 @@ import { UNFINISHED_TASK_STATUSES } from "../persistence/sqlite/task-status-sql.
  * - `mail`: a routed mail or GitHub item new since the last review.
  * - `memory_page`: a page the review reads for this Space changed, or a source left it.
  *   Resident pages (`me.md`, `readme.md`, `profile.md`) are context for every Space, not this one's.
- *   It is named so the verdict can say `nothing_to_act_on` rather than `unchanged`, but it never
- *   starts a review: Memory already holds what was saved, so a review woken by a page alone
- *   could only repeat it on a Task. A review that starts for another change still reads the
- *   changed pages.
+ *   It never starts a review; a page-only verdict is `nothing_to_act_on`.
  * - `task`: a Task of the Space was added, removed or changed in any field.
  * - `space_settings`: the Space instructions or inference policy changed, or there is no
  *   earlier review to compare with.
@@ -32,10 +29,9 @@ export type ReviewHold = "nothing" | "unfinished_tasks" | "open_offers"
 /**
  * Whether a review starts for one change while the Space holds one thing. A review starts
  * when any cell it is in says so. With nothing held a review can only offer new work, and an
- * offer needs a chat turn, a mail item or new Space settings behind it: a Task change alone
- * gives it nothing to comment on, ask about or retire. A Memory page change alone starts
- * nothing whatever the Space holds (the owner's decision of 2026-11-15), so nothing queues a
- * review when Memory is saved either.
+ * offer needs a chat turn, a mail item or new Space settings behind it: a page or Task change
+ * alone gives it nothing to comment on, ask about or retire. A page change alone starts nothing
+ * whatever the Space holds.
  */
 const STARTS: Record<ReviewChange, Record<ReviewHold, boolean>> = {
   chat_turn: { nothing: true, unfinished_tasks: true, open_offers: true },

@@ -3,6 +3,18 @@ import { Schema } from "effect"
 import { RUNS_ALONE } from "./event-batch.js"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
+/** The Task fields a Space review compares with its checkpoint, in checkpoint order. */
+export const REVIEWED_TASK_FIELDS = [
+  "text",
+  "body",
+  "status",
+  "owner",
+  "blocked",
+  "waiting_on",
+  "due_at",
+  "next_attempt_at"
+] as const
+
 const SummarySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(500)).pipe(
   Schema.annotateEncoded({
     description: "What this review did, in one or two sentences (up to 500 characters)."

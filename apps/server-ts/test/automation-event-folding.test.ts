@@ -162,9 +162,8 @@ it("a run asked for by hand folds no event deeper than itself", async () => {
   )
 })
 
-/** Makes a listener a Space's review job, which batches what waits for it in a window, then
- * runs. No Space review listens to events, so the events are queued while it is still a
- * listener; the fold rule at claim is the same for whatever waits in a review's queue. */
+/** Makes a listener a Space's review job. No review listens to events, so a test queues them
+ * while the job is still a listener. */
 const asReview = (automation: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient

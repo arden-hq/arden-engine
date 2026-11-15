@@ -317,15 +317,16 @@ export const makeSpaceJobSql = (
     })
   })
 
-  /** The wake for a change to the Space itself: its settings, its Memory page binding, or a
-   * restore, each by the owner's hand in the app. */
-  const queueSpaceWake = Effect.fn("SpaceJobSql.queueSpaceWake")(function* (
+  /** Queues a review wake only when the review can run; touches no Task worker job. */
+  const queueReviewWake = Effect.fn("SpaceJobSql.queueReviewWake")(function* (
     spaceId: string,
     now: string
   ) {
-    const state = yield* syncSpace(spaceId, now)
-    if (!state?.enabled) return
-    yield* queue(state, {
+    const space = yield* readJobSpace(sql, spaceId)
+    if (space === null || !jobEnabled(space)) return false
+    const state = yield* syncSpaceReview(spaceId, now)
+    if (state === null) return false
+    return yield* queue(state, {
       source: "event",
       queued_at: now,
       event_type: "space.wake",
@@ -335,10 +336,16 @@ export const makeSpaceJobSql = (
     })
   })
 
-  /** The wake for a change the owner made by hand to one of the Space's Tasks, with no run
-   * behind it. No run's Task change wakes a review: the owner's chat turn wakes it as a chat
-   * turn, and every other run's change is context the next review reads in its checkpoint diff.
-   * A burst folds into the one waiting wake and its batch window. */
+  /** A change to the Space itself: its settings, its Memory page binding, or a restore. */
+  const queueSpaceWake = Effect.fn("SpaceJobSql.queueSpaceWake")(function* (
+    spaceId: string,
+    now: string
+  ) {
+    yield* syncSpace(spaceId, now)
+    yield* queueReviewWake(spaceId, now)
+  })
+
+  /** A change to a Task's reviewed fields made by hand, with no run behind it. */
   const queueTaskChangedByHand = Effect.fn("SpaceJobSql.queueTaskChangedByHand")(function* (
     itemId: string,
     now: string
@@ -346,17 +353,7 @@ export const makeSpaceJobSql = (
     const tasks = yield* sql<{ readonly space_id: string | null }>`
       SELECT space_id FROM space_tasks WHERE item_id = ${itemId}`
     const spaceId = tasks[0]?.space_id ?? undefined
-    if (spaceId === undefined) return false
-    const state = yield* syncSpace(spaceId, now)
-    if (!state?.enabled) return false
-    return yield* queue(state, {
-      source: "event",
-      queued_at: now,
-      event_type: "task.changed",
-      event_key: `${itemId}@${now}`,
-      produced_by: null,
-      context: { space_id: spaceId, item_id: itemId }
-    })
+    return spaceId === undefined ? false : yield* queueReviewWake(spaceId, now)
   })
 
   const retryReview = Effect.fn("SpaceJobSql.retryReview")(function* (

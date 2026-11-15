@@ -151,10 +151,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
         unwokenPagesOnly: 777
       })
       expect(taskAlone).toEqual({ acted: 6, notActed: 28 })
-      // Every review that acted and would not start was woken by Memory pages alone. One offered
-      // work in a Space that held nothing, and the owner rejected it; the rest wrote Task
-      // comments or questions repeating what Memory had just saved, which the owner decided
-      // (2026-11-15) a page change alone should no longer start.
+      // Every review that acted and does not start changed Memory pages alone.
       expect(Object.fromEntries(actedSkipped)).toEqual({
         "nothing_to_act_on: changed memory_page; holds unfinished_tasks": 50,
         "nothing_to_act_on: changed memory_page; holds nothing": 1

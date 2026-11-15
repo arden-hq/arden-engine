@@ -27,6 +27,7 @@ import { taskJobId } from "../space-job-id.js"
 import { renameOwnedJob } from "./job-labels.js"
 import { WorkStore, WorkStoreError, type TaskAddress } from "../work/store.js"
 import { spaceChoices } from "../spaces/store.js"
+import { REVIEWED_TASK_FIELDS } from "../automations/space-review.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import {
   decodeWorkItem as decodeWorkItemWithSources,
@@ -481,7 +482,11 @@ export const makeWorkStore = ({
             )
           }
 
-          if (publicChanged && runId === undefined && actor === "user")
+          if (
+            runId === undefined &&
+            actor === "user" &&
+            REVIEWED_TASK_FIELDS.some((field) => row[field] !== updatedRow[field])
+          )
             yield* spaceJobs.queueTaskChangedByHand(updatedRow.item_id, updatedAt)
           yield* recordVersions
           if (spent.length === 0) return yield* decodeWorkItem(updatedRow)

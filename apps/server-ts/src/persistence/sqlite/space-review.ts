@@ -9,6 +9,7 @@ import {
   askedByOwner,
   canonicalDisposition,
   canonicalProposalId,
+  REVIEWED_TASK_FIELDS,
   SpaceReviewDispositionSchema,
   SpaceReviewInputSchema,
   type SpaceReviewItem
@@ -26,6 +27,8 @@ import { userChatSql } from "./chat-ownership.js"
 import { queuedEventType } from "./automation-listening.js"
 import { RUNS_ALONE } from "../automations/event-batch.js"
 import { keyMessageJson } from "./chat-key-message.js"
+
+const REVIEWED_TASK_COLUMNS = REVIEWED_TASK_FIELDS.map((field) => `'${field}', ${field}`).join(", ")
 
 const ITEM_REVIEW_DAYS = 14
 const ITEM_REVIEW_LIMIT = 20
@@ -343,9 +346,7 @@ export const makeSpaceReviewStore = ({
           AND json_extract(source, '$.kind') = 'memory' ORDER BY page_ref`
           const tasks = yield* sql<{
             readonly semantic: string
-          }>`SELECT json_object('item_id', item_id, 'text', text,
-        'body', body, 'status', status, 'owner', owner, 'blocked', blocked, 'waiting_on', waiting_on,
-        'due_at', due_at, 'next_attempt_at', next_attempt_at) AS semantic
+          }>`SELECT json_object('item_id', item_id, ${sql.literal(REVIEWED_TASK_COLUMNS)}) AS semantic
         FROM space_tasks WHERE space_id = ${current.space_id} ORDER BY item_id`
           const chats = yield* sql<{
             readonly sessionId: string

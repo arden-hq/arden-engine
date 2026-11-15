@@ -464,10 +464,22 @@ it("offers from the finished owner turn that started the Space review", async ()
         })),
         inferenceSnapshot: (yield* readInferenceReview(read, "space-1")).snapshot
       })
-      return { input, offer }
+      // The owner accepting the offer by hand is a Task change made by hand: it wakes the review.
+      yield* sql`UPDATE spaces SET page_id = 'page-1', page_path = 'projects/made-up.md'
+        WHERE space_id = 'space-1'`
+      yield* proposals.resolve(
+        offer.proposal_id,
+        { expected_revision: offer.revision, client_id: "accept-1", decision: "accept" },
+        { memory: [] }
+      )
+      const wakes = yield* sql<{ readonly event_type: string }>`
+        SELECT json_extract(context, '$.trigger_context_snapshot.event_type') AS event_type
+        FROM automation_event_queue WHERE task_id = 'space:space-1'`
+      return { input, offer, wakes: wakes.map((wake) => wake.event_type) }
     })
   )
   expect(outcome.input.admission).toBe("changed")
   expect(outcome.input.reads.chats.map((chat) => chat.turnId)).toEqual(["turn-1"])
   expect(outcome.offer).toMatchObject({ place: "space", status: "offered" })
+  expect(outcome.wakes).toEqual(["space.wake"])
 })

@@ -15,8 +15,8 @@ import { WorkStore } from "../src/persistence/work/store.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Which change wakes a Space review, from the source of each change. Memory pages alone start
-// nothing, so a Memory save queues nothing; a Task change, Space settings and page binding wake.
+// Which change wakes a Space review: a Memory save never; Space settings, page binding and a
+// Task change made by hand do.
 
 const REVISION = "a".repeat(64)
 const AT = "2026-11-01T00:00:00.000Z"
@@ -248,13 +248,15 @@ it("only a Task change made by hand wakes the Space review; no run's change does
       })
       const resultRun = yield* startChat(yield* chat(), "result", { isMeta: true })
       yield* clearQueue(sql)
-      const edit = (itemId: string, text: string, runId?: string) =>
+      const edit = (itemId: string, text: string, runId?: string, actor?: "user") =>
         Effect.gen(function* () {
           yield* work.update(
             { kind: "item", itemId },
             yield* updatedAt(sql, itemId),
             { text },
-            runId
+            runId,
+            runId === undefined ? undefined : `${runId}-call`,
+            actor
           )
           return yield* reviewRows(sql, "space-1")
         })
@@ -262,6 +264,8 @@ it("only a Task change made by hand wakes the Space review; no run's change does
         review: yield* edit(background.item_id, "By the review", reviewRun),
         worker: yield* edit(background.item_id, "By the worker", workerRun),
         ownerTurn: yield* edit(background.item_id, "By the owner's turn", ownerRun),
+        // A run acting for the user, as a token budget card the owner approved does.
+        actingForUser: yield* edit(background.item_id, "For the user", ownerRun, "user"),
         taskStep: yield* edit(inChat.item_id, "By the Task step", stepRun),
         result: yield* edit(background.item_id, "By a result delivered", resultRun)
       }
@@ -273,13 +277,14 @@ it("only a Task change made by hand wakes the Space review; no run's change does
     review: [],
     worker: [],
     ownerTurn: [],
+    actingForUser: [],
     taskStep: [],
     result: []
   })
-  expect(outcome.byHand).toEqual([{ causes: ["task.changed"], batched: true }])
+  expect(outcome.byHand).toEqual([{ causes: ["space.wake"], batched: true }])
 })
 
-it("the owner's own Task changes fold into one batched wake; attaching a file wakes nothing", async () => {
+it("the owner's own Task changes fold into one batched wake; a field the check does not compare wakes nothing", async () => {
   const rows = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -292,23 +297,54 @@ it("the owner's own Task changes fold into one batched wake; attaching a file wa
         { key: "a", text: "A" }
       )
       const address = { kind: "item", itemId: task.item_id } as const
+      const created = yield* reviewRows(sql, "space-1")
       yield* clearQueue(sql)
-      // A file is not part of what the check compares, so attaching one wakes nothing.
       yield* work.createAttachment(address, {
         name: "made-up.txt",
         media_type: "text/plain",
         data: new TextEncoder().encode("made-up")
       })
-      const attached = yield* reviewRows(sql, "space-1")
+      yield* work.update(address, yield* updatedAt(sql, task.item_id), { token_budget: 5000 })
+      const uncompared = yield* reviewRows(sql, "space-1")
       yield* work.update(address, yield* updatedAt(sql, task.item_id), { text: "Edited" })
       yield* work.stop(address, yield* updatedAt(sql, task.item_id))
-      return { attached, edited: yield* reviewRows(sql, "space-1") }
+      return { created, uncompared, edited: yield* reviewRows(sql, "space-1") }
     })
   )
   expect(rows).toEqual({
-    attached: [],
-    edited: [{ causes: ["task.changed", "task.changed"], batched: true }]
+    created: [{ causes: ["space.wake"], batched: true }],
+    uncompared: [],
+    edited: [{ causes: ["space.wake", "space.wake"], batched: true }]
   })
+})
+
+it("a Task change made by hand touches no other Task's worker job", async () => {
+  const enabled = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const work = yield* WorkStore
+      yield* space(sql, "space-1", true)
+      yield* (yield* SpaceStore).bindPage("space-1", "page-1", "projects/made-up-space.md")
+      const held = yield* work.create(
+        { kind: "space", spaceId: "space-1" },
+        { key: "a", text: "A" }
+      )
+      const edited = yield* work.create(
+        { kind: "space", spaceId: "space-1" },
+        { key: "b", text: "B" }
+      )
+      yield* sql`UPDATE scheduled_tasks SET enabled = 0 WHERE owner_task_id = ${held.item_id}`
+      yield* work.update(
+        { kind: "item", itemId: edited.item_id },
+        yield* updatedAt(sql, edited.item_id),
+        { text: "Edited" }
+      )
+      const [job] = yield* sql<{ readonly enabled: number }>`
+        SELECT enabled FROM scheduled_tasks WHERE owner_task_id = ${held.item_id}`
+      return job?.enabled
+    })
+  )
+  expect(enabled).toBe(0)
 })
 
 it("drafted instructions that say the same thing wake nothing", async () => {
