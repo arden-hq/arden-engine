@@ -105,7 +105,9 @@ it("nothing on the wiki change path or in event dispatch can reach a Space revie
     ...readdirSync(new URL("wiki/", src)).map((file) => `wiki/${file}`)
   ]
   for (const file of wikiPath.filter((name) => name.endsWith(".ts")))
-    expect(read(file), file).not.toMatch(/space-jobs|queueSpaceWake|spaceJobId|space_review/)
+    expect(read(file), file).not.toMatch(
+      /space-jobs|queueOwnerSpaceChangeWake|spaceJobId|space_review/
+    )
   expect(read("persistence/sqlite/automation-event-dispatch.ts")).not.toMatch(/space_review/)
 })
 

@@ -53,7 +53,7 @@ export interface SpaceJobSql {
   ) => SpaceJobWrite<SpaceJobRecoveryCursor | undefined>
   readonly materializeDue: (now: string) => SpaceJobWrite<void>
   readonly syncSpace: (spaceId: string, now: string) => SpaceJobWrite<JobState | null>
-  readonly queueSpaceWake: (spaceId: string, now: string) => SpaceJobWrite<void>
+  readonly queueOwnerSpaceChangeWake: (spaceId: string, now: string) => SpaceJobWrite<void>
   readonly queueTaskChangedByHand: (itemId: string, now: string) => SpaceJobWrite<boolean>
   readonly retryReview: (automationId: string, now: string) => SpaceJobWrite<void>
   readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
@@ -335,7 +335,7 @@ export const makeSpaceJobSql = (
     })
   })
 
-  const queueSpaceWake = Effect.fn("SpaceJobSql.queueSpaceWake")(function* (
+  const queueOwnerSpaceChangeWake = Effect.fn("SpaceJobSql.queueOwnerSpaceChangeWake")(function* (
     spaceId: string,
     now: string
   ) {
@@ -686,7 +686,7 @@ export const makeSpaceJobSql = (
     reconcile,
     materializeDue,
     syncSpace,
-    queueSpaceWake,
+    queueOwnerSpaceChangeWake,
     queueTaskChangedByHand,
     retryReview,
     queueInferenceChat,
