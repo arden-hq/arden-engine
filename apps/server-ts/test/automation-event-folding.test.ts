@@ -162,13 +162,13 @@ it("a run asked for by hand folds no event deeper than itself", async () => {
   )
 })
 
-/** A Space's review job: it batches what it hears in a window, then runs. */
-const review = (key: string) =>
+/** Makes a listener a Space's review job, which batches what waits for it in a window, then
+ * runs. No Space review listens to events, so the events are queued while it is still a
+ * listener; the fold rule at claim is the same for whatever waits in a review's queue. */
+const asReview = (automation: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const automation = yield* listener(key)
     yield* sql`UPDATE scheduled_tasks SET purpose = 'space_review', owner_space_id = 'space-1' WHERE task_id = ${automation}`
-    return automation
   })
 
 const AFTER_WINDOW = 31 * 60_000
@@ -179,7 +179,7 @@ it("a batch-window run folds no event held behind its running producer", async (
       const catalog = yield* AutomationCatalog
       const queue = yield* AutomationQueue
       yield* catalog.seedSystemAutomations([memoryCaptureHandler.spec])
-      const automation = yield* review("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a07")
+      const automation = yield* listener("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a07")
       yield* queue.requestRun(CAPTURE)
       const [capture] = yield* Effect.promise(async () =>
         queue.jobs.claim({
@@ -192,6 +192,7 @@ it("a batch-window run folds no event held behind its running producer", async (
       expect(capture?.payload.automationId).toBe(CAPTURE)
       yield* change("revision-1", null)
       yield* change("revision-2", CAPTURE)
+      yield* asReview(automation)
       const [lease] = yield* claim(Date.now() + AFTER_WINDOW)
       expect(lease?.payload.automationId).toBe(automation)
       expect(yield* folded(automation)).toEqual({
@@ -207,10 +208,11 @@ it("a batch-window run folds no event deeper than itself, nor one not yet due", 
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const producer = yield* listener("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a08", "task.changed")
-      const automation = yield* review("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a09")
+      const automation = yield* listener("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a09")
       yield* change("revision-1", null)
       yield* change("revision-2", producer)
       yield* change("revision-3", null)
+      yield* asReview(automation)
       const later = new Date(Date.now() + 2 * AFTER_WINDOW).toISOString()
       yield* sql`UPDATE automation_event_queue SET next_attempt_at = ${later}
         WHERE task_id = ${automation}
@@ -239,8 +241,9 @@ it("a manual row folded into an older Space review row still counts as asked", a
       const at = new Date().toISOString()
       yield* sql`INSERT INTO spaces (space_id, name, name_key, created_at, updated_at)
         VALUES ('space-1', 'Space', 'space', ${at}, ${at})`
-      const automation = yield* review("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a0a")
+      const automation = yield* listener("5f0d7c2a-3b1e-4c8d-9a6f-2e4b1d0c7a0a")
       yield* change("revision-1", null)
+      yield* asReview(automation)
       yield* sql`INSERT INTO automation_event_queue (task_id, source, event_key, context, created_at,
           claimed_at, attempt_count, last_error, next_attempt_at)
         VALUES (${automation}, 'manual', 'manual-1', '{"scheduled_for":null,"automation_run_id":null}',

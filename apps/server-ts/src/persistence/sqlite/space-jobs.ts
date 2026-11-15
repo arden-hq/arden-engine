@@ -28,10 +28,19 @@ import {
 import { taskIsLive, taskMayWake, taskMayWakeSql, taskStands, taskStandsSql } from "./task-wake.js"
 import { restartCutRunSql } from "./status-sets.js"
 import { SPACE_REVIEW_LADDER_MS, ladderStepMs } from "../automations/retry-ladders.js"
+import { chainMayWake } from "../automations/chain-depth.js"
 import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
+
+/** A Task's history gained a row that changes the Task, as the `task.changed` event says. */
+interface TaskChange {
+  readonly itemId: string
+  readonly eventKey: string
+  readonly producedBy: string | null
+  readonly chainDepth: number
+}
 
 interface JobState {
   readonly automationId: string
@@ -53,6 +62,7 @@ export interface SpaceJobSql {
   readonly materializeDue: (now: string) => SpaceJobWrite<void>
   readonly syncSpace: (spaceId: string, now: string) => SpaceJobWrite<JobState | null>
   readonly queueSpaceWake: (spaceId: string, now: string) => SpaceJobWrite<void>
+  readonly queueTaskChanged: (change: TaskChange, now: string) => SpaceJobWrite<boolean>
   readonly retryReview: (automationId: string, now: string) => SpaceJobWrite<void>
   readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
   readonly linkChat: (
@@ -316,12 +326,14 @@ export const makeSpaceJobSql = (
     })
   })
 
+  /** The wake for a change to the Space itself: its settings, whoever wrote them, its Memory
+   * page binding, a restore, or a file added to one of its Tasks. */
   const queueSpaceWake = Effect.fn("SpaceJobSql.queueSpaceWake")(function* (
     spaceId: string,
     now: string
   ) {
     const state = yield* syncSpace(spaceId, now)
-    if (state === null) return
+    if (!state?.enabled) return
     yield* queue(state, {
       source: "event",
       queued_at: now,
@@ -329,6 +341,31 @@ export const makeSpaceJobSql = (
       event_key: spaceId,
       produced_by: null,
       context: { space_id: spaceId }
+    })
+  })
+
+  /** The wake for a change to one of the Space's Tasks. A change the review wrote itself wakes
+   * nothing, so a review never queues its own next run; a burst of changes folds into the one
+   * waiting wake and its batch window. */
+  const queueTaskChanged = Effect.fn("SpaceJobSql.queueTaskChanged")(function* (
+    change: TaskChange,
+    now: string
+  ) {
+    const tasks = yield* sql<{ readonly space_id: string | null }>`
+      SELECT space_id FROM space_tasks WHERE item_id = ${change.itemId}`
+    const spaceId = tasks[0]?.space_id ?? undefined
+    if (spaceId === undefined) return false
+    if (change.producedBy === spaceJobId(spaceId) || !chainMayWake(change.chainDepth)) return false
+    const state = yield* syncSpace(spaceId, now)
+    if (!state?.enabled) return false
+    return yield* queue(state, {
+      source: "event",
+      queued_at: now,
+      event_type: "task.changed",
+      event_key: change.eventKey,
+      produced_by: change.producedBy,
+      ...(change.chainDepth === 0 ? {} : { chain_depth: change.chainDepth }),
+      context: { space_id: spaceId, item_id: change.itemId }
     })
   })
 
@@ -665,6 +702,7 @@ export const makeSpaceJobSql = (
     materializeDue,
     syncSpace,
     queueSpaceWake,
+    queueTaskChanged,
     retryReview,
     queueInferenceChat,
     linkChat,

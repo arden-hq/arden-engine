@@ -300,8 +300,7 @@ export const makeSpaceStore = ({
           if (next === undefined) return null
           if (current.name !== name)
             yield* renameOwnedJob(sql, spaceJobId(validSpaceId), `${name} worker`)
-          const shouldWake = current.inference.enabled && valid.instructions !== undefined
-          if (shouldWake) yield* spaceJobs.queueSpaceWake(validSpaceId, now)
+          if (valid.instructions !== undefined) yield* spaceJobs.queueSpaceWake(validSpaceId, now)
           else yield* spaceJobs.syncSpace(validSpaceId, now)
           const generations = yield* sql<{ readonly policy_generation: number }>`
         SELECT policy_generation FROM spaces WHERE space_id = ${validSpaceId}`
@@ -353,11 +352,14 @@ export const makeSpaceStore = ({
         WHERE space_id = ${validSpaceId}
           AND archived_at IS NULL
           AND (instructions_source IS NULL OR instructions_source = 'generated')
+          AND instructions IS NOT ${valid}
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
                   inference_policy, mark, created_at, updated_at, archived_at
       `
             const next = updated[0]
-            return next === undefined ? yield* get(validSpaceId) : yield* decodeRow(next, "update")
+            if (next === undefined) return yield* get(validSpaceId)
+            yield* spaceJobs.queueSpaceWake(validSpaceId, now)
+            return yield* decodeRow(next, "update")
           })
         )
         .pipe(
@@ -515,8 +517,7 @@ export const makeSpaceStore = ({
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
                   inference_policy, mark, created_at, updated_at, archived_at
       `
-          if (current.inference.enabled) yield* spaceJobs.queueSpaceWake(spaceId, now)
-          else yield* spaceJobs.syncSpace(spaceId, now)
+          yield* spaceJobs.queueSpaceWake(spaceId, now)
           return rows[0] === undefined ? null : yield* decodeRow(rows[0], "page")
         })
       )
@@ -732,8 +733,7 @@ export const makeSpaceStore = ({
           const next = restored[0]
           if (next === undefined) return null
           yield* restoreSpaceChats(sql, validSpaceId)
-          const state = yield* spaceJobs.syncSpace(validSpaceId, now)
-          if (state?.enabled === true) yield* spaceJobs.queueSpaceWake(validSpaceId, now)
+          yield* spaceJobs.queueSpaceWake(validSpaceId, now)
           return yield* decodeRow(next, "restore")
         })
       )

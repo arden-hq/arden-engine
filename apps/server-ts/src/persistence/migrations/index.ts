@@ -53,6 +53,7 @@ import { captureBatchCutByRevert } from "./0158_capture_batch_cut_by_revert.js"
 import { dropInferenceRejections } from "./0159_drop_inference_rejections.js"
 import { offersExpire } from "./0160_offers_expire.js"
 import { homePresenceLeaseIndex } from "./0161_home_presence_lease_index.js"
+import { memoryWakesLeaveReviews } from "./0162_memory_wakes_leave_reviews.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -349,7 +350,8 @@ export const migrations: ReadonlyArray<Migration> = [
   captureBatchCutByRevert,
   dropInferenceRejections,
   offersExpire,
-  homePresenceLeaseIndex
+  homePresenceLeaseIndex,
+  memoryWakesLeaveReviews
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

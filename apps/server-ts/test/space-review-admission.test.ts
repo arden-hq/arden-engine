@@ -220,6 +220,28 @@ describe("Space review admission", () => {
     expect(verdict.admission).toBe("nothing_to_act_on")
   })
 
+  it("binding a reviewed Space to another Memory page is a page change, which starts nothing", () => {
+    const bound = (pagePath: string) =>
+      JSON.stringify({
+        ...JSON.parse(semantic(HELD_TASKS)),
+        space: JSON.stringify({
+          ...JSON.parse(JSON.parse(semantic(HELD_TASKS)).space),
+          page_id: `page-${pagePath}`,
+          page_path: pagePath
+        })
+      })
+    const verdict = spaceReviewAdmission(
+      {
+        semantic: bound("projects/another.md"),
+        reads: reads({ pages: [page("owned")], removed: ["projects/one.md"] })
+      },
+      { semantic: bound("projects/one.md") },
+      false
+    )
+    expect([...verdict.changes]).toEqual(["memory_page"])
+    expect(verdict.admission).toBe("nothing_to_act_on")
+  })
+
   it("a deferred Task is held; a done or cancelled one is not", () => {
     const held = (status: MadeTask["status"]) =>
       spaceReviewAdmission(

@@ -88,7 +88,7 @@ export const makeAutomationEventDispatch = ({
       SELECT task_id, triggers, purpose, paused_at
       FROM scheduled_tasks
       WHERE ${listensForEvents(sql, sql`scheduled_tasks`)}
-        AND purpose IN ('user_automation', 'system', 'space_review')
+        AND purpose IN ('user_automation', 'system')
       ORDER BY task_id
     `
     let queued = 0
