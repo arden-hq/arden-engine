@@ -148,10 +148,19 @@ const llamaModel = (
   // `--ctx-size` fallback for an unloaded model is the same number.
   const contextLimit = positive(props?.default_generation_settings?.n_ctx) ?? positive(ctxSize)
   // An unloaded model's template is unknown until it loads, so whatever its
-  // `/props` would say is taken as absent: no reasoning effort, no images,
+  // `/props` would say is taken as absent: no effort levels, no images,
   // one tool call at a time. Loading it first lifts these at the next start.
-  const efforts =
+  const levels =
     caps?.supports_reasoning_effort === true ? (caps.reasoning_effort_levels ?? []) : []
+  // `none` is the server's, not the template's: `reasoning_effort: "none"`
+  // sets `enable_thinking: false` for any template, loaded or not (b12359
+  // `server-common.cpp`, its README's `reasoning_effort`). Checked on
+  // 2026-11-16 with Gemma 4 E2B, whose `/props` lists no levels: it thought
+  // through an 80-token limit without the field and answered in 21 tokens
+  // with it. A template that never thinks renders the same either way.
+  // `/props` says nothing about whether a template thinks, so `none` is
+  // offered for every model.
+  const efforts = ["none", ...levels.filter((level) => level !== "none")]
   return {
     id,
     contextLimit,
@@ -161,7 +170,7 @@ const llamaModel = (
       // long-standing alias of `n_predict`.
       maxTokensField: "max_tokens",
       systemRole: "system",
-      reasoningEffort: efforts.length > 0 ? "reasoning_effort" : "none",
+      reasoningEffort: "reasoning_effort",
       // Checked on b12359: the last chunk carries `usage` with `include_usage`.
       usageInStream: true,
       // The server turns `response_format: json_schema` into a grammar.
@@ -185,9 +194,7 @@ const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredMo
     // The model's window, or its main provider's when that one is smaller:
     // OpenRouter routes to that provider first.
     contextLimit: smallest([model.context_length, model.top_provider?.context_length]),
-    // Without `supported_efforts` the model reasons at its own default and
-    // offers no choice, rather than a guessed list.
-    reasoningEfforts: reasoning ? (model.reasoning?.supported_efforts ?? []) : [],
+    reasoningEfforts: reasoning ? openRouterEfforts(model.reasoning ?? undefined) : [],
     compat: {
       // 450 of 467 models list `max_tokens`, 91 `max_completion_tokens`
       // (listing of 2026-11-15); the docs give both one meaning.
@@ -205,12 +212,58 @@ const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredMo
       structuredOutput: parameters.includes("structured_outputs") ? "json_schema" : "none",
       imageInput: model.architecture?.input_modalities?.includes("image") === true,
       parallelToolCalls: parameters.includes("parallel_tool_calls"),
-      // Anthropic models cache only at explicit `cache_control` breakpoints
-      // (https://openrouter.ai/docs/guides/best-practices/prompt-caching).
-      cacheControl: model.id.startsWith("anthropic/") ? "anthropic" : "none"
+      cacheControl: explicitCache(model.id) ? "anthropic" : "none"
     }
   }
 }
+
+/**
+ * A model's efforts as https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+ * describes them (read 2026-11-16): `supported_efforts` lists them; `null`
+ * means every gateway value; left out, the model offers no effort choice and
+ * reasons at its own default. `mandatory` models reject `none`.
+ */
+const openRouterEfforts = (
+  reasoning: (typeof OpenRouterModelSchema.Type)["reasoning"] | undefined
+): ReadonlyArray<string> => {
+  const listed = reasoning?.supported_efforts
+  if (listed === undefined) return []
+  const efforts = listed ?? OPENROUTER_EFFORTS
+  return reasoning?.mandatory === true ? efforts.filter((effort) => effort !== "none") : efforts
+}
+
+/** Every `reasoning.effort` the gateway takes, highest first as the model list orders them. */
+const OPENROUTER_EFFORTS = ["max", "xhigh", "high", "medium", "low", "minimal", "none"]
+
+/**
+ * Which OpenRouter models cache only at explicit `cache_control`
+ * breakpoints, per https://openrouter.ai/docs/guides/best-practices/prompt-caching
+ * (read 2026-11-16). Anthropic Claude: explicit breakpoints work on every
+ * Claude provider (the top-level automatic form only on some). Alibaba:
+ * "requires explicit cache breakpoints", on exactly these models; its
+ * snapshot endpoints do not cache at all. Every other family the page
+ * covers caches by prefix on its own: OpenAI, Grok, Moonshot, Groq,
+ * DeepSeek, Z.AI, and Gemini 2.5 and newer ("implicit caching ... no
+ * `cache_control` breakpoints required"; Gemini's explicit breakpoints are
+ * an optional extra with storage cost, so they are not sent).
+ */
+const EXPLICIT_CACHE: {
+  readonly prefixes: ReadonlyArray<string>
+  readonly ids: ReadonlySet<string>
+} = {
+  prefixes: ["anthropic/"],
+  ids: new Set([
+    "deepseek/deepseek-v3.2",
+    "qwen/qwen3-max",
+    "qwen/qwen-plus",
+    "qwen/qwen3.6-plus",
+    "qwen/qwen3-coder-plus",
+    "qwen/qwen3-coder-flash"
+  ])
+}
+
+const explicitCache = (id: string): boolean =>
+  EXPLICIT_CACHE.ids.has(id) || EXPLICIT_CACHE.prefixes.some((prefix) => id.startsWith(prefix))
 
 /**
  * Where llama-server serves `/props`: beside `/v1`, so `baseUrl` without its
@@ -300,7 +353,10 @@ const OpenRouterModelSchema = Schema.Struct({
   ),
   reasoning: Schema.optionalKey(
     Schema.NullOr(
-      Schema.Struct({ supported_efforts: Schema.optionalKey(Schema.Array(Schema.String)) })
+      Schema.Struct({
+        supported_efforts: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+        mandatory: Schema.optionalKey(Schema.Boolean)
+      })
     )
   )
 })

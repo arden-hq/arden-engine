@@ -44,7 +44,7 @@ describe("modelsFor a chat-completions provider", () => {
           id: GEMMA,
           name: GEMMA,
           provider: { id: "llama.cpp", name: "llama.cpp" },
-          reasoningEfforts: [],
+          reasoningEfforts: ["none"],
           context: { hardLimit: 4096, compactionTrigger: 3276 }
         }
       ],

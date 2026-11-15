@@ -50,7 +50,7 @@ const notLoaded: Served = {
 const conservative = {
   maxTokensField: "max_tokens",
   systemRole: "system",
-  reasoningEffort: "none",
+  reasoningEffort: "reasoning_effort",
   usageInStream: true,
   structuredOutput: "json_schema",
   imageInput: false,
@@ -102,7 +102,7 @@ describe("discoverLlamaCpp", () => {
       {
         id: GEMMA,
         contextLimit: 4096,
-        reasoningEfforts: [],
+        reasoningEfforts: ["none"],
         compat: { ...conservative, imageInput: true, parallelToolCalls: true }
       }
     ])
@@ -117,8 +117,8 @@ describe("discoverLlamaCpp", () => {
     })
     const input = llama.input("http://127.0.0.1:9951/v1")
     expect(await discoverLlamaCpp(input, ["gemma-8k", "gemma-32k"])).toEqual([
-      { id: "gemma-8k", contextLimit: 8192, reasoningEfforts: [], compat: conservative },
-      { id: "gemma-32k", contextLimit: 32768, reasoningEfforts: [], compat: conservative }
+      { id: "gemma-8k", contextLimit: 8192, reasoningEfforts: ["none"], compat: conservative },
+      { id: "gemma-32k", contextLimit: 32768, reasoningEfforts: ["none"], compat: conservative }
     ])
     await expect(discoverLlamaCpp(input, undefined)).rejects.toThrow(
       "The llama.cpp server lists several models; set `model` to one of: gemma-32k, gemma-8k, ggml-org/gemma-4-E2B-it-GGUF:Q8_0"
@@ -136,7 +136,7 @@ describe("discoverLlamaCpp", () => {
       [`http://127.0.0.1:9951/props?model=${encodeURIComponent(GEMMA)}&autoload=false`]: notLoaded
     })
     expect(await discoverLlamaCpp(llama.input("http://127.0.0.1:9951/v1"), [GEMMA])).toEqual([
-      { id: GEMMA, contextLimit: undefined, reasoningEfforts: [], compat: conservative }
+      { id: GEMMA, contextLimit: undefined, reasoningEfforts: ["none"], compat: conservative }
     ])
   })
 
@@ -150,13 +150,31 @@ describe("discoverLlamaCpp", () => {
     expect(model).toEqual({
       id: "/Users/owner/.cache/huggingface/hub/models--ggml-org--gemma-4-E2B-it-GGUF/snapshots/2a8538c2e2d4687953a86c422c7c623cfd022880/gemma-4-E2B-it-Q8_0.gguf",
       contextLimit: 2048,
-      reasoningEfforts: [],
+      reasoningEfforts: ["none"],
       compat: { ...conservative, parallelToolCalls: true }
     })
     expect(llama.requested).toEqual([
       "http://127.0.0.1:9952/props",
       "http://127.0.0.1:9952/v1/models"
     ])
+  })
+
+  it("offers the server's thinking switch before the template's levels", async () => {
+    const props = await fixture("llama-single-props.json")
+    const levels: unknown = JSON.parse(
+      JSON.stringify(props)
+        .replace('"supports_reasoning_effort":false', '"supports_reasoning_effort":true')
+        .replace(
+          '"reasoning_effort_levels":[]',
+          '"reasoning_effort_levels":["low","medium","high"]'
+        )
+    )
+    const llama = server({
+      "http://127.0.0.1:9952/props": ok(levels),
+      "http://127.0.0.1:9952/v1/models": ok({ data: [{ id: "m" }] })
+    })
+    const [model] = await discoverLlamaCpp(llama.input("http://127.0.0.1:9952/v1"), undefined)
+    expect(model?.reasoningEfforts).toEqual(["none", "low", "medium", "high"])
   })
 
   it("refuses a server that is not llama.cpp or a template without tools", async () => {
@@ -252,6 +270,39 @@ describe("discoverOpenRouter", () => {
           cacheControl: "none"
         }
       }
+    ])
+  })
+
+  it("reads efforts and cache breakpoints as the OpenRouter docs define them", async () => {
+    const entry = (id: string, reasoning: unknown) => ({
+      id,
+      context_length: 131_072,
+      supported_parameters: ["tools", "reasoning"],
+      reasoning
+    })
+    const openRouter = server({
+      "https://openrouter.ai/api/v1/models": ok({
+        data: [
+          entry("vendor/any-effort", { supported_efforts: null, mandatory: false }),
+          entry("vendor/must-think", { supported_efforts: null, mandatory: true }),
+          entry("vendor/no-choice", { mandatory: true }),
+          entry("qwen/qwen3-max", { supported_efforts: ["high", "low", "none"], mandatory: false })
+        ]
+      })
+    })
+    const found = await discoverOpenRouter(openRouter.input("https://openrouter.ai/api/v1"), [
+      "vendor/any-effort",
+      "vendor/must-think",
+      "vendor/no-choice",
+      "qwen/qwen3-max"
+    ])
+    expect(
+      found.map((model) => [model.id, model.reasoningEfforts, model.compat.cacheControl])
+    ).toEqual([
+      ["vendor/any-effort", ["max", "xhigh", "high", "medium", "low", "minimal", "none"], "none"],
+      ["vendor/must-think", ["max", "xhigh", "high", "medium", "low", "minimal"], "none"],
+      ["vendor/no-choice", [], "none"],
+      ["qwen/qwen3-max", ["high", "low", "none"], "anthropic"]
     ])
   })
 

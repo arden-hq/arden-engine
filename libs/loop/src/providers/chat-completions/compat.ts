@@ -20,9 +20,10 @@ export interface ChatCompletionsCompat {
   readonly systemRole: "system" | "developer"
   /**
    * How the request's reasoning effort is sent: top-level `reasoning_effort`
-   * (OpenAI), OpenRouter's `reasoning: { effort }`, or not at all — a route
-   * without an effort setting (llama.cpp picks thinking from its template)
-   * does not receive one.
+   * (OpenAI, and llama.cpp, which turns thinking off for `none` with any
+   * template and hands other values to the template), OpenRouter's
+   * `reasoning: { effort }`, or not at all for a route without an effort
+   * setting.
    */
   readonly reasoningEffort: "reasoning_effort" | "openrouter" | "none"
   /**
@@ -51,11 +52,14 @@ export interface ChatCompletionsCompat {
    */
   readonly parallelToolCalls: boolean
   /**
-   * `anthropic` marks Anthropic prompt-cache breakpoints (`cache_control:
-   * { type: "ephemeral" }`) on the last tool, the first system message and
-   * the last conversation message — OpenRouter's documented API for Claude
-   * models, as prime `apply_anthropic_cache_control` sends it. Other servers
-   * cache by prefix on their own.
+   * `anthropic` marks Anthropic-syntax prompt-cache breakpoints
+   * (`cache_control: { type: "ephemeral" }`) on the last tool, the first
+   * system message and the last conversation message, as prime
+   * `apply_anthropic_cache_control` sends them. The value names the syntax,
+   * not the vendor: OpenRouter takes it for Claude and for Alibaba's Qwen
+   * models, which cache only at these breakpoints (which models, from the
+   * OpenRouter docs: server-ts `discovery.ts` `EXPLICIT_CACHE`). Other
+   * servers cache by prefix on their own.
    */
   readonly cacheControl: "anthropic" | "none"
 }
