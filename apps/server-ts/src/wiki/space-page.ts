@@ -85,21 +85,38 @@ export const logNoSpacePage = (spaceId: string, error: WikiError) =>
     message: error.message
   })
 
+/**
+ * How an archived Space came back: with the page it was bound to, with that page at the path it
+ * now has, or with none of its own, because the page is gone or another active Space holds or
+ * overlaps it. A Space that comes back with none gets a fresh page now, or at the next start.
+ */
+export type SpaceRestore = {
+  readonly kind: "kept" | "rebound" | "none"
+  readonly space: PersistedSpace
+}
+
 export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
   spaceId: string
-): Effect.fn.Return<PersistedSpace | null, WikiError | SpaceStoreError> {
+): Effect.fn.Return<SpaceRestore | null, WikiError | SpaceStoreError> {
   const space = yield* spaces.get(spaceId, true)
   if (space === null || space.archived_at === null) return null
   const current = yield* loadSnapshot(repository, "restore")
   const plan = planSpacePage(current.pages, space, yield* activeSpaceBindings(spaces))
-  const restored = yield* spaces.restore(spaceId, plan.kind === "create" ? null : plan.page)
-  if (restored === null || plan.kind !== "create") return restored
-  return yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
+  if (plan.kind !== "create") {
+    const restored = yield* spaces.restore(spaceId, plan.page)
+    return restored === null
+      ? null
+      : { kind: plan.kind === "keep" ? "kept" : "rebound", space: restored }
+  }
+  const restored = yield* spaces.restore(spaceId, null)
+  if (restored === null) return null
+  const withPage = yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
     Effect.map((ensured) => ensured?.space ?? restored),
     Effect.catch((error) => logNoSpacePage(spaceId, error).pipe(Effect.as(restored)))
   )
+  return { kind: "none", space: withPage }
 })
 
 const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (

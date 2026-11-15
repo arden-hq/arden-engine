@@ -17,6 +17,7 @@ import {
   ensureWikiSpacePage,
   logNoSpacePage,
   restoreWikiSpace,
+  type SpaceRestore,
   type WikiSpacePageInput
 } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
@@ -84,10 +85,9 @@ export interface WikiMutationMethods {
   >
   /** Gives every active Space a page, and counts what that took. */
   readonly ensureSpacePages: () => Effect.Effect<SpacePageCounts, WikiError>
-  /** Restores an archived Space with its page; see `restoreWikiSpace`. */
   readonly restoreSpace: (
     spaceId: string
-  ) => Effect.Effect<PersistedSpace | null, WikiError | SpaceStoreError>
+  ) => Effect.Effect<SpaceRestore | null, WikiError | SpaceStoreError>
   readonly publishReport: (input: WikiPublishReportInput) => Effect.Effect<
     {
       readonly page: WikiPage

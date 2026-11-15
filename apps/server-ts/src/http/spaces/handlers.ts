@@ -116,13 +116,11 @@ export const SpaceHandlers = HttpApiBuilder.group(
         )
       )
       .handle("restore", ({ params }) =>
-        wiki
-          .restoreSpace(params.spaceId)
-          .pipe(
-            Effect.mapError(lifecycleError),
-            Effect.flatMap(orNotFound),
-            Effect.map(publicSpace)
-          )
+        wiki.restoreSpace(params.spaceId).pipe(
+          Effect.mapError(lifecycleError),
+          Effect.flatMap(orNotFound),
+          Effect.map(({ space }) => publicSpace(space))
+        )
       )
       .handle("generateInstructions", ({ params }) =>
         draftInstructions(params.spaceId).pipe(

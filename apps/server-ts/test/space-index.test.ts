@@ -283,12 +283,13 @@ describe("every active Space has a page", () => {
         )
         const restored = yield* methods.restoreSpace(space.space_id)
         return {
-          path: restored?.page_path,
-          samePage: restored?.page_id === pageId
+          kind: restored?.kind,
+          path: restored?.space.page_path,
+          samePage: restored?.space.page_id === pageId
         }
       })
     )
-    expect(outcome).toEqual({ path: "areas/made-up-garden.md", samePage: false })
+    expect(outcome).toEqual({ kind: "none", path: "areas/made-up-garden.md", samePage: false })
   })
 
   it("a restored Space keeps a free page, and gets a fresh one when another Space overlaps it", async () => {
@@ -305,13 +306,19 @@ describe("every active Space has a page", () => {
         const keptAgain = yield* methods.restoreSpace(kept.space_id)
         const takenAgain = yield* methods.restoreSpace(taken.space_id)
         return {
-          kept: keptAgain?.page_id === keptPage?.page_id,
-          fresh: takenAgain?.page_id !== takenPage?.page_id,
-          path: takenAgain?.page_path
+          kinds: [keptAgain?.kind, takenAgain?.kind],
+          kept: keptAgain?.space.page_id === keptPage?.page_id,
+          fresh: takenAgain?.space.page_id !== takenPage?.page_id,
+          path: takenAgain?.space.page_path
         }
       })
     )
-    expect(outcome).toEqual({ kept: true, fresh: true, path: "areas/made-up-taken-2.md" })
+    expect(outcome).toEqual({
+      kinds: ["kept", "none"],
+      kept: true,
+      fresh: true,
+      path: "areas/made-up-taken-2.md"
+    })
   })
 
   it("a restored Space whose page is taken and cannot get a fresh one comes back with none", async () => {
@@ -324,12 +331,14 @@ describe("every active Space has a page", () => {
         yield* spaces.bindPage(other.space_id, freePage("areas-directory", "areas/README.md"))
         const restored = yield* methods.restoreSpace(taken.space_id)
         return {
-          active: restored?.archived_at === null,
-          page: restored?.page_path ?? null,
+          kind: restored?.kind,
+          active: restored?.space.archived_at === null,
+          page: restored?.space.page_path ?? null,
           bindings: (yield* spaces.activeBindings()).map((row) => row.space_id)
         }
       })
     )
+    expect(outcome.kind).toBe("none")
     expect(outcome.active).toBe(true)
     expect(outcome.page).toBeNull()
     expect(outcome.bindings).toHaveLength(1)
