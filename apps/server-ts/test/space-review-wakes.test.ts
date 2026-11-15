@@ -15,8 +15,8 @@ import { WorkStore } from "../src/persistence/work/store.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Which change wakes a Space review: a Memory save never; Space settings, page binding and a
-// Task change made by hand do.
+// Which change wakes a Space review: a Memory save and a page binding never; Space settings and
+// a Task change made by hand do.
 
 const REVISION = "a".repeat(64)
 const AT = "2026-11-01T00:00:00.000Z"
@@ -363,21 +363,6 @@ it("drafted instructions that say the same thing wake nothing", async () => {
   expect(rows).toEqual([])
 })
 
-it("binding a Space again to the page it has wakes nothing", async () => {
-  const rows = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const spaces = yield* SpaceStore
-      yield* space(sql, "space-1", true)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
-      yield* clearQueue(sql)
-      yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
-      return yield* reviewRows(sql, "space-1")
-    })
-  )
-  expect(rows).toEqual([])
-})
-
 it("Space settings wake the review the same way whether the owner or Arden wrote them", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
@@ -401,17 +386,19 @@ it("Space settings wake the review the same way whether the owner or Arden wrote
   expect(outcome.noPage).toEqual([])
 })
 
-it("binding the Space to another Memory page wakes the review", async () => {
-  const rows = await withTempDatabase(
+it("binding a page readies the Space review but wakes nothing, first time or again", async () => {
+  const outcome = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
       yield* space(sql, "space-1", true)
       yield* spaces.bindPage("space-1", "page-1", "projects/made-up-space.md")
-      yield* clearQueue(sql)
+      const first = yield* reviewRows(sql, "space-1")
       yield* spaces.bindPage("space-1", "page-2", "projects/another-made-up-space.md")
-      return yield* reviewRows(sql, "space-1")
+      const [job] = yield* sql<{ readonly enabled: number }>`
+        SELECT enabled FROM scheduled_tasks WHERE task_id = ${spaceJobId("space-1")}`
+      return { first, again: yield* reviewRows(sql, "space-1"), enabled: job?.enabled }
     })
   )
-  expect(rows).toEqual([{ causes: ["space.wake"], batched: true }])
+  expect(outcome).toEqual({ first: [], again: [], enabled: 1 })
 })

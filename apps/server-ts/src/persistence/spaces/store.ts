@@ -81,8 +81,9 @@ export class SpaceStore extends Context.Service<
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     /**
      * Binds an active Space to a page in place of any page it had, and an archived Space holding
-     * that page lets it go. Only `ensureWikiSpacePage` calls it, after checking that no other
-     * active Space holds or overlaps the page.
+     * that page lets it go. It readies the Space's review but wakes none. Only
+     * `wiki/space-page.ts` calls it, after checking that no other active Space holds or overlaps
+     * the page.
      */
     readonly bindPage: (
       spaceId: string,

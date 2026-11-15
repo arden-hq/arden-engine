@@ -444,7 +444,7 @@ export const makeSpaceStore = ({
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
                   inference_policy, mark, created_at, updated_at, archived_at
       `
-          yield* spaceJobs.queueSpaceWake(spaceId, now)
+          yield* spaceJobs.syncSpace(spaceId, now)
           return rows[0] === undefined ? null : yield* decodeRow(rows[0], "page")
         })
       )
