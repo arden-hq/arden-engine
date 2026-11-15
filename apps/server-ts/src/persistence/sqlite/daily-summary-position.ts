@@ -1,5 +1,7 @@
 import { DateTime, Effect, Schema } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
 
+import { DAILY_SUMMARY_AUTOMATION_ID } from "../automations/model.js"
 import { DailySummaryPosition, DailySummaryPositionError } from "../daily-summary/store.js"
 import type { PersistenceDeps } from "./deps.js"
 
@@ -22,6 +24,12 @@ const failure =
           message,
           ...(cause === undefined ? {} : { cause })
         })
+
+/** A paused Daily Summary owes no pages for the days it was off: its position starts again. */
+export const restartDailySummaryPosition = (sql: SqlClient.SqlClient, automationId: string) =>
+  automationId === DAILY_SUMMARY_AUTOMATION_ID
+    ? sql`DELETE FROM monitor_state WHERE namespace = ${NAMESPACE}`.pipe(Effect.asVoid)
+    : Effect.void
 
 export const makeDailySummaryPosition = ({
   writer

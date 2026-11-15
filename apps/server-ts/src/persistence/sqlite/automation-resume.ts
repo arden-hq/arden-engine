@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { endAutoPause } from "./automation-auto-pause.js"
 import { restartMeasuredTriggers } from "./automation-trigger-arming.js"
+import { restartDailySummaryPosition } from "./daily-summary-position.js"
 
 export const resumeAutomation = Effect.fn("AutomationResume.resume")(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -14,4 +15,5 @@ export const resumeAutomation = Effect.fn("AutomationResume.resume")(function* (
     WHERE task_id = ${automationId}`
   yield* endAutoPause(sql, automationId)
   yield* restartMeasuredTriggers(sql, automationId)
+  yield* restartDailySummaryPosition(sql, automationId)
 })

@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 
 import {
@@ -7,6 +8,7 @@ import {
 } from "../src/automations/handlers/daily-summary.js"
 import type { HandlerItem } from "../src/persistence/automations/handler-item.js"
 import type { AutomationJobLease } from "../src/persistence/automations/store.js"
+import { resumeAutomation } from "../src/persistence/sqlite/automation-resume.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { DailySummaryPosition } from "../src/persistence/daily-summary/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
@@ -353,4 +355,19 @@ it("settles a day unwritten once its run has failed in two jobs, and says so", a
     note: expect.stringContaining("daily/2026-11-11.md was not written: its run did not finish in 2 jobs"),
     settled: "2026-11-12"
   })
+})
+
+it("starts again from its resume after the owner pauses it, owing no paused days", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const position = yield* DailySummaryPosition
+      yield* position.current("2026-11-01")
+      yield* resumeAutomation({ sql, automationId: "user-automation", nextRunAt: null })
+      const other = (yield* position.current("2026-11-11")).settledDay
+      yield* resumeAutomation({ sql, automationId: "builtin-daily-summary", nextRunAt: null })
+      return { other, resumed: (yield* position.current("2026-11-11")).settledDay }
+    })
+  )
+  expect(outcome).toEqual({ other: "2026-11-01", resumed: "2026-11-11" })
 })
