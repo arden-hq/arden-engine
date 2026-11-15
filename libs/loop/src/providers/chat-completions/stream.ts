@@ -32,7 +32,10 @@ import { API } from "./request.js"
 const REASONING_FIELDS = ["reasoning_content", "reasoning", "reasoning_text"] as const
 
 interface StreamedCall {
+  /** The server's id, or one generated here for a server that streams none. */
   readonly id: string
+  /** Whether `id` came from the server; only a server id can tell two calls apart. */
+  readonly serverId: boolean
   name: string | undefined
   arguments: string
   /** Shown to the loop: a call is announced once its name is known. */
@@ -41,7 +44,7 @@ interface StreamedCall {
   search: boolean
 }
 
-/** A part of the answer, by first appearance: the reasoning, the text, or call `index`. */
+/** A part of the answer, by first appearance: the reasoning, the text, or call slot `index`. */
 type Part = "reasoning" | "text" | number
 
 /**
@@ -74,7 +77,14 @@ export const makeChunkMapper = (options: {
   let usage: Usage | undefined
   let answeredBy: string | undefined
   const parts: Array<Part> = []
+  /**
+   * Calls by slot, numbered here in order of first appearance. A slot is what
+   * the loop sees as `ToolCallDelta.index`, so it is unique per call even when
+   * the server's own `index` is not.
+   */
   const calls = new Map<number, StreamedCall>()
+  /** The slot of the call currently open at each server `index`. */
+  const slotAtIndex = new Map<number, number>()
   const details = new Map<number, Record<string, JsonValue>>()
   let nextDetailIndex = 0
 
@@ -125,12 +135,12 @@ export const makeChunkMapper = (options: {
       throw new SemanticResponseError(`${options.label} returned an invalid tool call delta`)
     const fn = isRecord(value.function) ? value.function : {}
     const id = typeof value.id === "string" && value.id.length > 0 ? value.id : undefined
-    const index = callIndex(value.index, id)
+    const index = callSlot(value.index, id)
     const name = typeof fn.name === "string" && fn.name.length > 0 ? fn.name : undefined
     const argumentsDelta = typeof fn.arguments === "string" ? fn.arguments : ""
-    // A server that streams no id gets one here; the first id seen stays.
     const call: StreamedCall = calls.get(index) ?? {
       id: id ?? options.generateId(),
+      serverId: id !== undefined,
       name: undefined,
       arguments: "",
       announced: false,
@@ -167,12 +177,29 @@ export const makeChunkMapper = (options: {
     ]
   }
 
-  const callIndex = (raw: unknown, id: string | undefined): number => {
-    if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) return raw
-    const byId = [...calls].find(([, call]) => call.id === id)
-    if (byId !== undefined) return byId[0]
-    return calls.size === 0 ? 0 : Math.max(...calls.keys()) + 1
+  /**
+   * The slot a delta belongs to. A server `index` keys a call, except that a
+   * new server id at an index already in use starts another call: Ollama and
+   * some gateways send every call of a parallel batch at index 0 and tell them
+   * apart only by id (hermes `_ToolCallAccumulator`). Without an index, an id
+   * keys the call and a fragment with neither continues the call open last,
+   * so a server that sends neither streams one call.
+   */
+  const callSlot = (raw: unknown, id: string | undefined): number => {
+    const serverIndex =
+      typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : undefined
+    const byId =
+      id === undefined ? undefined : [...calls].find(([, call]) => call.serverId && call.id === id)
+    const open = serverIndex === undefined ? lastSlot() : slotAtIndex.get(serverIndex)
+    const openCall = open === undefined ? undefined : calls.get(open)
+    const continues =
+      openCall !== undefined && (id === undefined || !openCall.serverId || openCall.id === id)
+    const slot = byId?.[0] ?? (continues ? open : undefined) ?? calls.size
+    if (serverIndex !== undefined) slotAtIndex.set(serverIndex, slot)
+    return slot
   }
+
+  const lastSlot = (): number | undefined => (calls.size === 0 ? undefined : calls.size - 1)
 
   // OpenRouter streams `reasoning_details` in fragments keyed by `index`:
   // `text` and `summary` fragments append, every other key overwrites (prime

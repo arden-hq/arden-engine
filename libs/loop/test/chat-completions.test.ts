@@ -229,6 +229,115 @@ describe("Chat Completions stream mapping", () => {
   })
 })
 
+describe("Chat Completions call identity", () => {
+  /** The calls a stream of `tool_calls` deltas yields, and the `ToolCallDelta` indexes the loop saw. */
+  const callsOf = async (deltas: ReadonlyArray<Record<string, unknown>>) => {
+    let generated = 0
+    const { provider: cc } = provider(
+      [
+        () =>
+          sseResponse([
+            ...deltas.map((delta) => llamaChunk({ tool_calls: [delta] })),
+            llamaChunk({}, "tool_calls"),
+            "[DONE]"
+          ])
+      ],
+      { generateId: () => `gen-${++generated}` }
+    )
+    const items = await collect(cc.stream(request()))
+    const announced = items.flatMap((item) =>
+      item._tag === "ToolCallDelta" && item.tool_id !== undefined
+        ? [{ index: item.index, id: item.tool_id }]
+        : []
+    )
+    return {
+      calls: completionOf(items).message.tool_calls?.map((made) => ({
+        id: made.id,
+        name: made.function.name,
+        arguments: made.function.arguments
+      })),
+      announced,
+      closed: items.flatMap((item) =>
+        item._tag === "ToolCallDelta" && item.done ? [item.index] : []
+      )
+    }
+  }
+
+  it("starts a new call when a new id arrives at an index already in use", async () => {
+    expect(
+      await callsOf([
+        { index: 0, id: "a", function: { name: "read", arguments: '{"p"' } },
+        { index: 0, function: { arguments: ":1}" } },
+        { index: 0, id: "b", function: { name: "write", arguments: '{"q":2}' } }
+      ])
+    ).toEqual({
+      calls: [
+        { id: "a", name: "read", arguments: '{"p":1}' },
+        { id: "b", name: "write", arguments: '{"q":2}' }
+      ],
+      announced: [
+        { index: 0, id: "a" },
+        { index: 1, id: "b" }
+      ],
+      closed: [0, 1]
+    })
+  })
+
+  it("tells calls without an index apart by id, and continues the open call on a fragment", async () => {
+    expect(
+      await callsOf([
+        { id: "a", function: { name: "read", arguments: '{"p"' } },
+        { function: { arguments: ":1}" } },
+        { id: "b", function: { name: "write", arguments: "{" } },
+        { id: "b", function: { arguments: '"q":2}' } }
+      ])
+    ).toEqual({
+      calls: [
+        { id: "a", name: "read", arguments: '{"p":1}' },
+        { id: "b", name: "write", arguments: '{"q":2}' }
+      ],
+      announced: [
+        { index: 0, id: "a" },
+        { index: 1, id: "b" }
+      ],
+      closed: [0, 1]
+    })
+  })
+
+  it("reads fragments with neither index nor id as one call", async () => {
+    expect(
+      await callsOf([
+        { function: { name: "read", arguments: '{"p"' } },
+        { function: { arguments: ":1}" } }
+      ])
+    ).toEqual({
+      calls: [{ id: "gen-1", name: "read", arguments: '{"p":1}' }],
+      announced: [{ index: 0, id: "gen-1" }],
+      closed: [0]
+    })
+  })
+
+  it("keys calls with only an index by that index, whatever order they interleave in", async () => {
+    expect(
+      await callsOf([
+        { index: 1, function: { name: "write", arguments: "{" } },
+        { index: 0, function: { name: "read", arguments: '{"p":1}' } },
+        { index: 1, function: { arguments: '"q":2}' } }
+      ])
+    ).toEqual({
+      calls: [
+        { id: "gen-1", name: "write", arguments: '{"q":2}' },
+        { id: "gen-2", name: "read", arguments: '{"p":1}' }
+      ],
+      announced: [
+        { index: 0, id: "gen-1" },
+        { index: 1, id: "gen-2" }
+      ],
+      closed: [0, 1]
+    })
+  })
+})
+
 describe("Chat Completions request body", () => {
   it("orders a multi-turn tool history: outputs follow calls, context waits, an interrupted call is closed", async () => {
     const { provider: cc, transport } = provider([answered("Ok.")])
