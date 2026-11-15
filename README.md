@@ -36,11 +36,11 @@ This repository is the open-source engine of Arden. It holds the agent server, t
 - A client sends requests over HTTP and reads events over SSE (server-sent events). `libs/protocol` defines every route and event.
 - When a host app starts the server with a launch token (the capability), each request must carry that token in a header. The desktop app does this. A bare `just server` sets no token, so any local process can call it.
 - The server stores its data in the data folder, `~/.arden` by default. Set `ARDEN_DIR` to change it. The main file is `arden.db`. The Wiki is under `memory/wiki` and Skills are under `skills`.
-- The model comes from a provider. A host gives one to the server, or the standalone server uses your Codex CLI login. See "Run it".
+- The model comes from a provider. A host gives one to the server, a settings file names one (a local llama.cpp server, OpenRouter, any OpenAI Chat Completions or Responses endpoint, a Codex account), or the standalone server uses your Codex CLI login. See "Run it".
 
 ## Run it
 
-You need [Bun](https://bun.sh), Node.js 22.16 or later, and the [Codex CLI](https://github.com/openai/codex).
+You need [Bun](https://bun.sh), Node.js 22.16 or later, and a model: the [Codex CLI](https://github.com/openai/codex) sign-in below, or a local `llama-server` (see "A local model").
 
 ```bash
 bun install
@@ -77,7 +77,19 @@ The server reads the Codex CLI login from `$CODEX_HOME/auth.json`, or `~/.codex/
 
 If the file is missing or the token expired, the server starts without a model and prints `run codex login`. `/health` then shows `has_providers: false`, and `arden run` stops with `Arden has no model to answer with`.
 
-To use another credential, embed the server. See the next section.
+To use another credential, start the server from a settings file (next section) or embed it.
+
+### A local model
+
+`arden exec` and `arden serve` start a server of their own from a settings file, with its own data folder. A `chat-completions` provider runs on llama.cpp's `llama-server` with no key, or on OpenRouter with the key in a named environment variable:
+
+```bash
+llama-server -m model.gguf --ctx-size 32768 --jinja --port 8080 &
+echo '{ "dataDirectory": "/tmp/arden-local", "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" } }' > /tmp/arden-local.json
+node apps/cli/dist/main.js exec --config /tmp/arden-local.json "Say hello"
+```
+
+`apps/cli/README.md` has a checked run and what each failure says; `apps/server-ts/README.md` lists the providers and every settings field.
 
 ## Embed it
 
