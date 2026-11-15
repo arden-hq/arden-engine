@@ -74,4 +74,3 @@ export const latestHumanText = (messages: ReadonlyArray<ContentEnvelope>): strin
   const message = messages.findLast(isHumanMessage)
   return message === undefined ? undefined : authoredText(message.content)
 }
-

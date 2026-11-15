@@ -84,7 +84,10 @@ it("refuses an unreadable retention rule from Capture, a restore and its approva
         const listing = makeWikiListingMethods(repository)
         const capture = makeWikiCaptureMethods(repository, spaces, listing.read)
         const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
-        yield* unchecked(repository, createPage("reports", "reports/README.md", readme("Keep: 1 month")))
+        yield* unchecked(
+          repository,
+          createPage("reports", "reports/README.md", readme("Keep: 1 month"))
+        )
         const bad = yield* repository.get("reports")
         if (bad === null) throw new Error("reports/README.md is missing")
         const badCommit = (yield* repository.currentRevision) ?? ""

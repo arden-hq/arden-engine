@@ -97,7 +97,11 @@ export const renderSpaceContext = (
             0,
             Math.min(
               instructionsBytes,
-              maxBytes - byteLength(intro) - byteLength(instructionsTitle) - byteLength(navigation) - 4
+              maxBytes -
+                byteLength(intro) -
+                byteLength(instructionsTitle) -
+                byteLength(navigation) -
+                4
             )
           ),
           { suffix: INSTRUCTIONS_CUT }
@@ -141,9 +145,7 @@ export const renderSpaceContext = (
     })
   )
   const page =
-    view.page === undefined
-      ? undefined
-      : pageBlock(view.page, Math.min(remaining, pageBytes))
+    view.page === undefined ? undefined : pageBlock(view.page, Math.min(remaining, pageBytes))
   place(page?.text)
   return {
     text: [head, ...blocks, navigation].join("\n\n"),

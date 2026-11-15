@@ -489,7 +489,10 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
                   : []
               )
             )
-            const stillMatched = new Map<string, { readonly stamp: string; readonly blobId: string }>()
+            const stillMatched = new Map<
+              string,
+              { readonly stamp: string; readonly blobId: string }
+            >()
             for (const resource of active) {
               const stamp = stamps.get(resource.path)
               const known = matched.get(resource.path)

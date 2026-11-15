@@ -509,7 +509,11 @@ describe("a write to a page whose file changed outside", () => {
   it("is refused once, not as a conflict to retry, with where the page stands", async () => {
     const outcome = await withMemory(({ root, repository, settle, outside, snapshot }) =>
       Effect.gen(function* () {
-        const mutations = makeWikiMutationMethods(repository, spaces, makeWikiListingMethods(repository).read)
+        const mutations = makeWikiMutationMethods(
+          repository,
+          spaces,
+          makeWikiListingMethods(repository).read
+        )
         const write = (pageId: string) =>
           Effect.gen(function* () {
             const pages = yield* snapshot()

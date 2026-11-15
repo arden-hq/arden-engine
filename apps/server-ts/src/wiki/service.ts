@@ -27,11 +27,7 @@ import {
   type WikiMaintenancePrepareInput
 } from "./maintenance.js"
 import { makeWikiMutationMethods, type WikiMutationMethods } from "./mutations.js"
-import {
-  makeOutsideEdits,
-  type OutsideEditCheck,
-  type OutsideEditState
-} from "./outside-edits.js"
+import { makeOutsideEdits, type OutsideEditCheck, type OutsideEditState } from "./outside-edits.js"
 import { makeWikiPublisher, WikiChangeSink } from "./publication.js"
 import {
   makeWikiReportRetentionMethods,
@@ -142,14 +138,12 @@ const make = Effect.fn("Wiki.make")(function* (
     importReferencePages: notifyAfter(imports.importReferencePages),
     applyContentStep: <E>(step: WikiContentStep<E>) =>
       lifecycle.isAccepting()
-        ? contentSteps
-            .applyContentStep(step)
-            .pipe(
-              Effect.mapError((error) =>
-                error instanceof WikiError ? outsideEdits.explain(error) : error
-              ),
-              Effect.tap(publishSavedChanges)
-            )
+        ? contentSteps.applyContentStep(step).pipe(
+            Effect.mapError((error) =>
+              error instanceof WikiError ? outsideEdits.explain(error) : error
+            ),
+            Effect.tap(publishSavedChanges)
+          )
         : wikiError(
             "update",
             "blocked",

@@ -29,7 +29,12 @@ const ALLOWANCE_OF: Readonly<Record<string, string>> = {
 const currentSource = (source: unknown): ReadonlyArray<unknown> => {
   if (typeof source !== "object" || source === null) return [source]
   if ("kind" in source && source.kind === "collection") return []
-  if ("kind" in source && source.kind === "space" && "reason" in source && RETIRED_REASONS.has(source.reason))
+  if (
+    "kind" in source &&
+    source.kind === "space" &&
+    "reason" in source &&
+    RETIRED_REASONS.has(source.reason)
+  )
     return []
   if ("reason" in source && RETIRED_REASONS.has(source.reason) && "kind" in source)
     return [{ ...source, reason: ALLOWANCE_OF[String(source.kind)] ?? source.reason }]
