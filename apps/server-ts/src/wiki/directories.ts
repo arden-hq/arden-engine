@@ -23,7 +23,6 @@ import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
 import { loadSnapshot } from "./snapshot.js"
 import { spaceOwnsWikiPath } from "./space-index.js"
-import { requireNoSpacePage } from "./write-rules.js"
 
 const DIRECTORY_CONTRACT_HEADING = "## Directory contract"
 const MAX_DIRECTORY_PATH_CHARS = 4_096
@@ -252,12 +251,6 @@ export const makeWikiDirectoryMethods = (
 
     const { actor, origin, reason } = input.commit
     if (occupant !== undefined && !ownsLeafBoundary) {
-      yield* requireNoSpacePage(
-        spaces,
-        "create",
-        { pageId: occupant.page.pageId, path: occupant.resource.path },
-        "A Space owns this Wiki page, so it cannot be opened as a directory"
-      )
       const content = yield* reviseWikiPage(occupant.page, {
         body: adoptedDirectoryBody(occupant.page.body, contract)
       }).pipe(

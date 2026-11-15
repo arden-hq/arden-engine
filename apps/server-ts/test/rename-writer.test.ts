@@ -2,9 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
-import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq/revisions/effect"
+import {
+  ManagedFileRepository,
+  managedFileRepositoryNodeLayer,
+  type ManagedFileRepositoryShape
+} from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
 import { renameApprovalsStoreWriter } from "../src/persistence/migrations/0168_rename_approvals_store_writer.js"
@@ -26,9 +30,13 @@ import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService } from "./kit.js"
 
+const bindings: Array<{ space_id: string; page_id: string; page_path: string }> = []
 const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
-  activeBindings: () => Effect.succeed([])
+  activeBindings: () => Effect.succeed([...bindings])
 })
+
+const SPACE_REFUSAL =
+  "topics/garden.md is a Space's own page. Move or archive the Space first. Nothing was saved."
 
 const content = (path: string): string =>
   formatWikiPage({
@@ -52,7 +60,83 @@ const AGENT: WikiCommitIdentity = {
   reason: "move a page"
 }
 
+type Renames = ReturnType<typeof makeWikiRenameMethods>
+
+const withGarden = <A>(
+  body: (memory: {
+    readonly renames: Renames
+    readonly request: (commit: WikiCommitIdentity) => ReturnType<Renames["requestRename"]>
+    readonly repository: ManagedFileRepositoryShape
+    readonly store: WikiRenameStore["Service"]
+  }) => Effect.Effect<A, unknown>
+) =>
+  Effect.gen(function* () {
+    const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "arden-rename-writer-")))
+    const store = yield* WikiRenameStore
+    return yield* Effect.gen(function* () {
+      const repository = yield* ManagedFileRepository
+      yield* commitWiki(
+        { repository, spaces },
+        { ...ownerInApp("seed"), expectedRevision: null },
+        ["topics/README.md", "topics/garden.md"].map((path) =>
+          createPage(`id:${path}`, path, content(path))
+        )
+      )
+      const garden = yield* makeWikiListingMethods(repository).read("id:topics/garden.md")
+      const renames = makeWikiRenameMethods(repository, spaces, store)
+      const request = (commit: WikiCommitIdentity) =>
+        renames.requestRename({
+          pageId: garden.pageId,
+          newPath: "topics/orchard.md",
+          newTitle: "Orchard",
+          expectedVersion: garden.version,
+          expectedHead: garden.repositoryHead,
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+          commit
+        })
+      return yield* body({ renames, request, repository, store })
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root })),
+      Effect.ensuring(Effect.promise(() => rm(root, { recursive: true, force: true })))
+    )
+  })
+
 describe("a rename keeps the writer that asked for it", () => {
+  beforeEach(() => {
+    bindings.length = 0
+  })
+
+  it("leaves an accepted rename open, with its reason, once a Space owns the page", async () => {
+    const outcome = await withTempDatabase(
+      withGarden(({ renames, request, repository, store }) =>
+        Effect.gen(function* () {
+          const asked = yield* request(AGENT)
+          bindings.push({
+            space_id: "space-garden",
+            page_id: "id:topics/garden.md",
+            page_path: "topics/garden.md"
+          })
+          const fromPending = yield* renames.acceptRename({ approvalId: asked.approvalId })
+          yield* store.beginApply(asked.approvalId)
+          const fromApplying = yield* renames.acceptRename({ approvalId: asked.approvalId })
+          const [last] = yield* repository.history({ limit: 1 })
+          return {
+            fromPending: [fromPending.status, fromPending.resolution],
+            fromApplying: [fromApplying.status, fromApplying.resolution],
+            renamed: last?.reason !== "seed"
+          }
+        })
+      )
+    )
+    const left = `Rename could not be applied: ${SPACE_REFUSAL}`
+    expect(outcome).toEqual({
+      fromPending: ["pending", left],
+      fromApplying: ["pending", left],
+      renamed: false
+    })
+  })
+
   it("commits an accepted rename as that writer, and opens no second request by another", async () => {
     const root = await mkdtemp(join(tmpdir(), "arden-rename-writer-"))
     try {

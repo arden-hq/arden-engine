@@ -623,15 +623,24 @@ const wasUnmerged = Effect.fn("Wiki.wasUnmerged")(function* (
   return false
 })
 
-const requireCaptureLeavesSpacePages = Effect.fn("Wiki.requireCaptureLeavesSpacePages")(function* (
-  { spaceOwns }: CommitView,
+/**
+ * A Space's own page keeps its path: no writer moves, archives or merges it away, since the Space
+ * is moved or archived first. Capture also leaves its earlier versions alone.
+ */
+const requireSpacePageKept = Effect.fn("Wiki.requireSpacePageKept")(function* (
+  { origin, spaceOwns }: CommitView,
   write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  if (write.action !== "restore_version" || write.path.before === undefined) return
-  if (!(yield* spaceOwns(write.resourceId, write.path.before))) return
+  const path = write.path.before
+  if (path === undefined) return
+  const retires = write.action === "merge" || write.path.after !== path
+  if (!retires && !(write.action === "restore_version" && isCaptureWriter(origin))) return
+  if (!(yield* spaceOwns(write.resourceId, path))) return
   return yield* ruleError(
     "space",
-    `${write.path.before} belongs to a Space. Capture does not restore an earlier version of a Space's page. Nothing was saved.`
+    retires
+      ? `${path} is a Space's own page. Move or archive the Space first. Nothing was saved.`
+      : `${path} belongs to a Space. Capture does not restore an earlier version of a Space's page. Nothing was saved.`
   )
 })
 
@@ -730,7 +739,7 @@ const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (view: CommitView, write: ResolvedWrite) => Effect.Effect<void, WikiCommitError>
 }> = [
-  { binds: isCaptureWriter, check: requireCaptureLeavesSpacePages },
+  { binds: () => true, check: requireSpacePageKept },
   { binds: (origin) => !isOwnerOrigin(origin), check: requireRedirectOnlyByMerge },
   { binds: () => true, check: (_view, write) => requireHumanAliases(write) },
   { binds: isUpkeep, check: requireNotRecord },

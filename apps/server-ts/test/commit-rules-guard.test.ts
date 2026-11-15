@@ -32,10 +32,14 @@ it("tells a merge, a version restore, a report and a link rewrite only by the ac
   expect(naming(/\brewriteLinks\(/u)).toEqual(["wiki/rename.ts"])
 })
 
-it("refuses a write to a Space's own page in one place", () => {
+it("keeps a Space's own page at the commit point, and reads ownership elsewhere only to place a new page", () => {
   expect(naming(/\bisSpacePage\(/u)).toEqual([
     "wiki/commit.ts",
     "wiki/publication.ts",
     "wiki/write-rules.ts"
   ])
+  const writeRules = readFileSync(join(SOURCE, "wiki/write-rules.ts"), "utf8")
+  expect(writeRules.match(/\bisSpacePage\(/gu)).toHaveLength(1)
+  expect(writeRules).toMatch(/requireCreatable[\s\S]*\bisSpacePage\(/u)
+  expect(naming(/Move or archive the Space first/iu)).toEqual(["wiki/commit.ts"])
 })

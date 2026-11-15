@@ -13,9 +13,11 @@ import { describe, expect, it } from "vitest"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import {
+  archivePage,
   commitWiki,
   createPage,
   mergePage,
+  movePage,
   ownerInApp,
   updatePage,
   type WikiCommitError,
@@ -195,5 +197,46 @@ describe("what only one action may do, whatever the writer's call", () => {
       })
     )
     expect(outcome).toEqual({ agentEdit: "retire", agentMerge: "saved", ownerInFile: "saved" })
+  })
+
+  it("keeps a Space's own page where it is, for every writer, at the commit point", async () => {
+    const outcome = await withMemory((repository) =>
+      Effect.gen(function* () {
+        const retire = {
+          archive: archivePage,
+          merge: (page: ResourceVersion) => mergePage(page, redirectTo(page)),
+          move: (page: ResourceVersion) => movePage(page, "projects/orchard.md")
+        }
+        const tried: Record<string, string> = {}
+        for (const [name, write] of Object.entries(retire)) {
+          for (const [writer, identity] of [
+            ["agent", AGENT],
+            ["owner", ownerInApp("test")]
+          ] as const)
+            tried[`${writer} ${name}`] = yield* commitOutcome(
+              repository,
+              identity,
+              write,
+              SPACE_PAGE
+            )
+        }
+        tried["agent archive of another page"] = yield* commitOutcome(
+          repository,
+          AGENT,
+          archivePage,
+          "topics/seeds.md"
+        )
+        return tried
+      })
+    )
+    expect(outcome).toEqual({
+      "agent archive": "space",
+      "owner archive": "space",
+      "agent merge": "space",
+      "owner merge": "space",
+      "agent move": "space",
+      "owner move": "space",
+      "agent archive of another page": "saved"
+    })
   })
 })

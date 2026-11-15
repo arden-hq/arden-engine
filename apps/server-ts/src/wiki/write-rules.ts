@@ -9,7 +9,7 @@ import {
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
-import { wikiError, type WikiError, type WikiOperation } from "./errors.js"
+import { wikiError, type WikiError } from "./errors.js"
 import { isReadme, normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 import { isSpacePage } from "./space-index.js"
@@ -19,24 +19,6 @@ export interface WikiWriter {
   readonly pageId: string
   readonly authority: WikiLocationAuthority
 }
-
-/** Refuses to rename, retire or reshape a Space's own page: the Space is moved or archived first. */
-export const requireNoSpacePage = Effect.fn("Wiki.requireNoSpacePage")(function* (
-  spaces: SpaceStore["Service"],
-  operation: WikiOperation,
-  page: { readonly pageId: string; readonly path: string },
-  refusal = "A Space owns this Wiki page; move or archive the Space first"
-): Effect.fn.Return<void, WikiError> {
-  const bound = yield* isSpacePage(spaces, page.pageId, page.path).pipe(
-    Effect.mapError((cause) =>
-      wikiError(operation, "storage", "Could not check Space page ownership", {
-        pageId: page.pageId,
-        cause
-      })
-    )
-  )
-  if (bound) return yield* wikiError(operation, "blocked", refusal, { pageId: page.pageId })
-})
 
 /** The content a page update writes, once every rule for replacing this page holds. */
 export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
@@ -109,10 +91,6 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
   yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-  yield* requireNoSpacePage(spaces, operation, {
-    pageId: input.pageId,
-    path: current.resource.path
-  })
   if (isReadme(current.resource.path)) {
     const directory = posix.dirname(current.resource.path)
     const prefix = `${directory}/`

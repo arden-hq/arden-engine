@@ -37,7 +37,6 @@ import {
   reviseWikiPage
 } from "./page.js"
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
-import { requireNoSpacePage } from "./write-rules.js"
 
 /** Who renames when the owner asks for and accepts a rename in the app. */
 export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
@@ -500,10 +499,6 @@ export const makeWikiRenameMethods = (
         )
       }
     }
-    yield* requireNoSpacePage(spaces, "rename", {
-      pageId: input.pageId,
-      path: current.resource.path
-    })
     if (snapshot.head === null) {
       return yield* wikiError("rename", "corrupt", "A stored Wiki page has no repository head", {
         pageId: input.pageId
@@ -551,19 +546,6 @@ export const makeWikiRenameMethods = (
       const boundary = yield* resolveWikiWriteBoundary(spaces, writer.authority, snapshot, "rename")
       const paths = yield* planMutationPaths(plan, snapshot.pages)
       yield* requireWikiWritePaths(boundary, "rename", paths)
-      const applying = approval
-      yield* requireNoSpacePage(spaces, "rename", { pageId: plan.pageId, path: plan.oldPath }).pipe(
-        Effect.tapError((error) =>
-          applying.status === "applying" && error.reason === "blocked"
-            ? store
-                .releaseApply(
-                  applying.approvalId,
-                  "A Space took ownership before the rename was committed"
-                )
-                .pipe(Effect.mapError(mapStoreError))
-            : Effect.void
-        )
-      )
     }
     if (approval.status === "pending") {
       approval = yield* store.beginApply(input.approvalId).pipe(Effect.mapError(mapStoreError))
