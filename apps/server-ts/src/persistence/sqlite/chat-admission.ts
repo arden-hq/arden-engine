@@ -43,6 +43,7 @@ import {
   wokenOccurrence
 } from "./run-context.js"
 import { bindInChatTask } from "./in-chat-task.js"
+import { taskStepDepth } from "./run-cause.js"
 import { holdsUnattendedInput, readLastEndedRun } from "./chat-hold.js"
 import { captureRunPolicy, workerScopes } from "./run-policy.js"
 import { appendQuestionChange } from "./question-events.js"
@@ -535,18 +536,16 @@ export const makeChatAdmission = ({
         if (sender?.kind === "continuation") runContext = sender.context
         else if (answeredByUser) runContext = { origin: chatOrigin, task: delivery.context.task }
         else if (delivery?.kind === "answer") runContext = delivery.context
-        else if (valid.continuesTask !== undefined)
+        else if (valid.continuesTask !== undefined) {
+          const depth = yield* taskStepDepth(sql, valid.continuesTask)
           runContext = {
-            origin:
-              valid.continuesTask.chainDepth === 0
-                ? chatOrigin
-                : { ...chatOrigin, chain_depth: valid.continuesTask.chainDepth },
+            origin: depth === 0 ? chatOrigin : { ...chatOrigin, chain_depth: depth },
             task: yield* bindInChatTask(sql, {
               itemId: valid.continuesTask.itemId,
               sessionId: valid.sessionId
             }).pipe(Effect.mapError((cause) => conflict(cause.message, "task_idle")))
           }
-        else if (previousRun)
+        } else if (previousRun)
           runContext = yield* continuedContext(sql, previousRun.context).pipe(
             Effect.mapError(arrivalConflict)
           )

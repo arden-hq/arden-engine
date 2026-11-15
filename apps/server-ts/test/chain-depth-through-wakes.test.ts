@@ -68,7 +68,9 @@ const dispatchTaskChanges = (after: number) =>
  * Task made by `makeTask`. Nothing waits when it returns: the Task's first wake is dropped, so the
  * owner's edit by hand is the only start.
  */
-const followerAndTask = <R>(makeTask: Effect.Effect<{ readonly item_id: string }, unknown, R>) =>
+const followerAndTask = <T extends { readonly item_id: string }, R>(
+  makeTask: Effect.Effect<T, unknown, R>
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
@@ -185,10 +187,10 @@ it("an owner Automation on task.changed that edits an in-chat Task stops at the 
       return yield* rounds(setup, (lease, round) =>
         Effect.gen(function* () {
           yield* endJobWithoutRun(lease)
-          const step = yield* nextStep(setup.itemId)
+          yield* nextStep(setup.itemId)
           const started = yield* startChat(setup.task.sessionId, `step-${round}`, {
             isMeta: true,
-            continuesTask: { itemId: setup.itemId, chainDepth: step.chainDepth }
+            continuesTask: { itemId: setup.itemId }
           })
           yield* setup.edit(started.runId, `Edited by step ${round}`)
           yield* finishChat(started, `step-${round}`)
@@ -341,23 +343,58 @@ it("a failed Space review is retried at the depth of the wake it answered", asyn
   expect(retried).toEqual([{ event: "space.review_retry", depth: 1 }])
 })
 
-// A restart hands an idle in-chat Task on through `idleInChat`; a wake hands it on through
-// `nextInChat`. Both give the step the depth of the Task's latest wake, as a due check does.
-it("an in-chat Task step goes on at the depth of the Task's latest wake, after a wake and after a restart", async () => {
+// A wake and a restart both hand an in-chat Task on by its id only; admission reads the depth of
+// the Task's latest wake, as a due check does, so no caller states a depth.
+it("an in-chat Task step is admitted at the depth of the Task's latest wake", async () => {
   const depths = await withTempDatabase(
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
       const setup = yield* followerAndTask(inChatTask)
-      const handedOn = Effect.gen(function* () {
-        const idle = (yield* (yield* WorkStore).idleInChat()).find(
-          (step) => step.itemId === setup.itemId
-        )
-        return { wake: (yield* nextStep(setup.itemId)).chainDepth, restart: idle?.chainDepth }
-      })
-      const created = yield* handedOn
+      const admitted = (id: string) =>
+        Effect.gen(function* () {
+          const started = yield* startChat(setup.task.sessionId, id, {
+            isMeta: true,
+            continuesTask: { itemId: setup.itemId }
+          })
+          yield* finishChat(started, id)
+          const [row] = yield* sql<{ readonly depth: number | null }>`
+            SELECT json_extract(metadata_json, '$.run_context.origin.chain_depth') AS depth
+            FROM chat_runs WHERE run_id = ${started.runId}`
+          return row?.depth ?? 0
+        })
+      const created = yield* admitted("step-created")
       yield* setup.edit(undefined, "Edited by hand")
       yield* rounds(setup, (lease) => endJobWithoutRun(lease), 2)
-      return { created, woken: yield* handedOn }
+      return { created, woken: yield* admitted("step-woken") }
     })
   )
-  expect(depths).toEqual({ created: { wake: 0, restart: 0 }, woken: { wake: 1, restart: 1 } })
+  expect(depths).toEqual({ created: 0, woken: 1 })
+})
+
+// The end of a run hands the step on at the depth that run's changes carry: an owner Automation's
+// run adds one to the wake it answered, whatever the Task's own latest wake was.
+it("an in-chat Task step handed on by a run's end is admitted at the depth of that run's changes", async () => {
+  const depth = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const setup = yield* followerAndTask(inChatTask)
+      yield* setup.edit(undefined, "Edited by hand")
+      yield* dispatchTaskChanges(setup.seen)
+      const follower = (yield* claimAll("round-1")).find(
+        (lease) => lease.payload.automationId === setup.follower
+      )
+      if (follower === undefined) throw new Error("the follower was not woken")
+      let followerRun = ""
+      yield* runJob(follower, "follower-1", (runId) => Effect.sync(() => (followerRun = runId)))
+      const started = yield* startChat(setup.task.sessionId, "step-after-run", {
+        isMeta: true,
+        continuesTask: { itemId: setup.itemId, afterRunId: followerRun }
+      })
+      const [row] = yield* sql<{ readonly depth: number | null }>`
+        SELECT json_extract(metadata_json, '$.run_context.origin.chain_depth') AS depth
+        FROM chat_runs WHERE run_id = ${started.runId}`
+      return row?.depth ?? 0
+    })
+  )
+  expect(depth).toBe(1)
 })

@@ -145,7 +145,7 @@ it("only a Task change made by hand wakes the Space review; no run's change does
       const ownerRun = (yield* startChat(yield* chat(), "owner-turn")).runId
       const stepRun = (yield* startChat(taskChat, "task-step", {
         isMeta: true,
-        continuesTask: { itemId: inChat.item_id, chainDepth: 0 }
+        continuesTask: { itemId: inChat.item_id }
       })).runId
       const resultRun = (yield* startChat(yield* chat(), "result", { isMeta: true })).runId
       yield* clearQueue(sql)

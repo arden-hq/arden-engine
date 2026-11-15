@@ -13,7 +13,11 @@ import type { ModelRole } from "@arden-hq/protocol/models"
 import type { Interaction } from "@arden-hq/loop"
 import { DateTime, Effect, Schema } from "effect"
 import { ChatUpdateSchema } from "@arden-hq/protocol/effect/chat"
-import type { ChatAutomationOrigin, ChatCaptureInput } from "../persistence/chat/store.js"
+import type {
+  ChatAutomationOrigin,
+  ChatCaptureInput,
+  TaskStepCause
+} from "../persistence/chat/store.js"
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 import {
   isWorkflowDeliveryClientId,
@@ -43,7 +47,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly announce?: true
   readonly fromChat?: ChatHandoffSource
   readonly forwardedFrom?: HistoryMessage["forwarded_from"]
-  readonly continuesTask?: { readonly itemId: string; readonly chainDepth: number }
+  readonly continuesTask?: TaskStepCause
   readonly capture?: ChatCaptureInput["via"]
   readonly fromQueue?: true
 }
@@ -69,7 +73,7 @@ export const taskContinuation = (input: {
   readonly sessionId: string
   readonly sourceId: string
   readonly itemId: string
-  readonly chainDepth: number
+  readonly afterRunId?: string | undefined
   readonly text: string
   readonly approvalMode?: ChatApprovalMode | undefined
 }): ChatSendInput => {
@@ -96,7 +100,10 @@ export const taskContinuation = (input: {
       causedBy: { type: "message", id: input.sourceId }
     },
     isMeta: true,
-    continuesTask: { itemId: input.itemId, chainDepth: input.chainDepth }
+    continuesTask: {
+      itemId: input.itemId,
+      ...(input.afterRunId === undefined ? {} : { afterRunId: input.afterRunId })
+    }
   }
 }
 

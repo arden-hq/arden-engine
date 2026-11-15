@@ -48,6 +48,22 @@ export const taskWakeDepth = (
   sql`COALESCE((SELECT ${attemptWakeDepth(sql, "attempt")} FROM automation_runs AS attempt
     WHERE attempt.item_id = ${itemId} ORDER BY attempt.id DESC LIMIT 1), 0)`
 
+/** The depth an in-chat Task step goes on at: that of the run whose end handed it the step, or
+ *  else that of the wake the Task's latest attempt answered. Read where the step is admitted. */
+export const taskStepDepth = (
+  sql: SqlClient.SqlClient,
+  step: { readonly itemId: string; readonly afterRunId?: string | undefined }
+) =>
+  step.afterRunId === undefined
+    ? sql<{
+        readonly depth: number
+      }>`SELECT ${taskWakeDepth(sql, sql`${step.itemId}`)} AS depth`.pipe(
+        Effect.map(([row]) => row?.depth ?? 0)
+      )
+    : readCause(sql, step.afterRunId).pipe(
+        Effect.map((cause) => causedChainDepth(cause.automationId ?? null, cause.wakeDepth))
+      )
+
 export const readCause = (sql: SqlClient.SqlClient, runId: string) =>
   sql<{
     readonly automation_id: string | null

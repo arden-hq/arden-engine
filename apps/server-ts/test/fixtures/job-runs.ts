@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { AutomationId } from "../../src/persistence/automations/model.js"
 import { AutomationQueue } from "../../src/persistence/automations/queue.js"
-import { ChatWriteStore } from "../../src/persistence/chat/store.js"
+import { ChatWriteStore, type TaskStepCause } from "../../src/persistence/chat/store.js"
 
 const message = (id: string, isMeta: boolean) => ({
   message_id: id,
@@ -19,7 +19,7 @@ export const startChat = (
   id: string,
   options: {
     readonly isMeta?: boolean
-    readonly continuesTask?: { readonly itemId: string; readonly chainDepth: number }
+    readonly continuesTask?: TaskStepCause
     readonly automation?: {
       readonly automationId: string
       readonly attemptId: number

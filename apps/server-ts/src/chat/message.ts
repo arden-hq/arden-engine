@@ -76,7 +76,6 @@ import {
   type ChatSendInput
 } from "./message-input.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
-import { causedChainDepth } from "../persistence/automations/chain-depth.js"
 
 export interface ChatMessageShape {
   readonly runnerAvailability: Stream.Stream<boolean>
@@ -573,17 +572,8 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
             if (step === undefined) return
             const handedOn =
               "itemId" in input
-                ? { sourceId: input.sourceId, chainDepth: step.chainDepth }
-                : {
-                    sourceId: input.afterRunId,
-                    chainDepth: yield* runs
-                      .cause(input.afterRunId)
-                      .pipe(
-                        Effect.map((cause) =>
-                          causedChainDepth(cause.automationId ?? null, cause.wakeDepth)
-                        )
-                      )
-                  }
+                ? { sourceId: input.sourceId }
+                : { sourceId: input.afterRunId, afterRunId: input.afterRunId }
             const chatMode = step.approvalMode
             yield* send(
               taskContinuation({

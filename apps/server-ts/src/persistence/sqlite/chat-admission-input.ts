@@ -38,7 +38,10 @@ export const chatAdmissionInputSchema = Schema.Struct({
     Schema.Struct({ id: Schema.NonEmptyString, token: Schema.NonEmptyString })
   ),
   continuesTask: Schema.optionalKey(
-    Schema.Struct({ itemId: Schema.NonEmptyString, chainDepth: Schema.Natural })
+    Schema.Struct({
+      itemId: Schema.NonEmptyString,
+      afterRunId: Schema.optionalKey(Schema.NonEmptyString)
+    })
   ),
   fromQueue: Schema.optionalKey(Schema.Literal(true)),
   capture: Schema.optionalKey(

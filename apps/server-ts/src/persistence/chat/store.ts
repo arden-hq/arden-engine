@@ -28,6 +28,13 @@ export interface ChatAutomationOrigin {
   readonly name: string
 }
 
+/** What handed an in-chat Task its step: a wake of the Task, or the end of `afterRunId`.
+ *  Admission reads the step's chain depth from it (`run-cause.ts`); no caller states one. */
+export interface TaskStepCause {
+  readonly itemId: string
+  readonly afterRunId?: string
+}
+
 export interface ChatWriteStartInput {
   readonly approvalReply?: { readonly runId: string; readonly toolId: string }
   readonly deliveryId?: string
@@ -47,8 +54,7 @@ export interface ChatWriteStartInput {
   readonly automationPrompt?: string
   readonly automationContextMode?: AutomationContextMode
   readonly outputSchema?: JsonObject
-  /** `chainDepth`: of the wake or run that handed the Task this step (`chain-depth.ts`). */
-  readonly continuesTask?: { readonly itemId: string; readonly chainDepth: number }
+  readonly continuesTask?: TaskStepCause
   readonly capture?: ChatCaptureInput
   readonly fromQueue?: true
 }
