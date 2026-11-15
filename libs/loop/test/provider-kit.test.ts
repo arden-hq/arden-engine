@@ -356,7 +356,9 @@ describe("a connection that fails", () => {
     ])
     // A query is cut with everything after it: the path appended to such a base URL lands inside
     // it (the settings refuse one for that reason).
-    expect([chat, responses].map((cause) => (cause instanceof Error ? cause.message : cause))).toEqual([
+    expect(
+      [chat, responses].map((cause) => (cause instanceof Error ? cause.message : cause))
+    ).toEqual([
       "llama.cpp: cannot reach http://127.0.0.1:8080/v1: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)",
       "OpenAI: cannot reach http://127.0.0.1:8080/v1/responses: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)"
     ])

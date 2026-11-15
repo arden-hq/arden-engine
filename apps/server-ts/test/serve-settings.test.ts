@@ -87,7 +87,9 @@ it("a provider base URL with a query or fragment is refused: every request path 
   expect(() => parseSettings(settings("http://127.0.0.1:8080/v1?key=secret"))).toThrow(
     /^Invalid settings: `provider.baseUrl` must not contain a query: a request path is appended to it$/
   )
-  expect(() => parseSettings(settings("http://127.0.0.1:8080/v1?"))).toThrow(/must not contain a query/)
+  expect(() => parseSettings(settings("http://127.0.0.1:8080/v1?"))).toThrow(
+    /must not contain a query/
+  )
   expect(() => parseSettings(settings("http://127.0.0.1:8080/v1#models"))).toThrow(
     /must not contain a fragment/
   )

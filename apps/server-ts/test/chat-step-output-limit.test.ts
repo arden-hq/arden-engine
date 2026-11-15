@@ -50,7 +50,12 @@ const recording = (outputLimit: ModelCapabilities["outputLimit"] = undefined) =>
       return [
         {
           _tag: "Completed",
-          message: { role: "assistant", content: "Done.", tool_calls: null, reasoning_content: null },
+          message: {
+            role: "assistant",
+            content: "Done.",
+            tool_calls: null,
+            reasoning_content: null
+          },
           finish_reason: "stop",
           usage: { prompt_tokens: 2, completion_tokens: 1 },
           model: request.model
@@ -110,11 +115,15 @@ const chatSteps = (requests: ReadonlyArray<ModelProviderRequest>) =>
     .map((request) => request.maxOutputTokens)
 
 describe("a chat step's output limit", () => {
-  it("is the room the window leaves above the compaction trigger", { timeout: 30_000 }, async () => {
-    const model = recording()
-    await chatTurn(model.provider, host())
-    expect(chatSteps(model.requests)).toEqual([32_768 - 26_214])
-  })
+  it(
+    "is the room the window leaves above the compaction trigger",
+    { timeout: 30_000 },
+    async () => {
+      const model = recording()
+      await chatTurn(model.provider, host())
+      expect(chatSteps(model.requests)).toEqual([32_768 - 26_214])
+    }
+  )
 
   it("is never more than the model's own output cap", { timeout: 30_000 }, async () => {
     const model = recording()
