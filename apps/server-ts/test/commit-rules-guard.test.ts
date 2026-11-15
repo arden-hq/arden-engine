@@ -25,11 +25,10 @@ it("decides what a writer may do only at the commit point", () => {
   expect(naming(/from "\.\/commit\.js"/u)).not.toContain("wiki/write-rules.ts")
 })
 
-it("tells a merge, a version restore, a report and a link rewrite only by the action its one caller states", () => {
+it("tells a merge, a version restore and a report only by the action its one caller states", () => {
   expect(naming(/\bmergePage\(/u)).toEqual(["wiki/mutations.ts"])
   expect(naming(/\brestoreVersion\(/u)).toEqual(["wiki/restore.ts"])
   expect(naming(/(?<!\.)\bpublishReport\(/u)).toEqual(["wiki/reports.ts"])
-  expect(naming(/\brewriteLinks\(/u)).toEqual(["wiki/rename.ts"])
 })
 
 it("keeps a Space's own page at the commit point, and reads ownership elsewhere only to place a new page", () => {

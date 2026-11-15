@@ -54,12 +54,11 @@ const pinnedAt = (
 const updateAction = (
   commit: Commit,
   text: string
-): "edit" | "publish" | "restore_version" | "merge" | "rewrite_links" => {
+): "edit" | "publish" | "restore_version" | "merge" => {
   const page = Effect.runSync(Effect.option(parseWikiPage(text)))
   if (Option.isSome(page) && page.value.lifecycle === "redirect") return "merge"
   if (/^publish report /iu.test(commit.reason)) return "publish"
   if (/^restore /iu.test(commit.reason)) return "restore_version"
-  if (commit.changes.some((change) => change.action === "move")) return "rewrite_links"
   return "edit"
 }
 

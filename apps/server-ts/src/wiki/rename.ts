@@ -7,7 +7,7 @@ import {
   movePage,
   ownerInApp,
   requireCommitRules,
-  rewriteLinks,
+  updatePage,
   type WikiCommitIdentity,
   type WikiWrite
 } from "./commit.js"
@@ -122,7 +122,7 @@ const decodeWriter = Effect.fn("WikiRename.decodeWriter")(function* (
 const planOperations = (plan: RenamePlan): ReadonlyArray<WikiWrite> => [
   movePage(plan.source, plan.newPath, plan.movedContent),
   createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),
-  ...plan.rewrites.map((rewrite) => rewriteLinks(rewrite.resource, rewrite.content))
+  ...plan.rewrites.map((rewrite) => updatePage(rewrite.resource, rewrite.content))
 ]
 type PlannedResource = RenamePlan["source"]
 

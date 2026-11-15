@@ -197,14 +197,14 @@ type Operation<Tag extends WikiPageOperation["_tag"]> = Extract<
 
 /**
  * One page write, with the action its caller states. The commit rules read the action, never
- * the operation's shape: a merge, a version restore, a report and a rename's link rewrite all
- * replace a page's content, and each is told apart only here.
+ * the operation's shape: an edit, a merge, a version restore and a report all replace a page's
+ * content, and each is told apart only here. A rename's link rewrites are edits.
  */
 export type WikiWrite =
   | { readonly action: "create"; readonly operation: Operation<"Create"> }
   | { readonly action: "publish"; readonly operation: Operation<"Create" | "Update"> }
   | {
-      readonly action: "edit" | "restore_version" | "merge" | "rewrite_links"
+      readonly action: "edit" | "restore_version" | "merge"
       readonly operation: Operation<"Update">
     }
   | { readonly action: "move"; readonly operation: Operation<"Move"> }
@@ -265,12 +265,6 @@ export const mergePage = (
 ): WikiWrite => ({
   action: "merge",
   operation: updated(page, formatRedirectPage(redirect))
-})
-
-/** A rename's new link targets in a page that links to the renamed one. */
-export const rewriteLinks = (page: PageVersion, content: string): WikiWrite => ({
-  action: "rewrite_links",
-  operation: updated(page, content)
 })
 
 export const movePage = (page: PageVersion, path: string, content?: string): WikiWrite => ({
@@ -567,7 +561,6 @@ const requireAutomatedRecordWrite = Effect.fn("Wiki.requireAutomatedRecordWrite"
   switch (write.action) {
     case "edit":
     case "restore_version":
-    case "rewrite_links":
     case "restore_archived":
       return
     case "create":
@@ -685,7 +678,6 @@ const keepsCodeOwnedPage = Effect.fn("Wiki.keepsCodeOwnedPage")(function* (
     case "edit":
     case "restore_version":
     case "merge":
-    case "rewrite_links":
     case "restore_archived":
       break
   }
