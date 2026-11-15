@@ -2,7 +2,7 @@ import { isTaskUnfinished, taskActivityWords, type SpaceTask } from "@arden-hq/p
 import { Schema } from "effect"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
-import { clipLine, cutBytes, cutText } from "@arden-hq/std/text"
+import { byteLength, clipLine, cutBytes, cutText } from "@arden-hq/std/text"
 import { chatHref } from "../sessions/chat-href.js"
 
 export interface SpaceView {
@@ -52,8 +52,6 @@ const TRACKED_SETTLED_TASKS = 30
 const TRACKED_CHATS = 50
 const MORE_LINE_BYTES = 120
 
-const encoder = new TextEncoder()
-const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 const INSTRUCTIONS_CUT = "\n[Cut to fit: the rest of the Space instructions is left out.]"
 

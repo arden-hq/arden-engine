@@ -6,10 +6,10 @@ import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
-import { hasText, pageKind, recordFolders, type RecordFolders } from "./collections.js"
-import { overPageLimit } from "./commit.js"
-import { pageWikiLinks } from "./links.js"
-import { isReadme, normal, textSentences, visibleText } from "./page.js"
+import { hasText, pageKind, recordFolders, type RecordFolders } from "../../src/wiki/collections.js"
+import { overPageLimit } from "../../src/wiki/commit.js"
+import { pageWikiLinks } from "../../src/wiki/links.js"
+import { isReadme, normal, textSentences, visibleText } from "../../src/wiki/page.js"
 import {
   activeRunPages,
   followRedirect,
@@ -17,8 +17,8 @@ import {
   resolveWikiLinkTarget,
   type PageRecord,
   type RunPage
-} from "./snapshot.js"
-import { untrackedFiles, untrackedPageIds } from "./untracked.js"
+} from "../../src/wiki/snapshot.js"
+import { untrackedFiles, untrackedPageIds } from "../../src/wiki/untracked.js"
 
 /** Memory as it stands: the pages in history and the other files in the Memory folder. */
 export interface MemoryFolder {

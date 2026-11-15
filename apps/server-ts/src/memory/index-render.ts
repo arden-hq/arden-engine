@@ -1,3 +1,4 @@
+import { byteLength } from "@arden-hq/std/text"
 import type { RunMemorySource } from "@arden-hq/protocol/runs"
 
 import type { SpacePageBinding } from "../persistence/spaces/store.js"
@@ -25,8 +26,6 @@ export interface RenderedIndex extends RenderedMemory {
   readonly shown: ReadonlySet<string>
 }
 
-const encoder = new TextEncoder()
-const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 export const renderIndex = (
   pages: ReadonlyArray<RunPage>,

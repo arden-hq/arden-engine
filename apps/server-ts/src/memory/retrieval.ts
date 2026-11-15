@@ -1,3 +1,4 @@
+import { byteLength } from "@arden-hq/std/text"
 import { parseCalendarDay, utcDay } from "@arden-hq/std/time"
 import type { RunMemoryRecallRole, RunMemorySource } from "@arden-hq/protocol/runs"
 import { pageKind, recordFolders, type PageKind } from "../wiki/collections.js"
@@ -43,8 +44,6 @@ export interface MemorySources {
 const normalized = (value: string): string =>
   value.toLocaleLowerCase().split(/\s+/u).filter(Boolean).join(" ")
 
-const encoder = new TextEncoder()
-const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 const bytePrefix = (text: string, maxBytes: number): string => {
   if (byteLength(text) <= maxBytes) return text

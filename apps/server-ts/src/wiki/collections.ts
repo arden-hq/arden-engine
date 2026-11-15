@@ -1,6 +1,6 @@
 import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
 import { parseCalendarDay } from "@arden-hq/std/time"
-import { clipLine } from "@arden-hq/std/text"
+import { byteLength, clipLine } from "@arden-hq/std/text"
 import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
@@ -235,8 +235,6 @@ export interface MemoryIndex {
 
 const INDEX_SUMMARY_CHARS = 120
 
-const encoder = new TextEncoder()
-const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 const indexLine = ({ path, summary }: MemoryIndexLine): string =>
   summary === null ? `- ${path}` : `- ${path}: ${summary}`

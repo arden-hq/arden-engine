@@ -1,3 +1,4 @@
+import { byteLength } from "@arden-hq/std/text"
 import type {
   RunMemoryBudget,
   RunMemoryComposition,
@@ -78,8 +79,6 @@ export interface MemoryContext {
   readonly record: RunMemoryComposition
 }
 
-const encoder = new TextEncoder()
-const byteLength = (value: string): number => encoder.encode(value).byteLength
 
 /**
  * The one place a run's Memory block is composed: every source renders itself into its own
