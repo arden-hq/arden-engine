@@ -6,8 +6,6 @@ import { wikiMaintenanceHandler } from "../src/automations/handlers/wiki-mainten
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Maintenance runs from Memory changes, not from a clock.
-
 const MAINTENANCE = wikiMaintenanceHandler.spec.automationId
 
 it("Maintenance has no time trigger, only its change trigger", () => {
@@ -22,7 +20,6 @@ it("a stored timer is gone after the system Automations are seeded again", async
       const sql = yield* SqlClient.SqlClient
       const catalog = yield* AutomationCatalog
       yield* catalog.seedSystemAutomations([wikiMaintenanceHandler.spec])
-      // The row as a database from before the update holds it: a 6-hour timer, due later.
       yield* sql`UPDATE scheduled_tasks
         SET triggers = '[{"id":"t1","type":"time","every":"6h"},{"id":"t2","type":"event","event_type":"wiki.changed"}]',
           next_run_at = '2099-01-01T00:00:00.000Z'

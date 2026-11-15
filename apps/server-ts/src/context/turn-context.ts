@@ -351,12 +351,6 @@ type TurnMeasure = <A, E, R>(
   skipped: A
 ) => Effect.Effect<A, E, R>
 
-/**
- * What a run is sent from Memory and its Space, as prompt sections: the reader's sources from
- * one Memory turn, composed into one block from one budget. The run's record of what it was
- * sent is written here, from the same sections. The memory test calls this same function on a
- * replay copy and reads that record, so it measures what a chat is really sent.
- */
 export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(function* (
   services: Pick<TurnContextServices, "spaces" | "summaries" | "work" | "chat">,
   input: {

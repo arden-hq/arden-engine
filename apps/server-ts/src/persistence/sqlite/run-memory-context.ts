@@ -11,11 +11,6 @@ const CompositionJson = Schema.fromJsonString(RunMemoryContextSchema)
 const StoredJson = Schema.fromJsonString(Schema.Array(Schema.Record(Schema.String, Schema.Unknown)))
 const decodeRecord = Schema.decodeUnknownEffect(Schema.Array(RunMemoryContextSchema))
 
-// Records written before each Memory source had its own allowance (by the memory test and
-// unreleased builds only) hold retired values: `collection` sources, retired cut reasons and
-// no `reader`. They are read as the record says now: collection lines and Space contexts with a
-// retired reason left out, each other retired reason as the allowance of its source's kind, and
-// `owner`, since only owner chats were recorded before `reader`.
 const RETIRED_REASONS: ReadonlySet<unknown> = new Set([
   "block_budget",
   "core_page_budget",

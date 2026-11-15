@@ -60,7 +60,6 @@ const currentNextRunAt = (input: {
     input.schedule,
     Number.isFinite(parsed) ? parsed : input.nowMs
   )
-  // A schedule that lost its time trigger keeps no run that was due under it.
   if (next === null) return null
   return input.row.next_run_at !== null && !input.spec.rearmOnSeed ? input.row.next_run_at : next
 }

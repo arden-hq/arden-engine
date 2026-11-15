@@ -9,15 +9,8 @@ import { partialService } from "./kit.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 import type { Wiki } from "../src/wiki/service.js"
 
-// Every wiki_restore_page call on the copy, replayed against today's restore gates with no model
-// and no Memory write. A "read first" failure is the approved follow-up of a card that waited in
-// the chat when it carries the card's call id with ":approved"; that follow-up ran in a new
-// toolset, which had none of its run's reads. Today the card carries them. Pages are keyed by the
-// path each call named. Only counts leave this file.
-
 const located = locateReplayCopy()
 
-/** Calls that, once finished without error, leave the run having seen the page at `path`. */
 const SEES_PAGE = new Set([
   "wiki_read_page",
   "wiki_edit_page",
@@ -73,7 +66,6 @@ it("replays every page restore on the copy against today's gates", async (contex
     runs.set(runId, made)
     return made
   }
-  /** Whether the run had seen the page when each card was made, keyed by the card's call. */
   const seenWhenAsked = new Map<string, boolean>()
   const counts = {
     restores: 0,

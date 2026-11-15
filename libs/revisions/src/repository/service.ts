@@ -265,7 +265,6 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
 ): Effect.fn.Return<ManagedFileRepositoryShape, RepositoryError, RevisionStorage | Scope.Scope> {
   const storage = yield* RevisionStorage
   const withLockQueue = (yield* Semaphore.make(1)).withPermit
-  /** Each tracked file's stamp when a scan last found it matching its history. */
   let matched = new Map<string, { readonly stamp: string; readonly blobId: string }>()
   let scans = 0
   let closed = false

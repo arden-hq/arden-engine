@@ -1,11 +1,3 @@
-// Replays a month of the owner's runs and typed turns through the rules that decide what a run
-// is sent from Memory, with no model and no write: which runs get a Memory block, by recorded
-// actor, and how many typed turns the word search reads nothing of. It reads
-// the database named by ARDEN_MEMORY_BLOCK_REPLAY_DB, opened read-only and immutable, skips
-// when the variable is unset or names no file, and prints and asserts counts only.
-//
-//   ARDEN_MEMORY_BLOCK_REPLAY_DB=<path to arden.db> npx vitest run test/memory-block-replay.test.ts
-
 import { existsSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import { Schema } from "effect"
@@ -16,7 +8,6 @@ import { wordSearchTerms } from "../src/memory/retrieval.js"
 import { authoredText, isHumanMessage } from "../src/persistence/transcript/content.js"
 
 const DATABASE = process.env["ARDEN_MEMORY_BLOCK_REPLAY_DB"]?.trim() ?? ""
-// The month the rebuild plan measured.
 const FROM = "2026-10-14T00:00:00.000Z"
 const UNTIL = "2026-11-14T00:00:00.000Z"
 
@@ -65,7 +56,6 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
         const key = actorLabel(actor)
         const row = byActor.get(key) ?? { runs: 0, before: 0, after: 0 }
         row.runs += 1
-        // Before: a chat a person started (no Automation origin, not a helper's chat).
         if (
           run.session_type !== "agent" &&
           run.origin_automation_id === null &&

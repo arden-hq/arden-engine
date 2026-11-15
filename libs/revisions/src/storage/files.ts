@@ -227,7 +227,6 @@ export const removeTree = Effect.fn("RevisionStorage.removeTree")(function* (
     .pipe(Effect.mapError((cause) => storageFailure("remove directory", cause)))
 })
 
-/** Atomic writes stage their bytes in a folder with this name prefix beside the target. */
 const ATOMIC_TEMPORARY_PREFIX = ".arden-"
 
 export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (

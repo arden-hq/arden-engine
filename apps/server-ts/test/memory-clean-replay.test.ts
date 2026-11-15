@@ -19,9 +19,6 @@ import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { parseWikiPage } from "../src/wiki/page.js"
 import { locateReplayCopy, runOnReplayCopy } from "./fixtures/replay-copy.js"
 
-// The "Memory stays clean" changes on the real history, with no model. Opening the copy migrates
-// it, so the chat summary repair runs on it. Only counts leave this file.
-
 const located = locateReplayCopy()
 
 it("replays the commit-point limit, the timer, Daily's days and chat summaries on the copy", async (context) => {
@@ -109,8 +106,6 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
     })
   )
 
-  // Daily from 9 September on the copy, as if the position had been set then: which days
-  // would run the model, with no model. The update itself starts the position two days back.
   const timezone = machineTimeZone()
   const daily = await Effect.runPromise(
     Effect.gen(function* () {

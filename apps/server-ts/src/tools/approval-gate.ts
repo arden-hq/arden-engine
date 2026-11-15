@@ -294,7 +294,6 @@ const withWhy = (prompt: ToolApprovalPrompt, note: string): ToolApprovalPrompt =
     ? { ...prompt, presentation: { ...prompt.presentation, why: note } }
     : prompt
 
-/** Approval data key for what the run had read when it asked; the tool never sees it. */
 const RUN_READS = "run_reads"
 
 const withRunReads = (prompt: ToolApprovalPrompt, run: ServerRunContext): ToolApprovalPrompt => ({
@@ -302,10 +301,6 @@ const withRunReads = (prompt: ToolApprovalPrompt, run: ServerRunContext): ToolAp
   data: { ...prompt.data, [RUN_READS]: run.observations.snapshot() }
 })
 
-/**
- * An approved call runs in a new toolset (a resumed run, or a card's follow-up), so it takes
- * what its run had read when it asked, as if the run had waited.
- */
 const withAdoptedReads = <
   C extends { readonly run: ServerRunContext; readonly approval?: ToolApprovalContext }
 >(

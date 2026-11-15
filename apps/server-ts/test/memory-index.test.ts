@@ -4,8 +4,6 @@ import { memoryIndex } from "../src/wiki/collections.js"
 import { formatWikiPage, parseWikiPage, wikiPageSummary } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const page = (
   path: string,
   body = `About ${path}. More detail follows here.`,

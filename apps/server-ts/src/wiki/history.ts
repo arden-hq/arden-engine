@@ -58,11 +58,6 @@ export interface WikiHistoryMethods {
   readonly lineOrigin: (pageId: string, text: string) => Effect.Effect<WikiLineOrigin, WikiError>
 }
 
-/**
- * Which saved change put a line of the page's current text there: the newest change whose
- * earlier version lacks the line. A line removed and later put back names the change that put it
- * back. `ambiguous` counts the different current lines that hold the text.
- */
 type WikiLineOrigin =
   | {
       readonly kind: "added"
@@ -74,13 +69,10 @@ type WikiLineOrigin =
     }
   | { readonly kind: "ambiguous"; readonly lines: number }
   | { readonly kind: "absent" }
-  /** The line is older than the newest `searched` changes, which is as far back as a line is traced. */
   | { readonly kind: "older"; readonly searched: number }
 
 const linesOf = (text: string): ReadonlyArray<string> => text.split("\n").map((line) => line.trim())
 
-// Each change searched costs one stored version read in a single call, so a search over a
-// page's changes stops after this many, and says so.
 const VERSION_SEARCH_COMMITS = 500
 const VERSION_DIFF_CHARS = 65_536
 

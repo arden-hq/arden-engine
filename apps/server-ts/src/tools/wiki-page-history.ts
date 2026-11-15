@@ -56,17 +56,9 @@ const RestoreParametersSchema = Schema.Struct({
   })
 })
 
-/**
- * The page stored at exactly this path, merged pages included. History and restore work on the
- * page itself, where reading follows a merged path to the page that replaced it.
- */
 const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
   snapshot.pages.find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
 
-/**
- * The page a restore names, the version of it the run has seen, and the saved change to bring
- * back. A merged page has no body to read; its stored version is the one to restore over.
- */
 const prepareRestore = async (
   wiki: Wiki["Service"],
   input: { readonly path: string; readonly at: string },
@@ -152,8 +144,6 @@ export const makeWikiPageHistoryTools = ({
           }
         ]
       })
-      // The listing names the current version, so a restore can follow it. A version the run read
-      // earlier is kept: a change it has not seen still refuses the restore.
       if (ctx.run.observations.observed(record.page.pageId) === undefined)
         ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
       return {

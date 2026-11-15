@@ -1,10 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** A revert removes the chat summary it cuts into, instead of cutting its position back.
- *
- * A summary is derived from the messages it covers, so once a removed message is among them its
- * title, text and topics are stale; the next summary run writes a fresh one from what is left. */
 const up = (database: DatabaseSync): void => {
   database.exec("DROP TRIGGER chat_positions_cut_at_removal")
   database.exec(`CREATE TRIGGER chat_positions_cut_at_removal

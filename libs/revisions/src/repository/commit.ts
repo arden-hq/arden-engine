@@ -42,12 +42,6 @@ export interface CommitResult {
   readonly replayed: boolean
 }
 
-/**
- * One commit under the repository lock: prepare, materialize, publish. With `adopting`, the
- * commit records an outside change to that one resource that is already in the working tree, so
- * nothing is installed and only the final check runs. A touched file may already hold the new
- * content, as when a file put back by hand is restored.
- */
 export const commit = Effect.fn("RevisionRepository.commit")(function* (
   storage: RevisionStorageShape,
   head: Effect.Effect<string | null, RevisionError>,

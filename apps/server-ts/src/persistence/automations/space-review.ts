@@ -80,8 +80,6 @@ const ChatTurnSchema = Schema.Struct({
 const ReviewPageBasisSchema = Schema.Literals(["owned", "source", "linked"])
 const StoredPageBasisSchema = Schema.Literals(["owned", "source", "linked", "resident"])
 
-// Inputs stored before standing facts reached every review in its Memory block also list
-// those pages, as `resident`; they are left out when read.
 const leaveOutResident = <Page extends { readonly basis: string }>(
   pages: ReadonlyArray<Page>
 ): ReadonlyArray<Page & { readonly basis: typeof ReviewPageBasisSchema.Type }> =>

@@ -14,7 +14,6 @@ import {
 type Placement = Pick<RunMemorySource, "outcome" | "reason">
 
 const WHOLE: Placement = { outcome: "whole", reason: null }
-/** Cut short at a boundary, with a notice, to fit the recall's allowance. */
 const RENDERED_IN_PART: Placement = { outcome: "cut", reason: "recall_allowance" }
 const PASSAGE: Placement = { outcome: "passage", reason: null }
 const NO_ROOM: Placement = { outcome: "dropped", reason: "recall_allowance" }

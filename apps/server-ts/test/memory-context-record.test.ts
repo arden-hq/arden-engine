@@ -38,8 +38,6 @@ import type { AutomationId } from "../src/persistence/automations/model.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService, sessionHeader } from "./kit.js"
 
-// Made-up pages; nothing here comes from anyone's Memory.
-
 const QUERY = "orchard lantern ledger notes for the week"
 
 const page = (path: string, title: string, body: string): PageRecord => {
@@ -82,10 +80,6 @@ const MEMORY_KEYS = ["Core Memory", "Memory index", "Current Space", "Memory con
 const memoryKeys = (sections: ReadonlyArray<RuntimeSection>) =>
   sections.map((section) => section.key).filter((key) => MEMORY_KEYS.includes(key))
 
-/**
- * Reads the prompt back without the assembler: every `### ` page block in the Memory sections,
- * by the page path it names, with its bytes as they stand in the prompt.
- */
 const blocksInPrompt = (sections: ReadonlyArray<RuntimeSection>): ReadonlyMap<string, number> =>
   new Map(
     sections
@@ -599,8 +593,6 @@ describe("one owner for each limit and rule", () => {
         !allowed.includes(relative) && pattern.test(readFileSync(join(root, relative), "utf8"))
     )
 
-  // Memory reaches the prompt only through `assembleMemoryContext`, which gives every source
-  // its room and returns the sections with their record.
   it("only the assembler builds Memory sections or gives a source its room", () => {
     expect(
       offenders(/"(Core Memory|Memory recall|Memory index|Current Space)"[^\n]*\)/u, [
@@ -617,7 +609,6 @@ describe("one owner for each limit and rule", () => {
     expect(files.filter((file) => file.endsWith("continuity-budget.ts"))).toEqual([])
   })
 
-  // The seed README tells the model where profile facts go; it states no limit or rule.
   it("only core-memory.ts names the standing-facts pages", () => {
     expect(
       offenders(/["'`](me|profile)["'`]|\b(me|profile)\.md\b/u, [

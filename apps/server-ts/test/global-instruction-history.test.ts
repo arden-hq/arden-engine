@@ -17,9 +17,6 @@ import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { deleteSessionOwnedData } from "../src/persistence/sqlite/session-deletion.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Every change to the standing rules is a version with its writer and time. The rules file stays
-// the live copy; the versions are the history the rules tools list and restore from.
-
 const CHAT = { kind: "chat", chat: { sessionId: "session-1", runId: "run-1" } } as const
 const RESTORE = {
   kind: "restore",
@@ -39,7 +36,6 @@ const withRulesFolder = async <A>(use: (folder: string) => Promise<A>): Promise<
 const causes = (error: unknown): string =>
   error instanceof Error ? `${errorMessage(error)} ${causes(error.cause)}` : errorMessage(error)
 
-/** Starts the rules service over `file`, the way the server does at each start. */
 const started = <A, E, R>(file: string, body: Effect.Effect<A, E, R | GlobalInstructions>) =>
   body.pipe(Effect.provide(Layer.fresh(globalInstructionsLayer(file))))
 
@@ -179,7 +175,6 @@ it("lets a version be forgotten, keeps every text unchanged, and never reuses a 
   expect(causes(result.relink)).toContain("only loses its chat")
 })
 
-/** A history store in memory whose writes can be made to fail, as a locked database would. */
 const flakyStore = () => {
   const rows: Array<InstructionVersion> = []
   const state = { failing: false }

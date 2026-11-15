@@ -5,13 +5,6 @@ import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
 
-/**
- * Which Memory a run is sent, by its recorded actor. A person's chat turn reads as the owner,
- * whoever started the chat. Helpers, Task workers, Space reviews and runs with no recorded
- * actor read as workers: they act for the owner but have no owner text to recall from.
- * Automations bring their own prompt and read none; a helper reads what the run that started
- * it would, without recall.
- */
 export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined => {
   switch (actor.kind) {
     case "person":
@@ -42,21 +35,13 @@ export const MEMORY_READS: Readonly<
  * `MEMORY_BLOCK_MAX_BYTES`.
  */
 export const MEMORY_BUDGET = {
-  /** Each standing-facts page: its writer limit in UTF-16 units, at most three bytes each, and
-   *  its heading lines. Past its writer limit or this, the page is cut. */
   standingPage: 28_000,
   /** The standing-facts note and section heading. */
   standingFrame: 1_000,
-  /** The smallest size tried (4,000 to 10,000) that lists every page outside the four largest
-   *  folders on the owner's copy. Over it, folders fold. */
   index: 10_000,
-  /** The Space context's size before the one block. */
   space: 10_000,
-  /** Inside the Space context: its instructions, three times the longest on the owner's copy. */
   spaceInstructions: 4_000,
-  /** Inside the Space context: its Memory page, as before the one block. */
   spacePage: 4_000,
-  /** Recall's size before the one block: 6,000 for pages, 1,000 for its note and notices. */
   recall: 7_000
 } as const
 
@@ -133,7 +118,6 @@ export const assembleMemoryContext = ({
 
 const none: RenderedMemory = { text: undefined, sources: [] }
 
-/** The Space context in its allowance; its own renderer fits it and says what it cut. */
 const renderSpace = (
   space: SpaceMemoryInput
 ): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {

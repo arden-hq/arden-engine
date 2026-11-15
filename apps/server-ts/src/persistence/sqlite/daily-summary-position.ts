@@ -4,7 +4,6 @@ import { DAILY_SUMMARY_AUTOMATION_ID } from "../automations/model.js"
 import { DailySummaryPosition, DailySummaryPositionError } from "../daily-summary/store.js"
 import type { PersistenceDeps } from "./deps.js"
 
-/** Kept under the Automation's own id, so resuming it starts the position again. */
 const NAMESPACE = DAILY_SUMMARY_AUTOMATION_ID
 const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
 const StateJson = Schema.fromJsonString(

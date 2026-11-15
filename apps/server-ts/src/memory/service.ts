@@ -116,11 +116,6 @@ const sources = Effect.fn("Memory.sources")(function* (
   return prepared.render(chats)
 })
 
-/**
- * The Memory one run reads: one snapshot of the pages and its sources over it, or undefined
- * when the pages cannot be read. `Memory.withTurn` hands it to a chat turn; the memory test
- * opens it the same way on a replay copy.
- */
 export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
   services: MemoryTurnServices
 ) {

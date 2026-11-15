@@ -7,10 +7,6 @@ import { defineServerTool } from "../src/tools/define.js"
 import type { ServerRunContext } from "../src/tools/run-context.js"
 import { gatePolicy, recordOf, serverRunContext } from "./kit.js"
 
-// An approved call runs later in a new toolset: after a pause, the run resumes as a new agent;
-// after a card that waits in the chat, the follow-up runs detached. Either way it must know what
-// its run had read when it asked, or every tool that changes only what the run has read fails.
-
 const NOTE = "note"
 
 const editNote = defineServerTool({

@@ -16,7 +16,6 @@ export const isStandingFactsPage = (page: {
   return STANDING_FACTS_PAGES.some((name) => path === name || `${pageId}.md` === name)
 }
 
-/** The size writers keep each standing-facts page to, and the size each is sent whole up to. */
 const STANDING_PAGE_LIMIT_CHARS = 9_000
 
 /**

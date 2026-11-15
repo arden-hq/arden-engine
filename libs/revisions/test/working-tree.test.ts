@@ -94,7 +94,6 @@ const takeIn = (repository: ManagedFileRepositoryShape, resourceId: string) =>
     })
   })
 
-/** Every file under the history folder, so a test can see that a refused commit wrote nothing. */
 const historyFiles = async (root: string): Promise<number> =>
   (await readdir(join(root, ".managed-history"), { recursive: true })).length
 

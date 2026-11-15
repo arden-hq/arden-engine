@@ -73,11 +73,6 @@ export interface OutsideEditCheck {
   readonly unreadableFiles: ReadonlyArray<{ readonly path: string; readonly reason: string }>
 }
 
-/**
- * More pages missing at once than this is read as a folder moved, renamed or not mounted, not as
- * a decision to forget them: none is archived, and each is set aside with a notice. Archiving
- * that many pages is left to the app, where it is one deliberate act.
- */
 export const MAX_MISSING_ARCHIVED = 20
 
 const OUTSIDE_EDIT_IDENTITY = {
@@ -92,7 +87,6 @@ const writer = (pageId: string): WikiWriter => ({
   commit: OUTSIDE_EDIT_IDENTITY
 })
 
-/** Rule refusals set a page aside; a failing store or repository fails the whole check. */
 const refusal = (cause: WikiError): string | undefined => {
   switch (cause.reason) {
     case "invalid":
@@ -119,7 +113,6 @@ const utf8 = (bytes: Uint8Array): string | undefined => {
 
 const isPagePath = (path: string): boolean => path.endsWith(".md")
 
-/** The state a change was seen in, so two checks can tell whether it stayed the same. */
 const stateOf = (change: WorkingFileChange): string => {
   switch (change.kind) {
     case "changed":
@@ -131,8 +124,6 @@ const stateOf = (change: WorkingFileChange): string => {
   }
 }
 
-/** Updates first, then archives deepest first with each folder's README after its pages, so
- *  a folder deleted outside is archived in one check. */
 const rank = (change: WorkingFileChange): number => {
   if (change.kind !== "missing") return 0
   return posix.basename(change.resource.path).toLowerCase() === "readme.md" ? 2 : 1
@@ -145,8 +136,6 @@ const byOrder = (left: WorkingFileChange, right: WorkingFileChange): number =>
   depth(right) - depth(left) ||
   compareCodePoints(left.resource.path, right.resource.path)
 
-/** Where each untracked page file now stands, by the page id in its front matter and by its
- *  exact bytes, so a page moved outside is recognized rather than archived. */
 const untrackedPages = Effect.fn("Wiki.untrackedPages")(function* (
   files: ReadonlyArray<UntrackedFile>
 ) {
@@ -163,11 +152,6 @@ const untrackedPages = Effect.fn("Wiki.untrackedPages")(function* (
   return { byPageId, byBlob }
 })
 
-/**
- * The one place that reads the working tree against Memory history and takes changes in. It runs
- * from the Memory change poll, never from a chat turn: recall reads history only, so a broken
- * file outside never stops it.
- */
 export const makeOutsideEdits = (input: {
   readonly repository: ManagedFileRepositoryShape
   readonly spaces: SpaceStore["Service"]
@@ -224,9 +208,7 @@ export const makeOutsideEdits = (input: {
     }
   })
 
-  /** Each page's state at the check before, by page id. */
   let seenBefore = new Map<string, string>()
-  /** The pages the last check left out, by path. */
   let leftOutByPath = new Map<string, OutsideEditState>()
 
   const scanAndTakeIn = Effect.fn("Wiki.scanAndTakeIn")(function* (): Effect.fn.Return<
@@ -311,7 +293,6 @@ export const makeOutsideEdits = (input: {
   })
 
   let listed = ""
-  /** Takes in what the rules allow; logs the files left out each time that list changes. */
   const check = Effect.fn("Wiki.checkOutsideEdits")(function* () {
     const result = yield* scanAndTakeIn()
     leftOutByPath = new Map<string, OutsideEditState>([
@@ -339,7 +320,6 @@ export const makeOutsideEdits = (input: {
     return result
   })
 
-  /** The rule refusal's message, or undefined when the rules allow the change. */
   const allowed = (rules: Effect.Effect<unknown, WikiError>) =>
     rules.pipe(
       Effect.as(undefined),
@@ -349,10 +329,8 @@ export const makeOutsideEdits = (input: {
       })
     )
 
-  /** Where `path` stands, when the last check left it out. */
   const state = (path: string): OutsideEditState | undefined => leftOutByPath.get(path)
 
-  /** A write refused because its file differs from history, told where that page stands. */
   const explain = (error: WikiError): WikiError => {
     const cause = error.cause
     if (!(cause instanceof WorkingFileChangedError)) return error
@@ -362,7 +340,6 @@ export const makeOutsideEdits = (input: {
   return { check, state, explain }
 }
 
-/** The refusal a writer gets for a page whose file was changed outside Arden. */
 const outsideEditRefusal = (path: string, state: OutsideEditState | undefined): string =>
   state?.kind === "set_aside"
     ? `${path} was changed outside Arden and Memory set that change aside: ${state.detail}. Nothing was saved. Arden cannot write this page until its file is fixed or put back.`

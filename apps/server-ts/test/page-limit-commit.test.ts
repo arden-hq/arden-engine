@@ -33,9 +33,6 @@ import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { partialService } from "./kit.js"
 
-// The page size limit binds every writer inside Arden at the one commit point. An edit made to
-// the files outside Arden is taken in and can be listed as over.
-
 const OWNER: WikiCommitIdentity = {
   actor: "user:desktop",
   origin: { kind: "user", via: "desktop" },
@@ -100,7 +97,6 @@ const withWiki = async <A>(
   }
 }
 
-/** A write that skips every rule, as older code wrote the over-limit versions still in history. */
 const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiPageOperation) =>
   Effect.gen(function* () {
     const head = yield* repository.currentRevision
@@ -397,7 +393,6 @@ const sources = (directory: string): ReadonlyArray<string> =>
     return entry.name.endsWith(".ts") ? [path] : []
   })
 
-/** Who reads a page's limit, and why. Only the commit refuses a write over it. */
 const LIMIT_READERS = {
   "memory/core-memory.ts": "asks for condensing before a page is full",
   "memory/retrieval.ts": "cuts a page past its limit when it is sent",
@@ -414,10 +409,6 @@ it("reads a page's limit only in its listed readers, so no second refusal can ap
   expect(Object.values(coreMemory).filter((value) => typeof value === "number")).toEqual([])
 })
 
-/**
- * Every repository method that writes a Memory commit, and the one file allowed to call it.
- * Taking in outside edits skips the size limit by design.
- */
 const MEMORY_WRITERS = [
   { method: /\brepository\s*\.\s*commit\(/u, file: "wiki/commit.ts" },
   { method: /\.adoptWorkingChanges?\(/u, file: "wiki/commit.ts" },

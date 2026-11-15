@@ -1,12 +1,3 @@
-// Runs, on the replay copy, the check the server runs each minute for Memory files changed
-// outside Arden, and prints what it did by page path: the changes it took in, the pages it set
-// aside with the reason, the files not in Memory, and each page's last change made outside,
-// read from history.
-// It prints no page text.
-//
-// Run it with `just memory-outside-edits <replay folder>`. It opens the copy only through
-// test/fixtures/replay-copy.ts, which refuses the owner's real data: no server, no model.
-
 import { join } from "node:path"
 import { ManagedFileRepository, managedFileRepositoryNodeLayer } from "@arden-hq/revisions/effect"
 import { Effect, Layer, References } from "effect"
@@ -46,8 +37,6 @@ it("checks the copy's Memory folder for changes made outside Arden", async () =>
   const wiki = wikiLayer(roots).pipe(Layer.provide(automationWikiChangeSinkLayer))
   const quiet = Effect.provideService(References.MinimumLogLevel, "Error")
 
-  // The server decides about a file once it has stayed the same for one poll, so the recipe runs
-  // the check twice, as two polls would.
   const checks = await runOnReplayCopy(
     copy,
     Effect.gen(function* () {

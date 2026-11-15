@@ -1,15 +1,8 @@
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 
-/**
- * The saved places of the readers of Memory history: the last commit each has handled, or null
- * before the first. Each reader moves its own place with one compare-and-set; this file is the
- * only writer of either row.
- */
 const READERS = {
-  /** Announces each commit as a `wiki.changed` event. */
   publication: { namespace: "wiki_publication", field: "revision" },
-  /** Wiki Maintenance: the newest commit it has reviewed. */
   maintenance: { namespace: "wiki_maintenance", field: "processedHead" }
 } as const
 
@@ -70,7 +63,6 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
     return { raw, revision }
   })
 
-  /** The saved place, set to `initial` the first time. */
   const start = Effect.fn("MemoryHistoryPosition.start")(function* (
     sql: SqlClient.SqlClient,
     initial: string | null
@@ -86,7 +78,6 @@ export const memoryHistoryPosition = (reader: MemoryHistoryReader) => {
   const read = (sql: SqlClient.SqlClient): Effect.Effect<string | null, PositionError> =>
     readRow(sql).pipe(Effect.map((row) => row.revision))
 
-  /** Moves the place from `expected` to `next`. Run it inside the caller's transaction. */
   const advance = Effect.fn("MemoryHistoryPosition.advance")(function* (
     sql: SqlClient.SqlClient,
     input: { readonly expected: string | null; readonly next: string }

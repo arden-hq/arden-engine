@@ -14,7 +14,5 @@ export const resumeAutomation = Effect.fn("AutomationResume.resume")(function* (
     WHERE task_id = ${automationId}`
   yield* endAutoPause(sql, automationId)
   yield* restartMeasuredTriggers(sql, automationId)
-  // A position an Automation keeps under its own id restarts: a paused one owes no work for the
-  // time it was off.
   yield* sql`DELETE FROM monitor_state WHERE namespace = ${automationId}`
 })

@@ -27,9 +27,7 @@ import { sha256Hex } from "@arden-hq/std/hash"
 const GLOBAL_INSTRUCTIONS_FILE = "AGENTS.md"
 /** The most rules text, in bytes, the rules may hold. */
 export const MAX_RULES_BYTES = 128 * 1024
-/** The rules as the file stores them: the text and one closing newline. */
 const storedText = (content: string): string => (content === "" ? "" : `${content}\n`)
-/** One limit for reading and writing, so every version the history records can be restored. */
 const withinLimit = (content: string): boolean =>
   Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
 const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
@@ -80,7 +78,6 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
   if (!status.isFile() || status.isSymbolicLink()) {
     return yield* error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file`)
   }
-  // The file may hold the closing newline beyond the limit; a larger one is not read at all.
   if (status.size > MAX_RULES_BYTES + 1) return yield* error("read", "invalid", tooLarge)
   const bytes = yield* Effect.tryPromise({
     try: () => readFile(filename),
@@ -131,9 +128,6 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
   const lock = yield* Semaphore.make(1)
   const store = yield* InstructionVersionStore
 
-  // The file is the live copy and wins: a history that cannot be written never stops the rules
-  // from loading or changing. The writer of a version it missed is kept until the next read
-  // records it; after a restart, that version is recorded as an outside edit.
   let missed: { readonly digest: string; readonly writer: InstructionWriter } | undefined
   const record = (snapshot: GlobalInstructionsSnapshot, writer: InstructionWriter) =>
     store.append({ content: snapshot.content ?? "", digest: snapshot.version, writer }).pipe(
@@ -152,7 +146,6 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
       )
     )
 
-  /** Records a version the history does not have yet: the first one, a missed one, or an outside edit. */
   const adopt = (snapshot: GlobalInstructionsSnapshot) =>
     store.latest().pipe(
       Effect.matchEffect({

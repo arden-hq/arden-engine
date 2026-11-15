@@ -20,10 +20,6 @@ import {
 import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 
-// The rules every writer of an existing page meets, whether it writes through Arden, captures,
-// restores or edits the file outside it. Each takes the writer's place and identity; none writes.
-
-/** Who writes, and where they may write. No commit identity is the owner in the app. */
 export interface WikiWriter {
   readonly pageId: string
   readonly authority: WikiLocationAuthority
@@ -101,7 +97,6 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
   return yield* requireReplacement("restore", current, input)
 })
 
-/** The rules for the text that replaces a page, whoever writes it; the content it writes. */
 const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
   operation: "update" | "restore",
   current: PageRecord,

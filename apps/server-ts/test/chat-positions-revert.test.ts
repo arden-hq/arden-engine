@@ -13,13 +13,9 @@ import type { ServerRunContext } from "../src/tools/run-context.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService } from "./kit.js"
 
-// A revert removes messages and later messages reuse their numbers. Every stored position into
-// a chat's messages is cut back by the one removal trigger, so no reader stays ahead of its chat.
-
 const AT = "2026-11-14T09:00:00.000Z"
 const REMOVAL_TRIGGER = "chat_positions_cut_at_removal"
 
-/** One finished turn: the owner writes `id`, the assistant answers. Two messages. */
 const turn = Effect.fn("turn")(function* (sessionId: string, id: string) {
   const chat = yield* ChatWriteStore
   const started = yield* chat.start({
@@ -68,7 +64,6 @@ it("a revert removes the chat summary it cuts into, so no removed turn stays sum
       return { cut, newer, older, saved, emptied: yield* summaries.chat(chat) }
     })
   )
-  // A summary that reaches less far than the stored one is refused, and says so.
   expect(outcome).toEqual({
     cut: null,
     newer: true,
@@ -78,10 +73,6 @@ it("a revert removes the chat summary it cuts into, so no removed turn stays sum
   })
 })
 
-/**
- * Per-chat sequence columns the removal trigger does not cut, each with why it needs no cut.
- * A new column fails the guard below until it is cut or listed here.
- */
 const NOT_POSITIONS: Readonly<Record<string, string>> = {
   "session_messages.seq": "the message numbers themselves",
   "session_turns.message_start_seq": "rebuilt from the messages by the revert",

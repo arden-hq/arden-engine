@@ -1,14 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** A revert cuts the chat summary's position, as it cuts Memory Capture's.
- *
- * A summary is saved only when it reaches at least as far as the stored one, but a revert lets
- * later messages reuse the removed numbers. A stored summary could then be ahead of its chat, and
- * every newer summary of that chat was refused. The removal trigger now cuts the summary back to
- * the message before the first one removed, and deletes it when no message before that is left
- * (0165 replaces this with removing it). Stored summaries ahead of their chat are removed, since
- * their text covers removed messages. */
 const up = (database: DatabaseSync): void => {
   database.exec("DROP TRIGGER memory_capture_cut_at_removal")
   database.exec(`CREATE TRIGGER chat_positions_cut_at_removal

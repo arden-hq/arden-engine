@@ -1,20 +1,3 @@
-// The "sent" half of the memory test, with no model: for each question in the owner's private
-// question file, open a new chat on the replay copy with the question as its first message (in
-// the question's Space, if it names one) and run the product's own prefetch, the code a real
-// new chat runs, which records on the copy what the run was sent. The score reads that record:
-// which pages were sent, the bytes, what was left out for room, and whether every expected
-// page was sent. Writes the results beside the question file, never in the repository, and
-// prints counts by kind only.
-//
-// Run it with `just memory-test-sent <question file> <replay folder> [--baseline <results file>]`.
-// With a baseline it fails when any expected page is sent less fully than there: whole to in
-// part, or whole or in part to not sent. It runs under vitest,
-// which resolves the engine's TypeScript sources, and opens the copy only through
-// test/fixtures/replay-copy.ts: no server, no scheduler, no model, and `fetch` refuses.
-//
-// Semantic recall is off: matching by meaning embeds the question with the local embedding
-// model, which is a model call. Recall here is by words.
-
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Effect, Layer, References, Schema } from "effect"
@@ -59,7 +42,6 @@ const BaselineFile = Schema.fromJsonString(
   })
 )
 
-/** The results file named by `--baseline <file>` in the flags, if any. */
 const baselineOf = (flags: string): string | undefined => {
   const words = flags.split(/\s+/u).filter(Boolean)
   const at = words.indexOf("--baseline")

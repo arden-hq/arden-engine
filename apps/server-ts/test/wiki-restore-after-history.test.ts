@@ -16,10 +16,6 @@ import {
 } from "./fixtures/wiki-repository.js"
 import { gatePolicy, recordOf, serverRunContext } from "./kit.js"
 
-// The owner asks to bring back an older version of a page. The chat lists the page's history,
-// the owner approves a card that shows what changes, and the approved call runs later in a new
-// toolset (a resumed run, or a card's follow-up).
-
 const PATH = "topics/note.md"
 const PAGE = "note"
 

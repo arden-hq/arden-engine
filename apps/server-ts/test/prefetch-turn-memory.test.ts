@@ -11,8 +11,6 @@ import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import { partialService } from "./kit.js"
 
-// A chat outside a Space reads no Space store; the sources, the block and the record are what
-// change.
 const prefetch = (memory: MemoryTurn | undefined, reader: RunMemoryReader = "owner") => {
   const records: Array<RunMemoryContext> = []
   const services = {

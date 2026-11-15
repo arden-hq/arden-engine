@@ -1,10 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** The owner's standing rules (`AGENTS.md`) keep every version, so a change can be listed and
- * undone. Each change appends a row with its writer and time. A row's text never changes; it
- * loses its chat when that chat is deleted, and the whole row can be forgotten. Numbers are never
- * reused. The server seeds the rules as they are at its first start, so the table starts empty. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE global_instruction_versions (
       version INTEGER PRIMARY KEY AUTOINCREMENT CHECK(version > 0),

@@ -30,14 +30,11 @@ Keep dated notes until the user requests removal; revision history preserves edi
 YYYY-MM-DD.md uses the machine's local calendar date. Read its observation period, source references, and coverage gaps.
 `
 
-/** What one model run is handed for a day, at most; the rest is counted in the page input. */
 const EVIDENCE_EXCERPTS = 30
 const EVIDENCE_CHARS = 16_000
 const EXCERPT_CHARS = 2_000
 const SESSION_PAGE = 100
 const MESSAGE_PAGE = 250
-/** Jobs a day's run may fail or block in before the day is settled unwritten, so one bad day
- * neither holds back the days after it nor is paid for every night. */
 const DAY_TRIES = 2
 
 const nextDay = (day: string, days = 1): string =>
@@ -69,7 +66,6 @@ export const makeDailySummaryRunner = (services: {
 }): AutomationRunner => {
   const timezone = services.timezone ?? machineTimeZone()
 
-  /** Owner messages created in [start, end), from every owner chat, archived ones included. */
   const dayMessages = Effect.fn("DailySummary.dayMessages")(function* (
     startMs: number,
     endMs: number

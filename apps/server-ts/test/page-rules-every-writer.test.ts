@@ -25,9 +25,6 @@ import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { partialService } from "./kit.js"
 
-// A rule about the text that replaces a page binds every writer: the app, the tools, Capture, a
-// restore and an outside edit. Made-up pages only.
-
 const OWNER: WikiCommitIdentity = {
   actor: "user:desktop",
   origin: { kind: "user", via: "desktop" },
@@ -177,7 +174,6 @@ const sources = (directory: string): ReadonlyArray<string> =>
     return entry.name.endsWith(".ts") ? [path] : []
   })
 
-/** The checks that decide whether text may replace a page, and the one file allowed each. */
 const REPLACEMENT_RULES = [
   { check: /\bwrittenContent\(/u, owner: "write-rules.ts", defined: "page.ts" },
   { check: /\bunreadableKeepRule\(/u, owner: "write-rules.ts", defined: "report-retention.ts" },

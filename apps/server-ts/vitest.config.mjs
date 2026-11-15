@@ -45,8 +45,6 @@ const memoryTestProject =
       ]
     : []
 
-// The outside-edit check on the replay copy is a script, not a test: it runs only in its own
-// project, from `just memory-outside-edits`.
 const outsideEditsProject =
   process.env.ARDEN_OUTSIDE_EDITS === "1"
     ? [

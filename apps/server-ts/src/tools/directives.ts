@@ -145,7 +145,6 @@ const writerPhrase = (
 const chatOf = (writer: InstructionWriter): string | undefined =>
   writer.kind === "chat" || writer.kind === "restore" ? writer.chat?.sessionId : undefined
 
-/** Approval and replacement shared by every tool that changes the rules, so each asks the same. */
 const makeRulesChange = ({
   instructions,
   sessions

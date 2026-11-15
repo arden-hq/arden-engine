@@ -62,7 +62,6 @@ export const withWikiRepository = async <A>(
       ...makeWikiRestoreMethods(repository, spaces, listing.read)
     })
     const save: WikiRepositoryFixture["save"] = async ({ pageId, path, body, origin, actor }) => {
-      // Saves a few milliseconds apart, so each version has its own time to name it by.
       await new Promise((resolve) => setTimeout(resolve, 5))
       const content = formatWikiPage({
         pageId,
@@ -100,7 +99,6 @@ export const captureChat = (sessionId: string): WikiCommitOrigin => ({
 })
 export const ownerEdit: WikiCommitOrigin = { kind: "user", via: "filesystem" }
 
-/** The Wiki operation tools over `wiki`, run by an owner's chat turn; chat `gone` no longer exists. */
 const at = DateTime.makeUnsafe("2026-11-01T10:00:00Z")
 const runRecord: ChatRunRecord = {
   runId: "run-fixture",

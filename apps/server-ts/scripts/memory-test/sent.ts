@@ -175,7 +175,6 @@ export const renderCountTable = (results: ReadonlyArray<SentResult>): string => 
 
 const LEVEL_NAMES = ["not sent", "sent in part", "sent whole"] as const
 
-/** How fully a page was sent, read from its question's result. */
 const pageLevel = (result: Pick<SentResult, "missing" | "inPart">, path: string): 0 | 1 | 2 => {
   if (result.missing.includes(path)) return 0
   return result.inPart.includes(path) ? 1 : 2

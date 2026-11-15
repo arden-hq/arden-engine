@@ -13,9 +13,6 @@ import type { ServerRunContext } from "../src/tools/run-context.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
 
-// "Undo my last rule change": list the versions, then restore one, with the owner's approval
-// and only in the owner's own turn, the same as any other change to the rules.
-
 const context = (run: ServerRunContext = serverRunContext()): ToolContext<ServerRunContext> => ({
   run,
   signal: new AbortController().signal,

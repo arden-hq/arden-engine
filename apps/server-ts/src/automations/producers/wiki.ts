@@ -30,12 +30,6 @@ export const wikiChangedEvent = (input: {
   }
 })
 
-/**
- * The one-minute Memory poll: take in changes made outside Arden, announce every new commit, then
- * let the search index catch up with the head. Nothing on a chat turn reads the files themselves.
- * Each step runs whether or not the one before it failed; a failed announcement still fails the
- * poll, so it is reported and retried.
- */
 const pollMemoryChanges = Effect.fn("Wiki.pollChanges")(function* () {
   const wiki = yield* Wiki
   const index = yield* WikiEmbeddingIndex

@@ -27,8 +27,6 @@ import { wikiError, type WikiError } from "../src/wiki/errors.js"
 import { loadSnapshot, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
 
-// Made-up pages on a temporary Memory folder; nothing here comes from anyone's Memory.
-
 const roots: string[] = []
 
 afterEach(async () => {
@@ -71,7 +69,6 @@ interface Memory {
   readonly root: string
   readonly repository: ManagedFileRepositoryShape
   readonly check: () => Effect.Effect<OutsideEditCheck, unknown>
-  /** Two checks one poll apart: the second decides what stayed the same since the first. */
   readonly settle: () => Effect.Effect<OutsideEditCheck, unknown>
   readonly commits: () => Effect.Effect<number, unknown>
   readonly snapshot: () => Effect.Effect<Snapshot, unknown>
@@ -123,7 +120,6 @@ const withMemory = async <A>(
   )
 }
 
-/** The check's result with each refusal's wording left out. */
 const shape = (result: OutsideEditCheck) => ({
   takenIn: result.takenIn.map((item) => [item.path, item.action]),
   setAside: result.setAside.map((item) => [item.path, item.reason]),
@@ -399,7 +395,6 @@ describe("an outside change meets the rules an app edit meets", () => {
     const result = await withMemory(({ root, settle, commits }) =>
       Effect.gen(function* () {
         const before = yield* commits()
-        // Written by hand: Arden's own formatter drops a path alias, an editor does not.
         yield* Effect.promise(() =>
           writeFile(
             join(root, "notes/kept.md"),
@@ -432,8 +427,6 @@ describe("an outside change meets the rules an app edit meets", () => {
           }
         }),
       {
-        // The second check's first read of Memory: right after it, another writer merges a page
-        // into `kept`, before the check archives `kept`.
         snapshot: (repository) => () =>
           loadSnapshot(repository, "list").pipe(
             Effect.tap((current) => {

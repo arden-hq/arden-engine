@@ -14,8 +14,6 @@ import { Wiki } from "../src/wiki/service.js"
 import type { PageRecord, Snapshot } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
 
-// Made-up pages and a fake embedder: the index's own refresh path, with no model and no database.
-
 const record = (pageId: string, version: string): PageRecord => ({
   resource: {
     resourceId: pageId,
@@ -129,7 +127,6 @@ it("follows Memory from the poll: once per new head, and again after a failed re
   const indexed = () => Object.fromEntries(stored)
   const versions = (current: Snapshot) =>
     Object.fromEntries(current.pages.map((page) => [page.page.pageId, page.resource.versionId]))
-  /** Lets the index's background worker run until it has nothing queued. */
   const settle = Effect.sleep("30 millis")
 
   const result = await Effect.runPromise(

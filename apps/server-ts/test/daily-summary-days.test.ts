@@ -17,9 +17,6 @@ import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Daily Summary takes its day from a saved position: each ended day after it gets its own run,
-// with that day's evidence only. Real chat stores; the wiki and the model run are fakes.
-
 const NOW = Date.parse("2026-11-13T10:00:00.000Z")
 
 const turn = Effect.fn("turn")(function* (sessionId: string, id: string, at: string) {
@@ -186,7 +183,6 @@ it("fills each ended day after the saved one, each from its own day's messages",
       yield* turn(chat, "twelfth-a", "2026-11-12T08:00:00.000Z")
       yield* turn(chat, "twelfth-b", "2026-11-12T23:59:00.000Z")
       yield* turn(chat, "today", "2026-11-13T09:00:00.000Z")
-      // The computer was off: nothing settled after the 8th, and the 9th had no messages.
       yield* position.current("2026-11-08")
       const { ran, runner } = yield* dailyRunner()
       const first = yield* runner(job)

@@ -118,7 +118,6 @@ interface MemoryIndexLine {
   readonly summary: string | null
 }
 
-/** A folder whose direct pages are counted on one line instead of listed; "" is the root. */
 interface MemoryIndexFold {
   readonly folder: string
   readonly pages: number
@@ -139,8 +138,6 @@ export interface MemoryIndex {
   readonly bytes: number
 }
 
-// At 120 characters a summary line still says what the page is for, and on the owner's copy
-// every page outside the four largest folders fits the Memory block's index allowance.
 const INDEX_SUMMARY_CHARS = 120
 
 const encoder = new TextEncoder()

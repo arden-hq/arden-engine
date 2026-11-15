@@ -46,9 +46,6 @@ export class RevisionLockFactory extends Context.Service<
 
 export type StorageError = RevisionStorageError | RevisionConflictError | UnsafePathError
 
-/** One entry under the working root, by its relative path. */
-/** A regular file's identity, size and modification time, as listed; equal stamps mean it was
- *  not replaced, resized or modified since. */
 interface WorkingStamp {
   readonly id: string
   readonly modifiedAt: number

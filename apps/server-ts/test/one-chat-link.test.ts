@@ -2,9 +2,6 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { expect, it } from "vitest"
 
-// A chat link is built in one place, `chatHref` in sessions/chat-href.ts, and read back only
-// there; a chat named by its id becomes a link only through `chatLinkOf` in tools/call-receipt.ts.
-
 const ROOT = join(import.meta.dirname, "../src")
 const OWNER = "sessions/chat-href.ts"
 const LINKER = "tools/call-receipt.ts"
@@ -31,7 +28,6 @@ it("builds and reads chat links only in the owner", () => {
   expect(building).toEqual([])
 })
 
-/** Files that load a chat's header and build a link, each from something else. */
 const LINKS_NOT_FROM_HEADERS = {
   "tools/workflows.ts": "loads headers to check access; links a script's stored chat ref"
 }

@@ -8,9 +8,6 @@ import { WikiEventOutbox } from "../src/persistence/automations/wiki-event-outbo
 import { WikiMaintenanceStore } from "../src/persistence/wiki-maintenance/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// The publish cursor and the Maintenance head are two places in Memory history with one
-// compare-and-set, in persistence/sqlite/memory-history-position.ts.
-
 const A = "a".repeat(64)
 const B = "b".repeat(64)
 const C = "c".repeat(64)

@@ -165,7 +165,6 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
   expectedVersion: page.versionId
 })
 
-/** A rule at the commit point refused the write. */
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
   rule: Schema.Literals(["aliases", "size"] as const),
   message: Schema.String
@@ -197,8 +196,6 @@ export const commitWiki = (
   const checked = requireCommitRules(repository, options.origin, operations).pipe(
     Effect.andThen(commit)
   )
-  // A key that already named a commit is a replay: the repository returns that commit, or
-  // refuses a different request under it, so the rules are not asked again of a landed write.
   return replayKey === undefined
     ? checked
     : repository
@@ -271,7 +268,6 @@ export const overPageLimit = (page: {
     : { chars: page.body.length, limit }
 }
 
-/** The size refusal, in the owner's words for an owner's edit and with the steps for a model. */
 const limitRefusal = (
   origin: WikiCommitOrigin,
   path: string,
@@ -291,8 +287,6 @@ const limitRefusal = (
   })
 }
 
-/** A write that does not grow a page already over its limit goes through, so the page can be
- *  shortened, renamed or moved in steps. */
 const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,
@@ -328,10 +322,6 @@ const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
 const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" && origin.via === "filesystem"
 
-/**
- * Every rule a Memory write meets at the commit point, and the writers it binds. The one place
- * that decides whether a commit may land; `commitWiki` and `commitOutsideChange` both run it.
- */
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (
@@ -340,9 +330,7 @@ const COMMIT_RULES: ReadonlyArray<{
     operation: WikiPageOperation
   ) => Effect.Effect<void, WikiCommitError>
 }> = [
-  // Aliases: every writer.
   { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
-  // Size: every writer but an outside edit, which is taken in over the limit.
   { binds: (origin) => !isOutsideEdit(origin), check: requireWithinLimit }
 ]
 

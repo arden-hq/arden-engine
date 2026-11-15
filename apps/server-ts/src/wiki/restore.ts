@@ -211,7 +211,6 @@ export const makeWikiRestoreMethods = (
     return historical
   })
 
-  /** The content a restore writes, once every rule for it holds, the commit's included. */
   const restorableContent = Effect.fn("Wiki.restorableContent")(function* (
     snapshot: Snapshot,
     current: PageRecord,

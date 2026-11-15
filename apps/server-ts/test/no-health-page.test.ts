@@ -2,9 +2,6 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { expect, it } from "vitest"
 
-// No writer has produced `health.md` since the derived health page was removed, so no code may
-// treat a page of that name specially. A page that code owns comes back as one named predicate.
-
 const ROOTS = [
   join(import.meta.dirname, "../src"),
   join(import.meta.dirname, "../../../libs/protocol/src")
