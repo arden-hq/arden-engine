@@ -23,6 +23,7 @@ const writerOf = (origin: WikiCommitOrigin): string => {
   switch (origin.kind) {
     case "user":
     case "forget":
+    case "rules":
       return "owner"
     case "agent":
       return "chat"

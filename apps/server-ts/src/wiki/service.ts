@@ -17,7 +17,7 @@ import {
 } from "./content-steps.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { makeWikiForgetMethods, type WikiForgetMethods } from "./forgotten.js"
-import { initializeWikiFoundation } from "./foundation.js"
+import { createRulesPage, initializeWikiFoundation } from "./foundation.js"
 import { makeWikiChangeMethods, type WikiChangeMethods } from "./change.js"
 import { makeWikiHistoryMethods, type WikiHistoryMethods } from "./history.js"
 import { makeWikiImportMethods, type WikiImportMethods } from "./imported.js"
@@ -49,6 +49,8 @@ type WikiShape = WikiListingMethods &
   WikiImportMethods &
   WikiForgetMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
+    /** Makes the owner's rules page from the rules file it replaces. */
+    readonly createRulesPage: (body: string) => Effect.Effect<void, WikiError>
     readonly checkOutsideEdits: () => Effect.Effect<OutsideEditCheck, WikiError>
     /** Where a page whose file was changed outside Arden stands, as of the last check. */
     readonly outsideEditState: (path: string) => OutsideEditState | undefined
@@ -115,6 +117,7 @@ const make = Effect.fn("Wiki.make")(function* (
     ...makeWikiHistoryMethods(repository, listing.snapshot),
     ...makeWikiChangeMethods(repository),
     publishChanges,
+    createRulesPage: notifyAfter((body: string) => createRulesPage({ repository, spaces }, body)),
     checkOutsideEdits: outsideEdits.check,
     outsideEditState: outsideEdits.state,
     prepareMaintenance: makeWikiMaintenanceMethods(repository).prepare,

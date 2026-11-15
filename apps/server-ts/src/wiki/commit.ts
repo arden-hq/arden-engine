@@ -43,13 +43,14 @@ import {
 } from "./retraction.js"
 import { brokenRedirect, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
 import { spacePageCheck } from "./space-index.js"
-import { isCodeOwnedPage } from "./code-owned-pages.js"
+import { codeOwnedPage, isCodeOwnedPage } from "./code-owned-pages.js"
 
 export type WikiCommitOrigin =
   /** The owner, in the app or in the file. */
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
-  /** The owner's own chat turn, forgetting or undoing a retraction after their approval. */
-  | { readonly kind: "forget"; readonly sessionId: string }
+  /** The owner's own chat turn after their approval: forgetting or undoing a retraction, or
+   *  changing their standing rules. */
+  | { readonly kind: "forget" | "rules"; readonly sessionId: string }
   | {
       readonly kind: "agent"
       readonly sessionId: string | undefined
@@ -111,7 +112,7 @@ const RETIRED_UPKEEP_ORIGINS: ReadonlyMap<string, string> = new Map([
 const CHAIN_MARK = "~"
 const AGENT_ORIGIN = "wiki.agent"
 const CAPTURE_ORIGIN = "memory.capture"
-const FORGET_ORIGIN = "memory.forget"
+const OWNER_TURN_ORIGINS = { forget: "memory.forget", rules: "memory.rules" } as const
 const CHAINED = /^(.+)~(\d+)$/u
 
 const chainMark = (chainDepth: number | undefined): string =>
@@ -139,7 +140,8 @@ export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
     case "capture":
       return withChat(CAPTURE_ORIGIN, origin.sessionId)
     case "forget":
-      return withChat(FORGET_ORIGIN, origin.sessionId)
+    case "rules":
+      return withChat(OWNER_TURN_ORIGINS[origin.kind], origin.sessionId)
     case "space_page":
       return "space.page"
     case "system":
@@ -162,9 +164,10 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
     }
   const captureChat = chatOf(origin, CAPTURE_ORIGIN)
   if (captureChat !== null) return { kind: "capture", sessionId: captureChat }
-  const forgetChat = chatOf(origin, FORGET_ORIGIN)
-  if (forgetChat !== null && forgetChat !== undefined)
-    return { kind: "forget", sessionId: forgetChat }
+  for (const kind of ["forget", "rules"] as const) {
+    const ownerChat = chatOf(origin, OWNER_TURN_ORIGINS[kind])
+    if (ownerChat !== null && ownerChat !== undefined) return { kind, sessionId: ownerChat }
+  }
   if (origin === "space.page") return { kind: "space_page" }
   const prefix = [UPKEEP_PREFIX, AUTOMATION_PREFIX].find((each) => origin.startsWith(each))
   const named = prefix === undefined ? "" : origin.slice(prefix.length).trim()
@@ -187,6 +190,7 @@ export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => 
     case "automation":
       return origin.kind
     case "forget":
+    case "rules":
       return "user"
     case "capture":
     case "upkeep":
@@ -202,6 +206,7 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
     case "agent":
     case "capture":
     case "forget":
+    case "rules":
       return origin.sessionId
     case "user":
     case "automation":
@@ -216,7 +221,7 @@ const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
   wikiOriginSource(origin) === "automation"
 
 const isOwnerOrigin = (origin: WikiCommitOrigin): boolean =>
-  origin.kind === "user" || origin.kind === "forget"
+  origin.kind === "user" || origin.kind === "forget" || origin.kind === "rules"
 
 const isCaptureWriter = (origin: WikiCommitOrigin): boolean => origin.kind === "capture"
 
@@ -688,7 +693,8 @@ const keepsCodeOwnedPage = (origin: WikiCommitOrigin, write: ResolvedWrite): boo
     case "create":
     case "new_page":
     case "publish":
-      if (write.before === null) return origin.kind === "forget"
+      if (write.before === null)
+        return codeOwnedPage(write.path.after ?? "")?.madeBy === origin.kind
       break
     case "archive":
       return false
@@ -720,8 +726,7 @@ const requireCodeOwnedPageKept = Effect.fn("Wiki.requireCodeOwnedPageKept")(func
   if (keepsCodeOwnedPage(origin, write)) return
   return yield* ruleError(
     "code_owned",
-    `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
-      "Nothing was saved. To let a line back, undo its entry in a chat or delete the entry from the page."
+    `${path} cannot be made, moved, renamed, merged or archived by hand. Nothing was saved. ${path} ${codeOwnedPage(path)?.holds ?? ""}`
   )
 })
 

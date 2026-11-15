@@ -7,6 +7,7 @@ import type { ModelRoute } from "../../models/provider.js"
 import { chatOutputOptions } from "../../models/structured-output.js"
 import type { StopReason } from "@arden-hq/loop"
 import { Effect } from "effect"
+import { join } from "node:path"
 
 import { systemHandlerForAutomation } from "../../automations/system.js"
 import { loadLocalInstructions } from "../../context/local-instructions.js"
@@ -23,10 +24,10 @@ import { renderTodoReminder } from "../../context/todo-reminder.js"
 import { renderThreadContext } from "../../context/thread.js"
 import {
   chatSystemPrompt,
-  GlobalInstructions,
   globalInstructionManifest,
   loadForRun
 } from "../../context/global-instructions.js"
+import { RULES_PAGE_PATH } from "../../wiki/code-owned-pages.js"
 import { runPolicyOf } from "../../execution/policy.js"
 import { authorityScopes } from "../../execution/authority.js"
 import { boundAuthority } from "../run-authority.js"
@@ -90,6 +91,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
   readonly workFolder: string | undefined
 }) {
   const experiments = yield* ContextExperiments
+  const dataRoot = yield* DataRoot
   const chat = yield* ChatWriteStore
   const services: TurnContextServices = {
     sessions: yield* SessionQueries,
@@ -112,13 +114,13 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
       rules: yield* PermissionRules
     }),
     rules: yield* PermissionRules,
-    dataDir: (yield* DataRoot).dir
+    dataDir: dataRoot.dir
   }
+  const rulesFile = join(dataRoot.wiki.workingRoot, RULES_PAGE_PATH)
   const registry = yield* ServerToolRegistry
   const compaction = yield* ContextCompaction
   const automations = yield* AutomationCatalog
   const automationQueue = yield* AutomationQueue
-  const globalInstructions = yield* GlobalInstructions
   const settingsStore = yield* IntelligenceSettingsStore
   const readAssistantName = (): Promise<string> =>
     Effect.runPromise(
@@ -177,9 +179,9 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
       systemPrompt: async () => {
         const [assistantName, current] = await Promise.all([
           readAssistantName(),
-          Effect.runPromise(loadForRun(globalInstructions))
+          Effect.runPromise(loadForRun(services.wiki))
         ])
-        return chatSystemPrompt(assistantName, globalInstructions.file, current)
+        return chatSystemPrompt(assistantName, rulesFile, current)
       },
       ...(workFolder === undefined ? {} : { localInstructionDirectories: [workFolder] }),
       localInstructions: async ({ sessionId, runId, signal, target, targetKind }) => {
@@ -200,10 +202,10 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
       recordLocalInstructions: ({ runId, sources }) =>
         Effect.runPromise(
           Effect.gen(function* () {
-            const load = yield* loadForRun(globalInstructions)
+            const load = yield* loadForRun(services.wiki)
             yield* chat.recordLocalInstructions({
               runId,
-              sources: [...globalInstructionManifest(globalInstructions.file, load), ...sources]
+              sources: [...globalInstructionManifest(rulesFile, load), ...sources]
             })
           })
         ),

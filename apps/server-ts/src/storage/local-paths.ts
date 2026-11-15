@@ -519,7 +519,7 @@ export const displayLocalPath = (target: string, cwd: string | null): string => 
     : collapseHome(target)
 }
 
-export const revisionOrAbsent = async (target: string): Promise<string> => {
+const revisionOrAbsent = async (target: string): Promise<string> => {
   try {
     return sha256Hex(await readFile(target))
   } catch (cause) {

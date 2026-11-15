@@ -7,6 +7,7 @@ import { resolve } from "node:path"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
+import { RULES_PAGE_PATH } from "./code-owned-pages.js"
 import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage } from "./page.js"
@@ -78,4 +79,38 @@ checkpoints stay in application storage. Add specialist directories only when a 
       )
     })
   ).pipe(Effect.mapError(mapRevisionError("open")))
+})
+
+/** Makes the owner's rules page from `body`, the rules file it replaces, as the owner's own words. */
+export const createRulesPage = Effect.fn("Wiki.createRulesPage")(function* (
+  { repository, spaces }: WikiCommitPoint,
+  body: string
+): Effect.fn.Return<void, WikiError> {
+  const pageId = randomUUID()
+  const head = yield* repository.currentRevision.pipe(Effect.mapError(mapRevisionError("create")))
+  yield* commitWiki(
+    { repository, spaces },
+    {
+      actor: "user:external",
+      origin: { kind: "user", via: "filesystem" },
+      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+      reason: `move the standing rules into Memory as ${RULES_PAGE_PATH}`,
+      expectedRevision: head
+    },
+    [
+      createPage(
+        pageId,
+        RULES_PAGE_PATH,
+        formatWikiPage({
+          pageId,
+          title: "Global instructions",
+          aliases: [],
+          lifecycle: "active",
+          redirectTo: null,
+          metadata: {},
+          body
+        })
+      )
+    ]
+  ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
 })

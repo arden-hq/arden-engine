@@ -52,10 +52,9 @@ import { dropInferenceRejections } from "./0157_drop_inference_rejections.js"
 import { offersExpire } from "./0158_offers_expire.js"
 import { homePresenceLeaseIndex } from "./0159_home_presence_lease_index.js"
 import { memoryWakesLeaveReviews } from "./0160_memory_wakes_leave_reviews.js"
-import { globalInstructionVersions } from "./0161_global_instruction_versions.js"
-import { retiredMemoryRecords } from "./0162_retired_memory_records.js"
-import { reportRetentionRetired } from "./0163_report_retention_retired.js"
-import { renameApprovalsStoreWriter } from "./0164_rename_approvals_store_writer.js"
+import { retiredMemoryRecords } from "./0161_retired_memory_records.js"
+import { reportRetentionRetired } from "./0162_report_retention_retired.js"
+import { renameApprovalsStoreWriter } from "./0163_rename_approvals_store_writer.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -352,7 +351,6 @@ export const migrations: ReadonlyArray<Migration> = [
   offersExpire,
   homePresenceLeaseIndex,
   memoryWakesLeaveReviews,
-  globalInstructionVersions,
   retiredMemoryRecords,
   reportRetentionRetired,
   renameApprovalsStoreWriter

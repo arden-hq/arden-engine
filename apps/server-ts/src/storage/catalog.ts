@@ -93,14 +93,6 @@ const rootEntries = {
     rebuildability: "diagnostic",
     lifecycle: "Service logs. Rotated diagnostics, not operational history."
   },
-  "AGENTS.md": {
-    kind: "known",
-    authority: "configuration",
-    bucket: "housekeeping",
-    backup: "required",
-    rebuildability: "authoritative",
-    lifecycle: "Global instructions for every chat."
-  },
   "directives.json": {
     kind: "known",
     authority: "configuration",
