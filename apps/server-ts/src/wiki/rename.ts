@@ -1,12 +1,5 @@
 import type { ManagedFileRepositoryShape, ResourceVersion } from "@arden-hq/revisions/effect"
-import {
-  commitWiki,
-  createPage,
-  isAutomatedOrigin,
-  movePage,
-  updatePage,
-  type WikiCommitIdentity
-} from "./commit.js"
+import { commitWiki, createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
 import type { WikiRenameApproval } from "@arden-hq/protocol/wiki"
 import { Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
@@ -27,6 +20,7 @@ import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, rewriteWikiLinkTargets } from "./links.js"
 import { formatRedirectPage, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
+import { requireRenamable } from "./write-rules.js"
 
 const ResourceSchema = Schema.Struct({
   resourceId: Schema.NonEmptyString,
@@ -339,18 +333,6 @@ const planMutationPaths = Effect.fn("WikiRename.planMutationPaths")(function* (
   return paths
 })
 
-const reportDestination = (
-  pages: ReadonlyArray<PageRecord>,
-  path: string
-): PageRecord | undefined =>
-  pages.find(
-    (record) =>
-      record.page.lifecycle === "active" &&
-      Object.hasOwn(record.page.metadata, "producer_automation_id") &&
-      posix.basename(record.resource.path).toLowerCase() === "readme.md" &&
-      path.toLowerCase().startsWith(`${posix.dirname(record.resource.path).toLowerCase()}/`)
-  )
-
 export const makeWikiRenameMethods = (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
@@ -390,16 +372,12 @@ export const makeWikiRenameMethods = (
         pageId: input.pageId
       })
     }
-    if (reportDestination(snapshot.pages, input.newPath) !== undefined) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "Publish reports through their producer instead of moving pages into its directory",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
+    yield* requireRenamable(snapshot, {
+      pageId: input.pageId,
+      newPath: input.newPath,
+      rewrittenPageIds: [],
+      origin: undefined
+    })
     const targetNames = new Set(
       pageNamesForPath(input.newPath).map((name) => name.trim().toLowerCase())
     )
@@ -512,34 +490,12 @@ export const makeWikiRenameMethods = (
       const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
       const paths = yield* planMutationPaths(plan, snapshot.pages)
       yield* requireWikiWritePaths(boundary, "rename", paths)
-      if (reportDestination(snapshot.pages, plan.newPath) !== undefined) {
-        return yield* wikiError(
-          "rename",
-          "blocked",
-          "Publish reports through their producer instead of moving pages into its directory",
-          {
-            pageId: plan.pageId
-          }
-        )
-      }
-      if (input.commit !== undefined && isAutomatedOrigin(input.commit.origin)) {
-        const rewrites = new Set(plan.rewrites.map((rewrite) => rewrite.resource.resourceId))
-        const protectedPage = snapshot.pages.find(
-          (record) =>
-            Object.hasOwn(record.page.metadata, "producer_automation_id") &&
-            (record.page.pageId === plan.pageId || rewrites.has(record.page.pageId))
-        )
-        if (protectedPage !== undefined) {
-          return yield* wikiError(
-            "rename",
-            "blocked",
-            "Automation runs cannot move produced pages or rewrite producer-owned reports",
-            {
-              pageId: protectedPage.page.pageId
-            }
-          )
-        }
-      }
+      yield* requireRenamable(snapshot, {
+        pageId: plan.pageId,
+        newPath: plan.newPath,
+        rewrittenPageIds: plan.rewrites.map((rewrite) => rewrite.resource.resourceId),
+        origin: input.commit?.origin
+      })
       const spaceBound = yield* spaces.hasPageBinding(plan.pageId, plan.oldPath).pipe(
         Effect.mapError((cause) =>
           wikiError("rename", "storage", "Could not check Space page ownership", {

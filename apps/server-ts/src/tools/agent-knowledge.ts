@@ -2,7 +2,8 @@ import { cutText } from "@arden-hq/std/text"
 import { readdir, readFile, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 
-import { IMPORTED_DIRECTORY, type CommittedPage } from "../wiki/imported.js"
+import { IMPORTED_DIRECTORY } from "../wiki/collections.js"
+import type { CommittedPage } from "../wiki/imported.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { slugify } from "@arden-hq/std/slug"
 

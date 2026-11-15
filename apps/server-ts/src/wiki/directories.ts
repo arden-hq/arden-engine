@@ -1,3 +1,4 @@
+import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
@@ -10,7 +11,13 @@ import {
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
-import { DIRECTORY_CONTRACT_HEADINGS, directorySections } from "./collections.js"
+import {
+  DIRECTORY_CONTRACT_HEADINGS,
+  directorySections,
+  markedProducer,
+  pageKind,
+  recordFolders
+} from "./collections.js"
 import {
   commitWiki,
   createPage,
@@ -134,17 +141,9 @@ export const makeWikiDirectoryMethods = (
       }
     }
     yield* requireWikiWritePaths(boundary, "create", [readmePath])
-    const ownedAncestor = snapshot.pages.find(
-      (record) =>
-        record.page.lifecycle === "active" &&
-        posix.basename(record.resource.path).toLowerCase() === "readme.md" &&
-        Object.hasOwn(record.page.metadata, "producer_automation_id") &&
-        readmePath
-          .toLowerCase()
-          .startsWith(`${posix.dirname(record.resource.path).toLowerCase()}/`) &&
-        record.resource.path.toLowerCase() !== readmePath.toLowerCase()
-    )
-    if (ownedAncestor !== undefined) {
+    const folders = recordFolders(snapshot.pages)
+    const placed = pageKind(folders, readmePath)
+    if (placed.kind === "record" && placed.folder.producer.kind === "automation") {
       return yield* wikiError(
         "create",
         "blocked",
@@ -182,16 +181,14 @@ export const makeWikiDirectoryMethods = (
           { pageId: current.page.pageId }
         )
       }
-      if (
-        producerAutomationId !== undefined &&
-        current.page.metadata["producer_automation_id"] !== producerAutomationId
-      ) {
+      const boundProducer = markedProducer(current.page)
+      if (producerAutomationId !== undefined && boundProducer !== producerAutomationId) {
         const occupied = snapshot.pages.some(
           (record) =>
             record.resource.path.toLowerCase().startsWith(`${directory.toLowerCase()}/`) &&
             record.page.pageId !== current.page.pageId
         )
-        if (Object.hasOwn(current.page.metadata, "producer_automation_id") || occupied) {
+        if (boundProducer !== undefined || occupied) {
           return yield* wikiError(
             "create",
             "blocked",
@@ -211,7 +208,10 @@ export const makeWikiDirectoryMethods = (
               current.resource,
               formatWikiPage({
                 ...current.page,
-                metadata: { ...current.page.metadata, producer_automation_id: producerAutomationId }
+                metadata: {
+                  ...current.page.metadata,
+                  [WIKI_REPORT_FIELDS.automationId]: producerAutomationId
+                }
               })
             )
           ]
@@ -266,14 +266,6 @@ export const makeWikiDirectoryMethods = (
     }
     const reason = input.commit?.reason ?? `create Wiki directory ${directory}`
     if (occupant !== undefined && !ownsLeafBoundary) {
-      if (Object.hasOwn(occupant.page.metadata, "producer_automation_id")) {
-        return yield* wikiError(
-          "create",
-          "blocked",
-          "Automation-owned pages cannot be opened as Wiki directories",
-          { pageId: occupant.page.pageId }
-        )
-      }
       const spaceBound = yield* spaces
         .hasPageBinding(occupant.page.pageId, occupant.resource.path)
         .pipe(
@@ -316,7 +308,9 @@ export const makeWikiDirectoryMethods = (
       lifecycle: "active",
       redirectTo: null,
       metadata:
-        producerAutomationId === undefined ? {} : { producer_automation_id: producerAutomationId },
+        producerAutomationId === undefined
+          ? {}
+          : { [WIKI_REPORT_FIELDS.automationId]: producerAutomationId },
       body: contract
     })
     yield* parseWikiPage(content, pageId).pipe(

@@ -1,9 +1,11 @@
+import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
+import { parseCalendarDay } from "@arden-hq/std/time"
 import { clipLine } from "@arden-hq/std/text"
 import type { Nodes } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
-import { wikiPageSummary, type ParsedWikiPage } from "./page.js"
+import { normal, wikiPageSummary, type ParsedWikiPage } from "./page.js"
 import type { PageRecord } from "./snapshot.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
@@ -46,6 +48,97 @@ const sectionsOf = (page: ParsedWikiPage): ReadonlyMap<string, string> => {
   return sections
 }
 
+export const IMPORTED_DIRECTORY = "imported"
+
+export const isImportedPath = (path: string): boolean =>
+  path.toLowerCase().startsWith(`${IMPORTED_DIRECTORY}/`)
+
+/** Who writes a record folder: one Automation publishing reports, or the import of notes. */
+export type RecordProducer =
+  | { readonly kind: "automation"; readonly automationId: string }
+  | { readonly kind: "import" }
+
+export interface RecordFolder {
+  readonly directory: string
+  readonly producer: RecordProducer
+}
+
+/**
+ * What a page is. Knowledge is kept current by chats and upkeep. A record is kept as its
+ * producer wrote it: every page in a record folder, at any depth, but the folder's README,
+ * which is its contract. A record's `day` is the date its file name starts with, if any.
+ */
+export type PageKind =
+  | { readonly kind: "knowledge" }
+  | { readonly kind: "contract"; readonly folder: RecordFolder }
+  | { readonly kind: "record"; readonly folder: RecordFolder; readonly day: string | undefined }
+
+/** The record folders of Memory, by directory as `normal` spells it. */
+export type RecordFolders = ReadonlyMap<string, RecordFolder>
+
+const isReadme = (path: string): boolean => posix.basename(path).toLowerCase() === "readme.md"
+
+/** The Automation a page names as its producer: on a contract, the folder's; on a record, its. */
+export const markedProducer = (page: ParsedWikiPage): string | undefined => {
+  const producer = page.metadata[WIKI_REPORT_FIELDS.automationId]
+  return typeof producer === "string" && producer.length > 0 ? producer : undefined
+}
+
+const folderProducer = (readmePath: string, page: ParsedWikiPage): RecordProducer | undefined => {
+  if (isImportedPath(readmePath)) return { kind: "import" }
+  const automationId = markedProducer(page)
+  return automationId === undefined ? undefined : { kind: "automation", automationId }
+}
+
+export const recordFolders = (pages: ReadonlyArray<PageRecord>): RecordFolders => {
+  const folders = new Map<string, RecordFolder>()
+  for (const record of pages) {
+    const path = record.resource.path
+    if (
+      record.resource.state !== "active" ||
+      record.page.lifecycle !== "active" ||
+      !isReadme(path) ||
+      posix.dirname(path) === "."
+    )
+      continue
+    const directory = posix.dirname(path)
+    const producer = folderProducer(path, record.page)
+    if (producer !== undefined) folders.set(normal(directory), { directory, producer })
+  }
+  return folders
+}
+
+const DAY_PREFIX = /^(\d{4}-\d{2}-\d{2})(?:$|[^\d])/u
+
+const dayOfName = (path: string): string | undefined => {
+  const day = DAY_PREFIX.exec(posix.basename(path, posix.extname(path)))?.[1]
+  return day !== undefined && parseCalendarDay(day) !== undefined ? day : undefined
+}
+
+export const pageKind = (folders: RecordFolders, path: string): PageKind => {
+  const directory = posix.dirname(path)
+  const own = folders.get(normal(directory))
+  if (own !== undefined && isReadme(path)) return { kind: "contract", folder: own }
+  for (let at = directory; at !== "." && at !== "/"; at = posix.dirname(at)) {
+    const folder = folders.get(normal(at))
+    if (folder === undefined) continue
+    return {
+      kind: "record",
+      folder,
+      day: folder.producer.kind === "automation" ? dayOfName(path) : undefined
+    }
+  }
+  return { kind: "knowledge" }
+}
+
+/** The Automation whose folder holds this page, as a record or as the contract; undefined otherwise. */
+export const producingAutomation = (folders: RecordFolders, path: string): string | undefined => {
+  const kind = pageKind(folders, path)
+  return kind.kind !== "knowledge" && kind.folder.producer.kind === "automation"
+    ? kind.folder.producer.automationId
+    : undefined
+}
+
 export interface WikiCollection {
   readonly directory: string
   readonly path: string
@@ -69,6 +162,7 @@ export const wikiCollections = (
   const active = pages.filter(
     (record) => record.resource.state === "active" && record.page.lifecycle === "active"
   )
+  const folders = recordFolders(active)
   const directPages = new Map<string, number>()
   for (const page of active) {
     const key = posix.dirname(page.resource.path).toLowerCase()
@@ -76,14 +170,12 @@ export const wikiCollections = (
   }
   return active
     .filter(
-      (record) =>
-        posix.basename(record.resource.path).toLowerCase() === "readme.md" &&
-        posix.dirname(record.resource.path) !== "."
+      (record) => isReadme(record.resource.path) && posix.dirname(record.resource.path) !== "."
     )
     .map((record): WikiCollection => {
       const directory = posix.dirname(record.resource.path)
       const sections = sectionsOf(record.page)
-      const producer = record.page.metadata["producer_automation_id"]
+      const kind = pageKind(folders, record.resource.path)
       return {
         directory,
         path: record.resource.path,
@@ -94,7 +186,10 @@ export const wikiCollections = (
         producers: excerpt(sections.get("Producers")),
         consumers: excerpt(sections.get("Consumers")),
         records: excerpt(sections.get("Records")),
-        producer: typeof producer === "string" ? producer : undefined,
+        producer:
+          kind.kind === "contract" && kind.folder.producer.kind === "automation"
+            ? kind.folder.producer.automationId
+            : undefined,
         contract: DIRECTORY_CONTRACT_HEADINGS.every((heading) => sections.get(heading))
           ? "complete"
           : "incomplete",

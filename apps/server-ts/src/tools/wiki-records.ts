@@ -1,5 +1,6 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { memoryHref } from "../lib/memory-link.js"
+import { markedProducer } from "../wiki/collections.js"
 import type { PageRecord } from "../wiki/snapshot.js"
 import type { ServerRunContext } from "./run-context.js"
 import { appliedReceipt, type CallIdentity } from "./call-receipt.js"
@@ -116,9 +117,9 @@ export const reportProvenanceLines = (record: PageRecord): ReadonlyArray<string>
   ...(typeof record.page.metadata["observation_period"] === "string"
     ? [`Observation period: ${record.page.metadata["observation_period"]}`]
     : []),
-  ...(typeof record.page.metadata["producer_automation_id"] === "string"
-    ? [`Producer Automation: ${record.page.metadata["producer_automation_id"]}`]
-    : []),
+  ...(markedProducer(record.page) === undefined
+    ? []
+    : [`Producer Automation: ${markedProducer(record.page)}`]),
   ...(Array.isArray(record.page.metadata["source_refs"])
     ? [
         "Original source references:",

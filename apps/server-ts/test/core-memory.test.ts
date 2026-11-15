@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { coreCondenseTarget, crowdedCorePages } from "../src/memory/core-memory.js"
-import { createRefusal } from "../src/wiki/mutations.js"
+import { createRefusal } from "../src/wiki/write-rules.js"
 
 const profile = (chars: number) => ({ path: "me.md", pageId: "me", chars })
 

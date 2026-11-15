@@ -315,6 +315,7 @@ it("reads the reports last changed on each day, and only those", async () => {
       yield* (yield* DailySummaryPosition).current("2026-11-10")
       const { ran, runner } = yield* dailyRunner({
         pages: [
+          page("reports/README.md", "user-automation", "Contract."),
           page("reports/eleventh.md", "user-automation", "Eleventh report."),
           page("reports/twelfth.md", "user-automation", "Twelfth report.")
         ],

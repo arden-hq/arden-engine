@@ -2,7 +2,12 @@ import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import { DIRECTORY_CONTRACT_HEADINGS, directorySections } from "./collections.js"
+import {
+  DIRECTORY_CONTRACT_HEADINGS,
+  directorySections,
+  pageKind,
+  recordFolders
+} from "./collections.js"
 import { commitWiki, createPage } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
@@ -43,15 +48,13 @@ export const createWikiSpacePage = Effect.fn("Wiki.createSpacePageCommit")(funct
         wikiError("create", "storage", "Could not check Space directory ownership", { cause })
       )
     )
-  const root = current.pages.find((record) => record.resource.path.toLowerCase() === "readme.md")
   const sections = directory === undefined ? undefined : directorySections(directory.page.body)
   if (
     conflictingDirectory ||
     spaceOwned ||
-    (root !== undefined && Object.hasOwn(root.page.metadata, "producer_automation_id")) ||
+    pageKind(recordFolders(current.pages), directoryPath).kind !== "knowledge" ||
     (directory !== undefined &&
       (directory.page.lifecycle !== "active" ||
-        Object.hasOwn(directory.page.metadata, "producer_automation_id") ||
         DIRECTORY_CONTRACT_HEADINGS.some((heading) => !sections?.get(heading))))
   ) {
     return yield* wikiError(

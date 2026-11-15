@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { decodeWikiOrigin, LEGACY_MAINTENANCE_ORIGIN, wikiOriginSource } from "./commit.js"
 import { isContentStepOrigin } from "./content-steps.js"
 import { mapRevisionError, wikiError, type WikiError, type WikiOperation } from "./errors.js"
-import { isImportedPath } from "./imported.js"
+import { isImportedPath } from "./collections.js"
 import { pageWikiLinks } from "./links.js"
 import {
   pageNameIndex,
