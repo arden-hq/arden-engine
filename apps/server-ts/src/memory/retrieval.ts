@@ -62,7 +62,7 @@ const termsOf = (page: PageRecord["page"]) => {
   if (cached !== undefined) return cached
   const computed = {
     title: searchTerms(`${page.title} ${page.aliases.join(" ")}`),
-    body: searchTerms(page.body.slice(0, 12_000))
+    body: searchTerms(page.body)
   }
   pageTerms.set(page, computed)
   return computed
