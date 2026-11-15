@@ -67,8 +67,18 @@ export const assertOutsideRealData = (folder: string): void => {
   }
 }
 
+/** The entries of a folder, or none when it went away: another test's lock folder can vanish mid-scan. */
+const entriesOf = (folder: string) => {
+  try {
+    return readdirSync(folder, { withFileTypes: true })
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return []
+    throw cause
+  }
+}
+
 const secretIn = (folder: string): string | undefined => {
-  for (const entry of readdirSync(folder, { withFileTypes: true })) {
+  for (const entry of entriesOf(folder)) {
     const path = join(folder, entry.name)
     if (entry.isSymbolicLink()) return path
     if (SECRET_EXTENSION.test(entry.name)) return path
