@@ -129,7 +129,6 @@ const make = Effect.fn("Wiki.make")(function* (
     archive: notifyAfter(mutations.archive),
     mergeInto: notifyAfter(mutations.mergeInto),
     restore: notifyAfter(restores.restore),
-    restoreRevision: notifyAfter(restores.restoreRevision),
     contentToRestore: restores.contentToRestore,
     restoreArchived: notifyAfter(restores.restoreArchived),
     importReferencePages: notifyAfter(imports.importReferencePages),

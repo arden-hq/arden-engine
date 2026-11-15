@@ -265,7 +265,7 @@ export const makeWikiPageHistoryTools = ({
         wiki
           .contentToRestore({
             pageId: record.page.pageId,
-            commitId: version.commitId,
+            version: { commitId: version.commitId, side: "after" },
             head,
             authority: identity.authority,
             commit: restoreCommit(identity, record.resource.path, version.timestamp)
@@ -292,9 +292,9 @@ export const makeWikiPageHistoryTools = ({
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
       const restored = await Effect.runPromise(
         wiki
-          .restoreRevision({
+          .restore({
             pageId: record.page.pageId,
-            commitId: version.commitId,
+            version: { commitId: version.commitId, side: "after" },
             expectedVersion,
             expectedHead: head,
             authority: identity.authority,

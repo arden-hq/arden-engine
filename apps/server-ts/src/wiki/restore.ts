@@ -1,10 +1,10 @@
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
+import type { ManagedFileRepositoryShape, ResourceVersion } from "@arden-hq/revisions/effect"
 import type { WikiPage } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import { GLOBAL_WIKI_LOCATION_AUTHORITY, type WikiLocationAuthority } from "./authority.js"
+import type { WikiLocationAuthority } from "./authority.js"
 import {
   commitWiki,
   decodeWikiOrigin,
@@ -26,17 +26,16 @@ import {
   readRecord
 } from "./snapshot.js"
 
-interface WikiRestoreInput {
-  readonly pageId: string
+/** The page as commit `commitId` left it (`after`), or as it was before that commit (`before`).
+ *  `before` undoes an upkeep (Tidy) commit, and only while it is the page's latest change. */
+interface WikiRestoreVersion {
   readonly commitId: string
-  readonly expectedVersion: string
-  readonly expectedHead: string
-  readonly commit: WikiCommitIdentity
+  readonly side: "after" | "before"
 }
 
-interface WikiRestoreRevisionInput {
+interface WikiRestoreInput {
   readonly pageId: string
-  readonly commitId: string
+  readonly version: WikiRestoreVersion
   readonly expectedVersion: string
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
@@ -45,7 +44,7 @@ interface WikiRestoreRevisionInput {
 
 interface WikiRestoreContentInput {
   readonly pageId: string
-  readonly commitId: string
+  readonly version: WikiRestoreVersion
   readonly head: string
   readonly authority: WikiLocationAuthority
   readonly commit: WikiCommitIdentity
@@ -61,9 +60,8 @@ interface WikiRestoreArchivedInput {
 
 export interface WikiRestoreMethods {
   readonly restore: (input: WikiRestoreInput) => Effect.Effect<WikiPage, WikiError>
-  readonly restoreRevision: (input: WikiRestoreRevisionInput) => Effect.Effect<WikiPage, WikiError>
-  /** The page text a restore to `commitId` would write, for the owner to review first. It is
-   *  refused by every rule the restore itself would meet. */
+  /** The page text a restore would write, for the owner to review first. It is refused by every
+   *  rule the restore itself would meet. */
   readonly contentToRestore: (input: WikiRestoreContentInput) => Effect.Effect<string, WikiError>
   readonly restoreArchived: (input: WikiRestoreArchivedInput) => Effect.Effect<WikiPage, WikiError>
 }
@@ -73,139 +71,69 @@ export const makeWikiRestoreMethods = (
   spaces: SpaceStore["Service"],
   read: WikiListingMethods["read"]
 ): WikiRestoreMethods => {
-  const restore = Effect.fn("Wiki.restore")(function* (input: WikiRestoreInput) {
-    return yield* withConflictDetail(
-      repository,
-      Effect.gen(function* () {
-        const snapshot = yield* loadSnapshot(repository, "restore")
-        const current = yield* requireCurrent(
-          "restore",
-          snapshot,
-          input.pageId,
-          input.expectedVersion,
-          input.expectedHead
-        )
-        if (current.page.lifecycle !== "active") {
-          return yield* wikiError("restore", "invalid", "Only active Wiki pages can be restored", {
-            pageId: input.pageId
-          })
-        }
-        const pageHistory = yield* repository
-          .history({
-            resourceId: input.pageId,
-            start: input.expectedHead,
-            limit: null
-          })
-          .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-        const maintenance = pageHistory.find((commit) => commit.commitId === input.commitId)
-        if (maintenance === undefined) {
-          return yield* wikiError(
-            "restore",
-            "not_found",
-            `Tidy commit is not a reachable page change: ${input.commitId}`,
-            { pageId: input.pageId }
-          )
-        }
-        if (decodeWikiOrigin(maintenance.origin).kind !== "upkeep") {
-          return yield* wikiError("restore", "invalid", "Commit is not a Tidy change", {
-            pageId: input.pageId
-          })
-        }
-        const changes = maintenance.changes.filter(
-          (change) => (change.after ?? change.before)?.resourceId === input.pageId
-        )
-        const change = changes[0]
-        if (
-          changes.length !== 1 ||
-          change === undefined ||
-          change.action !== "update" ||
-          change.before === null ||
-          change.after === null
-        ) {
-          return yield* wikiError(
-            "restore",
-            "invalid",
-            "A Tidy commit must contain exactly one page update",
-            { pageId: input.pageId }
-          )
-        }
-        if (
-          pageHistory[0]?.commitId !== input.commitId ||
-          current.resource.versionId !== change.after.versionId
-        ) {
-          return yield* wikiError(
-            "restore",
-            "conflict",
-            `Memory page changed after Tidy commit ${input.commitId}`,
-            { pageId: input.pageId }
-          )
-        }
-        const beforeRecord = yield* readRecord(repository, "restore", change.before, "invalid")
-        if (beforeRecord.page.lifecycle !== "active") {
-          return yield* wikiError(
-            "restore",
-            "invalid",
-            "The Tidy change did not replace an active page",
-            {
-              pageId: input.pageId
-            }
-          )
-        }
-        const content = yield* replacementContent("update", input.pageId, beforeRecord.page.content)
-        yield* commitWiki(
-          { repository, spaces },
-          {
-            ...input.commit,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-            expectedRevision: input.expectedHead
-          },
-          [restoreVersion(current.resource, content)]
-        ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-        const page = yield* read(input.pageId).pipe(
-          Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
-        )
-        return page
-      })
-    )
-  })
-
-  const historicalVersion = Effect.fn("Wiki.historicalVersion")(function* (
-    input: Pick<WikiRestoreContentInput, "pageId" | "commitId" | "head">
+  const versionToRestore = Effect.fn("Wiki.versionToRestore")(function* (
+    current: PageRecord,
+    input: Pick<WikiRestoreContentInput, "pageId" | "version" | "head">
   ) {
+    const { commitId, side } = input.version
+    if (side === "before" && current.page.lifecycle !== "active") {
+      return yield* wikiError("restore", "invalid", "Only active Wiki pages can be restored", {
+        pageId: input.pageId
+      })
+    }
     const pageHistory = yield* repository
       .history({ resourceId: input.pageId, start: input.head, limit: null })
       .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-    const selected = pageHistory.find((commit) => commit.commitId === input.commitId)
+    const selected = pageHistory.find((commit) => commit.commitId === commitId)
     if (selected === undefined) {
       return yield* wikiError(
         "restore",
         "not_found",
-        `Revision is not a reachable page change: ${input.commitId}`,
+        `Revision is not a reachable page change: ${commitId}`,
         { pageId: input.pageId }
       )
     }
     const changes = selected.changes.filter(
       (change) => (change.after ?? change.before)?.resourceId === input.pageId
     )
-    const source = changes.length === 1 ? changes[0]?.after : undefined
-    if (source === undefined || source === null || source.state !== "active") {
+    const change = changes.length === 1 ? changes[0] : undefined
+    const invalid = (message: string) =>
+      wikiError("restore", "invalid", message, { pageId: input.pageId })
+    if (side === "after") {
+      if (change?.after?.state !== "active") {
+        return yield* invalid(
+          "Selected revision does not contain one active version of this Wiki page"
+        )
+      }
+      return yield* activeVersion(change.after, invalid)
+    }
+    if (decodeWikiOrigin(selected.origin).kind !== "upkeep") {
+      return yield* invalid("Commit is not a Tidy change")
+    }
+    if (change?.action !== "update" || change.before === null || change.after === null) {
+      return yield* invalid("A Tidy commit must contain exactly one page update")
+    }
+    if (
+      pageHistory[0]?.commitId !== commitId ||
+      current.resource.versionId !== change.after.versionId
+    ) {
       return yield* wikiError(
         "restore",
-        "invalid",
-        "Selected revision does not contain one active version of this Wiki page",
+        "conflict",
+        `Memory page changed after Tidy commit ${commitId}`,
         { pageId: input.pageId }
       )
     }
-    const historical = yield* readRecord(repository, "restore", source, "invalid")
+    return yield* activeVersion(change.before, invalid)
+  })
+
+  const activeVersion = Effect.fn("Wiki.activeVersion")(function* (
+    resource: ResourceVersion,
+    invalid: (message: string) => WikiError
+  ) {
+    const historical = yield* readRecord(repository, "restore", resource, "invalid")
     if (historical.page.lifecycle !== "active") {
-      return yield* wikiError(
-        "restore",
-        "invalid",
-        "Selected revision is not an active Wiki page",
-        {
-          pageId: input.pageId
-        }
-      )
+      return yield* invalid("Selected revision is not an active Wiki page")
     }
     return historical
   })
@@ -214,7 +142,7 @@ export const makeWikiRestoreMethods = (
     current: PageRecord,
     input: WikiRestoreContentInput
   ) {
-    const historical = yield* historicalVersion(input)
+    const historical = yield* versionToRestore(current, input)
     const content = yield* replacementContent("restore", input.pageId, historical.page.content)
     yield* requireCommitRules(
       { repository, spaces },
@@ -233,9 +161,7 @@ export const makeWikiRestoreMethods = (
     return yield* restorableContent(current, input)
   })
 
-  const restoreRevision = Effect.fn("Wiki.restoreRevision")(function* (
-    input: WikiRestoreRevisionInput
-  ) {
+  const restore = Effect.fn("Wiki.restore")(function* (input: WikiRestoreInput) {
     return yield* withConflictDetail(
       repository,
       Effect.gen(function* () {
@@ -247,15 +173,8 @@ export const makeWikiRestoreMethods = (
           input.expectedVersion,
           input.expectedHead
         )
-        const content = yield* restorableContent(current, {
-          pageId: input.pageId,
-          commitId: input.commitId,
-          head: input.expectedHead,
-          authority: input.authority,
-          commit: input.commit
-        })
-        const changed = content !== current.page.content
-        if (!changed) {
+        const content = yield* restorableContent(current, { ...input, head: input.expectedHead })
+        if (content === current.page.content) {
           const latestHead = yield* repository.currentRevision.pipe(
             Effect.mapError(mapRevisionError("restore", input.pageId))
           )
@@ -267,18 +186,13 @@ export const makeWikiRestoreMethods = (
         } else {
           yield* commitWiki(
             { repository, spaces },
-            {
-              expectedRevision: input.expectedHead,
-              authority: input.authority,
-              ...input.commit
-            },
+            { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
             [restoreVersion(current.resource, content)]
           ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
         }
-        const page = yield* read(input.pageId).pipe(
+        return yield* read(input.pageId).pipe(
           Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
         )
-        return page
       })
     )
   })
@@ -351,5 +265,5 @@ export const makeWikiRestoreMethods = (
     )
   })
 
-  return { restore, restoreRevision, contentToRestore, restoreArchived }
+  return { restore, contentToRestore, restoreArchived }
 }
