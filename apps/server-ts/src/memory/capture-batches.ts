@@ -420,7 +420,7 @@ export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   }
 })
 
-const messageContent = (message: StoredMessageEnvelope): string | null => {
+export const messageContent = (message: StoredMessageEnvelope): string | null => {
   if (message.superseded === true) return null
   const text = compactAnswerBlocks(authoredText(message.content)).trim()
   return text.length === 0 ? null : text

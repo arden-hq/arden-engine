@@ -1,5 +1,7 @@
-import { Effect } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { messageContent } from "../../memory/capture-batches.js"
+import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
 import type { Backfill } from "./backfills/backfill.js"
 
 // Migration 0155 put every old message of an owner chat into one backlog range. This backfill
@@ -15,7 +17,8 @@ import type { Backfill } from "./backfills/backfill.js"
 // where its batch started and ended; a batch from the beginning of a chat stores no start, so
 // its start is the first message its prompt quotes. Inside a finished batch every message counts
 // as read except a turn the owner typed that the prompt never quoted: some were left out, and
-// the owner's words are what must not be lost. A message counts only if it existed when the run
+// the owner's words are what must not be lost. A batch that stopped inside its last message did
+// not read that message. A message counts only if it existed when the run
 // started, because revert lets later messages reuse its number. Runs from before batches were
 // recorded show nothing, so their turns stay in the backlog. Whatever is unsure stays there.
 
@@ -33,12 +36,16 @@ const OLD_BATCH = "json_type(run.metadata_json, '$.memory_capture_batch.end.offs
 /** The header the old Capture wrote before each message it quoted in its prompt. */
 const EXCERPT = /\[(?:user|assistant); sequence (\d+); characters \d+-\d+; /gu
 
+const decodeMessage = Schema.decodeUnknownOption(Schema.fromJsonString(StoredMessageEnvelopeSchema))
+
 interface BatchRow {
   readonly session_id: string
   readonly started_at: string
   readonly start_tag: string
   readonly start_seq: number | null
   readonly end_seq: number
+  readonly end_offset: number
+  readonly ending: string | null
   readonly prompt: string
 }
 
@@ -136,12 +143,18 @@ const readBatches = Effect.fn("MemoryCaptureBacklog.readBatches")(function* (
              AS INTEGER) AS start_seq,
            CAST(json_extract(run.metadata_json, '$.memory_capture_batch.end.sequence') AS INTEGER)
              AS end_seq,
+           CAST(json_extract(run.metadata_json, '$.memory_capture_batch.end.offset') AS INTEGER)
+             AS end_offset,
+           ending.message_json AS ending,
            prompt.message_json AS prompt
     FROM chat_runs AS run
     JOIN session_turns AS turn ON turn.session_id = run.session_id
       AND turn.turn_id = json_extract(run.metadata_json, '$.turn_id')
     JOIN session_messages AS prompt ON prompt.session_id = turn.session_id
       AND prompt.message_id = turn.user_message_id
+    LEFT JOIN session_messages AS ending
+      ON ending.session_id = json_extract(run.metadata_json, '$.memory_capture_batch.sessionId')
+      AND ending.seq = json_extract(run.metadata_json, '$.memory_capture_batch.end.sequence')
     WHERE run.status = 'completed' AND ${sql.literal(OLD_BATCH)}
       AND json_extract(run.metadata_json, '$.memory_capture_batch.sessionId')
         IN ${sql.in(sessionIds)}`
@@ -154,7 +167,7 @@ const readBatches = Effect.fn("MemoryCaptureBacklog.readBatches")(function* (
         sessionId: row.session_id,
         startedAt: row.started_at,
         from,
-        through: row.end_seq,
+        through: endsWhole(row) ? row.end_seq : row.end_seq - 1,
         quoted: new Set(quoted)
       }
     ]
@@ -173,6 +186,13 @@ const batchStart = (row: BatchRow, quoted: ReadonlyArray<number>): number | unde
     default:
       return undefined
   }
+}
+
+/** Whether the batch read its last message to the end; unsure when that message is unreadable. */
+const endsWhole = (row: BatchRow): boolean => {
+  if (row.ending === null) return true
+  const ending = decodeMessage(row.ending)
+  return Option.isSome(ending) && row.end_offset >= (messageContent(ending.value)?.length ?? 0)
 }
 
 const readBy = (message: RangedMessage, batch: ReadBatch): boolean =>
