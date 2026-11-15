@@ -63,17 +63,7 @@ export const makeOwnerMessagesAfter = (
     const query = yield* Schema.decodeUnknownEffect(TranscriptPageQuerySchema)({
       _tag: "After",
       ...input
-    }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new TranscriptQueryError({
-            operation: "page",
-            sessionId: input.sessionId,
-            message: "Invalid owner-message query",
-            cause
-          })
-      )
-    )
+    }).pipe(Effect.mapError(failure(input.sessionId, "Invalid owner-message query")))
     const rows = yield* sql<TranscriptRow>`
       SELECT session_id, message_id, seq, role, message_json, client_id, created_at
       FROM session_messages AS message
