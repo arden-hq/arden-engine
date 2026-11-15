@@ -47,8 +47,16 @@ export class RevisionLockFactory extends Context.Service<
 export type StorageError = RevisionStorageError | RevisionConflictError | UnsafePathError
 
 /** One entry under the working root, by its relative path. */
+/** A regular file's identity, size and modification time, as listed; equal stamps mean it was
+ *  not replaced, resized or modified since. */
+export interface WorkingStamp {
+  readonly id: string
+  readonly modifiedAt: number
+}
+
 export type WorkingEntry =
-  | { readonly kind: "file"; readonly path: string }
+  /** `stamp` is undefined for a symlink or an entry that is not a regular file. */
+  | { readonly kind: "file"; readonly path: string; readonly stamp: WorkingStamp | undefined }
   | { readonly kind: "unreadable"; readonly path: string; readonly reason: string }
 
 type RevisionObjectKind = "blob" | "tree" | "commit"

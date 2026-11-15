@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 
 import { parseIdempotencyRecord } from "../domain/transaction.js"
 import {
+  Clock,
   Context,
   Effect,
   Layer,
@@ -249,11 +250,24 @@ const decodeChangeSet = Effect.fn("decodeChangeSet")(function* (
   }).pipe(Effect.mapError((cause) => new InvalidRevisionInputError({ message: cause.message })))
 })
 
+/**
+ * A scan reads a tracked file only when its stamp (identity, size, modification time) differs
+ * from the last scan that found it matching history. A file modified within `SETTLED_MS` of a
+ * scan is read again at the next, since a same-size write in the same instant keeps its stamp.
+ * Every `FULL_SCAN_EVERY`th scan reads every file, which bounds how long an edit that restores
+ * a file's size and time goes unseen.
+ */
+const SETTLED_MS = 2_000
+const FULL_SCAN_EVERY = 60
+
 const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
   options: ManagedFileRepositoryOptions
 ): Effect.fn.Return<ManagedFileRepositoryShape, RepositoryError, RevisionStorage | Scope.Scope> {
   const storage = yield* RevisionStorage
   const withLockQueue = (yield* Semaphore.make(1)).withPermit
+  /** Each tracked file's stamp when a scan last found it matching its history. */
+  let matched = new Map<string, { readonly stamp: string; readonly blobId: string }>()
+  let scans = 0
   let closed = false
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -464,7 +478,30 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
               .filter((resource) => resource.state === "active")
               .sort((left, right) => compareCodePoints(left.resourceId, right.resourceId))
             const changes: WorkingFileChange[] = []
+            const startedAt = yield* Clock.currentTimeMillis
+            const rehashAll = scans % FULL_SCAN_EVERY === 0
+            scans += 1
+            const listing = yield* storage.listWorkingFiles
+            const stamps = new Map(
+              listing.flatMap((entry) =>
+                entry.kind === "file" && entry.stamp !== undefined
+                  ? [[entry.path, entry.stamp] as const]
+                  : []
+              )
+            )
+            const stillMatched = new Map<string, { readonly stamp: string; readonly blobId: string }>()
             for (const resource of active) {
+              const stamp = stamps.get(resource.path)
+              const known = matched.get(resource.path)
+              if (
+                !rehashAll &&
+                stamp !== undefined &&
+                known?.stamp === stamp.id &&
+                known.blobId === resource.blobId
+              ) {
+                stillMatched.set(resource.path, known)
+                continue
+              }
               const read = yield* Effect.result(storage.readWorking(resource.path, true, true))
               if (Result.isFailure(read)) {
                 changes.push({ kind: "unreadable", resource, reason: read.failure.message })
@@ -472,11 +509,14 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
                 changes.push({ kind: "missing", resource })
               } else if (sha256Hex(read.success) !== resource.blobId) {
                 changes.push({ kind: "changed", resource, content: new Uint8Array(read.success) })
+              } else if (stamp !== undefined && stamp.modifiedAt < startedAt - SETTLED_MS) {
+                stillMatched.set(resource.path, { stamp: stamp.id, blobId: resource.blobId })
               }
             }
+            matched = stillMatched
             const tracked = new Set(active.map((resource) => resource.path))
             const untracked: UntrackedFile[] = []
-            for (const entry of yield* storage.listWorkingFiles) {
+            for (const entry of listing) {
               if (tracked.has(entry.path)) continue
               if (
                 entry.kind === "unreadable" ||

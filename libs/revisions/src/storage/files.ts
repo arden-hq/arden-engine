@@ -299,11 +299,27 @@ const listWorkingEntry = Effect.fn("RevisionStorage.listWorkingEntry")(function*
   const linked = yield* entryIsSymlink(fs, entry).pipe(
     Effect.mapError((cause) => storageFailure("inspect working entry", cause))
   )
-  if (linked) return [{ kind: "file", path: relative }]
+  if (linked) return [{ kind: "file", path: relative, stamp: undefined }]
   const info = yield* fs
     .stat(entry)
     .pipe(Effect.mapError((cause) => storageFailure("stat working entry", cause)))
-  if (info.type !== "Directory") return [{ kind: "file", path: relative }]
+  if (info.type === "File") {
+    const modifiedAt = Option.match(info.mtime, {
+      onNone: () => 0,
+      onSome: (date) => date.getTime()
+    })
+    return [
+      {
+        kind: "file",
+        path: relative,
+        stamp: {
+          id: [info.dev, Option.getOrElse(info.ino, () => 0), info.size, modifiedAt].join(":"),
+          modifiedAt
+        }
+      }
+    ]
+  }
+  if (info.type !== "Directory") return [{ kind: "file", path: relative, stamp: undefined }]
   return yield* listWorkingFolder(fs, path, historyRoot, entry, `${relative}/`)
 })
 

@@ -7,6 +7,7 @@ import {
   rm,
   symlink,
   unlink,
+  utimes,
   writeFile
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -161,6 +162,49 @@ describe("working tree status", () => {
     await useRepository(root, (repository) => repository.workingTreeStatus())
     await expect(readFile(join(root, "notes", "b.md"))).rejects.toThrow()
     await expect(mkdir(join(root, "notes"))).resolves.toBeUndefined()
+  })
+})
+
+describe("a scan reads only files that may have changed", () => {
+  const hourAgo = new Date(Date.now() - 3_600_000)
+  const scan = (repository: ManagedFileRepositoryShape) =>
+    repository.workingTreeStatus().pipe(Effect.map((status) => status.changes.map(summary)))
+
+  it("does not read a file that kept its stamp since it matched history, until a full scan", async () => {
+    const root = await seeded()
+    await utimes(join(root, "a.md"), hourAgo, hourAgo)
+    const outcome = await useRepository(root, (repository) =>
+      Effect.gen(function* () {
+        const first = yield* scan(repository)
+        yield* Effect.promise(() => chmod(join(root, "a.md"), 0o000))
+        const idle: Array<ReadonlyArray<unknown>> = []
+        for (let index = 1; index < 60; index += 1) idle.push(yield* scan(repository))
+        const full = yield* scan(repository)
+        yield* Effect.promise(() => chmod(join(root, "a.md"), 0o644))
+        return { first, idle: idle.filter((changes) => changes.length > 0).length, full }
+      })
+    )
+    expect(outcome).toEqual({
+      first: [],
+      idle: 0,
+      full: [{ kind: "unreadable", resourceId: "a" }]
+    })
+  })
+
+  it("reads again a file whose size changed, even with its old time put back", async () => {
+    const root = await seeded()
+    await utimes(join(root, "a.md"), hourAgo, hourAgo)
+    const changes = await useRepository(root, (repository) =>
+      Effect.gen(function* () {
+        yield* scan(repository)
+        yield* Effect.promise(async () => {
+          await writeFile(join(root, "a.md"), "one more")
+          await utimes(join(root, "a.md"), hourAgo, hourAgo)
+        })
+        return yield* scan(repository)
+      })
+    )
+    expect(changes).toEqual([{ kind: "changed", resourceId: "a", text: "one more" }])
   })
 })
 
