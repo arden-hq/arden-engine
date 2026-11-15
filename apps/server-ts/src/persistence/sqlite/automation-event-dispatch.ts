@@ -19,7 +19,7 @@ import type { QueueContext } from "./automation-queue-context.js"
 import type { PersistenceDeps } from "./deps.js"
 import { touchCause } from "./effect-targets.js"
 import type { UnitOfWork } from "../unit-of-work.js"
-import { memoryHistoryPosition } from "./memory-history-position.js"
+import { readerPosition } from "./reader-position.js"
 import { iso } from "../../runtime/clock.js"
 
 const storeError = (
@@ -138,7 +138,7 @@ export const makeAutomationEventDispatch = ({
   ) {
     return yield* writer.transact(dispatchInTransaction(event)).pipe(Effect.mapError(failure))
   })
-  const publication = memoryHistoryPosition("publication")
+  const publication = readerPosition("publication")
   const wikiPublicationCursor = Effect.fn("Automation.wikiPublicationCursor")(function* (
     initialRevision: string | null
   ) {
