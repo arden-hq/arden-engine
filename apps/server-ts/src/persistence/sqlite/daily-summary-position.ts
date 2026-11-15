@@ -5,7 +5,9 @@ import type { PersistenceDeps } from "./deps.js"
 
 const NAMESPACE = "daily_summary"
 const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
-const StateJson = Schema.fromJsonString(Schema.Struct({ settledDay: Day }))
+const StateJson = Schema.fromJsonString(
+  Schema.Struct({ settledDay: Day, tries: Schema.optionalKey(Schema.Int) })
+)
 
 type Operation = DailySummaryPositionError["operation"]
 
@@ -25,48 +27,63 @@ export const makeDailySummaryPosition = ({
   writer
 }: Pick<PersistenceDeps, "writer">): DailySummaryPosition["Service"] => {
   const sql = writer.sql
-  const encode = (day: string, operation: Operation) =>
-    Schema.encodeUnknownEffect(StateJson)({ settledDay: day }).pipe(
-      Effect.mapError(failure(operation, "invalid", `Not a calendar day: ${day}`))
+  const encode = (
+    state: { readonly settledDay: string; readonly tries?: number },
+    operation: Operation
+  ) =>
+    Schema.encodeUnknownEffect(StateJson)(state).pipe(
+      Effect.mapError(failure(operation, "invalid", `Not a calendar day: ${state.settledDay}`))
     )
-  const read = Effect.fn("SqliteDailySummaryPosition.read")(function* (operation: Operation) {
-    const rows = yield* sql<{ readonly state: string }>`
-      SELECT state FROM monitor_state WHERE namespace = ${NAMESPACE}`.pipe(
-      Effect.mapError(failure(operation, "storage", "Could not read the Daily Summary position"))
-    )
-    const row = rows[0]
-    if (row === undefined)
-      return yield* failure(operation, "storage", "The Daily Summary position is not set")()
-    const state = yield* Schema.decodeUnknownEffect(StateJson)(row.state).pipe(
-      Effect.mapError(failure(operation, "corrupt", "The Daily Summary position is corrupt"))
-    )
-    return state.settledDay
-  })
 
-  const initialize = Effect.fn("SqliteDailySummaryPosition.initialize")(function* (day: string) {
-    const state = yield* encode(day, "initialize")
+  const current = Effect.fn("SqliteDailySummaryPosition.current")(function* (
+    startIfUnset: string
+  ) {
+    const state = yield* encode({ settledDay: startIfUnset }, "read")
     const at = DateTime.formatIso(yield* DateTime.now)
     yield* writer.run(
       sql`INSERT INTO monitor_state (namespace, state, updated_at)
         VALUES (${NAMESPACE}, ${state}, ${at}) ON CONFLICT(namespace) DO NOTHING`.pipe(
-        Effect.mapError(
-          failure("initialize", "storage", "Could not set the Daily Summary position")
-        )
+        Effect.mapError(failure("read", "storage", "Could not set the Daily Summary position"))
       )
     )
-    return yield* read("initialize")
+    const rows = yield* sql<{ readonly state: string }>`
+      SELECT state FROM monitor_state WHERE namespace = ${NAMESPACE}`.pipe(
+      Effect.mapError(failure("read", "storage", "Could not read the Daily Summary position"))
+    )
+    const row = rows[0]
+    if (row === undefined)
+      return yield* failure("read", "storage", "The Daily Summary position is not set")()
+    const stored = yield* Schema.decodeUnknownEffect(StateJson)(row.state).pipe(
+      Effect.mapError(failure("read", "corrupt", "The Daily Summary position is corrupt"))
+    )
+    return { settledDay: stored.settledDay, tries: stored.tries ?? 0 }
+  })
+
+  const tried = Effect.fn("SqliteDailySummaryPosition.tried")(function* (settled: string) {
+    const at = DateTime.formatIso(yield* DateTime.now)
+    const rows = yield* writer.run(
+      sql<{ readonly namespace: string }>`UPDATE monitor_state
+        SET state = json_set(state, '$.tries', coalesce(json_extract(state, '$.tries'), 0) + 1),
+            updated_at = ${at}
+        WHERE namespace = ${NAMESPACE} AND json_extract(state, '$.settledDay') = ${settled}
+        RETURNING namespace`.pipe(
+        Effect.mapError(failure("tried", "storage", "Could not count a Daily Summary try"))
+      )
+    )
+    if (rows.length === 0)
+      return yield* failure("tried", "conflict", "The Daily Summary position moved")()
   })
 
   const advance = Effect.fn("SqliteDailySummaryPosition.advance")(function* (input: {
     readonly from: string
     readonly to: string
   }) {
-    const from = yield* encode(input.from, "advance")
-    const to = yield* encode(input.to, "advance")
+    const to = yield* encode({ settledDay: input.to }, "advance")
     const at = DateTime.formatIso(yield* DateTime.now)
     const rows = yield* writer.run(
       sql<{ readonly namespace: string }>`UPDATE monitor_state SET state = ${to}, updated_at = ${at}
-        WHERE namespace = ${NAMESPACE} AND state IN (${from}, ${to})
+        WHERE namespace = ${NAMESPACE}
+          AND json_extract(state, '$.settledDay') IN (${input.from}, ${input.to})
         RETURNING namespace`.pipe(
         Effect.mapError(
           failure("advance", "storage", "Could not advance the Daily Summary position")
@@ -77,5 +94,5 @@ export const makeDailySummaryPosition = ({
       return yield* failure("advance", "conflict", "The Daily Summary position moved")()
   })
 
-  return DailySummaryPosition.of({ initialize, settled: () => read("read"), advance })
+  return DailySummaryPosition.of({ current, tried, advance })
 }

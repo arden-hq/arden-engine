@@ -32,6 +32,7 @@ export const AutomationId = Schema.NonEmptyString.pipe(Schema.brand("AutomationI
 export type AutomationId = typeof AutomationId.Type
 
 export const HOME_LETTER_AUTOMATION_ID = AutomationId.make(HOME_LETTER_AUTOMATION_REF)
+export const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summary")
 
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId

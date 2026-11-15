@@ -3,7 +3,7 @@ import { DateTime, Effect, Predicate } from "effect"
 import type { SessionStore } from "../../persistence/sessions/store.js"
 import type { TranscriptQueries } from "../../persistence/transcript/queries.js"
 import { ownerText } from "../../persistence/transcript/owner-words.js"
-import { AutomationId } from "../../persistence/automations/model.js"
+import { DAILY_SUMMARY_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import type { AutomationHandlerItems } from "../../persistence/automations/handler-items.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
 import { markdownValue } from "../../prompts/format.js"
@@ -14,8 +14,6 @@ import { runItemLoop } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import type { DailySummaryPosition } from "../../persistence/daily-summary/store.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
-
-const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summary")
 
 const DAILY_CONTRACT = `## Purpose
 Dated personal chronology and reflection, including summaries of recorded Arden activity.
@@ -37,6 +35,9 @@ const EVIDENCE_CHARS = 16_000
 const EXCERPT_CHARS = 2_000
 const SESSION_PAGE = 100
 const MESSAGE_PAGE = 250
+/** Jobs a day's run may fail or block in before the day is settled unwritten, so one bad day
+ * neither holds back the days after it nor is paid for every night. */
+const DAY_TRIES = 2
 
 const nextDay = (day: string, days = 1): string =>
   DateTime.formatIsoDate(DateTime.add(DateTime.makeUnsafe(`${day}T00:00:00Z`), { days }))
@@ -44,8 +45,8 @@ const nextDay = (day: string, days = 1): string =>
 const dayStart = (day: string, timezone: string): DateTime.Zoned =>
   DateTime.makeZonedUnsafe(`${day}T00:00:00`, { timeZone: timezone, adjustForTimeZone: true })
 
-/** The day before the last ended day: where the position starts, so the first start after an
- * update writes only the page the old timer would have written. */
+/** The day before the last ended day: where the position starts, so the first job after an
+ * update writes only the last ended day's page. */
 export const dailyStartPosition = (nowMs: number, timezone: string): string =>
   nextDay(localDayOf(nowMs, timezone), -2)
 
@@ -221,15 +222,22 @@ export const makeDailySummaryRunner = (services: {
       label: "Daily summary",
       kind: "daily",
       next: Effect.fn("DailySummary.next")(function* () {
-        const settled = yield* services.position.settled()
+        const place = yield* services.position.current(dailyStartPosition(job.leasedAt, timezone))
+        const settled = place.settledDay
         const date = nextDay(settled)
         if (date >= today) return "idle" as const
+        if (place.tries >= DAY_TRIES) {
+          notes.push(`daily/${date}.md was not written: its run did not finish in ${DAY_TRIES} jobs`)
+          yield* services.position.advance({ from: settled, to: date })
+          return "advance" as const
+        }
         const prepared = yield* prepareDay(date)
         if (prepared.kind === "settled") {
           if (prepared.note !== undefined) notes.push(prepared.note)
           yield* services.position.advance({ from: settled, to: date })
           return "advance" as const
         }
+        yield* services.position.tried(settled)
         return { kind: "daily" as const, date, timezone, markdown: prepared.markdown }
       }),
       commit: (data) => services.position.advance({ from: nextDay(data.date, -1), to: data.date }),

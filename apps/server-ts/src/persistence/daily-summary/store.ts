@@ -5,20 +5,29 @@ export class DailySummaryPositionError extends Schema.TaggedError<DailySummaryPo
   "DailySummaryPositionError",
   {
     ...storeErrorFields({
-      operations: ["initialize", "read", "advance"],
+      operations: ["read", "tried", "advance"],
       reasons: ["invalid", "conflict", "corrupt", "storage"]
     })
   }
 ) {}
 
 /** The last calendar day (`YYYY-MM-DD`) Daily Summary settled: its page written, already there,
- * or nothing to write. Each ended day after it is settled in order. */
+ * or nothing to write. Each ended day after it is settled in order. `tries` counts the jobs that
+ * started a run on the next day without settling it. */
+export interface DailySummaryPlace {
+  readonly settledDay: string
+  readonly tries: number
+}
+
 export class DailySummaryPosition extends Context.Service<
   DailySummaryPosition,
   {
-    /** Stores `day` only when no position is stored yet; returns the stored one. */
-    readonly initialize: (day: string) => Effect.Effect<string, DailySummaryPositionError>
-    readonly settled: () => Effect.Effect<string, DailySummaryPositionError>
+    /** The stored position; stores `startIfUnset` with no tries when none is stored. */
+    readonly current: (
+      startIfUnset: string
+    ) => Effect.Effect<DailySummaryPlace, DailySummaryPositionError>
+    /** Counts one more job that started a run on the day after `settled`. */
+    readonly tried: (settled: string) => Effect.Effect<void, DailySummaryPositionError>
     readonly advance: (input: {
       readonly from: string
       readonly to: string

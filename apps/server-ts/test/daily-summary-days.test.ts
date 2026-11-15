@@ -78,7 +78,31 @@ const contract: PageRecord = {
   )
 }
 
-const dailyRunner = Effect.fn("dailyRunner")(function* () {
+const page = (path: string, producer: string, body: string): PageRecord => ({
+  resource: { ...contract.resource, resourceId: path, path },
+  page: Effect.runSync(
+    parseWikiPage(
+      formatWikiPage({
+        pageId: path,
+        title: path,
+        aliases: [],
+        lifecycle: "active",
+        redirectTo: null,
+        metadata: { producer_automation_id: producer },
+        body
+      }),
+      path
+    )
+  )
+})
+
+const dailyRunner = Effect.fn("dailyRunner")(function* (
+  options: {
+    readonly pages?: ReadonlyArray<PageRecord>
+    readonly updatedAt?: ReadonlyMap<string, string>
+    readonly fails?: (date: string) => boolean
+  } = {}
+) {
   const ran: Array<{
     readonly date: string
     readonly messages: ReadonlyArray<string>
@@ -87,8 +111,16 @@ const dailyRunner = Effect.fn("dailyRunner")(function* () {
   let items = 0
   const runner = makeDailySummaryRunner({
     wiki: {
-      snapshot: () => Effect.succeed({ head: "head", pages: [contract] }),
-      pageTimes: () => Effect.succeed(new Map()),
+      snapshot: () => Effect.succeed({ head: "head", pages: [contract, ...(options.pages ?? [])] }),
+      pageTimes: () =>
+        Effect.succeed(
+          new Map(
+            [...(options.updatedAt ?? [])].map(([pageId, updatedAt]) => [
+              pageId,
+              { createdAt: updatedAt, updatedAt }
+            ])
+          )
+        ),
       createDirectory: () => Effect.die(new Error("the contract exists"))
     },
     sessions: yield* SessionStore,
@@ -123,11 +155,12 @@ const dailyRunner = Effect.fn("dailyRunner")(function* () {
           ],
           markdown: data.markdown
         })
+      const failed = data.kind === "daily" && options.fails?.(data.date) === true
       return Effect.succeed({
         item: { ...item, runId: "run-1" },
-        state: "done" as const,
-        detail: null,
-        result: "Written."
+        state: failed ? ("failed" as const) : ("done" as const),
+        detail: failed ? "The provider failed 3 times" : null,
+        result: failed ? null : "Written."
       })
     },
     timezone: "UTC"
@@ -147,10 +180,10 @@ it("fills each ended day after the saved one, each from its own day's messages",
       yield* turn(chat, "twelfth-b", "2026-11-12T23:59:00.000Z")
       yield* turn(chat, "today", "2026-11-13T09:00:00.000Z")
       // The computer was off: nothing settled after the 8th, and the 9th had no messages.
-      yield* position.initialize("2026-11-08")
+      yield* position.current("2026-11-08")
       const { ran, runner } = yield* dailyRunner()
       const first = yield* runner(job)
-      const settled = yield* position.settled()
+      const settled = (yield* position.current("2026-11-01")).settledDay
       const again = yield* runner(job)
       return {
         ran: ran.map(({ date, messages }) => ({ date, messages })),
@@ -193,7 +226,7 @@ it("says in the page input how much of a busy day the limit left out", async () 
           `busy-${index}`,
           `2026-11-12T${String(index).padStart(2, "0")}:00:00.000Z`
         )
-      yield* (yield* DailySummaryPosition).initialize("2026-11-11")
+      yield* (yield* DailySummaryPosition).current("2026-11-11")
       const { ran, runner } = yield* dailyRunner()
       yield* runner(job)
       return ran.map((day) => day.markdown)
@@ -206,4 +239,118 @@ it("says in the page input how much of a busy day the limit left out", async () 
   expect(markdown[0]).toContain(
     "Left out by that limit: 10 messages and 0 reports; 0 excerpts shortened."
   )
+})
+
+it("keeps the stored position across restarts, and moves it only from where it is", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const position = yield* DailySummaryPosition
+      const first = yield* position.current("2026-11-08")
+      yield* position.advance({ from: "2026-11-08", to: "2026-11-09" })
+      const restarted = yield* position.current("2026-11-11")
+      const stale = yield* position
+        .advance({ from: "2026-11-05", to: "2026-11-12" })
+        .pipe(Effect.flip, Effect.map((error) => error.reason))
+      return { first: first.settledDay, restarted: restarted.settledDay, stale }
+    })
+  )
+  expect(outcome).toEqual({ first: "2026-11-08", restarted: "2026-11-09", stale: "conflict" })
+})
+
+it("settles a day whose page is already there without a run", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const chat = (yield* sessions.create({})).sessionId
+      yield* turn(chat, "twelfth", "2026-11-12T09:00:00.000Z")
+      const position = yield* DailySummaryPosition
+      yield* position.current("2026-11-11")
+      const { ran, runner } = yield* dailyRunner({
+        pages: [page("daily/2026-11-12.md", "builtin-daily-summary", "Written before a crash.")]
+      })
+      yield* runner(job)
+      return { ran: ran.length, settled: (yield* position.current("2026-11-01")).settledDay }
+    })
+  )
+  expect(outcome).toEqual({ ran: 0, settled: "2026-11-12" })
+})
+
+it("reads archived chats, past the first page of chats and of messages", async () => {
+  const messages = await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const archived = (yield* sessions.create({})).sessionId
+      yield* turn(archived, "archived", "2026-11-12T01:00:00.000Z")
+      yield* sessions.archive(archived)
+      const long = (yield* sessions.create({})).sessionId
+      for (let index = 0; index < 126; index += 1)
+        yield* turn(long, `long-${index}`, `2026-11-12T02:${String(index % 60).padStart(2, "0")}:00.000Z`)
+      for (let index = 0; index < 100; index += 1)
+        yield* turn(
+          (yield* sessions.create({})).sessionId,
+          `chat-${index}`,
+          `2026-11-12T12:${String(index % 60).padStart(2, "0")}:00.000Z`
+        )
+      yield* (yield* DailySummaryPosition).current("2026-11-11")
+      const { ran, runner } = yield* dailyRunner()
+      yield* runner(job)
+      return ran.map((day) => day.markdown)
+    })
+  )
+  expect(messages).toHaveLength(1)
+  expect(messages[0]).toContain("every owner chat's messages from this day (454)")
+}, 60_000)
+
+it("reads the reports last changed on each day, and only those", async () => {
+  const markdown = await withTempDatabase(
+    Effect.gen(function* () {
+      yield* (yield* DailySummaryPosition).current("2026-11-10")
+      const { ran, runner } = yield* dailyRunner({
+        pages: [
+          page("reports/eleventh.md", "user-automation", "Eleventh report."),
+          page("reports/twelfth.md", "user-automation", "Twelfth report.")
+        ],
+        updatedAt: new Map([
+          ["reports/eleventh.md", "2026-11-11T10:00:00.000Z"],
+          ["reports/twelfth.md", "2026-11-12T10:00:00.000Z"]
+        ])
+      })
+      yield* runner(job)
+      return ran.map((day) => ({
+        date: day.date,
+        reports: [...day.markdown.matchAll(/^arden:memory\/(\S+)$/gmu)].map((match) => match[1])
+      }))
+    })
+  )
+  expect(markdown).toEqual([
+    { date: "2026-11-11", reports: ["reports/eleventh.md"] },
+    { date: "2026-11-12", reports: ["reports/twelfth.md"] }
+  ])
+})
+
+it("settles a day unwritten once its run has failed in two jobs, and says so", async () => {
+  const outcome = await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const chat = (yield* sessions.create({})).sessionId
+      yield* turn(chat, "eleventh", "2026-11-11T09:00:00.000Z")
+      yield* turn(chat, "twelfth", "2026-11-12T09:00:00.000Z")
+      const position = yield* DailySummaryPosition
+      yield* position.current("2026-11-10")
+      const { ran, runner } = yield* dailyRunner({ fails: (date) => date === "2026-11-11" })
+      const jobs = [yield* runner(job), yield* runner(job), yield* runner(job)]
+      return {
+        ran: ran.map((day) => day.date),
+        outcome: jobs.map((result) => result.outcome),
+        note: jobs[2]?.result,
+        settled: (yield* position.current("2026-11-01")).settledDay
+      }
+    })
+  )
+  expect(outcome).toEqual({
+    ran: ["2026-11-11", "2026-11-11", "2026-11-12"],
+    outcome: ["failed", "failed", "finished"],
+    note: expect.stringContaining("daily/2026-11-11.md was not written: its run did not finish in 2 jobs"),
+    settled: "2026-11-12"
+  })
 })
