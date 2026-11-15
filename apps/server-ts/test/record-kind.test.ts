@@ -87,3 +87,21 @@ describe("record or knowledge", () => {
     ])
   })
 })
+
+describe("imported notes", () => {
+  it("are records by their path alone, with no README or with an archived one", () => {
+    const kinds = (pages: ReadonlyArray<PageRecord>) => {
+      const folders = recordFolders(pages)
+      return ["imported/notes.md", "imported/codex/2024-01-01-notes.md"].map(
+        (path) => pageKind(folders, path).kind
+      )
+    }
+    expect([
+      kinds([page("topics/garden.md")]),
+      kinds([{ ...page("imported/README.md"), resource: { ...page("imported/README.md").resource, state: "archived" } }])
+    ]).toEqual([
+      ["record", "record"],
+      ["record", "record"]
+    ])
+  })
+})

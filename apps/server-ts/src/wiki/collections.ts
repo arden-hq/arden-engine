@@ -88,8 +88,14 @@ const folderProducer = (readmePath: string, page: ParsedWikiPage): RecordProduce
   return automationId === undefined ? undefined : { kind: "automation", automationId }
 }
 
+/**
+ * The record folders of Memory: every folder whose active README names its producing Automation,
+ * and `imported/`, which holds imported notes by its name, README or not.
+ */
 export const recordFolders = (pages: ReadonlyArray<PageRecord>): RecordFolders => {
-  const folders = new Map<string, RecordFolder>()
+  const folders = new Map<string, RecordFolder>([
+    [normal(IMPORTED_DIRECTORY), { directory: IMPORTED_DIRECTORY, producer: { kind: "import" } }]
+  ])
   for (const record of pages) {
     const path = record.resource.path
     if (
