@@ -51,6 +51,7 @@ describe("only wiki/space-index.ts decides which pages a Space owns", () => {
 describe("one create-and-bind gives a Space its page", () => {
   it("binds, restores and makes Space pages only in wiki/space-page.ts", () => {
     expect(where(/\.bindPage\(/u)).toEqual(["wiki/space-page.ts"])
+    expect(where(/\bas FreeSpacePage\b/u)).toEqual(["wiki/space-index.ts"])
     expect(callingSpaceStore("restore")).toEqual(["wiki/space-page.ts"])
     expect(where(/\bcreateSpacePage\(/u)).toEqual(["wiki/space-page.ts"])
   })

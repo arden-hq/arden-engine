@@ -1,7 +1,12 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
-import type { PersistedSpace, SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
+import type {
+  FreeSpacePage,
+  PersistedSpace,
+  SpaceStore,
+  SpaceStoreError
+} from "../persistence/spaces/store.js"
 import {
   DIRECTORY_CONTRACT_HEADINGS,
   directorySections,
@@ -15,7 +20,7 @@ import { loadSnapshot, type Snapshot } from "./snapshot.js"
 import {
   activeSpaceBindings,
   bindingOwnsPath,
-  overlapsAnother,
+  freeSpacePage,
   planSpacePage,
   type SpaceBinding
 } from "./space-index.js"
@@ -56,17 +61,20 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
   if (plan.kind === "keep") return { space, created: undefined }
   const page =
     plan.kind === "rebind"
-      ? { pageId: plan.pageId, path: plan.pagePath }
+      ? plan.page
       : yield* createSpacePage(repository, current, others, {
           spaceId: space.space_id,
           title: space.name,
           home: input.home ?? "areas"
         })
   const bound = yield* spaces
-    .bindPage(space.space_id, page.pageId, page.path)
+    .bindPage(space.space_id, page)
     .pipe(Effect.mapError(storageError("Could not bind the Space's page")))
   if (bound === null) return undefined
-  return { space: bound, created: plan.kind === "create" ? page : undefined }
+  return {
+    space: bound,
+    created: plan.kind === "create" ? { pageId: page.pageId, path: page.pagePath } : undefined
+  }
 })
 
 /** Logs a Space left without a page; the start check gives it one. */
@@ -86,10 +94,7 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   if (space === null || space.archived_at === null) return null
   const current = yield* loadSnapshot(repository, "restore")
   const plan = planSpacePage(current.pages, space, yield* activeSpaceBindings(spaces))
-  const restored = yield* spaces.restore(
-    spaceId,
-    plan.kind === "create" ? null : { pageId: plan.pageId, pagePath: plan.pagePath }
-  )
+  const restored = yield* spaces.restore(spaceId, plan.kind === "create" ? null : plan.page)
   if (restored === null || plan.kind !== "create") return restored
   return yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
     Effect.map((ensured) => ensured?.space ?? restored),
@@ -102,7 +107,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   current: Snapshot,
   others: ReadonlyArray<SpaceBinding>,
   input: { readonly spaceId: string; readonly title: string; readonly home: "projects" | "areas" }
-): Effect.fn.Return<{ readonly pageId: string; readonly path: string }, WikiError> {
+): Effect.fn.Return<FreeSpacePage, WikiError> {
   const title = input.title.trim()
   if (title.length === 0) {
     return yield* wikiError("create", "invalid", "Space page title must not be empty")
@@ -137,15 +142,15 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   const usedNames = new Set(
     current.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
   )
+  const pageId = randomUUID()
   const base = spacePageSlug(title)
   let suffix = 1
   let path = `${home}/${base}.md`
-  while (
-    pageNamesForPath(path).some((name) => usedNames.has(normal(name))) ||
-    overlapsAnother(others, path)
-  ) {
+  let free = freeSpacePage(others, { pageId, pagePath: path })
+  while (pageNamesForPath(path).some((name) => usedNames.has(normal(name))) || free === undefined) {
     suffix += 1
     path = `${home}/${base}-${suffix}.md`
+    free = freeSpacePage(others, { pageId, pagePath: path })
   }
   const directoryId = randomUUID()
   const directoryContent = formatWikiPage({
@@ -178,7 +183,6 @@ Finite outcomes belong in projects; reusable references belong in resources. Lin
 Keep useful context; archive obsolete pages deliberately and preserve evidence.
 `
   })
-  const pageId = randomUUID()
   const content = formatWikiPage({
     pageId,
     title,
@@ -206,7 +210,7 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
       createPage(pageId, path, content)
     ]
   ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
-  return { pageId, path }
+  return free
 })
 
 type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">

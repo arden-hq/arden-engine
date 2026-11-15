@@ -2,7 +2,12 @@ import { isWithin } from "@arden-hq/std/paths"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
-import type { SpaceBindingRow, SpacePageBinding, SpaceStore } from "../persistence/spaces/store.js"
+import type {
+  FreeSpacePage,
+  SpaceBindingRow,
+  SpacePageBinding,
+  SpaceStore
+} from "../persistence/spaces/store.js"
 import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
@@ -43,7 +48,7 @@ export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
   binding.kind === "half_made" || spaceOwnsPath(binding.page_path, path)
 
 /** Whether another active Space's pages and the pages `path` would head overlap. */
-export const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boolean =>
+const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boolean =>
   others.some(
     (other) =>
       bindingOwnsPath(other, path) ||
@@ -56,6 +61,12 @@ export const heldByAnother = (
   pageId: string,
   pagePath: string
 ): boolean => others.some((other) => other.page_id === pageId) || overlapsAnother(others, pagePath)
+
+export const freeSpacePage = (
+  others: ReadonlyArray<SpaceBinding>,
+  page: SpacePageBinding
+): FreeSpacePage | undefined =>
+  heldByAnother(others, page.pageId, page.pagePath) ? undefined : (page as FreeSpacePage)
 
 const isBoundPage = (
   bindings: ReadonlyArray<SpaceBindingRow>,
@@ -99,8 +110,7 @@ export const spacePageIndex = (
   })
 
 export type SpacePagePlan =
-  | ({ readonly kind: "keep" } & SpacePageBinding)
-  | ({ readonly kind: "rebind" } & SpacePageBinding)
+  | { readonly kind: "keep" | "rebind"; readonly page: FreeSpacePage }
   | { readonly kind: "create" }
 
 export const planSpacePage = (
@@ -115,10 +125,7 @@ export const planSpacePage = (
   if (record === undefined) return { kind: "create" }
   const path = record.resource.path
   if (canonicalWikiPath(path) === undefined) return { kind: "create" }
-  if (heldByAnother(others, record.page.pageId, path)) return { kind: "create" }
-  return {
-    kind: path === space.page_path ? "keep" : "rebind",
-    pageId: record.page.pageId,
-    pagePath: path
-  }
+  const page = freeSpacePage(others, { pageId: record.page.pageId, pagePath: path })
+  if (page === undefined) return { kind: "create" }
+  return { kind: path === space.page_path ? "keep" : "rebind", page }
 }

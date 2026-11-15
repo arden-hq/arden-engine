@@ -18,9 +18,9 @@ import {
   SpaceStore,
   SpaceStoreError,
   KEEP_ONE_SPACE,
+  type FreeSpacePage,
   type PersistedSpace,
-  type SpaceBindingRow,
-  type SpacePageBinding
+  type SpaceBindingRow
 } from "../spaces/store.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import { renameOwnedJob } from "./job-labels.js"
@@ -431,8 +431,7 @@ export const makeSpaceStore = ({
 
   const bindPage = Effect.fn("SqliteSpaceStore.bindPage")(function* (
     spaceId: string,
-    pageId: string,
-    pagePath: string
+    { pageId, pagePath }: FreeSpacePage
   ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
     const now = DateTime.formatIso(yield* DateTime.now)
     return yield* writer
@@ -557,7 +556,7 @@ export const makeSpaceStore = ({
 
   const restore = Effect.fn("SqliteSpaceStore.restore")(function* (
     spaceId: string,
-    page: SpacePageBinding | null
+    page: FreeSpacePage | null
   ): Effect.fn.Return<PersistedSpace | null, SpaceStoreError> {
     const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
       Effect.mapError((cause) =>

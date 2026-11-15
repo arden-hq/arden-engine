@@ -33,6 +33,7 @@ import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
 import { partialService, serverRunContext } from "./kit.js"
+import { freePage } from "./fixtures/free-space-page.js"
 
 const page = (
   path: string,
@@ -127,16 +128,14 @@ describe("what gives an active Space its page", () => {
   it("keeps a page that is still there and free", () => {
     expect(planSpacePage(pages, binding("a", "areas/garden.md"), [])).toEqual({
       kind: "keep",
-      pageId: "id-areas/garden.md",
-      pagePath: "areas/garden.md"
+      page: { pageId: "id-areas/garden.md", pagePath: "areas/garden.md" }
     })
   })
 
   it("binds the page again at the path it was renamed to", () => {
     expect(planSpacePage(pages, binding("a", "areas/old-name.md", "renamed"), [])).toEqual({
       kind: "rebind",
-      pageId: "renamed",
-      pagePath: "areas/moved.md"
+      page: { pageId: "renamed", pagePath: "areas/moved.md" }
     })
   })
 
@@ -171,11 +170,11 @@ describe("an archived Space releases its pages", () => {
         const spaces = yield* SpaceStore
         yield* insertSpace(sql, "a")
         yield* insertSpace(sql, "b")
-        yield* spaces.bindPage("a", "page-a", "areas/made-up-a.md")
+        yield* spaces.bindPage("a", freePage("page-a", "areas/made-up-a.md"))
         const before = (yield* spaces.activeBindings()).map((row) => row.space_id)
         yield* archiveRow(sql, "a")
         const after = (yield* spaces.activeBindings()).map((row) => row.space_id)
-        yield* spaces.bindPage("b", "page-a", "areas/made-up-a.md")
+        yield* spaces.bindPage("b", freePage("page-a", "areas/made-up-a.md"))
         const archived = yield* spaces.get("a", true)
         return { before, after, archived: archived?.page_path ?? null }
       })
@@ -190,14 +189,11 @@ describe("an archived Space releases its pages", () => {
         const spaces = yield* SpaceStore
         yield* insertSpace(sql, "a")
         yield* insertSpace(sql, "b")
-        yield* spaces.bindPage("a", "page-a", "areas/made-up-a.md")
-        yield* spaces.bindPage("b", "page-b", "areas/made-up-b.md")
+        yield* spaces.bindPage("a", freePage("page-a", "areas/made-up-a.md"))
+        yield* spaces.bindPage("b", freePage("page-b", "areas/made-up-b.md"))
         yield* archiveRow(sql, "a")
         yield* archiveRow(sql, "b")
-        const restored = yield* spaces.restore("a", {
-          pageId: "page-a",
-          pagePath: "areas/made-up-b.md"
-        })
+        const restored = yield* spaces.restore("a", freePage("page-a", "areas/made-up-b.md"))
         const stale = yield* spaces.get("b", true)
         return { restored: restored?.page_path ?? null, stale: stale?.page_path ?? null }
       })
@@ -305,7 +301,7 @@ describe("every active Space has a page", () => {
         const takenPage = (yield* methods.ensureSpacePage({ spaceId: taken.space_id }))?.space
         yield* archiveRow(sql, kept.space_id)
         yield* archiveRow(sql, taken.space_id)
-        yield* spaces.bindPage(other.space_id, "inside", "areas/made-up-taken/inside.md")
+        yield* spaces.bindPage(other.space_id, freePage("inside", "areas/made-up-taken/inside.md"))
         const keptAgain = yield* methods.restoreSpace(kept.space_id)
         const takenAgain = yield* methods.restoreSpace(taken.space_id)
         return {
@@ -325,7 +321,7 @@ describe("every active Space has a page", () => {
         const other = yield* spaces.create({ name: "Made-up other" })
         yield* methods.ensureSpacePage({ spaceId: taken.space_id })
         yield* archiveRow(sql, taken.space_id)
-        yield* spaces.bindPage(other.space_id, "areas-directory", "areas/README.md")
+        yield* spaces.bindPage(other.space_id, freePage("areas-directory", "areas/README.md"))
         const restored = yield* methods.restoreSpace(taken.space_id)
         return {
           active: restored?.archived_at === null,
@@ -514,14 +510,14 @@ describe("a Space worker's chat name", () => {
         const spaces = yield* SpaceStore
         const followed = yield* spaces.create({ name: "Made-up one" })
         const kept = yield* spaces.create({ name: "Made-up two" })
-        yield* spaces.bindPage(followed.space_id, "page-one", "areas/made-up-one.md")
-        yield* spaces.bindPage(kept.space_id, "page-two", "areas/made-up-two.md")
+        yield* spaces.bindPage(followed.space_id, freePage("page-one", "areas/made-up-one.md"))
+        yield* spaces.bindPage(kept.space_id, freePage("page-two", "areas/made-up-two.md"))
         yield* sql`UPDATE sessions SET name = 'My own name'
           WHERE session_id = (SELECT thread_id FROM scheduled_tasks
             WHERE task_id = ${spaceJobId(kept.space_id)})`
         yield* spaces.update(followed.space_id, { name: "Made-up first" })
         yield* spaces.update(kept.space_id, { name: "Made-up second" })
-        yield* spaces.bindPage(kept.space_id, "page-two", "areas/made-up-second.md")
+        yield* spaces.bindPage(kept.space_id, freePage("page-two", "areas/made-up-second.md"))
         yield* spaces.update(kept.space_id, { name: "Made-up second" })
         return {
           followed: yield* chatName(sql, followed.space_id),

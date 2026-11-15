@@ -26,6 +26,13 @@ export interface SpacePageBinding {
   readonly pagePath: string
 }
 
+declare const checkedFree: unique symbol
+/**
+ * A page no other active Space holds or overlaps. Only `freeSpacePage` in wiki/space-index.ts
+ * makes one.
+ */
+export type FreeSpacePage = SpacePageBinding & { readonly [checkedFree]: true }
+
 export const spaceChoices = (
   spaces: ReadonlyArray<{ readonly space_id: string; readonly name: string }>
 ): string =>
@@ -87,8 +94,7 @@ export class SpaceStore extends Context.Service<
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly bindPage: (
       spaceId: string,
-      pageId: string,
-      pagePath: string
+      page: FreeSpacePage
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly archive: (
       spaceId: string,
@@ -96,7 +102,7 @@ export class SpaceStore extends Context.Service<
     ) => Effect.Effect<SpaceArchiveResponse | null, SpaceStoreError>
     readonly restore: (
       spaceId: string,
-      page: SpacePageBinding | null
+      page: FreeSpacePage | null
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
     readonly detail: (spaceId: string) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
     readonly recordLetterSubject: (

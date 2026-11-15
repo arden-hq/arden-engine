@@ -15,6 +15,7 @@ import { makeSpaceJobSql } from "../src/persistence/sqlite/space-jobs.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 import { taskJobId } from "../src/persistence/space-job-id.js"
+import { freePage } from "./fixtures/free-space-page.js"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -93,7 +94,7 @@ it("persists the state record atomically, keeps it out of public updates, and re
         expect(
           yield* sql`SELECT json_extract(continuation_context, '$.next') AS next, due_at FROM space_tasks WHERE item_id = ${task.item_id}`
         ).toEqual([{ next: "[]", due_at: null }])
-        yield* spaces.bindPage(space.space_id, "travel-page", "spaces/travel.md")
+        yield* spaces.bindPage(space.space_id, freePage("travel-page", "spaces/travel.md"))
         expect(yield* work.execution(task.item_id)).toEqual({ kind: "queued" })
         const dated = yield* work.update(
           { kind: "key", scope: { kind: "space", spaceId: space.space_id }, key: task.stable_key },
