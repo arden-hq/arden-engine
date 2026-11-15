@@ -77,7 +77,7 @@ export interface WikiWriter {
   readonly authority: WikiLocationAuthority
 }
 
-/** Tidy, the upkeep Automation; the system handler registry decides which Automation that is. */
+/** Wiki Maintenance, the upkeep Automation; the system handler registry decides which Automation that is. */
 export const upkeepOrigin = (
   automationId: string,
   chainDepth?: number
@@ -560,7 +560,7 @@ const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
     return yield* ruleError(
       "records",
       `${path} is ${kind.kind === "record" ? "a record" : "the contract"} of ${kind.folder.directory}/, kept as its producer wrote it. ` +
-        "Tidy reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
+        "Wiki Maintenance reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
     )
   }
 })

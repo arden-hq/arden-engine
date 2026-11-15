@@ -17,6 +17,7 @@ import {
 import type { AutomationRules } from "../automations/model.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
 import { parseLease } from "./automation-lease.js"
+import { givesUp as giveUpRule, skipReason } from "./automation-auto-pause.js"
 import { nextId, type Writer } from "./deps.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { iso } from "../../runtime/clock.js"
@@ -166,10 +167,23 @@ export const makeHandlerItems = ({
       )
     )
 
+  const givesUp: AutomationHandlerItems["Service"]["givesUp"] = (lease, runId) => {
+    const { runId: attemptId } = parseLease(lease)
+    return giveUpRule(sql, {
+      automationId: lease.payload.automationId,
+      attemptId,
+      chatRunId: runId
+    }).pipe(
+      Effect.map((cause) => (cause === undefined ? undefined : skipReason(cause))),
+      Effect.mapError((cause) => failure("Could not read the Automation's failed runs", cause))
+    )
+  }
+
   return AutomationHandlerItems.of({
     prepareHandlerItem,
     settleHandlerItem: transition("settle"),
-    retryHandlerItem: transition("retry")
+    retryHandlerItem: transition("retry"),
+    givesUp
   })
 }
 

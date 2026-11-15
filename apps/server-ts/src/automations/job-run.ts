@@ -12,13 +12,35 @@ import {
 } from "../persistence/automations/store.js"
 import { awaitEnded, jobResult, startAutomationRun, type AutomationRunner } from "./runner.js"
 import { ChatMessageConflictError } from "../chat/message-errors.js"
-import { TRANSIENT_RUN_ERROR_CODES, type ChatRunErrorCode } from "@arden-hq/protocol/chat"
+import { TRANSIENT_RUN_ERROR_CODES } from "@arden-hq/protocol/chat"
 import { JOB_RETRY_LADDER_MS } from "../persistence/automations/retry-ladders.js"
 
 const COLLISION_RETRY_DELAY_MS = 1_000
 
-const isTransient = (code: ChatRunErrorCode | null): boolean =>
-  TRANSIENT_RUN_ERROR_CODES.some((transient) => transient === code)
+/**
+ * The one failure rule for every Automation run: a run that failed on a transient error and wrote
+ * nothing is tried again after each delay of `JOB_RETRY_LADDER_MS`; anything else ends it. `again`
+ * starts try number `tries` and waits for its end, or answers undefined when it could not start.
+ */
+export const retried = Effect.fn("Automation.retried")(function* <
+  Ended extends TerminalAutomationChatRun,
+  E
+>(
+  first: Ended,
+  tries: number,
+  again: (tries: number) => Effect.Effect<Ended | undefined, E>
+): Effect.fn.Return<Ended, E> {
+  let observed = first
+  for (const [step, delay] of JOB_RETRY_LADDER_MS.slice(tries - 1).entries()) {
+    if (observed.status !== "failed" || observed.wrote) break
+    if (!TRANSIENT_RUN_ERROR_CODES.some((transient) => transient === observed.errorCode)) break
+    yield* Effect.sleep(delay)
+    const next = yield* again(tries + step + 1)
+    if (next === undefined) break
+    observed = next
+  }
+  return observed
+})
 
 export const makeAutomationJobRunner = (services: {
   readonly chat: Pick<ChatMessage["Service"], "startAutomation">
@@ -84,21 +106,27 @@ export const makeAutomationJobRunner = (services: {
     }
 
     const observe = () => awaitEnded(services.queue.observeOccurrence(job.payload.automationRunId))
-    let observed = yield* observe()
-    for (const [index, delay] of JOB_RETRY_LADDER_MS.entries()) {
-      if (job.payload.purpose === "task_execution" || job.payload.purpose === "space_review") break
-      if (job.payload.handler !== null || bound?.authority === "revoked") break
-      if (observed.status !== "failed" || observed.wrote || !isTransient(observed.errorCode)) break
-      yield* Effect.sleep(delay)
-      const started = yield* startAutomationRun(services.chat, job, {
-        sessionId,
-        clientId: `automation-run-${job.payload.automationRunId}-retry-${index + 1}`,
-        prompt: job.payload.prompt,
-        name: job.payload.name
-      }).pipe(Effect.option)
-      if (started._tag === "None") break
-      observed = yield* observe()
-    }
+    const once =
+      job.payload.purpose === "task_execution" ||
+      job.payload.purpose === "space_review" ||
+      job.payload.handler !== null ||
+      bound?.authority === "revoked"
+    const first = yield* observe()
+    const observed = once
+      ? first
+      : yield* retried(first, 1, (tries) =>
+          startAutomationRun(services.chat, job, {
+            sessionId,
+            clientId: `automation-run-${job.payload.automationRunId}-retry-${tries - 1}`,
+            prompt: job.payload.prompt,
+            name: job.payload.name
+          }).pipe(
+            Effect.option,
+            Effect.flatMap((started) =>
+              started._tag === "None" ? Effect.succeed(undefined) : observe()
+            )
+          )
+        )
     return {
       status: "ended",
       outcome: occurrenceOutcome(observed, {

@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
+import { givesUp } from "../src/persistence/sqlite/automation-auto-pause.js"
 import { outcomeSql } from "../src/persistence/sqlite/automation-run-outcome.js"
 import { countsAsRun } from "../src/persistence/sqlite/automation-skip-record.js"
 import { failureRows } from "../src/persistence/sqlite/inbox-failure-rows.js"
@@ -159,7 +160,7 @@ const seed = (sql: SqlClient.SqlClient) => {
     `INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type, space_id)
        VALUES ('chat', 'ref-chat', '${at(100)}', '${at(1)}', 'chat', 'sp'),
               ('thread', 'ref-thread', '${at(100)}', '${at(1)}', 'chat', NULL)`,
-    ...["auto-1", "auto-2", "auto-3"].map(
+    ...["auto-1", "auto-2", "auto-3", "auto-4"].map(
       (
         id
       ) => `INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers, created_at, thread_id)
@@ -284,6 +285,29 @@ it("the Inbox's failures read the recent and stuck lists, not every failure", as
           plan.some((step) => step.includes(index)),
           index
         ).toBe(true)
+    })
+  )
+})
+
+it("an Automation gives up on its third failed run in a row since it last gave up", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* seed(sql)
+      for (const id of [21, 22, 23, 24, 25])
+        yield* sql`INSERT INTO automation_runs (id, task_id, automation_ref, started_at, ended_at,
+            status, outcome) VALUES (${id}, 'auto-4', 'ref-auto-4', ${at(1)}, ${at(1)}, 'failed', 'failed')`
+      const givesUpAt = (attemptId: number) =>
+        givesUp(sql, { automationId: "auto-4", attemptId, chatRunId: null })
+      expect(yield* givesUpAt(22)).toBeUndefined()
+      expect(yield* givesUpAt(23)).toEqual({ kind: "streak" })
+      // 23 moved past its item; its failed event names that item's run.
+      yield* sql`UPDATE automation_runs SET chat_run_id = 'r-e6' WHERE id = 23`
+      yield* sql`INSERT INTO entity_events (key, entity, entity_id, event, run_id, text, place_kind,
+          occurred_at, shown) VALUES (${`${PREFIX}23`}, 'automation', 'auto-4', 'failed',
+          'r-e6', 'Skipped.', 'own', ${at(1)}, 1)`
+      expect(yield* givesUpAt(25)).toBeUndefined()
+      expect(yield* givesUpAt(26)).toEqual({ kind: "streak" })
     })
   )
 })

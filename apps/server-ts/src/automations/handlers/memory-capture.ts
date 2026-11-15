@@ -1,10 +1,8 @@
 import { Effect } from "effect"
 import type { Memory } from "../../memory/service.js"
 import { AutomationId } from "../../persistence/automations/model.js"
-import type { AutomationHandlerItems } from "../../persistence/automations/handler-items.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
-import type { HandlerItemRunner } from "../handler-item-run.js"
-import { runItemLoop } from "../item-loop.js"
+import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
 import { withoutTools } from "../../execution/toolset-middleware.js"
@@ -17,14 +15,11 @@ const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "wiki_merge_page"
 ])
 
-const makeMemoryCaptureRunner = (services: {
-  readonly memory: Pick<Memory["Service"], "nextCaptureBatch" | "completeCaptureBatch">
-  readonly handlerItems: Pick<
-    AutomationHandlerItems["Service"],
-    "prepareHandlerItem" | "settleHandlerItem"
-  >
-  readonly runItem: HandlerItemRunner
-}): AutomationRunner =>
+const makeMemoryCaptureRunner = (
+  services: ItemLoopServices & {
+    readonly memory: Pick<Memory["Service"], "nextCaptureBatch" | "completeCaptureBatch">
+  }
+): AutomationRunner =>
   runItemLoop(services, {
     label: "Memory Capture",
     kind: "memory",

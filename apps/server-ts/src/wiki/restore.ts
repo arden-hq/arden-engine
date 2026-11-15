@@ -27,7 +27,7 @@ import {
 } from "./snapshot.js"
 
 /** The page as commit `commitId` left it (`after`), or as it was before that commit (`before`).
- *  `before` undoes an upkeep (Tidy) commit, and only while it is the page's latest change. */
+ *  `before` undoes an upkeep (Wiki Maintenance) commit, and only while it is the page's latest change. */
 interface WikiRestoreVersion {
   readonly commitId: string
   readonly side: "after" | "before"
@@ -108,10 +108,10 @@ export const makeWikiRestoreMethods = (
       return yield* activeVersion(change.after, invalid)
     }
     if (decodeWikiOrigin(selected.origin).kind !== "upkeep") {
-      return yield* invalid("Commit is not a Tidy change")
+      return yield* invalid("Commit is not a Wiki Maintenance change")
     }
     if (change?.action !== "update" || change.before === null || change.after === null) {
-      return yield* invalid("A Tidy commit must contain exactly one page update")
+      return yield* invalid("Maintenance commit must contain exactly one page update")
     }
     if (
       pageHistory[0]?.commitId !== commitId ||
@@ -120,7 +120,7 @@ export const makeWikiRestoreMethods = (
       return yield* wikiError(
         "restore",
         "conflict",
-        `Memory page changed after Tidy commit ${commitId}`,
+        `Wiki page changed after Maintenance commit ${commitId}`,
         { pageId: input.pageId }
       )
     }

@@ -12,73 +12,117 @@ import { recordAutomationEvent } from "./entity-events.js"
 import { userAutomationSql } from "./authority-sql.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-const FAILURES_BEFORE_PAUSE = 3
+const FAILURES_BEFORE_GIVING_UP = 3
 
-const lastingFailure = Effect.fn("AutomationAutoPause.lastingFailure")(function* (
+export type GiveUpCause =
+  | { readonly kind: "streak" }
+  | { readonly kind: "lasting"; readonly said: string; readonly next: string }
+
+/**
+ * The one rule for when an Automation gives up after its run `attemptId` failed: the failure is a
+ * refusal that comes back the same until the owner changes something, or it is the
+ * FAILURES_BEFORE_GIVING_UP-th failed run in a row since the Automation last gave up.
+ */
+export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
   sql: SqlClient.SqlClient,
-  attemptId: number
-) {
-  const rows = yield* sql<{ readonly error_code: string | null; readonly error: string | null }>`
-    SELECT chat.error_code, COALESCE(chat.error_message, attempt.error) AS error
-    FROM automation_runs AS attempt JOIN chat_runs AS chat ON chat.run_id = attempt.chat_run_id
-    WHERE attempt.id = ${attemptId}`
-  const row = rows[0]
-  if (row === undefined || !isLastingRunError(row.error_code)) return undefined
-  const error = (row.error ?? "").trim()
-  const said = providerSentence(error) ?? (cutText(firstLine(error), 200) || "Its run failed.")
-  const next =
-    row.error_code === "model_unavailable"
-      ? "Pick another model for it, then resume it."
-      : "Resume it once that's fixed."
-  return `${said} ${next}`
-})
-
-export const pauseAfterFailures = Effect.fn("AutomationAutoPause.pauseAfterFailures")(
-  function* (options: {
-    readonly sql: SqlClient.SqlClient
-    readonly sessionEvents: SessionLifecycleEvents["Service"]
+  input: {
     readonly automationId: string
     readonly attemptId: number
-  }) {
-    const { sql, automationId } = options
-    const lasting = yield* lastingFailure(sql, options.attemptId)
-    const latest = yield* sql<{ readonly outcome: string }>`
-      SELECT outcome FROM (SELECT id, ${outcomeSql(sql, sql`automation_runs`)} AS outcome
-        FROM automation_runs
-        WHERE task_id = ${automationId} AND ended_at IS NOT NULL
-          AND ${countsAsRun(sql, sql`automation_runs`)}
-          AND id > (SELECT COALESCE(MAX(json_extract(payload, '$.attemptId')), 0)
+    readonly chatRunId: string | null
+  }
+) {
+  const { automationId } = input
+  const lasting = yield* sql<{ readonly error_code: string | null; readonly error: string | null }>`
+    SELECT chat.error_code, COALESCE(chat.error_message, attempt.error) AS error
+    FROM chat_runs AS chat JOIN automation_runs AS attempt ON attempt.id = ${input.attemptId}
+    WHERE chat.run_id = ${input.chatRunId}`
+  const refused = lasting[0]
+  if (refused !== undefined && isLastingRunError(refused.error_code)) {
+    const error = (refused.error ?? "").trim()
+    return {
+      kind: "lasting",
+      said: providerSentence(error) ?? (cutText(firstLine(error), 200) || "Its run failed."),
+      next:
+        refused.error_code === "model_unavailable"
+          ? "Pick another model for it, then resume it."
+          : "Resume it once that's fixed."
+    } satisfies GiveUpCause
+  }
+  const before = yield* sql<{ readonly outcome: string }>`
+    SELECT outcome FROM (SELECT id, ${outcomeSql(sql, sql`automation_runs`)} AS outcome
+      FROM automation_runs
+      WHERE task_id = ${automationId} AND id < ${input.attemptId} AND ended_at IS NOT NULL
+        AND ${countsAsRun(sql, sql`automation_runs`)}
+        AND id > MAX(
+          (SELECT COALESCE(MAX(json_extract(payload, '$.attemptId')), 0)
             FROM automation_deliveries
             WHERE task_id = ${automationId}
-              AND json_extract(payload, '$.kind') = 'automation_paused'))
-      WHERE outcome NOT IN ('cancelled', 'interrupted')
-      ORDER BY id DESC LIMIT ${FAILURES_BEFORE_PAUSE}`
-    const streak =
-      latest.length === FAILURES_BEFORE_PAUSE && latest.every((run) => run.outcome === "failed")
-    if (!streak && lasting === undefined) return false
-    const live = yield* sql`SELECT task_id FROM scheduled_tasks
-      WHERE task_id = ${automationId} AND ${userAutomationSql()} AND enabled = 1`
-    if (live.length === 0) return false
-    yield* haltAutomation({
-      sql,
-      sessionEvents: options.sessionEvents,
-      automationId,
-      halt: "pause"
-    })
-    const line =
-      lasting === undefined
-        ? `Paused after ${FAILURES_BEFORE_PAUSE} failed runs in a row. Resume it once the cause is fixed.`
-        : `Paused: ${lasting}`
+              AND json_extract(payload, '$.kind') = 'automation_paused'),
+          (SELECT COALESCE(MAX(skipped.id), 0)
+            FROM automation_runs AS skipped
+            JOIN entity_events AS event ON event.run_id = skipped.chat_run_id
+            WHERE skipped.task_id = ${automationId}
+              AND event.entity = 'automation' AND event.event = 'failed')))
+    WHERE outcome NOT IN ('cancelled', 'interrupted')
+    ORDER BY id DESC LIMIT ${FAILURES_BEFORE_GIVING_UP - 1}`
+  return before.length === FAILURES_BEFORE_GIVING_UP - 1 &&
+    before.every((run) => run.outcome === "failed")
+    ? ({ kind: "streak" } satisfies GiveUpCause)
+    : undefined
+})
+
+/** Why a job that works through items moved past one, for the line that names it. */
+export const skipReason = (cause: GiveUpCause): string =>
+  cause.kind === "lasting" ? cause.said : `it failed ${FAILURES_BEFORE_GIVING_UP} runs in a row`
+
+/**
+ * What giving up does once `givesUp` holds for a failed run: a user Automation is paused; a job
+ * that works through items has already moved past the failing item, and its failed event says so.
+ * Both are told through `recordAutomationEvent`. Answers whether the Automation was paused.
+ */
+export const giveUp = Effect.fn("AutomationGiveUp.giveUp")(function* (options: {
+  readonly sql: SqlClient.SqlClient
+  readonly sessionEvents: SessionLifecycleEvents["Service"]
+  readonly automationId: string
+  readonly attemptId: number
+  readonly chatRunId: string | null
+  readonly then: "pause" | { readonly skipped: string }
+}) {
+  const { sql, automationId } = options
+  const cause = yield* givesUp(sql, options)
+  if (cause === undefined) return false
+  if (options.then !== "pause") {
     yield* recordAutomationEvent(sql, {
       sessionEvents: options.sessionEvents,
       automationId,
       attemptId: options.attemptId,
-      event: "paused",
-      text: line
+      runId: options.chatRunId,
+      event: "failed",
+      text: options.then.skipped
     })
-    return true
+    return false
   }
-)
+  const live = yield* sql`SELECT task_id FROM scheduled_tasks
+    WHERE task_id = ${automationId} AND ${userAutomationSql()} AND enabled = 1`
+  if (live.length === 0) return false
+  yield* haltAutomation({
+    sql,
+    sessionEvents: options.sessionEvents,
+    automationId,
+    halt: "pause"
+  })
+  yield* recordAutomationEvent(sql, {
+    sessionEvents: options.sessionEvents,
+    automationId,
+    attemptId: options.attemptId,
+    event: "paused",
+    text:
+      cause.kind === "streak"
+        ? `Paused after ${FAILURES_BEFORE_GIVING_UP} failed runs in a row. Resume it once the cause is fixed.`
+        : `Paused: ${cause.said} ${cause.next}`
+  })
+  return true
+})
 
 export const SPACE_ARCHIVED_PAUSE_LINE = "Paused: its chat's Space was archived"
 

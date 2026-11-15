@@ -4,15 +4,14 @@ import type { SessionStore } from "../../persistence/sessions/store.js"
 import type { TranscriptQueries } from "../../persistence/transcript/queries.js"
 import { ownerText } from "../../persistence/transcript/owner-words.js"
 import { DAILY_SUMMARY_AUTOMATION_ID } from "../../persistence/automations/model.js"
-import type { AutomationHandlerItems } from "../../persistence/automations/handler-items.js"
+import type { HandlerItemDataOf } from "../../persistence/automations/handler-item.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
 import { markdownValue } from "../../prompts/format.js"
 import type { Wiki } from "../../wiki/service.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
 import { automationOrigin } from "../../wiki/commit.js"
 import { pageKind, producingAutomation, recordFolders } from "../../wiki/collections.js"
-import type { HandlerItemRunner } from "../handler-item-run.js"
-import { runItemLoop } from "../item-loop.js"
+import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import type { DailySummaryPosition } from "../../persistence/daily-summary/store.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
@@ -37,7 +36,6 @@ const EVIDENCE_CHARS = 16_000
 const EXCERPT_CHARS = 2_000
 const SESSION_PAGE = 100
 const MESSAGE_PAGE = 250
-const TRIES_BEFORE_DAY_SKIPPED = 2
 
 const nextDay = (day: string, days = 1): string =>
   DateTime.formatIsoDate(DateTime.add(DateTime.makeUnsafe(`${day}T00:00:00Z`), { days }))
@@ -54,18 +52,15 @@ type DayPreparation =
   | { readonly kind: "settled"; readonly note?: string }
   | { readonly kind: "write"; readonly markdown: string }
 
-export const makeDailySummaryRunner = (services: {
-  readonly wiki: Pick<Wiki["Service"], "snapshot" | "pageTimes" | "createDirectory">
-  readonly sessions: Pick<SessionStore["Service"], "list">
-  readonly transcripts: Pick<TranscriptQueries["Service"], "conversationPage">
-  readonly position: DailySummaryPosition["Service"]
-  readonly handlerItems: Pick<
-    AutomationHandlerItems["Service"],
-    "prepareHandlerItem" | "settleHandlerItem"
-  >
-  readonly runItem: HandlerItemRunner
-  readonly timezone?: string
-}): AutomationRunner => {
+export const makeDailySummaryRunner = (
+  services: ItemLoopServices & {
+    readonly wiki: Pick<Wiki["Service"], "snapshot" | "pageTimes" | "createDirectory">
+    readonly sessions: Pick<SessionStore["Service"], "list">
+    readonly transcripts: Pick<TranscriptQueries["Service"], "conversationPage">
+    readonly position: DailySummaryPosition["Service"]
+    readonly timezone?: string
+  }
+): AutomationRunner => {
   const timezone = services.timezone ?? machineTimeZone()
 
   const dayMessages = Effect.fn("DailySummary.dayMessages")(function* (
@@ -223,31 +218,25 @@ export const makeDailySummaryRunner = (services: {
   return (job) => {
     const today = localDayOf(job.leasedAt, timezone)
     const notes: Array<string> = []
+    const settle = (data: HandlerItemDataOf<"daily">) =>
+      services.position.advance({ from: nextDay(data.date, -1), to: data.date })
     return runItemLoop(services, {
       label: "Daily summary",
       kind: "daily",
       next: Effect.fn("DailySummary.next")(function* () {
-        const place = yield* services.position.current(dailyStartPosition(job.leasedAt, timezone))
-        const settled = place.settledDay
+        const settled = yield* services.position.current(dailyStartPosition(job.leasedAt, timezone))
         const date = nextDay(settled)
         if (date >= today) return "idle" as const
-        if (place.tries >= TRIES_BEFORE_DAY_SKIPPED) {
-          notes.push(
-            `daily/${date}.md was not written: its run did not finish in ${TRIES_BEFORE_DAY_SKIPPED} jobs`
-          )
-          yield* services.position.advance({ from: settled, to: date })
-          return "advance" as const
-        }
         const prepared = yield* prepareDay(date)
         if (prepared.kind === "settled") {
           if (prepared.note !== undefined) notes.push(prepared.note)
           yield* services.position.advance({ from: settled, to: date })
           return "advance" as const
         }
-        yield* services.position.tried(settled)
         return { kind: "daily" as const, date, timezone, markdown: prepared.markdown }
       }),
-      commit: (data) => services.position.advance({ from: nextDay(data.date, -1), to: data.date }),
+      commit: settle,
+      skip: (data) => settle(data).pipe(Effect.as(`daily/${data.date}.md`)),
       summary: (item) =>
         [
           item === undefined

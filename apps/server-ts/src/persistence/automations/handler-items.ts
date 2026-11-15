@@ -17,5 +17,10 @@ export class AutomationHandlerItems extends Context.Service<
       lease: AutomationJobLeaseRef,
       item: HandlerItemRef
     ) => Effect.Effect<HandlerItem, AutomationStoreError>
+    /** Why the Automation gives up on the item whose last try was Chat run `runId`, if it does. */
+    readonly givesUp: (
+      lease: AutomationJobLeaseRef,
+      runId: string
+    ) => Effect.Effect<string | undefined, AutomationStoreError>
   }
 >()("@arden-hq/server/persistence/automations/AutomationHandlerItems") {}

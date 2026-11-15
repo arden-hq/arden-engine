@@ -1,7 +1,8 @@
 import { Schema } from "effect"
 import { MemoryCaptureBatchSchema } from "../memory/store.js"
+import { JOB_RETRY_LADDER_MS } from "./retry-ladders.js"
 
-export const MAX_HANDLER_ITEM_ATTEMPTS = 3
+export const MAX_HANDLER_ITEM_ATTEMPTS = JOB_RETRY_LADDER_MS.length + 1
 
 export const HandlerItemInputSchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,
