@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest"
 
 import { searchPages } from "../src/tools/wiki-search.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
+import { runPage } from "./kit.js"
 
 const HASH = "0".repeat(64)
 
-const page = (path: string, title: string, body: string): PageRecord => {
+const page = (path: string, title: string, body: string): RunPage => {
   const pageId = `id:${path}`
-  return {
+  return runPage({
     resource: { resourceId: pageId, path, blobId: HASH, state: "active", versionId: HASH },
     page: Effect.runSync(
       parseWikiPage(
@@ -25,7 +26,7 @@ const page = (path: string, title: string, body: string): PageRecord => {
         pageId
       )
     )
-  }
+  })
 }
 
 const pages = [

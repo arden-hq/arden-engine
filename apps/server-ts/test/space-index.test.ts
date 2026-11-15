@@ -12,7 +12,7 @@ import { archivePage } from "../src/wiki/commit.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
 import { commitWiki } from "../src/wiki/commit.js"
 import { planSpacePage, spaceOwnsPath, spacePageList, spacePages } from "../src/wiki/space-index.js"
 import { startMemoryContentSteps } from "../src/memory/content-steps.js"
@@ -25,14 +25,14 @@ import { Wiki } from "../src/wiki/service.js"
 import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
-import { partialService, serverRunContext } from "./kit.js"
+import { partialService, runPage, serverRunContext } from "./kit.js"
 
 const page = (
   path: string,
   options: { readonly state?: "active" | "archived"; readonly pageId?: string } = {}
-): PageRecord => {
+): RunPage => {
   const pageId = options.pageId ?? `id-${path}`
-  return {
+  return runPage({
     resource: {
       resourceId: pageId,
       path,
@@ -54,7 +54,7 @@ const page = (
         pageId
       )
     )
-  }
+  })
 }
 
 const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding => ({

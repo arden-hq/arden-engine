@@ -2,7 +2,8 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { memoryIndex } from "../src/wiki/collections.js"
 import { formatWikiPage, parseWikiPage, wikiPageSummary } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
+import { runPage } from "./kit.js"
 
 const page = (
   path: string,
@@ -12,9 +13,9 @@ const page = (
     readonly lifecycle?: "active" | "redirect"
     readonly state?: "active" | "archived"
   } = {}
-): PageRecord => {
+): RunPage => {
   const pageId = `id-${path}`
-  return {
+  return runPage({
     resource: {
       resourceId: pageId,
       path,
@@ -36,13 +37,13 @@ const page = (
         pageId
       )
     )
-  }
+  })
 }
 
-const folder = (name: string, count: number): ReadonlyArray<PageRecord> =>
+const folder = (name: string, count: number): ReadonlyArray<RunPage> =>
   Array.from({ length: count }, (_, index) => page(`${name}/page-${index}.md`))
 
-const PAGES: ReadonlyArray<PageRecord> = [
+const PAGES: ReadonlyArray<RunPage> = [
   page("README.md"),
   page("active-work.md"),
   page("ideas.md"),

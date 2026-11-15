@@ -7,8 +7,8 @@ import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { Wiki } from "../src/wiki/service.js"
-import { snapshotOf, type PageRecord } from "../src/wiki/snapshot.js"
-import { partialService } from "./kit.js"
+import { snapshotOf, type RunPage } from "../src/wiki/snapshot.js"
+import { partialService, runPage } from "./kit.js"
 
 const HASH = "0".repeat(64)
 
@@ -23,13 +23,14 @@ const content = (path: string, body: string, producer?: string): string =>
     body
   })
 
-const page = (path: string, body = `About ${path}.`, producer?: string): PageRecord => ({
-  resource: { resourceId: `id:${path}`, path, blobId: HASH, state: "active", versionId: HASH },
-  page: Effect.runSync(parseWikiPage(content(path, body, producer), `id:${path}`))
-})
+const page = (path: string, body = `About ${path}.`, producer?: string): RunPage =>
+  runPage({
+    resource: { resourceId: `id:${path}`, path, blobId: HASH, state: "active", versionId: HASH },
+    page: Effect.runSync(parseWikiPage(content(path, body, producer), `id:${path}`))
+  })
 
 describe("recall of records", () => {
-  const recalled = (pages: ReadonlyArray<PageRecord>, query: string) =>
+  const recalled = (pages: ReadonlyArray<RunPage>, query: string) =>
     (
       prepareMemorySources({
         pages,

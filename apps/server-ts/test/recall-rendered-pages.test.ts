@@ -2,15 +2,16 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
+import { runPage } from "./kit.js"
 
 // Made-up pages; nothing here comes from anyone's Memory.
 
 const HASH = "0".repeat(64)
 
-const page = (path: string, title: string, body: string): PageRecord => {
+const page = (path: string, title: string, body: string): RunPage => {
   const pageId = `id:${path}`
-  return {
+  return runPage({
     resource: { resourceId: pageId, path, blobId: HASH, state: "active", versionId: HASH },
     page: Effect.runSync(
       parseWikiPage(
@@ -26,7 +27,7 @@ const page = (path: string, title: string, body: string): PageRecord => {
         pageId
       )
     )
-  }
+  })
 }
 
 const encoder = new TextEncoder()

@@ -26,7 +26,7 @@ import type { Memory, MemoryTurn } from "../src/memory/service.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
 import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type { SkillCatalog } from "../src/skills/service.js"
 import type { TodoStore } from "../src/persistence/todos/store.js"
@@ -41,13 +41,13 @@ import type { PermissionRules } from "../src/persistence/permissions/rules.js"
 import type { ToolApprovalPolicy } from "../src/tools/approval-policy.js"
 import type { AutomationId } from "../src/persistence/automations/model.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { partialService, sessionHeader } from "./kit.js"
+import { partialService, runPage, sessionHeader } from "./kit.js"
 
 const QUERY = "orchard lantern ledger notes for the week"
 
-const page = (path: string, title: string, body: string): PageRecord => {
+const page = (path: string, title: string, body: string): RunPage => {
   const pageId = `id-${path}`
-  return {
+  return runPage({
     resource: {
       resourceId: pageId,
       path,
@@ -69,7 +69,7 @@ const page = (path: string, title: string, body: string): PageRecord => {
         pageId
       )
     )
-  }
+  })
 }
 
 const core = page("me.md", "Me", "Prefers short replies.")
@@ -97,7 +97,7 @@ const blocksInPrompt = (sections: ReadonlyArray<RuntimeSection>): ReadonlyMap<st
 /** The record's sent page sources, by path, with their bytes. */
 const recordedBlocks = (
   record: ReadonlyArray<RunMemorySource>,
-  pages: ReadonlyArray<PageRecord>
+  pages: ReadonlyArray<RunPage>
 ): ReadonlyMap<string, number> =>
   new Map(
     record.flatMap((source) =>
@@ -147,7 +147,7 @@ const compose = async ({
   originSource = "personal"
 }: {
   readonly actor: Actor | undefined
-  readonly pages?: ReadonlyArray<PageRecord>
+  readonly pages?: ReadonlyArray<RunPage>
   readonly messages?: ReadonlyArray<ChatRunnerMessage>
   readonly spaceId?: string | null
   readonly instructions?: string | null

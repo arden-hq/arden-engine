@@ -30,7 +30,7 @@ import { toolParametersJsonSchema } from "../src/tools/tool-json-schema.js"
 import { wikiChangeTools } from "../src/tools/wiki-change.js"
 import { makeWikiChangeMethods } from "../src/wiki/change.js"
 import { Wiki } from "../src/wiki/service.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import { snapshotOf, type PageRecord } from "../src/wiki/snapshot.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService, serverRunContext, sessionHeader } from "./kit.js"
 
@@ -385,10 +385,13 @@ describe("wiki_read_change by page link", () => {
         Wiki,
         partialService<Wiki["Service"]>("Wiki", {
           snapshot: () =>
-            Effect.succeed({
-              head: hash("c"),
-              pages: [page(arden2, "Arden"), page(notes1, "Notes"), page(plan4, "Plan")]
-            }),
+            Effect.succeed(
+              snapshotOf(hash("c"), [
+                page(arden2, "Arden"),
+                page(notes1, "Notes"),
+                page(plan4, "Plan")
+              ])
+            ),
           ...makeWikiChangeMethods(repository)
         })
       ),

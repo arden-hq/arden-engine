@@ -62,7 +62,7 @@ import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import { claimKey } from "../src/wiki/retraction.js"
 import { Wiki } from "../src/wiki/service.js"
-import { activeRunPages, type Snapshot } from "../src/wiki/snapshot.js"
+import { activeRunPages, type PageRecord } from "../src/wiki/snapshot.js"
 import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
 
 const LINE = "Sam lives in the old town by the river."
@@ -102,7 +102,7 @@ interface Memory {
   readonly mutations: ReturnType<typeof makeWikiMutationMethods>
   readonly restores: ReturnType<typeof makeWikiRestoreMethods>
   readonly forgetting: ReturnType<typeof makeWikiForgetMethods>
-  readonly page: (path: string) => Effect.Effect<Snapshot["pages"][number], unknown>
+  readonly page: (path: string) => Effect.Effect<PageRecord, unknown>
   readonly write: (
     path: string,
     body: string,
@@ -571,7 +571,11 @@ describe("what forgotten.md holds and where it stays", () => {
           Effect.provideService(
             SessionLifecycleEvents,
             partialService<SessionLifecycleEvents["Service"]>("SessionLifecycleEvents", {
-              appendEvent: (event) => Effect.sync(() => void events.push(event))
+              appendEvent: (event) =>
+                Effect.sync(() => {
+                  events.push(event)
+                  return { records: [], headSequence: events.length }
+                })
             })
           ),
           Effect.provideService(ToolExecutionStore, partialService("ToolExecutionStore", {}))

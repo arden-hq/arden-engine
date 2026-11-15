@@ -13,6 +13,7 @@ import type { RunAuthority } from "../src/execution/authority.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import type { ApprovalGatePolicy } from "../src/tools/approval-gate.js"
 import type { SessionHistoryHeader } from "../src/persistence/sessions/model.js"
+import { snapshotOf, type PageRecord, type RunPage } from "../src/wiki/snapshot.js"
 import {
   makeBrowserObservationRegistry,
   makeObservationRegistry,
@@ -110,6 +111,13 @@ export const serverRunContext = (overrides: Partial<ServerRunContext> = {}): Ser
     readPermissions: () => Promise.reject(new Error("readPermissions is outside this test")),
     ...overrides
   }
+}
+
+/** A page as a run is given it, made through the run view; a code-owned page throws. */
+export const runPage = (record: PageRecord): RunPage => {
+  const [shown] = snapshotOf(null, [record]).pages
+  if (shown === undefined) throw new Error(`${record.resource.path} is never shown to a run`)
+  return shown
 }
 
 export const recordOf = (value: unknown): { readonly [key: string]: unknown } => {
