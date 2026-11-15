@@ -1,11 +1,17 @@
-import { Effect } from "effect"
+import { DateTime, Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { SummaryStore } from "../src/persistence/summaries/store.js"
+import { SessionQueries } from "../src/persistence/sessions/queries.js"
+import type { SessionHeaderSnapshot } from "../src/persistence/sessions/model.js"
+import { readMutationReceipt } from "../src/persistence/tools/mutation-receipt.js"
+import { chatSummaryTools } from "../src/tools/chat-summary.js"
+import type { ServerRunContext } from "../src/tools/run-context.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { partialService } from "./kit.js"
 
 // A revert removes messages and later messages reuse their numbers. Every stored position into
 // a chat's messages is cut back by the one removal trigger, so no reader stays ahead of its chat.
@@ -134,4 +140,46 @@ it("cuts every per-chat message position in the one removal trigger", async () =
   ])
   expect(uncut).toEqual([])
   expect(Object.keys(NOT_POSITIONS).filter((column) => !found.columns.includes(column))).toEqual([])
+})
+
+it("tells the run a summary was not saved when the stored one reaches further", async () => {
+  const result = async (saved: boolean) => {
+    const [tool] = await Effect.runPromise(
+      chatSummaryTools.pipe(
+        Effect.provideService(
+          SessionQueries,
+          partialService<SessionQueries["Service"]>("SessionQueries", {
+            loadHeaderSnapshot: () =>
+              Effect.succeed({
+                header: { startedAt: DateTime.makeUnsafe("2026-11-12T09:00:00.000Z") },
+                metadata: { fork_of: { source_session_id: "chat", through_sequence: 3 } }
+              } as unknown as SessionHeaderSnapshot),
+            loadHistoryHeader: () => Effect.succeed(null)
+          })
+        ),
+        Effect.provideService(
+          SummaryStore,
+          partialService<SummaryStore["Service"]>("SummaryStore", {
+            setChat: () => Effect.succeed(saved)
+          })
+        )
+      )
+    )
+    if (tool === undefined) throw new Error("set_chat_summary is missing")
+    const output = await tool.execute(
+      { outcome: "summary", title: "Three turns", summary: "What the chat covered." },
+      {
+        toolCallId: "call-1",
+        signal: new AbortController().signal,
+        run: { sessionId: "fork", runId: "run-1" } as unknown as ServerRunContext,
+        messages: []
+      }
+    )
+    return { content: output.content, outcome: readMutationReceipt(output.host)?.outcome }
+  }
+  expect(await result(false)).toEqual({
+    content: "Not saved: the stored summary of this chat already reaches further.",
+    outcome: "no_op"
+  })
+  expect(await result(true)).toEqual({ content: "Summary saved.", outcome: "applied" })
 })
