@@ -1,5 +1,4 @@
 const PROFILE_PAGE_BUDGET_CHARS = 9_000
-const ROOT_INDEX_BUDGET_CHARS = 2_500
 
 /**
  * A Core Memory page is condensed before it is full, not after. Writes over the budget are
@@ -17,7 +16,6 @@ export const corePageBudget = (page: {
 }): number | undefined => {
   const path = page.path.toLocaleLowerCase()
   const pageId = page.pageId.toLocaleLowerCase()
-  if (path === "readme.md") return ROOT_INDEX_BUDGET_CHARS
   if (path === "me.md" || path === "profile.md" || pageId === "me" || pageId === "profile")
     return PROFILE_PAGE_BUDGET_CHARS
   return undefined

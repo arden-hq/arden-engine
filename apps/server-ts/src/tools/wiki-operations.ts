@@ -613,7 +613,7 @@ const makeWikiOperationTools = ({
       "Replace one exact text block in an active Wiki page body. The old text must match exactly once; no prior read is needed. " +
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting; ` +
       "create another page only for a distinct subject or useful reading scope, with a contextual link. " +
-      "The root README.md and me.md have smaller Core Memory limits; a patch that leaves either over its limit is refused. Asks by default, except in Memory runs.",
+      "me.md has a smaller Core Memory limit; a patch that leaves it over that limit is refused. Asks by default, except in Memory runs.",
     parameters: Schema.toStandardSchemaV1(PatchParametersSchema),
     metadata: {
       display: { card: "page_patch" },

@@ -12,6 +12,7 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
+import { initializeWikiFoundation } from "../src/wiki/foundation.js"
 import {
   archivePage,
   commitWiki,
@@ -258,6 +259,25 @@ describe("the page size limit at the commit", () => {
       moved: "saved",
       longer: expect.stringMatching(/^profile\.md would have 9201 characters, /u)
     })
+  })
+
+  it("commits the seed pages of a fresh Memory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "arden-page-limit-seed-"))
+    try {
+      const pages = await Effect.runPromise(
+        Effect.gen(function* () {
+          const repository = yield* ManagedFileRepository
+          yield* initializeWikiFoundation(repository, { workingRoot: root })
+          return (yield* repository.listResources()).map((resource) => resource.path).sort()
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root }))
+        ) as Effect.Effect<ReadonlyArray<string>>
+      )
+      expect(pages).toContain("README.md")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it("takes in an outside edit over the limit, and names it as over", async () => {
