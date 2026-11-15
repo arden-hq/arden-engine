@@ -728,7 +728,7 @@ const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function
     write.given ?? (write.action === "restore_archived" ? yield* write.beforeContent : null)
   if (isSystemPage(path) || source === null) return
   const after = yield* pageBody(source)
-  const kept = write.before?.state === "active" && write.action !== "restore_archived"
+  const kept = write.before?.state === "active"
   const had = kept ? yield* pageBody((yield* write.beforeContent) ?? new Uint8Array()) : undefined
   const entry = putBack(lines, had, after)
   if (entry !== undefined) return yield* ruleError("retraction", retractionRefusal(path, entry))
