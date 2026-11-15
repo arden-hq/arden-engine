@@ -1,23 +1,9 @@
-import type { ToolContext } from "@arden-hq/loop"
-import { Effect, Schema } from "effect"
-import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
-import type { Wiki } from "../wiki/service.js"
-import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
-import type { ServerRunContext } from "./run-context.js"
+import { Schema } from "effect"
 import { RunQueries } from "../persistence/runs/queries.js"
+import type { Wiki } from "../wiki/service.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import {
-  WikiPathSchema,
-  activePage,
-  readablePage,
-  loadSnapshot,
-  pageNotFound,
-  wikiFailure,
-  writtenPageData
-} from "./wiki.js"
-import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
-import { pageReceipt, requireObserved } from "./wiki-records.js"
-
+import { WikiPathSchema, changePages, writtenPageData } from "./wiki.js"
+import { requireObserved } from "./wiki-records.js"
 const ActiveWikiPathSchema = WikiPathSchema.annotate({
   description: "Exact relative POSIX .md path of an active page returned by Wiki search or listing."
 })
@@ -35,64 +21,6 @@ const MergeParametersSchema = Schema.Struct({
       "Exact path of the active page that now holds the content. The retired path redirects there, so links to it keep working."
   })
 })
-
-const mergeArchivedPage = async (input: {
-  readonly wiki: Wiki["Service"]
-  readonly snapshot: Snapshot
-  readonly head: string
-  readonly record: PageRecord
-  readonly target: string
-  readonly ctx: ToolContext<ServerRunContext>
-  readonly effects: CallEffects
-  readonly identity: WikiWriteIdentity
-  readonly expectedVersion: string
-}) => {
-  const { wiki, snapshot, record, ctx } = input
-  const target = readablePage(snapshot, input.target)
-  if (target === null) throw pageNotFound(snapshot, input.target)
-  const merged = await recordApplied(
-    input.effects,
-    Effect.runPromise(
-      wiki
-        .mergeInto({
-          pageId: record.page.pageId,
-          targetPageId: target.page.pageId,
-          expectedVersion: input.expectedVersion,
-          expectedHead: input.head,
-          authority: input.identity.authority,
-          commit: {
-            actor: input.identity.actor,
-            origin: input.identity.origin,
-            reason: `merge wiki page ${record.resource.path} into ${target.resource.path}`
-          }
-        })
-        .pipe(Effect.mapError(wikiFailure)),
-      { signal: ctx.signal }
-    )
-  )
-  const retired = (await loadSnapshot(wiki, ctx.signal)).pages.find(
-    (page) => page.page.pageId === record.page.pageId
-  )
-  return {
-    result: `Archived ${record.resource.path}; its path now redirects to ${merged.path}.`,
-    preview: "Wiki page merged",
-    data: { page: writtenPageData(merged), merged_from: record.resource.path, changed: true },
-    ...(retired === undefined
-      ? {}
-      : {
-          host: pageReceipt({
-            ctx,
-            page: {
-              pageId: retired.page.pageId,
-              path: retired.resource.path,
-              title: record.page.title,
-              version: retired.resource.versionId
-            },
-            beforeVersion: input.expectedVersion
-          })
-        })
-  }
-}
 
 /**
  * The two ways a page leaves the Wiki. Merging keeps its path opening the page that replaced
@@ -124,40 +52,29 @@ export const makeWikiRetireTools = ({
       target: "reported"
     },
     execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = activePage(snapshot, input.path)
-      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const expectedVersion = requireObserved(ctx.run, record)
-      const archived = await recordApplied(
-        effects,
-        Effect.runPromise(
-          wiki
-            .archive({
+      const {
+        saved: [{ page: archived }],
+        receipt
+      } = await changePages({ wiki, runs }, ctx, effects, {
+        paths: [input.path],
+        save: async ({ head, records: [record], writer, run }) => {
+          const expectedVersion = requireObserved(ctx.run, record)
+          const archived = await run(
+            wiki.archive({
               pageId: record.page.pageId,
               expectedVersion,
-              expectedHead: snapshot.head,
-              authority: identity.authority,
-              commit: {
-                actor: identity.actor,
-                origin: identity.origin,
-                reason: `archive wiki page ${record.resource.path}`
-              }
+              expectedHead: head,
+              ...writer(`archive wiki page ${record.resource.path}`)
             })
-            .pipe(Effect.mapError(wikiFailure)),
-          { signal: ctx.signal }
-        )
-      )
-      ctx.run.observations.observe(archived.pageId, archived.version)
+          )
+          return [{ page: { ...archived, title: record.page.title }, before: expectedVersion }]
+        }
+      })
       return {
         result: `Archived ${archived.path}.`,
         preview: "Wiki page archived",
         data: { page: archived, changed: true },
-        host: pageReceipt({
-          ctx,
-          page: { ...archived, title: record.page.title },
-          beforeVersion: expectedVersion
-        })
+        ...(receipt === undefined ? {} : { host: receipt })
       }
     }
   }),
@@ -182,26 +99,37 @@ export const makeWikiRetireTools = ({
       target: "reported"
     },
     execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = activePage(snapshot, input.path)
-      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-      const target = activePage(snapshot, input.into)
-      if (target === null) throw pageNotFound(snapshot, input.into)
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const expectedVersion = requireObserved(ctx.run, record)
-      // The run must have read the page that keeps the content, not only the one it retires.
-      requireObserved(ctx.run, target)
-      return mergeArchivedPage({
-        wiki,
-        snapshot,
-        head: snapshot.head,
-        record,
-        target: target.resource.path,
-        ctx,
-        effects,
-        identity,
-        expectedVersion
+      const {
+        records: [record, target],
+        receipt
+      } = await changePages({ wiki, runs }, ctx, effects, {
+        paths: [input.path, input.into],
+        save: async ({ head, records: [record, target], writer, run }) => {
+          const expectedVersion = requireObserved(ctx.run, record)
+          // The run must have read the page that keeps the content, not only the one it retires.
+          requireObserved(ctx.run, target)
+          await run(
+            wiki.mergeInto({
+              pageId: record.page.pageId,
+              targetPageId: target.page.pageId,
+              expectedVersion,
+              expectedHead: head,
+              ...writer(`merge wiki page ${record.resource.path} into ${target.resource.path}`)
+            })
+          )
+          return [{ page: await run(wiki.read(record.page.pageId)), before: expectedVersion }]
+        }
       })
+      return {
+        result: `Archived ${record.resource.path}; its path now redirects to ${target.resource.path}.`,
+        preview: "Wiki page merged",
+        data: {
+          page: writtenPageData({ ...target.page, path: target.resource.path }),
+          merged_from: record.resource.path,
+          changed: true
+        },
+        ...(receipt === undefined ? {} : { host: receipt })
+      }
     }
   })
 ]

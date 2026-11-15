@@ -12,6 +12,7 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
 import {
   WikiPathSchema,
+  changePages,
   loadSnapshot,
   pageNotFound,
   readablePage,
@@ -19,9 +20,9 @@ import {
   writtenPageData
 } from "./wiki.js"
 import { changeFailure, ChangeTimeSchema } from "./wiki-change.js"
-import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
-import { wikiOriginChat, wikiOriginSource, type WikiCommitIdentity } from "../wiki/commit.js"
-import { pageReceipt, pageSource, requireObserved } from "./wiki-records.js"
+import { writeIdentity } from "./wiki-identity.js"
+import { wikiOriginChat, wikiOriginSource } from "../wiki/commit.js"
+import { pageSource, requireObserved } from "./wiki-records.js"
 
 const MAX_HISTORY_ENTRIES = 100
 const MAX_LINE_CHARS = 4_096
@@ -133,35 +134,26 @@ type MergedPage = PageRecord & { readonly page: { readonly lifecycle: "redirect"
 const isMergedPage = (record: PageRecord): record is MergedPage =>
   record.page.lifecycle === "redirect"
 
-const prepareRestore = async (
+/** The version a restore of `record` requires, and the earlier version saved at `at`. */
+const restoreSource = async (
   wiki: Wiki["Service"],
-  input: { readonly path: string; readonly at: string },
+  record: PageRecord,
+  at: string,
   ctx: ToolContext<ServerRunContext>
-) => {
-  const snapshot = await loadSnapshot(wiki, ctx.signal)
-  const record = pageStoredAt(snapshot, input.path)
-  if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-  const expectedVersion = isMergedPage(record)
+) => ({
+  expectedVersion: isMergedPage(record)
     ? record.resource.versionId
-    : requireObserved(ctx.run, record)
-  const version = await Effect.runPromise(
+    : requireObserved(ctx.run, record),
+  version: await Effect.runPromise(
     wiki
-      .changeAt({ path: record.resource.path, pageId: record.page.pageId, at: input.at })
+      .changeAt({ path: record.resource.path, pageId: record.page.pageId, at })
       .pipe(Effect.mapError((error) => changeFailure(error, record.resource.path))),
     { signal: ctx.signal }
   )
-  return { head: snapshot.head, record, expectedVersion, version }
-}
-
-const restoreCommit = (
-  identity: Pick<WikiWriteIdentity, "actor" | "origin">,
-  path: string,
-  savedAt: string
-): WikiCommitIdentity => ({
-  actor: identity.actor,
-  origin: identity.origin,
-  reason: `restore wiki page ${path} to its version saved ${savedAt}`
 })
+
+const restoreReason = (path: string, savedAt: string): string =>
+  `restore wiki page ${path} to its version saved ${savedAt}`
 
 /** A page's saved history, where one of its lines came from, and bringing back an earlier version. */
 export const makeWikiPageHistoryTools = ({
@@ -253,7 +245,10 @@ export const makeWikiPageHistoryTools = ({
       target: "reported"
     },
     approvalPrompt: async (input, ctx) => {
-      const { head, record, expectedVersion, version } = await prepareRestore(wiki, input, ctx)
+      const snapshot = await loadSnapshot(wiki, ctx.signal)
+      const record = pageStoredAt(snapshot, input.path)
+      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
+      const { expectedVersion, version } = await restoreSource(wiki, record, input.at, ctx)
       if (expectedVersion !== record.resource.versionId)
         throw new ToolExecutionError(
           `${record.resource.path} changed after this run read it. Read it again, then retry.`,
@@ -265,9 +260,13 @@ export const makeWikiPageHistoryTools = ({
           .contentToRestore({
             pageId: record.page.pageId,
             version: { commitId: version.commitId, side: "after" },
-            head,
+            head: snapshot.head,
             authority: identity.authority,
-            commit: restoreCommit(identity, record.resource.path, version.timestamp)
+            commit: {
+              actor: identity.actor,
+              origin: identity.origin,
+              reason: restoreReason(record.resource.path, version.timestamp)
+            }
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -287,38 +286,38 @@ export const makeWikiPageHistoryTools = ({
       }
     },
     execute: async (input, ctx, effects) => {
-      const { head, record, expectedVersion, version } = await prepareRestore(wiki, input, ctx)
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const restored = await Effect.runPromise(
-        wiki
-          .restore({
-            pageId: record.page.pageId,
-            version: { commitId: version.commitId, side: "after" },
-            expectedVersion,
-            expectedHead: head,
-            authority: identity.authority,
-            commit: restoreCommit(identity, record.resource.path, version.timestamp)
-          })
-          .pipe(Effect.mapError(wikiFailure)),
-        { signal: ctx.signal }
-      )
-      const changed = restored.version !== expectedVersion
-      if (changed) effects.applied()
-      else effects.unchanged()
-      ctx.run.observations.observe(restored.pageId, restored.version)
+      const {
+        saved: [{ page: restored }],
+        changed,
+        receipt
+      } = await changePages({ wiki, runs }, ctx, effects, {
+        paths: [input.path],
+        find: pageStoredAt,
+        save: async ({ head, records: [record], writer, run }) => {
+          const { expectedVersion, version } = await restoreSource(wiki, record, input.at, ctx)
+          const page = await run(
+            wiki.restore({
+              pageId: record.page.pageId,
+              version: { commitId: version.commitId, side: "after" },
+              expectedVersion,
+              expectedHead: head,
+              ...writer(restoreReason(record.resource.path, version.timestamp))
+            })
+          )
+          return [{ page: { ...page, savedAt: version.timestamp }, before: expectedVersion }]
+        }
+      })
       return {
         result: changed
-          ? `Restored ${restored.path} to its version saved ${version.timestamp}.`
-          : `${restored.path} already matches its version saved ${version.timestamp}.`,
+          ? `Restored ${restored.path} to its version saved ${restored.savedAt}.`
+          : `${restored.path} already matches its version saved ${restored.savedAt}.`,
         preview: changed ? "Wiki page restored" : "Wiki page unchanged",
         data: {
           page: writtenPageData(restored),
-          restored_from: version.timestamp,
+          restored_from: restored.savedAt,
           changed
         },
-        ...(changed
-          ? { host: pageReceipt({ ctx, page: restored, beforeVersion: expectedVersion }) }
-          : {})
+        ...(receipt === undefined ? {} : { host: receipt })
       }
     }
   })

@@ -6,7 +6,6 @@ import {
   encodeWikiOrigin,
   movePage,
   ownerInApp,
-  requireCommitRules,
   updatePage,
   type WikiCommitIdentity,
   type WikiWrite
@@ -29,6 +28,7 @@ import {
 } from "./authority.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, rewriteWikiLinkTargets } from "./links.js"
+import { pageIn, writerOf, type WikiChanges } from "./page-change.js"
 import {
   formatRedirectPage,
   isReadme,
@@ -414,6 +414,7 @@ const planMutationPaths = Effect.fn("WikiRename.planMutationPaths")(function* (
 export const makeWikiRenameMethods = (
   repository: ManagedFileRepositoryShape,
   spaces: SpaceStore["Service"],
+  changes: WikiChanges,
   store: WikiRenameStore["Service"]
 ): WikiRenameMethods => {
   const listRenameApprovals = Effect.fn("WikiRename.list")(function* () {
@@ -422,94 +423,65 @@ export const makeWikiRenameMethods = (
   })
 
   const requestRename = Effect.fn("WikiRename.request")(function* (input: WikiRenameRequestInput) {
-    const snapshot = yield* loadSnapshot(repository, "rename")
-    const current = snapshot.wholeSet.find((record) => record.page.pageId === input.pageId)
-    if (current === undefined) {
-      return yield* wikiError("rename", "not_found", `Unknown Wiki page: ${input.pageId}`, {
-        pageId: input.pageId
-      })
-    }
-    if (
-      snapshot.head !== input.expectedHead ||
-      current.resource.versionId !== input.expectedVersion
-    ) {
-      return yield* wikiError("rename", "conflict", "Wiki page changed", {
-        pageId: input.pageId,
-        currentContent: current.page.content,
-        currentVersion: current.resource.versionId,
-        currentHead: snapshot.head
-      })
-    }
-    if (current.page.lifecycle !== "active") {
-      return yield* wikiError("rename", "invalid", "Only active Wiki pages can be renamed", {
-        pageId: input.pageId
-      })
-    }
-    if (input.newPath.toLowerCase() === current.resource.path.toLowerCase()) {
-      return yield* wikiError("rename", "invalid", "A Wiki rename requires a different path", {
-        pageId: input.pageId
-      })
-    }
-    if (takesName(namesTakenAt([input.newPath]), current.resource.path)) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "The new Wiki path conflicts with the redirect kept at the old path",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
-    const nameOwner = nameTakenBy(snapshot, input.newPath, input.pageId)
-    if (nameOwner !== undefined) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "Another Wiki page already owns the new path or link name",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
-    if (isReadme(current.resource.path)) {
-      const prefix = `${posix.dirname(current.resource.path)}/`
-      if (
-        snapshot.wholeSet.some(
-          (record) =>
-            record.page.pageId !== input.pageId &&
-            record.page.lifecycle === "active" &&
-            record.resource.path.startsWith(prefix)
-        )
-      ) {
-        return yield* wikiError(
-          "rename",
-          "blocked",
-          "Move child pages before renaming this directory page",
-          {
+    const plan = yield* changes.preview(
+      writerOf("rename", input, input.expectedHead, [input]),
+      Effect.fn("WikiRename.plan")(function* (snapshot) {
+        const current = yield* pageIn("rename", snapshot, input.pageId)
+        if (current.page.lifecycle !== "active") {
+          return yield* wikiError("rename", "invalid", "Only active Wiki pages can be renamed", {
             pageId: input.pageId
+          })
+        }
+        if (input.newPath.toLowerCase() === current.resource.path.toLowerCase()) {
+          return yield* wikiError("rename", "invalid", "A Wiki rename requires a different path", {
+            pageId: input.pageId
+          })
+        }
+        if (takesName(namesTakenAt([input.newPath]), current.resource.path)) {
+          return yield* wikiError(
+            "rename",
+            "blocked",
+            "The new Wiki path conflicts with the redirect kept at the old path",
+            { pageId: input.pageId }
+          )
+        }
+        if (nameTakenBy(snapshot, input.newPath, input.pageId) !== undefined) {
+          return yield* wikiError(
+            "rename",
+            "blocked",
+            "Another Wiki page already owns the new path or link name",
+            { pageId: input.pageId }
+          )
+        }
+        if (isReadme(current.resource.path)) {
+          const prefix = `${posix.dirname(current.resource.path)}/`
+          if (
+            snapshot.wholeSet.some(
+              (record) =>
+                record.page.pageId !== input.pageId &&
+                record.page.lifecycle === "active" &&
+                record.resource.path.startsWith(prefix)
+            )
+          ) {
+            return yield* wikiError(
+              "rename",
+              "blocked",
+              "Move child pages before renaming this directory page",
+              { pageId: input.pageId }
+            )
           }
+        }
+        const plan = yield* buildPlan(
+          repository,
+          current,
+          snapshot.wholeSet,
+          input.expectedHead,
+          input.newPath,
+          input.newTitle
         )
-      }
-    }
-    if (snapshot.head === null) {
-      return yield* wikiError("rename", "corrupt", "A stored Wiki page has no repository head", {
-        pageId: input.pageId
+        return { writes: planOperations(plan), value: plan }
       })
-    }
-
-    const plan = yield* buildPlan(
-      repository,
-      current,
-      snapshot.wholeSet,
-      snapshot.head,
-      input.newPath,
-      input.newTitle
     )
-    yield* requireCommitRules(
-      { repository, spaces },
-      { origin: input.commit.origin, authority: input.authority },
-      planOperations(plan)
-    ).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
     const approval = yield* store
       .createOrGet({
         approvalId: randomUUID(),

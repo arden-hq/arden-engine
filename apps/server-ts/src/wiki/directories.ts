@@ -1,5 +1,4 @@
 import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
@@ -18,10 +17,11 @@ import {
   pageKind,
   recordFolders
 } from "./collections.js"
-import { commitWiki, createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
-import { mapRevisionError, WikiError, wikiError } from "./errors.js"
+import { createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
+import { type WikiError, wikiError } from "./errors.js"
+import { writerOf, type WikiChanges, type WikiPlan } from "./page-change.js"
 import { formatWikiPage, parseWikiPage, reviseWikiPage } from "./page.js"
-import { directoryReadme, loadSnapshot, nameTakenBy } from "./snapshot.js"
+import { directoryReadme, nameTakenBy } from "./snapshot.js"
 import { spaceOwnsWikiPath } from "./space-index.js"
 
 const DIRECTORY_CONTRACT_HEADING = "## Directory contract"
@@ -40,12 +40,6 @@ interface WikiDirectoryWriteResult {
   readonly pageId: string
   readonly changed: boolean
   readonly adopted: boolean
-}
-
-export interface WikiDirectoryMethods {
-  readonly createDirectory: (
-    input: WikiCreateDirectoryInput
-  ) => Effect.Effect<WikiDirectoryWriteResult, WikiError>
 }
 
 const directoryPath = (value: string): string | undefined => {
@@ -91,196 +85,190 @@ const hasDirectoryContract = (body: string, contract: string): boolean => {
   )
 }
 
-export const makeWikiDirectoryMethods = (
-  repository: ManagedFileRepositoryShape,
-  spaces: SpaceStore["Service"]
-): WikiDirectoryMethods => {
-  const createDirectory = Effect.fn("Wiki.createDirectory")(function* (
-    input: WikiCreateDirectoryInput
-  ) {
-    const producerAutomationId = input.producerAutomationId
-    const directory = directoryPath(input.path)
-    if (directory === undefined) {
-      return yield* wikiError(
-        "create",
-        "invalid",
-        "Wiki directories must use a relative POSIX path without a trailing slash"
-      )
-    }
-    const contract = directoryContract(input.body)
-    if (contract === undefined) {
-      return yield* wikiError(
-        "create",
-        "invalid",
-        `Wiki directory contracts require exact headings: ${DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}`).join(", ")}`
-      )
-    }
-    const snapshot = yield* loadSnapshot(repository, "create")
-    const readmePath = `${directory}/README.md`
-    const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "create")
-    if (boundary === undefined) {
-      const spaceOwned = yield* spaceOwnsWikiPath(spaces, readmePath).pipe(
-        Effect.mapError((cause) =>
-          wikiError("create", "storage", "Could not validate Space Wiki ownership", { cause })
-        )
-      )
-      if (spaceOwned) {
-        return yield* wikiError(
-          "create",
-          "blocked",
-          "Only the owning Space run may create or adopt directories inside a Space Wiki boundary"
-        )
-      }
-    }
-    yield* requireWikiWritePaths(boundary, "create", [readmePath])
-    const folders = recordFolders(snapshot.wholeSet)
-    const placed = pageKind(folders, readmePath)
-    if (placed.kind === "record" && placed.folder.producer.kind === "automation") {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        "Report destinations cannot contain nested directories"
-      )
-    }
-    const parent = posix.dirname(directory)
-    if (parent !== "." && directoryReadme(snapshot.wholeSet, parent) === undefined) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        `Parent Wiki directory does not exist: ${parent}`
-      )
-    }
-
-    const current = snapshot.wholeSet.find(
-      (record) => record.resource.path.toLowerCase() === readmePath.toLowerCase()
+export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
+  changes: WikiChanges,
+  spaces: SpaceStore["Service"],
+  input: WikiCreateDirectoryInput
+) {
+  const producerAutomationId = input.producerAutomationId
+  const directory = directoryPath(input.path)
+  if (directory === undefined) {
+    return yield* wikiError(
+      "create",
+      "invalid",
+      "Wiki directories must use a relative POSIX path without a trailing slash"
     )
-    if (current !== undefined) {
-      if (
-        current.page.lifecycle !== "active" ||
-        !hasDirectoryContract(current.page.body, contract)
-      ) {
-        return yield* wikiError(
-          "create",
-          "conflict",
-          `Wiki directory already exists with a different contract: ${directory}`,
-          { pageId: current.page.pageId }
+  }
+  const contract = directoryContract(input.body)
+  if (contract === undefined) {
+    return yield* wikiError(
+      "create",
+      "invalid",
+      `Wiki directory contracts require exact headings: ${DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}`).join(", ")}`
+    )
+  }
+  const readmePath = `${directory}/README.md`
+  const planned = yield* changes.change(
+    writerOf("create", input),
+    Effect.fn("Wiki.planDirectory")(function* (snapshot): Effect.fn.Return<
+      WikiPlan<WikiDirectoryWriteResult>,
+      WikiError
+    > {
+      const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "create")
+      if (boundary === undefined) {
+        const spaceOwned = yield* spaceOwnsWikiPath(spaces, readmePath).pipe(
+          Effect.mapError((cause) =>
+            wikiError("create", "storage", "Could not validate Space Wiki ownership", { cause })
+          )
         )
-      }
-      const boundProducer = markedProducer(current.page)
-      if (producerAutomationId !== undefined && boundProducer !== producerAutomationId) {
-        const occupied = snapshot.wholeSet.some(
-          (record) =>
-            record.resource.path.toLowerCase().startsWith(`${directory.toLowerCase()}/`) &&
-            record.page.pageId !== current.page.pageId
-        )
-        if (boundProducer !== undefined || occupied) {
+        if (spaceOwned) {
           return yield* wikiError(
             "create",
             "blocked",
-            "Only an empty, unowned directory can become a report destination"
+            "Only the owning Space run may create or adopt directories inside a Space Wiki boundary"
           )
         }
-        yield* commitWiki(
-          { repository, spaces },
-          {
-            ...input.commit,
-            authority: input.authority,
-            reason: "Bind report destination",
-            expectedRevision: snapshot.head
-          },
-          [
-            updatePage(
-              current.resource,
-              formatWikiPage({
-                ...current.page,
-                metadata: {
-                  ...current.page.metadata,
-                  [WIKI_REPORT_FIELDS.automationId]: producerAutomationId
-                }
-              })
-            )
-          ]
-        ).pipe(Effect.mapError(mapRevisionError("create")))
-        return { pageId: current.page.pageId, changed: true, adopted: false }
       }
-      return {
-        pageId: current.page.pageId,
-        changed: false,
-        adopted: current.page.body.trimEnd() !== contract.trimEnd()
-      }
-    }
-
-    const occupant = snapshot.wholeSet.find(
-      (record) =>
-        record.resource.path.toLowerCase() === `${directory}.md`.toLowerCase() &&
-        record.page.lifecycle === "active"
-    )
-    if (occupant !== undefined && producerAutomationId !== undefined) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        "An existing subject page cannot become a report destination"
-      )
-    }
-    if (occupant !== undefined) {
-      yield* requireWikiWritePaths(boundary, "create", [occupant.resource.path])
-    }
-    const ownsLeafBoundary =
-      occupant !== undefined &&
-      authorityOwnsBoundaryPage(boundary, occupant.page.pageId, occupant.resource.path)
-    const nameOwner = nameTakenBy(snapshot, readmePath, occupant?.page.pageId)
-    if (nameOwner !== undefined) {
-      return yield* wikiError(
-        "create",
-        "conflict",
-        `Wiki directory name already belongs to another page: ${directory}`,
-        { pageId: nameOwner.page.pageId }
-      )
-    }
-
-    const { actor, origin, reason } = input.commit
-    if (occupant !== undefined && !ownsLeafBoundary) {
-      const content = yield* reviseWikiPage(occupant.page, {
-        body: adoptedDirectoryBody(occupant.page.body, contract)
-      }).pipe(
-        Effect.mapError((cause) =>
-          wikiError("create", "invalid", cause.message, {
-            pageId: occupant.page.pageId,
-            cause
-          })
+      yield* requireWikiWritePaths(boundary, "create", [readmePath])
+      const placed = pageKind(recordFolders(snapshot.wholeSet), readmePath)
+      if (placed.kind === "record" && placed.folder.producer.kind === "automation") {
+        return yield* wikiError(
+          "create",
+          "blocked",
+          "Report destinations cannot contain nested directories"
         )
+      }
+      const parent = posix.dirname(directory)
+      if (parent !== "." && directoryReadme(snapshot.wholeSet, parent) === undefined) {
+        return yield* wikiError(
+          "create",
+          "blocked",
+          `Parent Wiki directory does not exist: ${parent}`
+        )
+      }
+
+      const current = snapshot.wholeSet.find(
+        (record) => record.resource.path.toLowerCase() === readmePath.toLowerCase()
       )
-      yield* commitWiki(
-        { repository, spaces },
-        { actor, origin, reason, authority: input.authority, expectedRevision: snapshot.head },
-        [movePage(occupant.resource, readmePath, content)]
-      ).pipe(Effect.mapError(mapRevisionError("create", occupant.page.pageId)))
-      return { pageId: occupant.page.pageId, changed: true, adopted: true }
-    }
+      if (current !== undefined) {
+        if (
+          current.page.lifecycle !== "active" ||
+          !hasDirectoryContract(current.page.body, contract)
+        ) {
+          return yield* wikiError(
+            "create",
+            "conflict",
+            `Wiki directory already exists with a different contract: ${directory}`,
+            { pageId: current.page.pageId }
+          )
+        }
+        const boundProducer = markedProducer(current.page)
+        if (producerAutomationId !== undefined && boundProducer !== producerAutomationId) {
+          const occupied = snapshot.wholeSet.some(
+            (record) =>
+              record.resource.path.toLowerCase().startsWith(`${directory.toLowerCase()}/`) &&
+              record.page.pageId !== current.page.pageId
+          )
+          if (boundProducer !== undefined || occupied) {
+            return yield* wikiError(
+              "create",
+              "blocked",
+              "Only an empty, unowned directory can become a report destination"
+            )
+          }
+          return {
+            writes: [
+              updatePage(
+                current.resource,
+                formatWikiPage({
+                  ...current.page,
+                  metadata: {
+                    ...current.page.metadata,
+                    [WIKI_REPORT_FIELDS.automationId]: producerAutomationId
+                  }
+                })
+              )
+            ],
+            reason: "Bind report destination",
+            value: { pageId: current.page.pageId, changed: true, adopted: false }
+          }
+        }
+        return {
+          writes: [],
+          value: {
+            pageId: current.page.pageId,
+            changed: false,
+            adopted: current.page.body.trimEnd() !== contract.trimEnd()
+          }
+        }
+      }
 
-    const pageId = randomUUID()
-    const content = formatWikiPage({
-      pageId,
-      title: directoryTitle(directory),
-      aliases: [],
-      lifecycle: "active",
-      redirectTo: null,
-      metadata:
-        producerAutomationId === undefined
-          ? {}
-          : { [WIKI_REPORT_FIELDS.automationId]: producerAutomationId },
-      body: contract
+      const occupant = snapshot.wholeSet.find(
+        (record) =>
+          record.resource.path.toLowerCase() === `${directory}.md`.toLowerCase() &&
+          record.page.lifecycle === "active"
+      )
+      if (occupant !== undefined && producerAutomationId !== undefined) {
+        return yield* wikiError(
+          "create",
+          "blocked",
+          "An existing subject page cannot become a report destination"
+        )
+      }
+      if (occupant !== undefined) {
+        yield* requireWikiWritePaths(boundary, "create", [occupant.resource.path])
+      }
+      const ownsLeafBoundary =
+        occupant !== undefined &&
+        authorityOwnsBoundaryPage(boundary, occupant.page.pageId, occupant.resource.path)
+      const nameOwner = nameTakenBy(snapshot, readmePath, occupant?.page.pageId)
+      if (nameOwner !== undefined) {
+        return yield* wikiError(
+          "create",
+          "conflict",
+          `Wiki directory name already belongs to another page: ${directory}`,
+          { pageId: nameOwner.page.pageId }
+        )
+      }
+
+      if (occupant !== undefined && !ownsLeafBoundary) {
+        const content = yield* reviseWikiPage(occupant.page, {
+          body: adoptedDirectoryBody(occupant.page.body, contract)
+        }).pipe(
+          Effect.mapError((cause) =>
+            wikiError("create", "invalid", cause.message, {
+              pageId: occupant.page.pageId,
+              cause
+            })
+          )
+        )
+        return {
+          writes: [movePage(occupant.resource, readmePath, content)],
+          value: { pageId: occupant.page.pageId, changed: true, adopted: true }
+        }
+      }
+
+      const pageId = randomUUID()
+      const content = formatWikiPage({
+        pageId,
+        title: directoryTitle(directory),
+        aliases: [],
+        lifecycle: "active",
+        redirectTo: null,
+        metadata:
+          producerAutomationId === undefined
+            ? {}
+            : { [WIKI_REPORT_FIELDS.automationId]: producerAutomationId },
+        body: contract
+      })
+      yield* parseWikiPage(content, pageId).pipe(
+        Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
+      )
+      return {
+        writes: [createPage(pageId, readmePath, content)],
+        value: { pageId, changed: true, adopted: false }
+      }
     })
-    yield* parseWikiPage(content, pageId).pipe(
-      Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
-    )
-    yield* commitWiki(
-      { repository, spaces },
-      { actor, origin, reason, authority: input.authority, expectedRevision: snapshot.head },
-      [createPage(pageId, readmePath, content)]
-    ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
-    return { pageId, changed: true, adopted: false }
-  })
-
-  return { createDirectory }
-}
+  )
+  return planned.value
+})

@@ -3,27 +3,23 @@ import type { WikiPage } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
-import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { WikiLocationAuthority } from "./authority.js"
 import {
-  commitWiki,
   decodeWikiOrigin,
-  requireCommitRules,
   restoreArchivedPage,
   restoreVersion,
   type WikiCommitIdentity
 } from "./commit.js"
-import { requireCurrent, withConflictDetail } from "./conflict.js"
-import { mapRevisionError, WikiError, wikiError } from "./errors.js"
-import type { WikiListingMethods } from "./listing.js"
+import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
+import { pageIn, writerOf, type WikiChanges } from "./page-change.js"
 import { isReadme, replacementContent } from "./page.js"
 import {
   directoryReadme,
-  loadSnapshot,
   nameTakenBy,
   notFound,
   type PageRecord,
-  readRecord
+  readRecord,
+  type Snapshot
 } from "./snapshot.js"
 
 /** The page as commit `commitId` left it (`after`), or as it was before that commit (`before`).
@@ -68,8 +64,7 @@ export interface WikiRestoreMethods {
 
 export const makeWikiRestoreMethods = (
   repository: ManagedFileRepositoryShape,
-  spaces: SpaceStore["Service"],
-  read: WikiListingMethods["read"]
+  changes: WikiChanges
 ): WikiRestoreMethods => {
   const versionToRestore = Effect.fn("Wiki.versionToRestore")(function* (
     current: PageRecord,
@@ -138,132 +133,95 @@ export const makeWikiRestoreMethods = (
     return historical
   })
 
-  const restorableContent = Effect.fn("Wiki.restorableContent")(function* (
-    current: PageRecord,
-    input: WikiRestoreContentInput
-  ) {
-    const historical = yield* versionToRestore(current, input)
-    const content = yield* replacementContent("restore", input.pageId, historical.page.content)
-    yield* requireCommitRules(
-      { repository, spaces },
-      { origin: input.commit.origin, authority: input.authority },
-      [restoreVersion(current.resource, content)]
-    ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-    return content
-  })
+  /** The page as `input.version` holds it, written as its next version. */
+  const restorePlan = (input: Pick<WikiRestoreContentInput, "pageId" | "version" | "head">) =>
+    Effect.fn("Wiki.planRestore")(function* (snapshot: Snapshot) {
+      const current = yield* pageIn("restore", snapshot, input.pageId)
+      const historical = yield* versionToRestore(current, input)
+      const content = yield* replacementContent("restore", input.pageId, historical.page.content)
+      return {
+        writes: [restoreVersion(current.resource, content)],
+        value: { content, unchanged: content === current.page.content }
+      }
+    })
 
-  const contentToRestore = Effect.fn("Wiki.contentToRestore")(function* (
-    input: WikiRestoreContentInput
-  ) {
-    const snapshot = yield* loadSnapshot(repository, "restore")
-    const current = snapshot.wholeSet.find((record) => record.page.pageId === input.pageId)
-    if (current === undefined) return yield* notFound("restore", input.pageId)
-    return yield* restorableContent(current, input)
-  })
+  const contentToRestore = (input: WikiRestoreContentInput) =>
+    changes
+      .preview(writerOf("restore", input), restorePlan(input))
+      .pipe(Effect.map(({ content }) => content))
 
-  const restore = Effect.fn("Wiki.restore")(function* (input: WikiRestoreInput) {
-    return yield* withConflictDetail(
-      repository,
-      Effect.gen(function* () {
-        const snapshot = yield* loadSnapshot(repository, "restore")
-        const current = yield* requireCurrent(
-          "restore",
-          snapshot,
-          input.pageId,
-          input.expectedVersion,
-          input.expectedHead
+  const restore = (input: WikiRestoreInput) => {
+    const writer = writerOf("restore", input, input.expectedHead, [input])
+    return changes
+      .change(writer, (snapshot) =>
+        restorePlan({ ...input, head: input.expectedHead })(snapshot).pipe(
+          // A restore that changes nothing is still refused by the rules a change would meet.
+          Effect.tap((plan) =>
+            plan.value.unchanged ? changes.check(writer, plan.writes) : Effect.void
+          ),
+          Effect.map((plan) => (plan.value.unchanged ? { ...plan, writes: [] } : plan))
         )
-        const content = yield* restorableContent(current, { ...input, head: input.expectedHead })
-        if (content === current.page.content) {
-          const latestHead = yield* repository.currentRevision.pipe(
-            Effect.mapError(mapRevisionError("restore", input.pageId))
-          )
-          if (latestHead !== input.expectedHead) {
-            return yield* wikiError("restore", "conflict", "Wiki changed during the restore", {
+      )
+      .pipe(Effect.andThen(changes.saved("restore", input.pageId)))
+  }
+
+  const restoreArchived = (input: WikiRestoreArchivedInput) =>
+    changes
+      .change(
+        writerOf("restore", input),
+        Effect.fn("Wiki.planRestoreArchived")(function* (snapshot) {
+          const resource = yield* repository
+            .get(input.pageId, { at: snapshot.head })
+            .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+          if (resource === null) return yield* notFound("restore", input.pageId)
+          if (resource.state !== "archived") {
+            return yield* wikiError(
+              "restore",
+              "invalid",
+              "Only archived Wiki pages can be restored",
+              { pageId: input.pageId }
+            )
+          }
+          if (
+            snapshot.head !== input.expectedHead ||
+            resource.versionId !== input.expectedVersion
+          ) {
+            return yield* wikiError("restore", "conflict", "Wiki page changed", {
               pageId: input.pageId
             })
           }
-        } else {
-          yield* commitWiki(
-            { repository, spaces },
-            { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
-            [restoreVersion(current.resource, content)]
-          ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-        }
-        return yield* read(input.pageId).pipe(
-          Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
-        )
-      })
-    )
-  })
-
-  const restoreArchived = Effect.fn("Wiki.restoreArchived")(function* (
-    input: WikiRestoreArchivedInput
-  ) {
-    return yield* withConflictDetail(
-      repository,
-      Effect.gen(function* () {
-        const snapshot = yield* loadSnapshot(repository, "restore")
-        const resource = yield* repository
-          .get(input.pageId, { at: snapshot.head })
-          .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-        if (resource === null) return yield* notFound("restore", input.pageId)
-        if (resource.state !== "archived") {
-          return yield* wikiError(
-            "restore",
-            "invalid",
-            "Only archived Wiki pages can be restored",
-            {
-              pageId: input.pageId
-            }
-          )
-        }
-        if (snapshot.head !== input.expectedHead || resource.versionId !== input.expectedVersion) {
-          return yield* wikiError("restore", "conflict", "Wiki page changed", {
-            pageId: input.pageId
-          })
-        }
-        const archived = yield* readRecord(repository, "restore", resource)
-        if (archived.page.lifecycle !== "active") {
-          return yield* wikiError(
-            "restore",
-            "invalid",
-            "Archived page is not an active Wiki page",
-            {
-              pageId: input.pageId
-            }
-          )
-        }
-        const own = posix.dirname(resource.path)
-        const directory = isReadme(resource.path) ? posix.dirname(own) : own
-        if (directory !== "." && directoryReadme(snapshot.wholeSet, directory) === undefined) {
-          return yield* wikiError(
-            "restore",
-            "blocked",
-            `Restore the Wiki directory ${directory} first`,
-            { pageId: input.pageId }
-          )
-        }
-        const taken = nameTakenBy(snapshot, resource.path)
-        if (taken !== undefined) {
-          return yield* wikiError(
-            "restore",
-            "conflict",
-            `Wiki path or link name is taken by ${taken.resource.path}`,
-            { pageId: input.pageId }
-          )
-        }
-        yield* commitWiki(
-          { repository, spaces },
-          { ...input.commit, authority: input.authority, expectedRevision: input.expectedHead },
-          [restoreArchivedPage(resource)]
-        ).pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-        return yield* read(input.pageId).pipe(
-          Effect.mapError((cause) => new WikiError({ ...cause, operation: "restore" }))
-        )
-      })
-    )
-  })
+          const archived = yield* readRecord(repository, "restore", resource)
+          if (archived.page.lifecycle !== "active") {
+            return yield* wikiError(
+              "restore",
+              "invalid",
+              "Archived page is not an active Wiki page",
+              { pageId: input.pageId }
+            )
+          }
+          const own = posix.dirname(resource.path)
+          const directory = isReadme(resource.path) ? posix.dirname(own) : own
+          if (directory !== "." && directoryReadme(snapshot.wholeSet, directory) === undefined) {
+            return yield* wikiError(
+              "restore",
+              "blocked",
+              `Restore the Wiki directory ${directory} first`,
+              { pageId: input.pageId }
+            )
+          }
+          const taken = nameTakenBy(snapshot, resource.path)
+          if (taken !== undefined) {
+            return yield* wikiError(
+              "restore",
+              "conflict",
+              `Wiki path or link name is taken by ${taken.resource.path}`,
+              { pageId: input.pageId }
+            )
+          }
+          return { writes: [restoreArchivedPage(resource)], value: undefined }
+        })
+      )
+      .pipe(Effect.andThen(changes.saved("restore", input.pageId)))
 
   return { restore, contentToRestore, restoreArchived }
 }
