@@ -7,14 +7,19 @@ import type {
   RevisionError
 } from "@arden-hq/revisions/effect"
 import { Effect, Option, Schema } from "effect"
+import { posix } from "node:path"
 
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
+import { pageKind, recordFolders, type PageKind, type RecordFolders } from "./collections.js"
 import { aliasesAreHuman, parseWikiPage } from "./page.js"
+import type { PageRecord } from "./snapshot.js"
 
 export type WikiCommitOrigin =
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
   | { readonly kind: "agent"; readonly sessionId: string | undefined }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
+  /** Wiki Maintenance. History records it as its Automation, so a decoded origin is never this. */
+  | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
   | {
       readonly kind: "capture"
       readonly replayKey: string | undefined
@@ -55,6 +60,7 @@ const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
     case "agent":
       return withChat(AGENT_ORIGIN, origin.sessionId)
     case "automation":
+    case "upkeep":
       return `${AUTOMATION_PREFIX}${origin.automationId}${
         origin.chainDepth === undefined || origin.chainDepth === 0
           ? ""
@@ -97,6 +103,7 @@ export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => 
     case "automation":
       return origin.kind
     case "capture":
+    case "upkeep":
       return "automation"
     case "space_page":
     case "system":
@@ -111,6 +118,7 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
       return origin.sessionId
     case "user":
     case "automation":
+    case "upkeep":
     case "space_page":
     case "system":
       return undefined
@@ -166,7 +174,7 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
 })
 
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
-  rule: Schema.Literals(["aliases", "size"] as const),
+  rule: Schema.Literals(["aliases", "size", "records"] as const),
   message: Schema.String
 }) {}
 
@@ -288,8 +296,7 @@ const limitRefusal = (
 }
 
 const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
-  repository: ManagedFileRepositoryShape,
-  origin: WikiCommitOrigin,
+  { repository, origin }: CommitView,
   operation: WikiPageOperation
 ): Effect.fn.Return<void, WikiCommitError> {
   if (operation._tag === "Archive") return
@@ -322,29 +329,79 @@ const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
 const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" && origin.via === "filesystem"
 
+const isUpkeep = (origin: WikiCommitOrigin): boolean => origin.kind === "upkeep"
+
+const isReadme = (path: string): boolean => posix.basename(path).toLowerCase() === "readme.md"
+
+/** The record folders at the head a commit is checked against, from the README pages alone. */
+const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
+  repository: ManagedFileRepositoryShape
+): Effect.fn.Return<RecordFolders, RevisionError> {
+  const readmes = (yield* repository.listResources()).filter((resource) => isReadme(resource.path))
+  const pages = yield* Effect.forEach(readmes, (resource) =>
+    repository.readVersion(resource).pipe(
+      Effect.flatMap((bytes) => parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)),
+      Effect.map((page): ReadonlyArray<PageRecord> =>
+        Option.isNone(page) ? [] : [{ resource, page: page.value }]
+      )
+    )
+  )
+  return recordFolders(pages.flat())
+})
+
+const recordsRefusal = (path: string, kind: Exclude<PageKind, { kind: "knowledge" }>) =>
+  new WikiCommitRuleError({
+    rule: "records",
+    message:
+      `${path} is ${kind.kind === "record" ? "a record" : "the contract"} of ${kind.folder.directory}/, kept as its producer wrote it. ` +
+      "Wiki Maintenance reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
+  })
+
+const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
+  { repository, folders }: CommitView,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const paths = [before?.path, "path" in operation ? operation.path : undefined]
+  for (const path of paths) {
+    if (path === undefined) continue
+    const kind = pageKind(yield* folders, path)
+    if (kind.kind !== "knowledge") return yield* recordsRefusal(path, kind)
+  }
+})
+
+interface CommitView {
+  readonly repository: ManagedFileRepositoryShape
+  readonly origin: WikiCommitOrigin
+  /** Read once per commit, and only by a rule that needs it. */
+  readonly folders: Effect.Effect<RecordFolders, RevisionError>
+}
+
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
   readonly check: (
-    repository: ManagedFileRepositoryShape,
-    origin: WikiCommitOrigin,
+    view: CommitView,
     operation: WikiPageOperation
   ) => Effect.Effect<void, WikiCommitError>
 }> = [
-  { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
+  { binds: () => true, check: (_view, operation) => requireHumanAliases(operation) },
+  { binds: isUpkeep, check: requireNotRecord },
   { binds: (origin) => !isOutsideEdit(origin), check: requireWithinLimit }
 ]
 
 /** Fails with the first rule that refuses one of `operations` for this writer. */
-export const requireCommitRules = (
+export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function* (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,
   operations: ReadonlyArray<WikiPageOperation>
-): Effect.Effect<void, WikiCommitError> =>
-  Effect.forEach(
-    COMMIT_RULES.filter((rule) => rule.binds(origin)),
-    (rule) =>
-      Effect.forEach(operations, (operation) => rule.check(repository, origin, operation), {
-        discard: true
-      }),
-    { discard: true }
-  )
+): Effect.fn.Return<void, WikiCommitError> {
+  const view: CommitView = {
+    repository,
+    origin,
+    folders: yield* Effect.cached(currentRecordFolders(repository))
+  }
+  for (const rule of COMMIT_RULES) {
+    if (!rule.binds(origin)) continue
+    for (const operation of operations) yield* rule.check(view, operation)
+  }
+})

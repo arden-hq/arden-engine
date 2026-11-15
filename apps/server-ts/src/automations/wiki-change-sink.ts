@@ -9,11 +9,12 @@ import { wikiChangedEvent } from "./producers/wiki.js"
 import { MEMORY_CAPTURE_AUTOMATION_ID } from "./handlers/memory-capture.js"
 
 const producerWakeDepth = (origin: WikiCommitOrigin): number =>
-  origin.kind === "automation" ? (origin.chainDepth ?? 0) : 0
+  origin.kind === "automation" || origin.kind === "upkeep" ? (origin.chainDepth ?? 0) : 0
 
 const producingAutomation = (origin: WikiCommitOrigin): string | null => {
   switch (origin.kind) {
     case "automation":
+    case "upkeep":
       return origin.automationId
     case "capture":
       return MEMORY_CAPTURE_AUTOMATION_ID

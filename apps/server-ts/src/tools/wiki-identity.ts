@@ -116,7 +116,11 @@ export const readRunCause = (
 const automationOrigin = (cause: RunCause & { readonly automationId: string }) => ({
   actor: `Automation ${cause.automationId}`,
   origin: {
-    kind: "automation" as const,
+    kind:
+      systemHandlerForAutomation(AutomationId.make(cause.automationId))?.spec.handler ===
+      "wiki_maintenance"
+        ? ("upkeep" as const)
+        : ("automation" as const),
     automationId: cause.automationId,
     chainDepth: cause.wakeDepth
   },

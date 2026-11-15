@@ -70,6 +70,20 @@ export const wikiError = (
     ...(options?.cause === undefined ? {} : { cause: options.cause })
   })
 
+/** A refused write is `invalid` when what was written breaks a rule, `blocked` when this writer
+ *  may not make it. */
+const ruleReason = (
+  rule: Extract<WikiCommitError, { readonly _tag: "WikiCommitRuleError" }>["rule"]
+): "invalid" | "blocked" => {
+  switch (rule) {
+    case "aliases":
+    case "size":
+      return "invalid"
+    case "records":
+      return "blocked"
+  }
+}
+
 export const mapRevisionError =
   (operation: WikiOperation, pageId?: string) =>
   (cause: WikiCommitError): WikiError => {
@@ -90,6 +104,7 @@ export const mapRevisionError =
       case "CorruptRepositoryError":
         return wikiError(operation, "corrupt", cause.message, options)
       case "WikiCommitRuleError":
+        return wikiError(operation, ruleReason(cause.rule), cause.message, options)
       case "InvalidRevisionInputError":
       case "NoChangesError":
       case "RevisionContentLimitError":
