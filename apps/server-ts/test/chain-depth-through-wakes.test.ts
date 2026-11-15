@@ -201,11 +201,11 @@ it("a Memory write by an in-chat step carries the depth it was woken at to the c
       )
       const sink = yield* WikiChangeSink
       yield* sink.cursor(null)
-      const publish = (revision: string, chainDepth: number) =>
+      const publish = (previousRevision: string | null, revision: string, chainDepth: number) =>
         Effect.gen(function* () {
           yield* sql`DELETE FROM automation_event_queue`
           yield* sink.publish({
-            previousRevision: null,
+            previousRevision,
             revision,
             savedAt: AT,
             paths: ["notes/made-up.md"],
@@ -217,8 +217,8 @@ it("a Memory write by an in-chat step carries the depth it was woken at to the c
           return rows.length
         })
       return {
-        atOne: yield* publish("a".repeat(64), 1),
-        atTwo: yield* publish("b".repeat(64), 2)
+        atOne: yield* publish(null, "a".repeat(64), 1),
+        atTwo: yield* publish("a".repeat(64), "b".repeat(64), 2)
       }
     }).pipe(Effect.provide(automationWikiChangeSinkLayer))
   )
