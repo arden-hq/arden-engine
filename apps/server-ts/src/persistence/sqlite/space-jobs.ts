@@ -32,6 +32,7 @@ import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
+import { renameOwnedJob } from "./job-labels.js"
 
 interface JobState {
   readonly automationId: string
@@ -134,10 +135,7 @@ export const makeSpaceJobSql = (
       ORDER BY started_at, session_id
       LIMIT 1
     `
-    if (existing[0] !== undefined) {
-      yield* sql`UPDATE sessions SET name = ${name} WHERE session_id = ${existing[0].session_id} AND name IS NOT ${name}`
-      return existing[0].session_id
-    }
+    if (existing[0] !== undefined) return existing[0].session_id
 
     const sessionId = yield* nextId
     yield* insertSession({
@@ -167,6 +165,7 @@ export const makeSpaceJobSql = (
     readonly ownerTaskId?: string
     readonly now: string
   }) {
+    yield* renameOwnedJob(sql, input.automationId, input.name)
     const sessionId = yield* ensureSession(input.automationId, input.spaceId, input.name, input.now)
     const before = yield* sql<{ readonly enabled: number }>`
       SELECT enabled FROM scheduled_tasks WHERE task_id = ${input.automationId}`

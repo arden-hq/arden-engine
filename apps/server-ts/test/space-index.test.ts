@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -498,4 +499,51 @@ describe("the start check", () => {
     )
     expect(calls).toEqual(["content step", "space pages"])
   })
+})
+
+describe("a Space worker's chat name", () => {
+  const chatName = (sql: SqlClient.SqlClient, spaceId: string) =>
+    sql<{ readonly job: string; readonly chat: string | null }>`
+      SELECT job.name AS job, chat.name AS chat FROM scheduled_tasks AS job
+      LEFT JOIN sessions AS chat ON chat.session_id = job.thread_id
+      WHERE job.task_id = ${spaceJobId(spaceId)}`.pipe(Effect.map((rows) => rows[0]))
+
+  it("follows the Space's name, and keeps a name the owner gave it", async () => {
+    const outcome = await withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const spaces = yield* SpaceStore
+        const followed = yield* spaces.create({ name: "Made-up one" })
+        const kept = yield* spaces.create({ name: "Made-up two" })
+        yield* spaces.bindPage(followed.space_id, "page-one", "areas/made-up-one.md")
+        yield* spaces.bindPage(kept.space_id, "page-two", "areas/made-up-two.md")
+        yield* sql`UPDATE sessions SET name = 'My own name'
+          WHERE session_id = (SELECT thread_id FROM scheduled_tasks
+            WHERE task_id = ${spaceJobId(kept.space_id)})`
+        yield* spaces.update(followed.space_id, { name: "Made-up first" })
+        yield* spaces.update(kept.space_id, { name: "Made-up second" })
+        yield* spaces.bindPage(kept.space_id, "page-two", "areas/made-up-second.md")
+        yield* spaces.update(kept.space_id, { name: "Made-up second" })
+        return {
+          followed: yield* chatName(sql, followed.space_id),
+          kept: yield* chatName(sql, kept.space_id)
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      followed: { job: "Made-up first worker", chat: "Made-up first worker" },
+      kept: { job: "Made-up second worker", chat: "My own name" }
+    })
+  })
+})
+
+it("renames a job's chat only through renameOwnedJob, besides the owner's own edits", () => {
+  const root = join(import.meta.dirname, "../src/persistence/sqlite")
+  const naming = readdirSync(root)
+    .filter((name) => name.endsWith(".ts"))
+    .filter((name) =>
+      /UPDATE sessions\s+SET name\b/u.test(readFileSync(join(root, name), "utf8"))
+    )
+    .sort()
+  expect(naming).toEqual(["automation-catalog-edit.ts", "job-labels.ts", "session-lifecycle.ts"])
 })
