@@ -57,6 +57,8 @@ import {
   type RuntimeContext
 } from "../context/runtime-update.js"
 import { currentIso } from "../runtime/clock.js"
+import type { ModelDefinition } from "../models/host.js"
+import { chatStepOutputLimit, outputLimitDelivery } from "../models/side-call.js"
 import { TODO_REMINDER_SOURCE, todoReminderDue } from "../context/todo-reminder.js"
 import {
   OWNER_INSTRUCTIONS_SOURCE,
@@ -135,6 +137,9 @@ export interface LoopChatRunnerOptions {
     readonly automationId: AutomationId | null
   }) => PromiseLike<ReadonlyArray<string>>
   readonly agentOptions?: LoopChatRunnerAgentOptions
+  /** The window and output cap a model declares; each step's output limit
+   *  follows from them (`chatStepOutputLimit`). Absent, a step sends none. */
+  readonly modelContext?: (model: string) => ModelDefinition["context"] | undefined
   /** Replace the complete model history at a durable compaction boundary.
    *  System messages in a replacement are ignored: the current system prefix
    *  is kept and the replacement's non-system messages follow it. */
@@ -489,10 +494,16 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
     if (input.model === null) {
       throw new Error("The Loop Chat runner requires a selected ModelHost model")
     }
-    const { imageInput } = await resolveModelCapabilities({
+    const capabilities = await resolveModelCapabilities({
       provider: config.provider,
       model: input.model
     })
+    const imageInput = capabilities.imageInput
+    const window = config.modelContext?.(input.model)
+    const maxOutputTokens =
+      window === undefined
+        ? undefined
+        : chatStepOutputLimit({ context: window, delivery: outputLimitDelivery(capabilities) })
     const sourceToolset =
       typeof config.toolset === "function"
         ? await config.toolset({
@@ -579,6 +590,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
     })
     const agent = makeAgent(
       {
+        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
         ...config.config,
         model: input.model,
         cacheScope: input.treeRootSessionId,

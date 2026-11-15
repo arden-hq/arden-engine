@@ -1,5 +1,9 @@
 /**
- * Side calls: model requests the server makes for itself outside a chat
+ * Output limits: the one place the server decides how many tokens a model
+ * request may write, for a chat step (`chatStepOutputLimit`) and for a side
+ * call (the rest of this file).
+ *
+ * Side calls are model requests the server makes for itself outside a chat
  * run — chat names, task descriptions, reviews, triage, rule compiles,
  * compaction summaries. Each names a budget of visible answer tokens, but
  * every wire counts thinking against the output limit (OpenAI and
@@ -11,6 +15,7 @@
  */
 
 import type { ModelCapabilities } from "@arden-hq/loop"
+import type { ModelDefinition } from "./host.js"
 
 /**
  * The effort that turns thinking off wherever a model declares it: OpenAI
@@ -88,3 +93,37 @@ export const sideCallOutputLimit = ({
     effort === THINKING_OFF ? answerTokens : answerTokens + REASONING_ALLOWANCE_TOKENS,
     outputCap ?? Number.POSITIVE_INFINITY
   )
+
+/**
+ * The most one chat step may write, on a route that sends the limit: the
+ * room the model's window leaves above its compaction trigger, and never
+ * more than the model's own `outputCap`. Undefined on a route that sends
+ * none (Codex refuses the field), so its wire stays as it was.
+ *
+ * Why a limit at all: without one llama.cpp writes until the window is full
+ * (`n_predict` defaults to -1; b12359 answers `finish_reason: "length"` at
+ * prompt + output = `n_ctx`, checked 2026-11-16), and Gemma 4 E2B on a 32k
+ * window thought for 13,000 and 20,000+ tokens before one answer. Why this
+ * room: compaction keeps a step's prompt under the trigger, so a step that
+ * writes no more than the rest of the window cannot overflow it by its own
+ * output, and on a small window the room still holds a long answer (6,554
+ * tokens at 32,768). A step cut off at the limit ends with `length`, and the
+ * loop asks the model to continue in smaller steps (`policy.ts`
+ * `appendOutputLimitContinuation`), twice at most before the run stops with
+ * `max_output_length`.
+ */
+export const chatStepOutputLimit = ({
+  context,
+  delivery
+}: {
+  readonly context: ModelDefinition["context"]
+  readonly delivery: OutputLimitDelivery
+}): number | undefined => {
+  if (delivery === "omitted") return undefined
+  const room = context.hardLimit - context.compactionTrigger
+  // A definition may set its trigger at the window itself (`host.ts` allows
+  // it); that leaves no room to size a step by, so only the model's own cap,
+  // if any, applies.
+  if (room < 1) return context.outputCap
+  return Math.min(room, context.outputCap ?? Number.POSITIVE_INFINITY)
+}

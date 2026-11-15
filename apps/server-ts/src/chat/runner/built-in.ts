@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import { systemHandlerForAutomation } from "../../automations/system.js"
 import { loadLocalInstructions } from "../../context/local-instructions.js"
 import { ContextCompaction, type ContextCompactionError } from "../../context/service.js"
+import { ModelCatalog } from "../../models/catalog.js"
 import { renderLocalTimeContext } from "../../context/system-context.js"
 import {
   composeTurnContext,
@@ -116,6 +117,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
   }
   const registry = yield* ServerToolRegistry
   const compaction = yield* ContextCompaction
+  const catalog = yield* ModelCatalog
   const automations = yield* AutomationCatalog
   const automationQueue = yield* AutomationQueue
   const globalInstructions = yield* GlobalInstructions
@@ -168,6 +170,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
   return (route: ModelRoute): ChatRunner =>
     makeLoopChatRunner({
       provider: route.provider,
+      modelContext: (model) => catalog.installed().models.get(model)?.context,
       onRequestComplete: (input) =>
         compaction.rememberRequest({ ...input, provider: route.provider }),
       output: async (input) =>
