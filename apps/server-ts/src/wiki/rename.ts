@@ -372,7 +372,7 @@ const planAlreadyApplied = Effect.fn("WikiRename.planAlreadyApplied")(function* 
   plan: RenamePlan
 ) {
   const snapshot = yield* loadSnapshot(repository, "rename")
-  const pages = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
+  const pages = new Map(snapshot.wholeSet.map((record) => [record.page.pageId, record] as const))
   const source = pages.get(plan.pageId)
   const redirect = pages.get(plan.redirect.resourceId)
   if (
@@ -418,7 +418,7 @@ export const makeWikiRenameMethods = (
 
   const requestRename = Effect.fn("WikiRename.request")(function* (input: WikiRenameRequestInput) {
     const snapshot = yield* loadSnapshot(repository, "rename")
-    const current = snapshot.pages.find((record) => record.page.pageId === input.pageId)
+    const current = snapshot.wholeSet.find((record) => record.page.pageId === input.pageId)
     if (current === undefined) {
       return yield* wikiError("rename", "not_found", `Unknown Wiki page: ${input.pageId}`, {
         pageId: input.pageId
@@ -462,7 +462,7 @@ export const makeWikiRenameMethods = (
         }
       )
     }
-    const nameOwner = snapshot.pages.find(
+    const nameOwner = snapshot.wholeSet.find(
       (record) =>
         record.page.pageId !== input.pageId &&
         pageNamesForPath(record.resource.path).some((name) =>
@@ -482,7 +482,7 @@ export const makeWikiRenameMethods = (
     if (isReadme(current.resource.path)) {
       const prefix = `${posix.dirname(current.resource.path)}/`
       if (
-        snapshot.pages.some(
+        snapshot.wholeSet.some(
           (record) =>
             record.page.pageId !== input.pageId &&
             record.page.lifecycle === "active" &&
@@ -508,13 +508,13 @@ export const makeWikiRenameMethods = (
     const plan = yield* buildPlan(
       repository,
       current,
-      snapshot.pages,
+      snapshot.wholeSet,
       snapshot.head,
       input.newPath,
       input.newTitle
     )
     const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
-    const paths = yield* planMutationPaths(plan, snapshot.pages)
+    const paths = yield* planMutationPaths(plan, snapshot.wholeSet)
     yield* requireWikiWritePaths(boundary, "rename", paths)
     yield* requireCommitRules(
       { repository, spaces },
@@ -544,7 +544,7 @@ export const makeWikiRenameMethods = (
     if (approval.status === "pending" || !alreadyApplied) {
       const snapshot = yield* loadSnapshot(repository, "rename")
       const boundary = yield* resolveWikiWriteBoundary(spaces, writer.authority, snapshot, "rename")
-      const paths = yield* planMutationPaths(plan, snapshot.pages)
+      const paths = yield* planMutationPaths(plan, snapshot.wholeSet)
       yield* requireWikiWritePaths(boundary, "rename", paths)
     }
     if (approval.status === "pending") {

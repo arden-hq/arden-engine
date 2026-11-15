@@ -288,7 +288,7 @@ export const makeWikiMutationMethods = (
           input.expectedHead
         )
         yield* requireRetirable(spaces, "merge", snapshot, current, input)
-        const target = snapshot.pages.find(
+        const target = snapshot.wholeSet.find(
           (record) =>
             record.page.pageId === input.targetPageId && record.page.lifecycle === "active"
         )

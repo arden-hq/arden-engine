@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 
-import { prepareMemorySources } from "../src/memory/retrieval.js"
+import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import {
   changedAgo,
   lastChangedLine,
@@ -9,14 +9,15 @@ import {
   PAGE_AGE_RULE
 } from "../src/wiki/page-age.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
+import { runPage } from "./kit.js"
 
 const HASH = "0".repeat(64)
 const NOW = new Date("2026-11-13T12:00:00Z").getTime()
 
-const page = (path: string, title: string, body: string): PageRecord => {
+const page = (path: string, title: string, body: string): RunPage => {
   const pageId = `id:${path}`
-  return {
+  return runPage({
     resource: { resourceId: pageId, path, blobId: HASH, state: "active", versionId: HASH },
     page: Effect.runSync(
       parseWikiPage(
@@ -32,7 +33,7 @@ const page = (path: string, title: string, body: string): PageRecord => {
         pageId
       )
     )
-  }
+  })
 }
 
 describe("page age", () => {
@@ -61,8 +62,12 @@ describe("page age", () => {
     const undated = page("areas/career/applications/cohere.md", "Cohere", "Status: Applied.")
     const recall = prepareMemorySources({
       pages: [elicit, undated],
-      recall: { query: "elicit cohere application status applied", excludedPageIds: new Set() },
-      today: "2026-11-14",
+      recall: recallCandidates({
+        pages: [elicit, undated],
+        query: "elicit cohere application status applied",
+        today: "2026-11-14",
+        sentElsewhere: new Set()
+      }),
       lastChanged: lastChangedLines(
         new Map([
           [elicit.page.pageId, { createdAt: null, updatedAt: "2026-09-15T01:39:16Z" }],

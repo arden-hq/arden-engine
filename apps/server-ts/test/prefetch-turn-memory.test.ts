@@ -10,7 +10,7 @@ import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import { MEMORY_READS } from "../src/context/memory-context.js"
-import { spacePageIndex } from "../src/wiki/space-index.js"
+import { renderIndex } from "../src/memory/index-render.js"
 import { partialService } from "./kit.js"
 
 const SPACE: PersistedSpace = {
@@ -107,7 +107,7 @@ const turn = (
       revision: "rev-1",
       readContent: (pageId) =>
         Effect.succeed({ pageId, path: "areas/garden.md", version: "v1", content: "Beds." }),
-      spaceIndex: (space) => (maxBytes) => spacePageIndex([], space, maxBytes),
+      spaceList: (space) => (maxBytes) => renderIndex([], { kind: "space", space }, maxBytes),
       sources: (input) => {
         asked.push(input)
         return sources(input)
@@ -157,14 +157,16 @@ describe("prefetchTurnMemory outside a Space", () => {
       ...context.recall
     ]
     expect(sent(none.memoryContext)).toEqual([])
-    expect(none.records).toEqual([{ reader: "owner", revision: null, query: null, sources: [] }])
+    expect(none.records).toEqual([
+      { reader: "owner", revision: null, query: null, budget: expect.any(Object), sources: [] }
+    ])
     const failing = turn(() =>
       Effect.fail(new MemoryError({ operation: "recall", message: "broken", sessionId: "chat-1" }))
     )
     const failed = await prefetch(failing.memory)
     expect(sent(failed.memoryContext)).toEqual([])
     expect(failed.records).toEqual([
-      { reader: "owner", revision: "rev-1", query: null, sources: [] }
+      { reader: "owner", revision: "rev-1", query: null, budget: expect.any(Object), sources: [] }
     ])
   })
 })

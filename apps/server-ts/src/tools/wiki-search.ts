@@ -1,12 +1,12 @@
 import type { SemanticMemoryMatch } from "../embedding/wiki-index.js"
 import { searchTerms } from "../memory/lexical-score.js"
 import { rankMemoryPages } from "../memory/retrieval.js"
-import type { PageRecord } from "../wiki/snapshot.js"
+import type { RunPage } from "../wiki/snapshot.js"
 
 const MAX_SNIPPET_CHARS = 280
 
 interface WikiSearchMatch {
-  readonly record: PageRecord
+  readonly record: RunPage
   readonly snippet: string
 }
 
@@ -33,7 +33,7 @@ const snippet = (body: string, query: string, terms: ReadonlySet<string>): strin
 }
 
 /** How directly a page holds the whole query as written: 0 names it, 1 names part, 2 mentions. */
-const phraseTier = (record: PageRecord, query: string): number | undefined => {
+const phraseTier = (record: RunPage, query: string): number | undefined => {
   const path = normalized(record.resource.path)
   const title = normalized(record.page.title)
   const aliases = record.page.aliases.map(normalized)
@@ -52,7 +52,7 @@ const phraseTier = (record: PageRecord, query: string): number | undefined => {
  * holding the query as an exact phrase; no query needs to be an exact phrase.
  */
 export const searchPages = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   text: string,
   limit: number,
   semanticMatches: ReadonlyArray<SemanticMemoryMatch> = []

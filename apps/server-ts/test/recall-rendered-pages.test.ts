@@ -1,16 +1,17 @@
 import { Effect } from "effect"
 import { expect, it } from "vitest"
-import { prepareMemorySources } from "../src/memory/retrieval.js"
+import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
+import { runPage } from "./kit.js"
 
 // Made-up pages; nothing here comes from anyone's Memory.
 
 const HASH = "0".repeat(64)
 
-const page = (path: string, title: string, body: string): PageRecord => {
+const page = (path: string, title: string, body: string): RunPage => {
   const pageId = `id:${path}`
-  return {
+  return runPage({
     resource: { resourceId: pageId, path, blobId: HASH, state: "active", versionId: HASH },
     page: Effect.runSync(
       parseWikiPage(
@@ -26,7 +27,7 @@ const page = (path: string, title: string, body: string): PageRecord => {
         pageId
       )
     )
-  }
+  })
 }
 
 const encoder = new TextEncoder()
@@ -34,17 +35,22 @@ const bytes = (value: string): number => encoder.encode(value).byteLength
 
 it("recall fits its room in bytes, cuts a page whole lines at a time, and records each block", () => {
   const room = 7_000
+  const pages = [
+    page("projects/garden.md", "Garden", "The garden seeds are ordered."),
+    page(
+      "projects/kitchen.md",
+      "Kitchen",
+      "The kitchen garden plan, line by line: café, crème brûlée.\n".repeat(2_000)
+    )
+  ]
   const recall = prepareMemorySources({
-    pages: [
-      page("projects/garden.md", "Garden", "The garden seeds are ordered."),
-      page(
-        "projects/kitchen.md",
-        "Kitchen",
-        "The kitchen garden plan, line by line: café, crème brûlée.\n".repeat(2_000)
-      )
-    ],
-    recall: { query: "garden seeds kitchen plan", excludedPageIds: new Set() },
-    today: "2026-11-14",
+    pages,
+    recall: recallCandidates({
+      pages,
+      query: "garden seeds kitchen plan",
+      today: "2026-11-14",
+      sentElsewhere: new Set()
+    }),
     lastChanged: new Map()
   })
     .render(new Map())
@@ -72,8 +78,12 @@ it("records a matched passage cut for room as cut, and names a page with no room
   const render = (room: number) =>
     prepareMemorySources({
       pages,
-      recall: { query: "garden seeds kitchen plan", excludedPageIds: new Set() },
-      today: "2026-11-14",
+      recall: recallCandidates({
+        pages,
+        query: "garden seeds kitchen plan",
+        today: "2026-11-14",
+        sentElsewhere: new Set()
+      }),
       semanticMatches: [
         {
           pageId: "id:projects/kitchen.md",
@@ -92,8 +102,12 @@ it("records a matched passage cut for room as cut, and names a page with no room
   ])
   const whole = prepareMemorySources({
     pages,
-    recall: { query: "kitchen plan", excludedPageIds: new Set() },
-    today: "2026-11-14",
+    recall: recallCandidates({
+      pages,
+      query: "kitchen plan",
+      today: "2026-11-14",
+      sentElsewhere: new Set()
+    }),
     semanticMatches: [
       { pageId: "id:projects/kitchen.md", chunkText: "The kitchen plan.", score: 0.9 }
     ],

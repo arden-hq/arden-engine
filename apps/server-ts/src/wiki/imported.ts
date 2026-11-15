@@ -136,9 +136,9 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
   snapshot: Snapshot,
   input: WikiImportInput
 ) {
-  const byPath = new Map(snapshot.pages.map((record) => [normal(record.resource.path), record]))
+  const byPath = new Map(snapshot.wholeSet.map((record) => [normal(record.resource.path), record]))
   const names = new Set(
-    snapshot.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
+    snapshot.wholeSet.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
   )
   const operations: Array<WikiWrite> = []
   const created: Array<string> = []

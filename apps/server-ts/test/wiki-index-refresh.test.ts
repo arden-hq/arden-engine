@@ -12,7 +12,7 @@ import { EmbeddingSettingsStore } from "../src/persistence/settings/store.js"
 import { wikiError } from "../src/wiki/errors.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import { Wiki } from "../src/wiki/service.js"
-import type { PageRecord, Snapshot } from "../src/wiki/snapshot.js"
+import { snapshotOf, type PageRecord, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
 
 const record = (pageId: string, version: string): PageRecord => ({
@@ -41,10 +41,11 @@ const record = (pageId: string, version: string): PageRecord => ({
 
 const version = (digit: string) => digit.repeat(64)
 
-const snapshot = (head: string, pages: ReadonlyArray<readonly [string, string]>): Snapshot => ({
-  head: version(head),
-  pages: pages.map(([pageId, digit]) => record(pageId, version(digit)))
-})
+const snapshot = (head: string, pages: ReadonlyArray<readonly [string, string]>): Snapshot =>
+  snapshotOf(
+    version(head),
+    pages.map(([pageId, digit]) => record(pageId, version(digit)))
+  )
 
 const START = snapshot("1", [["a", "a"]])
 const MOVED = snapshot("2", [

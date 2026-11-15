@@ -1,3 +1,4 @@
+import { snapshotOf } from "../src/wiki/snapshot.js"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -255,7 +256,7 @@ it("a manual row folded into an older Space review row still counts as asked", a
       let asked: boolean | undefined
       yield* reviews.prepareSpaceReview(lease, (evidence) => {
         asked = evidence.asked
-        return buildSpaceReviewInput({ head: null, pages: [] })(evidence)
+        return buildSpaceReviewInput(snapshotOf(null, []))(evidence)
       })
       expect(asked).toBe(true)
     })

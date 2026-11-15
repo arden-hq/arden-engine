@@ -111,6 +111,18 @@ export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras
   reader: Schema.Literals(["owner", "worker"] as const),
   revision: Schema.NullOr(IdentifierSchema),
   query: Schema.NullOr(Schema.String),
+  budget: Schema.optionalKey(
+    withExtras({
+      standing_page: PositiveIntSchema,
+      standing_frame: PositiveIntSchema,
+      index: PositiveIntSchema,
+      space: PositiveIntSchema,
+      space_instructions: PositiveIntSchema,
+      space_page: PositiveIntSchema,
+      space_page_list: PositiveIntSchema,
+      recall: PositiveIntSchema
+    })
+  ),
   sources: Schema.Array(RunMemorySourceSchema)
 })
 

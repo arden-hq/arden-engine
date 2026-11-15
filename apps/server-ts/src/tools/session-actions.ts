@@ -360,7 +360,7 @@ const resolveDestination = async (
         services.wiki.snapshot().pipe(Effect.mapError(wikiFailure)),
         { signal }
       )
-      const exists = snapshot.pages.some(
+      const exists = snapshot.wholeSet.some(
         (record) => record.page.lifecycle === "active" && record.resource.path === destination.path
       )
       if (!exists) {

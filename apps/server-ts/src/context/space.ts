@@ -92,7 +92,7 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
             : {
                 path: page.path,
                 content: page.content,
-                index: memory.spaceIndex({ pageId: page.pageId, pagePath: page.path })
+                list: memory.spaceList({ pageId: page.pageId, pagePath: page.path })
               },
         questions: questions.questions.map((question) => ({
           question_id: question.question_id,

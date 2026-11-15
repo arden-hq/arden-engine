@@ -14,9 +14,9 @@ import { describe, expect, it } from "vitest"
 import { buildSpaceReviewInput } from "../src/automations/space-review-input.js"
 import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-sink.js"
 import { toolFacts } from "../src/tools/approval-decision.js"
-import { prepareMemorySources } from "../src/memory/retrieval.js"
+import { prepareMemorySources, recallCandidates } from "../src/memory/retrieval.js"
 import { WikiEventOutbox } from "../src/persistence/automations/wiki-event-outbox.js"
-import type { SpaceStore } from "../src/persistence/spaces/store.js"
+import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type {
   WikiRenameApprovalRecord,
@@ -24,12 +24,18 @@ import type {
 } from "../src/persistence/wiki/rename-store.js"
 import type { ServerTool } from "../src/tools/define.js"
 import { memoryForgetTools } from "../src/tools/memory-forget.js"
+import { sessionActionTools } from "../src/tools/session-actions.js"
+import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
+import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
+import { SessionStore } from "../src/persistence/sessions/store.js"
+import { ToolExecutionStore } from "../src/persistence/tools/store.js"
+import { WorkStore } from "../src/persistence/work/store.js"
 import type { ServerRunContext } from "../src/tools/run-context.js"
 import { makeWikiPageHistoryTools } from "../src/tools/wiki-page-history.js"
 import { searchPages } from "../src/tools/wiki-search.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { makeWikiChangeMethods } from "../src/wiki/change.js"
-import { memoryIndex } from "../src/wiki/collections.js"
+import { DIRECTORY_CONTRACT_HEADINGS, memoryIndex } from "../src/wiki/collections.js"
 import {
   archivePage,
   commitOutsideChange,
@@ -56,7 +62,7 @@ import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import { claimKey } from "../src/wiki/retraction.js"
 import { Wiki } from "../src/wiki/service.js"
-import { activeRunPages, type Snapshot } from "../src/wiki/snapshot.js"
+import { activeRunPages, type PageRecord } from "../src/wiki/snapshot.js"
 import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
@@ -97,7 +103,7 @@ interface Memory {
   readonly mutations: ReturnType<typeof makeWikiMutationMethods>
   readonly restores: ReturnType<typeof makeWikiRestoreMethods>
   readonly forgetting: ReturnType<typeof makeWikiForgetMethods>
-  readonly page: (path: string) => Effect.Effect<Snapshot["pages"][number], unknown>
+  readonly page: (path: string) => Effect.Effect<PageRecord, unknown>
   readonly write: (
     path: string,
     body: string,
@@ -127,7 +133,7 @@ const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>
         const page = (path: string) =>
           listing.snapshot().pipe(
             Effect.flatMap((snapshot) => {
-              const record = snapshot.pages.find((candidate) => candidate.resource.path === path)
+              const record = snapshot.wholeSet.find((candidate) => candidate.resource.path === path)
               return record === undefined
                 ? Effect.die(`${path} is missing`)
                 : Effect.succeed(record)
@@ -447,8 +453,12 @@ describe("forgetting a line", () => {
         const query = "sam does not live in the old town river forgotten"
         const prepared = prepareMemorySources({
           pages: snapshot.pages,
-          recall: { query, excludedPageIds: new Set() },
-          today: "2026-11-15",
+          recall: recallCandidates({
+            pages: snapshot.pages,
+            query: query,
+            today: "2026-11-15",
+            sentElsewhere: new Set()
+          }),
           lastChanged: new Map()
         })
         const upkeep = makeWikiMaintenanceMethods(memory.repository)
@@ -458,7 +468,9 @@ describe("forgetting a line", () => {
         const undoRange = yield* upkeep.prepare({
           processedHead: afterForget
         })
-        const indexText = prepared.render(new Map()).index(100_000).text ?? ""
+        const indexText =
+          prepared.render(new Map()).index({ maxBytes: 100_000, shownElsewhere: new Set() }).text ??
+          ""
         const linking = yield* memory.page("places/town.md")
         yield* memory.write("places/town.md", `${OTHER}\nSee [[forgotten]].\n`, ownerInApp("link"))
         const review = buildSpaceReviewInput(yield* memory.listing.snapshot())({
@@ -481,7 +493,7 @@ describe("forgetting a line", () => {
             finding.paths.includes("forgotten.md")
           ),
           reviewed: review.pages.some((page) => page.path === "forgotten.md"),
-          stored: snapshot.pages.some((record) => record.resource.path === "forgotten.md"),
+          stored: snapshot.wholeSet.some((record) => record.resource.path === "forgotten.md"),
           recalled: prepared.recalled
             .map((record) => record.resource.path)
             .includes("forgotten.md"),
@@ -554,6 +566,101 @@ const renameStore = (): WikiRenameStore["Service"] => {
 const LINKED = "Sam works with [[places/town.md|Town]] council every week."
 
 describe("what forgotten.md holds and where it stays", () => {
+  it("offers the owner forgotten.md as a place to open", async () => {
+    const opened = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const events: Array<unknown> = []
+        const tools = yield* sessionActionTools.pipe(
+          Effect.provideService(SessionStore, partialService("SessionStore", {})),
+          Effect.provideService(SessionQueries, partialService("SessionQueries", {})),
+          Effect.provideService(AutomationCatalog, partialService("AutomationCatalog", {})),
+          Effect.provideService(SpaceStore, partialService("SpaceStore", {})),
+          Effect.provideService(WorkStore, partialService("WorkStore", {})),
+          Effect.provideService(
+            Wiki,
+            partialService<Wiki["Service"]>("Wiki", { snapshot: memory.listing.snapshot })
+          ),
+          Effect.provideService(
+            SessionLifecycleEvents,
+            partialService<SessionLifecycleEvents["Service"]>("SessionLifecycleEvents", {
+              appendEvent: (event) =>
+                Effect.sync(() => {
+                  events.push(event)
+                  return { records: [], headSequence: events.length }
+                })
+            })
+          ),
+          Effect.provideService(ToolExecutionStore, partialService("ToolExecutionStore", {}))
+        )
+        const open = tools.find((tool) => tool.definition.name === "app_open")
+        if (open === undefined) throw new Error("app_open is missing")
+        yield* Effect.promise(() =>
+          Promise.resolve(
+            open.execute(
+              { destination: { kind: "memory", path: "forgotten.md" }, label: "Forgotten" },
+              {
+                run: serverRunContext(),
+                signal: new AbortController().signal,
+                toolCallId: "call-fixture",
+                messages: []
+              }
+            )
+          )
+        )
+        return events.map((event) => recordOf(event)["destination"])
+      })
+    )
+    expect(opened).toEqual([{ kind: "memory", path: "forgotten.md" }])
+  })
+
+  it("shows the owner forgotten.md, and keeps its name taken for a folder or a rename", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const forgotten = yield* memory.page("forgotten.md")
+        const listed = (yield* memory.listing.list()).pages.map((page) => page.path)
+        const read = yield* memory.listing.read(forgotten.page.pageId)
+        const message = (error: unknown) =>
+          error === undefined ? "accepted" : recordOf(error)["message"]
+        const folder = yield* refusal(
+          memory.mutations.createDirectory({
+            path: "forgotten",
+            body: DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}\n\nMine.`).join(
+              "\n\n"
+            ),
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AGENT
+          })
+        )
+        const sam = yield* memory.page("people/sam.md")
+        const renamed = yield* refusal(
+          makeWikiRenameMethods(memory.repository, spaces, renameStore()).requestRename({
+            pageId: "sam",
+            newPath: "forgotten.md",
+            newTitle: "Sam",
+            expectedVersion: sam.resource.versionId,
+            expectedHead: (yield* memory.listing.head()) ?? "",
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AGENT
+          })
+        )
+        return {
+          listed: listed.includes("forgotten.md"),
+          read: read.path,
+          folder: message(folder),
+          renamed: message(renamed)
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      listed: true,
+      read: "forgotten.md",
+      folder: "forgotten.md is kept by Arden for the owner. Nothing was saved; leave it unchanged.",
+      renamed: "Another Wiki page already owns the new path or link name"
+    })
+  })
+
   it("holds no link, so a run can still rename a page a forgotten line linked to", async () => {
     const outcome = await withMemory((memory) =>
       Effect.gen(function* () {

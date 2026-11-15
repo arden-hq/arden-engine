@@ -8,10 +8,9 @@ import type {
   SpacePageBinding,
   SpaceStore
 } from "../persistence/spaces/store.js"
-import { memoryIndex, type MemoryIndex } from "./collections.js"
 import { isReadme } from "./page.js"
 import { canonicalWikiPath } from "./paths.js"
-import { activeRunPages, type PageRecord } from "./snapshot.js"
+import { activeRunPages, type RunPage } from "./snapshot.js"
 
 const spaceFolder = (pagePath: string): string => {
   if (isReadme(pagePath)) return posix.dirname(pagePath)
@@ -101,29 +100,26 @@ export const spacePageCheck = (spaces: ActiveBindings) =>
 
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   space: SpacePageBinding
-): ReadonlyArray<PageRecord> =>
+): ReadonlyArray<RunPage> =>
   activeRunPages(pages).filter((record) => spaceOwnsPath(space.pagePath, record.resource.path))
 
-/** The generated list of the pages a Space owns besides its own page, in at most `maxBytes`. */
-export const spacePageIndex = (
-  pages: ReadonlyArray<PageRecord>,
-  space: SpacePageBinding,
-  maxBytes: number
-): MemoryIndex =>
-  memoryIndex(spacePages(pages, space), {
-    root: spaceFolder(space.pagePath),
-    maxBytes,
-    leaveOut: (record) => record.page.pageId === space.pageId
-  })
+/** What a Space's list of its other pages holds: the pages under the folder it heads, but its own. */
+export const spacePageList = (
+  pages: ReadonlyArray<RunPage>,
+  space: SpacePageBinding
+): { readonly root: string; readonly pages: ReadonlyArray<RunPage> } => ({
+  root: spaceFolder(space.pagePath),
+  pages: spacePages(pages, space).filter((record) => record.page.pageId !== space.pageId)
+})
 
 export type SpacePagePlan =
   | { readonly kind: "keep" | "rebind"; readonly page: FreeSpacePage }
   | { readonly kind: "create" }
 
 export const planSpacePage = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   space: SpaceBindingRow,
   others: ReadonlyArray<SpaceBinding>
 ): SpacePagePlan => {

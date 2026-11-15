@@ -139,8 +139,8 @@ export const makeWikiListingMethods = (
     }
     const shown = [
       ...(includeRedirects
-        ? current.pages
-        : current.pages.filter((record) => record.page.lifecycle === "active"))
+        ? current.wholeSet
+        : current.wholeSet.filter((record) => record.page.lifecycle === "active"))
     ]
       .sort(compareWikiPage)
       .filter((record) => cursor === null || afterWikiCursor(record, cursor))

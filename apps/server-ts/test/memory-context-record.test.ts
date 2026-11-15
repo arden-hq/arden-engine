@@ -1,7 +1,11 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { RunMemoryContextSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
+import type {
+  RunMemoryComposition,
+  RunMemoryContext,
+  RunMemorySource
+} from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
@@ -16,12 +20,13 @@ import {
   type TurnContextServices
 } from "../src/context/turn-context.js"
 import { unrecordedAuthority, type Actor, type RunAuthority } from "../src/execution/authority.js"
-import { prepareMemorySources, recallQuery } from "../src/memory/retrieval.js"
+import { renderIndex } from "../src/memory/index-render.js"
+import { prepareMemorySources, recallCandidates, recallQuery } from "../src/memory/retrieval.js"
 import type { Memory, MemoryTurn } from "../src/memory/service.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
 import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import type { SkillCatalog } from "../src/skills/service.js"
 import type { TodoStore } from "../src/persistence/todos/store.js"
@@ -29,7 +34,6 @@ import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store
 import type { SummaryStore } from "../src/persistence/summaries/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import type { Wiki } from "../src/wiki/service.js"
-import { spacePageIndex } from "../src/wiki/space-index.js"
 import type { CliTools } from "../src/cli-tools/service.js"
 import type { FocusChoiceStore } from "../src/persistence/focus-choices/store.js"
 import type { AnswerBlockStore } from "../src/persistence/answer-blocks/store.js"
@@ -37,13 +41,13 @@ import type { PermissionRules } from "../src/persistence/permissions/rules.js"
 import type { ToolApprovalPolicy } from "../src/tools/approval-policy.js"
 import type { AutomationId } from "../src/persistence/automations/model.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { partialService, sessionHeader } from "./kit.js"
+import { partialService, runPage, sessionHeader } from "./kit.js"
 
 const QUERY = "orchard lantern ledger notes for the week"
 
-const page = (path: string, title: string, body: string): PageRecord => {
+const page = (path: string, title: string, body: string): RunPage => {
   const pageId = `id-${path}`
-  return {
+  return runPage({
     resource: {
       resourceId: pageId,
       path,
@@ -65,7 +69,7 @@ const page = (path: string, title: string, body: string): PageRecord => {
         pageId
       )
     )
-  }
+  })
 }
 
 const core = page("me.md", "Me", "Prefers short replies.")
@@ -93,7 +97,7 @@ const blocksInPrompt = (sections: ReadonlyArray<RuntimeSection>): ReadonlyMap<st
 /** The record's sent page sources, by path, with their bytes. */
 const recordedBlocks = (
   record: ReadonlyArray<RunMemorySource>,
-  pages: ReadonlyArray<PageRecord>
+  pages: ReadonlyArray<RunPage>
 ): ReadonlyMap<string, number> =>
   new Map(
     record.flatMap((source) =>
@@ -143,7 +147,7 @@ const compose = async ({
   originSource = "personal"
 }: {
   readonly actor: Actor | undefined
-  readonly pages?: ReadonlyArray<PageRecord>
+  readonly pages?: ReadonlyArray<RunPage>
   readonly messages?: ReadonlyArray<ChatRunnerMessage>
   readonly spaceId?: string | null
   readonly instructions?: string | null
@@ -161,7 +165,7 @@ const compose = async ({
         version: spacePage.resource.versionId,
         content: spaceBody
       }),
-    spaceIndex: (space) => (maxBytes) => spacePageIndex(pages, space, maxBytes),
+    spaceList: (space) => (maxBytes) => renderIndex(pages, { kind: "space", space }, maxBytes),
     sources: (input) =>
       Effect.sync(() => {
         if (input.recall !== undefined) searches.push(input.recall.query)
@@ -170,11 +174,12 @@ const compose = async ({
           recall:
             input.recall === undefined
               ? undefined
-              : {
+              : recallCandidates({
+                  pages,
                   query: input.recall.query,
-                  excludedPageIds: new Set(input.recall.excludePageIds ?? [])
-                },
-          today: "2026-11-14",
+                  today: "2026-11-14",
+                  sentElsewhere: new Set(input.recall.excludePageIds ?? [])
+                }),
           lastChanged: new Map()
         }).render(new Map())
       })
@@ -366,6 +371,51 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     expect((space?.bytes ?? 0) + (list?.bytes ?? 0) + 2).toBe(bytes(text ?? ""))
   })
 
+  const listLines = (text: string | undefined) =>
+    new Set((text ?? "").split("\n").filter((line) => line.startsWith("- ")))
+
+  it("leaves out of the Memory index the lines the Space list shows, so no line is sent twice", async () => {
+    const beds = page("spaces/garden/beds.md", "Beds", "Raised beds.")
+    const seeds = page("spaces/garden/seeds/list.md", "Seeds", "Seed list.")
+    const pages = [...PAGES, beds, seeds]
+    const owner = await compose({ actor: person, spaceId: "space-1", pages })
+    const index = owner.sections.find((section) => section.key === "Memory index")?.text
+    const space = owner.sections.find((section) => section.key === "Current Space")?.text
+    expect([...listLines(index)].filter((line) => listLines(space).has(line))).toEqual([])
+    expect(index).not.toContain("spaces/garden/beds.md")
+    expect(index).not.toContain("(folded)")
+    expect(
+      owner.writes[0]?.sources.find((source) => source.kind === "index" && source.root === "")
+    ).toMatchObject({ folded: [], outcome: "whole", reason: null })
+    const worker = await compose({
+      actor: { kind: "task_worker", item_id: "t", space_id: "space-1" },
+      spaceId: "space-1",
+      pages
+    })
+    const workerIndex = worker.sections.find((section) => section.key === "Memory index")?.text
+    expect(workerIndex).toContain("- spaces/garden/beds.md")
+    expect(workerIndex).not.toContain("(folded)")
+  })
+
+  it("keeps in the Memory index the Space's pages its list folded, each page shown once", async () => {
+    const beds = Array.from({ length: 30 }, (_, index) =>
+      page(
+        `spaces/garden/bed-${index}.md`,
+        `Bed ${index}`,
+        "A raised bed in the garden, with its soil, crops and watering notes."
+      )
+    )
+    const owner = await compose({ actor: person, spaceId: "space-1", pages: [...PAGES, ...beds] })
+    const index = owner.sections.find((section) => section.key === "Memory index")?.text
+    const space = owner.sections.find((section) => section.key === "Current Space")?.text
+    expect(space).toContain("- spaces/garden/ (folded)")
+    expect([...listLines(index)].filter((line) => listLines(space).has(line))).toEqual([])
+    for (const bed of beds) expect(index).toContain(`- ${bed.resource.path}`)
+    expect(
+      owner.writes[0]?.sources.find((source) => source.kind === "index" && source.root === "")
+    ).toMatchObject({ listed: 33, folded: [], outcome: "whole", reason: null })
+  })
+
   it("folds a long list of the Space's pages in its own allowance, with a notice", async () => {
     const many = Array.from({ length: 120 }, (_, index) =>
       page(`spaces/garden/beds/bed-${index}.md`, `Bed ${index}`, "A raised bed in the garden.")
@@ -378,7 +428,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     })
     const text = composed.sections.find((section) => section.key === "Current Space")?.text ?? ""
     expect(text).toContain("spaces/garden/beds/ (folded)")
-    expect(text).toContain("[Folded to fit")
+    expect(text).toContain("[Folded to fit: a folder marked folded")
     const record = composed.writes[0]?.sources ?? []
     expect(record.find((source) => source.kind === "index" && source.root !== "")).toMatchObject({
       root: "spaces/garden",
@@ -387,7 +437,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "cut",
       reason: "index_allowance"
     })
-    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePageList)
+    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.space_page_list)
     expect(record.find((source) => source.kind === "space")).toEqual(
       plain.writes[0]?.sources.find((source) => source.kind === "space")
     )
@@ -411,6 +461,7 @@ describe("what an owner chat is sent and records", () => {
       reader: "owner",
       revision: "rev-1",
       query: QUERY,
+      budget: expect.any(Object),
       sources: undefined
     })
     expect(record.map(({ bytes: _bytes, ...rest }) => rest)).toEqual([
@@ -556,7 +607,7 @@ describe("each source in its own allowance", () => {
     const coreSource = composed.writes[0]?.sources.find((source) => source.kind === "core")
     expect(coreSource).toEqual(expect.objectContaining({ outcome: "whole", reason: null }))
     expect(coreSource?.bytes).toBeGreaterThan(26_000)
-    expect(coreSource?.bytes).toBeLessThanOrEqual(MEMORY_BUDGET.standingPage)
+    expect(coreSource?.bytes).toBeLessThanOrEqual(MEMORY_BUDGET.standing_page)
   })
 
   it("keeps the whole block within the sum of its allowances", async () => {
@@ -653,6 +704,7 @@ describe("one owner for each limit and rule", () => {
     expect(
       offenders(/"(Core Memory|Memory recall|Memory index|Current Space)"[^\n]*\)/u, [
         "context/memory-context.ts",
+        "memory/index-render.ts",
         "memory/retrieval.ts"
       ])
     ).toEqual([])
@@ -663,6 +715,15 @@ describe("one owner for each limit and rule", () => {
       offenders(/\.(index|recall)\??\.?\(\s*[\d_A-Z]/u, ["context/memory-context.ts"])
     ).toEqual([])
     expect(files.filter((file) => file.endsWith("continuity-budget.ts"))).toEqual([])
+  })
+
+  it("renders every generated page list, the Memory index and a Space's, in one renderer", () => {
+    expect(
+      offenders(/\bmemoryIndex\(/u, ["memory/index-render.ts", "wiki/collections.ts"])
+    ).toEqual([])
+    expect(offenders(/\[(Folded|Cut to fit: the last lines)/u, ["memory/index-render.ts"])).toEqual(
+      []
+    )
   })
 
   it("only core-memory.ts names the standing-facts pages", () => {
@@ -685,19 +746,37 @@ describe("the stored record", () => {
     outcome: "cut",
     reason: "recall_allowance"
   })
-  const first: RunMemoryContext = {
+  const budget = {
+    standing_page: 28_000,
+    standing_frame: 1_000,
+    index: 10_000,
+    space: 10_000,
+    space_instructions: 4_000,
+    space_page: 4_000,
+    space_page_list: 2_000,
+    recall: 7_000
+  }
+  const first: RunMemoryComposition = {
     reader: "owner",
     revision: "rev-1",
     query: "a made-up question",
+    budget,
     sources: [source("page-a"), source("page-b")]
   }
-  const steered: RunMemoryContext = {
+  const steered: RunMemoryComposition = {
     reader: "owner",
     revision: "rev-1",
     query: "a made-up steer",
+    budget,
     sources: [source("page-c")]
   }
-  const none: RunMemoryContext = { reader: "worker", revision: null, query: null, sources: [] }
+  const none: RunMemoryComposition = {
+    reader: "worker",
+    revision: null,
+    query: null,
+    budget,
+    sources: []
+  }
 
   it("keeps every composition of a run in order, once each, and adds no row for none", async () => {
     const result = await withTempDatabase(
@@ -717,6 +796,16 @@ describe("the stored record", () => {
       })
     )
     expect(result).toEqual({ kept: [first, steered, none], never: [], rows: ["run-a"] })
+  })
+
+  it("records the budget each composition was made under, every allowance of it", async () => {
+    const composed = await compose({ actor: person, spaceId: "space-1" })
+    const budget = composed.writes[0]?.budget
+    expect(budget).toEqual(MEMORY_BUDGET)
+    const decode = Schema.decodeUnknownSync(RunMemoryContextSchema)
+    expect(decode(composed.writes[0])).toEqual(composed.writes[0])
+    const { budget: _budget, ...before } = first
+    expect(decode(before)).toEqual(before)
   })
 
   it("never writes a retired value", () => {

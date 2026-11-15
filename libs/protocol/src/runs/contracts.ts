@@ -54,7 +54,7 @@ export interface RunLocalInstructionSource extends JsonRecord {
 /**
  * How much of a Memory source reached the prompt: `passage` is the part a search matched,
  * chosen rather than cut. `cut` and `dropped` name the limit in `reason`. For the index, `cut`
- * means folders were folded, and past that, lines were left out from the end.
+ * means folders were folded to fit, and past that, lines were left out from the end.
  */
 export type RunMemoryOutcome = "whole" | "passage" | "cut" | "dropped"
 
@@ -124,7 +124,9 @@ export interface RunMemoryRecalledSource extends RunMemoryPageFields {
 
 /**
  * The generated index of the pages under `root` ("" is all of Memory): `listed` pages had a
- * line each, and each folded folder was counted as one line of `pages`.
+ * line each, and each folded folder was counted as one line of `pages`. The Memory index folds
+ * whole the folder of a Space list the run is also sent, so no line is sent twice; that fold
+ * alone leaves it `whole`.
  */
 export interface RunMemoryIndexSource extends JsonRecord {
   readonly kind: "index"
@@ -144,6 +146,23 @@ export type RunMemorySource =
   | RunMemoryIndexSource
 
 /**
+ * The allowances, in UTF-8 bytes, a Memory block was composed under: `standing_page` for each
+ * standing-facts page and `standing_frame` for their note and heading; the Space context in
+ * `space`, with `space_instructions` and `space_page` its shares, and `space_page_list` beside
+ * it; `index` and `recall`.
+ */
+export interface RunMemoryBudget extends JsonRecord {
+  readonly standing_page: number
+  readonly standing_frame: number
+  readonly index: number
+  readonly space: number
+  readonly space_instructions: number
+  readonly space_page: number
+  readonly space_page_list: number
+  readonly recall: number
+}
+
+/**
  * One composition of a Run's Memory block: what every model request was sent from it until
  * the Run composed its context again. All pages were read at Memory `revision` (null when
  * Memory could not be read). `query` is the owner's recent typed text as far as the recall's
@@ -153,8 +172,13 @@ export interface RunMemoryContext extends JsonRecord {
   readonly reader: RunMemoryReader
   readonly revision: string | null
   readonly query: string | null
+  /** Absent in a composition stored before the record named its budget, so not known. */
+  readonly budget?: RunMemoryBudget
   readonly sources: ReadonlyArray<RunMemorySource>
 }
+
+/** A composition as it is written now: every new one names its budget. */
+export type RunMemoryComposition = RunMemoryContext & { readonly budget: RunMemoryBudget }
 
 /** Durable, restart-safe projection of one Run. */
 export interface RunDetail extends JsonRecord {

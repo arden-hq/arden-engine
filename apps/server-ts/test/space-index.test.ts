@@ -12,14 +12,14 @@ import { archivePage, movePage, ownerInApp } from "../src/wiki/commit.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
 import { commitWiki, type WikiCommitPoint } from "../src/wiki/commit.js"
 import {
   bindingOwnsPath,
   planSpacePage,
   spaceBinding,
   spaceOwnsPath,
-  spacePageIndex,
+  spacePageList,
   spacePages,
   type SpaceBinding
 } from "../src/wiki/space-index.js"
@@ -33,15 +33,15 @@ import { Wiki } from "../src/wiki/service.js"
 import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { withoutSpaces, namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
-import { partialService, serverRunContext } from "./kit.js"
+import { partialService, runPage, serverRunContext } from "./kit.js"
 import { freePage } from "./fixtures/free-space-page.js"
 
 const page = (
   path: string,
   options: { readonly state?: "active" | "archived"; readonly pageId?: string } = {}
-): PageRecord => {
+): RunPage => {
   const pageId = options.pageId ?? `id-${path}`
-  return {
+  return runPage({
     resource: {
       resourceId: pageId,
       path,
@@ -63,7 +63,7 @@ const page = (
         pageId
       )
     )
-  }
+  })
 }
 
 const binding = (spaceId: string, path: string | null, pageId = `id-${path}`): SpaceBinding =>
@@ -98,24 +98,21 @@ describe("which pages a Space owns", () => {
   })
 
   it("lists every other page the Space owns, leaving out its own page, folder case aside", () => {
-    const index = spacePageIndex(
-      [...pages, page("areas/Garden/notes.md")],
-      { pageId: "id-areas/garden.md", pagePath: "areas/garden.md" },
-      10_000
-    )
-    expect(index.root).toBe("areas/garden")
-    expect(index.lines.map((line) => line.path).sort()).toEqual([
+    const list = spacePageList([...pages, page("areas/Garden/notes.md")], {
+      pageId: "id-areas/garden.md",
+      pagePath: "areas/garden.md"
+    })
+    expect(list.root).toBe("areas/garden")
+    expect(list.pages.map((record) => record.resource.path).sort()).toEqual([
       "areas/Garden/notes.md",
       "areas/garden/beds.md",
       "areas/garden/seeds/list.md"
     ])
-    expect(index.unlisted).toBe(0)
-    const own = spacePageIndex(
-      pages,
-      { pageId: "id-areas/kitchen/README.md", pagePath: "areas/kitchen/README.md" },
-      10_000
-    )
-    expect(own.lines.map((line) => line.path)).toEqual(["areas/kitchen/pans.md"])
+    const own = spacePageList(pages, {
+      pageId: "id-areas/kitchen/README.md",
+      pagePath: "areas/kitchen/README.md"
+    })
+    expect(own.pages.map((record) => record.resource.path)).toEqual(["areas/kitchen/pans.md"])
   })
 })
 

@@ -134,7 +134,7 @@ export const makeDailySummaryRunner = (services: {
     const end = dayStart(nextDay(date), timezone)
     const path = `daily/${date}.md`
     const snapshot = yield* services.wiki.snapshot()
-    const existing = snapshot.pages.find(
+    const existing = snapshot.wholeSet.find(
       (page) => page.resource.path.toLowerCase() === path.toLowerCase()
     )
     const folders = recordFolders(snapshot.pages)

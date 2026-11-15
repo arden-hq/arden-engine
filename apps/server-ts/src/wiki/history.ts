@@ -201,12 +201,12 @@ export const makeWikiHistoryMethods = (
 
   const links = Effect.fn("Wiki.links")(function* (pageId: string) {
     const current = yield* snapshot()
-    const byId = new Map(current.pages.map((record) => [record.page.pageId, record] as const))
+    const byId = new Map(current.wholeSet.map((record) => [record.page.pageId, record] as const))
     const record = byId.get(pageId)
     if (record === undefined || record.page.lifecycle !== "active" || current.head === null) {
       return yield* notFound("links", pageId)
     }
-    const names = pageNameIndex(current.pages)
+    const names = pageNameIndex(current.wholeSet)
     const reference = (sourcePageId: string, token: WikiLinkToken): WikiLink => {
       const targetPageId = resolveWikiLinkTarget(byId, names, sourcePageId, token)
       return {
@@ -221,7 +221,7 @@ export const makeWikiHistoryMethods = (
     }
     const outgoing = pageWikiLinks(record).map((token) => reference(pageId, token))
     const backlinks: WikiLink[] = []
-    for (const source of current.pages) {
+    for (const source of current.wholeSet) {
       for (const token of pageWikiLinks(source)) {
         const item = reference(source.page.pageId, token)
         if (item.targetPageId === pageId) backlinks.push(item)

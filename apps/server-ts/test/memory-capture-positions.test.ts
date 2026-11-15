@@ -1,3 +1,4 @@
+import { snapshotOf } from "../src/wiki/snapshot.js"
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { DateTime, Effect, Exit } from "effect"
@@ -31,7 +32,7 @@ const capture = Effect.fn("capture")(function* (receipts = new Set<string>()) {
         Effect.sync(() => {
           receipts.add(JSON.stringify(identity))
         }),
-      snapshot: () => Effect.succeed({ head: null, pages: [] })
+      snapshot: () => Effect.succeed(snapshotOf(null, []))
     },
     captures: yield* MemoryCaptureStore,
     sessions: yield* SessionQueries,

@@ -6,7 +6,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { posix } from "node:path"
 
 import { isReadme, normal, wikiPageSummary, type ParsedWikiPage } from "./page.js"
-import { activeRunPages, type PageRecord } from "./snapshot.js"
+import { activeRunPages, type PageRecord, type RunPage } from "./snapshot.js"
 
 export const DIRECTORY_CONTRACT_HEADINGS = [
   "Purpose",
@@ -166,12 +166,8 @@ export interface WikiCollection {
 
 const excerpt = (text: string | undefined): string => clipLine(text ?? "", 240)
 
-export const wikiCollections = (
-  pages: ReadonlyArray<PageRecord>
-): ReadonlyArray<WikiCollection> => {
-  const active = pages.filter(
-    (record) => record.resource.state === "active" && record.page.lifecycle === "active"
-  )
+export const wikiCollections = (pages: ReadonlyArray<RunPage>): ReadonlyArray<WikiCollection> => {
+  const active = activeRunPages(pages)
   const folders = recordFolders(active)
   const directPages = new Map<string, number>()
   for (const page of active) {
@@ -265,7 +261,7 @@ export const prepareMemoryIndex = (pages: ReadonlyArray<PageRecord>): void => {
  * fit, lines are left out from the end. Pure: the same pages give the same index.
  */
 export const memoryIndex = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   options: {
     readonly root: string
     readonly maxBytes: number

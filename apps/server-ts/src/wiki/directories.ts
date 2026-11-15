@@ -133,7 +133,7 @@ export const makeWikiDirectoryMethods = (
       }
     }
     yield* requireWikiWritePaths(boundary, "create", [readmePath])
-    const folders = recordFolders(snapshot.pages)
+    const folders = recordFolders(snapshot.wholeSet)
     const placed = pageKind(folders, readmePath)
     if (placed.kind === "record" && placed.folder.producer.kind === "automation") {
       return yield* wikiError(
@@ -145,7 +145,7 @@ export const makeWikiDirectoryMethods = (
     const parent = posix.dirname(directory)
     if (
       parent !== "." &&
-      !snapshot.pages.some(
+      !snapshot.wholeSet.some(
         (record) =>
           record.resource.path.toLowerCase() === `${parent}/readme.md`.toLowerCase() &&
           record.page.lifecycle === "active"
@@ -158,7 +158,7 @@ export const makeWikiDirectoryMethods = (
       )
     }
 
-    const current = snapshot.pages.find(
+    const current = snapshot.wholeSet.find(
       (record) => record.resource.path.toLowerCase() === readmePath.toLowerCase()
     )
     if (current !== undefined) {
@@ -175,7 +175,7 @@ export const makeWikiDirectoryMethods = (
       }
       const boundProducer = markedProducer(current.page)
       if (producerAutomationId !== undefined && boundProducer !== producerAutomationId) {
-        const occupied = snapshot.pages.some(
+        const occupied = snapshot.wholeSet.some(
           (record) =>
             record.resource.path.toLowerCase().startsWith(`${directory.toLowerCase()}/`) &&
             record.page.pageId !== current.page.pageId
@@ -216,7 +216,7 @@ export const makeWikiDirectoryMethods = (
       }
     }
 
-    const occupant = snapshot.pages.find(
+    const occupant = snapshot.wholeSet.find(
       (record) =>
         record.resource.path.toLowerCase() === `${directory}.md`.toLowerCase() &&
         record.page.lifecycle === "active"
@@ -235,7 +235,7 @@ export const makeWikiDirectoryMethods = (
       occupant !== undefined &&
       authorityOwnsBoundaryPage(boundary, occupant.page.pageId, occupant.resource.path)
     const targetNames = new Set(pageNamesForPath(readmePath).map(normal))
-    const nameOwner = snapshot.pages.find(
+    const nameOwner = snapshot.wholeSet.find(
       (record) =>
         record.page.pageId !== occupant?.page.pageId &&
         pageNamesForPath(record.resource.path).some((name) => targetNames.has(normal(name)))

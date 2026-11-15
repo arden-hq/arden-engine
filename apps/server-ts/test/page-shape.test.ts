@@ -6,21 +6,23 @@ import { describe, expect, it } from "vitest"
 
 import { formatRedirectPage, formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import { FINDING_KINDS, memoryFindings, type FindingKind } from "../src/wiki/page-shape.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import type { RunPage } from "../src/wiki/snapshot.js"
+import { runPage } from "./kit.js"
 import { untrackedFiles } from "../src/wiki/untracked.js"
 
 const HASH = "0".repeat(64)
 
-const record = (path: string, content: string, pageId: string): PageRecord => ({
-  resource: { resourceId: pageId, path, blobId: HASH, state: "active", versionId: HASH },
-  page: Effect.runSync(parseWikiPage(content, pageId))
-})
+const record = (path: string, content: string, pageId: string): RunPage =>
+  runPage({
+    resource: { resourceId: pageId, path, blobId: HASH, state: "active", versionId: HASH },
+    page: Effect.runSync(parseWikiPage(content, pageId))
+  })
 
 const page = (
   path: string,
   body: string,
   options: { readonly title?: string; readonly metadata?: Record<string, string> } = {}
-): PageRecord =>
+): RunPage =>
   record(
     path,
     formatWikiPage({
@@ -35,7 +37,7 @@ const page = (
     `id:${path}`
   )
 
-const redirect = (path: string, target: string): PageRecord =>
+const redirect = (path: string, target: string): RunPage =>
   record(
     path,
     formatRedirectPage({ pageId: `id:${path}`, title: path, redirectTo: target }),
@@ -45,7 +47,7 @@ const redirect = (path: string, target: string): PageRecord =>
 const LONG = "The made-up project ships its first build once the review of the design is done."
 const linked = (...paths: ReadonlyArray<string>) => paths.map((path) => `[[${path}]]`).join(" ")
 
-const base = (...more: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> => {
+const base = (...more: ReadonlyArray<RunPage>): ReadonlyArray<RunPage> => {
   const notes = more.map((extra) => extra.resource.path).filter((path) => path.startsWith("notes/"))
   return [
     page("README.md", `Entry. ${linked("notes/README.md", "daily/README.md")}`),
@@ -58,7 +60,7 @@ const base = (...more: ReadonlyArray<PageRecord>): ReadonlyArray<PageRecord> => 
 }
 
 const found = (
-  pages: ReadonlyArray<PageRecord>,
+  pages: ReadonlyArray<RunPage>,
   kind: FindingKind,
   untracked: ReadonlyArray<UntrackedFile> = []
 ) =>

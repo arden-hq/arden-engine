@@ -14,7 +14,7 @@ import { DailySummaryPosition } from "../src/persistence/daily-summary/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
-import type { PageRecord } from "../src/wiki/snapshot.js"
+import { snapshotOf, type PageRecord } from "../src/wiki/snapshot.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 const NOW = Date.parse("2026-11-13T10:00:00.000Z")
@@ -110,7 +110,7 @@ const dailyRunner = Effect.fn("dailyRunner")(function* (
   let items = 0
   const runner = makeDailySummaryRunner({
     wiki: {
-      snapshot: () => Effect.succeed({ head: "head", pages: [contract, ...(options.pages ?? [])] }),
+      snapshot: () => Effect.succeed(snapshotOf("head", [contract, ...(options.pages ?? [])])),
       pageTimes: () =>
         Effect.succeed(
           new Map(

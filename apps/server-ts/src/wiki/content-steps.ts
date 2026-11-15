@@ -70,7 +70,7 @@ export const makeWikiContentStepMethods = (
       ({ resource }) => !isImportedPath(resource.path)
     )
     const taken = new Set(
-      snapshot.pages.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
+      snapshot.wholeSet.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
     )
     const rewritten = yield* step.rewrite(
       pages.map(({ page, resource }) => ({

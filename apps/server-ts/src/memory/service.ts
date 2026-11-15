@@ -9,13 +9,12 @@ import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { lastChangedLines } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import type { PageTimes } from "../wiki/timestamps.js"
-import type { MemoryIndex } from "../wiki/collections.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
-import { spacePageIndex } from "../wiki/space-index.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { prepareMemorySources, recordsPastRecallAge, type MemorySources } from "./retrieval.js"
+import { renderIndex, type RenderedIndex } from "./index-render.js"
+import { prepareMemorySources, recallCandidates, type MemorySources } from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -32,10 +31,10 @@ export interface MemoryTurn {
   readonly revision: string | null
   readonly readContent: (pageId: string) => ReturnType<typeof readSnapshotContent>
   /** The generated list of a Space's pages besides its own, in at most `maxBytes`. */
-  readonly spaceIndex: (space: {
+  readonly spaceList: (space: {
     readonly pageId: string
     readonly pagePath: string
-  }) => (maxBytes: number) => MemoryIndex
+  }) => (maxBytes: number) => RenderedIndex
   /** What this run may be sent from Memory: standing facts, the index and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
@@ -76,21 +75,21 @@ const sources = Effect.fn("Memory.sources")(function* (
         })
     )
   )
+  const now = DateTime.toEpochMillis(yield* DateTime.now)
   const recall =
     valid.recall === undefined
       ? undefined
-      : { query: valid.recall.query, excludedPageIds: new Set(valid.recall.excludePageIds ?? []) }
-  const now = DateTime.toEpochMillis(yield* DateTime.now)
-  const today = localDayOf(now, machineTimeZone())
+      : recallCandidates({
+          pages: current.pages,
+          query: valid.recall.query,
+          today: localDayOf(now, machineTimeZone()),
+          sentElsewhere: new Set(valid.recall.excludePageIds ?? [])
+        })
   const semantic =
     recall === undefined
       ? []
       : yield* embeddings
-          .search(
-            current,
-            recall.query,
-            new Set([...recall.excludedPageIds, ...recordsPastRecallAge(current.pages, today)])
-          )
+          .search(current, recall.query, recall.excluded)
           .pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Semantic Memory recall failed", cause).pipe(Effect.as([]))
@@ -109,7 +108,6 @@ const sources = Effect.fn("Memory.sources")(function* (
     lastChanged: lastChangedLines(times, now),
     pages: current.pages,
     recall,
-    today,
     semanticMatches: semantic
   })
   const chats = yield* discussedIn({
@@ -144,7 +142,8 @@ export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
   return {
     revision: current.head,
     readContent: (pageId) => readSnapshotContent(current, pageId),
-    spaceIndex: (space) => (maxBytes) => spacePageIndex(current.pages, space, maxBytes),
+    spaceList: (space) => (maxBytes) =>
+      renderIndex(current.pages, { kind: "space", space }, maxBytes),
     sources: (input) => sources(services, input, current)
   } satisfies MemoryTurn
 })

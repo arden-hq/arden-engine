@@ -21,7 +21,7 @@ it("prints the findings on the copy's Memory, paths and counts only", async () =
       const snapshot = yield* loadSnapshot(repository, "list")
       const status = yield* repository.workingTreeStatus(UNTRACKED_PAGES)
       return {
-        pages: snapshot.pages.length,
+        pages: snapshot.wholeSet.length,
         untracked: status.untracked.length,
         findings: memoryFindings({ pages: snapshot.pages, untracked: status.untracked })
       }
