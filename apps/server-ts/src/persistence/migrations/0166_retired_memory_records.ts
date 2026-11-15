@@ -49,6 +49,22 @@ const todayComposition = (composition: unknown): unknown => {
 const todayRecord = (record: unknown): unknown =>
   Array.isArray(record) ? record.map(todayComposition) : record
 
+const rewriteRecords = (database: DatabaseSync): void => {
+  const update = database.prepare(
+    "UPDATE run_sidecars SET context_manifest_json = ? WHERE run_id = ?"
+  )
+  const rows = database
+    .prepare(
+      "SELECT run_id, context_manifest_json FROM run_sidecars WHERE context_manifest_json <> '[]'"
+    )
+    .all()
+  for (const row of rows) {
+    const stored = JSON.parse(String(row["context_manifest_json"])) as unknown
+    const next = JSON.stringify(todayRecord(stored))
+    if (next !== JSON.stringify(stored)) update.run(next, String(row["run_id"]))
+  }
+}
+
 const withoutResident = (pages: unknown): unknown =>
   Array.isArray(pages)
     ? pages.filter((page) => !isObject(page) || page["basis"] !== "resident")
@@ -65,66 +81,62 @@ const todayReviewInput = (input: unknown): unknown => {
 }
 
 const todayQueuedContext = (context: unknown): unknown =>
-  isObject(context) && "space_review_input" in context
+  isObject(context)
     ? { ...context, space_review_input: todayReviewInput(context["space_review_input"]) }
     : context
 
-const rewrite = (
-  database: DatabaseSync,
-  query: { readonly select: string; readonly update: string },
-  today: (stored: unknown) => unknown
-): void => {
-  const update = database.prepare(query.update)
-  for (const row of database.prepare(query.select).all()) {
-    const stored = String(row["stored"])
-    const next = JSON.stringify(today(JSON.parse(stored)))
-    if (next !== JSON.stringify(JSON.parse(stored))) update.run(next, row["id"] as string | number)
+// Review inputs are large: SQLite picks the rows that name a resident page, and each is parsed once.
+const RESIDENT = `'%"basis":"resident"%'`
+const REVIEW_INPUTS = [
+  {
+    table: "automation_runs",
+    key: "id",
+    column: "input_json",
+    where: "purpose = 'space_review' AND input_json IS NOT NULL",
+    today: todayReviewInput
+  },
+  {
+    table: "space_review_checkpoints",
+    key: "space_id",
+    column: "reviewed_input",
+    where: "1",
+    today: todayReviewInput
+  },
+  {
+    table: "automation_event_queue",
+    key: "id",
+    column: "context",
+    where: "json_type(context, '$.space_review_input') = 'object'",
+    today: todayQueuedContext
+  }
+] as const
+
+const dropResident = (database: DatabaseSync, input: (typeof REVIEW_INPUTS)[number]): void => {
+  const { table, key, column } = input
+  const keys = database
+    .prepare(
+      `SELECT ${key} AS key FROM ${table} WHERE ${input.where} AND ${column} LIKE ${RESIDENT}`
+    )
+    .all()
+  const read = database.prepare(`SELECT ${column} AS stored FROM ${table} WHERE ${key} = ?`)
+  const update = database.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${key} = ?`)
+  for (const row of keys) {
+    const id = row["key"] as string | number
+    const stored = JSON.parse(String(read.get(id)?.["stored"])) as unknown
+    update.run(JSON.stringify(input.today(stored)), id)
   }
 }
 
 const IMMUTABLE_RUN = "automation_runs_immutable_context"
 
 const up = (database: DatabaseSync): void => {
-  rewrite(
-    database,
-    {
-      select: `SELECT run_id AS id, context_manifest_json AS stored FROM run_sidecars
-        WHERE context_manifest_json <> '[]'`,
-      update: "UPDATE run_sidecars SET context_manifest_json = ? WHERE run_id = ?"
-    },
-    todayRecord
-  )
+  rewriteRecords(database)
   const trigger = database
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
     .get(IMMUTABLE_RUN)?.["sql"]
   if (typeof trigger === "string") database.exec(`DROP TRIGGER ${IMMUTABLE_RUN}`)
-  rewrite(
-    database,
-    {
-      select: `SELECT id, input_json AS stored FROM automation_runs
-        WHERE purpose = 'space_review' AND input_json IS NOT NULL`,
-      update: "UPDATE automation_runs SET input_json = ? WHERE id = ?"
-    },
-    todayReviewInput
-  )
+  for (const input of REVIEW_INPUTS) dropResident(database, input)
   if (typeof trigger === "string") database.exec(trigger)
-  rewrite(
-    database,
-    {
-      select: "SELECT space_id AS id, reviewed_input AS stored FROM space_review_checkpoints",
-      update: "UPDATE space_review_checkpoints SET reviewed_input = ? WHERE space_id = ?"
-    },
-    todayReviewInput
-  )
-  rewrite(
-    database,
-    {
-      select: `SELECT id, context AS stored FROM automation_event_queue
-        WHERE json_extract(context, '$.space_review_input') IS NOT NULL`,
-      update: "UPDATE automation_event_queue SET context = ? WHERE id = ?"
-    },
-    todayQueuedContext
-  )
 }
 
 export const retiredMemoryRecords: Migration = {
