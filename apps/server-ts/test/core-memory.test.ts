@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import { coreCondenseTarget, crowdedCorePages } from "../src/memory/core-memory.js"
-import { requireWithinCoreBudget } from "../src/tools/wiki-records.js"
 
 const profile = (chars: number) => ({ path: "me.md", pageId: "me", chars })
 
@@ -21,15 +20,5 @@ describe("Core Memory size", () => {
     expect(crowdedCorePages([{ path: "projects/arden.md", pageId: "x", chars: 30_000 }])).toEqual(
       []
     )
-  })
-
-  it("refuses an oversized write and says how much to cut", () => {
-    const body = "a".repeat(9_068)
-    expect(() => requireWithinCoreBudget({ path: "me.md", pageId: "me", body })).toThrow(
-      /Cut at least 68 characters; aim for 7200 or fewer \(1868 less\)/
-    )
-    expect(() =>
-      requireWithinCoreBudget({ path: "me.md", pageId: "me", body: "a".repeat(9_000) })
-    ).not.toThrow()
   })
 })

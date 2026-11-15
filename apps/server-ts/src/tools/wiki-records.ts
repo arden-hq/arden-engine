@@ -1,5 +1,4 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { memoryHref } from "../lib/memory-link.js"
 import type { PageRecord } from "../wiki/snapshot.js"
 import type { ServerRunContext } from "./run-context.js"
@@ -101,23 +100,6 @@ export const directoryReceipt = (
     title: page.title,
     href: memoryHref(page.path)
   })
-
-export const requireWithinCoreBudget = (page: {
-  readonly path: string
-  readonly pageId: string
-  readonly body: string
-}): void => {
-  const budget = corePageBudget(page)
-  if (budget === undefined || page.body.length <= budget) return
-  const target = coreCondenseTarget(budget)
-  throw new ToolExecutionError(
-    `${page.path} would have ${page.body.length} characters, but every chat receives only the first ${budget}. ` +
-      `Nothing was saved. Cut at least ${page.body.length - budget} characters; aim for ${target} or fewer ` +
-      `(${page.body.length - target} less) so later updates fit. Trimming a few words will not do it. ` +
-      `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`,
-    { preview: "Core Memory page too long", retryable: false }
-  )
-}
 
 /** The version of a page this run read. A page is changed only after the run has read it. */
 export const requireObserved = (ctx: ServerRunContext, record: PageRecord): string => {

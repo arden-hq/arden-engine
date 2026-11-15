@@ -8,6 +8,7 @@ import {
 } from "@arden-hq/revisions/effect"
 import { Effect, Option } from "effect"
 
+import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { aliasesAreHuman, parseWikiPage } from "./page.js"
 
 export type WikiCommitOrigin =
@@ -175,7 +176,7 @@ export const commitWiki = (
   const replayKey =
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
-  return requireHumanAliases(operations).pipe(
+  return requirePageRules(repository, operations).pipe(
     Effect.andThen(
       repository.commit({
         actor: options.actor,
@@ -191,26 +192,70 @@ export const commitWiki = (
   )
 }
 
-const requireHumanAliases = (
+/** How far a page body is over its limit, or undefined when it fits or has none. */
+export const overPageLimit = (page: {
+  readonly path: string
+  readonly pageId: string
+  readonly body: string
+}): { readonly chars: number; readonly limit: number } | undefined => {
+  const limit = corePageBudget(page)
+  return limit === undefined || page.body.length <= limit
+    ? undefined
+    : { chars: page.body.length, limit }
+}
+
+const limitRefusal = (path: string, over: { readonly chars: number; readonly limit: number }) => {
+  const target = coreCondenseTarget(over.limit)
+  return new InvalidRevisionInputError({
+    message:
+      `${path} would have ${over.chars} characters, but every chat receives only the first ${over.limit}. ` +
+      `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
+      `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
+      `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
+  })
+}
+
+/** The rules every page a commit leaves active must meet, whoever writes it. */
+const requirePageRules = (
+  repository: ManagedFileRepositoryShape,
   operations: ReadonlyArray<WikiPageOperation>
+): Effect.Effect<void, RevisionError> =>
+  Effect.forEach(operations, (operation) => requirePageRule(repository, operation), {
+    discard: true
+  })
+
+const requirePageRule = Effect.fn("Wiki.requirePageRule")(function* (
+  repository: ManagedFileRepositoryShape,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, RevisionError> {
+  if (operation._tag === "Archive") return
+  const given = "content" in operation ? operation.content : undefined
+  if (given !== undefined) yield* requireHumanAliases(operation.resourceId, given)
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
+  if (path === undefined || corePageBudget({ path, pageId: operation.resourceId }) === undefined)
+    return
+  const content = given ?? (before === null ? undefined : yield* repository.readVersion(before))
+  if (content === undefined) return
+  const page = yield* parseWikiPage(decoder.decode(content)).pipe(Effect.option)
+  if (Option.isNone(page)) return
+  const over = overPageLimit({ path, pageId: operation.resourceId, body: page.value.body })
+  if (over !== undefined) return yield* limitRefusal(path, over)
+})
+
+const requireHumanAliases = (
+  resourceId: string,
+  content: Uint8Array
 ): Effect.Effect<void, InvalidRevisionInputError> =>
-  Effect.forEach(
-    operations,
-    (operation) => {
-      const content = "content" in operation ? operation.content : undefined
-      if (content === undefined) return Effect.void
-      return parseWikiPage(decoder.decode(content)).pipe(
-        Effect.option,
-        Effect.flatMap((page) =>
-          Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
-            ? Effect.void
-            : Effect.fail(
-                new InvalidRevisionInputError({
-                  message: `Wiki page ${operation.resourceId} keeps a path or a repeated name as an alias`
-                })
-              )
-        )
-      )
-    },
-    { discard: true }
+  parseWikiPage(decoder.decode(content)).pipe(
+    Effect.option,
+    Effect.flatMap((page) =>
+      Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
+        ? Effect.void
+        : Effect.fail(
+            new InvalidRevisionInputError({
+              message: `Wiki page ${resourceId} keeps a path or a repeated name as an alias`
+            })
+          )
+    )
   )
