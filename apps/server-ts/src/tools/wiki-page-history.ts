@@ -59,6 +59,11 @@ const RestoreParametersSchema = Schema.Struct({
 const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
   snapshot.pages.find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
 
+type MergedPage = PageRecord & { readonly page: { readonly lifecycle: "redirect" } }
+
+const isMergedPage = (record: PageRecord): record is MergedPage =>
+  record.page.lifecycle === "redirect"
+
 const prepareRestore = async (
   wiki: Wiki["Service"],
   input: { readonly path: string; readonly at: string },
@@ -67,10 +72,9 @@ const prepareRestore = async (
   const snapshot = await loadSnapshot(wiki, ctx.signal)
   const record = pageStoredAt(snapshot, input.path)
   if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-  const expectedVersion =
-    record.page.lifecycle === "redirect"
-      ? record.resource.versionId
-      : requireObserved(ctx.run, record)
+  const expectedVersion = isMergedPage(record)
+    ? record.resource.versionId
+    : requireObserved(ctx.run, record)
   const version = await Effect.runPromise(
     wiki
       .changeAt({ path: record.resource.path, pageId: record.page.pageId, at: input.at })
