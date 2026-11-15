@@ -31,7 +31,7 @@ import {
 } from "../domain/errors.js"
 import type { RevisionError } from "../domain/errors.js"
 import { encodeUtf8 } from "../domain/format.js"
-import { commit, type CommitResult } from "./commit.js"
+import { adoptWorkingChange, commit, type CommitResult } from "./commit.js"
 import { makeHistoryQuery } from "./history.js"
 import {
   diff as queryDiff,
@@ -570,7 +570,13 @@ const makeRepository = Effect.fn("makeManagedFileRepository")(function* (
             : { expectedHead: input.expectedHead })
         }).pipe(
           Effect.flatMap((changeSet) =>
-            commit(storage, head, changeSet, options.checkpoint, change.resource.resourceId)
+            adoptWorkingChange(
+              storage,
+              head,
+              changeSet,
+              change.resource.resourceId,
+              options.checkpoint
+            )
           )
         )
       ),
