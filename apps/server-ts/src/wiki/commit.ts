@@ -198,10 +198,20 @@ export const commitWiki = (
   )
   return replayKey === undefined
     ? checked
-    : repository
-        .idempotencyReceipt(replayKey)
-        .pipe(Effect.flatMap((receipt) => (receipt === null ? checked : commit)))
+    : replayOrCommit(repository, replayKey, { checked, landed: commit })
 }
+
+const replayOrCommit = (
+  repository: ManagedFileRepositoryShape,
+  replayKey: string,
+  write: {
+    readonly checked: Effect.Effect<CommitResult, WikiCommitError>
+    readonly landed: Effect.Effect<CommitResult, WikiCommitError>
+  }
+): Effect.Effect<CommitResult, WikiCommitError> =>
+  repository
+    .idempotencyReceipt(replayKey)
+    .pipe(Effect.flatMap((receipt) => (receipt === null ? write.checked : write.landed)))
 
 /**
  * Record one change made outside Arden that is already in the page's file. It meets the commit
