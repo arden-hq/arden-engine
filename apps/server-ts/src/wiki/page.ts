@@ -106,7 +106,7 @@ export const normal = (value: string): string => value.trim().toLowerCase()
 export const isReadme = (path: string): boolean =>
   posix.basename(path).toLowerCase() === "readme.md"
 
-export const pageNamesForPath = (path: string): ReadonlyArray<string> => {
+const pageNamesForPath = (path: string): ReadonlyArray<string> => {
   const names = [path, ...(path.endsWith(".md") ? [path.slice(0, -3)] : [])]
   if (isReadme(path)) {
     const directory = posix.dirname(path)
