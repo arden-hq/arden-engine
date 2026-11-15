@@ -457,7 +457,7 @@ it("offers from the finished owner turn that started the Space review", async ()
         toolCallId: "call-review",
         input: { key: "made-up-follow-up", text: "Do the made-up follow-up" },
         capture: { basis: "inferred", reason: "Made up." },
-        sources: input.reads.chats.map((chat) => ({
+        sources: (input.reads?.chats ?? []).map((chat) => ({
           kind: "chat" as const,
           session_id: chat.sessionId,
           turn_id: chat.turnId,
@@ -480,7 +480,7 @@ it("offers from the finished owner turn that started the Space review", async ()
     })
   )
   expect(outcome.input.admission).toBe("changed")
-  expect(outcome.input.reads.chats.map((chat) => chat.turnId)).toEqual(["turn-1"])
+  expect(outcome.input.reads?.chats.map((chat) => chat.turnId)).toEqual(["turn-1"])
   expect(outcome.offer).toMatchObject({ place: "space", status: "offered" })
   expect(outcome.wakes).toEqual(["space.wake"])
 })

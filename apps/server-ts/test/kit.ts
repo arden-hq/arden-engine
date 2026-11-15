@@ -83,7 +83,11 @@ const codeModeHost = (overrides: Partial<CodeModeHost> = {}): CodeModeHost => ({
 const fakeScriptHost = (overrides: Partial<ScriptHost> = {}): ScriptHost => ({
   executionProfile: {
     hash: "fixture",
-    modes: { research: { changesState: false }, code: { changesState: true } }
+    modes: {
+      research: { changesState: false },
+      code: { changesState: true },
+      work: { changesState: true }
+    }
   },
   agent: outside("dynamic workflow agent"),
   tool: outside("dynamic workflow tool"),
