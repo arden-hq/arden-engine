@@ -463,7 +463,9 @@ describe("forgetting a line", () => {
         const undoRange = yield* upkeep.prepare({
           processedHead: afterForget
         })
-        const indexText = prepared.render(new Map()).index({ maxBytes: 100_000, shownElsewhere: new Set() }).text ?? ""
+        const indexText =
+          prepared.render(new Map()).index({ maxBytes: 100_000, shownElsewhere: new Set() }).text ??
+          ""
         const linking = yield* memory.page("places/town.md")
         yield* memory.write("places/town.md", `${OTHER}\nSee [[forgotten]].\n`, ownerInApp("link"))
         const review = buildSpaceReviewInput(yield* memory.listing.snapshot())({
@@ -613,7 +615,9 @@ describe("what forgotten.md holds and where it stays", () => {
         const folder = yield* refusal(
           memory.mutations.createDirectory({
             path: "forgotten",
-            body: DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}\n\nMine.`).join("\n\n"),
+            body: DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}\n\nMine.`).join(
+              "\n\n"
+            ),
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
             commit: AGENT
           })

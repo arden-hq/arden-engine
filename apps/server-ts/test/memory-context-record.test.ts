@@ -399,7 +399,11 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
 
   it("keeps in the Memory index the Space's pages its list folded, each page shown once", async () => {
     const beds = Array.from({ length: 30 }, (_, index) =>
-      page(`spaces/garden/bed-${index}.md`, `Bed ${index}`, "A raised bed in the garden, with its soil, crops and watering notes.")
+      page(
+        `spaces/garden/bed-${index}.md`,
+        `Bed ${index}`,
+        "A raised bed in the garden, with its soil, crops and watering notes."
+      )
     )
     const owner = await compose({ actor: person, spaceId: "space-1", pages: [...PAGES, ...beds] })
     const index = owner.sections.find((section) => section.key === "Memory index")?.text
