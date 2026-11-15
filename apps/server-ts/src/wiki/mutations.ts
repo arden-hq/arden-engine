@@ -202,12 +202,8 @@ export const makeWikiMutationMethods = (
           return yield* wikiError("update", "invalid", "An update names a page twice", { pageId })
         }
         const snapshot = yield* loadSnapshot(repository, "update")
-        const { origin } = input.commit
         // A replayable write read before its head moved may have landed already; its receipt decides.
-        const replay =
-          origin.kind === "capture" &&
-          origin.replayKey !== undefined &&
-          snapshot.head !== input.expectedHead
+        const replay = input.commit.replayKey !== undefined && snapshot.head !== input.expectedHead
         const edits = yield* Effect.forEach(
           input.edits,
           Effect.fn("Wiki.updateWrite")(function* (edit: WikiPageEdit) {

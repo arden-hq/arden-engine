@@ -157,13 +157,16 @@ const runRecord: ChatRunRecord = {
   reasoningEffort: null
 }
 
-export const wikiToolsOver = (wiki: Wiki["Service"]): ReadonlyArray<ServerTool> =>
+export const wikiToolsOver = (
+  wiki: Wiki["Service"],
+  metadata: ChatRunRecord["metadata"] = runRecord.metadata
+): ReadonlyArray<ServerTool> =>
   Effect.runSync(
     wikiOperationTools.pipe(
       Effect.provideService(
         RunQueries,
         partialService<RunQueries["Service"]>("RunQueries", {
-          get: () => Effect.succeed(runRecord),
+          get: () => Effect.succeed({ ...runRecord, metadata }),
           cause: () => Effect.succeed({ automationId: undefined, wakeDepth: 0 })
         })
       ),

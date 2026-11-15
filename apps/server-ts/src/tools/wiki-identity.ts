@@ -14,7 +14,13 @@ import {
   type MemoryCaptureBatchIdentity
 } from "../persistence/memory/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY, type WikiLocationAuthority } from "../wiki/authority.js"
-import { upkeepOrigin, type WikiCommitOrigin } from "../wiki/commit.js"
+import { captureReplayKey } from "../wiki/capture.js"
+import {
+  automationOrigin,
+  upkeepOrigin,
+  type WikiCommitIdentity,
+  type WikiCommitOrigin
+} from "../wiki/commit.js"
 
 export interface WikiRunIdentityContext {
   readonly runId: string
@@ -26,7 +32,6 @@ export interface WikiRunIdentityContext {
 export interface WikiWriteIdentity {
   readonly actor: string
   readonly origin: WikiCommitOrigin
-  readonly capture: boolean
   readonly captureBatch: MemoryCaptureBatchIdentity | null
   readonly authority: WikiLocationAuthority
 }
@@ -113,20 +118,18 @@ export const readRunCause = (
     { signal: input.signal }
   )
 
-const automationOrigin = (cause: RunCause & { readonly automationId: string }) => ({
-  actor: `Automation ${cause.automationId}`,
-  origin:
+const automationWriter = (cause: RunCause & { readonly automationId: string }) => {
+  const upkeep =
     systemHandlerForAutomation(AutomationId.make(cause.automationId))?.spec.handler ===
     "wiki_maintenance"
+  return {
+    actor: `Automation ${cause.automationId}`,
+    origin: upkeep
       ? upkeepOrigin(cause.automationId, cause.wakeDepth)
-      : {
-          kind: "automation" as const,
-          automationId: cause.automationId,
-          chainDepth: cause.wakeDepth
-        },
-  capture: false,
-  captureBatch: null
-})
+      : automationOrigin(cause.automationId, cause.wakeDepth),
+    captureBatch: null
+  }
+}
 
 /** A Memory write by a chat run that is no Automation's: the owner's turn, an in-chat Task step,
  *  or a helper of either. It carries the depth its run was woken at. */
@@ -160,23 +163,37 @@ const admittedIdentity = async (
     )
     return {
       actor: "memory:capture",
-      origin: { kind: "capture", replayKey: undefined, sessionId: captureBatch.sessionId },
-      capture: true,
+      origin: { kind: "capture", sessionId: captureBatch.sessionId },
       captureBatch
     }
   }
   const cause = await readRunCause(runs, input)
   if (cause.automationId !== undefined)
-    return automationOrigin({ ...cause, automationId: cause.automationId })
+    return automationWriter({ ...cause, automationId: cause.automationId })
   if (context.origin.kind !== "chat")
     throw identityUnavailable("This Run's Automation is no longer recorded.")
   return {
     actor: "Agent",
     origin: agentOrigin(input.sessionId, cause),
-    capture: false,
     captureBatch: null
   }
 }
+
+/** The commit of one tool write. A Capture write carries a replay key from its batch: `phase`
+ *  and, for a write that is once per call, the call's `request`. */
+export const toolCommit = (
+  identity: WikiWriteIdentity,
+  reason: string,
+  phase: string,
+  request?: unknown
+): WikiCommitIdentity => ({
+  actor: identity.actor,
+  origin: identity.origin,
+  reason,
+  ...(identity.captureBatch === null
+    ? {}
+    : { replayKey: captureReplayKey(identity.captureBatch, phase, request) })
+})
 
 const identityUnavailable = (message: string): ToolExecutionError =>
   new ToolExecutionError(message, { preview: "Wiki write identity unavailable", retryable: false })

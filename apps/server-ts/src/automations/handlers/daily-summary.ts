@@ -9,6 +9,7 @@ import { PROMPT_TEXT } from "../../prompts/catalog.js"
 import { markdownValue } from "../../prompts/format.js"
 import type { Wiki } from "../../wiki/service.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
+import { automationOrigin } from "../../wiki/commit.js"
 import { pageKind, producingAutomation, recordFolders } from "../../wiki/collections.js"
 import type { HandlerItemRunner } from "../handler-item-run.js"
 import { runItemLoop } from "../item-loop.js"
@@ -192,7 +193,7 @@ export const makeDailySummaryRunner = (services: {
         producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID,
         commit: {
           actor: `Automation ${DAILY_SUMMARY_AUTOMATION_ID}`,
-          origin: { kind: "automation", automationId: DAILY_SUMMARY_AUTOMATION_ID },
+          origin: automationOrigin(DAILY_SUMMARY_AUTOMATION_ID),
           reason: "create Wiki directory daily"
         }
       })

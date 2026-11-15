@@ -1,3 +1,4 @@
+import { createToolset } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 import { makeMemoryCaptureBatches } from "../src/memory/capture-batches.js"
@@ -9,7 +10,8 @@ import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { snapshotOf } from "../src/wiki/snapshot.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { ownerEdit, withWikiRepository } from "./fixtures/wiki-repository.js"
+import { ownerEdit, withWikiRepository, wikiToolsOver } from "./fixtures/wiki-repository.js"
+import { serverRunContext } from "./kit.js"
 
 const AT = "2026-11-14T09:00:00.000Z"
 
@@ -106,8 +108,9 @@ it("saves a Capture patch set once on replay, and none of it when one page confl
           authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
           commit: {
             actor: "memory:capture",
-            origin: { kind: "capture", sessionId: "s", replayKey: "batch" },
-            reason: "capture"
+            origin: { kind: "capture", sessionId: "s" },
+            reason: "capture",
+            replayKey: "batch"
           }
         })
       )
@@ -115,5 +118,34 @@ it("saves a Capture patch set once on replay, and none of it when one page confl
     expect(await patch(read).then(head)).toBe(landed)
     await expect(patch(landed, (await pages())[0].version, "X3")).rejects.toThrow()
     expect((await pages()).map((page) => page.content.includes("X2"))).toEqual([true, true])
+  })
+})
+
+it("lands a Capture patch once when its call is sent again", async () => {
+  await withWikiRepository(async ({ wiki, save }) => {
+    await save({ pageId: "a", path: "a.md", body: "Old line.\n", origin: ownerEdit })
+    const tools = wikiToolsOver(wiki, {
+      run_context: {
+        origin: { kind: "automation", automation_id: "builtin-memory-capture", occurrence_id: "o" },
+        task: null
+      },
+      memory_capture_batch: {
+        sessionId: "s",
+        start: { _tag: "Beginning" },
+        end: { _tag: "AfterSequence", sequence: 1 },
+        endMessageId: "m"
+      }
+    })
+    const patch = () =>
+      createToolset(tools, { toJsonSchema: () => ({ type: "object" }) })(
+        serverRunContext()
+      ).execute({
+        name: "wiki_patch_page",
+        args: { path: "a.md", old_text: "Old", new_text: "Old new" },
+        toolCallId: "p"
+      })
+    await patch()
+    await expect(patch()).rejects.toThrow()
+    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("\nOld new line.")
   })
 })

@@ -6,7 +6,7 @@ import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { writeIdentity } from "./wiki-identity.js"
+import { toolCommit, writeIdentity } from "./wiki-identity.js"
 import { formatWikiPage } from "../wiki/page.js"
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import { Wiki } from "../wiki/service.js"
@@ -19,7 +19,6 @@ import {
   WikiPathSchema,
   activePage,
   readablePage,
-  captureReplayOrigin,
   loadSnapshot,
   pageData,
   pageNotFound,
@@ -424,16 +423,12 @@ const makeWikiOperationTools = ({
             path: input.path,
             body: input.body,
             authority: identity.authority,
-            commit: {
-              actor: identity.actor,
-              origin: captureReplayOrigin(
-                identity.origin,
-                "create-directory",
-                input.path,
-                input.body
-              ),
-              reason: `create Wiki directory ${input.path}`
-            }
+            commit: toolCommit(
+              identity,
+              `create Wiki directory ${input.path}`,
+              "wiki_create_directory",
+              input
+            )
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -524,11 +519,12 @@ const makeWikiOperationTools = ({
               ],
               expectedHead: head,
               authority: identity.authority,
-              commit: {
-                actor: identity.actor,
-                origin: identity.origin,
-                reason: `patch wiki page ${record.resource.path}`
-              }
+              commit: toolCommit(
+                identity,
+                `patch wiki page ${record.resource.path}`,
+                "wiki_patch_page",
+                input
+              )
             })
             .pipe(Effect.mapError(wikiFailure)),
           { signal: ctx.signal }

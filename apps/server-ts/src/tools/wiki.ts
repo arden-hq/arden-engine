@@ -4,9 +4,7 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import { Array as Arr, Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
-import { writeIdentity } from "./wiki-identity.js"
-import type { WikiCommitOrigin } from "../wiki/commit.js"
-import { captureReplayKey } from "../wiki/capture.js"
+import { toolCommit, writeIdentity } from "./wiki-identity.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
@@ -29,7 +27,6 @@ import {
   pagesReceipt,
   reportProvenanceLines
 } from "./wiki-records.js"
-import { sha256Hex } from "@arden-hq/std/hash"
 import {
   CORE_CONDENSE_ADVICE,
   coreCondenseTarget,
@@ -133,26 +130,6 @@ const CapturePatchSetParametersSchema = Schema.Struct({
     description: "All already-read page replacements to commit together, from 1 to 12 pages."
   })
 })
-
-export const captureReplayOrigin = (
-  origin: WikiCommitOrigin,
-  action: "create" | "create-directory" | "edit",
-  path: string,
-  content: string
-): WikiCommitOrigin =>
-  origin.kind === "capture"
-    ? {
-        kind: "capture",
-        sessionId: origin.sessionId,
-        replayKey: `memory-capture:${sha256Hex(
-          JSON.stringify({
-            action,
-            content_sha256: sha256Hex(content),
-            path
-          })
-        )}`
-      }
-    : origin
 
 export const wikiFailure = (error: WikiError): ToolExecutionError => {
   switch (error.reason) {
@@ -586,7 +563,7 @@ const makeWikiTools = ({
         })
       )
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      if (!identity.capture || identity.captureBatch === null) {
+      if (identity.captureBatch === null) {
         throw new ToolExecutionError(
           "Only the built-in Memory Capture worker can apply a Memory patch set.",
           { preview: "Memory Capture required", retryable: false }
@@ -598,15 +575,11 @@ const makeWikiTools = ({
             edits,
             expectedHead,
             authority: identity.authority,
-            commit: {
-              actor: identity.actor,
-              origin: {
-                kind: "capture",
-                sessionId: identity.captureBatch.sessionId,
-                replayKey: captureReplayKey(identity.captureBatch, "patch")
-              },
-              reason: `capture Memory patch set for ${edits.map(({ path }) => path).join(", ")}`
-            }
+            commit: toolCommit(
+              identity,
+              `capture Memory patch set for ${edits.map(({ path }) => path).join(", ")}`,
+              "patch"
+            )
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -690,16 +663,12 @@ const makeWikiTools = ({
               title: input.title,
               body: input.body,
               authority: identity.authority,
-              commit: {
-                actor: identity.actor,
-                origin: captureReplayOrigin(
-                  identity.origin,
-                  "create",
-                  input.path,
-                  `${input.title}\n${input.body}`
-                ),
-                reason: `create wiki page ${input.path}`
-              }
+              commit: toolCommit(
+                identity,
+                `create wiki page ${input.path}`,
+                "wiki_create_page",
+                input
+              )
             })
             .pipe(Effect.mapError(wikiFailure)),
           { signal: ctx.signal }
@@ -776,16 +745,12 @@ const makeWikiTools = ({
               ],
               expectedHead: snapshot.head,
               authority: identity.authority,
-              commit: {
-                actor: identity.actor,
-                origin: captureReplayOrigin(
-                  identity.origin,
-                  "edit",
-                  record.resource.path,
-                  replacement
-                ),
-                reason: `edit wiki page ${record.resource.path}`
-              }
+              commit: toolCommit(
+                identity,
+                `edit wiki page ${record.resource.path}`,
+                "wiki_edit_page",
+                input
+              )
             })
             .pipe(Effect.mapError(wikiFailure)),
           { signal: ctx.signal }

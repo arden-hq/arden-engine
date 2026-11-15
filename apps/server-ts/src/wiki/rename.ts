@@ -547,8 +547,8 @@ export const makeWikiRenameMethods = (
     const outcome = yield* commitWiki(
       { repository, spaces },
       {
-        idempotencyKey: `wiki-rename:${approval.approvalId}`,
         ...writer.commit,
+        replayKey: `wiki-rename:${approval.approvalId}`,
         authority: writer.authority,
         expectedRevision: plan.baseHead
       },

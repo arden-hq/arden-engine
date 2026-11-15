@@ -80,7 +80,7 @@ const commitOrigin = (writer: Writer, automationId: string | null): WikiCommitOr
     case "upkeep":
       return { kind: "upkeep", automationId: automationId ?? "" }
     case "capture":
-      return { kind: "capture", replayKey: undefined, sessionId: undefined }
+      return { kind: "capture", sessionId: undefined }
     case "daily":
     case "other system":
     case "user automation":

@@ -17,11 +17,13 @@ const naming = (pattern: RegExp): ReadonlyArray<string> =>
 it("makes the upkeep writer only through its constructor", () => {
   expect(naming(/kind: "upkeep"/u)).toEqual(["wiki/commit.ts"])
   expect(naming(/\bupkeepOrigin\(/u)).toEqual(["tools/wiki-identity.ts", "wiki/commit.ts"])
+  expect(naming(/origin: \{\s*kind: "automation"/u)).toEqual([])
+  expect(naming(/\bidempotencyKey\b/u)).toEqual(["wiki/commit.ts"])
 })
 
 it("reads a writer's kind only at the commit point, and checks its Space boundary there", () => {
   const wiki = (paths: ReadonlyArray<string>) => paths.filter((path) => path.startsWith("wiki/"))
-  expect(wiki(naming(/\.origin\.kind\b/u))).toEqual(["wiki/commit.ts"])
+  expect(wiki(naming(/\.origin\.kind\b/u))).toEqual([])
   expect(naming(/\brequireWikiWritePaths\(/u)).toEqual([
     "wiki/commit.ts",
     "wiki/directories.ts",

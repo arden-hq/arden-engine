@@ -57,11 +57,7 @@ export type WikiCommitOrigin =
     }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
   | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
-  | {
-      readonly kind: "capture"
-      readonly replayKey: string | undefined
-      readonly sessionId: string | undefined
-    }
+  | { readonly kind: "capture"; readonly sessionId: string | undefined }
   | { readonly kind: "space_page" }
   | { readonly kind: "system"; readonly name: string }
 
@@ -71,6 +67,8 @@ export interface WikiCommitIdentity {
   readonly actor: string
   readonly origin: WikiCommitOrigin
   readonly reason: string
+  /** Names a write that may be sent again after a crash; the same write lands once. */
+  readonly replayKey?: string
 }
 
 /** Who writes, and where in Memory they may write. */
@@ -85,6 +83,16 @@ export const upkeepOrigin = (
   chainDepth?: number
 ): Extract<WikiCommitOrigin, { readonly kind: "upkeep" }> => ({
   kind: "upkeep",
+  automationId,
+  ...(chainDepth === undefined ? {} : { chainDepth })
+})
+
+/** An Automation other than Tidy. */
+export const automationOrigin = (
+  automationId: string,
+  chainDepth?: number
+): Extract<WikiCommitOrigin, { readonly kind: "automation" }> => ({
+  kind: "automation",
   automationId,
   ...(chainDepth === undefined ? {} : { chainDepth })
 })
@@ -154,7 +162,7 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
       ...(agentChained?.[2] === undefined ? {} : { chainDepth: Number(agentChained[2]) })
     }
   const captureChat = chatOf(origin, CAPTURE_ORIGIN)
-  if (captureChat !== null) return { kind: "capture", replayKey: undefined, sessionId: captureChat }
+  if (captureChat !== null) return { kind: "capture", sessionId: captureChat }
   const forgetChat = chatOf(origin, FORGET_ORIGIN)
   if (forgetChat !== null && forgetChat !== undefined)
     return { kind: "forget", sessionId: forgetChat }
@@ -170,7 +178,7 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   const chainDepth = chained?.[2] === undefined ? undefined : Number(chained[2])
   return prefix === UPKEEP_PREFIX || retired !== undefined
     ? upkeepOrigin(retired ?? automationId, chainDepth)
-    : { kind: "automation", automationId, ...(chainDepth === undefined ? {} : { chainDepth }) }
+    : automationOrigin(automationId, chainDepth)
 }
 
 export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => {
@@ -339,16 +347,10 @@ export interface WikiCommitPoint {
 
 export const commitWiki = (
   point: WikiCommitPoint,
-  options: WikiCommitIdentity &
-    WikiWriter & {
-      readonly expectedRevision: string | null
-      readonly idempotencyKey?: string
-    },
+  options: WikiCommitIdentity & WikiWriter & { readonly expectedRevision: string | null },
   writes: ReadonlyArray<WikiWrite>
 ): Effect.Effect<CommitResult, WikiCommitError> => {
-  const replayKey =
-    options.idempotencyKey ??
-    (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
+  const { replayKey } = options
   const commit = point.repository.commit({
     actor: options.actor,
     origin: encodeWikiOrigin(options.origin),

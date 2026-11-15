@@ -8,7 +8,7 @@ import type { SpaceStore } from "../persistence/spaces/store.js"
 import { markedProducer, recordFolders } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { commitWiki, publishReport } from "./commit.js"
+import { automationOrigin, commitWiki, publishReport } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
 import { formatWikiPage, isReadme, normal, parseWikiPage } from "./page.js"
@@ -127,11 +127,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     {
       expectedRevision: snapshot.head,
       actor: `Automation ${input.producerAutomationId}`,
-      origin: {
-        kind: "automation",
-        automationId: input.producerAutomationId,
-        ...(input.producerChainDepth === undefined ? {} : { chainDepth: input.producerChainDepth })
-      },
+      origin: automationOrigin(input.producerAutomationId, input.producerChainDepth),
       authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
       reason: `Publish report ${content.path}`
     },
