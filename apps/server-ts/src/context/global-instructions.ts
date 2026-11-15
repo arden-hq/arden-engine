@@ -27,7 +27,10 @@ import { sha256Hex } from "@arden-hq/std/hash"
 const GLOBAL_INSTRUCTIONS_FILE = "AGENTS.md"
 /** The most rules text, in bytes, the rules may hold. */
 export const MAX_RULES_BYTES = 128 * 1024
-const storedText = (content: string): string => (content === "" ? "" : `${content}\n`)
+const CLOSING_NEWLINE = "\n"
+const MAX_STORED_RULES_BYTES = MAX_RULES_BYTES + CLOSING_NEWLINE.length
+const storedText = (content: string): string =>
+  content === "" ? "" : `${content}${CLOSING_NEWLINE}`
 const withinLimit = (content: string): boolean =>
   Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
 const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
@@ -78,7 +81,7 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
   if (!status.isFile() || status.isSymbolicLink()) {
     return yield* error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file`)
   }
-  if (status.size > MAX_RULES_BYTES + 1) return yield* error("read", "invalid", tooLarge)
+  if (status.size > MAX_STORED_RULES_BYTES) return yield* error("read", "invalid", tooLarge)
   const bytes = yield* Effect.tryPromise({
     try: () => readFile(filename),
     catch: (cause) => error("read", "storage", "Global instructions could not be read", cause)
