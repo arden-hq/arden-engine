@@ -83,9 +83,9 @@ export interface CommandReceiptV1 {
   /** The model the Run ran on, as the server names it (llama.cpp, OpenRouter: the server's own id). */
   readonly model_id: RunDetail["model_id"]
   readonly reasoning_effort: RunDetail["reasoning_effort"]
-  /** The server's terminal result as it sent it. Its `cost` is what the server
-   *  priced, not a bill: a local model costs nothing, and a server that prices
-   *  no call reports 0 (see the CLI README). */
+  /** The server's terminal result as it sent it. Its `cost` is the dollars the
+   *  provider reported for the Run's model requests, absent when it reported
+   *  none (llama.cpp, Codex): never an estimate (see the CLI README). */
   readonly result: RunTerminalResult | null
   readonly error: CommandReceiptError | null
   readonly declined: ReadonlyArray<DeclinedRequest>

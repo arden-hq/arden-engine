@@ -41,7 +41,7 @@ Run `arden --help` for every option.
   | `3` | `serve` and `exec`: the model server named by `provider.baseUrl` did not answer at start (not running, or not at that address) | `provider_unavailable` |
   | `124` | timed out | |
   | `130` | interrupted | |
-- The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, `cost`. The server prices no model call yet, so `cost` is 0 on every provider, a local model included; count tokens from `usage`.
+- The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, and `cost`, the US dollars the provider reported for the Run's model requests (OpenRouter does). A Run whose provider reported no cost (llama.cpp, Codex) has no `cost`; Arden never estimates one. The server README's "Cost" says what it covers.
 - `--model` takes an id `arden models` lists. Any other is refused before a chat is made (exit 2), with the ids the server has.
 - A prompt longer than one message takes (100,000 characters) is refused before the server is reached (exit 2).
 - `--approval` sets how the Run handles approvals. `--no-wait-approval` declines what needs an approval instead of waiting.
@@ -67,7 +67,7 @@ Checked on 2026-11-16 with llama.cpp b12359 and Gemma 4 E2B (Q8_0) on an Apple-s
 
 ```json
 {"type":"command_receipt","status":"completed","exit_code":0,"model_id":"/…/gemma-4-E2B-it-Q8_0.gguf",
- "result":{"text":"The output of running `uname -s` is: Darwin","usage":{"prompt":12942,"completion":298,"total":26128,"cache_read":12888,"cache_write":0},"cost":0,"steps":1}}
+ "result":{"text":"The output of running `uname -s` is: Darwin","usage":{"prompt":12942,"completion":298,"total":26128,"cache_read":12888,"cache_write":0},"steps":1}}
 ```
 
 llama.cpp names a model by its file path unless `llama-server --alias <name>` gives it a name; `arden models` prints the id either way. OpenRouter needs its key variable and a model: `"provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini"`.
