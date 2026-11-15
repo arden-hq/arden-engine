@@ -27,10 +27,13 @@ import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
   readonly sessionId: string
-  /** What the recall searches for and must not choose; undefined for a run with no recall. */
+  /**
+   * What the recall searches for, and how many characters of a page's content from its start the
+   * run is sent elsewhere; undefined for a run with no recall.
+   */
   readonly recall?: {
     readonly query: string
-    readonly excludePageIds?: ReadonlyArray<string>
+    readonly sent?: { readonly pageId: string; readonly chars: number }
   }
 }
 
@@ -66,7 +69,9 @@ const sources = Effect.fn("Memory.sources")(function* (
       recall: Schema.optionalKey(
         Schema.Struct({
           query: Schema.String,
-          excludePageIds: Schema.optionalKey(Schema.Array(Schema.NonEmptyString))
+          sent: Schema.optionalKey(
+            Schema.Struct({ pageId: Schema.NonEmptyString, chars: Schema.Number })
+          )
         })
       )
     })
@@ -89,7 +94,11 @@ const sources = Effect.fn("Memory.sources")(function* (
           pages: current.pages,
           query: valid.recall.query,
           today: localDayOf(now, machineTimeZone()),
-          sentElsewhere: new Set(valid.recall.excludePageIds ?? [])
+          sent: new Map(
+            valid.recall.sent === undefined
+              ? []
+              : [[valid.recall.sent.pageId, valid.recall.sent.chars]]
+          )
         })
   const semantic =
     recall === undefined

@@ -126,18 +126,20 @@ export const assembleMemoryContext = ({
 
 const none: RenderedMemory = { text: undefined, sources: [] }
 
-/** Whether the Space's own page reaches the run whole, so recall has nothing to add from it. */
-export const spacePageSentWhole = (space: SpaceMemoryInput): boolean =>
-  space.page !== undefined && renderSpace(space).sources[0]?.outcome === "whole"
+const SPACE_ROOM = {
+  maxBytes: MEMORY_BUDGET.space,
+  instructionsBytes: MEMORY_BUDGET.space_instructions,
+  pageBytes: MEMORY_BUDGET.space_page
+}
+
+/** How many characters of the Space page's content, from its start, the Space context sends. */
+export const spacePageSent = (view: SpaceView): number =>
+  renderSpaceContext(view, SPACE_ROOM).page?.sent ?? 0
 
 const renderSpace = (
   space: SpaceMemoryInput
 ): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
-  const rendered = renderSpaceContext(space.view, {
-    maxBytes: MEMORY_BUDGET.space,
-    instructionsBytes: MEMORY_BUDGET.space_instructions,
-    pageBytes: MEMORY_BUDGET.space_page
-  })
+  const rendered = renderSpaceContext(space.view, SPACE_ROOM)
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
@@ -146,8 +148,8 @@ const renderSpace = (
     bytes: byteLength(rendered.text)
   }
   const source: RunMemorySource =
-    rendered.page === "cut" || rendered.page === "dropped"
-      ? { ...identity, outcome: rendered.page, reason: "space_page_allowance" }
-      : { ...identity, outcome: "whole", reason: null }
+    rendered.page === undefined || rendered.page.outcome === "whole"
+      ? { ...identity, outcome: "whole", reason: null }
+      : { ...identity, outcome: rendered.page.outcome, reason: "space_page_allowance" }
   return { text: rendered.text, sources: [source] }
 }

@@ -28,7 +28,7 @@ import {
   assembleMemoryContext,
   MEMORY_READS,
   memoryReaderOf,
-  spacePageSentWhole
+  spacePageSent
 } from "./memory-context.js"
 import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
@@ -395,10 +395,9 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
               ? {
                   recall: {
                     query: input.query,
-                    ...(space?.page !== undefined &&
-                    spacePageSentWhole({ view: space.view, page: space.page })
-                      ? { excludePageIds: [space.page.pageId] }
-                      : {})
+                    ...(space?.page === undefined
+                      ? {}
+                      : { sent: { pageId: space.page.pageId, chars: spacePageSent(space.view) } })
                   }
                 }
               : {})

@@ -387,28 +387,40 @@ const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageK
 export interface RecallCandidates {
   readonly query: string
   readonly excluded: ReadonlySet<string>
+  /** The body of each page the run already holds in part, past what it holds. */
+  readonly unsent: ReadonlyMap<string, string>
 }
 
 export const recallCandidates = ({
   pages,
   query,
   today,
-  sentElsewhere
+  sent
 }: {
   readonly pages: ReadonlyArray<RunPage>
   readonly query: string
   /** The run's date, `YYYY-MM-DD` in the owner's zone: the day a record's age is counted from. */
   readonly today: string
-  readonly sentElsewhere: ReadonlySet<string>
+  /** How many characters of each page's content, from its start, the run is sent elsewhere. */
+  readonly sent: ReadonlyMap<string, number>
 }): RecallCandidates => {
   const active = activeRunPages(pages)
+  const unsent = new Map(
+    active.flatMap((record) => {
+      const chars = sent.get(record.page.pageId)
+      if (chars === undefined) return []
+      const { content, body } = record.page
+      return [[record.page.pageId, body.slice(Math.max(0, chars - content.length + body.length))]]
+    })
+  )
   return {
     query,
     excluded: new Set([
-      ...sentElsewhere,
+      ...[...unsent].filter(([, rest]) => rest.trim() === "").map(([pageId]) => pageId),
       ...active.filter(standingFacts).map((record) => record.page.pageId),
       ...recordsPastRecallAge(active, today)
-    ])
+    ]),
+    unsent
   }
 }
 
@@ -433,6 +445,31 @@ const recordsPastRecallAge = (
   })
 }
 
+/**
+ * The pages recall chooses. A page the run holds in part is ranked by the text it lacks, and
+ * offered only when that text matches.
+ */
+const rankRecall = (
+  active: ReadonlyArray<RunPage>,
+  recall: RecallCandidates,
+  semanticMatches: ReadonlyArray<SemanticMemoryMatch>
+): ReadonlyArray<RankedMemoryPage> => {
+  const queryTerms = wordSearchTerms(recall.query)
+  const matches = semanticMatches.filter(
+    (match) => recall.unsent.get(match.pageId)?.includes(match.chunkText) ?? true
+  )
+  const pages = active.flatMap((record) => {
+    if (recall.excluded.has(record.page.pageId)) return []
+    const rest = recall.unsent.get(record.page.pageId)
+    if (rest === undefined) return [record]
+    const matched =
+      [...searchTerms(rest)].some((term) => queryTerms.has(term)) ||
+      matches.some((match) => match.pageId === record.page.pageId)
+    return matched ? [{ ...record, page: { ...record.page, body: rest } }] : []
+  })
+  return rankMemoryPages({ pages, queryTerms, semanticMatches: matches }).slice(0, RESULT_LIMIT)
+}
+
 export const prepareMemorySources = ({
   pages,
   recall,
@@ -450,14 +487,7 @@ export const prepareMemorySources = ({
   const kinds = pageKinds(active)
   const kindOf = (record: PageRecord): PageKind =>
     kinds.get(record.page.pageId) ?? { kind: "knowledge" }
-  const selected =
-    recall === undefined
-      ? []
-      : rankMemoryPages({
-          pages: active.filter((record) => !recall.excluded.has(record.page.pageId)),
-          queryTerms: wordSearchTerms(recall.query),
-          semanticMatches
-        }).slice(0, RESULT_LIMIT)
+  const selected = recall === undefined ? [] : rankRecall(active, recall, semanticMatches)
   return {
     recalled: selected.map(({ record }) => record),
     render: (discussed) => ({
