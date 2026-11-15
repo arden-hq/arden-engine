@@ -9,7 +9,7 @@ import { quietRunOutcome } from "./run-outcomes.js"
 import { recordAutomationEvent } from "./entity-events.js"
 import { announceNotice } from "./notices.js"
 import { recordEnding, toldOutcomeOf } from "./run-ending.js"
-import { pauseAfterFailures } from "./automation-auto-pause.js"
+import { giveUp } from "./automation-auto-pause.js"
 import { parseLease } from "./automation-lease.js"
 import {
   JobLeaseLostError,
@@ -276,13 +276,16 @@ export const makeFencedOccurrences = ({
         context: fenced.context
       })
     }
+    const item = fenced.context.handler_item
     const paused =
-      userAutomation && outcome === "failed"
-        ? yield* pauseAfterFailures({
+      outcome === "failed" && (userAutomation || item !== undefined)
+        ? yield* giveUp({
             sql,
             sessionEvents,
             automationId: fenced.row.task_id,
-            attemptId: fenced.parsed.runId
+            attemptId: fenced.parsed.runId,
+            chatRunId: settledRunId,
+            then: item === undefined ? "pause" : { skipped: run.error ?? "Its run failed." }
           })
         : false
     yield* sql`DELETE FROM automation_event_queue WHERE id = ${fenced.parsed.queueId}`

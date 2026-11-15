@@ -7,9 +7,7 @@ import type { PersistenceDeps } from "./deps.js"
 
 const NAMESPACE = automationPositionNamespace(DAILY_SUMMARY_AUTOMATION_ID)
 const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
-const StateJson = Schema.fromJsonString(
-  Schema.Struct({ settledDay: Day, tries: Schema.optionalKey(Schema.Int) })
-)
+const StateJson = Schema.fromJsonString(Schema.Struct({ settledDay: Day }))
 
 type Operation = DailySummaryPositionError["operation"]
 
@@ -29,10 +27,7 @@ export const makeDailySummaryPosition = ({
   writer
 }: Pick<PersistenceDeps, "writer">): DailySummaryPosition["Service"] => {
   const sql = writer.sql
-  const encode = (
-    state: { readonly settledDay: string; readonly tries?: number },
-    operation: Operation
-  ) =>
+  const encode = (state: { readonly settledDay: string }, operation: Operation) =>
     Schema.encodeUnknownEffect(StateJson)(state).pipe(
       Effect.mapError(failure(operation, "invalid", `Not a calendar day: ${state.settledDay}`))
     )
@@ -56,22 +51,7 @@ export const makeDailySummaryPosition = ({
     const stored = yield* Schema.decodeUnknownEffect(StateJson)(row.state).pipe(
       Effect.mapError(failure("read", "corrupt", "The Daily Summary position is corrupt"))
     )
-    return { settledDay: stored.settledDay, tries: stored.tries ?? 0 }
-  })
-
-  const tried = Effect.fn("SqliteDailySummaryPosition.tried")(function* (settled: string) {
-    const at = DateTime.formatIso(yield* DateTime.now)
-    const rows = yield* writer.run(
-      sql<{ readonly namespace: string }>`UPDATE monitor_state
-        SET state = json_set(state, '$.tries', coalesce(json_extract(state, '$.tries'), 0) + 1),
-            updated_at = ${at}
-        WHERE namespace = ${NAMESPACE} AND json_extract(state, '$.settledDay') = ${settled}
-        RETURNING namespace`.pipe(
-        Effect.mapError(failure("tried", "storage", "Could not count a Daily Summary try"))
-      )
-    )
-    if (rows.length === 0)
-      return yield* failure("tried", "conflict", "The Daily Summary position moved")()
+    return stored.settledDay
   })
 
   const advance = Effect.fn("SqliteDailySummaryPosition.advance")(function* (input: {
@@ -94,5 +74,5 @@ export const makeDailySummaryPosition = ({
       return yield* failure("advance", "conflict", "The Daily Summary position moved")()
   })
 
-  return DailySummaryPosition.of({ current, tried, advance })
+  return DailySummaryPosition.of({ current, advance })
 }
