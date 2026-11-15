@@ -302,20 +302,27 @@ const renderRecall = (
 /** The part of a query the word search reads; the meaning search embeds all of it. */
 export const recallQuery = (query: string): string => query.slice(0, QUERY_LIMIT)
 
+/** The terms the word search reads from a query; none when it reads nothing of it. */
+export const wordSearchTerms = (query: string): ReadonlySet<string> => {
+  const text = normalized(recallQuery(query))
+  return text.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(text)
+}
+
 /**
- * The recall's query from the owner's typed turns, newest first: the latest whole, then
- * earlier turns while the word search still reads that far, so a short reply searches with
- * what it answers.
+ * The recall's query from the owner's typed turns, newest first: the latest turn whole. When
+ * the word search reads nothing of it (a short reply), earlier turns follow it, newest first,
+ * as far as the word search reads, so the reply searches with what it answers.
  */
 export const recallText = (turns: ReadonlyArray<string>): string => {
-  let text = ""
-  for (const turn of turns) {
-    const typed = turn.trim()
-    if (typed === "") continue
+  const typed = turns.map((turn) => turn.trim()).filter((turn) => turn !== "")
+  const latest = typed[0]
+  if (latest === undefined || wordSearchTerms(latest).size > 0) return latest ?? ""
+  let text = latest
+  for (const earlier of typed.slice(1)) {
     if (text.length >= QUERY_LIMIT) break
-    text = text === "" ? typed : `${text}\n${typed}`
+    text = `${text}\n${earlier}`
   }
-  return text
+  return text === latest ? latest : recallQuery(text)
 }
 
 export interface RankedMemoryPage {
@@ -431,7 +438,6 @@ export const prepareMemorySources = ({
       record.page.pageId !== "health"
   )
   const standing = active.filter(standingFacts)
-  const queryText = recall === undefined ? "" : normalized(recallQuery(recall.query))
   const selected =
     recall === undefined
       ? []
@@ -439,7 +445,7 @@ export const prepareMemorySources = ({
           pages: active.filter(
             (record) => !standingFacts(record) && !recall.excludedPageIds.has(record.page.pageId)
           ),
-          queryTerms: queryText.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(queryText),
+          queryTerms: wordSearchTerms(recall.query),
           semanticMatches
         }).slice(0, RESULT_LIMIT)
   return {

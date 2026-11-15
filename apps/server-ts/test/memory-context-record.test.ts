@@ -350,19 +350,28 @@ describe("what an owner chat is sent and records", () => {
     expect(index?.text).not.toContain("me.md")
   })
 
-  it("searches the owner's recent typed turns, newest first, so a short reply recalls", async () => {
-    const composed = await compose({
-      actor: person,
-      messages: [
-        { role: "user", content: QUERY },
-        { role: "assistant", content: "Which ledger?" },
-        { role: "user", content: "yes" }
-      ]
-    })
-    expect(composed.searches).toEqual([`yes\n${QUERY}`])
-    expect(composed.writes[0]?.sources.filter((source) => source.kind === "recalled")).not.toEqual(
-      []
-    )
+  const turns = (...typed: ReadonlyArray<string>): ReadonlyArray<ChatRunnerMessage> =>
+    typed.flatMap((content) => [
+      { role: "user" as const, content },
+      { role: "assistant" as const, content: "Which ledger?" }
+    ])
+
+  it("adds earlier typed turns, newest first, only when the word search reads nothing of the latest", async () => {
+    const short = await compose({ actor: person, messages: turns(QUERY, "yes ok fine") })
+    expect(short.searches).toEqual([`yes ok fine\n${QUERY}`])
+    expect(short.writes[0]?.sources.filter((source) => source.kind === "recalled")).not.toEqual([])
+    const readable = await compose({ actor: person, messages: turns(QUERY, "orchard plan") })
+    expect(readable.searches).toEqual(["orchard plan"])
+    const question = "what did we decide about the second greenhouse"
+    const later = await compose({ actor: person, messages: turns(QUERY, question) })
+    expect(later.searches).toEqual([question])
+  })
+
+  it("adds earlier turns only as far as the word search reads", async () => {
+    const paste = `${QUERY} ${"pasted document text ".repeat(2_000)}`
+    const composed = await compose({ actor: person, messages: turns(paste, "yes") })
+    expect(composed.searches).toEqual([`yes\n${paste}`.slice(0, 512)])
+    expect(composed.writes[0]?.query).toBe(composed.searches[0])
   })
 
   it("keeps a long owner message once, as far as the word search read it", async () => {
