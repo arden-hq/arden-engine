@@ -358,20 +358,22 @@ const finishReason = (raw: string, label: string): FinishReason => {
 }
 
 /**
- * Usage without double counting: `prompt_tokens` includes the cached and the
- * cache-written tokens, so both come off it. Some servers (seen on
- * OpenRouter) count this request's cache writes inside `cached_tokens` as
- * well; with both reported, writes come off the cached count (prime
- * `parse_chunk_usage`).
+ * Usage without double counting: `prompt_tokens` counts every input token,
+ * cached and cache-written ones included, so both come off it.
+ * `cached_tokens` is what was read from the cache and `cache_write_tokens`
+ * what this request wrote; the two never overlap (OpenRouter's usage
+ * accounting docs, and live on 2026-11-16 for Claude, OpenAI and Alibaba:
+ * a Claude request that read 23,949 tokens and wrote 14,979 more reported
+ * exactly those two counts, and was billed for exactly them). prime's
+ * `parse_chunk_usage` takes writes off the cached count as well; OpenRouter
+ * no longer reports that way.
  */
 const usageOf = (raw: Readonly<Record<string, unknown>>): Usage => {
   const details = isRecord(raw.prompt_tokens_details) ? raw.prompt_tokens_details : {}
-  const prompt = tokens(raw.prompt_tokens)
-  const reportedCached = tokens(details.cached_tokens)
+  const cacheRead = tokens(details.cached_tokens)
   const cacheWrite = tokens(details.cache_write_tokens)
-  const cacheRead = cacheWrite > 0 ? Math.max(0, reportedCached - cacheWrite) : reportedCached
   return {
-    prompt_tokens: Math.max(0, prompt - cacheRead - cacheWrite),
+    prompt_tokens: Math.max(0, tokens(raw.prompt_tokens) - cacheRead - cacheWrite),
     completion_tokens: tokens(raw.completion_tokens),
     cache_read_tokens: cacheRead,
     cache_write_tokens: cacheWrite

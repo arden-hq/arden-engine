@@ -662,9 +662,9 @@ describe("OpenRouter reasoning_details", () => {
       },
       finish_reason: "stop",
       usage: {
-        prompt_tokens: 20,
+        prompt_tokens: 16,
         completion_tokens: 12,
-        cache_read_tokens: 6,
+        cache_read_tokens: 10,
         cache_write_tokens: 4
       },
       model: "openai/gpt-5-mini"
@@ -699,6 +699,99 @@ describe("OpenRouter reasoning_details", () => {
       { role: "assistant", content: "Done." },
       { role: "assistant", content: "Done." }
     ])
+  })
+})
+
+describe("OpenRouter usage", () => {
+  /** The last chunk of a real OpenRouter stream (2026-11-16), usage as sent. */
+  const lastChunk = (model: string, provider: string, usage: unknown) => ({
+    id: "gen-1794783619-MvelW4gWCTL0KKjx1E8i",
+    object: "chat.completion.chunk",
+    created: 1794783619,
+    model,
+    provider,
+    service_tier: "default",
+    choices: [
+      {
+        index: 0,
+        delta: { content: "", role: "assistant" },
+        finish_reason: "stop",
+        native_finish_reason: "end_turn"
+      }
+    ],
+    usage
+  })
+
+  /**
+   * `prompt_tokens` counts every input token; `cached_tokens` counts only the
+   * tokens read from the cache and `cache_write_tokens` only those written by
+   * this request, never overlapping. Claude Haiku 5.5 with `cache_control`
+   * breakpoints read a 23,949-token prefix and wrote 14,979 more: OpenRouter
+   * billed 22 x $0.10 + 23,949 x $0.01 + 14,979 x $0.125 per million =
+   * $0.002114, exactly its `upstream_inference_prompt_cost`. GPT-6 Luna's
+   * first request over an 17,957-token prefix wrote 17,954, read none.
+   */
+  it.each([
+    [
+      "anthropic/claude-haiku-5.5",
+      "Claude Platform on AWS",
+      {
+        prompt_tokens: 38950,
+        completion_tokens: 4,
+        total_tokens: 38954,
+        cost: 0.002116065,
+        is_byok: false,
+        prompt_tokens_details: {
+          cached_tokens: 23949,
+          cache_write_tokens: 14979,
+          audio_tokens: 0,
+          video_tokens: 0
+        },
+        cost_details: {
+          upstream_inference_cost: 0.002116065,
+          upstream_inference_prompt_cost: 0.002114065,
+          upstream_inference_completions_cost: 0.000002
+        },
+        completion_tokens_details: { reasoning_tokens: 0, image_tokens: 0, audio_tokens: 0 }
+      },
+      {
+        prompt_tokens: 22,
+        completion_tokens: 4,
+        cache_read_tokens: 23949,
+        cache_write_tokens: 14979
+      }
+    ],
+    [
+      "openai/gpt-6-luna",
+      "OpenAI",
+      {
+        prompt_tokens: 17957,
+        completion_tokens: 5,
+        total_tokens: 17962,
+        cost: 0.00224705,
+        is_byok: false,
+        prompt_tokens_details: {
+          cached_tokens: 0,
+          cache_write_tokens: 17954,
+          audio_tokens: 0,
+          video_tokens: 0
+        },
+        cost_details: {
+          upstream_inference_cost: 0.00224705,
+          upstream_inference_prompt_cost: 0.00224455,
+          upstream_inference_completions_cost: 0.0000025
+        },
+        completion_tokens_details: { reasoning_tokens: 0, image_tokens: 0, audio_tokens: 0 }
+      },
+      { prompt_tokens: 3, completion_tokens: 5, cache_read_tokens: 0, cache_write_tokens: 17954 }
+    ]
+  ])("splits %s usage into fresh, read and written tokens", async (model, served, usage, split) => {
+    const { provider: cc } = provider(
+      [() => sseResponse([lastChunk(model, served, usage), "[DONE]"])],
+      { providerId: "openrouter", baseUrl: "https://openrouter.ai/api/v1" }
+    )
+    const completed = completionOf(await collect(cc.stream(request({ model }))))
+    expect(completed.usage).toEqual(split)
   })
 })
 
