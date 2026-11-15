@@ -5,8 +5,9 @@ import { it } from "vitest"
 import { FINDING_KINDS, FINDINGS, memoryFindings } from "../src/wiki/page-shape.js"
 import { loadSnapshot } from "../src/wiki/snapshot.js"
 import { UNTRACKED_PAGES } from "../src/wiki/untracked.js"
-import { locateReplayCopy, runOnReplayCopy } from "../test/fixtures/replay-copy.js"
+import { locateReplayCopy } from "../test/fixtures/replay-copy.js"
 
+// Reads the copy's Memory files only: the database is not opened, so no migration runs.
 it("prints the findings on the copy's Memory, paths and counts only", async () => {
   const located = locateReplayCopy()
   if (located.kind === "absent") throw new Error(located.reason)
@@ -15,8 +16,7 @@ it("prints the findings on the copy's Memory, paths and counts only", async () =
     workingRoot: join(copy.wiki, "pages"),
     historyRoot: join(copy.wiki, ".wiki-history")
   }
-  const findings = await runOnReplayCopy(
-    copy,
+  const findings = await Effect.runPromise(
     Effect.gen(function* () {
       const repository = yield* ManagedFileRepository
       const snapshot = yield* loadSnapshot(repository, "list")
