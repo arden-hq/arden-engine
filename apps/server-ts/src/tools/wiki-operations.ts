@@ -109,10 +109,12 @@ const HistoryParametersSchema = Schema.Struct({
     })
     .pipe(Schema.withDecodingDefault(Effect.succeed(20))),
   line: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_LINE_CHARS))
-    .annotate({
-      description:
-        "Text from one line of the page. Instead of the list, returns the change that added that line: who wrote it, when, and in which chat."
-    })
+    .pipe(
+      Schema.annotateEncoded({
+        description:
+          "Text from one line of the page. Instead of the list, returns the change that added that line: who wrote it, when, and in which chat."
+      })
+    )
     .pipe(Schema.optionalKey)
 })
 
