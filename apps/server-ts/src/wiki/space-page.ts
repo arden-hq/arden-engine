@@ -232,7 +232,7 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
 
 type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">
 
-const withSpacePage = (
+const withSpacePageOrDeferred = (
   wiki: EnsureSpacePage,
   space: PersistedSpace,
   home: WikiSpacePageInput["home"]
@@ -255,5 +255,5 @@ export const createSpaceWithPage = Effect.fn("Spaces.createWithPage")(function* 
   } = {}
 ) {
   const space = yield* services.spaces.create(input, options.mutation)
-  return yield* withSpacePage(services.wiki, space, options.home)
+  return yield* withSpacePageOrDeferred(services.wiki, space, options.home)
 })
