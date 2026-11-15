@@ -3,6 +3,7 @@ import { Effect } from "effect"
 
 import { decodeWikiOrigin, wikiOriginSource, type WikiCommitSource } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
+import { isSystemPage } from "./system-pages.js"
 
 const CHANGE_DIFF_CHARS = 12_000
 const MIN_PAGE_CHARS = 400
@@ -94,6 +95,12 @@ const touches =
       ? change.before?.path === name.path || change.after?.path === name.path
       : (change.after ?? change.before)?.resourceId === name.pageId
 
+/** Whether a run is shown this side of a saved change: never a code-owned page's. */
+export const shownToRuns = (change: ResourceChange): boolean =>
+  ![change.before?.path, change.after?.path].some(
+    (path) => path !== undefined && isSystemPage(path)
+  )
+
 const pathOf = (change: ResourceChange): string => (change.after ?? change.before)?.path ?? ""
 
 const diffTarget = (change: ResourceChange) => (change.action === "archive" ? null : change.after)
@@ -113,7 +120,9 @@ export const makeWikiChangeMethods = (
     const commits = yield* repository
       .history({ resourceId: name.pageId ?? null, limit: CHANGE_SEARCH_COMMITS })
       .pipe(Effect.mapError(mapRevisionError("history", name.pageId)))
-    const ofPage = commits.filter((commit) => commit.changes.some(touches(name)))
+    const ofPage = commits.filter((commit) =>
+      commit.changes.some((change) => shownToRuns(change) && touches(name)(change))
+    )
     // A time copied from a listing names that change exactly, even when two
     // changes were saved within one millisecond.
     const found =
@@ -134,7 +143,7 @@ export const makeWikiChangeMethods = (
     input: WikiChangeName & { readonly offset: number }
   ) {
     const commit = yield* changeAt(input)
-    const changes = commit.changes
+    const changes = commit.changes.filter(shownToRuns)
     const start = changes.findIndex(touches(input))
     const diffs: Array<WikiChangeDiff> = []
     let budget = CHANGE_DIFF_CHARS

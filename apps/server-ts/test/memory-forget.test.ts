@@ -22,8 +22,10 @@ import type { ServerTool } from "../src/tools/define.js"
 import { memoryForgetTools } from "../src/tools/memory-forget.js"
 import type { ServerRunContext } from "../src/tools/run-context.js"
 import { activePages } from "../src/tools/wiki.js"
+import { makeWikiPageHistoryTools } from "../src/tools/wiki-page-history.js"
 import { searchPages } from "../src/tools/wiki-search.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
+import { makeWikiChangeMethods } from "../src/wiki/change.js"
 import { memoryIndex } from "../src/wiki/collections.js"
 import {
   commitWiki,
@@ -522,6 +524,70 @@ describe("what forgotten.md holds and where it stays", () => {
 })
 
 
+describe("no run is sent forgotten.md", () => {
+  it("leaves it out of the changes a run lists and reads, and out of page history", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        yield* memory.forgetting.undoForget({ id: 1, turn: TURN })
+        const changes = makeWikiChangeMethods(memory.repository)
+        const read = yield* changes.readChange({
+          path: "people/sam.md",
+          pageId: "sam",
+          at: undefined,
+          offset: 0
+        })
+        const direct = yield* refusal(
+          changes.readChange({ path: "forgotten.md", pageId: undefined, at: undefined, offset: 0 })
+        )
+        const listed = yield* memory.listing.listChanges({
+          since: "2000-01-01T00:00:00.000Z",
+          offset: 0,
+          limit: 10
+        })
+        const [historyTool] = makeWikiPageHistoryTools({
+          wiki: partialService<Wiki["Service"]>("Wiki", { snapshot: memory.listing.snapshot }),
+          runs: partialService("RunQueries", {}),
+          sessions: partialService("SessionQueries", {})
+        })
+        const history = yield* Effect.promise(() =>
+          Promise.resolve(
+            historyTool?.execute(
+              { path: "forgotten.md", limit: 20 },
+              {
+                run: serverRunContext(),
+                signal: new AbortController().signal,
+                toolCallId: "call-fixture",
+                messages: []
+              }
+            )
+          ).then(
+            () => "read",
+            (error: unknown) => errorMessage(error)
+          )
+        )
+        return {
+          read: read.pages.map((page) => page.path).toSorted(),
+          diffs: read.diffs.map((diff) => diff.path).toSorted(),
+          direct: direct?.reason,
+          listed: listed.entries.map((entry) => entry.changes.length),
+          listedSystem: listed.entries.some((entry) =>
+            entry.changes.some((change) => change.path === "forgotten.md")
+          ),
+          history: history.startsWith("No active wiki page exists at 'forgotten.md'")
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      read: ["people/sam.md", "places/town.md"],
+      diffs: ["people/sam.md", "places/town.md"],
+      direct: "not_found",
+      listed: [2, 5],
+      listedSystem: false,
+      history: true
+    })
+  })
+})
 
 describe("memory_forget", () => {
   const context = (run: ServerRunContext): ToolContext<ServerRunContext> => ({

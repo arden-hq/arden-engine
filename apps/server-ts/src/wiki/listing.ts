@@ -4,6 +4,7 @@ import type { WikiPage, WikiPageListOptions, WikiPagePage } from "@arden-hq/prot
 import { WIKI_PAGE_DEFAULT_LIMIT, WIKI_PAGE_MAX_LIMIT } from "@arden-hq/protocol/wiki"
 import { DateTime, Effect, Option, Schema } from "effect"
 
+import { shownToRuns } from "./change.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import {
   detail,
@@ -180,9 +181,27 @@ export const makeWikiListingMethods = (
     if (Option.isNone(sinceDateTime)) {
       return yield* wikiError("list", "invalid", "Invalid Wiki change timestamp")
     }
-    const commits = yield* repository
-      .history({ limit: input.offset + input.limit + 1 })
-      .pipe(Effect.mapError(mapRevisionError("list")))
+    const wanted = input.offset + input.limit + 1
+    // A commit that changed only a code-owned page is no change a run sees, so read further
+    // back until enough remain.
+    const shown = (limit: number) =>
+      repository.history({ limit }).pipe(
+        Effect.mapError(mapRevisionError("list")),
+        Effect.map((read) => ({
+          complete: read.length < limit,
+          commits: read.flatMap((commit) => {
+            const changes = commit.changes.filter(shownToRuns)
+            return changes.length === 0 ? [] : [{ ...commit, changes }]
+          })
+        }))
+      )
+    let limit = wanted
+    let read = yield* shown(limit)
+    while (!read.complete && read.commits.length < wanted) {
+      limit += wanted - read.commits.length
+      read = yield* shown(limit)
+    }
+    const commits = read.commits
     const recent: Array<(typeof commits)[number]> = []
     for (const commit of commits) {
       const timestamp = DateTime.make(commit.timestamp)

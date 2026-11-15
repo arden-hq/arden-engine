@@ -205,11 +205,13 @@ const parseDirectory = (value: string): string | null => {
   return directory
 }
 
+/** Every page a run may name, whatever its lifecycle: never a code-owned one. */
+export const runPages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
+  snapshot.pages.filter((record) => !isSystemPage(record.resource.path))
+
 /** The active pages a run may find, read or write by path. */
 export const activePages = (snapshot: Snapshot): ReadonlyArray<PageRecord> =>
-  snapshot.pages.filter(
-    (record) => record.page.lifecycle === "active" && !isSystemPage(record.resource.path)
-  )
+  runPages(snapshot).filter((record) => record.page.lifecycle === "active")
 
 export const activePage = (snapshot: Snapshot, path: string): PageRecord | null => {
   const pages = activePages(snapshot)

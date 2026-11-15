@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { toolFailure } from "./tool-failure.js"
-import { activePages, loadSnapshot, wikiFailure } from "./wiki.js"
+import { activePages, loadSnapshot, runPages, wikiFailure } from "./wiki.js"
 import { MAX_PAGE_SOURCES, pageSource } from "./wiki-records.js"
 import { memoryPathOf, readChangeCall } from "../lib/memory-link.js"
 import { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
@@ -184,7 +184,9 @@ const makeWikiChangeTools = ({
     execute: async (input, ctx) => {
       const path = memoryPathOf(input.page)
       const snapshot = await loadSnapshot(wiki, ctx.signal).catch(() => undefined)
-      const pageId = snapshot?.pages.find((record) => record.resource.path === path)?.page.pageId
+      const pageId = (snapshot === undefined ? [] : runPages(snapshot)).find(
+        (record) => record.resource.path === path
+      )?.page.pageId
       // A Space review was told which pages changed since its previous review;
       // it reads all of that change, not only the page's last save.
       const reads =

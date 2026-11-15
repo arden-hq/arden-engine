@@ -14,6 +14,7 @@ import {
   loadSnapshot,
   pageNotFound,
   readablePage,
+  runPages,
   wikiFailure,
   writtenPageData
 } from "./wiki.js"
@@ -57,7 +58,7 @@ const RestoreParametersSchema = Schema.Struct({
 })
 
 const pageStoredAt = (snapshot: Snapshot, path: string): PageRecord | null =>
-  snapshot.pages.find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
+  runPages(snapshot).find((record) => record.resource.path === path) ?? readablePage(snapshot, path)
 
 const prepareRestore = async (
   wiki: Wiki["Service"],
