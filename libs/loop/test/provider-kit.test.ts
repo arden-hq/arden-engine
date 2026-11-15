@@ -133,6 +133,23 @@ const REJECTIONS: ReadonlyArray<
     "context_length_exceeded"
   ],
   [
+    "OpenAI refusing a tool schema, relayed by OpenRouter",
+    400,
+    JSON.stringify({
+      error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+          raw: '{\n  "error": {\n    "message": "Invalid schema for function \'permissions_read\': schema must be a JSON Schema of \'type: \\"object\\"\', got \'type: \\"None\\"\'.",\n    "type": "invalid_request_error",\n    "param": "tools[21].function.parameters",\n    "code": "invalid_function_parameters"\n  }\n}',
+          provider_name: "OpenAI",
+          is_byok: false,
+          provider_error_code: "invalid_function_parameters"
+        }
+      }
+    }),
+    "request_invalid"
+  ],
+  [
     "OpenRouter unknown model ID",
     400,
     '{"error":{"message":"openai/no-such-model-xyz is not a valid model ID","code":400}}',

@@ -193,7 +193,12 @@ export const classifyRejection = (
     MODEL_UNAVAILABLE_PROSE.test(rejection.message)
   )
     return "model_unavailable"
-  if (status === 400 && rejection.type === "invalid_request_error") return "request_invalid"
+  if (
+    status === 400 &&
+    (rejection.type === "invalid_request_error" ||
+      rejection.upstream?.type === "invalid_request_error")
+  )
+    return "request_invalid"
   if (status === 401 || status === 403) return "provider_auth"
   if (status === 429) return "rate_limited"
   if (status !== undefined && retryableStatus(status)) return "provider_unavailable"
