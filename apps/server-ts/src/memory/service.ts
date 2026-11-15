@@ -13,13 +13,8 @@ import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
 import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
-import { renderIndex } from "./index-render.js"
-import {
-  prepareMemorySources,
-  recallCandidates,
-  type MemorySources,
-  type RenderedMemory
-} from "./retrieval.js"
+import { renderIndex, type RenderedIndex } from "./index-render.js"
+import { prepareMemorySources, recallCandidates, type MemorySources } from "./retrieval.js"
 import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
@@ -39,7 +34,7 @@ export interface MemoryTurn {
   readonly spaceList: (space: {
     readonly pageId: string
     readonly pagePath: string
-  }) => (maxBytes: number) => RenderedMemory
+  }) => (maxBytes: number) => RenderedIndex
   /** What this run may be sent from Memory: standing facts, the index and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }

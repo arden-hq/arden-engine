@@ -4,7 +4,7 @@ import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { clipLine, cutBytes, cutText } from "@arden-hq/std/text"
 import { chatHref } from "../sessions/chat-href.js"
-import type { RenderedMemory } from "../memory/retrieval.js"
+import type { RenderedIndex } from "../memory/index-render.js"
 
 export interface SpaceView {
   readonly space_id: string
@@ -18,7 +18,7 @@ export interface SpaceView {
         readonly path: string
         readonly content: string
         /** The generated list of the Space's other pages, in at most `maxBytes`. */
-        readonly list: (maxBytes: number) => RenderedMemory
+        readonly list: (maxBytes: number) => RenderedIndex
       }
     | undefined
   readonly questions: ReadonlyArray<SpaceQuestionView>
@@ -81,7 +81,7 @@ export const renderSpaceContext = (
 ): {
   readonly text: string
   readonly page: SpacePageShown | undefined
-  readonly list: RenderedMemory | undefined
+  readonly list: RenderedIndex | undefined
 } => {
   const intro = [
     "## Current Space",

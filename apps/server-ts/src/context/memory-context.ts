@@ -122,7 +122,10 @@ export const assembleMemoryContext = ({
   const standing = sources?.standing(MEMORY_BUDGET.standingPage) ?? none
   const spaced = space === undefined ? undefined : renderSpace(space)
   const index =
-    sources?.index({ maxBytes: MEMORY_BUDGET.index, listedElsewhere: spaced?.listRoot }) ?? none
+    sources?.index({
+      maxBytes: MEMORY_BUDGET.index,
+      shownElsewhere: spaced?.shown ?? new Set()
+    }) ?? none
   const recall = sources?.recall?.(MEMORY_BUDGET.recall)
   return {
     core: textSection("Core Memory", standing.text),
@@ -154,8 +157,8 @@ const renderSpace = (
 ): {
   readonly text: string
   readonly sources: ReadonlyArray<RunMemorySource>
-  /** The folder whose pages the Space context lists, when it lists any. */
-  readonly listRoot: string | undefined
+  /** The paths of the pages the Space context lists by line. */
+  readonly shown: ReadonlySet<string>
 } => {
   const rendered = renderSpaceContext(space.view, {
     maxBytes: MEMORY_BUDGET.space,
@@ -180,6 +183,6 @@ const renderSpace = (
   return {
     text: rendered.text,
     sources: [source, ...list],
-    listRoot: list.find((listed) => listed.kind === "index")?.root
+    shown: rendered.list?.shown ?? new Set()
   }
 }

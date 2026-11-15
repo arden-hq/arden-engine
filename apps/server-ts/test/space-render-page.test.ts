@@ -85,7 +85,7 @@ it("keeps the list of the Space's pages within its own allowance, and says when 
   expect(shown?.sources).toEqual([
     expect.objectContaining({ kind: "index", outcome: "cut", reason: "index_allowance" })
   ])
-  expect(shown?.text).toContain("[Folded: a folder marked folded")
+  expect(shown?.text).toContain("[Folded to fit: a folder marked folded")
   expect(shown?.text).toContain("[Cut to fit: the last lines are left out")
   expect(new TextEncoder().encode(`\n\n${shown?.text ?? ""}`).byteLength).toBeLessThanOrEqual(
     shares.pageListBytes

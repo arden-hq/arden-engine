@@ -371,25 +371,22 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     expect((space?.bytes ?? 0) + (list?.bytes ?? 0) + 2).toBe(bytes(text ?? ""))
   })
 
-  it("folds the Space's folder in the Memory index when the Space list is sent, so no line is sent twice", async () => {
+  const listLines = (text: string | undefined) =>
+    new Set((text ?? "").split("\n").filter((line) => line.startsWith("- ")))
+
+  it("leaves out of the Memory index the lines the Space list shows, so no line is sent twice", async () => {
     const beds = page("spaces/garden/beds.md", "Beds", "Raised beds.")
     const seeds = page("spaces/garden/seeds/list.md", "Seeds", "Seed list.")
     const pages = [...PAGES, beds, seeds]
-    const lines = (text: string | undefined) =>
-      new Set((text ?? "").split("\n").filter((line) => line.startsWith("- ")))
     const owner = await compose({ actor: person, spaceId: "space-1", pages })
     const index = owner.sections.find((section) => section.key === "Memory index")?.text
     const space = owner.sections.find((section) => section.key === "Current Space")?.text
-    expect([...lines(index)].filter((line) => lines(space).has(line))).toEqual([])
-    expect(index).toContain("- spaces/garden/ (folded)")
+    expect([...listLines(index)].filter((line) => listLines(space).has(line))).toEqual([])
     expect(index).not.toContain("spaces/garden/beds.md")
+    expect(index).not.toContain("(folded)")
     expect(
       owner.writes[0]?.sources.find((source) => source.kind === "index" && source.root === "")
-    ).toMatchObject({
-      folded: [{ folder: "spaces/garden", pages: 2 }],
-      outcome: "whole",
-      reason: null
-    })
+    ).toMatchObject({ folded: [], outcome: "whole", reason: null })
     const worker = await compose({
       actor: { kind: "task_worker", item_id: "t", space_id: "space-1" },
       spaceId: "space-1",
@@ -398,6 +395,21 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     const workerIndex = worker.sections.find((section) => section.key === "Memory index")?.text
     expect(workerIndex).toContain("- spaces/garden/beds.md")
     expect(workerIndex).not.toContain("(folded)")
+  })
+
+  it("keeps in the Memory index the Space's pages its list folded, each page shown once", async () => {
+    const beds = Array.from({ length: 30 }, (_, index) =>
+      page(`spaces/garden/bed-${index}.md`, `Bed ${index}`, "A raised bed in the garden, with its soil, crops and watering notes.")
+    )
+    const owner = await compose({ actor: person, spaceId: "space-1", pages: [...PAGES, ...beds] })
+    const index = owner.sections.find((section) => section.key === "Memory index")?.text
+    const space = owner.sections.find((section) => section.key === "Current Space")?.text
+    expect(space).toContain("- spaces/garden/ (folded)")
+    expect([...listLines(index)].filter((line) => listLines(space).has(line))).toEqual([])
+    for (const bed of beds) expect(index).toContain(`- ${bed.resource.path}`)
+    expect(
+      owner.writes[0]?.sources.find((source) => source.kind === "index" && source.root === "")
+    ).toMatchObject({ listed: 33, folded: [], outcome: "whole", reason: null })
   })
 
   it("folds a long list of the Space's pages in its own allowance, with a notice", async () => {
@@ -412,7 +424,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
     })
     const text = composed.sections.find((section) => section.key === "Current Space")?.text ?? ""
     expect(text).toContain("spaces/garden/beds/ (folded)")
-    expect(text).toContain("[Folded: a folder marked folded")
+    expect(text).toContain("[Folded to fit: a folder marked folded")
     const record = composed.writes[0]?.sources ?? []
     expect(record.find((source) => source.kind === "index" && source.root !== "")).toMatchObject({
       root: "spaces/garden",
@@ -646,7 +658,7 @@ describe("each source in its own allowance", () => {
     })
     expect(index?.bytes).toBeLessThanOrEqual(10_000)
     expect(text).toContain("- daily/ (folded)")
-    expect(text).toContain("[Folded: a folder marked folded is not listed page by page")
+    expect(text).toContain("[Folded to fit: a folder marked folded is not listed page by page")
     expect(text).not.toContain("250")
   })
 
