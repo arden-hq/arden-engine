@@ -6,7 +6,6 @@ import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../wiki/authority.js"
 import { directorySections } from "../wiki/collections.js"
-import { KEEP_RULE_FORMS, statesReportRetention } from "../wiki/report-retention.js"
 import { WikiReportContentSchema } from "../wiki/reports.js"
 import { Wiki } from "../wiki/service.js"
 import { resolveAutomation } from "./automation-records.js"
@@ -40,7 +39,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
         }),
         contract: Schema.NonEmptyString.check(Schema.isMaxLength(40_000)).annotate({
           description:
-            "Complete README with nonempty ## Purpose, ## Producers, ## Consumers, ## Boundaries, ## Retention and ## Records sections. Retention holds one line the server runs: `Keep: forever`, `Keep: 30 days` (dated reports older than that are archived unless a subject page links to them), or `Keep: 30 days, monthly summary` (one summary page per month is written first). Records specifies filename/date/timezone and evidence lookup conventions; dated reports start with YYYY-MM-DD."
+            "Complete README with nonempty ## Purpose, ## Producers, ## Consumers, ## Boundaries, ## Retention and ## Records sections. Records specifies filename/date/timezone and evidence lookup conventions; dated reports start with YYYY-MM-DD."
         })
       })
     ),
@@ -75,12 +74,6 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
           preview: "Missing record conventions",
           retryable: false
         })
-      }
-      if (!statesReportRetention(directorySections(input.contract).get("Retention"))) {
-        throw new ToolExecutionError(
-          `The ## Retention section needs one rule line: ${KEEP_RULE_FORMS}`,
-          { preview: "Missing retention rule", retryable: false }
-        )
       }
       const automation = await resolveAutomation(
         services.automations,

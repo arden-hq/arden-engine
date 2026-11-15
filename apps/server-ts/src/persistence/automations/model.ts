@@ -23,8 +23,7 @@ export const SYSTEM_HANDLER_IDS = [
   "home_letter",
   "managed_history_collection",
   "wiki_maintenance",
-  "chat_summaries",
-  "report_retention"
+  "chat_summaries"
 ] as const
 export type SystemHandlerId = (typeof SYSTEM_HANDLER_IDS)[number]
 

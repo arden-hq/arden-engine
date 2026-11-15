@@ -11,7 +11,6 @@ import { Effect } from "effect"
 import { expect, it } from "vitest"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
-import { makeWikiCaptureMethods } from "../src/wiki/capture.js"
 import {
   createPage,
   updatePage,
@@ -30,17 +29,6 @@ const OWNER: WikiCommitIdentity = {
   origin: { kind: "user", via: "desktop" },
   reason: "owner restore"
 }
-
-const readme = (retention: string) =>
-  formatWikiPage({
-    pageId: "reports",
-    title: "Reports",
-    aliases: [],
-    lifecycle: "active",
-    redirectTo: null,
-    metadata: { producer_automation_id: "auto-reports" },
-    body: `## Purpose\n\nReports.\n\n## Retention\n\n${retention}\n`
-  })
 
 const profile = (body: string) =>
   formatWikiPage({
@@ -71,70 +59,6 @@ const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiPageOp
 
 const message = <A>(effect: Effect.Effect<A, WikiError>) =>
   Effect.match(effect, { onFailure: (error) => error.message, onSuccess: () => "saved" })
-
-it("refuses an unreadable retention rule from Capture, a restore and its approval card", async () => {
-  const root = await mkdtemp(join(tmpdir(), "arden-page-rules-"))
-  try {
-    const outcome = await Effect.runPromise(
-      Effect.gen(function* () {
-        const repository = yield* ManagedFileRepository
-        const listing = makeWikiListingMethods(repository)
-        const capture = makeWikiCaptureMethods(repository, spaces, listing.read)
-        const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
-        yield* unchecked(
-          repository,
-          createPage("reports", "reports/README.md", readme("Keep: 1 month"))
-        )
-        const bad = yield* repository.get("reports")
-        if (bad === null) throw new Error("reports/README.md is missing")
-        const badCommit = (yield* repository.currentRevision) ?? ""
-        yield* unchecked(repository, updatePage(bad, readme("Keep: 30 days")))
-        const good = yield* repository.get("reports")
-        if (good === null) throw new Error("reports/README.md is missing")
-        const head = (yield* repository.currentRevision) ?? ""
-        const restoreInput = {
-          pageId: "reports",
-          commitId: badCommit,
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          commit: OWNER
-        }
-        return {
-          capture: yield* message(
-            capture.applyCapturePatchSet({
-              edits: [
-                { pageId: "reports", content: readme("Keep: 30d"), expectedVersion: good.versionId }
-              ],
-              expectedHead: head,
-              authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-              batch: {
-                sessionId: "chat-1",
-                start: { _tag: "Beginning" },
-                end: { _tag: "AfterSequence", sequence: 3 },
-                endMessageId: "message-3"
-              },
-              commit: { actor: "memory:capture", reason: "capture" }
-            })
-          ),
-          card: yield* message(restores.contentToRestore({ ...restoreInput, head })),
-          restore: yield* message(
-            restores.restoreRevision({
-              ...restoreInput,
-              expectedVersion: good.versionId,
-              expectedHead: head
-            })
-          )
-        }
-      }).pipe(Effect.scoped, Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root })))
-    )
-    expect(outcome).toEqual({
-      capture: expect.stringMatching(/^The retention rule "Keep: 30d" was not understood/u),
-      card: expect.stringMatching(/^The retention rule "Keep: 1 month" was not understood/u),
-      restore: expect.stringMatching(/^The retention rule "Keep: 1 month" was not understood/u)
-    })
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
 
 it("refuses a restore over the size limit on its approval card, before the owner approves", async () => {
   const root = await mkdtemp(join(tmpdir(), "arden-page-rules-"))
@@ -176,7 +100,6 @@ const sources = (directory: string): ReadonlyArray<string> =>
 
 const REPLACEMENT_RULES = [
   { check: /\bwrittenContent\(/u, owner: "write-rules.ts", defined: "page.ts" },
-  { check: /\bunreadableKeepRule\(/u, owner: "write-rules.ts", defined: "report-retention.ts" },
   { check: /\baliasesAreHuman\(/u, owner: "commit.ts", defined: "page.ts" },
   { check: /\bcorePageBudget\(/u, owner: "commit.ts", defined: undefined }
 ]

@@ -21,7 +21,6 @@ import {
   type WikiCommitOrigin,
   updatePage
 } from "./commit.js"
-import { MONTHLY_SUMMARY_MAX_CHARS } from "./report-retention.js"
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { createWikiSpacePage, type WikiSpacePageInput } from "./space-page.js"
 import { makeWikiDirectoryMethods, type WikiCreateDirectoryInput } from "./directories.js"
@@ -36,13 +35,7 @@ import {
 } from "./page.js"
 import { publishWikiReport, type WikiPublishReportInput } from "./reports.js"
 import { loadSnapshot, readRecord, type PageRecord } from "./snapshot.js"
-import {
-  isRetentionSummaryWrite,
-  requireArchivable,
-  requireRetirable,
-  requireUpdatable,
-  summaryTooLong
-} from "./write-rules.js"
+import { requireArchivable, requireRetirable, requireUpdatable } from "./write-rules.js"
 
 const MEMORY_CAPTURE_ORIGIN: WikiCommitOrigin = {
   kind: "capture",
@@ -156,15 +149,9 @@ export const makeWikiMutationMethods = (
       return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
     }
     const origin = input.commit?.origin ?? MEMORY_CAPTURE_ORIGIN
-    // Report Retention writes the one monthly summary that replaces a month of reports.
-    const writesMonthlySummary = isRetentionSummaryWrite(origin, input.path)
-    if (writesMonthlySummary && input.body.length > MONTHLY_SUMMARY_MAX_CHARS) {
-      return yield* wikiError("create", "invalid", summaryTooLong(input.body.length))
-    }
     if (
       Object.hasOwn(directoryPage.page.metadata, "producer_automation_id") &&
-      isAutomatedOrigin(origin) &&
-      !writesMonthlySummary
+      isAutomatedOrigin(origin)
     ) {
       return yield* wikiError(
         "create",

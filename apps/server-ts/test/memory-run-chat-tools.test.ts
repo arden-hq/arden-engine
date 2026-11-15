@@ -2,7 +2,6 @@ import type { ToolCallRequest, ToolEntry, Toolset } from "@arden-hq/loop"
 import { describe, expect, it } from "vitest"
 
 import { memoryCaptureHandler } from "../src/automations/handlers/memory-capture.js"
-import { reportRetentionHandler } from "../src/automations/handlers/report-retention.js"
 import { wikiMaintenanceHandler } from "../src/automations/handlers/wiki-maintenance.js"
 import { withoutTools } from "../src/execution/toolset-middleware.js"
 
@@ -43,11 +42,6 @@ describe("Maintenance-only tools in Memory runs", () => {
 
   it("Memory Capture cannot read other chats or merge pages; it judges its batch", async () => {
     const toolset = memoryCaptureHandler.tools?.(base()) ?? base()
-    expect(await advertised(toolset)).toEqual(["wiki_read_page"])
-  })
-
-  it("Report Retention writes its summary from the reports alone", async () => {
-    const toolset = reportRetentionHandler.tools?.(base()) ?? base()
     expect(await advertised(toolset)).toEqual(["wiki_read_page"])
   })
 

@@ -7,17 +7,9 @@ import {
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
-import { isAutomatedOrigin, type WikiCommitIdentity, type WikiCommitOrigin } from "./commit.js"
-import { directorySections } from "./collections.js"
+import { isAutomatedOrigin, type WikiCommitIdentity } from "./commit.js"
 import { wikiError, type WikiError } from "./errors.js"
 import { parseWikiPage, writtenContent } from "./page.js"
-import {
-  isMonthlySummaryPath,
-  KEEP_RULE_FORMS,
-  MONTHLY_SUMMARY_MAX_CHARS,
-  unreadableKeepRule
-} from "./report-retention.js"
-import { REPORT_RETENTION_AUTOMATION } from "./retire-reports.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 
 export interface WikiWriter {
@@ -25,14 +17,6 @@ export interface WikiWriter {
   readonly authority: WikiLocationAuthority
   readonly commit?: WikiCommitIdentity
 }
-
-export const isRetentionSummaryWrite = (origin: WikiCommitOrigin, path: string): boolean =>
-  origin.kind === "automation" &&
-  origin.automationId === REPORT_RETENTION_AUTOMATION &&
-  isMonthlySummaryPath(path)
-
-export const summaryTooLong = (chars: number): string =>
-  `The monthly summary has ${chars} characters; it replaces a month of reports only when it is ${MONTHLY_SUMMARY_MAX_CHARS} or fewer. Nothing was saved. Keep fewer items and shorter links, then save it again.`
 
 /** The content a page update writes, once every rule for replacing this page holds. */
 export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
@@ -48,7 +32,7 @@ export const requireUpdatable = Effect.fn("Wiki.requireUpdatable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "update")
   yield* requireWikiWritePaths(boundary, "update", [current.resource.path])
-  return yield* requireReplacement("update", current, input)
+  return yield* requireReplacement("update", input)
 })
 
 /**
@@ -94,12 +78,11 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
       )
     }
   }
-  return yield* requireReplacement("restore", current, input)
+  return yield* requireReplacement("restore", input)
 })
 
 const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
   operation: "update" | "restore",
-  current: PageRecord,
   input: WikiWriter & { readonly content: string }
 ): Effect.fn.Return<string, WikiError> {
   const replacement = yield* parseWikiPage(input.content, input.pageId).pipe(
@@ -114,28 +97,6 @@ const requireReplacement = Effect.fn("Wiki.requireReplacement")(function* (
     return yield* wikiError(operation, "invalid", "A page update cannot create a redirect", {
       pageId: input.pageId
     })
-  }
-  if (
-    input.commit !== undefined &&
-    isRetentionSummaryWrite(input.commit.origin, current.resource.path) &&
-    replacement.body.length > MONTHLY_SUMMARY_MAX_CHARS
-  ) {
-    return yield* wikiError(operation, "invalid", summaryTooLong(replacement.body.length), {
-      pageId: input.pageId
-    })
-  }
-  const keepRule =
-    posix.basename(current.resource.path).toLowerCase() === "readme.md" &&
-    Object.hasOwn(replacement.metadata, "producer_automation_id")
-      ? unreadableKeepRule(directorySections(replacement.body).get("Retention"))
-      : undefined
-  if (keepRule !== undefined) {
-    return yield* wikiError(
-      operation,
-      "invalid",
-      `The retention rule "${keepRule}" was not understood, so it would keep every report. Nothing was saved. Write ${KEEP_RULE_FORMS}.`,
-      { pageId: input.pageId }
-    )
   }
   return yield* writtenContent(replacement).pipe(
     Effect.mapError((cause) =>
