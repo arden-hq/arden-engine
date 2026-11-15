@@ -68,7 +68,6 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
     "space_page_read",
     "space_page_patch",
     "space_page_write",
-    "space_page_create",
     "space_create",
     "space_settings_update",
     "space_archive"
@@ -291,7 +290,6 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   wiki_move_page: inputs(["path", "wiki_search"]),
   wiki_restore_page: inputs(["path", "wiki_search"], ["at", "wiki_page_history"]),
   space_page_patch: inputs(["old_text", "space_page_read"]),
-  space_page_create: inputs(["space_id", "space_list"]),
   space_settings_update: inputs(["space_id", "space_list"], ["expected_updated_at", "space_list"]),
   space_archive: inputs(["space_id", "space_list"]),
   task_start: inputs(["key", "space_board_read", "task_get"]),

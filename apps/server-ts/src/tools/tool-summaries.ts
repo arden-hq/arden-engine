@@ -72,7 +72,6 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   item_move: "Moves a mail or GitHub item to the Space you name.",
   space_create: "Creates a new Space.",
   space_archive: "Archives a Space; you can restore it from Settings.",
-  space_page_create: "Creates a Space’s Memory page, if it has none.",
   space_list: "Looks at your Spaces.",
   space_page_read: "Reads a Space’s page.",
   space_page_patch: "Changes part of a Space’s page.",

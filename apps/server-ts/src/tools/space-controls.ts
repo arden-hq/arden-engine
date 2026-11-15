@@ -12,7 +12,6 @@ import { Wiki } from "../wiki/service.js"
 import { createSpaceWithPage } from "../wiki/space-page.js"
 import type { ServerRunContext } from "./run-context.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { pageReceipt } from "./wiki-records.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
 
 interface Services {
@@ -191,48 +190,6 @@ const makeSpaceSetupTools = (
         result: JSON.stringify(publicSpace(space)),
         preview: `${space.name} created`,
         data: { space: publicSpace(space) }
-      }
-    }
-  }),
-  defineServerTool({
-    name: "space_page_create",
-    description:
-      "Create and attach a Space's Memory page at the user's request. If a page is already attached, changes nothing. Returns the Space with its page_path. To add context, read the page with space_page_read, then use space_page_write. Ordinary Chat only.",
-    parameters: Schema.toStandardSchemaV1(
-      Schema.Struct({
-        space_id: Schema.NonEmptyString.annotate({
-          description: "Exact Space identity returned by space_list; never its display name."
-        })
-      })
-    ),
-    metadata: {
-      effect: "arden_db",
-      display_name: "Create Space Memory",
-      kind: "tool",
-      action: "write",
-      source: "_spaces",
-      changes_state: true,
-      target: "reported",
-      destructive: false,
-      concurrency_group: "space_work"
-    },
-    execute: async (input, ctx, effects) => {
-      await requireChat(services, ctx)
-      const ensured = await Effect.runPromise(
-        services.wiki
-          .ensureSpacePage({ spaceId: input.space_id })
-          .pipe(Effect.mapError((cause) => failure(cause))),
-        { signal: ctx.signal }
-      )
-      if (!ensured) throw refusal("Space is unavailable")
-      const { space, created: page } = ensured
-      if (page === undefined) effects.unchanged()
-      else effects.applied()
-      return {
-        result: JSON.stringify(publicSpace(space)),
-        preview: `${space.name} Memory ready`,
-        data: { space: publicSpace(space) },
-        ...(page === undefined ? {} : { host: pageReceipt({ ctx, page, beforeVersion: "absent" }) })
       }
     }
   })

@@ -547,3 +547,18 @@ it("renames a job's chat only through renameOwnedJob, besides the owner's own ed
     .sort()
   expect(naming).toEqual(["automation-catalog-edit.ts", "job-labels.ts", "session-lifecycle.ts"])
 })
+
+it("makes a Space's page only at creation, at the start check and from the released app's route", () => {
+  const root = join(import.meta.dirname, "../src")
+  const sources = (directory: string): ReadonlyArray<string> =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) return sources(path)
+      return entry.name.endsWith(".ts") ? [path] : []
+    })
+  const callers = sources(root)
+    .filter((path) => /\.ensureSpacePage\(/u.test(readFileSync(path, "utf8")))
+    .map((path) => path.slice(root.length + 1))
+    .sort()
+  expect(callers).toEqual(["http/spaces/handlers.ts", "wiki/space-page.ts"])
+})
