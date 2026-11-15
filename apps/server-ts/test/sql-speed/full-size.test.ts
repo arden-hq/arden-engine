@@ -250,7 +250,6 @@ const routeCalls = (
     "/admin/wiki/pages/:pageId/diff": [`/admin/wiki/pages/${MISSING}/diff`],
     "/admin/wiki/pages/:pageId/versions/diff": [`/admin/wiki/pages/${MISSING}/versions/diff`],
     "/admin/wiki/pages/:pageId/links": [`/admin/wiki/pages/${MISSING}/links`],
-    "/admin/wiki/rename-approvals": ["/admin/wiki/rename-approvals"],
     "/sessions/:sessionId/terminals": [`/sessions/${ids.chat}/terminals`],
     "/sessions/:sessionId/terminals/:terminalId/output": [
       `/sessions/${ids.chat}/terminals/${MISSING}/output`

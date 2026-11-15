@@ -222,9 +222,6 @@ export const tableTells = {
     silent:
       "Browser procedure work is already reported by its normal durable tool and script records."
   },
-  wiki_rename_approvals: {
-    silent: "Wiki: its change sink (wiki/service.ts) tells every Wiki write."
-  },
   storage_settings: { silent: ownSetting },
   storage_retention: { silent: ownSetting },
   session_file_cleanup: { silent: files },

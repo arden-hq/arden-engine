@@ -9,14 +9,9 @@ export const operationsSchemaSection = {
     "home_letters",
     "inbox_reads",
     "inbox_dismissals",
-    "monitor_state",
-    "wiki_rename_approvals"
+    "monitor_state"
   ],
-  indexes: [
-    "idx_home_presence_lease",
-    "idx_wiki_rename_approvals_open_page",
-    "idx_wiki_rename_approvals_open_created"
-  ],
+  indexes: ["idx_home_presence_lease"],
   triggers: [],
   statements: [
     `CREATE TABLE home_presence (
@@ -63,26 +58,6 @@ export const operationsSchemaSection = {
       namespace TEXT PRIMARY KEY,
       state TEXT NOT NULL,
       updated_at TEXT NOT NULL
-    )`,
-    `CREATE TABLE "wiki_rename_approvals" (
-      approval_id TEXT PRIMARY KEY CHECK (length(approval_id) > 0),
-      page_id TEXT NOT NULL CHECK (length(page_id) > 0),
-      plan_json TEXT NOT NULL CHECK (json_valid(plan_json) AND json_type(plan_json) = 'object'),
-      writer_json TEXT CHECK (writer_json IS NULL OR (json_valid(writer_json) AND json_type(writer_json) = 'object')),
-      status TEXT NOT NULL CHECK (status IN ('pending', 'applying', 'accepted', 'rejected')),
-      created_at TEXT NOT NULL,
-      commit_id TEXT,
-      resolution TEXT,
-      CHECK (
-        (status IN ('pending', 'applying', 'rejected') AND commit_id IS NULL)
-        OR (status = 'accepted' AND commit_id IS NOT NULL)
-      ),
-      CHECK (status IN ('accepted', 'rejected') OR writer_json IS NOT NULL)
-    )`,
-    `CREATE UNIQUE INDEX idx_wiki_rename_approvals_open_page
-      ON wiki_rename_approvals(page_id)
-      WHERE status IN ('pending', 'applying')`,
-    `CREATE INDEX idx_wiki_rename_approvals_open_created
-      ON wiki_rename_approvals(status, created_at)`
+    )`
   ]
 } as const satisfies OperationalSchemaSection

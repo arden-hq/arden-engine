@@ -24,11 +24,7 @@ it("makes the upkeep writer only through its constructor", () => {
 it("reads a writer's kind only at the commit point, and checks its Space boundary there", () => {
   const wiki = (paths: ReadonlyArray<string>) => paths.filter((path) => path.startsWith("wiki/"))
   expect(wiki(naming(/\.origin\.kind\b/u))).toEqual([])
-  expect(naming(/\brequireWikiWritePaths\(/u)).toEqual([
-    "wiki/commit.ts",
-    "wiki/directories.ts",
-    "wiki/rename.ts"
-  ])
+  expect(naming(/\brequireWikiWritePaths\(/u)).toEqual(["wiki/commit.ts", "wiki/directories.ts"])
 })
 
 it("tells a merge, a version restore and a report only by the action its one caller states", () => {

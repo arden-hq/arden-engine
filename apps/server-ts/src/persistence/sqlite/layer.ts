@@ -73,8 +73,6 @@ import { ChatRules } from "../chat/rules.js"
 import { ContextCompactionStore } from "../compaction/store.js"
 import { makeContextCompactionStore } from "./compaction.js"
 import type { ModelHost, ModelHostSource } from "../../models/host.js"
-import { WikiRenameStore } from "../wiki/rename-store.js"
-import { makeWikiRenameStore } from "./wiki-renames.js"
 import { ReaderPositions } from "../reader-position.js"
 import { makeReaderPositions } from "./reader-position.js"
 import { AutomationCatalog } from "../automations/catalog.js"
@@ -476,7 +474,6 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(ModelStore, built.models),
     Context.make(ModelCatalog, catalog),
     Context.make(ContextCompactionStore, makeContextCompactionStore(deps)),
-    Context.make(WikiRenameStore, makeWikiRenameStore(deps)),
     Context.make(ReaderPositions, makeReaderPositions(deps)),
     Context.make(MemoryCaptureStore, makeMemoryCaptureStore(deps)),
     Context.make(WikiEmbeddingStore, makeWikiEmbeddingStore(deps)),

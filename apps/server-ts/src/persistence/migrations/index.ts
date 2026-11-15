@@ -54,7 +54,7 @@ import { homePresenceLeaseIndex } from "./0159_home_presence_lease_index.js"
 import { memoryWakesLeaveReviews } from "./0160_memory_wakes_leave_reviews.js"
 import { retiredMemoryRecords } from "./0161_retired_memory_records.js"
 import { reportRetentionRetired } from "./0162_report_retention_retired.js"
-import { renameApprovalsStoreWriter } from "./0163_rename_approvals_store_writer.js"
+import { dropRenameApprovals } from "./0163_drop_rename_approvals.js"
 import { captureBacklogTriedAt } from "./0164_capture_backlog_tried_at.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
@@ -354,7 +354,7 @@ export const migrations: ReadonlyArray<Migration> = [
   memoryWakesLeaveReviews,
   retiredMemoryRecords,
   reportRetentionRetired,
-  renameApprovalsStoreWriter,
+  dropRenameApprovals,
   captureBacklogTriedAt
 ]
 

@@ -6,7 +6,6 @@ import {
 import { Context, Effect, Layer, Scope } from "effect"
 
 import { SpaceStore } from "../persistence/spaces/store.js"
-import { WikiRenameStore } from "../persistence/wiki/rename-store.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { makeWikiCaptureMethods, type WikiCaptureMethods } from "./capture.js"
@@ -64,17 +63,12 @@ export class Wiki extends Context.Service<Wiki, WikiShape>()("@arden-hq/server/w
 
 const make = Effect.fn("Wiki.make")(function* (
   options: WikiRepositoryOptions
-): Effect.fn.Return<
-  Wiki["Service"],
-  WikiError,
-  Scope.Scope | WikiChangeSink | SpaceStore | WikiRenameStore
-> {
+): Effect.fn.Return<Wiki["Service"], WikiError, Scope.Scope | WikiChangeSink | SpaceStore> {
   const diagnostics = yield* Diagnostics
   const lifecycle = yield* ServerLifecycle
   yield* diagnostics.startupPhase("wiki_open_started")
   const changeSink = yield* WikiChangeSink
   const spaces = yield* SpaceStore
-  const renameStore = yield* WikiRenameStore
   const repository = yield* Layer.build(
     managedFileRepositoryNodeLayer({
       ...options,
@@ -108,7 +102,7 @@ const make = Effect.fn("Wiki.make")(function* (
   const mutations = makeWikiMutationMethods(changes, spaces)
   const restores = makeWikiRestoreMethods(repository, changes)
   const capture = makeWikiCaptureMethods(repository)
-  const rename = makeWikiRenameMethods(repository, spaces, changes, renameStore)
+  const rename = makeWikiRenameMethods(repository, changes)
   const imports = makeWikiImportMethods(changes)
   const contentSteps = makeWikiContentStepMethods(repository, changes)
   const forgetting = makeWikiForgetMethods(changes)
@@ -156,13 +150,11 @@ const make = Effect.fn("Wiki.make")(function* (
           ),
     finalizeCaptureBatch: capture.finalizeCaptureBatch,
     hasFinalizedCaptureBatch: capture.hasFinalizedCaptureBatch,
-    ...rename,
-    requestRename: notifyAfter(rename.requestRename),
-    acceptRename: notifyAfter(rename.acceptRename)
+    planRename: rename.planRename,
+    rename: notifyAfter(rename.rename)
   })
 })
 
 export const wikiLayer = (
   options: WikiRepositoryOptions
-): Layer.Layer<Wiki, WikiError, WikiChangeSink | SpaceStore | WikiRenameStore> =>
-  Layer.effect(Wiki, make(options))
+): Layer.Layer<Wiki, WikiError, WikiChangeSink | SpaceStore> => Layer.effect(Wiki, make(options))

@@ -34,11 +34,12 @@ import { makeWikiListingMethods } from "../../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../../src/wiki/mutations.js"
 import { formatWikiPage } from "../../src/wiki/page.js"
 import { makeWikiChanges } from "../../src/wiki/page-change.js"
+import { makeWikiRenameMethods } from "../../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../../src/wiki/restore.js"
 import { Wiki } from "../../src/wiki/service.js"
 import { partialService, recordOf, serverRunContext, sessionHeader } from "../kit.js"
 
-/** The real Wiki read, history, change, update and restore methods over a fresh repository on disk. */
+/** The real Wiki read, history, change, update, rename and restore methods over a fresh repository on disk. */
 export interface WikiRepositoryFixture {
   readonly repository: ManagedFileRepositoryShape
   readonly workingRoot: string
@@ -65,7 +66,9 @@ export const withWikiRepository = async <A>(
       )
     )
     const listing = makeWikiListingMethods(repository)
-    const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {})
+    const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
+      activeBindings: () => Effect.succeed([])
+    })
     const changes = makeWikiChanges({ repository, spaces }, listing.read)
     const wiki = partialService<Wiki["Service"]>("Wiki", {
       ...listing,
@@ -73,6 +76,7 @@ export const withWikiRepository = async <A>(
       ...makeWikiChangeMethods(repository),
       ...makeWikiRestoreMethods(repository, changes),
       ...makeWikiMutationMethods(changes, spaces),
+      ...makeWikiRenameMethods(repository, changes),
       createRulesPage: (body) => createRulesPage(withoutSpaces(repository), body)
     })
     const clock = distinctMillisClock()
