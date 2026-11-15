@@ -46,6 +46,16 @@ export interface WikiCommitIdentity {
   readonly reason: string
 }
 
+/** Tidy, the upkeep Automation; the system handler registry decides which Automation that is. */
+export const upkeepOrigin = (
+  automationId: string,
+  chainDepth?: number
+): Extract<WikiCommitOrigin, { readonly kind: "upkeep" }> => ({
+  kind: "upkeep",
+  automationId,
+  ...(chainDepth === undefined ? {} : { chainDepth })
+})
+
 /** The owner, changing Memory in the app. */
 export const ownerInApp = (
   reason: string,
@@ -118,11 +128,10 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
     automationId === "" ? origin : `${prefix ?? ""}${automationId}`
   )
   if (automationId === "" && retired === undefined) return { kind: "system", name: origin }
-  return {
-    kind: prefix === UPKEEP_PREFIX || retired !== undefined ? "upkeep" : "automation",
-    automationId: retired ?? automationId,
-    ...(chained?.[2] === undefined ? {} : { chainDepth: Number(chained[2]) })
-  }
+  const chainDepth = chained?.[2] === undefined ? undefined : Number(chained[2])
+  return prefix === UPKEEP_PREFIX || retired !== undefined
+    ? upkeepOrigin(retired ?? automationId, chainDepth)
+    : { kind: "automation", automationId, ...(chainDepth === undefined ? {} : { chainDepth }) }
 }
 
 export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => {
@@ -487,25 +496,29 @@ const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(
       `${path} is at the Memory root. An Automation run does not archive or merge it. Nothing was saved.`
     )
   }
-  if (!merge) return
-  for (const commit of yield* repository.history({
-    resourceId: operation.resourceId,
-    limit: null
-  })) {
+  if (merge && (yield* wasUnmerged(repository, operation.resourceId)))
+    return yield* ruleError(
+      "retire",
+      `${path} was merged before and then restored, so it stays its own page. Leave it.`
+    )
+})
+
+/** Whether the page was a redirect in some earlier version: merged once, then restored. */
+const wasUnmerged = Effect.fn("Wiki.wasUnmerged")(function* (
+  repository: ManagedFileRepositoryShape,
+  resourceId: string
+): Effect.fn.Return<boolean, RevisionError> {
+  for (const commit of yield* repository.history({ resourceId, limit: null })) {
     const version = commit.changes.find(
-      (change) => (change.after ?? change.before)?.resourceId === operation.resourceId
+      (change) => (change.after ?? change.before)?.resourceId === resourceId
     )?.after
     if (version === undefined || version === null || version.state !== "active") continue
     const earlier = yield* parseWikiPage(
       decoder.decode(yield* repository.readVersion(version))
     ).pipe(Effect.option)
-    if (Option.isSome(earlier) && earlier.value.lifecycle === "redirect") {
-      return yield* ruleError(
-        "retire",
-        `${path} was merged before and then restored, so it stays its own page. Leave it.`
-      )
-    }
+    if (Option.isSome(earlier) && earlier.value.lifecycle === "redirect") return true
   }
+  return false
 })
 
 const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
@@ -567,8 +580,10 @@ const pageBody = (bytes: Uint8Array): Effect.Effect<string> => {
   )
 }
 
+const isSpacePageWriter = (origin: WikiCommitOrigin): boolean => origin.kind === "space_page"
+
 const keepsForgottenLines = (origin: WikiCommitOrigin): boolean =>
-  !isOwnerOrigin(origin) && origin.kind !== "space_page"
+  !isOwnerOrigin(origin) && !isSpacePageWriter(origin)
 
 const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function* (
   { repository, guarded }: CommitView,
