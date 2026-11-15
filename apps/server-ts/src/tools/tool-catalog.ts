@@ -280,7 +280,7 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   skill_update: inputs(["name", "skill"]),
   wiki_edit_page: inputs(["path", "wiki_search", "wiki_read_page"]),
   wiki_patch_page: inputs(["path", "wiki_search"], ["old_text", "wiki_read_page"]),
-  wiki_page_history: inputs(["path", "wiki_search"]),
+  wiki_page_history: inputs(["path", "wiki_search"], ["line", "wiki_read_page"]),
   wiki_links: inputs(["path", "wiki_search"]),
   wiki_archive_page: inputs(["path", "wiki_search"]),
   wiki_merge_page: inputs(["path", "wiki_search"], ["into", "wiki_search"]),

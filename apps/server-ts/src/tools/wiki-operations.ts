@@ -5,6 +5,8 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
+import { SessionQueries } from "../persistence/sessions/queries.js"
+import { lineOriginOutput } from "./wiki-line-origin.js"
 import { writeIdentity } from "./wiki-identity.js"
 import { formatWikiPage } from "../wiki/page.js"
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
@@ -41,6 +43,7 @@ import { changeFailure, ChangeTimeSchema } from "./wiki-change.js"
 import { readChangeCall } from "../lib/memory-link.js"
 
 const MAX_HISTORY_ENTRIES = 100
+const MAX_LINE_CHARS = 4_096
 const MAX_LINKS = 500
 const MAX_SEARCH_RESULTS = 20
 const MAX_CHANGE_OFFSET = 10_000
@@ -104,7 +107,13 @@ const HistoryParametersSchema = Schema.Struct({
     .annotate({
       description: `Maximum newest-first revisions to return, from 1 to ${MAX_HISTORY_ENTRIES}. Defaults to 20.`
     })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(20)))
+    .pipe(Schema.withDecodingDefault(Effect.succeed(20))),
+  line: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_LINE_CHARS))
+    .annotate({
+      description:
+        "Text from one line of the page. Instead of the list, returns the change that added that line: who wrote it, when, and in which chat."
+    })
+    .pipe(Schema.optionalKey)
 })
 
 const RestoreParametersSchema = Schema.Struct({
@@ -227,15 +236,19 @@ const linkData = (
   target_path: link.targetPageId === null ? null : (paths.get(link.targetPageId) ?? null)
 })
 
-const makeWikiOperationTools = ({
-  wiki,
-  runs,
-  embeddings
-}: {
+interface WikiOperationDeps {
   readonly wiki: Wiki["Service"]
   readonly runs: Pick<RunQueries["Service"], "get" | "cause">
   readonly embeddings: Pick<WikiEmbeddingIndex["Service"], "search">
-}): ReadonlyArray<ServerTool> => [
+  readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
+}
+
+const makeWikiOperationTools = ({
+  wiki,
+  runs,
+  embeddings,
+  sessions
+}: WikiOperationDeps): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_search",
     description:
@@ -379,6 +392,8 @@ const makeWikiOperationTools = ({
       const record = pageStoredAt(snapshot, input.path)
       if (record === null) throw pageNotFound(snapshot, input.path)
       ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
+      if (input.line !== undefined)
+        return lineOriginOutput({ wiki, sessions }, record, input.line, ctx.signal)
       const history = await Effect.runPromise(
         wiki.history(record.page.pageId, { limit: input.limit }).pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -781,6 +796,7 @@ export const wikiOperationTools = Effect.gen(function* () {
   return makeWikiOperationTools({
     wiki: yield* Wiki,
     runs: yield* RunQueries,
-    embeddings: yield* WikiEmbeddingIndex
+    embeddings: yield* WikiEmbeddingIndex,
+    sessions: yield* SessionQueries
   })
 })
