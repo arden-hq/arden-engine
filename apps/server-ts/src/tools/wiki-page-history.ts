@@ -40,7 +40,6 @@ const chatPhrase = async (
     : { phrase: ` in ${link}`, link }
 }
 
-/** wiki_page_history's answer for one line: the change that added it. */
 const lineOriginOutput = async (
   { wiki, sessions }: { readonly wiki: Wiki["Service"]; readonly sessions: Sessions },
   record: PageRecord,

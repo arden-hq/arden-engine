@@ -45,7 +45,6 @@ export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|
 /** The first line of `text` (`\n` or `\r\n`), trimmed. */
 export const firstLine = (text: string): string => (text.split(/\r?\n/u, 1)[0] ?? "").trim()
 
-/** The UTF-8 byte length of `text`. */
 export const byteLength = (text: string): number => {
   let bytes = 0
   for (let index = 0; index < text.length; index += 1) {

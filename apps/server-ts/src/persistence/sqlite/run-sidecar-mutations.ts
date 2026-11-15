@@ -43,9 +43,8 @@ export const deleteRunSidecarsBySessionInTransaction = Effect.fn("RunSidecars.de
   }
 )
 
-// `run_sidecars.context_manifest_json` holds what a run was sent from Memory: every composition
-// of its Memory context, in order, in the shape of `RunMemoryContextSchema`. `'[]'` (the column
-// default) is "sent none". It is kept as long as the run is.
+// `run_sidecars.context_manifest_json` holds every composition of the run's Memory context, in
+// order. `'[]'` (the column default) means none was sent.
 const MemoryContextJson = Schema.fromJsonString(Schema.Array(RunMemoryContextSchema))
 const CompositionJson = Schema.fromJsonString(RunMemoryContextSchema)
 const decodeRecord = Schema.decodeUnknownEffect(MemoryContextJson)

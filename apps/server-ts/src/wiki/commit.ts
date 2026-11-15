@@ -87,7 +87,6 @@ export const upkeepOrigin = (
   ...(chainDepth === undefined ? {} : { chainDepth })
 })
 
-/** An Automation other than Tidy. */
 export const automationOrigin = (
   automationId: string,
   chainDepth?: number
