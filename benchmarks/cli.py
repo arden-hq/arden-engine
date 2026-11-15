@@ -178,6 +178,11 @@ def invoke_candidate(profile, job, directory, image=None, keep_home=False):
             "seccomp=unconfined",
             "--security-opt",
             "systempaths=unconfined",
+            # Docker Desktop names the host `host.docker.internal`; Docker
+            # Engine on Linux does only with this entry. A profile reaches a
+            # llama.cpp on the host by that name (`llama-cpp-docker.json`).
+            "--add-host",
+            "host.docker.internal:host-gateway",
             "--mount",
             f"type=bind,src={directory},dst=/trial",
             "--mount",

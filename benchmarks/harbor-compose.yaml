@@ -5,3 +5,8 @@ services:
     security_opt:
       - seccomp=unconfined
       - systempaths=unconfined
+    # Docker Desktop names the host `host.docker.internal`; Docker Engine on
+    # Linux does only with this entry. A profile reaches a llama.cpp on the
+    # host by that name (`profiles/llama-cpp-docker.json`).
+    extra_hosts:
+      - host.docker.internal:host-gateway

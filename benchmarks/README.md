@@ -63,10 +63,29 @@ python3 benchmarks/cli.py single --profile benchmarks/profiles/local-llama.json 
 # /tmp/trial/observations/usage.json:  "modelRequests": 4, "promptTokens": 9732, "completionTokens": 882
 ```
 
-In a container (`run`, Harbor) the host's `127.0.0.1` is the container's own.
-The server takes plain HTTP only to this machine's loopback address, so
-`http://host.docker.internal:8080/v1` is refused; reach a host llama.cpp from a
-container only over HTTPS, or run the trial with `single` on the host.
+In a container (`run`, Harbor) the host's `127.0.0.1` is the container's own:
+the container reaches the host as `host.docker.internal`. The server takes
+plain HTTP only to this machine's loopback address unless the profile opts in
+for that one host, as `llama-cpp-docker.json` does with
+`"insecureHttpHost": "host.docker.internal"` (the server README says what the
+opt-in risks and why it takes no `apiKeyEnv`). `run` passes
+`--add-host host.docker.internal:host-gateway` and `harbor-compose.yaml` adds
+the same entry, because Docker Engine on Linux defines that name only then;
+Docker Desktop defines it itself. Checked on 2026-11-16 with Docker Desktop
+29.9.2 on macOS and llama.cpp b12359: one `single` trial in the `arden-bench`
+image completed, 4 model requests, `answer.txt` holding `42`. On Docker Desktop
+a `llama-server` on the default `127.0.0.1` is reachable from the container,
+so leave `--host` alone. On Linux the container reaches the host at the
+`docker0` bridge address, so `llama-server` must listen there:
+`--host 172.17.0.1` (the bridge address; `ip addr show docker0`), or
+`--host 0.0.0.0`, which also exposes it to the network (not checked here).
+
+```bash
+llama-server -m model.gguf --alias gemma --ctx-size 32768 --jinja --port 8080 &
+cp benchmarks/profiles/llama-cpp-docker.json benchmarks/profiles/local-llama-docker.json   # model: "gemma"
+python3 benchmarks/cli.py run --suite <suite> --data <data> --image arden-bench \
+  --profile benchmarks/profiles/local-llama-docker.json --output <dir> --limit 1 --allow-model-calls
+```
 
 The package contains built runtime files, workspace manifests, and the lockfile.
 It excludes the checkout, personal state, datasets, and credentials. Linux
