@@ -12,21 +12,28 @@ export const isLoopbackHost = (host: string): boolean =>
 export type ServerUrlIssue = "invalid" | "credentials" | "fragment" | "insecure"
 
 /**
+ * Where plain HTTP may go: `loopback` to this machine alone, `never` nowhere,
+ * `any` to every host, for a caller that sends nothing secret over it.
+ */
+export type PlainHttp = "loopback" | "never" | "any"
+
+/**
  * Why `raw` is not a server address Arden may connect to, or undefined when it
  * is one: an absolute URL with no user name, password or fragment, over https,
- * or over http to this machine (`isLoopbackHost`). `http: "never"` takes https
- * alone. A page's origin is checked by passing `url.origin`.
+ * or over http where `http` allows it (to this machine, `isLoopbackHost`, by
+ * default). A page's origin is checked by passing `url.origin`.
  */
 export const serverUrlIssue = (
   raw: string,
-  { http = "loopback" }: { readonly http?: "loopback" | "never" } = {}
+  { http = "loopback" }: { readonly http?: PlainHttp } = {}
 ): ServerUrlIssue | undefined => {
   if (!URL.canParse(raw)) return "invalid"
   const url = new URL(raw)
   if (url.username !== "" || url.password !== "") return "credentials"
   if (url.hash !== "") return "fragment"
   if (url.protocol === "https:") return undefined
-  return url.protocol === "http:" && http === "loopback" && isLoopbackHost(url.hostname)
+  if (url.protocol !== "http:") return "insecure"
+  return http === "any" || (http === "loopback" && isLoopbackHost(url.hostname))
     ? undefined
     : "insecure"
 }
@@ -36,22 +43,17 @@ export type BaseUrlIssue = ServerUrlIssue | "query"
 
 /**
  * Why `raw` is not a base URL Arden may send requests under, or undefined
- * when it is one: a server address (`serverUrlIssue`) without a query or a
- * fragment, even an empty one (`…/v1?`, `…/v1#`), since every request path is
- * appended to it (`${baseUrl}/chat/completions`) and would land inside them.
- * `insecureHttpHost` also takes plain HTTP to that one host (`URL.hostname`),
- * which the caller has opted into; nothing else about the rule changes.
+ * when it is one: a server address (`serverUrlIssue`, with the same `http`)
+ * without a query or a fragment, even an empty one (`…/v1?`, `…/v1#`), since
+ * every request path is appended to it (`${baseUrl}/chat/completions`) and
+ * would land inside them.
  */
 export const baseUrlIssue = (
   raw: string,
-  { insecureHttpHost }: { readonly insecureHttpHost?: string | undefined } = {}
+  options?: { readonly http?: PlainHttp }
 ): BaseUrlIssue | undefined => {
-  const issue = serverUrlIssue(raw)
-  const optedIn =
-    issue === "insecure" &&
-    new URL(raw).protocol === "http:" &&
-    new URL(raw).hostname === insecureHttpHost
-  if (issue !== undefined && !optedIn) return issue
+  const issue = serverUrlIssue(raw, options)
+  if (issue !== undefined) return issue
   if (raw.includes("#")) return "fragment"
   return raw.includes("?") ? "query" : undefined
 }

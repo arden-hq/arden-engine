@@ -80,8 +80,7 @@ What each failure says, checked on 2026-11-16 (llama.cpp b12359):
 | `model` not on the llama.cpp server | 2 | `Model is not on the llama.cpp server: <id> (it lists: <ids>)` |
 | `server: "generic"` without `contextLimit` | 2 | ``Invalid settings: a `chat-completions` provider on a generic server needs `model` and `contextLimit` `` |
 | `apiKeyEnv` names an unset variable | 2 | ``Missing environment variable <NAME>, named by `provider.apiKeyEnv` `` |
-| `baseUrl` over plain HTTP to another machine (`http://192.168.1.20:8080/v1`) | 2 | ``Invalid settings: `provider.baseUrl` must use HTTPS or loopback HTTP. To send chats to 192.168.1.20 over plain HTTP, readable on the network, add "insecureHttpHost": "192.168.1.20" to `provider`; no key is ever sent that way`` |
-| `insecureHttpHost` with `apiKeyEnv` | 2 | ``Invalid settings: `provider.apiKeyEnv` would send the key in clear text to <host>; serve it over HTTPS, or run the server without a key`` |
+| `baseUrl` over plain HTTP to another machine with `apiKeyEnv` (`http://192.168.1.20:8080/v1`) | 2 | ``Invalid settings: `provider.baseUrl` would send the key in clear text to 192.168.1.20: use HTTPS, or remove `apiKeyEnv` if the server needs no key`` |
 | `baseUrl` with a query (`…/v1?api_key=…`) or a fragment | 2 | ``Invalid settings: `provider.baseUrl` must not contain a query: a request path is appended to it`` |
 | prompt larger than the model's window | 1 | `context_length_exceeded`: `Your input exceeds this model's context window. …` |
 | `llama-server` stopped after the start | 1 | `provider_unavailable`: `llama.cpp: cannot reach http://127.0.0.1:8080/v1/chat/completions: fetch failed (connect ECONNREFUSED 127.0.0.1:8080)` |

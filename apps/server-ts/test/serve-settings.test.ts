@@ -48,7 +48,7 @@ it("a settings file is refused with the reason when it cannot be applied", () =>
       contextLimit: 1000,
       provider: { kind: "responses", baseUrl: "http://example.com", apiKeyEnv: "KEY" }
     })
-  ).toThrow(/HTTPS or loopback/)
+  ).toThrow(/would send the key in clear text to example.com/)
   expect(parseSettings(base)).toEqual(base)
 })
 
@@ -70,13 +70,6 @@ it("a chat-completions provider needs only what its server does not report", () 
     /^Invalid settings: a `chat-completions` provider on a generic server needs `model` and `contextLimit`$/
   )
   expect(() => parseSettings(provider({ server: "vllm" }))).toThrow(/server/)
-  // The same address rule as `responses`: a conversation leaves this machine only over HTTPS.
-  expect(() =>
-    parseSettings({
-      ...base,
-      provider: { kind: "chat-completions", baseUrl: "http://10.0.0.2:8080/v1" }
-    })
-  ).toThrow(/HTTPS or loopback/)
 })
 
 it("a provider base URL with a query or fragment is refused: every request path is appended to it", () => {
@@ -101,46 +94,45 @@ it("a provider base URL with a query or fragment is refused: every request path 
   )
 })
 
-it("plain HTTP to another machine needs an opt-in that names its host, and never carries a key", () => {
+it("plain HTTP goes to any host only when no key is sent: a key never crosses the network in clear text", () => {
   const settings = (baseUrl: string, fields: Record<string, string> = {}) => ({
     dataDirectory: "/tmp/arden-settings",
     provider: { kind: "chat-completions", baseUrl, ...fields }
   })
-  const docker = "http://host.docker.internal:8080/v1"
-  // Off by default, and the refusal names the exact setting that opts in.
-  expect(() => parseSettings(settings(docker))).toThrow(
-    new SettingsError(
-      'Invalid settings: `provider.baseUrl` must use HTTPS or loopback HTTP. To send chats to host.docker.internal over plain HTTP, readable on the network, add "insecureHttpHost": "host.docker.internal" to `provider`; no key is ever sent that way'
-    )
-  )
-  const optedIn = settings(docker, { insecureHttpHost: "host.docker.internal" })
-  expect(parseSettings(optedIn)).toEqual(optedIn)
-  // A `baseUrl` edited to another host does not inherit the opt-in.
+  // No key: a llama.cpp on the Docker host or on the LAN, with no setting.
+  for (const url of ["http://host.docker.internal:8080/v1", "http://192.168.1.20:8080/v1"])
+    expect(parseSettings(settings(url))).toEqual(settings(url))
+  // A key goes only over HTTPS or to this machine.
   expect(() =>
-    parseSettings(settings("http://10.0.0.2:8080/v1", { insecureHttpHost: "host.docker.internal" }))
+    parseSettings(settings("http://192.168.1.20:8080/v1", { apiKeyEnv: "LLAMA_KEY" }))
   ).toThrow(
     new SettingsError(
-      "Invalid settings: `provider.insecureHttpHost` is host.docker.internal, but `provider.baseUrl` goes to 10.0.0.2"
+      "Invalid settings: `provider.baseUrl` would send the key in clear text to 192.168.1.20: use HTTPS, or remove `apiKeyEnv` if the server needs no key"
     )
   )
-  // The rule exists so a key never crosses the network in clear text.
+  // A `responses` provider always sends a key.
   expect(() =>
     parseSettings({
-      ...optedIn,
-      provider: { ...optedIn.provider, apiKeyEnv: "LLAMA_KEY" }
+      dataDirectory: "/tmp/arden-settings",
+      model: "m",
+      contextLimit: 1000,
+      provider: { kind: "responses", baseUrl: "http://192.168.1.20:8080/v1", apiKeyEnv: "KEY" }
     })
   ).toThrow(
     new SettingsError(
-      "Invalid settings: `provider.apiKeyEnv` would send the key in clear text to host.docker.internal; serve it over HTTPS, or run the server without a key"
+      "Invalid settings: `provider.baseUrl` would send the key in clear text to 192.168.1.20: use HTTPS; a `responses` provider always sends a key"
     )
   )
-  // Loopback HTTP and HTTPS need no opt-in, and a key goes to them as before.
+  // Loopback HTTP and HTTPS take a key as before.
   for (const url of ["http://127.0.0.1:8080/v1", "https://llama.example/v1"])
     expect(parseSettings(settings(url, { apiKeyEnv: "KEY" }))).toEqual(
       settings(url, { apiKeyEnv: "KEY" })
     )
-  // Another scheme is not plain HTTP: no opt-in is offered for it.
+  // Another scheme is neither.
   expect(() => parseSettings(settings("ftp://10.0.0.2/v1"))).toThrow(
+    new SettingsError("Invalid settings: `provider.baseUrl` must use HTTPS or HTTP")
+  )
+  expect(() => parseSettings(settings("ftp://10.0.0.2/v1", { apiKeyEnv: "KEY" }))).toThrow(
     new SettingsError("Invalid settings: `provider.baseUrl` must use HTTPS or loopback HTTP")
   )
 })

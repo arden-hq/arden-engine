@@ -45,19 +45,7 @@ const ProviderSchema = Schema.Union([
     kind: Schema.Literal("chat-completions"),
     baseUrl: text,
     apiKeyEnv: Schema.optionalKey(text),
-    server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS)),
-    /**
-     * Opts into plain HTTP to another machine: a llama.cpp server on the
-     * Docker host (`host.docker.internal`) or on the LAN. Every chat then
-     * crosses the network readable by anyone on the path. Off by default.
-     * It names the host and must repeat `baseUrl`'s own (`URL.hostname`), so
-     * a `baseUrl` later edited or mistyped to another host is refused instead
-     * of silently getting clear text too. It refuses `apiKeyEnv`: the rule
-     * it relaxes exists so a key never crosses the network in clear text, and
-     * the servers it is for run without one; a server with a key goes behind
-     * HTTPS. Only this kind takes it: a `responses` provider always sends a key.
-     */
-    insecureHttpHost: Schema.optionalKey(text)
+    server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS))
   }),
   /** The Codex sign-in on this machine (`codex login`). The default. */
   Schema.Struct({ kind: Schema.Literal("codex-login") })
@@ -173,12 +161,11 @@ export class SettingsError extends Error {
   }
 }
 
-const BASE_URL_ISSUES: Record<BaseUrlIssue, string> = {
+const BASE_URL_ISSUES: Record<Exclude<BaseUrlIssue, "insecure">, string> = {
   invalid: "is not a URL",
   credentials: "must not contain credentials",
   fragment: "must not contain a fragment: a request path is appended to it",
-  query: "must not contain a query: a request path is appended to it",
-  insecure: "must use HTTPS or loopback HTTP"
+  query: "must not contain a query: a request path is appended to it"
 }
 
 const decode = Schema.decodeUnknownSync(SettingsSchema)
@@ -223,38 +210,32 @@ export const parseSettings = (value: unknown): Settings => {
 type BaseUrlProvider = Extract<NonNullable<Settings["provider"]>, { readonly baseUrl: string }>
 
 /**
- * A key, and a conversation, go only to an HTTPS endpoint or to this machine.
- * `insecureHttpHost` lets the conversation alone go over plain HTTP to the one
- * host it names; discovery and chat requests both use this `baseUrl`, so
- * this one check covers them all.
+ * A key never crosses the network in clear text: a provider that sends one
+ * (`apiKeyEnv`, which a `responses` provider always has) goes over HTTPS or to
+ * this machine. One that sends none may use plain HTTP to any host, such as a
+ * llama.cpp on the Docker host or the LAN. Discovery and chat requests both
+ * use this `baseUrl`, so this one check covers them all.
  */
 const checkBaseUrl = (provider: BaseUrlProvider): void => {
-  const optIn = provider.kind === "chat-completions" ? provider.insecureHttpHost : undefined
-  const host = URL.canParse(provider.baseUrl) ? new URL(provider.baseUrl).hostname : undefined
-  if (optIn !== undefined && host !== undefined && host !== optIn)
-    throw new SettingsError(
-      `Invalid settings: \`provider.insecureHttpHost\` is ${optIn}, but \`provider.baseUrl\` goes to ${host}`
-    )
-  const issue = baseUrlIssue(provider.baseUrl, { insecureHttpHost: optIn })
-  if (issue !== undefined)
-    throw new SettingsError(
-      `Invalid settings: \`provider.baseUrl\` ${BASE_URL_ISSUES[issue]}${issue === "insecure" ? optInHint(provider) : ""}`
-    )
-  if (
-    optIn !== undefined &&
-    provider.apiKeyEnv !== undefined &&
-    baseUrlIssue(provider.baseUrl) === "insecure"
+  const sendsKey = provider.apiKeyEnv !== undefined
+  const issue = baseUrlIssue(provider.baseUrl, { http: sendsKey ? "loopback" : "any" })
+  if (issue === undefined) return
+  throw new SettingsError(
+    `Invalid settings: \`provider.baseUrl\` ${issue === "insecure" ? insecureReason(provider) : BASE_URL_ISSUES[issue]}`
   )
-    throw new SettingsError(
-      `Invalid settings: \`provider.apiKeyEnv\` would send the key in clear text to ${optIn}; serve it over HTTPS, or run the server without a key`
-    )
 }
 
-/** The exact setting that opts a refused plain-HTTP `baseUrl` in, where one can. */
-const optInHint = (provider: BaseUrlProvider): string => {
+const insecureReason = (provider: BaseUrlProvider): string => {
   const url = new URL(provider.baseUrl)
-  if (provider.kind !== "chat-completions" || url.protocol !== "http:") return ""
-  return `. To send chats to ${url.hostname} over plain HTTP, readable on the network, add "insecureHttpHost": "${url.hostname}" to \`provider\`; no key is ever sent that way`
+  if (url.protocol !== "http:")
+    return provider.apiKeyEnv === undefined
+      ? "must use HTTPS or HTTP"
+      : "must use HTTPS or loopback HTTP"
+  const remedy =
+    provider.kind === "responses"
+      ? "use HTTPS; a `responses` provider always sends a key"
+      : "use HTTPS, or remove `apiKeyEnv` if the server needs no key"
+  return `would send the key in clear text to ${url.hostname}: ${remedy}`
 }
 
 type ModelField = "model" | "contextLimit"
