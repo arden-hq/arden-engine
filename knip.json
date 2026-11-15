@@ -8,7 +8,7 @@
       "ignoreDependencies": ["@typescript/native", "effect", "vitest"]
     },
     "libs/*": {
-      "entry": ["scripts/*.ts"],
+      "entry": ["scripts/*.ts", "test/live/*.live.ts"],
       "project": ["src/**/*.ts!", "test/**/*.ts"]
     },
     "apps/cli": {

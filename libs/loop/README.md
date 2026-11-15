@@ -11,8 +11,9 @@ The package is plain TypeScript. It has no Effect and no schema library. Its one
 | Import | What it gives you |
 | --- | --- |
 | `@arden-hq/loop` | `makeAgent`, `createTool`, `createToolset`, the error classes, budgets and all contract types |
-| `@arden-hq/loop/providers/openai-responses` | `makeOpenAiResponsesProvider`, the one bundled provider |
-| `@arden-hq/loop/provider-kit` | Retry, SSE and abort helpers for writing another provider |
+| `@arden-hq/loop/providers/openai-responses` | `makeOpenAiResponsesProvider`, the OpenAI Responses provider |
+| `@arden-hq/loop/providers/chat-completions` | `makeChatCompletionsProvider`, the OpenAI-compatible Chat Completions provider (llama.cpp, OpenRouter, any compatible server) |
+| `@arden-hq/loop/provider-kit` | The streamed-request loop, retry, SSE, rejection classification, tool-history ordering and abort helpers for writing another provider |
 
 The server (`@arden-hq/server`) and the CLI use it. Desktop and iOS do not import it.
 
@@ -99,14 +100,52 @@ A provider may implement `openSession()` for invocation-local transport state. T
 
 A `ModelProvider` has a `stream(request)` function. It returns tagged items: `TextDelta`, `ReasoningDelta`, `ToolCallDelta`, `ProviderToolCall`, `ProviderStreamRetry` and one final `Completed`. Providers import only the kit and the root contracts. They never import `agent/`, `tools/` or `internal/`. A dependency-cruiser rule holds this.
 
-The provider owns prompt caching, replay state and transport retry. The host owns credentials. The Responses factory only calls `auth.headers()` for each connection attempt.
+The provider owns prompt caching, replay state and transport retry. The host owns credentials. A factory only calls `auth.headers()` for each connection attempt.
+
+One implementation per concern, in the kit, so every adapter behaves the same:
+
+- `streamSse` is the connection loop: auth headers per attempt, one forced refresh on a 401 before anything was emitted, the error body read into the failure, the idle timeout, and the bounded retry announced by `ProviderStreamRetry`. An adapter supplies the URL, the body and an event mapper.
+- `classifyRejection` maps a refusal to a `ProviderErrorCode`. It holds the one table of context-overflow and model-unavailable wordings for every server we talk to.
+- `orderToolHistory` puts each tool output right after its call, holds context back while calls are pending, and closes an interrupted call with a "not recorded" output.
+- `contextBlockText` is how a `context` block reads to a model on any wire.
+
+`test/provider-kit.test.ts` fails when an adapter grows its own copy of one of these.
+
+### Origin and replay
+
+Every assistant answer carries `origin: { provider, api, model }`: who served it, which wire, and the model that actually answered (a router can answer with another model than the one requested). The loop persists it untouched beside `provider_state`.
+
+An adapter reads both to decide what it sends back on a later request:
+
+- Chat Completions sends a stored `provider_state["chat-completions"].reasoning_details` back only when the turn's origin matches this provider id, this wire and the request's model (`sameOrigin`). Encrypted reasoning and signatures are bound to the issuer and model that wrote them; every reference agent drops them on a mismatch. Plain reasoning text is never sent back in `content`.
+- Responses still replays its own `provider_state` whatever the origin. Whether OpenAI accepts encrypted reasoning across models is an open question; the stamp is there for when it is decided.
+
+### Chat Completions
+
+`makeChatCompletionsProvider({ providerId, baseUrl, auth?, compat? })` posts to `${baseUrl}/chat/completions`. Servers differ only through the `compat` flags (`ChatCompletionsCompat`; each flag's comment says what it changes and which server needs it), never through a branch on `providerId`. Typical settings:
+
+- llama.cpp `llama-server`: `{ structuredOutput: "json_schema", parallelToolCalls: true }`, plus `imageInput: true` with a multimodal projector. No `auth`.
+- OpenRouter: `{ reasoningEffort: "openrouter", structuredOutput: "json_schema" }`, plus `cacheControl: "anthropic"` for Claude models; routing preferences go in `extraBody: { provider: … }`.
+
+The provider emits only `Completed`, so the loop runs a turn's tool calls as one batch. A system or developer message inside the conversation is sent in place, in the route's one instruction role.
+
+The live check drives the real loop against a server; it is not part of `bun run test`:
+
+```bash
+CHAT_COMPLETIONS_BASE_URL=http://127.0.0.1:9931/v1 \
+CHAT_COMPLETIONS_MODEL=ggml-org/gemma-4-E2B-it-GGUF:Q8_0 \
+CHAT_COMPLETIONS_COMPAT='{"structuredOutput":"json_schema","imageInput":true,"parallelToolCalls":true}' \
+bun --conditions=arden-source libs/loop/test/live/chat-completions.live.ts
+```
+
+The script's header lists the other variables (an API key variable name, a reasoning effort, the overflow prompt size, cases to skip).
 
 ## Layout
 
 - `src/agent/` holds `makeAgent`, the run loop, budgets, recovery and background tools.
 - `src/tools/` holds `createTool`, `createToolset` and dispatch.
 - `src/contracts/` holds the message, tool, provider and event types.
-- `src/providers/kit/` and `src/providers/openai-responses/` hold the two provider entry points.
+- `src/providers/kit/` holds the provider kit; `src/providers/openai-responses/` and `src/providers/chat-completions/` hold the two bundled providers.
 - `src/internal/` holds locks, the event queue and validation.
 
 ## Build
