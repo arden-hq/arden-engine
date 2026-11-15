@@ -72,7 +72,6 @@ it("reads the whole set only in consistency checks, the owner's routes and diagn
     "src/wiki/mutations.ts",
     "src/wiki/outside-edits.ts",
     "src/wiki/rename.ts",
-    "src/wiki/reports.ts",
     "src/wiki/restore.ts",
     "src/wiki/snapshot.ts",
     "src/wiki/space-page.ts",
