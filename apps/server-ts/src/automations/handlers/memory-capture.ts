@@ -15,35 +15,47 @@ const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "wiki_merge_page"
 ])
 
-const makeMemoryCaptureRunner = (
-  services: ItemLoopServices & {
-    readonly memory: Pick<
-      Memory["Service"],
-      "nextCaptureBatch" | "completeCaptureBatch" | "skipCaptureBatch"
-    >
+/**
+ * Backlog batches one Capture job reads once the chats have no new work: one, so a batch Capture
+ * skipped is tried again later, or `ARDEN_CAPTURE_CATCH_UP` for a one-time catch-up of old turns.
+ */
+const BACKLOG_BATCHES_PER_JOB = Math.max(1, Number(process.env.ARDEN_CAPTURE_CATCH_UP) || 1)
+
+const makeMemoryCaptureRunner =
+  (
+    services: ItemLoopServices & {
+      readonly memory: Pick<
+        Memory["Service"],
+        "nextCaptureBatch" | "nextBacklogBatch" | "completeCaptureBatch" | "skipCaptureBatch"
+      >
+    }
+  ): AutomationRunner =>
+  (job) => {
+    let backlog = BACKLOG_BATCHES_PER_JOB
+    return runItemLoop(services, {
+      label: "Memory Capture",
+      kind: "memory",
+      next: Effect.fn("MemoryCapture.next")(function* () {
+        const batch =
+          (yield* services.memory.nextCaptureBatch()) ??
+          (backlog-- > 0 ? yield* services.memory.nextBacklogBatch() : null)
+        return batch === null ? ("idle" as const) : { kind: "memory" as const, batch }
+      }),
+      commit: (data) => services.memory.completeCaptureBatch(data.batch),
+      skip: (data) =>
+        services.memory
+          .skipCaptureBatch(data.batch)
+          .pipe(
+            Effect.as(
+              `a batch of chat ${data.batch.identity.sessionId} (kept in the backlog and tried again after a day)`
+            )
+          ),
+      summary: (item) =>
+        `memory capture: reviewed ${item?.reviewed ?? 0} batch(es), skipped ${item?.skipped ?? 0}`,
+      cancelled: "Memory capture cancelled",
+      incomplete: "Memory Capture review deferred"
+    })(job)
   }
-): AutomationRunner =>
-  runItemLoop(services, {
-    label: "Memory Capture",
-    kind: "memory",
-    next: () =>
-      services.memory
-        .nextCaptureBatch()
-        .pipe(
-          Effect.map((batch) =>
-            batch === null ? ("idle" as const) : { kind: "memory" as const, batch }
-          )
-        ),
-    commit: (data) => services.memory.completeCaptureBatch(data.batch),
-    skip: (data) =>
-      services.memory
-        .skipCaptureBatch(data.batch)
-        .pipe(Effect.as(`a batch of chat ${data.batch.identity.sessionId}, kept in the backlog`)),
-    summary: (item) =>
-      `memory capture: reviewed ${item?.reviewed ?? 0} batch(es), skipped ${item?.skipped ?? 0}`,
-    cancelled: "Memory capture cancelled",
-    incomplete: "Memory Capture review deferred"
-  })
 
 export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
   spec: {

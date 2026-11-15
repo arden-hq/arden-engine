@@ -1,7 +1,7 @@
 import { createToolset } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { expect, it, vi } from "vitest"
+import { expect, it } from "vitest"
 import { makeMemoryCaptureBatches } from "../src/memory/capture-batches.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { MemoryCaptureStore } from "../src/persistence/memory/store.js"
@@ -55,7 +55,7 @@ const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "compl
   return Effect.gen(function* () {
     const read: Array<string> = []
     for (let round = 0; round < 50; round += 1) {
-      const batch = yield* batches.nextCaptureBatch()
+      const batch = (yield* batches.nextCaptureBatch()) ?? (yield* batches.nextBacklogBatch())
       if (batch === null) return read
       read.push(
         ...[...batch.markdown.matchAll(/^> \[user; sequence \d+; .*\] (\S+)$/gmu)].flatMap(
@@ -94,7 +94,6 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
 })
 
 it("reads a backlog range once, after new work, and removes it as it is read", async () => {
-  vi.stubEnv("ARDEN_CAPTURE_CATCH_UP", "5")
   const read = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -103,19 +102,18 @@ it("reads a backlog range once, after new work, and removes it as it is read", a
       yield* turn(chat, "old-a")
       yield* turn(chat, "old-b")
       yield* startCaptureAfterCopies(sql, chat)
-      yield* sql`INSERT INTO memory_capture_backlog VALUES (${chat}, 0, 3)`
+      yield* sql`INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq)
+        VALUES (${chat}, 0, 3)`
       yield* turn(chat, "new-c")
       const first = yield* drainer
       const left = yield* sql`SELECT 1 FROM memory_capture_backlog`
       return { first, left: left.length, again: yield* drainer }
     })
   )
-  vi.unstubAllEnvs()
   expect(read).toEqual({ first: ["new-c", "old-a", "old-b"], left: 0, again: [] })
 })
 
-it("skips a batch into the backlog, passes it this server start, and reads it at the next", async () => {
-  vi.stubEnv("ARDEN_CAPTURE_CATCH_UP", "5")
+it("skips a batch into the backlog, rests it a day, and then reads it again", async () => {
   const read = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -123,16 +121,12 @@ it("skips a batch into the backlog, passes it this server start, and reads it at
       yield* turn(chat, "skip-a")
       yield* turn(chat, "skip-b")
       const skipped = yield* yield* drain("skip")
-      const backlog = yield* sql`SELECT from_seq, through_seq FROM memory_capture_backlog`
-      return { skipped, backlog, next: yield* yield* drain() }
+      const resting = yield* yield* drain()
+      yield* sql`UPDATE memory_capture_backlog SET tried_at = '2026-01-01T00:00:00.000Z'`
+      return { skipped, resting, next: yield* yield* drain() }
     })
   )
-  vi.unstubAllEnvs()
-  expect(read).toEqual({
-    skipped: ["skip-a", "skip-b"],
-    backlog: [{ from_seq: 0, through_seq: 3 }],
-    next: ["skip-a", "skip-b"]
-  })
+  expect(read).toEqual({ skipped: ["skip-a", "skip-b"], resting: [], next: ["skip-a", "skip-b"] })
 })
 
 const captureUpdate = (

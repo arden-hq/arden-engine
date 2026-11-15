@@ -84,11 +84,14 @@ export class MemoryCaptureStore extends Context.Service<
     readonly advance: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /** Moves the position as `advance` does, and puts the batch's messages in the backlog. */
+    /**
+     * Moves the position as `advance` does, and puts the batch's messages in the backlog; the
+     * range they are in rests a day.
+     */
     readonly skip: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /** Backlog ranges, the one whose first message is oldest first. */
+    /** Backlog ranges not resting, the one whose first message is oldest first. */
     readonly listBacklog: () => Effect.Effect<
       ReadonlyArray<MemoryCaptureBacklogRange>,
       MemoryCaptureStoreError
@@ -99,6 +102,10 @@ export class MemoryCaptureStore extends Context.Service<
      */
     readonly readBacklog: (
       read: MemoryCaptureBacklogRange
+    ) => Effect.Effect<void, MemoryCaptureStoreError>
+    /** Rests the range that starts at `range.fromSeq` for a day. */
+    readonly restBacklog: (
+      range: MemoryCaptureBacklogRange
     ) => Effect.Effect<void, MemoryCaptureStoreError>
   }
 >()("@arden-hq/server/persistence/memory/MemoryCaptureStore") {}

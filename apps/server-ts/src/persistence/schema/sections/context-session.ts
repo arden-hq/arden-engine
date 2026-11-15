@@ -261,7 +261,7 @@ export const contextSessionSchemaSection = {
     `CREATE TABLE memory_capture_backlog (
       session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
       from_seq INTEGER NOT NULL CHECK(from_seq >= 0),
-      through_seq INTEGER NOT NULL,
+      through_seq INTEGER NOT NULL, tried_at TEXT,
       CHECK(through_seq >= from_seq),
       PRIMARY KEY (session_id, from_seq)
     ) WITHOUT ROWID`,

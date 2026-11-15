@@ -179,32 +179,50 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
 
 /**
  * Moves the position past `batch` as `advanceCapture` does, unread, and puts the whole messages
- * it touched in the backlog, joined to the range that ends where they start.
+ * it touched in the backlog, joined to the range that ends where they start. A batch read from the
+ * backlog is already there. Either way its range rests a day.
  */
 export const skipCapture = Effect.fn("MemoryCapturePositions.skip")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
-  if ((yield* advanceCapture(sql, batch)) === "superseded") return "superseded"
   const start = columnsOf(batch.start)
   const fromSeq = start.read_seq + (start.read_offset === null ? 1 : 0)
+  if ((yield* advanceCapture(sql, batch)) === "superseded")
+    return (yield* restCaptureBacklog(sql, { sessionId: batch.sessionId, seq: fromSeq }))
+      ? "moved"
+      : "superseded"
   const [position] = yield* sql<{ readonly read_seq: number }>`
     SELECT read_seq FROM memory_capture_positions WHERE session_id = ${batch.sessionId}
   `
   const throughSeq = position?.read_seq ?? -1
   if (throughSeq < fromSeq) return "moved"
+  const now = DateTime.formatIso(yield* DateTime.now)
   const joined = yield* sql`
-    UPDATE memory_capture_backlog SET through_seq = MAX(through_seq, ${throughSeq})
+    UPDATE memory_capture_backlog SET through_seq = MAX(through_seq, ${throughSeq}), tried_at = ${now}
     WHERE session_id = ${batch.sessionId} AND from_seq <= ${fromSeq}
       AND through_seq >= ${fromSeq - 1}
     RETURNING 1
   `
   if (joined.length === 0)
     yield* sql`
-      INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq)
-      VALUES (${batch.sessionId}, ${fromSeq}, ${throughSeq})
+      INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq, tried_at)
+      VALUES (${batch.sessionId}, ${fromSeq}, ${throughSeq}, ${now})
     `
   return "moved"
+})
+
+/** Rests the backlog range that holds message `seq` for a day. Answers whether one holds it. */
+export const restCaptureBacklog = Effect.fn("MemoryCapturePositions.restBacklog")(function* (
+  sql: SqlClient.SqlClient,
+  at: { readonly sessionId: string; readonly seq: number }
+) {
+  const rested = yield* sql`
+    UPDATE memory_capture_backlog SET tried_at = ${DateTime.formatIso(yield* DateTime.now)}
+    WHERE session_id = ${at.sessionId} AND from_seq <= ${at.seq} AND through_seq >= ${at.seq}
+    RETURNING 1
+  `
+  return rested.length > 0
 })
 
 export const listCaptureBacklog = Effect.fn("MemoryCapturePositions.listBacklog")(function* (
@@ -219,6 +237,9 @@ export const listCaptureBacklog = Effect.fn("MemoryCapturePositions.listBacklog"
     FROM memory_capture_backlog AS backlog
     LEFT JOIN session_messages AS message ON message.session_id = backlog.session_id
       AND message.seq = backlog.from_seq
+    WHERE backlog.tried_at IS NULL OR backlog.tried_at <= ${DateTime.formatIso(
+      DateTime.subtract(yield* DateTime.now, { days: 1 })
+    )}
     ORDER BY message.created_at, backlog.session_id, backlog.from_seq
   `
   return rows.map((row): MemoryCaptureBacklogRange => ({

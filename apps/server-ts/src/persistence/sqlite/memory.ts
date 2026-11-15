@@ -12,6 +12,7 @@ import {
   listCaptureWork,
   prepareCapture,
   readCaptureBacklog,
+  restCaptureBacklog,
   skipCapture
 } from "./memory-capture-positions.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -70,6 +71,15 @@ export const makeMemoryCaptureStore = ({
           Effect.mapError(
             failed("advance", "Could not record a read backlog range", read.sessionId)
           )
+        ),
+    restBacklog: (range) =>
+      writer
+        .transact(
+          restCaptureBacklog(writer.sql, { sessionId: range.sessionId, seq: range.fromSeq })
+        )
+        .pipe(
+          Effect.mapError(failed("skip", "Could not rest a backlog range", range.sessionId)),
+          Effect.asVoid
         )
   })
 }
