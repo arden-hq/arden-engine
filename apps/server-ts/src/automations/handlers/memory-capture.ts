@@ -17,7 +17,10 @@ const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
 
 const makeMemoryCaptureRunner = (
   services: ItemLoopServices & {
-    readonly memory: Pick<Memory["Service"], "nextCaptureBatch" | "completeCaptureBatch">
+    readonly memory: Pick<
+      Memory["Service"],
+      "nextCaptureBatch" | "completeCaptureBatch" | "skipCaptureBatch"
+    >
   }
 ): AutomationRunner =>
   runItemLoop(services, {
@@ -32,6 +35,10 @@ const makeMemoryCaptureRunner = (
           )
         ),
     commit: (data) => services.memory.completeCaptureBatch(data.batch),
+    skip: (data) =>
+      services.memory
+        .skipCaptureBatch(data.batch)
+        .pipe(Effect.as(`a batch of chat ${data.batch.identity.sessionId}, kept in the backlog`)),
     summary: (item) =>
       `memory capture: reviewed ${item?.reviewed ?? 0} batch(es), skipped ${item?.skipped ?? 0}`,
     cancelled: "Memory capture cancelled",

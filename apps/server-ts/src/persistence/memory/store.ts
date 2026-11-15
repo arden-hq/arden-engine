@@ -41,7 +41,7 @@ export interface MemoryCaptureWork {
   readonly prepared: MemoryCaptureBatchIdentity | undefined
 }
 
-/** Old messages of a chat, `fromSeq` through `throughSeq`, that no Capture run was shown. */
+/** Messages of a chat, `fromSeq` through `throughSeq`, behind its position and not read. */
 export interface MemoryCaptureBacklogRange {
   readonly sessionId: string
   readonly fromSeq: number
@@ -60,7 +60,7 @@ export type MemoryCaptureMove = "moved" | "superseded"
 export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureStoreError>()(
   "MemoryCaptureStoreError",
   {
-    operation: Schema.Literals(["list", "prepare", "advance"] as const),
+    operation: Schema.Literals(["list", "prepare", "advance", "skip"] as const),
     message: Schema.String,
     sessionId: Schema.optionalKey(Schema.NonEmptyString),
     cause: Schema.optionalKey(Schema.Defect())
@@ -82,6 +82,10 @@ export class MemoryCaptureStore extends Context.Service<
      * revert left.
      */
     readonly advance: (
+      batch: MemoryCaptureBatchIdentity
+    ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
+    /** Moves the position as `advance` does, and puts the batch's messages in the backlog. */
+    readonly skip: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
     /** Backlog ranges, the one whose first message is oldest first. */

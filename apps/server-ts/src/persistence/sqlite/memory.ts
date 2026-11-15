@@ -11,7 +11,8 @@ import {
   listCaptureBacklog,
   listCaptureWork,
   prepareCapture,
-  readCaptureBacklog
+  readCaptureBacklog,
+  skipCapture
 } from "./memory-capture-positions.js"
 import type { PersistenceDeps } from "./deps.js"
 
@@ -37,7 +38,11 @@ export const makeMemoryCaptureStore = ({
     )
   })
 
-  const move = (operation: "prepare" | "advance", write: typeof prepareCapture, message: string) =>
+  const move = (
+    operation: "prepare" | "advance" | "skip",
+    write: typeof prepareCapture,
+    message: string
+  ) =>
     Effect.fn(`SqliteMemoryCaptureStore.${operation}`)(function* (
       batch: MemoryCaptureBatchIdentity
     ) {
@@ -53,6 +58,7 @@ export const makeMemoryCaptureStore = ({
     listWork,
     prepare: move("prepare", prepareCapture, "Could not prepare a Memory capture batch"),
     advance: move("advance", advanceCapture, "Could not advance Memory capture"),
+    skip: move("skip", skipCapture, "Could not skip a Memory capture batch"),
     listBacklog: () =>
       listCaptureBacklog(writer.sql).pipe(
         Effect.mapError(failed("list", "Could not list the Memory capture backlog"))

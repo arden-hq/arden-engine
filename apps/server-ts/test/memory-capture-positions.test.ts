@@ -38,7 +38,7 @@ const turn = Effect.fn("turn")(function* (sessionId: string, id: string) {
 })
 
 /** Runs Capture until idle and returns the owner messages it was handed. */
-const drain = Effect.fn("drain")(function* () {
+const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "complete") {
   const receipts = new Set<string>()
   const batches = makeMemoryCaptureBatches({
     wiki: {
@@ -62,7 +62,7 @@ const drain = Effect.fn("drain")(function* () {
           (m) => m[1] ?? []
         )
       )
-      yield* batches.completeCaptureBatch(batch)
+      yield* (settle === "skip" ? batches.skipCaptureBatch : batches.completeCaptureBatch)(batch)
     }
     throw new Error("Capture did not become idle")
   })
@@ -112,6 +112,27 @@ it("reads a backlog range once, after new work, and removes it as it is read", a
   )
   vi.unstubAllEnvs()
   expect(read).toEqual({ first: ["new-c", "old-a", "old-b"], left: 0, again: [] })
+})
+
+it("skips a batch into the backlog, passes it this server start, and reads it at the next", async () => {
+  vi.stubEnv("ARDEN_CAPTURE_CATCH_UP", "5")
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const chat = (yield* (yield* SessionStore).create({})).sessionId
+      yield* turn(chat, "skip-a")
+      yield* turn(chat, "skip-b")
+      const skipped = yield* yield* drain("skip")
+      const backlog = yield* sql`SELECT from_seq, through_seq FROM memory_capture_backlog`
+      return { skipped, backlog, next: yield* yield* drain() }
+    })
+  )
+  vi.unstubAllEnvs()
+  expect(read).toEqual({
+    skipped: ["skip-a", "skip-b"],
+    backlog: [{ from_seq: 0, through_seq: 3 }],
+    next: ["skip-a", "skip-b"]
+  })
 })
 
 const captureUpdate = (

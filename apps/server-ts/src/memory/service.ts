@@ -2,14 +2,18 @@ import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
-import { MemoryCaptureStore, type MemoryCaptureBatch } from "../persistence/memory/store.js"
+import { MemoryCaptureStore } from "../persistence/memory/store.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { loadPageAges } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
-import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
+import {
+  makeMemoryCaptureBatches,
+  MemoryError,
+  type MemoryCaptureBatches
+} from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
 import { renderSpacePageList } from "./index-render.js"
@@ -150,9 +154,7 @@ export class Memory extends Context.Service<
     readonly withTurn: <A, E, R>(
       consume: (turn: MemoryTurn | undefined) => Effect.Effect<A, E, R>
     ) => Effect.Effect<A, E, R>
-    readonly nextCaptureBatch: () => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
-    readonly completeCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
-  }
+  } & MemoryCaptureBatches
 >()("@arden-hq/server/memory/Memory") {
   static layer(): Layer.Layer<
     Memory,
@@ -191,8 +193,7 @@ export class Memory extends Context.Service<
         return Memory.of({
           prepare: preparation.schedule,
           withTurn,
-          nextCaptureBatch: captureBatches.nextCaptureBatch,
-          completeCaptureBatch: captureBatches.completeCaptureBatch
+          ...captureBatches
         })
       })
     )

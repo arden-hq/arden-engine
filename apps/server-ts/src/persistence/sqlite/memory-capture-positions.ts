@@ -177,6 +177,36 @@ export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(functi
   return "moved"
 })
 
+/**
+ * Moves the position past `batch` as `advanceCapture` does, unread, and puts the whole messages
+ * it touched in the backlog, joined to the range that ends where they start.
+ */
+export const skipCapture = Effect.fn("MemoryCapturePositions.skip")(function* (
+  sql: SqlClient.SqlClient,
+  batch: MemoryCaptureBatchIdentity
+): Effect.fn.Return<MemoryCaptureMove, unknown> {
+  if ((yield* advanceCapture(sql, batch)) === "superseded") return "superseded"
+  const start = columnsOf(batch.start)
+  const fromSeq = start.read_seq + (start.read_offset === null ? 1 : 0)
+  const [position] = yield* sql<{ readonly read_seq: number }>`
+    SELECT read_seq FROM memory_capture_positions WHERE session_id = ${batch.sessionId}
+  `
+  const throughSeq = position?.read_seq ?? -1
+  if (throughSeq < fromSeq) return "moved"
+  const joined = yield* sql`
+    UPDATE memory_capture_backlog SET through_seq = MAX(through_seq, ${throughSeq})
+    WHERE session_id = ${batch.sessionId} AND from_seq <= ${fromSeq}
+      AND through_seq >= ${fromSeq - 1}
+    RETURNING 1
+  `
+  if (joined.length === 0)
+    yield* sql`
+      INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq)
+      VALUES (${batch.sessionId}, ${fromSeq}, ${throughSeq})
+    `
+  return "moved"
+})
+
 export const listCaptureBacklog = Effect.fn("MemoryCapturePositions.listBacklog")(function* (
   sql: SqlClient.SqlClient
 ) {

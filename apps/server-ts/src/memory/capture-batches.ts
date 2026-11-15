@@ -54,6 +54,8 @@ export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError"
 export interface MemoryCaptureBatches {
   readonly nextCaptureBatch: () => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
   readonly completeCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
+  /** Moves past the batch unread; its messages go to the backlog. */
+  readonly skipCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
 }
 
 /** Hands Memory Capture one batch of chat evidence at a time and records what it read. */
@@ -116,21 +118,18 @@ export const makeMemoryCaptureBatches = (input: {
   const captureError = (message: string, sessionId: string) => (cause: unknown) =>
     new MemoryError({ operation: "capture", message, sessionId, cause })
 
-  const advance = Effect.fn("Memory.advanceCapture")(function* (
-    identity: MemoryCaptureBatchIdentity
-  ) {
-    const moved = yield* captures
-      .advance(identity)
-      .pipe(
-        Effect.mapError(
-          captureError("Could not record Memory capture progress", identity.sessionId)
-        )
+  const move = (operation: "advance" | "skip", message: string) =>
+    Effect.fn(`Memory.${operation}Capture`)(function* (identity: MemoryCaptureBatchIdentity) {
+      const moved = yield* captures[operation](identity).pipe(
+        Effect.mapError(captureError(message, identity.sessionId))
       )
-    if (moved === "superseded")
-      yield* Effect.logInfo("Memory capture batch superseded before it advanced", {
-        sessionId: identity.sessionId
-      })
-  })
+      if (moved === "superseded")
+        yield* Effect.logInfo(`Memory capture batch superseded before ${operation}`, {
+          sessionId: identity.sessionId
+        })
+    })
+  const advance = move("advance", "Could not record Memory capture progress")
+  const skip = move("skip", "Could not skip the Memory capture batch")
 
   /**
    * Reads the work's chat from `start`, through the batch's end when it was prepared, and never
@@ -217,11 +216,15 @@ export const makeMemoryCaptureBatches = (input: {
    * The backlog: old messages no Capture run was shown, read once each after the chats have no
    * new work, at most `ARDEN_CAPTURE_CATCH_UP` batches per server start, none when it is unset.
    * Its progress is the receipts of the batches it finished, and a range shrinks as far as every
-   * batch from its start was finished. A batch with nothing to review stops that: its messages
-   * stay in the backlog, and this server start passes the range from then on.
+   * batch from its start was finished. A batch with nothing to review, or one skipped since this
+   * server start, stops that: its messages stay in the backlog, and this server start passes the
+   * range from then on.
    */
   let catchUp = Number(process.env.ARDEN_CAPTURE_CATCH_UP ?? 0)
   const passed = new Set<string>()
+  const skipped = new Set<string>()
+  const batchKey = (identity: MemoryCaptureBatchIdentity) =>
+    JSON.stringify([identity.sessionId, identity.start, identity.end, identity.endMessageId])
   const nextBacklogBatch = Effect.fn("Memory.nextBacklogBatch")(function* (): Effect.fn.Return<
     MemoryCaptureBatch | null,
     MemoryError
@@ -254,7 +257,8 @@ export const makeMemoryCaptureBatches = (input: {
         })
         if (read === undefined) break
         const identity = { sessionId, start, end: read.end, endMessageId: read.endMessageId }
-        if (read.reviewable) {
+        const reviewable = read.reviewable && !skipped.has(batchKey(identity))
+        if (reviewable) {
           const done = yield* wiki
             .hasFinalizedCaptureBatch(identity)
             .pipe(
@@ -267,7 +271,7 @@ export const makeMemoryCaptureBatches = (input: {
             return yield* offer(identity, read.excerpts)
           }
         }
-        finished &&= read.reviewable
+        finished &&= reviewable
         if (finished && read.end._tag === "AfterSequence") {
           yield* captures
             .readBacklog({ sessionId, fromSeq, throughSeq: read.end.sequence })
@@ -356,7 +360,14 @@ export const makeMemoryCaptureBatches = (input: {
     yield* advance(batch.identity)
   })
 
-  return { nextCaptureBatch, completeCaptureBatch }
+  return {
+    nextCaptureBatch,
+    completeCaptureBatch,
+    skipCaptureBatch: (batch) =>
+      skip(batch.identity).pipe(
+        Effect.tap(() => Effect.sync(() => skipped.add(batchKey(batch.identity))))
+      )
+  }
 }
 
 /** One batch as Capture reads it: what it quotes, where it ends, and whether a model reviews it. */
