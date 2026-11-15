@@ -9,8 +9,8 @@ import type { DiscussedChat } from "./discussed-in.js"
 import { isStandingFactsPage, STANDING_PAGE_LIMIT_CHARS } from "./core-memory.js"
 import { FIELD_WEIGHT, lexicalScore, searchTerms } from "./lexical-score.js"
 
-// The word search reads this much of the query: enough for several recent turns, and the
-// recorded query stays small.
+// The word search reads this much of the query: enough for a long question, and the recorded
+// query stays small.
 const QUERY_LIMIT = 512
 // Under 12 characters a query is a greeting or an acknowledgement, whose words match pages
 // at random.
@@ -318,23 +318,6 @@ export const recallQuery = (query: string): string => query.slice(0, QUERY_LIMIT
 export const wordSearchTerms = (query: string): ReadonlySet<string> => {
   const text = normalized(recallQuery(query))
   return text.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(text)
-}
-
-/**
- * The recall's query from the owner's typed turns, newest first: the latest turn whole. When
- * the word search reads nothing of it (a short reply), earlier turns follow it, newest first,
- * as far as the word search reads, so the reply searches with what it answers.
- */
-export const recallText = (turns: ReadonlyArray<string>): string => {
-  const typed = turns.map((turn) => turn.trim()).filter((turn) => turn !== "")
-  const latest = typed[0]
-  if (latest === undefined || wordSearchTerms(latest).size > 0) return latest ?? ""
-  let text = latest
-  for (const earlier of typed.slice(1)) {
-    if (text.length >= QUERY_LIMIT) break
-    text = `${text}\n${earlier}`
-  }
-  return text === latest ? latest : recallQuery(text)
 }
 
 export interface RankedMemoryPage {

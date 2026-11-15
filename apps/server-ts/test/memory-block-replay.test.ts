@@ -1,6 +1,6 @@
 // Replays a month of the owner's runs and typed turns through the rules that decide what a run
 // is sent from Memory, with no model and no write: which runs get a Memory block, by recorded
-// actor, and what the recall searches with for each typed turn. It reads
+// actor, and how many typed turns the word search reads nothing of. It reads
 // the database named by ARDEN_MEMORY_BLOCK_REPLAY_DB, opened read-only and immutable, skips
 // when the variable is unset or names no file, and prints and asserts counts only.
 //
@@ -12,7 +12,7 @@ import { Schema } from "effect"
 import { expect, it } from "vitest"
 import { memoryReaderOf } from "../src/context/memory-context.js"
 import { RunAuthoritySchema, type RunAuthority } from "../src/execution/authority.js"
-import { recallText, wordSearchTerms } from "../src/memory/retrieval.js"
+import { wordSearchTerms } from "../src/memory/retrieval.js"
 import { authoredText, isHumanMessage } from "../src/persistence/transcript/content.js"
 
 const DATABASE = process.env["ARDEN_MEMORY_BLOCK_REPLAY_DB"]?.trim() ?? ""
@@ -81,33 +81,22 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           .prepare(
             `SELECT m.session_id, m.created_at, m.message_json
              FROM session_messages m JOIN sessions s ON s.session_id = m.session_id
-             WHERE m.role = 'user' AND s.session_type != 'agent' AND m.created_at < ?
-             ORDER BY m.session_id, m.seq`
+             WHERE m.role = 'user' AND s.session_type != 'agent'
+               AND m.created_at >= ? AND m.created_at < ?`
           )
-          .all(UNTIL)
+          .all(FROM, UNTIL)
       )
-      const typedSoFar = new Map<string, Array<string>>()
+      let typed = 0
       let short = 0
-      let shortSearchingNothingAfter = 0
-      let readableAfterEarlier = 0
-      let readableSearchingOtherText = 0
       for (const row of messages) {
         const message: unknown = JSON.parse(row.message_json)
         if (typeof message !== "object" || message === null || !("role" in message)) continue
         const envelope = { ...message, role: String(message.role) }
         if (!isHumanMessage(envelope)) continue
         const text = authoredText("content" in message ? message.content : undefined)
-        const earlier = typedSoFar.get(row.session_id) ?? []
-        typedSoFar.set(row.session_id, [...earlier, text])
-        if (row.created_at < FROM || text.trim() === "") continue
-        const query = recallText([text, ...earlier.toReversed()])
-        if (searches(text)) {
-          if (earlier.some((turn) => turn.trim() !== "")) readableAfterEarlier += 1
-          if (query !== text.trim()) readableSearchingOtherText += 1
-          continue
-        }
-        short += 1
-        if (!searches(query)) shortSearchingNothingAfter += 1
+        if (text.trim() === "") continue
+        typed += 1
+        if (!searches(text)) short += 1
       }
 
       const rows = [...byActor].toSorted(([left], [right]) => left.localeCompare(right))
@@ -116,8 +105,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           "",
           `Runs ${FROM.slice(0, 10)} to ${UNTIL.slice(0, 10)} by recorded actor: runs, sent a Memory block before, after.`,
           ...rows.map(([key, row]) => `  ${key}: ${row.runs}, ${row.before}, ${row.after}`),
-          `Typed turns the word search reads nothing of: ${short}; with earlier turns added, it reads nothing for ${shortSearchingNothingAfter}.`,
-          `Typed turns it reads, after an earlier typed turn: ${readableAfterEarlier}; searched with other text than the turn: ${readableSearchingOtherText}.`,
+          `Typed turns: ${typed}; the word search reads nothing of ${short}.`,
           ""
         ].join("\n")
       )
@@ -125,8 +113,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
       for (const [key, row] of rows)
         if (key.endsWith("automation") || key === "helper of automation") expect(row.after).toBe(0)
         else expect(row.after).toBe(row.runs)
-      expect(shortSearchingNothingAfter).toBeLessThanOrEqual(short)
-      expect(readableSearchingOtherText).toBe(0)
+      expect(short).toBeLessThanOrEqual(typed)
     } finally {
       database.close()
     }

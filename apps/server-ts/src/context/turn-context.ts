@@ -3,7 +3,7 @@ import { ContextExperiments } from "./experiments.js"
 import type { ToolApprovalPolicy } from "../tools/approval-policy.js"
 import type { PermissionRules } from "../persistence/permissions/rules.js"
 import { Effect, Exit } from "effect"
-import { humanTextsNewestFirst } from "../persistence/transcript/content.js"
+import { latestHumanText } from "../persistence/transcript/content.js"
 import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 
@@ -36,7 +36,6 @@ import { textSection, type RuntimeContext, type RuntimeSection } from "./runtime
 import { effectiveAccessContext, renderAuthority } from "./effective-access.js"
 import { boundAuthority } from "../chat/run-authority.js"
 import type { RunAuthority } from "../execution/authority.js"
-import { recallText } from "../memory/retrieval.js"
 import {
   renderAgentFamilyContext,
   renderCliToolsContext,
@@ -165,7 +164,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
           runId: input.runId,
           reader,
           spaceId: origin.header?.spaceId ?? undefined,
-          query: recallText(humanTextsNewestFirst(input.messages)),
+          query: latestHumanText(input.messages)?.trim() ?? "",
           memory,
           measure
         })
@@ -366,7 +365,7 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     readonly reader: RunMemoryReader
     /** The chat's Space, if it has one; the reader decides whether it is sent. */
     readonly spaceId: string | undefined
-    /** The owner's recent typed text, newest first. */
+    /** The owner's latest typed turn. */
     readonly query: string
     readonly memory: MemoryTurn | undefined
     readonly measure: TurnMeasure

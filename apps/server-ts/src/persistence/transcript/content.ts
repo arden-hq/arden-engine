@@ -75,11 +75,3 @@ export const latestHumanText = (messages: ReadonlyArray<ContentEnvelope>): strin
   return message === undefined ? undefined : authoredText(message.content)
 }
 
-/** The text a person typed in each of their turns, newest first. */
-export const humanTextsNewestFirst = (
-  messages: ReadonlyArray<ContentEnvelope>
-): ReadonlyArray<string> =>
-  messages
-    .filter(isHumanMessage)
-    .map((message) => authoredText(message.content))
-    .toReversed()
