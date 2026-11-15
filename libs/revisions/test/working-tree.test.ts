@@ -473,6 +473,62 @@ describe("taking in one outside change", () => {
     expect(await readFile(join(root, "a.md"), "utf8")).toBe("edited twice")
   })
 
+  it("refuses a file put back to its recorded content after the scan, and writes no history", async () => {
+    const root = await seeded()
+    await writeFile(join(root, "a.md"), "edited")
+    const before = await historyFiles(root)
+
+    const exit = await useRepository(root, (repository) =>
+      Effect.gen(function* () {
+        const status = yield* repository.workingTreeStatus()
+        const change = present(status.changes[0], "the outside change")
+        if (change.kind === "unreadable") return yield* Effect.die(new Error("unexpected"))
+        yield* Effect.promise(() => writeFile(join(root, "a.md"), "one"))
+        return yield* Effect.exit(
+          repository.adoptWorkingChange(change, { ...adoption, expectedHead: status.revision })
+        )
+      })
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(await historyFiles(root)).toBe(before)
+    expect(await readFile(join(root, "a.md"), "utf8")).toBe("one")
+  })
+
+  it("installs nothing: a file put back to its recorded content once prepared stays as it is", async () => {
+    const root = await seeded()
+    await writeFile(join(root, "a.md"), "edited")
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* ManagedFileRepository
+        const exit = yield* Effect.exit(takeIn(repository, "a"))
+        expect(Exit.isFailure(exit)).toBe(true)
+      }).pipe(
+        Effect.provide(
+          managedFileRepositoryNodeLayer({
+            workingRoot: root,
+            checkpoint: (stage) =>
+              stage === "after_prepared"
+                ? Effect.promise(() => writeFile(join(root, "a.md"), "one"))
+                : Effect.void
+          })
+        )
+      )
+    )
+
+    const state = await useRepository(root, (repository) =>
+      Effect.gen(function* () {
+        const head = present(yield* repository.head, "a head")
+        return {
+          actions: (yield* repository.inspectCommit(head)).changes.map((change) => change.action),
+          a: new TextDecoder().decode(yield* repository.read("a"))
+        }
+      })
+    )
+    expect(state).toEqual({ actions: ["create", "create", "create", "create"], a: "one" })
+    expect(await readFile(join(root, "a.md"), "utf8")).toBe("one")
+  })
+
   it("is refused when the file changes after the commit was prepared, and never overwritten", async () => {
     const root = await seeded()
     await writeFile(join(root, "a.md"), "edited")
