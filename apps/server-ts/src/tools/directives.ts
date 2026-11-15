@@ -7,7 +7,11 @@ import { createTwoFilesPatch } from "diff"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
-import { GlobalInstructions, GlobalInstructionsError } from "../context/global-instructions.js"
+import {
+  GlobalInstructions,
+  GlobalInstructionsError,
+  MAX_RULES_BYTES
+} from "../context/global-instructions.js"
 import type { InstructionChat, InstructionWriter } from "../persistence/instructions/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { appliedReceipt } from "./call-receipt.js"
@@ -18,7 +22,7 @@ const DIRECTIVES_RESOURCE_ID = "directives"
 const MAX_DIFF_BYTES = 64 * 1024
 const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 const ReplaceParametersSchema = Schema.Struct({
-  directives: Schema.Trim.check(Schema.isMaxLength(120_000)).pipe(
+  directives: Schema.Trim.check(Schema.isMaxLength(MAX_RULES_BYTES)).pipe(
     Schema.annotateEncoded({
       description:
         "The complete desired global instructions as Markdown. This replaces the whole AGENTS.md."

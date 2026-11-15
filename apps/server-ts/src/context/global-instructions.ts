@@ -25,7 +25,13 @@ import {
 import { sha256Hex } from "@arden-hq/std/hash"
 
 const GLOBAL_INSTRUCTIONS_FILE = "AGENTS.md"
-const MAX_BYTES = 128 * 1024
+/** The most rules text, in bytes, the rules may hold. */
+export const MAX_RULES_BYTES = 128 * 1024
+/** The rules as the file stores them: the text and one closing newline. */
+const storedText = (content: string): string => (content === "" ? "" : `${content}\n`)
+/** One limit for reading and writing, so every version the history records can be restored. */
+const withinLimit = (content: string): boolean => Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
+const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
 
 interface GlobalInstructionsSnapshot {
   readonly content: string | undefined
@@ -70,13 +76,11 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
   if (status === undefined) {
     return { content: undefined, version: "absent", bytes: 0 } satisfies GlobalInstructionsSnapshot
   }
-  if (!status.isFile() || status.isSymbolicLink() || status.size > MAX_BYTES) {
-    return yield* error(
-      "read",
-      "invalid",
-      `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file under ${formatBytes(MAX_BYTES)}`
-    )
+  if (!status.isFile() || status.isSymbolicLink()) {
+    return yield* error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file`)
   }
+  // The file may hold the closing newline beyond the limit; a larger one is not read at all.
+  if (status.size > MAX_RULES_BYTES + 1) return yield* error("read", "invalid", tooLarge)
   const bytes = yield* Effect.tryPromise({
     try: () => readFile(filename),
     catch: (cause) => error("read", "storage", "Global instructions could not be read", cause)
@@ -87,6 +91,7 @@ const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (fil
       error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not valid UTF-8`, cause)
   })
   const content = text.trim()
+  if (!withinLimit(content)) return yield* error("read", "invalid", tooLarge)
   return {
     content: content === "" ? undefined : content,
     version: sha256Hex(bytes),
@@ -126,25 +131,36 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
   const store = yield* InstructionVersionStore
 
   // The file is the live copy and wins: a history that cannot be written never stops the rules
-  // from loading or changing. A change it missed is adopted on the next read as an outside edit.
+  // from loading or changing. The writer of a version it missed is kept until the next read
+  // records it; after a restart, that version is recorded as an outside edit.
+  let missed: { readonly digest: string; readonly writer: InstructionWriter } | undefined
   const record = (snapshot: GlobalInstructionsSnapshot, writer: InstructionWriter) =>
     store.append({ content: snapshot.content ?? "", digest: snapshot.version, writer }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          missed = undefined
+        })
+      ),
       Effect.asVoid,
       Effect.catch((cause) =>
-        Effect.logWarning("A standing rules version was not recorded", { cause })
+        Effect.sync(() => {
+          missed = { digest: snapshot.version, writer }
+        }).pipe(
+          Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
+        )
       )
     )
 
-  /** Records a version the history does not have yet: the first one, or an outside edit. */
+  /** Records a version the history does not have yet: the first one, a missed one, or an outside edit. */
   const adopt = (snapshot: GlobalInstructionsSnapshot) =>
     store.latest().pipe(
       Effect.matchEffect({
         onFailure: (cause) =>
           Effect.logWarning("The standing rules history could not be read", { cause }),
         onSuccess: (latest) => {
-          if (latest === undefined) return record(snapshot, { kind: "seed" })
-          if (latest.digest === snapshot.version) return Effect.void
-          return record(snapshot, { kind: "outside" })
+          if (latest?.digest === snapshot.version) return Effect.void
+          if (missed?.digest === snapshot.version) return record(snapshot, missed.writer)
+          return record(snapshot, latest === undefined ? { kind: "seed" } : { kind: "outside" })
         }
       })
     )
@@ -159,10 +175,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
     return yield* lock.withPermit(
       Effect.gen(function* () {
         const content = input.content.trim()
-        const text = content === "" ? "" : `${content}\n`
-        if (Buffer.byteLength(text, "utf8") > MAX_BYTES) {
-          return yield* error("replace", "invalid", "Global instructions are too large")
-        }
+        if (!withinLimit(content)) return yield* error("replace", "invalid", tooLarge)
         const current = yield* readSnapshot(file)
         yield* adopt(current)
         if (current.content === (content === "" ? undefined : content)) return current
@@ -174,7 +187,7 @@ const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
           )
         }
         const written = yield* Effect.tryPromise({
-          try: () => atomicCompareAndSwap(file, text, input.expectedVersion),
+          try: () => atomicCompareAndSwap(file, storedText(content), input.expectedVersion),
           catch: (cause) =>
             cause instanceof LocalRevisionConflict
               ? error(

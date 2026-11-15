@@ -3,10 +3,15 @@ import { SqlClient } from "effect/unstable/sql"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { sha256Hex } from "@arden-hq/std/hash"
 import { expect, it } from "vitest"
 
 import { GlobalInstructions, globalInstructionsLayer } from "../src/context/global-instructions.js"
-import { InstructionVersionStore } from "../src/persistence/instructions/store.js"
+import {
+  type InstructionVersion,
+  InstructionVersionStore,
+  InstructionVersionStoreError
+} from "../src/persistence/instructions/store.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { deleteSessionOwnedData } from "../src/persistence/sqlite/session-deletion.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
@@ -171,4 +176,142 @@ it("lets a version be forgotten, keeps every text unchanged, and never reuses a 
   expect(result.listed.versions.map((version) => version.version)).toEqual([3, 1])
   expect(causes(result.rewrite)).toContain("immutable")
   expect(causes(result.relink)).toContain("only loses its chat")
+})
+
+/** A history store in memory whose writes can be made to fail, as a locked database would. */
+const flakyStore = () => {
+  const rows: Array<InstructionVersion> = []
+  const state = { failing: false }
+  const store = InstructionVersionStore.of({
+    latest: () => Effect.succeed(rows.at(-1)),
+    get: (version) => Effect.succeed(rows.find((row) => row.version === version)),
+    list: ({ limit }) =>
+      Effect.succeed({ versions: rows.toReversed().slice(0, limit), total: rows.length }),
+    append: ({ content, digest, writer }) => {
+      if (state.failing)
+        return Effect.fail(
+          new InstructionVersionStoreError({
+            operation: "append",
+            reason: "storage",
+            message: "database is locked"
+          })
+        )
+      const row = { version: rows.length + 1, content, digest, writer, recordedAt: "now" }
+      rows.push(row)
+      return Effect.succeed(row)
+    }
+  })
+  return { rows, state, layer: Layer.succeed(InstructionVersionStore, store) }
+}
+
+const startedOver = <A, E>(
+  file: string,
+  store: ReturnType<typeof flakyStore>,
+  body: Effect.Effect<A, E, GlobalInstructions>
+) =>
+  Effect.runPromise(
+    body.pipe(Effect.provide(globalInstructionsLayer(file).pipe(Layer.provide(store.layer))))
+  )
+
+it("keeps loading and changing the rules when the history cannot be written", async () => {
+  await withRulesFolder(async (folder) => {
+    const file = join(folder, "AGENTS.md")
+    await writeFile(file, "Rule one.\n")
+    const store = flakyStore()
+    store.state.failing = true
+    const loaded = await startedOver(
+      file,
+      store,
+      Effect.gen(function* () {
+        const rules = yield* GlobalInstructions
+        const first = yield* rules.read()
+        yield* rules.replace({
+          content: "Rule one.\nRule two.",
+          expectedVersion: first.version,
+          writer: CHAT
+        })
+        return yield* rules.read()
+      })
+    )
+    expect(loaded.content).toBe("Rule one.\nRule two.")
+    expect(store.rows).toEqual([])
+  })
+})
+
+it("records a change the history missed under its own writer, not as an outside edit", async () => {
+  await withRulesFolder(async (folder) => {
+    const file = join(folder, "AGENTS.md")
+    await writeFile(file, "Rule one.\n")
+    const store = flakyStore()
+    await startedOver(
+      file,
+      store,
+      Effect.gen(function* () {
+        const rules = yield* GlobalInstructions
+        const first = yield* rules.read()
+        store.state.failing = true
+        yield* rules.replace({
+          content: "Rule one.\nRule two.",
+          expectedVersion: first.version,
+          writer: CHAT
+        })
+        store.state.failing = false
+        yield* rules.read()
+      })
+    )
+    expect(store.rows.map((row) => row.writer)).toEqual([{ kind: "seed" }, CHAT])
+  })
+})
+
+it("records an outside edit a change replaces before any read", async () => {
+  await withRulesFolder(async (folder) => {
+    const file = join(folder, "AGENTS.md")
+    await writeFile(file, "Rule one.\n")
+    const store = flakyStore()
+    await startedOver(
+      file,
+      store,
+      Effect.gen(function* () {
+        const rules = yield* GlobalInstructions
+        const edited = "Rule three, typed in an editor.\n"
+        yield* Effect.promise(() => writeFile(file, edited))
+        yield* rules.replace({
+          content: "Rule four.",
+          expectedVersion: sha256Hex(Buffer.from(edited)),
+          writer: CHAT
+        })
+      })
+    )
+    expect(store.rows.map((row) => row.writer.kind)).toEqual(["seed", "outside", "chat"])
+  })
+})
+
+it("can restore every version it can record, up to the size limit", async () => {
+  await withRulesFolder(async (folder) => {
+    const file = join(folder, "AGENTS.md")
+    const largest = "x".repeat(128 * 1024)
+    await writeFile(file, largest)
+    const store = flakyStore()
+    const after = await startedOver(
+      file,
+      store,
+      Effect.gen(function* () {
+        const rules = yield* GlobalInstructions
+        const current = yield* rules.read()
+        const cleared = yield* rules.replace({
+          content: "",
+          expectedVersion: current.version,
+          writer: CHAT
+        })
+        yield* rules.replace({
+          content: (yield* rules.version(1))?.content ?? "",
+          expectedVersion: cleared.version,
+          writer: { kind: "restore", chat: CHAT.chat, from: 1 }
+        })
+        return yield* rules.read()
+      })
+    )
+    expect(after.content).toBe(largest)
+    expect(store.rows.map((row) => row.writer.kind)).toEqual(["seed", "chat", "restore"])
+  })
 })
