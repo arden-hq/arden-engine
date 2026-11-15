@@ -57,7 +57,7 @@ export type StartServer<Server extends StartedServer> = (
 ) => Promise<Server>
 
 /** What a new chat runs on: the model list's chat model when the server started. */
-export interface StartedOn {
+interface StartedOn {
   readonly provider: string
   readonly model: string
   readonly contextWindow: number
