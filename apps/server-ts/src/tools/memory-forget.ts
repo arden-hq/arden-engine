@@ -3,6 +3,7 @@ import { countOf } from "@arden-hq/std/count"
 import { Effect, Schema } from "effect"
 
 import { SessionQueries } from "../persistence/sessions/queries.js"
+import type { WikiError } from "../wiki/errors.js"
 import type { RetractionChange } from "../wiki/forgotten.js"
 import { MAX_CLAIM_CHARS } from "../wiki/retraction.js"
 import { Wiki } from "../wiki/service.js"
@@ -50,6 +51,12 @@ const requestOf = (input: typeof ForgetParametersSchema.Type): ForgetRequest =>
     ? { kind: "undo", id: input.undo }
     : { kind: "forget", lines: input.lines ?? [], claim: input.claim ?? "" }
 
+/** A forget's own refusals already say what to pass instead; other failures read as any write's. */
+const forgetFailure = (error: WikiError): ToolExecutionError =>
+  error.operation === "forget" && (error.reason === "invalid" || error.reason === "not_found")
+    ? new ToolExecutionError(error.message, { preview: "Nothing forgotten", retryable: false })
+    : wikiFailure(error)
+
 const changeDiff = (change: RetractionChange): string =>
   change.pages.map((page) => boundedDiff(page.path, page.before, page.after)).join("\n")
 
@@ -85,7 +92,7 @@ const makeMemoryForgetTools = ({
       (request.kind === "forget"
         ? wiki.planForget({ lines: request.lines, claim: request.claim, turn })
         : wiki.planUndoForget({ id: request.id, turn })
-      ).pipe(Effect.mapError(wikiFailure)),
+      ).pipe(Effect.mapError(forgetFailure)),
       { signal: ctx.signal }
     )
   }
@@ -138,7 +145,7 @@ const makeMemoryForgetTools = ({
           (request.kind === "forget"
             ? wiki.forget({ lines: request.lines, claim: request.claim, turn })
             : wiki.undoForget({ id: request.id, turn })
-          ).pipe(Effect.mapError(wikiFailure)),
+          ).pipe(Effect.mapError(forgetFailure)),
           { signal: ctx.signal }
         )
         effects.applied()

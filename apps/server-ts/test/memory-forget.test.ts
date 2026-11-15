@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext } from "@arden-hq/loop"
+import { errorMessage } from "@arden-hq/std/errors"
 import {
   ManagedFileRepository,
   managedFileRepositoryNodeLayer,
@@ -492,16 +493,24 @@ describe("memory_forget", () => {
               )
             ).then(
               () => "done",
-              (error: unknown) =>
-                String(error).includes("user's own turn") ? "refused" : String(error)
+              (error: unknown) => {
+                const message = errorMessage(error)
+                return message.includes("user's own turn") ? "refused" : message
+              }
             )
           )
         const forgotten = yield* run({ lines: [LINE], claim: "Sam moved away" }, true)
         const undoByReview = yield* run({ undo: 1 }, false)
         const undone = yield* run({ undo: 1 }, true)
-        return [forgotten, undoByReview, undone]
+        const short = yield* run({ lines: ["- Works here."], claim: "Wrong job" }, true)
+        return [forgotten, undoByReview, undone, short]
       })
     )
-    expect(outcome).toEqual(["done", "refused", "done"])
+    expect(outcome).toEqual([
+      "done",
+      "refused",
+      "done",
+      "Line 1 has fewer than 4 words, so it carries no claim to guard. Pass whole page lines."
+    ])
   })
 })
