@@ -104,16 +104,18 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
 const withCurrent = (repository: ManagedFileRepositoryShape, cause: WikiError) => {
   const pageId = cause.pageId
   if (cause.reason !== "conflict" || pageId === undefined) return Effect.succeed(cause)
+  // An Error's message is not an own enumerable field, so a spread of `cause` drops it.
+  const told = { ...cause, message: cause.message }
   return Effect.gen(function* () {
     const currentHead = yield* repository.currentRevision
     const resource = yield* repository.get(pageId, { at: currentHead })
-    if (resource === null) return new WikiError({ ...cause, currentHead })
+    if (resource === null) return new WikiError({ ...told, currentHead })
     const bytes = yield* repository.readVersion(resource)
     const currentContent = yield* Effect.try(() =>
       new TextDecoder("utf-8", { fatal: true }).decode(bytes)
     )
     return new WikiError({
-      ...cause,
+      ...told,
       currentHead,
       currentVersion: resource.versionId,
       currentContent
@@ -207,6 +209,8 @@ export const makeWikiChanges = (
       ),
     check,
     saved: (operation, pageId) =>
-      read(pageId).pipe(Effect.mapError((cause) => new WikiError({ ...cause, operation })))
+      read(pageId).pipe(
+        Effect.mapError((cause) => new WikiError({ ...cause, message: cause.message, operation }))
+      )
   }
 }
