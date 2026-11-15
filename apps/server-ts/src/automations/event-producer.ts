@@ -13,6 +13,7 @@ import type {
 } from "../persistence/automations/model.js"
 import type { AutomationStoreError } from "../persistence/automations/store.js"
 import type { AutomationTriggers } from "../persistence/automations/triggers.js"
+import type { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import type { Wiki } from "../wiki/service.js"
 
 export type AutomationEventProducerServices =
@@ -20,6 +21,7 @@ export type AutomationEventProducerServices =
   | GoogleConnections
   | McpEvents
   | Wiki
+  | WikiEmbeddingIndex
 
 interface AutomationEventAvailability {
   readonly googleAccounts: ReadonlyArray<GoogleAccount>
