@@ -113,13 +113,13 @@ export const renderCollection = (collection: WikiCollection): string =>
     ...(collection.records ? [`Records: ${collection.records}`] : [])
   ].join(" ")
 
-export interface MemoryIndexLine {
+interface MemoryIndexLine {
   readonly path: string
   readonly summary: string | null
 }
 
 /** A folder whose direct pages are counted on one line instead of listed; "" is the root. */
-export interface MemoryIndexFold {
+interface MemoryIndexFold {
   readonly folder: string
   readonly pages: number
 }
