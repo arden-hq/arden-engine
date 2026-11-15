@@ -164,7 +164,6 @@ export const makeAutomationJobs = ({
   "writer" | "sessionEvents" | "rules" | "diagnostics"
 >): AutomationQueue["Service"]["jobs"] => {
   const sql = writer.sql
-  /** The wake depth an attempt's run origin records (`scheduledRunOrigin`). */
   const originChainDepthSql = () =>
     sql.literal("COALESCE(json_extract(attempt.origin, '$.chain_depth'), 0)")
   const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
