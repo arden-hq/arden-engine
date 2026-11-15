@@ -309,7 +309,9 @@ describe("the record folder checks of Memory's own writes", () => {
       ]
     )
     expect(outcome).toEqual({
-      projects: expect.stringMatching(/^blocked: The projects directory must be an active, unowned/u),
+      projects: expect.stringMatching(
+        /^blocked: The projects directory must be an active, unowned/u
+      ),
       areas: "saved"
     })
   })
@@ -326,7 +328,10 @@ describe("the record folder checks of Memory's own writes", () => {
               authority: GLOBAL_WIKI_LOCATION_AUTHORITY
             })
           )
-        return { inRecords: yield* directory("daily/inner"), inTopics: yield* directory("topics/inner") }
+        return {
+          inRecords: yield* directory("daily/inner"),
+          inTopics: yield* directory("topics/inner")
+        }
       })
     )
     expect(outcome).toEqual({
@@ -382,9 +387,7 @@ describe("the record folder checks of Memory's own writes", () => {
             newPath: "daily/garden.md",
             newTitle: "Garden",
             expectedVersion: garden.version,
-            expectedHead: yield* repository.currentRevision.pipe(
-              Effect.map((head) => head ?? "")
-            ),
+            expectedHead: yield* repository.currentRevision.pipe(Effect.map((head) => head ?? "")),
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY
           })
         )

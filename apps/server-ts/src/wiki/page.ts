@@ -103,7 +103,8 @@ const parseYaml = (source: string): unknown => {
 export const normal = (value: string): string => value.trim().toLowerCase()
 
 /** Whether a path is a folder's README, its contract, in any letter case. */
-export const isReadme = (path: string): boolean => posix.basename(path).toLowerCase() === "readme.md"
+export const isReadme = (path: string): boolean =>
+  posix.basename(path).toLowerCase() === "readme.md"
 
 export const pageNamesForPath = (path: string): ReadonlyArray<string> => {
   const names = [path, ...(path.endsWith(".md") ? [path.slice(0, -3)] : [])]

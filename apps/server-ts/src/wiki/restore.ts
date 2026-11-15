@@ -332,8 +332,7 @@ export const makeWikiRestoreMethods = (
         )
         yield* requireWikiWritePaths(boundary, "restore", [resource.path])
         const own = posix.dirname(resource.path)
-        const directory =
-          isReadme(resource.path) ? posix.dirname(own) : own
+        const directory = isReadme(resource.path) ? posix.dirname(own) : own
         if (directory !== ".") {
           const readme = `${directory}/readme.md`.toLowerCase()
           const mapped = snapshot.pages.some(

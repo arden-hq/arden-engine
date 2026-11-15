@@ -43,9 +43,7 @@ const commit = (repository: ManagedFileRepositoryShape, operation: WikiPageOpera
 
 /** The Maintenance brief for the changes made by `changes` after the seed. */
 const brief = (
-  changes: (
-    repository: ManagedFileRepositoryShape
-  ) => Effect.Effect<unknown, unknown>
+  changes: (repository: ManagedFileRepositoryShape) => Effect.Effect<unknown, unknown>
 ): Promise<string> =>
   Effect.runPromise(
     Effect.gen(function* () {

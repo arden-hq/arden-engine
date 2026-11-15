@@ -459,9 +459,9 @@ const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(
       (change) => (change.after ?? change.before)?.resourceId === operation.resourceId
     )?.after
     if (version === undefined || version === null || version.state !== "active") continue
-    const earlier = yield* parseWikiPage(decoder.decode(yield* repository.readVersion(version))).pipe(
-      Effect.option
-    )
+    const earlier = yield* parseWikiPage(
+      decoder.decode(yield* repository.readVersion(version))
+    ).pipe(Effect.option)
     if (Option.isSome(earlier) && earlier.value.lifecycle === "redirect") {
       return yield* ruleError(
         "retire",

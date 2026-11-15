@@ -87,7 +87,9 @@ const isReviewableChange = (folders: RecordFolders, change: PageChange): boolean
 /** How the brief names a page upkeep may read but not change. */
 const readOnlyMark = (folders: RecordFolders, path: string): string => {
   const kind = pageKind(folders, path).kind
-  return kind === "knowledge" ? "" : ` (${kind === "record" ? "record" : "folder contract"}; read only)`
+  return kind === "knowledge"
+    ? ""
+    : ` (${kind === "record" ? "record" : "folder contract"}; read only)`
 }
 
 const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(function* (

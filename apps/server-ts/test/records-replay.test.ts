@@ -110,25 +110,30 @@ const replayedOperation = Effect.fn("replayedOperation")(function* (
   const current = yield* repository.findByPath(path)
   if (current === null) return undefined
   const text = new TextDecoder().decode(yield* repository.readVersion(current))
-  const replayed: { readonly replayed: Replayed; readonly operation: WikiPageOperation } =
-    tool === "wiki_move_page" && newPath !== undefined
-      ? { replayed: "move", operation: movePage(current, newPath) }
-      : tool === "wiki_archive_page"
-        ? { replayed: "archive", operation: archivePage(current) }
-        : tool === "wiki_merge_page"
-          ? {
-              replayed: "merge",
-              operation: updatePage(
-                current,
-                formatRedirectPage({
-                  pageId: current.resourceId,
-                  title: path,
-                  redirectTo: "replay-target"
-                })
-              )
-            }
-          : { replayed: "update", operation: updatePage(current, text) }
-  return replayed
+  const replay = (replayed: Replayed, operation: WikiPageOperation) => ({ replayed, operation })
+  switch (tool) {
+    case "wiki_move_page":
+      return newPath === undefined ? undefined : replay("move", movePage(current, newPath))
+    case "wiki_archive_page":
+      return replay("archive", archivePage(current))
+    case "wiki_merge_page":
+      return replay(
+        "merge",
+        updatePage(
+          current,
+          formatRedirectPage({
+            pageId: current.resourceId,
+            title: path,
+            redirectTo: "replay-target"
+          })
+        )
+      )
+    case "wiki_patch_page":
+    case "wiki_edit_page":
+    case "wiki_restore_page":
+    case "wiki_apply_patch_set":
+      return replay("update", updatePage(current, text))
+  }
 })
 
 const withCopyMemory = <A, E>(
