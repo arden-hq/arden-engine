@@ -24,6 +24,12 @@ export interface RunUsage extends JsonRecord {
   readonly total: number
   readonly cache_read: number
   readonly cache_write: number
+  /**
+   * US dollars, as the model provider reported them for every request counted
+   * (OpenRouter does; llama.cpp and Codex report none). Absent when any of
+   * them reported none: a cost is never estimated, and 0 means a reported 0.
+   */
+  readonly cost?: number
 }
 
 /** Final model output and bounded execution metrics persisted with a completed Run. */
@@ -31,7 +37,12 @@ export interface RunTerminalResult extends JsonRecord {
   readonly text: string
   readonly data: JsonValue
   readonly usage: RunUsage
-  readonly cost: number
+  /**
+   * The Run's own model requests' cost, the same as `usage.cost`: absent when
+   * a provider reported none. Side jobs (a chat name, a compaction summary)
+   * are counted in the usage report, not here.
+   */
+  readonly cost?: number
   readonly duration_ms: number
   readonly tool_time_ms: number
   readonly steps: number
@@ -239,6 +250,8 @@ export interface UsageDailyCell extends JsonRecord {
   readonly output: number
   readonly cache_read: number
   readonly cache_write: number
+  /** Reported US dollars (`RunUsage.cost`); absent when any call counted reported none. */
+  readonly cost?: number
   /** Runs for kind `chat`; model calls for every other kind. */
   readonly runs: number
 }
@@ -253,6 +266,8 @@ export interface UsageTopSession extends JsonRecord {
   readonly output: number
   readonly cache_read: number
   readonly cache_write: number
+  /** Reported US dollars (`RunUsage.cost`); absent when any Run counted has none. */
+  readonly cost?: number
   readonly runs: number
   /** Mean final model-input size across the session's recorded Runs. */
   readonly average_last_input: number | null

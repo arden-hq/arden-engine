@@ -131,3 +131,24 @@ it("folds every model-call kind into the owner's four usage groups", () => {
     safety
   })
 })
+
+it("tells a reported cost from an unknown one in a Run's result", () => {
+  const reported = {
+    ...completedRun,
+    result: {
+      ...completedRun.result,
+      usage: { ...completedRun.result.usage, cost: 0.0004 },
+      cost: 0.0004
+    }
+  }
+  expect(runDecoders.detail(reported).result).toEqual(reported.result)
+  const { cost: _cost, ...unknown } = completedRun.result
+  const unpriced = { ...completedRun, result: unknown }
+  expect(runDecoders.detail(unpriced).result).toEqual(unknown)
+  expect(() =>
+    runDecoders.detail({
+      ...completedRun,
+      result: { ...completedRun.result, usage: { ...completedRun.result.usage, cost: -1 } }
+    })
+  ).toThrow(ProtocolError)
+})

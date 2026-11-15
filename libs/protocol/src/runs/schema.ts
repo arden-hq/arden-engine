@@ -30,14 +30,15 @@ export const RunUsageSchema = withExtras({
   completion: NonNegativeIntSchema,
   total: NonNegativeIntSchema,
   cache_read: NonNegativeIntSchema,
-  cache_write: NonNegativeIntSchema
+  cache_write: NonNegativeIntSchema,
+  cost: Schema.optionalKey(NonNegativeNumberSchema)
 })
 
 export const RunTerminalResultSchema = withExtras({
   text: Schema.String,
   data: Schema.Json,
   usage: RunUsageSchema,
-  cost: NonNegativeNumberSchema,
+  cost: Schema.optionalKey(NonNegativeNumberSchema),
   duration_ms: NonNegativeIntSchema,
   tool_time_ms: NonNegativeIntSchema,
   steps: NonNegativeIntSchema,
@@ -244,6 +245,7 @@ export const UsageDailyCellSchema = withExtras({
   output: NonNegativeIntSchema,
   cache_read: NonNegativeIntSchema,
   cache_write: NonNegativeIntSchema,
+  cost: Schema.optionalKey(NonNegativeNumberSchema),
   runs: NonNegativeIntSchema
 })
 
@@ -257,6 +259,7 @@ export const UsageTopSessionSchema = withExtras({
   output: NonNegativeIntSchema,
   cache_read: NonNegativeIntSchema,
   cache_write: NonNegativeIntSchema,
+  cost: Schema.optionalKey(NonNegativeNumberSchema),
   runs: NonNegativeIntSchema,
   average_last_input: Schema.NullOr(NonNegativeIntSchema)
 })
