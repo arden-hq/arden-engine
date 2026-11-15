@@ -201,7 +201,7 @@ export type WikiWrite =
   | { readonly action: "archive"; readonly operation: Operation<"Archive"> }
   | { readonly action: "restore_archived"; readonly operation: Operation<"Restore"> }
 
-export type WikiPageAction = WikiWrite["action"]
+type WikiPageAction = WikiWrite["action"]
 
 type PageVersion = Pick<ResourceVersion, "resourceId" | "versionId">
 
