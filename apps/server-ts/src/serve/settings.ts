@@ -45,7 +45,19 @@ const ProviderSchema = Schema.Union([
     kind: Schema.Literal("chat-completions"),
     baseUrl: text,
     apiKeyEnv: Schema.optionalKey(text),
-    server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS))
+    server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS)),
+    /**
+     * Opts into plain HTTP to another machine: a llama.cpp server on the
+     * Docker host (`host.docker.internal`) or on the LAN. Every chat then
+     * crosses the network readable by anyone on the path. Off by default.
+     * It names the host and must repeat `baseUrl`'s own (`URL.hostname`), so
+     * a `baseUrl` later edited or mistyped to another host is refused instead
+     * of silently getting clear text too. It refuses `apiKeyEnv`: the rule
+     * it relaxes exists so a key never crosses the network in clear text, and
+     * the servers it is for run without one; a server with a key goes behind
+     * HTTPS. Only this kind takes it: a `responses` provider always sends a key.
+     */
+    insecureHttpHost: Schema.optionalKey(text)
   }),
   /** The Codex sign-in on this machine (`codex login`). The default. */
   Schema.Struct({ kind: Schema.Literal("codex-login") })
@@ -199,18 +211,50 @@ export const parseSettings = (value: unknown): Settings => {
         `Invalid settings: \`${field}\` must be \`model\` or one of \`extraModels\``
       )
   const provider = settings.provider
-  if (provider !== undefined && "baseUrl" in provider) {
-    // A key, and a conversation, go only to an HTTPS endpoint or to this machine.
-    const issue = baseUrlIssue(provider.baseUrl)
-    if (issue !== undefined)
-      throw new SettingsError(`Invalid settings: \`provider.baseUrl\` ${BASE_URL_ISSUES[issue]}`)
-  }
+  if (provider !== undefined && "baseUrl" in provider) checkBaseUrl(provider)
   if (provider?.kind === "responses")
     requireFields(settings, "a `responses` provider", ["model", "contextLimit"])
   // An absent `server` is checked once it is detected, by the same rule.
   if (provider?.kind === "chat-completions" && provider.server !== undefined)
     requireServerFields(settings, provider.server)
   return settings
+}
+
+type BaseUrlProvider = Extract<NonNullable<Settings["provider"]>, { readonly baseUrl: string }>
+
+/**
+ * A key, and a conversation, go only to an HTTPS endpoint or to this machine.
+ * `insecureHttpHost` lets the conversation alone go over plain HTTP to the one
+ * host it names; discovery and chat requests both use this `baseUrl`, so
+ * this one check covers them all.
+ */
+const checkBaseUrl = (provider: BaseUrlProvider): void => {
+  const optIn = provider.kind === "chat-completions" ? provider.insecureHttpHost : undefined
+  const host = URL.canParse(provider.baseUrl) ? new URL(provider.baseUrl).hostname : undefined
+  if (optIn !== undefined && host !== undefined && host !== optIn)
+    throw new SettingsError(
+      `Invalid settings: \`provider.insecureHttpHost\` is ${optIn}, but \`provider.baseUrl\` goes to ${host}`
+    )
+  const issue = baseUrlIssue(provider.baseUrl, { insecureHttpHost: optIn })
+  if (issue !== undefined)
+    throw new SettingsError(
+      `Invalid settings: \`provider.baseUrl\` ${BASE_URL_ISSUES[issue]}${issue === "insecure" ? optInHint(provider) : ""}`
+    )
+  if (
+    optIn !== undefined &&
+    provider.apiKeyEnv !== undefined &&
+    baseUrlIssue(provider.baseUrl) === "insecure"
+  )
+    throw new SettingsError(
+      `Invalid settings: \`provider.apiKeyEnv\` would send the key in clear text to ${optIn}; serve it over HTTPS, or run the server without a key`
+    )
+}
+
+/** The exact setting that opts a refused plain-HTTP `baseUrl` in, where one can. */
+const optInHint = (provider: BaseUrlProvider): string => {
+  const url = new URL(provider.baseUrl)
+  if (provider.kind !== "chat-completions" || url.protocol !== "http:") return ""
+  return `. To send chats to ${url.hostname} over plain HTTP, readable on the network, add "insecureHttpHost": "${url.hostname}" to \`provider\`; no key is ever sent that way`
 }
 
 type ModelField = "model" | "contextLimit"

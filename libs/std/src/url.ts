@@ -39,10 +39,19 @@ export type BaseUrlIssue = ServerUrlIssue | "query"
  * when it is one: a server address (`serverUrlIssue`) without a query or a
  * fragment, even an empty one (`…/v1?`, `…/v1#`), since every request path is
  * appended to it (`${baseUrl}/chat/completions`) and would land inside them.
+ * `insecureHttpHost` also takes plain HTTP to that one host (`URL.hostname`),
+ * which the caller has opted into; nothing else about the rule changes.
  */
-export const baseUrlIssue = (raw: string): BaseUrlIssue | undefined => {
+export const baseUrlIssue = (
+  raw: string,
+  { insecureHttpHost }: { readonly insecureHttpHost?: string | undefined } = {}
+): BaseUrlIssue | undefined => {
   const issue = serverUrlIssue(raw)
-  if (issue !== undefined) return issue
+  const optedIn =
+    issue === "insecure" &&
+    new URL(raw).protocol === "http:" &&
+    new URL(raw).hostname === insecureHttpHost
+  if (issue !== undefined && !optedIn) return issue
   if (raw.includes("#")) return "fragment"
   return raw.includes("?") ? "query" : undefined
 }
