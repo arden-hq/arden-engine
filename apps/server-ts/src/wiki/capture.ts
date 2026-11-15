@@ -7,12 +7,9 @@ import { sha256Hex } from "@arden-hq/std/hash"
 
 // Version 2 names the batch by its chat, its start and end positions and the message at its
 // end, which tells a batch apart from a later one that reuses its numbers after a revert.
-// The patch set and the batch's end are each once per batch; any other write is once per tool
-// call `request`.
 export const captureReplayKey = (
   identity: MemoryCaptureBatchIdentity,
-  phase: string,
-  request?: unknown
+  phase: "patch" | "final"
 ): string =>
   `memory-capture-${phase}:${sha256Hex(
     JSON.stringify({
@@ -21,8 +18,7 @@ export const captureReplayKey = (
       session_id: identity.sessionId,
       start: identity.start,
       end: identity.end,
-      end_message_id: identity.endMessageId,
-      request
+      end_message_id: identity.endMessageId
     })
   )}`
 

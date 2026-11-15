@@ -6,7 +6,7 @@ import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { toolCommit, writeIdentity } from "./wiki-identity.js"
+import { writeIdentity } from "./wiki-identity.js"
 import { formatWikiPage } from "../wiki/page.js"
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import { Wiki } from "../wiki/service.js"
@@ -423,12 +423,11 @@ const makeWikiOperationTools = ({
             path: input.path,
             body: input.body,
             authority: identity.authority,
-            commit: toolCommit(
-              identity,
-              `create Wiki directory ${input.path}`,
-              "wiki_create_directory",
-              input
-            )
+            commit: {
+              actor: identity.actor,
+              origin: identity.origin,
+              reason: `create Wiki directory ${input.path}`
+            }
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -519,12 +518,11 @@ const makeWikiOperationTools = ({
               ],
               expectedHead: head,
               authority: identity.authority,
-              commit: toolCommit(
-                identity,
-                `patch wiki page ${record.resource.path}`,
-                "wiki_patch_page",
-                input
-              )
+              commit: {
+                actor: identity.actor,
+                origin: identity.origin,
+                reason: `patch wiki page ${record.resource.path}`
+              }
             })
             .pipe(Effect.mapError(wikiFailure)),
           { signal: ctx.signal }

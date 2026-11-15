@@ -12,6 +12,7 @@ import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { ownerEdit, withWikiRepository, wikiToolsOver } from "./fixtures/wiki-repository.js"
 import { serverRunContext } from "./kit.js"
+import type { Wiki } from "../src/wiki/service.js"
 
 const AT = "2026-11-14T09:00:00.000Z"
 
@@ -90,6 +91,23 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
   })
 })
 
+const captureUpdate = (
+  wiki: Wiki["Service"],
+  expectedHead: string | null,
+  edits: Parameters<Wiki["Service"]["update"]>[0]["edits"]
+) =>
+  wiki.update({
+    edits,
+    expectedHead: expectedHead ?? "",
+    authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+    commit: {
+      actor: "memory:capture",
+      origin: { kind: "capture", sessionId: "s" },
+      reason: "capture",
+      replayKey: "batch"
+    }
+  })
+
 it("saves a Capture patch set once on replay, and none of it when one page conflicts", async () => {
   await withWikiRepository(async ({ repository, wiki, save }) => {
     await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
@@ -99,20 +117,10 @@ it("saves a Capture patch set once on replay, and none of it when one page confl
     const [read, [a, b]] = [await head(), await pages()]
     const patch = (expectedHead: string | null, versionOfA = a.version, mark = "X2") =>
       Effect.runPromise(
-        wiki.update({
-          edits: [
-            { pageId: "a", content: a.content.replace("A1", mark), expectedVersion: versionOfA },
-            { pageId: "b", content: b.content.replace("B1", mark), expectedVersion: b.version }
-          ],
-          expectedHead: expectedHead ?? "",
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          commit: {
-            actor: "memory:capture",
-            origin: { kind: "capture", sessionId: "s" },
-            reason: "capture",
-            replayKey: "batch"
-          }
-        })
+        captureUpdate(wiki, expectedHead, [
+          { pageId: "a", content: a.content.replace("A1", mark), expectedVersion: versionOfA },
+          { pageId: "b", content: b.content.replace("B1", mark), expectedVersion: b.version }
+        ])
       )
     const landed = await patch(read).then(head)
     expect(await patch(read).then(head)).toBe(landed)
@@ -121,31 +129,33 @@ it("saves a Capture patch set once on replay, and none of it when one page confl
   })
 })
 
-it("lands a Capture patch once when its call is sent again", async () => {
+const CAPTURE_RUN = {
+  run_context: {
+    origin: { kind: "automation", automation_id: "builtin-memory-capture", occurrence_id: "o" },
+    task: null
+  },
+  memory_capture_batch: {
+    sessionId: "s",
+    start: { _tag: "Beginning" },
+    end: { _tag: "Beginning" },
+    endMessageId: "m"
+  }
+}
+
+it("applies a Capture patch again once the page has its old text again", async () => {
   await withWikiRepository(async ({ wiki, save }) => {
-    await save({ pageId: "a", path: "a.md", body: "Old line.\n", origin: ownerEdit })
-    const tools = wikiToolsOver(wiki, {
-      run_context: {
-        origin: { kind: "automation", automation_id: "builtin-memory-capture", occurrence_id: "o" },
-        task: null
-      },
-      memory_capture_batch: {
-        sessionId: "s",
-        start: { _tag: "Beginning" },
-        end: { _tag: "AfterSequence", sequence: 1 },
-        endMessageId: "m"
-      }
-    })
+    await save({ pageId: "a", path: "a.md", body: "Status: open\n", origin: ownerEdit })
     const patch = () =>
-      createToolset(tools, { toJsonSchema: () => ({ type: "object" }) })(
+      createToolset(wikiToolsOver(wiki, CAPTURE_RUN), { toJsonSchema: () => ({ type: "object" }) })(
         serverRunContext()
       ).execute({
         name: "wiki_patch_page",
-        args: { path: "a.md", old_text: "Old", new_text: "Old new" },
+        args: { path: "a.md", old_text: "open", new_text: "closed" },
         toolCallId: "p"
       })
     await patch()
-    await expect(patch()).rejects.toThrow()
-    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("\nOld new line.")
+    await save({ pageId: "a", path: "a.md", body: "Status: open\n", origin: ownerEdit })
+    await patch()
+    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("Status: closed")
   })
 })

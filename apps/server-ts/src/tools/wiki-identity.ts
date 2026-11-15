@@ -14,13 +14,7 @@ import {
   type MemoryCaptureBatchIdentity
 } from "../persistence/memory/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY, type WikiLocationAuthority } from "../wiki/authority.js"
-import { captureReplayKey } from "../wiki/capture.js"
-import {
-  automationOrigin,
-  upkeepOrigin,
-  type WikiCommitIdentity,
-  type WikiCommitOrigin
-} from "../wiki/commit.js"
+import { automationOrigin, upkeepOrigin, type WikiCommitOrigin } from "../wiki/commit.js"
 
 export interface WikiRunIdentityContext {
   readonly runId: string
@@ -178,22 +172,6 @@ const admittedIdentity = async (
     captureBatch: null
   }
 }
-
-/** The commit of one tool write. A Capture write carries a replay key from its batch: `phase`
- *  and, for a write that is once per call, the call's `request`. */
-export const toolCommit = (
-  identity: WikiWriteIdentity,
-  reason: string,
-  phase: string,
-  request?: unknown
-): WikiCommitIdentity => ({
-  actor: identity.actor,
-  origin: identity.origin,
-  reason,
-  ...(identity.captureBatch === null
-    ? {}
-    : { replayKey: captureReplayKey(identity.captureBatch, phase, request) })
-})
 
 const identityUnavailable = (message: string): ToolExecutionError =>
   new ToolExecutionError(message, { preview: "Wiki write identity unavailable", retryable: false })

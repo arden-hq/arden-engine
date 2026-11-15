@@ -4,7 +4,8 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import { Array as Arr, Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
-import { toolCommit, writeIdentity } from "./wiki-identity.js"
+import { writeIdentity } from "./wiki-identity.js"
+import { captureReplayKey } from "../wiki/capture.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
@@ -575,11 +576,12 @@ const makeWikiTools = ({
             edits,
             expectedHead,
             authority: identity.authority,
-            commit: toolCommit(
-              identity,
-              `capture Memory patch set for ${edits.map(({ path }) => path).join(", ")}`,
-              "patch"
-            )
+            commit: {
+              actor: identity.actor,
+              origin: identity.origin,
+              reason: `capture Memory patch set for ${edits.map(({ path }) => path).join(", ")}`,
+              replayKey: captureReplayKey(identity.captureBatch, "patch")
+            }
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -663,12 +665,11 @@ const makeWikiTools = ({
               title: input.title,
               body: input.body,
               authority: identity.authority,
-              commit: toolCommit(
-                identity,
-                `create wiki page ${input.path}`,
-                "wiki_create_page",
-                input
-              )
+              commit: {
+                actor: identity.actor,
+                origin: identity.origin,
+                reason: `create wiki page ${input.path}`
+              }
             })
             .pipe(Effect.mapError(wikiFailure)),
           { signal: ctx.signal }
@@ -745,12 +746,11 @@ const makeWikiTools = ({
               ],
               expectedHead: snapshot.head,
               authority: identity.authority,
-              commit: toolCommit(
-                identity,
-                `edit wiki page ${record.resource.path}`,
-                "wiki_edit_page",
-                input
-              )
+              commit: {
+                actor: identity.actor,
+                origin: identity.origin,
+                reason: `edit wiki page ${record.resource.path}`
+              }
             })
             .pipe(Effect.mapError(wikiFailure)),
           { signal: ctx.signal }
