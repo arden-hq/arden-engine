@@ -50,6 +50,8 @@ export class EmbeddingControlRejected extends Schema.TaggedError<EmbeddingContro
 export class WikiEmbeddingIndex extends Context.Service<
   WikiEmbeddingIndex,
   {
+    /** Queue a refresh when the snapshot's head differs from the one last queued. The Memory
+     *  poll calls it; a search never does. */
     readonly schedule: (snapshot: Snapshot) => Effect.Effect<void>
     readonly status: () => Effect.Effect<EmbeddingIndexStatus, WikiEmbeddingIndexError>
     readonly control: (
@@ -356,8 +358,18 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
     }
   })
 
+  const queuedHead = yield* Ref.make<{ readonly head: string | null } | undefined>(undefined)
+  const queueRefresh = (snapshot: Snapshot): Effect.Effect<void> =>
+    Ref.set(queuedHead, { head: snapshot.head }).pipe(
+      Effect.andThen(Queue.offer(queue, snapshot)),
+      Effect.asVoid
+    )
   const schedule = (snapshot: Snapshot): Effect.Effect<void> =>
-    Queue.offer(queue, snapshot).pipe(Effect.asVoid)
+    Ref.get(queuedHead).pipe(
+      Effect.flatMap((queued) =>
+        queued !== undefined && queued.head === snapshot.head ? Effect.void : queueRefresh(snapshot)
+      )
+    )
 
   const status = Effect.fn("WikiEmbeddingIndex.status")(function* () {
     const snapshot = yield* wiki
@@ -429,7 +441,7 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
     const snapshot = yield* wiki
       .snapshot()
       .pipe(Effect.mapError((cause) => indexError("control", "Could not read the Wiki", cause)))
-    yield* schedule(snapshot)
+    yield* queueRefresh(snapshot)
     return yield* status().pipe(
       Effect.mapError((cause) => indexError("control", cause.message, cause))
     )
@@ -440,7 +452,6 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
     query: string,
     excludedPageIds: ReadonlySet<string> = new Set()
   ) {
-    yield* schedule(snapshot)
     const text = query.trim()
     if (text.length < MIN_QUERY_LENGTH) return []
     const { settings, catalog, indexes } = yield* readState("search")
@@ -485,6 +496,7 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
             Effect.tap(() => Ref.set(lastError, undefined)),
             Effect.catch((cause) =>
               Ref.set(lastError, cause.message).pipe(
+                Effect.andThen(Ref.set(queuedHead, undefined)),
                 Effect.andThen(Effect.logWarning("Wiki embedding refresh failed", cause))
               )
             )
@@ -495,7 +507,7 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
   )
   yield* lifecycle.background(
     wiki.snapshot().pipe(
-      Effect.flatMap(schedule),
+      Effect.flatMap(queueRefresh),
       Effect.catchCause((cause) =>
         Effect.logWarning("Initial Wiki embedding refresh failed", cause)
       )

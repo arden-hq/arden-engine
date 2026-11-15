@@ -45,6 +45,18 @@ const memoryTestProject =
       ]
     : []
 
+// The outside-edit check on the replay copy is a script, not a test: it runs only in its own
+// project, from `just memory-outside-edits`.
+const outsideEditsProject =
+  process.env.ARDEN_OUTSIDE_EDITS === "1"
+    ? [
+        {
+          extends: true,
+          test: { name: "outside-edits", include: ["scripts/memory-outside-edits.ts"] }
+        }
+      ]
+    : []
+
 // The SQLite threads write here every table scan the tests cause; the check
 // in test/sql-scans/global.ts reads it after the run.
 const scanLog = fileURLToPath(new URL("../../node_modules/.cache/sql-scans/", import.meta.url))
@@ -75,7 +87,8 @@ export default mergeConfig(
         },
         ...speedProject,
         ...backlogProject,
-        ...memoryTestProject
+        ...memoryTestProject,
+        ...outsideEditsProject
       ]
     }
   })

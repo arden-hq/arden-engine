@@ -1,4 +1,5 @@
 import {
+  type AdoptableWorkingChange,
   type CommitInput,
   type CommitResult,
   InvalidRevisionInputError,
@@ -47,7 +48,7 @@ const chatOf = (origin: string, base: string): string | undefined | null => {
     : null
 }
 
-export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
+const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
   switch (origin.kind) {
     case "user":
       return origin.via
@@ -175,7 +176,7 @@ export const commitWiki = (
   const replayKey =
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
-  return requireHumanAliases(operations).pipe(
+  return requireCommitRules(operations).pipe(
     Effect.andThen(
       repository.commit({
         actor: options.actor,
@@ -191,7 +192,39 @@ export const commitWiki = (
   )
 }
 
-const requireHumanAliases = (
+/**
+ * Record one change made outside Arden that is already in the page's file. It meets the same
+ * commit-point rules as `commitWiki`, and is guarded by the head the caller decided on.
+ */
+export const commitOutsideChange = (
+  repository: ManagedFileRepositoryShape,
+  options: WikiCommitIdentity & { readonly expectedRevision: string | null },
+  change: AdoptableWorkingChange
+): Effect.Effect<CommitResult, RevisionError> =>
+  requireCommitRules(
+    change.kind === "changed"
+      ? [
+          {
+            _tag: "Update",
+            resourceId: change.resource.resourceId,
+            expectedVersion: change.resource.versionId,
+            content: change.content
+          }
+        ]
+      : []
+  ).pipe(
+    Effect.andThen(
+      repository.adoptWorkingChange(change, {
+        actor: options.actor,
+        origin: encodeWikiOrigin(options.origin),
+        reason: options.reason,
+        expectedHead: options.expectedRevision
+      })
+    )
+  )
+
+/** The rules every Memory write meets at the commit point, outside edits included. */
+const requireCommitRules = (
   operations: ReadonlyArray<WikiPageOperation>
 ): Effect.Effect<void, InvalidRevisionInputError> =>
   Effect.forEach(

@@ -4,10 +4,12 @@ import { Context, Effect, FileSystem, Layer, Option, Path, Semaphore } from "eff
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
 import {
   atomicWrite,
+  directoriesPresent,
   ensureDirectory,
   entryIsSymlink,
   inspectRegular,
   isAlreadyExists,
+  listWorkingTree,
   relativeParts,
   removeTree,
   storageFailure,
@@ -43,6 +45,11 @@ export class RevisionLockFactory extends Context.Service<
 >()("@arden-hq/revisions/RevisionLockFactory") {}
 
 export type StorageError = RevisionStorageError | RevisionConflictError | UnsafePathError
+
+/** One entry under the working root, by its relative path. */
+export type WorkingEntry =
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "unreadable"; readonly path: string; readonly reason: string }
 
 type RevisionObjectKind = "blob" | "tree" | "commit"
 
@@ -149,6 +156,10 @@ export interface RevisionStorageShape {
     allowMissing?: boolean,
     requireStandalone?: boolean
   ) => Effect.Effect<Uint8Array | null, StorageError>
+  /** Every file and symlink under the working root outside history, sorted by path. An entry
+   *  that cannot be inspected or a folder that cannot be listed is reported, never fatal; an
+   *  entry removed while the listing runs is left out. */
+  readonly listWorkingFiles: Effect.Effect<ReadonlyArray<WorkingEntry>, StorageError>
   readonly writeWorking: (
     relativePath: string,
     content: Uint8Array,
@@ -316,7 +327,11 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
   ) {
     const file = yield* workingPath(value)
     const parts = yield* relativeParts(value)
-    yield* ensureDirectory(fs, path, workingRoot, parts.slice(0, -1))
+    if (!(yield* directoriesPresent(fs, path, workingRoot, parts.slice(0, -1)))) {
+      return allowMissing
+        ? null
+        : yield* new RevisionStorageError({ message: `file is missing: ${file}` })
+    }
     return yield* readRegular(file, allowMissing, standalone)
   })
   const writeWorkingAsync = Effect.fn("RevisionStorage.writeWorkingAsync")(function* (
@@ -735,6 +750,11 @@ const makeStorage = Effect.fn("makeRevisionStorage")(function* (
     ),
     readWorking: (value, allowMissing = false, standalone = true) =>
       readWorkingAsync(value, allowMissing, standalone),
+    listWorkingFiles: listWorkingTree(fs, path, workingRoot, historyRoot).pipe(
+      Effect.map((entries) =>
+        [...entries].sort((left, right) => compareCodePoints(left.path, right.path))
+      )
+    ),
     writeWorking: (value, content, noReplace = false) =>
       writeWorkingAsync(value, content, noReplace),
     removeWorking: Effect.fn("RevisionStorage.removeWorking")(function* (value, missingOk = false) {

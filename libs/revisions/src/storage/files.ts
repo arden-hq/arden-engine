@@ -1,9 +1,9 @@
-import { Effect, FileSystem, Option, Path } from "effect"
+import { Effect, FileSystem, Option, Path, Result } from "effect"
 import * as PlatformError from "effect/PlatformError"
 
 import { normalizeRelativePath } from "../domain/model.js"
 import { RevisionConflictError, RevisionStorageError, UnsafePathError } from "../domain/errors.js"
-import type { StorageError } from "./service.js"
+import type { StorageError, WorkingEntry } from "./service.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 export const storageFailure = (operation: string, cause: unknown): RevisionStorageError =>
@@ -53,12 +53,29 @@ export const entryIsSymlink = (
     )
   )
 
-export const ensureDirectory = Effect.fn("RevisionStorage.ensureDirectory")(function* (
+export const ensureDirectory = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   root: string,
   parts: ReadonlyArray<string>
-): Effect.fn.Return<void, StorageError> {
+): Effect.Effect<void, StorageError> =>
+  walkDirectories(fs, path, root, parts, "create").pipe(Effect.asVoid)
+
+/** Whether every directory on the way exists, without creating any. */
+export const directoriesPresent = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  root: string,
+  parts: ReadonlyArray<string>
+): Effect.Effect<boolean, StorageError> => walkDirectories(fs, path, root, parts, "check")
+
+const walkDirectories = Effect.fn("RevisionStorage.walkDirectories")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  root: string,
+  parts: ReadonlyArray<string>,
+  missing: "create" | "check"
+): Effect.fn.Return<boolean, StorageError> {
   const rootInfo = yield* fs
     .stat(root)
     .pipe(Effect.mapError((cause) => storageFailure("stat repository root", cause)))
@@ -74,6 +91,7 @@ export const ensureDirectory = Effect.fn("RevisionStorage.ensureDirectory")(func
     const exists = yield* fs
       .exists(current)
       .pipe(Effect.mapError((cause) => storageFailure("check repository directory", cause)))
+    if (!exists && missing === "check") return false
     if (!exists) {
       yield* fs
         .makeDirectory(current, { mode: 0o700 })
@@ -97,6 +115,7 @@ export const ensureDirectory = Effect.fn("RevisionStorage.ensureDirectory")(func
       })
     }
   }
+  return true
 })
 
 /** Only a caller that allows a missing file gets `null` back. */
@@ -208,6 +227,9 @@ export const removeTree = Effect.fn("RevisionStorage.removeTree")(function* (
     .pipe(Effect.mapError((cause) => storageFailure("remove directory", cause)))
 })
 
+/** Atomic writes stage their bytes in a folder with this name prefix beside the target. */
+const ATOMIC_TEMPORARY_PREFIX = ".arden-"
+
 export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
   fs: FileSystem.FileSystem,
   path: Path.Path,
@@ -221,7 +243,7 @@ export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
   if (existing !== null && noReplace)
     return yield* new RevisionConflictError({ message: `target already exists: ${target}` })
   const temporary = yield* fs
-    .makeTempFile({ directory: parent, prefix: ".arden-", suffix: ".tmp" })
+    .makeTempFile({ directory: parent, prefix: ATOMIC_TEMPORARY_PREFIX, suffix: ".tmp" })
     .pipe(Effect.mapError((cause) => storageFailure("create atomic temporary file", cause)))
   const temporaryDirectory = path.dirname(temporary)
   let installed = false
@@ -266,3 +288,55 @@ export const atomicWrite = Effect.fn("RevisionStorage.atomicWrite")(function* (
     yield* fs.remove(temporaryDirectory, { recursive: true, force: true }).pipe(Effect.ignore)
   }
 })
+
+const listWorkingEntry = Effect.fn("RevisionStorage.listWorkingEntry")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  historyRoot: string,
+  entry: string,
+  relative: string
+): Effect.fn.Return<ReadonlyArray<WorkingEntry>, StorageError> {
+  const linked = yield* entryIsSymlink(fs, entry).pipe(
+    Effect.mapError((cause) => storageFailure("inspect working entry", cause))
+  )
+  if (linked) return [{ kind: "file", path: relative }]
+  const info = yield* fs
+    .stat(entry)
+    .pipe(Effect.mapError((cause) => storageFailure("stat working entry", cause)))
+  if (info.type !== "Directory") return [{ kind: "file", path: relative }]
+  return yield* listWorkingFolder(fs, path, historyRoot, entry, `${relative}/`)
+})
+
+const listWorkingFolder = Effect.fn("RevisionStorage.listWorkingFolder")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  historyRoot: string,
+  directory: string,
+  prefix: string
+): Effect.fn.Return<ReadonlyArray<WorkingEntry>, StorageError> {
+  const names = yield* fs
+    .readDirectory(directory)
+    .pipe(Effect.mapError((cause) => storageFailure("list working folder", cause)))
+  const entries: Array<WorkingEntry> = []
+  for (const name of names) {
+    const entry = path.join(directory, name)
+    if (entry === historyRoot || name.startsWith(ATOMIC_TEMPORARY_PREFIX)) continue
+    const relative = `${prefix}${name}`
+    const listed = yield* Effect.result(listWorkingEntry(fs, path, historyRoot, entry, relative))
+    if (Result.isSuccess(listed)) entries.push(...listed.success)
+    else if (!(listed.failure._tag === "RevisionStorageError" && isMissing(listed.failure.cause)))
+      entries.push({ kind: "unreadable", path: relative, reason: listed.failure.message })
+  }
+  return entries
+})
+
+/** Every entry under the working root outside history. A folder that cannot be listed or an
+ *  entry that cannot be inspected is reported; an entry removed while the listing runs is left
+ *  out. Only the root itself failing fails the listing. */
+export const listWorkingTree = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  workingRoot: string,
+  historyRoot: string
+): Effect.Effect<ReadonlyArray<WorkingEntry>, StorageError> =>
+  listWorkingFolder(fs, path, historyRoot, workingRoot, "")

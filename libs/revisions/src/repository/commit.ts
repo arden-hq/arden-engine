@@ -25,7 +25,6 @@ import type { RevisionStorageShape } from "../storage/service.js"
 import { currentMap, timestamp } from "./state.js"
 import {
   artifact,
-  assertWorking,
   installRows,
   recoverTransactions,
   validateBeforePrepare,
@@ -42,16 +41,18 @@ export interface CommitResult {
   readonly replayed: boolean
 }
 
-const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
-  left.length === right.length && left.every((value, index) => value === right[index])
-
-/** One commit under the repository lock: prepare, materialize, publish. */
+/**
+ * One commit under the repository lock: prepare, materialize, publish. With `adopting`, the
+ * commit records an outside change to that one resource that is already in the working tree, so
+ * nothing is installed and only the final check runs. A touched file may already hold the new
+ * content, as when a file put back by hand is restored.
+ */
 export const commit = Effect.fn("RevisionRepository.commit")(function* (
   storage: RevisionStorageShape,
   head: Effect.Effect<string | null, RevisionError>,
   changeSet: ChangeSet,
   checkpoint?: (stage: string) => Effect.Effect<void, RevisionError>,
-  adoptedPaths?: ReadonlyMap<string, string>
+  adopting?: string
 ): Effect.fn.Return<CommitResult, RevisionError> {
   const critical = Effect.gen(function* () {
     yield* recoverTransactions(storage)
@@ -83,48 +84,29 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
     }
     const before = yield* currentMap(storage, oldHead)
     const applied = yield* applyChangeSet(changeSet, before)
-    const adopted =
-      adoptedPaths === undefined
-        ? null
-        : new Map<string, { readonly path: string; readonly content: Uint8Array }>()
-    if (adoptedPaths !== undefined && adopted !== null) {
-      for (const operation of changeSet.operations) {
-        if (operation._tag !== "Update") {
-          return yield* new InvalidRevisionInputError({
-            message: "working-tree adoption only supports active resource updates"
-          })
-        }
-        const path = adoptedPaths.get(operation.resourceId)
-        if (path === undefined) {
-          return yield* new InvalidRevisionInputError({
-            message: `working-tree adoption is missing resource: ${operation.resourceId}`
-          })
-        }
-        adopted.set(operation.resourceId, { path, content: new Uint8Array(operation.content) })
-      }
-      if (adopted.size !== adoptedPaths.size) {
+    if (adopting !== undefined) {
+      const [operation, ...rest] = changeSet.operations
+      if (
+        operation === undefined ||
+        rest.length > 0 ||
+        operation.resourceId !== adopting ||
+        (operation._tag !== "Update" && operation._tag !== "Archive")
+      ) {
         return yield* new InvalidRevisionInputError({
-          message: "working-tree adoption contains an unknown resource"
+          message: "working-tree adoption takes one update or archive of its own resource"
         })
       }
     }
-    for (const resource of before.values()) {
-      if (resource.state !== "active") continue
-      const change = adopted?.get(resource.resourceId)
-      if (change === undefined) {
-        yield* assertWorking(storage, resource.path, resource.blobId)
-        continue
-      }
-      if (change.path !== resource.path) {
-        return yield* new RevisionConflictError({
-          message: `managed resource path changed: ${resource.resourceId}`
-        })
-      }
-      const content = yield* storage.readWorking(resource.path, true, true)
-      if (content === null || !bytesEqual(content, change.content)) {
-        return yield* new RevisionConflictError({
-          message: `working file changed after preview: ${resource.path}`
-        })
+    const adoptedPath = adopting === undefined ? undefined : before.get(adopting)?.path
+    for (const row of applied.rows) {
+      const current = yield* workingHash(storage, row.path)
+      if (adoptedPath === row.path) {
+        if (current !== row.newBlob)
+          return yield* new RevisionConflictError({
+            message: `working file changed after the scan: ${row.path}`
+          })
+      } else if (current !== row.oldBlob && current !== row.newBlob) {
+        return yield* new RevisionConflictError({ message: `working file changed: ${row.path}` })
       }
     }
     for (const [blobId, content] of applied.payloads)
@@ -185,7 +167,7 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
       canonicalJsonl(transactionRecord(transactionWithoutId)),
       true
     )
-    if (adopted !== null) {
+    if (adopting !== undefined) {
       yield* storage.writeMetadata(
         `transactions/${transactionId}/markers/ADOPTING`,
         new Uint8Array(),
@@ -201,15 +183,8 @@ export const commit = Effect.fn("RevisionRepository.commit")(function* (
           : new RevisionConflictError({ message: "current ref changed before materialization" })
       )
     )
-    yield* installRows(storage, transaction, adopted !== null)
-    for (const row of rows) {
-      const actual = yield* workingHash(storage, row.path)
-      if (actual !== row.newBlob)
-        return yield* new RevisionConflictError({
-          message: `materialized path does not match new tree: ${row.path}`
-        })
-    }
-    yield* validateWorkingTree(storage, newHead)
+    if (adopting === undefined) yield* installRows(storage, transaction)
+    yield* validateWorkingTree(storage, transaction)
     if (checkpoint !== undefined) yield* checkpoint("before_ref")
     yield* storage.compareAndSwapRef(oldHead, newHead)
     if (checkpoint !== undefined) yield* checkpoint("after_ref")

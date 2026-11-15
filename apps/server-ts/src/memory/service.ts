@@ -41,12 +41,6 @@ interface MemoryTurnServices {
   readonly spaces: SpaceStore["Service"]
 }
 
-const memorySnapshot = Effect.fn("Memory.snapshot")(function* (wiki: Wiki["Service"]) {
-  const observed = yield* wiki.observe()
-  const loaded = yield* wiki.snapshot()
-  return loaded.head === observed ? loaded : yield* wiki.snapshot()
-})
-
 const sources = Effect.fn("Memory.sources")(function* (
   services: MemoryTurnServices,
   input: MemorySourcesInput,
@@ -130,11 +124,13 @@ const sources = Effect.fn("Memory.sources")(function* (
 export const openMemoryTurn = Effect.fn("Memory.openTurn")(function* (
   services: MemoryTurnServices
 ) {
-  const current = yield* memorySnapshot(services.wiki).pipe(
-    Effect.catchTag("WikiError", (cause) =>
-      Effect.logWarning("Memory snapshot unavailable", { cause }).pipe(Effect.as(undefined))
+  const current = yield* services.wiki
+    .snapshot()
+    .pipe(
+      Effect.catchTag("WikiError", (cause) =>
+        Effect.logWarning("Memory snapshot unavailable", { cause }).pipe(Effect.as(undefined))
+      )
     )
-  )
   if (current === undefined) return undefined
   return {
     revision: current.head,
@@ -171,7 +167,6 @@ export class Memory extends Context.Service<
 
         yield* startMemoryContentSteps({ wiki, sessions, transcript })
 
-        const snapshot = () => memorySnapshot(wiki)
         const preparation = yield* makeMemoryPreparation({ wiki })
         const turnServices = { wiki, embeddings, sessions, spaces }
 
@@ -183,7 +178,6 @@ export class Memory extends Context.Service<
 
         const captureBatches = makeMemoryCaptureBatches({
           wiki,
-          snapshot,
           captures,
           sessions,
           transcript

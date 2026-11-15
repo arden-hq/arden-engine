@@ -30,9 +30,9 @@ const capture = Effect.fn("capture")(function* (receipts = new Set<string>()) {
       finalizeCaptureBatch: (identity) =>
         Effect.sync(() => {
           receipts.add(JSON.stringify(identity))
-        })
+        }),
+      snapshot: () => Effect.succeed({ head: null, pages: [] })
     },
-    snapshot: () => Effect.succeed({ head: null, pages: [] }),
     captures: yield* MemoryCaptureStore,
     sessions: yield* SessionQueries,
     transcript: yield* TranscriptQueries

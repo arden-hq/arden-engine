@@ -99,32 +99,14 @@ export const workingHash = (
 ): Effect.Effect<string | null, RepositoryError> =>
   storage.readWorking(path, true, true).pipe(Effect.map(contentHash))
 
-export const assertWorking = Effect.fn("RevisionTransaction.assertWorking")(function* (
-  storage: RevisionStorageShape,
-  path: string,
-  expected: string | null
-): Effect.fn.Return<void, RepositoryError> {
-  const actual = yield* workingHash(storage, path)
-  if (actual !== expected)
-    return yield* new RevisionConflictError({ message: `working file changed: ${path}` })
-})
-
+/** Write each row's new content; `validateWorkingTree` then checks every row together. */
 export const installRows = Effect.fn("RevisionTransaction.installRows")(function* (
   storage: RevisionStorageShape,
-  transaction: Transaction,
-  expectPreinstalled = false
+  transaction: Transaction
 ): Effect.fn.Return<void, RepositoryError> {
   for (const [index, row] of transaction.rows.entries()) {
     const expected = row.newBlob
     const current = yield* workingHash(storage, row.path)
-    if (expectPreinstalled) {
-      if (expected === null || current !== expected) {
-        return yield* new RevisionConflictError({
-          message: `adopted working file changed during transaction: ${row.path}`
-        })
-      }
-      continue
-    }
     const baseline = row.oldBlob
     const displacement = artifact(transaction.transactionId, "displaced", index)
     const displaced = (yield* storage.readMetadata(displacement, true)) !== null
@@ -173,14 +155,8 @@ export const installRows = Effect.fn("RevisionTransaction.installRows")(function
       return yield* new CorruptRepositoryError({
         message: `transaction artifact is invalid: ${row.path}`
       })
-    if ((yield* workingHash(storage, row.path)) !== expected) {
+    if ((yield* workingHash(storage, row.path)) !== expected)
       yield* storage.writeWorking(row.path, content, true)
-      if ((yield* workingHash(storage, row.path)) !== expected) {
-        return yield* new RevisionConflictError({
-          message: `working file changed during install: ${row.path}`
-        })
-      }
-    }
   }
 })
 
@@ -303,11 +279,9 @@ const rollbackTransaction = Effect.fn("RevisionTransaction.rollbackTransaction")
     if (!(yield* tryWriteWorking(storage, row.path, content))) conflicted = true
   }
 
-  const previous = yield* currentMap(storage, transaction.oldHead)
-  for (const version of previous.values()) {
-    if (version.state !== "active") continue
-    const observed = yield* observeWorking(storage, version.path)
-    if (observed.conflicted || observed.hash !== version.blobId) conflicted = true
+  for (const row of transaction.rows) {
+    const observed = yield* observeWorking(storage, row.path)
+    if (observed.conflicted || observed.hash !== row.oldBlob) conflicted = true
   }
   if (conflicted) {
     yield* moveTransactionToConflicts(storage, transaction.transactionId)
@@ -323,18 +297,19 @@ const rollbackTransaction = Effect.fn("RevisionTransaction.rollbackTransaction")
   yield* storage.removeMetadataTree(`transactions/${transaction.transactionId}`)
 })
 
-/** Validate every active path in a resulting tree before publishing or deleting recovery metadata. */
+/**
+ * Validate every path the transaction touches before publishing or deleting recovery metadata.
+ * Paths it does not touch may differ from history: they are outside edits not yet taken in.
+ */
 export const validateWorkingTree = Effect.fn("RevisionTransaction.validateWorkingTree")(function* (
   storage: RevisionStorageShape,
-  head: string
+  transaction: Transaction
 ): Effect.fn.Return<void, RepositoryError> {
-  const snapshot = yield* currentMap(storage, head)
-  for (const version of snapshot.values()) {
-    if (version.state !== "active") continue
-    const observed = yield* observeWorking(storage, version.path)
-    if (observed.conflicted || observed.hash !== version.blobId) {
+  for (const row of transaction.rows) {
+    const observed = yield* observeWorking(storage, row.path)
+    if (observed.conflicted || observed.hash !== row.newBlob) {
       return yield* new RevisionConflictError({
-        message: `working tree does not match resulting tree: ${version.path}`
+        message: `working tree does not match resulting tree: ${row.path}`
       })
     }
   }
@@ -379,8 +354,8 @@ export const recoverTransactions = Effect.fn("recoverRevisionTransactions")(func
         })
       }
       const materialize = Effect.gen(function* () {
-        yield* installRows(storage, transaction, adopting)
-        yield* validateWorkingTree(storage, transaction.newHead)
+        if (!adopting) yield* installRows(storage, transaction)
+        yield* validateWorkingTree(storage, transaction)
       })
       const ready = yield* materialize.pipe(
         Effect.as(true),

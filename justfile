@@ -66,6 +66,10 @@ memory-test-sent questions copy *flags:
 memory-test-answered questions copy *flags:
     cd apps/server-ts && ARDEN_MEMORY_TEST=answered ARDEN_MEMORY_TEST_FLAGS="{{flags}}" ARDEN_MEMORY_TEST_QUESTIONS={{questions}} ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project memory-test
 
+# Run, on the replay copy in <copy>, the check the server runs each minute for Memory files changed outside Arden, and print by page path what it took in, what it set aside and why, the files not in Memory, and each page's last outside change. Prints no page text.
+memory-outside-edits copy:
+    cd apps/server-ts && ARDEN_OUTSIDE_EDITS=1 ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project outside-edits
+
 # Register every engine package with `bun link`, so a local app checkout uses this engine.
 link:
     for dir in libs/* apps/server-ts; do (cd "$dir" && bun link); done
