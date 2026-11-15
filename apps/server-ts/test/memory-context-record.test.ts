@@ -433,7 +433,7 @@ describe("which runs are sent Memory, by recorded actor, whatever the chat's ori
       outcome: "cut",
       reason: "index_allowance"
     })
-    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.spacePageList)
+    expect(bytes(text)).toBeLessThanOrEqual(MEMORY_BUDGET.space + MEMORY_BUDGET.space_page_list)
     expect(record.find((source) => source.kind === "space")).toEqual(
       plain.writes[0]?.sources.find((source) => source.kind === "space")
     )
@@ -603,7 +603,7 @@ describe("each source in its own allowance", () => {
     const coreSource = composed.writes[0]?.sources.find((source) => source.kind === "core")
     expect(coreSource).toEqual(expect.objectContaining({ outcome: "whole", reason: null }))
     expect(coreSource?.bytes).toBeGreaterThan(26_000)
-    expect(coreSource?.bytes).toBeLessThanOrEqual(MEMORY_BUDGET.standingPage)
+    expect(coreSource?.bytes).toBeLessThanOrEqual(MEMORY_BUDGET.standing_page)
   })
 
   it("keeps the whole block within the sum of its allowances", async () => {
@@ -797,17 +797,7 @@ describe("the stored record", () => {
   it("records the budget each composition was made under, every allowance of it", async () => {
     const composed = await compose({ actor: person, spaceId: "space-1" })
     const budget = composed.writes[0]?.budget
-    expect(budget).toEqual({
-      standing_page: MEMORY_BUDGET.standingPage,
-      standing_frame: MEMORY_BUDGET.standingFrame,
-      index: MEMORY_BUDGET.index,
-      space: MEMORY_BUDGET.space,
-      space_instructions: MEMORY_BUDGET.spaceInstructions,
-      space_page: MEMORY_BUDGET.spacePage,
-      space_page_list: MEMORY_BUDGET.spacePageList,
-      recall: MEMORY_BUDGET.recall
-    })
-    expect(Object.keys(budget ?? {})).toHaveLength(Object.keys(MEMORY_BUDGET).length)
+    expect(budget).toEqual(MEMORY_BUDGET)
     const decode = Schema.decodeUnknownSync(RunMemoryContextSchema)
     expect(decode(composed.writes[0])).toEqual(composed.writes[0])
     const { budget: _budget, ...before } = first

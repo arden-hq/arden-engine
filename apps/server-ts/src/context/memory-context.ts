@@ -45,41 +45,30 @@ const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3
 const STANDING_PAGE_HEADING_BYTES = 1_000
 
 /**
- * Every allowance in a run's Memory block, in UTF-8 bytes. Each source renders itself into its
- * own allowance with its own notices and takes no room from another, so the block is at most
- * `MEMORY_BLOCK_MAX_BYTES`.
+ * Every allowance in a run's Memory block, in UTF-8 bytes, under the names the run record
+ * gives them. Each source renders itself into its own allowance with its own notices and takes
+ * no room from another, so the block is at most `MEMORY_BLOCK_MAX_BYTES`.
  */
 export const MEMORY_BUDGET = {
-  standingPage:
+  standing_page:
     standingPageLimitChars * MAX_UTF8_BYTES_PER_UTF16_UNIT + STANDING_PAGE_HEADING_BYTES,
   /** The standing-facts note and section heading. */
-  standingFrame: 1_000,
+  standing_frame: 1_000,
   index: 10_000,
   space: 10_000,
-  spacePageList: 2_000,
-  spaceInstructions: 4_000,
-  spacePage: 4_000,
+  space_page_list: 2_000,
+  space_instructions: 4_000,
+  space_page: 4_000,
   recall: 7_000
-} as const
+} as const satisfies RunMemoryBudget
 
 export const MEMORY_BLOCK_MAX_BYTES =
-  STANDING_FACTS_PAGES.length * MEMORY_BUDGET.standingPage +
-  MEMORY_BUDGET.standingFrame +
+  STANDING_FACTS_PAGES.length * MEMORY_BUDGET.standing_page +
+  MEMORY_BUDGET.standing_frame +
   MEMORY_BUDGET.index +
   MEMORY_BUDGET.space +
-  MEMORY_BUDGET.spacePageList +
+  MEMORY_BUDGET.space_page_list +
   MEMORY_BUDGET.recall
-
-const RECORDED_BUDGET = {
-  standing_page: MEMORY_BUDGET.standingPage,
-  standing_frame: MEMORY_BUDGET.standingFrame,
-  index: MEMORY_BUDGET.index,
-  space: MEMORY_BUDGET.space,
-  space_instructions: MEMORY_BUDGET.spaceInstructions,
-  space_page: MEMORY_BUDGET.spacePage,
-  space_page_list: MEMORY_BUDGET.spacePageList,
-  recall: MEMORY_BUDGET.recall
-} satisfies RunMemoryBudget
 
 /** A Space's view, and its Memory page at the version read, when it has one. */
 export interface SpaceMemoryInput {
@@ -119,7 +108,7 @@ export const assembleMemoryContext = ({
   /** The text the recall searched with. */
   readonly query: string
 }): MemoryContext => {
-  const standing = sources?.standing(MEMORY_BUDGET.standingPage) ?? none
+  const standing = sources?.standing(MEMORY_BUDGET.standing_page) ?? none
   const spaced = space === undefined ? undefined : renderSpace(space)
   const index =
     sources?.index({
@@ -139,7 +128,7 @@ export const assembleMemoryContext = ({
       reader,
       revision,
       query: recall === undefined ? null : recallQuery(query),
-      budget: RECORDED_BUDGET,
+      budget: MEMORY_BUDGET,
       sources: [
         ...standing.sources,
         ...index.sources,
@@ -162,9 +151,9 @@ const renderSpace = (
 } => {
   const rendered = renderSpaceContext(space.view, {
     maxBytes: MEMORY_BUDGET.space,
-    instructionsBytes: MEMORY_BUDGET.spaceInstructions,
-    pageBytes: MEMORY_BUDGET.spacePage,
-    pageListBytes: MEMORY_BUDGET.spacePageList
+    instructionsBytes: MEMORY_BUDGET.space_instructions,
+    pageBytes: MEMORY_BUDGET.space_page,
+    pageListBytes: MEMORY_BUDGET.space_page_list
   })
   const list = rendered.list?.sources ?? []
   const identity = {
