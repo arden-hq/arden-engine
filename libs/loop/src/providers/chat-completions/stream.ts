@@ -16,6 +16,7 @@ import type { ToolSearch } from "../../contracts/tools.js"
 import {
   answerToolSearch,
   pendingToolSearch,
+  reportedCost,
   SemanticResponseError,
   TOOL_SEARCH_TOOL_NAME,
   type SseEvent,
@@ -299,7 +300,8 @@ export const makeChunkMapper = (options: {
         prompt_tokens: 0,
         completion_tokens: 0,
         cache_read_tokens: 0,
-        cache_write_tokens: 0
+        cache_write_tokens: 0,
+        cost: undefined
       },
       model: options.requestedModel
     }
@@ -377,7 +379,8 @@ const usageOf = (raw: Readonly<Record<string, unknown>>): Usage => {
     prompt_tokens: Math.max(0, tokens(raw.prompt_tokens) - cacheRead - cacheWrite),
     completion_tokens: tokens(raw.completion_tokens),
     cache_read_tokens: cacheRead,
-    cache_write_tokens: cacheWrite
+    cache_write_tokens: cacheWrite,
+    cost: reportedCost(raw)
   }
 }
 

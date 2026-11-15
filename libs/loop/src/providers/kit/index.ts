@@ -8,6 +8,7 @@
 
 export { isAbortError, raceAbort } from "../../abort.js"
 export { contextBlockText } from "./content.js"
+export { reportedCost } from "./cost.js"
 export {
   HttpStatusError,
   ProviderError,

@@ -10,6 +10,7 @@ import type { ToolSearch } from "../../contracts/tools.js"
 import { OpenAiCitationFilter, stripOpenAiCitations } from "./citations.js"
 import {
   MAX_STATUS_DETAIL_CHARS,
+  reportedCost,
   RetryableProviderError,
   SemanticResponseError
 } from "../kit/index.js"
@@ -147,7 +148,8 @@ const completion = (
       prompt_tokens: Math.max(0, (usage?.input_tokens ?? 0) - cacheReadTokens - cacheWriteTokens),
       completion_tokens: usage?.output_tokens ?? 0,
       cache_read_tokens: cacheReadTokens,
-      cache_write_tokens: cacheWriteTokens
+      cache_write_tokens: cacheWriteTokens,
+      cost: usage?.cost
     },
     model: requestedModel
   }
@@ -165,7 +167,8 @@ const usageFrom = (value: unknown): ResponseUsage | null => {
       cached_tokens: tokens(details?.cached_tokens),
       cache_write_tokens: tokens(details?.cache_write_tokens)
     },
-    output_tokens: tokens(raw.output_tokens)
+    output_tokens: tokens(raw.output_tokens),
+    cost: reportedCost(raw)
   }
 }
 

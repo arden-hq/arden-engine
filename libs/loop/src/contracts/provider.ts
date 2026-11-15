@@ -33,13 +33,24 @@ export interface Usage {
   readonly completion_tokens: number
   readonly cache_read_tokens: number
   readonly cache_write_tokens: number
+  /**
+   * What the provider says these requests cost, in US dollars, as it reported
+   * it (OpenRouter's `usage.cost`; see `reportedCost`). Never computed from a
+   * price table. Undefined when any request counted reported none (llama.cpp,
+   * Codex, a response without usage): a sum with an unknown part is unknown,
+   * so a reported total is always the whole spend, and a reported 0 (a free
+   * model) stays apart from "not reported".
+   */
+  readonly cost: number | undefined
 }
 
+/** The usage of no request at all: nothing spent, so the cost is a known 0. */
 export const zeroUsage = (): Usage => ({
   prompt_tokens: 0,
   completion_tokens: 0,
   cache_read_tokens: 0,
-  cache_write_tokens: 0
+  cache_write_tokens: 0,
+  cost: 0
 })
 
 const count = (value: number | undefined): number => value ?? 0
@@ -47,11 +58,13 @@ const count = (value: number | undefined): number => value ?? 0
 export const usageInputTokens = (usage: Partial<Usage>): number =>
   count(usage.prompt_tokens) + count(usage.cache_read_tokens) + count(usage.cache_write_tokens)
 
+/** Adds a response's usage; a response without a reported cost leaves the total's unknown. */
 export const addUsage = (left: Usage, right: Partial<Usage>): Usage => ({
   prompt_tokens: count(left.prompt_tokens) + count(right.prompt_tokens),
   completion_tokens: count(left.completion_tokens) + count(right.completion_tokens),
   cache_read_tokens: count(left.cache_read_tokens) + count(right.cache_read_tokens),
-  cache_write_tokens: count(left.cache_write_tokens) + count(right.cache_write_tokens)
+  cache_write_tokens: count(left.cache_write_tokens) + count(right.cache_write_tokens),
+  cost: left.cost === undefined || right.cost === undefined ? undefined : left.cost + right.cost
 })
 
 export interface TextContentDelta {

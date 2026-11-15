@@ -112,6 +112,8 @@ export interface ResponseUsage {
     readonly cache_write_tokens: number
   }
   readonly output_tokens: number
+  /** The spend the usage reports (`reportedCost`); Codex and OpenAI report none. */
+  readonly cost: number | undefined
 }
 
 export interface ResponseShape {

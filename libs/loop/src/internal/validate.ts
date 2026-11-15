@@ -341,6 +341,9 @@ const checkCompletion = (value: Record<string, unknown>): CompletionResponse => 
   ]) {
     if (!Number.isInteger(usage[field])) invalidItem(`usage ${field} must be an integer`)
   }
+  const cost = usage.cost
+  if (cost !== undefined && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0))
+    invalidItem("usage cost must be a finite non-negative number of dollars")
   const message: Record<string, unknown> = {
     content: null,
     tool_calls: null,

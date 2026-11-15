@@ -680,7 +680,8 @@ describe("OpenRouter reasoning_details", () => {
         prompt_tokens: 16,
         completion_tokens: 12,
         cache_read_tokens: 10,
-        cache_write_tokens: 4
+        cache_write_tokens: 4,
+        cost: 0.0001
       },
       model: "openai/gpt-5-mini"
     })
@@ -880,7 +881,8 @@ describe("OpenRouter usage", () => {
         prompt_tokens: 22,
         completion_tokens: 4,
         cache_read_tokens: 23949,
-        cache_write_tokens: 14979
+        cache_write_tokens: 14979,
+        cost: 0.002116065
       }
     ],
     [
@@ -905,7 +907,13 @@ describe("OpenRouter usage", () => {
         },
         completion_tokens_details: { reasoning_tokens: 0, image_tokens: 0, audio_tokens: 0 }
       },
-      { prompt_tokens: 3, completion_tokens: 5, cache_read_tokens: 0, cache_write_tokens: 17954 }
+      {
+        prompt_tokens: 3,
+        completion_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 17954,
+        cost: 0.00224705
+      }
     ]
   ])("splits %s usage into fresh, read and written tokens", async (model, served, usage, split) => {
     const { provider: cc } = provider(
@@ -914,6 +922,116 @@ describe("OpenRouter usage", () => {
     )
     const completed = completionOf(await collect(cc.stream(request({ model }))))
     expect(completed.usage).toEqual(split)
+  })
+
+  /**
+   * `cost` is what OpenRouter charged the account's credits. With a key of
+   * the person's own (BYOK) that is only OpenRouter's fee, and the upstream's
+   * bill is `cost_details.upstream_inference_cost` (usage-accounting docs;
+   * prime `reported_cost`), so the spend is their sum, and unknown without
+   * the upstream bill. A free model's 0 is a reported 0. BYOK is not checked
+   * live: the key used has no provider key of its own.
+   */
+  it.each([
+    ["a free model", { cost: 0, is_byok: false }, 0],
+    [
+      "BYOK with the upstream bill",
+      { cost: 0.003, is_byok: true, cost_details: { upstream_inference_cost: 0.2 } },
+      0.203
+    ],
+    ["BYOK without the upstream bill", { cost: 0.003, is_byok: true }, undefined],
+    ["no cost field", {}, undefined],
+    ["a cost that is not a number", { cost: "0.1" }, undefined]
+  ])("reads the spend of %s", async (_name, fields, cost) => {
+    const { provider: cc } = provider(
+      [
+        () =>
+          sseResponse([
+            lastChunk("openai/gpt-6-luna", "OpenAI", {
+              prompt_tokens: 10,
+              completion_tokens: 2,
+              ...fields
+            }),
+            "[DONE]"
+          ])
+      ],
+      { providerId: "openrouter", baseUrl: "https://openrouter.ai/api/v1" }
+    )
+    const completed = completionOf(
+      await collect(cc.stream(request({ model: "openai/gpt-6-luna" })))
+    )
+    expect(completed.usage.cost).toBe(cost)
+  })
+
+  it("sums every response's spend into the run's usage, and leaves it unknown when one reported none", async () => {
+    const answer = (cost: number | undefined) => () =>
+      sseResponse([
+        lastChunk("openai/gpt-6-luna", "OpenAI", {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          ...(cost === undefined ? {} : { cost })
+        }),
+        "[DONE]"
+      ])
+    const toolCall = (cost: number) => () =>
+      sseResponse([
+        {
+          ...lastChunk("openai/gpt-6-luna", "OpenAI", {
+            prompt_tokens: 8,
+            completion_tokens: 3,
+            cost
+          }),
+          choices: [
+            {
+              index: 0,
+              delta: { tool_calls: [{ index: 0, ...call("call_1") }] },
+              finish_reason: "tool_calls"
+            }
+          ]
+        },
+        "[DONE]"
+      ])
+    const run = async (answers: ReadonlyArray<() => Response>) => {
+      const { provider: cc } = provider(answers, {
+        providerId: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1"
+      })
+      return makeAgent(
+        { model: "openai/gpt-6-luna" },
+        {
+          provider: cc,
+          toolset: {
+            entries: () => [
+              {
+                description: weather.description,
+                parameters: weather.parameters,
+                meta: { name: "weather" }
+              }
+            ],
+            loadedNames: () => new Set(),
+            load: () => {},
+            execute: () => ({ content: "Sunny.", preview: "Sunny." })
+          }
+        }
+      ).run([{ role: "user", content: "Weather?" }])
+    }
+    const known = await run([toolCall(0.0004), answer(0.0001)])
+    expect(known.usage).toEqual({
+      prompt_tokens: 18,
+      completion_tokens: 5,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost: 0.0004 + 0.0001
+    })
+    const unknown = await run([toolCall(0.0004), answer(undefined)])
+    expect(unknown.usage).toEqual({
+      prompt_tokens: 18,
+      completion_tokens: 5,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost: undefined
+    })
+    expect("cost" in unknown.usage).toBe(true)
   })
 })
 

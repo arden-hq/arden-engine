@@ -207,6 +207,59 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     expect(final.message.content).toBe("Done.")
   })
 
+  it("reports no spend for a Codex response, so a run's cost stays unknown, not 0", async () => {
+    const transport = makeTransport([
+      () =>
+        sseResponse((control) => {
+          control.send({ type: "response.completed", response: simpleCompleted })
+          control.end()
+        })
+    ])
+    const provider = makeOpenAiResponsesProvider({ auth: staticAuth, fetch: transport.fetchImpl })
+    const result = await makeAgent(
+      { model: "gpt-5.4" },
+      {
+        provider,
+        toolset: {
+          entries: () => [],
+          loadedNames: () => new Set(),
+          load: () => {},
+          execute: () => ({ content: "", preview: "" })
+        }
+      }
+    ).run([{ role: "user", content: "Hi." }])
+    expect(result.usage).toEqual({
+      prompt_tokens: 3,
+      completion_tokens: 2,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost: undefined
+    })
+    expect(Object.keys(result.usage)).toContain("cost")
+    expect(result.cost).toBe(0)
+  })
+
+  it("carries the spend a Responses route reports in usage, as OpenRouter's Responses API does", async () => {
+    const transport = makeTransport([
+      () =>
+        sseResponse((control) => {
+          control.send({
+            type: "response.completed",
+            response: { ...simpleCompleted, usage: { ...simpleCompleted.usage, cost: 0.0007 } }
+          })
+          control.end()
+        })
+    ])
+    const provider = makeOpenAiResponsesProvider({ auth: staticAuth, fetch: transport.fetchImpl })
+    expect(completionOf(await collect(provider.stream(baseRequest))).usage).toEqual({
+      prompt_tokens: 3,
+      completion_tokens: 2,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost: 0.0007
+    })
+  })
+
   it("hands a tool its arguments without the citation markers a model wrote into them", async () => {
     const cited =
       '{"message":"Verified: Sep 7 2026. \uE200cite\uE202turn654819fetch1\uE202turn909470fetch0\uE201"}'
