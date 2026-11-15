@@ -29,7 +29,7 @@ import { makeWikiPageHistoryTools } from "../src/tools/wiki-page-history.js"
 import { searchPages } from "../src/tools/wiki-search.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { makeWikiChangeMethods } from "../src/wiki/change.js"
-import { memoryIndex } from "../src/wiki/collections.js"
+import { DIRECTORY_CONTRACT_HEADINGS, memoryIndex } from "../src/wiki/collections.js"
 import {
   archivePage,
   commitOutsideChange,
@@ -547,6 +547,51 @@ const renameStore = (): WikiRenameStore["Service"] => {
 const LINKED = "Sam works with [[places/town.md|Town]] council every week."
 
 describe("what forgotten.md holds and where it stays", () => {
+  it("shows the owner forgotten.md, and keeps its name taken for a folder or a rename", async () => {
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        yield* forget(memory)
+        const forgotten = yield* memory.page("forgotten.md")
+        const listed = (yield* memory.listing.list()).pages.map((page) => page.path)
+        const read = yield* memory.listing.read(forgotten.page.pageId)
+        const message = (error: unknown) =>
+          error === undefined ? "accepted" : recordOf(error)["message"]
+        const folder = yield* refusal(
+          memory.mutations.createDirectory({
+            path: "forgotten",
+            body: DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}\n\nMine.`).join("\n\n"),
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AGENT
+          })
+        )
+        const sam = yield* memory.page("people/sam.md")
+        const renamed = yield* refusal(
+          makeWikiRenameMethods(memory.repository, spaces, renameStore()).requestRename({
+            pageId: "sam",
+            newPath: "forgotten.md",
+            newTitle: "Sam",
+            expectedVersion: sam.resource.versionId,
+            expectedHead: (yield* memory.listing.head()) ?? "",
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: AGENT
+          })
+        )
+        return {
+          listed: listed.includes("forgotten.md"),
+          read: read.path,
+          folder: message(folder),
+          renamed: message(renamed)
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      listed: true,
+      read: "forgotten.md",
+      folder: "forgotten.md is kept by Arden for the owner. Nothing was saved; leave it unchanged.",
+      renamed: "Another Wiki page already owns the new path or link name"
+    })
+  })
+
   it("holds no link, so a run can still rename a page a forgotten line linked to", async () => {
     const outcome = await withMemory((memory) =>
       Effect.gen(function* () {
