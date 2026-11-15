@@ -562,7 +562,8 @@ describe("what forgotten.md holds and where it stays", () => {
           newTitle: "City",
           expectedVersion: town.resource.versionId,
           expectedHead: (yield* memory.listing.head()) ?? "",
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+          commit: AGENT
         })
         const accepted = yield* renames.acceptRename({
           approvalId: requested.approvalId,

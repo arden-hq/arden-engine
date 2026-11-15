@@ -144,6 +144,7 @@ const OWNER: WikiCommitOrigin = { kind: "user", via: "desktop" }
 const PRODUCER: WikiCommitOrigin = { kind: "automation", automationId: "auto-daily" }
 const OTHER_AUTOMATION: WikiCommitOrigin = { kind: "automation", automationId: "auto-other" }
 const CAPTURE: WikiCommitOrigin = { kind: "capture", replayKey: undefined, sessionId: undefined }
+const UPKEEP: WikiCommitOrigin = { kind: "upkeep", automationId: "builtin-wiki-maintenance" }
 
 const redirect = (path: string, to: string) =>
   formatRedirectPage({ pageId: `id:${path}`, title: path, redirectTo: `id:${to}` })
@@ -392,11 +393,70 @@ describe("the record folder checks of Memory's own writes", () => {
             newTitle: "Garden",
             expectedVersion: garden.version,
             expectedHead: yield* repository.currentRevision.pipe(Effect.map((head) => head ?? "")),
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: { actor: "test", origin: OWNER, reason: "test rename" }
           })
         )
       })
     )
     expect(outcome).toMatch(/^blocked: daily\/garden\.md /u)
+  })
+
+  it("checks a rename for the writer that asks, over every page the rename writes", async () => {
+    let approvals = 0
+    const store = partialService<WikiRenameStore["Service"]>("WikiRenameStore", {
+      createOrGet: (input) =>
+        Effect.sync(() => {
+          approvals += 1
+          return {
+            ...input,
+            status: "pending" as const,
+            createdAt: "2026-11-15T00:00:00.000Z",
+            commitId: null,
+            resolution: null
+          }
+        })
+    })
+    const outcome = await withMemory(
+      (repository) =>
+        Effect.gen(function* () {
+          const listing = makeWikiListingMethods(repository)
+          const report = yield* listing.read("id:daily/2026-11-11.md")
+          const garden = yield* listing.read("id:topics/garden.md")
+          const head = (yield* repository.currentRevision) ?? ""
+          const renames = makeWikiRenameMethods(repository, spaces, store)
+          const request = (
+            pageId: string,
+            version: string,
+            newPath: string,
+            origin: WikiCommitOrigin
+          ) =>
+            refusal(
+              renames.requestRename({
+                pageId,
+                newPath,
+                newTitle: "Moved",
+                expectedVersion: version,
+                expectedHead: head,
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+                commit: { actor: origin.kind, origin, reason: "test rename" }
+              })
+            )
+          return {
+            record: yield* request(report.pageId, report.version, "topics/moved.md", UPKEEP),
+            linkedFromRecord: yield* request(
+              garden.pageId,
+              garden.version,
+              "topics/garden-moved.md",
+              UPKEEP
+            ),
+            approvals
+          }
+        }),
+      [...SEED, ["daily/2026-11-12.md", "See [[topics/garden.md|Garden]]."]]
+    )
+    expect(outcome.record).toMatch(/^blocked: daily\/2026-11-11\.md is a record/u)
+    expect(outcome.linkedFromRecord).toMatch(/^blocked: daily\/2026-11-12\.md is a record/u)
+    expect(outcome.approvals).toBe(0)
   })
 })

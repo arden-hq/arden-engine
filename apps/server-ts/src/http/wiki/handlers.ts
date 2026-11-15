@@ -301,7 +301,8 @@ export const WikiHandlers = HttpApiBuilder.group(
             newTitle: payload.new_title,
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            commit: OWNER_RENAME
           })
           .pipe(Effect.map(renameApproval), Effect.mapError(writeError))
       )

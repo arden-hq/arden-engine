@@ -6,7 +6,8 @@ import {
   ownerInApp,
   requireCommitRules,
   updatePage,
-  type WikiCommitIdentity
+  type WikiCommitIdentity,
+  type WikiPageOperation
 } from "./commit.js"
 import type { WikiRenameApproval } from "@arden-hq/protocol/wiki"
 import { Effect, Predicate, Schema } from "effect"
@@ -36,10 +37,7 @@ import {
 import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
 import { isSpacePage } from "./space-index.js"
 
-/**
- * Who renames when the owner accepts in the app. A request is checked against the rules that bind
- * this writer, so a rename even the owner may not make is refused before anyone approves it.
- */
+/** Who renames when the owner asks for and accepts a rename in the app. */
 export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
 
 const ResourceSchema = Schema.Struct({
@@ -72,6 +70,13 @@ const RenamePlanSchema = Schema.Struct({
 })
 
 type RenamePlan = typeof RenamePlanSchema.Type
+
+/** Every page write a rename makes, in one commit. */
+const planOperations = (plan: RenamePlan): ReadonlyArray<WikiPageOperation> => [
+  movePage(plan.source, plan.newPath, plan.movedContent),
+  createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),
+  ...plan.rewrites.map((rewrite) => updatePage(rewrite.resource, rewrite.content))
+]
 type PlannedResource = RenamePlan["source"]
 
 interface WikiRenameRequestInput {
@@ -81,6 +86,9 @@ interface WikiRenameRequestInput {
   readonly expectedVersion: string
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
+  /** The writer that will commit the rename. Its rules are checked over the whole plan before
+   *  any approval is made. */
+  readonly commit: WikiCommitIdentity
 }
 
 interface WikiRenameAcceptInput {
@@ -392,9 +400,6 @@ export const makeWikiRenameMethods = (
         pageId: input.pageId
       })
     }
-    yield* requireCommitRules(repository, OWNER_RENAME.origin, [
-      movePage(current.resource, input.newPath)
-    ]).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
     const targetNames = new Set(
       pageNamesForPath(input.newPath).map((name) => name.trim().toLowerCase())
     )
@@ -484,6 +489,9 @@ export const makeWikiRenameMethods = (
     const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "rename")
     const paths = yield* planMutationPaths(plan, snapshot.pages)
     yield* requireWikiWritePaths(boundary, "rename", paths)
+    yield* requireCommitRules(repository, input.commit.origin, planOperations(plan)).pipe(
+      Effect.mapError(mapRevisionError("rename", input.pageId))
+    )
     const approval = yield* store
       .createOrGet({
         approvalId: randomUUID(),
@@ -549,11 +557,7 @@ export const makeWikiRenameMethods = (
         ...input.commit,
         expectedRevision: plan.baseHead
       },
-      [
-        movePage(plan.source, plan.newPath, plan.movedContent),
-        createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),
-        ...plan.rewrites.map((rewrite) => updatePage(rewrite.resource, rewrite.content))
-      ]
+      planOperations(plan)
     ).pipe(
       Effect.mapError(mapRevisionError("rename", plan.pageId)),
       Effect.map((result) => ({ _tag: "Committed" as const, result })),

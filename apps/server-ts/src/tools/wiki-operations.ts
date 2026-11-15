@@ -565,6 +565,11 @@ const makeWikiOperationTools = ({
         }
       }
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
+      const commit = {
+        actor: identity.actor,
+        origin: identity.origin,
+        reason: `move wiki page ${record.resource.path} to ${input.new_path}`
+      }
       const expectedVersion = requireObserved(ctx.run, record)
       const requested = await Effect.runPromise(
         wiki
@@ -574,7 +579,8 @@ const makeWikiOperationTools = ({
             newTitle: record.page.title,
             expectedVersion,
             expectedHead: snapshot.head,
-            authority: identity.authority
+            authority: identity.authority,
+            commit
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
@@ -584,11 +590,7 @@ const makeWikiOperationTools = ({
           .acceptRename({
             approvalId: requested.approvalId,
             authority: identity.authority,
-            commit: {
-              actor: identity.actor,
-              origin: identity.origin,
-              reason: `move wiki page ${record.resource.path} to ${input.new_path}`
-            }
+            commit
           })
           .pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
