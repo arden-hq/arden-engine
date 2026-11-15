@@ -19,13 +19,14 @@ import {
   type ToolCall,
   type UserMessage
 } from "../contracts/messages.js"
-import type {
-  PendingToolCall,
-  ToolDeclaration,
-  ToolMeta,
-  ToolResult,
-  ToolSearch,
-  Toolset
+import {
+  loadedToolNames,
+  type PendingToolCall,
+  type ToolDeclaration,
+  type ToolMeta,
+  type ToolResult,
+  type ToolSearch,
+  type Toolset
 } from "../contracts/tools.js"
 import {
   addUsage,
@@ -48,7 +49,7 @@ import {
   type RunBudget,
   type ToolPaused
 } from "../contracts/events.js"
-import { budgetStopReason, loadedInHistory, withBudgetReminder } from "./policy.js"
+import { budgetStopReason, withBudgetReminder } from "./policy.js"
 import type { AgentOutputOptions } from "./structured-output.js"
 import { callbackFailure, hookCall, invoke } from "./guards.js"
 import { decodeMessages } from "../internal/validate.js"
@@ -329,7 +330,7 @@ export const prepare = async (
 ): Promise<StepView> => {
   const { wiring, state, messages } = run
   const entries = await wiring.toolset.entries()
-  const loaded = new Set([...(await wiring.toolset.loadedNames()), ...loadedInHistory(messages)])
+  const loaded = new Set([...(await wiring.toolset.loadedNames()), ...loadedToolNames(messages)])
   const visible: Array<ToolDeclaration> = []
   const deferred: Array<ToolDeclaration> = []
   for (const entry of entries) {
@@ -487,7 +488,7 @@ const carryLoadedTools = (
   prepared: ModelRequest
 ): { readonly history: ReadonlyArray<ChatMessage>; readonly record?: ChatMessage } => {
   const deferred = new Set(prepared.deferredTools.map((tool) => tool.name))
-  const kept = loadedInHistory(replacement)
+  const kept = loadedToolNames(replacement)
   const names = [...loaded].filter((name) => deferred.has(name) && !kept.has(name)).sort()
   if (names.length === 0) return { history: replacement }
   const record = appendOnlyToolRecord(

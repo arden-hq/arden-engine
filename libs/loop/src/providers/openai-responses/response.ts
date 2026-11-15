@@ -15,6 +15,7 @@ import {
 } from "../kit/index.js"
 import { TERMINAL_RESPONSE_CODES } from "./errors.js"
 import {
+  API,
   asRecord,
   messageItemText,
   normalizeOutputItem,
@@ -115,9 +116,6 @@ const outputParts = (response: ResponseShape): ReadonlyArray<AssistantOutputPart
 
 const replayItems = (output: ReadonlyArray<OutputItem | ToolSearchOutputInputItem>): JsonValue =>
   output as unknown as JsonValue
-
-/** This wire's name in a message origin. */
-const API = "openai-responses"
 
 const completion = (
   response: ResponseShape,

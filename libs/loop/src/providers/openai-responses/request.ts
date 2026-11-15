@@ -1,15 +1,16 @@
-import type { ChatMessage } from "../../contracts/messages.js"
+import type { AssistantMessage, ChatMessage, ProviderToolCall } from "../../contracts/messages.js"
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
 import type { ModelProviderRequest } from "../../contracts/provider.js"
 import {
   contextBlockText,
+  isToolSearchCall,
   MISSING_TOOL_OUTPUT,
   orderToolHistory,
   type ToolHistoryBatch,
   type ToolHistoryWire
 } from "../kit/index.js"
 import { OpenAiResponsesProviderError } from "./errors.js"
-import { asRecord, WEB_SEARCH_TOOL_NAME, type InputItem } from "./items.js"
+import { API, asRecord, WEB_SEARCH_TOOL_NAME, type InputItem } from "./items.js"
 import { responseItems } from "./stored-items.js"
 import {
   clientToolSearchTool,
@@ -143,24 +144,13 @@ const convertMessages = (
       continue
     }
     if (message.role === "developer" && toolSearch !== undefined && message.loaded_tools?.length) {
-      const callId = `tool-load-${message.message_id ?? message.loaded_tools.join(",")}`
       batches.push({
-        items: [
-          {
-            type: "tool_search_call",
-            call_id: callId,
-            execution: "client",
-            status: "completed",
-            arguments: { query: `select:${message.loaded_tools.join(",")}` }
-          },
-          {
-            type: "tool_search_output",
-            call_id: callId,
-            execution: "client",
-            status: "completed",
-            tools: namespacedTools(toolSearch.lookup(message.loaded_tools))
-          }
-        ],
+        items: clientSearchExchange(
+          `tool-load-${message.message_id ?? message.loaded_tools.join(",")}`,
+          { query: `select:${message.loaded_tools.join(",")}` },
+          message.loaded_tools,
+          toolSearch
+        ),
         deferWhileCallsPending: true
       })
       continue
@@ -219,16 +209,16 @@ const convertMessages = (
     }
 
     const replay = responseItems(message, asyncTools)
-    if ("provider_tool_calls" in message) {
-      const calls = message.provider_tool_calls
-      if (calls !== null && !Array.isArray(calls)) {
-        throw new OpenAiResponsesProviderError("Stored provider tool history is invalid")
-      }
-      if (replay === undefined && Array.isArray(calls) && calls.length > 0) {
-        throw new OpenAiResponsesProviderError(
-          "Stored provider tool history requires matching OpenAI response items"
-        )
-      }
+    const providerCalls = message.provider_tool_calls ?? []
+    if (!Array.isArray(providerCalls)) {
+      throw new OpenAiResponsesProviderError("Stored provider tool history is invalid")
+    }
+    // This wire's own turns replay from their stored items; a turn this wire
+    // wrote (or one from before origins) that lost them cannot be rebuilt.
+    if (replay === undefined && providerCalls.length > 0 && writtenHere(message)) {
+      throw new OpenAiResponsesProviderError(
+        "Stored provider tool history requires matching OpenAI response items"
+      )
     }
 
     if (replay !== undefined) {
@@ -239,6 +229,7 @@ const convertMessages = (
     batches.push({
       items: [
         ...(content.length > 0 ? [{ role: "assistant", content }] : []),
+        ...foreignToolSearches(providerCalls, toolSearch),
         ...(message.tool_calls ?? []).map((call) => ({
           type: "function_call",
           call_id: call.id,
@@ -259,6 +250,62 @@ const convertMessages = (
     input
   }
 }
+
+const writtenHere = (message: AssistantMessage): boolean =>
+  message.origin === undefined || message.origin.api === API
+
+/**
+ * One client search and its output: how a search reaches the model on this
+ * wire when no stored items hold it (a compaction's `loaded_tools` record, or
+ * a search another wire answered).
+ */
+const clientSearchExchange = (
+  callId: string,
+  args: unknown,
+  names: ReadonlyArray<string>,
+  toolSearch: ToolSearch
+): ReadonlyArray<InputItem> => [
+  {
+    type: "tool_search_call",
+    call_id: callId,
+    execution: "client",
+    status: "completed",
+    arguments: args
+  },
+  {
+    type: "tool_search_output",
+    call_id: callId,
+    execution: "client",
+    status: "completed",
+    tools: namespacedTools(toolSearch.lookup(names))
+  }
+]
+
+/**
+ * The provider calls of a turn another wire wrote. Its tool searches are
+ * rebuilt as native search items from the provider-neutral fields, so the
+ * tools they loaded stay in the conversation. Without a search on this
+ * request there is no deferred catalog: every tool is declared already, and
+ * a search item would name a tool the request does not have, so the exchange
+ * is left out. Any other provider call (another route's hosted tool) reached
+ * the model as that turn's text and has no item here.
+ */
+const foreignToolSearches = (
+  calls: ReadonlyArray<ProviderToolCall>,
+  toolSearch: ToolSearch | undefined
+): ReadonlyArray<InputItem> =>
+  toolSearch === undefined
+    ? []
+    : calls
+        .filter(isToolSearchCall)
+        .flatMap((call) =>
+          clientSearchExchange(
+            call.id,
+            call.arguments ?? {},
+            call.loaded_tool_names ?? [],
+            toolSearch
+          )
+        )
 
 /** Responses items open calls with `function_call` and answer them with `function_call_output`. */
 const FUNCTION_CALL_HISTORY: ToolHistoryWire<InputItem> = {

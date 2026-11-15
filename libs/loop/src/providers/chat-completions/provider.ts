@@ -96,7 +96,7 @@ export const makeChatCompletionsProvider = (
     structuredOutput: compat.structuredOutput === "json_schema" ? "native" : "none",
     asyncTools: "message",
     steering: "boundary",
-    toolSearch: "none"
+    toolSearch: "client"
   })
   const fetch = options.fetch ?? globalThis.fetch
   const generateId = options.generateId ?? defaultGenerateId
@@ -119,7 +119,8 @@ export const makeChatCompletionsProvider = (
           requestedModel: request.model,
           providerId: options.providerId,
           label,
-          generateId
+          generateId,
+          toolSearch: request.toolSearch
         })
     })
   }

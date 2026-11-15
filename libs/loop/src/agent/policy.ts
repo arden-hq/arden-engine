@@ -169,22 +169,6 @@ export const withBudgetReminder = (
   return [system, ...messages.slice(1)]
 }
 
-export const loadedInHistory = (messages: ReadonlyArray<ChatMessage>): Set<string> => {
-  const loaded = new Set<string>()
-  for (const message of messages) {
-    if (message.role === "developer") {
-      for (const name of message.loaded_tools ?? []) loaded.add(name)
-      for (const name of message.removed_tools ?? []) loaded.delete(name)
-    }
-    if (message.role === "assistant") {
-      for (const call of message.provider_tool_calls ?? []) {
-        for (const name of call.loaded_tool_names ?? []) loaded.add(name)
-      }
-    }
-  }
-  return loaded
-}
-
 export const recoveredTerminalText = (
   calls: ReadonlyArray<PendingToolCall>,
   recovered: ReadonlyMap<string, Required<ToolResult>>,

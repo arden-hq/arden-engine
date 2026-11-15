@@ -116,19 +116,26 @@ describe("tool-history ordering", () => {
 
 /**
  * The guard against a second copy: transport, rejection prose, tool-history
- * ordering and context rendering live in the kit, and an adapter that grows
- * its own again fails here.
+ * ordering, context rendering and the tool-search answer live in the kit (the
+ * loaded-tool derivation in the contracts, shared with the loop), and an
+ * adapter that grows its own again fails here.
  */
 it("keeps shared provider machinery in the kit only", () => {
   const providers = join(import.meta.dirname, "../src/providers")
-  const owned: ReadonlyArray<readonly [string, string]> = [
-    ["readSseEvents(", "the SSE transport (kit streamSse)"],
-    ["retryAfterHints(", "the status read (kit streamSse)"],
-    [".getReader(", "the body read (kit streamSse)"],
-    ["Tool output was not recorded", "the missing tool output (kit orderToolHistory)"],
-    ["context (?:length|window)", "the overflow prose (kit isContextOverflow)"],
-    ["is not supported|does not exist", "the model-unavailable prose (kit classifyRejection)"],
-    ["</${", "the context block rendering (kit contextBlockText)"]
+  const owned: ReadonlyArray<readonly [RegExp, string]> = [
+    [/readSseEvents\(/, "the SSE transport (kit streamSse)"],
+    [/retryAfterHints\(/, "the status read (kit streamSse)"],
+    [/\.getReader\(/, "the body read (kit streamSse)"],
+    [/Tool output was not recorded/, "the missing tool output (kit orderToolHistory)"],
+    [/context (?:length|window)/, "the overflow prose (kit isContextOverflow)"],
+    [
+      /\bmodel\b.{0,80}?(?:is not supported|does not exist)/i,
+      "the model-unavailable prose (kit classifyRejection)"
+    ],
+    [/<\/\$\{/, "the context block rendering (kit contextBlockText)"],
+    [/= "tool_search"/, "the search tool name (kit TOOL_SEARCH_TOOL_NAME)"],
+    [/No tools matched|\.search\(\{/, "the search answer (kit answerToolSearch)"],
+    [/\.removed_tools/, "the loaded-tool derivation (contracts loadedToolNames)"]
   ]
   const copies = readdirSync(providers, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name !== "kit")
@@ -136,7 +143,7 @@ it("keeps shared provider machinery in the kit only", () => {
       readdirSync(join(providers, adapter.name)).flatMap((file) => {
         const source = readFileSync(join(providers, adapter.name, file), "utf8")
         return owned.flatMap(([needle, what]) =>
-          source.includes(needle) ? [`${adapter.name}/${file} copies ${what}`] : []
+          needle.test(source) ? [`${adapter.name}/${file} copies ${what}`] : []
         )
       })
     )

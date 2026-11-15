@@ -12,7 +12,15 @@ import type {
   ModelStreamItem,
   Usage
 } from "../../contracts/provider.js"
-import { SemanticResponseError, type SseEvent, type SseEventMapper } from "../kit/index.js"
+import type { ToolSearch } from "../../contracts/tools.js"
+import {
+  answerToolSearch,
+  pendingToolSearch,
+  SemanticResponseError,
+  TOOL_SEARCH_TOOL_NAME,
+  type SseEvent,
+  type SseEventMapper
+} from "../kit/index.js"
 import { errorFrameFailure } from "./errors.js"
 import { API } from "./request.js"
 
@@ -27,6 +35,10 @@ interface StreamedCall {
   readonly id: string
   name: string | undefined
   arguments: string
+  /** Shown to the loop: a call is announced once its name is known. */
+  announced: boolean
+  /** A call to the request's tool search, which this adapter answers. */
+  search: boolean
 }
 
 /** A part of the answer, by first appearance: the reasoning, the text, or call `index`. */
@@ -39,12 +51,22 @@ type Part = "reasoning" | "text" | number
  * Only `Completed` carries the answer: no `OutputItemReady`, so the loop
  * runs the calls as one batch after the response (the documented behaviour
  * for a provider that emits only `Completed`).
+ *
+ * With a `toolSearch`, a call to the search tool is the adapter's own: it
+ * streams as a pending `ProviderToolCall`, is answered with the kit's
+ * `answerToolSearch` when the response ends, and is recorded in
+ * `provider_tool_calls` with an `execution: "provider"` part, exactly as the
+ * Responses adapter records its native search. The model wrote a tool call
+ * and waits for its result, so the response is never a final answer:
+ * `continuation` asks the loop for another model step, as Responses does
+ * with `end_turn: false`.
  */
 export const makeChunkMapper = (options: {
   readonly requestedModel: string
   readonly providerId: string
   readonly label: string
   readonly generateId: () => string
+  readonly toolSearch: ToolSearch | undefined
 }): SseEventMapper => {
   let text = ""
   let reasoning = ""
@@ -106,33 +128,40 @@ export const makeChunkMapper = (options: {
     const index = callIndex(value.index, id)
     const name = typeof fn.name === "string" && fn.name.length > 0 ? fn.name : undefined
     const argumentsDelta = typeof fn.arguments === "string" ? fn.arguments : ""
-    const known = calls.get(index)
-    if (known === undefined) {
-      // A server that streams no id gets one here; the first id seen stays,
-      // as the loop already announced the call under it.
-      const call: StreamedCall = { id: id ?? options.generateId(), name, arguments: argumentsDelta }
+    // A server that streams no id gets one here; the first id seen stays.
+    const call: StreamedCall = calls.get(index) ?? {
+      id: id ?? options.generateId(),
+      name: undefined,
+      arguments: "",
+      announced: false,
+      search: false
+    }
+    if (!calls.has(index)) {
       calls.set(index, call)
       see(index)
-      return [
-        {
-          _tag: "ToolCallDelta",
-          index,
-          tool_id: call.id,
-          ...(name === undefined ? {} : { name }),
-          arguments_delta: argumentsDelta,
-          done: false
-        }
-      ]
     }
-    const named = known.name === undefined && name !== undefined
-    if (named) known.name = name
-    known.arguments += argumentsDelta
+    if (call.name === undefined) call.name = name
+    call.arguments += argumentsDelta
+    if (call.announced) {
+      return call.search
+        ? []
+        : [{ _tag: "ToolCallDelta", index, arguments_delta: argumentsDelta, done: false }]
+    }
+    // Whether a call is the search is known only from its name, so a call
+    // stays unannounced until the name arrives (the loop starts no call
+    // without one either), then announces everything streamed so far.
+    if (call.name === undefined) return []
+    call.announced = true
+    call.search = options.toolSearch !== undefined && call.name === TOOL_SEARCH_TOOL_NAME
+    if (call.search)
+      return [{ _tag: "ProviderToolCall", call: pendingToolSearch(call.id, call.arguments) }]
     return [
       {
         _tag: "ToolCallDelta",
         index,
-        ...(named ? { name } : {}),
-        arguments_delta: argumentsDelta,
+        tool_id: call.id,
+        name: call.name,
+        arguments_delta: call.arguments,
         done: false
       }
     ]
@@ -180,14 +209,27 @@ export const makeChunkMapper = (options: {
       // the loop answers malformed ones with a correction the model can act on.
       return reason === "length" && !isCompleteJson(call.arguments)
         ? []
-        : [{ index, id: call.id, name: call.name, arguments: call.arguments }]
+        : [{ index, id: call.id, name: call.name, arguments: call.arguments, search: call.search }]
     })
-    const toolCalls = kept.map((call): ToolCall => ({
+    const runtime = kept.filter((call) => !call.search)
+    const toolCalls = runtime.map((call): ToolCall => ({
       id: call.id,
       type: "function",
       function: { name: call.name, arguments: call.arguments }
     }))
-    const keptIds = new Map(kept.map((call) => [call.index, call.id]))
+    const searches = kept
+      .filter((call) => call.search)
+      .map((call) => answerToolSearch(call.id, call.arguments, options.toolSearch).call)
+    const keptParts = new Map(
+      kept.map((call): [number, AssistantOutputPart] => [
+        call.index,
+        {
+          type: "tool_call",
+          tool_call_id: call.id,
+          execution: call.search ? "provider" : "runtime"
+        }
+      ])
+    )
     const origin: MessageOrigin = {
       provider: options.providerId,
       api: API,
@@ -204,17 +246,17 @@ export const makeChunkMapper = (options: {
         output_parts: parts.flatMap((part): ReadonlyArray<AssistantOutputPart> => {
           if (part === "reasoning") return [{ type: "reasoning", text: reasoning }]
           if (part === "text") return [{ type: "text", text }]
-          const id = keptIds.get(part)
-          return id === undefined
-            ? []
-            : [{ type: "tool_call", tool_call_id: id, execution: "runtime" }]
+          const kept = keptParts.get(part)
+          return kept === undefined ? [] : [kept]
         }),
+        ...(searches.length === 0 ? {} : { provider_tool_calls: searches }),
         ...(replay.length === 0
           ? {}
           : { provider_state: { [API]: { reasoning_details: replay } } }),
         origin
       },
-      finish_reason: reason === "stop" && toolCalls.length > 0 ? "tool_calls" : reason,
+      ...(searches.length === 0 ? {} : { continuation: true }),
+      finish_reason: runtimeFinish(reason, toolCalls.length > 0),
       usage: usage ?? {
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -224,7 +266,7 @@ export const makeChunkMapper = (options: {
       model: options.requestedModel
     }
     return [
-      ...kept.map((call): ModelStreamItem => ({
+      ...runtime.map((call): ModelStreamItem => ({
         _tag: "ToolCallDelta",
         index: call.index,
         arguments_delta: null,
@@ -249,6 +291,17 @@ export const makeChunkMapper = (options: {
     },
     end: () => (finish === undefined ? [] : terminal())
   }
+}
+
+/**
+ * `tool_calls` names the runtime calls the loop runs; a response whose only
+ * call was a search this adapter answered finished as `stop`, as the
+ * Responses adapter reports it.
+ */
+const runtimeFinish = (reason: FinishReason, hasRuntimeCalls: boolean): FinishReason => {
+  if (reason === "stop" && hasRuntimeCalls) return "tool_calls"
+  if (reason === "tool_calls" && !hasRuntimeCalls) return "stop"
+  return reason
 }
 
 const finishReason = (raw: string, label: string): FinishReason => {

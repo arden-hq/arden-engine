@@ -122,9 +122,10 @@ export interface ResponseShape {
 export type RawResponseEvent = Readonly<Record<string, unknown>>
 
 export const WEB_SEARCH_TOOL_NAME = "web_search"
-export const TOOL_SEARCH_TOOL_NAME = "tool_search"
 /** This provider's key in an assistant message's `provider_state`. */
 export const PROVIDER_STATE_KEY = "openai-responses"
+/** This wire's name in a message origin. */
+export const API = "openai-responses"
 
 export const asRecord = (value: unknown): Readonly<Record<string, unknown>> | null =>
   isRecord(value) ? value : null

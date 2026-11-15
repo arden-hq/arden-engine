@@ -110,6 +110,30 @@ export interface ToolSearchResult {
   readonly matched: ReadonlyArray<string>
 }
 
+/**
+ * The deferred tools a history has loaded by its end, in the order they were
+ * first loaded: every search's `loaded_tool_names`, every `developer`
+ * record's `loaded_tools`, less its `removed_tools`. Only provider-neutral
+ * fields count, so a conversation keeps its tools when it moves between
+ * wires. The loop and every adapter that declares loaded tools itself read
+ * this one derivation.
+ */
+export const loadedToolNames = (messages: ReadonlyArray<ChatMessage>): Set<string> => {
+  const loaded = new Set<string>()
+  for (const message of messages) {
+    if (message.role === "developer") {
+      for (const name of message.loaded_tools ?? []) loaded.add(name)
+      for (const name of message.removed_tools ?? []) loaded.delete(name)
+    }
+    if (message.role === "assistant") {
+      for (const call of message.provider_tool_calls ?? []) {
+        for (const name of call.loaded_tool_names ?? []) loaded.add(name)
+      }
+    }
+  }
+  return loaded
+}
+
 export interface ToolResult {
   readonly content: string
   readonly preview: string

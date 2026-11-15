@@ -9,6 +9,8 @@ import {
   type ChatCompletionsProviderOptions
 } from "../src/providers/chat-completions/provider.js"
 import { MISSING_TOOL_OUTPUT } from "../src/providers/kit/index.js"
+import { makeOpenAiResponsesProvider } from "../src/providers/openai-responses/provider.js"
+import { makeToolSearch } from "../src/tools/search.js"
 import { collect, completionOf, defined, recordOf, scriptedFetch, sseResponse } from "./kit.js"
 
 const GEMMA = "ggml-org/gemma-4-E2B-it-GGUF:Q8_0"
@@ -394,7 +396,7 @@ describe("Chat Completions request body", () => {
       structuredOutput: "none",
       asyncTools: "message",
       steering: "boundary",
-      toolSearch: "none"
+      toolSearch: "client"
     })
     expect(
       await provider([], { compat: { structuredOutput: "json_schema" } }).provider.capabilities?.(
@@ -686,4 +688,522 @@ it("persists the origin through a makeAgent run and decodes it back", async () =
   })
   expect(decodeMessage(JSON.parse(JSON.stringify(assistant)))).toEqual(assistant)
   expect(() => decodeMessage({ ...assistant, origin: { provider: "llama.cpp" } })).toThrow()
+})
+
+describe("Chat Completions client tool search", () => {
+  const shell = {
+    name: "shell_run",
+    description: "Run a shell command and return its output.\nUse for files and processes.",
+    parameters: { type: "object", properties: { command: { type: "string" } } },
+    group: "system"
+  }
+  const mail = {
+    name: "mail_send",
+    description: "Send an email.",
+    parameters: { type: "object", properties: { to: { type: "string" } } },
+    group: "mail"
+  }
+  const search = makeToolSearch({
+    catalog: [shell, mail].map((declaration) => ({
+      declaration,
+      meta: { name: declaration.name, deferred: true, group: declaration.group }
+    })),
+    loaded: new Set()
+  })
+  const searchTool = {
+    type: "function",
+    function: {
+      name: "tool_search",
+      description: search.description,
+      parameters: search.parameters
+    }
+  }
+  const wire = (tool: { name: string; description: string; parameters: unknown }) => ({
+    type: "function",
+    function: { name: tool.name, description: tool.description, parameters: tool.parameters }
+  })
+  const searchRequest = (overrides: Partial<ModelProviderRequest> = {}) =>
+    request({ tools: [weather], deferredTools: [shell, mail], toolSearch: search, ...overrides })
+  const SHELL_LOADED =
+    "Loaded 1 tool; call it directly now:\n- shell_run: Run a shell command and return its output."
+  const searchChunk = (id: string, args: string, index = 0) =>
+    llamaChunk({
+      tool_calls: [
+        { index, id, type: "function", function: { name: "tool_search", arguments: args } }
+      ]
+    })
+
+  it("declares the search, the core tools and nothing deferred until the history loads it", async () => {
+    const { provider: cc, transport } = provider([answered("Ok."), answered("Ok.")])
+    await collect(cc.stream(searchRequest()))
+    await collect(cc.stream(request({ tools: [weather], deferredTools: [] })))
+    expect(transport.requests.map((sent) => recordOf(sent.body).tools)).toEqual([
+      [wire(weather), searchTool],
+      [wire(weather)]
+    ])
+  })
+
+  it("answers a search call itself and hands the loop a provider call that continues the run", async () => {
+    const { provider: cc } = provider([
+      () =>
+        sseResponse([
+          llamaChunk({ role: "assistant", content: null }),
+          searchChunk("srch", '{"query":'),
+          llamaChunk({ tool_calls: [{ index: 0, function: { arguments: '"shell"}' } }] }),
+          llamaChunk({}, "tool_calls"),
+          llamaUsage,
+          "[DONE]"
+        ])
+    ])
+
+    const items = await collect(cc.stream(searchRequest()))
+
+    expect(items).toEqual([
+      {
+        _tag: "ProviderToolCall",
+        call: {
+          id: "srch",
+          name: "tool_search",
+          arguments: {},
+          result: "",
+          done: false,
+          loaded_tool_names: [],
+          source_refs: []
+        }
+      },
+      {
+        _tag: "Completed",
+        continuation: true,
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: null,
+          reasoning_content: null,
+          output_parts: [{ type: "tool_call", tool_call_id: "srch", execution: "provider" }],
+          provider_tool_calls: [
+            {
+              id: "srch",
+              name: "tool_search",
+              arguments: { query: "shell" },
+              result: SHELL_LOADED,
+              done: true,
+              loaded_tool_names: ["shell_run"],
+              source_refs: []
+            }
+          ],
+          origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+        },
+        finish_reason: "stop",
+        usage: {
+          prompt_tokens: 5,
+          completion_tokens: 199,
+          cache_read_tokens: 71,
+          cache_write_tokens: 0
+        },
+        model: GEMMA
+      }
+    ])
+  })
+
+  it("keeps an ordinary call in the same response a runtime call, in the order the model wrote them", async () => {
+    const { provider: cc } = provider([
+      () =>
+        sseResponse([
+          llamaChunk({ content: "Both." }),
+          llamaChunk({
+            tool_calls: [
+              { index: 0, id: "w1", function: { name: "weather", arguments: '{"city":"Paris"}' } }
+            ]
+          }),
+          searchChunk("s1", '{"query":"mail","limit":1}', 1),
+          llamaChunk({}, "tool_calls"),
+          "[DONE]"
+        ])
+    ])
+
+    const items = await collect(cc.stream(searchRequest()))
+
+    expect(items.map((item) => item._tag)).toEqual([
+      "TextDelta",
+      "ToolCallDelta",
+      "ProviderToolCall",
+      "ToolCallDelta",
+      "Completed"
+    ])
+    const completed = completionOf(items)
+    expect(completed).toMatchObject({ continuation: true, finish_reason: "tool_calls" })
+    expect(completed.message).toEqual({
+      role: "assistant",
+      content: "Both.",
+      tool_calls: [call("w1")],
+      reasoning_content: null,
+      output_parts: [
+        { type: "text", text: "Both." },
+        { type: "tool_call", tool_call_id: "w1", execution: "runtime" },
+        { type: "tool_call", tool_call_id: "s1", execution: "provider" }
+      ],
+      provider_tool_calls: [
+        {
+          id: "s1",
+          name: "tool_search",
+          arguments: { query: "mail", limit: 1 },
+          result: "Loaded 1 tool; call it directly now:\n- mail_send: Send an email.",
+          done: true,
+          loaded_tool_names: ["mail_send"],
+          source_refs: []
+        }
+      ],
+      origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+    })
+  })
+
+  it("answers malformed search arguments with a correction instead of failing the run", async () => {
+    const { provider: cc } = provider([
+      () =>
+        sseResponse([searchChunk("bad1", "shell please"), llamaChunk({}, "tool_calls"), "[DONE]"]),
+      () =>
+        sseResponse([searchChunk("bad2", '{"q":"shell"}'), llamaChunk({}, "tool_calls"), "[DONE]"])
+    ])
+    const calls = [
+      completionOf(await collect(cc.stream(searchRequest()))),
+      completionOf(await collect(cc.stream(searchRequest())))
+    ].map((completed) => completed.message.provider_tool_calls)
+
+    const hint = 'Call tool_search again with one JSON object such as {"query": "send email"}.'
+    expect(calls).toEqual([
+      [
+        {
+          id: "bad1",
+          name: "tool_search",
+          arguments: {},
+          result: `tool_search arguments are not valid JSON. ${hint}`,
+          done: true,
+          loaded_tool_names: [],
+          source_refs: []
+        }
+      ],
+      [
+        {
+          id: "bad2",
+          name: "tool_search",
+          arguments: { q: "shell" },
+          result: `tool_search needs a non-empty string "query". ${hint}`,
+          done: true,
+          loaded_tool_names: [],
+          source_refs: []
+        }
+      ]
+    ])
+  })
+
+  it("replays the search exchange as a call and its result, and declares what it loaded", async () => {
+    const { provider: cc, transport } = provider([
+      () =>
+        sseResponse([
+          searchChunk("srch", '{"query":"shell"}'),
+          llamaChunk({}, "tool_calls"),
+          "[DONE]"
+        ]),
+      answered("Ok.")
+    ])
+    const first = completionOf(await collect(cc.stream(searchRequest())))
+    const stored: AssistantMessage = {
+      role: "assistant",
+      content: "",
+      provider_tool_calls: defined(first.message.provider_tool_calls ?? undefined, "a search"),
+      output_parts: defined(first.message.output_parts ?? undefined, "output parts"),
+      origin: defined(first.message.origin, "an origin")
+    }
+    await collect(
+      cc.stream(searchRequest({ messages: [{ role: "user", content: "List files." }, stored] }))
+    )
+
+    expect(transport.requests[1]?.body).toEqual({
+      model: GEMMA,
+      messages: [
+        { role: "user", content: "List files." },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "srch",
+              type: "function",
+              function: { name: "tool_search", arguments: '{"query":"shell"}' }
+            }
+          ]
+        },
+        { role: "tool", tool_call_id: "srch", content: SHELL_LOADED }
+      ],
+      stream: true,
+      stream_options: { include_usage: true },
+      tools: [wire(weather), searchTool, wire(shell)]
+    })
+  })
+
+  it("keeps the tools a Responses search loaded, and follows compaction and removal records", async () => {
+    const responsesTurn: AssistantMessage = {
+      role: "assistant",
+      content: "",
+      provider_tool_calls: [
+        {
+          id: "tsc_1",
+          name: "tool_search",
+          arguments: { query: "mail" },
+          result: "Loaded: mail_send",
+          done: true,
+          loaded_tool_names: ["mail_send"],
+          source_refs: []
+        },
+        {
+          id: "ws_1",
+          name: "web_search",
+          arguments: { query: "news" },
+          result: "",
+          done: true,
+          loaded_tool_names: [],
+          source_refs: []
+        }
+      ],
+      output_parts: [
+        { type: "tool_call", tool_call_id: "ws_1", execution: "provider" },
+        { type: "tool_call", tool_call_id: "tsc_1", execution: "provider" }
+      ],
+      provider_state: { "openai-responses": [{ type: "tool_search_call", id: "tsc_1" }] },
+      origin: { provider: "openai", api: "openai-responses", model: "gpt-5.4" }
+    }
+    const { provider: cc, transport } = provider([answered("Ok."), answered("Ok.")])
+    await collect(
+      cc.stream(searchRequest({ messages: [{ role: "user", content: "Mail Bo." }, responsesTurn] }))
+    )
+    const compacted: ReadonlyArray<ChatMessage> = [
+      { role: "user", content: "Summary of earlier work." },
+      {
+        role: "developer",
+        content: "Tools still loaded from earlier in this conversation: mail_send, shell_run.",
+        loaded_tools: ["shell_run", "mail_send"]
+      },
+      {
+        role: "developer",
+        content: "Tools changed in this conversation. No longer available: shell_run.",
+        removed_tools: ["shell_run"]
+      },
+      { role: "user", content: "Go on." }
+    ]
+    await collect(cc.stream(searchRequest({ messages: compacted })))
+
+    expect(transport.requests.map((sent) => recordOf(sent.body).messages)).toEqual([
+      [
+        { role: "user", content: "Mail Bo." },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "tsc_1",
+              type: "function",
+              function: { name: "tool_search", arguments: '{"query":"mail"}' }
+            }
+          ]
+        },
+        { role: "tool", tool_call_id: "tsc_1", content: "Loaded: mail_send" }
+      ],
+      [
+        { role: "user", content: "Summary of earlier work." },
+        {
+          role: "system",
+          content: "Tools still loaded from earlier in this conversation: mail_send, shell_run."
+        },
+        {
+          role: "system",
+          content: "Tools changed in this conversation. No longer available: shell_run."
+        },
+        { role: "user", content: "Go on." }
+      ]
+    ])
+    expect(transport.requests.map((sent) => recordOf(sent.body).tools)).toEqual([
+      [wire(weather), searchTool, wire(mail)],
+      [wire(weather), searchTool, wire(mail)]
+    ])
+  })
+
+  it("replays a search answered here on the Responses wire as native search items", async () => {
+    const chatTurn: AssistantMessage = {
+      role: "assistant",
+      content: "Looking.",
+      provider_tool_calls: [
+        {
+          id: "srch",
+          name: "tool_search",
+          arguments: { query: "shell" },
+          result: SHELL_LOADED,
+          done: true,
+          loaded_tool_names: ["shell_run"],
+          source_refs: []
+        }
+      ],
+      origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA }
+    }
+    const transport = scriptedFetch([
+      () =>
+        sseResponse([
+          { type: "response.completed", response: { output: [], usage: null, end_turn: true } }
+        ])
+    ])
+    const responses = makeOpenAiResponsesProvider({
+      auth: { headers: async () => ({ authorization: "Bearer t" }) },
+      fetch: transport.fetch
+    })
+    const messages: ReadonlyArray<ChatMessage> = [
+      { role: "user", content: "List files." },
+      chatTurn,
+      { role: "user", content: "Again." }
+    ]
+    await collect(responses.stream(searchRequest({ model: "gpt-5.4", messages })))
+    expect(recordOf(transport.requests[0]?.body).input).toEqual([
+      { role: "user", content: "List files." },
+      { role: "assistant", content: "Looking." },
+      {
+        type: "tool_search_call",
+        call_id: "srch",
+        execution: "client",
+        status: "completed",
+        arguments: { query: "shell" }
+      },
+      {
+        type: "tool_search_output",
+        call_id: "srch",
+        execution: "client",
+        status: "completed",
+        tools: [
+          {
+            type: "namespace",
+            name: "system",
+            description: "Tools in the system namespace.",
+            tools: [
+              {
+                type: "function",
+                name: "shell_run",
+                description: shell.description,
+                parameters: shell.parameters,
+                strict: false,
+                defer_loading: true
+              }
+            ]
+          }
+        ]
+      },
+      { role: "user", content: "Again." }
+    ])
+
+    const ownTurnWithoutItems: AssistantMessage = {
+      ...chatTurn,
+      origin: { provider: "openai", api: "openai-responses", model: "gpt-5.4" }
+    }
+    expect(() =>
+      responses.stream(
+        searchRequest({
+          model: "gpt-5.4",
+          messages: [messages[0] as ChatMessage, ownTurnWithoutItems]
+        })
+      )
+    ).toThrow("Stored provider tool history requires matching OpenAI response items")
+  })
+
+  it("runs search, then the loaded tool, then the answer through makeAgent", async () => {
+    const { provider: cc, transport } = provider([
+      () =>
+        sseResponse([
+          searchChunk("srch", '{"query":"shell command"}'),
+          llamaChunk({}, "tool_calls"),
+          "[DONE]"
+        ]),
+      () =>
+        sseResponse([
+          llamaChunk({
+            tool_calls: [
+              {
+                index: 0,
+                id: "run1",
+                function: { name: "shell_run", arguments: '{"command":"ls"}' }
+              }
+            ]
+          }),
+          llamaChunk({}, "tool_calls"),
+          "[DONE]"
+        ]),
+      answered("Two files: a.txt and b.txt.")
+    ])
+    const executed: Array<string> = []
+    const result = await makeAgent(
+      { model: GEMMA },
+      {
+        provider: cc,
+        toolset: {
+          entries: () =>
+            [weather, shell, mail].map((tool) => ({
+              description: tool.description,
+              parameters: tool.parameters,
+              meta: {
+                name: tool.name,
+                ...("group" in tool ? { deferred: true, group: tool.group } : {})
+              }
+            })),
+          loadedNames: () => new Set(),
+          load: () => {},
+          execute: (call) => {
+            executed.push(`${call.name} ${JSON.stringify(call.args)}`)
+            return { content: "a.txt\nb.txt", preview: "2 files" }
+          }
+        }
+      }
+    ).run([{ role: "user", content: "List my files." }])
+
+    expect(result.text).toBe("Two files: a.txt and b.txt.")
+    expect(executed).toEqual(['shell_run {"command":"ls"}'])
+    const sent = transport.requests.map((request) => recordOf(request.body))
+    expect(
+      sent.map((body) =>
+        (body.tools as ReadonlyArray<{ function: { name: string } }>).map(
+          (tool) => tool.function.name
+        )
+      )
+    ).toEqual([
+      ["weather", "tool_search"],
+      ["weather", "tool_search", "shell_run"],
+      ["weather", "tool_search", "shell_run"]
+    ])
+    // The first message is the loop's background-tools note.
+    expect((sentMessages(sent[2]) as ReadonlyArray<unknown>).slice(1)).toEqual([
+      { role: "user", content: "List my files." },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "srch",
+            type: "function",
+            function: { name: "tool_search", arguments: '{"query":"shell command"}' }
+          }
+        ]
+      },
+      {
+        role: "tool",
+        tool_call_id: "srch",
+        content: SHELL_LOADED
+      },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "run1",
+            type: "function",
+            function: { name: "shell_run", arguments: '{"command":"ls"}' }
+          }
+        ]
+      },
+      { role: "tool", tool_call_id: "run1", content: "a.txt\nb.txt" }
+    ])
+  })
 })

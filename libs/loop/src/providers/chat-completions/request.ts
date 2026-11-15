@@ -5,15 +5,18 @@ import type {
   ChatMessage,
   JsonObject,
   JsonValue,
-  MessageOrigin
+  MessageOrigin,
+  ProviderToolCall
 } from "../../contracts/messages.js"
 import type { ModelProviderRequest } from "../../contracts/provider.js"
-import type { ToolDeclaration } from "../../contracts/tools.js"
+import { loadedToolNames, type ToolDeclaration } from "../../contracts/tools.js"
 import {
   contextBlockText,
+  isToolSearchCall,
   MISSING_TOOL_OUTPUT,
   orderToolHistory,
   sameOrigin,
+  TOOL_SEARCH_TOOL_NAME,
   type ToolHistoryBatch,
   type ToolHistoryWire
 } from "../kit/index.js"
@@ -103,10 +106,12 @@ const buildPayload = (
   const { compat, label } = context
   const fail = (message: string) => new ChatCompletionsProviderError(`${label} ${message}`)
   if (request.model.trim().length === 0) throw fail("needs a model ID")
-  if (request.toolSearch !== undefined) throw fail("cannot search tools on the client")
   if (request.responseFormat !== undefined && compat.structuredOutput === "none")
     throw fail("route does not constrain output to a JSON schema")
-  const tools = request.tools.map((tool) => functionTool(tool, fail))
+  const tools = declaredTools(request).map((tool) => functionTool(tool, fail))
+  const names = tools.map((tool) => tool.function.name)
+  const repeated = names.find((name, index) => names.indexOf(name) !== index)
+  if (repeated !== undefined) throw fail(`declares the tool ${repeated} twice`)
   if (request.toolChoice === "required" && tools.length === 0)
     throw fail("needs at least one function tool for a required tool choice")
   const messages = convertMessages(request, context)
@@ -159,6 +164,34 @@ const reasoningFields = (
   }
 }
 
+/**
+ * The tools one request declares. With a client search, that is the core
+ * set, the search itself as an ordinary function tool (this wire has no
+ * search item; the adapter answers the call), and every deferred tool the
+ * history has loaded so far, in load order. Loaded tools come from the
+ * provider-neutral history (`loadedToolNames`), so tools a search on another
+ * wire loaded stay declared here.
+ *
+ * Cost on llama.cpp: a chat template renders the tools near the start of the
+ * prompt, before the conversation, and the server reuses its KV cache only up
+ * to the first token that differs. Loading a tool therefore changes the
+ * prompt from the end of the old tool list, and the server reads everything
+ * after it again (measured in the live check, see README "Chat Completions").
+ * Load order keeps that point as late as the template allows: loaded tools
+ * are appended, never sorted in.
+ */
+const declaredTools = (request: ModelProviderRequest): ReadonlyArray<ToolDeclaration> => {
+  const search = request.toolSearch
+  if (search === undefined) return request.tools
+  const core = new Set(request.tools.map((tool) => tool.name))
+  const loaded = [...loadedToolNames(request.messages)].filter((name) => !core.has(name))
+  return [
+    ...request.tools,
+    { name: TOOL_SEARCH_TOOL_NAME, description: search.description, parameters: search.parameters },
+    ...search.lookup(loaded)
+  ]
+}
+
 const functionTool = (tool: ToolDeclaration, fail: (message: string) => Error): WireTool => {
   if (tool.hosted === true) throw fail(`has no hosted tool ${tool.name}`)
   return {
@@ -203,9 +236,8 @@ const convertMessages = (
         // A system or developer message inside the conversation stays where
         // it is, in the route's one instruction role: OpenAI accepts it
         // anywhere, and llama.cpp renders it in place (checked against
-        // gemma-4 on 2026-11-15). A `developer` message's `loaded_tools` have
-        // no form here, as the route searches no tools; `content` is its
-        // plain-text fallback.
+        // gemma-4 on 2026-11-15). A `developer` message's `loaded_tools` are
+        // declared as tools (`declaredTools`); its `content` says so in text.
         case "system":
         case "developer": {
           const content = textContent(message, label)
@@ -244,7 +276,13 @@ const convertMessages = (
           ]
         case "assistant": {
           const item = assistantItem(message, origin, label)
-          return item === undefined ? [] : [{ items: [item], deferWhileCallsPending: false }]
+          if (item === undefined) return []
+          return [
+            {
+              items: [item, ...searchesOf(message).map(searchResultItem)],
+              deferWhileCallsPending: false
+            }
+          ]
         }
       }
     }
@@ -256,11 +294,26 @@ const convertMessages = (
 }
 
 /**
- * An assistant turn on this wire: its text as a string, its runtime calls,
- * and its replay state. `provider_tool_calls` (calls another provider ran
- * upstream) have no form on this wire and are never sent: their results
- * already reached the model as that turn's text. Reasoning text is never
- * replayed in `content`.
+ * The turn's tool searches, whichever wire answered them: each is replayed
+ * as an ordinary call to the search tool, answered by a `tool` message with
+ * the result the model read, rebuilt from the provider-neutral record alone.
+ */
+const searchesOf = (message: AssistantMessage): ReadonlyArray<ProviderToolCall> =>
+  (message.provider_tool_calls ?? []).filter(isToolSearchCall)
+
+const searchResultItem = (call: ProviderToolCall): WireMessage => ({
+  role: "tool",
+  tool_call_id: call.id,
+  content: call.result === undefined || call.result.length === 0 ? MISSING_TOOL_OUTPUT : call.result
+})
+
+/**
+ * An assistant turn on this wire: its text as a string, its calls in the
+ * order the model wrote them (`output_parts`), and its replay state. Tool
+ * searches are calls here like any other. Other `provider_tool_calls` (a
+ * hosted tool another route ran upstream) have no form on this wire and are
+ * never sent: their results already reached the model as that turn's text.
+ * Reasoning text is never replayed in `content`.
  */
 const assistantItem = (
   message: AssistantMessage,
@@ -268,11 +321,33 @@ const assistantItem = (
   label: string
 ): WireMessage | undefined => {
   const content = textContent(message, label)
-  const calls = (message.tool_calls ?? []).map((call): WireToolCall => ({
-    id: call.id,
-    type: "function",
-    function: { name: call.function.name, arguments: call.function.arguments }
-  }))
+  const written = new Map<string, WireToolCall>([
+    ...searchesOf(message).map((call): [string, WireToolCall] => [
+      call.id,
+      {
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.arguments ?? {}) }
+      }
+    ]),
+    ...(message.tool_calls ?? []).map((call): [string, WireToolCall] => [
+      call.id,
+      {
+        id: call.id,
+        type: "function",
+        function: { name: call.function.name, arguments: call.function.arguments }
+      }
+    ])
+  ])
+  const ordered = (message.output_parts ?? []).flatMap((part) =>
+    part.type === "tool_call" ? [part.tool_call_id] : []
+  )
+  const calls = [
+    ...new Set([...ordered.filter((id) => written.has(id)), ...written.keys()])
+  ].flatMap((id) => {
+    const call = written.get(id)
+    return call === undefined ? [] : [call]
+  })
   const details = replayedReasoningDetails(message, origin)
   if (content.length === 0 && calls.length === 0 && details === undefined) return undefined
   return {

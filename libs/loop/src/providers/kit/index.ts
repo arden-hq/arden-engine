@@ -1,8 +1,9 @@
 /**
  * `@arden-hq/loop/provider-kit` — the transport pieces a model provider needs:
  * classified errors, the bounded retry policy, the SSE body reader, the
- * streamed-request loop, rejection classification, tool-history ordering and
- * abort helpers. A provider imports this kit and the root contracts, nothing else.
+ * streamed-request loop, rejection classification, tool-history ordering, the
+ * client tool-search answer and abort helpers. A provider imports this kit and
+ * the root contracts, nothing else.
  */
 
 export { isAbortError, raceAbort } from "../../abort.js"
@@ -33,6 +34,13 @@ export {
   retryingFetch
 } from "./retry.js"
 export { readSseEvents, type SseEvent, SseParser } from "./sse.js"
+export {
+  type AnsweredToolSearch,
+  answerToolSearch,
+  isToolSearchCall,
+  pendingToolSearch,
+  TOOL_SEARCH_TOOL_NAME
+} from "./tool-search.js"
 export {
   MISSING_TOOL_OUTPUT,
   orderToolHistory,
