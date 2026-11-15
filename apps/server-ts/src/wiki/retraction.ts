@@ -67,7 +67,7 @@ export const storedRetractions = (
  * The retractions a page's metadata holds. An entry that does not read is skipped with a
  * warning: only the owner can write such an entry, and owner edits are never refused.
  */
-export const retractionsOf = (
+const retractionsOf = (
   metadata: Readonly<Record<string, Schema.Json>>
 ): Effect.Effect<ReadonlyArray<Retraction>> => {
   const { stored, entries } = storedRetractions(metadata)
