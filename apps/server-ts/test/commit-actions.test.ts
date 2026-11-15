@@ -240,3 +240,54 @@ describe("what only one action may do, whatever the writer's call", () => {
     })
   })
 })
+
+describe("a path or link name taken, at the commit point", () => {
+  it("refuses every writer a write that places a page on a name another page holds", async () => {
+    const outcome = await withMemory((repository) =>
+      Effect.gen(function* () {
+        const place = (identity: WikiCommitIdentity, writes: ReadonlyArray<WikiWrite>) =>
+          Effect.gen(function* () {
+            return yield* commitWiki(
+              { repository, spaces },
+              { ...identity, expectedRevision: yield* repository.currentRevision },
+              writes
+            )
+          }).pipe(
+            Effect.match({
+              onFailure: (error: WikiCommitError) =>
+                error._tag === "WikiCommitRuleError" ? error.rule : error._tag,
+              onSuccess: () => "saved"
+            })
+          )
+        const seeds = yield* repository.findByPath("topics/seeds.md")
+        if (seeds === null) throw new Error("topics/seeds.md is missing")
+        const readme = "topics/seeds/README.md"
+        return {
+          "owner create": yield* place(ownerInApp("test"), [
+            createPage(`id:${readme}`, readme, content(readme, "Folder."))
+          ]),
+          "agent create": yield* place(AGENT, [
+            createPage(`id:${readme}`, readme, content(readme, "Folder."))
+          ]),
+          "agent move": yield* place(AGENT, [movePage(seeds, "topics.md")]),
+          "two creates on one name": yield* place(ownerInApp("test"), [
+            createPage("id:topics/beds.md", "topics/beds.md", content("topics/beds.md", "Beds.")),
+            createPage(
+              "id:topics/beds/README.md",
+              "topics/beds/README.md",
+              content("topics/beds/README.md", "Folder.")
+            )
+          ]),
+          "a move onto its own other name": yield* place(AGENT, [movePage(seeds, readme)])
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      "owner create": "names",
+      "agent create": "names",
+      "agent move": "names",
+      "two creates on one name": "names",
+      "a move onto its own other name": "saved"
+    })
+  })
+})

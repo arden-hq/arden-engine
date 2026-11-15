@@ -20,8 +20,8 @@ import {
 } from "./collections.js"
 import { commitWiki, createPage, movePage, updatePage, type WikiCommitIdentity } from "./commit.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
-import { formatWikiPage, normal, pageNamesForPath, parseWikiPage, reviseWikiPage } from "./page.js"
-import { loadSnapshot } from "./snapshot.js"
+import { formatWikiPage, parseWikiPage, reviseWikiPage } from "./page.js"
+import { loadSnapshot, nameTakenBy } from "./snapshot.js"
 import { spaceOwnsWikiPath } from "./space-index.js"
 
 const DIRECTORY_CONTRACT_HEADING = "## Directory contract"
@@ -234,12 +234,7 @@ export const makeWikiDirectoryMethods = (
     const ownsLeafBoundary =
       occupant !== undefined &&
       authorityOwnsBoundaryPage(boundary, occupant.page.pageId, occupant.resource.path)
-    const targetNames = new Set(pageNamesForPath(readmePath).map(normal))
-    const nameOwner = snapshot.wholeSet.find(
-      (record) =>
-        record.page.pageId !== occupant?.page.pageId &&
-        pageNamesForPath(record.resource.path).some((name) => targetNames.has(normal(name)))
-    )
+    const nameOwner = nameTakenBy(snapshot, readmePath, occupant?.page.pageId)
     if (nameOwner !== undefined) {
       return yield* wikiError(
         "create",

@@ -12,7 +12,14 @@ import { posix } from "node:path"
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import type { SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
 import { pageKind, producingAutomation, recordFolders, type RecordFolders } from "./collections.js"
-import { aliasesAreHuman, formatRedirectPage, isReadme, parseWikiPage } from "./page.js"
+import {
+  aliasesAreHuman,
+  formatRedirectPage,
+  isReadme,
+  namesTakenAt,
+  parseWikiPage,
+  takesName
+} from "./page.js"
 import {
   guardedLines,
   openRetractions,
@@ -296,7 +303,8 @@ class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("Wik
     "retire",
     "code_owned",
     "retraction",
-    "space"
+    "space",
+    "names"
   ] as const),
   message: Schema.String
 }) {}
@@ -419,6 +427,8 @@ interface CommitView {
   readonly repository: ManagedFileRepositoryShape
   readonly origin: WikiCommitOrigin
   readonly folders: Effect.Effect<RecordFolders, RevisionError>
+  /** Where each active page is once the commit's writes are made, by its id. */
+  readonly occupied: Effect.Effect<ReadonlyMap<string, string>, RevisionError>
   readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
   readonly spaceOwns: (pageId: string, path: string) => Effect.Effect<boolean, SpaceStoreError>
 }
@@ -505,9 +515,10 @@ const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
 const isUpkeep = (origin: WikiCommitOrigin): boolean => origin.kind === "upkeep"
 
 const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
-  repository: ManagedFileRepositoryShape
+  repository: ManagedFileRepositoryShape,
+  active: Effect.Effect<ReadonlyArray<ResourceVersion>, RevisionError>
 ): Effect.fn.Return<RecordFolders, RevisionError> {
-  const readmes = (yield* repository.listResources()).filter((resource) => isReadme(resource.path))
+  const readmes = (yield* active).filter((resource) => isReadme(resource.path))
   const pages = yield* Effect.forEach(readmes, (resource) =>
     repository.readVersion(resource).pipe(
       Effect.flatMap((bytes) => parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)),
@@ -521,6 +532,35 @@ const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
 
 const ruleError = (rule: WikiCommitRuleError["rule"], message: string) =>
   new WikiCommitRuleError({ rule, message })
+
+const occupiedAfter = (
+  active: ReadonlyArray<ResourceVersion>,
+  writes: ReadonlyArray<ResolvedWrite>
+): ReadonlyMap<string, string> => {
+  const paths = new Map(active.map((resource) => [resource.resourceId, resource.path] as const))
+  for (const write of writes) {
+    if (write.path.after === undefined) paths.delete(write.resourceId)
+    else paths.set(write.resourceId, write.path.after)
+  }
+  return paths
+}
+
+const requireNameFree = Effect.fn("Wiki.requireNameFree")(function* (
+  { occupied }: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  const path = write.path.after
+  if (path === undefined) return
+  if (write.before?.state === "active" && write.path.before === path) return
+  const wanted = namesTakenAt([path])
+  for (const [resourceId, other] of yield* occupied) {
+    if (resourceId === write.resourceId || !takesName(wanted, other)) continue
+    return yield* ruleError(
+      "names",
+      `${path} would take a path or link name that ${other} holds. Nothing was saved. Choose another path.`
+    )
+  }
+})
 
 const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
   { folders }: CommitView,
@@ -742,6 +782,7 @@ const COMMIT_RULES: ReadonlyArray<{
   readonly check: (view: CommitView, write: ResolvedWrite) => Effect.Effect<void, WikiCommitError>
 }> = [
   { binds: () => true, check: requireSpacePageKept },
+  { binds: () => true, check: requireNameFree },
   { binds: (origin) => !isOwnerOrigin(origin), check: requireRedirectOnlyByMerge },
   { binds: () => true, check: (_view, write) => requireHumanAliases(write) },
   { binds: isUpkeep, check: requireNotRecord },
@@ -759,14 +800,18 @@ export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function*
   origin: WikiCommitOrigin,
   writes: ReadonlyArray<WikiWrite>
 ): Effect.fn.Return<void, WikiCommitError> {
+  const resolved = yield* Effect.forEach(writes, (write) => resolveWrite(repository, write))
+  const active = yield* Effect.cached(repository.listResources())
   const view: CommitView = {
     repository,
     origin,
-    folders: yield* Effect.cached(currentRecordFolders(repository)),
+    folders: yield* Effect.cached(currentRecordFolders(repository, active)),
+    occupied: yield* Effect.cached(
+      active.pipe(Effect.map((list) => occupiedAfter(list, resolved)))
+    ),
     guarded: yield* Effect.cached(openRetractions(repository).pipe(Effect.map(guardedLines))),
     spaceOwns: yield* spacePageCheck(spaces)
   }
-  const resolved = yield* Effect.forEach(writes, (write) => resolveWrite(repository, write))
   for (const rule of COMMIT_RULES) {
     if (!rule.binds(origin)) continue
     for (const write of resolved) yield* rule.check(view, write)

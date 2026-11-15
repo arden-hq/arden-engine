@@ -21,8 +21,15 @@ import {
 import { requireCurrent, withConflictDetail } from "./conflict.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import type { WikiListingMethods } from "./listing.js"
-import { isReadme, normal, pageNamesForPath } from "./page.js"
-import { loadSnapshot, notFound, type PageRecord, readRecord, type Snapshot } from "./snapshot.js"
+import { isReadme } from "./page.js"
+import {
+  loadSnapshot,
+  nameTakenBy,
+  notFound,
+  type PageRecord,
+  readRecord,
+  type Snapshot
+} from "./snapshot.js"
 import { requireRestorable, requireUpdatable } from "./write-rules.js"
 
 interface WikiRestoreInput {
@@ -346,10 +353,7 @@ export const makeWikiRestoreMethods = (
             )
           }
         }
-        const names = new Set(pageNamesForPath(resource.path).map(normal))
-        const taken = snapshot.wholeSet.find((record) =>
-          pageNamesForPath(record.resource.path).some((name) => names.has(normal(name)))
-        )
+        const taken = nameTakenBy(snapshot, resource.path)
         if (taken !== undefined) {
           return yield* wikiError(
             "restore",

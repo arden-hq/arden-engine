@@ -10,8 +10,8 @@ import {
   type WikiLocationAuthority
 } from "./authority.js"
 import { wikiError, type WikiError } from "./errors.js"
-import { isReadme, normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
-import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
+import { isReadme, parseWikiPage, writtenContent } from "./page.js"
+import { followRedirect, nameTakenBy, type PageRecord, type Snapshot } from "./snapshot.js"
 import { isSpacePage } from "./space-index.js"
 
 /** A write's page and where its writer may write. Who the writer is, the commit rules decide. */
@@ -187,10 +187,7 @@ export const requireCreatable = Effect.fn("Wiki.requireCreatable")(function* (
       "Pages cannot be created inside a Space-owned directory"
     )
   }
-  const targetNames = new Set(pageNamesForPath(input.path).map((name) => normal(name)))
-  const existing = snapshot.wholeSet.find((record) =>
-    pageNamesForPath(record.resource.path).some((name) => targetNames.has(normal(name)))
-  )
+  const existing = nameTakenBy(snapshot, input.path)
   if (existing !== undefined) {
     return yield* wikiError(
       "create",

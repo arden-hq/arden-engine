@@ -15,7 +15,7 @@ import {
 } from "./commit.js"
 import { directoryContract, directoryTitle } from "./directories.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
-import { formatWikiPage, normal, pageNamesForPath } from "./page.js"
+import { formatWikiPage, namesTakenAt, normal, takesName } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 
@@ -137,9 +137,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
   input: WikiImportInput
 ) {
   const byPath = new Map(snapshot.wholeSet.map((record) => [normal(record.resource.path), record]))
-  const names = new Set(
-    snapshot.wholeSet.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
-  )
+  const names = namesTakenAt(snapshot.wholeSet.map((record) => record.resource.path))
   const operations: Array<WikiWrite> = []
   const created: Array<string> = []
   const updated: Array<string> = []
@@ -185,7 +183,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
     }
     const current = byPath.get(normal(readme))
     if (current === undefined) {
-      if (pageNamesForPath(readme).some((name) => names.has(normal(name)))) {
+      if (takesName(names, readme)) {
         return yield* wikiError(
           "create",
           "blocked",
@@ -216,7 +214,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
     }
     const current = byPath.get(normal(page.path))
     if (current === undefined) {
-      if (pageNamesForPath(page.path).some((name) => names.has(normal(name)))) {
+      if (takesName(names, page.path)) {
         return yield* wikiError(
           "create",
           "blocked",

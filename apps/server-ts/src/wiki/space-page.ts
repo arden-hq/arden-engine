@@ -15,8 +15,8 @@ import {
 } from "./collections.js"
 import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
-import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
-import { loadSnapshot, type Snapshot } from "./snapshot.js"
+import { formatWikiPage, namesTakenAt, parseWikiPage, takesName } from "./page.js"
+import { loadSnapshot, nameTakenBy, type Snapshot } from "./snapshot.js"
 import {
   activeSpaceBindings,
   bindingOwnsPath,
@@ -142,12 +142,8 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
   const directory = current.wholeSet.find(
     (record) => record.resource.path.toLowerCase() === directoryPath.toLowerCase()
   )
-  const directoryNames = new Set(pageNamesForPath(directoryPath).map(normal))
-  const conflictingDirectory = current.wholeSet.some(
-    (record) =>
-      record !== directory &&
-      pageNamesForPath(record.resource.path).some((name) => directoryNames.has(normal(name)))
-  )
+  const conflictingDirectory =
+    nameTakenBy(current, directoryPath, directory?.page.pageId) !== undefined
   const spaceOwned = others.some((binding) => bindingOwnsPath(binding, directoryPath))
   const sections = directory === undefined ? undefined : directorySections(directory.page.body)
   if (
@@ -164,15 +160,13 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
       `The ${home} directory must be an active, unowned collection with a valid directory contract`
     )
   }
-  const usedNames = new Set(
-    current.wholeSet.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
-  )
+  const usedNames = namesTakenAt(current.wholeSet.map((record) => record.resource.path))
   const pageId = randomUUID()
   const base = spacePageSlug(title)
   let suffix = 1
   let path = `${home}/${base}.md`
   let free = freeSpacePage(others, { pageId, pagePath: path })
-  while (pageNamesForPath(path).some((name) => usedNames.has(normal(name))) || free === undefined) {
+  while (takesName(usedNames, path) || free === undefined) {
     suffix += 1
     path = `${home}/${base}-${suffix}.md`
     free = freeSpacePage(others, { pageId, pagePath: path })

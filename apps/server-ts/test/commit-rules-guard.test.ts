@@ -42,3 +42,8 @@ it("keeps a Space's own page at the commit point, and reads ownership elsewhere 
   expect(writeRules).toMatch(/requireCreatable[\s\S]*\bisSpacePage\(/u)
   expect(naming(/Move or archive the Space first/iu)).toEqual(["wiki/commit.ts"])
 })
+
+it("compares page names in one form, and refuses a taken name for every writer at the commit point", () => {
+  expect(naming(/\bpageNamesForPath\(/u)).toEqual(["wiki/page.ts"])
+  expect(naming(/\brequireNameFree\b/u)).toEqual(["wiki/commit.ts"])
+})

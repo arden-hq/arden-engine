@@ -73,8 +73,10 @@ export const wikiError = (
 
 const ruleReason = (
   rule: Extract<WikiCommitError, { readonly _tag: "WikiCommitRuleError" }>["rule"]
-): "invalid" | "blocked" => {
+): "invalid" | "blocked" | "conflict" => {
   switch (rule) {
+    case "names":
+      return "conflict"
     case "aliases":
     case "size":
     case "retraction":

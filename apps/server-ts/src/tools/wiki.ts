@@ -9,7 +9,7 @@ import type { WikiCommitOrigin } from "../wiki/commit.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
-import { normal, pageNamesForPath, reviseWikiPage } from "../wiki/page.js"
+import { nameKeys, namesTakenAt, normal, reviseWikiPage } from "../wiki/page.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import {
@@ -213,11 +213,7 @@ export const activePage = (snapshot: Snapshot, path: string): PageRecord | null 
   const direct = pages.find((record) => record.resource.path === path)
   if (direct !== undefined) return direct
   const wanted = normal(path)
-  return (
-    pages.find((record) =>
-      pageNamesForPath(record.resource.path).some((name) => normal(name) === wanted)
-    ) ?? null
-  )
+  return pages.find((record) => nameKeys(record.resource.path).includes(wanted)) ?? null
 }
 
 export const readablePage = (snapshot: Snapshot, path: string): PageRecord | null =>
@@ -324,7 +320,7 @@ export const loadSnapshot = (wiki: Wiki["Service"], signal: AbortSignal): Promis
   Effect.runPromise(wiki.snapshot().pipe(Effect.mapError(wikiFailure)), { signal })
 
 const pagesWithPathAlias = (snapshot: Snapshot, path: string): ReadonlyArray<string> => {
-  const wanted = new Set(pageNamesForPath(path).map(normal))
+  const wanted = namesTakenAt([path])
   return activeRunPages(snapshot.pages)
     .filter((record) => record.page.aliases.some((alias) => wanted.has(normal(alias))))
     .map((record) => record.resource.path)
@@ -469,7 +465,7 @@ const makeWikiTools = ({
         : []
       const status = [
         ...(record.resource.path === input.path ||
-        pageNamesForPath(record.resource.path).some((name) => normal(name) === normal(input.path))
+        nameKeys(record.resource.path).includes(normal(input.path))
           ? []
           : [`${input.path} now redirects here, to ${record.resource.path}.`]),
         `page_ref: ${record.page.pageId}`,

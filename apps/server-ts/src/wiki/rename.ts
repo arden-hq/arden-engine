@@ -32,11 +32,18 @@ import { pageWikiLinks, rewriteWikiLinkTargets } from "./links.js"
 import {
   formatRedirectPage,
   isReadme,
-  pageNamesForPath,
+  namesTakenAt,
+  takesName,
   parseWikiPage,
   reviseWikiPage
 } from "./page.js"
-import { loadSnapshot, pageNameIndex, resolveWikiLinkTarget, type PageRecord } from "./snapshot.js"
+import {
+  loadSnapshot,
+  nameTakenBy,
+  pageNameIndex,
+  resolveWikiLinkTarget,
+  type PageRecord
+} from "./snapshot.js"
 
 /** Who renames when the owner asks for and accepts a rename in the app. */
 export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
@@ -445,14 +452,7 @@ export const makeWikiRenameMethods = (
         pageId: input.pageId
       })
     }
-    const targetNames = new Set(
-      pageNamesForPath(input.newPath).map((name) => name.trim().toLowerCase())
-    )
-    if (
-      pageNamesForPath(current.resource.path).some((name) =>
-        targetNames.has(name.trim().toLowerCase())
-      )
-    ) {
+    if (takesName(namesTakenAt([input.newPath]), current.resource.path)) {
       return yield* wikiError(
         "rename",
         "blocked",
@@ -462,13 +462,7 @@ export const makeWikiRenameMethods = (
         }
       )
     }
-    const nameOwner = snapshot.wholeSet.find(
-      (record) =>
-        record.page.pageId !== input.pageId &&
-        pageNamesForPath(record.resource.path).some((name) =>
-          targetNames.has(name.trim().toLowerCase())
-        )
-    )
+    const nameOwner = nameTakenBy(snapshot, input.newPath, input.pageId)
     if (nameOwner !== undefined) {
       return yield* wikiError(
         "rename",

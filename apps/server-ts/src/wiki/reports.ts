@@ -10,8 +10,8 @@ import { canonicalWikiPath } from "./paths.js"
 import { commitWiki, publishReport } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
-import { formatWikiPage, isReadme, normal, pageNamesForPath, parseWikiPage } from "./page.js"
-import { loadSnapshot } from "./snapshot.js"
+import { formatWikiPage, isReadme, normal, parseWikiPage } from "./page.js"
+import { loadSnapshot, nameTakenBy } from "./snapshot.js"
 import { spaceOwnsWikiPath } from "./space-index.js"
 
 export const WikiReportContentSchema = Schema.Struct({
@@ -80,10 +80,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
   )
   if (spaceOwned)
     return yield* wikiError("create", "blocked", "Reports cannot claim a Space-owned path")
-  const names = new Set(pageNamesForPath(content.path).map(normal))
-  const current = snapshot.wholeSet.find((record) =>
-    pageNamesForPath(record.resource.path).some((name) => names.has(normal(name)))
-  )
+  const current = nameTakenBy(snapshot, content.path)
   if (
     current !== undefined &&
     (current.resource.path !== content.path ||

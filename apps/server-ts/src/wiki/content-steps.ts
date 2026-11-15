@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { commitWiki, createPage, updatePage, type WikiWrite } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { isImportedPath } from "./collections.js"
-import { formatRedirectPage, normal, pageNamesForPath, reviseWikiPage } from "./page.js"
+import { formatRedirectPage, namesTakenAt, normal, reviseWikiPage } from "./page.js"
 import { activeRunPages, loadSnapshot } from "./snapshot.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 
@@ -69,9 +69,7 @@ export const makeWikiContentStepMethods = (
     const pages = activeRunPages(snapshot.pages).filter(
       ({ resource }) => !isImportedPath(resource.path)
     )
-    const taken = new Set(
-      snapshot.wholeSet.flatMap((record) => pageNamesForPath(record.resource.path).map(normal))
-    )
+    const taken = namesTakenAt(snapshot.wholeSet.map((record) => record.resource.path))
     const rewritten = yield* step.rewrite(
       pages.map(({ page, resource }) => ({
         path: resource.path,

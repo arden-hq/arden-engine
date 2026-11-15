@@ -9,9 +9,11 @@ import { Effect } from "effect"
 import { mapRevisionError, WikiError, wikiError, type WikiOperation } from "./errors.js"
 import type { WikiLinkToken } from "./links.js"
 import {
+  nameKeys,
+  namesTakenAt,
   normal,
-  pageNamesForPath,
   parseWikiPage,
+  takesName,
   type ParsedWikiPage,
   wikiPageExcerpt
 } from "./page.js"
@@ -110,22 +112,30 @@ export const readRecord = Effect.fn("Wiki.readRecord")(function* (
   return { resource, page }
 })
 
-const pageNames = (record: PageRecord): ReadonlyArray<string> =>
-  pageNamesForPath(record.resource.path)
-
 export const pageNameIndex = (
   pages: ReadonlyArray<PageRecord>
 ): ReadonlyMap<string, ReadonlySet<string>> => {
   const names = new Map<string, Set<string>>()
   for (const page of pages) {
-    for (const name of pageNames(page)) {
-      const key = normal(name)
+    for (const key of nameKeys(page.resource.path)) {
       const entries = names.get(key) ?? new Set<string>()
       entries.add(page.page.pageId)
       names.set(key, entries)
     }
   }
   return names
+}
+
+/** The page of the whole set that holds a name a page at `path` would take, but `exceptPageId`. */
+export const nameTakenBy = (
+  snapshot: Pick<Snapshot, "wholeSet">,
+  path: string,
+  exceptPageId?: string
+): PageRecord | undefined => {
+  const wanted = namesTakenAt([path])
+  return snapshot.wholeSet.find(
+    (record) => record.page.pageId !== exceptPageId && takesName(wanted, record.resource.path)
+  )
 }
 
 export const followRedirect = (
@@ -149,8 +159,7 @@ export const redirectTargetAt = (snapshot: Snapshot, path: string): RunPage | nu
   const wanted = normal(path)
   const redirect = snapshot.pages.find(
     (record) =>
-      record.page.lifecycle === "redirect" &&
-      pageNamesForPath(record.resource.path).some((name) => normal(name) === wanted)
+      record.page.lifecycle === "redirect" && nameKeys(record.resource.path).includes(wanted)
   )
   if (redirect === undefined) return null
   const byId = new Map(snapshot.pages.map((record) => [record.page.pageId, record] as const))
