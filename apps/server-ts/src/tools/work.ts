@@ -1,6 +1,7 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
+import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { readSpecialChat } from "../context/special-chat.js"
@@ -157,7 +158,7 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
     name: "permissions_read",
     description:
       "Read this chat's approval mode, the permission rules it follows (its Space's list and Everywhere, with each rule's id), and the tools whose own check still asks for some calls in this mode whatever the rules say. Call it before you tell the user what a mode or rule covers, and before you offer to change or remove a rule. Works only in the user's own chat.",
-    parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
+    parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     metadata: {
       effect: "none",
       display_name: "Read Permissions",

@@ -26,6 +26,9 @@ const toolContractProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<s
       .filter((name) => !names.has(name))
       .map((name) => `TOOL_SUMMARIES has ${name}, which is not a built-in tool`),
     ...tools.flatMap(parameterProblems),
+    ...tools.flatMap((tool) =>
+      objectRootProblems(tool.definition.name, tool.entry(toolParametersJsonSchema).parameters)
+    ),
     ...tools.flatMap(groupProblems),
     ...hashInputProblems(tools),
     ...catalogNameProblems(tools)
@@ -78,6 +81,23 @@ const described = (schema: unknown, definitions: Readonly<Record<string, unknown
     (key) => Array.isArray(schema[key]) && schema[key].some((part) => described(part, definitions))
   )
 }
+
+/**
+ * Every provider takes only an object at a tool's parameter root: OpenAI
+ * refuses anything else (`Schema.Struct({})` became `anyOf: [object, array]`
+ * and OpenRouter's OpenAI models refused every request that declared it, live
+ * on 2026-11-16), while Codex and Claude let it through, so only this check
+ * catches it before a person does.
+ */
+export const objectRootProblems = (
+  tool: string,
+  parameters: Readonly<Record<string, unknown>>
+): ReadonlyArray<string> =>
+  parameters["type"] === "object"
+    ? []
+    : [
+        `${tool} parameters must be type "object" at the root; an empty input is EmptyParametersSchema`
+      ]
 
 // Calls in one group run one at a time. A second spelling for the same
 // service (drive_write and google_drive_write) let writes overlap.

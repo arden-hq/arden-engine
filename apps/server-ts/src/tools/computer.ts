@@ -5,6 +5,7 @@ import { ComputerService } from "../computer/service.js"
 import { KeyedSerialQueue } from "../mcp/serial.js"
 import { appTarget } from "./action-targets.js"
 import { defineServerTool } from "./define.js"
+import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { computerNativeTools } from "./computer-native.js"
 import { isComputerStep, type ComputerStep } from "@arden-hq/protocol/computer"
 import { scriptStep } from "../computer/step.js"
@@ -29,7 +30,6 @@ const CellSchema = Schema.Struct({
       "Body of an async JavaScript function, run in strict mode (1-32,000 characters). Await every call and return the result you need."
   })
 })
-const EmptySchema = Schema.Struct({})
 
 export const computerTools = Effect.gen(function* () {
   const { driver, control } = yield* ComputerService
@@ -156,7 +156,7 @@ export const computerTools = Effect.gen(function* () {
       name: "computer_reset",
       description:
         "Stop native control, invalidate all native observations, and discard this chat's persistent computer script state. Use for takeover or recovery. Other native calls are cancelled; browser control remains governed by its own Take control button.",
-      parameters: Schema.toStandardSchemaV1(EmptySchema),
+      parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
       metadata: {
         effect: "run_record",
         changes_state: true,

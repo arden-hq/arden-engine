@@ -4,6 +4,7 @@ import { BrowserProcedures } from "../browser/procedures/service.js"
 import { BrowserProcedureStore } from "../persistence/browser-procedures/store.js"
 import { BrowserClient } from "../browser/service.js"
 import { defineServerTool } from "./define.js"
+import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { runBrowserForRun, webUrl } from "./browser-support.js"
 
 export const browserProcedureTools = Effect.gen(function* () {
@@ -102,7 +103,7 @@ export const browserProcedureTools = Effect.gen(function* () {
       name: "browser_procedure_verify",
       description:
         "Internal checkpoint in a saved browser procedure. After it, the rest of this procedure run may only read, to check the result. Only a recorded procedure can call it.",
-      parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
+      parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
       metadata: {
         display_name: "Verify browser result",
         kind: "browser",
