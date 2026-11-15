@@ -1,6 +1,7 @@
 import { DateTime, Effect } from "effect"
 
 import {
+  type InstructionChat,
   type InstructionVersion,
   InstructionVersionStore,
   InstructionVersionStoreError,
@@ -26,24 +27,22 @@ const corrupt = (row: VersionRow): InstructionVersionStoreError =>
     message: `Standing rules version ${row.version} has an unknown writer`
   })
 
+const chatOf = (row: VersionRow): InstructionChat | undefined =>
+  row.session_id === null || row.run_id === null
+    ? undefined
+    : { sessionId: row.session_id, runId: row.run_id }
+
 const writerOf = (row: VersionRow): InstructionWriter | undefined => {
   switch (row.writer) {
     case "seed":
     case "outside":
       return { kind: row.writer }
     case "chat":
-      return row.session_id === null || row.run_id === null
-        ? undefined
-        : { kind: "chat", sessionId: row.session_id, runId: row.run_id }
+      return { kind: "chat", chat: chatOf(row) }
     case "restore":
-      return row.session_id === null || row.run_id === null || row.restored_from === null
+      return row.restored_from === null
         ? undefined
-        : {
-            kind: "restore",
-            sessionId: row.session_id,
-            runId: row.run_id,
-            from: row.restored_from
-          }
+        : { kind: "restore", chat: chatOf(row), from: row.restored_from }
     default:
       return undefined
   }
@@ -70,9 +69,13 @@ const writerColumns = (writer: InstructionWriter) => {
     case "outside":
       return { session: null, run: null, from: null }
     case "chat":
-      return { session: writer.sessionId, run: writer.runId, from: null }
+      return { session: writer.chat?.sessionId ?? null, run: writer.chat?.runId ?? null, from: null }
     case "restore":
-      return { session: writer.sessionId, run: writer.runId, from: writer.from }
+      return {
+        session: writer.chat?.sessionId ?? null,
+        run: writer.chat?.runId ?? null,
+        from: writer.from
+      }
   }
 }
 
@@ -108,7 +111,7 @@ export const makeInstructionVersionStore = ({
           ORDER BY version DESC LIMIT ${limit}`
         const [count] = yield* reader<{
           readonly total: number
-        }>`SELECT COALESCE(MAX(version), 0) AS total FROM global_instruction_versions`
+        }>`SELECT COUNT(*) AS total FROM global_instruction_versions`
         return {
           versions: yield* Effect.forEach(rows, versionOf),
           total: count?.total ?? 0
@@ -122,10 +125,9 @@ export const makeInstructionVersionStore = ({
             const recordedAt = DateTime.formatIso(yield* DateTime.now)
             const columns = writerColumns(by)
             const rows = yield* sql<VersionRow>`INSERT INTO global_instruction_versions
-              (version, content, digest, writer, session_id, run_id, restored_from, recorded_at)
-              SELECT COALESCE(MAX(version), 0) + 1, ${content}, ${digest}, ${by.kind},
-                ${columns.session}, ${columns.run}, ${columns.from}, ${recordedAt}
-              FROM global_instruction_versions
+              (content, digest, writer, session_id, run_id, restored_from, recorded_at)
+              VALUES (${content}, ${digest}, ${by.kind}, ${columns.session}, ${columns.run},
+                ${columns.from}, ${recordedAt})
               RETURNING *`
             const [row] = rows
             if (row === undefined)

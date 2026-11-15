@@ -8,7 +8,7 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { GlobalInstructions, GlobalInstructionsError } from "../context/global-instructions.js"
-import type { InstructionWriter } from "../persistence/instructions/store.js"
+import type { InstructionChat, InstructionWriter } from "../persistence/instructions/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { appliedReceipt } from "./call-receipt.js"
 import type { CallEffects } from "../execution/tool-effect.js"
@@ -123,21 +123,23 @@ const writerPhrase = (
   writer: InstructionWriter,
   chats: ReadonlyMap<string, string | undefined>
 ): string => {
-  const chat = (sessionId: string) => chats.get(sessionId) ?? "a chat that no longer exists"
+  const chat = (writer: { readonly chat: InstructionChat | undefined }) =>
+    (writer.chat === undefined ? undefined : chats.get(writer.chat.sessionId)) ??
+    "a chat that no longer exists"
   switch (writer.kind) {
     case "seed":
       return "the rules as they were when this history began"
     case "outside":
       return "edited outside Arden, taken as yours"
     case "chat":
-      return `changed in ${chat(writer.sessionId)}`
+      return `changed in ${chat(writer)}`
     case "restore":
-      return `version ${writer.from} restored in ${chat(writer.sessionId)}`
+      return `version ${writer.from} restored in ${chat(writer)}`
   }
 }
 
 const chatOf = (writer: InstructionWriter): string | undefined =>
-  writer.kind === "chat" || writer.kind === "restore" ? writer.sessionId : undefined
+  writer.kind === "chat" || writer.kind === "restore" ? writer.chat?.sessionId : undefined
 
 /** Approval and replacement shared by every tool that changes the rules, so each asks the same. */
 const makeRulesChange = ({
@@ -191,7 +193,7 @@ const makeRulesChange = ({
         { preview: "Read instructions first", retryable: true }
       )
     }
-    const by = { sessionId: ctx.run.sessionId, runId: ctx.run.runId }
+    const chat = { sessionId: ctx.run.sessionId, runId: ctx.run.runId }
     const snapshot = await Effect.runPromise(
       instructions
         .replace({
@@ -199,8 +201,8 @@ const makeRulesChange = ({
           expectedVersion: expected,
           writer:
             restoredFrom === undefined
-              ? { kind: "chat", ...by }
-              : { kind: "restore", ...by, from: restoredFrom }
+              ? { kind: "chat", chat }
+              : { kind: "restore", chat, from: restoredFrom }
         })
         .pipe(Effect.mapError(failure)),
       { signal: ctx.signal }

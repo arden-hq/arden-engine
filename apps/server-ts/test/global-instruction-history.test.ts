@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -6,12 +7,19 @@ import { expect, it } from "vitest"
 
 import { GlobalInstructions, globalInstructionsLayer } from "../src/context/global-instructions.js"
 import { InstructionVersionStore } from "../src/persistence/instructions/store.js"
+import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
+import { deleteSessionOwnedData } from "../src/persistence/sqlite/session-deletion.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 // Every change to the standing rules is a version with its writer and time. The rules file stays
 // the live copy; the versions are the history the rules tools list and restore from.
 
-const CHAT = { kind: "chat", sessionId: "session-1", runId: "run-1" } as const
+const CHAT = { kind: "chat", chat: { sessionId: "session-1", runId: "run-1" } } as const
+const RESTORE = {
+  kind: "restore",
+  chat: { sessionId: "session-1", runId: "run-2" },
+  from: 1
+} as const
 
 const withRulesFolder = async <A>(use: (folder: string) => Promise<A>): Promise<A> => {
   const folder = await mkdtemp(join(tmpdir(), "arden-rules-"))
@@ -21,6 +29,9 @@ const withRulesFolder = async <A>(use: (folder: string) => Promise<A>): Promise<
     await rm(folder, { recursive: true, force: true })
   }
 }
+
+const causes = (error: unknown): string =>
+  error instanceof Error ? `${error.message} ${causes(error.cause)}` : String(error)
 
 /** Starts the rules service over `file`, the way the server does at each start. */
 const started = <A, E, R>(file: string, body: Effect.Effect<A, E, R | GlobalInstructions>) =>
@@ -80,7 +91,7 @@ it("records each change with its writer, adopts an outside edit as the owner's, 
           const restored = yield* rules.replace({
             content: (yield* rules.version(1))?.content ?? "",
             expectedVersion: outside.version,
-            writer: { kind: "restore", sessionId: "session-1", runId: "run-2", from: 1 }
+            writer: RESTORE
           })
           return { changed, restored, history: yield* rules.versions({ limit: 10 }) }
         })
@@ -88,7 +99,7 @@ it("records each change with its writer, adopts an outside edit as the owner's, 
     )
     expect(result.history.total).toBe(4)
     expect(result.history.versions.map((version) => version.writer)).toEqual([
-      { kind: "restore", sessionId: "session-1", runId: "run-2", from: 1 },
+      RESTORE,
       { kind: "outside" },
       CHAT,
       { kind: "seed" }
@@ -122,4 +133,42 @@ it("records nothing when a change leaves the rules as they are", async () => {
     )
     expect(total).toBe(1)
   })
+})
+
+it("drops a version's chat when that chat is deleted, and keeps its text", async () => {
+  const latest = await withTempDatabase(
+    Effect.gen(function* () {
+      const store = yield* InstructionVersionStore
+      yield* store.append({ content: "Rule one.", digest: "d1", writer: CHAT })
+      const sql = yield* SqlClient.SqlClient
+      const events = yield* SessionLifecycleEvents
+      yield* sql.withTransaction(deleteSessionOwnedData(sql, events, "session-1"))
+      return yield* store.latest()
+    })
+  )
+  expect(latest).toMatchObject({ content: "Rule one.", writer: { kind: "chat", chat: undefined } })
+})
+
+it("lets a version be forgotten, keeps every text unchanged, and never reuses a number", async () => {
+  const result = await withTempDatabase(
+    Effect.gen(function* () {
+      const store = yield* InstructionVersionStore
+      const sql = yield* SqlClient.SqlClient
+      yield* store.append({ content: "Rule one.", digest: "d1", writer: { kind: "seed" } })
+      yield* store.append({ content: "A secret.", digest: "d2", writer: CHAT })
+      yield* sql`DELETE FROM global_instruction_versions WHERE version = 2`
+      const next = yield* store.append({ content: "Rule two.", digest: "d3", writer: CHAT })
+      const rewrite = yield* sql`UPDATE global_instruction_versions SET content = 'x'`.pipe(
+        Effect.flip
+      )
+      const relink = yield* sql`UPDATE global_instruction_versions SET session_id = 'other'
+        WHERE version = 3`.pipe(Effect.flip)
+      return { next, rewrite, relink, listed: yield* store.list({ limit: 10 }) }
+    })
+  )
+  expect(result.next.version).toBe(3)
+  expect(result.listed.total).toBe(2)
+  expect(result.listed.versions.map((version) => version.version)).toEqual([3, 1])
+  expect(causes(result.rewrite)).toContain("immutable")
+  expect(causes(result.relink)).toContain("only loses its chat")
 })
