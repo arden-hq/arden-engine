@@ -54,11 +54,11 @@ export const isImportedPath = (path: string): boolean =>
   path.toLowerCase().startsWith(`${IMPORTED_DIRECTORY}/`)
 
 /** Who writes a record folder: one Automation publishing reports, or the import of notes. */
-export type RecordProducer =
+type RecordProducer =
   | { readonly kind: "automation"; readonly automationId: string }
   | { readonly kind: "import" }
 
-export interface RecordFolder {
+interface RecordFolder {
   readonly directory: string
   readonly producer: RecordProducer
 }

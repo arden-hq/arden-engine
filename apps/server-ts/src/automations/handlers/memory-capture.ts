@@ -15,7 +15,7 @@ export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-ca
  * Tools of the Memory tool scope that only Wiki Maintenance holds: it checks notes against the
  * chats they cite and merges pages. Every other handler in the scope hides them.
  */
-export const MAINTENANCE_ONLY_TOOLS: ReadonlySet<string> = new Set([
+const MAINTENANCE_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "session_read",
   "session_search_transcripts",
   "wiki_merge_page"
