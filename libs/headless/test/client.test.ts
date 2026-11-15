@@ -157,4 +157,31 @@ describe("HeadlessClient", () => {
     ])
     expect(calls[1]?.body).toMatchObject({ client_id: "later-1", message: "after the run" })
   })
+  it("lists the server's models by provider, with the ids a new chat takes", async () => {
+    const requested: Array<string> = []
+    const client = createHeadlessClient({
+      baseUrl: "http://arden.test",
+      fetch: async (input) => {
+        requested.push(String(input))
+        return Response.json({
+          models: ["gemma-4", "qwen3"],
+          groups: [{ provider: "llama.cpp", label: "llama.cpp", models: ["gemma-4", "qwen3"] }],
+          reasoning_efforts: { "gemma-4": ["none", "medium"] }
+        })
+      }
+    })
+    expect(await client.listModels()).toEqual({
+      providers: [
+        {
+          id: "llama.cpp",
+          name: "llama.cpp",
+          models: [
+            { id: "gemma-4", name: "gemma-4", reasoningEfforts: ["none", "medium"] },
+            { id: "qwen3", name: "qwen3", reasoningEfforts: [] }
+          ]
+        }
+      ]
+    })
+    expect(requested).toEqual(["http://arden.test/models"])
+  })
 })

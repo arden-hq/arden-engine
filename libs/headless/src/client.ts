@@ -15,6 +15,7 @@ import {
 } from "@arden-hq/protocol/chat"
 import { spaceDecoders, spaceRoutes, type SpaceListResponse } from "@arden-hq/protocol/spaces"
 import { healthDecoders, healthRoutes, type HealthStatus } from "@arden-hq/protocol/health"
+import { modelDecoders, modelRoutes, type ModelCatalog } from "@arden-hq/protocol/models"
 import { ProtocolError } from "@arden-hq/protocol"
 import {
   isTerminalRunStatus,
@@ -40,7 +41,7 @@ import {
 import { retryableStatus } from "@arden-hq/std/retry"
 import { sleep } from "@arden-hq/std/sleep"
 
-export type { RunDetail, RunTerminalResult }
+export type { ModelCatalog, RunDetail, RunTerminalResult }
 
 /** One decoded frame of a run's session event stream. */
 export type HeadlessRunEvent = DecodedServerEventFrame
@@ -393,6 +394,16 @@ export class HeadlessClient {
     await this.#requestJson(sessionRoutes.permanentDelete(sessionId, { stop: false }), {
       method: "DELETE"
     })
+  }
+
+  /**
+   * The models a chat may run on, grouped by provider, as the server reports
+   * them: a configured server lists its settings' `model` first, then
+   * `extraModels`; on llama.cpp and OpenRouter the ids are the server's own.
+   * `createSession({ chat_model })` takes one of these ids.
+   */
+  async listModels(): Promise<ModelCatalog> {
+    return modelDecoders.catalog(await this.#requestJson(modelRoutes.catalog, { method: "GET" }))
   }
 
   async listSpaces(): Promise<SpaceListResponse> {
