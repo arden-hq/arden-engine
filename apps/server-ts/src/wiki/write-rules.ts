@@ -9,16 +9,15 @@ import {
   resolveWikiWriteBoundary,
   type WikiLocationAuthority
 } from "./authority.js"
-import type { WikiCommitIdentity } from "./commit.js"
 import { wikiError, type WikiError } from "./errors.js"
 import { isReadme, normal, pageNamesForPath, parseWikiPage, writtenContent } from "./page.js"
 import { followRedirect, type PageRecord, type Snapshot } from "./snapshot.js"
 import { isSpacePage } from "./space-index.js"
 
+/** A write's page and where its writer may write. Who the writer is, the commit rules decide. */
 export interface WikiWriter {
   readonly pageId: string
   readonly authority: WikiLocationAuthority
-  readonly commit: WikiCommitIdentity
 }
 
 /** The content a page update writes, once every rule for replacing this page holds. */
@@ -50,24 +49,6 @@ export const requireRestorable = Effect.fn("Wiki.requireRestorable")(function* (
 ): Effect.fn.Return<string, WikiError> {
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, "restore")
   yield* requireWikiWritePaths(boundary, "restore", [current.resource.path])
-  if (input.commit.origin.kind === "capture") {
-    const spaceBound = yield* isSpacePage(spaces, current.page.pageId, current.resource.path).pipe(
-      Effect.mapError((cause) =>
-        wikiError("restore", "storage", "Could not check Memory page ownership", {
-          pageId: input.pageId,
-          cause
-        })
-      )
-    )
-    if (spaceBound) {
-      return yield* wikiError(
-        "restore",
-        "blocked",
-        "Automatic Memory cannot restore a Space-owned page",
-        { pageId: input.pageId }
-      )
-    }
-  }
   return yield* requireReplacement("restore", input)
 })
 
@@ -110,22 +91,6 @@ export const requireRetirable = Effect.fn("Wiki.requireRetirable")(function* (
   }
   const boundary = yield* resolveWikiWriteBoundary(spaces, input.authority, snapshot, operation)
   yield* requireWikiWritePaths(boundary, operation, [current.resource.path])
-  const pageIsSpaceBound = yield* isSpacePage(spaces, input.pageId, current.resource.path).pipe(
-    Effect.mapError((cause) =>
-      wikiError(operation, "storage", "Could not check Space page ownership", {
-        pageId: input.pageId,
-        cause
-      })
-    )
-  )
-  if (pageIsSpaceBound) {
-    return yield* wikiError(
-      operation,
-      "blocked",
-      "A Space owns this Wiki page; move or archive the Space first",
-      { pageId: input.pageId }
-    )
-  }
   if (isReadme(current.resource.path)) {
     const directory = posix.dirname(current.resource.path)
     const prefix = `${directory}/`

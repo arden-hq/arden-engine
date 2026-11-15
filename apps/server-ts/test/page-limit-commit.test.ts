@@ -21,7 +21,7 @@ import {
   overPageLimit,
   updatePage,
   type WikiCommitIdentity,
-  type WikiPageOperation
+  type WikiWrite
 } from "../src/wiki/commit.js"
 import type { WikiError } from "../src/wiki/errors.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
@@ -32,6 +32,7 @@ import { formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRestoreMethods } from "../src/wiki/restore.js"
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import { partialService } from "./kit.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const OWNER: WikiCommitIdentity = {
   actor: "user:desktop",
@@ -97,14 +98,14 @@ const withWiki = async <A>(
   }
 }
 
-const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiPageOperation) =>
+const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiWrite) =>
   Effect.gen(function* () {
     const head = yield* repository.currentRevision
     return yield* repository.commit({
       actor: "test",
       origin: "test.unchecked",
       reason: "write past the rules",
-      operations: [operation],
+      operations: [operation.operation],
       expectedHead: head
     })
   })
@@ -209,10 +210,12 @@ describe("the page size limit at the commit", () => {
         )
         const big = yield* repository.get("big")
         if (big === null) throw new Error("topics/big.md is missing")
-        const write = (operation: WikiPageOperation) =>
+        const write = (operation: WikiWrite) =>
           repository.currentRevision.pipe(
             Effect.flatMap((head) =>
-              commitWiki(repository, { ...OWNER, expectedRevision: head }, [operation])
+              commitWiki(withoutSpaces(repository), { ...OWNER, expectedRevision: head }, [
+                operation
+              ])
             ),
             Effect.flip,
             Effect.map((error) => error.message)
@@ -240,14 +243,16 @@ describe("the page size limit at the commit", () => {
           repository,
           createPage("me", "me.md", content("me", "Me", "g".repeat(9_400)))
         )
-        const write = (operation: (page: ResourceVersion) => WikiPageOperation) =>
+        const write = (operation: (page: ResourceVersion) => WikiWrite) =>
           Effect.gen(function* () {
             const page = yield* repository.get("me")
             if (page === null) throw new Error("me.md is missing")
             const head = yield* repository.currentRevision
-            return yield* commitWiki(repository, { ...OWNER, expectedRevision: head }, [
-              operation(page)
-            ]).pipe(Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" }))
+            return yield* commitWiki(
+              withoutSpaces(repository),
+              { ...OWNER, expectedRevision: head },
+              [operation(page)]
+            ).pipe(Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" }))
           })
         return {
           shorter: yield* write((page) => updatePage(page, content("me", "Me", "g".repeat(9_200)))),
@@ -273,7 +278,7 @@ describe("the page size limit at the commit", () => {
         const write = (identity: WikiCommitIdentity) =>
           repository.currentRevision.pipe(
             Effect.flatMap((head) =>
-              commitWiki(repository, { ...identity, expectedRevision: head }, [
+              commitWiki(withoutSpaces(repository), { ...identity, expectedRevision: head }, [
                 createPage("me", "me.md", content("me", "Me", "h".repeat(9_068)))
               ])
             ),
@@ -302,7 +307,7 @@ describe("the page size limit at the commit", () => {
         const head = yield* repository.currentRevision
         const batch = (expected: ResourceVersion) =>
           commitWiki(
-            repository,
+            withoutSpaces(repository),
             {
               actor: "memory:capture",
               origin: { kind: "capture", replayKey: "capture-batch-1", sessionId: undefined },
@@ -320,7 +325,7 @@ describe("the page size limit at the commit", () => {
         const shortened = yield* repository.get("me")
         if (shortened === null) throw new Error("me.md is missing")
         yield* commitWiki(
-          repository,
+          withoutSpaces(repository),
           { ...OWNER, expectedRevision: yield* repository.currentRevision },
           [updatePage(shortened, content("me", "Me", "Short."))]
         )
@@ -336,7 +341,7 @@ describe("the page size limit at the commit", () => {
       const pages = await Effect.runPromise(
         Effect.gen(function* () {
           const repository = yield* ManagedFileRepository
-          yield* initializeWikiFoundation(repository, { workingRoot: root })
+          yield* initializeWikiFoundation(withoutSpaces(repository), { workingRoot: root })
           return (yield* repository.listResources()).map((resource) => resource.path).sort()
         }).pipe(
           Effect.scoped,

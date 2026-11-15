@@ -308,11 +308,7 @@ export const WikiHandlers = HttpApiBuilder.group(
       )
       .handle("acceptRename", ({ params }) =>
         wiki
-          .acceptRename({
-            approvalId: params.approvalId,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-            commit: OWNER_RENAME
-          })
+          .acceptRename({ approvalId: params.approvalId })
           .pipe(Effect.map(renameApproval), Effect.mapError(writeError))
       )
       .handle("rejectRename", ({ params, payload }) =>

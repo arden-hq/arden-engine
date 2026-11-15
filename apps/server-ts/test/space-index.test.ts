@@ -13,7 +13,7 @@ import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
 import { formatWikiPage, parseWikiPage } from "../src/wiki/page.js"
 import type { PageRecord } from "../src/wiki/snapshot.js"
-import { commitWiki } from "../src/wiki/commit.js"
+import { commitWiki, type WikiCommitPoint } from "../src/wiki/commit.js"
 import {
   bindingOwnsPath,
   planSpacePage,
@@ -32,7 +32,7 @@ import { wikiError } from "../src/wiki/errors.js"
 import { Wiki } from "../src/wiki/service.js"
 import { createSpaceWithPage, type WikiSpacePageInput } from "../src/wiki/space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
+import { withoutSpaces, namedTool, runRecord, toolContext } from "./fixtures/wiki-repository.js"
 import { partialService, serverRunContext } from "./kit.js"
 import { freePage } from "./fixtures/free-space-page.js"
 
@@ -187,12 +187,13 @@ const insertSpace = (sql: SqlClient.SqlClient, spaceId: string) =>
 const archiveRow = (sql: SqlClient.SqlClient, spaceId: string) =>
   sql`UPDATE spaces SET archived_at = ${AT} WHERE space_id = ${spaceId}`
 
-const renamePage = (repository: ManagedFileRepository["Service"], pageId: string, path: string) =>
+const renamePage = (point: WikiCommitPoint, pageId: string, path: string) =>
   Effect.gen(function* () {
+    const { repository } = point
     const current = yield* repository.get(pageId)
     if (current === null) return yield* Effect.die(new Error("the Space page is missing"))
     yield* commitWiki(
-      repository,
+      point,
       { ...ownerInApp("rename a Space page"), expectedRevision: yield* repository.currentRevision },
       [movePage(current, path)]
     )
@@ -308,7 +309,7 @@ describe("every active Space has a page", () => {
         const current = yield* repository.get(pageId)
         if (current === null) return yield* Effect.die(new Error("the Space page is missing"))
         yield* commitWiki(
-          repository,
+          withoutSpaces(repository),
           {
             expectedRevision: head,
             actor: "user:desktop",
@@ -335,7 +336,7 @@ describe("every active Space has a page", () => {
         const first = yield* methods.ensureSpacePage({ spaceId: space.space_id })
         const pageId = first?.space.page_id ?? ""
         yield* archiveRow(sql, space.space_id)
-        yield* renamePage(repository, pageId, "areas/made-up-renamed.md")
+        yield* renamePage({ repository, spaces }, pageId, "areas/made-up-renamed.md")
         const restored = yield* methods.restoreSpace(space.space_id)
         return {
           kind: restored?.kind,
@@ -418,12 +419,16 @@ describe("every active Space has a page", () => {
     })
   })
 
-  it("counts a Space whose page was renamed as bound again, not kept", async () => {
+  it("counts a Space whose page moved in older history as bound again, not kept", async () => {
     const outcome = await withSpacesAndWiki((methods, { spaces, repository }) =>
       Effect.gen(function* () {
         const space = yield* spaces.create({ name: "Made-up garden" })
         const first = yield* methods.ensureSpacePage({ spaceId: space.space_id })
-        yield* renamePage(repository, first?.space.page_id ?? "", "areas/made-up-renamed.md")
+        yield* renamePage(
+          withoutSpaces(repository),
+          first?.space.page_id ?? "",
+          "areas/made-up-renamed.md"
+        )
         const counts = yield* methods.ensureSpacePages()
         const path = (yield* spaces.get(space.space_id))?.page_path
         return { counts, path }

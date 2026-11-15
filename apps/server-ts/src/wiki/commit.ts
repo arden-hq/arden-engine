@@ -10,8 +10,9 @@ import { Effect, Option, Schema } from "effect"
 import { posix } from "node:path"
 
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
+import type { SpaceStore, SpaceStoreError } from "../persistence/spaces/store.js"
 import { pageKind, producingAutomation, recordFolders, type RecordFolders } from "./collections.js"
-import { aliasesAreHuman, isReadme, parseWikiPage } from "./page.js"
+import { aliasesAreHuman, formatRedirectPage, isReadme, parseWikiPage } from "./page.js"
 import {
   guardedLines,
   openRetractions,
@@ -20,6 +21,7 @@ import {
   type OpenRetraction
 } from "./retraction.js"
 import type { PageRecord } from "./snapshot.js"
+import { spacePageCheck } from "./space-index.js"
 import { isCodeOwnedPage } from "./system-pages.js"
 
 export type WikiCommitOrigin =
@@ -45,6 +47,16 @@ export interface WikiCommitIdentity {
   readonly origin: WikiCommitOrigin
   readonly reason: string
 }
+
+/** Tidy, the upkeep Automation; the system handler registry decides which Automation that is. */
+export const upkeepOrigin = (
+  automationId: string,
+  chainDepth?: number
+): Extract<WikiCommitOrigin, { readonly kind: "upkeep" }> => ({
+  kind: "upkeep",
+  automationId,
+  ...(chainDepth === undefined ? {} : { chainDepth })
+})
 
 /** The owner, changing Memory in the app. */
 export const ownerInApp = (
@@ -73,7 +85,7 @@ const chatOf = (origin: string, base: string): string | undefined | null => {
     : null
 }
 
-const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
+export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
   switch (origin.kind) {
     case "user":
       return origin.via
@@ -118,11 +130,10 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
     automationId === "" ? origin : `${prefix ?? ""}${automationId}`
   )
   if (automationId === "" && retired === undefined) return { kind: "system", name: origin }
-  return {
-    kind: prefix === UPKEEP_PREFIX || retired !== undefined ? "upkeep" : "automation",
-    automationId: retired ?? automationId,
-    ...(chained?.[2] === undefined ? {} : { chainDepth: Number(chained[2]) })
-  }
+  const chainDepth = chained?.[2] === undefined ? undefined : Number(chained[2])
+  return prefix === UPKEEP_PREFIX || retired !== undefined
+    ? upkeepOrigin(retired ?? automationId, chainDepth)
+    : { kind: "automation", automationId, ...(chainDepth === undefined ? {} : { chainDepth }) }
 }
 
 export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => {
@@ -163,49 +174,114 @@ const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
 const isOwnerOrigin = (origin: WikiCommitOrigin): boolean =>
   origin.kind === "user" || origin.kind === "forget"
 
-export type WikiPageOperation = CommitInput["operations"][number]
+const isCaptureWriter = (origin: WikiCommitOrigin): boolean => origin.kind === "capture"
+
+const isSpacePageWriter = (origin: WikiCommitOrigin): boolean => origin.kind === "space_page"
+
+type WikiPageOperation = CommitInput["operations"][number]
+
+type Operation<Tag extends WikiPageOperation["_tag"]> = Extract<
+  WikiPageOperation,
+  { readonly _tag: Tag }
+>
+
+/**
+ * One page write, with the action its caller states. The commit rules read the action, never
+ * the operation's shape: a merge, a version restore, a report and a rename's link rewrite all
+ * replace a page's content, and each is told apart only here.
+ */
+export type WikiWrite =
+  | { readonly action: "create"; readonly operation: Operation<"Create"> }
+  | { readonly action: "publish"; readonly operation: Operation<"Create" | "Update"> }
+  | {
+      readonly action: "edit" | "restore_version" | "merge" | "rewrite_links"
+      readonly operation: Operation<"Update">
+    }
+  | { readonly action: "move"; readonly operation: Operation<"Move"> }
+  | { readonly action: "archive"; readonly operation: Operation<"Archive"> }
+  | { readonly action: "restore_archived"; readonly operation: Operation<"Restore"> }
+
+type WikiPageAction = WikiWrite["action"]
 
 type PageVersion = Pick<ResourceVersion, "resourceId" | "versionId">
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
-export const createPage = (
-  resourceId: string,
-  path: string,
-  content: string
-): WikiPageOperation => ({
+const created = (resourceId: string, path: string, content: string): Operation<"Create"> => ({
   _tag: "Create",
   resourceId,
   path,
   content: encoder.encode(content)
 })
 
-export const updatePage = (page: PageVersion, content: string): WikiPageOperation => ({
+const updated = (page: PageVersion, content: string): Operation<"Update"> => ({
   _tag: "Update",
   resourceId: page.resourceId,
   expectedVersion: page.versionId,
   content: encoder.encode(content)
 })
 
-export const movePage = (page: PageVersion, path: string, content?: string): WikiPageOperation => ({
-  _tag: "Move",
-  resourceId: page.resourceId,
-  expectedVersion: page.versionId,
-  path,
-  ...(content === undefined ? {} : { content: encoder.encode(content) })
+export const createPage = (resourceId: string, path: string, content: string): WikiWrite => ({
+  action: "create",
+  operation: created(resourceId, path, content)
 })
 
-export const archivePage = (page: PageVersion): WikiPageOperation => ({
-  _tag: "Archive",
-  resourceId: page.resourceId,
-  expectedVersion: page.versionId
+export const updatePage = (page: PageVersion, content: string): WikiWrite => ({
+  action: "edit",
+  operation: updated(page, content)
 })
 
-export const restorePage = (page: PageVersion): WikiPageOperation => ({
-  _tag: "Restore",
-  resourceId: page.resourceId,
-  expectedVersion: page.versionId
+/** A report its producing Automation publishes: its first version or a new one. */
+export const publishReport = (
+  page: PageVersion | { readonly resourceId: string; readonly path: string },
+  content: string
+): WikiWrite => ({
+  action: "publish",
+  operation:
+    "versionId" in page ? updated(page, content) : created(page.resourceId, page.path, content)
+})
+
+/** An earlier version's content, written as the page's next version. */
+export const restoreVersion = (page: PageVersion, content: string): WikiWrite => ({
+  action: "restore_version",
+  operation: updated(page, content)
+})
+
+/** The page replaced by a redirect to `redirectTo`; restoring an earlier version undoes it. */
+export const mergePage = (
+  page: PageVersion,
+  redirect: { readonly pageId: string; readonly title: string; readonly redirectTo: string }
+): WikiWrite => ({
+  action: "merge",
+  operation: updated(page, formatRedirectPage(redirect))
+})
+
+/** A rename's new link targets in a page that links to the renamed one. */
+export const rewriteLinks = (page: PageVersion, content: string): WikiWrite => ({
+  action: "rewrite_links",
+  operation: updated(page, content)
+})
+
+export const movePage = (page: PageVersion, path: string, content?: string): WikiWrite => ({
+  action: "move",
+  operation: {
+    _tag: "Move",
+    resourceId: page.resourceId,
+    expectedVersion: page.versionId,
+    path,
+    ...(content === undefined ? {} : { content: encoder.encode(content) })
+  }
+})
+
+export const archivePage = (page: PageVersion): WikiWrite => ({
+  action: "archive",
+  operation: { _tag: "Archive", resourceId: page.resourceId, expectedVersion: page.versionId }
+})
+
+export const restoreArchivedPage = (page: PageVersion): WikiWrite => ({
+  action: "restore_archived",
+  operation: { _tag: "Restore", resourceId: page.resourceId, expectedVersion: page.versionId }
 })
 
 class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("WikiCommitRuleError", {
@@ -215,40 +291,45 @@ class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()("Wik
     "records",
     "retire",
     "code_owned",
-    "retraction"
+    "retraction",
+    "space"
   ] as const),
   message: Schema.String
 }) {}
 
-export type WikiCommitError = RevisionError | WikiCommitRuleError
+export type WikiCommitError = RevisionError | SpaceStoreError | WikiCommitRuleError
+
+/** What the commit rules read: the pages and their history, and which pages Spaces own. */
+export interface WikiCommitPoint {
+  readonly repository: ManagedFileRepositoryShape
+  readonly spaces: Pick<SpaceStore["Service"], "activeBindings">
+}
 
 export const commitWiki = (
-  repository: ManagedFileRepositoryShape,
+  point: WikiCommitPoint,
   options: WikiCommitIdentity & {
     readonly expectedRevision: string | null
     readonly idempotencyKey?: string
   },
-  operations: ReadonlyArray<WikiPageOperation>
+  writes: ReadonlyArray<WikiWrite>
 ): Effect.Effect<CommitResult, WikiCommitError> => {
   const replayKey =
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
-  const commit = repository.commit({
+  const commit = point.repository.commit({
     actor: options.actor,
     origin: encodeWikiOrigin(options.origin),
     reason: options.reason,
-    operations,
+    operations: writes.map((write) => write.operation),
     ...(options.expectedRevision === null
       ? { expectedHead: null, enforceExpectedHead: true }
       : { expectedHead: options.expectedRevision }),
     ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
   })
-  const checked = requireCommitRules(repository, options.origin, operations).pipe(
-    Effect.andThen(commit)
-  )
+  const checked = requireCommitRules(point, options.origin, writes).pipe(Effect.andThen(commit))
   return replayKey === undefined
     ? checked
-    : replayOrCommit(repository, replayKey, { checked, landed: commit })
+    : replayOrCommit(point.repository, replayKey, { checked, landed: commit })
 }
 
 const replayOrCommit = (
@@ -268,22 +349,25 @@ const replayOrCommit = (
  * rules that bind an outside edit, and is guarded by the head the caller decided on.
  */
 export const commitOutsideChange = (
-  repository: ManagedFileRepositoryShape,
+  point: WikiCommitPoint,
   options: WikiCommitIdentity & { readonly expectedRevision: string | null },
   change: AdoptableWorkingChange
 ): Effect.Effect<CommitResult, WikiCommitError> =>
-  requireCommitRules(repository, options.origin, [
+  requireCommitRules(point, options.origin, [
     change.kind === "changed"
       ? {
-          _tag: "Update",
-          resourceId: change.resource.resourceId,
-          expectedVersion: change.resource.versionId,
-          content: change.content
+          action: "edit",
+          operation: {
+            _tag: "Update",
+            resourceId: change.resource.resourceId,
+            expectedVersion: change.resource.versionId,
+            content: change.content
+          }
         }
       : archivePage(change.resource)
   ]).pipe(
     Effect.andThen(
-      repository.adoptWorkingChange(change, {
+      point.repository.adoptWorkingChange(change, {
         actor: options.actor,
         origin: encodeWikiOrigin(options.origin),
         reason: options.reason,
@@ -292,12 +376,52 @@ export const commitOutsideChange = (
     )
   )
 
-const requireHumanAliases = (
-  operation: WikiPageOperation
-): Effect.Effect<void, WikiCommitRuleError> => {
-  const content = "content" in operation ? operation.content : undefined
-  if (content === undefined) return Effect.void
-  return parseWikiPage(decoder.decode(content)).pipe(
+/** One write and the facts the rules read about it, each looked up once per commit. */
+interface ResolvedWrite {
+  readonly action: WikiPageAction
+  readonly resourceId: string
+  /** The page as it stands before the write, archived or not; null for a new page. */
+  readonly before: ResourceVersion | null
+  /** Where the page is before the write, and where it is after; none once archived. */
+  readonly path: { readonly before: string | undefined; readonly after: string | undefined }
+  /** The content the write gives; none for an archive, a restore or a move that keeps it. */
+  readonly given: Uint8Array | undefined
+  /** The content of `before`, read at most once. */
+  readonly beforeContent: Effect.Effect<Uint8Array | null, RevisionError>
+}
+
+const resolveWrite = Effect.fn("Wiki.resolveWrite")(function* (
+  repository: ManagedFileRepositoryShape,
+  { action, operation }: WikiWrite
+): Effect.fn.Return<ResolvedWrite, RevisionError> {
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const moved = "path" in operation ? operation.path : undefined
+  return {
+    action,
+    resourceId: operation.resourceId,
+    before,
+    path: {
+      before: before?.path,
+      after: operation._tag === "Archive" ? undefined : (moved ?? before?.path)
+    },
+    given: "content" in operation ? operation.content : undefined,
+    beforeContent: yield* Effect.cached(
+      before === null ? Effect.succeed(null) : repository.readVersion(before)
+    )
+  }
+})
+
+interface CommitView {
+  readonly repository: ManagedFileRepositoryShape
+  readonly origin: WikiCommitOrigin
+  readonly folders: Effect.Effect<RecordFolders, RevisionError>
+  readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
+  readonly spaceOwns: (pageId: string, path: string) => Effect.Effect<boolean, SpaceStoreError>
+}
+
+const requireHumanAliases = (write: ResolvedWrite): Effect.Effect<void, WikiCommitRuleError> => {
+  if (write.given === undefined) return Effect.void
+  return parseWikiPage(decoder.decode(write.given)).pipe(
     Effect.option,
     Effect.flatMap((page) =>
       Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
@@ -305,7 +429,7 @@ const requireHumanAliases = (
         : Effect.fail(
             new WikiCommitRuleError({
               rule: "aliases",
-              message: `Wiki page ${operation.resourceId} keeps a path or a repeated name as an alias`
+              message: `Wiki page ${write.resourceId} keeps a path or a repeated name as an alias`
             })
           )
     )
@@ -343,32 +467,30 @@ const limitRefusal = (
 }
 
 const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
-  { repository, origin }: CommitView,
-  operation: WikiPageOperation
+  { origin }: CommitView,
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  if (operation._tag === "Archive") return
-  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
-  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
+  const path = write.path.after
   if (path === undefined) return
-  const given = "content" in operation ? operation.content : undefined
-  const over = yield* bodyOverLimit(repository, path, operation.resourceId, given ?? before)
+  const written = write.given === undefined ? write.beforeContent : Effect.succeed(write.given)
+  const over = yield* bodyOverLimit(path, write.resourceId, written)
   if (over === undefined) return
   const was =
-    before?.state === "active"
-      ? yield* bodyOverLimit(repository, before.path, operation.resourceId, before)
+    write.before?.state === "active"
+      ? yield* bodyOverLimit(write.before.path, write.resourceId, write.beforeContent)
       : undefined
   if (was !== undefined && over.chars <= was.chars) return
   return yield* limitRefusal(origin, path, over)
 })
 
 const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
-  repository: ManagedFileRepositoryShape,
   path: string,
   pageId: string,
-  content: Uint8Array | ResourceVersion | null
+  content: Effect.Effect<Uint8Array | null, RevisionError>
 ): Effect.fn.Return<{ readonly chars: number; readonly limit: number } | undefined, RevisionError> {
-  if (content === null || corePageBudget({ path, pageId }) === undefined) return undefined
-  const bytes = content instanceof Uint8Array ? content : yield* repository.readVersion(content)
+  if (corePageBudget({ path, pageId }) === undefined) return undefined
+  const bytes = yield* content
+  if (bytes === null) return undefined
   const page = yield* parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
   return Option.isNone(page) ? undefined : overPageLimit({ path, pageId, body: page.value.body })
 })
@@ -396,31 +518,11 @@ const currentRecordFolders = Effect.fn("Wiki.currentRecordFolders")(function* (
 const ruleError = (rule: WikiCommitRuleError["rule"], message: string) =>
   new WikiCommitRuleError({ rule, message })
 
-const pathBefore = Effect.fn("Wiki.pathBefore")(function* (
-  repository: ManagedFileRepositoryShape,
-  operation: WikiPageOperation
-): Effect.fn.Return<string | undefined, RevisionError> {
-  if (operation._tag === "Create") return undefined
-  return (yield* repository.get(operation.resourceId))?.path
-})
-
-const writesRedirect = (operation: WikiPageOperation): Effect.Effect<boolean> =>
-  operation._tag === "Update"
-    ? parseWikiPage(decoder.decode(operation.content)).pipe(
-        Effect.map((page) => page.lifecycle === "redirect"),
-        Effect.orElseSucceed(() => false)
-      )
-    : Effect.succeed(false)
-
 const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
-  { repository, folders }: CommitView,
-  operation: WikiPageOperation
+  { folders }: CommitView,
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  const paths = [
-    yield* pathBefore(repository, operation),
-    "path" in operation ? operation.path : undefined
-  ]
-  for (const path of paths) {
+  for (const path of [write.path.before, write.path.after]) {
     if (path === undefined) continue
     const kind = pageKind(yield* folders, path)
     if (kind.kind === "knowledge") continue
@@ -434,52 +536,61 @@ const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
 
 const requireNoMoveIntoRecords = Effect.fn("Wiki.requireNoMoveIntoRecords")(function* (
   { folders }: CommitView,
-  operation: WikiPageOperation
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  if (operation._tag !== "Move") return
-  const producer = producingAutomation(yield* folders, operation.path)
+  if (write.action !== "move" || write.path.after === undefined) return
+  const producer = producingAutomation(yield* folders, write.path.after)
   if (producer === undefined) return
   return yield* ruleError(
     "records",
-    `${operation.path} is in the record folder of Automation ${producer}, which only it fills, by publishing reports. Nothing was moved.`
+    `${write.path.after} is in the record folder of Automation ${producer}, which only it fills, by publishing reports. Nothing was moved.`
   )
 })
 
+const isProducer = (origin: WikiCommitOrigin, producer: string): boolean =>
+  origin.kind === "automation" && origin.automationId === producer
+
 const requireAutomatedRecordWrite = Effect.fn("Wiki.requireAutomatedRecordWrite")(function* (
-  { repository, origin, folders }: CommitView,
-  operation: WikiPageOperation
+  { origin, folders }: CommitView,
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  if (operation._tag === "Restore") return
-  if (operation._tag === "Create") {
-    const producer = producingAutomation(yield* folders, operation.path)
-    if (
-      producer === undefined ||
-      (origin.kind === "automation" && origin.automationId === producer)
-    )
+  switch (write.action) {
+    case "edit":
+    case "restore_version":
+    case "rewrite_links":
+    case "restore_archived":
       return
-    return yield* ruleError(
-      "records",
-      `${operation.path} is in the record folder of Automation ${producer}; only that Automation adds pages to it, by publishing reports. Nothing was saved.`
-    )
+    case "create":
+    case "publish": {
+      if (write.before !== null || write.path.after === undefined) return
+      const producer = producingAutomation(yield* folders, write.path.after)
+      if (producer === undefined || (write.action === "publish" && isProducer(origin, producer)))
+        return
+      return yield* ruleError(
+        "records",
+        `${write.path.after} is in the record folder of Automation ${producer}; only that Automation adds pages to it, by publishing reports. Nothing was saved.`
+      )
+    }
+    case "move":
+    case "archive":
+    case "merge": {
+      if (write.path.before === undefined) return
+      const producer = producingAutomation(yield* folders, write.path.before)
+      if (producer === undefined) return
+      return yield* ruleError(
+        "records",
+        `${write.path.before} belongs to the record folder of Automation ${producer}. An Automation run does not move, archive or merge away its pages. Nothing was saved.`
+      )
+    }
   }
-  if (operation._tag === "Update" && !(yield* writesRedirect(operation))) return
-  const path = yield* pathBefore(repository, operation)
-  if (path === undefined) return
-  const producer = producingAutomation(yield* folders, path)
-  if (producer === undefined) return
-  return yield* ruleError(
-    "records",
-    `${path} belongs to the record folder of Automation ${producer}. An Automation run does not move, archive or merge away its pages. Nothing was saved.`
-  )
 })
 
 const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(function* (
   { repository }: CommitView,
-  operation: WikiPageOperation
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  const merge = yield* writesRedirect(operation)
-  if (operation._tag !== "Archive" && !merge) return
-  const path = yield* pathBefore(repository, operation)
+  if (write.action !== "archive" && write.action !== "merge") return
+  const path = write.path.before
   if (path === undefined) return
   if (posix.dirname(path) === ".") {
     return yield* ruleError(
@@ -487,71 +598,106 @@ const requireAutomatedRetirement = Effect.fn("Wiki.requireAutomatedRetirement")(
       `${path} is at the Memory root. An Automation run does not archive or merge it. Nothing was saved.`
     )
   }
-  if (!merge) return
-  for (const commit of yield* repository.history({
-    resourceId: operation.resourceId,
-    limit: null
-  })) {
+  if (write.action === "merge" && (yield* wasUnmerged(repository, write.resourceId)))
+    return yield* ruleError(
+      "retire",
+      `${path} was merged before and then restored, so it stays its own page. Leave it.`
+    )
+})
+
+/** Whether the page was a redirect in some earlier version: merged once, then restored. */
+const wasUnmerged = Effect.fn("Wiki.wasUnmerged")(function* (
+  repository: ManagedFileRepositoryShape,
+  resourceId: string
+): Effect.fn.Return<boolean, RevisionError> {
+  for (const commit of yield* repository.history({ resourceId, limit: null })) {
     const version = commit.changes.find(
-      (change) => (change.after ?? change.before)?.resourceId === operation.resourceId
+      (change) => (change.after ?? change.before)?.resourceId === resourceId
     )?.after
     if (version === undefined || version === null || version.state !== "active") continue
     const earlier = yield* parseWikiPage(
       decoder.decode(yield* repository.readVersion(version))
     ).pipe(Effect.option)
-    if (Option.isSome(earlier) && earlier.value.lifecycle === "redirect") {
-      return yield* ruleError(
-        "retire",
-        `${path} was merged before and then restored, so it stays its own page. Leave it.`
-      )
-    }
+    if (Option.isSome(earlier) && earlier.value.lifecycle === "redirect") return true
   }
+  return false
+})
+
+/**
+ * A Space's own page keeps its path: no writer moves, archives or merges it away, since the Space
+ * is moved or archived first. Capture also leaves its earlier versions alone.
+ */
+const requireSpacePageKept = Effect.fn("Wiki.requireSpacePageKept")(function* (
+  { origin, spaceOwns }: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  const path = write.path.before
+  if (path === undefined) return
+  const retires = write.action === "merge" || write.path.after !== path
+  if (!retires && !(write.action === "restore_version" && isCaptureWriter(origin))) return
+  if (!(yield* spaceOwns(write.resourceId, path))) return
+  return yield* ruleError(
+    "space",
+    retires
+      ? `${path} is a Space's own page. Move or archive the Space first. Nothing was saved.`
+      : `${path} belongs to a Space. Capture does not restore an earlier version of a Space's page. Nothing was saved.`
+  )
+})
+
+/** Only a merge turns a page into a redirect; the owner may still do it by hand in the file. */
+const requireRedirectOnlyByMerge = Effect.fn("Wiki.requireRedirectOnlyByMerge")(function* (
+  _view: CommitView,
+  write: ResolvedWrite
+): Effect.fn.Return<void, WikiCommitError> {
+  if (write.before === null || write.given === undefined || write.action === "merge") return
+  const page = yield* parseWikiPage(decoder.decode(write.given)).pipe(Effect.option)
+  if (Option.isNone(page) || page.value.lifecycle !== "redirect") return
+  return yield* ruleError(
+    "retire",
+    `${write.before.path} would become a redirect, which only a merge makes. Nothing was saved.`
+  )
 })
 
 const keepsSystemPage = Effect.fn("Wiki.keepsSystemPage")(function* (
   origin: WikiCommitOrigin,
-  operation: WikiPageOperation,
-  before: ResourceVersion | null
+  write: ResolvedWrite
 ): Effect.fn.Return<boolean> {
-  switch (operation._tag) {
-    case "Create":
-      return origin.kind === "forget"
-    case "Archive":
+  switch (write.action) {
+    case "create":
+    case "publish":
+      if (write.before === null) return origin.kind === "forget"
+      break
+    case "archive":
       return false
-    case "Update":
-    case "Move":
-    case "Restore": {
-      const path = "path" in operation ? operation.path : undefined
-      if (path !== undefined && path !== before?.path) return false
-      const content = "content" in operation ? operation.content : undefined
-      if (content === undefined) return true
-      const page = yield* parseWikiPage(decoder.decode(content)).pipe(Effect.option)
-      return Option.isNone(page) || page.value.lifecycle === "active"
-    }
+    case "move":
+      if (write.path.after !== write.path.before) return false
+      break
+    case "edit":
+    case "restore_version":
+    case "merge":
+    case "rewrite_links":
+    case "restore_archived":
+      break
   }
+  if (write.given === undefined) return true
+  const page = yield* parseWikiPage(decoder.decode(write.given)).pipe(Effect.option)
+  return Option.isNone(page) || page.value.lifecycle === "active"
 })
 
-interface CommitView {
-  readonly repository: ManagedFileRepositoryShape
-  readonly origin: WikiCommitOrigin
-  readonly folders: Effect.Effect<RecordFolders, RevisionError>
-  readonly guarded: Effect.Effect<ReadonlyMap<string, OpenRetraction>, RevisionError>
-}
-
 const requireSystemPageKept = Effect.fn("Wiki.requireSystemPageKept")(function* (
-  { repository, origin }: CommitView,
-  operation: WikiPageOperation
+  { origin }: CommitView,
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
-  const paths = [before?.path, "path" in operation ? operation.path : undefined]
-  const path = paths.find((candidate) => candidate !== undefined && isCodeOwnedPage(candidate))
+  const path = [write.path.before, write.path.after].find(
+    (candidate) => candidate !== undefined && isCodeOwnedPage(candidate)
+  )
   if (path === undefined) return
   if (!isOwnerOrigin(origin))
     return yield* ruleError(
       "code_owned",
       `${path} is kept by Arden for the owner. Nothing was saved; leave it unchanged.`
     )
-  if (yield* keepsSystemPage(origin, operation, before)) return
+  if (yield* keepsSystemPage(origin, write)) return
   return yield* ruleError(
     "code_owned",
     `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
@@ -568,39 +714,34 @@ const pageBody = (bytes: Uint8Array): Effect.Effect<string> => {
 }
 
 const keepsForgottenLines = (origin: WikiCommitOrigin): boolean =>
-  !isOwnerOrigin(origin) && origin.kind !== "space_page"
+  !isOwnerOrigin(origin) && !isSpacePageWriter(origin)
 
 const requireNoRetractedLine = Effect.fn("Wiki.requireNoRetractedLine")(function* (
-  { repository, guarded }: CommitView,
-  operation: WikiPageOperation
+  { guarded }: CommitView,
+  write: ResolvedWrite
 ): Effect.fn.Return<void, WikiCommitError> {
-  if (operation._tag === "Archive") return
+  const path = write.path.after
+  if (path === undefined) return
   const lines = yield* guarded
   if (lines.size === 0) return
-  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
-  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
-  const given = "content" in operation ? operation.content : undefined
-  const source = given ?? (operation._tag === "Restore" ? before : null)
-  if (path === undefined || isCodeOwnedPage(path) || source === null) return
-  const after = yield* pageBody(
-    source instanceof Uint8Array ? source : yield* repository.readVersion(source)
-  )
-  const had =
-    before === null || operation._tag === "Restore" || before.state !== "active"
-      ? undefined
-      : yield* pageBody(yield* repository.readVersion(before))
+  const source =
+    write.given ?? (write.action === "restore_archived" ? yield* write.beforeContent : null)
+  if (isCodeOwnedPage(path) || source === null) return
+  const after = yield* pageBody(source)
+  const kept = write.before?.state === "active"
+  const had = kept ? yield* pageBody((yield* write.beforeContent) ?? new Uint8Array()) : undefined
   const entry = putBack(lines, had, after)
   if (entry !== undefined) return yield* ruleError("retraction", retractionRefusal(path, entry))
 })
 
+/** Each rule, the writers it binds and the check it makes on every write of a commit. */
 const COMMIT_RULES: ReadonlyArray<{
   readonly binds: (origin: WikiCommitOrigin) => boolean
-  readonly check: (
-    view: CommitView,
-    operation: WikiPageOperation
-  ) => Effect.Effect<void, WikiCommitError>
+  readonly check: (view: CommitView, write: ResolvedWrite) => Effect.Effect<void, WikiCommitError>
 }> = [
-  { binds: () => true, check: (_view, operation) => requireHumanAliases(operation) },
+  { binds: () => true, check: requireSpacePageKept },
+  { binds: (origin) => !isOwnerOrigin(origin), check: requireRedirectOnlyByMerge },
+  { binds: () => true, check: (_view, write) => requireHumanAliases(write) },
   { binds: isUpkeep, check: requireNotRecord },
   { binds: () => true, check: requireNoMoveIntoRecords },
   { binds: isAutomatedOrigin, check: requireAutomatedRecordWrite },
@@ -610,20 +751,22 @@ const COMMIT_RULES: ReadonlyArray<{
   { binds: keepsForgottenLines, check: requireNoRetractedLine }
 ]
 
-/** Fails with the first rule that refuses one of `operations` for this writer. */
+/** Fails with the first rule that refuses one of `writes` for this writer. */
 export const requireCommitRules = Effect.fn("Wiki.requireCommitRules")(function* (
-  repository: ManagedFileRepositoryShape,
+  { repository, spaces }: WikiCommitPoint,
   origin: WikiCommitOrigin,
-  operations: ReadonlyArray<WikiPageOperation>
+  writes: ReadonlyArray<WikiWrite>
 ): Effect.fn.Return<void, WikiCommitError> {
   const view: CommitView = {
     repository,
     origin,
     folders: yield* Effect.cached(currentRecordFolders(repository)),
-    guarded: yield* Effect.cached(openRetractions(repository).pipe(Effect.map(guardedLines)))
+    guarded: yield* Effect.cached(openRetractions(repository).pipe(Effect.map(guardedLines))),
+    spaceOwns: yield* spacePageCheck(spaces)
   }
+  const resolved = yield* Effect.forEach(writes, (write) => resolveWrite(repository, write))
   for (const rule of COMMIT_RULES) {
     if (!rule.binds(origin)) continue
-    for (const operation of operations) yield* rule.check(view, operation)
+    for (const write of resolved) yield* rule.check(view, write)
   }
 })

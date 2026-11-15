@@ -16,6 +16,7 @@ interface ApprovalRow {
   readonly approval_id: string
   readonly page_id: string
   readonly plan_json: string
+  readonly writer_json: string | null
   readonly status: string
   readonly created_at: string
   readonly commit_id: string | null
@@ -26,6 +27,7 @@ const ApprovalRowSchema = Schema.Struct({
   approval_id: Schema.NonEmptyString,
   page_id: Schema.NonEmptyString,
   plan_json: Schema.String,
+  writer_json: Schema.NullOr(Schema.String),
   status: WikiRenameApprovalStatusSchema,
   created_at: Schema.NonEmptyString,
   commit_id: Schema.NullOr(Schema.NonEmptyString),
@@ -35,7 +37,8 @@ const ApprovalRowSchema = Schema.Struct({
 const CreateInputSchema = Schema.Struct({
   approvalId: Schema.NonEmptyString,
   pageId: Schema.NonEmptyString,
-  plan: JsonObjectSchema
+  plan: JsonObjectSchema,
+  writer: JsonObjectSchema
 })
 
 const DecisionInputSchema = Schema.Struct({
@@ -48,7 +51,7 @@ const FinishInputSchema = Schema.Struct({
   commitId: Schema.NonEmptyString
 })
 
-const columns = `approval_id, page_id, plan_json, status, created_at, commit_id, resolution`
+const columns = `approval_id, page_id, plan_json, writer_json, status, created_at, commit_id, resolution`
 
 const error = (
   operation: WikiRenameStoreOperation,
@@ -103,14 +106,38 @@ const decodeApproval = Effect.fn("SqliteWikiRenameStore.decodeApproval")(functio
       })
     )
   )
-  return {
+  const writer =
+    row.writer_json === null
+      ? undefined
+      : yield* decodeJson(JsonObjectSchema, row.writer_json).pipe(
+          Effect.mapError((cause) =>
+            error(operation, "corrupt", "Stored Wiki rename writer is corrupt", {
+              approvalId: row.approval_id,
+              pageId: row.page_id,
+              cause
+            })
+          )
+        )
+  const fields = {
     approvalId: row.approval_id,
     pageId: row.page_id,
     plan,
-    status: row.status,
     createdAt: row.created_at,
     commitId: row.commit_id,
     resolution: row.resolution
+  }
+  switch (row.status) {
+    case "accepted":
+    case "rejected":
+      return { ...fields, status: row.status, writer }
+    case "pending":
+    case "applying":
+      return writer === undefined
+        ? yield* error(operation, "corrupt", "An open Wiki rename approval has no writer", {
+            approvalId: row.approval_id,
+            pageId: row.page_id
+          })
+        : { ...fields, status: row.status, writer }
   }
 })
 
@@ -172,6 +199,15 @@ export const makeWikiRenameStore = ({
         })
       )
     )
+    const writerJson = yield* encodeJson(JsonObjectSchema, valid.writer).pipe(
+      Effect.mapError((cause) =>
+        error("create", "invalid", "Wiki rename writer cannot be encoded", {
+          approvalId: valid.approvalId,
+          pageId: valid.pageId,
+          cause
+        })
+      )
+    )
     return yield* writer
       .transact(
         Effect.gen(function* () {
@@ -194,7 +230,7 @@ export const makeWikiRenameStore = ({
             )
           const open = openRows[0]
           if (open !== undefined) {
-            if (open.plan_json !== planJson) {
+            if (open.plan_json !== planJson || open.writer_json !== writerJson) {
               return yield* error(
                 "create",
                 "conflict",
@@ -211,13 +247,13 @@ export const makeWikiRenameStore = ({
           const createdAt = DateTime.formatIso(yield* DateTime.now)
           const rows = yield* sql<ApprovalRow>`
         INSERT INTO wiki_rename_approvals (
-          approval_id, page_id, plan_json, status, created_at,
+          approval_id, page_id, plan_json, writer_json, status, created_at,
           commit_id, resolution
         ) VALUES (
-          ${valid.approvalId}, ${valid.pageId}, ${planJson}, 'pending', ${createdAt},
+          ${valid.approvalId}, ${valid.pageId}, ${planJson}, ${writerJson}, 'pending', ${createdAt},
           NULL, NULL
         )
-        RETURNING approval_id, page_id, plan_json, status, created_at, commit_id, resolution
+        RETURNING approval_id, page_id, plan_json, writer_json, status, created_at, commit_id, resolution
       `.pipe(
             Effect.mapError(
               mapStorage("create", "Could not create Wiki rename approval", {
@@ -294,7 +330,7 @@ export const makeWikiRenameStore = ({
         UPDATE wiki_rename_approvals
         SET status = 'applying', resolution = NULL
         WHERE approval_id = ${valid} AND status = 'pending'
-        RETURNING approval_id, page_id, plan_json, status, created_at, commit_id, resolution
+        RETURNING approval_id, page_id, plan_json, writer_json, status, created_at, commit_id, resolution
       `.pipe(
             Effect.mapError(
               mapStorage("begin_apply", "Could not begin Wiki rename approval", {
@@ -332,7 +368,7 @@ export const makeWikiRenameStore = ({
         UPDATE wiki_rename_approvals
         SET status = 'accepted', commit_id = ${valid.commitId}, resolution = NULL
         WHERE approval_id = ${valid.approvalId} AND status = 'applying'
-        RETURNING approval_id, page_id, plan_json, status, created_at, commit_id, resolution
+        RETURNING approval_id, page_id, plan_json, writer_json, status, created_at, commit_id, resolution
       `.pipe(
             Effect.mapError(
               mapStorage("finish_apply", "Could not finish Wiki rename approval", {
@@ -373,7 +409,7 @@ export const makeWikiRenameStore = ({
         UPDATE wiki_rename_approvals
         SET status = 'pending', resolution = ${valid.resolution ?? null}
         WHERE approval_id = ${valid.approvalId} AND status = 'applying'
-        RETURNING approval_id, page_id, plan_json, status, created_at, commit_id, resolution
+        RETURNING approval_id, page_id, plan_json, writer_json, status, created_at, commit_id, resolution
       `.pipe(
             Effect.mapError(
               mapStorage("release_apply", "Could not release Wiki rename approval", {
@@ -412,7 +448,7 @@ export const makeWikiRenameStore = ({
         UPDATE wiki_rename_approvals
         SET status = 'rejected', resolution = ${valid.resolution ?? null}
         WHERE approval_id = ${valid.approvalId} AND status = 'pending'
-        RETURNING approval_id, page_id, plan_json, status, created_at, commit_id, resolution
+        RETURNING approval_id, page_id, plan_json, writer_json, status, created_at, commit_id, resolution
       `.pipe(
             Effect.mapError(
               mapStorage("reject", "Could not reject Wiki rename approval", {

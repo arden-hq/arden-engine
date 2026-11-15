@@ -12,7 +12,8 @@ import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 
 import type { SpaceStore } from "../src/persistence/spaces/store.js"
-import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
+import { makeWikiCaptureMethods } from "../src/wiki/capture.js"
+import { commitWiki, createPage, mergePage, ownerInApp } from "../src/wiki/commit.js"
 import {
   makeOutsideEdits,
   MAX_MISSING_ARCHIVED,
@@ -26,6 +27,7 @@ import { wikiFailure } from "../src/tools/wiki.js"
 import { wikiError, type WikiError } from "../src/wiki/errors.js"
 import { loadSnapshot, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService } from "./kit.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const roots: string[] = []
 
@@ -90,7 +92,7 @@ const withMemory = async <A>(
     Effect.gen(function* () {
       const repository = yield* ManagedFileRepository
       yield* commitWiki(
-        repository,
+        withoutSpaces(repository),
         {
           actor: "test",
           origin: { kind: "system", name: "test" },
@@ -457,7 +459,7 @@ describe("an outside change meets the rules an app edit meets", () => {
               const source = current.pages.find((record) => record.page.pageId === "folder-page")
               if (loads !== 2 || source === undefined) return Effect.void
               return commitWiki(
-                repository,
+                withoutSpaces(repository),
                 {
                   actor: "test",
                   origin: { kind: "system", name: "test" },
@@ -465,14 +467,11 @@ describe("an outside change meets the rules an app edit meets", () => {
                   expectedRevision: current.head
                 },
                 [
-                  updatePage(
-                    source.resource,
-                    formatRedirectPage({
-                      pageId: "folder-page",
-                      title: "Inner",
-                      redirectTo: "kept"
-                    })
-                  )
+                  mergePage(source.resource, {
+                    pageId: "folder-page",
+                    title: "Inner",
+                    redirectTo: "kept"
+                  })
                 ]
               ).pipe(Effect.mapError((cause) => wikiError("observe", "storage", cause.message)))
             })
@@ -605,5 +604,78 @@ describe("one owner for reading files against Memory history", () => {
         (path) => path.startsWith("memory/") || path.startsWith("context/")
       )
     ).toEqual([])
+  })
+})
+
+describe("a Capture patch set that meets a page changed outside Arden", () => {
+  it("saves nothing, so the batch read again saves every page once, after the change is taken in", async () => {
+    const batch = {
+      sessionId: "chat-1",
+      start: { _tag: "Beginning" },
+      end: { _tag: "AfterSequence", sequence: 3 },
+      endMessageId: "message-3"
+    } as const
+    const outcome = await withMemory((memory) =>
+      Effect.gen(function* () {
+        const capture = makeWikiCaptureMethods(
+          memory.repository,
+          spaces,
+          makeWikiListingMethods(memory.repository).read
+        )
+        const patchSet = Effect.gen(function* () {
+          const snapshot = yield* memory.snapshot()
+          const edits = ["edited", "kept"].map((pageId) => {
+            const record = snapshot.pages.find((each) => each.page.pageId === pageId)
+            if (record === undefined) throw new Error(`${pageId} is missing`)
+            return {
+              pageId,
+              expectedVersion: record.resource.versionId,
+              content: page(pageId, `Captured about ${pageId}.\n`)
+            }
+          })
+          return {
+            edits,
+            expectedHead: snapshot.head ?? "",
+            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+            batch,
+            commit: { actor: "memory:capture", reason: "test patch set" }
+          }
+        })
+        const apply = (input: Parameters<typeof capture.applyCapturePatchSet>[0]) =>
+          capture.applyCapturePatchSet(input).pipe(
+            Effect.match({
+              onFailure: (error) => `${error.reason}: ${error.message}`,
+              onSuccess: (result) => result.pages.map((each) => each.path).join(", ")
+            })
+          )
+        yield* Effect.promise(() =>
+          writeFile(join(memory.root, "notes/edited.md"), page("edited", "Changed by hand.\n"))
+        )
+        const seeded = yield* memory.commits()
+        const refused = yield* apply(yield* patchSet)
+        const afterRefusal = yield* memory.commits()
+        yield* memory.settle()
+        const takenIn = yield* memory.commits()
+        const again = yield* patchSet
+        const saved = yield* apply(again)
+        const afterSave = yield* memory.commits()
+        yield* apply(again)
+        return {
+          refused,
+          refusedWrites: afterRefusal - seeded,
+          saved,
+          savedWrites: afterSave - takenIn,
+          repeatedWrites: (yield* memory.commits()) - afterSave
+        }
+      })
+    )
+    expect(outcome).toEqual({
+      refused:
+        "blocked: notes/edited.md was changed outside Arden and Memory has not taken that change in. Nothing was saved.",
+      refusedWrites: 0,
+      saved: "notes/edited.md, notes/kept.md",
+      savedWrites: 1,
+      repeatedWrites: 0
+    })
   })
 })

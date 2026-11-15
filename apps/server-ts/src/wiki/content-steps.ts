@@ -2,11 +2,12 @@ import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect } from "effect"
 
-import { commitWiki, createPage, updatePage, type WikiPageOperation } from "./commit.js"
+import { commitWiki, createPage, updatePage, type WikiWrite } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { isImportedPath } from "./collections.js"
 import { formatRedirectPage, normal, pageNamesForPath, reviseWikiPage } from "./page.js"
 import { activeRunPages, loadSnapshot } from "./snapshot.js"
+import type { SpaceStore } from "../persistence/spaces/store.js"
 
 interface ContentStepPage {
   readonly path: string
@@ -53,7 +54,8 @@ const receiptKey = (name: string): string => `memory-content-step:${name}`
 const redirectId = (path: string): string => `wiki-redirect:path:${sha256Hex(normal(path))}`
 
 export const makeWikiContentStepMethods = (
-  repository: ManagedFileRepositoryShape
+  repository: ManagedFileRepositoryShape,
+  spaces: SpaceStore["Service"]
 ): WikiContentStepMethods => ({
   applyContentStep: Effect.fn("Wiki.applyContentStep")(function* <E>(
     step: WikiContentStep<E>
@@ -80,7 +82,7 @@ export const makeWikiContentStepMethods = (
       taken
     )
     const changed: Array<string> = []
-    const operations: Array<WikiPageOperation> = []
+    const operations: Array<WikiWrite> = []
     for (const [index, record] of pages.entries()) {
       const next = rewritten.pages[index]
       if (next === undefined) continue
@@ -112,7 +114,7 @@ export const makeWikiContentStepMethods = (
     }
     if (operations.length > 0) {
       yield* commitWiki(
-        repository,
+        { repository, spaces },
         {
           actor: "system",
           origin: { kind: "system", name: `${ORIGIN_PREFIX}${step.name}` },

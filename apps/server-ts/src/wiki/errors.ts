@@ -82,6 +82,7 @@ const ruleReason = (
     case "records":
     case "retire":
     case "code_owned":
+    case "space":
       return "blocked"
   }
 }
@@ -116,6 +117,8 @@ export const mapRevisionError =
         return wikiError(operation, "closed", cause.message, options)
       case "RevisionStorageError":
         return wikiError(operation, "storage", cause.message, options)
+      case "SpaceStoreError":
+        return wikiError(operation, "storage", "Could not check which pages Spaces own", options)
       case "IdempotencyConflictError":
         return wikiError(operation, "storage", "internal write identity conflict", options)
     }

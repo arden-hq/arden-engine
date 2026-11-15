@@ -90,6 +90,15 @@ export const spaceOwnsWikiPath = (spaces: ActiveBindings, path: string) =>
 export const isSpacePage = (spaces: ActiveBindings, pageId: string, path: string) =>
   activeSpaceBindings(spaces).pipe(Effect.map((bindings) => isBoundPage(bindings, pageId, path)))
 
+/** `isSpacePage` for many pages, with the bindings read at most once, when first asked for. */
+export const spacePageCheck = (spaces: ActiveBindings) =>
+  Effect.cached(Effect.suspend(() => activeSpaceBindings(spaces))).pipe(
+    Effect.map(
+      (bindings) => (pageId: string, path: string) =>
+        bindings.pipe(Effect.map((all) => isBoundPage(all, pageId, path)))
+    )
+  )
+
 /** The active pages a Space owns: its own page and every page under the folder it heads. */
 export const spacePages = (
   pages: ReadonlyArray<PageRecord>,

@@ -10,7 +10,7 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 
 import { PROMPT_TEXT } from "../src/prompts/catalog.js"
-import { archivePage, createPage, type WikiPageOperation } from "../src/wiki/commit.js"
+import { archivePage, createPage, type WikiWrite } from "../src/wiki/commit.js"
 import { makeWikiMaintenanceMethods } from "../src/wiki/maintenance.js"
 import { formatWikiPage } from "../src/wiki/page.js"
 
@@ -28,13 +28,13 @@ const content = (path: string, body: string, producer?: string): string =>
 const create = (path: string, body: string, producer?: string) =>
   createPage(`id:${path}`, path, content(path, body, producer))
 
-const commit = (repository: ManagedFileRepositoryShape, operation: WikiPageOperation) =>
+const commit = (repository: ManagedFileRepositoryShape, operation: WikiWrite) =>
   Effect.gen(function* () {
     return (yield* repository.commit({
       actor: "test",
       origin: "desktop",
       reason: "test change",
-      operations: [operation],
+      operations: [operation.operation],
       expectedHead: yield* repository.currentRevision
     })).commit.commitId
   })

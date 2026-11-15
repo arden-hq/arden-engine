@@ -15,7 +15,7 @@ import {
   createPage,
   updatePage,
   type WikiCommitIdentity,
-  type WikiPageOperation
+  type WikiWrite
 } from "../src/wiki/commit.js"
 import type { WikiError } from "../src/wiki/errors.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
@@ -45,14 +45,14 @@ const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
   activeBindings: () => Effect.succeed([])
 })
 
-const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiPageOperation) =>
+const unchecked = (repository: ManagedFileRepositoryShape, operation: WikiWrite) =>
   Effect.gen(function* () {
     const head = yield* repository.currentRevision
     return yield* repository.commit({
       actor: "test",
       origin: "test.unchecked",
       reason: "write past the rules",
-      operations: [operation],
+      operations: [operation.operation],
       expectedHead: head
     })
   })

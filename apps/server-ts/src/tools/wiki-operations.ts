@@ -591,13 +591,7 @@ const makeWikiOperationTools = ({
         { signal: ctx.signal }
       )
       const accepted = await Effect.runPromise(
-        wiki
-          .acceptRename({
-            approvalId: requested.approvalId,
-            authority: identity.authority,
-            commit
-          })
-          .pipe(Effect.mapError(wikiFailure)),
+        wiki.acceptRename({ approvalId: requested.approvalId }).pipe(Effect.mapError(wikiFailure)),
         { signal: ctx.signal }
       )
       if (accepted.status !== "accepted") {

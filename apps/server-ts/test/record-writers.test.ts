@@ -14,20 +14,24 @@ import {
   archivePage,
   commitWiki,
   createPage,
+  mergePage,
   movePage,
+  publishReport,
+  restoreVersion,
   ownerInApp,
   updatePage,
   type WikiCommitOrigin,
-  type WikiPageOperation
+  type WikiWrite
 } from "../src/wiki/commit.js"
 import type { WikiError } from "../src/wiki/errors.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../src/wiki/mutations.js"
-import { formatRedirectPage, formatWikiPage } from "../src/wiki/page.js"
+import { formatWikiPage } from "../src/wiki/page.js"
 import { makeWikiRenameMethods } from "../src/wiki/rename.js"
 import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store.js"
 import type { WikiRenameStore } from "../src/persistence/wiki/rename-store.js"
 import { partialService } from "./kit.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const CONTRACT = [
   "## Purpose",
@@ -91,7 +95,7 @@ const withMemory = <A>(
             actor: "test",
             origin: "test.seed",
             reason: "seed",
-            operations: [createPage(`id:${path}`, path, content(path, text, producer))],
+            operations: [createPage(`id:${path}`, path, content(path, text, producer)).operation],
             expectedHead: yield* repository.currentRevision
           })
         return yield* body(repository)
@@ -114,14 +118,14 @@ const page = (pages: Pages, path: string) => {
 const write = (
   repository: ManagedFileRepositoryShape,
   origin: WikiCommitOrigin,
-  operation: (pages: Pages) => WikiPageOperation
+  operation: (pages: Pages) => WikiWrite
 ) =>
   Effect.gen(function* () {
     const pages = new Map(
       (yield* repository.listResources()).map((resource) => [resource.path, resource] as const)
     )
     return yield* commitWiki(
-      repository,
+      withoutSpaces(repository),
       {
         actor: origin.kind,
         origin,
@@ -143,8 +147,11 @@ const OTHER_AUTOMATION: WikiCommitOrigin = { kind: "automation", automationId: "
 const CAPTURE: WikiCommitOrigin = { kind: "capture", replayKey: undefined, sessionId: undefined }
 const UPKEEP: WikiCommitOrigin = { kind: "upkeep", automationId: "builtin-wiki-maintenance" }
 
-const redirect = (path: string, to: string) =>
-  formatRedirectPage({ pageId: `id:${path}`, title: path, redirectTo: `id:${to}` })
+const redirect = (path: string, to: string) => ({
+  pageId: `id:${path}`,
+  title: path,
+  redirectTo: `id:${to}`
+})
 
 describe("the record rules for writers, at the commit point", () => {
   it("lets only a folder's producer add a page to it, among automated writers", async () => {
@@ -158,7 +165,13 @@ describe("the record rules for writers, at the commit point", () => {
             created("daily/2026-11-12.md")
           ),
           capture: yield* write(repository, CAPTURE, created("daily/2026-11-13.md")),
-          producer: yield* write(repository, PRODUCER, created("daily/2026-11-14.md")),
+          producer: yield* write(repository, PRODUCER, () =>
+            publishReport(
+              { resourceId: "id:daily/2026-11-14.md", path: "daily/2026-11-14.md" },
+              content("daily/2026-11-14.md", "New.")
+            )
+          ),
+          producerPlainCreate: yield* write(repository, PRODUCER, created("daily/2026-11-16.md")),
           owner: yield* write(repository, OWNER, created("daily/2026-11-15.md")),
           knowledge: yield* write(repository, OTHER_AUTOMATION, created("topics/new.md"))
         }
@@ -168,6 +181,7 @@ describe("the record rules for writers, at the commit point", () => {
       otherAutomation: "records",
       capture: "records",
       producer: "saved",
+      producerPlainCreate: "records",
       owner: "saved",
       knowledge: "saved"
     })
@@ -211,7 +225,7 @@ describe("the record rules for writers, at the commit point", () => {
             archivePage(page(pages, "daily/README.md"))
           ),
           mergeRecord: yield* write(repository, CAPTURE, (pages) =>
-            updatePage(
+            mergePage(
               page(pages, "daily/2026-11-11.md"),
               redirect("daily/2026-11-11.md", "topics/garden.md")
             )
@@ -244,24 +258,21 @@ describe("the record rules for writers, at the commit point", () => {
           archivePage(page(pages, "notes.md"))
         )
         yield* write(repository, OWNER, (pages) =>
-          updatePage(
-            page(pages, "topics/seeds.md"),
-            redirect("topics/seeds.md", "topics/garden.md")
-          )
+          mergePage(page(pages, "topics/seeds.md"), redirect("topics/seeds.md", "topics/garden.md"))
         )
         yield* write(repository, OWNER, (pages) =>
-          updatePage(page(pages, "topics/seeds.md"), content("topics/seeds.md", "Seeds."))
+          restoreVersion(page(pages, "topics/seeds.md"), content("topics/seeds.md", "Seeds."))
         )
         return {
           archiveRoot,
           mergeAgain: yield* write(repository, CAPTURE, (pages) =>
-            updatePage(
+            mergePage(
               page(pages, "topics/seeds.md"),
               redirect("topics/seeds.md", "topics/garden.md")
             )
           ),
           ownerMergeAgain: yield* write(repository, OWNER, (pages) =>
-            updatePage(
+            mergePage(
               page(pages, "topics/seeds.md"),
               redirect("topics/seeds.md", "topics/garden.md")
             )

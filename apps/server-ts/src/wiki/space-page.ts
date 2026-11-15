@@ -13,7 +13,7 @@ import {
   pageKind,
   recordFolders
 } from "./collections.js"
-import { commitWiki, createPage } from "./commit.js"
+import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage, normal, pageNamesForPath, parseWikiPage } from "./page.js"
 import { loadSnapshot, type Snapshot } from "./snapshot.js"
@@ -68,7 +68,7 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
   const page =
     plan.kind === "rebind"
       ? plan.page
-      : yield* createSpacePage(repository, current, others, {
+      : yield* createSpacePage({ repository, spaces }, current, others, {
           spaceId: space.space_id,
           title: space.name,
           home: input.home ?? "areas"
@@ -128,7 +128,7 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
 })
 
 const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
-  repository: ManagedFileRepositoryShape,
+  point: WikiCommitPoint,
   current: Snapshot,
   others: ReadonlyArray<SpaceBinding>,
   input: { readonly spaceId: string; readonly title: string; readonly home: "projects" | "areas" }
@@ -221,7 +221,7 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
     Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
   )
   yield* commitWiki(
-    repository,
+    point,
     {
       expectedRevision: current.head,
       actor: "user:space",

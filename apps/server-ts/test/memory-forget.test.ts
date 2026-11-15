@@ -58,6 +58,7 @@ import { claimKey } from "../src/wiki/retraction.js"
 import { Wiki } from "../src/wiki/service.js"
 import { activeRunPages, type Snapshot } from "../src/wiki/snapshot.js"
 import { partialService, recordOf, runAuthority, serverRunContext, sessionHeader } from "./kit.js"
+import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const LINE = "Sam lives in the old town by the river."
 const OTHER = "The town has two bridges and one market."
@@ -110,13 +111,17 @@ const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>
     return await Effect.runPromise(
       Effect.gen(function* () {
         const repository = yield* ManagedFileRepository
-        yield* commitWiki(repository, { ...ownerInApp("seed"), expectedRevision: null }, [
-          createPage("root", "README.md", content("root", "Pages.")),
-          createPage("people", "people/README.md", content("people", "People.")),
-          createPage("places", "places/README.md", content("places", "Places.")),
-          createPage("sam", "people/sam.md", content("sam", `${LINE}\n- Works at the bakery.\n`)),
-          createPage("town", "places/town.md", content("town", `- ${LINE}\n${OTHER}\n`))
-        ])
+        yield* commitWiki(
+          withoutSpaces(repository),
+          { ...ownerInApp("seed"), expectedRevision: null },
+          [
+            createPage("root", "README.md", content("root", "Pages.")),
+            createPage("people", "people/README.md", content("people", "People.")),
+            createPage("places", "places/README.md", content("places", "Places.")),
+            createPage("sam", "people/sam.md", content("sam", `${LINE}\n- Works at the bakery.\n`)),
+            createPage("town", "places/town.md", content("town", `- ${LINE}\n${OTHER}\n`))
+          ]
+        )
         const listing = makeWikiListingMethods(repository)
         const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
         const page = (path: string) =>
@@ -148,7 +153,7 @@ const withMemory = async <A>(body: (memory: Memory) => Effect.Effect<A, unknown>
           listing,
           mutations,
           restores: makeWikiRestoreMethods(repository, spaces, listing.read),
-          forgetting: makeWikiForgetMethods(repository),
+          forgetting: makeWikiForgetMethods(repository, spaces),
           page,
           write
         })
@@ -265,13 +270,13 @@ describe("forgetting a line", () => {
         )
         const move = yield* refusal(
           commitWiki(
-            memory.repository,
+            withoutSpaces(memory.repository),
             { ...AGENT, expectedRevision: yield* memory.listing.head() },
             [movePage(sam.resource, "people/samuel.md", content("sam", `${LINE}\n`))]
           )
         )
         const step = yield* refusal(
-          makeWikiContentStepMethods(memory.repository).applyContentStep({
+          makeWikiContentStepMethods(memory.repository, spaces).applyContentStep({
             name: "test-step",
             reason: "test content step",
             rewrite: (pages) =>
@@ -314,7 +319,7 @@ describe("forgetting a line", () => {
           Effect.gen(function* () {
             return yield* refusal(
               commitWiki(
-                memory.repository,
+                withoutSpaces(memory.repository),
                 { ...commit, expectedRevision: yield* memory.listing.head() },
                 [createPage(path, path, heading)]
               )
@@ -357,7 +362,7 @@ describe("forgetting a line", () => {
         const forgotten = yield* memory.page("forgotten.md")
         const agent = yield* refusal(
           commitWiki(
-            memory.repository,
+            withoutSpaces(memory.repository),
             { ...AGENT, expectedRevision: yield* memory.listing.head() },
             [updatePage(forgotten.resource, `${forgotten.page.content}\nClosed by an agent.\n`)]
           )
@@ -378,7 +383,7 @@ describe("forgetting a line", () => {
         const stored = forgotten.page.metadata["retractions"]
         const handWritten = { note: "written by hand" }
         yield* commitWiki(
-          memory.repository,
+          withoutSpaces(memory.repository),
           { ...OUTSIDE, expectedRevision: yield* memory.listing.head() },
           [
             updatePage(
@@ -511,11 +516,17 @@ describe("forgetting a line", () => {
 
 const renameStore = (): WikiRenameStore["Service"] => {
   const rows = new Map<string, WikiRenameApprovalRecord>()
-  const set = (approvalId: string, change: Partial<WikiRenameApprovalRecord>) =>
+  const set = (
+    approvalId: string,
+    change:
+      | { readonly status: "pending"; readonly resolution: string | null }
+      | { readonly status: "applying" }
+      | { readonly status: "accepted"; readonly commitId: string }
+  ) =>
     Effect.suspend(() => {
       const row = rows.get(approvalId)
-      if (row === undefined) return Effect.die(`${approvalId} is missing`)
-      const next = { ...row, ...change }
+      if (row?.writer === undefined) return Effect.die(`${approvalId} is missing`)
+      const next: WikiRenameApprovalRecord = { ...row, ...change, writer: row.writer }
       rows.set(approvalId, next)
       return Effect.succeed(next)
     })
@@ -566,11 +577,7 @@ describe("what forgotten.md holds and where it stays", () => {
           authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
           commit: AGENT
         })
-        const accepted = yield* renames.acceptRename({
-          approvalId: requested.approvalId,
-          authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-          commit: AGENT
-        })
+        const accepted = yield* renames.acceptRename({ approvalId: requested.approvalId })
         return { backlinks, status: accepted.status, resolution: accepted.resolution }
       })
     )
@@ -596,48 +603,60 @@ describe("what forgotten.md holds and where it stays", () => {
       Effect.gen(function* () {
         const head = () => memory.listing.head()
         const madeByHand = yield* refusal(
-          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
-            createPage("by-hand", "forgotten.md", content("by-hand", "Made by hand."))
-          ])
+          commitWiki(
+            withoutSpaces(memory.repository),
+            { ...ownerInApp("x"), expectedRevision: yield* head() },
+            [createPage("by-hand", "forgotten.md", content("by-hand", "Made by hand."))]
+          )
         )
         yield* forget(memory)
         const forgotten = yield* memory.page("forgotten.md")
         const moved = yield* refusal(
-          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
-            movePage(forgotten.resource, "forgotten-things.md")
-          ])
+          commitWiki(
+            withoutSpaces(memory.repository),
+            { ...ownerInApp("x"), expectedRevision: yield* head() },
+            [movePage(forgotten.resource, "forgotten-things.md")]
+          )
         )
         const archived = yield* refusal(
-          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
-            archivePage(forgotten.resource)
-          ])
+          commitWiki(
+            withoutSpaces(memory.repository),
+            { ...ownerInApp("x"), expectedRevision: yield* head() },
+            [archivePage(forgotten.resource)]
+          )
         )
         const redirected = yield* refusal(
-          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
-            updatePage(
-              forgotten.resource,
-              formatWikiPage({
-                pageId: forgotten.page.pageId,
-                title: "Forgotten",
-                aliases: [],
-                lifecycle: "redirect",
-                redirectTo: "town",
-                metadata: {},
-                body: ""
-              })
-            )
-          ])
+          commitWiki(
+            withoutSpaces(memory.repository),
+            { ...ownerInApp("x"), expectedRevision: yield* head() },
+            [
+              updatePage(
+                forgotten.resource,
+                formatWikiPage({
+                  pageId: forgotten.page.pageId,
+                  title: "Forgotten",
+                  aliases: [],
+                  lifecycle: "redirect",
+                  redirectTo: "town",
+                  metadata: {},
+                  body: ""
+                })
+              )
+            ]
+          )
         )
         const edited = yield* refusal(
-          commitWiki(memory.repository, { ...ownerInApp("x"), expectedRevision: yield* head() }, [
-            updatePage(forgotten.resource, `${forgotten.page.content}\nA note of mine.\n`)
-          ])
+          commitWiki(
+            withoutSpaces(memory.repository),
+            { ...ownerInApp("x"), expectedRevision: yield* head() },
+            [updatePage(forgotten.resource, `${forgotten.page.content}\nA note of mine.\n`)]
+          )
         )
         yield* Effect.promise(() => rm(join(memory.root, "forgotten.md")))
         const kept = yield* memory.page("forgotten.md")
         const deleted = yield* refusal(
           commitOutsideChange(
-            memory.repository,
+            withoutSpaces(memory.repository),
             { ...OUTSIDE, expectedRevision: yield* head() },
             { kind: "missing", resource: kept.resource }
           )
@@ -694,7 +713,7 @@ describe("no run is sent forgotten.md", () => {
         for (const note of [1, 2, 3]) {
           const forgotten = yield* memory.page("forgotten.md")
           yield* commitWiki(
-            memory.repository,
+            withoutSpaces(memory.repository),
             { ...OUTSIDE, expectedRevision: yield* memory.listing.head() },
             [
               updatePage(
@@ -789,7 +808,7 @@ describe("no run is sent forgotten.md", () => {
       Effect.gen(function* () {
         yield* forget(memory)
         const stepped: Array<string> = []
-        yield* makeWikiContentStepMethods(memory.repository).applyContentStep({
+        yield* makeWikiContentStepMethods(memory.repository, spaces).applyContentStep({
           name: "test-step",
           reason: "test content step",
           rewrite: (pages) =>
@@ -861,13 +880,13 @@ describe("no run is sent forgotten.md", () => {
       Effect.gen(function* () {
         const river = "The river floods the lower town every spring."
         yield* commitWiki(
-          memory.repository,
+          withoutSpaces(memory.repository),
           { ...ownerInApp("x"), expectedRevision: yield* memory.listing.head() },
           [createPage("river", "places/river.md", content("river", `${river}\n${LINE}\n`))]
         )
         const made = yield* memory.page("places/river.md")
         yield* commitWiki(
-          memory.repository,
+          withoutSpaces(memory.repository),
           { ...ownerInApp("x"), expectedRevision: yield* memory.listing.head() },
           [archivePage(made.resource)]
         )
@@ -890,9 +909,11 @@ describe("no run is sent forgotten.md", () => {
 
   it("words a size refusal for the owner's own forget as it does for the owner", async () => {
     const message = await withMemory((memory) =>
-      requireCommitRules(memory.repository, { kind: "forget", sessionId: TURN.sessionId }, [
-        createPage("me", "me.md", content("me", `${"word ".repeat(2_000)}\n`))
-      ]).pipe(
+      requireCommitRules(
+        withoutSpaces(memory.repository),
+        { kind: "forget", sessionId: TURN.sessionId },
+        [createPage("me", "me.md", content("me", `${"word ".repeat(2_000)}\n`))]
+      ).pipe(
         Effect.flip,
         Effect.map((error) => error.message)
       )

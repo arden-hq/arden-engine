@@ -84,8 +84,7 @@ const OUTSIDE_EDIT_IDENTITY = {
 
 const writer = (pageId: string): WikiWriter => ({
   pageId,
-  authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-  commit: OUTSIDE_EDIT_IDENTITY
+  authority: GLOBAL_WIKI_LOCATION_AUTHORITY
 })
 
 const refusal = (cause: WikiError): string | undefined => {
@@ -248,7 +247,7 @@ export const makeOutsideEdits = (input: {
         continue
       }
       const adopted = yield* commitOutsideChange(
-        repository,
+        { repository, spaces },
         { ...OUTSIDE_EDIT_IDENTITY, expectedRevision: pages.head },
         decided.change
       ).pipe(Effect.result)
@@ -347,6 +346,7 @@ const adoptionFailure = (cause: WikiCommitError): "again" | "refused" | "fail" =
     case "IdempotencyConflictError":
     case "RepositoryClosedError":
     case "RevisionStorageError":
+    case "SpaceStoreError":
       return "fail"
   }
 }

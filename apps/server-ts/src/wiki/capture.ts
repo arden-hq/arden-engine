@@ -109,7 +109,6 @@ export const makeWikiCaptureMethods = (
             const content = yield* requireUpdatable(spaces, snapshot, current, {
               pageId: edit.pageId,
               authority: input.authority,
-              commit: { ...input.commit, origin },
               content: edit.content
             })
             return { current, expectedVersion: edit.expectedVersion, content }
@@ -121,7 +120,7 @@ export const makeWikiCaptureMethods = (
             : replacements
         if (changed.length > 0) {
           yield* commitWiki(
-            repository,
+            { repository, spaces },
             {
               actor: input.commit.actor,
               origin,
