@@ -6,9 +6,10 @@ import type { Migration } from "./index.js"
  * - A run's Memory record (`run_sidecars.context_manifest_json`): a composition without a
  *   reader was the owner's; `collection` sources are gone; a retired reason becomes the
  *   allowance of its kind, and a Space source dropped for a retired reason is gone.
- * - A Space review input (`automation_runs.input_json`, `space_review_checkpoints`, and a queued
- *   job's `space_review_input`): pages with the `resident` basis are gone, in `pages` and in
- *   `reads.pages`.
+ * - A Space review input that a server path reads (a running review's `automation_runs.input_json`,
+ *   `space_review_checkpoints`, and a queued job's `space_review_input`): pages with the
+ *   `resident` basis are gone, in `pages` and in `reads.pages`. A finished run's input stays as
+ *   it was sent; only replays read it, through `todayReviewInput`.
  * A row already in today's shape is left as it is.
  */
 
@@ -70,7 +71,7 @@ const withoutResident = (pages: unknown): unknown =>
     ? pages.filter((page) => !isObject(page) || page["basis"] !== "resident")
     : pages
 
-const todayReviewInput = (input: unknown): unknown => {
+export const todayReviewInput = (input: unknown): unknown => {
   if (!isObject(input)) return input
   const reads = input["reads"]
   return {
@@ -92,7 +93,7 @@ const REVIEW_INPUTS = [
     table: "automation_runs",
     key: "id",
     column: "input_json",
-    where: "purpose = 'space_review' AND input_json IS NOT NULL",
+    where: "status = 'running' AND purpose = 'space_review' AND input_json IS NOT NULL",
     today: todayReviewInput
   },
   {

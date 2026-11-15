@@ -125,7 +125,7 @@ const reviewInput = (bases: ReadonlyArray<string>) => ({
   prompt: "Made-up prompt"
 })
 
-it("migration 0166 rewrites stored Memory records and Space review inputs to today's shape", () => {
+it("migration 0166 rewrites stored Memory records and the review inputs a server path reads", () => {
   const database = migrated()
   const sidecar = database.prepare(`INSERT INTO run_sidecars
     (run_id, session_id, context_manifest_json, source_refs_json, evidence_json, updated_at)
@@ -140,6 +140,10 @@ it("migration 0166 rewrites stored Memory records and Space review inputs to tod
   run.run("space_review", JSON.stringify(stored))
   run.run("space_review", JSON.stringify(reviewInput(["owned"])))
   run.run("system", JSON.stringify(stored))
+  database
+    .prepare(`INSERT INTO automation_runs (task_id, purpose, started_at, ended_at, status, input_json)
+      VALUES ('job', 'space_review', '${at}', '${at}', 'completed', ?)`)
+    .run(JSON.stringify(stored))
   database
     .prepare(`INSERT INTO space_review_checkpoints (space_id, reviewed_input, reviewed_at)
       VALUES ('space-1', ?, '${at}')`)
@@ -173,10 +177,12 @@ it("migration 0166 rewrites stored Memory records and Space review inputs to tod
     ["owned", "linked", "source"]
   ]
   expect(
-    column("SELECT input_json FROM automation_runs WHERE purpose = 'space_review' ORDER BY id").map(
-      bases
-    )
+    column(`SELECT input_json FROM automation_runs
+      WHERE purpose = 'space_review' AND status = 'running' ORDER BY id`).map(bases)
   ).toEqual([kept, [["owned"], ["owned"]]])
+  expect(column("SELECT input_json FROM automation_runs WHERE status = 'completed'")).toEqual([
+    JSON.stringify(stored)
+  ])
   expect(column("SELECT input_json FROM automation_runs WHERE purpose = 'system'")).toEqual([
     JSON.stringify(stored)
   ])
@@ -187,7 +193,8 @@ it("migration 0166 rewrites stored Memory records and Space review inputs to tod
   expect(queued.map((context) => bases(JSON.stringify(context.space_review_input)))).toEqual([kept])
 
   expect(
-    column(`SELECT count(*) FROM automation_runs WHERE purpose = 'space_review' AND input_json LIKE '%"resident"%'
+    column(`SELECT count(*) FROM automation_runs
+        WHERE purpose = 'space_review' AND status = 'running' AND input_json LIKE '%"resident"%'
       UNION ALL SELECT count(*) FROM space_review_checkpoints WHERE reviewed_input LIKE '%"resident"%'
       UNION ALL SELECT count(*) FROM automation_event_queue WHERE context LIKE '%"resident"%'`)
   ).toEqual(["0", "0", "0"])

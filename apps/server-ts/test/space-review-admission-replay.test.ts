@@ -15,10 +15,8 @@ import {
   spaceReviewAdmission,
   type ReviewChange
 } from "../src/automations/space-review-admission.js"
-import {
-  askedByOwner,
-  SpaceReviewInputSchema
-} from "../src/persistence/automations/space-review.js"
+import { askedByOwner } from "../src/persistence/automations/space-review.js"
+import { decodeStoredReviewInput } from "./fixtures/review-history.js"
 
 const DATABASE = process.env["ARDEN_REVIEW_REPLAY_DB"]?.trim() ?? ""
 // The window the rebuild plan measured: 1,293 review rows, 113 of which did something.
@@ -35,7 +33,6 @@ const WOKEN_BY: ReadonlySet<ReviewChange> = new Set(["chat_turn", "mail", "space
 const decodeTrigger = Schema.decodeUnknownSync(
   Schema.fromJsonString(AutomationTriggerContextSchema)
 )
-const decodeInput = Schema.decodeUnknownSync(Schema.fromJsonString(SpaceReviewInputSchema))
 
 const RowsSchema = Schema.Array(
   Schema.Struct({
@@ -74,7 +71,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
       // with no chat turn and no mail.
       const taskAlone = { acted: 0, notActed: 0 }
       for (const row of rows) {
-        const input = decodeInput(row.input_json)
+        const input = decodeStoredReviewInput(row.input_json)
         if (row.started_at >= FROM && input.reads !== undefined) {
           const verdict = spaceReviewAdmission(
             { semantic: input.semantic, reads: input.reads },
