@@ -18,6 +18,7 @@ const producerWakeDepth = (origin: WikiCommitOrigin): number => {
     case "capture":
     case "user":
     case "forget":
+    case "rules":
     case "space_page":
     case "system":
       return 0
@@ -33,6 +34,7 @@ const automationOfOrigin = (origin: WikiCommitOrigin): string | null => {
       return MEMORY_CAPTURE_AUTOMATION_ID
     case "user":
     case "forget":
+    case "rules":
     case "agent":
     case "space_page":
     case "system":
