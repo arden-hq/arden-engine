@@ -64,7 +64,7 @@ const RUN_STATUS_READERS = {
   "persistence/sqlite/run-ending.ts": 1,
   "persistence/sqlite/run-policy.ts": 1,
   "persistence/sqlite/space-job-recovery.ts": 1,
-  "persistence/sqlite/space-review.ts": 2,
+  "persistence/sqlite/space-review.ts": 3,
   "persistence/sqlite/task-next-move.ts": 1,
   "persistence/sqlite/work-retention.ts": 1
 }
