@@ -8,9 +8,7 @@ def profile_environment(config, get):
     such as llama.cpp, which has no key), a Codex account id (`accountIdEnv`),
     and the variables its benchmark-owned MCP servers read. Every path a trial
     takes (a bare `single`, a `run` container, Harbor) forwards this set and
-    nothing else. A profile that opts into plain HTTP (`insecureHttpHost`,
-    for a container reaching the host's llama.cpp) names no key: the server
-    refuses one over plain HTTP, so nothing is forwarded for it.
+    nothing else.
     """
     named = [
         (config[field], field)

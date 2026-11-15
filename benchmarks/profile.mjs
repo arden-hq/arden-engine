@@ -19,13 +19,6 @@ export const ProfileSchema = Schema.Struct({
    * has no key and leaves it out; every other provider needs it.
    */
   apiKeyEnv: Schema.optionalKey(Schema.NonEmptyString),
-  /**
-   * A `chat-completions` provider's opt-in to plain HTTP to this one host, for
-   * a container reaching the host's llama.cpp (`host.docker.internal`); it
-   * repeats `baseUrl`'s host and takes no `apiKeyEnv` (the server's
-   * `insecureHttpHost` says why).
-   */
-  insecureHttpHost: Schema.optionalKey(Schema.NonEmptyString),
   model: Schema.NonEmptyString,
   reasoningEffort: Schema.NullOr(Schema.NonEmptyString),
   contextLimit: positive,
@@ -76,8 +69,8 @@ export async function readProfile(filename) {
   const profile = Schema.decodeUnknownSync(ProfileSchema)(raw, { onExcessProperty: "error" })
   if (profile.server !== undefined && profile.provider !== "chat-completions")
     throw new Error("`server` belongs to a chat-completions provider")
-  // The server's own rules, before a trial starts it: HTTPS, loopback HTTP or
-  // the opted-in plain-HTTP host for `baseUrl`, the fields each provider needs (a key variable for all but
+  // The server's own rules, before a trial starts it: HTTPS or loopback HTTP
+  // for a `baseUrl` that gets a key, the fields each provider needs (a key variable for all but
   // `chat-completions`). The data folder is a placeholder; the trial names its own.
   try {
     parseSettings({ dataDirectory: "/profile-check", ...modelSettings(profile) })
@@ -117,8 +110,7 @@ function providerSettings(profile) {
         kind: "chat-completions",
         baseUrl: profile.baseUrl,
         ...(profile.apiKeyEnv ? { apiKeyEnv: profile.apiKeyEnv } : {}),
-        ...(profile.server ? { server: profile.server } : {}),
-        ...(profile.insecureHttpHost ? { insecureHttpHost: profile.insecureHttpHost } : {})
+        ...(profile.server ? { server: profile.server } : {})
       }
     case "responses":
       return { kind: "responses", baseUrl: profile.baseUrl, apiKeyEnv: profile.apiKeyEnv }

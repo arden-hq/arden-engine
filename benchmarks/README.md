@@ -64,11 +64,10 @@ python3 benchmarks/cli.py single --profile benchmarks/profiles/local-llama.json 
 ```
 
 In a container (`run`, Harbor) the host's `127.0.0.1` is the container's own:
-the container reaches the host as `host.docker.internal`. The server takes
-plain HTTP only to this machine's loopback address unless the profile opts in
-for that one host, as `llama-cpp-docker.json` does with
-`"insecureHttpHost": "host.docker.internal"` (the server README says what the
-opt-in risks and why it takes no `apiKeyEnv`). `run` passes
+the container reaches the host as `host.docker.internal`, as
+`llama-cpp-docker.json` does. The server takes plain HTTP to another host only
+from a provider that sends no key, so that profile names no `apiKeyEnv` (the
+server README says why). `run` passes
 `--add-host host.docker.internal:host-gateway` and `harbor-compose.yaml` adds
 the same entry, because Docker Engine on Linux defines that name only then;
 Docker Desktop defines it itself. Checked on 2026-11-16 with Docker Desktop

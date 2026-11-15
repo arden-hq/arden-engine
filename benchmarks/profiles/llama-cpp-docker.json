@@ -3,7 +3,6 @@
   "provider": "chat-completions",
   "server": "llama.cpp",
   "baseUrl": "http://host.docker.internal:8080/v1",
-  "insecureHttpHost": "host.docker.internal",
   "model": "REPLACE_WITH_MODEL_ID",
   "reasoningEffort": null,
   "contextLimit": 32768,

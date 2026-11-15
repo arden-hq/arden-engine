@@ -71,38 +71,27 @@ test("a local llama.cpp profile names no key; every other provider needs one", (
     await assert.rejects(read("responses.json", responses), {
       message: `Profile ${join(directory, "responses.json")}: Invalid settings: Expected string at ["provider"]["apiKeyEnv"]`
     })
-    // A container reaching the host's server by name is plain HTTP off this machine.
-    await assert.rejects(
-      read("docker.json", { ...local, baseUrl: "http://host.docker.internal:8080/v1" }),
-      /`provider.baseUrl` must use HTTPS or loopback HTTP\. .*add "insecureHttpHost": "host.docker.internal"/
-    )
   }))
 
-test("a container profile opts into plain HTTP to the host it names, with no key", () =>
+test("a container profile reaches the host's server over plain HTTP when it names no key", () =>
   withProfiles(async (read) => {
     const { apiKeyEnv: _, ...docker } = {
       ...base,
       server: "llama.cpp",
-      baseUrl: "http://host.docker.internal:8080/v1",
-      insecureHttpHost: "host.docker.internal"
+      baseUrl: "http://host.docker.internal:8080/v1"
     }
     assert.deepEqual(modelSettings(await read("docker.json", docker)), {
       provider: {
         kind: "chat-completions",
         baseUrl: "http://host.docker.internal:8080/v1",
-        server: "llama.cpp",
-        insecureHttpHost: "host.docker.internal"
+        server: "llama.cpp"
       },
       model: "vendor/model",
       contextLimit: 131072
     })
     await assert.rejects(
-      read("other-host.json", { ...docker, baseUrl: "http://10.0.0.2:8080/v1" }),
-      /`provider.insecureHttpHost` is host.docker.internal, but `provider.baseUrl` goes to 10.0.0.2/
-    )
-    await assert.rejects(
       read("keyed.json", { ...docker, apiKeyEnv: "LLAMA_KEY" }),
-      /`provider.apiKeyEnv` would send the key in clear text to host.docker.internal/
+      /`provider.baseUrl` would send the key in clear text to host.docker.internal: use HTTPS, or remove `apiKeyEnv`/
     )
   }))
 
