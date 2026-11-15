@@ -9,6 +9,7 @@ import {
 } from "@arden-hq/revisions/effect"
 import { Effect, Option } from "effect"
 
+import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { aliasesAreHuman, parseWikiPage } from "./page.js"
 
 export type WikiCommitOrigin =
@@ -177,6 +178,7 @@ export const commitWiki = (
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
   return requireCommitRules(operations).pipe(
+    Effect.andThen(requireWithinLimits(repository, operations)),
     Effect.andThen(
       repository.commit({
         actor: options.actor,
@@ -191,6 +193,73 @@ export const commitWiki = (
     )
   )
 }
+
+/** How far a page body is over its limit, or undefined when it fits or has none. */
+export const overPageLimit = (page: {
+  readonly path: string
+  readonly pageId: string
+  readonly body: string
+}): { readonly chars: number; readonly limit: number } | undefined => {
+  const limit = corePageBudget(page)
+  return limit === undefined || page.body.length <= limit
+    ? undefined
+    : { chars: page.body.length, limit }
+}
+
+const limitRefusal = (path: string, over: { readonly chars: number; readonly limit: number }) => {
+  const target = coreCondenseTarget(over.limit)
+  return new InvalidRevisionInputError({
+    message:
+      `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
+      `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
+      `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
+      `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
+  })
+}
+
+/**
+ * The size limit binds every writer inside Arden; an outside edit is taken in over it. A write
+ * that does not grow a page already over its limit goes through, so the page can be shortened,
+ * renamed or moved in steps.
+ */
+const requireWithinLimits = (
+  repository: ManagedFileRepositoryShape,
+  operations: ReadonlyArray<WikiPageOperation>
+): Effect.Effect<void, RevisionError> =>
+  Effect.forEach(operations, (operation) => requireWithinLimit(repository, operation), {
+    discard: true
+  })
+
+const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
+  repository: ManagedFileRepositoryShape,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, RevisionError> {
+  if (operation._tag === "Archive") return
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
+  if (path === undefined) return
+  const given = "content" in operation ? operation.content : undefined
+  const over = yield* bodyOverLimit(repository, path, operation.resourceId, given ?? before)
+  if (over === undefined) return
+  const was =
+    before?.state === "active"
+      ? yield* bodyOverLimit(repository, before.path, operation.resourceId, before)
+      : undefined
+  if (was !== undefined && over.chars <= was.chars) return
+  return yield* limitRefusal(path, over)
+})
+
+const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
+  repository: ManagedFileRepositoryShape,
+  path: string,
+  pageId: string,
+  content: Uint8Array | ResourceVersion | null
+): Effect.fn.Return<{ readonly chars: number; readonly limit: number } | undefined, RevisionError> {
+  if (content === null || corePageBudget({ path, pageId }) === undefined) return undefined
+  const bytes = content instanceof Uint8Array ? content : yield* repository.readVersion(content)
+  const page = yield* parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
+  return Option.isNone(page) ? undefined : overPageLimit({ path, pageId, body: page.value.body })
+})
 
 /**
  * Record one change made outside Arden that is already in the page's file. It meets the same

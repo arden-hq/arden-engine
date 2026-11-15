@@ -4,7 +4,6 @@ import { sessionForkOriginFromMetadata } from "../persistence/sessions/fork-orig
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SummaryStore, type ChatSummary } from "../persistence/summaries/store.js"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
 
 export const chatSummaryText = (summary: ChatSummary): string =>
@@ -107,20 +106,25 @@ const makeSetChatSummaryTool = (services: {
           retryable: true
         })
       }
-      await recordApplied(
-        effects,
-        Effect.runPromise(
-          services.summaries.setChat({
-            sessionId: fork.sourceSessionId,
-            title: input.title.trim(),
-            summary: input.summary.trim(),
-            topics: (input.topics ?? []).map((topic) => topic.trim()).filter(Boolean),
-            throughSequence: fork.throughSequence,
-            runId: ctx.run.runId
-          }),
-          { signal: ctx.signal }
-        )
+      const saved = await Effect.runPromise(
+        services.summaries.setChat({
+          sessionId: fork.sourceSessionId,
+          title: input.title.trim(),
+          summary: input.summary.trim(),
+          topics: (input.topics ?? []).map((topic) => topic.trim()).filter(Boolean),
+          throughSequence: fork.throughSequence,
+          runId: ctx.run.runId
+        }),
+        { signal: ctx.signal }
       )
+      if (!saved) {
+        effects.unchanged()
+        return {
+          result: "Not saved: the stored summary of this chat already reaches further.",
+          preview: "Newer summary kept"
+        }
+      }
+      effects.applied()
       const source = await Effect.runPromise(
         services.sessions
           .loadHistoryHeader(fork.sourceSessionId)

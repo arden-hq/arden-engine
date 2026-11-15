@@ -36,8 +36,7 @@ import {
   directoryReceipt,
   pageReceipt,
   pageSource,
-  requireObserved,
-  requireWithinCoreBudget
+  requireObserved
 } from "./wiki-records.js"
 import { searchPages } from "./wiki-search.js"
 import { readChangeCall } from "../lib/memory-link.js"
@@ -150,7 +149,6 @@ const preparePatch = async (
       }
     )
   }
-  requireWithinCoreBudget({ path: record.resource.path, pageId: record.page.pageId, body })
   return { head: snapshot.head, record, body }
 }
 

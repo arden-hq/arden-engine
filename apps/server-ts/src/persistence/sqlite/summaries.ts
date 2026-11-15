@@ -62,7 +62,7 @@ export const makeSummaryStore = ({
   const setChat = Effect.fn("SqliteSummaryStore.setChat")(
     function* (input: Parameters<SummaryStore["Service"]["setChat"]>[0]) {
       const now = DateTime.formatIso(yield* DateTime.now)
-      yield* writer.run(sql`
+      const saved = yield* writer.run(sql<{ readonly session_id: string }>`
         INSERT INTO chat_summaries (session_id, title, summary, topics_json, through_sequence, run_id, updated_at)
         VALUES (${input.sessionId}, ${input.title}, ${input.summary}, ${JSON.stringify(input.topics)},
                 ${input.throughSequence}, ${input.runId}, ${now})
@@ -70,7 +70,9 @@ export const makeSummaryStore = ({
           title = excluded.title, summary = excluded.summary, topics_json = excluded.topics_json,
           through_sequence = excluded.through_sequence, run_id = excluded.run_id, updated_at = excluded.updated_at
         WHERE excluded.through_sequence >= chat_summaries.through_sequence
+        RETURNING session_id
       `)
+      return saved.length > 0
     },
     Effect.mapError(failure("set_chat", "Could not save the chat summary"))
   )

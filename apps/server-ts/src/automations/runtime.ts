@@ -49,6 +49,7 @@ import {
   type SessionLifecycleDelivery
 } from "../persistence/sessions/events.js"
 import { WikiMaintenanceStore } from "../persistence/wiki-maintenance/store.js"
+import { DailySummaryPosition } from "../persistence/daily-summary/store.js"
 import { Wiki } from "../wiki/service.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 import type { AutomationId } from "../persistence/automations/model.js"
@@ -84,6 +85,7 @@ export class AutomationRuntime extends Context.Service<
     | SessionLifecycleEvents
     | Wiki
     | WikiMaintenanceStore
+    | DailySummaryPosition
     | StoragePolicyStore
     | HomeStore
     | IntelligenceSettingsStore
@@ -120,6 +122,7 @@ export class AutomationRuntime extends Context.Service<
       const sessionEvents = yield* SessionLifecycleEvents
       const wiki = yield* Wiki
       const wikiMaintenance = yield* WikiMaintenanceStore
+      const dailyPosition = yield* DailySummaryPosition
       const sessions = yield* SessionStore
       const transcripts = yield* TranscriptQueries
       const summaries = yield* SummaryStore
@@ -158,6 +161,7 @@ export class AutomationRuntime extends Context.Service<
         memory,
         wiki,
         wikiMaintenance,
+        dailyPosition,
         retentionPolicy,
         sessions,
         summaries,

@@ -66,7 +66,7 @@ const makeChatSummariesRunner = (services: {
       return jobResult.failed(observed.error, observed.result, run)
     const saved = yield* services.summaries.chat(fork.sourceSessionId)
     if (saved?.runId !== runId) {
-      return jobResult.completed("no_change", "Nothing to recall in this chat", run)
+      return jobResult.completed("no_change", "No new summary saved for this chat", run)
     }
     if (saved.spaceId !== null) {
       yield* services

@@ -103,7 +103,7 @@ export class SummaryStore extends Context.Service<
       readonly topics: ReadonlyArray<string>
       readonly throughSequence: number
       readonly runId: string | null
-    }) => Effect.Effect<void, SummaryStoreError>
+    }) => Effect.Effect<boolean, SummaryStoreError>
     readonly chat: (sessionId: string) => Effect.Effect<ChatSummary | null, SummaryStoreError>
     readonly chats: (
       sessionIds: ReadonlyArray<string>

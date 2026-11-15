@@ -48,7 +48,7 @@ export const contextSessionSchemaSection = {
     "message_turns_ad",
     "sessions_legacy_context_revision",
     "sessions_archive_drops_pending",
-    "memory_capture_cut_at_removal",
+    "chat_positions_cut_at_removal",
     "memory_capture_owner_chat_starts",
     "memory_capture_owner_chat_starts_after_copies"
   ],
@@ -250,7 +250,8 @@ export const contextSessionSchemaSection = {
       ON sessions(origin_automation_id, started_at DESC)
       WHERE session_type = 'channel' AND archived_at IS NULL`,
     // How far Memory Capture has read each owner chat, and old unread ranges it never reads
-    // (migrations 0155, 0157, 0158).
+    // (migrations 0155, 0157, 0158). Removing a message cuts every stored position into its
+    // chat, these and the chat summary's, because later messages reuse its number (0164).
     `CREATE TABLE memory_capture_positions (
       session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
       read_seq INTEGER NOT NULL CHECK(read_seq >= -1),
@@ -268,9 +269,10 @@ export const contextSessionSchemaSection = {
     ) WITHOUT ROWID`,
     `CREATE INDEX idx_sessions_capture_owner ON sessions(session_id)
       WHERE session_type = 'chat' AND origin_automation_id IS NULL`,
-    `CREATE TRIGGER memory_capture_cut_at_removal
+    `CREATE TRIGGER chat_positions_cut_at_removal
       AFTER DELETE ON session_messages
       WHEN EXISTS (SELECT 1 FROM memory_capture_positions WHERE session_id = OLD.session_id)
+        OR EXISTS (SELECT 1 FROM chat_summaries WHERE session_id = OLD.session_id)
       BEGIN
         UPDATE memory_capture_positions
         SET read_seq = OLD.seq - 1, read_offset = NULL, prepared_json = NULL,
@@ -288,6 +290,11 @@ export const contextSessionSchemaSection = {
         WHERE session_id = OLD.session_id AND from_seq >= OLD.seq;
         UPDATE memory_capture_backlog SET through_seq = OLD.seq - 1
         WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
+        DELETE FROM chat_summaries WHERE session_id = OLD.session_id
+          AND NOT EXISTS (SELECT 1 FROM session_messages
+            WHERE session_id = OLD.session_id AND seq < OLD.seq);
+        UPDATE chat_summaries SET through_sequence = OLD.seq - 1
+        WHERE session_id = OLD.session_id AND through_sequence >= OLD.seq;
       END`,
     `CREATE TRIGGER memory_capture_owner_chat_starts
       AFTER INSERT ON sessions

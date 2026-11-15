@@ -79,6 +79,8 @@ import { WikiRenameStore } from "../wiki/rename-store.js"
 import { makeWikiRenameStore } from "./wiki-renames.js"
 import { WikiMaintenanceStore } from "../wiki-maintenance/store.js"
 import { makeWikiMaintenanceStore } from "./wiki-maintenance.js"
+import { DailySummaryPosition } from "../daily-summary/store.js"
+import { makeDailySummaryPosition } from "./daily-summary-position.js"
 import { AutomationCatalog } from "../automations/catalog.js"
 import { AutomationRules } from "../automations/model.js"
 import { WikiEventOutbox } from "../automations/wiki-event-outbox.js"
@@ -481,6 +483,7 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(ContextCompactionStore, makeContextCompactionStore(deps)),
     Context.make(WikiRenameStore, makeWikiRenameStore(deps)),
     Context.make(WikiMaintenanceStore, makeWikiMaintenanceStore(deps)),
+    Context.make(DailySummaryPosition, makeDailySummaryPosition(deps)),
     Context.make(MemoryCaptureStore, makeMemoryCaptureStore(deps)),
     Context.make(WikiEmbeddingStore, makeWikiEmbeddingStore(deps)),
     Context.make(McpStore, makeMcpStore(deps)),

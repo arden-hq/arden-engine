@@ -32,7 +32,6 @@ import {
   corePageBudget,
   STANDING_LIMIT_NOTE
 } from "../memory/core-memory.js"
-import { requireWithinCoreBudget } from "./wiki-records.js"
 
 const MAX_PAGE_LINES = 4_000
 export const MAX_WIKI_CONTENT_CHARS = 40_000
@@ -590,12 +589,6 @@ const makeWikiTools = ({
               { preview: "Read required", retryable: false }
             )
           }
-          if (edit.body !== undefined)
-            requireWithinCoreBudget({
-              path: record.resource.path,
-              pageId: record.page.pageId,
-              body: edit.body
-            })
           return {
             record,
             expectedVersion,
@@ -702,7 +695,6 @@ const makeWikiTools = ({
           { preview: "Wiki path already exists", retryable: false }
         )
       }
-      requireWithinCoreBudget({ path: input.path, pageId: "", body: input.body })
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
       const created = await recordApplied(
         effects,
@@ -784,12 +776,6 @@ const makeWikiTools = ({
           { preview: "Read required", retryable: false }
         )
       }
-      if (input.body !== undefined)
-        requireWithinCoreBudget({
-          path: record.resource.path,
-          pageId: record.page.pageId,
-          body: input.body
-        })
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
       const updated = await recordApplied(
         effects,
