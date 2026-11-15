@@ -21,7 +21,7 @@ const makeWikiMaintenanceRunner = (services: {
   readonly runItem: HandlerItemRunner
 }): AutomationRunner =>
   runItemLoop(services, {
-    label: "Wiki Maintenance",
+    label: "Tidy",
     kind: "wiki",
     next: Effect.fn("WikiMaintenance.next")(function* () {
       const processedHead = yield* services.maintenance.processedHead()
@@ -48,16 +48,16 @@ const makeWikiMaintenanceRunner = (services: {
       services.maintenance.compareAndSet({ expected: data.processedHead, next: data.sourceHead }),
     summary: (item) =>
       item === undefined
-        ? "wiki maintenance: idle"
-        : `wiki maintenance: reviewed ${item.reviewed}, skipped ${item.skipped}`,
-    cancelled: "Wiki maintenance cancelled",
-    incomplete: "Wiki Maintenance review incomplete"
+        ? "tidy: idle"
+        : `tidy: reviewed ${item.reviewed}, skipped ${item.skipped}`,
+    cancelled: "Tidy cancelled",
+    incomplete: "Tidy review incomplete"
   })
 
 export const wikiMaintenanceHandler: SystemAutomationHandler<"wiki_maintenance"> = {
   spec: {
     automationId: WIKI_MAINTENANCE_AUTOMATION_ID,
-    name: "Wiki Maintenance",
+    name: "Tidy",
     description: "Reconcile cross-page Wiki consistency after each Wiki commit.",
     prompt: PROMPT_TEXT.wikiMaintenance,
     handler: "wiki_maintenance",

@@ -37,3 +37,23 @@ it("a stored timer is gone after the system Automations are seeded again", async
   )
   expect(stored).toEqual([{ types: ["event"], nextRunAt: null }])
 })
+
+it("Maintenance is shown as Tidy under its old id, and a reseed renames a stored job and its chat", async () => {
+  const stored = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      yield* catalog.seedSystemAutomations([wikiMaintenanceHandler.spec])
+      yield* sql`UPDATE scheduled_tasks SET name = 'Wiki Maintenance' WHERE task_id = ${MAINTENANCE}`
+      yield* sql`UPDATE sessions SET name = 'Wiki Maintenance'
+        WHERE session_id = (SELECT thread_id FROM scheduled_tasks WHERE task_id = ${MAINTENANCE})`
+      yield* catalog.seedSystemAutomations([wikiMaintenanceHandler.spec])
+      return yield* sql<{ readonly job: string; readonly chat: string | null }>`
+        SELECT task.name AS job, chat.name AS chat FROM scheduled_tasks AS task
+        LEFT JOIN sessions AS chat ON chat.session_id = task.thread_id
+        WHERE task.task_id = ${MAINTENANCE}`
+    })
+  )
+  expect(MAINTENANCE).toBe("builtin-wiki-maintenance")
+  expect(stored).toEqual([{ job: "Tidy", chat: "Tidy" }])
+})

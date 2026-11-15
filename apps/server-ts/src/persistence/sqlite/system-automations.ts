@@ -13,6 +13,7 @@ import { AutomationTriggersSchema, scheduleEffect, writtenTriggers } from "./aut
 import { encodeJson } from "./json.js"
 import { insertSession } from "./session-insert.js"
 import { haltAutomation } from "./automation-halt.js"
+import { renameOwnedJob } from "./job-labels.js"
 import { iso } from "../../runtime/clock.js"
 
 interface StoredSystemAutomation {
@@ -183,8 +184,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
             })
             yield* sql`
                 UPDATE scheduled_tasks
-                SET name = ${spec.name},
-                    description = ${spec.description},
+                SET description = ${spec.description},
                     description_source = 'manual',
                     prompt = CASE WHEN prompt_author IS NULL THEN ${spec.prompt} ELSE prompt END,
                     context_mode = ${spec.contextMode},
@@ -200,6 +200,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                     next_run_at = ${nextRunAt}
                 WHERE task_id = ${spec.automationId}
               `
+            yield* renameOwnedJob(sql, spec.automationId, spec.name)
             if (!enabled && row.enabled === 1)
               yield* haltAutomation({
                 sql,

@@ -92,7 +92,7 @@ const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(functi
       return yield* wikiError(
         operation,
         "invalid",
-        "Wiki Maintenance current page exceeds the scan limit",
+        "Tidy: the current page exceeds the scan limit",
         { pageId: resource.resourceId }
       )
     }
@@ -101,7 +101,7 @@ const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(functi
       return yield* wikiError(
         operation,
         "invalid",
-        "Wiki Maintenance current Wiki exceeds the scan limit"
+        "Tidy: the current Memory exceeds the scan limit"
       )
     }
   }
