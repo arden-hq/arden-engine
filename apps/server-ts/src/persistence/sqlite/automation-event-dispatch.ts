@@ -76,12 +76,11 @@ export const makeAutomationEventDispatch = ({
         ? yield* touchCause(sql, reported.touches)
         : undefined
     const event = written === undefined ? reported : { ...reported, ...written }
-    if (!chainMayWake(event.chainDepth)) return { queued: 0 }
     const nowMs = yield* Clock.currentTimeMillis
     const rows = yield* sql<{
       readonly task_id: string
       readonly triggers: string
-      readonly purpose: string
+      readonly purpose: "user_automation" | "system"
       readonly paused_at: string | null
     }>`
       SELECT task_id, triggers, purpose, paused_at
@@ -93,6 +92,7 @@ export const makeAutomationEventDispatch = ({
     let queued = 0
     for (const row of rows) {
       if (row.task_id === event.producedBy) continue
+      if (!chainMayWake(event.chainDepth, row.purpose)) continue
       if (!listensFor({ pausedAt: row.paused_at, eventType: event.eventType })) continue
       const triggers = yield* listenerTriggers(row)
       if (triggers === undefined) continue

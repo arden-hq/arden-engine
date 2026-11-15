@@ -631,13 +631,39 @@ describe("a Space worker's chat name", () => {
   })
 })
 
-it("renames a job's chat only through renameOwnedJob, besides the owner's own edits", () => {
-  const root = join(import.meta.dirname, "../src/persistence/sqlite")
-  const naming = readdirSync(root)
-    .filter((name) => name.endsWith(".ts"))
-    .filter((name) => /UPDATE sessions\s+SET name\b/u.test(readFileSync(join(root, name), "utf8")))
+it("names a chat only through renameOwnedJob, the owner's own rename and a continued chat", () => {
+  const root = join(import.meta.dirname, "../src")
+  const sources = (directory: string): ReadonlyArray<string> =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) return entry.name === "migrations" ? [] : sources(path)
+      return entry.name.endsWith(".ts") ? [path] : []
+    })
+  const setsName = (text: string) =>
+    [...text.matchAll(/UPDATE sessions\b([\s\S]*?)\bWHERE\b/gu)].some((statement) =>
+      /(?<![_.])\bname\s*=/u.test(statement[1] ?? "")
+    )
+  const naming = sources(root)
+    .filter((path) => setsName(readFileSync(path, "utf8")))
+    .map((path) => path.slice(root.length + 1))
     .sort()
-  expect(naming).toEqual(["automation-catalog-edit.ts", "job-labels.ts", "session-lifecycle.ts"])
+  expect(naming).toEqual([
+    "persistence/sqlite/job-labels.ts",
+    "persistence/sqlite/session-continue.ts",
+    "persistence/sqlite/session-lifecycle.ts"
+  ])
+  const renamesJob = (text: string) =>
+    [
+      ...text.matchAll(/UPDATE scheduled_tasks\b([\s\S]*?)\bWHERE\b/gu),
+      ...text.matchAll(/INSERT INTO scheduled_tasks\b[\s\S]*?DO UPDATE SET([\s\S]*?)\bWHERE\b/gu)
+    ].some((statement) => /(?<![_.])\bname\s*=/u.test(statement[1] ?? ""))
+  const unfollowed = sources(root)
+    .filter((path) => {
+      const text = readFileSync(path, "utf8")
+      return renamesJob(text) && !/chatsFollowJobName\(|renameOwnedJob\(/u.test(text)
+    })
+    .map((path) => path.slice(root.length + 1))
+  expect(unfollowed).toEqual([])
 })
 
 it("makes a Space's page only at creation, at the start check and from the released app's route", () => {

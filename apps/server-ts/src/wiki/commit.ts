@@ -29,7 +29,11 @@ export type WikiCommitOrigin =
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
   /** The owner's own chat turn, forgetting or undoing a retraction after their approval. */
   | { readonly kind: "forget"; readonly sessionId: string }
-  | { readonly kind: "agent"; readonly sessionId: string | undefined }
+  | {
+      readonly kind: "agent"
+      readonly sessionId: string | undefined
+      readonly chainDepth?: number
+    }
   | { readonly kind: "automation"; readonly automationId: string; readonly chainDepth?: number }
   | { readonly kind: "upkeep"; readonly automationId: string; readonly chainDepth?: number }
   | {
@@ -74,6 +78,10 @@ const CHAIN_MARK = "~"
 const AGENT_ORIGIN = "wiki.agent"
 const CAPTURE_ORIGIN = "memory.capture"
 const FORGET_ORIGIN = "memory.forget"
+const CHAINED = /^(.+)~(\d+)$/u
+
+const chainMark = (chainDepth: number | undefined): string =>
+  chainDepth === undefined || chainDepth === 0 ? "" : `${CHAIN_MARK}${chainDepth}`
 
 const withChat = (base: string, sessionId: string | undefined): string =>
   sessionId === undefined ? base : `${base}@${sessionId}`
@@ -90,14 +98,10 @@ export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
     case "user":
       return origin.via
     case "agent":
-      return withChat(AGENT_ORIGIN, origin.sessionId)
+      return `${withChat(AGENT_ORIGIN, origin.sessionId)}${chainMark(origin.chainDepth)}`
     case "automation":
     case "upkeep":
-      return `${origin.kind === "upkeep" ? UPKEEP_PREFIX : AUTOMATION_PREFIX}${origin.automationId}${
-        origin.chainDepth === undefined || origin.chainDepth === 0
-          ? ""
-          : `${CHAIN_MARK}${origin.chainDepth}`
-      }`
+      return `${origin.kind === "upkeep" ? UPKEEP_PREFIX : AUTOMATION_PREFIX}${origin.automationId}${chainMark(origin.chainDepth)}`
     case "capture":
       return withChat(CAPTURE_ORIGIN, origin.sessionId)
     case "forget":
@@ -114,8 +118,14 @@ const isDesktopOrigin = (origin: string): origin is `desktop${string}` =>
 
 export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   if (origin === "filesystem" || isDesktopOrigin(origin)) return { kind: "user", via: origin }
-  const agentChat = chatOf(origin, AGENT_ORIGIN)
-  if (agentChat !== null) return { kind: "agent", sessionId: agentChat }
+  const agentChained = CHAINED.exec(origin)
+  const agentChat = chatOf(agentChained?.[1] ?? origin, AGENT_ORIGIN)
+  if (agentChat !== null)
+    return {
+      kind: "agent",
+      sessionId: agentChat,
+      ...(agentChained?.[2] === undefined ? {} : { chainDepth: Number(agentChained[2]) })
+    }
   const captureChat = chatOf(origin, CAPTURE_ORIGIN)
   if (captureChat !== null) return { kind: "capture", replayKey: undefined, sessionId: captureChat }
   const forgetChat = chatOf(origin, FORGET_ORIGIN)
@@ -124,7 +134,7 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
   if (origin === "space.page") return { kind: "space_page" }
   const prefix = [UPKEEP_PREFIX, AUTOMATION_PREFIX].find((each) => origin.startsWith(each))
   const named = prefix === undefined ? "" : origin.slice(prefix.length).trim()
-  const chained = /^(.+)~(\d+)$/u.exec(named)
+  const chained = CHAINED.exec(named)
   const automationId = chained?.[1] ?? named
   const retired = RETIRED_UPKEEP_ORIGINS.get(
     automationId === "" ? origin : `${prefix ?? ""}${automationId}`

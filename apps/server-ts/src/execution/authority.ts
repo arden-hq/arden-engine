@@ -1,6 +1,7 @@
 import { isWithin } from "@arden-hq/std/paths"
 import type { RunContext } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
+import { originChainDepth } from "../persistence/automations/chain-depth.js"
 import {
   isUserAutomationPurpose,
   JobPurposeSchema,
@@ -172,8 +173,7 @@ export const deriveAuthority = (facts: AdmissionFacts): RunAuthority => {
         actor.kind === "person" || actor.kind === "unrecorded"
           ? null
           : (facts.originAutomation?.automation_id ?? facts.chatAutomation?.automation_id ?? null),
-      chain_depth:
-        facts.context.origin.kind === "automation" ? (facts.context.origin.chain_depth ?? 0) : 0,
+      chain_depth: originChainDepth(facts.context.origin),
       task_item_id: facts.context.task?.item_id ?? null
     },
     reach: {

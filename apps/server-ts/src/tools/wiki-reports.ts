@@ -10,7 +10,7 @@ import { WikiReportContentSchema } from "../wiki/reports.js"
 import { Wiki } from "../wiki/service.js"
 import { resolveAutomation } from "./automation-records.js"
 import { loadSnapshot, wikiFailure, writtenPageData } from "./wiki.js"
-import { readRunCause, readWikiRun } from "./wiki-identity.js"
+import { agentOrigin, readRunCause, readWikiRun } from "./wiki-identity.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { directoryReceipt, pageReceipt } from "./wiki-records.js"
 
@@ -75,6 +75,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
           retryable: false
         })
       }
+      const cause = await readRunCause(services.runs, { ...ctx.run, signal: ctx.signal })
       const automation = await resolveAutomation(
         services.automations,
         input.automation_ref,
@@ -91,7 +92,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
               authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
               commit: {
                 actor: "Agent",
-                origin: { kind: "agent", sessionId: ctx.run.sessionId },
+                origin: agentOrigin(ctx.run.sessionId, cause),
                 reason: `Configure reports for ${automation.name}`
               }
             })

@@ -476,6 +476,25 @@ describe("the run's cause", () => {
     })
   })
 
+  it("every run a wake starts keeps the wake's depth: an Automation, a Task worker, a review, an in-chat step", () => {
+    const at = (origin: RunContext["origin"]) =>
+      deriveAuthority(facts({ sessionId: "woken", context: { origin, task: null } })).owns
+        .chain_depth
+    expect({
+      automation: at({
+        kind: "automation",
+        automation_id: "a",
+        occurrence_id: "o",
+        chain_depth: 2
+      }),
+      worker: at({ kind: "task", item_id: "t", occurrence_id: "o", chain_depth: 2 }),
+      review: at({ kind: "space", space_id: "s", occurrence_id: "o", chain_depth: 2 }),
+      step: at({ kind: "chat", session_id: "woken", turn_id: "m", chain_depth: 2 }),
+      owner: at({ kind: "chat", session_id: "woken", turn_id: "m" }),
+      unrecorded: at({ kind: "unrecorded" })
+    }).toEqual({ automation: 2, worker: 2, review: 2, step: 2, owner: 0, unrecorded: 0 })
+  })
+
   it("a delegate that drops its depth is wider than its parent: it could wake a longer chain", () => {
     const agent = narrowed(woken)
     expect(widerAxes({ ...agent, owns: { ...agent.owns, chain_depth: 0 } }, woken)).toEqual([

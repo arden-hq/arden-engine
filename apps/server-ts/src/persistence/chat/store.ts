@@ -47,7 +47,8 @@ export interface ChatWriteStartInput {
   readonly automationPrompt?: string
   readonly automationContextMode?: AutomationContextMode
   readonly outputSchema?: JsonObject
-  readonly continuesTask?: { readonly itemId: string }
+  /** `chainDepth`: of the wake or run that handed the Task this step (`chain-depth.ts`). */
+  readonly continuesTask?: { readonly itemId: string; readonly chainDepth: number }
   readonly capture?: ChatCaptureInput
   readonly fromQueue?: true
 }

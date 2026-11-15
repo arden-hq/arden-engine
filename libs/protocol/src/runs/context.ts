@@ -3,19 +3,36 @@ import { NonNegativeIntSchema } from "../common/schema.js"
 
 const Identity = Schema.NonEmptyString
 
+/** Automation runs behind the wake that started this run; absent: 0, as for the owner's turn. */
+const wokenAt = { chain_depth: Schema.optionalKey(NonNegativeIntSchema) }
+
 /** Captured once at admission. Later delivery destinations do
  * not rewrite the request that caused this attempt. */
 export const RunOriginSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("chat"), session_id: Identity, turn_id: Identity }),
+  Schema.Struct({
+    kind: Schema.Literal("chat"),
+    session_id: Identity,
+    turn_id: Identity,
+    ...wokenAt
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation"),
     automation_id: Identity,
     occurrence_id: Identity,
-    /** Automation runs behind the wake that started this one; absent: 0. */
-    chain_depth: Schema.optionalKey(NonNegativeIntSchema)
+    ...wokenAt
   }),
-  Schema.Struct({ kind: Schema.Literal("task"), item_id: Identity, occurrence_id: Identity }),
-  Schema.Struct({ kind: Schema.Literal("space"), space_id: Identity, occurrence_id: Identity }),
+  Schema.Struct({
+    kind: Schema.Literal("task"),
+    item_id: Identity,
+    occurrence_id: Identity,
+    ...wokenAt
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("space"),
+    space_id: Identity,
+    occurrence_id: Identity,
+    ...wokenAt
+  }),
   Schema.Struct({ kind: Schema.Literal("unrecorded") })
 ])
 

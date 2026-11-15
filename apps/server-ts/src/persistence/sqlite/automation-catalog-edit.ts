@@ -19,6 +19,7 @@ import { AutomationCatalog, type PromptWriter } from "../automations/catalog.js"
 import { AutomationStoreError } from "../automations/store.js"
 import { isSpaceWorkJob, isUserAutomationPurpose, type JobPurpose } from "../job-classification.js"
 import { namedPublicRef } from "../public-ref.js"
+import { chatsFollowJobName } from "./job-labels.js"
 import { decodeJson, encodeJson } from "./json.js"
 import {
   AutomationTriggersSchema,
@@ -425,6 +426,7 @@ export const makeAutomationCatalogEdits = ({
                   writtenAt: iso(yield* Clock.currentTimeMillis)
                 })
               : row.instruction_revision_id
+          yield* chatsFollowJobName(sql, validAutomationId, name)
           yield* sql`
           UPDATE scheduled_tasks
           SET followup_generation = followup_generation + 1, name = ${name},
@@ -498,7 +500,7 @@ export const makeAutomationCatalogEdits = ({
           )
           yield* sql`
             UPDATE sessions
-            SET name = ${name}, chat_model = ${model}
+            SET chat_model = ${model}
             WHERE origin_automation_id = ${validAutomationId}
               AND session_type = 'channel'
               AND archived_at IS NULL

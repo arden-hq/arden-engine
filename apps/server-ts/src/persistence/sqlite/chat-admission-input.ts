@@ -37,7 +37,9 @@ export const chatAdmissionInputSchema = Schema.Struct({
   automationLease: Schema.optionalKey(
     Schema.Struct({ id: Schema.NonEmptyString, token: Schema.NonEmptyString })
   ),
-  continuesTask: Schema.optionalKey(Schema.Struct({ itemId: Schema.NonEmptyString })),
+  continuesTask: Schema.optionalKey(
+    Schema.Struct({ itemId: Schema.NonEmptyString, chainDepth: Schema.Natural })
+  ),
   fromQueue: Schema.optionalKey(Schema.Literal(true)),
   capture: Schema.optionalKey(
     Schema.Struct({

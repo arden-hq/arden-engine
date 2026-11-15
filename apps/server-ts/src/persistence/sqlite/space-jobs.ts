@@ -10,6 +10,7 @@ import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sess
 import type { UnitOfWork } from "../unit-of-work.js"
 import { enqueue, type QueueWriter } from "./automation-enqueue.js"
 import type { JsonColumnError } from "./json.js"
+import { attemptWakeDepth, readRunCause, taskWakeDepth } from "./run-cause.js"
 
 import { spaceJobId, taskJobId } from "../space-job-id.js"
 import { hasPendingTaskApproval, hasPendingTaskQuestion } from "./task-question-state.js"
@@ -34,6 +35,30 @@ import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
 import { renameOwnedJob } from "./job-labels.js"
 
+type EventWake = Extract<AutomationTriggerContext, { readonly source: "event" }>
+
+/** Who made the change a wake answers: the run's Automation and chain depth, carried so the run
+ *  the wake starts inherits them (`chain-depth.ts`). */
+type WakeCause = Pick<EventWake, "produced_by" | "chain_depth">
+
+const woken = (producedBy: string | null, chainDepth: number): WakeCause =>
+  chainDepth === 0
+    ? { produced_by: producedBy }
+    : { produced_by: producedBy, chain_depth: chainDepth }
+
+/** The owner, the outside world or a clock: no run made the change. */
+const NO_RUN = woken(null, 0)
+
+/** What wakes a Task's worker: a run's change, the owner's, or the Task's own work going on (a
+ *  check it booked coming due, a deferral ending), which continues at its last attempt's depth. */
+export type TaskWaker =
+  | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "owner" }
+  | { readonly kind: "continuation" }
+
+export const taskWaker = (runId: string | undefined): TaskWaker =>
+  runId === undefined ? { kind: "owner" } : { kind: "run", runId }
+
 interface JobState {
   readonly automationId: string
   readonly enabled: boolean
@@ -53,7 +78,11 @@ export interface SpaceJobSql {
   ) => SpaceJobWrite<SpaceJobRecoveryCursor | undefined>
   readonly materializeDue: (now: string) => SpaceJobWrite<void>
   readonly syncSpace: (spaceId: string, now: string) => SpaceJobWrite<JobState | null>
-  readonly queueOwnerSpaceChangeWake: (spaceId: string, now: string) => SpaceJobWrite<void>
+  readonly queueOwnerSpaceChangeWake: (
+    spaceId: string,
+    now: string,
+    runId: string | undefined
+  ) => SpaceJobWrite<void>
   readonly queueTaskChangedByHand: (itemId: string, now: string) => SpaceJobWrite<boolean>
   readonly retryReview: (automationId: string, now: string) => SpaceJobWrite<void>
   readonly queueInferenceChat: (sessionId: string, now: string) => SpaceJobWrite<boolean>
@@ -69,7 +98,12 @@ export interface SpaceJobSql {
     spaceIds: ReadonlyArray<string>
   ) => SpaceJobWrite<ReadonlyArray<string>>
   readonly queueItemsRouted: (spaceId: string, now: string) => SpaceJobWrite<void>
-  readonly queueTaskWake: (itemId: string, now: string, fromPerson?: boolean) => SpaceJobWrite<void>
+  readonly queueTaskWake: (
+    itemId: string,
+    now: string,
+    by: TaskWaker,
+    fromPerson?: boolean
+  ) => SpaceJobWrite<void>
   readonly stopTask: (itemId: string, settlingRunId?: string) => SpaceJobWrite<void>
   readonly context: (
     automationId: string
@@ -104,6 +138,27 @@ export const makeSpaceJobSql = (
   sessionEvents: SessionLifecycleEvents["Service"]
 ): SpaceJobSql => {
   const writer: QueueWriter = { sql, sessionEvents }
+  const wakeCause = Effect.fn("SpaceJobSql.wakeCause")(function* (runId: string | undefined) {
+    if (runId === undefined) return NO_RUN
+    const cause = yield* readRunCause(sql, runId)
+    return woken(cause.produced_by, cause.chain_depth)
+  })
+  const taskWakeCause = Effect.fn("SpaceJobSql.taskWakeCause")(function* (
+    itemId: string,
+    by: TaskWaker
+  ) {
+    switch (by.kind) {
+      case "run":
+        return yield* wakeCause(by.runId)
+      case "owner":
+        return NO_RUN
+      case "continuation": {
+        const [task] = yield* sql<{ readonly chain_depth: number }>`
+          SELECT ${taskWakeDepth(sql, sql`${itemId}`)} AS chain_depth`
+        return woken(null, task?.chain_depth ?? 0)
+      }
+    }
+  })
   const halt = Effect.fn("SpaceJobSql.halt")(function* (
     automationId: string,
     reason: AutomationHalt,
@@ -287,7 +342,8 @@ export const makeSpaceJobSql = (
 
   const queue = Effect.fn("SpaceJobSql.queue")(function* (
     state: JobState,
-    trigger: AutomationTriggerContext,
+    cause: WakeCause,
+    wake: Omit<EventWake, "source" | "produced_by" | "chain_depth">,
     options: {
       readonly triggerContext?: string
       readonly personChangeAt?: string
@@ -302,7 +358,7 @@ export const makeSpaceJobSql = (
       context: {
         scheduled_for: null,
         automation_run_id: null,
-        trigger_context_snapshot: trigger,
+        trigger_context_snapshot: { source: "event", ...wake, ...cause } satisfies EventWake,
         ...(options.triggerContext === undefined
           ? {}
           : { trigger_context: options.triggerContext }),
@@ -319,28 +375,28 @@ export const makeSpaceJobSql = (
   /** Queues a review wake only when the review can run; touches no Task worker job. */
   const queueReviewWake = Effect.fn("SpaceJobSql.queueReviewWake")(function* (
     spaceId: string,
-    now: string
+    now: string,
+    cause: WakeCause
   ) {
     const space = yield* readJobSpace(sql, spaceId)
     if (space === null || !jobEnabled(space)) return false
     const state = yield* syncSpaceReview(spaceId, now)
     if (state === null) return false
-    return yield* queue(state, {
-      source: "event",
+    return yield* queue(state, cause, {
       queued_at: now,
       event_type: "space.wake",
       event_key: spaceId,
-      produced_by: null,
       context: { space_id: spaceId }
     })
   })
 
   const queueOwnerSpaceChangeWake = Effect.fn("SpaceJobSql.queueOwnerSpaceChangeWake")(function* (
     spaceId: string,
-    now: string
+    now: string,
+    runId: string | undefined
   ) {
     yield* syncSpace(spaceId, now)
-    yield* queueReviewWake(spaceId, now)
+    yield* queueReviewWake(spaceId, now, yield* wakeCause(runId))
   })
 
   /** A change to a Task's reviewed fields made by hand, with no run behind it. */
@@ -351,7 +407,7 @@ export const makeSpaceJobSql = (
     const tasks = yield* sql<{ readonly space_id: string | null }>`
       SELECT space_id FROM space_tasks WHERE item_id = ${itemId}`
     const spaceId = tasks[0]?.space_id ?? undefined
-    return spaceId === undefined ? false : yield* queueReviewWake(spaceId, now)
+    return spaceId === undefined ? false : yield* queueReviewWake(spaceId, now, NO_RUN)
   })
 
   const retryReview = Effect.fn("SpaceJobSql.retryReview")(function* (
@@ -362,8 +418,10 @@ export const makeSpaceJobSql = (
       readonly failed: number
       readonly restart_cut: number
       readonly space_id: string | null
+      readonly chain_depth: number
     }>`
       SELECT ${outcomeSql(sql, sql`attempt`)} = 'failed' AS failed,
+        ${attemptWakeDepth(sql, "attempt")} AS chain_depth,
         COALESCE(${restartCutRunSql("chat")}, 0) AS restart_cut,
         job.owner_space_id AS space_id
       FROM automation_runs AS attempt JOIN scheduled_tasks AS job ON job.task_id = attempt.task_id
@@ -380,12 +438,11 @@ export const makeSpaceJobSql = (
     if (state === null || !state.enabled) return
     yield* queue(
       state,
+      woken(null, attempts[0]?.chain_depth ?? 0),
       {
-        source: "event",
         queued_at: now,
         event_type: "space.review_retry",
         event_key: automationId,
-        produced_by: null,
         context: { space_id: spaceId }
       },
       { dueAt: Date.parse(now) + delay }
@@ -426,12 +483,11 @@ export const makeSpaceJobSql = (
     if (!state?.enabled) return false
     return yield* queue(
       state,
+      yield* wakeCause(row.run_id),
       {
-        source: "event",
         queued_at: now,
         event_type: "chat.completed",
         event_key: row.run_id,
-        produced_by: null,
         context: {
           space_id: row.space_id,
           session_id: sessionId,
@@ -506,12 +562,11 @@ export const makeSpaceJobSql = (
         linked_at = excluded.linked_at`
     return yield* queue(
       state,
+      yield* wakeCause(run.run_id),
       {
-        source: "event",
         queued_at: now,
         event_type: "chat.completed",
         event_key: run.run_id,
-        produced_by: null,
         context: {
           space_id: spaceId,
           session_id: sessionId,
@@ -538,12 +593,11 @@ export const makeSpaceJobSql = (
     if (!state?.enabled) return
     yield* queue(
       state,
+      NO_RUN,
       {
-        source: "event",
         queued_at: now,
         event_type: "item.routed",
         event_key: spaceId,
-        produced_by: null,
         context: { space_id: spaceId }
       },
       {
@@ -556,6 +610,7 @@ export const makeSpaceJobSql = (
   const queueTaskWake = Effect.fn("SpaceJobSql.queueTaskWake")(function* (
     itemId: string,
     now: string,
+    by: TaskWaker,
     fromPerson = false
   ) {
     const task = yield* readJobTask(sql, itemId)
@@ -575,12 +630,11 @@ export const makeSpaceJobSql = (
     if (state === null) return
     yield* queue(
       state,
+      yield* taskWakeCause(task.item_id, by),
       {
-        source: "event",
         queued_at: now,
         event_type: "task.wake",
         event_key: task.item_id,
-        produced_by: null,
         context: { space_id: task.space_id, item_id: task.item_id }
       },
       fromPerson ? { personChangeAt: now } : {}
@@ -619,12 +673,10 @@ export const makeSpaceJobSql = (
     for (const row of due) {
       const state = yield* syncTask(row.item_id, now)
       if (state === null) continue
-      yield* queue(state, {
-        source: "event",
+      yield* queue(state, yield* taskWakeCause(row.item_id, { kind: "continuation" }), {
         queued_at: now,
         event_type: "task.due",
         event_key: row.item_id,
-        produced_by: null,
         context: { item_id: row.item_id, scheduled_for: row.next_attempt_at }
       })
       yield* sql`
