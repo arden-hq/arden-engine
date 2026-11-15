@@ -1,5 +1,6 @@
-import type { RevisionError } from "@arden-hq/revisions/effect"
 import { Schema } from "effect"
+
+import type { WikiCommitError } from "./commit.js"
 
 const WikiOperationSchema = Schema.Literals([
   "open",
@@ -71,7 +72,7 @@ export const wikiError = (
 
 export const mapRevisionError =
   (operation: WikiOperation, pageId?: string) =>
-  (cause: RevisionError): WikiError => {
+  (cause: WikiCommitError): WikiError => {
     const options = {
       ...(pageId === undefined ? {} : { pageId }),
       cause
@@ -81,6 +82,7 @@ export const mapRevisionError =
         return wikiError(operation, "conflict", cause.message, options)
       case "CorruptRepositoryError":
         return wikiError(operation, "corrupt", cause.message, options)
+      case "WikiCommitRuleError":
       case "InvalidRevisionInputError":
       case "NoChangesError":
       case "RevisionContentLimitError":

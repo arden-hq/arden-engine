@@ -42,7 +42,12 @@ const OWNER: WikiCommitIdentity = {
   reason: "owner edit"
 }
 const REFUSAL =
-  /^me\.md would have 9068 characters, .*Nothing was saved\. Cut at least 68 characters/u
+  /^me\.md would have 9068 characters; its limit is 9000, .*Nothing was saved\. Shorten it by at least 68 characters\.$/u
+const AGENT: WikiCommitIdentity = {
+  actor: "agent:test",
+  origin: { kind: "agent", sessionId: undefined },
+  reason: "agent edit"
+}
 
 const content = (pageId: string, title: string, body: string) =>
   formatWikiPage({
@@ -261,8 +266,71 @@ describe("the page size limit at the commit", () => {
       shorter: "saved",
       retitled: "saved",
       moved: "saved",
-      longer: expect.stringMatching(/^profile\.md would have 9201 characters, /u)
+      longer: expect.stringMatching(/^profile\.md would have 9201 characters; its limit is 9000/u)
     })
+  })
+
+  it("tells a model writer how to condense, and the owner only what to shorten", async () => {
+    const outcome = await withWiki(({ repository }) =>
+      Effect.gen(function* () {
+        const write = (identity: WikiCommitIdentity) =>
+          repository.currentRevision.pipe(
+            Effect.flatMap((head) =>
+              commitWiki(repository, { ...identity, expectedRevision: head }, [
+                createPage("me", "me.md", content("me", "Me", "h".repeat(9_068)))
+              ])
+            ),
+            Effect.flip,
+            Effect.map((error) => error.message)
+          )
+        return { owner: yield* write(OWNER), agent: yield* write(AGENT) }
+      })
+    )
+    expect(outcome.owner).toMatch(REFUSAL)
+    expect(outcome.owner).not.toMatch(/retry|Trimming/u)
+    expect(outcome.agent).toMatch(
+      /^me\.md would have 9068 characters, but it is sent whole to every run .*Cut at least 68 characters; aim for 7200 or fewer .*Then retry with the new fact included\.$/u
+    )
+  })
+
+  it("replays a landed commit under its key even when the page has changed since", async () => {
+    const outcome = await withWiki(({ repository }) =>
+      Effect.gen(function* () {
+        yield* unchecked(
+          repository,
+          createPage("me", "me.md", content("me", "Me", "i".repeat(9_600)))
+        )
+        const over = yield* repository.get("me")
+        if (over === null) throw new Error("me.md is missing")
+        const head = yield* repository.currentRevision
+        const batch = (expected: ResourceVersion) =>
+          commitWiki(
+            repository,
+            {
+              actor: "memory:capture",
+              origin: { kind: "capture", replayKey: "capture-batch-1", sessionId: undefined },
+              reason: "capture",
+              expectedRevision: head
+            },
+            [updatePage(expected, content("me", "Me", "i".repeat(9_400)))]
+          ).pipe(
+            Effect.match({
+              onFailure: (error) => error.message,
+              onSuccess: (result) => (result.replayed ? "replayed" : "saved")
+            })
+          )
+        const first = yield* batch(over)
+        const shortened = yield* repository.get("me")
+        if (shortened === null) throw new Error("me.md is missing")
+        yield* commitWiki(
+          repository,
+          { ...OWNER, expectedRevision: yield* repository.currentRevision },
+          [updatePage(shortened, content("me", "Me", "Short."))]
+        )
+        return { first, retried: yield* batch(over) }
+      })
+    )
+    expect(outcome).toEqual({ first: "saved", retried: "replayed" })
   })
 
   it("commits the seed pages of a fresh Memory", async () => {

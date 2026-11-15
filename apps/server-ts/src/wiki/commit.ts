@@ -1,13 +1,12 @@
-import {
-  type AdoptableWorkingChange,
-  type CommitInput,
-  type CommitResult,
-  InvalidRevisionInputError,
-  type ManagedFileRepositoryShape,
-  type ResourceVersion,
-  type RevisionError
+import type {
+  AdoptableWorkingChange,
+  CommitInput,
+  CommitResult,
+  ManagedFileRepositoryShape,
+  ResourceVersion,
+  RevisionError
 } from "@arden-hq/revisions/effect"
-import { Effect, Option } from "effect"
+import { Effect, Option, Schema } from "effect"
 
 import { CORE_CONDENSE_ADVICE, coreCondenseTarget, corePageBudget } from "../memory/core-memory.js"
 import { aliasesAreHuman, parseWikiPage } from "./page.js"
@@ -166,6 +165,14 @@ export const restorePage = (page: PageVersion): WikiPageOperation => ({
   expectedVersion: page.versionId
 })
 
+/** A rule at the commit point refused the write. */
+export class WikiCommitRuleError extends Schema.TaggedError<WikiCommitRuleError>()(
+  "WikiCommitRuleError",
+  { rule: Schema.Literals(["aliases", "size"] as const), message: Schema.String }
+) {}
+
+export type WikiCommitError = RevisionError | WikiCommitRuleError
+
 export const commitWiki = (
   repository: ManagedFileRepositoryShape,
   options: WikiCommitIdentity & {
@@ -173,104 +180,44 @@ export const commitWiki = (
     readonly idempotencyKey?: string
   },
   operations: ReadonlyArray<WikiPageOperation>
-): Effect.Effect<CommitResult, RevisionError> => {
+): Effect.Effect<CommitResult, WikiCommitError> => {
   const replayKey =
     options.idempotencyKey ??
     (options.origin.kind === "capture" ? options.origin.replayKey : undefined)
-  return requireCommitRules(operations).pipe(
-    Effect.andThen(requireWithinLimits(repository, operations)),
-    Effect.andThen(
-      repository.commit({
-        actor: options.actor,
-        origin: encodeWikiOrigin(options.origin),
-        reason: options.reason,
-        operations,
-        ...(options.expectedRevision === null
-          ? { expectedHead: null, enforceExpectedHead: true }
-          : { expectedHead: options.expectedRevision }),
-        ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
-      })
-    )
+  const commit = repository.commit({
+    actor: options.actor,
+    origin: encodeWikiOrigin(options.origin),
+    reason: options.reason,
+    operations,
+    ...(options.expectedRevision === null
+      ? { expectedHead: null, enforceExpectedHead: true }
+      : { expectedHead: options.expectedRevision }),
+    ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
+  })
+  const checked = requireCommitRules(repository, options.origin, operations).pipe(
+    Effect.andThen(commit)
   )
-}
-
-/** How far a page body is over its limit, or undefined when it fits or has none. */
-export const overPageLimit = (page: {
-  readonly path: string
-  readonly pageId: string
-  readonly body: string
-}): { readonly chars: number; readonly limit: number } | undefined => {
-  const limit = corePageBudget(page)
-  return limit === undefined || page.body.length <= limit
-    ? undefined
-    : { chars: page.body.length, limit }
-}
-
-const limitRefusal = (path: string, over: { readonly chars: number; readonly limit: number }) => {
-  const target = coreCondenseTarget(over.limit)
-  return new InvalidRevisionInputError({
-    message:
-      `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
-      `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
-      `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
-      `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
-  })
+  // A key that already named a commit is a replay: the repository returns that commit, or
+  // refuses a different request under it, so the rules are not asked again of a landed write.
+  return replayKey === undefined
+    ? checked
+    : repository
+        .idempotencyReceipt(replayKey)
+        .pipe(Effect.flatMap((receipt) => (receipt === null ? checked : commit)))
 }
 
 /**
- * The size limit binds every writer inside Arden; an outside edit is taken in over it. A write
- * that does not grow a page already over its limit goes through, so the page can be shortened,
- * renamed or moved in steps.
- */
-const requireWithinLimits = (
-  repository: ManagedFileRepositoryShape,
-  operations: ReadonlyArray<WikiPageOperation>
-): Effect.Effect<void, RevisionError> =>
-  Effect.forEach(operations, (operation) => requireWithinLimit(repository, operation), {
-    discard: true
-  })
-
-const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
-  repository: ManagedFileRepositoryShape,
-  operation: WikiPageOperation
-): Effect.fn.Return<void, RevisionError> {
-  if (operation._tag === "Archive") return
-  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
-  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
-  if (path === undefined) return
-  const given = "content" in operation ? operation.content : undefined
-  const over = yield* bodyOverLimit(repository, path, operation.resourceId, given ?? before)
-  if (over === undefined) return
-  const was =
-    before?.state === "active"
-      ? yield* bodyOverLimit(repository, before.path, operation.resourceId, before)
-      : undefined
-  if (was !== undefined && over.chars <= was.chars) return
-  return yield* limitRefusal(path, over)
-})
-
-const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
-  repository: ManagedFileRepositoryShape,
-  path: string,
-  pageId: string,
-  content: Uint8Array | ResourceVersion | null
-): Effect.fn.Return<{ readonly chars: number; readonly limit: number } | undefined, RevisionError> {
-  if (content === null || corePageBudget({ path, pageId }) === undefined) return undefined
-  const bytes = content instanceof Uint8Array ? content : yield* repository.readVersion(content)
-  const page = yield* parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
-  return Option.isNone(page) ? undefined : overPageLimit({ path, pageId, body: page.value.body })
-})
-
-/**
- * Record one change made outside Arden that is already in the page's file. It meets the same
- * commit-point rules as `commitWiki`, and is guarded by the head the caller decided on.
+ * Record one change made outside Arden that is already in the page's file. It meets the commit
+ * rules that bind an outside edit, and is guarded by the head the caller decided on.
  */
 export const commitOutsideChange = (
   repository: ManagedFileRepositoryShape,
   options: WikiCommitIdentity & { readonly expectedRevision: string | null },
   change: AdoptableWorkingChange
-): Effect.Effect<CommitResult, RevisionError> =>
+): Effect.Effect<CommitResult, WikiCommitError> =>
   requireCommitRules(
+    repository,
+    options.origin,
     change.kind === "changed"
       ? [
           {
@@ -292,27 +239,124 @@ export const commitOutsideChange = (
     )
   )
 
-/** The rules every Memory write meets at the commit point, outside edits included. */
-const requireCommitRules = (
+const requireHumanAliases = (
+  operation: WikiPageOperation
+): Effect.Effect<void, WikiCommitRuleError> => {
+  const content = "content" in operation ? operation.content : undefined
+  if (content === undefined) return Effect.void
+  return parseWikiPage(decoder.decode(content)).pipe(
+    Effect.option,
+    Effect.flatMap((page) =>
+      Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
+        ? Effect.void
+        : Effect.fail(
+            new WikiCommitRuleError({
+              rule: "aliases",
+              message: `Wiki page ${operation.resourceId} keeps a path or a repeated name as an alias`
+            })
+          )
+    )
+  )
+}
+
+/** How far a page body is over its limit, or undefined when it fits or has none. */
+export const overPageLimit = (page: {
+  readonly path: string
+  readonly pageId: string
+  readonly body: string
+}): { readonly chars: number; readonly limit: number } | undefined => {
+  const limit = corePageBudget(page)
+  return limit === undefined || page.body.length <= limit
+    ? undefined
+    : { chars: page.body.length, limit }
+}
+
+/** The size refusal, in the owner's words for an owner's edit and with the steps for a model. */
+const limitRefusal = (
+  origin: WikiCommitOrigin,
+  path: string,
+  over: { readonly chars: number; readonly limit: number }
+): WikiCommitRuleError => {
+  const target = coreCondenseTarget(over.limit)
+  return new WikiCommitRuleError({
+    rule: "size",
+    message:
+      origin.kind === "user"
+        ? `${path} would have ${over.chars} characters; its limit is ${over.limit}, because it is sent whole to every chat. ` +
+          `Nothing was saved. Shorten it by at least ${over.chars - over.limit} characters.`
+        : `${path} would have ${over.chars} characters, but it is sent whole to every run and is limited to ${over.limit}. ` +
+          `Nothing was saved. Cut at least ${over.chars - over.limit} characters; aim for ${target} or fewer ` +
+          `(${over.chars - target} less) so later updates fit. Trimming a few words will not do it. ` +
+          `${CORE_CONDENSE_ADVICE} Then retry with the new fact included.`
+  })
+}
+
+/** A write that does not grow a page already over its limit goes through, so the page can be
+ *  shortened, renamed or moved in steps. */
+const requireWithinLimit = Effect.fn("Wiki.requireWithinLimit")(function* (
+  repository: ManagedFileRepositoryShape,
+  origin: WikiCommitOrigin,
+  operation: WikiPageOperation
+): Effect.fn.Return<void, WikiCommitError> {
+  if (operation._tag === "Archive") return
+  const before = operation._tag === "Create" ? null : yield* repository.get(operation.resourceId)
+  const path = ("path" in operation ? operation.path : undefined) ?? before?.path
+  if (path === undefined) return
+  const given = "content" in operation ? operation.content : undefined
+  const over = yield* bodyOverLimit(repository, path, operation.resourceId, given ?? before)
+  if (over === undefined) return
+  const was =
+    before?.state === "active"
+      ? yield* bodyOverLimit(repository, before.path, operation.resourceId, before)
+      : undefined
+  if (was !== undefined && over.chars <= was.chars) return
+  return yield* limitRefusal(origin, path, over)
+})
+
+const bodyOverLimit = Effect.fn("Wiki.bodyOverLimit")(function* (
+  repository: ManagedFileRepositoryShape,
+  path: string,
+  pageId: string,
+  content: Uint8Array | ResourceVersion | null
+): Effect.fn.Return<{ readonly chars: number; readonly limit: number } | undefined, RevisionError> {
+  if (content === null || corePageBudget({ path, pageId }) === undefined) return undefined
+  const bytes = content instanceof Uint8Array ? content : yield* repository.readVersion(content)
+  const page = yield* parseWikiPage(decoder.decode(bytes)).pipe(Effect.option)
+  return Option.isNone(page) ? undefined : overPageLimit({ path, pageId, body: page.value.body })
+})
+
+const isOutsideEdit = (origin: WikiCommitOrigin): boolean =>
+  origin.kind === "user" && origin.via === "filesystem"
+
+/**
+ * Every rule a Memory write meets at the commit point, and the writers it binds. The one place
+ * that decides whether a commit may land; `commitWiki` and `commitOutsideChange` both run it.
+ */
+const COMMIT_RULES: ReadonlyArray<{
+  readonly binds: (origin: WikiCommitOrigin) => boolean
+  readonly check: (
+    repository: ManagedFileRepositoryShape,
+    origin: WikiCommitOrigin,
+    operation: WikiPageOperation
+  ) => Effect.Effect<void, WikiCommitError>
+}> = [
+  // Aliases: every writer.
+  { binds: () => true, check: (_repository, _origin, operation) => requireHumanAliases(operation) },
+  // Size: every writer but an outside edit, which is taken in over the limit.
+  { binds: (origin) => !isOutsideEdit(origin), check: requireWithinLimit }
+]
+
+/** Fails with the first rule that refuses one of `operations` for this writer. */
+export const requireCommitRules = (
+  repository: ManagedFileRepositoryShape,
+  origin: WikiCommitOrigin,
   operations: ReadonlyArray<WikiPageOperation>
-): Effect.Effect<void, InvalidRevisionInputError> =>
+): Effect.Effect<void, WikiCommitError> =>
   Effect.forEach(
-    operations,
-    (operation) => {
-      const content = "content" in operation ? operation.content : undefined
-      if (content === undefined) return Effect.void
-      return parseWikiPage(decoder.decode(content)).pipe(
-        Effect.option,
-        Effect.flatMap((page) =>
-          Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
-            ? Effect.void
-            : Effect.fail(
-                new InvalidRevisionInputError({
-                  message: `Wiki page ${operation.resourceId} keeps a path or a repeated name as an alias`
-                })
-              )
-        )
-      )
-    },
+    COMMIT_RULES.filter((rule) => rule.binds(origin)),
+    (rule) =>
+      Effect.forEach(operations, (operation) => rule.check(repository, origin, operation), {
+        discard: true
+      }),
     { discard: true }
   )

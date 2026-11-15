@@ -1,7 +1,6 @@
 import type {
   AdoptableWorkingChange,
   ManagedFileRepositoryShape,
-  RevisionError,
   UntrackedFile,
   WorkingFileChange
 } from "@arden-hq/revisions/effect"
@@ -12,7 +11,7 @@ import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { commitOutsideChange, type WikiCommitIdentity } from "./commit.js"
+import { commitOutsideChange, type WikiCommitError, type WikiCommitIdentity } from "./commit.js"
 import { mapRevisionError, type WikiError } from "./errors.js"
 import { parseWikiPage } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
@@ -333,10 +332,11 @@ export const makeOutsideEdits = (input: {
   return { check }
 }
 
-const adoptionFailure = (cause: RevisionError): "again" | "refused" | "fail" => {
+const adoptionFailure = (cause: WikiCommitError): "again" | "refused" | "fail" => {
   switch (cause._tag) {
     case "RevisionConflictError":
       return "again"
+    case "WikiCommitRuleError":
     case "InvalidRevisionInputError":
     case "NoChangesError":
     case "RevisionContentLimitError":
