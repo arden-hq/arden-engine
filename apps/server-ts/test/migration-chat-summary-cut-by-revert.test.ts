@@ -2,11 +2,12 @@ import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
 import { chatSummaryCutByRevert } from "../src/persistence/migrations/0164_chat_summary_cut_by_revert.js"
+import { chatSummaryRemovedByRevert } from "../src/persistence/migrations/0165_chat_summary_removed_by_revert.js"
 import { migrations } from "../src/persistence/migrations/index.js"
 
 const at = "2026-11-01T00:00:00.000Z"
 
-it("migration 0164 removes each stored chat summary ahead of its chat, and the trigger removes later ones", () => {
+it("migration 0164 removes each stored chat summary ahead of its chat, and after 0165 a revert removes the one it cuts into", () => {
   const database = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false })
   for (const statement of baselineStatements) database.exec(statement)
   for (const migration of migrations.filter(
@@ -27,6 +28,7 @@ it("migration 0164 removes each stored chat summary ahead of its chat, and the t
   message.run("before", "before-1", 1)
 
   chatSummaryCutByRevert.up(database)
+  chatSummaryRemovedByRevert.up(database)
   const stored = () =>
     database
       .prepare("SELECT session_id, through_sequence FROM chat_summaries ORDER BY session_id")
