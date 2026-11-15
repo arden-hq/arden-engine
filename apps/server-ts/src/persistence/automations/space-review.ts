@@ -1,5 +1,5 @@
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
-import { Schema } from "effect"
+import { Schema, SchemaTransformation } from "effect"
 import { RUNS_ALONE } from "./event-batch.js"
 import type { SpaceReviewSnapshot } from "./job-prompt.js"
 
@@ -77,6 +77,50 @@ const ChatTurnSchema = Schema.Struct({
   turnId: Schema.String
 })
 
+const ReviewPageBasisSchema = Schema.Literals(["owned", "source", "linked"])
+const StoredPageBasisSchema = Schema.Literals(["owned", "source", "linked", "resident"])
+
+// Inputs stored before standing facts reached every review in its Memory block also list
+// those pages, as `resident`; they are left out when read.
+const leaveOutResident = <Page extends { readonly basis: string }>(
+  pages: ReadonlyArray<Page>
+): ReadonlyArray<Page & { readonly basis: typeof ReviewPageBasisSchema.Type }> =>
+  pages.flatMap((page) =>
+    page.basis === "owned" || page.basis === "source" || page.basis === "linked"
+      ? [{ ...page, basis: page.basis }]
+      : []
+  )
+
+const readPageFields = {
+  pageId: Schema.String,
+  path: Schema.String,
+  version: Schema.String,
+  previousVersion: Schema.NullOr(Schema.String)
+}
+const ReadPagesSchema = Schema.Array(
+  Schema.Struct({ ...readPageFields, basis: StoredPageBasisSchema })
+).pipe(
+  Schema.decodeTo(
+    Schema.Array(Schema.Struct({ ...readPageFields, basis: ReviewPageBasisSchema })),
+    SchemaTransformation.transform({ decode: leaveOutResident, encode: (pages) => pages })
+  )
+)
+
+const inputPageFields = {
+  pageId: Schema.String,
+  path: Schema.String,
+  version: Schema.String,
+  rootPageId: Schema.String
+}
+const InputPagesSchema = Schema.Array(
+  Schema.Struct({ ...inputPageFields, basis: StoredPageBasisSchema })
+).pipe(
+  Schema.decodeTo(
+    Schema.Array(Schema.Struct({ ...inputPageFields, basis: ReviewPageBasisSchema })),
+    SchemaTransformation.transform({ decode: leaveOutResident, encode: (pages) => pages })
+  )
+)
+
 const SpaceReviewReadsSchema = Schema.Struct({
   space: Schema.Struct({ name: Schema.String, instructions: Schema.NullOr(Schema.String) }),
   openTasks: Schema.Array(
@@ -89,15 +133,7 @@ const SpaceReviewReadsSchema = Schema.Struct({
   ),
   proposals: Schema.Array(Schema.String),
   memory: Schema.Struct({ base: Schema.NullOr(Schema.String), head: Schema.NullOr(Schema.String) }),
-  pages: Schema.Array(
-    Schema.Struct({
-      pageId: Schema.String,
-      path: Schema.String,
-      version: Schema.String,
-      basis: Schema.Literals(["owned", "source", "linked", "resident"]),
-      previousVersion: Schema.NullOr(Schema.String)
-    })
-  ),
+  pages: ReadPagesSchema,
   chats: Schema.Array(ChatTurnSchema),
   removed: Schema.Array(Schema.String),
   items: Schema.Array(
@@ -128,15 +164,7 @@ export const SpaceReviewInputSchema = Schema.Struct({
   admission: SpaceReviewAdmissionSchema,
   spaceId: Schema.String,
   repositoryHead: Schema.NullOr(Schema.String),
-  pages: Schema.Array(
-    Schema.Struct({
-      pageId: Schema.String,
-      path: Schema.String,
-      version: Schema.String,
-      basis: Schema.Literals(["owned", "source", "linked", "resident"]),
-      rootPageId: Schema.String
-    })
-  ),
+  pages: InputPagesSchema,
   chats: Schema.Array(ChatTurnSchema),
   semantic: Schema.String,
   unresolved: Schema.Array(Schema.String),

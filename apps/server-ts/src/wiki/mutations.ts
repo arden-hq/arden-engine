@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
+import { isStandingFactsPage } from "../memory/core-memory.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import {
   authorityOwnsBoundaryPage,
@@ -197,7 +198,7 @@ export const makeWikiMutationMethods = (
     }
     const directory = posix.dirname(input.path)
     if (
-      (directory === "." && input.path !== "me.md") ||
+      (directory === "." && !isStandingFactsPage({ path: input.path, pageId: "" })) ||
       posix.basename(input.path).toLowerCase() === "readme.md"
     ) {
       return yield* wikiError(

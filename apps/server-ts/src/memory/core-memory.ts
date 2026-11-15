@@ -1,5 +1,19 @@
-const PROFILE_PAGE_BUDGET_CHARS = 9_000
-const ROOT_INDEX_BUDGET_CHARS = 2_500
+/**
+ * Standing facts: the owner's profile and standing preferences, sent whole to every run that
+ * reads Memory. The one rule that names their pages.
+ */
+export const isStandingFactsPage = (page: {
+  readonly path: string
+  readonly pageId: string
+}): boolean => {
+  const path = page.path.toLocaleLowerCase()
+  const pageId = page.pageId.toLocaleLowerCase()
+  return path === "me.md" || path === "profile.md" || pageId === "me" || pageId === "profile"
+}
+
+// Every run that reads Memory is sent each standing-facts page whole, so writers keep each
+// one to this size: a fourth of the Memory block (36,000 bytes).
+const STANDING_PAGE_LIMIT_CHARS = 9_000
 
 /**
  * A Core Memory page is condensed before it is full, not after. Writes over the budget are
@@ -14,14 +28,7 @@ const CONDENSE_TO = 0.8
 export const corePageBudget = (page: {
   readonly path: string
   readonly pageId: string
-}): number | undefined => {
-  const path = page.path.toLocaleLowerCase()
-  const pageId = page.pageId.toLocaleLowerCase()
-  if (path === "readme.md") return ROOT_INDEX_BUDGET_CHARS
-  if (path === "me.md" || path === "profile.md" || pageId === "me" || pageId === "profile")
-    return PROFILE_PAGE_BUDGET_CHARS
-  return undefined
-}
+}): number | undefined => (isStandingFactsPage(page) ? STANDING_PAGE_LIMIT_CHARS : undefined)
 
 /** The size a condensed Core Memory page should end at or under. */
 export const coreCondenseTarget = (budget: number): number => Math.floor(budget * CONDENSE_TO)

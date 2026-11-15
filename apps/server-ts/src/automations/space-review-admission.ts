@@ -68,11 +68,7 @@ export const spaceReviewAdmission = (
   const changes = new Set<ReviewChange>()
   if (current.reads.chats.length > 0) changes.add("chat_turn")
   if (current.reads.items.some((item) => item.isNew)) changes.add("mail")
-  if (
-    current.reads.pages.some((page) => page.basis !== "resident") ||
-    current.reads.removed.length > 0
-  )
-    changes.add("memory_page")
+  if (current.reads.pages.length > 0 || current.reads.removed.length > 0) changes.add("memory_page")
   if (before === undefined || before.settings !== now.settings) changes.add("space_settings")
   if (before !== undefined && !sameTasks(before.tasks, now.tasks)) changes.add("task")
   const holds = new Set<ReviewHold>()
