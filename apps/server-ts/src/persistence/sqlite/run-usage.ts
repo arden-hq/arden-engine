@@ -25,6 +25,16 @@ const unionCost = (costs: ReadonlyArray<Cost>): Cost => {
   return known.length === 0 ? "absent" : Math.max(...known)
 }
 
+/** The samples' cost: their sum when every one has a cost, else unknown. */
+const samplesCost = (
+  sampled:
+    | { readonly calls: number; readonly priced: number; readonly spent: number | null }
+    | undefined
+): Cost => {
+  if (sampled === undefined || sampled.calls === 0) return "absent"
+  return sampled.priced === sampled.calls ? (sampled.spent ?? 0) : "unknown"
+}
+
 const union = (left: Usage, right: Usage): Usage => {
   const prompt = Math.max(left.prompt, right.prompt)
   const completion = Math.max(left.completion, right.completion)
@@ -76,15 +86,9 @@ const account = Effect.fn("RunUsage.account")(function* (sql: SqlClient.SqlClien
       sum(json_extract(usage_json, '$.cost')) AS spent
     FROM run_model_usage WHERE run_id = ${runId}`
   const sampled = samples[0]
-  const sampledCost: Cost =
-    sampled === undefined || sampled.calls === 0
-      ? "absent"
-      : sampled.priced === sampled.calls
-        ? (sampled.spent ?? 0)
-        : "unknown"
   const cost = unionCost([
     costOf(row.accounted !== null, previous),
-    sampledCost,
+    samplesCost(sampled),
     costOf(row.final !== null, final)
   ])
   const tokens = union(previous, union(sampled ?? empty, final))
