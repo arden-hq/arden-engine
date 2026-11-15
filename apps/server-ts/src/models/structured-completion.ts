@@ -18,6 +18,8 @@ import type { ModelAssignment } from "@arden-hq/protocol/models"
 import { Context, Effect, Layer, Schema } from "effect"
 import { STRUCTURED_OUTPUT_DIALECTS } from "./structured-output.js"
 import { ModelStore } from "../persistence/models/store.js"
+import { ModelCatalog } from "./catalog.js"
+import { sideCallEffort, sideCallOutputLimit } from "./side-call.js"
 import { type ModelCallUsage, UsageStore } from "../persistence/usage/store.js"
 import { meteredModelCall } from "./call-usage.js"
 import { ModelProviderService, type ModelRoute } from "./provider.js"
@@ -106,11 +108,14 @@ interface ResolvedAssignment {
   readonly assignment: ModelAssignment
   readonly label: string
   readonly model: string
+  /** The model's declared efforts, which decide how its side calls think. */
+  readonly efforts: ReadonlyArray<string>
   readonly route: ModelRoute
 }
 
+/** One agent per side call, its effort and output limit chosen in `side-call.ts`. */
 const agentFor = (
-  { assignment, model, route }: ResolvedAssignment,
+  { assignment, model, efforts, route }: ResolvedAssignment,
   {
     maxOutputTokens,
     toolChoice,
@@ -128,8 +133,11 @@ const agentFor = (
     readonly maxIterations?: number
     readonly modelRequestMiddlewares?: AgentConfigInput["modelRequestMiddlewares"]
   }
-): Agent =>
-  makeAgent(
+): Agent => {
+  const assigned = assignment.reasoningEffort ?? undefined
+  const reasoningEffort =
+    worker === undefined ? sideCallEffort({ assigned, declared: efforts }) : assigned
+  return makeAgent(
     {
       model,
       maxIterations,
@@ -141,14 +149,16 @@ const agentFor = (
             maxToolConcurrency: 1,
             maxToolCalls: worker.maxToolCalls
           }),
-      maxOutputTokens,
+      maxOutputTokens: sideCallOutputLimit({
+        answerTokens: maxOutputTokens,
+        effort: reasoningEffort
+      }),
       toolChoice,
-      ...(assignment.reasoningEffort === null
-        ? {}
-        : { reasoningEffort: assignment.reasoningEffort })
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort })
     },
     { provider: route.provider, toolset, hooks: { onResponse } }
   )
+}
 
 const providerFailed = (label: string) => (cause: unknown) =>
   new StructuredCompletionError({
@@ -174,11 +184,12 @@ export class StructuredCompletion extends Context.Service<
   static readonly layer: Layer.Layer<
     StructuredCompletion,
     never,
-    ModelStore | ModelProviderService | UsageStore
+    ModelStore | ModelCatalog | ModelProviderService | UsageStore
   > = Layer.effect(
     StructuredCompletion,
     Effect.gen(function* () {
       const models = yield* ModelStore
+      const catalog = yield* ModelCatalog
       const modelProvider = yield* ModelProviderService
       const usageStore = yield* UsageStore
       const metered = <A, E>(
@@ -210,7 +221,20 @@ export class StructuredCompletion extends Context.Service<
             message: `The ${label} model is not available`
           })
         }
-        return { assignment, label, model: assignment.modelId, route }
+        const definition = catalog.installed().models.get(assignment.modelId)
+        if (definition === undefined) {
+          return yield* new StructuredCompletionError({
+            reason: "unavailable",
+            message: `The ${label} model ${assignment.modelId} is not in the model list`
+          })
+        }
+        return {
+          assignment,
+          label,
+          model: assignment.modelId,
+          efforts: definition.reasoningEfforts,
+          route
+        }
       })
 
       const messages = (

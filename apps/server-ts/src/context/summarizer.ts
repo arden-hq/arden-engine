@@ -6,6 +6,7 @@ import {
   type ModelProviderRequest
 } from "@arden-hq/loop"
 import { withUntrustedDataRule } from "../models/instructions.js"
+import { sideCallOutputLimit } from "../models/side-call.js"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 import { HANDOFF_BYTES_PER_TOKEN, handoffContent } from "./handoff.js"
 
@@ -61,6 +62,16 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
     input.maxOutputTokens,
     Math.max(1, Math.floor(input.contextWindow / 4))
   )
+  // `maxOutputTokens` is the handoff's own size; the request's limit also
+  // leaves room for thinking, within the quarter of the window the summary
+  // already reserves. The effort stays the chat's (see `sideCallEffort`).
+  const requestTokens = Math.min(
+    sideCallOutputLimit({
+      answerTokens: maxOutputTokens,
+      effort: input.reasoningEffort ?? undefined
+    }),
+    Math.max(maxOutputTokens, Math.floor(input.contextWindow / 4))
+  )
   const maxBytes = maxOutputTokens * HANDOFF_BYTES_PER_TOKEN
   const summaryBytes = maxBytes - Buffer.byteLength(handoffContent({ ...input, summary: "" }))
   if (summaryBytes <= 0) throw new Error("Compaction budget cannot fit its recovery reference")
@@ -71,12 +82,7 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
       { role: "system", content: withUntrustedDataRule(PROMPT_TEXT.compaction) },
       {
         role: "user",
-        content: fitSource(
-          input.sourceText,
-          input.priorSummary,
-          input.contextWindow,
-          maxOutputTokens
-        )
+        content: fitSource(input.sourceText, input.priorSummary, input.contextWindow, requestTokens)
       }
     ],
     tools: [],
@@ -92,19 +98,19 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
   let request = input.cachedRequest ?? standalone
   let summary: string
   try {
-    summary = await complete(input, request, instruction, maxOutputTokens)
+    summary = await complete(input, request, instruction, requestTokens)
   } catch (cause) {
     if (input.signal?.aborted === true || input.fallback === "none" || request === standalone)
       throw cause
     request = standalone
-    summary = await complete(input, request, instruction, maxOutputTokens)
+    summary = await complete(input, request, instruction, requestTokens)
   }
   if (Buffer.byteLength(handoffContent({ ...input, summary })) > maxBytes) {
     summary = await complete(
       input,
       request,
       `${instruction}\nThe previous candidate was too long. Rewrite more concisely: keep active constraints and next actions; replace historical detail with lookup hints. Stay within the stated budget.`,
-      maxOutputTokens
+      requestTokens
     )
   }
   if (Buffer.byteLength(handoffContent({ ...input, summary })) > maxBytes)
