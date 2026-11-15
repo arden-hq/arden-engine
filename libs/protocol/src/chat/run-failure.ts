@@ -11,7 +11,9 @@ const IMAGE_TOO_LARGE_TEXT = "An image was too large to send. Arden now shrinks 
 const IMAGE_TOO_LARGE = /image you provided requires \d+ patches|resize the image and try again/i
 
 const MODEL_UNAVAILABLE_NEXT = "Pick another model for this chat, then try again."
-const MODEL_UNAVAILABLE_FALLBACK = "The model provider won't run this model on this account."
+/** Shown when the refusal carries no sentence of its own. True of every route: a Codex account, an
+ *  OpenRouter key, a local llama.cpp server that has no account at all. */
+const MODEL_UNAVAILABLE_FALLBACK = "The model server won't run this model."
 
 /**
  * The provider's own sentence inside "<Provider> request failed with status

@@ -7,7 +7,8 @@ import {
   CHAT_REPLY_QUOTES_MAX,
   chatRequests,
   type ChatReplyContext,
-  type ChatRunErrorCode
+  type ChatRunErrorCode,
+  runFailureText
 } from "@arden-hq/protocol/chat"
 
 it("keeps delta streams lossy and terminal events authoritative", () => {
@@ -159,4 +160,11 @@ it("sends the quoted messages of a reply as a list, one or several, up to the li
   expect(() => sent(Array.from({ length: CHAT_REPLY_QUOTES_MAX + 1 }, (_, n) => quote(n)))).toThrow(
     ProtocolError
   )
+})
+
+it("says a model was refused in words true of any provider, an account or a local server", () => {
+  expect(runFailureText("model_unavailable", "llama.cpp request failed with status 404")).toEqual({
+    text: "The model server won't run this model. Pick another model for this chat, then try again.",
+    detail: "llama.cpp request failed with status 404"
+  })
 })
