@@ -152,6 +152,8 @@ let lifecycle: Promise<void> = Promise.resolve()
 let exiting = false
 let stopRequested = false
 let cliAccess: { readonly path: string; readonly capability: string } | undefined
+/** The account route last installed: Codex, or none when signed out. */
+let providerRoute: "codex" | "local_only" = brokeredProviderRoute.id
 
 const credentialRpc = createParentPortRpc<BrokerCredential | null, undefined>(parentPort, {
   type: "credential_request",
@@ -282,7 +284,16 @@ const start = async (input: unknown): Promise<void> => {
       diagnostics,
       localAccess,
       browserBroker: browserBridge,
-      power
+      power,
+      // A saved model server changed the list: the app reads it again, as
+      // after a ChatGPT sign-in. The route is still the account's.
+      onModelListChange: () => {
+        try {
+          parentPort.postMessage({ type: "provider_changed", route: providerRoute })
+        } catch {
+          // The host may be gone; it reads the list when it comes back.
+        }
+      }
     })
     if (stopRequested) return
     appVersion = message.options.version
@@ -350,6 +361,7 @@ const replaceProvider = async (): Promise<void> => {
   const route = credential === null ? "local_only" : brokeredProviderRoute.id
   try {
     await current.replaceProvider(providerFor(credential, version))
+    providerRoute = route
     parentPort.postMessage({ type: "provider_changed", route })
   } catch (cause) {
     parentPort.postMessage({

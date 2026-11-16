@@ -1,12 +1,16 @@
 import {
+  ChatEndpointCheckResponseSchema,
+  ChatEndpointDraftRequestSchema,
+  ChatEndpointSaveResponseSchema,
   DecisionSourceRequestSchema,
   DecisionStatusResponseSchema,
   ModelEndpointCheckResponseSchema,
   ModelEndpointDraftRequestSchema,
-  ModelEndpointKindSchema,
+  ModelEndpointRouteKindSchema,
   ModelEndpointSaveResponseSchema,
   ModelEndpointsResponseSchema
 } from "@arden-hq/protocol/effect/model-endpoints"
+import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/unstable/httpapi"
 
 const errors = [
@@ -14,7 +18,9 @@ const errors = [
   HttpApiError.UnprocessableEntityNoContent,
   HttpApiError.InternalServerErrorNoContent
 ] as const
-const params = { kind: ModelEndpointKindSchema }
+const params = { kind: ModelEndpointRouteKindSchema }
+/** `search` and `decision` take the endpoint draft, `chat` the model server's; the kind decides. */
+const draft = Schema.Union([ModelEndpointDraftRequestSchema, ChatEndpointDraftRequestSchema])
 
 export class ModelEndpointsApi extends HttpApiGroup.make("modelEndpoints", { topLevel: true }).add(
   HttpApiEndpoint.get("list", "/model-endpoints", {
@@ -23,8 +29,8 @@ export class ModelEndpointsApi extends HttpApiGroup.make("modelEndpoints", { top
   }),
   HttpApiEndpoint.put("save", "/model-endpoints/:kind", {
     params,
-    payload: ModelEndpointDraftRequestSchema,
-    success: ModelEndpointSaveResponseSchema,
+    payload: draft,
+    success: Schema.Union([ModelEndpointSaveResponseSchema, ChatEndpointSaveResponseSchema]),
     error: errors
   }),
   HttpApiEndpoint.delete("remove", "/model-endpoints/:kind", {
@@ -34,8 +40,8 @@ export class ModelEndpointsApi extends HttpApiGroup.make("modelEndpoints", { top
   }),
   HttpApiEndpoint.post("check", "/model-endpoints/:kind/check", {
     params,
-    payload: ModelEndpointDraftRequestSchema,
-    success: ModelEndpointCheckResponseSchema,
+    payload: draft,
+    success: Schema.Union([ModelEndpointCheckResponseSchema, ChatEndpointCheckResponseSchema]),
     error: errors
   }),
   HttpApiEndpoint.get("decisionStatus", "/decisions/status", {

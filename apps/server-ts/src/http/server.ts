@@ -35,7 +35,7 @@ import { ChatHistory } from "../chat/history.js"
 import { makeBuiltInChatRunners } from "../chat/runner/built-in.js"
 import { idleCompactionRuntime } from "../context/idle-runtime.js"
 import { ContextCompaction } from "../context/service.js"
-import type { ModelHostSource } from "../models/host.js"
+import { EMPTY_MODEL_HOST_SOURCE, type ModelHostSource } from "../models/host.js"
 import type { HostedServerOptions } from "../config/options.js"
 import { StructuredCompletion } from "../models/structured-completion.js"
 import { Decisions } from "../models/decisions/service.js"
@@ -142,13 +142,14 @@ const composeServer = (
   options: ServerLayerOptions,
   record: SqlitePersistenceOptions["record"]
 ) => {
-  const modelProvider = ModelProviderService.layer({
+  const hostRoute = {
     provider: options.provider,
     structuredOutputDialect: options.structuredOutputDialect,
     planLimits: options.planLimits,
     approvalReview: options.approvalReview,
     transcription: options.transcription
-  })
+  }
+  const modelProvider = ModelProviderService.layer(hostRoute)
   const storage = recoveredSqlitePersistenceLayer({
     filename: root.databaseFile,
     dataDir: root.dir,
@@ -183,10 +184,22 @@ const composeServer = (
     ).pipe(Effect.map(embeddingModelsLayer))
   ).pipe(Layer.provide(llama))
   const localDecision = localDecisionEndpointLayer(modelsRoot).pipe(Layer.provide(llama))
+  const providerSwitch = ModelProviderSwitch.layer({
+    route: hostRoute,
+    host: options.modelHost ?? EMPTY_MODEL_HOST_SOURCE,
+    refresh: options.refreshModelHost
+  }).pipe(Layer.provide(modelProvider), Layer.provide(storage))
   const modelEndpoints = ModelEndpoints.layer({
     vault: options.credentialVault,
-    fetch: retryingFetch(globalThis.fetch)
-  }).pipe(Layer.provideMerge(embeddingModels), Layer.provide(localDecision), Layer.provide(storage))
+    fetch: retryingFetch(globalThis.fetch),
+    chatFetch: globalThis.fetch,
+    modelListChanged: options.onModelListChange ?? (() => undefined)
+  }).pipe(
+    Layer.provideMerge(embeddingModels),
+    Layer.provide(localDecision),
+    Layer.provide(providerSwitch),
+    Layer.provide(storage)
+  )
   const embeddings = wikiEmbeddingIndexLayer.pipe(
     Layer.provide(modelEndpoints),
     Layer.provide(storage),
@@ -207,10 +220,6 @@ const composeServer = (
     pauseFile: root.computerPause,
     installRoot: root.computer
   })
-  const providerSwitch = ModelProviderSwitch.layer.pipe(
-    Layer.provide(modelProvider),
-    Layer.provide(storage)
-  )
   const completion = StructuredCompletion.layer.pipe(
     Layer.provide(modelProvider),
     Layer.provide(storage)

@@ -85,6 +85,10 @@ export interface ServerOptions {
   /** Host-owned Google transport. Omit to use the default fetch. Never supplied by the renderer. */
   /** Host-owned startup milestones and structured operational events. Never exposed over HTTP. */
   readonly diagnostics?: DiagnosticsReporter
+  /** Called when the server itself changed the model list: a model server was
+   *  saved, edited or removed, or listed other models when asked again. The
+   *  desktop daemon tells the app as it does after a ChatGPT sign-in. */
+  readonly onModelListChange?: () => void
 }
 
 /** The model provider a host configures, at start or when it swaps providers. */

@@ -22,11 +22,14 @@ interface BrokeredCredentials {
   readonly request: (forceRefresh: boolean, signal: AbortSignal) => Promise<BrokerCredential | null>
 }
 
-type StartingProvider = Required<ModelProviderOptions>
-
+/**
+ * The host's part of the model route (`ModelProviderSwitch` adds a saved
+ * model server's). Every field is optional, as the server reads them: the
+ * Codex route happens to supply them all.
+ */
 export interface ProviderRoute {
   readonly id: "codex"
-  readonly start: (credentials: BrokeredCredentials, appVersion: string) => StartingProvider
+  readonly start: (credentials: BrokeredCredentials, appVersion: string) => ModelProviderOptions
 }
 
 interface ProviderRuntime {
@@ -40,7 +43,7 @@ interface ProviderRuntime {
 
 const startLazyProvider = (
   discover: () => Promise<ProviderRuntime>
-): Omit<StartingProvider, "structuredOutputDialect"> => {
+): Omit<ModelProviderOptions, "structuredOutputDialect"> => {
   let failed = false
   let started: ProviderRuntime | undefined
   const readingListeners = new Set<() => void>()

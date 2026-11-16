@@ -1,5 +1,8 @@
 import {
+  chatEndpointCheckResponse,
+  chatEndpointSaveResponse,
   decisionStatusResponse,
+  decodeChatEndpointDraftEffect,
   decodeModelEndpointDraftEffect,
   modelEndpointSaveResponse,
   modelEndpointsResponse
@@ -21,9 +24,15 @@ const failed = (
         Effect.andThen(Effect.fail(new HttpApiError.InternalServerError({})))
       )
 
+/** A draft of the wrong kind (a model server's sent to `search`) is unprocessable, as a format of the wrong kind is. */
 const draftOf = (payload: unknown) =>
   decodeModelEndpointDraftEffect(payload).pipe(
-    Effect.mapError(() => new HttpApiError.BadRequest({}))
+    Effect.mapError(() => new HttpApiError.UnprocessableEntity({}))
+  )
+
+const chatDraftOf = (payload: unknown) =>
+  decodeChatEndpointDraftEffect(payload).pipe(
+    Effect.mapError(() => new HttpApiError.UnprocessableEntity({}))
   )
 
 export const ModelEndpointHandlers = HttpApiBuilder.group(
@@ -54,29 +63,46 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
       .handle("list", () =>
         endpoints.list().pipe(Effect.map(modelEndpointsResponse), Effect.catch(failed))
       )
-      .handle("save", ({ params, payload }) =>
-        draftOf(payload).pipe(
-          Effect.flatMap((draft) => endpoints.save(params.kind, draft).pipe(Effect.catch(failed))),
+      .handle("save", ({ params, payload }) => {
+        const kind = params.kind
+        if (kind === "chat")
+          return chatDraftOf(payload).pipe(
+            Effect.flatMap((draft) => endpoints.saveChat(draft).pipe(Effect.catch(failed))),
+            Effect.map(chatEndpointSaveResponse)
+          )
+        return draftOf(payload).pipe(
+          Effect.flatMap((draft) => endpoints.save(kind, draft).pipe(Effect.catch(failed))),
           Effect.tap((result) =>
-            result.result === "saved" && params.kind === "search"
+            result.result === "saved" && kind === "search"
               ? followSearchChange("resume")
               : Effect.void
           ),
           Effect.map(modelEndpointSaveResponse)
         )
-      )
-      .handle("remove", ({ params }) =>
-        (params.kind === "search" ? followSearchChange("off") : Effect.void).pipe(
-          Effect.andThen(endpoints.remove(params.kind)),
+      })
+      .handle("remove", ({ params }) => {
+        const kind = params.kind
+        if (kind === "chat")
+          return endpoints
+            .removeChat()
+            .pipe(Effect.map(modelEndpointsResponse), Effect.catch(failed))
+        return (kind === "search" ? followSearchChange("off") : Effect.void).pipe(
+          Effect.andThen(endpoints.remove(kind)),
           Effect.map(modelEndpointsResponse),
           Effect.catch(failed)
         )
-      )
-      .handle("check", ({ params, payload }) =>
-        draftOf(payload).pipe(
-          Effect.flatMap((draft) => endpoints.check(params.kind, draft).pipe(Effect.catch(failed)))
+      })
+      .handle("check", ({ params, payload }) => {
+        const kind = params.kind
+        if (kind === "chat")
+          return chatDraftOf(payload).pipe(
+            Effect.flatMap((draft) => endpoints.checkChat(draft).pipe(Effect.catch(failed))),
+            Effect.map(chatEndpointCheckResponse)
+          )
+        return draftOf(payload).pipe(
+          Effect.flatMap((draft) => endpoints.check(kind, draft).pipe(Effect.catch(failed)))
         )
-      )
+      })
       .handle("decisionStatus", () =>
         endpoints.decisionStatus().pipe(Effect.map(decisionStatusResponse), Effect.catch(failed))
       )
