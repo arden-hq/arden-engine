@@ -56,6 +56,7 @@ export const makeWikiRetireTools = ({
         saved: [{ page: archived }],
         receipt
       } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
         paths: [input.path],
         save: async ({ head, records: [record], writer, run }) => {
           const expectedVersion = requireObserved(ctx.run, record)
@@ -103,6 +104,7 @@ export const makeWikiRetireTools = ({
         records: [record, target],
         receipt
       } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
         paths: [input.path, input.into],
         save: async ({ head, records: [record, target], writer, run }) => {
           const expectedVersion = requireObserved(ctx.run, record)

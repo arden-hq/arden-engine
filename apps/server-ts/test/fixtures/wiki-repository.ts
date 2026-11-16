@@ -19,6 +19,7 @@ import type { SpaceStore } from "../../src/persistence/spaces/store.js"
 import type { ServerTool } from "../../src/tools/define.js"
 import type { ServerRunContext } from "../../src/tools/run-context.js"
 import { wikiOperationTools } from "../../src/tools/wiki-operations.js"
+import { makeWikiCaptureMethods } from "../../src/wiki/capture.js"
 import { makeWikiChangeMethods } from "../../src/wiki/change.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../src/wiki/authority.js"
 import {
@@ -77,6 +78,7 @@ export const withWikiRepository = async <A>(
       ...makeWikiRestoreMethods(repository, changes),
       ...makeWikiMutationMethods(changes, spaces),
       ...makeWikiRenameMethods(repository, changes),
+      ...makeWikiCaptureMethods(repository),
       createRulesPage: (body) => createRulesPage(withoutSpaces(repository), body)
     })
     const clock = distinctMillisClock()

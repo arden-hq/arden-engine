@@ -149,7 +149,7 @@ const make = Effect.fn("Wiki.make")(function* (
             `Memory content step ${step.name} runs only after the server is ready`
           ),
     finalizeCaptureBatch: capture.finalizeCaptureBatch,
-    hasFinalizedCaptureBatch: capture.hasFinalizedCaptureBatch,
+    hasCaptureReceipt: capture.hasCaptureReceipt,
     planRename: rename.planRename,
     rename: notifyAfter(rename.rename)
   })

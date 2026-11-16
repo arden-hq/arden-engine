@@ -13,6 +13,7 @@ import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { capturedText } from "../persistence/transcript/content.js"
 import type { TranscriptMessageRecord } from "../persistence/transcript/model.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
+import { captureBatchKey } from "../wiki/capture.js"
 import type { Wiki } from "../wiki/service.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
 import { crowdedCorePages } from "./core-memory.js"
@@ -54,10 +55,7 @@ export interface MemoryCaptureBatches {
 
 /** Hands Memory Capture one batch of chat evidence at a time and records what it read. */
 export const makeMemoryCaptureBatches = (input: {
-  readonly wiki: Pick<
-    Wiki["Service"],
-    "hasFinalizedCaptureBatch" | "finalizeCaptureBatch" | "snapshot"
-  >
+  readonly wiki: Pick<Wiki["Service"], "hasCaptureReceipt" | "finalizeCaptureBatch" | "snapshot">
   readonly captures: MemoryCaptureStore["Service"]
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
   readonly transcript: Pick<
@@ -241,7 +239,7 @@ export const makeMemoryCaptureBatches = (input: {
         const identity = { sessionId, start, end: read.end, endMessageId: read.endMessageId }
         if (read.reviewable) {
           const done = yield* wiki
-            .hasFinalizedCaptureBatch(identity)
+            .hasCaptureReceipt(captureBatchKey(identity))
             .pipe(
               Effect.mapError(
                 captureError("Could not inspect the Memory capture receipt", sessionId)
@@ -295,7 +293,7 @@ export const makeMemoryCaptureBatches = (input: {
       if (work === undefined) return null
       if (work.prepared !== undefined) {
         const committed = yield* wiki
-          .hasFinalizedCaptureBatch(work.prepared)
+          .hasCaptureReceipt(captureBatchKey(work.prepared))
           .pipe(
             Effect.mapError(
               captureError("Could not inspect the Memory capture receipt", work.sessionId)

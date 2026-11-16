@@ -68,7 +68,7 @@ export interface WikiCommitIdentity {
   readonly actor: string
   readonly origin: WikiCommitOrigin
   readonly reason: string
-  /** Names a write that may be sent again after a crash; the same write lands once. */
+  /** Names a write that may be sent again after a crash; its receipt marks that it landed. */
   readonly replayKey?: string
 }
 
@@ -355,33 +355,21 @@ export const commitWiki = (
   writes: ReadonlyArray<WikiWrite>
 ): Effect.Effect<CommitResult, WikiCommitError> => {
   const { replayKey } = options
-  const commit = point.repository.commit({
-    actor: options.actor,
-    origin: encodeWikiOrigin(options.origin),
-    reason: options.reason,
-    operations: writes.map((write) => write.operation),
-    ...(options.expectedRevision === null
-      ? { expectedHead: null, enforceExpectedHead: true }
-      : { expectedHead: options.expectedRevision }),
-    ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
-  })
-  const checked = requireCommitRules(point, options, writes).pipe(Effect.andThen(commit))
-  return replayKey === undefined
-    ? checked
-    : replayOrCommit(point.repository, replayKey, { checked, landed: commit })
+  return requireCommitRules(point, options, writes).pipe(
+    Effect.andThen(
+      point.repository.commit({
+        actor: options.actor,
+        origin: encodeWikiOrigin(options.origin),
+        reason: options.reason,
+        operations: writes.map((write) => write.operation),
+        ...(options.expectedRevision === null
+          ? { expectedHead: null, enforceExpectedHead: true }
+          : { expectedHead: options.expectedRevision }),
+        ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
+      })
+    )
+  )
 }
-
-const replayOrCommit = (
-  repository: ManagedFileRepositoryShape,
-  replayKey: string,
-  write: {
-    readonly checked: Effect.Effect<CommitResult, WikiCommitError>
-    readonly landed: Effect.Effect<CommitResult, WikiCommitError>
-  }
-): Effect.Effect<CommitResult, WikiCommitError> =>
-  repository
-    .idempotencyReceipt(replayKey)
-    .pipe(Effect.flatMap((receipt) => (receipt === null ? write.checked : write.landed)))
 
 /**
  * Record one change made outside Arden that is already in the page's file. It meets the commit

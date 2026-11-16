@@ -90,12 +90,20 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
   snapshot: Snapshot
 ): Effect.fn.Return<void, WikiError> {
   const { read } = writer
-  if (read === undefined || (writer.replayKey !== undefined && snapshot.head !== read.head)) return
+  if (read === undefined) return
   for (const [pageId, version] of read.versions) {
     const record = yield* pageIn(writer.operation, snapshot, pageId)
-    if (snapshot.head !== read.head || record.resource.versionId !== version) {
+    if (record.resource.versionId !== version)
       return yield* wikiError(writer.operation, "conflict", "Memory page changed", { pageId })
-    }
+  }
+  if (snapshot.head !== read.head) {
+    const only = read.versions.length === 1 ? read.versions[0]?.[0] : undefined
+    return yield* wikiError(
+      writer.operation,
+      "conflict",
+      "Memory page changed",
+      only === undefined ? {} : { pageId: only }
+    )
   }
 })
 

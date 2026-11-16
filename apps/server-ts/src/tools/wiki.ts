@@ -8,7 +8,7 @@ import { writeIdentity, type WikiWriteIdentity } from "./wiki-identity.js"
 import type { ServerRunContext } from "./run-context.js"
 import type { WikiLocationAuthority } from "../wiki/authority.js"
 import type { WikiCommitIdentity } from "../wiki/commit.js"
-import { captureReplayKey } from "../wiki/capture.js"
+import { captureSaveKey } from "../wiki/capture.js"
 import type { WikiError } from "../wiki/errors.js"
 import { ObservationPeriodSchema } from "../wiki/observation-period.js"
 import { outsideEditNotice } from "../wiki/outside-edits.js"
@@ -405,6 +405,8 @@ export const changePages = async <
   ctx: ToolContext<ServerRunContext>,
   effects: CallEffects,
   request: {
+    /** The tool's arguments; a Capture save is keyed by them. */
+    readonly input: unknown
     readonly paths: Paths
     /** The page a path names; an active page unless given. */
     readonly find?: (snapshot: Snapshot, path: string) => PageRecord | null
@@ -422,16 +424,32 @@ export const changePages = async <
     return record
   })
   const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
+  const run = <A>(effect: Effect.Effect<A, WikiError>) =>
+    Effect.runPromise(effect.pipe(Effect.mapError(wikiFailure)), { signal: ctx.signal })
+  const replayKey =
+    identity.captureBatch === null ? undefined : captureSaveKey(ctx.run.runId, request.input)
+  if (replayKey !== undefined && (await run(wiki.hasCaptureReceipt(replayKey))))
+    throw new ToolExecutionError(
+      "This run already saved this exact request; nothing was saved again.",
+      {
+        preview: "Already saved",
+        retryable: false
+      }
+    )
   const saved = await request.save({
     head,
     records,
     identity,
     writer: (reason) => ({
       authority: identity.authority,
-      commit: { actor: identity.actor, origin: identity.origin, reason }
+      commit: {
+        actor: identity.actor,
+        origin: identity.origin,
+        reason,
+        ...(replayKey === undefined ? {} : { replayKey })
+      }
     }),
-    run: (effect) =>
-      Effect.runPromise(effect.pipe(Effect.mapError(wikiFailure)), { signal: ctx.signal })
+    run
   })
   for (const { page } of saved) ctx.run.observations.observe(page.pageId, page.version)
   const moved = saved.filter(({ page, before }) => page.version !== before)
@@ -741,8 +759,9 @@ const makeWikiTools = ({
     execute: async (input, ctx, effects) => {
       const edits = input.edits ?? [{ ...input, path: input.path ?? "" }]
       const { records, saved, changed, receipt } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
         paths: Arr.map(edits, (edit) => edit.path),
-        save: async ({ head, records, identity, writer, run }) => {
+        save: async ({ head, records, writer, run }) => {
           const revised = await Promise.all(
             Arr.map(Arr.zip(edits, records), async ([edit, record]) => ({
               record,
@@ -751,20 +770,8 @@ const makeWikiTools = ({
               })
             }))
           )
-          const replayKey =
-            input.edits === undefined || identity.captureBatch === null
-              ? undefined
-              : captureReplayKey(identity.captureBatch, "patch")
-          const sent = revised.filter(
-            ({ record, content }) => replayKey !== undefined || content !== record.page.content
-          )
+          const sent = revised.filter(({ record, content }) => content !== record.page.content)
           if (!Arr.isArrayNonEmpty(sent)) return Arr.map(revised, ({ record }) => keptPage(record))
-          const expectedHead = replayKey === undefined ? head : ctx.run.observations.observedHead()
-          if (expectedHead === undefined)
-            throw new ToolExecutionError("Read every page before editing them, then retry.", {
-              preview: "Read required",
-              retryable: false
-            })
           const sentEdits = Arr.map(sent, ({ record, content }) => ({
             pageId: record.page.pageId,
             content,
@@ -773,14 +780,10 @@ const makeWikiTools = ({
           const pages = await run(
             wiki.update({
               edits: sentEdits,
-              expectedHead,
-              authority: identity.authority,
-              commit: {
-                ...writer(
-                  `edit wiki page ${sent.map(({ record }) => record.resource.path).join(", ")}`
-                ).commit,
-                ...(replayKey === undefined ? {} : { replayKey })
-              }
+              expectedHead: head,
+              ...writer(
+                `edit wiki page ${sent.map(({ record }) => record.resource.path).join(", ")}`
+              )
             })
           )
           return Arr.map(Arr.zip(pages, sentEdits), ([page, edit]) => ({

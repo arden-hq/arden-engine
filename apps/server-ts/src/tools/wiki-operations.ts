@@ -494,6 +494,7 @@ const makeWikiOperationTools = ({
         changed,
         receipt
       } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
         paths: [input.path],
         save: async ({ head, records: [record], writer, run }) => {
           const body = patchedBody(record, input)
@@ -555,6 +556,7 @@ const makeWikiOperationTools = ({
         changed,
         receipt
       } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
         paths: [input.path],
         save: async ({ head, records: [record], writer, run }) => {
           if (record.resource.path === input.new_path) return [keptPage(record)]

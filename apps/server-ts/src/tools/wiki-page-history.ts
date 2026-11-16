@@ -290,6 +290,7 @@ export const makeWikiPageHistoryTools = ({
         changed,
         receipt
       } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
         paths: [input.path],
         find: pageStoredAt,
         save: async ({ head, records: [record], writer, run }) => {

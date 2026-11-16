@@ -9,6 +9,7 @@ import { startCaptureAfterCopies } from "../src/persistence/sqlite/memory-captur
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
+import { captureBatchKey } from "../src/wiki/capture.js"
 import { snapshotOf } from "../src/wiki/snapshot.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
@@ -42,10 +43,9 @@ const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "compl
   const receipts = new Set<string>()
   const batches = makeMemoryCaptureBatches({
     wiki: {
-      hasFinalizedCaptureBatch: (identity) =>
-        Effect.succeed(receipts.has(JSON.stringify(identity))),
+      hasCaptureReceipt: (key) => Effect.succeed(receipts.has(key)),
       finalizeCaptureBatch: (identity) =>
-        Effect.sync(() => void receipts.add(JSON.stringify(identity))),
+        Effect.sync(() => void receipts.add(captureBatchKey(identity))),
       snapshot: () => Effect.succeed(snapshotOf(null, []))
     },
     captures: yield* MemoryCaptureStore,
@@ -158,54 +158,11 @@ const captureUpdate = (
     commit: {
       actor: "memory:capture",
       origin: { kind: "capture", sessionId: "s" },
-      reason: "capture",
-      replayKey: "batch"
+      reason: "capture"
     }
   })
 
-it("saves a Capture patch set once on replay, and none of it when one page conflicts", async () => {
-  await withWikiRepository(async ({ repository, wiki, save }) => {
-    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
-    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
-    const head = () => Effect.runPromise(repository.currentRevision)
-    const pages = () => Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
-    const [read, [a, b]] = [await head(), await pages()]
-    const patch = (expectedHead: string | null, versionOfA = a.version, mark = "X2") =>
-      Effect.runPromise(
-        captureUpdate(wiki, expectedHead, [
-          { pageId: "a", content: a.content.replace("A1", mark), expectedVersion: versionOfA },
-          { pageId: "b", content: b.content.replace("B1", mark), expectedVersion: b.version }
-        ])
-      )
-    const landed = await patch(read).then(head)
-    expect(await patch(read).then(head)).toBe(landed)
-    await expect(patch(landed, (await pages())[0].version, "X3")).rejects.toThrow()
-    expect((await pages()).map((page) => page.content.includes("X2"))).toEqual([true, true])
-  })
-})
-
-it("replays a Capture patch set whose first save left out an unchanged page", async () => {
-  await withWikiRepository(async ({ repository, wiki, save }) => {
-    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
-    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
-    const head = () => Effect.runPromise(repository.currentRevision)
-    const [read, [a, b]] = [
-      await head(),
-      await Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
-    ]
-    const patch = () =>
-      Effect.runPromise(
-        captureUpdate(wiki, read, [
-          { pageId: "a", content: a.content.replace("A1", "A2"), expectedVersion: a.version },
-          { pageId: "b", content: b.content, expectedVersion: b.version }
-        ])
-      )
-    const landed = await patch().then(head)
-    expect(await patch().then(head)).toBe(landed)
-  })
-})
-
-it("names no single page in a conflict of a patch set", async () => {
+it("names the page that changed in a conflict of several pages", async () => {
   await withWikiRepository(async ({ wiki, save }) => {
     await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
     await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
@@ -219,7 +176,7 @@ it("names no single page in a conflict of a patch set", async () => {
         ])
       )
     )
-    expect([error.reason, error.pageId]).toEqual(["conflict", undefined])
+    expect([error.reason, error.pageId]).toEqual(["conflict", "b"])
   })
 })
 
@@ -236,20 +193,21 @@ const CAPTURE_RUN = {
   }
 }
 
-it("applies a Capture patch again once the page has its old text again", async () => {
+it("saves a repeated Capture request once in its run, and a different one again", async () => {
   await withWikiRepository(async ({ wiki, save }) => {
     await save({ pageId: "a", path: "a.md", body: "Status: open\n", origin: ownerEdit })
-    const patch = () =>
-      createToolset(wikiToolsOver(wiki, CAPTURE_RUN), { toJsonSchema: () => ({ type: "object" }) })(
-        serverRunContext()
-      ).execute({
+    const tools = createToolset(wikiToolsOver(wiki, CAPTURE_RUN), {
+      toJsonSchema: () => ({ type: "object" })
+    })(serverRunContext())
+    const patch = (old_text: string, new_text: string) =>
+      tools.execute({
         name: "wiki_patch_page",
-        args: { path: "a.md", old_text: "open", new_text: "closed" },
+        args: { path: "a.md", old_text, new_text },
         toolCallId: "p"
       })
-    await patch()
-    await save({ pageId: "a", path: "a.md", body: "Status: open\n", origin: ownerEdit })
-    await patch()
-    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("Status: closed")
+    await patch("open", "open, then closed")
+    await expect(patch("open", "open, then closed")).rejects.toThrow("already saved")
+    await patch("closed", "done")
+    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("Status: open, then done\n")
   })
 })
