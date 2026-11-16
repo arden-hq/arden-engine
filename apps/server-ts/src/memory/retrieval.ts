@@ -14,12 +14,6 @@ import { chatHref } from "../sessions/chat-href.js"
 const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
 const RESULT_LIMIT = 3
-/**
- * How many days before the run's date a record may be and still be recalled: enough for "this
- * week" and "last week" questions. An older record is reached by link, date or search; a
- * folder's newest record and an undated one are recalled at any age.
- */
-
 /** A Memory source rendered into the room it was given, and the record of what it holds. */
 export interface RenderedMemory {
   /** The prompt section, or undefined when the source holds nothing. */
@@ -390,7 +384,6 @@ export const recallCandidates = ({
 }: {
   readonly pages: ReadonlyArray<RunPage>
   readonly query: string
-  /** The run's date, `YYYY-MM-DD` in the owner's zone: the day a record's age is counted from. */
   /** How many characters of each page's content, from its start, the run is sent elsewhere. */
   readonly sent: ReadonlyMap<string, number>
 }): RecallCandidates => {
