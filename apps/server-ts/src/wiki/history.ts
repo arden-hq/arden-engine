@@ -11,6 +11,7 @@ import type {
   WikiPageDiff,
   WikiPageHistoryResponse,
   WikiPageLinks,
+  WikiRestoreSide,
   WikiVersionDiff,
   WikiVersionDiffRouteOptions
 } from "@arden-hq/protocol/wiki"
@@ -20,6 +21,7 @@ import { Effect } from "effect"
 import { decodeWikiOrigin, type WikiCommitOrigin, wikiOriginChat } from "./commit.js"
 import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
 import { pageWikiLinks, type WikiLinkToken } from "./links.js"
+import { contentRestoring } from "./restore.js"
 import {
   mapHistory,
   notFound,
@@ -73,6 +75,7 @@ type WikiLineOrigin =
 
 const linesOf = (text: string): ReadonlyArray<string> => text.split("\n").map((line) => line.trim())
 
+const RESTORE_SIDES: ReadonlyArray<WikiRestoreSide> = ["after", "before"]
 const VERSION_SEARCH_COMMITS = 500
 const VERSION_DIFF_CHARS = 65_536
 
@@ -111,7 +114,7 @@ export const makeWikiHistoryMethods = (
     if (resource === null || resource.state !== "active" || !resource.path.endsWith(".md")) {
       return yield* notFound("history", pageId)
     }
-    yield* readRecord(repository, "history", resource)
+    const current = yield* readRecord(repository, "history", resource)
     const commits = yield* repository
       .history({
         resourceId: pageId,
@@ -146,7 +149,16 @@ export const makeWikiHistoryMethods = (
         if (part.added) addedLines += part.count
         else if (part.removed) removedLines += part.count
       }
-      return { ...mapHistory(commit), addedLines, removedLines }
+      const restorable = yield* Effect.filter(RESTORE_SIDES, (side) =>
+        contentRestoring(repository, current, commits, { commitId: commit.commitId, side }).pipe(
+          Effect.map(({ unchanged }) => !unchanged),
+          Effect.catchIf(
+            (error) => error.reason === "invalid" || error.reason === "conflict",
+            () => Effect.succeed(false)
+          )
+        )
+      )
+      return { ...mapHistory(commit), addedLines, removedLines, restorable }
     })
     const summaries = yield* Effect.forEach(commits, summarize, { concurrency: 8 })
     return { pageId, repositoryHead: head, commits: summaries }

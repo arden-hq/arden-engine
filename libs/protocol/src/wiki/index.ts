@@ -7,6 +7,7 @@ import type {
   WikiPageGuard,
   WikiPageListOptions,
   WikiPagePage,
+  WikiRestoreSide,
   WikiVersionDiffRouteOptions
 } from "./contracts.js"
 import {
@@ -40,7 +41,8 @@ import {
   encodeWikiPagePathEffect,
   encodeWikiPagesPathEffect,
   encodeWikiRestoreArchivedPathEffect,
-  encodeWikiVersionRequestEffect
+  encodeWikiVersionRequestEffect,
+  encodeWikiHistoryRestoreRequestEffect
 } from "./schema.js"
 
 export * from "./contracts.js"
@@ -111,9 +113,9 @@ export const wikiRequests = {
       "encode"
     )
   },
-  restoreHistory(page: WikiPageGuard): string {
+  restoreHistory(page: WikiPageGuard, side: WikiRestoreSide): string {
     return runBoundary(
-      encodeWikiVersionRequestEffect(pageGuard(page)),
+      encodeWikiHistoryRestoreRequestEffect({ page: pageGuard(page), side }),
       "Invalid Wiki history-restore request",
       "encode"
     )

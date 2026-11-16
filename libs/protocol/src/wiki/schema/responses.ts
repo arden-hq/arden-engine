@@ -23,7 +23,8 @@ import {
   WikilinkNodeSchema,
   WikiPageIdSchema,
   WikiRevisionIdSchema,
-  WikiResourceStateSchema
+  WikiResourceStateSchema,
+  WikiRestoreSideSchema
 } from "./shared.js"
 
 /** Wire schemas retain additive fields; mapping removes known storage-only keys. */
@@ -79,7 +80,8 @@ export const WikiHistoryCommitSchema = withExtras({
   origin: boundedText(1_024),
   reason: Schema.String.check(Schema.isMaxLength(16_384)),
   timestamp: IsoDateTimeStringSchema,
-  changes: Schema.Array(WikiHistoryChangeSchema)
+  changes: Schema.Array(WikiHistoryChangeSchema),
+  restorable: Schema.Array(WikiRestoreSideSchema)
 })
 
 export const WikiPageHistoryResponseSchema = withExtras({
@@ -235,6 +237,7 @@ const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHist
     reason,
     timestamp,
     changes,
+    restorable,
     ...extras
   } = commit
   return {
@@ -247,7 +250,8 @@ const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHist
     origin,
     reason,
     timestamp,
-    changes: changes.map(mapHistoryChange)
+    changes: changes.map(mapHistoryChange),
+    restorable
   }
 }
 

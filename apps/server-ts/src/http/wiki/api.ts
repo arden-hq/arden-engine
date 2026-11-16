@@ -2,6 +2,7 @@ import {
   WikiArchiveResponseSchema,
   WikiDiffQuerySchema,
   WikiHistoryQuerySchema,
+  WikiHistoryRestoreRequestSchema,
   WikiPageDiffResponseSchema,
   WikiPageHistoryResponseSchema,
   WikiPageIdSchema,
@@ -66,7 +67,7 @@ export class WikiApi extends HttpApiGroup.make("wiki", { topLevel: true }).add(
   }),
   HttpApiEndpoint.post("restoreHistory", "/admin/wiki/pages/:pageId/history/:commitId/restore", {
     params: { pageId: WikiPageIdSchema, commitId: WikiRevisionIdSchema },
-    payload: WikiVersionRequestSchema,
+    payload: WikiHistoryRestoreRequestSchema,
     success: WikiPageSchema,
     error: wikiWriteErrors
   }),

@@ -204,7 +204,8 @@ export const WikiHandlers = HttpApiBuilder.group(
                 origin: commit.origin,
                 reason: commit.reason,
                 timestamp: commit.timestamp,
-                changes: commit.changes.map(historyChange)
+                changes: commit.changes.map(historyChange),
+                restorable: commit.restorable
               }))
             })),
             Effect.mapError(wikiErrorToHttp)
@@ -214,11 +215,16 @@ export const WikiHandlers = HttpApiBuilder.group(
         wiki
           .restore({
             pageId: params.pageId,
-            version: { commitId: params.commitId, side: "before" },
+            version: { commitId: params.commitId, side: payload.side ?? "before" },
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-            commit: ownerInApp(`restore Maintenance commit ${params.commitId}`, "desktop.restore")
+            commit: ownerInApp(
+              payload.side === "after"
+                ? `restore wiki page to its version of commit ${params.commitId}`
+                : `restore Maintenance commit ${params.commitId}`,
+              "desktop.restore"
+            )
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )

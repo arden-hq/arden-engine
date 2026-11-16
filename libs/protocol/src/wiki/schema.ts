@@ -5,6 +5,7 @@ export {
   WikiTitleSchema,
   WikiResourceStateSchema,
   WikiPageLifecycleSchema,
+  WikiRestoreSideSchema,
   WikiMetadataSchema
 } from "./schema/shared.js"
 
@@ -46,10 +47,13 @@ export {
   WikiCreateRequestSchema,
   WikiUpdateRequestSchema,
   WikiVersionRequestSchema,
+  WikiHistoryRestoreRequestContextSchema,
+  WikiHistoryRestoreRequestSchema,
   WikiRenameRequestSchema,
   encodeCreateWikiRequestEffect,
   encodeUpdateWikiRequestEffect,
   encodeWikiVersionRequestEffect,
+  encodeWikiHistoryRestoreRequestEffect,
   encodeRenameWikiRequestEffect
 } from "./schema/requests.js"
 

@@ -1,5 +1,5 @@
-import type { ManagedFileRepositoryShape, ResourceVersion } from "@arden-hq/revisions/effect"
-import type { WikiPage } from "@arden-hq/protocol/wiki"
+import type { Commit, ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
+import type { WikiPage, WikiRestoreSide } from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 import { posix } from "node:path"
 
@@ -26,7 +26,7 @@ import {
  *  `before` undoes an upkeep (Wiki Maintenance) commit, and only while it is the page's latest change. */
 interface WikiRestoreVersion {
   readonly commitId: string
-  readonly side: "after" | "before"
+  readonly side: WikiRestoreSide
 }
 
 interface WikiRestoreInput {
@@ -62,45 +62,41 @@ export interface WikiRestoreMethods {
   readonly restoreArchived: (input: WikiRestoreArchivedInput) => Effect.Effect<WikiPage, WikiError>
 }
 
-export const makeWikiRestoreMethods = (
+/** The page text restoring `version` writes over `current`, judged against the page's history
+ *  newest first, and whether that text is what the page holds already. */
+export const contentRestoring = Effect.fn("Wiki.contentRestoring")(function* (
   repository: ManagedFileRepositoryShape,
-  changes: WikiChanges
-): WikiRestoreMethods => {
-  const versionToRestore = Effect.fn("Wiki.versionToRestore")(function* (
-    current: PageRecord,
-    input: Pick<WikiRestoreContentInput, "pageId" | "version" | "head">
-  ) {
-    const { commitId, side } = input.version
-    if (side === "before" && current.page.lifecycle !== "active") {
-      return yield* wikiError("restore", "invalid", "Only active Memory pages can be restored", {
-        pageId: input.pageId
-      })
-    }
-    const pageHistory = yield* repository
-      .history({ resourceId: input.pageId, start: input.head, limit: null })
-      .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
-    const selected = pageHistory.find((commit) => commit.commitId === commitId)
-    if (selected === undefined) {
-      return yield* wikiError(
-        "restore",
-        "not_found",
-        `Revision is not a reachable page change: ${commitId}`,
-        { pageId: input.pageId }
-      )
-    }
-    const changes = selected.changes.filter(
-      (change) => (change.after ?? change.before)?.resourceId === input.pageId
+  current: PageRecord,
+  pageHistory: ReadonlyArray<Commit>,
+  version: WikiRestoreVersion
+) {
+  const pageId = current.page.pageId
+  const { commitId, side } = version
+  const invalid = (message: string) => wikiError("restore", "invalid", message, { pageId })
+  if (side === "before" && current.page.lifecycle !== "active") {
+    return yield* invalid("Only active Memory pages can be restored")
+  }
+  const selected = pageHistory.find((commit) => commit.commitId === commitId)
+  if (selected === undefined) {
+    return yield* wikiError(
+      "restore",
+      "not_found",
+      `Revision is not a reachable page change: ${commitId}`,
+      { pageId }
     )
-    const change = changes.length === 1 ? changes[0] : undefined
-    const invalid = (message: string) =>
-      wikiError("restore", "invalid", message, { pageId: input.pageId })
+  }
+  const changes = selected.changes.filter(
+    (change) => (change.after ?? change.before)?.resourceId === pageId
+  )
+  const change = changes.length === 1 ? changes[0] : undefined
+  const resource = yield* Effect.gen(function* () {
     if (side === "after") {
       if (change?.after?.state !== "active") {
         return yield* invalid(
           "Selected revision does not contain one active version of this Memory page"
         )
       }
-      return yield* activeVersion(change.after, invalid)
+      return change.after
     }
     if (decodeWikiOrigin(selected.origin).kind !== "upkeep") {
       return yield* invalid("Commit is not a Wiki Maintenance change")
@@ -116,33 +112,32 @@ export const makeWikiRestoreMethods = (
         "restore",
         "conflict",
         `Memory page changed after Maintenance commit ${commitId}`,
-        { pageId: input.pageId }
+        { pageId }
       )
     }
-    return yield* activeVersion(change.before, invalid)
+    return change.before
   })
+  const historical = yield* readRecord(repository, "restore", resource, "invalid")
+  if (historical.page.lifecycle !== "active") {
+    return yield* invalid("Selected revision is not an active Memory page")
+  }
+  const content = yield* replacementContent("restore", pageId, historical.page.content)
+  return { content, unchanged: content === current.page.content }
+})
 
-  const activeVersion = Effect.fn("Wiki.activeVersion")(function* (
-    resource: ResourceVersion,
-    invalid: (message: string) => WikiError
-  ) {
-    const historical = yield* readRecord(repository, "restore", resource, "invalid")
-    if (historical.page.lifecycle !== "active") {
-      return yield* invalid("Selected revision is not an active Memory page")
-    }
-    return historical
-  })
-
+export const makeWikiRestoreMethods = (
+  repository: ManagedFileRepositoryShape,
+  changes: WikiChanges
+): WikiRestoreMethods => {
   /** The page as `input.version` holds it, written as its next version. */
   const restorePlan = (input: Pick<WikiRestoreContentInput, "pageId" | "version" | "head">) =>
     Effect.fn("Wiki.planRestore")(function* (snapshot: Snapshot) {
       const current = yield* pageIn("restore", snapshot, input.pageId)
-      const historical = yield* versionToRestore(current, input)
-      const content = yield* replacementContent("restore", input.pageId, historical.page.content)
-      return {
-        writes: [restoreVersion(current.resource, content)],
-        value: { content, unchanged: content === current.page.content }
-      }
+      const pageHistory = yield* repository
+        .history({ resourceId: input.pageId, start: input.head, limit: null })
+        .pipe(Effect.mapError(mapRevisionError("restore", input.pageId)))
+      const value = yield* contentRestoring(repository, current, pageHistory, input.version)
+      return { writes: [restoreVersion(current.resource, value.content)], value }
     })
 
   const contentToRestore = (input: WikiRestoreContentInput) =>

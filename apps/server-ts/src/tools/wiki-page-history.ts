@@ -205,7 +205,7 @@ export const makeWikiPageHistoryTools = ({
             reason: commit.reason,
             action: change.action,
             path: (change.after ?? change.before)?.path ?? input.path,
-            restorable: change.after?.state === "active"
+            restorable: commit.restorable.includes("after")
           }
         ]
       })

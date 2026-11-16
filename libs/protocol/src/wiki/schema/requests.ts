@@ -5,6 +5,7 @@ import {
   strict,
   WikiPageIdSchema,
   WikiPathSchema,
+  WikiRestoreSideSchema,
   WikiRevisionIdSchema,
   WikiTitleSchema,
   WikiMetadataSchema
@@ -40,6 +41,11 @@ export const WikiUpdateRequestContextSchema = Schema.Struct({
   content: Schema.String
 })
 
+export const WikiHistoryRestoreRequestContextSchema = Schema.Struct({
+  page: WikiPageGuardSchema,
+  side: WikiRestoreSideSchema
+})
+
 export const WikiRenameRequestContextSchema = Schema.Struct({
   page: WikiPageGuardSchema,
   input: RenameWikiPageInputSchema
@@ -64,6 +70,13 @@ export const WikiUpdateRequestSchema = Schema.Struct({
 export const WikiVersionRequestSchema = Schema.Struct({
   expected_version: WikiRevisionIdSchema,
   expected_head: WikiRevisionIdSchema
+})
+
+/** `side` is absent from releases that could only undo a Maintenance change: it means `before`. */
+export const WikiHistoryRestoreRequestSchema = Schema.Struct({
+  expected_version: WikiRevisionIdSchema,
+  expected_head: WikiRevisionIdSchema,
+  side: Schema.optionalKey(WikiRestoreSideSchema)
 })
 
 export const WikiRenameRequestSchema = Schema.Struct({
@@ -114,6 +127,19 @@ export const encodeWikiVersionRequestEffect = (value: unknown) =>
     })),
     Effect.flatMap((request) =>
       Schema.decodeUnknownEffect(WikiVersionRequestSchema)(request, strict)
+    ),
+    Effect.map(JSON.stringify)
+  )
+
+export const encodeWikiHistoryRestoreRequestEffect = (value: unknown) =>
+  Schema.decodeUnknownEffect(WikiHistoryRestoreRequestContextSchema)(value, strict).pipe(
+    Effect.map(({ page, side }) => ({
+      expected_version: page.version,
+      expected_head: page.repositoryHead,
+      side
+    })),
+    Effect.flatMap((request) =>
+      Schema.decodeUnknownEffect(WikiHistoryRestoreRequestSchema)(request, strict)
     ),
     Effect.map(JSON.stringify)
   )
