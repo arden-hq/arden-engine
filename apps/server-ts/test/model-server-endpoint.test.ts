@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { startServer, type ServerHandle, type ServerOptions } from "../src/index.js"
 import type { McpOAuthVault } from "../src/mcp/vault.js"
 import type { ModelHost } from "../src/models/host.js"
+import { brokeredProviderRoute } from "../src/providers/registry.js"
 
 const headers = { "content-type": "application/json" }
 const GEMMA = "gemma-4"
@@ -321,7 +322,16 @@ describe("the model server beside the signed-in account", () => {
       await first.stop()
 
       llama.setDown(true)
-      const second = await started({}, first.folder)
+      // The desktop's start: the ChatGPT route waits for a credential that turns out absent,
+      // then the daemon swaps to no account. The saved list must survive both.
+      const second = await started(
+        brokeredProviderRoute.start(
+          { initial: Promise.resolve(null), request: async () => null },
+          "0.0.0-test"
+        ),
+        first.folder
+      )
+      await second.server.replaceProvider({})
       // Nobody is signed in: the server's models are the whole list, and new chats start on them.
       expect(await groups(second)).toEqual([["llama.cpp", [GEMMA]]])
       await expect

@@ -108,12 +108,21 @@ const composed = (part: HostPart, server: ServerModels | undefined): HostPart =>
       provider: mixed(part.route.provider, server.provider, served),
       planMeters: (model) => !served.has(model)
     },
-    host:
-      part.host.kind === "ready"
-        ? { kind: "ready", host: merge(part.host.host) }
-        : { kind: "discovering", host: part.host.host.then(merge) },
+    host: mergedSource(part.host, merge),
     refresh: refresh === undefined ? undefined : () => refresh().then(merge)
   }
+}
+
+const mergedSource = (
+  source: ModelHostSource,
+  merge: (host: ModelHost) => ModelHost
+): ModelHostSource => {
+  if (source.kind === "ready") return { kind: "ready", host: merge(source.host) }
+  const host = source.host.then(merge)
+  // The host's list may fail (no ChatGPT credential at start); the catalog
+  // reads that failure when it asks, so it must never surface unhandled.
+  void host.catch(() => undefined)
+  return { kind: "discovering", host }
 }
 
 /**
