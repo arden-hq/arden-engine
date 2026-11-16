@@ -200,14 +200,6 @@ export const SpaceSessionSchema = withExtras({
   last_activity: Schema.optionalKey(Schema.String)
 })
 
-const SpaceOverviewSchema = withExtras({
-  now: Schema.String,
-  next: Schema.Array(Schema.String),
-  updated_at: IsoDateTimeStringSchema,
-  revision_id: Schema.NullOr(Schema.Int),
-  source_freshness: Schema.Literals(["fresh", "stale", "unknown"])
-})
-
 export const SpaceDetailSchema: Schema.Codec<SpaceDetail> = withExtras({
   conversation_session_id: Schema.NullOr(Schema.NonEmptyString),
   inference: TaskInferencePolicySchema,
@@ -217,7 +209,6 @@ export const SpaceDetailSchema: Schema.Codec<SpaceDetail> = withExtras({
   instructions: Schema.NullOr(Schema.String),
   agent: Schema.NullOr(SpaceAgentStatusSchema),
   sessions: Schema.Array(SpaceSessionSchema),
-  overview: Schema.optionalKey(Schema.NullOr(SpaceOverviewSchema)),
   work: SpaceSnapshotSchema
 }).check(
   Schema.makeFilter((detail) =>

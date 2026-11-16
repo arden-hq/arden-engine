@@ -182,7 +182,6 @@ const routeCalls = (
     ),
     "/automations/events": [`/automations/events${q({ after_seq: "0" })}`],
     "/spaces/:spaceId/history": [`/spaces/${ids.space}/history`],
-    "/spaces/:spaceId/overview-history": [`/spaces/${ids.space}/overview-history`],
     "/spaces": ["/spaces"],
     "/spaces/overview": ["/spaces/overview"],
     "/spaces/archived": ["/spaces/archived"],

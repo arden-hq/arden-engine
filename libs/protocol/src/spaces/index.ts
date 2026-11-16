@@ -58,9 +58,6 @@ export const spaceRoutes = {
   item(spaceId: string): string {
     return route(encodeSpaceItemPathEffect(spaceId), "Invalid Space route")
   },
-  overviewHistory(spaceId: string): string {
-    return `${route(encodeSpaceItemPathEffect(spaceId), "Invalid Space route")}/overview-history`
-  },
   conversation(spaceId: string): string {
     return route(encodeSpaceConversationPathEffect(spaceId), "Invalid Space-conversation route")
   },

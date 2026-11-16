@@ -34,7 +34,6 @@ const makeChatSummariesRunner = (services: {
   readonly chat: ChatMessage["Service"]
   readonly queue: AutomationQueue["Service"]
   readonly summaries: SummaryStore["Service"]
-  readonly spaceOverview: SystemHandlerServices["spaceOverview"]
   readonly linkOfferChat: SystemHandlerServices["linkOfferChat"]
   readonly awaitRun: AwaitAutomationRun
 }): AutomationRunner =>
@@ -57,14 +56,6 @@ const makeChatSummariesRunner = (services: {
     const saved = yield* services.summaries.chat(fork.sourceSessionId)
     if (saved?.runId !== runId) {
       return jobResult.completed("no_change", "No new summary saved for this chat", run)
-    }
-    if (saved.spaceId !== null) {
-      yield* services
-        .spaceOverview(saved.spaceId, {
-          automationRunId: job.payload.automationRunId,
-          chatRunId: runId
-        })
-        .pipe(Effect.catchCause((cause) => Effect.logWarning("Space overview not updated", cause)))
     }
     yield* services
       .linkOfferChat({
@@ -107,7 +98,6 @@ export const chatSummariesHandler: SystemAutomationHandler<"chat_summaries"> = {
       chat: services.chat,
       queue: services.queue,
       summaries: services.summaries,
-      spaceOverview: services.spaceOverview,
       linkOfferChat: services.linkOfferChat,
       awaitRun: services.awaitRun
     })

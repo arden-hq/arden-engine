@@ -15,8 +15,6 @@ import { decodeWorkItem, workItemColumns, type WorkItemRow } from "./work-items.
 import { makeWorkSourceSql } from "./work-sources.js"
 import { inArdenWords } from "../restart-notice.js"
 import { iso } from "../../runtime/clock.js"
-import { spaceOverviewInput } from "./space-overview-input.js"
-import { overviewSourceFreshness } from "../summaries/freshness.js"
 import { taskOpenSql } from "./task-status-sql.js"
 
 interface OverviewSpaceRow extends SpaceRow {
@@ -386,34 +384,6 @@ export const makeSpaceReads = (
         last_activity: row.last_activity,
         summary: row.summary
       }))
-      const { overview, overviewSource } = yield* reader
-        .withTransaction(
-          Effect.gen(function* () {
-            const overviews = yield* reader<{
-              readonly now: string
-              readonly next_json: string
-              readonly updated_at: string
-              readonly revision_id: number | null
-              readonly sources_fingerprint: string
-            }>`SELECT now, next_json, updated_at, revision_id, sources_fingerprint
-            FROM space_summaries WHERE space_id = ${validSpaceId}`
-            const overview = overviews[0]
-            const overviewSource =
-              overview === undefined ? null : yield* spaceOverviewInput(reader, validSpaceId)
-            return { overview, overviewSource }
-          })
-        )
-        .pipe(
-          Effect.mapError((cause) =>
-            storeError(
-              "detail",
-              "storage",
-              "Could not load the Space overview",
-              validSpaceId,
-              cause
-            )
-          )
-        )
 
       const workers = yield* reader<SpaceWorkerRow>`
         SELECT task.task_id, task.last_result,
@@ -590,20 +560,6 @@ export const makeSpaceReads = (
               last_error: workerLatestFailed ? (worker?.latest_error ?? "Space run failed") : null
             },
         sessions,
-        overview:
-          overview === undefined
-            ? null
-            : {
-                now: overview.now,
-                next: JSON.parse(overview.next_json),
-                updated_at: overview.updated_at,
-                revision_id: overview.revision_id,
-                source_freshness: overviewSourceFreshness(
-                  overview.revision_id,
-                  overview.sources_fingerprint,
-                  overviewSource?.fingerprint ?? null
-                )
-              },
         work: {
           results: yield* readTaskResults(
             reader,

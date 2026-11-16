@@ -58,6 +58,7 @@ import { dropRenameApprovals } from "./0163_drop_rename_approvals.js"
 import { captureBacklogTriedAt } from "./0164_capture_backlog_tried_at.js"
 import { messageAuthors } from "./0165_message_authors.js"
 import { automationFailureStreak } from "./0166_automation_failure_streak.js"
+import { dropSpaceOverview } from "./0167_drop_space_overview.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -359,7 +360,8 @@ export const migrations: ReadonlyArray<Migration> = [
   dropRenameApprovals,
   captureBacklogTriedAt,
   messageAuthors,
-  automationFailureStreak
+  automationFailureStreak,
+  dropSpaceOverview
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

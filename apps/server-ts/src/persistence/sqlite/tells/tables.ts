@@ -244,7 +244,6 @@ export const tableTells = {
   space_chat_links: { tell: "space", id: "{row}.space_id" },
   space_conversations: { tell: "space", id: "{row}.space_id" },
   chat_summaries: { silent: "Read into the model's prompts; no screen shows it live." },
-  space_summaries: { tell: "space", id: "{row}.space_id" },
   communication_sequence_clock: { silent: internal },
   space_continuity_seen: { silent: internal },
   run_endings: { silent: delivered },
@@ -276,6 +275,5 @@ export const tableTells = {
   session_membership_changes: { silent: history },
   permission_changes: { silent: history },
   question_decisions: { silent: history },
-  tool_approval_decisions: { silent: history },
-  space_overview_revisions: { silent: history }
+  tool_approval_decisions: { silent: history }
 } as const satisfies Record<SchemaTable, TableTell>

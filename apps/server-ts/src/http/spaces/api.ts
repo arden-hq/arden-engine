@@ -15,10 +15,6 @@ import {
   UpdateSpaceInputSchema
 } from "@arden-hq/protocol/effect/spaces"
 import { Schema } from "effect"
-import {
-  SpaceOverviewHistoryPageSchema,
-  SpaceOverviewHistoryQuerySchema
-} from "../../persistence/summaries/store.js"
 import { SessionEndQuerySchema } from "@arden-hq/protocol/effect/sessions"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 import { completionErrors, StoreConflict, storeErrors, StoreInvalid } from "../errors.js"
@@ -28,12 +24,6 @@ export class SpacesApi extends HttpApiGroup.make("spaces", { topLevel: true }).a
     params: { spaceId: Schema.NonEmptyString },
     query: RecordedHistoryHttpQuerySchema,
     success: RecordedHistoryPageSchema,
-    error: storeErrors
-  }),
-  HttpApiEndpoint.get("overviewHistory", "/spaces/:spaceId/overview-history", {
-    params: { spaceId: Schema.NonEmptyString },
-    query: SpaceOverviewHistoryQuerySchema,
-    success: SpaceOverviewHistoryPageSchema,
     error: storeErrors
   }),
   HttpApiEndpoint.get("list", "/spaces", {

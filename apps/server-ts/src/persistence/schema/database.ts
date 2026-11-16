@@ -1,6 +1,5 @@
 import { contextHistorySchemaSection } from "./sections/context-history.js"
 import { authorityHistorySchemaSection } from "./sections/authority-history.js"
-import { spaceOverviewHistorySchemaSection } from "./sections/space-overview-history.js"
 import { workHistorySchemaSection } from "./sections/work-history.js"
 import type { OperationalSchemaSection } from "./section.js"
 import { spaceContinuitySchemaSection } from "./sections/space-continuity.js"
@@ -60,8 +59,7 @@ const sections = [
   taskProposalsSchemaSection,
   workHistorySchemaSection,
   contextHistorySchemaSection,
-  authorityHistorySchemaSection,
-  spaceOverviewHistorySchemaSection
+  authorityHistorySchemaSection
 ] as const satisfies ReadonlyArray<OperationalSchemaSection>
 
 export const databaseSchema = {

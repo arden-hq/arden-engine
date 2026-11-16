@@ -14,7 +14,6 @@ import { StructuredCompletion } from "../models/structured-completion.js"
 import { Decisions } from "../models/decisions/service.js"
 import { screenEventWake } from "./prefilter.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
-import { makeSpaceOverview } from "../memory/space-overview.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
 import { makeChatOutcomeLinker } from "../routing/chat-outcome.js"
 import { makeJobWorker } from "@arden-hq/jobs"
@@ -123,10 +122,6 @@ export class AutomationRuntime extends Context.Service<
       const sessions = yield* SessionStore
       const transcripts = yield* TranscriptQueries
       const summaries = yield* SummaryStore
-      const spaceOverview = makeSpaceOverview({
-        completion: yield* StructuredCompletion,
-        summaries
-      })
       const linkOfferChat = makeChatOutcomeLinker({
         spaces: yield* SpaceStore,
         proposals: yield* TaskProposalStore,
@@ -161,7 +156,6 @@ export class AutomationRuntime extends Context.Service<
         retentionPolicy,
         sessions,
         summaries,
-        spaceOverview,
         linkOfferChat,
         transcripts,
         awaitRun: awaitChatRun,

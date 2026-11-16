@@ -95,7 +95,6 @@ const tables: Readonly<Record<string, RouteTable>> = {
   spaceRoutes: table(spaceRoutes, {
     item: () => spaceRoutes.item(spaceId),
     archive: () => spaceRoutes.archive(spaceId, { stop: true }),
-    overviewHistory: () => spaceRoutes.overviewHistory(spaceId),
     conversation: () => spaceRoutes.conversation(spaceId),
     page: () => spaceRoutes.page(spaceId),
     restore: () => spaceRoutes.restore(spaceId),

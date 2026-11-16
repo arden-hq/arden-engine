@@ -216,13 +216,6 @@ export const PROMPT_CATALOG = Object.freeze({
     band: "background",
     slots: ["memory_filing_rule"]
   }),
-  spaceOverview: definePrompt({
-    id: "memory.space-overview",
-    revision: 2,
-    sourcePath: "memory/space-overview.md",
-    band: "auxiliary",
-    slots: []
-  }),
   chatSummary: definePrompt({
     id: "memory.chat-summary",
     revision: 3,
@@ -461,7 +454,6 @@ export const PROMPT_TEXT = Object.freeze({
   wikiMaintenance: renderText(PROMPT_CATALOG.wikiMaintenance, {}),
   dailySummary: renderText(PROMPT_CATALOG.dailySummary, {}),
   chatSummary: renderText(PROMPT_CATALOG.chatSummary, {}),
-  spaceOverview: renderText(PROMPT_CATALOG.spaceOverview, {}),
   conversationCommunication: renderText(PROMPT_CATALOG.conversationCommunication, {}),
   executorCommunication: renderText(PROMPT_CATALOG.executorCommunication, {}),
   agentFamily: renderText(PROMPT_CATALOG.agentFamily, {}),
