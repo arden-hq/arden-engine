@@ -73,28 +73,34 @@ export interface ModelEndpoint extends JsonRecord {
 export interface ModelEndpoints extends JsonRecord {
   readonly search: ModelEndpoint | null
   readonly decision: ModelEndpoint | null
-  /** The saved model server; its models are offered for chats beside ChatGPT's. */
-  readonly chat: ChatModelEndpoint | null
+  /**
+   * The saved model servers, in the order they were added; their models are
+   * offered for chats beside ChatGPT's. A model id is on one server only.
+   */
+  readonly chat: ReadonlyArray<ChatModelEndpoint>
 }
 
 /**
- * The path segment of the model server endpoint: `PUT`/`DELETE
- * /model-endpoints/chat`, `POST /model-endpoints/chat/check`. Not a
+ * The model servers' collection: `POST /model-endpoints/chat` adds one,
+ * `PUT`/`DELETE /model-endpoints/chat/:id` replace or remove one, `POST
+ * /model-endpoints/chat/check` checks a new one and `POST
+ * /model-endpoints/chat/:id/check` an edit of a saved one. Not a
  * `ModelEndpointKind`: its draft, saved shape and Check differ.
  */
 export type ChatEndpointKind = "chat"
 
 /**
  * Which model server. `llama.cpp`: a `llama-server` the person runs; every
- * model it lists that Arden can use is offered. `openrouter`: one named
- * OpenRouter model. `custom`: one named model on any other Chat Completions
- * server, which reports nothing about it.
+ * model it lists that Arden can use is offered. `openrouter`: the named
+ * OpenRouter models. `custom`: the named models on any other Chat Completions
+ * server, which reports nothing about them.
  */
 export type ChatEndpointService = "llama.cpp" | "openrouter" | "custom"
 
 /**
  * The key in a save or Check. `none`: the server takes no key. `keep`: the
- * saved key, for an edit at the same origin that does not retype it.
+ * key saved with the server being edited, for an edit at the same origin that
+ * does not retype it; a new server has none to keep.
  */
 export type ChatEndpointAuthInput =
   | { readonly kind: "none" }
@@ -111,7 +117,11 @@ export type ChatEndpointDraft =
   | {
       readonly service: "openrouter" | "custom"
       readonly baseUrl: string
-      readonly model: string
+      /**
+       * The models to offer, at least one and none twice. The Check proves
+       * each is there; its one chat request goes to the first.
+       */
+      readonly models: ReadonlyArray<string>
       readonly auth: ChatEndpointAuthInput
     }
 
@@ -141,11 +151,17 @@ export const CHAT_ENDPOINT_MIN_WINDOW = 32_768
 
 export interface ChatModelEndpoint extends JsonRecord {
   readonly kind: ChatEndpointKind
+  /** Assigned by the server when the server is added; names it in its routes. */
+  readonly id: string
   readonly service: ChatEndpointService
   readonly baseUrl: string
   /** The address's host and port, as the row names it: `127.0.0.1:8080`. */
   readonly host: string
-  /** The model picker's group name: `llama.cpp`, `OpenRouter`, or a custom server's host. */
+  /**
+   * The model picker's group name: `llama.cpp`, `OpenRouter`, or a custom
+   * server's host. When two saved servers would share a name, each carries
+   * its host too: `llama.cpp · 127.0.0.1:8080`.
+   */
   readonly group: string
   readonly auth: { readonly kind: "none" } | { readonly kind: "bearer" }
   /** What the server last reported, kept while it does not answer. */
@@ -180,7 +196,7 @@ export type ChatEndpointCheckFailure =
       readonly message: string
     }
   | {
-      /** The id is one another group of the model list uses (`openai-codex/…`). */
+      /** The id is one another group of the model list uses: Codex's (`openai-codex/…`) or another saved server's. */
       readonly result: "model_taken"
       readonly model: string
       readonly message: string
@@ -188,7 +204,8 @@ export type ChatEndpointCheckFailure =
 
 /**
  * Discovery plus one small chat request to the first offered model. `works`
- * lists what would be offered and what would not.
+ * lists what would be offered and what would not, and the group name the
+ * server would have beside the ones saved.
  */
 export type ChatEndpointCheck =
   | {

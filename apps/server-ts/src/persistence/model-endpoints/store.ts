@@ -96,10 +96,12 @@ const ChatSkipSchema = Schema.Union([
 ])
 
 /**
- * The saved model server. Its models are kept while it does not answer, so
- * chats and defaults that name them keep them; the key is in the vault.
+ * A saved model server. Its models are kept while it does not answer, so
+ * chats and defaults that name them keep them; its key is in the vault,
+ * under its id.
  */
 const StoredChatEndpointSchema = Schema.Struct({
+  id: Text(64),
   service: Schema.Literals(["llama.cpp", "openrouter", "custom"] as const),
   baseUrl: Text(2_048),
   auth: Schema.Union([
@@ -113,12 +115,28 @@ const StoredChatEndpointSchema = Schema.Struct({
 
 export type StoredChatEndpoint = typeof StoredChatEndpointSchema.Type
 
+/**
+ * The saved model servers, in the order added. A chat's stored model id must
+ * name one server, so no model id is on two of them; the Check refuses a
+ * taken id, and this refuses a write that would break that anyway.
+ */
+const StoredChatEndpointsSchema = Schema.Array(StoredChatEndpointSchema).check(
+  Schema.makeFilter((servers) => {
+    if (new Set(servers.map((server) => server.id)).size !== servers.length)
+      return "model server ids must be unique"
+    const models = servers.flatMap((server) => server.models.map((model) => model.id))
+    return new Set(models).size === models.length
+      ? undefined
+      : "a model must be on one model server only"
+  })
+)
+
 const DecisionSourceSchema = Schema.Literals(["local", "endpoint", "off"] as const)
 
 export const ModelEndpointSettingsSchema = Schema.Struct({
   search: Schema.NullOr(StoredEndpointSchema),
   decision: Schema.NullOr(StoredEndpointSchema),
-  chat: Schema.NullOr(StoredChatEndpointSchema),
+  chat: StoredChatEndpointsSchema,
   decisionSource: DecisionSourceSchema
 })
 
@@ -127,7 +145,7 @@ export type ModelEndpointSettings = typeof ModelEndpointSettingsSchema.Type
 export const ModelEndpointSettingsPatchSchema = Schema.Struct({
   search: Schema.optionalKey(Schema.NullOr(StoredEndpointSchema)),
   decision: Schema.optionalKey(Schema.NullOr(StoredEndpointSchema)),
-  chat: Schema.optionalKey(Schema.NullOr(StoredChatEndpointSchema)),
+  chat: Schema.optionalKey(StoredChatEndpointsSchema),
   decisionSource: Schema.optionalKey(DecisionSourceSchema)
 })
 
@@ -136,7 +154,7 @@ export type ModelEndpointSettingsPatch = typeof ModelEndpointSettingsPatchSchema
 export const DEFAULT_MODEL_ENDPOINT_SETTINGS: ModelEndpointSettings = {
   search: null,
   decision: null,
-  chat: null,
+  chat: [],
   decisionSource: "local"
 }
 

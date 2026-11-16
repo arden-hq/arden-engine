@@ -173,7 +173,7 @@ describe("the model server Check", () => {
       await checkChatEndpoint({
         service: "openrouter",
         baseUrl: "https://openrouter.ai/api/v1",
-        model: "openai/gpt-6-luna",
+        models: ["openai/gpt-6-luna"],
         key: "sk-or-wrong",
         fetch: refused.fetch
       })
@@ -183,7 +183,7 @@ describe("the model server Check", () => {
       await checkChatEndpoint({
         service: "openrouter",
         baseUrl: "https://openrouter.ai/api/v1",
-        model: "vendor/none",
+        models: ["openai/gpt-6-luna", "vendor/none"],
         key: "sk-or-test",
         fetch: missing.fetch
       })
@@ -201,7 +201,7 @@ describe("the model server Check", () => {
         {
           service: "custom",
           baseUrl: "http://10.0.0.5:8000/v1",
-          model: "served",
+          models: ["served"],
           key: undefined,
           fetch: server.fetch
         },
@@ -224,7 +224,7 @@ describe("the model server Check", () => {
       await checkChatEndpoint({
         service: "custom",
         baseUrl: "http://10.0.0.5:8000/v1",
-        model: "served",
+        models: ["served"],
         key: "secret",
         fetch: server.fetch
       })
@@ -234,5 +234,83 @@ describe("the model server Check", () => {
       message: "A key goes only over HTTPS, or plain HTTP to this Mac"
     })
     expect(server.bodies).toEqual([])
+  })
+
+  it("offers every named OpenRouter model with its own abilities and asks only the first", async () => {
+    const server = serving({
+      routes: {
+        "https://openrouter.ai/api/v1/models": {
+          data: [
+            {
+              id: "openai/gpt-6-luna",
+              context_length: 400_000,
+              top_provider: { context_length: 400_000, max_completion_tokens: 128_000 },
+              architecture: { input_modalities: ["text", "image"] },
+              supported_parameters: ["tools", "max_tokens", "reasoning"]
+            },
+            {
+              id: "anthropic/claude-haiku-5.5",
+              context_length: 200_000,
+              top_provider: { context_length: 200_000, max_completion_tokens: 64_000 },
+              architecture: { input_modalities: ["text"] },
+              supported_parameters: ["tools", "max_tokens"]
+            }
+          ]
+        }
+      }
+    })
+    const result = await checkChatEndpoint(
+      {
+        service: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        models: ["anthropic/claude-haiku-5.5", "openai/gpt-6-luna"],
+        key: "sk-or-test",
+        fetch: server.fetch
+      },
+      fixedClock
+    )
+    expect(result).toMatchObject({
+      result: "works",
+      models: [
+        { id: "anthropic/claude-haiku-5.5", window: 200_000, outputCap: 64_000 },
+        { id: "openai/gpt-6-luna", window: 400_000, outputCap: 128_000 }
+      ],
+      skipped: []
+    })
+    expect(
+      result.result === "works" && result.models.map((model) => model.compat.imageInput)
+    ).toEqual([false, true])
+    // The one paid request goes to the first named model.
+    expect(server.bodies.map((body) => body["model"])).toEqual(["anthropic/claude-haiku-5.5"])
+  })
+
+  it("skips a listed model another server offers, and refuses a named one", async () => {
+    const taken = new Map([["gemma-32k", "llama.cpp"]])
+    const router = serving({
+      routes: llamaRouter({ "gemma-32k": props(32_768), "qwen-64k": props(65_536) })
+    })
+    expect(await checkChatEndpoint(llama(router.fetch), { ...fixedClock, taken })).toMatchObject({
+      result: "works",
+      models: [{ id: "qwen-64k" }],
+      skipped: [{ id: "gemma-32k", reason: "model_taken" }]
+    })
+    const custom = serving({ routes: {} })
+    expect(
+      await checkChatEndpoint(
+        {
+          service: "custom",
+          baseUrl: "http://127.0.0.1:8000/v1",
+          models: ["served", "gemma-32k"],
+          key: undefined,
+          fetch: custom.fetch
+        },
+        { taken }
+      )
+    ).toEqual({
+      result: "model_taken",
+      model: "gemma-32k",
+      message: "gemma-32k is offered by another model server (llama.cpp)"
+    })
+    expect(custom.bodies).toEqual([])
   })
 })

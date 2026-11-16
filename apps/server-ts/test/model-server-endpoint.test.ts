@@ -21,11 +21,16 @@ import { brokeredProviderRoute } from "../src/providers/registry.js"
 
 const headers = { "content-type": "application/json" }
 const GEMMA = "gemma-4"
+const QWEN = "qwen-4"
 const CODEX = "openai-codex/gpt-test"
 
-/** A llama-server with one 32k model that calls tools; `down` drops every connection. */
-const fakeLlama = async () => {
+/**
+ * A llama-server with one 32k model that calls tools; `down` drops every
+ * connection. `keys` records each chat request's bearer key.
+ */
+const fakeLlama = async (model = GEMMA) => {
   const chats: Array<Record<string, unknown>> = []
+  const keys: Array<string | undefined> = []
   let down = false
   const server: Server = createServer((request, response) => {
     if (down) {
@@ -42,15 +47,16 @@ const fakeLlama = async () => {
         default_generation_settings: { n_ctx: 32_768 },
         chat_template_caps: { supports_tools: true }
       })
-    if (request.url === "/v1/models") return json({ data: [{ id: GEMMA }] })
+    if (request.url === "/v1/models") return json({ data: [{ id: model }] })
     if (request.url === "/v1/chat/completions") {
       let body = ""
+      keys.push(request.headers.authorization?.replace(/^Bearer /u, ""))
       request.on("data", (chunk: Buffer) => (body += chunk.toString()))
       request.on("end", () => {
         chats.push(JSON.parse(body))
         response.writeHead(200, { "content-type": "text/event-stream" })
         const chunk = (delta: unknown, finish: string | null) =>
-          `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", model: GEMMA, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+          `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
         const usage = { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 }
         response.end(
           `${chunk({ content: "Done." }, null)}${chunk({}, "stop")}data: ${JSON.stringify({ id: "c", choices: [], usage })}\n\ndata: [DONE]\n\n`
@@ -69,6 +75,7 @@ const fakeLlama = async () => {
     baseUrl: `http://127.0.0.1:${port}/v1`,
     host: `127.0.0.1:${port}`,
     chats,
+    keys,
     setDown: (value: boolean) => {
       down = value
     },
@@ -173,7 +180,8 @@ const started = async (options: Partial<ServerOptions>, directory?: string) => {
   cleanups.push(stop)
   const call = async (path: string, init?: RequestInit) => {
     const response = await server.fetch(path, init)
-    const body: unknown = await response.json()
+    const text = await response.text()
+    const body: unknown = text === "" ? undefined : JSON.parse(text)
     return { status: response.status, body }
   }
   return { server, folder, call, changes: () => changes, stop }
@@ -187,15 +195,41 @@ const llamaDraft = (baseUrl: string): ChatEndpointDraft => ({
   auth: { kind: "none" }
 })
 
-const save = async (running: Running, draft: ChatEndpointDraft) =>
+/** Adds a server, or replaces the saved one `id` names. */
+const save = async (running: Running, draft: ChatEndpointDraft, id?: string) =>
   modelEndpointDecoders.chatSave(
     (
-      await running.call(modelEndpointRoutes.endpoint("chat"), {
-        method: "PUT",
-        headers,
-        body: modelEndpointRequests.chatDraft(draft)
-      })
+      await running.call(
+        id === undefined ? modelEndpointRoutes.chatServers : modelEndpointRoutes.chatServer(id),
+        {
+          method: id === undefined ? "POST" : "PUT",
+          headers,
+          body: modelEndpointRequests.chatDraft(draft)
+        }
+      )
     ).body
+  )
+
+const saved = async (running: Running, draft: ChatEndpointDraft) => {
+  const result = await save(running, draft)
+  if (result.result !== "saved") throw new Error(`not saved: ${JSON.stringify(result)}`)
+  return result.endpoint
+}
+
+/** Checks a new server, or an edit of the saved one `id` names. */
+const check = async (running: Running, draft: ChatEndpointDraft, id?: string) => {
+  const response = await running.call(
+    id === undefined ? modelEndpointRoutes.chatCheck : modelEndpointRoutes.chatServerCheck(id),
+    { method: "POST", headers, body: modelEndpointRequests.chatDraft(draft) }
+  )
+  return response.status === 200
+    ? modelEndpointDecoders.chatCheck(response.body)
+    : { status: response.status }
+}
+
+const remove = async (running: Running, id: string) =>
+  modelEndpointDecoders.endpoints(
+    (await running.call(modelEndpointRoutes.chatServer(id), { method: "DELETE" })).body
   )
 
 const groups = async (running: Running) =>
@@ -256,11 +290,13 @@ describe("the model server beside the signed-in account", () => {
       const running = await started({ provider: codex.provider, modelHost: codexHost })
       expect(await groups(running)).toEqual([["OpenAI Codex", [CODEX]]])
 
-      const saved = await save(running, llamaDraft(llama.baseUrl))
-      expect(saved).toEqual({
+      const result = await save(running, llamaDraft(llama.baseUrl))
+      const id = result.result === "saved" ? result.endpoint.id : ""
+      expect(result).toEqual({
         result: "saved",
         endpoint: {
           kind: "chat",
+          id: expect.stringMatching(/^[A-Za-z0-9_-]+$/u),
           service: "llama.cpp",
           baseUrl: llama.baseUrl,
           host: llama.host,
@@ -300,10 +336,7 @@ describe("the model server beside the signed-in account", () => {
         ).status
       ).toBe(200)
 
-      const removed = await running.call(modelEndpointRoutes.endpoint("chat"), {
-        method: "DELETE"
-      })
-      expect(modelEndpointDecoders.endpoints(removed.body).chat).toBeNull()
+      expect((await remove(running, id)).chat).toEqual([])
       expect(running.changes()).toBe(2)
       expect(await groups(running)).toEqual([["OpenAI Codex", [CODEX]]])
       // The settings still name the removed model; nothing falls back, and reads still work.
@@ -335,55 +368,178 @@ describe("the model server beside the signed-in account", () => {
       // Nobody is signed in: the server's models are the whole list, and new chats start on them.
       expect(await groups(second)).toEqual([["llama.cpp", [GEMMA]]])
       await expect
-        .poll(async () => (await endpoints(second)).chat?.health.state, { timeout: 30_000 })
+        .poll(async () => (await endpoints(second)).chat[0]?.health.state, { timeout: 30_000 })
         .toBe("failing")
-      expect((await endpoints(second)).chat).toMatchObject({
-        models: [{ id: GEMMA }],
-        health: { state: "failing", reason: "unreachable" }
-      })
+      expect((await endpoints(second)).chat).toMatchObject([
+        { models: [{ id: GEMMA }], health: { state: "failing", reason: "unreachable" } }
+      ])
       expect(await chatOn(second, GEMMA)).toBe("error")
 
       llama.setDown(false)
       expect(await chatOn(second, GEMMA)).toBe("completed")
       await expect
-        .poll(async () => (await endpoints(second)).chat?.health.state, { timeout: 10_000 })
+        .poll(async () => (await endpoints(second)).chat[0]?.health.state, { timeout: 10_000 })
         .toBe("works")
     }
   )
 
-  it("keeps a key in the vault alone, and an edit that keeps it does not retype it", async () => {
-    const llama = await fakeLlama()
-    cleanups.push(llama.close)
+  it("keeps each server's key in the vault alone, uses it for an edit that keeps it, and removes it with its server", async () => {
+    const first = await fakeLlama(GEMMA)
+    const second = await fakeLlama(QWEN)
+    cleanups.push(first.close, second.close)
     const { vault, documents } = memoryVault()
     const running = await started({ credentialVault: vault })
-    const keyed: ChatEndpointDraft = {
+    const keyed = (baseUrl: string, model: string, apiKey: string): ChatEndpointDraft => ({
       service: "custom",
-      baseUrl: llama.baseUrl,
-      model: GEMMA,
-      auth: { kind: "bearer", apiKey: "sk-secret-123" }
-    }
-    const saved = await running.call(modelEndpointRoutes.endpoint("chat"), {
-      method: "PUT",
-      headers,
-      body: modelEndpointRequests.chatDraft(keyed)
+      baseUrl,
+      models: [model],
+      auth: { kind: "bearer", apiKey }
     })
-    expect(JSON.stringify(saved.body)).not.toContain("sk-secret-123")
-    expect(modelEndpointDecoders.chatSave(saved.body)).toMatchObject({
-      result: "saved",
-      endpoint: { group: llama.host, auth: { kind: "bearer" } }
-    })
-    expect([...documents.values()]).toEqual([{ secret: "sk-secret-123" }])
-    expect(llama.chats.at(-1)).toMatchObject({ model: GEMMA })
-    expect(JSON.stringify((await running.call(modelEndpointRoutes.list)).body)).not.toContain(
-      "sk-secret-123"
-    )
-    const kept = await running.call(modelEndpointRoutes.check("chat"), {
+    const firstDraft = keyed(first.baseUrl, GEMMA, "sk-first-123")
+    const response = await running.call(modelEndpointRoutes.chatServers, {
       method: "POST",
       headers,
-      body: modelEndpointRequests.chatDraft({ ...keyed, auth: { kind: "keep" } })
+      body: modelEndpointRequests.chatDraft(firstDraft)
     })
-    expect(modelEndpointDecoders.chatCheck(kept.body)).toMatchObject({ result: "works" })
-    await running.call(modelEndpointRoutes.endpoint("chat"), { method: "DELETE" })
-    expect(documents.size).toBe(0)
+    expect(JSON.stringify(response.body)).not.toContain("sk-first-123")
+    const one = modelEndpointDecoders.chatSave(response.body)
+    expect(one).toMatchObject({
+      result: "saved",
+      endpoint: { group: first.host, auth: { kind: "bearer" } }
+    })
+    const oneId = one.result === "saved" ? one.endpoint.id : ""
+    const two = await saved(running, keyed(second.baseUrl, QWEN, "sk-second-456"))
+    expect([...documents.values()]).toEqual([
+      { secret: "sk-first-123" },
+      { secret: "sk-second-456" }
+    ])
+    expect(first.keys).toEqual(["sk-first-123"])
+    expect(second.keys).toEqual(["sk-second-456"])
+    expect(JSON.stringify((await running.call(modelEndpointRoutes.list)).body)).not.toContain("sk-")
+
+    // `keep` is the edited server's own key; a new server has none to keep.
+    const kept: ChatEndpointDraft = { ...firstDraft, auth: { kind: "keep" } }
+    expect(await check(running, kept)).toEqual({ status: 422 })
+    expect(await check(running, kept, oneId)).toMatchObject({ result: "works" })
+    expect(first.keys.at(-1)).toBe("sk-first-123")
+    const edited = await save(running, { ...kept, models: [GEMMA, "gemma-4-fast"] }, oneId)
+    expect(edited).toMatchObject({
+      result: "saved",
+      endpoint: { id: oneId, models: [{ id: GEMMA }, { id: "gemma-4-fast" }] }
+    })
+    expect(first.keys.at(-1)).toBe("sk-first-123")
+    expect([...documents.values()]).toEqual([
+      { secret: "sk-first-123" },
+      { secret: "sk-second-456" }
+    ])
+    expect((await endpoints(running)).chat.map((server) => server.id)).toEqual([oneId, two.id])
+
+    await remove(running, oneId)
+    expect([...documents.values()]).toEqual([{ secret: "sk-second-456" }])
+    expect(
+      (await running.call(modelEndpointRoutes.chatServer(oneId), { method: "DELETE" })).status
+    ).toBe(404)
+  })
+
+  it(
+    "routes two servers' models by id, names each group by its host while they share a service, and keeps one working when the other goes",
+    { timeout: 60_000 },
+    async () => {
+      const gemma = await fakeLlama(GEMMA)
+      const qwen = await fakeLlama(QWEN)
+      cleanups.push(gemma.close, qwen.close)
+      const running = await started({})
+      const one = await saved(running, llamaDraft(gemma.baseUrl))
+      expect(one.group).toBe("llama.cpp")
+      const checked = await check(running, llamaDraft(qwen.baseUrl))
+      expect(checked).toMatchObject({ result: "works", group: `llama.cpp · ${qwen.host}` })
+      const two = await saved(running, llamaDraft(qwen.baseUrl))
+      expect(two.group).toBe(`llama.cpp · ${qwen.host}`)
+      expect(running.changes()).toBe(2)
+      expect((await endpoints(running)).chat.map((server) => server.group)).toEqual([
+        `llama.cpp · ${gemma.host}`,
+        `llama.cpp · ${qwen.host}`
+      ])
+      expect(await groups(running)).toEqual([
+        [`llama.cpp · ${gemma.host}`, [GEMMA]],
+        [`llama.cpp · ${qwen.host}`, [QWEN]]
+      ])
+
+      gemma.chats.length = 0
+      qwen.chats.length = 0
+      expect(await chatOn(running, GEMMA)).toBe("completed")
+      expect(await chatOn(running, QWEN)).toBe("completed")
+      expect(gemma.chats.length).toBeGreaterThan(0)
+      expect(qwen.chats.length).toBeGreaterThan(0)
+      expect(gemma.chats.every((body) => body["model"] === GEMMA)).toBe(true)
+      expect(qwen.chats.every((body) => body["model"] === QWEN)).toBe(true)
+
+      expect((await remove(running, one.id)).chat).toMatchObject([
+        { id: two.id, group: "llama.cpp" }
+      ])
+      expect(await groups(running)).toEqual([["llama.cpp", [QWEN]]])
+      expect(await chatOn(running, QWEN)).toBe("completed")
+      // The removed server's model is no longer one a chat can choose.
+      const sessionId = sessionDecoders.createResponse(
+        (
+          await running.call(sessionRoutes.collection, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({})
+          })
+        ).body
+      ).session_id
+      expect(
+        (
+          await running.call(sessionRoutes.model(sessionId), {
+            method: "PUT",
+            headers,
+            body: sessionRequests.setModel(GEMMA)
+          })
+        ).status
+      ).toBe(422)
+    }
+  )
+
+  it("refuses a model another saved server offers, but not a saved server's own models in its edit", async () => {
+    const first = await fakeLlama(GEMMA)
+    const again = await fakeLlama(GEMMA)
+    cleanups.push(first.close, again.close)
+    const running = await started({})
+    const one = await saved(running, llamaDraft(first.baseUrl))
+    const taken = {
+      result: "model_taken",
+      model: GEMMA,
+      message: `${GEMMA} is offered by another model server (llama.cpp)`
+    }
+    expect(await save(running, llamaDraft(again.baseUrl))).toEqual(taken)
+    expect(
+      await save(running, {
+        service: "custom",
+        baseUrl: again.baseUrl,
+        models: ["other", GEMMA],
+        auth: { kind: "none" }
+      })
+    ).toEqual(taken)
+    expect(await check(running, llamaDraft(first.baseUrl), one.id)).toMatchObject({
+      result: "works",
+      group: "llama.cpp",
+      models: [{ id: GEMMA }]
+    })
+    expect((await endpoints(running)).chat).toHaveLength(1)
+    expect(
+      (
+        await running.call(modelEndpointRoutes.chatServer("unknown"), {
+          method: "PUT",
+          headers,
+          body: modelEndpointRequests.chatDraft(llamaDraft(again.baseUrl))
+        })
+      ).status
+    ).toBe(404)
+  })
+
+  it("starts a new database with no model server saved", async () => {
+    const running = await started({})
+    expect(await endpoints(running)).toEqual({ search: null, decision: null, chat: [] })
   })
 })

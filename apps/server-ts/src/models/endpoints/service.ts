@@ -1,7 +1,5 @@
 import type {
   ChatEndpointCheck,
-  ChatEndpointDraft,
-  ChatEndpointKind,
   ChatEndpointSaveResult,
   DecisionBackendState,
   DecisionSource,
@@ -42,13 +40,13 @@ import { checkDecisionEndpoint } from "../decisions/service.js"
 import { DecisionEndpointSource, type SelectedDecisionEndpoint } from "../decisions/source.js"
 import { decisionSiteStatuses } from "../decisions/sites.js"
 import { ModelProviderSwitch } from "../provider-switch.js"
-import { makeChatEndpoint, view as chatView } from "./chat-service.js"
+import { makeChatEndpoint, viewAll as chatViews, type ChatEndpointRequest } from "./chat-service.js"
 import { type EndpointFailureReason, runtimeFailure } from "./failure.js"
 
 export class ModelEndpointsError extends Schema.TaggedError<ModelEndpointsError>()(
   "ModelEndpointsError",
   {
-    reason: Schema.Literals(["invalid", "storage"] as const),
+    reason: Schema.Literals(["invalid", "not_found", "storage"] as const),
     message: Schema.String,
     cause: Schema.optionalKey(Schema.Defect())
   }
@@ -69,14 +67,17 @@ export class ModelEndpoints extends Context.Service<
     readonly remove: (
       kind: ModelEndpointKind
     ) => Effect.Effect<ModelEndpointsView, ModelEndpointsError>
-    /** The model server: a Check, which also re-asks a saved one, and its save and removal. */
+    /**
+     * The model servers: a Check of a new one or of an edit (which also
+     * re-asks the saved one), adding or replacing one, removing one.
+     */
     readonly checkChat: (
-      draft: ChatEndpointDraft
+      request: ChatEndpointRequest
     ) => Effect.Effect<ChatEndpointCheck, ModelEndpointsError>
     readonly saveChat: (
-      draft: ChatEndpointDraft
+      request: ChatEndpointRequest
     ) => Effect.Effect<ChatEndpointSaveResult, ModelEndpointsError>
-    readonly removeChat: () => Effect.Effect<ModelEndpointsView, ModelEndpointsError>
+    readonly removeChat: (id: string) => Effect.Effect<ModelEndpointsView, ModelEndpointsError>
     readonly decisionStatus: () => Effect.Effect<DecisionStatus, ModelEndpointsError>
     readonly setDecisionSource: (
       source: DecisionSource
@@ -105,10 +106,13 @@ export interface ModelEndpointsOptions {
 const DECISION_TIMEOUT_MS = 3_000
 const CHECK_TIMEOUT_MS = 15_000
 
-const secretTarget = (kind: ModelEndpointKind | ChatEndpointKind): SecureDocumentTarget => ({
-  documentKey: `model-endpoint:${kind}`,
-  binding: `model-endpoint:${kind}:v1`
-})
+/** Where a key is in the vault: a search or decision endpoint's, or one model server's. */
+type SecretOwner = ModelEndpointKind | { readonly chat: string }
+
+const secretTarget = (owner: SecretOwner): SecureDocumentTarget => {
+  const name = typeof owner === "string" ? owner : `chat:${owner.chat}`
+  return { documentKey: `model-endpoint:${name}`, binding: `model-endpoint:${name}:v1` }
+}
 
 const SecretDocumentSchema = Schema.Struct({ secret: Schema.NonEmptyString })
 
@@ -128,6 +132,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
   const storage = (message: string) => (cause: unknown) =>
     new ModelEndpointsError({ reason: "storage", message, cause })
   const invalid = (message: string) => new ModelEndpointsError({ reason: "invalid", message })
+  const notFound = (message: string) => new ModelEndpointsError({ reason: "not_found", message })
 
   const settings = () =>
     store.settings().pipe(Effect.mapError(storage("Could not read model endpoint settings")))
@@ -136,10 +141,10 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       .updateSettings(patch)
       .pipe(Effect.mapError(storage("Could not save model endpoint settings")))
 
-  const readSecret = (kind: ModelEndpointKind | ChatEndpointKind) =>
+  const readSecret = (owner: SecretOwner) =>
     Effect.tryPromise({
       try: async () => {
-        const value = await readSecureDocument(options.vault, secretTarget(kind))
+        const value = await readSecureDocument(options.vault, secretTarget(owner))
         if (value === null) return undefined
         const decoded = await decodeVaultValue(
           SecretDocumentSchema,
@@ -150,29 +155,29 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       },
       catch: storage("Could not read the endpoint key")
     })
-  const writeSecret = (kind: ModelEndpointKind | ChatEndpointKind, secret: string) =>
+  const writeSecret = (owner: SecretOwner, secret: string) =>
     Effect.tryPromise({
-      try: () => writeSecureDocument(options.vault, secretTarget(kind), { secret }),
+      try: () => writeSecureDocument(options.vault, secretTarget(owner), { secret }),
       catch: storage("Could not save the endpoint key")
     })
-  const clearSecret = (kind: ModelEndpointKind | ChatEndpointKind) =>
+  const clearSecret = (owner: SecretOwner) =>
     Effect.tryPromise({
       try: () =>
         vaultOperation("Could not delete the endpoint key", () =>
-          requireVault(options.vault).clearDocument(secretTarget(kind))
+          requireVault(options.vault).clearDocument(secretTarget(owner))
         ),
       catch: storage("Could not delete the endpoint key")
     })
-  const readDocument = (kind: ModelEndpointKind | ChatEndpointKind) =>
+  const readDocument = (owner: SecretOwner) =>
     Effect.tryPromise({
-      try: () => readSecureDocument(options.vault, secretTarget(kind)),
+      try: () => readSecureDocument(options.vault, secretTarget(owner)),
       catch: storage("Could not read the endpoint key")
     })
-  const restoreDocument = (kind: ModelEndpointKind | ChatEndpointKind, value: unknown | null) =>
+  const restoreDocument = (owner: SecretOwner, value: unknown | null) =>
     value === null
-      ? clearSecret(kind)
+      ? clearSecret(owner)
       : Effect.tryPromise({
-          try: () => writeSecureDocument(options.vault, secretTarget(kind), value),
+          try: () => writeSecureDocument(options.vault, secretTarget(owner), value),
           catch: storage("Could not restore the endpoint key")
         })
 
@@ -492,21 +497,23 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     settings,
     update,
     invalid,
+    notFound,
     secrets: {
-      read: () => readSecret("chat"),
-      readDocument: () => readDocument("chat"),
-      write: (secret) => writeSecret("chat", secret),
-      restore: (value) => restoreDocument("chat", value)
+      read: (id) => readSecret({ chat: id }),
+      readDocument: (id) => readDocument({ chat: id }),
+      write: (id, secret) => writeSecret({ chat: id }, secret),
+      restore: (id, value) => restoreDocument({ chat: id }, value)
     },
     nextHealth,
     switch: providerSwitch,
-    listChanged: options.modelListChanged
+    listChanged: options.modelListChanged,
+    newId: () => crypto.randomUUID()
   })
   yield* chat
     .start()
     .pipe(
       Effect.catch((cause) =>
-        Effect.logWarning("The saved model server could not be loaded", { cause })
+        Effect.logWarning("The saved model servers could not be loaded", { cause })
       )
     )
 
@@ -530,7 +537,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       remove,
       checkChat: chat.check,
       saveChat: chat.save,
-      removeChat: () => chat.remove().pipe(Effect.map(viewAll)),
+      removeChat: (id) => chat.remove(id).pipe(Effect.map(viewAll)),
       decisionStatus,
       setDecisionSource
     })
@@ -610,5 +617,5 @@ const view = (kind: ModelEndpointKind, stored: StoredEndpoint): ModelEndpoint =>
 const viewAll = (saved: ModelEndpointSettings): ModelEndpointsView => ({
   search: saved.search === null ? null : view("search", saved.search),
   decision: saved.decision === null ? null : view("decision", saved.decision),
-  chat: saved.chat === null ? null : chatView(saved.chat)
+  chat: chatViews(saved.chat)
 })

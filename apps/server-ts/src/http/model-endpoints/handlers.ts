@@ -17,14 +17,23 @@ import { ArdenApi } from "../api.js"
 
 const failed = (
   error: ModelEndpointsError
-): Effect.Effect<never, HttpApiError.UnprocessableEntity | HttpApiError.InternalServerError> =>
-  error.reason === "invalid"
-    ? Effect.fail(new HttpApiError.UnprocessableEntity({}))
-    : Effect.logWarning("Model endpoint request failed", error).pipe(
+): Effect.Effect<
+  never,
+  HttpApiError.UnprocessableEntity | HttpApiError.NotFound | HttpApiError.InternalServerError
+> => {
+  switch (error.reason) {
+    case "invalid":
+      return Effect.fail(new HttpApiError.UnprocessableEntity({}))
+    case "not_found":
+      return Effect.fail(new HttpApiError.NotFound({}))
+    case "storage":
+      return Effect.logWarning("Model endpoint request failed", error).pipe(
         Effect.andThen(Effect.fail(new HttpApiError.InternalServerError({})))
       )
+  }
+}
 
-/** A draft of the wrong kind (a model server's sent to `search`) is unprocessable, as a format of the wrong kind is. */
+/** The payload was decoded by the route's schema; this maps it to the draft. */
 const draftOf = (payload: unknown) =>
   decodeModelEndpointDraftEffect(payload).pipe(
     Effect.mapError(() => new HttpApiError.UnprocessableEntity({}))
@@ -63,13 +72,45 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
       .handle("list", () =>
         endpoints.list().pipe(Effect.map(modelEndpointsResponse), Effect.catch(failed))
       )
+      .handle("addChat", ({ payload }) =>
+        chatDraftOf(payload).pipe(
+          Effect.flatMap((draft) =>
+            endpoints.saveChat({ draft, editing: undefined }).pipe(Effect.catch(failed))
+          ),
+          Effect.map(chatEndpointSaveResponse)
+        )
+      )
+      .handle("replaceChat", ({ params, payload }) =>
+        chatDraftOf(payload).pipe(
+          Effect.flatMap((draft) =>
+            endpoints.saveChat({ draft, editing: params.id }).pipe(Effect.catch(failed))
+          ),
+          Effect.map(chatEndpointSaveResponse)
+        )
+      )
+      .handle("removeChat", ({ params }) =>
+        endpoints
+          .removeChat(params.id)
+          .pipe(Effect.map(modelEndpointsResponse), Effect.catch(failed))
+      )
+      .handle("checkChat", ({ payload }) =>
+        chatDraftOf(payload).pipe(
+          Effect.flatMap((draft) =>
+            endpoints.checkChat({ draft, editing: undefined }).pipe(Effect.catch(failed))
+          ),
+          Effect.map(chatEndpointCheckResponse)
+        )
+      )
+      .handle("checkChatEdit", ({ params, payload }) =>
+        chatDraftOf(payload).pipe(
+          Effect.flatMap((draft) =>
+            endpoints.checkChat({ draft, editing: params.id }).pipe(Effect.catch(failed))
+          ),
+          Effect.map(chatEndpointCheckResponse)
+        )
+      )
       .handle("save", ({ params, payload }) => {
         const kind = params.kind
-        if (kind === "chat")
-          return chatDraftOf(payload).pipe(
-            Effect.flatMap((draft) => endpoints.saveChat(draft).pipe(Effect.catch(failed))),
-            Effect.map(chatEndpointSaveResponse)
-          )
         return draftOf(payload).pipe(
           Effect.flatMap((draft) => endpoints.save(kind, draft).pipe(Effect.catch(failed))),
           Effect.tap((result) =>
@@ -82,10 +123,6 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
       })
       .handle("remove", ({ params }) => {
         const kind = params.kind
-        if (kind === "chat")
-          return endpoints
-            .removeChat()
-            .pipe(Effect.map(modelEndpointsResponse), Effect.catch(failed))
         return (kind === "search" ? followSearchChange("off") : Effect.void).pipe(
           Effect.andThen(endpoints.remove(kind)),
           Effect.map(modelEndpointsResponse),
@@ -94,11 +131,6 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
       })
       .handle("check", ({ params, payload }) => {
         const kind = params.kind
-        if (kind === "chat")
-          return chatDraftOf(payload).pipe(
-            Effect.flatMap((draft) => endpoints.checkChat(draft).pipe(Effect.catch(failed))),
-            Effect.map(chatEndpointCheckResponse)
-          )
         return draftOf(payload).pipe(
           Effect.flatMap((draft) => endpoints.check(kind, draft).pipe(Effect.catch(failed)))
         )

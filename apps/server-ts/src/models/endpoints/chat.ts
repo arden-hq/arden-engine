@@ -39,12 +39,13 @@ import type { ModelDefinition } from "../host.js"
 import { type EndpointFailureReason, failureForStatus } from "./failure.js"
 
 /**
- * The desktop's model server: what a Check proves about it, and the models
+ * The desktop's model servers: what a Check proves about one, and the models
  * and adapters a saved one adds to the model list. Discovery, request shapes
  * and model definitions come from the shared Chat Completions builder
  * (`providers/chat-completions/route.ts`); this file adds only the desktop's
- * rules: one server, its models offered only when they call tools and have
- * `CHAT_ENDPOINT_MIN_WINDOW`, ids that never collide with Codex's.
+ * rules: models offered only when they call tools and have
+ * `CHAT_ENDPOINT_MIN_WINDOW`, ids that never collide with Codex's or another
+ * saved server's, a group name per server.
  */
 
 /** Which discovery each service runs. A custom server is asked nothing. */
@@ -54,19 +55,55 @@ const SERVER_OF: Record<ChatEndpointService, ChatCompletionsServer> = {
   custom: "generic"
 }
 
-/** The model picker's group: the service's name, or a custom server's host (never "local"). */
-export const chatGroup = (
-  service: ChatEndpointService,
-  baseUrl: string
-): ModelDefinition["provider"] =>
-  service === "custom"
-    ? { id: CHAT_COMPLETIONS_HOSTS.generic.id, name: new URL(baseUrl).host }
-    : CHAT_COMPLETIONS_HOSTS[SERVER_OF[service]]
+/** What names a server's group in the model picker. */
+export interface ChatServerIdentity {
+  readonly id: string
+  readonly service: ChatEndpointService
+  readonly baseUrl: string
+}
+
+/**
+ * Each server's group in the model picker, by server id. The name is the
+ * service's, or a custom server's host (never "local"); servers that would
+ * share a name each add their host. The model host wants one name per
+ * provider id, so the id is the server's own, never the service's: two
+ * llama.cpp servers are two groups.
+ */
+export const chatGroups = (
+  servers: ReadonlyArray<ChatServerIdentity>
+): ReadonlyMap<string, ModelDefinition["provider"]> => {
+  const named = servers.map((server) => {
+    const host = new URL(server.baseUrl).host
+    const name =
+      server.service === "custom" ? host : CHAT_COMPLETIONS_HOSTS[SERVER_OF[server.service]].name
+    return { id: server.id, host, name }
+  })
+  const shared = (name: string) => named.filter((server) => server.name === name).length > 1
+  return new Map(
+    named.map((server) => [
+      server.id,
+      {
+        id: `model-server-${server.id}`,
+        name:
+          shared(server.name) && server.name !== server.host
+            ? `${server.name} · ${server.host}`
+            : server.name
+      }
+    ])
+  )
+}
+
+/**
+ * The model ids other saved servers offer, each with its server's group
+ * name. A chat's stored model id names one server, so none may be offered
+ * twice.
+ */
+export type TakenModels = ReadonlyMap<string, string>
 
 /** What the person asked to check, with the key already resolved. */
 export type ChatEndpointTarget = (
   | { readonly service: "llama.cpp" }
-  | { readonly service: "openrouter" | "custom"; readonly model: string }
+  | { readonly service: "openrouter" | "custom"; readonly models: ReadonlyArray<string> }
 ) & {
   readonly baseUrl: string
   readonly key: string | undefined
@@ -97,13 +134,17 @@ const CHECK_OUTPUT_TOKENS = 32
 
 /**
  * Discovery as the Check and the start-up re-probe run it: no chat request.
- * llama.cpp offers every listed model Arden can use; OpenRouter and a custom
- * server offer the one named. A custom server reports neither its window nor
- * whether it calls tools: its model is taken to have `CHAT_ENDPOINT_MIN_WINDOW`,
- * and the Check's chat request declares a tool so a server that refuses tools
- * fails there.
+ * llama.cpp offers every listed model Arden can use, and skips the rest;
+ * OpenRouter and a custom server offer every named model, or fail on the
+ * first that cannot be offered, since the person asked for each. A custom
+ * server reports neither its windows nor whether it calls tools: its models
+ * are taken to have `CHAT_ENDPOINT_MIN_WINDOW`, and the Check's chat request
+ * declares a tool so a server that refuses tools fails there.
  */
-export const discoverChatEndpoint = async (target: ChatEndpointTarget): Promise<ChatDiscovery> => {
+export const discoverChatEndpoint = async (
+  target: ChatEndpointTarget,
+  taken: TakenModels
+): Promise<ChatDiscovery> => {
   const issue = baseUrlIssue(target.baseUrl, {
     http: target.key === undefined ? "any" : "loopback"
   })
@@ -118,25 +159,27 @@ export const discoverChatEndpoint = async (target: ChatEndpointTarget): Promise<
         return offered(
           listed.map((entry) =>
             entry.kind === "usable"
-              ? judged(entry.model)
+              ? judged(entry.model, taken)
               : { kind: "skipped", skip: skipOf(entry.id, entry.failure) }
-          )
+          ),
+          { named: false, taken }
         )
       }
       case "openrouter":
         return offered(
-          (await discoverOpenRouter(input, [target.model])).map((model) => judged(model))
+          (await discoverOpenRouter(input, target.models)).map((model) => judged(model, taken)),
+          { named: true, taken }
         )
       case "custom":
-        return offered([
-          judged(
-            declaredModel({
-              id: target.model,
-              contextLimit: CHAT_ENDPOINT_MIN_WINDOW,
-              reasoningEfforts: []
-            })
-          )
-        ])
+        return offered(
+          target.models.map((id) =>
+            judged(
+              declaredModel({ id, contextLimit: CHAT_ENDPOINT_MIN_WINDOW, reasoningEfforts: [] }),
+              taken
+            )
+          ),
+          { named: true, taken }
+        )
     }
   } catch (cause) {
     if (cause instanceof UnreachableError) return { result: "unreachable", message: cause.message }
@@ -156,22 +199,27 @@ export type ChatCheck =
 
 /**
  * Discovery, then one small chat request to the first offered model: it
- * proves the key and the wire format. Thinking is off where the model offers
- * `none`, and the answer is capped at `CHECK_OUTPUT_TOKENS`.
+ * proves the key and the wire format. Only the first, so a Check of several
+ * OpenRouter models costs one small request; the others' abilities come from
+ * the model list. Thinking is off where the model offers `none`, and the
+ * answer is capped at `CHECK_OUTPUT_TOKENS`.
  */
 export const checkChatEndpoint = async (
   target: ChatEndpointTarget,
-  { now = () => performance.now() }: { readonly now?: () => number } = {}
+  {
+    now = () => performance.now(),
+    taken = new Map()
+  }: { readonly now?: () => number; readonly taken?: TakenModels } = {}
 ): Promise<ChatCheck> => {
   const started = now()
-  const discovered = await discoverChatEndpoint(target)
+  const discovered = await discoverChatEndpoint(target, taken)
   if (discovered.result !== "works") return discovered
   const [first] = discovered.models
   if (first === undefined) throw new Error("A working discovery offers a model")
   const answered = await askOnce({
     provider: chatCompletionsProvider({
       connection: connectionOf(target),
-      providerId: chatGroup(target.service, target.baseUrl).id,
+      providerId: CHAT_COMPLETIONS_HOSTS[SERVER_OF[target.service]].id,
       models: [discoveredOf(first)]
     }),
     model: first,
@@ -181,7 +229,7 @@ export const checkChatEndpoint = async (
   return { ...discovered, ms: Math.round(now() - started) }
 }
 
-/** The saved server's models as the host lists them, and the adapters that serve them. */
+/** A saved server's models as the host lists them, and the adapters that serve them. */
 export interface ServerModels {
   readonly provider: ModelProvider
   readonly models: ReadonlyArray<ModelDefinition>
@@ -194,12 +242,12 @@ export interface ServerModels {
  */
 export const serverModels = (input: {
   readonly stored: StoredChatEndpoint
+  readonly group: ModelDefinition["provider"]
   readonly key: string | undefined
   readonly fetch: typeof globalThis.fetch
   readonly report: (failure: EndpointFailureReason | undefined) => void
 }): ServerModels => {
-  const { stored } = input
-  const group = chatGroup(stored.service, stored.baseUrl)
+  const { stored, group } = input
   const connection: ChatCompletionsConnection = connectionOf({
     baseUrl: stored.baseUrl,
     key: input.key,
@@ -225,9 +273,9 @@ type Judged =
   | { readonly kind: "skipped"; readonly skip: ChatEndpointSkip }
 
 /** The desktop's rules for one discovered model. */
-const judged = (model: DiscoveredModel): Judged => {
+const judged = (model: DiscoveredModel, taken: TakenModels): Judged => {
   const skip = (detail: ChatEndpointSkip): Judged => ({ kind: "skipped", skip: detail })
-  if (model.id.startsWith(CODEX_MODEL_PREFIX)) return skip({ id: model.id, reason: "model_taken" })
+  if (isTaken(model.id, taken)) return skip({ id: model.id, reason: "model_taken" })
   const window = model.contextLimit
   if (window === undefined) return skip({ id: model.id, reason: "window_unknown" })
   if (window < CHAT_ENDPOINT_MIN_WINDOW)
@@ -244,19 +292,61 @@ const judged = (model: DiscoveredModel): Judged => {
   }
 }
 
-/** Works when one model is offered; otherwise fails with the first model's reason. */
-const offered = (entries: ReadonlyArray<Judged>): ChatDiscovery => {
+const isTaken = (id: string, taken: TakenModels): boolean =>
+  id.startsWith(CODEX_MODEL_PREFIX) || taken.has(id)
+
+/** The Check's `model_taken` for the first of `ids` that is taken. */
+export const takenFailure = (
+  ids: ReadonlyArray<string>,
+  taken: TakenModels
+): ChatEndpointCheckFailure | undefined => {
+  const id = ids.find((model) => isTaken(model, taken))
+  return id === undefined ? undefined : skipFailure({ id, reason: "model_taken" }, taken)
+}
+
+/**
+ * A listing server works when one model is offered; a named one when every
+ * named model is. Otherwise it fails with the first skipped model's reason.
+ */
+const offered = (
+  entries: ReadonlyArray<Judged>,
+  rules: { readonly named: boolean; readonly taken: TakenModels }
+): ChatDiscovery => {
   const models = entries.flatMap((entry) => (entry.kind === "offered" ? [entry.model] : []))
   const skipped = entries.flatMap((entry) => (entry.kind === "skipped" ? [entry.skip] : []))
-  if (models.length > 0) return { result: "works", models, skipped }
   const [first] = skipped
+  if (models.length > 0 && (first === undefined || !rules.named))
+    return { result: "works", models, skipped }
   if (first === undefined) return { result: "model_missing", model: null, message: NO_MODEL }
-  return skipFailure(first)
+  return skipFailure(first, rules.taken)
+}
+
+/**
+ * A re-asked server's answer without the ids another saved server took
+ * since: those move to its skipped list as `model_taken`. Undefined when no
+ * model is left.
+ */
+export const untaken = (
+  found: Extract<ChatDiscovery, { readonly result: "works" }>,
+  taken: TakenModels
+): Extract<ChatDiscovery, { readonly result: "works" }> | undefined => {
+  const models = found.models.filter((model) => !taken.has(model.id))
+  if (models.length === 0) return undefined
+  return {
+    result: "works",
+    models,
+    skipped: [
+      ...found.skipped,
+      ...found.models.flatMap((model): ReadonlyArray<ChatEndpointSkip> =>
+        taken.has(model.id) ? [{ id: model.id, reason: "model_taken" }] : []
+      )
+    ]
+  }
 }
 
 const NO_MODEL = "The server lists no model"
 
-const skipFailure = (skip: ChatEndpointSkip): ChatEndpointCheckFailure => {
+const skipFailure = (skip: ChatEndpointSkip, taken: TakenModels): ChatEndpointCheckFailure => {
   switch (skip.reason) {
     case "no_tool_calls":
       return {
@@ -278,12 +368,17 @@ const skipFailure = (skip: ChatEndpointSkip): ChatEndpointCheckFailure => {
         model: skip.id,
         message: `The server does not report the window of ${skip.id}; load the model, then Check`
       }
-    case "model_taken":
+    case "model_taken": {
+      const owner = taken.get(skip.id)
       return {
         result: "model_taken",
         model: skip.id,
-        message: `${skip.id} is named like a ChatGPT model (${CODEX_MODEL_PREFIX}…)`
+        message:
+          owner === undefined
+            ? `${skip.id} is named like a ChatGPT model (${CODEX_MODEL_PREFIX}…)`
+            : `${skip.id} is offered by another model server (${owner})`
       }
+    }
     case "wrong_format":
       return {
         result: "wrong_format",
@@ -309,7 +404,7 @@ const discoveryFailure = (failure: DiscoveryFailure, message: string): ChatEndpo
     case "model_missing":
       return { result: "model_missing", model: failure.model, message }
     case "no_tool_calls":
-      return skipFailure({ id: failure.model, reason: "no_tool_calls" })
+      return skipFailure({ id: failure.model, reason: "no_tool_calls" }, new Map())
     case "several_models":
     case "model_props_failed":
       return { result: "wrong_format", message }

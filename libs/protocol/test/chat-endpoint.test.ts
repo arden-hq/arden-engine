@@ -5,6 +5,7 @@ import {
   CHAT_ENDPOINT_MIN_WINDOW,
   modelEndpointDecoders,
   modelEndpointRequests,
+  modelEndpointRoutes,
   type ChatEndpointCheck,
   type ChatEndpointDraft,
   type ChatModelEndpoint,
@@ -21,6 +22,7 @@ const wire = (value: unknown): unknown => JSON.parse(JSON.stringify(value))
 
 const saved: ChatModelEndpoint = {
   kind: "chat",
+  id: "7d1c2f0e-5b1a-4c0e-9a51-2f7b9c3d4e10",
   service: "llama.cpp",
   baseUrl: "http://127.0.0.1:8080/v1",
   host: "127.0.0.1:8080",
@@ -73,10 +75,27 @@ it("carries every Check state of a model server through the wire unchanged", () 
       wire(chatEndpointSaveResponse({ result: "saved", endpoint: saved }))
     )
   ).toEqual({ result: "saved", endpoint: saved })
-  const endpoints: ModelEndpoints = { search: null, decision: null, chat: saved }
-  expect(modelEndpointDecoders.endpoints(wire(modelEndpointsResponse(endpoints)))).toEqual(
-    endpoints
-  )
+  const openRouter: ChatModelEndpoint = {
+    ...saved,
+    id: "b2",
+    service: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    host: "openrouter.ai",
+    group: "OpenRouter",
+    auth: { kind: "bearer" },
+    models: [
+      { id: "openai/gpt-6-luna", contextWindow: 400_000, imageInput: true },
+      { id: "anthropic/claude-haiku-5.5", contextWindow: 200_000, imageInput: true }
+    ],
+    skipped: [],
+    health: { state: "works" }
+  }
+  for (const chat of [[], [saved, openRouter]]) {
+    const endpoints: ModelEndpoints = { search: null, decision: null, chat }
+    expect(modelEndpointDecoders.endpoints(wire(modelEndpointsResponse(endpoints)))).toEqual(
+      endpoints
+    )
+  }
 })
 
 it("sends a model server draft as the server reads it, and never a key it was not given", async () => {
@@ -85,13 +104,13 @@ it("sends a model server draft as the server reads it, and never a key it was no
     {
       service: "openrouter",
       baseUrl: "https://openrouter.ai/api/v1",
-      model: "openai/gpt-6-luna",
+      models: ["openai/gpt-6-luna", "anthropic/claude-haiku-5.5"],
       auth: { kind: "bearer", apiKey: "sk-or-test" }
     },
     {
       service: "custom",
       baseUrl: "https://models.example.com/v1",
-      model: "served",
+      models: ["served"],
       auth: { kind: "keep" }
     }
   ]
@@ -110,4 +129,23 @@ it("sends a model server draft as the server reads it, and never a key it was no
       })
     )
   ).rejects.toThrow()
+  // A named server names at least one model, and each once: each is one id in the model list.
+  for (const models of [[], ["a", "a"]])
+    await expect(
+      Effect.runPromise(
+        decodeChatEndpointDraftEffect({
+          service: "openrouter",
+          base_url: "https://openrouter.ai/api/v1",
+          models,
+          auth: { kind: "none" }
+        })
+      )
+    ).rejects.toThrow()
+})
+
+it("builds each model server's route from its id, and refuses an id that is not one", () => {
+  expect(modelEndpointRoutes.chatServer("b2")).toBe("/model-endpoints/chat/b2")
+  expect(modelEndpointRoutes.chatServerCheck("b2")).toBe("/model-endpoints/chat/b2/check")
+  expect(() => modelEndpointRoutes.chatServer("../search")).toThrow()
+  expect(() => modelEndpointRoutes.chatServer("check")).toThrow()
 })
