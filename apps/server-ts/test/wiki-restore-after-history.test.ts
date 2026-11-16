@@ -112,17 +112,20 @@ it("the owner restores a chosen version of any page over the route, refused once
       return { status: response.status, body: await response.json() }
     }
     const { pages } = await Effect.runPromise(wiki.list({}))
-    for (const pageId of [PAGE, pages.find((page) => page.path === RULES_PAGE_PATH)!.pageId]) {
+    for (const pageId of [
+      PAGE,
+      pages.find((page) => page.path === RULES_PAGE_PATH)?.pageId ?? ""
+    ]) {
       const first = await Effect.runPromise(wiki.read(pageId))
       const edit = wikiRequests.update(first, first.content.replace("First", "Second"))
       const second = wikiDecoders.page((await call("PUT", wikiRoutes.page(pageId), edit)).body)
       const history = (await call("GET", wikiRoutes.history(pageId))).body
-      const [latest, older] = wikiDecoders.history(history).commits
-      expect([latest!.restorable, older!.restorable]).toEqual([[], ["after"]])
+      const commits = wikiDecoders.history(history).commits
+      expect(commits.map((commit) => commit.restorable)).toEqual([[], ["after"]])
       const restore = (page: WikiPage) =>
         call(
           "POST",
-          wikiRoutes.historyRestore(pageId, older!.commitId),
+          wikiRoutes.historyRestore(pageId, commits[1]?.commitId ?? ""),
           wikiRequests.restoreHistory(page, "after")
         )
       const stale = await restore(first)
