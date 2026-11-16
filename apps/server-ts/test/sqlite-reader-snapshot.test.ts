@@ -97,6 +97,13 @@ it("runs at most half the reader connections as snapshots and leaves the rest to
               .pipe(Effect.forkScoped),
           { concurrency: "unbounded" }
         )
+        // Wait for the permits to fill, not for a fixed time: a slow machine (CI) had
+        // entered only one snapshot after 100 ms. Then wait once more, so a snapshot
+        // that got past the limit would show.
+        const deadline = Date.now() + 5_000
+        while ((yield* Ref.get(entered)) < READER_CONNECTIONS / 2 && Date.now() < deadline) {
+          yield* Effect.sleep("20 millis")
+        }
         yield* Effect.sleep("100 millis")
         const whileHeld = yield* Ref.get(entered)
         const read = count(
