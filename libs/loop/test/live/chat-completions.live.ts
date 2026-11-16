@@ -262,8 +262,10 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       let reasoning = ""
       let text = ""
       for await (const event of agentWith(noTools).stream([
-        // A question a model reasons about at any effort: OpenRouter's Claude
-        // and GPT models skip thinking on "what is 17 * 3?" (2026-11-16).
+        // A question most models reason about: OpenRouter's Claude and GPT
+        // models skip thinking on "what is 17 * 3?" (2026-11-16). Claude
+        // reasons only with CHAT_COMPLETIONS_EFFORT set; Claude Sonnet 5.5 at
+        // any effort and GPT-6 Astra at `low` still answer this one unthought.
         {
           role: "user",
           content:

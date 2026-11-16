@@ -70,7 +70,7 @@ Checked on 2026-11-16 with llama.cpp b12359 and Gemma 4 E2B (Q8_0) on an Apple-s
  "result":{"text":"The output of running `uname -s` is: Darwin","usage":{"prompt":12942,"completion":298,"total":26128,"cache_read":12888,"cache_write":0},"steps":1}}
 ```
 
-llama.cpp names a model by its file path unless `llama-server --alias <name>` gives it a name; `arden models` prints the id either way. OpenRouter needs its key variable and a model: `"provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini"`.
+llama.cpp names a model by its file path unless `llama-server --alias <name>` gives it a name; `arden models` prints the id either way. OpenRouter needs its key variable and a model: `"provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-6-luna"`.
 
 What each failure says, checked on 2026-11-16 (llama.cpp b12359):
 

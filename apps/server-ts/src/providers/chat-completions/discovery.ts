@@ -253,10 +253,10 @@ const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredMo
  * Checked live on 2026-11-16: the gateway takes exactly the seven values of
  * `OPENROUTER_EFFORTS` and refuses any other with a 400 naming them; a value
  * a model does not list is mapped to its nearest level, not refused (`max`
- * on Gemini 3.1 Flash Lite, `minimal` on Claude Haiku 5.5, `medium` on
- * DeepSeek V4.1 Flash all answered); `none` on a mandatory model (Gemini 3.5
- * Flash Lite, GLM 5.3 Flash, gpt-oss-20b) is refused with "Reasoning is
- * mandatory for this endpoint and cannot be disabled." So the listed efforts
+ * on Gemini 4 Hydrogen, `minimal` on GPT-6 Luna and Claude Haiku 5.5,
+ * `medium` on DeepSeek V4.1 Flash all answered); `none` on a mandatory model
+ * (GPT-6.1 Sol, Claude Sonnet 5.5, GLM 5.3 Flash) is refused with "Reasoning
+ * is mandatory for this endpoint and cannot be disabled." So the listed efforts
  * are the ones offered, and `none` only where reasoning is optional.
  */
 const openRouterEfforts = (
