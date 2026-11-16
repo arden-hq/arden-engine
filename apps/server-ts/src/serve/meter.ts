@@ -1,4 +1,9 @@
-import { addCost, type ModelProvider } from "@arden-hq/loop"
+import {
+  addCost,
+  providerErrorCode,
+  type ModelProvider,
+  type ProviderErrorCode
+} from "@arden-hq/loop"
 import { writeAtomicSync } from "@arden-hq/std/atomic-file"
 import { readFileSync } from "node:fs"
 
@@ -11,8 +16,9 @@ interface Usage {
   cacheWriteTokens: number
   /**
    * US dollars the providers reported for these requests (`Usage.cost`), or
-   * null once any request's provider reported none (llama.cpp, Codex): a
-   * total with an unknown part is never shown as the spend.
+   * null once any request's provider reported none (llama.cpp, Codex) or a
+   * request ended before its usage arrived: a total with an unknown part is
+   * never shown as the spend.
    */
   costUsd: number | null
   /** True once a request was refused because `maxModelRequests` was reached. */
@@ -87,9 +93,12 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
         throw new Error(REQUEST_LIMIT_REACHED)
       }
       usage.modelRequests += 1
+      // Whether this request's cost is known: reported, or nothing to bill.
+      let accounted = false
       try {
         for await (const item of await stream(request)) {
           if (typeof item === "object" && item !== null && "usage" in item) {
+            accounted = true
             const used = item.usage as Record<string, unknown>
             usage.promptTokens += count(used["prompt_tokens"])
             usage.completionTokens += count(used["completion_tokens"])
@@ -99,7 +108,15 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
           }
           yield item
         }
+      } catch (error) {
+        accounted = refusedBeforeRunning(providerErrorCode(error))
+        throw error
       } finally {
+        // A request cut off before its usage arrived (a cancel, a side job the
+        // stopping server drops, a dropped connection) may still be billed:
+        // behind a logging proxy, OpenRouter finished and priced four GPT-6.1
+        // Sol side calls an `exec` stop had abandoned (2026-11-16).
+        if (!accounted) usage.costUsd = null
         save()
       }
     }
@@ -126,5 +143,25 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
           }
         }),
     stream: metered((request) => provider.stream(request))
+  }
+}
+
+/**
+ * Whether a failure is the provider refusing the request before the model
+ * ran, which nothing bills. An outage or a failed answer may have run the
+ * model on the prompt, so its cost is unknown.
+ */
+const refusedBeforeRunning = (code: ProviderErrorCode | undefined): boolean => {
+  switch (code) {
+    case "context_length_exceeded":
+    case "rate_limited":
+    case "provider_auth":
+    case "request_invalid":
+    case "model_unavailable":
+      return true
+    case "provider_unavailable":
+    case "provider_error":
+    case undefined:
+      return false
   }
 }
