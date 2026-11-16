@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { capturedText } from "../transcript/content.js"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
@@ -66,6 +66,7 @@ export const memoryCaptureBacklogBackfill: Backfill = {
       ORDER BY session_id LIMIT ${limit}`
     const ranged = sessions.filter((session) => session.ranged === 1).map((s) => s.session_id)
     const batches = ranged.length === 0 ? [] : yield* readBatches(sql, ranged)
+    const now = DateTime.formatIso(yield* DateTime.now)
     let converted = 0
     for (const { session_id: sessionId } of sessions) {
       const messages = yield* sql<RangedMessage>`
@@ -90,8 +91,7 @@ export const memoryCaptureBacklogBackfill: Backfill = {
         WHERE session_id = ${sessionId} AND through_seq IS NOT NULL`
       for (const range of ranges)
         yield* sql`INSERT INTO memory_capture_unread (session_id, read_seq, through_seq, updated_at)
-          VALUES (${sessionId}, ${range.from - 1}, ${range.through},
-            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+          VALUES (${sessionId}, ${range.from - 1}, ${range.through}, ${now})`
       const deleted = yield* sql`DELETE FROM run_sidecars
         WHERE session_id = ${sessionId} AND ${sql.literal(MARKS)}
           AND json_remove(evidence_json, '$.memory_capture') = '{}'
