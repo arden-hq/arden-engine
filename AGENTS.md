@@ -17,6 +17,16 @@
   `observations`. `tool-contract.ts` refuses a hash input at start.
 - Before a commit: `just check` (typecheck, lint, format, tests).
 
+## Recipes
+
+A recipe shows one real past change file by file and ends with a check to run.
+Read the recipe before you start the task; `just check` fails when a recipe
+names a file that is gone.
+
+| Task | Recipe |
+|---|---|
+| Add, change or remove a table, column, index or trigger | `docs/recipes/add-migration.md` |
+
 ## Pull request descriptions
 
 A full agent-written PR description is accurate but too long to read. Write

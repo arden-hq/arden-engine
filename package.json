@@ -33,6 +33,7 @@
     "lint": "node tooling/lint.mjs",
     "check:tells": "bun --conditions=arden-source tooling/told-tables.mjs",
     "check:decision-words": "node tooling/decision-words.mjs",
+    "check:recipes": "node tooling/check-recipes.mjs",
     "test:libs": "bun run --sequential --filter './libs/*' test",
     "test:server": "bun run --filter '@arden-hq/server' test",
     "test:cli": "bun run --filter '@arden-hq/cli' test",

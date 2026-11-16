@@ -31,6 +31,7 @@ check:
     bun run --cwd apps/relay typecheck
     bun run check:tells
     bun run check:decision-words
+    bun run check:recipes
     bun run lint
     bun run format:check
     bun run knip
