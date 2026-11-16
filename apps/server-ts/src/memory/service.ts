@@ -1,5 +1,4 @@
-import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
-import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
 import { MemoryCaptureStore } from "../persistence/memory/store.js"
@@ -86,14 +85,12 @@ const sources = Effect.fn("Memory.sources")(function* (
         })
     )
   )
-  const now = DateTime.toEpochMillis(yield* DateTime.now)
   const recall =
     valid.recall === undefined
       ? undefined
       : recallCandidates({
           pages: current.pages,
           query: valid.recall.query,
-          today: localDayOf(now, machineTimeZone()),
           sent: new Map(
             valid.recall.sent === undefined
               ? []

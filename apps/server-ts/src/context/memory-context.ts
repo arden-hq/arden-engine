@@ -11,28 +11,9 @@ import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
 
-export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined => {
-  switch (actor.kind) {
-    case "person":
-      return "owner"
-    case "automation":
-      return undefined
-    case "agent":
-      return actor.root === "automation" ? undefined : "worker"
-    case "task_worker":
-    case "space_review":
-    case "unrecorded":
-      return "worker"
-  }
-}
-
-/** The Memory sources each reader is sent besides standing facts, which every reader is sent. */
-export const MEMORY_READS: Readonly<
-  Record<RunMemoryReader, { readonly space: boolean; readonly recall: boolean }>
-> = {
-  owner: { space: true, recall: true },
-  worker: { space: false, recall: false }
-}
+/** Only the owner's own turns are sent Memory. */
+export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined =>
+  actor.kind === "person" ? "owner" : undefined
 
 const standingPageLimitChars = Math.max(
   ...STANDING_FACTS_PAGES.map((path) => {

@@ -24,12 +24,7 @@ import type { AgentMode } from "../sessions/agent-mode.js"
 import type { CliTools } from "../cli-tools/service.js"
 import type { SkillCatalog } from "../skills/service.js"
 import type { Wiki } from "../wiki/service.js"
-import {
-  assembleMemoryContext,
-  MEMORY_READS,
-  memoryReaderOf,
-  spacePageSent
-} from "./memory-context.js"
+import { assembleMemoryContext, memoryReaderOf, spacePageSent } from "./memory-context.js"
 import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
 import { spaceAsksContext } from "./space-asks.js"
@@ -369,21 +364,18 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     readonly measure: TurnMeasure
   }
 ) {
-  const reads = MEMORY_READS[input.reader]
-  const space = reads.space
-    ? yield* input.measure(
-        "space",
-        spaceConversationContextSnapshot({
-          spaceId: input.spaceId,
-          sessionId: input.sessionId,
-          spaces: services.spaces,
-          summaries: services.summaries,
-          memory: input.memory,
-          work: services.work
-        }),
-        undefined
-      )
-    : undefined
+  const space = yield* input.measure(
+    "space",
+    spaceConversationContextSnapshot({
+      spaceId: input.spaceId,
+      sessionId: input.sessionId,
+      spaces: services.spaces,
+      summaries: services.summaries,
+      memory: input.memory,
+      work: services.work
+    }),
+    undefined
+  )
   const sources = yield* input
     .measure(
       "memory",
@@ -391,16 +383,12 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
         ? Effect.succeed(undefined)
         : input.memory.sources({
             sessionId: input.sessionId,
-            ...(reads.recall
-              ? {
-                  recall: {
-                    query: input.query,
-                    ...(space?.page === undefined
-                      ? {}
-                      : { sent: { pageId: space.page.pageId, chars: spacePageSent(space.view) } })
-                  }
-                }
-              : {})
+            recall: {
+              query: input.query,
+              ...(space?.page === undefined
+                ? {}
+                : { sent: { pageId: space.page.pageId, chars: spacePageSent(space.view) } })
+            }
           }),
       undefined
     )
