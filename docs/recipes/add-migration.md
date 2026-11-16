@@ -35,7 +35,8 @@ migration.
 ## 2. Register it
 
 In `apps/server-ts/src/persistence/migrations/index.ts`, add the import after the
-last import and the name at the end of `migrations`:
+import of the migration before yours (the imports are not in number order) and
+the name at the end of `migrations`:
 
 ```ts
 import { automationFailureStreak } from "./0166_automation_failure_streak.js"
@@ -64,7 +65,7 @@ add the new ones there in the same order.
 ## 4. Pin the SQL
 
 Run the check below once. It fails and prints the hash of your migration's SQL.
-Add that line to `apps/server-ts/test/fixtures/migration-sql-pins.ts`:
+Add it under your number, after the last line of `apps/server-ts/test/fixtures/migration-sql-pins.ts`:
 
 ```ts
   166: "28d44b72b0927fc2a6f55e4e10aef09b08048995548c2bae2f59ef3c48df7b3f",
