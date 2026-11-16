@@ -33,11 +33,11 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
     .get(authority.spaceId)
     .pipe(
       Effect.mapError((cause) =>
-        wikiError(operation, "storage", "Could not resolve the Space Wiki boundary", { cause })
+        wikiError(operation, "storage", "Could not resolve the Space Memory boundary", { cause })
       )
     )
   if (space === null || space.page_id === null || space.page_path === null) {
-    return yield* wikiError(operation, "blocked", "This Space run has no active Wiki boundary")
+    return yield* wikiError(operation, "blocked", "This Space run has no active Memory boundary")
   }
 
   const boundaryPage = snapshot.pages.find(
@@ -47,14 +47,19 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
       record.page.lifecycle === "active"
   )
   if (boundaryPage === undefined) {
-    return yield* wikiError(operation, "blocked", "This Space run's Wiki boundary is unavailable", {
-      pageId: space.page_id
-    })
+    return yield* wikiError(
+      operation,
+      "blocked",
+      "This Space run's Memory boundary is unavailable",
+      {
+        pageId: space.page_id
+      }
+    )
   }
 
   const bindings = yield* activeSpaceBindings(spaces).pipe(
     Effect.mapError((cause) =>
-      wikiError(operation, "storage", "Could not validate active Space Wiki boundaries", {
+      wikiError(operation, "storage", "Could not validate active Space Memory boundaries", {
         cause
       })
     )
@@ -64,7 +69,7 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
     return yield* wikiError(
       operation,
       "blocked",
-      "Active Space Wiki boundaries overlap or are invalid"
+      "Active Space Memory boundaries overlap or are invalid"
     )
   }
 
@@ -101,7 +106,7 @@ export const requireNewPagePlace = Effect.fn("Wiki.requireNewPagePlace")(functio
   const directory = posix.dirname(path)
   const readme = directoryReadme(snapshot.wholeSet, directory)
   if (readme === undefined)
-    return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
+    return yield* wikiError("create", "blocked", `Memory folder is not mapped: ${directory}`)
   const { pageId } = readme.page
   if (
     (yield* spaceOwns(pageId, readme.resource.path)) &&
@@ -110,14 +115,14 @@ export const requireNewPagePlace = Effect.fn("Wiki.requireNewPagePlace")(functio
     return yield* wikiError(
       "create",
       "blocked",
-      "Pages cannot be created inside a Space-owned directory"
+      "Pages cannot be created inside a Space-owned folder"
     )
   const existing = nameTakenBy(snapshot, path)
   if (existing !== undefined)
     return yield* wikiError(
       "create",
       "conflict",
-      `Wiki path or link name already exists: ${path}`,
+      `Memory path or link name already exists: ${path}`,
       {
         pageId: existing.page.pageId
       }

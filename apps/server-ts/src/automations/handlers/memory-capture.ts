@@ -1,10 +1,8 @@
 import { Effect } from "effect"
 import type { Memory } from "../../memory/service.js"
 import { AutomationId } from "../../persistence/automations/model.js"
-import type { AutomationHandlerItems } from "../../persistence/automations/handler-items.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
-import type { HandlerItemRunner } from "../handler-item-run.js"
-import { runItemLoop } from "../item-loop.js"
+import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
 import { withoutTools } from "../../execution/toolset-middleware.js"
@@ -17,31 +15,43 @@ const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "wiki_merge_page"
 ])
 
-const makeMemoryCaptureRunner = (services: {
-  readonly memory: Pick<Memory["Service"], "nextCaptureBatch" | "completeCaptureBatch">
-  readonly handlerItems: Pick<
-    AutomationHandlerItems["Service"],
-    "prepareHandlerItem" | "settleHandlerItem"
-  >
-  readonly runItem: HandlerItemRunner
-}): AutomationRunner =>
-  runItemLoop(services, {
-    label: "Memory Capture",
-    kind: "memory",
-    next: () =>
-      services.memory
-        .nextCaptureBatch()
-        .pipe(
-          Effect.map((batch) =>
-            batch === null ? ("idle" as const) : { kind: "memory" as const, batch }
-          )
-        ),
-    commit: (data) => services.memory.completeCaptureBatch(data.batch),
-    summary: (item) =>
-      `memory capture: reviewed ${item?.reviewed ?? 0} batch(es), skipped ${item?.skipped ?? 0}`,
-    cancelled: "Memory capture cancelled",
-    incomplete: "Memory Capture review deferred"
-  })
+const makeMemoryCaptureRunner =
+  (
+    services: ItemLoopServices & {
+      readonly memory: Pick<
+        Memory["Service"],
+        "nextCaptureBatch" | "completeCaptureBatch" | "skipCaptureBatch"
+      >
+    }
+  ): AutomationRunner =>
+  (job) => {
+    let retried = false
+    return runItemLoop(services, {
+      label: "Memory Capture",
+      kind: "memory",
+      next: Effect.fn("MemoryCapture.next")(function* () {
+        let batch = yield* services.memory.nextCaptureBatch(false)
+        if (batch === null && !retried) {
+          retried = true
+          batch = yield* services.memory.nextCaptureBatch(true)
+        }
+        return batch === null ? ("idle" as const) : { kind: "memory" as const, batch }
+      }),
+      commit: (data) => services.memory.completeCaptureBatch(data.batch),
+      skip: (data) =>
+        services.memory
+          .skipCaptureBatch(data.batch)
+          .pipe(
+            Effect.as(
+              `a batch of chat ${data.batch.identity.sessionId} (kept unread and tried again after a day)`
+            )
+          ),
+      summary: (item) =>
+        `memory capture: reviewed ${item?.reviewed ?? 0} batch(es), skipped ${item?.skipped ?? 0}`,
+      cancelled: "Memory capture cancelled",
+      incomplete: "Memory Capture review deferred"
+    })(job)
+  }
 
 export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
   spec: {

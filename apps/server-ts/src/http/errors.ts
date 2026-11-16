@@ -97,9 +97,8 @@ export const wikiErrorToHttp = (
   | StoreConflict
   | HttpApiError.ServiceUnavailable
   | StoreReasonHttp[Exclude<WikiError["reason"], "blocked" | "closed">] => {
-  if (error.reason === "blocked") return new StoreConflict({ detail: error.message })
   if (error.reason === "closed") return new HttpApiError.ServiceUnavailable({})
-  return storeErrorToHttp({ reason: error.reason, message: error.message })
+  return statuses[error.reason === "blocked" ? "conflict" : error.reason](error.message)
 }
 
 export const orNotFound = <A>(

@@ -46,6 +46,9 @@ export function wikiProducerFieldsUnchanged({
 
 export type WikiResourceState = "active" | "archived"
 export type WikiPageLifecycle = "active" | "redirect"
+/** A page as a commit left it (`after`), or as it was before an upkeep commit that is still its
+ *  latest change (`before`, the undo of a Wiki Maintenance change). */
+export type WikiRestoreSide = "after" | "before"
 
 /** Public page projection. Blob and tree storage identities are not exposed. */
 export interface WikiPageSummary extends JsonRecord {
@@ -108,6 +111,8 @@ export interface WikiHistoryCommit extends JsonRecord {
   readonly reason: string
   readonly timestamp: string
   readonly changes: ReadonlyArray<WikiHistoryChange>
+  /** The sides of this commit a history restore accepts now and that would change the page. */
+  readonly restorable: ReadonlyArray<WikiRestoreSide>
 }
 
 export interface WikiPageHistoryResponse extends JsonRecord {
@@ -166,19 +171,14 @@ export interface WikiPageLinks extends JsonRecord {
   readonly cameFrom: ReadonlyArray<WikiPageChat>
 }
 
-export type WikiRenameApprovalStatus = "pending" | "applying" | "accepted" | "rejected"
-
-export interface WikiRenameApproval extends JsonRecord {
-  readonly approvalId: string
+/** The pages and links a rename changes. */
+export interface WikiRenamePlan extends JsonRecord {
   readonly oldPath: string
   readonly newPath: string
   readonly oldTitle: string
   readonly newTitle: string
   readonly linkCount: number
   readonly pageCount: number
-  readonly status: WikiRenameApprovalStatus
-  readonly createdAt: string
-  readonly resolution: string | null
 }
 
 /** Structured detail returned for a stale Wiki write. */

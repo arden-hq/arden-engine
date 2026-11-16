@@ -5,7 +5,8 @@ import { TaskProposalStore } from "../src/persistence/proposals/store.js"
 import { OFFER_EXPIRY_HOURS } from "../src/persistence/sqlite/offer-rules.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString()
+const NOW = Date.now()
+const at = (hoursAgo: number) => new Date(NOW - hoursAgo * 3_600_000).toISOString()
 
 const homeOffer = (sql: SqlClient.SqlClient, id: string, hoursAgo: number) =>
   sql`INSERT INTO task_proposals (proposal_id, place, dedupe_key, stable_key, text, owner,

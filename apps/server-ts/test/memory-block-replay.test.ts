@@ -100,9 +100,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
         ].join("\n")
       )
       expect(runs.length).toBeGreaterThan(0)
-      for (const [key, row] of rows)
-        if (key.endsWith("automation") || key === "helper of automation") expect(row.after).toBe(0)
-        else expect(row.after).toBe(row.runs)
+      for (const [key, row] of rows) expect(row.after).toBe(key === "person" ? row.runs : 0)
       expect(short).toBeLessThanOrEqual(typed)
     } finally {
       database.close()

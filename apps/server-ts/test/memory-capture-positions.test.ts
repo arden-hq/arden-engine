@@ -1,12 +1,16 @@
 import { createToolset } from "@arden-hq/loop"
 import { Effect } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { makeMemoryCaptureBatches } from "../src/memory/capture-batches.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { MemoryCaptureStore } from "../src/persistence/memory/store.js"
+import { startCaptureAfterCopies } from "../src/persistence/sqlite/memory-capture-positions.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
+import type { StoredMessageEnvelope } from "../src/persistence/transcript/model.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
+import { captureBatchKey } from "../src/wiki/capture.js"
 import { snapshotOf } from "../src/wiki/snapshot.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
@@ -16,7 +20,11 @@ import type { Wiki } from "../src/wiki/service.js"
 
 const AT = "2026-11-14T09:00:00.000Z"
 
-const turn = Effect.fn("turn")(function* (sessionId: string, id: string) {
+const turn = Effect.fn("turn")(function* (
+  sessionId: string,
+  id: string,
+  relayed: ReadonlyArray<StoredMessageEnvelope> = []
+) {
   const chat = yield* ChatWriteStore
   const started = yield* chat.start({
     sessionId,
@@ -30,20 +38,20 @@ const turn = Effect.fn("turn")(function* (sessionId: string, id: string) {
     runId: started.runId,
     messages: [
       ...started.activeMessages,
+      ...relayed,
       { message_id: `${id}-answer`, role: "assistant", content: `Noted ${id}`, created_at: AT }
     ]
   })
 })
 
 /** Runs Capture until idle and returns the owner messages it was handed. */
-const drain = Effect.fn("drain")(function* () {
+const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "complete") {
   const receipts = new Set<string>()
   const batches = makeMemoryCaptureBatches({
     wiki: {
-      hasFinalizedCaptureBatch: (identity) =>
-        Effect.succeed(receipts.has(JSON.stringify(identity))),
+      hasCaptureReceipt: (key) => Effect.succeed(receipts.has(key)),
       finalizeCaptureBatch: (identity) =>
-        Effect.sync(() => void receipts.add(JSON.stringify(identity))),
+        Effect.sync(() => void receipts.add(captureBatchKey(identity))),
       snapshot: () => Effect.succeed(snapshotOf(null, []))
     },
     captures: yield* MemoryCaptureStore,
@@ -53,14 +61,14 @@ const drain = Effect.fn("drain")(function* () {
   return Effect.gen(function* () {
     const read: Array<string> = []
     for (let round = 0; round < 50; round += 1) {
-      const batch = yield* batches.nextCaptureBatch()
+      const batch = yield* batches.nextCaptureBatch(true)
       if (batch === null) return read
       read.push(
         ...[...batch.markdown.matchAll(/^> \[user; sequence \d+; .*\] (\S+)$/gmu)].flatMap(
           (m) => m[1] ?? []
         )
       )
-      yield* batches.completeCaptureBatch(batch)
+      yield* (settle === "skip" ? batches.skipCaptureBatch : batches.completeCaptureBatch)(batch)
     }
     throw new Error("Capture did not become idle")
   })
@@ -91,6 +99,78 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
   })
 })
 
+it("reads an older range once, after new work, and removes it as it is read", async () => {
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const drainer = yield* drain()
+      const chat = (yield* (yield* SessionStore).create({})).sessionId
+      yield* turn(chat, "old-a")
+      yield* turn(chat, "old-b")
+      yield* startCaptureAfterCopies(sql, chat)
+      yield* sql`INSERT INTO memory_capture_unread (session_id, read_seq, through_seq, updated_at)
+        VALUES (${chat}, -1, 3, ${AT})`
+      yield* turn(chat, "new-c")
+      const first = yield* drainer
+      const left = yield* sql`SELECT 1 FROM memory_capture_unread WHERE through_seq IS NOT NULL`
+      return { first, left: left.length, again: yield* drainer }
+    })
+  )
+  expect(read).toEqual({ first: ["new-c", "old-a", "old-b"], left: 0, again: [] })
+})
+
+it("keeps a skipped batch unread, rests it a day, and then reads it again", async () => {
+  const read = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const chat = (yield* (yield* SessionStore).create({})).sessionId
+      yield* turn(chat, "skip-a")
+      yield* turn(chat, "skip-b")
+      const skipped = yield* yield* drain("skip")
+      const resting = yield* yield* drain()
+      yield* sql`UPDATE memory_capture_unread SET tried_at = '2026-01-01T00:00:00.000Z'`
+      return { skipped, resting, next: yield* yield* drain() }
+    })
+  )
+  expect(read).toEqual({ skipped: ["skip-a", "skip-b"], resting: [], next: ["skip-a", "skip-b"] })
+})
+
+it("stores the owner's typed turn as theirs and an agent's message in it as not", async () => {
+  const relayed = {
+    message_id: "relayed",
+    role: "user",
+    is_meta: true,
+    content: "Done",
+    interaction: { kind: "message", from: { type: "agent", id: "w" }, content: "Done" },
+    created_at: AT
+  } as const
+  const owned = await withTempDatabase(
+    Effect.gen(function* () {
+      const chat = (yield* (yield* SessionStore).create({})).sessionId
+      yield* turn(chat, "typed", [relayed])
+      return yield* (yield* TranscriptQueries).ownerWordsIn(chat, ["typed", "relayed"])
+    })
+  )
+  expect([...owned]).toEqual(["typed"])
+})
+
+it("counts the owner's turns as theirs in a branch of a branch", async () => {
+  const owned = await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const chat = (yield* sessions.create({})).sessionId
+      yield* turn(chat, "typed-a")
+      const branch = yield* sessions.branch(chat, {})
+      if (branch === undefined) throw new Error("No branch")
+      yield* sessions.completeBranchPreparation({ childSessionId: branch.sessionId })
+      const twig = yield* sessions.branch(branch.sessionId, {})
+      if (twig === undefined) throw new Error("No branch of the branch")
+      return yield* (yield* TranscriptQueries).ownerWordsIn(twig.sessionId, ["typed-a"])
+    })
+  )
+  expect([...owned]).toEqual(["typed-a"])
+})
+
 const captureUpdate = (
   wiki: Wiki["Service"],
   expectedHead: string | null,
@@ -103,54 +183,11 @@ const captureUpdate = (
     commit: {
       actor: "memory:capture",
       origin: { kind: "capture", sessionId: "s" },
-      reason: "capture",
-      replayKey: "batch"
+      reason: "capture"
     }
   })
 
-it("saves a Capture patch set once on replay, and none of it when one page conflicts", async () => {
-  await withWikiRepository(async ({ repository, wiki, save }) => {
-    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
-    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
-    const head = () => Effect.runPromise(repository.currentRevision)
-    const pages = () => Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
-    const [read, [a, b]] = [await head(), await pages()]
-    const patch = (expectedHead: string | null, versionOfA = a.version, mark = "X2") =>
-      Effect.runPromise(
-        captureUpdate(wiki, expectedHead, [
-          { pageId: "a", content: a.content.replace("A1", mark), expectedVersion: versionOfA },
-          { pageId: "b", content: b.content.replace("B1", mark), expectedVersion: b.version }
-        ])
-      )
-    const landed = await patch(read).then(head)
-    expect(await patch(read).then(head)).toBe(landed)
-    await expect(patch(landed, (await pages())[0].version, "X3")).rejects.toThrow()
-    expect((await pages()).map((page) => page.content.includes("X2"))).toEqual([true, true])
-  })
-})
-
-it("replays a Capture patch set whose first save left out an unchanged page", async () => {
-  await withWikiRepository(async ({ repository, wiki, save }) => {
-    await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
-    await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
-    const head = () => Effect.runPromise(repository.currentRevision)
-    const [read, [a, b]] = [
-      await head(),
-      await Effect.runPromise(Effect.all([wiki.read("a"), wiki.read("b")]))
-    ]
-    const patch = () =>
-      Effect.runPromise(
-        captureUpdate(wiki, read, [
-          { pageId: "a", content: a.content.replace("A1", "A2"), expectedVersion: a.version },
-          { pageId: "b", content: b.content, expectedVersion: b.version }
-        ])
-      )
-    const landed = await patch().then(head)
-    expect(await patch().then(head)).toBe(landed)
-  })
-})
-
-it("names no single page in a conflict of a patch set", async () => {
+it("names the page that changed in a conflict of several pages", async () => {
   await withWikiRepository(async ({ wiki, save }) => {
     await save({ pageId: "a", path: "a.md", body: "A1\n", origin: ownerEdit })
     await save({ pageId: "b", path: "b.md", body: "B1\n", origin: ownerEdit })
@@ -164,7 +201,7 @@ it("names no single page in a conflict of a patch set", async () => {
         ])
       )
     )
-    expect([error.reason, error.pageId]).toEqual(["conflict", undefined])
+    expect([error.reason, error.pageId]).toEqual(["conflict", "b"])
   })
 })
 
@@ -181,20 +218,21 @@ const CAPTURE_RUN = {
   }
 }
 
-it("applies a Capture patch again once the page has its old text again", async () => {
+it("saves a repeated Capture request once in its run, and a different one again", async () => {
   await withWikiRepository(async ({ wiki, save }) => {
     await save({ pageId: "a", path: "a.md", body: "Status: open\n", origin: ownerEdit })
-    const patch = () =>
-      createToolset(wikiToolsOver(wiki, CAPTURE_RUN), { toJsonSchema: () => ({ type: "object" }) })(
-        serverRunContext()
-      ).execute({
+    const tools = createToolset(wikiToolsOver(wiki, CAPTURE_RUN), {
+      toJsonSchema: () => ({ type: "object" })
+    })(serverRunContext())
+    const patch = (old_text: string, new_text: string) =>
+      tools.execute({
         name: "wiki_patch_page",
-        args: { path: "a.md", old_text: "open", new_text: "closed" },
+        args: { path: "a.md", old_text, new_text },
         toolCallId: "p"
       })
-    await patch()
-    await save({ pageId: "a", path: "a.md", body: "Status: open\n", origin: ownerEdit })
-    await patch()
-    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("Status: closed")
+    await patch("open", "open, then closed")
+    await expect(patch("open", "open, then closed")).rejects.toThrow("already saved")
+    await patch("closed", "done")
+    expect((await Effect.runPromise(wiki.read("a"))).content).toContain("Status: open, then done\n")
   })
 })

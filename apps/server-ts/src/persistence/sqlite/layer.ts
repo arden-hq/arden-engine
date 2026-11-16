@@ -9,7 +9,6 @@ import { SpaceStore } from "../spaces/store.js"
 import { WorkStore } from "../work/store.js"
 import { TaskProposalStore } from "../proposals/store.js"
 import { FocusChoiceStore } from "../focus-choices/store.js"
-import { InstructionVersionStore } from "../instructions/store.js"
 import { CommunicationStore } from "../continuity/store.js"
 import { ChatWriteStore } from "../chat/store.js"
 import { TodoStore } from "../todos/store.js"
@@ -44,7 +43,6 @@ import { makeCapabilityOfferStore } from "./capability-offers.js"
 import { CapabilityOfferStore } from "../capability-offers/store.js"
 import { ConnectionItemStore } from "../connections/store.js"
 import { makeFocusChoiceStore } from "./focus-choices.js"
-import { makeInstructionVersionStore } from "./instruction-versions.js"
 import { makeCommunicationStore } from "./continuity.js"
 import { makeRunQueries } from "./runs.js"
 import { makeSessionQueries } from "./session-queries.js"
@@ -75,12 +73,8 @@ import { ChatRules } from "../chat/rules.js"
 import { ContextCompactionStore } from "../compaction/store.js"
 import { makeContextCompactionStore } from "./compaction.js"
 import type { ModelHost, ModelHostSource } from "../../models/host.js"
-import { WikiRenameStore } from "../wiki/rename-store.js"
-import { makeWikiRenameStore } from "./wiki-renames.js"
-import { WikiMaintenanceStore } from "../wiki-maintenance/store.js"
-import { makeWikiMaintenanceStore } from "./wiki-maintenance.js"
-import { DailySummaryPosition } from "../daily-summary/store.js"
-import { makeDailySummaryPosition } from "./daily-summary-position.js"
+import { ReaderPositions } from "../reader-position.js"
+import { makeReaderPositions } from "./reader-position.js"
 import { AutomationCatalog } from "../automations/catalog.js"
 import { AutomationRules } from "../automations/model.js"
 import { WikiEventOutbox } from "../automations/wiki-event-outbox.js"
@@ -452,7 +446,6 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(ConnectionItemStore, makeConnectionItemStore(deps)),
     Context.make(CapabilityOfferStore, makeCapabilityOfferStore(deps)),
     Context.make(FocusChoiceStore, makeFocusChoiceStore(deps)),
-    Context.make(InstructionVersionStore, makeInstructionVersionStore(deps)),
     Context.make(CommunicationStore, makeCommunicationStore(deps)),
     Context.make(SessionQueries, makeSessionQueries(deps)),
     Context.make(SessionStore, makeSessionStore(deps)),
@@ -481,9 +474,7 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(ModelStore, built.models),
     Context.make(ModelCatalog, catalog),
     Context.make(ContextCompactionStore, makeContextCompactionStore(deps)),
-    Context.make(WikiRenameStore, makeWikiRenameStore(deps)),
-    Context.make(WikiMaintenanceStore, makeWikiMaintenanceStore(deps)),
-    Context.make(DailySummaryPosition, makeDailySummaryPosition(deps)),
+    Context.make(ReaderPositions, makeReaderPositions(deps)),
     Context.make(MemoryCaptureStore, makeMemoryCaptureStore(deps)),
     Context.make(WikiEmbeddingStore, makeWikiEmbeddingStore(deps)),
     Context.make(McpStore, makeMcpStore(deps)),

@@ -10,6 +10,7 @@ export interface DataRootShape {
   readonly databaseName: string | null
   readonly wiki: { readonly workingRoot: string; readonly historyRoot: string }
   readonly skills: string
+  /** The old rules file, moved into Memory as its `AGENTS.md` page at start. */
   readonly globalInstructions: string
   readonly conversations: string
   readonly uploads: string

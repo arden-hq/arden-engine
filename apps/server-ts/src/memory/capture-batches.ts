@@ -1,7 +1,6 @@
 import type { RunOrigin } from "@arden-hq/protocol/runs"
-import { DateTime, Effect, Option, Schema } from "effect"
+import { DateTime, Effect, Schema } from "effect"
 
-import { compactAnswerBlocks } from "../context/answer-blocks.js"
 import type {
   MemoryCaptureBatch,
   MemoryCaptureBatchIdentity,
@@ -11,12 +10,10 @@ import type {
 } from "../persistence/memory/store.js"
 import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
-import { authoredText } from "../persistence/transcript/content.js"
-import type {
-  StoredMessageEnvelope,
-  TranscriptMessageRecord
-} from "../persistence/transcript/model.js"
+import { capturedText } from "../persistence/transcript/content.js"
+import type { TranscriptMessageRecord } from "../persistence/transcript/model.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
+import { captureBatchKey } from "../wiki/capture.js"
 import type { Wiki } from "../wiki/service.js"
 import { chatCitation, evidenceDateLabel } from "./chat-citations.js"
 import { crowdedCorePages } from "./core-memory.js"
@@ -32,17 +29,13 @@ type CaptureEvidenceKind =
   | { readonly kind: "space"; readonly spaceId: string; readonly occurrenceId: string }
   | { readonly kind: "unknown" }
 
-export interface CaptureExcerpt {
+interface CaptureExcerpt {
   readonly record: TranscriptMessageRecord
   readonly content: string
   readonly startOffset: number
   readonly endOffset: number
   readonly evidence: CaptureEvidenceKind
 }
-
-const SyntheticInteractionSchema = Schema.Struct({
-  from: Schema.Struct({ type: Schema.Literals(["agent", "workflow"] as const) })
-})
 
 export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError", {
   operation: Schema.Literals(["recall", "capture"] as const),
@@ -52,19 +45,24 @@ export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError"
 }) {}
 
 export interface MemoryCaptureBatches {
-  readonly nextCaptureBatch: () => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
+  /** The next batch of new work, or, when `older`, of any unread range that is not resting. */
+  readonly nextCaptureBatch: (
+    older: boolean
+  ) => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
   readonly completeCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
+  /** Moves past the batch unread; its messages stay unread in a range that rests a day. */
+  readonly skipCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
 }
 
 /** Hands Memory Capture one batch of chat evidence at a time and records what it read. */
 export const makeMemoryCaptureBatches = (input: {
-  readonly wiki: Pick<
-    Wiki["Service"],
-    "hasFinalizedCaptureBatch" | "finalizeCaptureBatch" | "snapshot"
-  >
+  readonly wiki: Pick<Wiki["Service"], "hasCaptureReceipt" | "finalizeCaptureBatch" | "snapshot">
   readonly captures: MemoryCaptureStore["Service"]
   readonly sessions: Pick<SessionQueries["Service"], "loadHistoryHeader">
-  readonly transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns">
+  readonly transcript: Pick<
+    TranscriptQueries["Service"],
+    "page" | "originsForTurns" | "ownerWordsIn"
+  >
 }): MemoryCaptureBatches => {
   const { wiki, captures, sessions, transcript } = input
 
@@ -116,21 +114,18 @@ export const makeMemoryCaptureBatches = (input: {
   const captureError = (message: string, sessionId: string) => (cause: unknown) =>
     new MemoryError({ operation: "capture", message, sessionId, cause })
 
-  const advance = Effect.fn("Memory.advanceCapture")(function* (
-    identity: MemoryCaptureBatchIdentity
-  ) {
-    const moved = yield* captures
-      .advance(identity)
-      .pipe(
-        Effect.mapError(
-          captureError("Could not record Memory capture progress", identity.sessionId)
-        )
+  const move = (operation: "advance" | "skip", message: string) =>
+    Effect.fn(`Memory.${operation}Capture`)(function* (identity: MemoryCaptureBatchIdentity) {
+      const moved = yield* captures[operation](identity).pipe(
+        Effect.mapError(captureError(message, identity.sessionId))
       )
-    if (moved === "superseded")
-      yield* Effect.logInfo("Memory capture batch superseded before it advanced", {
-        sessionId: identity.sessionId
-      })
-  })
+      if (moved === "superseded")
+        yield* Effect.logInfo(`Memory capture batch superseded before ${operation}`, {
+          sessionId: identity.sessionId
+        })
+    })
+  const advance = move("advance", "Could not record Memory capture progress")
+  const skip = move("skip", "Could not skip the Memory capture batch")
 
   /**
    * Reads the work's chat from `start`, through the batch's end when it was prepared, and never
@@ -159,12 +154,65 @@ export const makeMemoryCaptureBatches = (input: {
     }
   })
 
-  const nextCaptureBatch = Effect.fn("Memory.nextCaptureBatch")(function* (): Effect.fn.Return<
-    MemoryCaptureBatch | null,
-    MemoryError
-  > {
+  const offer = Effect.fn("Memory.offerCaptureBatch")(function* (
+    identity: MemoryCaptureBatchIdentity,
+    excerpts: ReadonlyArray<CaptureExcerpt>
+  ): Effect.fn.Return<MemoryCaptureBatch, MemoryError> {
+    const header = yield* sessions
+      .loadHistoryHeader(identity.sessionId)
+      .pipe(
+        Effect.mapError(
+          captureError("Could not read the Memory capture Session reference", identity.sessionId)
+        )
+      )
+    if (header === null) {
+      return yield* new MemoryError({
+        operation: "capture",
+        message: "Memory capture Session was not found",
+        sessionId: identity.sessionId
+      })
+    }
+    const crowded = yield* wiki.snapshot().pipe(
+      Effect.map((current) =>
+        crowdedCorePages(
+          current.pages
+            .filter((record) => record.page.lifecycle === "active")
+            .map((record) => ({
+              path: record.resource.path,
+              pageId: record.page.pageId,
+              chars: record.page.body.length
+            }))
+        )
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Core Memory size check failed", cause).pipe(Effect.as([]))
+      )
+    )
+    return {
+      identity,
+      markdown: [
+        renderTranscript(header, excerpts, DateTime.toDate(yield* DateTime.now)),
+        ...(crowded.length === 0
+          ? []
+          : [
+              "",
+              "## Core Memory to condense",
+              "",
+              ...crowded.map(
+                (page) =>
+                  `- ${page.path}: ${page.chars} characters; it is sent to every run, whole up to ${page.budget}. ` +
+                  `Bring it to ${page.target} or fewer.`
+              )
+            ])
+      ].join("\n")
+    }
+  })
+
+  const nextCaptureBatch = Effect.fn("Memory.nextCaptureBatch")(function* (
+    older: boolean
+  ): Effect.fn.Return<MemoryCaptureBatch | null, MemoryError> {
     while (true) {
-      const listed = yield* captures.listWork().pipe(
+      const listed = yield* captures.listWork(older).pipe(
         Effect.mapError(
           (cause) =>
             new MemoryError({
@@ -178,7 +226,7 @@ export const makeMemoryCaptureBatches = (input: {
       if (work === undefined) return null
       if (work.prepared !== undefined) {
         const committed = yield* wiki
-          .hasFinalizedCaptureBatch(work.prepared)
+          .hasCaptureReceipt(captureBatchKey(work.prepared))
           .pipe(
             Effect.mapError(
               captureError("Could not inspect the Memory capture receipt", work.sessionId)
@@ -206,54 +254,7 @@ export const makeMemoryCaptureBatches = (input: {
           )
         if (prepared === "superseded") continue
       }
-      const header = yield* sessions
-        .loadHistoryHeader(work.sessionId)
-        .pipe(
-          Effect.mapError(
-            captureError("Could not read the Memory capture Session reference", work.sessionId)
-          )
-        )
-      if (header === null) {
-        return yield* new MemoryError({
-          operation: "capture",
-          message: "Memory capture Session was not found",
-          sessionId: work.sessionId
-        })
-      }
-      const crowded = yield* wiki.snapshot().pipe(
-        Effect.map((current) =>
-          crowdedCorePages(
-            current.pages
-              .filter((record) => record.page.lifecycle === "active")
-              .map((record) => ({
-                path: record.resource.path,
-                pageId: record.page.pageId,
-                chars: record.page.body.length
-              }))
-          )
-        ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Core Memory size check failed", cause).pipe(Effect.as([]))
-        )
-      )
-      return {
-        identity: read.identity,
-        markdown: [
-          renderTranscript(header, read.excerpts, DateTime.toDate(yield* DateTime.now)),
-          ...(crowded.length === 0
-            ? []
-            : [
-                "",
-                "## Core Memory to condense",
-                "",
-                ...crowded.map(
-                  (page) =>
-                    `- ${page.path}: ${page.chars} characters; it is sent to every run, whole up to ${page.budget}. ` +
-                    `Bring it to ${page.target} or fewer.`
-                )
-              ])
-        ].join("\n")
-      }
+      return yield* offer(read.identity, read.excerpts)
     }
   })
 
@@ -270,11 +271,15 @@ export const makeMemoryCaptureBatches = (input: {
     yield* advance(batch.identity)
   })
 
-  return { nextCaptureBatch, completeCaptureBatch }
+  return {
+    nextCaptureBatch,
+    completeCaptureBatch,
+    skipCaptureBatch: (batch) => skip(batch.identity)
+  }
 }
 
 /** One batch as Capture reads it: what it quotes, where it ends, and whether a model reviews it. */
-export interface CaptureRead {
+interface CaptureRead {
   readonly excerpts: ReadonlyArray<CaptureExcerpt>
   readonly end: MemoryCapturePosition
   readonly endMessageId: string
@@ -285,10 +290,9 @@ export interface CaptureRead {
 /**
  * The batch Capture reads in a chat from `start`, through message `last` at most, ending at
  * `stop` when it reads a prepared batch again. Undefined when there is nothing past `start`.
- * Capture's work and the backlog count both batch through this, so they agree on the limits.
  */
-export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
-  transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns">,
+const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
+  transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns" | "ownerWordsIn">,
   input: {
     readonly sessionId: string
     readonly start: MemoryCapturePosition
@@ -311,7 +315,13 @@ export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   const origins = yield* transcript
     .originsForTurns(input.sessionId, turnIds)
     .pipe(Effect.mapError(failed("Could not read Memory source provenance")))
-  const selected = selectExcerpts(records, origins, input.start, input.stop)
+  const owned = yield* transcript
+    .ownerWordsIn(
+      input.sessionId,
+      records.flatMap((record) => (record.role === "user" ? [record.messageId] : []))
+    )
+    .pipe(Effect.mapError(failed("Could not read Memory source provenance")))
+  const selected = selectExcerpts(records, origins, owned, input.start, input.stop)
   if (selected === undefined) return undefined
   return {
     ...selected,
@@ -323,18 +333,13 @@ export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   }
 })
 
-const messageContent = (message: StoredMessageEnvelope): string | null => {
-  if (message.superseded === true) return null
-  const text = compactAnswerBlocks(authoredText(message.content)).trim()
-  return text.length === 0 ? null : text
-}
-
 const evidenceKind = (
   record: TranscriptMessageRecord,
-  origin: RunOrigin | undefined
+  origin: RunOrigin | undefined,
+  owned: ReadonlySet<string>
 ): CaptureEvidenceKind => {
-  if (origin === undefined || origin.kind === "unrecorded") return { kind: "unknown" }
-  switch (origin.kind) {
+  if (owned.has(record.messageId)) return { kind: "human" }
+  switch (origin?.kind) {
     case "automation":
       return {
         kind: "automation",
@@ -345,15 +350,11 @@ const evidenceKind = (
       return { kind: "task", itemId: origin.item_id, occurrenceId: origin.occurrence_id }
     case "space":
       return { kind: "space", spaceId: origin.space_id, occurrenceId: origin.occurrence_id }
-    case "chat": {
-      const synthetic =
-        record.envelope.is_meta === true ||
-        record.envelope.automation !== undefined ||
-        Option.isSome(
-          Schema.decodeUnknownOption(SyntheticInteractionSchema)(record.envelope.interaction)
-        )
-      return synthetic ? { kind: "unknown" } : { kind: "human" }
-    }
+    case "chat":
+      return record.role === "assistant" ? { kind: "human" } : { kind: "unknown" }
+    case "unrecorded":
+    case undefined:
+      return { kind: "unknown" }
   }
 }
 
@@ -365,6 +366,7 @@ const evidenceKind = (
 const selectExcerpts = (
   records: ReadonlyArray<TranscriptMessageRecord>,
   origins: ReadonlyMap<string, RunOrigin>,
+  owned: ReadonlySet<string>,
   start: MemoryCapturePosition,
   stop: MemoryCapturePosition | undefined
 ):
@@ -382,7 +384,7 @@ const selectExcerpts = (
       read = record
       continue
     }
-    const content = messageContent(record.envelope)
+    const content = capturedText(record.envelope)
     const startOffset = offsetIn(start, record.sequence) ?? 0
     if (content === null || startOffset >= content.length) {
       read = record
@@ -403,7 +405,11 @@ const selectExcerpts = (
       content: content.slice(startOffset, endOffset),
       startOffset,
       endOffset,
-      evidence: evidenceKind(record, origins.get(record.envelope.turn_id ?? record.messageId))
+      evidence: evidenceKind(
+        record,
+        origins.get(record.envelope.turn_id ?? record.messageId),
+        owned
+      )
     })
     characters += endOffset - startOffset
     if (endOffset < content.length) {

@@ -9,7 +9,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const dropInferenceRejections: Migration = {
-  version: 159,
+  version: 157,
   name: "drop_inference_rejections",
   foreignKeys: { kind: "enforced" },
   up

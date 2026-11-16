@@ -199,22 +199,34 @@ const metadataOf = (frontmatter: Record<string, Schema.Json>): WikiPage["metadat
   )
 }
 
+/**
+ * Reads `content` as a page. With `plainTitle`, the title of a code-owned page whose body holds all
+ * of it, a file with no frontmatter reads as that page's body, and its content is the page as Arden
+ * writes it.
+ */
 export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
   content: string,
-  expectedPageId?: string
+  expectedPageId?: string,
+  plainTitle?: string
 ): Effect.fn.Return<ParsedWikiPage, WikiPageFormatError> {
-  const [yaml, body] = yield* Effect.try({
-    try: () => splitPage(content),
-    catch: (cause) =>
-      cause instanceof WikiPageFormatError ? cause : fail("could not split Wiki page", cause)
-  })
-  const raw = yield* Effect.try({
-    try: () => parseYaml(yaml),
-    catch: (cause) =>
-      cause instanceof WikiPageFormatError ? cause : fail("invalid YAML frontmatter", cause)
-  })
+  const plain =
+    expectedPageId !== undefined && plainTitle !== undefined && !content.startsWith("---\n")
+  const [yaml, body] = plain
+    ? ["", content]
+    : yield* Effect.try({
+        try: () => splitPage(content),
+        catch: (cause) =>
+          cause instanceof WikiPageFormatError ? cause : fail("could not split Memory page", cause)
+      })
+  const raw = plain
+    ? { page_id: expectedPageId, title: plainTitle, aliases: [], lifecycle: "active" }
+    : yield* Effect.try({
+        try: () => parseYaml(yaml),
+        catch: (cause) =>
+          cause instanceof WikiPageFormatError ? cause : fail("invalid YAML frontmatter", cause)
+      })
   const frontmatter = yield* decodeFrontmatter(raw).pipe(
-    Effect.mapError((cause) => fail("invalid Wiki frontmatter", cause))
+    Effect.mapError((cause) => fail("invalid Memory page frontmatter", cause))
   )
   if (frontmatter.page_id.trim().length === 0) return yield* fail("page_id must be nonempty")
   if (frontmatter.title.trim().length === 0) return yield* fail("title must be nonempty")
@@ -232,7 +244,7 @@ export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
       validateGeneratedBoundaries(body)
     },
     catch: (cause) =>
-      cause instanceof WikiPageFormatError ? cause : fail("invalid Wiki page", cause)
+      cause instanceof WikiPageFormatError ? cause : fail("invalid Memory page", cause)
   })
   const redirectTo = frontmatter.redirect_to ?? null
   if (frontmatter.lifecycle === "redirect" && redirectTo === null) {
@@ -241,16 +253,16 @@ export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
   if (frontmatter.lifecycle === "active" && redirectTo !== null) {
     return yield* fail("active pages must not declare redirect_to")
   }
-  return Object.freeze({
+  const page = {
     pageId: frontmatter.page_id,
     title: frontmatter.title,
     aliases: Object.freeze([...frontmatter.aliases]),
     lifecycle: frontmatter.lifecycle,
     redirectTo,
     metadata: metadataOf(frontmatter),
-    body,
-    content
-  })
+    body
+  }
+  return Object.freeze({ ...page, content: plain ? formatWikiPage(page) : content })
 })
 
 export const formatRedirectPage = (page: {
@@ -293,7 +305,7 @@ export const reviseWikiPage = Effect.fn("WikiPage.revise")(function* (
   const [source] = yield* Effect.try({
     try: () => splitPage(page.content),
     catch: (cause) =>
-      cause instanceof WikiPageFormatError ? cause : fail("could not split Wiki page", cause)
+      cause instanceof WikiPageFormatError ? cause : fail("could not split Memory page", cause)
   })
   const document = yield* Effect.try({
     try: () =>
@@ -319,11 +331,14 @@ export const reviseWikiPage = Effect.fn("WikiPage.revise")(function* (
 export const replacementContent = Effect.fn("WikiPage.replacementContent")(function* (
   operation: WikiOperation,
   pageId: string,
-  content: string
+  content: string,
+  plainTitle?: string
 ): Effect.fn.Return<string, WikiError> {
   const invalid = (cause: WikiPageFormatError) =>
     wikiError(operation, "invalid", cause.message, { pageId, cause })
-  const replacement = yield* parseWikiPage(content, pageId).pipe(Effect.mapError(invalid))
+  const replacement = yield* parseWikiPage(content, pageId, plainTitle).pipe(
+    Effect.mapError(invalid)
+  )
   if (replacement.lifecycle !== "active")
     return yield* wikiError(operation, "invalid", "A page update cannot create a redirect", {
       pageId

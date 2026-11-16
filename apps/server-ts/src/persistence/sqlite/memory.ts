@@ -6,7 +6,12 @@ import {
   MemoryCaptureStoreError,
   type MemoryCaptureBatchIdentity
 } from "../memory/store.js"
-import { advanceCapture, listCaptureWork, prepareCapture } from "./memory-capture-positions.js"
+import {
+  advanceCapture,
+  listCaptureWork,
+  prepareCapture,
+  skipCapture
+} from "./memory-capture-positions.js"
 import type { PersistenceDeps } from "./deps.js"
 
 const failed =
@@ -22,16 +27,23 @@ const failed =
 export const makeMemoryCaptureStore = ({
   writer
 }: Pick<PersistenceDeps, "writer">): MemoryCaptureStore["Service"] => {
-  const listWork = Effect.fn("SqliteMemoryCaptureStore.listWork")(function* (limit = 8) {
+  const listWork = Effect.fn("SqliteMemoryCaptureStore.listWork")(function* (
+    older: boolean,
+    limit = 8
+  ) {
     const valid = yield* Schema.decodeUnknownEffect(
       Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
     )(limit).pipe(Effect.mapError(failed("list", "Invalid Memory capture page limit")))
-    return yield* listCaptureWork(writer.sql, valid).pipe(
+    return yield* listCaptureWork(writer.sql, valid, older).pipe(
       Effect.mapError(failed("list", "Could not list Memory capture work"))
     )
   })
 
-  const move = (operation: "prepare" | "advance", write: typeof prepareCapture, message: string) =>
+  const move = (
+    operation: "prepare" | "advance" | "skip",
+    write: typeof prepareCapture,
+    message: string
+  ) =>
     Effect.fn(`SqliteMemoryCaptureStore.${operation}`)(function* (
       batch: MemoryCaptureBatchIdentity
     ) {
@@ -46,6 +58,7 @@ export const makeMemoryCaptureStore = ({
   return MemoryCaptureStore.of({
     listWork,
     prepare: move("prepare", prepareCapture, "Could not prepare a Memory capture batch"),
-    advance: move("advance", advanceCapture, "Could not advance Memory capture")
+    advance: move("advance", advanceCapture, "Could not advance Memory capture"),
+    skip: move("skip", skipCapture, "Could not skip a Memory capture batch")
   })
 }

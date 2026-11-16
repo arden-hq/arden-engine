@@ -8,12 +8,8 @@ import type {
 } from "../../persistence/automations/store.js"
 import type { SummaryStore } from "../../persistence/summaries/store.js"
 import { PROMPT_TEXT } from "../../prompts/catalog.js"
-import {
-  jobResult,
-  startAutomationRun,
-  type AutomationRunner,
-  type AwaitAutomationRun
-} from "../runner.js"
+import { runByRule } from "../job-run.js"
+import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler, SystemHandlerServices } from "../system-handler.js"
 
 const CHAT_SUMMARIES_AUTOMATION_ID = AutomationId.make("builtin-chat-summaries")
@@ -38,7 +34,6 @@ const makeChatSummariesRunner = (services: {
   readonly chat: ChatMessage["Service"]
   readonly queue: AutomationQueue["Service"]
   readonly summaries: SummaryStore["Service"]
-  readonly spaceOverview: SystemHandlerServices["spaceOverview"]
   readonly linkOfferChat: SystemHandlerServices["linkOfferChat"]
   readonly awaitRun: AwaitAutomationRun
 }): AutomationRunner =>
@@ -48,33 +43,19 @@ const makeChatSummariesRunner = (services: {
     const fork = yield* services.queue.prepareForkSession(job)
     if (fork === null) return jobResult.withoutRun("no_input", "No chat to summarize")
     const sessionId = fork.sessionId
-    let runId = job.payload.chatRun?.runId ?? null
-    if (runId === null) {
-      const current = yield* services.summaries.chat(fork.sourceSessionId)
-      const receipt = yield* startAutomationRun(services.chat, job, {
-        sessionId,
-        clientId: `automation-run-${job.payload.automationRunId}`,
-        prompt: `${job.payload.prompt}\n\n${currentSummaryText(current)}`,
-        name: job.payload.name
-      })
-      if (receipt.runId === null) throw new Error("Chat summary has no Run identity")
-      runId = receipt.runId
-    }
+    const current = yield* services.summaries.chat(fork.sourceSessionId)
+    const observed = yield* runByRule(services, job, {
+      sessionId,
+      prompt: `${job.payload.prompt}\n\n${currentSummaryText(current)}`,
+      name: job.payload.name
+    })
+    const runId = observed.runId
     const run = { chatRunId: runId, chatSessionId: sessionId }
-    const observed = yield* services.awaitRun(runId)
     if (observed.status !== "completed")
       return jobResult.failed(observed.error, observed.result, run)
     const saved = yield* services.summaries.chat(fork.sourceSessionId)
     if (saved?.runId !== runId) {
       return jobResult.completed("no_change", "No new summary saved for this chat", run)
-    }
-    if (saved.spaceId !== null) {
-      yield* services
-        .spaceOverview(saved.spaceId, {
-          automationRunId: job.payload.automationRunId,
-          chatRunId: runId
-        })
-        .pipe(Effect.catchCause((cause) => Effect.logWarning("Space overview not updated", cause)))
     }
     yield* services
       .linkOfferChat({
@@ -117,7 +98,6 @@ export const chatSummariesHandler: SystemAutomationHandler<"chat_summaries"> = {
       chat: services.chat,
       queue: services.queue,
       summaries: services.summaries,
-      spaceOverview: services.spaceOverview,
       linkOfferChat: services.linkOfferChat,
       awaitRun: services.awaitRun
     })

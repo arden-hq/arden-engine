@@ -1,7 +1,7 @@
 import { makeTurnInputs } from "./transcript-turn-inputs.js"
 import { makeResolveReference } from "./transcript-reference.js"
 import { disposableForkSql } from "../schema/fork-disposition.js"
-import { makeOwnerMessagesAfter } from "./transcript-owner-messages.js"
+import { makeOwnerMessagesAfter, makeOwnerWordsIn } from "./transcript-owner-messages.js"
 import {
   agentResultPresentation,
   agentResultMessagePredicate
@@ -821,6 +821,7 @@ export const makeTranscriptQueries = ({
   return TranscriptQueries.of({
     turnInputs: makeTurnInputs({ sql, decodeRow }),
     ownerMessagesAfter: makeOwnerMessagesAfter(sql, decodeRow),
+    ownerWordsIn: makeOwnerWordsIn(sql),
     resolveReference,
     page,
     resolveConversationReference,

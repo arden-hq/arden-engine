@@ -127,11 +127,10 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
               sessions: yield* SessionStore,
               transcripts: yield* TranscriptQueries,
               position: {
-                current: () => Effect.succeed({ settledDay: settled, tries: 0 }),
-                tried: () => Effect.void,
-                advance: ({ to }) =>
+                start: () => Effect.succeed(settled),
+                advance: ({ next }) =>
                   Effect.sync(() => {
-                    settled = to
+                    settled = next
                   })
               },
               handlerItems: {
@@ -152,7 +151,8 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
                     phase: "settled",
                     runId: "run-1",
                     failure: null
-                  })
+                  }),
+                giveUp: () => Effect.succeed(undefined)
               },
               runItem: (_job, item) => {
                 const data = item.input.data
@@ -213,4 +213,4 @@ it("replays the commit-point limit, the timer, Daily's days and chat summaries o
   expect(database.summaries?.ahead).toBe(0)
   expect(database.maintenance).toEqual({ types: ["event"], nextRunAt: null })
   expect(daily.settled).toBe("2026-11-12")
-}, 1_800_000)
+})

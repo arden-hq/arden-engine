@@ -58,6 +58,6 @@ export const makeAutomationStores = (
     wikiOutbox: outbox,
     homeLetterInputs: makeHomeLetterInputs({ writer }),
     spaceReviews: makeSpaceReviewStore({ writer, sessionEvents }),
-    handlerItems: makeHandlerItems({ writer, rules })
+    handlerItems: makeHandlerItems({ writer, rules, sessionEvents })
   }
 }

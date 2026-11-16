@@ -83,6 +83,9 @@ export const failureRows = (sql: SqlClient.SqlClient, cutoff: string) => sql<Fai
     LEFT JOIN scheduled_tasks AS scheduled ON scheduled.task_id = attempt.task_id
     WHERE event.entity = 'automation' AND event.event = 'failed'
       AND attempt.status = 'failed' AND ${outcomeSql(sql, sql`attempt`)} = 'failed'
+      -- An event about a run whose failed ending is listed above is that same failure.
+      AND NOT EXISTS (SELECT 1 FROM run_endings
+        WHERE run_id = event.run_id AND decided = 1 AND status = 'failed')
     UNION ALL
     SELECT 3, attempt.id, attempt.task_id, attempt.chat_run_id, attempt.started_at, attempt.error,
       (SELECT error_code FROM chat_runs WHERE run_id = attempt.chat_run_id),

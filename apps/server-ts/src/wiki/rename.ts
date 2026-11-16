@@ -1,34 +1,20 @@
-import type { ManagedFileRepositoryShape, ResourceVersion } from "@arden-hq/revisions/effect"
+import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import {
-  commitWiki,
   createPage,
-  decodeWikiOrigin,
-  encodeWikiOrigin,
   movePage,
   ownerInApp,
-  requireCommitRules,
   updatePage,
   type WikiCommitIdentity,
   type WikiWrite
 } from "./commit.js"
-import type { WikiRenameApproval } from "@arden-hq/protocol/wiki"
-import { Effect, Predicate, Schema } from "effect"
-import { randomUUID } from "node:crypto"
+import type { WikiRenamePlan } from "@arden-hq/protocol/wiki"
+import { Effect } from "effect"
 import { posix } from "node:path"
 
-import type { SpaceStore } from "../persistence/spaces/store.js"
-import {
-  WikiRenameStoreError,
-  type WikiRenameApprovalRecord,
-  type WikiRenameStore
-} from "../persistence/wiki/rename-store.js"
-import {
-  requireWikiWritePaths,
-  resolveWikiWriteBoundary,
-  type WikiLocationAuthority
-} from "./authority.js"
-import { mapRevisionError, WikiError, wikiError } from "./errors.js"
+import type { WikiLocationAuthority } from "./authority.js"
+import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { pageWikiLinks, rewriteWikiLinkTargets } from "./links.js"
+import { pageIn, writerOf, type WikiChanges, type WikiPlan } from "./page-change.js"
 import {
   formatRedirectPage,
   isReadme,
@@ -38,192 +24,35 @@ import {
   reviseWikiPage
 } from "./page.js"
 import {
-  loadSnapshot,
   nameTakenBy,
   pageNameIndex,
   resolveWikiLinkTarget,
-  type PageRecord
+  type PageRecord,
+  type Snapshot
 } from "./snapshot.js"
 
-/** Who renames when the owner asks for and accepts a rename in the app. */
+/** Who renames when the owner renames a page in the app. */
 export const OWNER_RENAME: WikiCommitIdentity = ownerInApp("rename wiki page", "desktop.rename")
 
-const ResourceSchema = Schema.Struct({
-  resourceId: Schema.NonEmptyString,
-  versionId: Schema.NonEmptyString
-})
-
-const RewriteSchema = Schema.Struct({
-  resource: ResourceSchema,
-  content: Schema.String
-})
-
-const RenamePlanSchema = Schema.Struct({
-  baseHead: Schema.NonEmptyString,
-  pageId: Schema.NonEmptyString,
-  oldPath: Schema.NonEmptyString,
-  newPath: Schema.NonEmptyString,
-  oldTitle: Schema.NonEmptyString,
-  newTitle: Schema.NonEmptyString,
-  source: ResourceSchema,
-  movedContent: Schema.String,
-  redirect: Schema.Struct({
-    resourceId: Schema.NonEmptyString,
-    path: Schema.NonEmptyString,
-    content: Schema.String
-  }),
-  rewrites: Schema.Array(RewriteSchema),
-  linkCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  pageCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-})
-
-type RenamePlan = typeof RenamePlanSchema.Type
-
-const RenameWriterSchema = Schema.Struct({
-  actor: Schema.NonEmptyString,
-  origin: Schema.NonEmptyString,
-  reason: Schema.String,
-  authority: Schema.Union([
-    Schema.Struct({ _tag: Schema.Literal("Global") }),
-    Schema.Struct({ _tag: Schema.Literal("Space"), spaceId: Schema.NonEmptyString })
-  ])
-})
-
-interface RenameWriter {
-  readonly authority: WikiLocationAuthority
-  readonly commit: WikiCommitIdentity
-}
-
-const storedWriter = (writer: RenameWriter): typeof RenameWriterSchema.Type => ({
-  actor: writer.commit.actor,
-  origin: encodeWikiOrigin(writer.commit.origin),
-  reason: writer.commit.reason,
-  authority: writer.authority
-})
-
-const decodeWriter = Effect.fn("WikiRename.decodeWriter")(function* (
-  approval: WikiRenameApprovalRecord
-): Effect.fn.Return<RenameWriter, WikiError> {
-  if (approval.writer === undefined)
-    return yield* wikiError("rename", "corrupt", "This Wiki rename approval keeps no writer", {
-      pageId: approval.pageId
-    })
-  const writer = yield* Schema.decodeUnknownEffect(RenameWriterSchema)(approval.writer, {
-    onExcessProperty: "error"
-  }).pipe(
-    Effect.mapError((cause) =>
-      wikiError("rename", "corrupt", "Stored Wiki rename writer is invalid", {
-        pageId: approval.pageId,
-        cause
-      })
-    )
-  )
-  return {
-    authority: writer.authority,
-    commit: { actor: writer.actor, origin: decodeWikiOrigin(writer.origin), reason: writer.reason }
-  }
-})
-
-const planOperations = (plan: RenamePlan): ReadonlyArray<WikiWrite> => [
-  movePage(plan.source, plan.newPath, plan.movedContent),
-  createPage(plan.redirect.resourceId, plan.redirect.path, plan.redirect.content),
-  ...plan.rewrites.map((rewrite) => updatePage(rewrite.resource, rewrite.content))
-]
-type PlannedResource = RenamePlan["source"]
-
-interface WikiRenameRequestInput {
+interface WikiRenameInput {
   readonly pageId: string
   readonly newPath: string
   readonly newTitle: string
   readonly expectedVersion: string
+  /** The head the plan is made from and the rename is guarded by: any change to Memory since
+   *  refuses the rename. */
   readonly expectedHead: string
   readonly authority: WikiLocationAuthority
-  /** The writer that will commit the rename. Its rules are checked over the whole plan before
-   *  any approval is made. */
   readonly commit: WikiCommitIdentity
 }
 
-interface WikiRenameAcceptInput {
-  readonly approvalId: string
-}
-
 export interface WikiRenameMethods {
-  readonly listRenameApprovals: () => Effect.Effect<ReadonlyArray<WikiRenameApproval>, WikiError>
-  readonly requestRename: (
-    input: WikiRenameRequestInput
-  ) => Effect.Effect<WikiRenameApproval, WikiError>
-  readonly acceptRename: (
-    input: WikiRenameAcceptInput
-  ) => Effect.Effect<WikiRenameApproval, WikiError>
-  readonly rejectRename: (
-    approvalId: string,
-    resolution?: string | null
-  ) => Effect.Effect<WikiRenameApproval, WikiError>
+  /** The pages and links a rename would change, refused by every rule its commit would meet;
+   *  saves nothing. */
+  readonly planRename: (input: WikiRenameInput) => Effect.Effect<WikiRenamePlan, WikiError>
+  /** Saves that plan as one commit. */
+  readonly rename: (input: WikiRenameInput) => Effect.Effect<WikiRenamePlan, WikiError>
 }
-
-const storeErrorReason = (reason: WikiRenameStoreError["reason"]) => {
-  switch (reason) {
-    case "conflict":
-      return "blocked" as const
-    case "not_found":
-    case "corrupt":
-    case "invalid":
-    case "storage":
-      return reason
-  }
-}
-
-const mapStoreError = (cause: WikiRenameStoreError): WikiError => {
-  const reason = storeErrorReason(cause.reason)
-  return wikiError("rename", reason, cause.message, {
-    ...(cause.pageId === undefined ? {} : { pageId: cause.pageId }),
-    cause
-  })
-}
-
-const decodePlan = Effect.fn("WikiRename.decodePlan")(function* (
-  approval: WikiRenameApprovalRecord
-): Effect.fn.Return<RenamePlan, WikiError> {
-  const plan = yield* Schema.decodeUnknownEffect(RenamePlanSchema)(approval.plan, {
-    onExcessProperty: "error"
-  }).pipe(
-    Effect.mapError((cause) =>
-      wikiError("rename", "corrupt", "Stored Wiki rename plan is invalid", {
-        pageId: approval.pageId,
-        cause
-      })
-    )
-  )
-  if (plan.pageId !== approval.pageId) {
-    return yield* wikiError(
-      "rename",
-      "corrupt",
-      "Stored Wiki rename page identity does not match",
-      {
-        pageId: approval.pageId
-      }
-    )
-  }
-  return plan
-})
-
-const approvalView = Effect.fn("WikiRename.approvalView")(function* (
-  approval: WikiRenameApprovalRecord
-): Effect.fn.Return<WikiRenameApproval, WikiError> {
-  const plan = yield* decodePlan(approval)
-  return {
-    approvalId: approval.approvalId,
-    oldPath: plan.oldPath,
-    newPath: plan.newPath,
-    oldTitle: plan.oldTitle,
-    newTitle: plan.newTitle,
-    linkCount: plan.linkCount,
-    pageCount: plan.pageCount,
-    status: approval.status,
-    createdAt: approval.createdAt,
-    resolution: approval.resolution
-  }
-})
 
 const linkTarget = (path: string, keepExtension: boolean): string => {
   if (keepExtension) return path
@@ -234,22 +63,69 @@ const linkTarget = (path: string, keepExtension: boolean): string => {
   return path.endsWith(".md") ? path.slice(0, -3) : path
 }
 
-const plannedResource = (resource: ResourceVersion): PlannedResource => ({
-  resourceId: resource.resourceId,
-  versionId: resource.versionId
+const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
+  snapshot: Snapshot,
+  current: PageRecord,
+  newPath: string
+): Effect.fn.Return<void, WikiError> {
+  const { pageId } = current.page
+  if (current.page.lifecycle !== "active") {
+    return yield* wikiError("rename", "invalid", "Only active Memory pages can be renamed", {
+      pageId
+    })
+  }
+  if (newPath.toLowerCase() === current.resource.path.toLowerCase()) {
+    return yield* wikiError("rename", "invalid", "A Memory rename requires a different path", {
+      pageId
+    })
+  }
+  if (takesName(namesTakenAt([newPath]), current.resource.path)) {
+    return yield* wikiError(
+      "rename",
+      "blocked",
+      "The new Memory path conflicts with the redirect kept at the old path",
+      { pageId }
+    )
+  }
+  if (nameTakenBy(snapshot, newPath, pageId) !== undefined) {
+    return yield* wikiError(
+      "rename",
+      "blocked",
+      "Another Memory page already owns the new path or link name",
+      { pageId }
+    )
+  }
+  if (isReadme(current.resource.path)) {
+    const prefix = `${posix.dirname(current.resource.path)}/`
+    if (
+      snapshot.wholeSet.some(
+        (record) =>
+          record.page.pageId !== pageId &&
+          record.page.lifecycle === "active" &&
+          record.resource.path.startsWith(prefix)
+      )
+    ) {
+      return yield* wikiError(
+        "rename",
+        "blocked",
+        "Move child pages before renaming this folder page",
+        { pageId }
+      )
+    }
+  }
 })
 
-const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
+const renamePlan = Effect.fn("WikiRename.plan")(function* (
   repository: ManagedFileRepositoryShape,
-  source: PageRecord,
-  pages: ReadonlyArray<PageRecord>,
-  head: string,
-  newPath: string,
-  newTitle: string
-): Effect.fn.Return<RenamePlan, WikiError> {
+  snapshot: Snapshot,
+  input: WikiRenameInput
+): Effect.fn.Return<WikiPlan<WikiRenamePlan>, WikiError> {
+  const source = yield* pageIn("rename", snapshot, input.pageId)
+  yield* requireRenamable(snapshot, source, input.newPath)
+  const pages = snapshot.wholeSet
   const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
   const names = pageNameIndex(pages)
-  const rewrites: Array<{ resource: PlannedResource; content: string }> = []
+  const rewrites: Array<{ record: PageRecord; content: string }> = []
   let movedBody = source.page.body
   let linkCount = 0
   let pageCount = 0
@@ -262,14 +138,14 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
         token.page !== null &&
         resolveWikiLinkTarget(byId, names, record.page.pageId, token) === source.page.pageId
       ) {
-        replacements.set(token, linkTarget(newPath, token.page.toLowerCase().endsWith(".md")))
+        replacements.set(token, linkTarget(input.newPath, token.page.toLowerCase().endsWith(".md")))
       }
     }
     if (replacements.size === 0) continue
     const body = yield* Effect.try({
       try: () => rewriteWikiLinkTargets(record.page.body, replacements),
       catch: (cause) =>
-        wikiError("rename", "invalid", "Could not rewrite Wiki links", {
+        wikiError("rename", "invalid", "Could not rewrite Memory links", {
           pageId: record.page.pageId,
           cause
         })
@@ -280,10 +156,10 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
       movedBody = body
     } else {
       rewrites.push({
-        resource: plannedResource(record.resource),
+        record,
         content: yield* reviseWikiPage(record.page, { body }).pipe(
           Effect.mapError((cause) =>
-            wikiError("rename", "invalid", "Could not preserve Wiki page content", {
+            wikiError("rename", "invalid", "Could not preserve Memory page content", {
               pageId: record.page.pageId,
               cause
             })
@@ -295,25 +171,27 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
 
   const redirectId = `wiki-redirect:${source.resource.versionId}`
   const resources = yield* repository
-    .listResources({
-      at: head,
-      includeArchived: true
-    })
+    .listResources({ at: snapshot.head, includeArchived: true })
     .pipe(Effect.mapError(mapRevisionError("rename", source.page.pageId)))
   if (
     resources.some((resource) => resource.resourceId.toLowerCase() === redirectId.toLowerCase())
   ) {
-    return yield* wikiError("rename", "blocked", "A redirect already owns the previous Wiki path", {
-      pageId: source.page.pageId
-    })
+    return yield* wikiError(
+      "rename",
+      "blocked",
+      "A redirect already owns the previous Memory path",
+      {
+        pageId: source.page.pageId
+      }
+    )
   }
 
   const movedContent = yield* reviseWikiPage(source.page, {
-    title: newTitle,
+    title: input.newTitle,
     body: movedBody
   }).pipe(
     Effect.mapError((cause) =>
-      wikiError("rename", "invalid", "Could not preserve the renamed Wiki page", {
+      wikiError("rename", "invalid", "Could not preserve the renamed Memory page", {
         pageId: source.page.pageId,
         cause
       })
@@ -328,12 +206,12 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
     [
       [source.page.pageId, movedContent],
       [redirectId, redirectContent],
-      ...rewrites.map(({ resource, content }) => [resource.resourceId, content] as const)
+      ...rewrites.map(({ record, content }) => [record.page.pageId, content] as const)
     ] as const,
     ([pageId, content]) =>
       parseWikiPage(content, pageId).pipe(
         Effect.mapError((cause) =>
-          wikiError("rename", "invalid", "The Wiki rename would create an invalid page", {
+          wikiError("rename", "invalid", "The Memory rename would create an invalid page", {
             pageId,
             cause
           })
@@ -342,259 +220,34 @@ const buildPlan = Effect.fn("WikiRename.buildPlan")(function* (
     { discard: true }
   )
 
+  const writes: ReadonlyArray<WikiWrite> = [
+    movePage(source.resource, input.newPath, movedContent),
+    createPage(redirectId, source.resource.path, redirectContent),
+    ...rewrites.map(({ record, content }) => updatePage(record.resource, content))
+  ]
   return {
-    baseHead: head,
-    pageId: source.page.pageId,
-    oldPath: source.resource.path,
-    newPath,
-    oldTitle: source.page.title,
-    newTitle,
-    source: plannedResource(source.resource),
-    movedContent,
-    redirect: {
-      resourceId: redirectId,
-      path: source.resource.path,
-      content: redirectContent
-    },
-    rewrites,
-    linkCount,
-    pageCount
-  }
-})
-
-const loadApproval = Effect.fn("WikiRename.loadApproval")(function* (
-  store: WikiRenameStore["Service"],
-  approvalId: string
-): Effect.fn.Return<WikiRenameApprovalRecord, WikiError> {
-  const approval = yield* store.get(approvalId).pipe(Effect.mapError(mapStoreError))
-  return approval === null
-    ? yield* wikiError("rename", "not_found", "Wiki rename approval was not found")
-    : approval
-})
-
-const planAlreadyApplied = Effect.fn("WikiRename.planAlreadyApplied")(function* (
-  repository: ManagedFileRepositoryShape,
-  plan: RenamePlan
-) {
-  const snapshot = yield* loadSnapshot(repository, "rename")
-  const pages = new Map(snapshot.wholeSet.map((record) => [record.page.pageId, record] as const))
-  const source = pages.get(plan.pageId)
-  const redirect = pages.get(plan.redirect.resourceId)
-  if (
-    source?.resource.path !== plan.newPath ||
-    source.page.content !== plan.movedContent ||
-    redirect?.resource.path !== plan.redirect.path ||
-    redirect.page.content !== plan.redirect.content
-  ) {
-    return false
-  }
-  return plan.rewrites.every(
-    ({ resource, content }) => pages.get(resource.resourceId)?.page.content === content
-  )
-})
-
-const planMutationPaths = Effect.fn("WikiRename.planMutationPaths")(function* (
-  plan: RenamePlan,
-  pages: ReadonlyArray<PageRecord>
-): Effect.fn.Return<ReadonlyArray<string>, WikiError> {
-  const byId = new Map(pages.map((record) => [record.page.pageId, record] as const))
-  const paths = [plan.oldPath, plan.newPath, plan.redirect.path]
-  for (const rewrite of plan.rewrites) {
-    const record = byId.get(rewrite.resource.resourceId)
-    if (record === undefined) {
-      return yield* wikiError("rename", "conflict", "A Wiki rename backlink page changed", {
-        pageId: rewrite.resource.resourceId
-      })
+    writes,
+    value: {
+      oldPath: source.resource.path,
+      newPath: input.newPath,
+      oldTitle: source.page.title,
+      newTitle: input.newTitle,
+      linkCount,
+      pageCount
     }
-    paths.push(record.resource.path)
   }
-  return paths
 })
 
 export const makeWikiRenameMethods = (
   repository: ManagedFileRepositoryShape,
-  spaces: SpaceStore["Service"],
-  store: WikiRenameStore["Service"]
+  changes: WikiChanges
 ): WikiRenameMethods => {
-  const listRenameApprovals = Effect.fn("WikiRename.list")(function* () {
-    const approvals = yield* store.listOpen().pipe(Effect.mapError(mapStoreError))
-    return yield* Effect.forEach(approvals, approvalView)
-  })
-
-  const requestRename = Effect.fn("WikiRename.request")(function* (input: WikiRenameRequestInput) {
-    const snapshot = yield* loadSnapshot(repository, "rename")
-    const current = snapshot.wholeSet.find((record) => record.page.pageId === input.pageId)
-    if (current === undefined) {
-      return yield* wikiError("rename", "not_found", `Unknown Wiki page: ${input.pageId}`, {
-        pageId: input.pageId
-      })
-    }
-    if (
-      snapshot.head !== input.expectedHead ||
-      current.resource.versionId !== input.expectedVersion
-    ) {
-      return yield* wikiError("rename", "conflict", "Wiki page changed", {
-        pageId: input.pageId,
-        currentContent: current.page.content,
-        currentVersion: current.resource.versionId,
-        currentHead: snapshot.head
-      })
-    }
-    if (current.page.lifecycle !== "active") {
-      return yield* wikiError("rename", "invalid", "Only active Wiki pages can be renamed", {
-        pageId: input.pageId
-      })
-    }
-    if (input.newPath.toLowerCase() === current.resource.path.toLowerCase()) {
-      return yield* wikiError("rename", "invalid", "A Wiki rename requires a different path", {
-        pageId: input.pageId
-      })
-    }
-    if (takesName(namesTakenAt([input.newPath]), current.resource.path)) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "The new Wiki path conflicts with the redirect kept at the old path",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
-    const nameOwner = nameTakenBy(snapshot, input.newPath, input.pageId)
-    if (nameOwner !== undefined) {
-      return yield* wikiError(
-        "rename",
-        "blocked",
-        "Another Wiki page already owns the new path or link name",
-        {
-          pageId: input.pageId
-        }
-      )
-    }
-    if (isReadme(current.resource.path)) {
-      const prefix = `${posix.dirname(current.resource.path)}/`
-      if (
-        snapshot.wholeSet.some(
-          (record) =>
-            record.page.pageId !== input.pageId &&
-            record.page.lifecycle === "active" &&
-            record.resource.path.startsWith(prefix)
-        )
-      ) {
-        return yield* wikiError(
-          "rename",
-          "blocked",
-          "Move child pages before renaming this directory page",
-          {
-            pageId: input.pageId
-          }
-        )
-      }
-    }
-    if (snapshot.head === null) {
-      return yield* wikiError("rename", "corrupt", "A stored Wiki page has no repository head", {
-        pageId: input.pageId
-      })
-    }
-
-    const plan = yield* buildPlan(
-      repository,
-      current,
-      snapshot.wholeSet,
-      snapshot.head,
-      input.newPath,
-      input.newTitle
-    )
-    yield* requireCommitRules(
-      { repository, spaces },
-      { origin: input.commit.origin, authority: input.authority },
-      planOperations(plan)
-    ).pipe(Effect.mapError(mapRevisionError("rename", input.pageId)))
-    const approval = yield* store
-      .createOrGet({
-        approvalId: randomUUID(),
-        pageId: input.pageId,
-        plan,
-        writer: storedWriter(input)
-      })
-      .pipe(Effect.mapError(mapStoreError))
-    return yield* approvalView(approval)
-  })
-
-  const acceptRename = Effect.fn("WikiRename.accept")(function* (input: WikiRenameAcceptInput) {
-    let approval = yield* loadApproval(store, input.approvalId)
-    let plan = yield* decodePlan(approval)
-    if (approval.status === "accepted" || approval.status === "rejected") {
-      return yield* approvalView(approval)
-    }
-    const writer = yield* decodeWriter(approval)
-    const alreadyApplied =
-      approval.status === "applying" ? yield* planAlreadyApplied(repository, plan) : false
-    if (approval.status === "pending" || !alreadyApplied) {
-      const snapshot = yield* loadSnapshot(repository, "rename")
-      const boundary = yield* resolveWikiWriteBoundary(spaces, writer.authority, snapshot, "rename")
-      const paths = yield* planMutationPaths(plan, snapshot.wholeSet)
-      yield* requireWikiWritePaths(boundary, "rename", paths)
-    }
-    if (approval.status === "pending") {
-      approval = yield* store.beginApply(input.approvalId).pipe(Effect.mapError(mapStoreError))
-      plan = yield* decodePlan(approval)
-      if (approval.status === "accepted" || approval.status === "rejected") {
-        return yield* approvalView(approval)
-      }
-    }
-
-    const outcome = yield* commitWiki(
-      { repository, spaces },
-      {
-        ...writer.commit,
-        replayKey: `wiki-rename:${approval.approvalId}`,
-        authority: writer.authority,
-        expectedRevision: plan.baseHead
-      },
-      planOperations(plan)
-    ).pipe(
-      Effect.mapError(mapRevisionError("rename", plan.pageId)),
-      Effect.map((result) => ({ _tag: "Committed" as const, result })),
-      Effect.catch((cause) =>
-        cause.reason === "conflict" ||
-        cause.reason === "invalid" ||
-        Predicate.isTagged(cause.cause, "WikiCommitRuleError")
-          ? Effect.succeed({ _tag: "Uncommitted" as const, cause })
-          : Effect.fail(cause)
-      )
-    )
-
-    if (outcome._tag === "Uncommitted") {
-      const resolution =
-        outcome.cause.reason === "conflict"
-          ? "Wiki changed; reject this request and request the rename again"
-          : `Rename could not be applied: ${outcome.cause.message}`
-      const released = yield* store
-        .releaseApply(approval.approvalId, resolution.slice(0, 4_000))
-        .pipe(Effect.mapError(mapStoreError))
-      return yield* approvalView(released)
-    }
-    const finished = yield* store
-      .finishApply(approval.approvalId, outcome.result.commit.commitId)
-      .pipe(Effect.mapError(mapStoreError))
-    return yield* approvalView(finished)
-  })
-
-  const rejectRename = Effect.fn("WikiRename.reject")(function* (
-    approvalId: string,
-    resolution?: string | null
-  ) {
-    const rejected = yield* store
-      .reject(
-        approvalId,
-        resolution === null || resolution === undefined || resolution.length === 0
-          ? undefined
-          : resolution
-      )
-      .pipe(Effect.mapError(mapStoreError))
-    return yield* approvalView(rejected)
-  })
-
-  return { listRenameApprovals, requestRename, acceptRename, rejectRename }
+  const writer = (input: WikiRenameInput) => writerOf("rename", input, input.expectedHead, [input])
+  const plan = (input: WikiRenameInput) => (snapshot: Snapshot) =>
+    renamePlan(repository, snapshot, input)
+  return {
+    planRename: (input) => changes.preview(writer(input), plan(input)),
+    rename: (input) =>
+      changes.change(writer(input), plan(input)).pipe(Effect.map(({ value }) => value))
+  }
 }

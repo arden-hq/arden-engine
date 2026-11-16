@@ -31,7 +31,8 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 // including the edge cases, and expect the same answer in the same order.
 
 const HOUR = 3_600_000
-const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * HOUR).toISOString()
+const NOW = Date.now()
+const at = (hoursAgo: number) => new Date(NOW - hoursAgo * HOUR).toISOString()
 
 /** The question select before migration 150: a grouped pass over every change. */
 const oldQuestionSelect = (sql: SqlClient.SqlClient) => {

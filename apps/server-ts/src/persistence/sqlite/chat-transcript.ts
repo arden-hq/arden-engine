@@ -5,6 +5,7 @@ import type { SqlClient, SqlError } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import type { ChatCheckpointAnchor, ChatWriteError } from "../chat/store.js"
 import {
+  messageAuthor,
   MessageRoleSchema,
   StoredMessageEnvelopeSchema,
   visibleMessageCount,
@@ -359,11 +360,11 @@ export const appendMessagesInTransaction = Effect.fn("SqliteChatWriteStore.appen
       yield* sql`
       INSERT INTO session_messages (
         session_id, message_id, seq, role, message_json, client_id,
-        created_at, search_text
+        created_at, search_text, author
       ) VALUES (
         ${sessionId}, ${message.message_id}, ${sequence}, ${message.role},
         ${messageJson}, ${message.client_id ?? null}, ${message.created_at},
-        ${transcriptSearchText(message)}
+        ${transcriptSearchText(message)}, ${messageAuthor(message)}
       )
     `.pipe(
         Effect.mapError((cause) =>
@@ -539,10 +540,10 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
   const sequence = sequences[0]?.sequence ?? 0
   const turnIndex = sequences[0]?.turn_index ?? 0
   yield* options.sql`INSERT INTO session_messages (
-      session_id, message_id, seq, role, message_json, client_id, created_at, search_text
+      session_id, message_id, seq, role, message_json, client_id, created_at, search_text, author
     ) VALUES (
       ${options.sessionId}, ${options.messageId}, ${sequence}, 'user', ${messageJson}, NULL,
-      ${options.createdAt}, NULL
+      ${options.createdAt}, NULL, ${messageAuthor(message)}
     )`
   yield* hideFromActiveContext(options.sql, options.sessionId, sequence)
   yield* options.sql`INSERT INTO session_turns (

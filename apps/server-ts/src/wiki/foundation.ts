@@ -7,6 +7,7 @@ import { resolve } from "node:path"
 import { PROMPT_TEXT } from "../prompts/catalog.js"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
+import { RULES_PAGE_PATH, RULES_PAGE_TITLE } from "./code-owned-pages.js"
 import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
 import { formatWikiPage } from "./page.js"
@@ -20,7 +21,7 @@ export const initializeWikiFoundation = Effect.fn("Wiki.initializeFoundation")(f
   const entries = yield* Effect.tryPromise({
     try: () => readdir(options.workingRoot),
     catch: (cause) =>
-      wikiError("open", "storage", "Could not read the Wiki working directory", { cause })
+      wikiError("open", "storage", "Could not read the Memory working folder", { cause })
   })
   const historyRoot = resolve(
     options.historyRoot ?? resolve(options.workingRoot, ".managed-history")
@@ -78,4 +79,38 @@ checkpoints stay in application storage. Add specialist directories only when a 
       )
     })
   ).pipe(Effect.mapError(mapRevisionError("open")))
+})
+
+/** Makes the owner's rules page from `body`, the rules file it replaces, as the owner's own words. */
+export const createRulesPage = Effect.fn("Wiki.createRulesPage")(function* (
+  { repository, spaces }: WikiCommitPoint,
+  body: string
+): Effect.fn.Return<void, WikiError> {
+  const pageId = randomUUID()
+  const head = yield* repository.currentRevision.pipe(Effect.mapError(mapRevisionError("create")))
+  yield* commitWiki(
+    { repository, spaces },
+    {
+      actor: "user:external",
+      origin: { kind: "user", via: "filesystem" },
+      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+      reason: `move the standing rules into Memory as ${RULES_PAGE_PATH}`,
+      expectedRevision: head
+    },
+    [
+      createPage(
+        pageId,
+        RULES_PAGE_PATH,
+        formatWikiPage({
+          pageId,
+          title: RULES_PAGE_TITLE,
+          aliases: [],
+          lifecycle: "active",
+          redirectTo: null,
+          metadata: {},
+          body
+        })
+      )
+    ]
+  ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
 })

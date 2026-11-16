@@ -39,7 +39,7 @@ it("recall fits its room in bytes, cuts a long page, and records each block's by
       pages,
       query: "garden seeds kitchen plan",
       today: "2026-11-14",
-      sentElsewhere: new Set()
+      sent: new Map()
     }),
     lastChanged: new Map()
   })
@@ -56,4 +56,30 @@ it("recall fits its room in bytes, cuts a long page, and records each block's by
   expect(blocks.map((block) => bytes(block.replace(/\n*$/u, "")))).toEqual(
     sources.map((source) => source.bytes)
   )
+})
+
+it("recall of a page the run holds in part offers only the text past what it holds", () => {
+  const head = "Seeds are ordered for the garden.\n".repeat(10)
+  const space = page(
+    "spaces/garden.md",
+    "Garden",
+    `${head}The greenhouse key is under the blue pot.`
+  )
+  const held = space.page.content.length - space.page.body.length + head.length
+  const recallOf = (query: string) =>
+    prepareMemorySources({
+      pages: [space],
+      recall: recallCandidates({
+        pages: [space],
+        query,
+        today: "2026-11-14",
+        sent: new Map([[space.page.pageId, held]])
+      }),
+      lastChanged: new Map()
+    })
+      .render(new Map())
+      .recall?.(7_000).text ?? ""
+  expect(recallOf("where is the greenhouse key")).toContain("under the blue pot")
+  expect(recallOf("where is the greenhouse key")).not.toContain("Seeds are ordered")
+  expect(recallOf("which seeds were ordered for my garden")).toBe("")
 })

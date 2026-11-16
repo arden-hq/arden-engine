@@ -1,8 +1,5 @@
 import { writeFileSync } from "node:fs"
-import { join } from "node:path"
 import {
-  ManagedFileRepository,
-  managedFileRepositoryNodeLayer,
   type Commit,
   type ManagedFileRepositoryShape,
   type ResourceChange,
@@ -24,7 +21,7 @@ import {
 } from "../src/wiki/commit.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
 import { parseWikiPage } from "../src/wiki/page.js"
-import { locateReplayCopy } from "./fixtures/replay-copy.js"
+import { locateReplayCopy, onCopyMemory } from "./fixtures/replay-copy.js"
 import { withoutSpaces } from "./fixtures/wiki-repository.js"
 
 const located = locateReplayCopy()
@@ -125,10 +122,8 @@ const outcomeOf = Effect.fn("outcomeOf")(function* (
 
 it("replays every past Memory commit through today's commit rules and counts each outcome", async (context) => {
   if (located.kind === "absent") return context.skip(located.reason)
-  const wiki = located.copy.wiki
-  const { byCommit: outcomes, actions } = await Effect.runPromise(
+  const { byCommit: outcomes, actions } = await onCopyMemory(located.copy, (repository) =>
     Effect.gen(function* () {
-      const repository = yield* ManagedFileRepository
       const commits = [...(yield* repository.history({ limit: null }))].reverse()
       const byCommit: Array<readonly [string, string]> = []
       const actions: Record<string, number> = {}
@@ -138,15 +133,7 @@ it("replays every past Memory commit through today's commit rules and counts eac
         for (const action of replayed.actions) actions[action] = (actions[action] ?? 0) + 1
       }
       return { byCommit, actions }
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        managedFileRepositoryNodeLayer({
-          workingRoot: join(wiki, "pages"),
-          historyRoot: join(wiki, ".wiki-history")
-        })
-      )
-    )
+    })
   )
   const counts: Record<string, number> = {}
   for (const [, outcome] of outcomes) counts[outcome] = (counts[outcome] ?? 0) + 1
@@ -158,4 +145,4 @@ it("replays every past Memory commit through today's commit rules and counts eac
   )
   expect(outcomes.length).toBeGreaterThan(0)
   expect(outcomes.filter(([, outcome]) => !/^(allowed|refused:)/u.test(outcome))).toEqual([])
-}, 1_200_000)
+})

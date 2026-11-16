@@ -47,6 +47,7 @@ export const WikiPathSchema = trimmedText(4_096).check(
 export const WikiTitleSchema = trimmedText(4_096)
 export const WikiResourceStateSchema = Schema.Literals(["active", "archived"] as const)
 export const WikiPageLifecycleSchema = Schema.Literals(["active", "redirect"] as const)
+export const WikiRestoreSideSchema = Schema.Literals(["after", "before"] as const)
 export const WikiMetadataSchema = Schema.Record(Schema.String, Schema.Json)
 
 export const aliasesSchema = Schema.Array(trimmedText(4_096)).check(Schema.isMaxLength(100))

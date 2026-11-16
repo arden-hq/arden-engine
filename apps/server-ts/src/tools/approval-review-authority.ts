@@ -69,14 +69,6 @@ interface ReviewedRun {
 
 export type TrustedAuthorityReader = (run: ReviewedRun) => Promise<TrustedAuthority>
 
-const ownerWordsOf = (
-  envelopes: ReadonlyArray<Readonly<Record<string, unknown>>>
-): ReadonlyArray<string> =>
-  envelopes.flatMap((message) => {
-    const text = ownerText(message)
-    return text.length === 0 ? [] : [text]
-  })
-
 export const approvalReviewAuthority =
   (stores: {
     readonly runs: RunQueries["Service"]
@@ -116,7 +108,14 @@ export const approvalReviewAuthority =
             sessionId: root.sessionId,
             limit: 250
           })
-          const words = ownerWordsOf(conversation.records.map((record) => record.envelope))
+          const owned = yield* transcript.ownerWordsIn(
+            root.sessionId,
+            conversation.records.map((record) => record.messageId)
+          )
+          const words = conversation.records.flatMap((record) => {
+            const text = owned.has(record.messageId) ? ownerText(record.envelope) : ""
+            return text.length === 0 ? [] : [text]
+          })
           return { words }
         })
         const lineage = yield* sessionLineage(sessions, sessionId).pipe(
@@ -290,13 +289,11 @@ const originatingRequest = Effect.fn("ApprovalReview.originatingRequest")(functi
 ): Effect.fn.Return<TrustedAuthority["ownerRequest"], Error> {
   const sequence = yield* transcript.resolveReference(actor.session_id, actor.turn_id)
   if (sequence === null) return undefined
-  const page = yield* transcript.page({
-    _tag: "After",
+  const [record] = yield* transcript.ownerMessagesAfter({
     sessionId: actor.session_id,
     sequence: sequence - 1,
     limit: 1
   })
-  const record = page.records[0]
   if (
     record === undefined ||
     record.sequence !== sequence ||

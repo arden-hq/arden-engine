@@ -1,5 +1,4 @@
 import { WIKI_REPORT_FIELDS } from "@arden-hq/protocol/wiki"
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
@@ -8,11 +7,12 @@ import type { SpaceStore } from "../persistence/spaces/store.js"
 import { markedProducer, recordFolders } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { automationOrigin, commitWiki, publishReport } from "./commit.js"
-import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
+import { automationOrigin, publishReport } from "./commit.js"
+import { wikiError, type WikiError } from "./errors.js"
+import type { WikiChanges } from "./page-change.js"
 import { ObservationPeriodSchema, formatObservationPeriod } from "./observation-period.js"
 import { formatWikiPage, isReadme, normal, parseWikiPage } from "./page.js"
-import { loadSnapshot, nameTakenBy } from "./snapshot.js"
+import { nameTakenBy } from "./snapshot.js"
 import { spaceOwnsWikiPath } from "./space-index.js"
 
 export const WikiReportContentSchema = Schema.Struct({
@@ -37,7 +37,7 @@ const unwrapSourceUrl = (source: string): string =>
   /^https?:\/\//iu.test(source.trim()) ? source.replace(/\s+/gu, "") : source
 
 export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
-  repository: ManagedFileRepositoryShape,
+  changes: WikiChanges,
   spaces: SpaceStore["Service"],
   input: WikiPublishReportInput
 ): Effect.fn.Return<{ readonly pageId: string; readonly changed: boolean }, WikiError> {
@@ -62,76 +62,82 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
       "Publish one .md report inside a configured destination"
     )
   }
-  const snapshot = yield* loadSnapshot(repository, "create")
-  const destination = recordFolders(snapshot.pages).get(normal(directory))?.producer
-  if (
-    destination?.kind !== "automation" ||
-    destination.automationId !== input.producerAutomationId
-  ) {
-    return yield* wikiError(
-      "create",
-      "blocked",
-      "This Automation does not own the report destination"
-    )
+  const writer = {
+    operation: "create" as const,
+    actor: `Automation ${input.producerAutomationId}`,
+    origin: automationOrigin(input.producerAutomationId, input.producerChainDepth),
+    authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+    reason: `Publish report ${content.path}`
   }
-  const spaceOwned = yield* spaceOwnsWikiPath(spaces, content.path).pipe(
-    Effect.mapError((cause) =>
-      wikiError("create", "storage", "Could not check Space ownership", { cause })
-    )
+  const published = yield* changes.change(
+    writer,
+    Effect.fn("Wiki.planReport")(function* (snapshot) {
+      const destination = recordFolders(snapshot.pages).get(normal(directory))?.producer
+      if (
+        destination?.kind !== "automation" ||
+        destination.automationId !== input.producerAutomationId
+      ) {
+        return yield* wikiError(
+          "create",
+          "blocked",
+          "This Automation does not own the report destination"
+        )
+      }
+      const spaceOwned = yield* spaceOwnsWikiPath(spaces, content.path).pipe(
+        Effect.mapError((cause) =>
+          wikiError("create", "storage", "Could not check Space ownership", { cause })
+        )
+      )
+      if (spaceOwned)
+        return yield* wikiError("create", "blocked", "Reports cannot claim a Space-owned path")
+      const current = nameTakenBy(snapshot, content.path)
+      if (
+        current !== undefined &&
+        (current.resource.path !== content.path ||
+          current.page.lifecycle !== "active" ||
+          markedProducer(current.page) !== input.producerAutomationId)
+      ) {
+        return yield* wikiError("create", "blocked", "The report path belongs to another record")
+      }
+      if (
+        current !== undefined &&
+        current.page.title === content.title &&
+        current.page.body === content.body &&
+        current.page.metadata[WIKI_REPORT_FIELDS.period] === content.period &&
+        JSON.stringify(current.page.metadata[WIKI_REPORT_FIELDS.sources]) ===
+          JSON.stringify(content.sources)
+      ) {
+        return { writes: [], value: { pageId: current.page.pageId, changed: false } }
+      }
+      if (current !== undefined && current.resource.versionId !== input.expectedVersion) {
+        return yield* wikiError("update", "conflict", "Read the current report before replacing it")
+      }
+      const pageId = current?.page.pageId ?? randomUUID()
+      const formatted = formatWikiPage({
+        pageId,
+        title: content.title,
+        aliases: current?.page.aliases ?? [],
+        lifecycle: "active",
+        redirectTo: null,
+        metadata: {
+          ...current?.page.metadata,
+          [WIKI_REPORT_FIELDS.automationId]: input.producerAutomationId,
+          [WIKI_REPORT_FIELDS.runId]: input.runId,
+          [WIKI_REPORT_FIELDS.period]: content.period,
+          [WIKI_REPORT_FIELDS.sources]: [...content.sources]
+        },
+        body: content.body
+      })
+      yield* parseWikiPage(formatted, pageId).pipe(
+        Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { cause }))
+      )
+      return {
+        writes: [
+          publishReport(current?.resource ?? { resourceId: pageId, path: content.path }, formatted)
+        ],
+        value: { pageId, changed: true }
+      }
+    })
   )
-  if (spaceOwned)
-    return yield* wikiError("create", "blocked", "Reports cannot claim a Space-owned path")
-  const current = nameTakenBy(snapshot, content.path)
-  if (
-    current !== undefined &&
-    (current.resource.path !== content.path ||
-      current.page.lifecycle !== "active" ||
-      markedProducer(current.page) !== input.producerAutomationId)
-  ) {
-    return yield* wikiError("create", "blocked", "The report path belongs to another record")
-  }
-  if (
-    current !== undefined &&
-    current.page.title === content.title &&
-    current.page.body === content.body &&
-    current.page.metadata[WIKI_REPORT_FIELDS.period] === content.period &&
-    JSON.stringify(current.page.metadata[WIKI_REPORT_FIELDS.sources]) ===
-      JSON.stringify(content.sources)
-  ) {
-    return { pageId: current.page.pageId, changed: false }
-  }
-  if (current !== undefined && current.resource.versionId !== input.expectedVersion) {
-    return yield* wikiError("update", "conflict", "Read the current report before replacing it")
-  }
-  const pageId = current?.page.pageId ?? randomUUID()
-  const formatted = formatWikiPage({
-    pageId,
-    title: content.title,
-    aliases: current?.page.aliases ?? [],
-    lifecycle: "active",
-    redirectTo: null,
-    metadata: {
-      ...current?.page.metadata,
-      [WIKI_REPORT_FIELDS.automationId]: input.producerAutomationId,
-      [WIKI_REPORT_FIELDS.runId]: input.runId,
-      [WIKI_REPORT_FIELDS.period]: content.period,
-      [WIKI_REPORT_FIELDS.sources]: [...content.sources]
-    },
-    body: content.body
-  })
-  yield* parseWikiPage(formatted, pageId).pipe(
-    Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { cause }))
-  )
-  yield* commitWiki(
-    { repository, spaces },
-    {
-      expectedRevision: snapshot.head,
-      actor: `Automation ${input.producerAutomationId}`,
-      origin: automationOrigin(input.producerAutomationId, input.producerChainDepth),
-      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-      reason: `Publish report ${content.path}`
-    },
-    [publishReport(current?.resource ?? { resourceId: pageId, path: content.path }, formatted)]
-  ).pipe(Effect.mapError(mapRevisionError("create")))
-  return { pageId, changed: true }
+  return published.value
 })

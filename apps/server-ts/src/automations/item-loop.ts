@@ -19,27 +19,23 @@ interface ItemLoop<K extends HandlerItemKind> {
   readonly kind: K
   readonly next: () => Effect.Effect<HandlerItemDataOf<K> | "idle" | "advance", Error>
   readonly commit: (data: HandlerItemDataOf<K>) => Effect.Effect<void, Error>
-  /**
-   * Called when the model reports it cannot do an item, with its reason. "continue" moves on to
-   * `next` instead of ending the job, for a handler that has another way to finish the item.
-   */
-  readonly blocked?: (
-    data: HandlerItemDataOf<K>,
-    reason: string | null
-  ) => Effect.Effect<"stop" | "continue", Error>
+  /** Moves the position past an item the Automation gave up on, without its work, and names it. */
+  readonly skip: (data: HandlerItemDataOf<K>) => Effect.Effect<string, Error>
   readonly summary: (item: HandlerItem | undefined) => string
   readonly cancelled: string
   readonly incomplete: string
 }
 
+export interface ItemLoopServices {
+  readonly handlerItems: Pick<
+    AutomationHandlerItems["Service"],
+    "prepareHandlerItem" | "settleHandlerItem" | "giveUp"
+  >
+  readonly runItem: HandlerItemRunner
+}
+
 export const runItemLoop = <K extends HandlerItemKind>(
-  services: {
-    readonly handlerItems: Pick<
-      AutomationHandlerItems["Service"],
-      "prepareHandlerItem" | "settleHandlerItem"
-    >
-    readonly runItem: HandlerItemRunner
-  },
+  services: ItemLoopServices,
   loop: ItemLoop<K>
 ): AutomationRunner =>
   Effect.fn("AutomationItemLoop")(function* (
@@ -55,10 +51,26 @@ export const runItemLoop = <K extends HandlerItemKind>(
       error === null
         ? jobResult.completed("finished", result, run())
         : jobResult.failed(error, result, run())
-    let handled: string | undefined
+    const failed = Effect.fn("AutomationItemLoop.failed")(function* (
+      settled: HandlerItem & { readonly runId: string },
+      detail: string | null
+    ) {
+      const data = settled.input.data
+      if (!isItemKind(loop.kind, data)) return finished(detail ?? loop.incomplete)
+      const told = yield* services.handlerItems.giveUp(job, settled.runId, (decision) =>
+        decision.then === "skip"
+          ? loop
+              .skip(data)
+              .pipe(Effect.map((item) => `${loop.label} skipped ${item}: ${decision.reason}`))
+          : Effect.succeed(
+              `${loop.label} could not run: ${decision.reason} It tries the same work again on its next run.`
+            )
+      )
+      return finished(told ?? detail ?? loop.incomplete)
+    })
     while (true) {
-      if (item?.phase === "settled" && item.failure !== null && item.id !== handled)
-        return finished(item.failure)
+      if (item?.phase === "settled" && item.failure !== null)
+        return yield* failed(item, item.failure)
       if (item?.phase !== "pending") {
         const next = yield* loop.next()
         if (next === "idle") {
@@ -83,15 +95,7 @@ export const runItemLoop = <K extends HandlerItemKind>(
         return finished(outcome.detail ?? loop.cancelled, outcome.result ?? loop.summary(item))
       if (outcome.state === "failed" || outcome.state === "blocked") {
         item = yield* services.handlerItems.settleHandlerItem(job, outcome.item)
-        if (
-          outcome.state === "blocked" &&
-          loop.blocked !== undefined &&
-          (yield* loop.blocked(data, outcome.detail)) === "continue"
-        ) {
-          handled = item.id
-          continue
-        }
-        return finished(outcome.detail ?? loop.incomplete)
+        return yield* failed(outcome.item, outcome.detail)
       }
       yield* loop.commit(data)
       item = yield* services.handlerItems.settleHandlerItem(job, outcome.item)

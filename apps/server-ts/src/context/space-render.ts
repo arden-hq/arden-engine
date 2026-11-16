@@ -143,15 +143,19 @@ const fitInstructions = (instructions: string, room: number): string =>
   cutBytes(instructions, Math.max(0, room), { suffix: INSTRUCTIONS_CUT })
 
 /** How much of the Space's Memory page its context holds; `undefined` when it has no page. */
-export type SpacePageShown = "whole" | "cut" | "dropped"
+/** How much of the Space's page the context holds: characters of its content from the start. */
+export interface SpacePageShown {
+  readonly outcome: "whole" | "cut" | "dropped"
+  readonly sent: number
+}
 
 const spacePageShown = (
   page: SpaceView["page"],
-  block: { readonly whole: boolean } | undefined
+  block: { readonly sent: number } | undefined
 ): SpacePageShown | undefined => {
   if (page === undefined) return undefined
-  if (block === undefined) return "dropped"
-  return block.whole ? "whole" : "cut"
+  if (block === undefined) return { outcome: "dropped", sent: 0 }
+  return { outcome: block.sent === page.content.length ? "whole" : "cut", sent: block.sent }
 }
 
 export const SpaceFactsSchema = Schema.Struct({
@@ -388,12 +392,12 @@ const pageBlock = (
   page: NonNullable<SpaceView["page"]>,
   budget: number,
   title = "Space memory page"
-): { readonly text: string; readonly whole: boolean } | undefined => {
+): { readonly text: string; readonly sent: number } | undefined => {
   const heading = `${title} (${page.path}):`
   const continues = `(The page continues; read ${page.path} for the rest.)`
   if (byteLength(heading) + byteLength(continues) + 2 > budget) return undefined
   if (byteLength(heading) + byteLength(page.content) + 1 <= budget)
-    return { text: `${heading}\n${page.content}`, whole: true }
+    return { text: `${heading}\n${page.content}`, sent: page.content.length }
   const kept: Array<string> = []
   let used = byteLength(heading) + byteLength(continues) + 2
   for (const line of page.content.split("\n")) {
@@ -402,7 +406,10 @@ const pageBlock = (
     kept.push(line)
     used += cost
   }
-  return { text: [heading, ...kept, continues].join("\n"), whole: false }
+  return {
+    text: [heading, ...kept, continues].join("\n"),
+    sent: kept.reduce((chars, line) => chars + line.length + 1, 0)
+  }
 }
 
 const fitList = ({

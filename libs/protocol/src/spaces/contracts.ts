@@ -171,16 +171,6 @@ export interface SpaceSession extends JsonRecord {
   readonly last_activity?: string
 }
 
-/** Where a Space stands, rolled up from its chats' summaries. */
-export interface SpaceOverview extends JsonRecord {
-  readonly now: string
-  readonly next: ReadonlyArray<string>
-  readonly updated_at: string
-  readonly revision_id: number | null
-  /** Source data only; a later generator policy change is checked separately. */
-  readonly source_freshness: "fresh" | "stale" | "unknown"
-}
-
 export interface SpaceDetail extends JsonRecord {
   readonly conversation_session_id: string | null
   readonly inference: TaskInferencePolicy
@@ -190,8 +180,6 @@ export interface SpaceDetail extends JsonRecord {
   readonly instructions: string | null
   readonly agent: SpaceAgentStatus | null
   readonly sessions: ReadonlyArray<SpaceSession>
-  /** Absent from older servers and until the Space's chats have summaries. */
-  readonly overview?: SpaceOverview | null
   readonly work: SpaceSnapshot
 }
 

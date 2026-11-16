@@ -5,6 +5,7 @@ export {
   WikiTitleSchema,
   WikiResourceStateSchema,
   WikiPageLifecycleSchema,
+  WikiRestoreSideSchema,
   WikiMetadataSchema
 } from "./schema/shared.js"
 
@@ -21,9 +22,7 @@ export {
   WikiPageDiffResponseSchema,
   WikiLinkSchema,
   WikiPageLinksSchema,
-  WikiRenameApprovalStatusSchema,
-  WikiRenameApprovalSchema,
-  WikiRenameApprovalListResponseSchema,
+  WikiRenamePlanSchema,
   WikiRevisionConflictDetailSchema,
   WikiRevisionConflictEnvelopeSchema,
   WikiRevisionConflictResponseSchema,
@@ -34,8 +33,7 @@ export {
   toWikiPageDiff,
   toWikiVersionDiff,
   toWikiPageLinks,
-  toWikiRenameApproval,
-  toWikiRenameApprovals,
+  toWikiRenamePlan,
   toWikiRevisionConflict
 } from "./schema/responses.js"
 
@@ -46,17 +44,17 @@ export {
   WikiCreateRequestContextSchema,
   WikiUpdateRequestContextSchema,
   WikiRenameRequestContextSchema,
-  WikiRenameRejectInputSchema,
   WikiCreateRequestSchema,
   WikiUpdateRequestSchema,
   WikiVersionRequestSchema,
+  WikiHistoryRestoreRequestContextSchema,
+  WikiHistoryRestoreRequestSchema,
   WikiRenameRequestSchema,
-  WikiRenameRejectRequestSchema,
   encodeCreateWikiRequestEffect,
   encodeUpdateWikiRequestEffect,
   encodeWikiVersionRequestEffect,
-  encodeRenameWikiRequestEffect,
-  encodeRejectWikiRenameRequestEffect
+  encodeWikiHistoryRestoreRequestEffect,
+  encodeRenameWikiRequestEffect
 } from "./schema/requests.js"
 
 export {
@@ -64,7 +62,6 @@ export {
   WikiHistoryRouteOptionsSchema,
   WikiDiffRouteOptionsSchema,
   WikiVersionDiffRouteOptionsSchema,
-  WikiRenameDecisionSchema,
   WikiPageListQuerySchema,
   WikiHistoryQuerySchema,
   WikiDiffQuerySchema,
@@ -76,6 +73,5 @@ export {
   encodeWikiHistoryRestorePathEffect,
   encodeWikiDiffPathEffect,
   encodeWikiVersionDiffPathEffect,
-  encodeWikiLinksPathEffect,
-  encodeWikiRenameDecisionPathEffect
+  encodeWikiLinksPathEffect
 } from "./schema/routes.js"

@@ -1,4 +1,3 @@
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import type {
@@ -14,10 +13,11 @@ import {
   recordFolders
 } from "./collections.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
-import { commitWiki, createPage, type WikiCommitPoint } from "./commit.js"
-import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
+import { createPage } from "./commit.js"
+import { wikiError, type WikiError } from "./errors.js"
+import type { WikiChangeWriter, WikiChanges, WikiPlan } from "./page-change.js"
 import { formatWikiPage, namesTakenAt, parseWikiPage, takesName } from "./page.js"
-import { loadSnapshot, nameTakenBy, type Snapshot } from "./snapshot.js"
+import { nameTakenBy, type Snapshot } from "./snapshot.js"
 import {
   activeSpaceBindings,
   bindingOwnsPath,
@@ -47,8 +47,16 @@ export type SpacePageEnsured =
 const storageError = (message: string) => (cause: unknown) =>
   wikiError("create", "storage", message, { cause })
 
+const spacePageWriter = (spaceId: string, operation: "create" | "restore"): WikiChangeWriter => ({
+  operation,
+  actor: "user:space",
+  origin: { kind: "space_page" },
+  authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+  reason: `attach Memory page to Space ${spaceId}`
+})
+
 export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
-  repository: ManagedFileRepositoryShape,
+  changes: WikiChanges,
   spaces: SpaceStore["Service"],
   input: WikiSpacePageInput
 ): Effect.fn.Return<SpacePageEnsured | undefined, WikiError> {
@@ -56,27 +64,36 @@ export const ensureWikiSpacePage = Effect.fn("Wiki.ensureSpacePage")(function* (
     .get(input.spaceId)
     .pipe(Effect.mapError(storageError("Could not read the Space")))
   if (space === null) return undefined
-  const current = yield* loadSnapshot(repository, "create")
-  const others = (yield* activeSpaceBindings(spaces).pipe(
-    Effect.mapError(storageError("Could not read the Spaces' Memory pages"))
-  )).filter((binding) => binding.space_id !== space.space_id)
-  const plan = planSpacePage(current.pages, space, others)
+  const { value: plan } = yield* changes.change(
+    spacePageWriter(space.space_id, "create"),
+    Effect.fn("Wiki.planSpacePage")(function* (current): Effect.fn.Return<
+      WikiPlan<{ readonly kind: "create" | "keep" | "rebind"; readonly page: FreeSpacePage }>,
+      WikiError
+    > {
+      const others = (yield* activeSpaceBindings(spaces).pipe(
+        Effect.mapError(storageError("Could not read the Spaces' Memory pages"))
+      )).filter((binding) => binding.space_id !== space.space_id)
+      const plan = planSpacePage(current.pages, space, others)
+      return plan.kind === "create"
+        ? yield* createSpacePage(current, others, {
+            title: space.name,
+            home: input.home ?? "areas"
+          })
+        : { writes: [], value: plan }
+    })
+  )
   if (plan.kind === "keep") return { kind: "kept", space }
-  const page =
-    plan.kind === "rebind"
-      ? plan.page
-      : yield* createSpacePage({ repository, spaces }, current, others, {
-          spaceId: space.space_id,
-          title: space.name,
-          home: input.home ?? "areas"
-        })
   const bound = yield* spaces
-    .bindPage(space.space_id, page)
+    .bindPage(space.space_id, plan.page)
     .pipe(Effect.mapError(storageError("Could not bind the Space's page")))
   if (bound === null) return undefined
   return plan.kind === "rebind"
     ? { kind: "rebound", space: bound }
-    : { kind: "created", space: bound, created: { pageId: page.pageId, path: page.pagePath } }
+    : {
+        kind: "created",
+        space: bound,
+        created: { pageId: plan.page.pageId, path: plan.page.pagePath }
+      }
 })
 
 /** Logs a Space left without a page; the start check gives it one. */
@@ -93,14 +110,16 @@ export type SpaceRestore = {
 }
 
 export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
-  repository: ManagedFileRepositoryShape,
+  changes: WikiChanges,
   spaces: SpaceStore["Service"],
   spaceId: string
 ): Effect.fn.Return<SpaceRestore | null, WikiError | SpaceStoreError> {
   const space = yield* spaces.get(spaceId, true)
   if (space === null || space.archived_at === null) return null
-  const current = yield* loadSnapshot(repository, "restore")
-  const plan = planSpacePage(current.pages, space, yield* activeSpaceBindings(spaces))
+  const bindings = yield* activeSpaceBindings(spaces)
+  const plan = yield* changes.preview(spacePageWriter(spaceId, "restore"), (current) =>
+    Effect.succeed({ writes: [], value: planSpacePage(current.pages, space, bindings) })
+  )
   if (plan.kind !== "create") {
     const restored = yield* spaces.restore(spaceId, plan.page)
     return restored === null
@@ -109,7 +128,7 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   }
   const restored = yield* spaces.restore(spaceId, null)
   if (restored === null) return null
-  return yield* ensureWikiSpacePage(repository, spaces, { spaceId }).pipe(
+  return yield* ensureWikiSpacePage(changes, spaces, { spaceId }).pipe(
     Effect.map((ensured): SpaceRestore => ensured ?? { kind: "pageless", space: restored }),
     Effect.catch((error) =>
       logNoSpacePage(spaceId, error).pipe(
@@ -119,12 +138,14 @@ export const restoreWikiSpace = Effect.fn("Wiki.restoreSpace")(function* (
   )
 })
 
-const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
-  point: WikiCommitPoint,
+const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (
   current: Snapshot,
   others: ReadonlyArray<SpaceBinding>,
-  input: { readonly spaceId: string; readonly title: string; readonly home: "projects" | "areas" }
-): Effect.fn.Return<FreeSpacePage, WikiError> {
+  input: { readonly title: string; readonly home: "projects" | "areas" }
+): Effect.fn.Return<
+  WikiPlan<{ readonly kind: "create"; readonly page: FreeSpacePage }>,
+  WikiError
+> {
   const title = input.title.trim()
   if (title.length === 0) {
     return yield* wikiError("create", "invalid", "Space page title must not be empty")
@@ -149,7 +170,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePageCommit")(function* (
     return yield* wikiError(
       "create",
       "blocked",
-      `The ${home} directory must be an active, unowned collection with a valid directory contract`
+      `The ${home} folder must be an active, unowned collection with a valid folder contract`
     )
   }
   const usedNames = namesTakenAt(current.wholeSet.map((record) => record.resource.path))
@@ -206,23 +227,15 @@ Keep useful context; archive obsolete pages deliberately and preserve evidence.
   yield* parseWikiPage(content, pageId).pipe(
     Effect.mapError((cause) => wikiError("create", "invalid", cause.message, { pageId, cause }))
   )
-  yield* commitWiki(
-    point,
-    {
-      expectedRevision: current.head,
-      actor: "user:space",
-      origin: { kind: "space_page" },
-      authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-      reason: `attach Memory page to Space ${input.spaceId}`
-    },
-    [
+  return {
+    writes: [
       ...(directory === undefined
         ? [createPage(directoryId, directoryPath, directoryContent)]
         : []),
       createPage(pageId, path, content)
-    ]
-  ).pipe(Effect.mapError(mapRevisionError("create", pageId)))
-  return free
+    ],
+    value: { kind: "create" as const, page: free }
+  }
 })
 
 type EnsureSpacePage = Pick<WikiMutationMethods, "ensureSpacePage">

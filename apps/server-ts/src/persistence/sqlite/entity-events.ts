@@ -7,7 +7,6 @@ import { announceNotice } from "./notices.js"
 import { taskDoor } from "./ending-arrival.js"
 import { entityWeight, tellChat } from "./owner-update.js"
 import { entityPlaces, type ChatPlace, type Place } from "./run-destination.js"
-import { userAutomationSql } from "./authority-sql.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { failedRunStatusList, restartCutRunSql } from "./status-sets.js"
 
@@ -248,6 +247,7 @@ export const recordAutomationEvent = Effect.fn("EntityEvents.automation")(functi
     readonly sessionEvents: SessionLifecycleEvents["Service"]
     readonly automationId: string
     readonly attemptId: number
+    readonly runId?: string | null
     readonly event: "failed" | "paused"
     readonly text: string
   }
@@ -257,7 +257,7 @@ export const recordAutomationEvent = Effect.fn("EntityEvents.automation")(functi
     readonly automation_ref: string
     readonly context_mode: string
   }>`SELECT name, automation_ref, context_mode FROM scheduled_tasks
-    WHERE task_id = ${options.automationId} AND ${userAutomationSql()}`)[0]
+    WHERE task_id = ${options.automationId}`)[0]
   if (automation === undefined) return
   const ended = (yield* sql<{ readonly ended_at: string | null }>`
     SELECT ended_at FROM automation_runs WHERE id = ${options.attemptId}`)[0]
@@ -297,7 +297,7 @@ export const recordAutomationEvent = Effect.fn("EntityEvents.automation")(functi
       entity: "automation",
       entityId: options.automationId,
       event: options.event,
-      runId: null,
+      runId: options.runId ?? null,
       text: options.text,
       places,
       occurredAt: at,

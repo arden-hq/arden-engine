@@ -12,7 +12,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const memoryWakesLeaveReviews: Migration = {
-  version: 162,
+  version: 160,
   name: "memory_wakes_leave_reviews",
   foreignKeys: { kind: "enforced" },
   up

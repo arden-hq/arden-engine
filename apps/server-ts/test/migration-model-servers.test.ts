@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite"
 import { afterEach, expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
 import { migrations } from "../src/persistence/migrations/index.js"
-import { modelServerEndpoint } from "../src/persistence/migrations/0170_model_server_endpoint.js"
+import { modelServerEndpoint } from "../src/persistence/migrations/0169_model_server_endpoint.js"
 import { pendingMigrationSteps } from "../src/persistence/migrations/runner.js"
 
 const opened: DatabaseSync[] = []

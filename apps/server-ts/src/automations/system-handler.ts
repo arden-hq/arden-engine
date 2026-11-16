@@ -17,10 +17,8 @@ import type { HomeStore } from "../persistence/home/store.js"
 import type { SessionStore } from "../persistence/sessions/store.js"
 import type { StoragePolicyStore } from "../persistence/storage/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
-import type { makeSpaceOverview } from "../memory/space-overview.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
-import type { WikiMaintenanceStore } from "../persistence/wiki-maintenance/store.js"
-import type { DailySummaryPosition } from "../persistence/daily-summary/store.js"
+import type { ReaderPositions } from "../persistence/reader-position.js"
 import type { Wiki } from "../wiki/service.js"
 import type { HandlerItemRunner } from "./handler-item-run.js"
 import type { AutomationRunner, AwaitAutomationRun } from "./runner.js"
@@ -33,12 +31,10 @@ export interface SystemHandlerServices {
   readonly home: HomeStore["Service"]
   readonly memory: Memory["Service"]
   readonly wiki: Wiki["Service"]
-  readonly wikiMaintenance: WikiMaintenanceStore["Service"]
-  readonly dailyPosition: DailySummaryPosition["Service"]
+  readonly positions: ReaderPositions["Service"]
   readonly retentionPolicy: StoragePolicyStore["Service"]
   readonly sessions: SessionStore["Service"]
   readonly summaries: SummaryStore["Service"]
-  readonly spaceOverview: ReturnType<typeof makeSpaceOverview>
   readonly linkOfferChat: ReturnType<typeof makeChatOutcomeLinker>
   readonly transcripts: TranscriptQueries["Service"]
   readonly awaitRun: AwaitAutomationRun

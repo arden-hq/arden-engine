@@ -18,6 +18,7 @@ import {
   type WikiWriter
 } from "./commit.js"
 import { mapRevisionError, WikiError } from "./errors.js"
+import { codeOwnedPage } from "./code-owned-pages.js"
 import { isReadme, replacementContent } from "./page.js"
 import type { Snapshot } from "./snapshot.js"
 import {
@@ -174,7 +175,14 @@ export const makeOutsideEdits = (input: {
       case "changed": {
         const content = utf8(change.content)
         if (content === undefined) return setAside("unreadable", "The file is not UTF-8 text")
-        const refused = yield* allowed(replacementContent("update", record.page.pageId, content))
+        const refused = yield* allowed(
+          replacementContent(
+            "update",
+            record.page.pageId,
+            content,
+            codeOwnedPage(resource.path)?.plainTitle
+          )
+        )
         return refused === undefined ? { kind: "take_in", change } : setAside("refused", refused)
       }
       case "missing": {

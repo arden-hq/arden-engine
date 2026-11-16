@@ -375,7 +375,11 @@ export class ContextCompaction extends Context.Service<
           .settings()
           .pipe(Effect.mapError((cause) => mapSettingsError("manual", snapshot.sessionId, cause)))
         const beforeTokens = storedInputTokens(snapshot)
-        const plan = planCompaction(snapshot.messages, controls.compactionKeepRatio)
+        const plan = planCompaction(
+          snapshot.messages,
+          snapshot.ownerWords,
+          controls.compactionKeepRatio
+        )
         if (plan === null) {
           return {
             status: "nothing_to_compact",
@@ -434,6 +438,7 @@ export class ContextCompaction extends Context.Service<
           .pipe(Effect.mapError((cause) => mapSettingsError("automatic", input.sessionId, cause)))
         const plan = planCompaction(
           snapshot.messages,
+          snapshot.ownerWords,
           controls.compactionKeepRatio,
           input.pendingCallIds
         )

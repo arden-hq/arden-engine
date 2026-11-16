@@ -3,12 +3,9 @@ import type { ChatMessage } from "../chat/message.js"
 import type { TerminalAutomationChatRun } from "../persistence/automations/queue.js"
 import type { AutomationJobLease } from "../persistence/automations/store.js"
 import type { AutomationHandlerItems } from "../persistence/automations/handler-items.js"
-import {
-  MAX_HANDLER_ITEM_ATTEMPTS,
-  handlerItemClientId,
-  type HandlerItem
-} from "../persistence/automations/handler-item.js"
+import { handlerItemClientId, type HandlerItem } from "../persistence/automations/handler-item.js"
 import { handlerItemPrompt } from "./system.js"
+import { retried } from "./job-run.js"
 import { startAutomationRun, type AwaitAutomationRun } from "./runner.js"
 
 interface HandlerItemOutcome {
@@ -32,7 +29,7 @@ export const makeHandlerItemRunner = (services: {
     initial: HandlerItem
   ): Effect.fn.Return<HandlerItemOutcome, Error> {
     let item = initial
-    while (true) {
+    const run = Effect.fn("HandlerItemRunner.run")(function* () {
       let runId = item.runId
       if (runId === null) {
         const receipt = yield* startAutomationRun(services.chat, job, {
@@ -45,16 +42,20 @@ export const makeHandlerItemRunner = (services: {
         if (receipt.runId === null) throw new Error("Handler Chat Run has no identity")
         runId = receipt.runId
       }
-      const observed = yield* services.awaitRun(runId)
-      const retryable =
-        observed.status !== "cancelled" &&
-        (observed.status === "failed" || observed.blocked?.kind === "transient")
-      if (retryable && item.attempt < MAX_HANDLER_ITEM_ATTEMPTS) {
-        item = yield* services.handlerItems.retryHandlerItem(job, item)
-        yield* Effect.sleep("500 millis")
-        continue
-      }
-      return { item: { ...item, runId }, result: observed.result, ...describeOutcome(observed) }
+      return { ...(yield* services.awaitRun(runId)), runId }
+    })
+    const observed = yield* retried(yield* run(), item.attempt, () =>
+      services.handlerItems.retryHandlerItem(job, item).pipe(
+        Effect.flatMap((next) => {
+          item = next
+          return run()
+        })
+      )
+    )
+    return {
+      item: { ...item, runId: observed.runId },
+      result: observed.result,
+      ...describeOutcome(observed)
     }
   })
 

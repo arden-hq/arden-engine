@@ -43,13 +43,14 @@ import {
 } from "./retraction.js"
 import { brokenRedirect, loadSnapshot, type PageRecord, type Snapshot } from "./snapshot.js"
 import { spacePageCheck } from "./space-index.js"
-import { isCodeOwnedPage } from "./code-owned-pages.js"
+import { codeOwnedPage, isCodeOwnedPage } from "./code-owned-pages.js"
 
 export type WikiCommitOrigin =
   /** The owner, in the app or in the file. */
   | { readonly kind: "user"; readonly via: "filesystem" | `desktop${string}` }
-  /** The owner's own chat turn, forgetting or undoing a retraction after their approval. */
-  | { readonly kind: "forget"; readonly sessionId: string }
+  /** The owner's own chat turn after their approval: forgetting or undoing a retraction, or
+   *  changing their standing rules. */
+  | { readonly kind: "forget" | "rules"; readonly sessionId: string }
   | {
       readonly kind: "agent"
       readonly sessionId: string | undefined
@@ -67,7 +68,7 @@ export interface WikiCommitIdentity {
   readonly actor: string
   readonly origin: WikiCommitOrigin
   readonly reason: string
-  /** Names a write that may be sent again after a crash; the same write lands once. */
+  /** Names a write that may be sent again after a crash; its receipt marks that it landed. */
   readonly replayKey?: string
 }
 
@@ -77,7 +78,7 @@ export interface WikiWriter {
   readonly authority: WikiLocationAuthority
 }
 
-/** Tidy, the upkeep Automation; the system handler registry decides which Automation that is. */
+/** Wiki Maintenance, the upkeep Automation; the system handler registry decides which Automation that is. */
 export const upkeepOrigin = (
   automationId: string,
   chainDepth?: number
@@ -111,7 +112,7 @@ const RETIRED_UPKEEP_ORIGINS: ReadonlyMap<string, string> = new Map([
 const CHAIN_MARK = "~"
 const AGENT_ORIGIN = "wiki.agent"
 const CAPTURE_ORIGIN = "memory.capture"
-const FORGET_ORIGIN = "memory.forget"
+const OWNER_TURN_ORIGINS = { forget: "memory.forget", rules: "memory.rules" } as const
 const CHAINED = /^(.+)~(\d+)$/u
 
 const chainMark = (chainDepth: number | undefined): string =>
@@ -127,7 +128,7 @@ const chatOf = (origin: string, base: string): string | undefined | null => {
     : null
 }
 
-export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
+const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
   switch (origin.kind) {
     case "user":
       return origin.via
@@ -139,7 +140,8 @@ export const encodeWikiOrigin = (origin: WikiCommitOrigin): string => {
     case "capture":
       return withChat(CAPTURE_ORIGIN, origin.sessionId)
     case "forget":
-      return withChat(FORGET_ORIGIN, origin.sessionId)
+    case "rules":
+      return withChat(OWNER_TURN_ORIGINS[origin.kind], origin.sessionId)
     case "space_page":
       return "space.page"
     case "system":
@@ -162,9 +164,10 @@ export const decodeWikiOrigin = (origin: string): WikiCommitOrigin => {
     }
   const captureChat = chatOf(origin, CAPTURE_ORIGIN)
   if (captureChat !== null) return { kind: "capture", sessionId: captureChat }
-  const forgetChat = chatOf(origin, FORGET_ORIGIN)
-  if (forgetChat !== null && forgetChat !== undefined)
-    return { kind: "forget", sessionId: forgetChat }
+  for (const kind of ["forget", "rules"] as const) {
+    const ownerChat = chatOf(origin, OWNER_TURN_ORIGINS[kind])
+    if (ownerChat !== null && ownerChat !== undefined) return { kind, sessionId: ownerChat }
+  }
   if (origin === "space.page") return { kind: "space_page" }
   const prefix = [UPKEEP_PREFIX, AUTOMATION_PREFIX].find((each) => origin.startsWith(each))
   const named = prefix === undefined ? "" : origin.slice(prefix.length).trim()
@@ -187,6 +190,7 @@ export const wikiOriginSource = (origin: WikiCommitOrigin): WikiCommitSource => 
     case "automation":
       return origin.kind
     case "forget":
+    case "rules":
       return "user"
     case "capture":
     case "upkeep":
@@ -202,6 +206,7 @@ export const wikiOriginChat = (origin: WikiCommitOrigin): string | undefined => 
     case "agent":
     case "capture":
     case "forget":
+    case "rules":
       return origin.sessionId
     case "user":
     case "automation":
@@ -216,7 +221,7 @@ const isAutomatedOrigin = (origin: WikiCommitOrigin): boolean =>
   wikiOriginSource(origin) === "automation"
 
 const isOwnerOrigin = (origin: WikiCommitOrigin): boolean =>
-  origin.kind === "user" || origin.kind === "forget"
+  origin.kind === "user" || origin.kind === "forget" || origin.kind === "rules"
 
 const isCaptureWriter = (origin: WikiCommitOrigin): boolean => origin.kind === "capture"
 
@@ -350,33 +355,21 @@ export const commitWiki = (
   writes: ReadonlyArray<WikiWrite>
 ): Effect.Effect<CommitResult, WikiCommitError> => {
   const { replayKey } = options
-  const commit = point.repository.commit({
-    actor: options.actor,
-    origin: encodeWikiOrigin(options.origin),
-    reason: options.reason,
-    operations: writes.map((write) => write.operation),
-    ...(options.expectedRevision === null
-      ? { expectedHead: null, enforceExpectedHead: true }
-      : { expectedHead: options.expectedRevision }),
-    ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
-  })
-  const checked = requireCommitRules(point, options, writes).pipe(Effect.andThen(commit))
-  return replayKey === undefined
-    ? checked
-    : replayOrCommit(point.repository, replayKey, { checked, landed: commit })
+  return requireCommitRules(point, options, writes).pipe(
+    Effect.andThen(
+      point.repository.commit({
+        actor: options.actor,
+        origin: encodeWikiOrigin(options.origin),
+        reason: options.reason,
+        operations: writes.map((write) => write.operation),
+        ...(options.expectedRevision === null
+          ? { expectedHead: null, enforceExpectedHead: true }
+          : { expectedHead: options.expectedRevision }),
+        ...(replayKey === undefined ? {} : { idempotencyKey: replayKey })
+      })
+    )
+  )
 }
-
-const replayOrCommit = (
-  repository: ManagedFileRepositoryShape,
-  replayKey: string,
-  write: {
-    readonly checked: Effect.Effect<CommitResult, WikiCommitError>
-    readonly landed: Effect.Effect<CommitResult, WikiCommitError>
-  }
-): Effect.Effect<CommitResult, WikiCommitError> =>
-  repository
-    .idempotencyReceipt(replayKey)
-    .pipe(Effect.flatMap((receipt) => (receipt === null ? write.checked : write.landed)))
 
 /**
  * Record one change made outside Arden that is already in the page's file. It meets the commit
@@ -468,7 +461,7 @@ interface CommitView {
 const requireHumanAliases = ({ page, resourceId }: ResolvedWrite) =>
   Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
     ? Effect.void
-    : ruleError("aliases", `Wiki page ${resourceId} keeps a path or a repeated name as an alias`)
+    : ruleError("aliases", `Memory page ${resourceId} keeps a path or a repeated name as an alias`)
 
 const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
   { origin }: CommitView,
@@ -560,7 +553,7 @@ const requireNotRecord = Effect.fn("Wiki.requireNotRecord")(function* (
     return yield* ruleError(
       "records",
       `${path} is ${kind.kind === "record" ? "a record" : "the contract"} of ${kind.folder.directory}/, kept as its producer wrote it. ` +
-        "Tidy reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
+        "Wiki Maintenance reads it but does not change it. Nothing was saved. Put what it says on a subject page instead."
     )
   }
 })
@@ -688,7 +681,8 @@ const keepsCodeOwnedPage = (origin: WikiCommitOrigin, write: ResolvedWrite): boo
     case "create":
     case "new_page":
     case "publish":
-      if (write.before === null) return origin.kind === "forget"
+      if (write.before === null)
+        return codeOwnedPage(write.path.after ?? "")?.madeBy === origin.kind
       break
     case "archive":
       return false
@@ -720,8 +714,7 @@ const requireCodeOwnedPageKept = Effect.fn("Wiki.requireCodeOwnedPageKept")(func
   if (keepsCodeOwnedPage(origin, write)) return
   return yield* ruleError(
     "code_owned",
-    `${path} is where Arden keeps what the owner asked to forget, so it cannot be made, moved, renamed, merged or archived by hand. ` +
-      "Nothing was saved. To let a line back, undo its entry in a chat or delete the entry from the page."
+    `${path} cannot be made, moved, renamed, merged or archived by hand. Nothing was saved. ${path} ${codeOwnedPage(path)?.holds ?? ""}`
   )
 })
 
@@ -769,8 +762,8 @@ const requireActivePage = Effect.fn("Wiki.requireActivePage")(function* (
   if (Option.isNone(page) || page.value.lifecycle === "active") return
   const options = { pageId: write.resourceId }
   return yield* write.action === "edit"
-    ? wikiError("update", "invalid", "Only active Wiki pages can be updated", options)
-    : wikiError(write.action, "invalid", "Only active Wiki pages can be retired", options)
+    ? wikiError("update", "invalid", "Only active Memory pages can be updated", options)
+    : wikiError(write.action, "invalid", "Only active Memory pages can be retired", options)
 })
 
 const requireWithinBoundary = Effect.fn("Wiki.requireWithinBoundary")(function* (
@@ -811,7 +804,7 @@ const requireDirectoryEmptied = Effect.fn("Wiki.requireDirectoryEmptied")(functi
       after.get(record.page.pageId)?.startsWith(`${directory}/`) === true
   )
   if (child !== undefined)
-    return yield* wikiError(write.action, "blocked", `Active Wiki pages remain in ${directory}`, {
+    return yield* wikiError(write.action, "blocked", `Active Memory pages remain in ${directory}`, {
       pageId: write.resourceId
     })
 })

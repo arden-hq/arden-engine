@@ -609,9 +609,9 @@ const addMessage = (
       VALUES (${chat.sessionId}, ${id}, ${seq}, 'user',
         ${JSON.stringify({ message_id: id, role: "user", content: "x", ...message })},
         '2026-11-04T09:00:00.000Z')`
-    if (startsRun)
-      yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.turn_id', ${id})
-        WHERE run_id = ${chat.runId}`
+    if (!startsRun) return
+    yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.turn_id', ${id})
+      WHERE run_id = ${chat.runId}`
   })
 
 const report = {
@@ -624,16 +624,6 @@ const report = {
     content: "done"
   }
 }
-
-it("a question answer counts as the person's message", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const chat = yield* chatOnSpace({ text: "x", meta: true })
-      yield* addMessage(chat, 1000, { is_meta: true, question_answer: { question_id: "q" } }, true)
-      expect(Exit.isSuccess(yield* Effect.exit(chat.offer("a")))).toBe(true)
-    })
-  )
-})
 
 it("a turn woken by an agent report cites the person's latest message, unless a note cut in", async () => {
   await withTempDatabase(

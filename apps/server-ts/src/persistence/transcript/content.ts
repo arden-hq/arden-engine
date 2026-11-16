@@ -1,5 +1,10 @@
 import { Option, Predicate, Schema } from "effect"
 import { isHumanMessage } from "@arden-hq/loop"
+import { answerBlockText } from "@arden-hq/answer-ui"
+import { answerBlockTitle, replaceAnswerBlocks } from "@arden-hq/protocol/chat"
+import { cutText } from "@arden-hq/std/text"
+import type { StoredMessageEnvelope } from "./model.js"
+import { ownerText } from "./owner-words.js"
 
 export { isHumanMessage } from "@arden-hq/loop"
 
@@ -73,4 +78,68 @@ export interface ContentEnvelope {
 export const latestHumanText = (messages: ReadonlyArray<ContentEnvelope>): string | undefined => {
   const message = messages.findLast(isHumanMessage)
   return message === undefined ? undefined : authoredText(message.content)
+}
+
+const SUMMARY_CHARS = 300
+
+const summarizeAnswerBlock = (body: string): string => {
+  const lines = answerBlockText(body)
+    .split("\n")
+    .map((line) => line.trim())
+  const heading = lines.find((line) => line.startsWith("## "))?.slice(3)
+  const title = heading ?? answerBlockTitle(body)
+  const summary = cutText(
+    lines
+      .filter((line) => line.length > 0 && !line.startsWith("## ") && !TABLE_RULE.test(line))
+      .map(plainLine)
+      .filter((line) => line.length > 0)
+      .join("; "),
+    SUMMARY_CHARS
+  )
+  const label = title === undefined ? "interactive block" : `interactive block: ${title}`
+  return summary.length === 0 ? `[${label}]` : `[${label} — ${summary}]`
+}
+
+const COMPACT_CACHE_SIZE = 256
+const compacted = new Map<string, string>()
+
+export const compactAnswerBlock = (body: string): string => {
+  const known = compacted.get(body)
+  if (known !== undefined) return known
+  const line = summarizeAnswerBlock(body)
+  if (compacted.size >= COMPACT_CACHE_SIZE) {
+    const oldest = compacted.keys().next()
+    if (oldest.done !== true) compacted.delete(oldest.value)
+  }
+  compacted.set(body, line)
+  return line
+}
+
+export const compactAnswerBlocks = (markdown: string): string =>
+  replaceAnswerBlocks(markdown, compactAnswerBlock)
+
+const TABLE_RULE = /^\|(?:\s*-+\s*\|)+$/
+
+const plainLine = (line: string): string =>
+  line.startsWith("|")
+    ? line
+        .slice(1, -1)
+        .split(" | ")
+        .map((cell) => cell.trim())
+        .filter(Boolean)
+        .join(" ")
+    : line.replace(/\*\*(.+?)\*\*/g, "$1")
+
+/**
+ * The text Memory Capture reads of a message, or null when it reads none. An answer to Arden's
+ * question reads as what the owner said, with Arden's prompt marked as Arden's.
+ */
+export const capturedText = (message: StoredMessageEnvelope): string | null => {
+  if (message.superseded === true) return null
+  const text = (
+    message.question_answer === undefined
+      ? compactAnswerBlocks(authoredText(message.content))
+      : ownerText(message)
+  ).trim()
+  return text.length === 0 ? null : text
 }

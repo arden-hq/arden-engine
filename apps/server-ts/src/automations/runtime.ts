@@ -14,7 +14,6 @@ import { StructuredCompletion } from "../models/structured-completion.js"
 import { Decisions } from "../models/decisions/service.js"
 import { screenEventWake } from "./prefilter.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
-import { makeSpaceOverview } from "../memory/space-overview.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
 import { makeChatOutcomeLinker } from "../routing/chat-outcome.js"
 import { makeJobWorker } from "@arden-hq/jobs"
@@ -48,8 +47,7 @@ import {
   SessionLifecycleEvents,
   type SessionLifecycleDelivery
 } from "../persistence/sessions/events.js"
-import { WikiMaintenanceStore } from "../persistence/wiki-maintenance/store.js"
-import { DailySummaryPosition } from "../persistence/daily-summary/store.js"
+import { ReaderPositions } from "../persistence/reader-position.js"
 import { Wiki } from "../wiki/service.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 import type { AutomationId } from "../persistence/automations/model.js"
@@ -84,8 +82,7 @@ export class AutomationRuntime extends Context.Service<
     | Memory
     | SessionLifecycleEvents
     | Wiki
-    | WikiMaintenanceStore
-    | DailySummaryPosition
+    | ReaderPositions
     | StoragePolicyStore
     | HomeStore
     | IntelligenceSettingsStore
@@ -121,15 +118,10 @@ export class AutomationRuntime extends Context.Service<
       const memory = yield* Memory
       const sessionEvents = yield* SessionLifecycleEvents
       const wiki = yield* Wiki
-      const wikiMaintenance = yield* WikiMaintenanceStore
-      const dailyPosition = yield* DailySummaryPosition
+      const positions = yield* ReaderPositions
       const sessions = yield* SessionStore
       const transcripts = yield* TranscriptQueries
       const summaries = yield* SummaryStore
-      const spaceOverview = makeSpaceOverview({
-        completion: yield* StructuredCompletion,
-        summaries
-      })
       const linkOfferChat = makeChatOutcomeLinker({
         spaces: yield* SpaceStore,
         proposals: yield* TaskProposalStore,
@@ -160,12 +152,10 @@ export class AutomationRuntime extends Context.Service<
         home,
         memory,
         wiki,
-        wikiMaintenance,
-        dailyPosition,
+        positions,
         retentionPolicy,
         sessions,
         summaries,
-        spaceOverview,
         linkOfferChat,
         transcripts,
         awaitRun: awaitChatRun,
@@ -282,7 +272,7 @@ export class AutomationRuntime extends Context.Service<
           yield* store.seedSystemAutomations(SYSTEM_AUTOMATION_SPECS)
           yield* diagnostics.startupPhase("automation_seeds_ready")
           const maintenanceBaseline = yield* wiki.head()
-          yield* wikiMaintenance.initialize(maintenanceBaseline)
+          yield* positions.maintenance.start(maintenanceBaseline)
           yield* diagnostics.startupPhase("automation_wiki_ready")
           yield* store.reconcileSpaceJobs()
           yield* diagnostics.startupPhase("automation_space_jobs_ready")

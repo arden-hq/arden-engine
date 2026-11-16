@@ -14,8 +14,7 @@ const routes = [
   ["Space rules", permissionRoutes.spaceRules],
   ["Wiki page", wikiRoutes.page],
   ["Wiki archived-page restore", wikiRoutes.restoreArchived],
-  ["Wiki history restore", (id: string) => wikiRoutes.historyRestore("page", id)],
-  ["Wiki rename decision", (id: string) => wikiRoutes.renameDecision(id, "accept")]
+  ["Wiki history restore", (id: string) => wikiRoutes.historyRestore("page", id)]
 ] as const
 
 it.each(routes)(

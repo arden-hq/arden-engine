@@ -3,9 +3,10 @@ import type {
   WikiLink,
   WikiPage,
   WikiPageSummary,
-  WikiRenameApproval,
+  WikiRenamePlan,
   WikiResourceVersion
 } from "@arden-hq/protocol/wiki"
+import type { WikiRenameRequestSchema } from "@arden-hq/protocol/effect/wiki"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { pageCameFrom } from "../../memory/discussed-in.js"
@@ -74,17 +75,23 @@ const link = (value: WikiLink) => ({
   target_page_id: value.targetPageId
 })
 
-const renameApproval = (approval: WikiRenameApproval) => ({
-  approval_id: approval.approvalId,
-  old_path: approval.oldPath,
-  new_path: approval.newPath,
-  old_title: approval.oldTitle,
-  new_title: approval.newTitle,
-  link_count: approval.linkCount,
-  page_count: approval.pageCount,
-  status: approval.status,
-  created_at: approval.createdAt,
-  resolution: approval.resolution
+const renamePlan = (plan: WikiRenamePlan) => ({
+  old_path: plan.oldPath,
+  new_path: plan.newPath,
+  old_title: plan.oldTitle,
+  new_title: plan.newTitle,
+  link_count: plan.linkCount,
+  page_count: plan.pageCount
+})
+
+const renameInput = (payload: typeof WikiRenameRequestSchema.Type) => ({
+  pageId: payload.page_id,
+  newPath: payload.new_path,
+  newTitle: payload.new_title,
+  expectedVersion: payload.expected_version,
+  expectedHead: payload.expected_head,
+  authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+  commit: OWNER_RENAME
 })
 
 const conflictError = (error: WikiError) => ({
@@ -197,7 +204,8 @@ export const WikiHandlers = HttpApiBuilder.group(
                 origin: commit.origin,
                 reason: commit.reason,
                 timestamp: commit.timestamp,
-                changes: commit.changes.map(historyChange)
+                changes: commit.changes.map(historyChange),
+                restorable: commit.restorable
               }))
             })),
             Effect.mapError(wikiErrorToHttp)
@@ -207,11 +215,16 @@ export const WikiHandlers = HttpApiBuilder.group(
         wiki
           .restore({
             pageId: params.pageId,
-            version: { commitId: params.commitId, side: "before" },
+            version: { commitId: params.commitId, side: payload.side ?? "before" },
             expectedVersion: payload.expected_version,
             expectedHead: payload.expected_head,
             authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-            commit: ownerInApp(`restore Tidy commit ${params.commitId}`, "desktop.restore")
+            commit: ownerInApp(
+              payload.side === "after"
+                ? `restore wiki page to its version of commit ${params.commitId}`
+                : `restore Maintenance commit ${params.commitId}`,
+              "desktop.restore"
+            )
           })
           .pipe(Effect.map(pageDetail), Effect.mapError(writeError))
       )
@@ -295,34 +308,13 @@ export const WikiHandlers = HttpApiBuilder.group(
           Effect.mapError(wikiErrorToHttp)
         )
       )
-      .handle("listRenameApprovals", () =>
-        wiki.listRenameApprovals().pipe(
-          Effect.map((approvals) => ({ approvals: approvals.map(renameApproval) })),
-          Effect.mapError(wikiErrorToHttp)
-        )
-      )
-      .handle("requestRename", ({ payload }) =>
+      .handle("planRename", ({ payload }) =>
         wiki
-          .requestRename({
-            pageId: payload.page_id,
-            newPath: payload.new_path,
-            newTitle: payload.new_title,
-            expectedVersion: payload.expected_version,
-            expectedHead: payload.expected_head,
-            authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
-            commit: OWNER_RENAME
-          })
-          .pipe(Effect.map(renameApproval), Effect.mapError(writeError))
+          .planRename(renameInput(payload))
+          .pipe(Effect.map(renamePlan), Effect.mapError(writeError))
       )
-      .handle("acceptRename", ({ params }) =>
-        wiki
-          .acceptRename({ approvalId: params.approvalId })
-          .pipe(Effect.map(renameApproval), Effect.mapError(writeError))
-      )
-      .handle("rejectRename", ({ params, payload }) =>
-        wiki
-          .rejectRename(params.approvalId, payload?.resolution)
-          .pipe(Effect.map(renameApproval), Effect.mapError(writeError))
+      .handle("rename", ({ payload }) =>
+        wiki.rename(renameInput(payload)).pipe(Effect.map(renamePlan), Effect.mapError(writeError))
       )
   })
 )

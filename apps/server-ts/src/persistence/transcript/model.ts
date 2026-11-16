@@ -1,3 +1,4 @@
+import { isRecord } from "@arden-hq/std/json"
 import { DateTime, Option, Schema } from "effect"
 import { JsonObjectSchema } from "../json.js"
 
@@ -45,6 +46,24 @@ export const StoredMessageEnvelopeSchema = Schema.StructWithRest(
 )
 
 export type StoredMessageEnvelope = (typeof StoredMessageEnvelopeSchema)["Type"]
+
+/** Who wrote a user message, stored with it as `session_messages.author`. `unknown` is only
+ *  for old turns that kept no proof; no writer produces it. */
+export type MessageAuthor = "owner" | "answer" | "copy" | "automation" | "agent" | "app" | "unknown"
+
+/** The author a writer's own marks give its message; null for the roles Arden writes. */
+export const messageAuthor = (message: Readonly<Record<string, unknown>>): MessageAuthor | null => {
+  if (message.role !== "user") return null
+  if (message.forked_from !== undefined) return "copy"
+  if (message.automation !== undefined) return "automation"
+  const interaction = message.interaction
+  if (isRecord(interaction) && isRecord(interaction.from) && interaction.from.type === "harness")
+    return "app"
+  if (interaction !== undefined || message.from_chat !== undefined) return "agent"
+  if (message.sent_from !== undefined) return "agent"
+  if (message.is_meta !== true) return "owner"
+  return message.question_answer === undefined ? "app" : "answer"
+}
 
 export const visibleMessageCount = (messages: ReadonlyArray<StoredMessageEnvelope>): number =>
   messages.filter(

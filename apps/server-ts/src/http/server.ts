@@ -106,7 +106,7 @@ import { RequestIdMiddleware } from "./middleware/request-id.js"
 import { BootIdMiddleware } from "./middleware/boot-id.js"
 import { ServerLifecycle, serverLifecycleLayer } from "../runtime/lifecycle.js"
 import { LifecycleMiddleware } from "./middleware/lifecycle.js"
-import { globalInstructionsLayer } from "../context/global-instructions.js"
+import { rulesMoveLayer } from "../context/global-instructions.js"
 import { BrowserProcedures } from "../browser/procedures/service.js"
 import { BrowserProcedureRuntime } from "../browser/procedures/runtime.js"
 import { BrowserProcedureHandlers } from "./browser-procedures/handlers.js"
@@ -168,9 +168,7 @@ const composeServer = (
     Layer.provide(storage)
   )
   const skills = skillCatalogLayer(root.skills, { extraRoots: config.sharedSkillRoots })
-  const globalInstructions = globalInstructionsLayer(root.globalInstructions).pipe(
-    Layer.provide(storage)
-  )
+  const rulesMove = rulesMoveLayer(root.globalInstructions).pipe(Layer.provide(wiki))
   const cliTools = cliToolsLayer({ warm: config.data.kind === "disk" }).pipe(Layer.provide(skills))
   const modelsRoot = join(root.dir, "models")
   const llama = llamaServerLayer({
@@ -260,7 +258,6 @@ const composeServer = (
       Layer.provide(google),
       Layer.provide(mcp),
       Layer.provide(skills),
-      Layer.provide(globalInstructions),
       Layer.provide(wiki),
       Layer.provide(embeddings)
     )
@@ -293,7 +290,7 @@ const composeServer = (
     wiki,
     skills,
     cliTools,
-    globalInstructions,
+    rulesMove,
     embeddings,
     localModels,
     llama,

@@ -2,6 +2,11 @@ import { createHash } from "node:crypto"
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+  ManagedFileRepository,
+  managedFileRepositoryNodeLayer,
+  type ManagedFileRepositoryShape
+} from "@arden-hq/revisions/effect"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -192,3 +197,24 @@ export const rolledBack = Effect.fn("rolledBack")(function* <A, E, R>(
   if (!("value" in kept)) throw new Error("The rolled back body returned nothing")
   return kept.value
 })
+
+/** Runs `body` over the copy's Memory history while this process alone holds the copy. */
+export const onCopyMemory = <A, E>(
+  copy: ReplayFolder,
+  body: (repository: ManagedFileRepositoryShape) => Effect.Effect<A, E>
+): Promise<A> =>
+  holdingReplayCopy(copy, () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* body(yield* ManagedFileRepository)
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          managedFileRepositoryNodeLayer({
+            workingRoot: join(copy.wiki, "pages"),
+            historyRoot: join(copy.wiki, ".wiki-history")
+          })
+        )
+      )
+    )
+  )

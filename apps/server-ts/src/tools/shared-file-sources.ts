@@ -46,6 +46,17 @@ export const transcriptFiles = async (
           ),
         { signal }
       )
+      const owned = await Effect.runPromise(
+        transcript
+          .ownerWordsIn(
+            sessionId,
+            page.records.map((record) => record.messageId)
+          )
+          .pipe(
+            Effect.mapError((cause) => toolFailure(cause, "Chat attachments could not be listed"))
+          ),
+        { signal }
+      )
       for (const record of page.records) {
         const message = record.envelope
         if (message.role !== "user" || message.is_meta === true) continue
@@ -65,6 +76,7 @@ export const transcriptFiles = async (
             })
           }
         }
+        if (!owned.has(record.messageId)) continue
         for (const file of splitAttachedFiles(ownerText(message)).files) {
           if (file.directory) continue
           files.push({

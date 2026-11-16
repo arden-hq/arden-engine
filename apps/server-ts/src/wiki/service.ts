@@ -6,7 +6,6 @@ import {
 import { Context, Effect, Layer, Scope } from "effect"
 
 import { SpaceStore } from "../persistence/spaces/store.js"
-import { WikiRenameStore } from "../persistence/wiki/rename-store.js"
 import { Diagnostics } from "../runtime/diagnostics.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { makeWikiCaptureMethods, type WikiCaptureMethods } from "./capture.js"
@@ -17,7 +16,7 @@ import {
 } from "./content-steps.js"
 import { mapRevisionError, WikiError, wikiError } from "./errors.js"
 import { makeWikiForgetMethods, type WikiForgetMethods } from "./forgotten.js"
-import { initializeWikiFoundation } from "./foundation.js"
+import { createRulesPage, initializeWikiFoundation } from "./foundation.js"
 import { makeWikiChangeMethods, type WikiChangeMethods } from "./change.js"
 import { makeWikiHistoryMethods, type WikiHistoryMethods } from "./history.js"
 import { makeWikiImportMethods, type WikiImportMethods } from "./imported.js"
@@ -28,6 +27,7 @@ import {
   type WikiMaintenancePrepareInput
 } from "./maintenance.js"
 import { makeWikiMutationMethods, type WikiMutationMethods } from "./mutations.js"
+import { makeWikiChanges } from "./page-change.js"
 import { makeOutsideEdits, type OutsideEditCheck, type OutsideEditState } from "./outside-edits.js"
 import { makeWikiPublisher, WikiChangeSink } from "./publication.js"
 import { makeWikiRenameMethods, type WikiRenameMethods } from "./rename.js"
@@ -49,6 +49,8 @@ type WikiShape = WikiListingMethods &
   WikiImportMethods &
   WikiForgetMethods & {
     readonly publishChanges: () => Effect.Effect<{ readonly queued: number }, WikiError>
+    /** Makes the owner's rules page from the rules file it replaces. */
+    readonly createRulesPage: (body: string) => Effect.Effect<void, WikiError>
     readonly checkOutsideEdits: () => Effect.Effect<OutsideEditCheck, WikiError>
     /** Where a page whose file was changed outside Arden stands, as of the last check. */
     readonly outsideEditState: (path: string) => OutsideEditState | undefined
@@ -61,17 +63,12 @@ export class Wiki extends Context.Service<Wiki, WikiShape>()("@arden-hq/server/w
 
 const make = Effect.fn("Wiki.make")(function* (
   options: WikiRepositoryOptions
-): Effect.fn.Return<
-  Wiki["Service"],
-  WikiError,
-  Scope.Scope | WikiChangeSink | SpaceStore | WikiRenameStore
-> {
+): Effect.fn.Return<Wiki["Service"], WikiError, Scope.Scope | WikiChangeSink | SpaceStore> {
   const diagnostics = yield* Diagnostics
   const lifecycle = yield* ServerLifecycle
   yield* diagnostics.startupPhase("wiki_open_started")
   const changeSink = yield* WikiChangeSink
   const spaces = yield* SpaceStore
-  const renameStore = yield* WikiRenameStore
   const repository = yield* Layer.build(
     managedFileRepositoryNodeLayer({
       ...options,
@@ -101,13 +98,14 @@ const make = Effect.fn("Wiki.make")(function* (
         Effect.tap(publishSavedChanges)
       )
 
-  const mutations = makeWikiMutationMethods(repository, spaces, listing.read)
-  const restores = makeWikiRestoreMethods(repository, spaces, listing.read)
+  const changes = makeWikiChanges({ repository, spaces }, listing.read)
+  const mutations = makeWikiMutationMethods(changes, spaces)
+  const restores = makeWikiRestoreMethods(repository, changes)
   const capture = makeWikiCaptureMethods(repository)
-  const rename = makeWikiRenameMethods(repository, spaces, renameStore)
-  const imports = makeWikiImportMethods(repository, spaces)
-  const contentSteps = makeWikiContentStepMethods(repository, spaces)
-  const forgetting = makeWikiForgetMethods(repository, spaces)
+  const rename = makeWikiRenameMethods(repository, changes)
+  const imports = makeWikiImportMethods(changes)
+  const contentSteps = makeWikiContentStepMethods(repository, changes)
+  const forgetting = makeWikiForgetMethods(changes)
 
   yield* diagnostics.startupPhase("wiki_ready")
   return Wiki.of({
@@ -115,6 +113,7 @@ const make = Effect.fn("Wiki.make")(function* (
     ...makeWikiHistoryMethods(repository, listing.snapshot),
     ...makeWikiChangeMethods(repository),
     publishChanges,
+    createRulesPage: notifyAfter((body: string) => createRulesPage({ repository, spaces }, body)),
     checkOutsideEdits: outsideEdits.check,
     outsideEditState: outsideEdits.state,
     prepareMaintenance: makeWikiMaintenanceMethods(repository).prepare,
@@ -150,14 +149,12 @@ const make = Effect.fn("Wiki.make")(function* (
             `Memory content step ${step.name} runs only after the server is ready`
           ),
     finalizeCaptureBatch: capture.finalizeCaptureBatch,
-    hasFinalizedCaptureBatch: capture.hasFinalizedCaptureBatch,
-    ...rename,
-    requestRename: notifyAfter(rename.requestRename),
-    acceptRename: notifyAfter(rename.acceptRename)
+    hasCaptureReceipt: capture.hasCaptureReceipt,
+    planRename: rename.planRename,
+    rename: notifyAfter(rename.rename)
   })
 })
 
 export const wikiLayer = (
   options: WikiRepositoryOptions
-): Layer.Layer<Wiki, WikiError, WikiChangeSink | SpaceStore | WikiRenameStore> =>
-  Layer.effect(Wiki, make(options))
+): Layer.Layer<Wiki, WikiError, WikiChangeSink | SpaceStore> => Layer.effect(Wiki, make(options))

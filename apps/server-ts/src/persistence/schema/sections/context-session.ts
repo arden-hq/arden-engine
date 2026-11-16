@@ -15,8 +15,7 @@ export const contextSessionSchemaSection = {
     "answer_block_state",
     "message_turns",
     "session_pending_archives",
-    "memory_capture_positions",
-    "memory_capture_backlog"
+    "memory_capture_unread"
   ],
   indexes: [
     "idx_sessions_activity",
@@ -38,7 +37,9 @@ export const contextSessionSchemaSection = {
     "idx_sessions_parent_live",
     "idx_sessions_owner_chats",
     "idx_sessions_automation_channel",
-    "idx_sessions_capture_owner"
+    "idx_sessions_capture_owner",
+    "idx_memory_capture_unread_position",
+    "idx_memory_capture_unread_open"
   ],
   triggers: [
     "session_messages_role_insert",
@@ -124,7 +125,7 @@ export const contextSessionSchemaSection = {
       message_json TEXT NOT NULL,
       client_id TEXT,
       created_at TEXT NOT NULL,
-      search_text TEXT,
+      search_text TEXT, author TEXT,
       UNIQUE (session_id, message_id),
       UNIQUE (session_id, seq)
     )`,
@@ -249,33 +250,39 @@ export const contextSessionSchemaSection = {
     `CREATE INDEX idx_sessions_automation_channel
       ON sessions(origin_automation_id, started_at DESC)
       WHERE session_type = 'channel' AND archived_at IS NULL`,
-    `CREATE TABLE memory_capture_positions (
-      session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    `CREATE TABLE memory_capture_unread (
+      range_id INTEGER PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
       read_seq INTEGER NOT NULL CHECK(read_seq >= -1),
       read_offset INTEGER CHECK(read_offset IS NULL OR (read_offset > 0 AND read_seq >= 0)),
+      through_seq INTEGER
+        CHECK(through_seq IS NULL OR through_seq >= read_seq + (read_offset IS NULL)),
       prepared_json TEXT CHECK(prepared_json IS NULL OR json_valid(prepared_json)),
+      prepared_cut_seq INTEGER
+        CHECK(prepared_cut_seq IS NULL OR (prepared_json IS NOT NULL AND prepared_cut_seq > read_seq)),
       updated_at TEXT NOT NULL
-    , prepared_cut_seq INTEGER
-      CHECK(prepared_cut_seq IS NULL OR (prepared_json IS NOT NULL AND prepared_cut_seq > read_seq))) WITHOUT ROWID`,
-    `CREATE TABLE memory_capture_backlog (
-      session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-      from_seq INTEGER NOT NULL CHECK(from_seq >= 0),
-      through_seq INTEGER NOT NULL,
-      CHECK(through_seq >= from_seq),
-      PRIMARY KEY (session_id, from_seq)
-    ) WITHOUT ROWID`,
+    , tried_at TEXT)`,
+    `CREATE UNIQUE INDEX idx_memory_capture_unread_position
+      ON memory_capture_unread(session_id, read_seq, COALESCE(read_offset, 0))`,
+    `CREATE UNIQUE INDEX idx_memory_capture_unread_open
+      ON memory_capture_unread(session_id) WHERE through_seq IS NULL`,
     `CREATE INDEX idx_sessions_capture_owner ON sessions(session_id)
       WHERE session_type = 'chat' AND origin_automation_id IS NULL`,
     `CREATE TRIGGER chat_positions_cut_at_removal
       AFTER DELETE ON session_messages
-      WHEN EXISTS (SELECT 1 FROM memory_capture_positions WHERE session_id = OLD.session_id)
+      WHEN EXISTS (SELECT 1 FROM memory_capture_unread WHERE session_id = OLD.session_id)
         OR EXISTS (SELECT 1 FROM chat_summaries WHERE session_id = OLD.session_id)
       BEGIN
-        UPDATE memory_capture_positions
+        DELETE FROM memory_capture_unread
+        WHERE session_id = OLD.session_id AND through_seq IS NOT NULL
+          AND read_seq + (read_offset IS NULL) >= OLD.seq;
+        UPDATE memory_capture_unread SET through_seq = OLD.seq - 1
+        WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
+        UPDATE memory_capture_unread
         SET read_seq = OLD.seq - 1, read_offset = NULL, prepared_json = NULL,
           prepared_cut_seq = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE session_id = OLD.session_id AND read_seq >= OLD.seq;
-        UPDATE memory_capture_positions
+        UPDATE memory_capture_unread
         SET prepared_json = CASE WHEN OLD.seq <= read_seq + (read_offset IS NULL) THEN NULL ELSE prepared_json END,
           prepared_cut_seq = CASE WHEN OLD.seq <= read_seq + (read_offset IS NULL) THEN NULL
             ELSE MIN(COALESCE(prepared_cut_seq, OLD.seq), OLD.seq) END,
@@ -283,10 +290,6 @@ export const contextSessionSchemaSection = {
         WHERE session_id = OLD.session_id AND prepared_json IS NOT NULL
           AND COALESCE(json_extract(prepared_json, '$.end.sequence'),
             json_extract(prepared_json, '$.end.progress.sequence')) >= OLD.seq;
-        DELETE FROM memory_capture_backlog
-        WHERE session_id = OLD.session_id AND from_seq >= OLD.seq;
-        UPDATE memory_capture_backlog SET through_seq = OLD.seq - 1
-        WHERE session_id = OLD.session_id AND through_seq >= OLD.seq;
         DELETE FROM chat_summaries
         WHERE session_id = OLD.session_id AND through_sequence >= OLD.seq;
       END`,
@@ -294,16 +297,16 @@ export const contextSessionSchemaSection = {
       AFTER INSERT ON sessions
       WHEN NEW.session_type = 'chat' AND NEW.origin_automation_id IS NULL
       BEGIN
-        INSERT INTO memory_capture_positions (session_id, read_seq, read_offset, prepared_json, updated_at)
-        VALUES (NEW.session_id, -1, NULL, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+        INSERT INTO memory_capture_unread (session_id, read_seq, updated_at)
+        VALUES (NEW.session_id, -1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
       END`,
     `CREATE TRIGGER memory_capture_owner_chat_starts_after_copies
       BEFORE UPDATE OF session_type, origin_automation_id ON sessions
       WHEN NEW.session_type = 'chat' AND NEW.origin_automation_id IS NULL
         AND NOT (OLD.session_type = 'chat' AND OLD.origin_automation_id IS NULL)
-        AND NOT EXISTS (SELECT 1 FROM memory_capture_positions AS position
-          WHERE position.session_id = NEW.session_id
-            AND position.read_seq >= COALESCE((SELECT MAX(seq) FROM session_messages
+        AND NOT EXISTS (SELECT 1 FROM memory_capture_unread AS unread
+          WHERE unread.session_id = NEW.session_id AND unread.through_seq IS NULL
+            AND unread.read_seq >= COALESCE((SELECT MAX(seq) FROM session_messages
               WHERE session_id = NEW.session_id), -1))
       BEGIN
         SELECT RAISE(ABORT, 'A chat becomes an owner chat only once Memory Capture starts after the messages it holds');

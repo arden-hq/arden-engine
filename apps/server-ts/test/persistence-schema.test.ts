@@ -218,7 +218,10 @@ describe("persistence schema", () => {
         "trigger_last_id",
         "prompt_author",
         "instruction_revision_id",
-        "paused_at"
+        "paused_at",
+        "failed_runs",
+        "failed_item",
+        "failed_attempt"
       ])
       database.exec(`INSERT INTO scheduled_tasks
         (task_id, automation_ref, prompt, triggers, created_at, tool_scope, purpose)

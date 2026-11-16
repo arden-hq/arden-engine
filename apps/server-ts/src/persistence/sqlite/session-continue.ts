@@ -2,7 +2,11 @@ import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { DateTime, Effect, Schema } from "effect"
 import { SessionStoreError, type SessionStore } from "../sessions/store.js"
 import { transcriptSearchText } from "../transcript/search-text.js"
-import { StoredMessageEnvelopeSchema, visibleMessageCount } from "../transcript/model.js"
+import {
+  messageAuthor,
+  StoredMessageEnvelopeSchema,
+  visibleMessageCount
+} from "../transcript/model.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { sessionIdSchema, storeError } from "./session-rows.js"
@@ -80,7 +84,7 @@ export const makeSessionContinue = ({
           )
           yield* sql`UPDATE session_messages
               SET message_json = ${yield* encodeJson(StoredMessageEnvelopeSchema, own)},
-                search_text = ${transcriptSearchText(own)}
+                search_text = ${transcriptSearchText(own)}, author = ${messageAuthor(own)}
               WHERE session_id = ${validSessionId} AND message_id = ${message.message_id}`
         }
         const projection = yield* loadActiveContext(sql, validSessionId)

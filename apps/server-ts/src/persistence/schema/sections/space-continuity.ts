@@ -3,7 +3,7 @@ import type { OperationalSchemaSection } from "../section.js"
 export const spaceContinuitySchemaSection = {
   name: "space-continuity",
   storageDomain: "work",
-  tables: ["space_conversations", "chat_summaries", "space_summaries"],
+  tables: ["space_conversations", "chat_summaries"],
   indexes: [],
   triggers: ["space_conversation_binding", "space_conversation_session_guard"],
   statements: [
@@ -33,14 +33,6 @@ export const spaceContinuitySchemaSection = {
       topics_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(topics_json) AND json_type(topics_json) = 'array'),
       through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0),
       run_id TEXT,
-      updated_at TEXT NOT NULL
-    )`,
-    `CREATE TABLE space_summaries (
-      space_id TEXT PRIMARY KEY REFERENCES spaces(space_id) ON DELETE CASCADE,
-      now TEXT NOT NULL CHECK(length(now) > 0),
-      next_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(next_json) AND json_type(next_json) = 'array'),
-      recent TEXT,
-      sources_fingerprint TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`
   ]

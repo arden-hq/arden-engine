@@ -1,15 +1,18 @@
-import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
-import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 
 import { WikiEmbeddingIndex } from "../embedding/wiki-index.js"
-import { MemoryCaptureStore, type MemoryCaptureBatch } from "../persistence/memory/store.js"
+import { MemoryCaptureStore } from "../persistence/memory/store.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { loadPageAges } from "../wiki/page-age.js"
 import { Wiki } from "../wiki/service.js"
 import { readSnapshotContent, type Snapshot } from "../wiki/snapshot.js"
-import { makeMemoryCaptureBatches, MemoryError } from "./capture-batches.js"
+import {
+  makeMemoryCaptureBatches,
+  MemoryError,
+  type MemoryCaptureBatches
+} from "./capture-batches.js"
 import { startMemoryContentSteps } from "./content-steps.js"
 import { citedChatRefs, discussedIn } from "./discussed-in.js"
 import { renderSpacePageList } from "./index-render.js"
@@ -23,10 +26,13 @@ import { makeMemoryPreparation } from "./preparation.js"
 
 interface MemorySourcesInput {
   readonly sessionId: string
-  /** What the recall searches for and must not choose; undefined for a run with no recall. */
+  /**
+   * What the recall searches for, and how many characters of a page's content from its start the
+   * run is sent elsewhere; undefined for a run with no recall.
+   */
   readonly recall?: {
     readonly query: string
-    readonly excludePageIds?: ReadonlyArray<string>
+    readonly sent?: { readonly pageId: string; readonly chars: number }
   }
 }
 
@@ -42,8 +48,6 @@ export interface MemoryTurn {
   /** What this run may be sent from Memory: standing facts and, if asked, recall. */
   readonly sources: (input: MemorySourcesInput) => Effect.Effect<MemorySources, MemoryError>
 }
-
-export type { MemoryCaptureBatch } from "../persistence/memory/store.js"
 
 interface MemoryTurnServices {
   readonly wiki: Wiki["Service"]
@@ -64,7 +68,9 @@ const sources = Effect.fn("Memory.sources")(function* (
       recall: Schema.optionalKey(
         Schema.Struct({
           query: Schema.String,
-          excludePageIds: Schema.optionalKey(Schema.Array(Schema.NonEmptyString))
+          sent: Schema.optionalKey(
+            Schema.Struct({ pageId: Schema.NonEmptyString, chars: Schema.Number })
+          )
         })
       )
     })
@@ -79,15 +85,17 @@ const sources = Effect.fn("Memory.sources")(function* (
         })
     )
   )
-  const now = DateTime.toEpochMillis(yield* DateTime.now)
   const recall =
     valid.recall === undefined
       ? undefined
       : recallCandidates({
           pages: current.pages,
           query: valid.recall.query,
-          today: localDayOf(now, machineTimeZone()),
-          sentElsewhere: new Set(valid.recall.excludePageIds ?? [])
+          sent: new Map(
+            valid.recall.sent === undefined
+              ? []
+              : [[valid.recall.sent.pageId, valid.recall.sent.chars]]
+          )
         })
   const semantic =
     recall === undefined
@@ -150,9 +158,7 @@ export class Memory extends Context.Service<
     readonly withTurn: <A, E, R>(
       consume: (turn: MemoryTurn | undefined) => Effect.Effect<A, E, R>
     ) => Effect.Effect<A, E, R>
-    readonly nextCaptureBatch: () => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
-    readonly completeCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
-  }
+  } & MemoryCaptureBatches
 >()("@arden-hq/server/memory/Memory") {
   static layer(): Layer.Layer<
     Memory,
@@ -191,8 +197,7 @@ export class Memory extends Context.Service<
         return Memory.of({
           prepare: preparation.schedule,
           withTurn,
-          nextCaptureBatch: captureBatches.nextCaptureBatch,
-          completeCaptureBatch: captureBatches.completeCaptureBatch
+          ...captureBatches
         })
       })
     )

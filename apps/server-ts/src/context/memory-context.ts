@@ -11,28 +11,9 @@ import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/
 import { textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
 
-export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined => {
-  switch (actor.kind) {
-    case "person":
-      return "owner"
-    case "automation":
-      return undefined
-    case "agent":
-      return actor.root === "automation" ? undefined : "worker"
-    case "task_worker":
-    case "space_review":
-    case "unrecorded":
-      return "worker"
-  }
-}
-
-/** The Memory sources each reader is sent besides standing facts, which every reader is sent. */
-export const MEMORY_READS: Readonly<
-  Record<RunMemoryReader, { readonly space: boolean; readonly recall: boolean }>
-> = {
-  owner: { space: true, recall: true },
-  worker: { space: false, recall: false }
-}
+/** Only the owner's own turns are sent Memory. */
+export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined =>
+  actor.kind === "person" ? "owner" : undefined
 
 const standingPageLimitChars = Math.max(
   ...STANDING_FACTS_PAGES.map((path) => {
@@ -126,14 +107,20 @@ export const assembleMemoryContext = ({
 
 const none: RenderedMemory = { text: undefined, sources: [] }
 
+const SPACE_ROOM = {
+  maxBytes: MEMORY_BUDGET.space,
+  instructionsBytes: MEMORY_BUDGET.space_instructions,
+  pageBytes: MEMORY_BUDGET.space_page
+}
+
+/** How many characters of the Space page's content, from its start, the Space context sends. */
+export const spacePageSent = (view: SpaceView): number =>
+  renderSpaceContext(view, SPACE_ROOM).page?.sent ?? 0
+
 const renderSpace = (
   space: SpaceMemoryInput
 ): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
-  const rendered = renderSpaceContext(space.view, {
-    maxBytes: MEMORY_BUDGET.space,
-    instructionsBytes: MEMORY_BUDGET.space_instructions,
-    pageBytes: MEMORY_BUDGET.space_page
-  })
+  const rendered = renderSpaceContext(space.view, SPACE_ROOM)
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
@@ -142,8 +129,8 @@ const renderSpace = (
     bytes: byteLength(rendered.text)
   }
   const source: RunMemorySource =
-    rendered.page === "cut" || rendered.page === "dropped"
-      ? { ...identity, outcome: rendered.page, reason: "space_page_allowance" }
-      : { ...identity, outcome: "whole", reason: null }
+    rendered.page === undefined || rendered.page.outcome === "whole"
+      ? { ...identity, outcome: "whole", reason: null }
+      : { ...identity, outcome: rendered.page.outcome, reason: "space_page_allowance" }
   return { text: rendered.text, sources: [source] }
 }

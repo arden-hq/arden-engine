@@ -42,7 +42,7 @@ const readRun = async (
           new ToolExecutionError(
             `Could not resolve this Run's writing identity: ${cause.message}`,
             {
-              preview: "Wiki write identity unavailable",
+              preview: "Memory write identity unavailable",
               retryable: cause._tag === "RunQueryError"
             }
           )
@@ -104,7 +104,7 @@ export const readRunCause = (
       Effect.mapError(
         (cause) =>
           new ToolExecutionError(`Could not resolve who caused this Run: ${cause.message}`, {
-            preview: "Wiki write identity unavailable",
+            preview: "Memory write identity unavailable",
             retryable: true
           })
       )
@@ -174,4 +174,7 @@ const admittedIdentity = async (
 }
 
 const identityUnavailable = (message: string): ToolExecutionError =>
-  new ToolExecutionError(message, { preview: "Wiki write identity unavailable", retryable: false })
+  new ToolExecutionError(message, {
+    preview: "Memory write identity unavailable",
+    retryable: false
+  })

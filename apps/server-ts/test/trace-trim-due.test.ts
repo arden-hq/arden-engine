@@ -84,7 +84,8 @@ it("the due-for-trim list equals a fresh look after runs start, end and chats go
 })
 
 const DAY = 86_400_000
-const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString()
+const NOW = Date.now()
+const ago = (days: number) => new Date(NOW - days * DAY).toISOString()
 
 it("the hourly trim shrinks agent logs past the cutoff, archived too, and leaves a recent one", async () => {
   const outcome = await withTempDatabase(

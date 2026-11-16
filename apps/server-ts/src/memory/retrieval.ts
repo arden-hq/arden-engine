@@ -1,5 +1,5 @@
 import { byteLength } from "@arden-hq/std/text"
-import { parseCalendarDay, utcDay } from "@arden-hq/std/time"
+import { utcDay } from "@arden-hq/std/time"
 import type { RunMemoryRecallRole, RunMemorySource } from "@arden-hq/protocol/runs"
 import { pageKind, recordFolders, type PageKind } from "../wiki/collections.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
@@ -14,13 +14,6 @@ import { chatHref } from "../sessions/chat-href.js"
 const QUERY_LIMIT = 512
 const MIN_QUERY_LENGTH = 12
 const RESULT_LIMIT = 3
-/**
- * How many days before the run's date a record may be and still be recalled: enough for "this
- * week" and "last week" questions. An older record is reached by link, date or search; a
- * folder's newest record and an undated one are recalled at any age.
- */
-const RECORD_RECALL_DAYS = 14
-
 /** A Memory source rendered into the room it was given, and the record of what it holds. */
 export interface RenderedMemory {
   /** The prompt section, or undefined when the source holds nothing. */
@@ -370,13 +363,6 @@ export interface PreparedMemorySources {
   readonly render: (discussed: ReadonlyMap<string, ReadonlyArray<DiscussedChat>>) => MemorySources
 }
 
-const dayNumber = (day: string): number | undefined => {
-  const parsed = parseCalendarDay(day)
-  return parsed === undefined
-    ? undefined
-    : Date.UTC(parsed.year, parsed.month - 1, parsed.day) / 86_400_000
-}
-
 const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageKind> => {
   const folders = recordFolders(active)
   return new Map(
@@ -387,50 +373,58 @@ const pageKinds = (active: ReadonlyArray<PageRecord>): ReadonlyMap<string, PageK
 export interface RecallCandidates {
   readonly query: string
   readonly excluded: ReadonlySet<string>
+  /** The body of each page the run already holds in part, past what it holds. */
+  readonly unsent: ReadonlyMap<string, string>
 }
 
 export const recallCandidates = ({
   pages,
   query,
-  today,
-  sentElsewhere
+  sent
 }: {
   readonly pages: ReadonlyArray<RunPage>
   readonly query: string
-  /** The run's date, `YYYY-MM-DD` in the owner's zone: the day a record's age is counted from. */
-  readonly today: string
-  readonly sentElsewhere: ReadonlySet<string>
+  /** How many characters of each page's content, from its start, the run is sent elsewhere. */
+  readonly sent: ReadonlyMap<string, number>
 }): RecallCandidates => {
   const active = activeRunPages(pages)
+  const unsent = new Map(
+    active.flatMap((record) => {
+      const chars = sent.get(record.page.pageId)
+      if (chars === undefined) return []
+      const { content, body } = record.page
+      return [[record.page.pageId, body.slice(Math.max(0, chars - content.length + body.length))]]
+    })
+  )
   return {
     query,
     excluded: new Set([
-      ...sentElsewhere,
-      ...active.filter(standingFacts).map((record) => record.page.pageId),
-      ...recordsPastRecallAge(active, today)
-    ])
+      ...[...unsent].filter(([, rest]) => rest.trim() === "").map(([pageId]) => pageId),
+      ...active.filter(standingFacts).map((record) => record.page.pageId)
+    ]),
+    unsent
   }
 }
 
-const recordsPastRecallAge = (
+const rankRecall = (
   active: ReadonlyArray<RunPage>,
-  today: string
-): ReadonlyArray<string> => {
-  const todayNumber = dayNumber(today)
-  if (todayNumber === undefined) return []
-  const kinds = [...pageKinds(active)]
-  const newestDay = new Map<string, string>()
-  for (const [, kind] of kinds) {
-    if (kind.kind !== "record" || kind.day === undefined) continue
-    const newest = newestDay.get(kind.folder.directory)
-    if (newest === undefined || kind.day > newest) newestDay.set(kind.folder.directory, kind.day)
-  }
-  return kinds.flatMap(([pageId, kind]) => {
-    if (kind.kind !== "record" || kind.day === undefined) return []
-    if (newestDay.get(kind.folder.directory) === kind.day) return []
-    const day = dayNumber(kind.day)
-    return day === undefined || todayNumber - day <= RECORD_RECALL_DAYS ? [] : [pageId]
+  recall: RecallCandidates,
+  semanticMatches: ReadonlyArray<SemanticMemoryMatch>
+): ReadonlyArray<RankedMemoryPage> => {
+  const queryTerms = wordSearchTerms(recall.query)
+  const matches = semanticMatches.filter(
+    (match) => recall.unsent.get(match.pageId)?.includes(match.chunkText) ?? true
+  )
+  const pages = active.flatMap((record) => {
+    if (recall.excluded.has(record.page.pageId)) return []
+    const rest = recall.unsent.get(record.page.pageId)
+    if (rest === undefined) return [record]
+    const matched =
+      [...searchTerms(rest)].some((term) => queryTerms.has(term)) ||
+      matches.some((match) => match.pageId === record.page.pageId)
+    return matched ? [{ ...record, page: { ...record.page, body: rest } }] : []
   })
+  return rankMemoryPages({ pages, queryTerms, semanticMatches: matches }).slice(0, RESULT_LIMIT)
 }
 
 export const prepareMemorySources = ({
@@ -450,14 +444,7 @@ export const prepareMemorySources = ({
   const kinds = pageKinds(active)
   const kindOf = (record: PageRecord): PageKind =>
     kinds.get(record.page.pageId) ?? { kind: "knowledge" }
-  const selected =
-    recall === undefined
-      ? []
-      : rankMemoryPages({
-          pages: active.filter((record) => !recall.excluded.has(record.page.pageId)),
-          queryTerms: wordSearchTerms(recall.query),
-          semanticMatches
-        }).slice(0, RESULT_LIMIT)
+  const selected = recall === undefined ? [] : rankRecall(active, recall, semanticMatches)
   return {
     recalled: selected.map(({ record }) => record),
     render: (discussed) => ({

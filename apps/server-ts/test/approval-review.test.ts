@@ -529,6 +529,7 @@ it.each(["chat", "channel"] as const)(
           })
       }),
       transcript: partialService<TranscriptQueries["Service"]>("TranscriptQueries", {
+        ownerWordsIn: () => Effect.succeed(new Set(["typed", "after-gap", "answer"])),
         conversationPage: () =>
           Effect.succeed({
             records: messages.map((envelope, sequence) => ({
@@ -1026,29 +1027,6 @@ it("uses genuine source Chat words around an agent-written Automation update", a
     }),
     transcript: partialService<TranscriptQueries["Service"]>("TranscriptQueries", {
       resolveReference: () => Effect.succeed(2),
-      page: () =>
-        Effect.succeed({
-          records: messages
-            .filter((message) => message.sequence === 2)
-            .map((message) => ({
-              sessionId: "source-chat",
-              sequence: message.sequence,
-              messageId: message.messageId,
-              role: "user" as const,
-              clientId: null,
-              createdAt: at,
-              envelope: {
-                role: "user",
-                message_id: message.messageId,
-                created_at: "2026-10-15T20:06:01Z",
-                content: message.text
-              }
-            })),
-          hasMoreBefore: false,
-          hasMoreAfter: false,
-          firstSequence: 2,
-          lastSequence: 2
-        }),
       ownerMessagesAfter: ({ sequence }) =>
         Effect.succeed(
           messages

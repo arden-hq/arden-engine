@@ -35,8 +35,12 @@ interface OwnerLine {
   readonly text: string
 }
 
-const ownerLines = (messages: ReadonlyArray<ChatMessage>): ReadonlyArray<OwnerLine> =>
+const ownerLines = (
+  messages: ReadonlyArray<ChatMessage>,
+  owned: ReadonlySet<string>
+): ReadonlyArray<OwnerLine> =>
   messages.flatMap((message): ReadonlyArray<OwnerLine> => {
+    if (typeof message.message_id !== "string" || !owned.has(message.message_id)) return []
     const text = ownerText(message).trim()
     const at = typeof message.created_at === "string" ? message.created_at : ""
     return text.length === 0 ? [] : [{ at, text }]
@@ -44,12 +48,14 @@ const ownerLines = (messages: ReadonlyArray<ChatMessage>): ReadonlyArray<OwnerLi
 
 const clipped = (text: string): string => cutText(text, MAX_MESSAGE_CHARS, { suffix: " [… cut]" })
 
+/** The recital of the owner's latest words among `messages`, `owned` naming which those are. */
 export const renderOwnerInstructions = (
-  messages: ReadonlyArray<ChatMessage>
+  messages: ReadonlyArray<ChatMessage>,
+  owned: ReadonlySet<string>
 ): string | undefined => {
   const kept: OwnerLine[] = []
   let room = MAX_TOTAL_CHARS
-  const lines = ownerLines(messages)
+  const lines = ownerLines(messages, owned)
   for (let index = lines.length - 1; index >= 0 && kept.length < MAX_MESSAGES; index -= 1) {
     const line = lines[index]
     if (line === undefined) continue

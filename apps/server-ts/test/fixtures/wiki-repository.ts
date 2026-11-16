@@ -19,6 +19,7 @@ import type { SpaceStore } from "../../src/persistence/spaces/store.js"
 import type { ServerTool } from "../../src/tools/define.js"
 import type { ServerRunContext } from "../../src/tools/run-context.js"
 import { wikiOperationTools } from "../../src/tools/wiki-operations.js"
+import { makeWikiCaptureMethods } from "../../src/wiki/capture.js"
 import { makeWikiChangeMethods } from "../../src/wiki/change.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../src/wiki/authority.js"
 import {
@@ -28,17 +29,21 @@ import {
   type WikiCommitOrigin,
   type WikiCommitPoint
 } from "../../src/wiki/commit.js"
+import { createRulesPage } from "../../src/wiki/foundation.js"
 import { makeWikiHistoryMethods } from "../../src/wiki/history.js"
 import { makeWikiListingMethods } from "../../src/wiki/listing.js"
 import { makeWikiMutationMethods } from "../../src/wiki/mutations.js"
 import { formatWikiPage } from "../../src/wiki/page.js"
+import { makeWikiChanges } from "../../src/wiki/page-change.js"
+import { makeWikiRenameMethods } from "../../src/wiki/rename.js"
 import { makeWikiRestoreMethods } from "../../src/wiki/restore.js"
 import { Wiki } from "../../src/wiki/service.js"
 import { partialService, recordOf, serverRunContext, sessionHeader } from "../kit.js"
 
-/** The real Wiki read, history, change, update and restore methods over a fresh repository on disk. */
+/** The real Wiki read, history, change, update, rename and restore methods over a fresh repository on disk. */
 export interface WikiRepositoryFixture {
   readonly repository: ManagedFileRepositoryShape
+  readonly workingRoot: string
   readonly wiki: Wiki["Service"]
   /** Saves `body` as the page's whole body, creating the page on its first save. */
   readonly save: (input: {
@@ -62,13 +67,19 @@ export const withWikiRepository = async <A>(
       )
     )
     const listing = makeWikiListingMethods(repository)
-    const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {})
+    const spaces = partialService<SpaceStore["Service"]>("SpaceStore", {
+      activeBindings: () => Effect.succeed([])
+    })
+    const changes = makeWikiChanges({ repository, spaces }, listing.read)
     const wiki = partialService<Wiki["Service"]>("Wiki", {
       ...listing,
       ...makeWikiHistoryMethods(repository, listing.snapshot),
       ...makeWikiChangeMethods(repository),
-      ...makeWikiRestoreMethods(repository, spaces, listing.read),
-      ...makeWikiMutationMethods(repository, spaces, listing.read)
+      ...makeWikiRestoreMethods(repository, changes),
+      ...makeWikiMutationMethods(changes, spaces),
+      ...makeWikiRenameMethods(repository, changes),
+      ...makeWikiCaptureMethods(repository),
+      createRulesPage: (body) => createRulesPage(withoutSpaces(repository), body)
     })
     const clock = distinctMillisClock()
     const save: WikiRepositoryFixture["save"] = async ({ pageId, path, body, origin, actor }) => {
@@ -99,7 +110,7 @@ export const withWikiRepository = async <A>(
         }).pipe(Effect.provideService(Clock.Clock, clock))
       )
     }
-    return await use({ repository, wiki, save })
+    return await use({ repository, workingRoot: directory, wiki, save })
   } finally {
     await Effect.runPromise(Scope.close(scope, Exit.void))
     await rm(directory, { recursive: true, force: true })

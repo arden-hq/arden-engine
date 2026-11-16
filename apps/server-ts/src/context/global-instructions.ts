@@ -1,294 +1,82 @@
-import { formatBytes } from "@arden-hq/std/count"
-import { Context, Effect, Layer, Schema, Semaphore } from "effect"
-import { lstat, readFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { Effect, Layer } from "effect"
+import { readFile, rm } from "node:fs/promises"
+import { dirname } from "node:path"
 
 import { isErrnoCode } from "../fs/private-store.js"
-import {
-  type InstructionVersion,
-  InstructionVersionStore,
-  type InstructionVersionStoreError,
-  type InstructionWriter
-} from "../persistence/instructions/store.js"
 import { PROMPT_CATALOG } from "../prompts/catalog.js"
 import { baseSystemPrompt } from "../models/instructions.js"
 import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
-import {
-  atomicCompareAndSwap,
-  LocalRevisionConflict,
-  revisionOrAbsent
-} from "../storage/local-paths.js"
+import { isRulesPage } from "../wiki/code-owned-pages.js"
+import { Wiki } from "../wiki/service.js"
+import type { PageRecord, Snapshot } from "../wiki/snapshot.js"
 import {
   renderInstructionSource,
   type LocalInstructionManifestEntry
 } from "./local-instructions.js"
-import { sha256Hex } from "@arden-hq/std/hash"
 
-const GLOBAL_INSTRUCTIONS_FILE = "AGENTS.md"
-/** The most rules text, in bytes, the rules may hold. */
-export const MAX_RULES_BYTES = 128 * 1024
-const CLOSING_NEWLINE = "\n"
-const MAX_STORED_RULES_BYTES = MAX_RULES_BYTES + CLOSING_NEWLINE.length
-const storedText = (content: string): string =>
-  content === "" ? "" : `${content}${CLOSING_NEWLINE}`
-const withinLimit = (content: string): boolean =>
-  Buffer.byteLength(content, "utf8") <= MAX_RULES_BYTES
-const tooLarge = `${GLOBAL_INSTRUCTIONS_FILE} holds more than ${formatBytes(MAX_RULES_BYTES)} of rules`
-
-interface GlobalInstructionsSnapshot {
-  readonly content: string | undefined
-  readonly version: string
-  readonly bytes: number
-}
-
-export class GlobalInstructionsError extends Schema.TaggedError<GlobalInstructionsError>()(
-  "GlobalInstructionsError",
-  {
-    operation: Schema.Literals(["read", "replace", "history"] as const),
-    reason: Schema.Literals(["invalid", "conflict", "storage"] as const),
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Defect())
-  }
-) {}
-
-const error = (
-  operation: GlobalInstructionsError["operation"],
-  reason: GlobalInstructionsError["reason"],
-  message: string,
-  cause?: unknown
-): GlobalInstructionsError =>
-  new GlobalInstructionsError({
-    operation,
-    reason,
-    message,
-    ...(cause === undefined ? {} : { cause })
-  })
-
-const readSnapshot = Effect.fn("GlobalInstructions.readSnapshot")(function* (filename: string) {
-  const status = yield* Effect.tryPromise({
-    try: () => lstat(filename),
-    catch: (cause) => cause
-  }).pipe(
-    Effect.catch((cause) =>
-      isErrnoCode(cause, "ENOENT")
-        ? Effect.succeed(undefined)
-        : Effect.fail(error("read", "storage", "Global instructions could not be inspected", cause))
-    )
+export const rulesPage = (snapshot: Snapshot): PageRecord | undefined =>
+  snapshot.wholeSet.find(
+    (record) => isRulesPage(record.resource.path) && record.page.lifecycle === "active"
   )
-  if (status === undefined) {
-    return { content: undefined, version: "absent", bytes: 0 } satisfies GlobalInstructionsSnapshot
-  }
-  if (!status.isFile() || status.isSymbolicLink()) {
-    return yield* error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not a regular file`)
-  }
-  if (status.size > MAX_STORED_RULES_BYTES) return yield* error("read", "invalid", tooLarge)
-  const bytes = yield* Effect.tryPromise({
-    try: () => readFile(filename),
-    catch: (cause) => error("read", "storage", "Global instructions could not be read", cause)
-  })
-  const text = yield* Effect.try({
-    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-    catch: (cause) =>
-      error("read", "invalid", `${GLOBAL_INSTRUCTIONS_FILE} is not valid UTF-8`, cause)
-  })
-  const content = text.trim()
-  if (!withinLimit(content)) return yield* error("read", "invalid", tooLarge)
-  return {
-    content: content === "" ? undefined : content,
-    version: sha256Hex(bytes),
-    bytes: bytes.byteLength
-  } satisfies GlobalInstructionsSnapshot
-})
 
-export class GlobalInstructions extends Context.Service<
-  GlobalInstructions,
-  {
-    readonly file: string
-    readonly read: () => Effect.Effect<GlobalInstructionsSnapshot, GlobalInstructionsError>
-    /** Replaces the rules and records the new version under `writer`. */
-    readonly replace: (input: {
-      readonly content: string
-      readonly expectedVersion: string
-      readonly writer: Extract<InstructionWriter, { readonly kind: "chat" | "restore" }>
-    }) => Effect.Effect<GlobalInstructionsSnapshot, GlobalInstructionsError>
-    /** Newest first, with how many versions exist in all. */
-    readonly versions: (input: {
-      readonly limit: number
-    }) => Effect.Effect<
-      { readonly versions: ReadonlyArray<InstructionVersion>; readonly total: number },
-      GlobalInstructionsError
-    >
-    readonly version: (
-      version: number
-    ) => Effect.Effect<InstructionVersion | undefined, GlobalInstructionsError>
-  }
->()("@arden-hq/server/context/GlobalInstructions") {}
-
-interface MissedVersion {
-  readonly digest: string
-  readonly writer: InstructionWriter
-}
-
-const historyError = (cause: InstructionVersionStoreError): GlobalInstructionsError =>
-  error("history", "storage", "The standing rules history could not be read", cause)
-
-const make = Effect.fn("GlobalInstructions.make")(function* (file: string) {
-  const lock = yield* Semaphore.make(1)
-  const store = yield* InstructionVersionStore
-
-  let missed: MissedVersion | undefined
-  const recordMissedVersion = (version: MissedVersion, cause: InstructionVersionStoreError) =>
-    Effect.sync(() => {
-      missed = version
-    }).pipe(
-      Effect.andThen(Effect.logWarning("A standing rules version was not recorded", { cause }))
-    )
-
-  const record = (snapshot: GlobalInstructionsSnapshot, writer: InstructionWriter) =>
-    store.append({ content: snapshot.content ?? "", digest: snapshot.version, writer }).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          missed = undefined
-        })
-      ),
-      Effect.asVoid,
-      Effect.catch((cause) => recordMissedVersion({ digest: snapshot.version, writer }, cause))
-    )
-
-  const recordUnseenVersion = (snapshot: GlobalInstructionsSnapshot) =>
-    store.latest().pipe(
-      Effect.matchEffect({
-        onFailure: (cause) =>
-          Effect.logWarning("The standing rules history could not be read", { cause }),
-        onSuccess: (latest) => {
-          if (latest?.digest === snapshot.version) return Effect.void
-          if (missed?.digest === snapshot.version) return record(snapshot, missed.writer)
-          return record(snapshot, latest === undefined ? { kind: "seed" } : { kind: "outside" })
-        }
-      })
-    )
-
-  const read = () => lock.withPermit(readSnapshot(file).pipe(Effect.tap(recordUnseenVersion)))
-
-  const replace = Effect.fn("GlobalInstructions.replace")(function* (input: {
-    readonly content: string
-    readonly expectedVersion: string
-    readonly writer: Extract<InstructionWriter, { readonly kind: "chat" | "restore" }>
-  }) {
-    return yield* lock.withPermit(
-      Effect.gen(function* () {
-        const content = input.content.trim()
-        if (!withinLimit(content)) return yield* error("replace", "invalid", tooLarge)
-        const current = yield* readSnapshot(file)
-        yield* recordUnseenVersion(current)
-        if (current.content === (content === "" ? undefined : content)) return current
-        if (current.version !== input.expectedVersion) {
-          return yield* error(
-            "replace",
-            "conflict",
-            "Global instructions changed after they were read"
-          )
-        }
-        const written = yield* Effect.tryPromise({
-          try: () => atomicCompareAndSwap(file, storedText(content), input.expectedVersion),
-          catch: (cause) =>
-            cause instanceof LocalRevisionConflict
-              ? error(
-                  "replace",
-                  "conflict",
-                  "Global instructions changed after they were reviewed",
-                  cause
-                )
-              : error("replace", "storage", "Global instructions could not be replaced", cause)
-        })
-        const snapshot = {
-          content: content === "" ? undefined : content,
-          version: written.revision,
-          bytes: written.bytes
-        } satisfies GlobalInstructionsSnapshot
-        yield* record(snapshot, input.writer)
-        return snapshot
-      })
-    )
-  })
-
-  return GlobalInstructions.of({
-    file,
-    read,
-    replace,
-    versions: (input) => store.list(input).pipe(Effect.mapError(historyError)),
-    version: (version) => store.get(version).pipe(Effect.mapError(historyError))
-  })
-})
-
-const LEGACY_FILE = "directives.json"
-const LegacyDocument = Schema.fromJsonString(Schema.Struct({ content: Schema.String }))
-
-type DirectivesMove = "moved" | "already_moved" | "nothing_to_move" | "unreadable"
-
-const moveDirectivesJson = async (file: string): Promise<DirectivesMove> => {
-  if ((await revisionOrAbsent(file)) !== "absent") return "already_moved"
-  let raw: string
+const readRulesFile = async (file: string): Promise<string | undefined> => {
   try {
-    raw = await readFile(join(dirname(file), LEGACY_FILE), "utf8")
+    return new TextDecoder("utf-8", { fatal: true }).decode(await readFile(file))
   } catch (cause) {
-    if (isErrnoCode(cause, "ENOENT")) return "nothing_to_move"
-    return "unreadable"
-  }
-  const decoded = Schema.decodeUnknownOption(LegacyDocument)(raw)
-  if (decoded._tag === "None") return "unreadable"
-  try {
-    await atomicCompareAndSwap(file, decoded.value.content, "absent")
-    return "moved"
-  } catch (cause) {
-    if (cause instanceof LocalRevisionConflict) return "already_moved"
+    if (isErrnoCode(cause, "ENOENT")) return undefined
     throw cause
   }
 }
 
-/** The rules service. Its first start records the rules as they are as version one. */
-export const globalInstructionsLayer = (
-  file: string
-): Layer.Layer<GlobalInstructions, never, InstructionVersionStore> =>
-  Layer.effect(
-    GlobalInstructions,
+/**
+ * Moves the rules file at the data root into Memory as the rules page, once: the page is made
+ * only while Memory has none, and the file is removed after. A file left behind that holds what
+ * the page holds is removed at the next start. A file that cannot be read stays, and runs are told.
+ */
+export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
+  Layer.effectDiscard(
     Effect.gen(function* () {
-      const moved = yield* Effect.tryPromise(() => moveDirectivesJson(file)).pipe(
-        Effect.orElseSucceed((): DirectivesMove => "unreadable")
+      const wiki = yield* Wiki
+      const page = rulesPage(yield* wiki.snapshot())
+      const content = yield* Effect.tryPromise(() => readRulesFile(file))
+      if (page === undefined) yield* wiki.createRulesPage(content ?? "")
+      else if (page.page.body !== content) return
+      if (content !== undefined) yield* Effect.tryPromise(() => rm(file))
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("The standing rules could not be moved into Memory", { cause })
       )
-      if (moved === "unreadable") {
-        yield* Effect.logWarning(
-          `${LEGACY_FILE} could not be moved to ${GLOBAL_INSTRUCTIONS_FILE} and stays where it is`
-        )
-      }
-      const instructions = yield* make(file)
-      yield* instructions
-        .read()
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("The standing rules could not be read at start", { cause })
-          )
-        )
-      return instructions
-    })
-  )
-
-export type GlobalInstructionsLoad =
-  | { readonly kind: "read"; readonly snapshot: GlobalInstructionsSnapshot }
-  | { readonly kind: "failed"; readonly error: GlobalInstructionsError }
-
-export const loadForRun = (
-  instructions: GlobalInstructions["Service"]
-): Effect.Effect<GlobalInstructionsLoad> =>
-  instructions.read().pipe(
-    Effect.map((snapshot): GlobalInstructionsLoad => ({ kind: "read", snapshot })),
-    Effect.catch((error) =>
-      Effect.as(Effect.logWarning("Running without the global instructions", { error }), {
-        kind: "failed",
-        error
-      } satisfies GlobalInstructionsLoad)
     )
   )
+
+/**
+ * The rules a run is sent: the rules page. Every start makes it, so a run finds none only when the
+ * start could not move the rules file into Memory; that is `failed`, as is a Memory it cannot read.
+ */
+export type GlobalInstructionsLoad =
+  | { readonly kind: "read"; readonly page: PageRecord }
+  | { readonly kind: "failed" }
+
+export const loadForRun = (wiki: Wiki["Service"]): Effect.Effect<GlobalInstructionsLoad> =>
+  wiki.snapshot().pipe(
+    Effect.map(rulesPage),
+    Effect.flatMap((page) =>
+      page === undefined
+        ? Effect.fail("The rules file was not moved into Memory")
+        : Effect.succeed({ kind: "read", page } as const)
+    ),
+    Effect.catch((error) =>
+      Effect.as(Effect.logWarning("Running without the global instructions", { error }), {
+        kind: "failed"
+      } as const)
+    )
+  )
+
+const rulesText = (load: GlobalInstructionsLoad): string | undefined => {
+  if (load.kind === "failed") return undefined
+  const rules = load.page.page.body.trim()
+  return rules === "" ? undefined : rules
+}
 
 export const globalInstructionManifest = (
   file: string,
@@ -305,28 +93,31 @@ export const globalInstructionManifest = (
     digest
   })
   if (load.kind === "failed") return [entry("unreadable", null)]
-  if (load.snapshot.version === "absent") return []
-  return load.snapshot.content === undefined
+  return rulesText(load) === undefined
     ? [entry("empty", null)]
-    : [entry("loaded", load.snapshot.version)]
+    : [entry("loaded", load.page.resource.versionId)]
 }
 
 export const chatSystemPrompt = (
   assistantName: string,
   file: string,
   load: GlobalInstructionsLoad
-): string =>
-  joinPromptSections([
-    baseSystemPrompt(assistantName),
-    load.kind === "failed" || load.snapshot.content === undefined
-      ? undefined
-      : renderPromptSection(
-          "Global instructions",
-          [
-            PROMPT_CATALOG.globalInstructions.render({
-              assistant_name: JSON.stringify(assistantName)
-            }).text,
-            renderInstructionSource(file, "loaded", load.snapshot.content)
-          ].join("\n\n")
-        )
-  ]) ?? ""
+): string => {
+  const rules = rulesText(load)
+  return (
+    joinPromptSections([
+      baseSystemPrompt(assistantName),
+      rules === undefined
+        ? undefined
+        : renderPromptSection(
+            "Global instructions",
+            [
+              PROMPT_CATALOG.globalInstructions.render({
+                assistant_name: JSON.stringify(assistantName)
+              }).text,
+              renderInstructionSource(file, "loaded", rules)
+            ].join("\n\n")
+          )
+    ]) ?? ""
+  )
+}

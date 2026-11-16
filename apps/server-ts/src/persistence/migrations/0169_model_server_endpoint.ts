@@ -12,7 +12,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const modelServerEndpoint: Migration = {
-  version: 170,
+  version: 169,
   name: "model_server_endpoint",
   foreignKeys: { kind: "enforced" },
   up

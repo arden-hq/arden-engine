@@ -1,15 +1,6 @@
 import { cutText } from "@arden-hq/std/text"
 import { Predicate } from "effect"
 
-const ownWords = (message: Readonly<Record<string, unknown>>): boolean =>
-  message.role === "user" &&
-  message.interaction === undefined &&
-  message.from_chat === undefined &&
-  message.forked_from === undefined &&
-  message.sent_from === undefined &&
-  message.automation === undefined &&
-  (message.is_meta !== true || message.question_answer !== undefined)
-
 const typedText = (content: unknown): string => {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
@@ -58,8 +49,12 @@ const answeredText = (body: Readonly<Record<string, unknown>>): string => {
   return [`The user answered: ${jsonQuoted(answer)}`, ...asked].join("\n")
 }
 
+/**
+ * What the owner said in `message`, which `TranscriptQueries.ownerWordsIn` (or
+ * `ownerMessagesAfter`) proved is the owner's own words: the typed text, or an answer to Arden's
+ * question with Arden's prompt marked as Arden's.
+ */
 export const ownerText = (message: Readonly<Record<string, unknown>>): string => {
-  if (!ownWords(message)) return ""
   const typed = typedText(message.content)
   if (message.question_answer === undefined || !typed.trim().startsWith("<question_answer>"))
     return typed
@@ -67,8 +62,8 @@ export const ownerText = (message: Readonly<Record<string, unknown>>): string =>
   return body === undefined ? "" : answeredText(body)
 }
 
+/** What the owner typed in a proven `message`, without the choices Arden offered. */
 export const ownerKeystrokes = (message: Readonly<Record<string, unknown>>): string => {
-  if (!ownWords(message)) return ""
   if (!typedText(message.content).trim().startsWith("<question_answer>")) return ownerText(message)
   const ownAnswer = questionAnswerFields(message)?.own_answer
   return Predicate.isString(ownAnswer) ? ownAnswer : ""

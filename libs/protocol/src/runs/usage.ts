@@ -9,7 +9,8 @@
  * - `letter_subject`: the subject line of a Space letter.
  * - `chat_triage`: deciding which Space a loose chat belongs on.
  * - `focus_offer`: the objective of a focused chat Arden offers to open.
- * - `space_overview`: the Space overview made from its chats' summaries.
+ * - `space_overview`: the Space overview made from its chats' summaries. Past
+ *   spend only: the overview was removed.
  * - `space_instructions`, `automation_description`, `recipe_draft`: the text
  *   a Generate button writes.
  * - `capture`: routing a handed screenshot to the chat it belongs in.

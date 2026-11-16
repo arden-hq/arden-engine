@@ -2,10 +2,10 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { expect, it } from "vitest"
 
-// How far Memory Capture has read a chat has one owner: `memory_capture_positions`. These keep
+// How far Memory Capture has read a chat has one owner: `memory_capture_unread`. These keep
 // a second copy from coming back: the old marks in `run_sidecars`, or a Capture module that
 // depends on the chat's context number, which compaction, clear and revert change. How Capture
-// cuts a chat into batches has one owner too: `readCaptureBatch`, which the backlog count calls.
+// cuts a chat into batches has one owner too: the module that batches.
 
 const SOURCE = join(import.meta.dirname, "../src")
 const SCRIPTS = join(import.meta.dirname, "../scripts")
@@ -17,9 +17,6 @@ const sources = (directory: string): ReadonlyArray<string> =>
     return entry.name.endsWith(".ts") ? [path] : []
   })
 
-/** The backfill that removes the old marks is the one place left that reads them. */
-const MARK_REMOVAL = "persistence/sqlite/memory-capture-backlog-backfill.ts"
-
 const CAPTURE_MODULES = [
   "memory/capture-batches.ts",
   "persistence/memory/store.ts",
@@ -29,14 +26,14 @@ const CAPTURE_MODULES = [
   "automations/handlers/memory-capture.ts"
 ]
 
-it("reads Capture's old marks only in the backfill that removes them", () => {
+it("reads Capture's old marks nowhere outside the migration that removes them", () => {
   const readers = sources(SOURCE)
     .map((path) => relative(SOURCE, path))
     .filter((path) => !path.startsWith("persistence/migrations/"))
     .filter((path) =>
       /\$\.memory_capture(?![_a-z])/u.test(readFileSync(join(SOURCE, path), "utf8"))
     )
-  expect(readers).toEqual([MARK_REMOVAL])
+  expect(readers).toEqual([])
 })
 
 it("keeps the context number out of every Capture module", () => {

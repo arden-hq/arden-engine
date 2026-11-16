@@ -32,7 +32,7 @@ export class WikiChangeSink extends Context.Service<
 >()("@arden-hq/server/wiki/WikiChangeSink") {}
 
 const storageError = (cause: unknown) =>
-  wikiError("list", "storage", "Wiki change publication remains pending", { cause })
+  wikiError("list", "storage", "Memory change publication remains pending", { cause })
 
 export const makeWikiPublisher = Effect.fn("Wiki.makePublisher")(function* (
   repository: ManagedFileRepositoryShape,
@@ -58,7 +58,7 @@ export const makeWikiPublisher = Effect.fn("Wiki.makePublisher")(function* (
       return yield* wikiError(
         "list",
         "corrupt",
-        "Wiki publication cursor is outside the current history"
+        "Memory publication cursor is outside the current history"
       )
     }
     let queued = 0

@@ -7,6 +7,7 @@ import type {
   WikiPageGuard,
   WikiPageListOptions,
   WikiPagePage,
+  WikiRestoreSide,
   WikiVersionDiffRouteOptions
 } from "./contracts.js"
 import {
@@ -17,8 +18,7 @@ import {
   WikiPageLinksSchema,
   WikiPagePageSchema,
   WikiPageSchema,
-  WikiRenameApprovalListResponseSchema,
-  WikiRenameApprovalSchema,
+  WikiRenamePlanSchema,
   WikiRevisionConflictResponseSchema,
   toWikiArchiveResponse,
   toWikiPage,
@@ -27,11 +27,9 @@ import {
   toWikiPageHistoryResponse,
   toWikiPageLinks,
   toWikiPagePage,
-  toWikiRenameApproval,
-  toWikiRenameApprovals,
+  toWikiRenamePlan,
   toWikiRevisionConflict,
   encodeCreateWikiRequestEffect,
-  encodeRejectWikiRenameRequestEffect,
   encodeRenameWikiRequestEffect,
   encodeUpdateWikiRequestEffect,
   encodeWikiArchivePathEffect,
@@ -42,9 +40,9 @@ import {
   encodeWikiLinksPathEffect,
   encodeWikiPagePathEffect,
   encodeWikiPagesPathEffect,
-  encodeWikiRenameDecisionPathEffect,
   encodeWikiRestoreArchivedPathEffect,
-  encodeWikiVersionRequestEffect
+  encodeWikiVersionRequestEffect,
+  encodeWikiHistoryRestoreRequestEffect
 } from "./schema.js"
 
 export * from "./contracts.js"
@@ -76,16 +74,7 @@ export const wikiDecoders = {
     "Invalid Wiki version diff"
   ),
   links: projectedDecoderFor(WikiPageLinksSchema, toWikiPageLinks, "Invalid Wiki links"),
-  renameApproval: projectedDecoderFor(
-    WikiRenameApprovalSchema,
-    toWikiRenameApproval,
-    "Invalid Wiki rename approval"
-  ),
-  renameApprovals: projectedDecoderFor(
-    WikiRenameApprovalListResponseSchema,
-    toWikiRenameApprovals,
-    "Invalid Wiki rename approvals"
-  ),
+  rename: projectedDecoderFor(WikiRenamePlanSchema, toWikiRenamePlan, "Invalid Wiki rename"),
   revisionConflict: projectedDecoderFor(
     WikiRevisionConflictResponseSchema,
     toWikiRevisionConflict,
@@ -124,9 +113,9 @@ export const wikiRequests = {
       "encode"
     )
   },
-  restoreHistory(page: WikiPageGuard): string {
+  restoreHistory(page: WikiPageGuard, side: WikiRestoreSide): string {
     return runBoundary(
-      encodeWikiVersionRequestEffect(pageGuard(page)),
+      encodeWikiHistoryRestoreRequestEffect({ page: pageGuard(page), side }),
       "Invalid Wiki history-restore request",
       "encode"
     )
@@ -135,13 +124,6 @@ export const wikiRequests = {
     return runBoundary(
       encodeRenameWikiRequestEffect({ page: pageGuard(page), input }),
       "Invalid Wiki rename request",
-      "encode"
-    )
-  },
-  rejectRename(resolution?: string | null): string {
-    return runBoundary(
-      encodeRejectWikiRenameRequestEffect(resolution === undefined ? {} : { resolution }),
-      "Invalid Wiki rename rejection",
       "encode"
     )
   }
@@ -196,12 +178,6 @@ export const wikiRoutes = {
   links(pageId: string): string {
     return runBoundary(encodeWikiLinksPathEffect(pageId), "Invalid Wiki links route", "encode")
   },
-  renameApprovals: "/admin/wiki/rename-approvals",
-  renameDecision(approvalId: string, decision: "accept" | "reject"): string {
-    return runBoundary(
-      encodeWikiRenameDecisionPathEffect({ approvalId, decision }),
-      "Invalid Wiki rename-decision route",
-      "encode"
-    )
-  }
+  renamePreview: "/admin/wiki/rename/preview",
+  rename: "/admin/wiki/rename"
 } as const

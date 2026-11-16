@@ -7,7 +7,6 @@ import {
   StructuredCompletionError
 } from "../../models/structured-completion.js"
 import { SpaceStore, SpaceStoreError, type PersistedSpace } from "../../persistence/spaces/store.js"
-import { SummaryStore } from "../../persistence/summaries/store.js"
 import { makeSpaceInstructions } from "../../assist/space-instructions.js"
 import { Wiki } from "../../wiki/service.js"
 import { WikiError } from "../../wiki/errors.js"
@@ -45,7 +44,6 @@ export const SpaceHandlers = HttpApiBuilder.group(
     const sessions = yield* SessionStore
     const store = yield* SpaceStore
     const chatStop = yield* ChatStop
-    const summaries = yield* SummaryStore
     const wiki = yield* Wiki
     const completion = yield* StructuredCompletion
     const draftInstructions = makeSpaceInstructions({ completion, store, wiki })
@@ -89,11 +87,6 @@ export const SpaceHandlers = HttpApiBuilder.group(
     return handlers
       .handle("configurationHistory", ({ params, query }) =>
         store.history({ id: params.spaceId, ...query }).pipe(Effect.catch(failStore))
-      )
-      .handle("overviewHistory", ({ params, query }) =>
-        summaries
-          .spaceHistory(params.spaceId, query.after ?? 0, query.limit ?? 50)
-          .pipe(Effect.catch(failStore))
       )
       .handle("list", () =>
         store.list().pipe(

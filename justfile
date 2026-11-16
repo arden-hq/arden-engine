@@ -54,10 +54,6 @@ speed:
 replay-copy into *flags:
     node --conditions=arden-source apps/server-ts/scripts/replay-copy.ts --into {{into}} {{flags}}
 
-# Count, on the replay copy in <copy> and with no model, the Memory Capture runs a catch-up of the old unread turns would take, and the typed owner turns, before and since 28 Aug 2026.
-capture-backlog copy:
-    cd apps/server-ts && ARDEN_CAPTURE_BACKLOG=1 ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project capture-backlog
-
 # Score, on the replay copy in <copy> and with no model, whether a new chat is sent the Memory pages that answer each question in the private <questions> file. Results go beside <questions>. `--baseline <results file>` fails when an expected page is sent less fully than there.
 memory-test-sent questions copy *flags:
     cd apps/server-ts && ARDEN_MEMORY_TEST=sent ARDEN_MEMORY_TEST_FLAGS="{{flags}}" ARDEN_MEMORY_TEST_QUESTIONS={{questions}} ARDEN_REPLAY_COPY={{copy}} bunx vitest run --project memory-test

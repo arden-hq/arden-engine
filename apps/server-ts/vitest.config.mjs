@@ -20,18 +20,6 @@ const speedProject =
     ? [{ extends: true, test: { name: "speed", include: speed, testTimeout: 1_200_000 } }]
     : []
 
-// The Capture backlog count is a script on the replay copy, not a test: it runs only in its
-// own project, from `just capture-backlog`.
-const backlogProject =
-  process.env.ARDEN_CAPTURE_BACKLOG === "1"
-    ? [
-        {
-          extends: true,
-          test: { name: "capture-backlog", include: ["scripts/capture-backlog-count.ts"] }
-        }
-      ]
-    : []
-
 // The memory test's two halves are scripts on the replay copy, not tests: each runs only in its
 // own project, from `just memory-test-sent` or `just memory-test-answered`.
 const memoryTestHalf = process.env.ARDEN_MEMORY_TEST
@@ -54,6 +42,10 @@ const outsideEditsProject =
         }
       ]
     : []
+
+// The replays read one copy of real data and each holds it while it runs: they run one file at
+// a time, in their own project, with room to wait for each other.
+const replays = ["test/*-replay.test.ts"]
 
 const memoryShapeProject =
   process.env.ARDEN_MEMORY_SHAPE === "1"
@@ -79,8 +71,17 @@ export default mergeConfig(
           extends: true,
           test: {
             name: "unit",
-            exclude: [...configDefaults.exclude, ...boot, ...speed],
+            exclude: [...configDefaults.exclude, ...boot, ...speed, ...replays],
             isolate: false
+          }
+        },
+        {
+          extends: true,
+          test: {
+            name: "replay",
+            include: replays,
+            fileParallelism: false,
+            testTimeout: 1_800_000
           }
         },
         // The boot project carries the scan check: its teardown runs once, after both projects.
@@ -89,7 +90,6 @@ export default mergeConfig(
           test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }
         },
         ...speedProject,
-        ...backlogProject,
         ...memoryTestProject,
         ...outsideEditsProject,
         ...memoryShapeProject

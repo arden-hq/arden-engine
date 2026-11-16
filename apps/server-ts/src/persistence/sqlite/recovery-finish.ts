@@ -10,6 +10,7 @@ import type { ChatEventStore } from "../events/store.js"
 import type { EventDraft } from "../events/model.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import {
+  messageAuthor,
   StoredMessageEnvelopeSchema,
   type StoredMessageEnvelope,
   visibleMessageCount
@@ -179,11 +180,11 @@ export const appendRecoveredMessagesInTransaction = Effect.fn(
     yield* sql`
       INSERT INTO session_messages (
         session_id, message_id, seq, role, message_json, client_id,
-        created_at, search_text
+        created_at, search_text, author
       ) VALUES (
         ${run.session_id}, ${message.message_id}, ${sequence}, ${message.role},
         ${encoded}, ${message.client_id ?? null}, ${message.created_at},
-        ${transcriptSearchText(message)}
+        ${transcriptSearchText(message)}, ${messageAuthor(message)}
       )
     `
     sequence += 1

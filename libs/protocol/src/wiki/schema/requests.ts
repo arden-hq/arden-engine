@@ -5,6 +5,7 @@ import {
   strict,
   WikiPageIdSchema,
   WikiPathSchema,
+  WikiRestoreSideSchema,
   WikiRevisionIdSchema,
   WikiTitleSchema,
   WikiMetadataSchema
@@ -40,13 +41,14 @@ export const WikiUpdateRequestContextSchema = Schema.Struct({
   content: Schema.String
 })
 
+export const WikiHistoryRestoreRequestContextSchema = Schema.Struct({
+  page: WikiPageGuardSchema,
+  side: WikiRestoreSideSchema
+})
+
 export const WikiRenameRequestContextSchema = Schema.Struct({
   page: WikiPageGuardSchema,
   input: RenameWikiPageInputSchema
-})
-
-export const WikiRenameRejectInputSchema = Schema.Struct({
-  resolution: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(4_000))))
 })
 
 export const WikiCreateRequestSchema = Schema.Struct({
@@ -70,16 +72,19 @@ export const WikiVersionRequestSchema = Schema.Struct({
   expected_head: WikiRevisionIdSchema
 })
 
+/** `side` is absent from releases that could only undo a Maintenance change: it means `before`. */
+export const WikiHistoryRestoreRequestSchema = Schema.Struct({
+  expected_version: WikiRevisionIdSchema,
+  expected_head: WikiRevisionIdSchema,
+  side: Schema.optionalKey(WikiRestoreSideSchema)
+})
+
 export const WikiRenameRequestSchema = Schema.Struct({
   page_id: WikiPageIdSchema,
   new_path: WikiPathSchema,
   new_title: WikiTitleSchema,
   expected_version: WikiRevisionIdSchema,
   expected_head: WikiRevisionIdSchema
-})
-
-export const WikiRenameRejectRequestSchema = Schema.Struct({
-  resolution: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(4_000))))
 })
 
 /** Encode the public create input into the server's revision-aware request body. */
@@ -126,6 +131,19 @@ export const encodeWikiVersionRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
+export const encodeWikiHistoryRestoreRequestEffect = (value: unknown) =>
+  Schema.decodeUnknownEffect(WikiHistoryRestoreRequestContextSchema)(value, strict).pipe(
+    Effect.map(({ page, side }) => ({
+      expected_version: page.version,
+      expected_head: page.repositoryHead,
+      side
+    })),
+    Effect.flatMap((request) =>
+      Schema.decodeUnknownEffect(WikiHistoryRestoreRequestSchema)(request, strict)
+    ),
+    Effect.map(JSON.stringify)
+  )
+
 export const encodeRenameWikiRequestEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(WikiRenameRequestContextSchema)(value, strict).pipe(
     Effect.map(({ page, input }) => ({
@@ -137,14 +155,6 @@ export const encodeRenameWikiRequestEffect = (value: unknown) =>
     })),
     Effect.flatMap((request) =>
       Schema.decodeUnknownEffect(WikiRenameRequestSchema)(request, strict)
-    ),
-    Effect.map(JSON.stringify)
-  )
-
-export const encodeRejectWikiRenameRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(WikiRenameRejectInputSchema)(value, strict).pipe(
-    Effect.flatMap((request) =>
-      Schema.decodeUnknownEffect(WikiRenameRejectRequestSchema)(request, strict)
     ),
     Effect.map(JSON.stringify)
   )

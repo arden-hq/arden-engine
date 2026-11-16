@@ -11,12 +11,16 @@ import {
   MAX_HANDLER_ITEM_ATTEMPTS,
   handlerItemClientId,
   type HandlerItem,
+  type HandlerItemData,
   type HandlerItemInput,
   type HandlerItemRef
 } from "../automations/handler-item.js"
 import type { AutomationRules } from "../automations/model.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
 import { parseLease } from "./automation-lease.js"
+import { ITEM_GIVE_UP, endStreak, giveUpReason, givesUp } from "./automation-auto-pause.js"
+import { recordAutomationEvent } from "./entity-events.js"
+import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { nextId, type Writer } from "./deps.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { iso } from "../../runtime/clock.js"
@@ -61,12 +65,20 @@ const save = Effect.fn("HandlerItem.save")(function* (
   return item
 })
 
+/** Where the item starts, the same each run that tries it again. */
+const streakItem = (data: HandlerItemData): string =>
+  data.kind === "memory"
+    ? JSON.stringify([data.batch.identity.sessionId, data.batch.identity.start])
+    : String(data.kind === "daily" ? data.date : data.processedHead)
+
 export const makeHandlerItems = ({
   writer,
-  rules
+  rules,
+  sessionEvents
 }: {
   readonly writer: Writer
   readonly rules: Pick<AutomationRules["Service"], "itemOwner">
+  readonly sessionEvents: SessionLifecycleEvents["Service"]
 }): AutomationHandlerItems["Service"] => {
   const sql = writer.sql
   const prepareHandlerItem: AutomationHandlerItems["Service"]["prepareHandlerItem"] = Effect.fn(
@@ -166,10 +178,44 @@ export const makeHandlerItems = ({
       )
     )
 
+  const giveUp: AutomationHandlerItems["Service"]["giveUp"] = Effect.fn("HandlerItem.giveUp")(
+    function* (lease, runId, tell) {
+      const { runId: attemptId } = parseLease(lease)
+      const automationId = lease.payload.automationId
+      const data = (yield* load(sql, lease)).context.handler_item?.input.data
+      const cause = yield* givesUp(sql, {
+        automationId,
+        attemptId,
+        chatRunId: runId,
+        item: data === undefined ? null : streakItem(data)
+      })
+      if (cause === undefined) return undefined
+      const text = yield* tell({ then: ITEM_GIVE_UP[cause.kind], reason: giveUpReason(cause) })
+      yield* writer.transact(
+        Effect.andThen(
+          endStreak(sql, automationId),
+          recordAutomationEvent(sql, {
+            sessionEvents,
+            automationId,
+            attemptId,
+            runId,
+            event: "failed",
+            text
+          })
+        )
+      )
+      return text
+    },
+    Effect.mapError((cause) =>
+      cause instanceof Error ? cause : failure("Could not give up on the handler item", cause)
+    )
+  )
+
   return AutomationHandlerItems.of({
     prepareHandlerItem,
     settleHandlerItem: transition("settle"),
-    retryHandlerItem: transition("retry")
+    retryHandlerItem: transition("retry"),
+    giveUp
   })
 }
 

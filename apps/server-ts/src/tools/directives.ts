@@ -1,71 +1,59 @@
 import type { ServerRunContext } from "./run-context.js"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
-import { countOf, formatBytes } from "@arden-hq/std/count"
 import { createTwoFilesPatch } from "diff"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
-import {
-  GlobalInstructions,
-  GlobalInstructionsError,
-  MAX_RULES_BYTES
-} from "../context/global-instructions.js"
-import type { InstructionChat, InstructionWriter } from "../persistence/instructions/store.js"
+import { rulesPage } from "../context/global-instructions.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { appliedReceipt, chatLinkOf } from "./call-receipt.js"
-import type { CallEffects } from "../execution/tool-effect.js"
-import { toolFailure } from "./tool-failure.js"
+import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../wiki/authority.js"
+import { RULES_PAGE_PATH } from "../wiki/code-owned-pages.js"
+import type { WikiError } from "../wiki/errors.js"
+import { reviseWikiPage } from "../wiki/page.js"
+import { Wiki } from "../wiki/service.js"
+import { appliedReceipt } from "./call-receipt.js"
+import { toolFailure, toolFault } from "./tool-failure.js"
 import { requireOwnerTurn } from "./owner-turn.js"
 
-const DIRECTIVES_RESOURCE_ID = "directives"
 const MAX_DIFF_BYTES = 64 * 1024
 const EmptyParametersSchema = Schema.Record(Schema.String, Schema.Never)
 const ReplaceParametersSchema = Schema.Struct({
-  directives: Schema.Trim.check(Schema.isMaxLength(MAX_RULES_BYTES)).pipe(
+  directives: Schema.Trim.pipe(
     Schema.annotateEncoded({
-      description:
-        "The complete desired global instructions as Markdown. This replaces the whole AGENTS.md."
+      description: `The complete desired global instructions as Markdown. This replaces the whole ${RULES_PAGE_PATH}.`
     })
   )
 })
 
-const MAX_LISTED_VERSIONS = 100
-
-const HistoryParametersSchema = Schema.Struct({
-  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_LISTED_VERSIONS }))
-    .annotate({
-      description: `Most versions to list, newest first, from 1 to ${MAX_LISTED_VERSIONS}. Defaults to 20.`
-    })
-    .pipe(Schema.withDecodingDefault(Effect.succeed(20)))
-})
-
-const RestoreParametersSchema = Schema.Struct({
-  version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
-    description: "The version number directives_history lists."
-  })
-})
-
-const FAILURE_PREVIEWS = {
-  invalid: "Invalid instructions",
-  conflict: "Instructions changed",
-  storage: "Instructions unavailable"
-} as const satisfies Record<GlobalInstructionsError["reason"], string>
-
-const failure = (error: GlobalInstructionsError): ToolExecutionError =>
+const changedSinceRead = (): ToolExecutionError =>
   toolFailure(
-    error.reason === "conflict"
-      ? {
-          reason: error.reason,
-          message: `${error.message}. Call directives_get, recompute the full replacement, and retry.`
-        }
-      : error,
-    FAILURE_PREVIEWS[error.reason]
+    {
+      reason: "conflict",
+      message:
+        "Global instructions changed after they were read. Call directives_get, recompute the full replacement, and retry."
+    },
+    "Instructions changed"
+  )
+
+const failure = (error: WikiError): ToolExecutionError =>
+  error.reason === "conflict" ? changedSinceRead() : toolFailure(error, "Instructions unavailable")
+
+const readFirst = () =>
+  new ToolExecutionError(
+    "Read the current instructions before replacing them. Call directives_get, then retry.",
+    { preview: "Read instructions first", retryable: true }
   )
 
 const approvalDiff = (before: string, after: string): string => {
-  const diff = createTwoFilesPatch("AGENTS.md", "AGENTS.md", before, after, "before", "after", {
-    context: 3
-  })
+  const diff = createTwoFilesPatch(
+    RULES_PAGE_PATH,
+    RULES_PAGE_PATH,
+    before,
+    after,
+    "before",
+    "after",
+    { context: 3 }
+  )
   if (Buffer.byteLength(diff, "utf8") > MAX_DIFF_BYTES) {
     throw new ToolExecutionError(
       "The complete instructions diff is too large to review safely. Submit a smaller replacement.",
@@ -75,180 +63,59 @@ const approvalDiff = (before: string, after: string): string => {
   return diff
 }
 
-const requireInteractiveSession = (
-  sessions: SessionQueries["Service"],
-  run: ServerRunContext,
-  signal: AbortSignal
-) =>
-  requireOwnerTurn(
-    sessions,
-    run,
-    signal,
-    { kind: "directives" },
-    {
-      unverifiedBefore: "changing global instructions",
-      notOwnerTurn: "Global instructions change only in the user's own turn, after their approval"
-    }
-  )
+const OUTCOMES = {
+  unchanged: {
+    result: "Global instructions already had this content; nothing changed.",
+    preview: "Instructions unchanged"
+  },
+  cleared: { result: "Global instructions cleared.", preview: "Instructions cleared" },
+  replaced: { result: "Global instructions replaced.", preview: "Instructions replaced" }
+} as const
 
-const directivesOutcome = (
-  changed: boolean,
-  cleared: boolean
-): { readonly result: string; readonly preview: string } => {
-  if (!changed)
-    return {
-      result: "Global instructions already had this content; nothing changed.",
-      preview: "Instructions unchanged"
-    }
-  if (cleared) return { result: "Global instructions cleared.", preview: "Instructions cleared" }
-  return { result: "Global instructions replaced.", preview: "Instructions replaced" }
-}
-
-const writerPhrase = (
-  writer: InstructionWriter,
-  chats: ReadonlyMap<string, string | undefined>
-): string => {
-  const chat = (writer: { readonly chat: InstructionChat | undefined }) =>
-    (writer.chat === undefined ? undefined : chats.get(writer.chat.sessionId)) ??
-    "a chat that no longer exists"
-  switch (writer.kind) {
-    case "seed":
-      return "the rules as they were when this history began"
-    case "outside":
-      return "edited outside Arden, taken as yours"
-    case "chat":
-      return `changed in ${chat(writer)}`
-    case "restore":
-      return `version ${writer.from} restored in ${chat(writer)}`
-  }
-}
-
-const chatOf = (writer: InstructionWriter): string | undefined =>
-  writer.kind === "chat" || writer.kind === "restore" ? writer.chat?.sessionId : undefined
-
-const makeRulesChange = ({
-  instructions,
-  sessions
-}: {
-  readonly instructions: GlobalInstructions["Service"]
-  readonly sessions: SessionQueries["Service"]
-}) => {
-  const readCurrent = (signal: AbortSignal) =>
-    Effect.runPromise(instructions.read().pipe(Effect.mapError(failure)), { signal })
-
-  const approval = async (content: string, ctx: ToolContext<ServerRunContext>) => {
-    await requireInteractiveSession(sessions, ctx.run, ctx.signal)
-    const current = await readCurrent(ctx.signal)
-    const observed = ctx.run.observations.observed(DIRECTIVES_RESOURCE_ID)
-    if (current.version !== "absent" && observed === undefined) {
-      throw new ToolExecutionError(
-        "Read the current instructions before replacing them. Call directives_get, then retry.",
-        { preview: "Read instructions first", retryable: true }
-      )
-    }
-    if (observed !== undefined && observed !== current.version) {
-      throw failure(
-        new GlobalInstructionsError({
-          operation: "replace",
-          reason: "conflict",
-          message: "Global instructions changed after they were read"
-        })
-      )
-    }
-    return {
-      preview: content.trim() === "" ? "Clear instructions" : "Replace instructions",
-      diff: approvalDiff(current.content ?? "", content.trim())
-    }
-  }
-
-  const apply = async (
-    content: string,
-    restoredFrom: number | undefined,
-    ctx: ToolContext<ServerRunContext>,
-    effects: CallEffects
-  ) => {
-    await requireInteractiveSession(sessions, ctx.run, ctx.signal)
-    const current = await readCurrent(ctx.signal)
-    const observed = ctx.run.observations.observed(DIRECTIVES_RESOURCE_ID)
-    const expected = observed ?? (current.version === "absent" ? "absent" : null)
-    if (expected === null) {
-      throw new ToolExecutionError(
-        "Read the current instructions before replacing them. Call directives_get, then retry.",
-        { preview: "Read instructions first", retryable: true }
-      )
-    }
-    const chat = { sessionId: ctx.run.sessionId, runId: ctx.run.runId }
-    const snapshot = await Effect.runPromise(
-      instructions
-        .replace({
-          content,
-          expectedVersion: expected,
-          writer:
-            restoredFrom === undefined
-              ? { kind: "chat", chat }
-              : { kind: "restore", chat, from: restoredFrom }
-        })
-        .pipe(Effect.mapError(failure)),
-      { signal: ctx.signal }
-    )
-    const changed = snapshot.version !== expected
-    if (changed) effects.applied()
-    else effects.unchanged()
-    ctx.run.observations.observe(DIRECTIVES_RESOURCE_ID, snapshot.version)
-    const outcome = directivesOutcome(changed, snapshot.content === undefined)
-    return {
-      ...outcome,
-      data: { bytes: snapshot.bytes, version: snapshot.version },
-      ...(changed
-        ? {
-            host: appliedReceipt(ctx, {
-              kind: "versioned_resource",
-              resourceRef: `resource:${DIRECTIVES_RESOURCE_ID}`,
-              beforeVersion: expected,
-              afterVersion: snapshot.version,
-              domain: "resource",
-              title: "Instructions"
-            })
-          }
-        : {})
-    }
-  }
-
-  return { approval, apply }
-}
+const storedBody = (content: string): string => (content === "" ? "" : `${content}\n`)
 
 const makeDirectivesTools = ({
-  instructions,
+  wiki,
   sessions
 }: {
-  readonly instructions: GlobalInstructions["Service"]
+  readonly wiki: Wiki["Service"]
   readonly sessions: SessionQueries["Service"]
 }): ReadonlyArray<ServerTool> => {
-  const change = makeRulesChange({ instructions, sessions })
-  const storedVersion = async (version: number, signal: AbortSignal) => {
-    const stored = await Effect.runPromise(
-      instructions.version(version).pipe(Effect.mapError(failure)),
-      { signal }
-    )
-    if (stored === undefined)
-      throw new ToolExecutionError(
-        `There is no version ${version} of the instructions. Call directives_history to list them.`,
-        { preview: "No such version", retryable: false }
+  const readRules = async (signal: AbortSignal) => {
+    const snapshot = await Effect.runPromise(wiki.snapshot().pipe(Effect.mapError(failure)), {
+      signal
+    })
+    const record = rulesPage(snapshot)
+    if (record === undefined || snapshot.head === null)
+      throw toolFault(
+        `Memory has no ${RULES_PAGE_PATH} page: Arden could not move the rules file into it at start. Ask the user to check the rules file, then restart Arden.`,
+        "Instructions unavailable"
       )
-    return stored
+    return { record, head: snapshot.head }
   }
-  const chatLinks = async (sessionIds: ReadonlySet<string>, signal: AbortSignal) => {
-    const links = new Map<string, string | undefined>()
-    for (const sessionId of sessionIds)
-      links.set(sessionId, await chatLinkOf(sessions, sessionId, signal))
-    return links
+
+  const readByOwner = async (ctx: ToolContext<ServerRunContext>) => {
+    await requireOwnerTurn(
+      sessions,
+      ctx.run,
+      ctx.signal,
+      { kind: "directives" },
+      {
+        unverifiedBefore: "changing global instructions",
+        notOwnerTurn: "Global instructions change only in the user's own turn, after their approval"
+      }
+    )
+    const current = await readRules(ctx.signal)
+    const observed = ctx.run.observations.observed(current.record.page.pageId)
+    if (observed === undefined) throw readFirst()
+    if (observed !== current.record.resource.versionId) throw changedSinceRead()
+    return current
   }
 
   return [
     defineServerTool({
       name: "directives_get",
-      description:
-        "Read the user's global instructions, the AGENTS.md in Arden's data folder that applies to every chat, before replacing them.",
+      description: `Read the user's global instructions, the ${RULES_PAGE_PATH} page at the root of Memory that applies to every chat, before replacing them.`,
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
       metadata: {
         effect: "none",
@@ -262,82 +129,20 @@ const makeDirectivesTools = ({
         destructive: null
       },
       execute: async (_input, ctx) => {
-        const snapshot = await Effect.runPromise(
-          instructions.read().pipe(Effect.mapError(failure)),
-          {
-            signal: ctx.signal
-          }
-        )
-        ctx.run.observations.observe(DIRECTIVES_RESOURCE_ID, snapshot.version)
+        const { record } = await readRules(ctx.signal)
+        ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
+        const content = record.page.body.trim()
         return {
-          result: snapshot.content ?? "No global instructions are set.",
-          preview: snapshot.content === undefined ? "No instructions" : "Instructions loaded",
-          data: { bytes: snapshot.bytes, version: snapshot.version }
-        }
-      }
-    }),
-    defineServerTool({
-      name: "directives_history",
-      description:
-        "List the saved versions of the user's global instructions, newest first, with who changed them and when. Pass a version to directives_restore to bring it back.",
-      parameters: Schema.toStandardSchemaV1(HistoryParametersSchema),
-      metadata: {
-        effect: "none",
-        display_name: "Instructions History",
-        kind: "tool",
-        action: "read",
-        approval_preview: "List the versions of your standing instructions.",
-        source: "_directives",
-        changes_state: false,
-        concurrency_group: "directives",
-        destructive: null
-      },
-      execute: async (input, ctx) => {
-        const current = await Effect.runPromise(
-          instructions.read().pipe(Effect.mapError(failure)),
-          { signal: ctx.signal }
-        )
-        const { versions, total } = await Effect.runPromise(
-          instructions.versions({ limit: input.limit }).pipe(Effect.mapError(failure)),
-          { signal: ctx.signal }
-        )
-        ctx.run.observations.observe(DIRECTIVES_RESOURCE_ID, current.version)
-        const chats = await chatLinks(
-          new Set(versions.flatMap((version) => chatOf(version.writer) ?? [])),
-          ctx.signal
-        )
-        const older = total - versions.length
-        const lines = versions.map(
-          (version) =>
-            `- version ${version.version}${version.digest === current.version ? " (current)" : ""} — ${version.recordedAt} — ${writerPhrase(version.writer, chats)} — ${formatBytes(Buffer.byteLength(version.content, "utf8"))}`
-        )
-        return {
-          result:
-            versions.length === 0
-              ? "No versions of the instructions are saved yet."
-              : `Instructions history\n${lines.join("\n")}${older > 0 ? `\n${older} older versions are not shown; retry with a larger limit.` : ""}`,
-          preview: countOf(versions.length, "instructions version"),
-          data: {
-            total,
-            versions: versions.map((version) => ({
-              version: version.version,
-              current: version.digest === current.version,
-              recorded_at: version.recordedAt,
-              writer: version.writer.kind,
-              chat: (() => {
-                const sessionId = chatOf(version.writer)
-                return sessionId === undefined ? null : (chats.get(sessionId) ?? null)
-              })(),
-              restored_from: version.writer.kind === "restore" ? version.writer.from : null
-            }))
-          }
+          result: content === "" ? "No global instructions are set." : content,
+          preview: content === "" ? "No instructions" : "Instructions loaded",
+          data: { version: record.resource.versionId }
         }
       }
     }),
     defineServerTool({
       name: "directives_set",
       description: [
-        "Replace the user's global instructions (their AGENTS.md) with the complete Markdown you pass; empty text clears them.",
+        `Replace the user's global instructions (their ${RULES_PAGE_PATH}) with the complete Markdown you pass; empty text clears them.`,
         "Call directives_get first; the change fails if they changed since that read.",
         "Works only during the user's own turn in a chat; automations and other agents are refused. Asks by default."
       ].join(" "),
@@ -357,47 +162,67 @@ const makeDirectivesTools = ({
         idempotent: true,
         target: "reported"
       },
-      approvalPrompt: (input, ctx) => change.approval(input.directives, ctx),
-      execute: (input, ctx, effects) => change.apply(input.directives, undefined, ctx, effects)
-    }),
-    defineServerTool({
-      name: "directives_restore",
-      description: [
-        "Bring back one saved version of the user's global instructions, as directives_history lists it; this undoes later changes.",
-        "Works only during the user's own turn in a chat. Asks by default."
-      ].join(" "),
-      parameters: Schema.toStandardSchemaV1(RestoreParametersSchema),
-      metadata: {
-        effect: "arden_db",
-        display_name: "Restore Instructions",
-        standing: "always",
-        kind: "tool",
-        action: "write",
-        approval_preview: "Bring back an earlier version of your standing instructions.",
-        source: "_directives",
-        changes_state: true,
-        concurrency_group: "directives",
-        destructive: true,
-        default_approval: "ask",
-        idempotent: true,
-        target: "reported"
+      approvalPrompt: async (input, ctx) => {
+        const { record } = await readByOwner(ctx)
+        return {
+          preview: input.directives === "" ? "Clear instructions" : "Replace instructions",
+          diff: approvalDiff(record.page.body.trim(), input.directives)
+        }
       },
-      approvalPrompt: async (input, ctx) =>
-        change.approval((await storedVersion(input.version, ctx.signal)).content, ctx),
-      execute: async (input, ctx, effects) =>
-        change.apply(
-          (await storedVersion(input.version, ctx.signal)).content,
-          input.version,
-          ctx,
-          effects
-        )
+      execute: async (input, ctx, effects) => {
+        const { record, head } = await readByOwner(ctx)
+        const before = record.resource.versionId
+        const changed = record.page.body.trim() !== input.directives
+        let after = before
+        let outcome: keyof typeof OUTCOMES = "unchanged"
+        if (changed) {
+          const content = await Effect.runPromise(
+            reviseWikiPage(record.page, { body: storedBody(input.directives) }).pipe(
+              Effect.mapError((cause) => toolFault(cause.message, "Instructions unavailable"))
+            ),
+            { signal: ctx.signal }
+          )
+          const [page] = await Effect.runPromise(
+            wiki
+              .update({
+                edits: [{ pageId: record.page.pageId, content, expectedVersion: before }],
+                expectedHead: head,
+                authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
+                commit: {
+                  actor: "user:chat",
+                  origin: { kind: "rules", sessionId: ctx.run.sessionId },
+                  reason: "change the standing rules in a chat"
+                }
+              })
+              .pipe(Effect.mapError(failure)),
+            { signal: ctx.signal }
+          )
+          after = page.version
+          outcome = input.directives === "" ? "cleared" : "replaced"
+          effects.applied()
+        } else effects.unchanged()
+        ctx.run.observations.observe(record.page.pageId, after)
+        return {
+          ...OUTCOMES[outcome],
+          data: { version: after },
+          ...(changed
+            ? {
+                host: appliedReceipt(ctx, {
+                  kind: "versioned_resource",
+                  resourceRef: "resource:directives",
+                  beforeVersion: before,
+                  afterVersion: after,
+                  domain: "resource",
+                  title: "Instructions"
+                })
+              }
+            : {})
+        }
+      }
     })
   ]
 }
 
 export const directivesTools = Effect.gen(function* () {
-  return makeDirectivesTools({
-    instructions: yield* GlobalInstructions,
-    sessions: yield* SessionQueries
-  })
+  return makeDirectivesTools({ wiki: yield* Wiki, sessions: yield* SessionQueries })
 })

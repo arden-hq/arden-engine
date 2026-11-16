@@ -1,4 +1,3 @@
-import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
@@ -6,18 +5,12 @@ import { posix } from "node:path"
 import type { WikiLocationAuthority } from "./authority.js"
 import { IMPORTED_DIRECTORY, isImportedPath } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
-import {
-  commitWiki,
-  createPage,
-  updatePage,
-  type WikiCommitIdentity,
-  type WikiWrite
-} from "./commit.js"
+import { createPage, updatePage, type WikiCommitIdentity, type WikiWrite } from "./commit.js"
 import { directoryContract, directoryTitle } from "./directories.js"
-import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
+import { type WikiError, wikiError } from "./errors.js"
+import { writerOf, type WikiChanges } from "./page-change.js"
 import { formatWikiPage, namesTakenAt, normal, takesName } from "./page.js"
-import { loadSnapshot, type Snapshot } from "./snapshot.js"
-import type { SpaceStore } from "../persistence/spaces/store.js"
+import type { Snapshot } from "./snapshot.js"
 
 const HEAD_CONFLICT_RETRIES = 4
 
@@ -53,36 +46,28 @@ export interface WikiImportMethods {
   ) => Effect.Effect<WikiImportResult, WikiError>
 }
 
-export const makeWikiImportMethods = (
-  repository: ManagedFileRepositoryShape,
-  spaces: SpaceStore["Service"]
-): WikiImportMethods => {
-  const attempt = Effect.fn("Wiki.importAttempt")(function* (input: WikiImportInput) {
-    const snapshot = yield* loadSnapshot(repository, "create")
-    const plan = yield* planImport(snapshot, input)
-    if (plan.operations.length === 0) return { ...plan.result, committed: [] }
-    const written = yield* commitWiki(
-      { repository, spaces },
-      { ...input.commit, authority: input.authority, expectedRevision: snapshot.head },
-      plan.operations
-    ).pipe(Effect.mapError(mapRevisionError("create")))
-    return {
-      ...plan.result,
-      committed: written.commit.changes.flatMap((change) => {
-        const after = change.after
-        if (after === null) return []
-        return [
-          {
-            pageId: after.resourceId,
-            path: after.path,
-            title: plan.titles.get(after.resourceId) ?? posix.basename(after.path, ".md"),
-            beforeVersion: change.before?.versionId ?? "absent",
-            afterVersion: after.versionId
-          }
-        ]
-      })
-    }
-  })
+export const makeWikiImportMethods = (changes: WikiChanges): WikiImportMethods => {
+  const attempt = (input: WikiImportInput) =>
+    changes
+      .change(writerOf("create", input), (snapshot) => planImport(snapshot, input))
+      .pipe(
+        Effect.map(({ value, commit }) => ({
+          ...value.result,
+          committed: (commit?.commit.changes ?? []).flatMap((change) => {
+            const after = change.after
+            if (after === null) return []
+            return [
+              {
+                pageId: after.resourceId,
+                path: after.path,
+                title: value.titles.get(after.resourceId) ?? posix.basename(after.path, ".md"),
+                beforeVersion: change.before?.versionId ?? "absent",
+                afterVersion: after.versionId
+              }
+            ]
+          })
+        }))
+      )
 
   const importReferencePages = Effect.fn("Wiki.importReferencePages")(function* (
     input: WikiImportInput
@@ -175,11 +160,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
       !known.has(normal(parent)) &&
       !byPath.has(normal(`${parent}/README.md`))
     ) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        `Parent Wiki directory does not exist: ${parent}`
-      )
+      return yield* wikiError("create", "blocked", `Parent Memory folder does not exist: ${parent}`)
     }
     const current = byPath.get(normal(readme))
     if (current === undefined) {
@@ -187,7 +168,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
         return yield* wikiError(
           "create",
           "blocked",
-          `Wiki directory name already belongs to another page: ${directory.path}`
+          `Memory folder name already belongs to another page: ${directory.path}`
         )
       }
       create(readme, directoryTitle(directory.path), contract)
@@ -210,7 +191,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
   for (const page of input.pages) {
     const directory = posix.dirname(page.path)
     if (!known.has(normal(directory))) {
-      return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
+      return yield* wikiError("create", "blocked", `Memory folder is not mapped: ${directory}`)
     }
     const current = byPath.get(normal(page.path))
     if (current === undefined) {
@@ -218,7 +199,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
         return yield* wikiError(
           "create",
           "blocked",
-          `Wiki path or link name already exists: ${page.path}`
+          `Memory path or link name already exists: ${page.path}`
         )
       }
       create(page.path, page.title, page.body)
@@ -240,5 +221,5 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
       updated.push(page.path)
     }
   }
-  return { operations, titles, result: { created, updated, unchanged } }
+  return { writes: operations, value: { titles, result: { created, updated, unchanged } } }
 })

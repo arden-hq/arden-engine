@@ -132,7 +132,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const retiredMemoryRecords: Migration = {
-  version: 166,
+  version: 161,
   name: "retired_memory_records",
   foreignKeys: { kind: "enforced" },
   up

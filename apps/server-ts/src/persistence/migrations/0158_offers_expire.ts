@@ -86,7 +86,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const offersExpire: Migration = {
-  version: 160,
+  version: 158,
   name: "offers_expire",
   foreignKeys: { kind: "rebuilds", tables: ["task_proposals"] },
   up

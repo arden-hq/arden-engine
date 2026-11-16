@@ -57,8 +57,6 @@ const journal = "The event journal itself."
 const ownSetting =
   "A setting the owner changes on one screen, which applies the response; nothing else writes it."
 const internal = "Internal bookkeeping that no screen shows."
-const ruleVersions =
-  "Past versions of the standing rules, read by the rules tools; the rules file is the live copy."
 const files = "File lifecycle bookkeeping that no screen shows."
 const pipeline =
   "The connections pipeline: what reaches the owner is a proposal or a Task, told by theirs."
@@ -102,8 +100,7 @@ export const tableTells = {
   chat_event_deliveries: { silent: internal },
   answer_block_state: { silent: transcript },
   message_turns: { silent: transcript },
-  memory_capture_positions: { silent: internal },
-  memory_capture_backlog: { silent: internal },
+  memory_capture_unread: { silent: internal },
   chat_runs: { silent: run },
   run_model_usage: { silent: "Usage: Settings reads it when opened." },
   execution_budgets: { silent: ownSetting },
@@ -224,9 +221,6 @@ export const tableTells = {
     silent:
       "Browser procedure work is already reported by its normal durable tool and script records."
   },
-  wiki_rename_approvals: {
-    silent: "Wiki: its change sink (wiki/service.ts) tells every Wiki write."
-  },
   storage_settings: { silent: ownSetting },
   storage_retention: { silent: ownSetting },
   session_file_cleanup: { silent: files },
@@ -250,7 +244,6 @@ export const tableTells = {
   space_chat_links: { tell: "space", id: "{row}.space_id" },
   space_conversations: { tell: "space", id: "{row}.space_id" },
   chat_summaries: { silent: "Read into the model's prompts; no screen shows it live." },
-  space_summaries: { tell: "space", id: "{row}.space_id" },
   communication_sequence_clock: { silent: internal },
   space_continuity_seen: { silent: internal },
   run_endings: { silent: delivered },
@@ -282,7 +275,5 @@ export const tableTells = {
   session_membership_changes: { silent: history },
   permission_changes: { silent: history },
   question_decisions: { silent: history },
-  tool_approval_decisions: { silent: history },
-  space_overview_revisions: { silent: history },
-  global_instruction_versions: { silent: ruleVersions }
+  tool_approval_decisions: { silent: history }
 } as const satisfies Record<SchemaTable, TableTell>

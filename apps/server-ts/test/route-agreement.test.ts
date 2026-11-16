@@ -95,7 +95,6 @@ const tables: Readonly<Record<string, RouteTable>> = {
   spaceRoutes: table(spaceRoutes, {
     item: () => spaceRoutes.item(spaceId),
     archive: () => spaceRoutes.archive(spaceId, { stop: true }),
-    overviewHistory: () => spaceRoutes.overviewHistory(spaceId),
     conversation: () => spaceRoutes.conversation(spaceId),
     page: () => spaceRoutes.page(spaceId),
     restore: () => spaceRoutes.restore(spaceId),
@@ -225,8 +224,7 @@ const tables: Readonly<Record<string, RouteTable>> = {
     historyRestore: () => wikiRoutes.historyRestore("page-1", "commit-1"),
     diff: () => wikiRoutes.diff("page-1"),
     versionDiff: () => wikiRoutes.versionDiff("page-1", { before: "absent", after: "version-1" }),
-    links: () => wikiRoutes.links("page-1"),
-    renameDecision: () => wikiRoutes.renameDecision("approval-1", "accept")
+    links: () => wikiRoutes.links("page-1")
   }),
   scriptRoutes: table(scriptRoutes, {
     item: () => scriptRoutes.item(workflowTarget),

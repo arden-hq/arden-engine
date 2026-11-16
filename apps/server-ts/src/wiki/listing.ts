@@ -72,7 +72,8 @@ const WikiListCursorSchema = Schema.Struct({
 
 const decodeWikiListCursor = Effect.fn("Wiki.decodeListCursor")(function* (value: string) {
   const decoded = decodeOpaque(WikiListCursorSchema, value)
-  if (Option.isNone(decoded)) return yield* wikiError("list", "invalid", "Invalid Wiki page cursor")
+  if (Option.isNone(decoded))
+    return yield* wikiError("list", "invalid", "Invalid Memory page cursor")
   return decoded.value
 })
 
@@ -128,14 +129,14 @@ export const makeWikiListingMethods = (
     const includeRedirects = options.includeRedirects === true
     const limit = options.limit ?? WIKI_PAGE_DEFAULT_LIMIT
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > WIKI_PAGE_MAX_LIMIT) {
-      return yield* wikiError("list", "invalid", "Invalid Wiki page limit")
+      return yield* wikiError("list", "invalid", "Invalid Memory page limit")
     }
     const cursor = options.cursor === undefined ? null : yield* decodeWikiListCursor(options.cursor)
     if (
       cursor !== null &&
       (cursor.repositoryHead !== current.head || cursor.includeRedirects !== includeRedirects)
     ) {
-      return yield* wikiError("list", "conflict", "Wiki changed while reading pages")
+      return yield* wikiError("list", "conflict", "Memory changed while reading pages")
     }
     const shown = [
       ...(includeRedirects
@@ -192,23 +193,23 @@ export const makeWikiListingMethods = (
       input.limit < 1 ||
       input.limit > MAX_WIKI_CHANGE_LIMIT
     ) {
-      return yield* wikiError("list", "invalid", "Invalid Wiki change page bounds")
+      return yield* wikiError("list", "invalid", "Invalid Memory change page bounds")
     }
     const since = yield* Schema.decodeUnknownEffect(IsoDateTimeStringSchema)(input.since).pipe(
       Effect.mapError((cause) =>
-        wikiError("list", "invalid", "Invalid Wiki change timestamp", { cause })
+        wikiError("list", "invalid", "Invalid Memory change timestamp", { cause })
       )
     )
     const sinceDateTime = DateTime.make(since)
     if (Option.isNone(sinceDateTime)) {
-      return yield* wikiError("list", "invalid", "Invalid Wiki change timestamp")
+      return yield* wikiError("list", "invalid", "Invalid Memory change timestamp")
     }
     const commits = yield* readUntilShown(input.offset + input.limit + 1)
     const recent: Array<(typeof commits)[number]> = []
     for (const commit of commits) {
       const timestamp = DateTime.make(commit.timestamp)
       if (Option.isNone(timestamp)) {
-        return yield* wikiError("list", "corrupt", "Wiki history contains an invalid timestamp")
+        return yield* wikiError("list", "corrupt", "Memory history contains an invalid timestamp")
       }
       if (DateTime.toEpochMillis(timestamp.value) >= DateTime.toEpochMillis(sinceDateTime.value)) {
         recent.push(commit)
@@ -235,7 +236,7 @@ export const makeWikiListingMethods = (
           })
         })),
       catch: (cause) =>
-        wikiError("list", "corrupt", "Wiki history contains an invalid change", { cause })
+        wikiError("list", "corrupt", "Memory history contains an invalid change", { cause })
     })
     return {
       entries,

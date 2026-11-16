@@ -18,6 +18,8 @@ import {
   WIKI_PAGE_BUDGET_CHARS,
   WikiPathSchema,
   activePage,
+  changePages,
+  keptPage,
   readablePage,
   loadSnapshot,
   pageData,
@@ -25,17 +27,10 @@ import {
   wikiFailure,
   writtenPageData
 } from "./wiki.js"
-import { recordApplied } from "../execution/tool-effect.js"
 import { loadPageAges } from "../wiki/page-age.js"
 import { makeWikiRetireTools } from "./wiki-retire.js"
 import { MergedWikiPathSchema, makeWikiPageHistoryTools } from "./wiki-page-history.js"
-import {
-  MAX_PAGE_SOURCES,
-  directoryReceipt,
-  pageReceipt,
-  pageSource,
-  requireObserved
-} from "./wiki-records.js"
+import { MAX_PAGE_SOURCES, directoryReceipt, pageSource, requireObserved } from "./wiki-records.js"
 import { searchPages } from "./wiki-search.js"
 import { readChangeCall } from "../lib/memory-link.js"
 
@@ -120,34 +115,30 @@ const MoveParametersSchema = Schema.Struct({
 
 const exactOccurrences = (body: string, text: string): number => body.split(text).length - 1
 
-const preparePatch = async (
-  wiki: Wiki["Service"],
-  input: { readonly path: string; readonly old_text: string; readonly new_text: string },
-  signal: AbortSignal
-): Promise<{ readonly head: string; readonly record: PageRecord; readonly body: string }> => {
-  const snapshot = await loadSnapshot(wiki, signal)
-  const record = activePage(snapshot, input.path)
-  if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
+const patchedBody = (
+  record: PageRecord,
+  input: { readonly old_text: string; readonly new_text: string }
+): string => {
   const occurrences = exactOccurrences(record.page.body, input.old_text)
   if (occurrences !== 1) {
     throw new ToolExecutionError(
       occurrences === 0
-        ? "old_text was not found in the current Wiki page body."
-        : `old_text matches ${occurrences} places in the current Wiki page body.`,
+        ? "old_text was not found in the current Memory page body."
+        : `old_text matches ${occurrences} places in the current Memory page body.`,
       { preview: "Patch not applied", retryable: false }
     )
   }
   const body = record.page.body.replace(input.old_text, () => input.new_text)
   if (body.trim().length === 0) {
     throw new ToolExecutionError(
-      "A Wiki page must retain content. Archive it to remove the page.",
+      "A Memory page must retain content. Archive it to remove the page.",
       {
         preview: "Patch not applied",
         retryable: false
       }
     )
   }
-  return { head: snapshot.head, record, body }
+  return body
 }
 
 const directoryOutcome = (
@@ -478,7 +469,10 @@ const makeWikiOperationTools = ({
       target: "reported"
     },
     approvalPrompt: async (input, ctx) => {
-      const { record, body } = await preparePatch(wiki, input, ctx.signal)
+      const snapshot = await loadSnapshot(wiki, ctx.signal)
+      const record = activePage(snapshot, input.path)
+      if (record === null) throw pageNotFound(snapshot, input.path)
+      const body = patchedBody(record, input)
       return {
         preview: `Update ${record.resource.path}`,
         presentation: {
@@ -494,21 +488,19 @@ const makeWikiOperationTools = ({
       }
     },
     execute: async (input, ctx, effects) => {
-      const { head, record, body } = await preparePatch(wiki, input, ctx.signal)
-      if (body === record.page.body) {
-        effects.unchanged()
-        return {
-          result: `${record.resource.path} already has the requested body.`,
-          preview: "Wiki page unchanged",
-          data: { page: pageData(record), changed: false }
-        }
-      }
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const [updated] = await recordApplied(
-        effects,
-        Effect.runPromise(
-          wiki
-            .update({
+      const {
+        records: [record],
+        saved: [{ page }],
+        changed,
+        receipt
+      } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
+        paths: [input.path],
+        save: async ({ head, records: [record], writer, run }) => {
+          const body = patchedBody(record, input)
+          if (body === record.page.body) return [keptPage(record)]
+          const [updated] = await run(
+            wiki.update({
               edits: [
                 {
                   pageId: record.page.pageId,
@@ -517,24 +509,24 @@ const makeWikiOperationTools = ({
                 }
               ],
               expectedHead: head,
-              authority: identity.authority,
-              commit: {
-                actor: identity.actor,
-                origin: identity.origin,
-                reason: `patch wiki page ${record.resource.path}`
-              }
+              ...writer(`patch wiki page ${record.resource.path}`)
             })
-            .pipe(Effect.mapError(wikiFailure)),
-          { signal: ctx.signal }
-        )
-      )
-      ctx.run.observations.observe(updated.pageId, updated.version)
-      return {
-        result: `Patched ${updated.path}.`,
-        preview: "Wiki page patched",
-        data: { page: writtenPageData(updated), changed: true },
-        host: pageReceipt({ ctx, page: updated, beforeVersion: record.resource.versionId })
-      }
+          )
+          return [{ page: updated, before: record.resource.versionId }]
+        }
+      })
+      return changed
+        ? {
+            result: `Patched ${page.path}.`,
+            preview: "Wiki page patched",
+            data: { page: writtenPageData(page), changed: true },
+            ...(receipt === undefined ? {} : { host: receipt })
+          }
+        : {
+            result: `${record.resource.path} already has the requested body.`,
+            preview: "Wiki page unchanged",
+            data: { page: pageData(record), changed: false }
+          }
     }
   }),
   ...makeWikiRetireTools({ wiki, runs }),
@@ -557,66 +549,48 @@ const makeWikiOperationTools = ({
       target: "reported"
     },
     execute: async (input, ctx, effects) => {
-      const snapshot = await loadSnapshot(wiki, ctx.signal)
-      const record = activePage(snapshot, input.path)
-      if (record === null || snapshot.head === null) throw pageNotFound(snapshot, input.path)
-      if (record.resource.path === input.new_path) {
-        effects.unchanged()
-        ctx.run.observations.observe(record.page.pageId, record.resource.versionId)
+      let rewritten = { links: 0, pages: 0 }
+      const {
+        records: [record],
+        saved: [{ page }],
+        changed,
+        receipt
+      } = await changePages({ wiki, runs }, ctx, effects, {
+        input,
+        paths: [input.path],
+        save: async ({ head, records: [record], writer, run }) => {
+          if (record.resource.path === input.new_path) return [keptPage(record)]
+          const expectedVersion = requireObserved(ctx.run, record)
+          const renamed = await run(
+            wiki.rename({
+              pageId: record.page.pageId,
+              newPath: input.new_path,
+              newTitle: record.page.title,
+              expectedVersion,
+              expectedHead: head,
+              ...writer(`move wiki page ${record.resource.path} to ${input.new_path}`)
+            })
+          )
+          rewritten = { links: renamed.linkCount, pages: renamed.pageCount }
+          return [{ page: await run(wiki.read(record.page.pageId)), before: expectedVersion }]
+        }
+      })
+      if (!changed)
         return {
           result: `${record.resource.path} is already at the requested path.`,
           preview: "Wiki page unchanged",
           data: { page: pageData(record), changed: false }
         }
-      }
-      const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
-      const commit = {
-        actor: identity.actor,
-        origin: identity.origin,
-        reason: `move wiki page ${record.resource.path} to ${input.new_path}`
-      }
-      const expectedVersion = requireObserved(ctx.run, record)
-      const requested = await Effect.runPromise(
-        wiki
-          .requestRename({
-            pageId: record.page.pageId,
-            newPath: input.new_path,
-            newTitle: record.page.title,
-            expectedVersion,
-            expectedHead: snapshot.head,
-            authority: identity.authority,
-            commit
-          })
-          .pipe(Effect.mapError(wikiFailure)),
-        { signal: ctx.signal }
-      )
-      const accepted = await Effect.runPromise(
-        wiki.acceptRename({ approvalId: requested.approvalId }).pipe(Effect.mapError(wikiFailure)),
-        { signal: ctx.signal }
-      )
-      if (accepted.status !== "accepted") {
-        throw new ToolExecutionError(
-          accepted.resolution ??
-            "The Wiki changed before the move could be committed. Read the page and retry.",
-          { preview: "Wiki move not applied", retryable: true }
-        )
-      }
-      effects.applied()
-      const moved = await Effect.runPromise(
-        wiki.read(record.page.pageId).pipe(Effect.mapError(wikiFailure)),
-        { signal: ctx.signal }
-      )
-      ctx.run.observations.observe(moved.pageId, moved.version)
       return {
-        result: `Moved ${record.resource.path} to ${moved.path}.`,
+        result: `Moved ${record.resource.path} to ${page.path}.`,
         preview: "Wiki page moved",
         data: {
-          page: writtenPageData(moved),
+          page: writtenPageData(page),
           changed: true,
-          rewritten_links: accepted.linkCount,
-          rewritten_pages: accepted.pageCount
+          rewritten_links: rewritten.links,
+          rewritten_pages: rewritten.pages
         },
-        host: pageReceipt({ ctx, page: moved, beforeVersion: expectedVersion })
+        ...(receipt === undefined ? {} : { host: receipt })
       }
     }
   })

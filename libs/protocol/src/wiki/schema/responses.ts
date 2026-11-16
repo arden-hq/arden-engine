@@ -11,7 +11,7 @@ import type {
   WikiPageLinks,
   WikiPagePage,
   WikiPageSummary,
-  WikiRenameApproval,
+  WikiRenamePlan,
   WikiResourceVersion,
   WikiRevisionConflict
 } from "../contracts.js"
@@ -24,7 +24,7 @@ import {
   WikiPageIdSchema,
   WikiRevisionIdSchema,
   WikiResourceStateSchema,
-  trimmedText
+  WikiRestoreSideSchema
 } from "./shared.js"
 
 /** Wire schemas retain additive fields; mapping removes known storage-only keys. */
@@ -80,7 +80,8 @@ export const WikiHistoryCommitSchema = withExtras({
   origin: boundedText(1_024),
   reason: Schema.String.check(Schema.isMaxLength(16_384)),
   timestamp: IsoDateTimeStringSchema,
-  changes: Schema.Array(WikiHistoryChangeSchema)
+  changes: Schema.Array(WikiHistoryChangeSchema),
+  restorable: Schema.Array(WikiRestoreSideSchema)
 })
 
 export const WikiPageHistoryResponseSchema = withExtras({
@@ -132,28 +133,13 @@ export const WikiPageLinksSchema = withExtras({
   came_from: Schema.optionalKey(Schema.Array(WikiPageChatSchema))
 })
 
-export const WikiRenameApprovalStatusSchema = Schema.Literals([
-  "pending",
-  "applying",
-  "accepted",
-  "rejected"
-] as const)
-
-export const WikiRenameApprovalSchema = withExtras({
-  approval_id: trimmedText(512),
+export const WikiRenamePlanSchema = withExtras({
   old_path: boundedText(4_096),
   new_path: boundedText(4_096),
   old_title: boundedText(4_096),
   new_title: boundedText(4_096),
   link_count: NonNegativeIntSchema,
-  page_count: NonNegativeIntSchema,
-  status: WikiRenameApprovalStatusSchema,
-  created_at: IsoDateTimeStringSchema,
-  resolution: Schema.NullOr(Schema.String)
-})
-
-export const WikiRenameApprovalListResponseSchema = withExtras({
-  approvals: Schema.Array(WikiRenameApprovalSchema)
+  page_count: NonNegativeIntSchema
 })
 
 export const WikiRevisionConflictDetailSchema = withExtras({
@@ -251,6 +237,7 @@ const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHist
     reason,
     timestamp,
     changes,
+    restorable,
     ...extras
   } = commit
   return {
@@ -263,7 +250,8 @@ const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHist
     origin,
     reason,
     timestamp,
-    changes: changes.map(mapHistoryChange)
+    changes: changes.map(mapHistoryChange),
+    restorable
   }
 }
 
@@ -281,46 +269,23 @@ const mapLink = (link: typeof WikiLinkSchema.Type): WikiLink => {
   }
 }
 
-export const toWikiRenameApproval = (
-  approval: typeof WikiRenameApprovalSchema.Type
-): WikiRenameApproval => {
-  const {
-    approval_id,
-    old_path,
-    new_path,
-    old_title,
-    new_title,
-    link_count,
-    page_count,
-    generation: _generation,
-    status,
-    created_at,
-    resolved_at: _resolvedAt,
-    commit_id: _commitId,
-    resolution,
-    replacement_approval_id: _replacementApprovalId,
-    request_key: _requestKey,
-    request_fingerprint: _requestFingerprint,
-    base_head: _baseHead,
-    plan_json: _planJson,
-    claim_owner: _claimOwner,
-    claim_expires_at: _claimExpiresAt,
-    ...extras
-  } = approval
-  return {
-    ...extras,
-    approvalId: approval_id,
-    oldPath: old_path,
-    newPath: new_path,
-    oldTitle: old_title,
-    newTitle: new_title,
-    linkCount: link_count,
-    pageCount: page_count,
-    status,
-    createdAt: created_at,
-    resolution
-  }
-}
+export const toWikiRenamePlan = ({
+  old_path,
+  new_path,
+  old_title,
+  new_title,
+  link_count,
+  page_count,
+  ...extras
+}: typeof WikiRenamePlanSchema.Type): WikiRenamePlan => ({
+  ...extras,
+  oldPath: old_path,
+  newPath: new_path,
+  oldTitle: old_title,
+  newTitle: new_title,
+  linkCount: link_count,
+  pageCount: page_count
+})
 
 export const toWikiPagePage = ({
   repository_head,
@@ -429,11 +394,6 @@ export const toWikiPageLinks = ({
     })
   )
 })
-
-export const toWikiRenameApprovals = ({
-  approvals
-}: typeof WikiRenameApprovalListResponseSchema.Type): ReadonlyArray<WikiRenameApproval> =>
-  approvals.map(toWikiRenameApproval)
 
 const isRevisionConflictEnvelope = Schema.is(WikiRevisionConflictEnvelopeSchema)
 

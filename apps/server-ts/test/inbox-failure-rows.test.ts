@@ -1,6 +1,11 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
+import {
+  ITEM_GIVE_UP,
+  endStreak,
+  givesUp
+} from "../src/persistence/sqlite/automation-auto-pause.js"
 import { outcomeSql } from "../src/persistence/sqlite/automation-run-outcome.js"
 import { countsAsRun } from "../src/persistence/sqlite/automation-skip-record.js"
 import { failureRows } from "../src/persistence/sqlite/inbox-failure-rows.js"
@@ -18,7 +23,8 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 // and the new one on the same rows and expects the same Inbox entries.
 
 const DAY = 86_400_000
-const at = (days: number) => new Date(Date.now() - days * DAY).toISOString()
+const NOW = Date.now()
+const at = (days: number) => new Date(NOW - days * DAY).toISOString()
 const PREFIX = "automation-failed:"
 
 /** The failures read before migration 151. */
@@ -159,7 +165,7 @@ const seed = (sql: SqlClient.SqlClient) => {
     `INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type, space_id)
        VALUES ('chat', 'ref-chat', '${at(100)}', '${at(1)}', 'chat', 'sp'),
               ('thread', 'ref-thread', '${at(100)}', '${at(1)}', 'chat', NULL)`,
-    ...["auto-1", "auto-2", "auto-3"].map(
+    ...["auto-1", "auto-2", "auto-3", "auto-4"].map(
       (
         id
       ) => `INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers, created_at, thread_id)
@@ -284,6 +290,41 @@ it("the Inbox's failures read the recent and stuck lists, not every failure", as
           plan.some((step) => step.includes(index)),
           index
         ).toBe(true)
+    })
+  )
+})
+
+it("a failure streak ends when a run does its work and does not carry to the next item", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* seed(sql)
+      const givesUpAt = (attemptId: number, item: string) =>
+        givesUp(sql, { automationId: "auto-4", attemptId, chatRunId: null, item })
+      for (const attemptId of [21, 22]) expect(yield* givesUpAt(attemptId, "a")).toBeUndefined()
+      yield* endStreak(sql, "auto-4")
+      for (const attemptId of [23, 24]) expect(yield* givesUpAt(attemptId, "a")).toBeUndefined()
+      for (const attemptId of [25, 25, 26]) expect(yield* givesUpAt(attemptId, "b")).toBeUndefined()
+      expect(yield* givesUpAt(27, "b")).toEqual({ kind: "streak" })
+    })
+  )
+})
+
+it("an item job keeps its item when the provider refuses the run", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* seed(sql)
+      yield* sql`UPDATE chat_runs SET error_code = 'provider_auth' WHERE run_id = 'r-e6'`
+      yield* sql`INSERT INTO automation_runs (id, task_id, automation_ref, started_at, ended_at,
+          status, outcome) VALUES (21, 'auto-4', 'ref-auto-4', ${at(1)}, ${at(1)}, 'failed', 'failed')`
+      const cause = yield* givesUp(sql, {
+        automationId: "auto-4",
+        attemptId: 21,
+        chatRunId: "r-e6",
+        item: "a"
+      })
+      expect(cause && ITEM_GIVE_UP[cause.kind]).toBe("keep")
     })
   )
 })

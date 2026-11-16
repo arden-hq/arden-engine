@@ -66,7 +66,11 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
       const modelId = selection.modelId
       if (!route.planMeters(modelId)) return skip("chat model is not on the plan")
       const controls = yield* intelligence.settings()
-      const plan = planCompaction(snapshot.messages, controls.compactionKeepRatio)
+      const plan = planCompaction(
+        snapshot.messages,
+        snapshot.ownerWords,
+        controls.compactionKeepRatio
+      )
       if (plan === null) return skip("nothing to compact")
       const cachedRequest = replayPrefix(candidate, {
         sessionId: candidate.sessionId,

@@ -70,4 +70,4 @@ it("leaves no job run open without its job, and wakes Maintenance once, on the r
     leases: [[MAINTENANCE, "event"]],
     left: { changes: 0, runs: 1 }
   })
-}, 600_000)
+})

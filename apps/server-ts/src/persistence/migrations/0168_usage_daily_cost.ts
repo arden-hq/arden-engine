@@ -11,7 +11,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const usageDailyCost: Migration = {
-  version: 169,
+  version: 168,
   name: "usage_daily_cost",
   foreignKeys: { kind: "enforced" },
   up

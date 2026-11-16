@@ -1,5 +1,6 @@
 import { posix } from "node:path"
 
+import { isRulesPage } from "../wiki/code-owned-pages.js"
 import { isReadme } from "../wiki/page.js"
 
 /**
@@ -24,11 +25,12 @@ export const isStandingFactsPage = (page: {
 export const createRefusal = (
   path: string
 ): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
-  if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
+  if (!path.endsWith(".md"))
+    return { code: "invalid", message: "Memory page paths must end in .md" }
   if ((posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) || isReadme(path))
     return {
       code: "blocked",
-      message: "Wiki pages can be created only inside an existing Wiki directory"
+      message: "Memory pages can be created only inside an existing Memory folder"
     }
   return undefined
 }
@@ -45,10 +47,16 @@ const STANDING_PAGE_LIMIT_CHARS = 9_000
 const CONDENSE_ABOVE = 0.9
 const CONDENSE_TO = 0.8
 
+const RULES_PAGE_LIMIT_CHARS = 128 * 1024
+
+/** The limit of a page sent whole to every run or chat. */
 export const corePageBudget = (page: {
   readonly path: string
   readonly pageId: string
-}): number | undefined => (isStandingFactsPage(page) ? STANDING_PAGE_LIMIT_CHARS : undefined)
+}): number | undefined => {
+  if (isStandingFactsPage(page)) return STANDING_PAGE_LIMIT_CHARS
+  return isRulesPage(page.path) ? RULES_PAGE_LIMIT_CHARS : undefined
+}
 
 /** The size a condensed Core Memory page should end at or under. */
 export const coreCondenseTarget = (budget: number): number => Math.floor(budget * CONDENSE_TO)

@@ -47,21 +47,20 @@ import { chatListOrders } from "./0152_chat_list_orders.js"
 import { runsByDay } from "./0153_runs_by_day.js"
 import { jobRunClosesWithJob } from "./0154_job_run_closes_with_job.js"
 import { memoryCapturePositions } from "./0155_memory_capture_positions.js"
-import { jobHoldNamedForWhatItIs } from "./0156_job_hold_named_for_what_it_is.js"
-import { ownerChatStartsCapture } from "./0157_owner_chat_starts_capture.js"
-import { captureBatchCutByRevert } from "./0158_capture_batch_cut_by_revert.js"
-import { dropInferenceRejections } from "./0159_drop_inference_rejections.js"
-import { offersExpire } from "./0160_offers_expire.js"
-import { homePresenceLeaseIndex } from "./0161_home_presence_lease_index.js"
-import { memoryWakesLeaveReviews } from "./0162_memory_wakes_leave_reviews.js"
-import { globalInstructionVersions } from "./0163_global_instruction_versions.js"
-import { chatSummaryCutByRevert } from "./0164_chat_summary_cut_by_revert.js"
-import { chatSummaryRemovedByRevert } from "./0165_chat_summary_removed_by_revert.js"
-import { retiredMemoryRecords } from "./0166_retired_memory_records.js"
-import { reportRetentionRetired } from "./0167_report_retention_retired.js"
-import { renameApprovalsStoreWriter } from "./0168_rename_approvals_store_writer.js"
-import { usageDailyCost } from "./0169_usage_daily_cost.js"
-import { modelServerEndpoint } from "./0170_model_server_endpoint.js"
+import { chatPositionsCutAtRemoval } from "./0156_chat_positions_cut_at_removal.js"
+import { dropInferenceRejections } from "./0157_drop_inference_rejections.js"
+import { offersExpire } from "./0158_offers_expire.js"
+import { homePresenceLeaseIndex } from "./0159_home_presence_lease_index.js"
+import { memoryWakesLeaveReviews } from "./0160_memory_wakes_leave_reviews.js"
+import { retiredMemoryRecords } from "./0161_retired_memory_records.js"
+import { reportRetentionRetired } from "./0162_report_retention_retired.js"
+import { dropRenameApprovals } from "./0163_drop_rename_approvals.js"
+import { captureBacklogTriedAt } from "./0164_capture_backlog_tried_at.js"
+import { messageAuthors } from "./0165_message_authors.js"
+import { automationFailureStreak } from "./0166_automation_failure_streak.js"
+import { dropSpaceOverview } from "./0167_drop_space_overview.js"
+import { usageDailyCost } from "./0168_usage_daily_cost.js"
+import { modelServerEndpoint } from "./0169_model_server_endpoint.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -353,19 +352,18 @@ export const migrations: ReadonlyArray<Migration> = [
   runsByDay,
   jobRunClosesWithJob,
   memoryCapturePositions,
-  jobHoldNamedForWhatItIs,
-  ownerChatStartsCapture,
-  captureBatchCutByRevert,
+  chatPositionsCutAtRemoval,
   dropInferenceRejections,
   offersExpire,
   homePresenceLeaseIndex,
   memoryWakesLeaveReviews,
-  globalInstructionVersions,
-  chatSummaryCutByRevert,
-  chatSummaryRemovedByRevert,
   retiredMemoryRecords,
   reportRetentionRetired,
-  renameApprovalsStoreWriter,
+  dropRenameApprovals,
+  captureBacklogTriedAt,
+  messageAuthors,
+  automationFailureStreak,
+  dropSpaceOverview,
   usageDailyCost,
   modelServerEndpoint
 ]

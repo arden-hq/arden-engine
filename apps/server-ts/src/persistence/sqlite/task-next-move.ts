@@ -17,7 +17,7 @@ import { taskIsLive, taskMayWakeSql } from "./task-wake.js"
 import { hasPendingTaskQuestion } from "./task-question-state.js"
 import { inArdenWords } from "../restart-notice.js"
 import { taskJobId } from "../space-job-id.js"
-import { ownerWordsSql } from "./permission-offers.js"
+import { ownerWordsSql } from "./transcript-owner-messages.js"
 import { iso } from "../../runtime/clock.js"
 import {
   ladderStepMs,
