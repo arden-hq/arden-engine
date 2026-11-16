@@ -12,6 +12,7 @@ import {
 } from "../compaction/store.js"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
 import {
+  messageAuthor,
   StoredMessageEnvelopeSchema,
   TranscriptMessageDraftSchema,
   type StoredMessageEnvelope,
@@ -519,11 +520,12 @@ export const makeContextCompactionStore = ({
 
           yield* sql`
         INSERT INTO session_messages (
-          session_id, message_id, seq, role, message_json, client_id, created_at, search_text
+          session_id, message_id, seq, role, message_json, client_id, created_at, search_text,
+          author
         ) VALUES (
           ${valid.sessionId}, ${valid.handoff.messageId}, ${sequence}, ${valid.handoff.role},
           ${messageJson}, ${valid.handoff.clientId}, ${valid.handoff.envelope.created_at},
-          ${valid.handoff.searchText}
+          ${valid.handoff.searchText}, ${messageAuthor(valid.handoff.envelope)}
         )
       `.pipe(Effect.mapError(mapStorage("commit", "Could not append Session handoff", valid)))
           yield* sql`

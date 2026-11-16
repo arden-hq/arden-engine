@@ -247,10 +247,10 @@ export const copyIntoOwnerChat = Effect.fn("MemoryCapturePositions.copyIntoOwner
 ) {
   yield* sql`
       INSERT INTO session_messages (
-        session_id, message_id, seq, role, message_json, client_id, created_at, search_text
+        session_id, message_id, seq, role, message_json, client_id, created_at, search_text, author
       )
       SELECT ${input.to}, message_id, ROW_NUMBER() OVER (ORDER BY seq) - 1,
-             role, message_json, client_id, created_at, search_text
+             role, message_json, client_id, created_at, search_text, author
       FROM session_messages
       WHERE session_id = ${input.from} AND seq <= ${input.throughSeq}
       ORDER BY seq ASC

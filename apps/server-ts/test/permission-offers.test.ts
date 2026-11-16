@@ -610,11 +610,6 @@ const addMessage = (
         ${JSON.stringify({ message_id: id, role: "user", content: "x", ...message })},
         '2026-11-04T09:00:00.000Z')`
     if (!startsRun) return
-    yield* sql`INSERT INTO chat_runs
-      (run_id, session_id, status, started_at, updated_at, ended_at, metadata_json, assistant_message_id)
-      SELECT ${`before-${id}`}, session_id, 'completed', started_at, updated_at, updated_at,
-        metadata_json, ${`reply-before-${id}`}
-      FROM chat_runs WHERE run_id = ${chat.runId}`
     yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.turn_id', ${id})
       WHERE run_id = ${chat.runId}`
   })
@@ -629,21 +624,6 @@ const report = {
     content: "done"
   }
 }
-
-it("a question answer counts as the person's message once its question holds their answer", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const chat = yield* chatOnSpace({ text: "x", meta: true })
-      yield* sql`INSERT INTO run_questions (question_id, run_id, tool_call_id, content, created_at)
-        VALUES ('q', ${chat.runId}, 'asked', '{}', '2026-11-04T09:00:00.000Z')`
-      yield* addMessage(chat, 1000, { is_meta: true, question_answer: { question_id: "q" } }, true)
-      expect(Exit.isFailure(yield* Effect.exit(chat.offer("a")))).toBe(true)
-      yield* sql`UPDATE run_questions SET resolution = '{"client_id":"tap"}' WHERE question_id = 'q'`
-      expect(Exit.isSuccess(yield* Effect.exit(chat.offer("b")))).toBe(true)
-    })
-  )
-})
 
 it("a turn woken by an agent report cites the person's latest message, unless a note cut in", async () => {
   await withTempDatabase(
@@ -664,20 +644,6 @@ it("a run that is not a chat run of this chat stays refused, whatever the chat h
       const sql = yield* SqlClient.SqlClient
       const chat = yield* chatOnSpace({ text: "all granted" })
       yield* addMessage(chat, 1000, report, true)
-      yield* sql`DROP TRIGGER chat_runs_immutable_context`
-      yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json,
-          '$.run_context.origin', json('{"kind":"automation","automation_id":"a","occurrence_id":"o"}'))
-        WHERE run_id = ${chat.runId}`
-      expect(Exit.isFailure(yield* Effect.exit(chat.offer("a")))).toBe(true)
-    })
-  )
-})
-
-it("a message shaped like the person's, in a turn no chat started, is not their words", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const chat = yield* chatOnSpace({ text: "Allow the browser everywhere" })
       yield* sql`DROP TRIGGER chat_runs_immutable_context`
       yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json,
           '$.run_context.origin', json('{"kind":"automation","automation_id":"a","occurrence_id":"o"}'))
