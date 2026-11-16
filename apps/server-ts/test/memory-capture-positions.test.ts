@@ -8,6 +8,7 @@ import { MemoryCaptureStore } from "../src/persistence/memory/store.js"
 import { startCaptureAfterCopies } from "../src/persistence/sqlite/memory-capture-positions.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
+import type { StoredMessageEnvelope } from "../src/persistence/transcript/model.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { snapshotOf } from "../src/wiki/snapshot.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../src/wiki/authority.js"
@@ -18,7 +19,11 @@ import type { Wiki } from "../src/wiki/service.js"
 
 const AT = "2026-11-14T09:00:00.000Z"
 
-const turn = Effect.fn("turn")(function* (sessionId: string, id: string) {
+const turn = Effect.fn("turn")(function* (
+  sessionId: string,
+  id: string,
+  relayed: ReadonlyArray<StoredMessageEnvelope> = []
+) {
   const chat = yield* ChatWriteStore
   const started = yield* chat.start({
     sessionId,
@@ -32,6 +37,7 @@ const turn = Effect.fn("turn")(function* (sessionId: string, id: string) {
     runId: started.runId,
     messages: [
       ...started.activeMessages,
+      ...relayed,
       { message_id: `${id}-answer`, role: "assistant", content: `Noted ${id}`, created_at: AT }
     ]
   })
@@ -127,6 +133,25 @@ it("skips a batch into the backlog, rests it a day, and then reads it again", as
     })
   )
   expect(read).toEqual({ skipped: ["skip-a", "skip-b"], resting: [], next: ["skip-a", "skip-b"] })
+})
+
+it("stores the owner's typed turn as theirs and an agent's message in it as not", async () => {
+  const relayed = {
+    message_id: "relayed",
+    role: "user",
+    is_meta: true,
+    content: "Done",
+    interaction: { kind: "message", from: { type: "agent", id: "w" }, content: "Done" },
+    created_at: AT
+  } as const
+  const owned = await withTempDatabase(
+    Effect.gen(function* () {
+      const chat = (yield* (yield* SessionStore).create({})).sessionId
+      yield* turn(chat, "typed", [relayed])
+      return yield* (yield* TranscriptQueries).ownerWordsIn(chat, ["typed", "relayed"])
+    })
+  )
+  expect([...owned]).toEqual(["typed"])
 })
 
 it("counts the owner's turns as theirs in a branch of a branch", async () => {
