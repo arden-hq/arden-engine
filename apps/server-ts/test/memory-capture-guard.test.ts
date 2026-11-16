@@ -2,10 +2,10 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { expect, it } from "vitest"
 
-// How far Memory Capture has read a chat has one owner: `memory_capture_positions`. These keep
+// How far Memory Capture has read a chat has one owner: `memory_capture_unread`. These keep
 // a second copy from coming back: the old marks in `run_sidecars`, or a Capture module that
 // depends on the chat's context number, which compaction, clear and revert change. How Capture
-// cuts a chat into batches has one owner too: `readCaptureBatch`, which the backlog count calls.
+// cuts a chat into batches has one owner too: `readCaptureBatch`, which the unread count calls.
 
 const SOURCE = join(import.meta.dirname, "../src")
 const SCRIPTS = join(import.meta.dirname, "../scripts")

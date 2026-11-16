@@ -29,23 +29,17 @@ export const MemoryCaptureBatchIdentitySchema = Schema.Struct({
 })
 export type MemoryCaptureBatchIdentity = typeof MemoryCaptureBatchIdentitySchema.Type
 
-/** A chat with messages Capture has not read, or with a batch it prepared and did not finish. */
+/** An unread range of a chat with messages Capture has not read, or a batch it prepared and did not finish. */
 export interface MemoryCaptureWork {
   readonly sessionId: string
   readonly position: MemoryCapturePosition
   /**
-   * The last message the work may read: the chat's last message when it was listed, or, when a
-   * revert cut the prepared batch, the last message of it that is still there.
+   * The last message the work may read: the range's last, the chat's last message when it was
+   * listed for the open range, or, when a revert cut the prepared batch, the last message of it
+   * that is still there.
    */
   readonly throughSequence: number
   readonly prepared: MemoryCaptureBatchIdentity | undefined
-}
-
-/** Messages of a chat, `fromSeq` through `throughSeq`, behind its position and not read. */
-export interface MemoryCaptureBacklogRange {
-  readonly sessionId: string
-  readonly fromSeq: number
-  readonly throughSeq: number
 }
 
 export const MemoryCaptureBatchSchema = Schema.Struct({
@@ -70,7 +64,9 @@ export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureSto
 export class MemoryCaptureStore extends Context.Service<
   MemoryCaptureStore,
   {
+    /** Work in unread ranges; closed ranges too when `older`. */
     readonly listWork: (
+      older: boolean,
       limit?: number
     ) => Effect.Effect<ReadonlyArray<MemoryCaptureWork>, MemoryCaptureStoreError>
     /** Records the batch before the model reads it, if the chat is still at its start. */
@@ -78,34 +74,15 @@ export class MemoryCaptureStore extends Context.Service<
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
     /**
-     * Moves the chat's position from the batch's start to its end, or to the last message of it a
-     * revert left.
+     * Moves the range that stopped at the batch's start to its end, or to the last message of it
+     * a revert left; a closed range with nothing left is deleted.
      */
     readonly advance: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /**
-     * Moves the position as `advance` does, and puts the batch's messages in the backlog; the
-     * range they are in rests a day.
-     */
+    /** Moves the range as `advance` does, and keeps the batch's messages as a closed range that rests a day. */
     readonly skip: (
       batch: MemoryCaptureBatchIdentity
     ) => Effect.Effect<MemoryCaptureMove, MemoryCaptureStoreError>
-    /** Backlog ranges not resting, the one whose first message is oldest first. */
-    readonly listBacklog: () => Effect.Effect<
-      ReadonlyArray<MemoryCaptureBacklogRange>,
-      MemoryCaptureStoreError
-    >
-    /**
-     * Removes `fromSeq` through `throughSeq` from the range that starts at `fromSeq`, if it
-     * still starts there.
-     */
-    readonly readBacklog: (
-      read: MemoryCaptureBacklogRange
-    ) => Effect.Effect<void, MemoryCaptureStoreError>
-    /** Rests the range that starts at `range.fromSeq` for a day. */
-    readonly restBacklog: (
-      range: MemoryCaptureBacklogRange
-    ) => Effect.Effect<void, MemoryCaptureStoreError>
   }
 >()("@arden-hq/server/persistence/memory/MemoryCaptureStore") {}

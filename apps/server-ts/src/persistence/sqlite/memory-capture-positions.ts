@@ -3,7 +3,6 @@ import type { SqlClient } from "effect/unstable/sql"
 
 import {
   MemoryCaptureBatchIdentitySchema,
-  type MemoryCaptureBacklogRange,
   type MemoryCaptureBatchIdentity,
   type MemoryCaptureMove,
   type MemoryCapturePosition,
@@ -39,9 +38,6 @@ const positionOf = (columns: PositionColumns): MemoryCapturePosition => {
   }
 }
 
-const samePosition = (left: PositionColumns, right: PositionColumns): boolean =>
-  left.read_seq === right.read_seq && left.read_offset === right.read_offset
-
 const encodeIdentity = (identity: MemoryCaptureBatchIdentity) =>
   Schema.encodeEffect(IdentityJson)(identity)
 
@@ -52,40 +48,46 @@ interface WorkRow extends PositionColumns {
 }
 
 /**
- * Owner chats, archived ones included, that have a prepared batch to finish, or messages past
- * their position while no run is active in them. Prepared batches first, then the chat whose
- * oldest unread message is oldest.
+ * Unread ranges of owner chats, archived ones included, that have a prepared batch to finish or
+ * messages past where reading stopped: the open range of a chat while no run is active in it,
+ * and, when `older`, closed ranges not resting. Prepared batches first, then open ranges, then
+ * the range whose first unread message is oldest.
  */
 export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(function* (
   sql: SqlClient.SqlClient,
-  limit: number
+  limit: number,
+  older: boolean
 ) {
+  const restedSince = DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { days: 1 }))
   const rows = yield* sql<WorkRow>`
-    WITH chats AS (
-      SELECT session.session_id,
-             position.read_seq,
-             position.read_offset,
-             position.prepared_json,
-             CASE WHEN position.prepared_cut_seq IS NULL
-               THEN (SELECT MAX(seq) FROM session_messages AS message
-                 WHERE message.session_id = session.session_id)
-               ELSE position.prepared_cut_seq - 1 END AS through_seq,
+    WITH ranges AS (
+      SELECT unread.session_id,
+             unread.read_seq,
+             unread.read_offset,
+             unread.prepared_json,
+             unread.through_seq IS NULL AS open,
+             CASE WHEN unread.prepared_cut_seq IS NULL
+               THEN COALESCE(unread.through_seq, (SELECT MAX(seq) FROM session_messages AS message
+                 WHERE message.session_id = unread.session_id))
+               ELSE unread.prepared_cut_seq - 1 END AS through_seq,
              EXISTS (SELECT 1 FROM chat_runs AS run
-               WHERE run.session_id = session.session_id
+               WHERE run.session_id = unread.session_id
                  AND run.status IN ${activeRunStatusList}) AS running
-      FROM sessions AS session
-      JOIN memory_capture_positions AS position ON position.session_id = session.session_id
+      FROM memory_capture_unread AS unread
+      JOIN sessions AS session ON session.session_id = unread.session_id
       WHERE ${userChatSql("session")}
+        AND (unread.through_seq IS NULL OR (${older ? 1 : 0} = 1
+          AND (unread.tried_at IS NULL OR unread.tried_at <= ${restedSince})))
     )
     SELECT session_id, read_seq, read_offset, prepared_json, through_seq
-    FROM chats
+    FROM ranges
     WHERE through_seq IS NOT NULL
       AND (prepared_json IS NOT NULL
-        OR (running = 0 AND (through_seq > read_seq OR read_offset IS NOT NULL)))
-    ORDER BY prepared_json IS NULL,
+        OR ((open = 0 OR running = 0) AND (through_seq > read_seq OR read_offset IS NOT NULL)))
+    ORDER BY prepared_json IS NULL, open = 0,
       (SELECT created_at FROM session_messages AS message
-        WHERE message.session_id = chats.session_id
-          AND message.seq > chats.read_seq - (chats.read_offset IS NOT NULL)
+        WHERE message.session_id = ranges.session_id
+          AND message.seq > ranges.read_seq - (ranges.read_offset IS NOT NULL)
         ORDER BY message.seq LIMIT 1),
       session_id
     LIMIT ${limit}
@@ -106,38 +108,43 @@ export const listCaptureWork = Effect.fn("MemoryCapturePositions.listWork")(func
   )
 })
 
-interface StoredPosition extends PositionColumns {
+interface StoredRange {
+  readonly range_id: number
   readonly prepared_json: string | null
   readonly prepared_cut_seq: number | null
   readonly end_holds: number
 }
 
 /**
- * Where the chat's position goes when `batch` is read, or undefined when the chat moved on: the
- * position is not at the batch's start, another batch is prepared, or the message at its end is
- * gone. When a revert removed later messages of the prepared batch, it ends before the first
- * one removed: the last message it read that is still there.
+ * The unread range that stopped at `batch`'s start, and where it goes when the batch is read, or
+ * undefined when the chat moved on: no range stops there, another batch is prepared, or the
+ * message at its end is gone. When a revert removed later messages of the prepared batch, it
+ * ends before the first one removed: the last message it read that is still there.
  */
 const endOf = Effect.fn("MemoryCapturePositions.endOf")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity,
   encoded: string
-): Effect.fn.Return<PositionColumns | undefined, unknown> {
+): Effect.fn.Return<
+  { readonly rangeId: number; readonly end: PositionColumns } | undefined,
+  unknown
+> {
+  const start = columnsOf(batch.start)
   const end = columnsOf(batch.end)
-  const rows = yield* sql<StoredPosition>`
-    SELECT read_seq, read_offset, prepared_json, prepared_cut_seq,
+  const [row] = yield* sql<StoredRange>`
+    SELECT range_id, prepared_json, prepared_cut_seq,
            EXISTS (SELECT 1 FROM session_messages AS message
-             WHERE message.session_id = position.session_id AND message.seq = ${end.read_seq}
+             WHERE message.session_id = unread.session_id AND message.seq = ${end.read_seq}
                AND message.message_id = ${batch.endMessageId}) AS end_holds
-    FROM memory_capture_positions AS position
-    WHERE position.session_id = ${batch.sessionId}
+    FROM memory_capture_unread AS unread
+    WHERE session_id = ${batch.sessionId} AND read_seq = ${start.read_seq}
+      AND COALESCE(read_offset, 0) = ${start.read_offset ?? 0}
   `
-  const row = rows[0]
-  if (row === undefined || !samePosition(row, columnsOf(batch.start))) return undefined
+  if (row === undefined) return undefined
   if (row.prepared_json === encoded && row.prepared_cut_seq !== null)
-    return { read_seq: row.prepared_cut_seq - 1, read_offset: null }
+    return { rangeId: row.range_id, end: { read_seq: row.prepared_cut_seq - 1, read_offset: null } }
   if (row.end_holds === 1 && (row.prepared_json === null || row.prepared_json === encoded))
-    return end
+    return { rangeId: row.range_id, end }
   return undefined
 })
 
@@ -146,116 +153,65 @@ export const prepareCapture = Effect.fn("MemoryCapturePositions.prepare")(functi
   batch: MemoryCaptureBatchIdentity
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
   const encoded = yield* encodeIdentity(batch)
-  if ((yield* endOf(sql, batch, encoded)) === undefined) return "superseded"
+  const range = yield* endOf(sql, batch, encoded)
+  if (range === undefined) return "superseded"
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
-    UPDATE memory_capture_positions SET prepared_json = ${encoded}, updated_at = ${now}
-    WHERE session_id = ${batch.sessionId}
+    UPDATE memory_capture_unread SET prepared_json = ${encoded}, updated_at = ${now}
+    WHERE range_id = ${range.rangeId}
   `
   return "moved"
+})
+
+/** Moves `range` to its end; a closed range with nothing left is deleted. */
+const moveRange = Effect.fn("MemoryCapturePositions.move")(function* (
+  sql: SqlClient.SqlClient,
+  range: { readonly rangeId: number; readonly end: PositionColumns }
+) {
+  const { end } = range
+  yield* sql`
+    DELETE FROM memory_capture_unread
+    WHERE range_id = ${range.rangeId} AND ${end.read_offset === null ? 1 : 0} = 1
+      AND through_seq <= ${end.read_seq}
+  `
+  yield* sql`
+    UPDATE memory_capture_unread
+    SET read_seq = ${end.read_seq}, read_offset = ${end.read_offset}, prepared_json = NULL,
+      prepared_cut_seq = NULL, updated_at = ${DateTime.formatIso(yield* DateTime.now)}
+    WHERE range_id = ${range.rangeId}
+  `
 })
 
 export const advanceCapture = Effect.fn("MemoryCapturePositions.advance")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
-  const end = yield* endOf(sql, batch, yield* encodeIdentity(batch))
-  if (end === undefined) return "superseded"
-  const now = DateTime.formatIso(yield* DateTime.now)
-  yield* sql`
-    UPDATE memory_capture_positions
-    SET read_seq = ${end.read_seq}, read_offset = ${end.read_offset}, prepared_json = NULL,
-      prepared_cut_seq = NULL, updated_at = ${now}
-    WHERE session_id = ${batch.sessionId}
-  `
+  const range = yield* endOf(sql, batch, yield* encodeIdentity(batch))
+  if (range === undefined) return "superseded"
+  yield* moveRange(sql, range)
   return "moved"
 })
 
 /**
- * Moves the position past `batch` as `advanceCapture` does, unread, and puts the whole messages
- * it touched in the backlog, joined to the range that ends where they start. A batch read from the
- * backlog is already there. Either way its range rests a day.
+ * Moves the range past `batch` as `advanceCapture` does, unread, and keeps the whole messages it
+ * touched as a closed range that rests a day.
  */
 export const skipCapture = Effect.fn("MemoryCapturePositions.skip")(function* (
   sql: SqlClient.SqlClient,
   batch: MemoryCaptureBatchIdentity
 ): Effect.fn.Return<MemoryCaptureMove, unknown> {
+  const range = yield* endOf(sql, batch, yield* encodeIdentity(batch))
+  if (range === undefined) return "superseded"
+  yield* moveRange(sql, range)
   const start = columnsOf(batch.start)
-  const fromSeq = start.read_seq + (start.read_offset === null ? 1 : 0)
-  if ((yield* advanceCapture(sql, batch)) === "superseded")
-    return (yield* restCaptureBacklog(sql, { sessionId: batch.sessionId, seq: fromSeq }))
-      ? "moved"
-      : "superseded"
-  const [position] = yield* sql<{ readonly read_seq: number }>`
-    SELECT read_seq FROM memory_capture_positions WHERE session_id = ${batch.sessionId}
-  `
-  const throughSeq = position?.read_seq ?? -1
-  if (throughSeq < fromSeq) return "moved"
   const now = DateTime.formatIso(yield* DateTime.now)
-  const joined = yield* sql`
-    UPDATE memory_capture_backlog SET through_seq = MAX(through_seq, ${throughSeq}), tried_at = ${now}
-    WHERE session_id = ${batch.sessionId} AND from_seq <= ${fromSeq}
-      AND through_seq >= ${fromSeq - 1}
-    RETURNING 1
+  yield* sql`
+    INSERT INTO memory_capture_unread
+      (session_id, read_seq, read_offset, through_seq, tried_at, updated_at)
+    VALUES (${batch.sessionId}, ${start.read_seq}, ${start.read_offset}, ${range.end.read_seq},
+      ${now}, ${now})
   `
-  if (joined.length === 0)
-    yield* sql`
-      INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq, tried_at)
-      VALUES (${batch.sessionId}, ${fromSeq}, ${throughSeq}, ${now})
-    `
   return "moved"
-})
-
-/** Rests the backlog range that holds message `seq` for a day. Answers whether one holds it. */
-export const restCaptureBacklog = Effect.fn("MemoryCapturePositions.restBacklog")(function* (
-  sql: SqlClient.SqlClient,
-  at: { readonly sessionId: string; readonly seq: number }
-) {
-  const rested = yield* sql`
-    UPDATE memory_capture_backlog SET tried_at = ${DateTime.formatIso(yield* DateTime.now)}
-    WHERE session_id = ${at.sessionId} AND from_seq <= ${at.seq} AND through_seq >= ${at.seq}
-    RETURNING 1
-  `
-  return rested.length > 0
-})
-
-export const listCaptureBacklog = Effect.fn("MemoryCapturePositions.listBacklog")(function* (
-  sql: SqlClient.SqlClient
-) {
-  const rows = yield* sql<{
-    readonly session_id: string
-    readonly from_seq: number
-    readonly through_seq: number
-  }>`
-    SELECT backlog.session_id, backlog.from_seq, backlog.through_seq
-    FROM memory_capture_backlog AS backlog
-    LEFT JOIN session_messages AS message ON message.session_id = backlog.session_id
-      AND message.seq = backlog.from_seq
-    WHERE backlog.tried_at IS NULL OR backlog.tried_at <= ${DateTime.formatIso(
-      DateTime.subtract(yield* DateTime.now, { days: 1 })
-    )}
-    ORDER BY message.created_at, backlog.session_id, backlog.from_seq
-  `
-  return rows.map((row): MemoryCaptureBacklogRange => ({
-    sessionId: row.session_id,
-    fromSeq: row.from_seq,
-    throughSeq: row.through_seq
-  }))
-})
-
-export const readCaptureBacklog = Effect.fn("MemoryCapturePositions.readBacklog")(function* (
-  sql: SqlClient.SqlClient,
-  read: MemoryCaptureBacklogRange
-) {
-  yield* sql`
-    DELETE FROM memory_capture_backlog
-    WHERE session_id = ${read.sessionId} AND from_seq = ${read.fromSeq}
-      AND through_seq <= ${read.throughSeq}
-  `
-  yield* sql`
-    UPDATE memory_capture_backlog SET from_seq = ${read.throughSeq + 1}
-    WHERE session_id = ${read.sessionId} AND from_seq = ${read.fromSeq}
-  `
 })
 
 /**
@@ -271,13 +227,13 @@ export const startCaptureAfterCopies = Effect.fn("MemoryCapturePositions.start")
 ) {
   const now = DateTime.formatIso(yield* DateTime.now)
   yield* sql`
-    INSERT INTO memory_capture_positions (session_id, read_seq, read_offset, prepared_json, updated_at)
+    INSERT INTO memory_capture_unread (session_id, read_seq, updated_at)
     VALUES (${sessionId},
       COALESCE((SELECT MAX(seq) FROM session_messages WHERE session_id = ${sessionId}), -1),
-      NULL, NULL, ${now})
-    ON CONFLICT(session_id) DO UPDATE SET
+      ${now})
+    ON CONFLICT(session_id) WHERE through_seq IS NULL DO UPDATE SET
       read_seq = excluded.read_seq, read_offset = NULL, prepared_json = NULL,
-      updated_at = excluded.updated_at
+      prepared_cut_seq = NULL, updated_at = excluded.updated_at
   `
 })
 

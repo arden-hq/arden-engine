@@ -58,8 +58,9 @@ export const memoryCaptureBacklogBackfill: Backfill = {
     const sql = yield* SqlClient.SqlClient
     const sessions = yield* sql<{ readonly session_id: string; readonly ranged: number }>`
       SELECT session_id,
-             EXISTS (SELECT 1 FROM memory_capture_backlog AS backlog
-               WHERE backlog.session_id = session.session_id) AS ranged
+             EXISTS (SELECT 1 FROM memory_capture_unread AS unread
+               WHERE unread.session_id = session.session_id AND unread.through_seq IS NOT NULL)
+               AS ranged
       FROM sessions AS session
       WHERE session_id > ${cursor ?? ""}
       ORDER BY session_id LIMIT ${limit}`
@@ -76,18 +77,21 @@ export const memoryCaptureBacklogBackfill: Backfill = {
                    AND source.message_id = message.message_id) AS copy
         FROM session_messages AS message
         JOIN sessions AS session ON session.session_id = message.session_id
-        JOIN memory_capture_backlog AS backlog ON backlog.session_id = message.session_id
-          AND message.seq BETWEEN backlog.from_seq AND backlog.through_seq
+        JOIN memory_capture_unread AS unread ON unread.session_id = message.session_id
+          AND message.seq BETWEEN unread.read_seq + (unread.read_offset IS NULL)
+            AND unread.through_seq
         WHERE message.session_id = ${sessionId}
         ORDER BY message.seq`
       const ranges = unreadRanges(
         messages,
         batches.filter((batch) => batch.sessionId === sessionId)
       )
-      yield* sql`DELETE FROM memory_capture_backlog WHERE session_id = ${sessionId}`
+      yield* sql`DELETE FROM memory_capture_unread
+        WHERE session_id = ${sessionId} AND through_seq IS NOT NULL`
       for (const range of ranges)
-        yield* sql`INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq)
-          VALUES (${sessionId}, ${range.from}, ${range.through})`
+        yield* sql`INSERT INTO memory_capture_unread (session_id, read_seq, through_seq, updated_at)
+          VALUES (${sessionId}, ${range.from - 1}, ${range.through},
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
       const deleted = yield* sql`DELETE FROM run_sidecars
         WHERE session_id = ${sessionId} AND ${sql.literal(MARKS)}
           AND json_remove(evidence_json, '$.memory_capture') = '{}'

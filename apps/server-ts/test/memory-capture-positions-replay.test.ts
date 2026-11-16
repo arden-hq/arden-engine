@@ -6,13 +6,21 @@ import {
   memoryCaptureBacklogBackfill,
   TYPED_TURN
 } from "../src/persistence/sqlite/memory-capture-backlog-backfill.js"
+import { makeMemoryCaptureBatches } from "../src/memory/capture-batches.js"
+import { makeWriter } from "../src/persistence/sqlite/deps.js"
+import { makeMemoryCaptureStore } from "../src/persistence/sqlite/memory.js"
 import { listCaptureWork } from "../src/persistence/sqlite/memory-capture-positions.js"
+import { makeTranscriptQueries } from "../src/persistence/sqlite/transcript.js"
+import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
+import { captureBatchKey } from "../src/wiki/capture.js"
+import { snapshotOf } from "../src/wiki/snapshot.js"
 import {
   locateReplayCopy,
   rollBackOnReplayCopy,
   rolledBack,
   runOnReplayCopy
 } from "./fixtures/replay-copy.js"
+import { sessionHeader } from "./kit.js"
 
 // Capture positions over the real history, with no model. The copy is opened the way the
 // server opens it, so migration 0155 runs on it. The backfill and every appended turn then run
@@ -35,13 +43,15 @@ it("reads every owner turn from its position, and keeps every old unread turn co
       const captures = yield* MemoryCaptureStore
       const [chats] = yield* sql<{ readonly owner: number; readonly positions: number }>`SELECT
         (SELECT COUNT(*) FROM sessions AS session WHERE ${sql.literal(OWNER)}) AS owner,
-        (SELECT COUNT(*) FROM memory_capture_positions AS position
+        (SELECT COUNT(*) FROM memory_capture_unread AS position
           JOIN sessions AS session ON session.session_id = position.session_id
-          WHERE ${sql.literal(OWNER)}) AS positions`
-      return { chats, work: (yield* captures.listWork(100)).length }
+          WHERE ${sql.literal(OWNER)} AND position.through_seq IS NULL) AS positions`
+      return { chats, work: (yield* captures.listWork(false, 100)).length }
     })
   )
-  const replayed = await rollBackOnReplayCopy(located.copy, replay)
+  const replayed = await rollBackOnReplayCopy(located.copy, (sql) =>
+    replay(sql).pipe(Effect.provide(PersistenceWriteQueue.layer))
+  )
   // Vitest swallows console output; a direct write reaches the terminal.
   process.stdout.write(
     `Replay: ${migrated.chats?.owner} owner chats, ${migrated.chats?.positions} positions, ` +
@@ -59,7 +69,8 @@ it("reads every owner turn from its position, and keeps every old unread turn co
       `in ${replayed.backlog.since.chats} chats; unread typed turns that are branch copies ` +
       `${replayed.expected.copies}; inside a finished batch but never quoted ` +
       `${replayed.expected.unquoted}. A new turn lists ${replayed.listed} of ${replayed.chats} owner chats from ` +
-      `their position.\n`
+      `their position. Read with no model, Capture offers ${replayed.drained.offered} batches ` +
+      `and leaves ${replayed.drained.left} closed ranges.\n`
   )
   expect(migrated).toEqual({
     chats: { owner: migrated.chats?.owner, positions: migrated.chats?.owner },
@@ -71,14 +82,16 @@ it("reads every owner turn from its position, and keeps every old unread turn co
     neither: replayed.partition.neither,
     before: replayed.backlog.before.typedTurns,
     since: replayed.backlog.since.typedTurns,
-    listed: replayed.listed
+    listed: replayed.listed,
+    left: replayed.drained.left
   }).toEqual({
     marksAfter: 0,
     both: 0,
     neither: 0,
     before: replayed.expected.before,
     since: replayed.expected.since,
-    listed: replayed.chats
+    listed: replayed.chats,
+    left: 0
   })
 })
 
@@ -140,7 +153,8 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
           AND source.message_id = message.message_id) AS copy
     FROM session_messages AS message
     JOIN sessions AS session ON session.session_id = message.session_id
-    JOIN memory_capture_positions AS position ON position.session_id = message.session_id
+    JOIN memory_capture_unread AS position ON position.session_id = message.session_id
+      AND position.through_seq IS NULL
     WHERE ${sql.literal(OWNER)} AND message.seq <= position.read_seq AND message.role = 'user'
       AND json_extract(message.message_json, '$.is_meta') IS NULL
       AND EXISTS (SELECT 1 FROM session_turns AS turn WHERE turn.session_id = message.session_id
@@ -185,9 +199,9 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
   }>`
     WITH placed AS (
       SELECT message.read, message.copy,
-        EXISTS (SELECT 1 FROM memory_capture_backlog AS backlog
-          WHERE backlog.session_id = message.session_id
-            AND message.seq BETWEEN backlog.from_seq AND backlog.through_seq) AS ranged
+        EXISTS (SELECT 1 FROM memory_capture_unread AS unread
+          WHERE unread.session_id = message.session_id
+            AND message.seq BETWEEN unread.read_seq + 1 AND unread.through_seq) AS ranged
       FROM replay_messages AS message
     )
     SELECT COUNT(*) AS messages, SUM(read) AS read, SUM(copy) AS copies, SUM(ranged) AS backlog,
@@ -203,12 +217,12 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
     SELECT message.created_at < ${first.at} AS before,
            COUNT(DISTINCT message.session_id) AS chats,
            SUM(${sql.literal(TYPED_TURN)}) AS typed_turns
-    FROM memory_capture_backlog AS backlog
-    JOIN session_messages AS message ON message.session_id = backlog.session_id
-      AND message.seq BETWEEN backlog.from_seq AND backlog.through_seq
+    FROM memory_capture_unread AS unread
+    JOIN session_messages AS message ON message.session_id = unread.session_id
+      AND message.seq BETWEEN unread.read_seq + 1 AND unread.through_seq
     GROUP BY before`
   const [ranges] = yield* sql<{ readonly count: number }>`
-    SELECT COUNT(*) AS count FROM memory_capture_backlog`
+    SELECT COUNT(*) AS count FROM memory_capture_unread WHERE through_seq IS NOT NULL`
   const part = (before: 0 | 1) => {
     const row = parts.find((candidate) => candidate.before === before)
     return { chats: row?.chats ?? 0, typedTurns: row?.typed_turns ?? 0 }
@@ -233,11 +247,11 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
               content: "replay",
               created_at: "2026-11-14T00:00:00.000Z"
             })}, '2026-11-14T00:00:00.000Z', 'replay')`
-        return yield* listCaptureWork(sql, 100)
+        return yield* listCaptureWork(sql, 100, false)
       })
     )
     const stored = yield* sql<{ readonly read_seq: number }>`SELECT read_seq
-      FROM memory_capture_positions WHERE session_id = ${chat.session_id}`
+      FROM memory_capture_unread WHERE session_id = ${chat.session_id} AND through_seq IS NULL`
     const own = work.find((item) => item.sessionId === chat.session_id)
     const from = stored[0]?.read_seq ?? -1
     if (
@@ -249,7 +263,27 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
     )
       listed += 1
   }
+  const writer = makeWriter({ sql, reader: sql, queue: yield* PersistenceWriteQueue })
+  const receipts = new Set<string>()
+  const capture = makeMemoryCaptureBatches({
+    wiki: {
+      hasCaptureReceipt: (key) => Effect.succeed(receipts.has(key)),
+      finalizeCaptureBatch: (batch) => Effect.sync(() => void receipts.add(captureBatchKey(batch))),
+      snapshot: () => Effect.succeed(snapshotOf(null, []))
+    },
+    captures: makeMemoryCaptureStore({ writer }),
+    sessions: { loadHistoryHeader: (sessionId) => Effect.succeed(sessionHeader({ sessionId })) },
+    transcript: makeTranscriptQueries({ reader: sql, writer })
+  })
+  let offered = 0
+  for (let batch = yield* capture.nextCaptureBatch(true); batch !== null; offered += 1) {
+    yield* capture.completeCaptureBatch(batch)
+    batch = yield* capture.nextCaptureBatch(true)
+  }
+  const [left] = yield* sql<{ readonly count: number }>`
+    SELECT COUNT(*) AS count FROM memory_capture_unread WHERE through_seq IS NOT NULL`
   return {
+    drained: { offered, left: left?.count },
     marksBefore: first.marks,
     excerpts,
     marksAfter: marksAfter?.count,

@@ -55,7 +55,7 @@ const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "compl
   return Effect.gen(function* () {
     const read: Array<string> = []
     for (let round = 0; round < 50; round += 1) {
-      const batch = (yield* batches.nextCaptureBatch()) ?? (yield* batches.nextBacklogBatch())
+      const batch = yield* batches.nextCaptureBatch(true)
       if (batch === null) return read
       read.push(
         ...[...batch.markdown.matchAll(/^> \[user; sequence \d+; .*\] (\S+)$/gmu)].flatMap(
@@ -93,7 +93,7 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
   })
 })
 
-it("reads a backlog range once, after new work, and removes it as it is read", async () => {
+it("reads an older range once, after new work, and removes it as it is read", async () => {
   const read = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -102,18 +102,18 @@ it("reads a backlog range once, after new work, and removes it as it is read", a
       yield* turn(chat, "old-a")
       yield* turn(chat, "old-b")
       yield* startCaptureAfterCopies(sql, chat)
-      yield* sql`INSERT INTO memory_capture_backlog (session_id, from_seq, through_seq)
-        VALUES (${chat}, 0, 3)`
+      yield* sql`INSERT INTO memory_capture_unread (session_id, read_seq, through_seq, updated_at)
+        VALUES (${chat}, -1, 3, ${AT})`
       yield* turn(chat, "new-c")
       const first = yield* drainer
-      const left = yield* sql`SELECT 1 FROM memory_capture_backlog`
+      const left = yield* sql`SELECT 1 FROM memory_capture_unread WHERE through_seq IS NOT NULL`
       return { first, left: left.length, again: yield* drainer }
     })
   )
   expect(read).toEqual({ first: ["new-c", "old-a", "old-b"], left: 0, again: [] })
 })
 
-it("skips a batch into the backlog, rests it a day, and then reads it again", async () => {
+it("keeps a skipped batch unread, rests it a day, and then reads it again", async () => {
   const read = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -122,7 +122,7 @@ it("skips a batch into the backlog, rests it a day, and then reads it again", as
       yield* turn(chat, "skip-b")
       const skipped = yield* yield* drain("skip")
       const resting = yield* yield* drain()
-      yield* sql`UPDATE memory_capture_backlog SET tried_at = '2026-01-01T00:00:00.000Z'`
+      yield* sql`UPDATE memory_capture_unread SET tried_at = '2026-01-01T00:00:00.000Z'`
       return { skipped, resting, next: yield* yield* drain() }
     })
   )

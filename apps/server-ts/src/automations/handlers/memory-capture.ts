@@ -15,26 +15,26 @@ const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "wiki_merge_page"
 ])
 
-const BACKLOG_BATCHES_PER_JOB = Math.max(1, Number(process.env.ARDEN_CAPTURE_CATCH_UP) || 1)
+const OLDER_BATCHES_PER_JOB = Math.max(1, Number(process.env.ARDEN_CAPTURE_CATCH_UP) || 1)
 
 const makeMemoryCaptureRunner =
   (
     services: ItemLoopServices & {
       readonly memory: Pick<
         Memory["Service"],
-        "nextCaptureBatch" | "nextBacklogBatch" | "completeCaptureBatch" | "skipCaptureBatch"
+        "nextCaptureBatch" | "completeCaptureBatch" | "skipCaptureBatch"
       >
     }
   ): AutomationRunner =>
   (job) => {
-    let backlog = BACKLOG_BATCHES_PER_JOB
+    let older = OLDER_BATCHES_PER_JOB
     return runItemLoop(services, {
       label: "Memory Capture",
       kind: "memory",
       next: Effect.fn("MemoryCapture.next")(function* () {
         const batch =
-          (yield* services.memory.nextCaptureBatch()) ??
-          (backlog-- > 0 ? yield* services.memory.nextBacklogBatch() : null)
+          (yield* services.memory.nextCaptureBatch(false)) ??
+          (older-- > 0 ? yield* services.memory.nextCaptureBatch(true) : null)
         return batch === null ? ("idle" as const) : { kind: "memory" as const, batch }
       }),
       commit: (data) => services.memory.completeCaptureBatch(data.batch),
@@ -43,7 +43,7 @@ const makeMemoryCaptureRunner =
           .skipCaptureBatch(data.batch)
           .pipe(
             Effect.as(
-              `a batch of chat ${data.batch.identity.sessionId} (kept in the backlog and tried again after a day)`
+              `a batch of chat ${data.batch.identity.sessionId} (kept unread and tried again after a day)`
             )
           ),
       summary: (item) =>

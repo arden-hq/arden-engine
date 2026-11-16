@@ -1,11 +1,11 @@
 // Counts, on the replay copy and with no model, what a catch-up of Memory Capture's old unread
-// turns would take: the batches Capture would hand a model if it read every backlog range, and
+// turns would take: the batches Capture would hand a model if it read every closed unread range, and
 // the typed owner turns in those ranges, split at 28 Aug 2026, when the old marks began. Batches
 // come from Capture's own reader, so the count follows Capture's limits wherever they change.
 //
 // Run it with `just capture-backlog <replay folder>`. It runs under vitest, which resolves the
 // engine's TypeScript sources, and opens the copy only through test/fixtures/replay-copy.ts. The
-// backlog backfill runs first, as at server start, inside a transaction that is rolled back.
+// backfill of old unread turns runs first, as at server start, inside a transaction that is rolled back.
 
 import { DateTime, Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -38,7 +38,7 @@ interface Side {
   readonly typedTurnsPassed: number
 }
 
-it("counts the Capture runs a catch-up of the backlog would take", async () => {
+it("counts the Capture runs a catch-up of the old unread turns would take", async () => {
   const located = locateReplayCopy()
   if (located.kind === "absent") throw new Error(located.reason)
   // Opening the copy the way the server does runs any pending migration on it first.
@@ -52,7 +52,7 @@ it("counts the Capture runs a catch-up of the backlog would take", async () => {
   // Vitest swallows console output here; a direct write reaches the terminal.
   process.stdout.write(
     [
-      `Backlog ranges: ${counted.ranges}.`,
+      `Closed unread ranges: ${counted.ranges}.`,
       line("Before 28 Aug 2026", counted.before),
       line("Since 28 Aug 2026", counted.since),
       `Batches with nothing to review, which Capture passes without a model: ${counted.passed}.`,
@@ -75,19 +75,19 @@ const count = Effect.fn("countCaptureBacklog")(function* (sql: SqlClient.SqlClie
   })
   const ranges = yield* sql<{
     readonly session_id: string
-    readonly from_seq: number
+    readonly read_seq: number
     readonly through_seq: number
-  }>`SELECT session_id, from_seq, through_seq FROM memory_capture_backlog
-    ORDER BY session_id, from_seq`
+  }>`SELECT session_id, read_seq, through_seq FROM memory_capture_unread
+    WHERE through_seq IS NOT NULL ORDER BY session_id, read_seq`
   const typed = yield* sql<{
     readonly session_id: string
     readonly message_id: string
     readonly before: number
   }>`
     SELECT message.session_id, message.message_id, message.created_at < ${SPLIT_AT} AS before
-    FROM memory_capture_backlog AS backlog
-    JOIN session_messages AS message ON message.session_id = backlog.session_id
-      AND message.seq BETWEEN backlog.from_seq AND backlog.through_seq
+    FROM memory_capture_unread AS unread
+    JOIN session_messages AS message ON message.session_id = unread.session_id
+      AND message.seq BETWEEN unread.read_seq + 1 AND unread.through_seq
     WHERE ${sql.literal(TYPED_TURN)}`
   const key = (sessionId: string, messageId: string) => `${sessionId} ${messageId}`
   const typedBefore = new Map(typed.map((row) => [key(row.session_id, row.message_id), row.before]))
@@ -96,9 +96,9 @@ const count = Effect.fn("countCaptureBacklog")(function* (sql: SqlClient.SqlClie
   let passed = 0
   for (const range of ranges) {
     let start: MemoryCapturePosition =
-      range.from_seq === 0
+      range.read_seq < 0
         ? { _tag: "Beginning" }
-        : { _tag: "AfterSequence", sequence: range.from_seq - 1 }
+        : { _tag: "AfterSequence", sequence: range.read_seq }
     for (;;) {
       const read: CaptureRead | undefined = yield* readCaptureBatch(transcript, {
         sessionId: range.session_id,

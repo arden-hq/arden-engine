@@ -8,11 +8,8 @@ import {
 } from "../memory/store.js"
 import {
   advanceCapture,
-  listCaptureBacklog,
   listCaptureWork,
   prepareCapture,
-  readCaptureBacklog,
-  restCaptureBacklog,
   skipCapture
 } from "./memory-capture-positions.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -30,11 +27,14 @@ const failed =
 export const makeMemoryCaptureStore = ({
   writer
 }: Pick<PersistenceDeps, "writer">): MemoryCaptureStore["Service"] => {
-  const listWork = Effect.fn("SqliteMemoryCaptureStore.listWork")(function* (limit = 8) {
+  const listWork = Effect.fn("SqliteMemoryCaptureStore.listWork")(function* (
+    older: boolean,
+    limit = 8
+  ) {
     const valid = yield* Schema.decodeUnknownEffect(
       Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
     )(limit).pipe(Effect.mapError(failed("list", "Invalid Memory capture page limit")))
-    return yield* listCaptureWork(writer.sql, valid).pipe(
+    return yield* listCaptureWork(writer.sql, valid, older).pipe(
       Effect.mapError(failed("list", "Could not list Memory capture work"))
     )
   })
@@ -59,27 +59,6 @@ export const makeMemoryCaptureStore = ({
     listWork,
     prepare: move("prepare", prepareCapture, "Could not prepare a Memory capture batch"),
     advance: move("advance", advanceCapture, "Could not advance Memory capture"),
-    skip: move("skip", skipCapture, "Could not skip a Memory capture batch"),
-    listBacklog: () =>
-      listCaptureBacklog(writer.sql).pipe(
-        Effect.mapError(failed("list", "Could not list the Memory capture backlog"))
-      ),
-    readBacklog: (read) =>
-      writer
-        .transact(readCaptureBacklog(writer.sql, read))
-        .pipe(
-          Effect.mapError(
-            failed("advance", "Could not record a read backlog range", read.sessionId)
-          )
-        ),
-    restBacklog: (range) =>
-      writer
-        .transact(
-          restCaptureBacklog(writer.sql, { sessionId: range.sessionId, seq: range.fromSeq })
-        )
-        .pipe(
-          Effect.mapError(failed("skip", "Could not rest a backlog range", range.sessionId)),
-          Effect.asVoid
-        )
+    skip: move("skip", skipCapture, "Could not skip a Memory capture batch")
   })
 }

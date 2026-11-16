@@ -45,11 +45,12 @@ export class MemoryError extends Schema.TaggedError<MemoryError>()("MemoryError"
 }) {}
 
 export interface MemoryCaptureBatches {
-  readonly nextCaptureBatch: () => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
+  /** The next batch of new work, or, when `older`, of any unread range that is not resting. */
+  readonly nextCaptureBatch: (
+    older: boolean
+  ) => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
   readonly completeCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
-  /** The next batch of the backlog, or null when no range that is not resting has one. */
-  readonly nextBacklogBatch: () => Effect.Effect<MemoryCaptureBatch | null, MemoryError>
-  /** Moves past the batch unread; its messages stay in the backlog, which rests them a day. */
+  /** Moves past the batch unread; its messages stay unread in a range that rests a day. */
   readonly skipCaptureBatch: (batch: MemoryCaptureBatch) => Effect.Effect<void, MemoryError>
 }
 
@@ -207,79 +208,11 @@ export const makeMemoryCaptureBatches = (input: {
     }
   })
 
-  const nextBacklogBatch = Effect.fn("Memory.nextBacklogBatch")(function* (): Effect.fn.Return<
-    MemoryCaptureBatch | null,
-    MemoryError
-  > {
-    const ranges = yield* captures.listBacklog().pipe(
-      Effect.mapError(
-        (cause) =>
-          new MemoryError({
-            operation: "capture",
-            message: "Could not list the Memory capture backlog",
-            cause
-          })
-      )
-    )
-    for (const range of ranges) {
-      const { sessionId, throughSeq } = range
-      const failed = captureError("Could not record the Memory capture backlog", sessionId)
-      let fromSeq = range.fromSeq
-      let start: MemoryCapturePosition =
-        fromSeq === 0 ? { _tag: "Beginning" } : { _tag: "AfterSequence", sequence: fromSeq - 1 }
-      let finished = true
-      for (;;) {
-        const read: CaptureRead | undefined = yield* readCaptureBatch(transcript, {
-          sessionId,
-          start,
-          stop: undefined,
-          last: throughSeq
-        })
-        if (read === undefined) break
-        const identity = { sessionId, start, end: read.end, endMessageId: read.endMessageId }
-        if (read.reviewable) {
-          const done = yield* wiki
-            .hasCaptureReceipt(captureBatchKey(identity))
-            .pipe(
-              Effect.mapError(
-                captureError("Could not inspect the Memory capture receipt", sessionId)
-              )
-            )
-          if (!done) return yield* offer(identity, read.excerpts)
-        }
-        finished &&= read.reviewable
-        if (finished && read.end._tag === "AfterSequence") {
-          yield* captures
-            .readBacklog({ sessionId, fromSeq, throughSeq: read.end.sequence })
-            .pipe(Effect.mapError(failed))
-          fromSeq = read.end.sequence + 1
-        }
-        start = read.end
-      }
-      if (finished)
-        yield* captures
-          .readBacklog({ sessionId, fromSeq, throughSeq })
-          .pipe(Effect.mapError(failed))
-      else {
-        yield* captures
-          .restBacklog({ sessionId, fromSeq, throughSeq })
-          .pipe(Effect.mapError(failed))
-        yield* Effect.logInfo("Memory capture backlog range left with nothing to review", {
-          sessionId,
-          fromSeq,
-          throughSeq
-        })
-      }
-    }
-    return null
-  })
-
-  const nextCaptureBatch = Effect.fn("Memory.nextCaptureBatch")(function* (): Effect.fn.Return<
-    MemoryCaptureBatch | null,
-    MemoryError
-  > {
+  const nextCaptureBatch = Effect.fn("Memory.nextCaptureBatch")(function* (
+    older: boolean
+  ): Effect.fn.Return<MemoryCaptureBatch | null, MemoryError> {
     while (true) {
-      const listed = yield* captures.listWork().pipe(
+      const listed = yield* captures.listWork(older).pipe(
         Effect.mapError(
           (cause) =>
             new MemoryError({
@@ -340,7 +273,6 @@ export const makeMemoryCaptureBatches = (input: {
 
   return {
     nextCaptureBatch,
-    nextBacklogBatch,
     completeCaptureBatch,
     skipCaptureBatch: (batch) => skip(batch.identity)
   }
@@ -358,7 +290,7 @@ export interface CaptureRead {
 /**
  * The batch Capture reads in a chat from `start`, through message `last` at most, ending at
  * `stop` when it reads a prepared batch again. Undefined when there is nothing past `start`.
- * Capture's work and the backlog count both batch through this, so they agree on the limits.
+ * Capture's work and the unread count both batch through this, so they agree on the limits.
  */
 export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns" | "ownerWordsIn">,
