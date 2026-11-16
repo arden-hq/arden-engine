@@ -8,7 +8,7 @@ import path from "node:path"
 const root = path.resolve(import.meta.dirname, "..")
 const folder = path.join(root, "docs/recipes")
 const guide = readFileSync(path.join(root, "AGENTS.md"), "utf8")
-const REPO_PATH = /`((?:apps|libs|tooling|docs)\/[^`\s]+)`/g
+const REPO_PATH = /`((?:apps|libs|tooling|docs|landing)\/[^`\s]+)`/g
 
 const faults = readdirSync(folder)
   .filter((name) => name.endsWith(".md"))

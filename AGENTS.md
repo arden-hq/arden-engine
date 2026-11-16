@@ -24,6 +24,9 @@ names a file that is gone.
 | Task | Recipe |
 |---|---|
 | Add, change or remove a table, column, index or trigger | `docs/recipes/add-migration.md` |
+| Add a tool the model can call, or change one | `docs/recipes/add-tool.md` |
+| Add a model provider or model server | `docs/recipes/add-provider.md` |
+| Add an outside event that can start an Automation | `docs/recipes/add-outside-event.md` |
 
 ## Pull request descriptions
 
