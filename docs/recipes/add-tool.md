@@ -62,7 +62,7 @@ In `apps/server-ts/src/tools/registry.ts`, import it and add it to `builtinTools
   reserves it. For each parameter that takes an id or link, add an
   `INPUT_SOURCES` row: the parameter, then the tools that hand it out.
 - `apps/server-ts/src/tools/tool-summaries.ts`: one line for the public catalog.
-- `libs/protocol/src/views/tool-words.ts`: the verb the app shows.
+- `libs/protocol/src/views/tool-words.ts`: the verb the app shows, starting with a word from `VERB_FORMS` in that file (typecheck refuses any other).
 
 ```ts
   artifact_delete: inputs(["refs", "artifact_save", "browser_screenshot", "exec_command"]),
