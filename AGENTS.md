@@ -28,6 +28,23 @@ names a file that is gone.
 | Add a model provider or model server | `docs/recipes/add-provider.md` |
 | Add an outside event that can start an Automation | `docs/recipes/add-outside-event.md` |
 
+## Development ledger
+
+Every feature gets a development ledger (the `development-ledger` skill), started
+before the first edit. A feature is new or changed behaviour a person or the model
+can see; one bug fix or a docs change does not need one. The ledger holds the
+request in the owner's words, the points that mean "done", decisions with their
+reasons, and what was checked.
+
+Keep it in `.local/ledgers` of the main checkout, which git ignores. A worktree's
+own `.local` is deleted with the worktree, so from a worktree use:
+
+```bash
+ledger.py new "Title" --root "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.local/ledgers" --intent-file -
+```
+
+Resume one with `ledger.py list` from the main checkout.
+
 ## Pull request descriptions
 
 A full agent-written PR description is accurate but too long to read. Write
