@@ -601,7 +601,7 @@ describe("OpenRouter reasoning_details", () => {
   const routerChunk = (delta: unknown, finish: string | null = null) => ({
     id: "gen-1",
     provider: "OpenAI",
-    model: "openai/gpt-5-mini",
+    model: "openai/gpt-6-luna",
     object: "chat.completion.chunk",
     created: 1794771400,
     choices: [{ index: 0, delta, finish_reason: finish, native_finish_reason: finish }]
@@ -654,7 +654,7 @@ describe("OpenRouter reasoning_details", () => {
     )
 
     const completed = completionOf(
-      await collect(router.provider.stream(request({ model: "openai/gpt-5-mini" })))
+      await collect(router.provider.stream(request({ model: "openai/gpt-6-luna" })))
     )
     expect(completed).toEqual({
       _tag: "Completed",
@@ -671,8 +671,8 @@ describe("OpenRouter reasoning_details", () => {
         origin: {
           provider: "openrouter",
           api: "chat-completions",
-          model: "openai/gpt-5-mini",
-          requested_model: "openai/gpt-5-mini"
+          model: "openai/gpt-6-luna",
+          requested_model: "openai/gpt-6-luna"
         }
       },
       finish_reason: "stop",
@@ -683,7 +683,7 @@ describe("OpenRouter reasoning_details", () => {
         cache_write_tokens: 4,
         cost: 0.0001
       },
-      model: "openai/gpt-5-mini"
+      model: "openai/gpt-6-luna"
     })
 
     const stored: AssistantMessage = {
@@ -701,11 +701,11 @@ describe("OpenRouter reasoning_details", () => {
       providerId: "other-router",
       baseUrl: "https://example.test/v1"
     })
-    await collect(router.provider.stream(request({ model: "openai/gpt-5-mini", messages })))
+    await collect(router.provider.stream(request({ model: "openai/gpt-6-luna", messages })))
     await collect(
-      router.provider.stream(request({ model: "anthropic/claude-sonnet-4.5", messages }))
+      router.provider.stream(request({ model: "anthropic/claude-sonnet-5.5", messages }))
     )
-    await collect(other.provider.stream(request({ model: "openai/gpt-5-mini", messages })))
+    await collect(other.provider.stream(request({ model: "openai/gpt-6-luna", messages })))
 
     const replayed = [...router.transport.requests.slice(1), ...other.transport.requests].map(
       (sent) => (sentMessages(sent.body) as ReadonlyArray<unknown>)[1]
@@ -1040,7 +1040,7 @@ describe("Chat Completions failures", () => {
     const frame = (code: number, message: string) => ({
       id: "gen-2",
       object: "chat.completion.chunk",
-      model: "openai/gpt-5-mini",
+      model: "openai/gpt-6-luna",
       error: { code, message, metadata: { raw: "upstream detail" } },
       choices: [{ index: 0, delta: { content: "" }, finish_reason: "error" }]
     })
@@ -1478,8 +1478,8 @@ describe("Chat Completions client tool search", () => {
       origin: {
         provider: "openai",
         api: "openai-responses",
-        model: "gpt-5.4",
-        requested_model: "gpt-5.4"
+        model: "gpt-6.1-sol",
+        requested_model: "gpt-6.1-sol"
       }
     }
     const { provider: cc, transport } = provider([answered("Ok."), answered("Ok.")])
@@ -1574,7 +1574,7 @@ describe("Chat Completions client tool search", () => {
       chatTurn,
       { role: "user", content: "Again." }
     ]
-    await collect(responses.stream(searchRequest({ model: "gpt-5.4", messages })))
+    await collect(responses.stream(searchRequest({ model: "gpt-6.1-sol", messages })))
     expect(recordOf(transport.requests[0]?.body).input).toEqual([
       { role: "user", content: "List files." },
       { role: "assistant", content: "Looking." },
@@ -1616,14 +1616,14 @@ describe("Chat Completions client tool search", () => {
       origin: {
         provider: "openai",
         api: "openai-responses",
-        model: "gpt-5.4",
-        requested_model: "gpt-5.4"
+        model: "gpt-6.1-sol",
+        requested_model: "gpt-6.1-sol"
       }
     }
     expect(() =>
       responses.stream(
         searchRequest({
-          model: "gpt-5.4",
+          model: "gpt-6.1-sol",
           messages: [messages[0] as ChatMessage, ownTurnWithoutItems]
         })
       )

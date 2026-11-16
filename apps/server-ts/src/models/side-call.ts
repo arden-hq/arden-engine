@@ -75,8 +75,8 @@ export const sideCallEffort = ({
  *
  * Never more than the model's `outputCap`. OpenRouter clamps a larger limit
  * rather than refusing it: `max_tokens: 500000` was answered normally by
- * GPT-4o mini (cap 16,384), Claude Haiku 4.5 (64,000), Gemini 3.1 Flash
- * Lite (65,536) and DeepSeek V4.1 Flash (393,216) on 2026-11-16. The cap is
+ * GPT-6 Luna (cap 128,000), Claude Haiku 5.5 (128,000) and DeepSeek V4.1
+ * Flash 1017 (384,000) on 2026-11-16. The cap is
  * still applied here so the limit Arden sends is the limit the model works
  * under, on any server, not one a router silently lowers.
  */

@@ -223,17 +223,18 @@ describe("discoverOpenRouter", () => {
     const openRouter = await models()
     expect(
       await discoverOpenRouter(openRouter.input("https://openrouter.ai/api/v1"), [
-        "anthropic/claude-haiku-4.5",
+        "anthropic/claude-haiku-5.5",
         "nvidia/nemotron-3.5-super-vl",
         "deepseek/deepseek-v4.1-flash-1017",
-        "openai/gpt-4o-mini"
+        "openai/gpt-6-luna",
+        "unbiased/pareto-26.10"
       ])
     ).toEqual([
       {
-        id: "anthropic/claude-haiku-4.5",
-        contextLimit: 200_000,
-        outputCap: 64_000,
-        reasoningEfforts: [],
+        id: "anthropic/claude-haiku-5.5",
+        contextLimit: 1_000_000,
+        outputCap: 128_000,
+        reasoningEfforts: ["max", "xhigh", "high", "medium", "low", "none"],
         compat: {
           maxTokensField: "max_tokens",
           systemRole: "system",
@@ -279,16 +280,33 @@ describe("discoverOpenRouter", () => {
         }
       },
       {
-        id: "openai/gpt-4o-mini",
-        contextLimit: 128_000,
-        outputCap: 16_384,
+        id: "openai/gpt-6-luna",
+        contextLimit: 1_050_000,
+        outputCap: 128_000,
+        reasoningEfforts: ["max", "xhigh", "high", "medium", "low", "none"],
+        compat: {
+          maxTokensField: "max_tokens",
+          systemRole: "system",
+          reasoningEffort: "openrouter",
+          usageInStream: true,
+          structuredOutput: "json_schema",
+          imageInput: true,
+          parallelToolCalls: false,
+          cacheControl: "none"
+        }
+      },
+      {
+        // No reasoning and no structured outputs listed.
+        id: "unbiased/pareto-26.10",
+        contextLimit: 1_048_576,
+        outputCap: 131_072,
         reasoningEfforts: [],
         compat: {
           maxTokensField: "max_tokens",
           systemRole: "system",
           reasoningEffort: "none",
           usageInStream: true,
-          structuredOutput: "json_schema",
+          structuredOutput: "none",
           imageInput: true,
           parallelToolCalls: false,
           cacheControl: "none"

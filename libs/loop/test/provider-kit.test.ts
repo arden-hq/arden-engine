@@ -35,7 +35,7 @@ const REJECTIONS: ReadonlyArray<
   [
     "OpenAI throttle on tokens per minute",
     429,
-    '{"error":{"message":"Rate limit reached for gpt-4o in organization org-abc on tokens per min (TPM): Limit 30000, Used 28000, Requested 4000. Please try again in 4.2s.","type":"tokens","param":null,"code":"rate_limit_exceeded"}}',
+    '{"error":{"message":"Rate limit reached for gpt-6-luna in organization org-abc on tokens per min (TPM): Limit 30000, Used 28000, Requested 4000. Please try again in 4.2s.","type":"tokens","param":null,"code":"rate_limit_exceeded"}}',
     "rate_limited"
   ],
   [
@@ -212,7 +212,7 @@ const REJECTIONS: ReadonlyArray<
   [
     "Codex model refused",
     400,
-    `{"detail":"The 'gpt-5.5-pro' model is not supported when using Codex with a ChatGPT account."}`,
+    `{"detail":"The 'gpt-6.1-sol-pro' model is not supported when using Codex with a ChatGPT account."}`,
     "model_unavailable"
   ],
   [

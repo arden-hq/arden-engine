@@ -518,7 +518,7 @@ describe("the model a Run runs on", () => {
     const other = testIo({ client })
     expect(
       await runCli(
-        ["run", "hi", ...URL_ARGS, "--model", "gpt-5", "--output", "json"],
+        ["run", "hi", ...URL_ARGS, "--model", "gpt-6-sol", "--output", "json"],
         other.dependencies
       )
     ).toBe(2)
@@ -539,7 +539,7 @@ describe("the model a Run runs on", () => {
         result: null,
         error: {
           code: "invalid_input",
-          message: "This server has no model gpt-5. It lists: gemma-4"
+          message: "This server has no model gpt-6-sol. It lists: gemma-4"
         },
         declined: []
       }

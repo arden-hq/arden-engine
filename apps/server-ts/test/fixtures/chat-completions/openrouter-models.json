@@ -122,13 +122,13 @@
       }
     },
     {
-      "id": "anthropic/claude-haiku-4.5",
-      "canonical_slug": "anthropic/claude-4.5-haiku-20251001",
-      "hugging_face_id": "",
-      "name": "Anthropic: Claude Haiku 4.5",
-      "created": 1760547638,
-      "description": "Claude Haiku 4.5 is Anthropic\u2019s fastest and most efficient m",
-      "context_length": 200000,
+      "id": "anthropic/claude-haiku-5.5",
+      "canonical_slug": "anthropic/claude-haiku-5.5-20261007",
+      "hugging_face_id": null,
+      "name": "Anthropic: Claude Haiku 5.5",
+      "created": 1791397883,
+      "description": "Claude Haiku 5.5 is Anthropic's small, fast model for high-v",
+      "context_length": 1000000,
       "architecture": {
         "modality": "text+image+file->text",
         "input_modalities": [
@@ -143,16 +143,26 @@
         "instruct_type": null
       },
       "pricing": {
-        "prompt": "0.000001",
-        "completion": "0.000005",
+        "prompt": "0.0000001",
+        "completion": "0.0000005",
         "web_search": "0.01",
-        "input_cache_read": "0.0000001",
-        "input_cache_write": "0.00000125",
-        "input_cache_write_1h": "0.000002"
+        "input_cache_read": "0.00000001",
+        "input_cache_write": "0.000000125",
+        "input_cache_write_1h": "0.0000002",
+        "overrides": [
+          {
+            "min_prompt_tokens": 100000,
+            "prompt": "0.0000005",
+            "completion": "0.0000025",
+            "input_cache_read": "0.00000005",
+            "input_cache_write": "0.000000625",
+            "input_cache_write_1h": "0.000001"
+          }
+        ]
       },
       "top_provider": {
-        "context_length": 200000,
-        "max_completion_tokens": 64000,
+        "context_length": 1000000,
+        "max_completion_tokens": 128000,
         "is_moderated": true
       },
       "per_request_limits": null,
@@ -161,14 +171,212 @@
         "max_completion_tokens",
         "max_tokens",
         "reasoning",
+        "reasoning_effort",
         "response_format",
         "stop",
         "structured_outputs",
+        "tool_choice",
+        "tools",
+        "verbosity"
+      ],
+      "default_parameters": {},
+      "supported_voices": null,
+      "knowledge_cutoff": null,
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/anthropic/claude-haiku-5.5-20261007/endpoints"
+      },
+      "endpoints": [
+        "/api/v1/chat/completions",
+        "/api/v1/completions",
+        "/api/v1/messages",
+        "/api/v1/responses"
+      ],
+      "benchmarks": {
+        "design_arena": [
+          {
+            "arena": "models",
+            "category": "3d",
+            "elo": 1322,
+            "win_rate": 55.5,
+            "rank": 15
+          },
+          {
+            "arena": "models",
+            "category": "asciiart",
+            "elo": 1200,
+            "win_rate": 49.6,
+            "rank": 23
+          },
+          {
+            "arena": "models",
+            "category": "codecategories",
+            "elo": 1277,
+            "win_rate": 50.1,
+            "rank": 26
+          },
+          {
+            "arena": "models",
+            "category": "dataviz",
+            "elo": 1278,
+            "win_rate": 50.4,
+            "rank": 19
+          },
+          {
+            "arena": "models",
+            "category": "gamedev",
+            "elo": 1314,
+            "win_rate": 51.7,
+            "rank": 15
+          },
+          {
+            "arena": "models",
+            "category": "svg",
+            "elo": 1195,
+            "win_rate": 43.8,
+            "rank": 30
+          },
+          {
+            "arena": "models",
+            "category": "uicomponent",
+            "elo": 1272,
+            "win_rate": 50.5,
+            "rank": 32
+          },
+          {
+            "arena": "models",
+            "category": "website",
+            "elo": 1253,
+            "win_rate": 48.2,
+            "rank": 42
+          }
+        ],
+        "artificial_analysis": {
+          "intelligence_index": 36.5,
+          "coding_index": null,
+          "agentic_index": null
+        }
+      },
+      "reasoning": {
+        "mandatory": false,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low",
+          "none"
+        ],
+        "default_effort": "medium"
+      }
+    },
+    {
+      "id": "unbiased/pareto-26.10",
+      "canonical_slug": "unbiased/pareto-26.10-20261015",
+      "hugging_face_id": null,
+      "name": "Pareto 26.10",
+      "created": 1792073620,
+      "description": "Pareto is a multimodal composite model built for research, c",
+      "context_length": 1048576,
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000008",
+        "completion": "0.0000032",
+        "input_cache_read": "0.00000003"
+      },
+      "top_provider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 131072,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
         "temperature",
         "tool_choice",
         "tools",
-        "top_k",
         "top_p"
+      ],
+      "default_parameters": {},
+      "supported_voices": null,
+      "knowledge_cutoff": null,
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/unbiased/pareto-26.10-20261015/endpoints"
+      },
+      "endpoints": [
+        "/api/v1/chat/completions",
+        "/api/v1/completions",
+        "/api/v1/messages",
+        "/api/v1/responses"
+      ]
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "canonical_slug": "openai/gpt-6-luna-20260922",
+      "hugging_face_id": null,
+      "name": "OpenAI: GPT-6 Luna",
+      "created": 1790100786,
+      "description": "GPT-6 Luna is the fast, cost-efficient model in OpenAI's GPT",
+      "context_length": 1050000,
+      "architecture": {
+        "modality": "text+image+file->text",
+        "input_modalities": [
+          "file",
+          "image",
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "GPT",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000001",
+        "input_cache_write": "0.000000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000002",
+            "completion": "0.00000075",
+            "input_cache_read": "0.00000002",
+            "input_cache_write": "0.00000025"
+          }
+        ]
+      },
+      "top_provider": {
+        "context_length": 1050000,
+        "max_completion_tokens": 128000,
+        "is_moderated": true
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "include_reasoning",
+        "max_completion_tokens",
+        "max_tokens",
+        "reasoning",
+        "reasoning_effort",
+        "response_format",
+        "seed",
+        "structured_outputs",
+        "tool_choice",
+        "tools",
+        "verbosity"
       ],
       "default_parameters": {
         "temperature": null,
@@ -182,249 +390,7 @@
       "knowledge_cutoff": null,
       "expiration_date": null,
       "links": {
-        "details": "/api/v1/models/anthropic/claude-4.5-haiku-20251001/endpoints"
-      },
-      "endpoints": [
-        "/api/v1/chat/completions",
-        "/api/v1/completions",
-        "/api/v1/messages",
-        "/api/v1/responses"
-      ],
-      "benchmarks": {
-        "design_arena": [
-          {
-            "arena": "models",
-            "category": "3d",
-            "elo": 1052,
-            "win_rate": 41.1,
-            "rank": 111
-          },
-          {
-            "arena": "models",
-            "category": "asciiart",
-            "elo": 1129,
-            "win_rate": 49.3,
-            "rank": 52
-          },
-          {
-            "arena": "models",
-            "category": "codecategories",
-            "elo": 1104,
-            "win_rate": 44.9,
-            "rank": 106
-          },
-          {
-            "arena": "models",
-            "category": "dataviz",
-            "elo": 1121,
-            "win_rate": 45.7,
-            "rank": 97
-          },
-          {
-            "arena": "models",
-            "category": "gamedev",
-            "elo": 1086,
-            "win_rate": 44.7,
-            "rank": 103
-          },
-          {
-            "arena": "models",
-            "category": "svg",
-            "elo": 1015,
-            "win_rate": 39.1,
-            "rank": 89
-          },
-          {
-            "arena": "models",
-            "category": "uicomponent",
-            "elo": 1089,
-            "win_rate": 42.6,
-            "rank": 104
-          },
-          {
-            "arena": "models",
-            "category": "website",
-            "elo": 1114,
-            "win_rate": 45.1,
-            "rank": 107
-          }
-        ],
-        "artificial_analysis": {
-          "intelligence_index": 7.4,
-          "coding_index": 43.9,
-          "agentic_index": 8
-        }
-      },
-      "reasoning": {
-        "mandatory": false
-      }
-    },
-    {
-      "id": "qwen/qwen3-30b-a3b",
-      "canonical_slug": "qwen/qwen3-30b-a3b-04-28",
-      "hugging_face_id": "Qwen/Qwen3-30B-A3B",
-      "name": "Qwen: Qwen3 30B A3B",
-      "created": 1745878604,
-      "description": "Qwen3, the latest generation in the Qwen large language mode",
-      "context_length": 40960,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": [
-          "text"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "Qwen3",
-        "instruct_type": "qwen3"
-      },
-      "pricing": {
-        "prompt": "0.00000012",
-        "completion": "0.0000005"
-      },
-      "top_provider": {
-        "context_length": 40960,
-        "max_completion_tokens": 16384,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "frequency_penalty",
-        "include_reasoning",
-        "logit_bias",
-        "max_tokens",
-        "min_p",
-        "presence_penalty",
-        "reasoning",
-        "repetition_penalty",
-        "response_format",
-        "seed",
-        "stop",
-        "structured_outputs",
-        "temperature",
-        "tool_choice",
-        "tools",
-        "top_k",
-        "top_p"
-      ],
-      "default_parameters": {
-        "temperature": null,
-        "top_p": null,
-        "frequency_penalty": null
-      },
-      "supported_voices": null,
-      "knowledge_cutoff": "2025-03-31",
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/qwen/qwen3-30b-a3b-04-28/endpoints"
-      },
-      "endpoints": [
-        "/api/v1/chat/completions",
-        "/api/v1/completions",
-        "/api/v1/messages",
-        "/api/v1/responses"
-      ],
-      "benchmarks": {
-        "design_arena": [
-          {
-            "arena": "models",
-            "category": "codecategories",
-            "elo": 931,
-            "win_rate": 37.5,
-            "rank": 140
-          },
-          {
-            "arena": "models",
-            "category": "dataviz",
-            "elo": 967,
-            "win_rate": 39,
-            "rank": 123
-          },
-          {
-            "arena": "models",
-            "category": "gamedev",
-            "elo": 888,
-            "win_rate": 33.9,
-            "rank": 141
-          },
-          {
-            "arena": "models",
-            "category": "uicomponent",
-            "elo": 935,
-            "win_rate": 42.4,
-            "rank": 132
-          },
-          {
-            "arena": "models",
-            "category": "website",
-            "elo": 946,
-            "win_rate": 37.7,
-            "rank": 142
-          }
-        ]
-      },
-      "reasoning": {
-        "mandatory": false,
-        "default_enabled": true
-      }
-    },
-    {
-      "id": "openai/gpt-4o-mini",
-      "canonical_slug": "openai/gpt-4o-mini",
-      "hugging_face_id": null,
-      "name": "OpenAI: GPT-4o-mini",
-      "created": 1721260800,
-      "description": "GPT-4o mini is OpenAI's newest model after [GPT-4 Omni](/mod",
-      "context_length": 128000,
-      "architecture": {
-        "modality": "text+image+file->text",
-        "input_modalities": [
-          "text",
-          "image",
-          "file"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "GPT",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0.00000015",
-        "completion": "0.0000006",
-        "input_cache_read": "0.000000075"
-      },
-      "top_provider": {
-        "context_length": 128000,
-        "max_completion_tokens": 16384,
-        "is_moderated": true
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "frequency_penalty",
-        "logit_bias",
-        "logprobs",
-        "max_completion_tokens",
-        "max_tokens",
-        "prediction",
-        "presence_penalty",
-        "response_format",
-        "seed",
-        "stop",
-        "structured_outputs",
-        "temperature",
-        "tool_choice",
-        "tools",
-        "top_logprobs",
-        "top_p",
-        "web_search_options"
-      ],
-      "default_parameters": {},
-      "supported_voices": null,
-      "knowledge_cutoff": "2023-10-31",
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/openai/gpt-4o-mini/endpoints"
+        "details": "/api/v1/models/openai/gpt-6-luna-20260922/endpoints"
       },
       "endpoints": [
         "/api/v1/chat/completions",
@@ -435,10 +401,23 @@
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": null,
-          "coding_index": 11.4,
+          "intelligence_index": 27.9,
+          "coding_index": null,
           "agentic_index": null
         }
+      },
+      "reasoning": {
+        "mandatory": false,
+        "default_enabled": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low",
+          "none"
+        ],
+        "default_effort": "medium"
       }
     },
     {
@@ -659,8 +638,8 @@
       }
     }
   ],
-  "total_count": 467,
   "links": {
     "next": null
-  }
+  },
+  "total_count": 467
 }

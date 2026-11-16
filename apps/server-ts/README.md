@@ -50,7 +50,7 @@ node apps/server-ts/dist/main.js --config settings.json   # or: arden serve --co
 
   ```json
   { "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" } }
-  { "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini" }
+  { "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1", "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-6-luna" }
   ```
 
   A key never crosses the network in clear text: a provider that sends one (`apiKeyEnv`, always set on `responses`) needs an HTTPS `baseUrl` or plain HTTP to this machine (`localhost`, `127.0.0.1`, `::1`). A provider with no key may use plain HTTP to any host, such as a llama.cpp on the Docker host (`http://host.docker.internal:8080/v1`) or on the LAN; without HTTPS the chats themselves are readable on that network. A key over plain HTTP to another host is refused: use HTTPS, or remove `apiKeyEnv` if the server needs none.

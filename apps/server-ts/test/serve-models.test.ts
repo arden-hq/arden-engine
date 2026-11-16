@@ -102,8 +102,8 @@ describe("modelsFor a chat-completions provider", () => {
         },
         model: "deepseek/deepseek-v4.1-flash-1017",
         reasoningEffort: "low",
-        extraModels: ["anthropic/claude-haiku-4.5"],
-        helperModel: "anthropic/claude-haiku-4.5"
+        extraModels: ["anthropic/claude-haiku-5.5"],
+        helperModel: "anthropic/claude-haiku-5.5"
       }),
       {
         env: { OPENROUTER_KEY: "sk-test" },
@@ -127,11 +127,11 @@ describe("modelsFor a chat-completions provider", () => {
           context: { hardLimit: 1_048_576, compactionTrigger: 838_860, outputCap: 384_000 }
         },
         {
-          id: "anthropic/claude-haiku-4.5",
-          name: "anthropic/claude-haiku-4.5",
+          id: "anthropic/claude-haiku-5.5",
+          name: "anthropic/claude-haiku-5.5",
           provider: openRouter,
-          reasoningEfforts: [],
-          context: { hardLimit: 200_000, compactionTrigger: 160_000, outputCap: 64_000 }
+          reasoningEfforts: ["max", "xhigh", "high", "medium", "low", "none"],
+          context: { hardLimit: 1_000_000, compactionTrigger: 800_000, outputCap: 128_000 }
         }
       ],
       defaults: {
@@ -139,7 +139,7 @@ describe("modelsFor a chat-completions provider", () => {
         reasoningEfforts: { "deepseek/deepseek-v4.1-flash-1017": "low" },
         roles: {
           background: inherit,
-          helper: { modelId: "anthropic/claude-haiku-4.5", reasoningEffort: null }
+          helper: { modelId: "anthropic/claude-haiku-5.5", reasoningEffort: null }
         }
       }
     })
@@ -183,7 +183,7 @@ describe("modelsFor a chat-completions provider", () => {
             baseUrl: "https://openrouter.ai/api/v1",
             apiKeyEnv: "OPENROUTER_KEY"
           },
-          model: "openai/gpt-4o-mini"
+          model: "openai/gpt-6-luna"
         }),
         { env: {}, fetch: serving({}) }
       )

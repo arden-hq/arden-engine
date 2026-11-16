@@ -87,7 +87,7 @@ Serve:
       "provider": { "kind": "chat-completions", "baseUrl": "http://127.0.0.1:8080/v1" } }
   OpenRouter names the variable that holds its key, and the model:
     "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1",
-                  "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-4o-mini"
+                  "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-6-luna"
   Without a provider the server uses this machine's Codex sign-in (codex login).
   A settings mistake, a provider that does not answer, or an unset key
   variable stops the start with exit status 2 and the reason.
