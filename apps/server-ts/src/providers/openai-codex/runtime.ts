@@ -21,7 +21,8 @@ import {
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
-const MODEL_PREFIX = "openai-codex/"
+/** Every Codex model id starts with this, so no other group's id may (`model_taken`). */
+export const CODEX_MODEL_PREFIX = "openai-codex/"
 const PROVIDER = Object.freeze({ id: "openai-codex", name: "OpenAI Codex" })
 const CATALOG_TIMEOUT_MS = 5_000
 
@@ -268,7 +269,7 @@ const transcribe = async (
   return body.text
 }
 
-const modelId = (slug: string): string => `${MODEL_PREFIX}${slug}`
+const modelId = (slug: string): string => `${CODEX_MODEL_PREFIX}${slug}`
 
 const CHAT_MODEL_PREFERENCE = ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.5"] as const
 const HELPER_MODEL_PREFERENCE = ["gpt-6.1-luna", "gpt-6-luna", "gpt-5.4-mini"] as const
@@ -329,14 +330,14 @@ export const makeOpenAiCodexRuntime = async (
       approvalReview: makeCodexApprovalReview({
         baseUrl,
         credentials: options.credentials,
-        modelPrefix: MODEL_PREFIX,
+        modelPrefix: CODEX_MODEL_PREFIX,
         headers: codexClientHeaders(options.appVersion, version),
         fetch: planLimits.observingFetch(globalThis.fetch)
       }),
       provider: makeOpenAiResponsesProvider({
         baseUrl,
         credentials: options.credentials,
-        modelPrefix: MODEL_PREFIX,
+        modelPrefix: CODEX_MODEL_PREFIX,
         headers: {
           ...codexClientHeaders(options.appVersion, version),
           "OpenAI-Beta": "responses_websockets=2026-02-06"
