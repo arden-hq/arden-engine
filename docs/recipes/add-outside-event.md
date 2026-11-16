@@ -66,7 +66,7 @@ An outside event has `producedBy: null` and `chainDepth: 0`. `source.kind` is
 `mcp-event.ts`) or `feed` (never polled).
 
 A source whose items land in `connection_items` adds a `case` above and is a
-`feed`, like GitHub. Any other source keeps its own cursor, as
+`feed`, like GitHub: `{ eventType: "github.received", source: { kind: "feed" }, failureMessage: "GitHub item trigger failed" }`. Any other source keeps its own cursor, as
 `apps/server-ts/src/automations/producers/calendar-changes.ts` does: it calls
 `triggers.readSourceCursor(ref)`, then `triggers.publishSourceEvents({ ...ref, events, cursor })`.
 
@@ -84,7 +84,8 @@ Import it in `apps/server-ts/src/automations/event-producers.ts` and add
 
 Add a case to `describe` in `apps/server-ts/src/persistence/automations/event-text.ts`
 and to `skippedEventOf` in `apps/server-ts/src/persistence/automations/event-words.ts`.
-Email's case tells the run `connection_item_read(item_id=...)`.
+Email's case tells the run `connection_item_read(item_id=...)`. If a tool lists the
+source's items, add the type to `sourceListing` in `event-text.ts` too.
 
 - Every event names a read that opens what it is about (`f7f4b19ce`).
 

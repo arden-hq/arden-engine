@@ -22,6 +22,11 @@ Run the typecheck from the check. It names the three places that need the name:
       case "openrouter": return await discoverOpenRouter(input, wanted ?? []) // models.ts
 ```
 
+A server the settings name and nothing detects (a plain Chat Completions server):
+share the `generic` case in `discoverModels`, give it `["model", "contextLimit"]` in
+`SERVER_NEEDS`, and skip steps 2 and 3. `apps/server-ts/test/serve-settings.test.ts`
+refuses a server name that does not exist; if yours takes that name, change the test's.
+
 ## 2. Detect and discover it
 
 In `detectServer` (the step 1 file), know the server by its host or by an answer only

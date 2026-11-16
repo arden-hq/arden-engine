@@ -75,6 +75,9 @@ If the model must prefer the tool over another way (here, over `rm`), say so in
 
 ## Change a tool's parameters
 
+Find the tool with `grep -rn '"<tool_name>"' apps/server-ts/src/tools` and read its
+schema first: the parameter may exist with another range.
+
 Commit `9529af5` gave `wiki_page_history` an optional `line`, now in
 `apps/server-ts/src/tools/wiki-page-history.ts`. Its first version used
 `.annotate` and the server refused to start (`fc00b66`). The fixed field:
