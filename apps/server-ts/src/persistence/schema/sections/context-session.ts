@@ -124,7 +124,7 @@ export const contextSessionSchemaSection = {
       message_json TEXT NOT NULL,
       client_id TEXT,
       created_at TEXT NOT NULL,
-      search_text TEXT,
+      search_text TEXT, author TEXT,
       UNIQUE (session_id, message_id),
       UNIQUE (session_id, seq)
     )`,

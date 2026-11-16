@@ -30,6 +30,21 @@ it("decides what an automated writer may do to records only at the commit point"
   ])
 })
 
+it("stores the author with every message that can be a user's", () => {
+  const unnamed = sources(SOURCE)
+    .filter((path) => !path.startsWith("persistence/migrations/"))
+    .flatMap((path) =>
+      [
+        ...readFileSync(join(SOURCE, path), "utf8").matchAll(
+          /INSERT INTO session_messages\b[^`]*/gu
+        )
+      ]
+        .filter(([insert]) => !/\bauthor\b|'assistant'/u.test(insert))
+        .map(() => path)
+    )
+  expect(unnamed).toEqual([])
+})
+
 it("tells a folder's README by its name in one place", () => {
   expect(naming(/=== "readme\.md"/u)).toEqual(["wiki/page.ts"])
 })

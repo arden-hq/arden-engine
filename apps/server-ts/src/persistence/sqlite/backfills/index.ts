@@ -17,6 +17,7 @@ import { spaceWordsBackfill } from "../space-words-backfill.js"
 import { keyMessageCopiesBackfill } from "../key-message-copies-backfill.js"
 import { slimToolResultsBackfill } from "../tool-result-backfill.js"
 import { memoryCaptureBacklogBackfill } from "../memory-capture-backlog-backfill.js"
+import { messageAuthorsBackfill } from "../message-authors-backfill.js"
 import { checkBackfills, type AnyBackfill } from "./backfill.js"
 
 export const backfills: ReadonlyArray<AnyBackfill> = checkBackfills([
@@ -37,5 +38,6 @@ export const backfills: ReadonlyArray<AnyBackfill> = checkBackfills([
   spaceWordsBackfill,
   keyMessageCopiesBackfill,
   slimToolResultsBackfill,
-  memoryCaptureBacklogBackfill
+  memoryCaptureBacklogBackfill,
+  messageAuthorsBackfill
 ])

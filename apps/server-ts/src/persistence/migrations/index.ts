@@ -56,6 +56,7 @@ import { retiredMemoryRecords } from "./0161_retired_memory_records.js"
 import { reportRetentionRetired } from "./0162_report_retention_retired.js"
 import { dropRenameApprovals } from "./0163_drop_rename_approvals.js"
 import { captureBacklogTriedAt } from "./0164_capture_backlog_tried_at.js"
+import { messageAuthors } from "./0166_message_authors.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -355,7 +356,8 @@ export const migrations: ReadonlyArray<Migration> = [
   retiredMemoryRecords,
   reportRetentionRetired,
   dropRenameApprovals,
-  captureBacklogTriedAt
+  captureBacklogTriedAt,
+  messageAuthors
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {
