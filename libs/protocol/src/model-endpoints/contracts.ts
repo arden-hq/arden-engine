@@ -73,7 +73,138 @@ export interface ModelEndpoint extends JsonRecord {
 export interface ModelEndpoints extends JsonRecord {
   readonly search: ModelEndpoint | null
   readonly decision: ModelEndpoint | null
+  /** The saved model server; its models are offered for chats beside ChatGPT's. */
+  readonly chat: ChatModelEndpoint | null
 }
+
+/**
+ * The path segment of the model server endpoint: `PUT`/`DELETE
+ * /model-endpoints/chat`, `POST /model-endpoints/chat/check`. Not a
+ * `ModelEndpointKind`: its draft, saved shape and Check differ.
+ */
+export type ChatEndpointKind = "chat"
+
+/**
+ * Which model server. `llama.cpp`: a `llama-server` the person runs; every
+ * model it lists that Arden can use is offered. `openrouter`: one named
+ * OpenRouter model. `custom`: one named model on any other Chat Completions
+ * server, which reports nothing about it.
+ */
+export type ChatEndpointService = "llama.cpp" | "openrouter" | "custom"
+
+/**
+ * The key in a save or Check. `none`: the server takes no key. `keep`: the
+ * saved key, for an edit at the same origin that does not retype it.
+ */
+export type ChatEndpointAuthInput =
+  | { readonly kind: "none" }
+  | { readonly kind: "bearer"; readonly apiKey: string }
+  | { readonly kind: "keep" }
+
+/** The model server form as the person filled it in. */
+export type ChatEndpointDraft =
+  | {
+      readonly service: "llama.cpp"
+      readonly baseUrl: string
+      readonly auth: ChatEndpointAuthInput
+    }
+  | {
+      readonly service: "openrouter" | "custom"
+      readonly baseUrl: string
+      readonly model: string
+      readonly auth: ChatEndpointAuthInput
+    }
+
+/** A model the server offers, as the model picker lists it. */
+export interface ChatEndpointModel {
+  readonly id: string
+  /** Its context window in tokens. A `custom` server reports none: see `CHAT_ENDPOINT_MIN_WINDOW`. */
+  readonly contextWindow: number
+  readonly imageInput: boolean
+}
+
+/** A model the server lists that Arden does not offer, and why. Never dropped unsaid. */
+export type ChatEndpointSkip =
+  | {
+      readonly id: string
+      readonly reason: "no_tool_calls" | "window_unknown" | "model_taken" | "wrong_format"
+    }
+  | { readonly id: string; readonly reason: "window_too_small"; readonly window: number }
+
+/**
+ * The smallest window a chat model may have: the desktop app always offers
+ * the full tool set, and its first request is about 14,100 tokens with tool
+ * search (server README). A `custom` server reports no window, so its model is
+ * taken to have exactly this one.
+ */
+export const CHAT_ENDPOINT_MIN_WINDOW = 32_768
+
+export interface ChatModelEndpoint extends JsonRecord {
+  readonly kind: ChatEndpointKind
+  readonly service: ChatEndpointService
+  readonly baseUrl: string
+  /** The address's host and port, as the row names it: `127.0.0.1:8080`. */
+  readonly host: string
+  /** The model picker's group name: `llama.cpp`, `OpenRouter`, or a custom server's host. */
+  readonly group: string
+  readonly auth: { readonly kind: "none" } | { readonly kind: "bearer" }
+  /** What the server last reported, kept while it does not answer. */
+  readonly models: ReadonlyArray<ChatEndpointModel>
+  readonly skipped: ReadonlyArray<ChatEndpointSkip>
+  readonly health: ModelEndpointHealth
+}
+
+/** Why a model server cannot be saved; each carries what its sentence names. */
+export type ChatEndpointCheckFailure =
+  | ModelEndpointCheckFailure
+  | {
+      /** The address is not one Arden sends requests to; `insecure`: a key over plain HTTP to another machine. */
+      readonly result: "address_refused"
+      readonly issue: "invalid" | "credentials" | "fragment" | "query" | "insecure"
+      readonly message: string
+    }
+  | { readonly result: "no_tool_calls"; readonly model: string; readonly message: string }
+  | {
+      readonly result: "window_too_small"
+      readonly model: string
+      readonly window: number
+      /** `CHAT_ENDPOINT_MIN_WINDOW`. */
+      readonly needed: number
+      readonly message: string
+    }
+  | { readonly result: "window_unknown"; readonly model: string; readonly message: string }
+  | {
+      readonly result: "model_missing"
+      /** Null: the server lists no model at all. */
+      readonly model: string | null
+      readonly message: string
+    }
+  | {
+      /** The id is one another group of the model list uses (`openai-codex/…`). */
+      readonly result: "model_taken"
+      readonly model: string
+      readonly message: string
+    }
+
+/**
+ * Discovery plus one small chat request to the first offered model. `works`
+ * lists what would be offered and what would not.
+ */
+export type ChatEndpointCheck =
+  | {
+      readonly result: "works"
+      readonly host: string
+      readonly group: string
+      readonly models: ReadonlyArray<ChatEndpointModel>
+      readonly skipped: ReadonlyArray<ChatEndpointSkip>
+      readonly ms: number
+    }
+  | ChatEndpointCheckFailure
+
+/** A save runs the Check first; a failing server is not saved. */
+export type ChatEndpointSaveResult =
+  | { readonly result: "saved"; readonly endpoint: ChatModelEndpoint }
+  | ChatEndpointCheckFailure
 
 export type ModelEndpointCheckFailure = {
   readonly result: ModelEndpointFailureReason
