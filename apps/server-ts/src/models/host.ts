@@ -156,6 +156,12 @@ const EMPTY_MODEL_HOST: ModelHost = Object.freeze({
   })
 })
 
+/** The source of a server started without a model list. */
+export const EMPTY_MODEL_HOST_SOURCE: ModelHostSource = Object.freeze({
+  kind: "ready",
+  host: EMPTY_MODEL_HOST
+})
+
 const freezeHost = (host: ModelHost): ModelHost => {
   const roles: Readonly<Record<ModelRole, ModelAssignment>> = Object.freeze({
     background: freezeAssignment(host.defaults.roles.background),

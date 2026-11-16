@@ -40,7 +40,7 @@ import { TerminalSessions } from "../terminals/service.js"
 import { stopRun } from "./run-stop.js"
 import type { ServerToolRun } from "./runner-contract.js"
 import { chatRunnerSource, type ChatRunnerOptions } from "./runner-source.js"
-import { ModelProviderService } from "../models/provider.js"
+import { ModelProviderService, planReadingFor } from "../models/provider.js"
 import { StructuredCompletion } from "../models/structured-completion.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { SessionStore } from "../persistence/sessions/store.js"
@@ -258,7 +258,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
           const host: RunHost = {
             ...toolHost,
             runner,
-            planReading: () => modelProvider.current()?.planLimits?.latest(),
+            planReading: (model) => planReadingFor(modelProvider.current(), model),
             continueTask,
             scheduleLetterSubject,
             scheduleRunPurpose,

@@ -64,6 +64,7 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
       const selection = yield* models.selection(candidate.sessionId)
       if (selection.modelId === null) return skip("chat has no model")
       const modelId = selection.modelId
+      if (!route.planMeters(modelId)) return skip("chat model is not on the plan")
       const controls = yield* intelligence.settings()
       const plan = planCompaction(snapshot.messages, controls.compactionKeepRatio)
       if (plan === null) return skip("nothing to compact")

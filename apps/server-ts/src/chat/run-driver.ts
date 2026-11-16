@@ -55,7 +55,8 @@ export type TaskContinuationInput = { readonly approvalMode?: ChatApprovalMode }
 export interface RunHost extends ToolHost {
   readonly scheduleRunPurpose: HelperJobs["scheduleRunPurpose"]
   readonly runner: ChatRunner
-  readonly planReading: () => PlanReading | undefined
+  /** The plan reading a request to `model` is admitted against; undefined admits it. */
+  readonly planReading: (model: string) => PlanReading | undefined
   readonly continueTask: (input: TaskContinuationInput) => Effect.Effect<void>
   readonly scheduleLetterSubject: (
     sessionId: string,
@@ -192,7 +193,12 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
           admitModelRequest: async (sampleId) => {
             if (host.draining()) throw new Error("Draining for a restart")
             const admission = await runPromise(
-              store.admitModelRequest(input.runId, sampleId, host.planReading())
+              store.admitModelRequest(
+                input.runId,
+                sampleId,
+                // A run without a model never reaches a request: the runner refuses it.
+                input.model === null ? undefined : host.planReading(input.model)
+              )
             )
             if (admission.kind === "paused") {
               quotaPause = admission
