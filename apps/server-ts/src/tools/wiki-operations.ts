@@ -115,7 +115,6 @@ const MoveParametersSchema = Schema.Struct({
 
 const exactOccurrences = (body: string, text: string): number => body.split(text).length - 1
 
-/** The page body with `old_text` replaced, refused unless it matches once and leaves content. */
 const patchedBody = (
   record: PageRecord,
   input: { readonly old_text: string; readonly new_text: string }

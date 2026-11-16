@@ -19,7 +19,6 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 // and the new one on the same rows and expects the same Inbox entries.
 
 const DAY = 86_400_000
-// One clock reading for the file: two times asked for the same moment must be equal.
 const NOW = Date.now()
 const at = (days: number) => new Date(NOW - days * DAY).toISOString()
 const PREFIX = "automation-failed:"
@@ -303,7 +302,6 @@ it("an Automation gives up on its third failed run in a row since it last gave u
         givesUp(sql, { automationId: "auto-4", attemptId, chatRunId: null })
       expect(yield* givesUpAt(22)).toBeUndefined()
       expect(yield* givesUpAt(23)).toEqual({ kind: "streak" })
-      // 23 moved past its item; its failed event names that item's run.
       yield* sql`UPDATE automation_runs SET chat_run_id = 'r-e6' WHERE id = 23`
       yield* sql`INSERT INTO entity_events (key, entity, entity_id, event, run_id, text, place_kind,
           occurred_at, shown) VALUES (${`${PREFIX}23`}, 'automation', 'auto-4', 'failed',

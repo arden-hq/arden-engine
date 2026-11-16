@@ -209,12 +209,6 @@ export const makeMemoryCaptureBatches = (input: {
     }
   })
 
-  /**
-   * The backlog: messages behind a chat's position that Capture did not read. Its progress is the
-   * receipts of the batches it finished, and a range shrinks as far as every batch from its start
-   * was finished. A batch with nothing to review stops that: its messages stay in the backlog, and
-   * the range rests a day, as one does after Capture gives up on a batch of it.
-   */
   const nextBacklogBatch = Effect.fn("Memory.nextBacklogBatch")(function* (): Effect.fn.Return<
     MemoryCaptureBatch | null,
     MemoryError

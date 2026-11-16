@@ -1,28 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** A job run is open exactly while a queue row names it.
- *
- * `automation_runs.status = 'running'` was written at claim and cleared only
- * by settlement, so a queue row deleted any other way left its run running for
- * good. Such a run held every Memory change its Automation produced: Wiki
- * Maintenance waits while a producer has a running run. On the owner's data,
- * 11 runs from 9 and 10 October had no job and held 128 waiting changes.
- *
- * Two triggers now close the run in the same statement that deletes its queue
- * row, or points that row at another run. Settlement ends the run before it
- * deletes the row, so there they change nothing. The task's `job_held_since`
- * is cleared too once none of its rows is claimed, as recovery does at start.
- * Runs that belong to a chat run (`task_id IS NULL`) have no queue row and are
- * left alone. The runs already open with no job are closed the same way, but
- * at the last time each is known to have been alive (its chat run's last
- * update, else its start), not at the update: an Automation's cooldown counts
- * from its last ending and the history sorts by it.
- *
- * `scheduled_tasks.running_since` becomes `job_held_since`: it is set when a
- * worker claims one of the Automation's jobs and cleared when that job settles,
- * is released, retries or is deferred, so it never meant "the Automation is
- * running". That is the open run (automation-running.ts). */
 const up = (database: DatabaseSync): void => {
   database.exec("ALTER TABLE scheduled_tasks RENAME COLUMN running_since TO job_held_since")
   database.exec(`CREATE TRIGGER automation_job_closes_run_ad

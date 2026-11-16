@@ -1,17 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** A removed message cuts every position kept in its chat back to before it, because new messages
- * then reuse its number: Memory Capture's position and old backlog ranges, and the chat summary.
- *
- * A prepared Capture batch that read past the removed message keeps what it read before it and
- * records the first message removed in `prepared_cut_seq`: a finished batch advances to the
- * message before that, and a batch resumed after a restart reads only up to it. A removal at or
- * before the batch's first message clears the batch, since nothing it read is left. A batch
- * starts at the position: inside message `read_seq` when an offset is kept, else after it.
- *
- * A chat summary that reaches the removed message is deleted, as is every stored summary that
- * already reaches past its chat's last message. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TRIGGER chat_positions_cut_at_removal
       AFTER DELETE ON session_messages

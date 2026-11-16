@@ -12,12 +12,6 @@ import {
 import { userChatSql } from "./chat-ownership.js"
 import { activeRunStatusList } from "./status-sets.js"
 
-// The one writer of `memory_capture_positions`: how far Capture has read each owner chat.
-// The transcript owns where a chat ends, so the end is never stored. A trigger on
-// `session_messages` moves a position back when messages it covers are deleted
-// (revert, clear), because new messages then reuse their numbers, and marks where a deletion
-// cut a prepared batch (migration 0156).
-
 const IdentityJson = Schema.fromJsonString(MemoryCaptureBatchIdentitySchema)
 
 interface PositionColumns {

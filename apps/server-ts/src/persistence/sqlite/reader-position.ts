@@ -109,7 +109,6 @@ export const readerPosition = <R extends Reader>(reader: R) => {
   const stored = (cause: unknown): ReaderPositionError =>
     cause instanceof ReaderPositionError ? cause : failure("storage", "could not be stored")(cause)
 
-  /** The position on its own, each write in its own transaction. */
   const on = (writer: Writer): ReaderPosition<PositionOf<R>> => ({
     start: (initial) => writer.transact(start(writer.sql, initial)).pipe(Effect.mapError(stored)),
     read: () => read(writer.sql).pipe(Effect.mapError(stored)),

@@ -134,7 +134,6 @@ type MergedPage = PageRecord & { readonly page: { readonly lifecycle: "redirect"
 const isMergedPage = (record: PageRecord): record is MergedPage =>
   record.page.lifecycle === "redirect"
 
-/** The version a restore of `record` requires, and the earlier version saved at `at`. */
 const restoreSource = async (
   wiki: Wiki["Service"],
   record: PageRecord,

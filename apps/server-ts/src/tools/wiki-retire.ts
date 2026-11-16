@@ -106,7 +106,6 @@ export const makeWikiRetireTools = ({
         paths: [input.path, input.into],
         save: async ({ head, records: [record, target], writer, run }) => {
           const expectedVersion = requireObserved(ctx.run, record)
-          // The run must have read the page that keeps the content, not only the one it retires.
           requireObserved(ctx.run, target)
           await run(
             wiki.mergeInto({

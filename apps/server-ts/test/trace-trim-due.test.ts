@@ -84,7 +84,6 @@ it("the due-for-trim list equals a fresh look after runs start, end and chats go
 })
 
 const DAY = 86_400_000
-// One clock reading for the file: two times asked for the same moment must be equal.
 const NOW = Date.now()
 const ago = (days: number) => new Date(NOW - days * DAY).toISOString()
 

@@ -22,8 +22,6 @@ import {
   type Snapshot
 } from "./snapshot.js"
 
-/** The page as commit `commitId` left it (`after`), or as it was before that commit (`before`).
- *  `before` undoes an upkeep (Wiki Maintenance) commit, and only while it is the page's latest change. */
 interface WikiRestoreVersion {
   readonly commitId: string
   readonly side: WikiRestoreSide
@@ -129,7 +127,6 @@ export const makeWikiRestoreMethods = (
   repository: ManagedFileRepositoryShape,
   changes: WikiChanges
 ): WikiRestoreMethods => {
-  /** The page as `input.version` holds it, written as its next version. */
   const restorePlan = (input: Pick<WikiRestoreContentInput, "pageId" | "version" | "head">) =>
     Effect.fn("Wiki.planRestore")(function* (snapshot: Snapshot) {
       const current = yield* pageIn("restore", snapshot, input.pageId)
@@ -150,7 +147,6 @@ export const makeWikiRestoreMethods = (
     return changes
       .change(writer, (snapshot) =>
         restorePlan({ ...input, head: input.expectedHead })(snapshot).pipe(
-          // A restore that changes nothing is still refused by the rules a change would meet.
           Effect.tap((plan) =>
             plan.value.unchanged ? changes.check(writer, plan.writes) : Effect.void
           ),

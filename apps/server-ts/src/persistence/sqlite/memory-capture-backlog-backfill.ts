@@ -4,24 +4,6 @@ import { capturedText } from "../transcript/content.js"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
 import type { Backfill } from "./backfills/backfill.js"
 
-// Migration 0155 put every old message of an owner chat into one backlog range. This backfill
-// removes from those ranges the messages a finished Capture run was shown, and the messages a
-// branch copied from its source chat, which the source reads. Then it deletes the old marks, and
-// the `run_sidecars` rows that held nothing else: every reader of that table asks only for an
-// Automation's blocked outcome, so an empty row has none. It only ever shrinks a range, so a chat
-// that changed since the update stays correct.
-//
-// What Capture read comes from its finished runs, not from the old marks. The old Capture
-// settled every waiting mark of a chat with one batch, and a chat's first batch read only its
-// latest 40 records, so the marks claim turns that no run was shown. Each finished run stores
-// where its batch started and ended; a batch from the beginning of a chat stores no start, so
-// its start is the first message its prompt quotes. Inside a finished batch every message counts
-// as read except a turn the owner typed that the prompt never quoted: some were left out, and
-// the owner's words are what must not be lost. A batch that stopped inside its last message did
-// not read that message. A message counts only if it existed when the run
-// started, because revert lets later messages reuse its number. Runs from before batches were
-// recorded show nothing, so their turns stay in the backlog. Whatever is unsure stays there.
-
 const MARKS = "json_type(evidence_json, '$.memory_capture') IS NOT NULL"
 
 /** A `message` the owner typed: the user message that opens a turn, not a note the app added. */
@@ -188,7 +170,6 @@ const batchStart = (row: BatchRow, quoted: ReadonlyArray<number>): number | unde
   }
 }
 
-/** Whether the batch read its last message to the end; unsure when that message is unreadable. */
 const endsWhole = (row: BatchRow): boolean => {
   if (row.ending === null) return true
   const ending = decodeMessage(row.ending)

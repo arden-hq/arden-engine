@@ -67,7 +67,6 @@ export const assertOutsideRealData = (folder: string): void => {
   }
 }
 
-/** The entries of a folder, or none when it went away: another test's lock folder can vanish mid-scan. */
 const entriesOf = (folder: string) => {
   try {
     return readdirSync(folder, { withFileTypes: true })

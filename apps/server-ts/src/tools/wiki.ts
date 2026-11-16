@@ -751,8 +751,6 @@ const makeWikiTools = ({
               })
             }))
           )
-          // Capture saves a batch's edits once even when its run sends them again: every page
-          // it read goes into that one save, guarded by the head it read.
           const replayKey =
             input.edits === undefined || identity.captureBatch === null
               ? undefined

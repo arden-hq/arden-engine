@@ -7,11 +7,6 @@ export const FORGOTTEN_PAGE_PATH = "forgotten.md"
 export const RULES_PAGE_PATH = "AGENTS.md"
 export const RULES_PAGE_TITLE = "Global instructions"
 
-/**
- * Each page Arden keeps for the owner: the writer that makes it, and what it is. A page whose body
- * holds all of it has `plainTitle`: a file of it with no frontmatter reads as its body.
- * `forgotten.md` keeps its entries in frontmatter, so a file of it without one does not read.
- */
 const CODE_OWNED_PAGES: ReadonlyMap<
   string,
   {

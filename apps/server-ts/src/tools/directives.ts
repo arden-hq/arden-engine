@@ -94,7 +94,6 @@ const makeDirectivesTools = ({
     return { record, head: snapshot.head }
   }
 
-  /** The rules as this run read them, still current, in the user's own turn. */
   const readByOwner = async (ctx: ToolContext<ServerRunContext>) => {
     await requireOwnerTurn(
       sessions,

@@ -1,31 +1,6 @@
 import type { DatabaseSync } from "node:sqlite"
 import type { Migration } from "./index.js"
 
-/** Memory Capture keeps one position per owner chat: how far it has read.
- *
- * Capture used to mark each finished turn in `run_sidecars` and rebuild a cursor from the
- * marks, keyed by the chat's context number. Compaction, clear, revert and archive change that
- * number or hide the chat, so on the owner's data 966 marks waited and none could be read.
- * Stopped turns were never marked, and a long gap after a context change was read only in part.
- *
- * Capture now reads each owner chat from its position to its last message whenever no run is
- * active in it. A prepared batch is kept with its position; `prepared_cut_seq` is the first
- * message removed from it while it ran (migration 0156).
- *
- * Every existing owner chat starts at its last message, so nothing old is read after the update.
- * Its old messages become one backlog range, which Capture never reads. A backfill then removes
- * from those ranges what the old marks show Capture read, and the copies a branch holds of its
- * source, and deletes the old marks.
- *
- * A new owner chat holds nothing, so a trigger starts it at its beginning. A chat that holds
- * copies when it becomes an owner chat (a branch, a continued Automation copy) is moved past them
- * by `startCaptureAfterCopies`, and a second trigger refuses a chat that becomes an owner chat
- * before its position is past the messages it holds.
- *
- * A Capture job that prepared its batch before the update stores that batch in the old shape,
- * which no claim can read, so one such job would stop every Automation. Those jobs are deleted.
- * The trigger from migration 0154 closes their runs as interrupted, and their messages are in the
- * backlog with the rest. */
 const up = (database: DatabaseSync): void => {
   database.exec(`CREATE TABLE memory_capture_positions (
       session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,

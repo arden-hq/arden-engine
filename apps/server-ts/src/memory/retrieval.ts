@@ -445,10 +445,6 @@ const recordsPastRecallAge = (
   })
 }
 
-/**
- * The pages recall chooses. A page the run holds in part is ranked by the text it lacks, and
- * offered only when that text matches.
- */
 const rankRecall = (
   active: ReadonlyArray<RunPage>,
   recall: RecallCandidates,

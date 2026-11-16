@@ -15,10 +15,6 @@ const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "wiki_merge_page"
 ])
 
-/**
- * Backlog batches one Capture job reads once the chats have no new work: one, so a batch Capture
- * skipped is tried again later, or `ARDEN_CAPTURE_CATCH_UP` for a one-time catch-up of old turns.
- */
 const BACKLOG_BATCHES_PER_JOB = Math.max(1, Number(process.env.ARDEN_CAPTURE_CATCH_UP) || 1)
 
 const makeMemoryCaptureRunner =

@@ -90,7 +90,6 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
   snapshot: Snapshot
 ): Effect.fn.Return<void, WikiError> {
   const { read } = writer
-  // A replayable write read before its head moved may have landed already; its receipt decides.
   if (read === undefined || (writer.replayKey !== undefined && snapshot.head !== read.head)) return
   for (const [pageId, version] of read.versions) {
     const record = yield* pageIn(writer.operation, snapshot, pageId)
@@ -100,7 +99,6 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
   }
 })
 
-/** A conflict over one page, told with how that page reads now. */
 const withCurrent = (repository: ManagedFileRepositoryShape, cause: WikiError) => {
   const pageId = cause.pageId
   if (cause.reason !== "conflict" || pageId === undefined) return Effect.succeed(cause)
@@ -123,7 +121,6 @@ const withCurrent = (repository: ManagedFileRepositoryShape, cause: WikiError) =
   }).pipe(Effect.orElseSucceed(() => cause))
 }
 
-/** The page a refusal names: the one page the writer read, else the one page the plan writes. */
 const errorPage = (
   writer: WikiChangeWriter,
   writes: ReadonlyArray<WikiWrite>

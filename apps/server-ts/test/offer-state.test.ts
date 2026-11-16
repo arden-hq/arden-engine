@@ -5,7 +5,6 @@ import { TaskProposalStore } from "../src/persistence/proposals/store.js"
 import { OFFER_EXPIRY_HOURS } from "../src/persistence/sqlite/offer-rules.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// One clock reading for the file: two times asked for the same moment must be equal.
 const NOW = Date.now()
 const at = (hoursAgo: number) => new Date(NOW - hoursAgo * 3_600_000).toISOString()
 
