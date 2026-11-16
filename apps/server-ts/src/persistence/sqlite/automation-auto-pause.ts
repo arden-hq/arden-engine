@@ -1,8 +1,6 @@
 import { cutText, firstLine } from "@arden-hq/std/text"
 import { captureMutationVersions } from "./mutation-links.js"
 import type { MutationOperationIdentity } from "../tools/mutation-receipt.js"
-import { outcomeSql } from "./automation-run-outcome.js"
-import { countsAsRun } from "./automation-skip-record.js"
 import { DateTime, Effect } from "effect"
 import { isLastingRunError, providerSentence } from "@arden-hq/protocol/chat"
 import { haltAutomation } from "./automation-halt.js"
@@ -31,7 +29,8 @@ export const ITEM_GIVE_UP = { lasting: "keep", streak: "skip" } as const satisfi
 /**
  * The one rule for when an Automation gives up after its run `attemptId` failed: the failure is a
  * refusal that comes back the same until the owner changes something, or it is the
- * FAILURES_BEFORE_GIVING_UP-th failed run in a row since the Automation last gave up.
+ * FAILURES_BEFORE_GIVING_UP-th failed run in a row on the same `item` since the streak last ended.
+ * Counts the failure once per run; the caller ends the streak when it gives up.
  */
 export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
   sql: SqlClient.SqlClient,
@@ -39,12 +38,13 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
     readonly automationId: string
     readonly attemptId: number
     readonly chatRunId: string | null
+    readonly item: string | null
   }
 ): Effect.fn.Return<GiveUpCause | undefined, SqlError.SqlError> {
-  const { automationId } = input
+  const { automationId, attemptId, item } = input
   const lasting = yield* sql<{ readonly error_code: string | null; readonly error: string | null }>`
     SELECT chat.error_code, COALESCE(chat.error_message, attempt.error) AS error
-    FROM chat_runs AS chat JOIN automation_runs AS attempt ON attempt.id = ${input.attemptId}
+    FROM chat_runs AS chat JOIN automation_runs AS attempt ON attempt.id = ${attemptId}
     WHERE chat.run_id = ${input.chatRunId}`
   const refused = lasting[0]
   if (refused !== undefined && isLastingRunError(refused.error_code)) {
@@ -58,28 +58,17 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
           : "Resume it once that's fixed."
     }
   }
-  const before = yield* sql<{ readonly outcome: string }>`
-    SELECT outcome FROM (SELECT id, ${outcomeSql(sql, sql`automation_runs`)} AS outcome
-      FROM automation_runs
-      WHERE task_id = ${automationId} AND id < ${input.attemptId} AND ended_at IS NOT NULL
-        AND ${countsAsRun(sql, sql`automation_runs`)}
-        AND id > MAX(
-          (SELECT COALESCE(MAX(json_extract(payload, '$.attemptId')), 0)
-            FROM automation_deliveries
-            WHERE task_id = ${automationId}
-              AND json_extract(payload, '$.kind') = 'automation_paused'),
-          (SELECT COALESCE(MAX(skipped.id), 0)
-            FROM automation_runs AS skipped
-            JOIN entity_events AS event ON event.run_id = skipped.chat_run_id
-            WHERE skipped.task_id = ${automationId}
-              AND event.entity = 'automation' AND event.event = 'failed')))
-    WHERE outcome NOT IN ('cancelled', 'interrupted')
-    ORDER BY id DESC LIMIT ${FAILURES_BEFORE_GIVING_UP - 1}`
-  return before.length === FAILURES_BEFORE_GIVING_UP - 1 &&
-    before.every((run) => run.outcome === "failed")
-    ? { kind: "streak" }
-    : undefined
+  const streak = yield* sql<{ readonly failed_runs: number }>`UPDATE scheduled_tasks
+    SET failed_runs = CASE WHEN failed_attempt IS ${attemptId} THEN failed_runs
+        WHEN failed_item IS ${item} THEN failed_runs + 1 ELSE 1 END,
+      failed_item = ${item}, failed_attempt = ${attemptId}
+    WHERE task_id = ${automationId} RETURNING failed_runs`
+  return (streak[0]?.failed_runs ?? 0) >= FAILURES_BEFORE_GIVING_UP ? { kind: "streak" } : undefined
 })
+
+/** Ends the failure streak: a run did its work, the Automation gave up, or the owner resumed it. */
+export const endStreak = (sql: SqlClient.SqlClient, automationId: string) =>
+  sql`UPDATE scheduled_tasks SET failed_runs = 0, failed_item = NULL WHERE task_id = ${automationId}`
 
 /** Why a job gave up, for the line that tells the owner. */
 export const giveUpReason = (cause: GiveUpCause): string =>
@@ -97,11 +86,12 @@ export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (op
   readonly chatRunId: string | null
 }) {
   const { sql, automationId } = options
-  const cause = yield* givesUp(sql, options)
+  const cause = yield* givesUp(sql, { ...options, item: null })
   if (cause === undefined) return false
   const live = yield* sql`SELECT task_id FROM scheduled_tasks
     WHERE task_id = ${automationId} AND ${userAutomationSql()} AND enabled = 1`
   if (live.length === 0) return false
+  yield* endStreak(sql, automationId)
   yield* haltAutomation({
     sql,
     sessionEvents: options.sessionEvents,
@@ -176,6 +166,7 @@ export const endAutoPause = Effect.fn("AutomationAutoPause.end")(function* (
   automationId: string
 ) {
   const at = DateTime.formatIso(yield* DateTime.now)
+  yield* endStreak(sql, automationId)
   yield* sql`UPDATE automation_deliveries SET payload = json_set(payload, '$.resumedAt', ${at})
     WHERE task_id = ${automationId}
       AND json_extract(payload, '$.kind') IN ('automation_paused', 'automation_space_paused')

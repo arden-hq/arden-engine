@@ -11,13 +11,14 @@ import {
   MAX_HANDLER_ITEM_ATTEMPTS,
   handlerItemClientId,
   type HandlerItem,
+  type HandlerItemData,
   type HandlerItemInput,
   type HandlerItemRef
 } from "../automations/handler-item.js"
 import type { AutomationRules } from "../automations/model.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
 import { parseLease } from "./automation-lease.js"
-import { ITEM_GIVE_UP, giveUpReason, givesUp } from "./automation-auto-pause.js"
+import { ITEM_GIVE_UP, endStreak, giveUpReason, givesUp } from "./automation-auto-pause.js"
 import { recordAutomationEvent } from "./entity-events.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { nextId, type Writer } from "./deps.js"
@@ -63,6 +64,12 @@ const save = Effect.fn("HandlerItem.save")(function* (
   yield* sql`UPDATE automation_event_queue SET context = ${encoded} WHERE id = ${current.queueId}`
   return item
 })
+
+/** Where the item starts, the same each run that tries it again. */
+const streakItem = (data: HandlerItemData): string =>
+  data.kind === "memory"
+    ? JSON.stringify([data.batch.identity.sessionId, data.batch.identity.start])
+    : String(data.kind === "daily" ? data.date : data.processedHead)
 
 export const makeHandlerItems = ({
   writer,
@@ -175,18 +182,27 @@ export const makeHandlerItems = ({
     function* (lease, runId, tell) {
       const { runId: attemptId } = parseLease(lease)
       const automationId = lease.payload.automationId
-      const cause = yield* givesUp(sql, { automationId, attemptId, chatRunId: runId })
+      const data = (yield* load(sql, lease)).context.handler_item?.input.data
+      const cause = yield* givesUp(sql, {
+        automationId,
+        attemptId,
+        chatRunId: runId,
+        item: data === undefined ? null : streakItem(data)
+      })
       if (cause === undefined) return undefined
       const text = yield* tell({ then: ITEM_GIVE_UP[cause.kind], reason: giveUpReason(cause) })
       yield* writer.transact(
-        recordAutomationEvent(sql, {
-          sessionEvents,
-          automationId,
-          attemptId,
-          runId,
-          event: "failed",
-          text
-        })
+        Effect.andThen(
+          endStreak(sql, automationId),
+          recordAutomationEvent(sql, {
+            sessionEvents,
+            automationId,
+            attemptId,
+            runId,
+            event: "failed",
+            text
+          })
+        )
       )
       return text
     },

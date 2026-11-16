@@ -44,7 +44,7 @@ const up = (database: DatabaseSync): void => {
 }
 
 export const messageAuthors: Migration = {
-  version: 166,
+  version: 165,
   name: "message_authors",
   foreignKeys: { kind: "enforced" },
   up

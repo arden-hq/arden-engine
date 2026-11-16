@@ -111,6 +111,9 @@ export const automationSchemaSection = {
     "ALTER TABLE scheduled_tasks ADD COLUMN prompt_author TEXT CHECK(prompt_author IN ('owner', 'agent'))",
     "ALTER TABLE scheduled_tasks ADD COLUMN instruction_revision_id INTEGER",
     "ALTER TABLE scheduled_tasks ADD COLUMN paused_at TEXT",
+    "ALTER TABLE scheduled_tasks ADD COLUMN failed_runs INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE scheduled_tasks ADD COLUMN failed_item TEXT",
+    "ALTER TABLE scheduled_tasks ADD COLUMN failed_attempt INTEGER",
     `CREATE TABLE automation_instruction_revisions (
       revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL,

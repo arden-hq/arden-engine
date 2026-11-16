@@ -181,7 +181,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
       systemPrompt: async () => {
         const [assistantName, current] = await Promise.all([
           readAssistantName(),
-          Effect.runPromise(loadForRun(services.wiki, rulesFile))
+          Effect.runPromise(loadForRun(services.wiki))
         ])
         return chatSystemPrompt(assistantName, rulesFile, current)
       },
@@ -204,7 +204,7 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
       recordLocalInstructions: ({ runId, sources }) =>
         Effect.runPromise(
           Effect.gen(function* () {
-            const load = yield* loadForRun(services.wiki, rulesFile)
+            const load = yield* loadForRun(services.wiki)
             yield* chat.recordLocalInstructions({
               runId,
               sources: [...globalInstructionManifest(rulesFile, load), ...sources]

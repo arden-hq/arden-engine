@@ -1,4 +1,3 @@
-import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect, Layer } from "effect"
 import { readFile, rm } from "node:fs/promises"
 import { dirname } from "node:path"
@@ -51,37 +50,31 @@ export const rulesMoveLayer = (file: string): Layer.Layer<never, never, Wiki> =>
   )
 
 /**
- * The rules a run is sent: the rules page, or the rules file while a start could not move it into
- * Memory; `failed` when neither could be read.
+ * The rules a run is sent: the rules page. Every start makes it, so a run finds none only when the
+ * start could not move the rules file into Memory; that is `failed`, as is a Memory it cannot read.
  */
 export type GlobalInstructionsLoad =
-  | { readonly kind: "read"; readonly page: PageRecord | undefined }
-  | { readonly kind: "file"; readonly text: string }
-  | { readonly kind: "failed"; readonly error: unknown }
+  | { readonly kind: "read"; readonly page: PageRecord }
+  | { readonly kind: "failed" }
 
-export const loadForRun = (
-  wiki: Wiki["Service"],
-  file: string
-): Effect.Effect<GlobalInstructionsLoad> =>
-  Effect.gen(function* () {
-    const page = rulesPage(yield* wiki.snapshot())
-    if (page !== undefined) return { kind: "read", page } as const
-    const text = yield* Effect.tryPromise(() => readRulesFile(file))
-    return text === undefined
-      ? ({ kind: "read", page } as const)
-      : ({ kind: "file", text } as const)
-  }).pipe(
+export const loadForRun = (wiki: Wiki["Service"]): Effect.Effect<GlobalInstructionsLoad> =>
+  wiki.snapshot().pipe(
+    Effect.map(rulesPage),
+    Effect.flatMap((page) =>
+      page === undefined
+        ? Effect.fail("The rules file was not moved into Memory")
+        : Effect.succeed({ kind: "read", page } as const)
+    ),
     Effect.catch((error) =>
       Effect.as(Effect.logWarning("Running without the global instructions", { error }), {
-        kind: "failed",
-        error
-      } satisfies GlobalInstructionsLoad)
+        kind: "failed"
+      } as const)
     )
   )
 
 const rulesText = (load: GlobalInstructionsLoad): string | undefined => {
   if (load.kind === "failed") return undefined
-  const rules = (load.kind === "file" ? load.text : load.page?.page.body)?.trim()
+  const rules = load.page.page.body.trim()
   return rules === "" ? undefined : rules
 }
 
@@ -100,9 +93,9 @@ export const globalInstructionManifest = (
     digest
   })
   if (load.kind === "failed") return [entry("unreadable", null)]
-  const digest = load.kind === "file" ? sha256Hex(load.text) : load.page?.resource.versionId
-  if (digest === undefined) return []
-  return rulesText(load) === undefined ? [entry("empty", null)] : [entry("loaded", digest)]
+  return rulesText(load) === undefined
+    ? [entry("empty", null)]
+    : [entry("loaded", load.page.resource.versionId)]
 }
 
 export const chatSystemPrompt = (

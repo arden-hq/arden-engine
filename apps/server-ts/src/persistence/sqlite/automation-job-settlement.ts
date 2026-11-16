@@ -9,7 +9,7 @@ import { quietRunOutcome } from "./run-outcomes.js"
 import { recordAutomationEvent } from "./entity-events.js"
 import { announceNotice } from "./notices.js"
 import { recordEnding, toldOutcomeOf } from "./run-ending.js"
-import { pauseOnGivingUp } from "./automation-auto-pause.js"
+import { endStreak, pauseOnGivingUp } from "./automation-auto-pause.js"
 import { parseLease } from "./automation-lease.js"
 import {
   JobLeaseLostError,
@@ -243,6 +243,7 @@ export const makeFencedOccurrences = ({
             next_run_at = ${nextRunAt === undefined ? fenced.row.task_next_run_at : nextRunAt}
         WHERE task_id = ${fenced.row.task_id}
       `
+    if (counted && ran) yield* endStreak(sql, fenced.row.task_id)
     const userAutomation = isUserAutomationPurpose(fenced.row.purpose)
     const endingRecord = yield* recordEnding(sql, {
       kind: "occurrence",
