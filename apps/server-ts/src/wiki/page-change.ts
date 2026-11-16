@@ -95,7 +95,7 @@ const requireRead = Effect.fn("Wiki.requireRead")(function* (
   for (const [pageId, version] of read.versions) {
     const record = yield* pageIn(writer.operation, snapshot, pageId)
     if (snapshot.head !== read.head || record.resource.versionId !== version) {
-      return yield* wikiError(writer.operation, "conflict", "Wiki page changed", { pageId })
+      return yield* wikiError(writer.operation, "conflict", "Memory page changed", { pageId })
     }
   }
 })
@@ -178,7 +178,7 @@ export const makeWikiChanges = (
               return yield* wikiError(
                 writer.operation,
                 "conflict",
-                `Wiki changed during the ${writer.operation}`,
+                `Memory changed during the ${writer.operation}`,
                 page === undefined ? {} : { pageId: page }
               )
             }

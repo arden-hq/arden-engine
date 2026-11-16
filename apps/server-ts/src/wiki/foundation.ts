@@ -21,7 +21,7 @@ export const initializeWikiFoundation = Effect.fn("Wiki.initializeFoundation")(f
   const entries = yield* Effect.tryPromise({
     try: () => readdir(options.workingRoot),
     catch: (cause) =>
-      wikiError("open", "storage", "Could not read the Wiki working directory", { cause })
+      wikiError("open", "storage", "Could not read the Memory working folder", { cause })
   })
   const historyRoot = resolve(
     options.historyRoot ?? resolve(options.workingRoot, ".managed-history")

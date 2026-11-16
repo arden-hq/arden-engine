@@ -25,11 +25,12 @@ export const isStandingFactsPage = (page: {
 export const createRefusal = (
   path: string
 ): { readonly code: "invalid" | "blocked"; readonly message: string } | undefined => {
-  if (!path.endsWith(".md")) return { code: "invalid", message: "Wiki page paths must end in .md" }
+  if (!path.endsWith(".md"))
+    return { code: "invalid", message: "Memory page paths must end in .md" }
   if ((posix.dirname(path) === "." && !isStandingFactsPage({ path, pageId: "" })) || isReadme(path))
     return {
       code: "blocked",
-      message: "Wiki pages can be created only inside an existing Wiki directory"
+      message: "Memory pages can be created only inside an existing Memory folder"
     }
   return undefined
 }

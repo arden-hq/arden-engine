@@ -160,11 +160,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
       !known.has(normal(parent)) &&
       !byPath.has(normal(`${parent}/README.md`))
     ) {
-      return yield* wikiError(
-        "create",
-        "blocked",
-        `Parent Wiki directory does not exist: ${parent}`
-      )
+      return yield* wikiError("create", "blocked", `Parent Memory folder does not exist: ${parent}`)
     }
     const current = byPath.get(normal(readme))
     if (current === undefined) {
@@ -172,7 +168,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
         return yield* wikiError(
           "create",
           "blocked",
-          `Wiki directory name already belongs to another page: ${directory.path}`
+          `Memory folder name already belongs to another page: ${directory.path}`
         )
       }
       create(readme, directoryTitle(directory.path), contract)
@@ -195,7 +191,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
   for (const page of input.pages) {
     const directory = posix.dirname(page.path)
     if (!known.has(normal(directory))) {
-      return yield* wikiError("create", "blocked", `Wiki directory is not mapped: ${directory}`)
+      return yield* wikiError("create", "blocked", `Memory folder is not mapped: ${directory}`)
     }
     const current = byPath.get(normal(page.path))
     if (current === undefined) {
@@ -203,7 +199,7 @@ const planImport = Effect.fn("Wiki.planImport")(function* (
         return yield* wikiError(
           "create",
           "blocked",
-          `Wiki path or link name already exists: ${page.path}`
+          `Memory path or link name already exists: ${page.path}`
         )
       }
       create(page.path, page.title, page.body)

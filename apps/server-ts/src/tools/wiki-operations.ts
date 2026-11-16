@@ -124,15 +124,15 @@ const patchedBody = (
   if (occurrences !== 1) {
     throw new ToolExecutionError(
       occurrences === 0
-        ? "old_text was not found in the current Wiki page body."
-        : `old_text matches ${occurrences} places in the current Wiki page body.`,
+        ? "old_text was not found in the current Memory page body."
+        : `old_text matches ${occurrences} places in the current Memory page body.`,
       { preview: "Patch not applied", retryable: false }
     )
   }
   const body = record.page.body.replace(input.old_text, () => input.new_text)
   if (body.trim().length === 0) {
     throw new ToolExecutionError(
-      "A Wiki page must retain content. Archive it to remove the page.",
+      "A Memory page must retain content. Archive it to remove the page.",
       {
         preview: "Patch not applied",
         retryable: false

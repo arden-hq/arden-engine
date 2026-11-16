@@ -240,7 +240,7 @@ export const makeWikiMutationMethods = (
             return yield* wikiError(
               "merge",
               "invalid",
-              "A page merges only into another active Wiki page",
+              "A page merges only into another active Memory page",
               { pageId: input.pageId }
             )
           }

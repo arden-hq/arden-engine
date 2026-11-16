@@ -72,7 +72,7 @@ export const makeWikiRestoreMethods = (
   ) {
     const { commitId, side } = input.version
     if (side === "before" && current.page.lifecycle !== "active") {
-      return yield* wikiError("restore", "invalid", "Only active Wiki pages can be restored", {
+      return yield* wikiError("restore", "invalid", "Only active Memory pages can be restored", {
         pageId: input.pageId
       })
     }
@@ -97,7 +97,7 @@ export const makeWikiRestoreMethods = (
     if (side === "after") {
       if (change?.after?.state !== "active") {
         return yield* invalid(
-          "Selected revision does not contain one active version of this Wiki page"
+          "Selected revision does not contain one active version of this Memory page"
         )
       }
       return yield* activeVersion(change.after, invalid)
@@ -115,7 +115,7 @@ export const makeWikiRestoreMethods = (
       return yield* wikiError(
         "restore",
         "conflict",
-        `Wiki page changed after Maintenance commit ${commitId}`,
+        `Memory page changed after Maintenance commit ${commitId}`,
         { pageId: input.pageId }
       )
     }
@@ -128,7 +128,7 @@ export const makeWikiRestoreMethods = (
   ) {
     const historical = yield* readRecord(repository, "restore", resource, "invalid")
     if (historical.page.lifecycle !== "active") {
-      return yield* invalid("Selected revision is not an active Wiki page")
+      return yield* invalid("Selected revision is not an active Memory page")
     }
     return historical
   })
@@ -178,7 +178,7 @@ export const makeWikiRestoreMethods = (
             return yield* wikiError(
               "restore",
               "invalid",
-              "Only archived Wiki pages can be restored",
+              "Only archived Memory pages can be restored",
               { pageId: input.pageId }
             )
           }
@@ -186,7 +186,7 @@ export const makeWikiRestoreMethods = (
             snapshot.head !== input.expectedHead ||
             resource.versionId !== input.expectedVersion
           ) {
-            return yield* wikiError("restore", "conflict", "Wiki page changed", {
+            return yield* wikiError("restore", "conflict", "Memory page changed", {
               pageId: input.pageId
             })
           }
@@ -195,7 +195,7 @@ export const makeWikiRestoreMethods = (
             return yield* wikiError(
               "restore",
               "invalid",
-              "Archived page is not an active Wiki page",
+              "Archived page is not an active Memory page",
               { pageId: input.pageId }
             )
           }
@@ -205,7 +205,7 @@ export const makeWikiRestoreMethods = (
             return yield* wikiError(
               "restore",
               "blocked",
-              `Restore the Wiki directory ${directory} first`,
+              `Restore the Memory folder ${directory} first`,
               { pageId: input.pageId }
             )
           }
@@ -214,7 +214,7 @@ export const makeWikiRestoreMethods = (
             return yield* wikiError(
               "restore",
               "conflict",
-              `Wiki path or link name is taken by ${taken.resource.path}`,
+              `Memory path or link name is taken by ${taken.resource.path}`,
               { pageId: input.pageId }
             )
           }

@@ -70,12 +70,12 @@ const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
 ): Effect.fn.Return<void, WikiError> {
   const { pageId } = current.page
   if (current.page.lifecycle !== "active") {
-    return yield* wikiError("rename", "invalid", "Only active Wiki pages can be renamed", {
+    return yield* wikiError("rename", "invalid", "Only active Memory pages can be renamed", {
       pageId
     })
   }
   if (newPath.toLowerCase() === current.resource.path.toLowerCase()) {
-    return yield* wikiError("rename", "invalid", "A Wiki rename requires a different path", {
+    return yield* wikiError("rename", "invalid", "A Memory rename requires a different path", {
       pageId
     })
   }
@@ -83,7 +83,7 @@ const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
     return yield* wikiError(
       "rename",
       "blocked",
-      "The new Wiki path conflicts with the redirect kept at the old path",
+      "The new Memory path conflicts with the redirect kept at the old path",
       { pageId }
     )
   }
@@ -91,7 +91,7 @@ const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
     return yield* wikiError(
       "rename",
       "blocked",
-      "Another Wiki page already owns the new path or link name",
+      "Another Memory page already owns the new path or link name",
       { pageId }
     )
   }
@@ -108,7 +108,7 @@ const requireRenamable = Effect.fn("WikiRename.requireRenamable")(function* (
       return yield* wikiError(
         "rename",
         "blocked",
-        "Move child pages before renaming this directory page",
+        "Move child pages before renaming this folder page",
         { pageId }
       )
     }
@@ -145,7 +145,7 @@ const renamePlan = Effect.fn("WikiRename.plan")(function* (
     const body = yield* Effect.try({
       try: () => rewriteWikiLinkTargets(record.page.body, replacements),
       catch: (cause) =>
-        wikiError("rename", "invalid", "Could not rewrite Wiki links", {
+        wikiError("rename", "invalid", "Could not rewrite Memory links", {
           pageId: record.page.pageId,
           cause
         })
@@ -159,7 +159,7 @@ const renamePlan = Effect.fn("WikiRename.plan")(function* (
         record,
         content: yield* reviseWikiPage(record.page, { body }).pipe(
           Effect.mapError((cause) =>
-            wikiError("rename", "invalid", "Could not preserve Wiki page content", {
+            wikiError("rename", "invalid", "Could not preserve Memory page content", {
               pageId: record.page.pageId,
               cause
             })
@@ -176,9 +176,14 @@ const renamePlan = Effect.fn("WikiRename.plan")(function* (
   if (
     resources.some((resource) => resource.resourceId.toLowerCase() === redirectId.toLowerCase())
   ) {
-    return yield* wikiError("rename", "blocked", "A redirect already owns the previous Wiki path", {
-      pageId: source.page.pageId
-    })
+    return yield* wikiError(
+      "rename",
+      "blocked",
+      "A redirect already owns the previous Memory path",
+      {
+        pageId: source.page.pageId
+      }
+    )
   }
 
   const movedContent = yield* reviseWikiPage(source.page, {
@@ -186,7 +191,7 @@ const renamePlan = Effect.fn("WikiRename.plan")(function* (
     body: movedBody
   }).pipe(
     Effect.mapError((cause) =>
-      wikiError("rename", "invalid", "Could not preserve the renamed Wiki page", {
+      wikiError("rename", "invalid", "Could not preserve the renamed Memory page", {
         pageId: source.page.pageId,
         cause
       })
@@ -206,7 +211,7 @@ const renamePlan = Effect.fn("WikiRename.plan")(function* (
     ([pageId, content]) =>
       parseWikiPage(content, pageId).pipe(
         Effect.mapError((cause) =>
-          wikiError("rename", "invalid", "The Wiki rename would create an invalid page", {
+          wikiError("rename", "invalid", "The Memory rename would create an invalid page", {
             pageId,
             cause
           })

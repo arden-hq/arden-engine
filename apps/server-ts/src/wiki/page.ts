@@ -216,7 +216,7 @@ export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
     : yield* Effect.try({
         try: () => splitPage(content),
         catch: (cause) =>
-          cause instanceof WikiPageFormatError ? cause : fail("could not split Wiki page", cause)
+          cause instanceof WikiPageFormatError ? cause : fail("could not split Memory page", cause)
       })
   const raw = plain
     ? { page_id: expectedPageId, title: plainTitle, aliases: [], lifecycle: "active" }
@@ -226,7 +226,7 @@ export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
           cause instanceof WikiPageFormatError ? cause : fail("invalid YAML frontmatter", cause)
       })
   const frontmatter = yield* decodeFrontmatter(raw).pipe(
-    Effect.mapError((cause) => fail("invalid Wiki frontmatter", cause))
+    Effect.mapError((cause) => fail("invalid Memory page frontmatter", cause))
   )
   if (frontmatter.page_id.trim().length === 0) return yield* fail("page_id must be nonempty")
   if (frontmatter.title.trim().length === 0) return yield* fail("title must be nonempty")
@@ -244,7 +244,7 @@ export const parseWikiPage = Effect.fn("WikiPage.parse")(function* (
       validateGeneratedBoundaries(body)
     },
     catch: (cause) =>
-      cause instanceof WikiPageFormatError ? cause : fail("invalid Wiki page", cause)
+      cause instanceof WikiPageFormatError ? cause : fail("invalid Memory page", cause)
   })
   const redirectTo = frontmatter.redirect_to ?? null
   if (frontmatter.lifecycle === "redirect" && redirectTo === null) {
@@ -305,7 +305,7 @@ export const reviseWikiPage = Effect.fn("WikiPage.revise")(function* (
   const [source] = yield* Effect.try({
     try: () => splitPage(page.content),
     catch: (cause) =>
-      cause instanceof WikiPageFormatError ? cause : fail("could not split Wiki page", cause)
+      cause instanceof WikiPageFormatError ? cause : fail("could not split Memory page", cause)
   })
   const document = yield* Effect.try({
     try: () =>

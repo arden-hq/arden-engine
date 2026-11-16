@@ -96,7 +96,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
     return yield* wikiError(
       "create",
       "invalid",
-      "Wiki directories must use a relative POSIX path without a trailing slash"
+      "Memory folders must use a relative POSIX path without a trailing slash"
     )
   }
   const contract = directoryContract(input.body)
@@ -104,7 +104,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
     return yield* wikiError(
       "create",
       "invalid",
-      `Wiki directory contracts require exact headings: ${DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}`).join(", ")}`
+      `Memory folder contracts require exact headings: ${DIRECTORY_CONTRACT_HEADINGS.map((heading) => `## ${heading}`).join(", ")}`
     )
   }
   const readmePath = `${directory}/README.md`
@@ -118,14 +118,14 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
       if (boundary === undefined) {
         const spaceOwned = yield* spaceOwnsWikiPath(spaces, readmePath).pipe(
           Effect.mapError((cause) =>
-            wikiError("create", "storage", "Could not validate Space Wiki ownership", { cause })
+            wikiError("create", "storage", "Could not validate Space Memory ownership", { cause })
           )
         )
         if (spaceOwned) {
           return yield* wikiError(
             "create",
             "blocked",
-            "Only the owning Space run may create or adopt directories inside a Space Wiki boundary"
+            "Only the owning Space run may create or adopt folders inside a Space Memory boundary"
           )
         }
       }
@@ -135,7 +135,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
         return yield* wikiError(
           "create",
           "blocked",
-          "Report destinations cannot contain nested directories"
+          "Report destinations cannot contain nested folders"
         )
       }
       const parent = posix.dirname(directory)
@@ -143,7 +143,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
         return yield* wikiError(
           "create",
           "blocked",
-          `Parent Wiki directory does not exist: ${parent}`
+          `Parent Memory folder does not exist: ${parent}`
         )
       }
 
@@ -158,7 +158,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
           return yield* wikiError(
             "create",
             "conflict",
-            `Wiki directory already exists with a different contract: ${directory}`,
+            `Memory folder already exists with a different contract: ${directory}`,
             { pageId: current.page.pageId }
           )
         }
@@ -173,7 +173,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
             return yield* wikiError(
               "create",
               "blocked",
-              "Only an empty, unowned directory can become a report destination"
+              "Only an empty, unowned folder can become a report destination"
             )
           }
           return {
@@ -226,7 +226,7 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
         return yield* wikiError(
           "create",
           "conflict",
-          `Wiki directory name already belongs to another page: ${directory}`,
+          `Memory folder name already belongs to another page: ${directory}`,
           { pageId: nameOwner.page.pageId }
         )
       }

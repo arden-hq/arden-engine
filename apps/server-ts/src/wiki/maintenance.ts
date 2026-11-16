@@ -120,7 +120,7 @@ const loadMaintenanceSnapshot = Effect.fn("WikiMaintenance.loadSnapshot")(functi
       return yield* wikiError(
         operation,
         "invalid",
-        "Wiki Maintenance current Wiki exceeds the scan limit"
+        "Wiki Maintenance current Memory exceeds the scan limit"
       )
     }
   }
@@ -280,7 +280,7 @@ export const makeWikiMaintenanceMethods = (
         return yield* wikiError(
           "list",
           "conflict",
-          "Wiki changed while preparing Maintenance evidence"
+          "Memory changed while preparing Maintenance evidence"
         )
       }
       snapshotCache = {
@@ -381,7 +381,7 @@ export const makeWikiMaintenanceMethods = (
       return yield* wikiError(
         "list",
         "conflict",
-        "Wiki changed while preparing Maintenance evidence"
+        "Memory changed while preparing Maintenance evidence"
       )
     }
 

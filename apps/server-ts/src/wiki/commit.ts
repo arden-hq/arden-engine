@@ -473,7 +473,7 @@ interface CommitView {
 const requireHumanAliases = ({ page, resourceId }: ResolvedWrite) =>
   Option.isNone(page) || aliasesAreHuman(page.value.title, page.value.aliases)
     ? Effect.void
-    : ruleError("aliases", `Wiki page ${resourceId} keeps a path or a repeated name as an alias`)
+    : ruleError("aliases", `Memory page ${resourceId} keeps a path or a repeated name as an alias`)
 
 const refuseGrowthOverLimit = Effect.fn("Wiki.refuseGrowthOverLimit")(function* (
   { origin }: CommitView,
@@ -774,8 +774,8 @@ const requireActivePage = Effect.fn("Wiki.requireActivePage")(function* (
   if (Option.isNone(page) || page.value.lifecycle === "active") return
   const options = { pageId: write.resourceId }
   return yield* write.action === "edit"
-    ? wikiError("update", "invalid", "Only active Wiki pages can be updated", options)
-    : wikiError(write.action, "invalid", "Only active Wiki pages can be retired", options)
+    ? wikiError("update", "invalid", "Only active Memory pages can be updated", options)
+    : wikiError(write.action, "invalid", "Only active Memory pages can be retired", options)
 })
 
 const requireWithinBoundary = Effect.fn("Wiki.requireWithinBoundary")(function* (
@@ -816,7 +816,7 @@ const requireDirectoryEmptied = Effect.fn("Wiki.requireDirectoryEmptied")(functi
       after.get(record.page.pageId)?.startsWith(`${directory}/`) === true
   )
   if (child !== undefined)
-    return yield* wikiError(write.action, "blocked", `Active Wiki pages remain in ${directory}`, {
+    return yield* wikiError(write.action, "blocked", `Active Memory pages remain in ${directory}`, {
       pageId: write.resourceId
     })
 })

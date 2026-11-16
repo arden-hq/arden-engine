@@ -170,7 +170,7 @@ const createSpacePage = Effect.fn("Wiki.createSpacePage")(function* (
     return yield* wikiError(
       "create",
       "blocked",
-      `The ${home} directory must be an active, unowned collection with a valid directory contract`
+      `The ${home} folder must be an active, unowned collection with a valid folder contract`
     )
   }
   const usedNames = namesTakenAt(current.wholeSet.map((record) => record.resource.path))

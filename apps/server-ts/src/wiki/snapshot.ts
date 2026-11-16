@@ -50,7 +50,7 @@ export const activeRunPages = (pages: ReadonlyArray<RunPage>): ReadonlyArray<Run
   pages.filter((record) => record.resource.state === "active" && record.page.lifecycle === "active")
 
 export const notFound = (operation: WikiOperation, pageId: string): WikiError =>
-  wikiError(operation, "not_found", `Unknown Wiki page: ${pageId}`, { pageId })
+  wikiError(operation, "not_found", `Unknown Memory page: ${pageId}`, { pageId })
 
 export const readSnapshotPage = Effect.fn("Wiki.readSnapshotPage")(function* (
   snapshot: Snapshot,
@@ -76,7 +76,7 @@ const corruptPage = (
   resource: ResourceVersion,
   cause: unknown
 ): WikiError =>
-  wikiError(operation, "corrupt", `Invalid Wiki page ${resource.path}`, {
+  wikiError(operation, "corrupt", `Invalid Memory page ${resource.path}`, {
     pageId: resource.resourceId,
     cause
   })
@@ -95,7 +95,7 @@ export const readRecord = Effect.fn("Wiki.readRecord")(function* (
     catch: (cause) =>
       invalidReason === "corrupt"
         ? corruptPage(operation, resource, cause)
-        : wikiError(operation, "invalid", "Wiki page must be valid UTF-8", {
+        : wikiError(operation, "invalid", "Memory page must be valid UTF-8", {
             pageId: resource.resourceId,
             cause
           })

@@ -158,36 +158,36 @@ export const wikiFailure = (error: WikiError): ToolExecutionError => {
     case "not_found":
       return new ToolExecutionError(
         `${error.message} Call wiki_list_pages and retry with an exact active page path.`,
-        { preview: "Wiki page not found", retryable: false }
+        { preview: "Memory page not found", retryable: false }
       )
     case "conflict":
       return new ToolExecutionError(
-        "The wiki changed after it was read. Read the relevant page again, then retry.",
-        { preview: "Wiki changed", retryable: true }
+        "Memory changed after it was read. Read the relevant page again, then retry.",
+        { preview: "Memory changed", retryable: true }
       )
     case "blocked":
       return new ToolExecutionError(error.message, {
-        preview: "Wiki write blocked",
+        preview: "Memory write blocked",
         retryable: false
       })
     case "invalid":
       return new ToolExecutionError(
-        `The wiki page path, metadata, or Markdown body is invalid: ${error.message}`,
-        { preview: "Invalid wiki page", retryable: false }
+        `The Memory page path, metadata, or Markdown body is invalid: ${error.message}`,
+        { preview: "Invalid Memory page", retryable: false }
       )
     case "closed":
-      return new ToolExecutionError("The managed wiki is closed because Arden is shutting down.", {
-        preview: "Wiki closed",
+      return new ToolExecutionError("Memory is closed because Arden is shutting down.", {
+        preview: "Memory closed",
         retryable: false
       })
     case "corrupt":
       return new ToolExecutionError(error.message, {
-        preview: "Wiki storage failed",
+        preview: "Memory storage failed",
         retryable: false
       })
     case "storage":
       return new ToolExecutionError(error.message, {
-        preview: "Wiki storage failed",
+        preview: "Memory storage failed",
         retryable: true
       })
   }
@@ -328,15 +328,15 @@ export const pageNotFound = (snapshot: Snapshot, path: string): ToolExecutionErr
   if (redirected !== null)
     return new ToolExecutionError(
       `'${path}' now redirects to '${redirected.resource.path}'. Use '${redirected.resource.path}' to change that page.`,
-      { preview: "Wiki page moved", retryable: false }
+      { preview: "Memory page moved", retryable: false }
     )
   const named = pagesWithPathAlias(snapshot, path).slice(0, 3)
   const hint =
     named.length === 0
       ? "Call wiki_list_pages and retry with an exact active page path."
       : `${named.map((candidate) => `'${candidate}'`).join(", ")} lists '${path}' as an earlier name; read it if it is the page you want.`
-  return new ToolExecutionError(`No active wiki page exists at '${path}'. ${hint}`, {
-    preview: "Wiki page not found",
+  return new ToolExecutionError(`No active Memory page exists at '${path}'. ${hint}`, {
+    preview: "Memory page not found",
     retryable: false
   })
 }
@@ -486,16 +486,16 @@ const makeWikiTools = ({
       const directory = parseDirectory(input.directory)
       if (directory === null) {
         throw new ToolExecutionError(
-          "Wiki directory must be a relative POSIX path without '.' or '..'. Retry with a directory such as 'areas', or empty for the root.",
-          { preview: "Invalid wiki directory", retryable: false }
+          "Memory folder must be a relative POSIX path without '.' or '..'. Retry with a folder such as 'areas', or empty for the root.",
+          { preview: "Invalid Memory folder", retryable: false }
         )
       }
       const snapshot = await loadSnapshot(wiki, ctx.signal)
       const entries = listingEntries(activeRunPages(snapshot.pages), directory)
       if (directory !== "" && entries.length === 0) {
         throw new ToolExecutionError(
-          `No active wiki directory exists at '${directory}'. List its parent directory, or create the first page under this directory.`,
-          { preview: "Wiki directory not found", retryable: false }
+          `No active Memory folder exists at '${directory}'. List its parent folder, or create the first page under this folder.`,
+          { preview: "Memory folder not found", retryable: false }
         )
       }
       const visible = entries.slice(input.offset, input.offset + input.limit)
@@ -681,8 +681,8 @@ const makeWikiTools = ({
           }
         }
         throw new ToolExecutionError(
-          `A wiki page already exists at '${input.path}' with different content. Read the existing page, choose another path, or edit that page instead.`,
-          { preview: "Wiki path already exists", retryable: false }
+          `A Memory page already exists at '${input.path}' with different content. Read the existing page, choose another path, or edit that page instead.`,
+          { preview: "Memory path already exists", retryable: false }
         )
       }
       const identity = await writeIdentity(runs, { ...ctx.run, signal: ctx.signal })
