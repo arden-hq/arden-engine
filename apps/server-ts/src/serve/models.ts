@@ -1,5 +1,3 @@
-import { resolveModelCapabilities, type ModelProvider } from "@arden-hq/loop"
-import { makeChatCompletionsProvider } from "@arden-hq/loop/providers/chat-completions"
 import type { ModelProviderOptions } from "../config/options.js"
 import type { ModelDefinition, ModelHost } from "../models/host.js"
 import {
@@ -12,6 +10,15 @@ import {
   type DiscoveredModel,
   type DiscoveryInput
 } from "../providers/chat-completions/discovery.js"
+import {
+  CHAT_COMPLETIONS_HOSTS,
+  chatCompletionsDefinition,
+  chatCompletionsProvider,
+  connectionOf,
+  contextOf,
+  declaredModel,
+  discoveryInput
+} from "../providers/chat-completions/route.js"
 import { codexCliCredentials, CodexLoginError } from "../providers/openai-codex/cli-login.js"
 import { makeOpenAiCodexRuntime } from "../providers/openai-codex/runtime.js"
 import {
@@ -20,8 +27,6 @@ import {
   type OpenAiCredentialSource
 } from "../providers/openai-responses/provider.js"
 import { requireServerFields, SettingsError, type Settings } from "./settings.js"
-
-const COMPACTION_SHARE = 0.8
 
 /**
  * The model server named by `provider.baseUrl` did not answer at start: it is
@@ -92,11 +97,6 @@ const hostOf = (
   }
 }
 
-const contextOf = (limit: number): ModelDefinition["context"] => ({
-  hardLimit: limit,
-  compactionTrigger: Math.floor(limit * COMPACTION_SHARE)
-})
-
 /**
  * The chat model's window: the provider's own, lowered by `contextLimit`.
  * Raising it would only move the overflow from the settings to a request.
@@ -142,13 +142,6 @@ const codexModels = (settings: Settings, live: ModelHost): ModelHost => {
   )
 }
 
-/** How each Chat Completions server names itself in the model list. */
-const CHAT_COMPLETIONS_HOSTS: Record<ChatCompletionsServer, ModelDefinition["provider"]> = {
-  "llama.cpp": { id: "llama.cpp", name: "llama.cpp" },
-  openrouter: { id: "openrouter", name: "OpenRouter" },
-  generic: { id: "chat-completions", name: "Chat Completions" }
-}
-
 /**
  * The settings' models as their server reports them, `model` first. A generic
  * server reports nothing, so its models are what the settings say.
@@ -168,20 +161,20 @@ const discoverModels = async (
         // requireServerFields: OpenRouter needs `model`.
         return await discoverOpenRouter(input, wanted ?? [])
       case "generic":
-        return (wanted ?? []).map((id) => ({
-          id,
-          contextLimit: settings.contextLimit,
-          outputCap: undefined,
-          reasoningEfforts: declaredEfforts(settings),
-          compat: {}
-        }))
+        return (wanted ?? []).map((id) =>
+          declaredModel({
+            id,
+            contextLimit: settings.contextLimit,
+            reasoningEfforts: declaredEfforts(settings)
+          })
+        )
     }
   } catch (cause) {
     throw discoveryFailure(input.baseUrl, cause)
   }
 }
 
-const chatCompletionsDefinition = (
+const definitionFor = (
   settings: Settings,
   server: ChatCompletionsServer,
   model: DiscoveredModel,
@@ -200,35 +193,7 @@ const chatCompletionsDefinition = (
     throw new SettingsError(
       `${host.name} does not report the context window of ${model.id}; set \`contextLimit\``
     )
-  return {
-    id: model.id,
-    name: model.id,
-    provider: host,
-    reasoningEfforts: model.reasoningEfforts,
-    context: {
-      ...contextOf(limit),
-      ...(model.outputCap === undefined ? {} : { outputCap: model.outputCap })
-    }
-  }
-}
-
-/**
- * One adapter per model, picked by the request's model. The adapter shapes
- * every request by one `compat`, and models behind one server differ: a
- * router's vision model beside a text one, OpenRouter's Claude (cache
- * breakpoints) beside a model without reasoning.
- */
-const providerPerModel = (providers: ReadonlyMap<string, ModelProvider>): ModelProvider => {
-  const pick = (model: string): ModelProvider => {
-    const provider = providers.get(model)
-    if (provider === undefined) throw new Error(`No Chat Completions route for model ${model}`)
-    return provider
-  }
-  return {
-    protocolVersion: 1,
-    capabilities: (model) => resolveModelCapabilities({ provider: pick(model), model }),
-    stream: (request) => pick(request.model).stream(request)
-  }
+  return chatCompletionsDefinition({ group: host, model, window: limit })
 }
 
 const chatCompletionsRoute = async (
@@ -236,41 +201,27 @@ const chatCompletionsRoute = async (
   provider: ChatCompletionsProvider,
   { env, fetch }: ModelsForOptions
 ): Promise<ModelProviderOptions> => {
-  const baseUrl = provider.baseUrl.replace(/\/+$/, "")
-  const key =
-    provider.apiKeyEnv === undefined ? undefined : fromEnv(env, "apiKeyEnv", provider.apiKeyEnv)
-  const headers: Record<string, string> =
-    key === undefined ? {} : { authorization: `Bearer ${key}` }
-  const input: DiscoveryInput = {
-    baseUrl,
-    fetch,
-    headers,
-    signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)
-  }
+  const connection = connectionOf({
+    baseUrl: provider.baseUrl,
+    key:
+      provider.apiKeyEnv === undefined ? undefined : fromEnv(env, "apiKeyEnv", provider.apiKeyEnv),
+    fetch
+  })
+  const input = discoveryInput(connection, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS))
   const server = provider.server ?? (await detected(input))
   requireServerFields(settings, server)
   const [chat, ...extra] = await discoverModels(settings, server, input)
   if (chat === undefined) throw new Error("Discovery answered no model")
-  const providerId = CHAT_COMPLETIONS_HOSTS[server].id
   return {
-    provider: providerPerModel(
-      new Map(
-        [chat, ...extra].map((model) => [
-          model.id,
-          makeChatCompletionsProvider({
-            providerId,
-            baseUrl,
-            fetch,
-            ...(key === undefined ? {} : { auth: { headers: async () => headers } }),
-            compat: model.compat
-          })
-        ])
-      )
-    ),
+    provider: chatCompletionsProvider({
+      connection,
+      providerId: CHAT_COMPLETIONS_HOSTS[server].id,
+      models: [chat, ...extra]
+    }),
     modelHost: hostOf(
       settings,
-      chatCompletionsDefinition(settings, server, chat, true),
-      extra.map((model) => chatCompletionsDefinition(settings, server, model, false))
+      definitionFor(settings, server, chat, true),
+      extra.map((model) => definitionFor(settings, server, model, false))
     )
   }
 }

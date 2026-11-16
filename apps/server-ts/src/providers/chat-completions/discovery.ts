@@ -25,11 +25,68 @@ export interface DiscoveredModel {
   readonly compat: Partial<ChatCompletionsCompat>
 }
 
+/**
+ * Why a server's answer rules a model out. Each caller words these itself
+ * (the settings file names the field to fix, the desktop Check states what
+ * the server lacks); `DiscoveryError.message` is the settings file's wording.
+ */
+export type DiscoveryFailure =
+  | { readonly reason: "not_llama_cpp"; readonly url: string; readonly status: number }
+  | { readonly reason: "no_model_list"; readonly url: string; readonly status: number }
+  | { readonly reason: "no_model" }
+  | { readonly reason: "several_models"; readonly listed: ReadonlyArray<string> }
+  | {
+      readonly reason: "model_missing"
+      readonly server: "llama.cpp" | "openrouter"
+      readonly model: string
+      /** What a llama.cpp server lists instead; OpenRouter's hundreds are not named. */
+      readonly listed: ReadonlyArray<string>
+    }
+  | {
+      readonly reason: "model_props_failed"
+      readonly model: string
+      readonly url: string
+      readonly status: number
+      readonly message: string | undefined
+    }
+  | {
+      readonly reason: "no_tool_calls"
+      readonly server: "llama.cpp" | "openrouter"
+      readonly model: string
+    }
+
 /** The server cannot be asked, or its answer rules the settings out. */
 export class DiscoveryError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options)
+  readonly failure: DiscoveryFailure
+
+  constructor(failure: DiscoveryFailure) {
+    super(settingsMessage(failure))
     this.name = "DiscoveryError"
+    this.failure = failure
+  }
+}
+
+/** A failure in the settings file's words: which field to set, or what the server answered. */
+const settingsMessage = (failure: DiscoveryFailure): string => {
+  switch (failure.reason) {
+    case "not_llama_cpp":
+      return `${failure.url} did not answer as llama.cpp (HTTP ${failure.status}); set \`server\``
+    case "no_model_list":
+      return `${failure.url} did not list models (HTTP ${failure.status})`
+    case "no_model":
+      return "The llama.cpp server lists no model"
+    case "several_models":
+      return `The llama.cpp server lists several models; set \`model\` to one of: ${failure.listed.join(", ")}`
+    case "model_missing":
+      return failure.server === "openrouter"
+        ? `Model is not on OpenRouter: ${failure.model}`
+        : `Model is not on the llama.cpp server: ${failure.model} (it lists: ${failure.listed.join(", ")})`
+    case "model_props_failed":
+      return `${failure.url} for ${failure.model} answered HTTP ${failure.status}${failure.message === undefined ? "" : `: ${failure.message}`}`
+    case "no_tool_calls":
+      return failure.server === "openrouter"
+        ? `OpenRouter lists no tool calls for ${failure.model}, and every Arden request declares tools`
+        : `The chat template of ${failure.model} has no tool calls, and every Arden request declares tools`
   }
 }
 
@@ -82,53 +139,102 @@ export const discoverLlamaCpp = async (
   input: DiscoveryInput,
   wanted: ReadonlyArray<string> | undefined
 ): Promise<ReadonlyArray<DiscoveredModel>> => {
+  const server = await llamaServer(input)
+  const ids = server.models.map((model) => model.id)
+  if (wanted === undefined && ids.length !== 1)
+    throw new DiscoveryError(
+      ids.length === 0 ? { reason: "no_model" } : { reason: "several_models", listed: ids }
+    )
+  return Promise.all((wanted ?? ids).map((id) => llamaEntry(input, server, id)))
+}
+
+/** One model a llama.cpp server lists: what it can do, or why Arden cannot use it. */
+export type LlamaListing =
+  | { readonly id: string; readonly kind: "usable"; readonly model: DiscoveredModel }
+  | { readonly id: string; readonly kind: "refused"; readonly failure: DiscoveryFailure }
+
+/**
+ * Every model a llama.cpp server lists, in its order, each with its facts or
+ * the reason it cannot serve Arden. For a caller that offers what the server
+ * runs instead of naming models (the desktop's model server); a server that
+ * is not llama.cpp, or lists nothing, still fails as a whole.
+ */
+export const listLlamaCpp = async (input: DiscoveryInput): Promise<ReadonlyArray<LlamaListing>> => {
+  const server = await llamaServer(input)
+  if (server.models.length === 0) throw new DiscoveryError({ reason: "no_model" })
+  return Promise.all(
+    server.models.map(async ({ id }): Promise<LlamaListing> => {
+      try {
+        return { id, kind: "usable", model: await llamaEntry(input, server, id) }
+      } catch (cause) {
+        if (cause instanceof DiscoveryError) return { id, kind: "refused", failure: cause.failure }
+        throw cause
+      }
+    })
+  )
+}
+
+interface LlamaServer {
+  readonly root: string
+  readonly props: typeof PropsSchema.Type
+  readonly models: (typeof LlamaModelsSchema.Type)["data"]
+}
+
+const llamaServer = async (input: DiscoveryInput): Promise<LlamaServer> => {
   const root = serverRoot(input.baseUrl)
   const rootProps = await getJson(input, `${root}/props`)
   const props = decodeProps(rootProps.body)
   if (rootProps.status !== 200 || Option.isNone(props))
-    throw new DiscoveryError(
-      `${root}/props did not answer as llama.cpp (HTTP ${rootProps.status}); set \`server\``
-    )
+    throw new DiscoveryError({
+      reason: "not_llama_cpp",
+      url: `${root}/props`,
+      status: rootProps.status
+    })
   const listed = await getJson(input, `${input.baseUrl}/models`)
   const models = decodeLlamaModels(listed.body)
   if (listed.status !== 200 || Option.isNone(models))
-    throw new DiscoveryError(`${input.baseUrl}/models did not list models (HTTP ${listed.status})`)
-  const ids = models.value.data.map((model) => model.id)
-  const names = ids.join(", ")
-  if (wanted === undefined && ids.length !== 1)
-    throw new DiscoveryError(
-      ids.length === 0
-        ? "The llama.cpp server lists no model"
-        : `The llama.cpp server lists several models; set \`model\` to one of: ${names}`
-    )
-  const router = props.value.role === "router"
-  return Promise.all(
-    (wanted ?? ids).map(async (id) => {
-      const listing = models.value.data.find((model) => model.id === id)
-      if (listing === undefined)
-        throw new DiscoveryError(`Model is not on the llama.cpp server: ${id} (it lists: ${names})`)
-      // A router has no model of its own: each model's facts come from its
-      // child, asked by name. A single-model server answers for its one model.
-      if (!router) return llamaModel(id, props.value, undefined)
-      const own = await getJson(
-        input,
-        `${root}/props?model=${encodeURIComponent(id)}&autoload=false`
-      )
-      const loaded = decodeProps(own.body)
-      if (own.status === 200 && Option.isSome(loaded))
-        return llamaModel(id, loaded.value, undefined)
-      // b12359 answers an unloaded model with 400 `{"error":{"code":400,
-      // "message":"model is not loaded","type":"invalid_request_error"}}`
-      // (checked live on 2026-11-16); its window is then the `--ctx-size`
-      // the router will start its child with. Any other answer is an error.
-      const message = Option.getOrUndefined(decodeErrorMessage(own.body))
-      if (own.status === 400 && message === NOT_LOADED)
-        return llamaModel(id, undefined, ctxSizeArgument(listing.status?.args ?? []))
-      throw new DiscoveryError(
-        `${root}/props for ${id} answered HTTP ${own.status}${message === undefined ? "" : `: ${message}`}`
-      )
+    throw new DiscoveryError({
+      reason: "no_model_list",
+      url: `${input.baseUrl}/models`,
+      status: listed.status
     })
-  )
+  return { root, props: props.value, models: models.value.data }
+}
+
+const llamaEntry = async (
+  input: DiscoveryInput,
+  server: LlamaServer,
+  id: string
+): Promise<DiscoveredModel> => {
+  const { root } = server
+  const listing = server.models.find((model) => model.id === id)
+  if (listing === undefined)
+    throw new DiscoveryError({
+      reason: "model_missing",
+      server: "llama.cpp",
+      model: id,
+      listed: server.models.map((model) => model.id)
+    })
+  // A router has no model of its own: each model's facts come from its
+  // child, asked by name. A single-model server answers for its one model.
+  if (server.props.role !== "router") return llamaModel(id, server.props, undefined)
+  const own = await getJson(input, `${root}/props?model=${encodeURIComponent(id)}&autoload=false`)
+  const loaded = decodeProps(own.body)
+  if (own.status === 200 && Option.isSome(loaded)) return llamaModel(id, loaded.value, undefined)
+  // b12359 answers an unloaded model with 400 `{"error":{"code":400,
+  // "message":"model is not loaded","type":"invalid_request_error"}}`
+  // (checked live on 2026-11-16); its window is then the `--ctx-size`
+  // the router will start its child with. Any other answer is an error.
+  const message = Option.getOrUndefined(decodeErrorMessage(own.body))
+  if (own.status === 400 && message === NOT_LOADED)
+    return llamaModel(id, undefined, ctxSizeArgument(listing.status?.args ?? []))
+  throw new DiscoveryError({
+    reason: "model_props_failed",
+    model: id,
+    url: `${root}/props`,
+    status: own.status,
+    message
+  })
 }
 
 /**
@@ -143,13 +249,23 @@ export const discoverOpenRouter = async (
   const listed = await getJson(input, `${input.baseUrl}/models`)
   const list = decodeList(listed.body)
   if (listed.status !== 200 || Option.isNone(list))
-    throw new DiscoveryError(`${input.baseUrl}/models did not list models (HTTP ${listed.status})`)
+    throw new DiscoveryError({
+      reason: "no_model_list",
+      url: `${input.baseUrl}/models`,
+      status: listed.status
+    })
   return wanted.map((id) => {
     // Each entry is decoded alone, so one odd entry elsewhere in a list of
     // hundreds cannot fail every model.
     const entry = list.value.data.find((item) => Option.isSome(decodeEntryId(item, id)))
     const model = entry === undefined ? Option.none() : decodeOpenRouterModel(entry)
-    if (Option.isNone(model)) throw new DiscoveryError(`Model is not on OpenRouter: ${id}`)
+    if (Option.isNone(model))
+      throw new DiscoveryError({
+        reason: "model_missing",
+        server: "openrouter",
+        model: id,
+        listed: []
+      })
     return openRouterModel(model.value)
   })
 }
@@ -161,9 +277,7 @@ const llamaModel = (
 ): DiscoveredModel => {
   const caps = props?.chat_template_caps
   if (caps?.supports_tools === false)
-    throw new DiscoveryError(
-      `The chat template of ${id} has no tool calls, and every Arden request declares tools`
-    )
+    throw new DiscoveryError({ reason: "no_tool_calls", server: "llama.cpp", model: id })
   // `n_ctx` is the window one request gets (per slot), never `n_ctx_train`.
   // On b12359 a router child started with `--ctx-size 4096` and 4 slots
   // reports `n_ctx: 4096`: slots share one unified KV cache, so the
@@ -211,9 +325,7 @@ const llamaModel = (
 const openRouterModel = (model: typeof OpenRouterModelSchema.Type): DiscoveredModel => {
   const parameters = model.supported_parameters ?? []
   if (!parameters.includes("tools"))
-    throw new DiscoveryError(
-      `OpenRouter lists no tool calls for ${model.id}, and every Arden request declares tools`
-    )
+    throw new DiscoveryError({ reason: "no_tool_calls", server: "openrouter", model: model.id })
   const reasoning = parameters.includes("reasoning")
   return {
     id: model.id,
@@ -384,18 +496,17 @@ const PropsSchema = Schema.Struct({
 })
 const decodeProps = Schema.decodeUnknownOption(PropsSchema)
 
-const decodeLlamaModels = Schema.decodeUnknownOption(
-  Schema.Struct({
-    data: Schema.Array(
-      Schema.Struct({
-        id: Schema.String,
-        status: Schema.optionalKey(
-          Schema.Struct({ args: Schema.optionalKey(Schema.Array(Schema.String)) })
-        )
-      })
-    )
-  })
-)
+const LlamaModelsSchema = Schema.Struct({
+  data: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      status: Schema.optionalKey(
+        Schema.Struct({ args: Schema.optionalKey(Schema.Array(Schema.String)) })
+      )
+    })
+  )
+})
+const decodeLlamaModels = Schema.decodeUnknownOption(LlamaModelsSchema)
 
 const decodeList = Schema.decodeUnknownOption(Schema.Struct({ data: Schema.Array(Schema.Unknown) }))
 
