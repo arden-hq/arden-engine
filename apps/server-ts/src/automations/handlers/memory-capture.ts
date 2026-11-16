@@ -1,21 +1,24 @@
-import { Effect } from "effect"
-import type { Memory } from "../../memory/service.js"
-import { AutomationId } from "../../persistence/automations/model.js"
-import { PROMPT_TEXT } from "../../prompts/catalog.js"
-import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
-import type { AutomationRunner } from "../runner.js"
-import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
-import { withoutTools } from "../../execution/toolset-middleware.js"
+import { Effect } from "effect";
+import type { Memory } from "../../memory/service.js";
+import { AutomationId } from "../../persistence/automations/model.js";
+import { PROMPT_TEXT } from "../../prompts/catalog.js";
+import { runItemLoop, type ItemLoopServices } from "../item-loop.js";
+import type { AutomationRunner } from "../runner.js";
+import {
+  handlerItemText,
+  type SystemAutomationHandler,
+} from "../system-handler.js";
+import { withoutTools } from "../../execution/toolset-middleware.js";
 
-export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make("builtin-memory-capture")
+export const MEMORY_CAPTURE_AUTOMATION_ID = AutomationId.make(
+  "builtin-memory-capture",
+);
 
 const TIDY_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "session_read",
   "session_search_transcripts",
-  "wiki_merge_page"
-])
-
-const OLDER_BATCHES_PER_JOB = Math.max(1, Number(process.env.ARDEN_CAPTURE_CATCH_UP) || 1)
+  "wiki_merge_page",
+]);
 
 const makeMemoryCaptureRunner =
   (
@@ -23,19 +26,23 @@ const makeMemoryCaptureRunner =
       readonly memory: Pick<
         Memory["Service"],
         "nextCaptureBatch" | "completeCaptureBatch" | "skipCaptureBatch"
-      >
-    }
+      >;
+    },
   ): AutomationRunner =>
   (job) => {
-    let older = OLDER_BATCHES_PER_JOB
+    let retried = false;
     return runItemLoop(services, {
       label: "Memory Capture",
       kind: "memory",
       next: Effect.fn("MemoryCapture.next")(function* () {
-        const batch =
-          (yield* services.memory.nextCaptureBatch(false)) ??
-          (older-- > 0 ? yield* services.memory.nextCaptureBatch(true) : null)
-        return batch === null ? ("idle" as const) : { kind: "memory" as const, batch }
+        let batch = yield* services.memory.nextCaptureBatch(false);
+        if (batch === null && !retried) {
+          retried = true;
+          batch = yield* services.memory.nextCaptureBatch(true);
+        }
+        return batch === null
+          ? ("idle" as const)
+          : { kind: "memory" as const, batch };
       }),
       commit: (data) => services.memory.completeCaptureBatch(data.batch),
       skip: (data) =>
@@ -43,15 +50,15 @@ const makeMemoryCaptureRunner =
           .skipCaptureBatch(data.batch)
           .pipe(
             Effect.as(
-              `a batch of chat ${data.batch.identity.sessionId} (kept unread and tried again after a day)`
-            )
+              `a batch of chat ${data.batch.identity.sessionId} (kept unread and tried again after a day)`,
+            ),
           ),
       summary: (item) =>
         `memory capture: reviewed ${item?.reviewed ?? 0} batch(es), skipped ${item?.skipped ?? 0}`,
       cancelled: "Memory capture cancelled",
-      incomplete: "Memory Capture review deferred"
-    })(job)
-  }
+      incomplete: "Memory Capture review deferred",
+    })(job);
+  };
 
 export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
   spec: {
@@ -63,7 +70,7 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     triggers: [
       { type: "idle", idle_minutes: 10 },
       { type: "count", every_n: 10 },
-      { type: "time", at: "02:30", days: "daily" }
+      { type: "time", at: "02:30", days: "daily" },
     ],
     enabled: true,
     cooldownMinutes: 5,
@@ -72,7 +79,7 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     chatSession: true,
     manualRun: true,
     runsModel: true,
-    rearmOnSeed: true
+    rearmOnSeed: true,
   },
   item: handlerItemText("memory", (data) => data.batch.markdown),
   tools: (base) => withoutTools(base, TIDY_ONLY_TOOLS),
@@ -80,6 +87,6 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     makeMemoryCaptureRunner({
       memory: services.memory,
       handlerItems: services.handlerItems,
-      runItem: services.runItem
-    })
-}
+      runItem: services.runItem,
+    }),
+};

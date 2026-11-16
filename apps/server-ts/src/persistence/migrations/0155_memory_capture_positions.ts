@@ -26,11 +26,13 @@ const up = (database: DatabaseSync): void => {
         strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       FROM sessions AS session
       WHERE session.session_type = 'chat' AND session.origin_automation_id IS NULL`)
-  database.exec(`INSERT INTO memory_capture_unread (session_id, read_seq, through_seq, updated_at)
-      SELECT session_id, MIN(seq) - 1, MAX(seq), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-      FROM session_messages
-      WHERE session_id IN (SELECT session_id FROM memory_capture_unread)
-      GROUP BY session_id`)
+  database.exec(`DELETE FROM run_sidecars
+      WHERE json_type(evidence_json, '$.memory_capture') IS NOT NULL
+        AND json_remove(evidence_json, '$.memory_capture') = '{}'
+        AND context_manifest_json = '[]' AND source_refs_json = '[]'`)
+  database.exec(`UPDATE run_sidecars
+      SET evidence_json = json_remove(evidence_json, '$.memory_capture')
+      WHERE json_type(evidence_json, '$.memory_capture') IS NOT NULL`)
   database.exec(`CREATE TRIGGER memory_capture_owner_chat_starts
       AFTER INSERT ON sessions
       WHEN NEW.session_type = 'chat' AND NEW.origin_automation_id IS NULL

@@ -29,7 +29,7 @@ type CaptureEvidenceKind =
   | { readonly kind: "space"; readonly spaceId: string; readonly occurrenceId: string }
   | { readonly kind: "unknown" }
 
-export interface CaptureExcerpt {
+interface CaptureExcerpt {
   readonly record: TranscriptMessageRecord
   readonly content: string
   readonly startOffset: number
@@ -279,7 +279,7 @@ export const makeMemoryCaptureBatches = (input: {
 }
 
 /** One batch as Capture reads it: what it quotes, where it ends, and whether a model reviews it. */
-export interface CaptureRead {
+interface CaptureRead {
   readonly excerpts: ReadonlyArray<CaptureExcerpt>
   readonly end: MemoryCapturePosition
   readonly endMessageId: string
@@ -290,9 +290,8 @@ export interface CaptureRead {
 /**
  * The batch Capture reads in a chat from `start`, through message `last` at most, ending at
  * `stop` when it reads a prepared batch again. Undefined when there is nothing past `start`.
- * Capture's work and the unread count both batch through this, so they agree on the limits.
  */
-export const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
+const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   transcript: Pick<TranscriptQueries["Service"], "page" | "originsForTurns" | "ownerWordsIn">,
   input: {
     readonly sessionId: string

@@ -20,18 +20,6 @@ const speedProject =
     ? [{ extends: true, test: { name: "speed", include: speed, testTimeout: 1_200_000 } }]
     : []
 
-// The Capture backlog count is a script on the replay copy, not a test: it runs only in its
-// own project, from `just capture-backlog`.
-const backlogProject =
-  process.env.ARDEN_CAPTURE_BACKLOG === "1"
-    ? [
-        {
-          extends: true,
-          test: { name: "capture-backlog", include: ["scripts/capture-backlog-count.ts"] }
-        }
-      ]
-    : []
-
 // The memory test's two halves are scripts on the replay copy, not tests: each runs only in its
 // own project, from `just memory-test-sent` or `just memory-test-answered`.
 const memoryTestHalf = process.env.ARDEN_MEMORY_TEST
@@ -102,7 +90,6 @@ export default mergeConfig(
           test: { name: "boot", include: boot, globalSetup: ["./test/sql-scans/global.ts"] }
         },
         ...speedProject,
-        ...backlogProject,
         ...memoryTestProject,
         ...outsideEditsProject,
         ...memoryShapeProject
