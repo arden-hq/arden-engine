@@ -9,9 +9,11 @@ import {
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 
+import { StoreInvalid, wikiErrorToHttp } from "../src/http/errors.js"
 import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY as GLOBAL } from "../src/wiki/authority.js"
 import { commitWiki, createPage, ownerInApp, updatePage } from "../src/wiki/commit.js"
+import { mapRevisionError } from "../src/wiki/errors.js"
 import { makeWikiForgetMethods } from "../src/wiki/forgotten.js"
 import { makeWikiListingMethods } from "../src/wiki/listing.js"
 import { makeWikiChanges } from "../src/wiki/page-change.js"
@@ -83,7 +85,12 @@ it("forgetting a line removes every copy on every page in one commit, and no oth
               expectedRevision: yield* repository.currentRevision
             },
             [updatePage(town, content("town", `${LINE}\n`))]
-          ).pipe(Effect.match({ onFailure: (error) => error.message, onSuccess: () => "saved" }))
+          ).pipe(
+            Effect.match({
+              onFailure: (error) => wikiErrorToHttp(mapRevisionError("update")(error)),
+              onSuccess: () => "saved"
+            })
+          )
         })
         return {
           commits: (yield* commits()) - before,
@@ -94,12 +101,15 @@ it("forgetting a line removes every copy on every page in one commit, and no oth
       }).pipe(
         Effect.scoped,
         Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root }))
-      ) as Effect.Effect<{ commits: number; sam: string; town: string; putBack: string }>
+      ) as Effect.Effect<{ commits: number; sam: string; town: string; putBack: unknown }>
     )
     expect(outcome.commits).toBe(1)
     expect(outcome.sam).not.toContain(LINE)
     expect(outcome.town).not.toContain(LINE)
-    expect(outcome.putBack).toContain("entry 1 in forgotten.md")
+    expect(outcome.putBack).toBeInstanceOf(StoreInvalid)
+    expect(outcome.putBack).toMatchObject({
+      detail: expect.stringContaining("entry 1 in forgotten.md")
+    })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
