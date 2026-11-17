@@ -1,3 +1,4 @@
+import { isLoopbackHost } from "@arden-hq/std/url"
 import { cardTitle, readAmount } from "@arden-hq/std/vault-card"
 import { APPROVAL_FIELD_LABEL } from "@arden-hq/protocol/chat"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
@@ -35,8 +36,8 @@ const ReasonSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength
 const shopIssues = (value: string, path: string): Array<Schema.FilterIssue> => {
   if (!URL.canParse(value)) return [{ path: [path], issue: "must be an exact https origin" }]
   const url = new URL(value)
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
-  const secure = url.protocol === "https:" || (url.protocol === "http:" && local)
+  const secure =
+    url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname))
   return url.origin === value && secure
     ? []
     : [{ path: [path], issue: "must be an exact https origin without a path" }]
