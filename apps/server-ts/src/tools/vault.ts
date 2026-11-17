@@ -290,7 +290,7 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
     description: [
       "Ask the user to add an API key that is not in the Vault yet, on a secure card in the chat where they paste it.",
       "Never ask for a key, password or token in the chat, and never ask the user to paste one into a message or a file.",
-      "Check vault_list first; ask only for a key that is missing, with the service's API addresses and a reason in plain words.",
+      "Check vault_list first; ask only for a key that is missing, with the service's API addresses and a reason in plain words. The addresses are a suggestion: the user sees them on the card and keeps, changes or removes them, and only what they keep is saved.",
       "Once the user saves it, this run may use it at once, as vault_use_key describes. In a run no one is watching it does not ask."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(AskKeyParametersSchema),
