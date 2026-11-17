@@ -25,7 +25,8 @@ export interface VaultKeyBroker {
   readonly listVault: () => Promise<unknown>
   readonly keyEnvironment: (request: {
     readonly runId: string
-    readonly names: ReadonlyArray<string>
+    /** The keys' ids in the Vault, as the run was allowed them. */
+    readonly ids: ReadonlyArray<string>
     readonly reach: KeyProxyReach
   }) => Promise<unknown>
   /** Where saved keys and passwords appear in the text: [start, end) ranges, never values. */
@@ -161,10 +162,12 @@ export const makeVaultKeys = (
       const ids = granted(runId)
       if (ids.length === 0) return undefined
       const listed = decodeList(await requireBroker().listVault(), strict)
-      const names = listed.keys.filter((key) => ids.includes(key.id)).map((key) => key.name)
-      if (names.length === 0) return undefined
+      const saved = ids.filter((id) => listed.keys.some((key) => key.id === id))
+      if (saved.length === 0) return undefined
+      // By id, never by name: a key deleted and added again under its name is another key, which
+      // this run was not allowed.
       return decodeEnvironment(
-        await requireBroker().keyEnvironment({ runId, names, reach }),
+        await requireBroker().keyEnvironment({ runId, ids: saved, reach }),
         strict
       )
     },

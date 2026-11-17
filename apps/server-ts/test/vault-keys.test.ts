@@ -29,9 +29,9 @@ const desktop = (overrides: Partial<VaultKeyBroker> = {}): VaultKeyBroker => ({
     ],
     passwords: [{ site: "https://github.com", name: "password", userName: "alex" }]
   }),
-  keyEnvironment: async ({ names }) => ({
-    variables: names.includes("Todoist") ? { TODOIST_API_KEY: "gfq_Dvif9477324341hhkumjETE" } : {},
-    missing: names.filter((name) => name !== "Todoist"),
+  keyEnvironment: async ({ ids }) => ({
+    variables: ids.includes("k1") ? { TODOIST_API_KEY: "gfq_Dvif9477324341hhkumjETE" } : {},
+    missing: ids.filter((id) => id !== "k1"),
     proxyUrl: "http://arden:00ff@127.0.0.1:40123",
     caFile: "/tmp/ca.pem",
     caBundleFile: "/tmp/roots.pem"
@@ -89,6 +89,27 @@ describe("the Vault seen from the engine", () => {
     )
     vault.grant("run-1", "k1")
     expect(await vault.environment("run-1", "all")).toBeUndefined()
+  })
+
+  it("asks the desktop for a run's keys by id, never by name", async () => {
+    const asked: Array<ReadonlyArray<string>> = []
+    const vault = makeVaultKeys(
+      desktop({
+        keyEnvironment: async ({ ids }) => {
+          asked.push(ids)
+          return {
+            variables: {},
+            missing: [],
+            proxyUrl: "http://x",
+            caFile: "a",
+            caBundleFile: "b"
+          }
+        }
+      })
+    )
+    vault.grant("run-1", "k1")
+    await vault.environment("run-1", "all")
+    expect(asked).toEqual([["k1"]])
   })
 
   it("gives a run's commands only the keys the run was allowed", async () => {

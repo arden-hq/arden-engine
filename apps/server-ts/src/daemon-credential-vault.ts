@@ -95,8 +95,8 @@ export const createCredentialVaultBridge = (
 
   const keys: VaultKeyBroker = {
     listVault: () => request({ operation: "list_vault" }),
-    keyEnvironment: ({ runId, names, reach }) =>
-      request({ operation: "key_environment", runId, names, reach }),
+    keyEnvironment: ({ runId, ids, reach }) =>
+      request({ operation: "key_environment", runId, ids, reach }),
     findSecrets: (text) => request({ operation: "find_secrets", text }),
     endKeySession: (runId) => request({ operation: "end_key_session", runId })
   }
