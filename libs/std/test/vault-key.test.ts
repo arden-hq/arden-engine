@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { addressCovers, readAddresses, variableOf } from "../src/vault-key.js"
+import { addressCovers, onThisMachine, readAddresses, variableOf } from "../src/vault-key.js"
 
 describe("key rules", () => {
   test("a name gives the variable a command reads", () => {
@@ -50,5 +50,15 @@ describe("key rules", () => {
     expect(addressCovers("localhost:11434", at("localhost", 11434, false))).toBe(true)
     expect(addressCovers("localhost:11434", at("localhost", 11435, false))).toBe(false)
     expect(addressCovers("[::1]:8080", at("[::1]", 8080, false))).toBe(true)
+  })
+})
+
+describe("an address on this machine", () => {
+  test("is localhost, 127.0.0.1 or [::1], with or without a port", () => {
+    expect(
+      ["localhost:11434", "127.0.0.1", "[::1]:8080", "api.todoist.com", "10.0.0.2:80"].map(
+        onThisMachine
+      )
+    ).toEqual([true, true, true, false, false])
   })
 })

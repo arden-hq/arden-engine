@@ -108,6 +108,14 @@ function portOf(address: string): number | undefined {
 }
 
 /**
+ * Whether an address is on this machine (localhost, 127.0.0.1, [::1]): any program on it that
+ * listens there can receive a key sent to it, so the cards say so.
+ */
+export function onThisMachine(address: string): boolean {
+  return isLoopbackHost(hostOf(address))
+}
+
+/**
  * Whether a key bound to `address` may go in a request to `host` on `port`. The host matches
  * exactly (todoist.com does not cover api.todoist.com). An address without a port covers https
  * on 443, and for a host on this machine also http on 80; one with a port covers that port.
