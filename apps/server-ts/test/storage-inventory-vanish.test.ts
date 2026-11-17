@@ -27,8 +27,7 @@ vi.mock("node:fs/promises", async (original) => {
   }
 })
 
-const { scanInventoryUnsafe, scanStorageUnitsUnsafe } =
-  await import("../src/storage/inventory.js")
+const { scanInventoryUnsafe, scanStorageUnitsUnsafe } = await import("../src/storage/inventory.js")
 
 describe("storage scan while files come and go", () => {
   let root: string
