@@ -25,7 +25,7 @@ import { checkToolContract } from "./tool-contract.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { capabilityTools } from "./capability.js"
-import { computerTools } from "./computer.js"
+import { macTools } from "./mac-tools.js"
 import { codeModeTools } from "./code-mode.js"
 import { unlistedToolDisplay } from "./display.js"
 import { applyToolCatalog, ownedToolNames, refusalText, treeToolNames } from "./tool-catalog.js"
@@ -135,7 +135,7 @@ const builtinTools = Effect.all([
   chatSummaryTools,
   capabilityTools,
   codeModeTools,
-  computerTools,
+  macTools,
   workflowTools,
   sessionTools,
   sessionActionTools,

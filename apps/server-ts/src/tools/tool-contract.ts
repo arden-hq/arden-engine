@@ -118,6 +118,7 @@ const CONCURRENCY_GROUPS: ReadonlySet<string> = new Set([
   "drive_write",
   "filesystem",
   "gmail_write",
+  "mac_apps_write",
   "research_workspace",
   "session_todo",
   "sessions",

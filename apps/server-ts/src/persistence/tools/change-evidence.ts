@@ -27,6 +27,7 @@ const targetDomain = (source: string): ChangeEntry["domain"] => {
     case "gmail_draft":
       return "email"
     case "calendar":
+    case "mac_calendar":
       return "calendar"
     case "google_drive":
       return "document"

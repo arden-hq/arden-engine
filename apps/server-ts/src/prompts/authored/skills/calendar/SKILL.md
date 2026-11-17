@@ -1,7 +1,7 @@
 ---
 name: calendar
 description: Find, create, edit and answer Google Calendar events, and check when people are free.
-version: 1.4.0
+version: 1.4.1
 tool_group: Calendar
 ---
 
@@ -9,6 +9,7 @@ tool_group: Calendar
 
 ## Workflow
 
+- These tools reach connected Google accounts only. For the owner's iCloud or other calendars in the Mac's Calendar app, and for Reminders, use the `apple-apps` Skill.
 - Search the relevant time window when conflicts, duplicates, or the target event matter.
 - For an authorized change, call the corresponding Calendar tool with the intended event and guests. Arden's permission system decides whether to show an event approval card, execute directly or refuse. Do not invent a separate widget call or ask a second text confirmation before the card. A proposed meeting alone does not authorize creating an event or inviting guests.
 - The tool result is the outcome after any card decision. Do not repeat the mutation after approval; inspect uncertain outcomes before retrying.

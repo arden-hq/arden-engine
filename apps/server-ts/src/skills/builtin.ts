@@ -21,6 +21,7 @@ const BUILT_IN_SKILL_NAMES = [
   "browser",
   "computer-use",
   "github",
+  "apple-apps",
   "google-setup",
   "space-work",
   "arden-internals",
@@ -76,8 +77,13 @@ const readBuiltInSkill = (name: BuiltInSkillName): BuiltInSkill => {
   })
 }
 
+/** Skills for a Mac program are left out elsewhere. */
+const MAC_ONLY: ReadonlySet<BuiltInSkillName> = new Set(["apple-apps"])
+
 export const BUILT_IN_SKILLS: ReadonlyArray<BuiltInSkill> = Object.freeze(
-  BUILT_IN_SKILL_NAMES.map(readBuiltInSkill)
+  BUILT_IN_SKILL_NAMES.filter((name) => process.platform === "darwin" || !MAC_ONLY.has(name)).map(
+    readBuiltInSkill
+  )
 )
 
 const byName = new Map<string, BuiltInSkill>(BUILT_IN_SKILLS.map((skill) => [skill.name, skill]))

@@ -136,6 +136,23 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
     "calendar_list_calendars",
     "calendar_free_busy"
   ],
+  mac_calendar: [
+    "mac_calendar_list_calendars",
+    "mac_calendar_search",
+    "mac_calendar_read_event",
+    "mac_calendar_create_event",
+    "mac_calendar_edit_event",
+    "mac_calendar_delete_event"
+  ],
+  mac_reminders: [
+    "mac_reminders_list_lists",
+    "mac_reminders_search",
+    "mac_reminders_create",
+    "mac_reminders_edit",
+    "mac_reminders_complete",
+    "mac_reminders_delete"
+  ],
+  mac_contacts: ["mac_contacts_search", "mac_contacts_read"],
   drive: [
     "drive_search",
     "drive_list_doc_tabs",
@@ -360,6 +377,33 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
     ["account_ref", "google_accounts_list"],
     ["attachments", "drive_search", "drive_upload"]
   ),
+  mac_calendar_search: inputs(["calendar_ids", "mac_calendar_list_calendars"]),
+  mac_calendar_read_event: inputs([
+    "event_ref",
+    "mac_calendar_search",
+    "mac_calendar_create_event",
+    "mac_calendar_edit_event"
+  ]),
+  mac_calendar_create_event: inputs(["calendar_id", "mac_calendar_list_calendars"]),
+  mac_calendar_edit_event: inputs(
+    ["event_ref", "mac_calendar_search", "mac_calendar_create_event", "mac_calendar_edit_event"],
+    ["calendar_id", "mac_calendar_list_calendars"]
+  ),
+  mac_calendar_delete_event: inputs([
+    "event_ref",
+    "mac_calendar_search",
+    "mac_calendar_create_event",
+    "mac_calendar_edit_event"
+  ]),
+  mac_reminders_search: inputs(["list_ids", "mac_reminders_list_lists"]),
+  mac_reminders_create: inputs(["list_id", "mac_reminders_list_lists"]),
+  mac_reminders_edit: inputs(
+    ["reminder_ref", "mac_reminders_search", "mac_reminders_create"],
+    ["list_id", "mac_reminders_list_lists"]
+  ),
+  mac_reminders_complete: inputs(["reminder_ref", "mac_reminders_search", "mac_reminders_create"]),
+  mac_reminders_delete: inputs(["reminder_ref", "mac_reminders_search", "mac_reminders_create"]),
+  mac_contacts_read: inputs(["contact_ref", "mac_contacts_search"]),
   drive_upload: inputs(["file", "chat_files_list"], ["account_ref", "google_accounts_list"]),
   drive_download: inputs(["file_ref", "drive_search"]),
   drive_export: inputs(["file_ref", "drive_search"]),
