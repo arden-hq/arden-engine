@@ -407,13 +407,11 @@ export const computerNativeTools = (
               ...(input.query === undefined ? {} : { query: input.query })
             })
             const state = result.structuredContent
-            if (
-              result.isError ||
-              !isState(state) ||
-              state.pid !== input.target.pid ||
-              state.window_id !== input.target.window_id
-            )
-              return output(result)
+            if (result.isError || !isState(state)) return output(result)
+            // An answer for another window than asked is dropped whole (the driver path drops it
+            // first; this holds even if a state ever came another way).
+            if (state.pid !== input.target.pid || state.window_id !== input.target.window_id)
+              return output({ isError: true, content: [] })
             const application = await driver.application(state.pid, signal)
             signal.throwIfAborted()
             const target =

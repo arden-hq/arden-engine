@@ -17,7 +17,7 @@ import { currentMillis } from "../runtime/clock.js"
 import { CUA_RELEASE } from "./release.js"
 import { verifyCuaApp } from "./install.js"
 import { permissionSessionState, permissionGrantState } from "./permissions.js"
-import { appBundles, nativeCallRefusal, withoutOwnApps } from "./own-windows.js"
+import { appBundles, nativeCallRefusal, windowCall, withoutOwnApps } from "./own-windows.js"
 
 const executeFile = promisify(execFile)
 
@@ -143,7 +143,7 @@ export class NativeDriver {
             const refusal = await this.#ownWindowRefusal(name, args, send)
             if (refusal !== undefined)
               return { isError: true, content: [{ type: "text", text: refusal }] }
-            const result = await send(name, args)
+            const result = await windowCall(name, args, this.ownPid, send)
             if (name !== "list_apps") return result
             this.#learnBundles(result)
             return withoutOwnApps(result, this.ownPid)

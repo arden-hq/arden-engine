@@ -89,3 +89,87 @@ export const ownWindowIssue = (input: object, ownPid: number | undefined): strin
   if (Array.isArray(urls)) args.urls = urls.filter((url): url is string => typeof url === "string")
   return nativeCallRefusal(args, ownPid, () => undefined)
 }
+
+/** The window a driver call names: its pid and window id, when both are given. */
+const namedWindow = (
+  args: Readonly<Record<string, Schema.Json>>
+): { readonly pid: number; readonly windowId: number } | undefined => {
+  const pid = pidOf(args.pid)
+  const windowId = pidOf(args.window_id)
+  return pid === undefined || windowId === undefined ? undefined : { pid, windowId }
+}
+
+/** The window ids a `list_windows` answer lists for that pid; empty for anything else. */
+const windowIdsOf = (listing: CallToolResult, pid: number): ReadonlySet<number> => {
+  const structured = listing.isError ? undefined : listing.structuredContent
+  if (!isObject(structured) || !isArray(structured.windows)) return new Set()
+  return new Set(
+    structured.windows.flatMap((window) =>
+      isObject(window) && pidOf(window.pid) === pid && pidOf(window.window_id) !== undefined
+        ? [pidOf(window.window_id) ?? 0]
+        : []
+    )
+  )
+}
+
+const NOT_THAT_APPS_WINDOW =
+  "That window is not one of that app's windows. List the app's windows with computer_read again."
+
+/**
+ * The one check before any driver call that names a window, read or act: the window must be one
+ * the driver lists for that pid, and none of Arden's own. Arden never relies on the driver to
+ * check that a window belongs to a pid.
+ */
+const windowCallIssue = async (
+  target: { readonly pid: number; readonly windowId: number },
+  ownPid: number | undefined,
+  listWindows: (pid: number) => Promise<CallToolResult>
+): Promise<string | undefined> => {
+  if (
+    ownPid !== undefined &&
+    (await listWindows(ownPid).then((own) => windowIdsOf(own, ownPid))).has(target.windowId)
+  )
+    return OWN_WINDOW_REFUSAL
+  return windowIdsOf(await listWindows(target.pid), target.pid).has(target.windowId)
+    ? undefined
+    : NOT_THAT_APPS_WINDOW
+}
+
+/** Whether a driver's answer names another pid or window than the call asked for. */
+const answersAnotherWindow = (
+  target: { readonly pid: number; readonly windowId: number },
+  result: CallToolResult
+): boolean => {
+  const structured = result.structuredContent
+  if (!isObject(structured)) return false
+  const pid = structured.pid
+  const windowId = structured.window_id
+  return (
+    (pid !== undefined && pid !== target.pid) ||
+    (windowId !== undefined && windowId !== target.windowId)
+  )
+}
+
+const ANOTHER_WINDOW_ANSWER =
+  "The driver answered for a different window than the one asked, so Arden dropped its answer. Observe the window again."
+
+/**
+ * Every driver call that names a window, read or act, goes through here: the window must be one
+ * the driver lists for that pid and none of Arden's own (`windowCallIssue`), and an answer that
+ * names another pid or window than asked is dropped for an error with no content.
+ */
+export const windowCall = async (
+  name: string,
+  args: Readonly<Record<string, Schema.Json>>,
+  ownPid: number | undefined,
+  send: (name: string, args: Readonly<Record<string, Schema.Json>>) => Promise<CallToolResult>
+): Promise<CallToolResult> => {
+  const target = namedWindow(args)
+  if (target === undefined) return send(name, args)
+  const issue = await windowCallIssue(target, ownPid, (pid) => send("list_windows", { pid }))
+  if (issue !== undefined) return { isError: true, content: [{ type: "text", text: issue }] }
+  const result = await send(name, args)
+  return answersAnotherWindow(target, result)
+    ? { isError: true, content: [{ type: "text", text: ANOTHER_WINDOW_ANSWER }] }
+    : result
+}
