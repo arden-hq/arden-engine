@@ -16,7 +16,7 @@ import { runPolicyOf } from "../execution/policy.js"
 import { readAgentSessionMetadata } from "../sessions/agent-mode.js"
 import { isErrnoCode } from "../fs/private-store.js"
 import { gitMetadataRule } from "./git-metadata.js"
-import { PERSISTENCE_HOME_PATHS, SECRET_HOME_PATHS } from "../fs/protected-paths.js"
+import { PERSISTENCE_HOME_PATHS, secretPaths } from "../fs/protected-paths.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { toolFault, toolRefusal } from "../tools/tool-failure.js"
 import type { PermissionRules } from "../persistence/permissions/rules.js"
@@ -179,7 +179,7 @@ export const sandboxRule = (
   platform: NodeJS.Platform = process.platform
 ): SandboxRule | undefined => {
   if (policy.sandbox !== "code_agent" && policy.sandbox !== "approved_local") return undefined
-  const secrets = SECRET_HOME_PATHS.map((relative) => path.join(homeDirectory, relative))
+  const secrets = secretPaths(homeDirectory)
   const state = [policy.stateRoot]
   const writeRoot = policy.writeRoot
   const git =

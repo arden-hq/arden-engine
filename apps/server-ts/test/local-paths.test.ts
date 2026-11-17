@@ -245,24 +245,31 @@ describe("a never path rule", () => {
     )
   })
 
-  it("hides the desktop's profile from a sandboxed command, installed and development build alike", () => {
-    const rule = sandboxRule(
-      {
-        cwd: "/Users/me/src/demo",
-        readRoots: ["/Users/me/src/demo"],
-        writeRoot: "/Users/me/src/demo",
-        stateRoot: "/nonexistent/arden-state",
-        sandbox: "code_agent",
-        pathRules: NO_PATH_RULES
-      },
-      "/Users/me",
-      "darwin"
-    )
-    expect(rule?.hidden).toEqual(
-      expect.arrayContaining([
-        "/Users/me/Library/Application Support/Arden",
-        "/Users/me/Library/Application Support/arden-desktop"
-      ])
-    )
+  it("hides the profile of the desktop that started the engine, whichever it is, from a sandboxed command", () => {
+    const before = process.env.ARDEN_DESKTOP_PROFILE
+    process.env.ARDEN_DESKTOP_PROFILE = "/private/var/folders/xy/T/arden-ephemeral-dev-abc/electron"
+    try {
+      const rule = sandboxRule(
+        {
+          cwd: "/Users/me/src/demo",
+          readRoots: ["/Users/me/src/demo"],
+          writeRoot: "/Users/me/src/demo",
+          stateRoot: "/nonexistent/arden-state",
+          sandbox: "code_agent",
+          pathRules: NO_PATH_RULES
+        },
+        "/Users/me",
+        "darwin"
+      )
+      expect(rule?.hidden).toEqual(
+        expect.arrayContaining([
+          "/Users/me/Library/Application Support/Arden",
+          "/private/var/folders/xy/T/arden-ephemeral-dev-abc/electron"
+        ])
+      )
+    } finally {
+      if (before === undefined) delete process.env.ARDEN_DESKTOP_PROFILE
+      else process.env.ARDEN_DESKTOP_PROFILE = before
+    }
   })
 })

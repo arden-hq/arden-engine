@@ -3,7 +3,7 @@ import { realpath } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
 
-export const SECRET_HOME_PATHS = [
+const SECRET_HOME_PATHS = [
   ".ssh",
   ".gnupg",
   ".aws",
@@ -31,8 +31,6 @@ export const SECRET_HOME_PATHS = [
   "Library/Messages",
   "Library/Safari",
   "Library/Application Support/Arden",
-  // The desktop's own profile in a development build (Electron names it after the package).
-  "Library/Application Support/arden-desktop",
   ".config/Arden",
   "Library/Application Support/Google/Chrome",
   "Library/Application Support/Chromium",
@@ -70,8 +68,26 @@ export const PERSISTENCE_HOME_PATHS = [
   ".config/systemd/user"
 ] as const
 
-const sensitiveHomePaths = (home: string): ReadonlyArray<string> =>
-  [...SECRET_HOME_PATHS, ...PERSISTENCE_HOME_PATHS].map((relative) => path.join(home, relative))
+/**
+ * The secret folders, absolute: the list above, and the profile folder of the desktop that
+ * started this engine, whichever it is (installed, development build or a throwaway one); the
+ * desktop names it in ARDEN_DESKTOP_PROFILE.
+ */
+export const secretPaths = (
+  home: string,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): ReadonlyArray<string> => {
+  const profile = env.ARDEN_DESKTOP_PROFILE
+  return [
+    ...SECRET_HOME_PATHS.map((relative) => path.join(home, relative)),
+    ...(profile !== undefined && path.isAbsolute(profile) ? [profile] : [])
+  ]
+}
+
+const sensitiveHomePaths = (home: string): ReadonlyArray<string> => [
+  ...secretPaths(home),
+  ...PERSISTENCE_HOME_PATHS.map((relative) => path.join(home, relative))
+]
 
 export const tooWide = (
   folder: string,
