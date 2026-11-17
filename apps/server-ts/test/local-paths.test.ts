@@ -244,4 +244,25 @@ describe("a never path rule", () => {
       expect.arrayContaining(["/Users/me/Documents", "/Users/me/taxes"])
     )
   })
+
+  it("hides the desktop's profile from a sandboxed command, installed and development build alike", () => {
+    const rule = sandboxRule(
+      {
+        cwd: "/Users/me/src/demo",
+        readRoots: ["/Users/me/src/demo"],
+        writeRoot: "/Users/me/src/demo",
+        stateRoot: "/nonexistent/arden-state",
+        sandbox: "code_agent",
+        pathRules: NO_PATH_RULES
+      },
+      "/Users/me",
+      "darwin"
+    )
+    expect(rule?.hidden).toEqual(
+      expect.arrayContaining([
+        "/Users/me/Library/Application Support/Arden",
+        "/Users/me/Library/Application Support/arden-desktop"
+      ])
+    )
+  })
 })

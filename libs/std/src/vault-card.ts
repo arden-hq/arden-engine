@@ -260,27 +260,6 @@ export function cardSafeFields(card: CardDetails): CardSafeFields {
 export const cardTitle = (card: Pick<CardSafeFields, "brand" | "last4">): string =>
   `${card.brand} ending ${card.last4}`
 
-/**
- * Every spelling of the number a page may show: no spaces, groups of four (or American Express's
- * 4-6-5), each with spaces or dashes between the groups. The scrub looks for all of them.
- */
-export function cardNumberSpellings(digits: string): ReadonlyArray<string> {
-  const groups = (sizes: ReadonlyArray<number>): ReadonlyArray<string> => {
-    const parts: string[] = []
-    let start = 0
-    for (const size of sizes) {
-      if (start >= digits.length) break
-      parts.push(digits.slice(start, start + size))
-      start += size
-    }
-    if (start < digits.length) parts.push(digits.slice(start))
-    return parts
-  }
-  const fours = groups(Array.from({ length: Math.ceil(digits.length / 4) }, () => 4))
-  const shapes = [fours, ...(digits.length === 15 ? [groups([4, 6, 5])] : [])]
-  return [...new Set([digits, ...shapes.flatMap((parts) => [parts.join(" "), parts.join("-")])])]
-}
-
 export type AmountRead =
   | { readonly kind: "ok"; readonly text: string }
   | { readonly kind: "refused" }

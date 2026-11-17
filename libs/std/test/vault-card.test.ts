@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest"
 import {
   cardBrand,
-  cardNumberSpellings,
   cardSafeFields,
   cardTitle,
   passesLuhn,
@@ -122,21 +121,6 @@ describe("card rules", () => {
       nameOnCard: "Alex Morgan"
     })
     expect(cardTitle(safe)).toBe("Visa ending 4242")
-  })
-
-  test("every spelling of the number: plain, groups of four, Amex grouping, spaces or dashes", () => {
-    expect(cardNumberSpellings("4242424242424242")).toEqual([
-      "4242424242424242",
-      "4242 4242 4242 4242",
-      "4242-4242-4242-4242"
-    ])
-    expect(cardNumberSpellings("378282246310005")).toEqual([
-      "378282246310005",
-      "3782 8224 6310 005",
-      "3782-8224-6310-005",
-      "3782 822463 10005",
-      "3782-822463-10005"
-    ])
   })
 
   test("amounts read in their currency", () => {

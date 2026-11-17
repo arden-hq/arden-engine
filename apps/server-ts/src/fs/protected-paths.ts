@@ -31,6 +31,8 @@ export const SECRET_HOME_PATHS = [
   "Library/Messages",
   "Library/Safari",
   "Library/Application Support/Arden",
+  // The desktop's own profile in a development build (Electron names it after the package).
+  "Library/Application Support/arden-desktop",
   ".config/Arden",
   "Library/Application Support/Google/Chrome",
   "Library/Application Support/Chromium",
