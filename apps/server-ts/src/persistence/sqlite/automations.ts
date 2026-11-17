@@ -12,6 +12,8 @@ import { makeAutomationCatalog } from "./automation-catalog.js"
 import { makeAutomationDiagnostics } from "./automation-diagnostics.js"
 import { makeHandlerItems } from "./automation-handler-item.js"
 import { makeHomeLetterInputs } from "./automation-home-input.js"
+import type { DayActivity } from "../automations/day-activity.js"
+import { makeDayActivity } from "./day-activity.js"
 import { makeEventScreens, makeRunEvents } from "./automation-event-batch.js"
 import { makeAutomationJobs } from "./automation-jobs.js"
 import { makeAutomationRowReads, type AutomationStoreDeps } from "./automation-rows.js"
@@ -30,6 +32,7 @@ export const makeAutomationStores = (
   readonly triggers: AutomationTriggers["Service"]
   readonly wikiOutbox: WikiEventOutbox["Service"]
   readonly homeLetterInputs: HomeLetterInputs["Service"]
+  readonly dayActivity: DayActivity["Service"]
   readonly spaceReviews: SpaceReviewStore["Service"]
   readonly handlerItems: AutomationHandlerItems["Service"]
 } => {
@@ -57,6 +60,7 @@ export const makeAutomationStores = (
     triggers,
     wikiOutbox: outbox,
     homeLetterInputs: makeHomeLetterInputs({ writer }),
+    dayActivity: makeDayActivity({ reader }),
     spaceReviews: makeSpaceReviewStore({ writer, sessionEvents }),
     handlerItems: makeHandlerItems({ writer, rules, sessionEvents })
   }

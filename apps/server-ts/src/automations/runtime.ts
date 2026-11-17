@@ -1,6 +1,7 @@
 import { backoffDelayMs } from "@arden-hq/std/retry"
 import { HomeStore } from "../persistence/home/store.js"
 import { HomeLetterInputs } from "../persistence/automations/home-letter-inputs.js"
+import { DayActivity } from "../persistence/automations/day-activity.js"
 import { SpaceReviewStore } from "../persistence/automations/space-review-store.js"
 import { AutomationHandlerItems } from "../persistence/automations/handler-items.js"
 import { triggerFeedRecord } from "./trigger-feed.js"
@@ -76,6 +77,7 @@ export class AutomationRuntime extends Context.Service<
     | AutomationQueue
     | AutomationTriggers
     | HomeLetterInputs
+    | DayActivity
     | SpaceReviewStore
     | AutomationHandlerItems
     | ChatMessage
@@ -110,6 +112,7 @@ export class AutomationRuntime extends Context.Service<
       const queue = yield* AutomationQueue
       const triggers = yield* AutomationTriggers
       const homeLetterInputs = yield* HomeLetterInputs
+      const dayActivity = yield* DayActivity
       const spaceReviews = yield* SpaceReviewStore
       const handlerItems = yield* AutomationHandlerItems
       const chat = yield* ChatMessage
@@ -148,6 +151,7 @@ export class AutomationRuntime extends Context.Service<
         chat,
         queue,
         homeLetterInputs,
+        dayActivity,
         handlerItems,
         home,
         memory,

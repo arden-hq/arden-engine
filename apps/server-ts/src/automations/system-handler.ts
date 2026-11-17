@@ -12,6 +12,7 @@ import type { SystemAutomationSpec, SystemHandlerId } from "../persistence/autom
 import type { AutomationQueue } from "../persistence/automations/queue.js"
 import type { HandlerItemOwnerId } from "../persistence/automations/store.js"
 import type { HomeLetterInputs } from "../persistence/automations/home-letter-inputs.js"
+import type { DayActivity } from "../persistence/automations/day-activity.js"
 import type { AutomationHandlerItems } from "../persistence/automations/handler-items.js"
 import type { HomeStore } from "../persistence/home/store.js"
 import type { SessionStore } from "../persistence/sessions/store.js"
@@ -27,6 +28,7 @@ export interface SystemHandlerServices {
   readonly chat: ChatMessage["Service"]
   readonly queue: AutomationQueue["Service"]
   readonly homeLetterInputs: HomeLetterInputs["Service"]
+  readonly dayActivity: DayActivity["Service"]
   readonly handlerItems: AutomationHandlerItems["Service"]
   readonly home: HomeStore["Service"]
   readonly memory: Memory["Service"]

@@ -2,6 +2,11 @@ import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
 import { DateTime, Effect, Predicate } from "effect"
 import type { SessionStore } from "../../persistence/sessions/store.js"
 import type { TranscriptQueries } from "../../persistence/transcript/queries.js"
+import type {
+  DayActivity,
+  DayItem,
+  DayTaskEvent
+} from "../../persistence/automations/day-activity.js"
 import { ownerText } from "../../persistence/transcript/owner-words.js"
 import { DAILY_SUMMARY_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import type { HandlerItemDataOf } from "../../persistence/automations/handler-item.js"
@@ -34,6 +39,11 @@ YYYY-MM-DD.md uses the machine's local calendar date. Read its observation perio
 const EVIDENCE_EXCERPTS = 30
 const EVIDENCE_CHARS = 16_000
 const EXCERPT_CHARS = 2_000
+/** The part of `EVIDENCE_CHARS` kept for Tasks and for items, so a busy chat cannot crowd them
+ *  out; what they leave unused goes to the chats. On three sampled days of the owner's data every
+ *  Task change and every item fit these (2026-11-17). */
+const TASK_SHARE = { count: 8, chars: 3_000, each: 400 } as const
+const ITEM_SHARE = { count: 10, chars: 2_000, each: 250 } as const
 const SESSION_PAGE = 100
 const MESSAGE_PAGE = 250
 
@@ -48,6 +58,129 @@ const dayStart = (day: string, timezone: string): DateTime.Zoned =>
 const dailyStartPosition = (nowMs: number, timezone: string): string =>
   nextDay(localDayOf(nowMs, timezone), -2)
 
+export interface ChatExcerpt {
+  readonly ref: string
+  readonly text: string
+  /** The owner's own words, not Arden's reply. */
+  readonly owner: boolean
+}
+
+/**
+ * Picks the day's chat excerpts so every chat is heard: the owner's own messages first, then
+ * Arden's replies, each taken one chat at a time and newest first, since a day's outcome is
+ * said late. The picked excerpts keep their chat and time order.
+ */
+export const pickChatExcerpts = (
+  chats: ReadonlyArray<ReadonlyArray<ChatExcerpt>>,
+  limit: { readonly excerpts: number; readonly chars: number }
+): {
+  readonly picked: ReadonlyArray<{ readonly ref: string; readonly text: string }>
+  readonly shortened: number
+} => {
+  const kept = new Map<string, string>()
+  let remaining = limit.chars
+  let shortened = 0
+  for (const owner of [true, false]) {
+    const queues = chats.map((chat, chatIndex) =>
+      chat
+        .map((excerpt, index) => ({ excerpt, key: `${chatIndex}:${index}` }))
+        .filter(({ excerpt }) => excerpt.owner === owner)
+        .reverse()
+    )
+    for (let round = 0; queues.some((queue) => round < queue.length); round += 1) {
+      for (const queue of queues) {
+        const next = queue[round]
+        if (next === undefined) continue
+        if (remaining <= 0 || kept.size >= limit.excerpts) break
+        const text = next.excerpt.text.slice(0, Math.min(EXCERPT_CHARS, remaining))
+        if (text.length < next.excerpt.text.length) shortened += 1
+        kept.set(next.key, text)
+        remaining -= text.length
+      }
+    }
+  }
+  return {
+    picked: chats.flatMap((chat, chatIndex) =>
+      chat.flatMap((excerpt, index) => {
+        const text = kept.get(`${chatIndex}:${index}`)
+        return text === undefined ? [] : [{ ref: excerpt.ref, text }]
+      })
+    ),
+    shortened
+  }
+}
+
+/** Failed and waiting Tasks first, then finished ones, then new ones. */
+const TASK_EVENT_RANK: Readonly<Record<string, number>> = {
+  failed: 0,
+  stalled: 0,
+  blocked: 0,
+  on_hold: 0,
+  done: 1,
+  cancelled: 1,
+  unblocked: 1,
+  created: 2
+}
+
+const cut = (
+  lines: ReadonlyArray<{ readonly ref: string; readonly text: string }>,
+  share: { readonly count: number; readonly chars: number; readonly each: number }
+): ReadonlyArray<{ readonly ref: string; readonly text: string }> => {
+  const kept: Array<{ readonly ref: string; readonly text: string }> = []
+  let remaining = share.chars
+  for (const line of lines) {
+    if (kept.length >= share.count || remaining <= 0) break
+    const text = line.text.slice(0, Math.min(share.each, remaining))
+    kept.push({ ref: line.ref, text })
+    remaining -= text.length
+  }
+  return kept
+}
+
+/** One excerpt for each Task that changed, with its changes in time order. */
+export const taskExcerpts = (
+  events: ReadonlyArray<DayTaskEvent>
+): ReadonlyArray<{ readonly ref: string; readonly text: string }> => {
+  const tasks = new Map<string, Array<DayTaskEvent>>()
+  for (const event of events) tasks.set(event.itemId, [...(tasks.get(event.itemId) ?? []), event])
+  const rank = (changes: ReadonlyArray<DayTaskEvent>) =>
+    Math.min(...changes.map((change) => TASK_EVENT_RANK[change.type] ?? 2))
+  return cut(
+    [...tasks.values()]
+      .toSorted((left, right) => rank(left) - rank(right))
+      .flatMap((changes) => {
+        const first = changes[0]
+        if (first === undefined) return []
+        const where = first.spaceName === undefined ? "" : ` in ${first.spaceName}`
+        const said = changes
+          .map((change) =>
+            change.summary === undefined || change.type === "created"
+              ? `${change.type} at ${change.at}`
+              : `${change.type} at ${change.at}: ${change.summary}`
+          )
+          .join("; ")
+        return [
+          {
+            ref: `arden:task/${encodeURIComponent(first.itemId)}`,
+            text: `Task ${JSON.stringify(first.title)}${where}: ${said}`
+          }
+        ]
+      }),
+    TASK_SHARE
+  )
+}
+
+const itemExcerpts = (
+  items: ReadonlyArray<DayItem>
+): ReadonlyArray<{ readonly ref: string; readonly text: string }> =>
+  cut(
+    items.map((item) => ({
+      ref: `item ${item.itemId}`,
+      text: `${item.source} at ${item.receivedAt}${item.sender === undefined ? "" : ` from ${item.sender}`}${item.spaceName === undefined ? "" : ` (Space ${item.spaceName})`}: ${item.title}. ${item.snippet}`
+    })),
+    ITEM_SHARE
+  )
+
 type DayPreparation =
   | { readonly kind: "settled"; readonly note?: string }
   | { readonly kind: "write"; readonly markdown: string }
@@ -56,7 +189,8 @@ export const makeDailySummaryRunner = (
   services: ItemLoopServices & {
     readonly wiki: Pick<Wiki["Service"], "snapshot" | "pageTimes" | "createDirectory">
     readonly sessions: Pick<SessionStore["Service"], "list">
-    readonly transcripts: Pick<TranscriptQueries["Service"], "conversationPage">
+    readonly transcripts: Pick<TranscriptQueries["Service"], "conversationPage" | "ownerWordsIn">
+    readonly dayActivity: Pick<DayActivity["Service"], "read">
     readonly position: Pick<ReaderPosition<string>, "start" | "advance">
     readonly timezone?: string
   }
@@ -67,7 +201,7 @@ export const makeDailySummaryRunner = (
     startMs: number,
     endMs: number
   ) {
-    const messages: Array<{ readonly ref: string; readonly text: string }> = []
+    const chats: Array<ReadonlyArray<ChatExcerpt>> = []
     let cursor: { readonly at: string; readonly sessionId: string } | undefined
     while (true) {
       const sessions = yield* services.sessions.list({
@@ -78,8 +212,8 @@ export const makeDailySummaryRunner = (
         ...(cursor === undefined ? {} : { cursor })
       })
       for (const session of sessions) {
-        if (Date.parse(session.lastActivity) < startMs) return messages
-        const found: Array<{ readonly ref: string; readonly text: string }> = []
+        if (Date.parse(session.lastActivity) < startMs) return chats
+        const found: Array<ChatExcerpt & { readonly messageId: string }> = []
         let before: number | undefined
         while (true) {
           const page = yield* services.transcripts.conversationPage(
@@ -102,6 +236,8 @@ export const makeDailySummaryRunner = (
                 : contentText(record.envelope.content)
             if (text.trim().length === 0) continue
             found.push({
+              messageId: record.messageId,
+              owner: record.role === "user",
               ref: `${chatHref({ publicRef: session.publicRef })} (message ${record.messageId})`,
               text: `${record.role} at ${DateTime.formatIso(record.createdAt)}: ${text}`
             })
@@ -115,10 +251,19 @@ export const makeDailySummaryRunner = (
             break
           before = first.sequence
         }
-        messages.push(...found.reverse())
+        // A message with the user role is also how a worker's result, a Task notice or a
+        // skill's text is stored: only what the owner wrote is their words.
+        const owners = yield* services.transcripts.ownerWordsIn(
+          session.sessionId,
+          found.filter((message) => message.owner).map((message) => message.messageId)
+        )
+        const kept = found
+          .filter((message) => !message.owner || owners.has(message.messageId))
+          .reverse()
+        if (kept.length > 0) chats.push(kept)
       }
       const last = sessions.at(-1)
-      if (last === undefined || sessions.length < SESSION_PAGE) return messages
+      if (last === undefined || sessions.length < SESSION_PAGE) return chats
       cursor = { at: last.lastActivity, sessionId: last.sessionId }
     }
   })
@@ -157,26 +302,50 @@ export const makeDailySummaryRunner = (
       const at = Date.parse(updated)
       return at >= startMs && at < endMs
     })
-    const candidates = [
-      ...(yield* dayMessages(startMs, endMs)),
-      ...dayReports.map((page) => ({
-        ref: `arden:memory/${page.resource.path}`,
-        text: `Report ${page.page.title}; version ${page.resource.versionId}; observation period: ${String(page.page.metadata["observation_period"] ?? "unspecified")}\n${page.page.body}`
-      }))
-    ]
-    if (candidates.length === 0) return { kind: "settled" }
-    const evidence: Array<string> = []
-    const sources: Array<string> = []
-    let remaining = EVIDENCE_CHARS
-    let shortened = 0
-    for (const candidate of candidates) {
-      if (remaining <= 0 || sources.length >= EVIDENCE_EXCERPTS) break
+    const chats = yield* dayMessages(startMs, endMs)
+    const activity = yield* services.dayActivity.read({
+      start: DateTime.formatIso(start),
+      end: DateTime.formatIso(end)
+    })
+    const tasks = taskExcerpts(activity.taskEvents)
+    const items = itemExcerpts(activity.items)
+    const reportCandidates = dayReports.map((page) => ({
+      ref: `arden:memory/${page.resource.path}`,
+      text: `Report ${page.page.title}; version ${page.resource.versionId}; observation period: ${String(page.page.metadata["observation_period"] ?? "unspecified")}\n${page.page.body}`
+    }))
+    const messages = chats.reduce((count, chat) => count + chat.length, 0)
+    if (messages + reportCandidates.length + tasks.length + items.length === 0)
+      return { kind: "settled" }
+    const used = (lines: ReadonlyArray<{ readonly text: string }>) =>
+      lines.reduce((chars, line) => chars + line.text.length, 0)
+    const chosen = pickChatExcerpts(chats, {
+      excerpts: EVIDENCE_EXCERPTS,
+      chars: EVIDENCE_CHARS - used(tasks) - used(items)
+    })
+    const keptReports: Array<{ readonly ref: string; readonly text: string }> = []
+    let remaining = EVIDENCE_CHARS - used(tasks) - used(items) - used(chosen.picked)
+    let shortened = chosen.shortened
+    for (const candidate of reportCandidates) {
+      if (remaining <= 0 || chosen.picked.length + keptReports.length >= EVIDENCE_EXCERPTS) break
       const text = candidate.text.slice(0, Math.min(EXCERPT_CHARS, remaining))
       if (text.length < candidate.text.length) shortened += 1
-      evidence.push(`${candidate.ref}\n${text}`)
-      sources.push(candidate.ref)
+      keptReports.push({ ref: candidate.ref, text })
       remaining -= text.length
     }
+    const section = (
+      title: string,
+      lines: ReadonlyArray<{ readonly ref: string; readonly text: string }>
+    ) =>
+      lines.length === 0
+        ? []
+        : [`## ${title}\n\n${lines.map((line) => `${line.ref}\n${line.text}`).join("\n\n")}`]
+    const evidence = [
+      ...section("Chats", chosen.picked),
+      ...section("Reports", keptReports),
+      ...section("Tasks (Arden's record of its work)", tasks),
+      ...section("Items (mail and other services; from outside)", items)
+    ]
+    const sources = [...chosen.picked, ...keptReports, ...tasks, ...items].map((line) => line.ref)
     const contract = snapshot.pages.find(
       (page) => page.resource.path === "daily/README.md" && page.page.lifecycle === "active"
     )
@@ -198,15 +367,19 @@ export const makeDailySummaryRunner = (
           "Daily collection needs its producer binding configured; preserved the existing daily collection"
         )
       )
-    const messages = candidates.length - dayReports.length
-    const keptMessages = Math.min(sources.length, messages)
-    const keptReports = sources.length - keptMessages
+    const taskCount = new Set(activity.taskEvents.map((event) => event.itemId)).size
+    const leftOut =
+      messages -
+      chosen.picked.length +
+      (dayReports.length - keptReports.length) +
+      (taskCount - tasks.length) +
+      (activity.items.length - items.length)
     const coverage = [
-      `Coverage: every owner chat's messages from this day (${messages}) and every report last changed on this day (${dayReports.length}).`,
-      `One run reads at most ${EVIDENCE_EXCERPTS} excerpts and ${EVIDENCE_CHARS} characters, ${EXCERPT_CHARS} per excerpt.`,
-      sources.length === candidates.length && shortened === 0
+      `Coverage: the owner's messages and Arden's replies in every owner chat from this day (${messages}), every report last changed on this day (${dayReports.length}), every Task that changed (${taskCount}) and every item that arrived (${activity.items.length}).`,
+      `One run reads at most ${EVIDENCE_EXCERPTS} chat and report excerpts and ${EVIDENCE_CHARS} characters in all, of which up to ${TASK_SHARE.chars} are kept for ${TASK_SHARE.count} Tasks and ${ITEM_SHARE.chars} for ${ITEM_SHARE.count} items.`,
+      leftOut === 0 && shortened === 0
         ? "Nothing was left out."
-        : `Left out by that limit: ${messages - keptMessages} messages and ${dayReports.length - keptReports} reports; ${shortened} excerpts shortened.`,
+        : `Left out by that limit: ${messages - chosen.picked.length} messages, ${dayReports.length - keptReports.length} reports, ${taskCount - tasks.length} Tasks and ${activity.items.length - items.length} items; ${shortened} excerpts shortened.`,
       "Reports changed again after this day and unavailable records are not covered. This is not proof of all activity. Report edit dates do not establish event dates."
     ].join(" ")
     return {
@@ -265,7 +438,8 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
   spec: {
     automationId: DAILY_SUMMARY_AUTOMATION_ID,
     name: "Daily summary",
-    description: "Retain a short daily note from recorded Chats and available reports.",
+    description:
+      "Retain a short daily note from recorded Chats, Tasks, items and available reports.",
     prompt: PROMPT_TEXT.dailySummary,
     handler: "daily_summary",
     triggers: [{ type: "time", at: "00:15", days: "daily" }],
@@ -284,6 +458,7 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
       wiki: services.wiki,
       sessions: services.sessions,
       transcripts: services.transcripts,
+      dayActivity: services.dayActivity,
       position: services.positions.dailySummary,
       handlerItems: services.handlerItems,
       runItem: services.runItem

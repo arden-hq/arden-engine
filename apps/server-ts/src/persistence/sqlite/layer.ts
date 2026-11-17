@@ -79,6 +79,7 @@ import { AutomationCatalog } from "../automations/catalog.js"
 import { AutomationRules } from "../automations/model.js"
 import { WikiEventOutbox } from "../automations/wiki-event-outbox.js"
 import { HomeLetterInputs } from "../automations/home-letter-inputs.js"
+import { DayActivity } from "../automations/day-activity.js"
 import { SpaceReviewStore } from "../automations/space-review-store.js"
 import { AutomationHandlerItems } from "../automations/handler-items.js"
 import { AutomationTriggers } from "../automations/triggers.js"
@@ -437,6 +438,7 @@ const persistencePorts = (built: BuiltStores) => {
     Context.make(AutomationTriggers, automations.triggers),
     Context.make(WikiEventOutbox, automations.wikiOutbox),
     Context.make(HomeLetterInputs, automations.homeLetterInputs),
+    Context.make(DayActivity, automations.dayActivity),
     Context.make(SpaceReviewStore, automations.spaceReviews),
     Context.make(AutomationHandlerItems, automations.handlerItems),
     Context.make(SpaceStore, makeSpaceStore(deps)),
