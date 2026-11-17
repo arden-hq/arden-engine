@@ -7,7 +7,6 @@ import {
 } from "@arden-hq/protocol/automations"
 import type { AutomationRules, AutomationTriggerEvent } from "../automations/model.js"
 import { runOnlyIfSentences } from "../automations/event-words.js"
-import { isUserAutomationPurpose } from "../job-classification.js"
 import type { EventBatch } from "../automations/event-batch.js"
 import type { QueueContext } from "./automation-queue-context.js"
 
@@ -49,20 +48,14 @@ export const batchSize = (batch: QueueContext["event_batch"]): number =>
 export const matchEvent = (
   rules: AutomationRules["Service"],
   triggers: ReadonlyArray<AutomationTrigger>,
-  event: AutomationTriggerEvent,
-  purpose: string
+  event: AutomationTriggerEvent
 ) => {
   const matched = triggers.filter(
     (trigger): trigger is EventAutomationTrigger =>
       trigger.type === "event" && rules.eventMatches(trigger, event)
   )
-  return {
-    matched,
-    runOnlyIf:
-      matched.length > 0 && isUserAutomationPurpose(purpose)
-        ? runOnlyIfSentences(matched)
-        : undefined
-  }
+  // Which Automations may hold a sentence is decided where triggers are written.
+  return { matched, runOnlyIf: matched.length > 0 ? runOnlyIfSentences(matched) : undefined }
 }
 
 export const eventFromSnapshot = (context: QueueContext): AutomationTriggerEvent | undefined => {

@@ -352,7 +352,8 @@ export const makeAutomationCatalogEdits = ({
             "update",
             validAutomationId
           )
-          if (spec !== null) yield* refuseSystemRunOnlyIf(schedule.triggers, validAutomationId)
+          if (spec !== null && !spec.triggers.some(hasRunOnlyIf))
+            yield* refuseSystemRunOnlyIf(schedule.triggers, validAutomationId)
           const triggersJson =
             valid.triggers === undefined
               ? row.triggers
@@ -627,16 +628,24 @@ const requireUserChat = Effect.fn("SqliteAutomationStore.requireUserChat")(funct
   }
 })
 
+const hasRunOnlyIf = (trigger: PersonalAutomationTriggers["triggers"][number]): boolean =>
+  trigger.type === "event" && trigger.run_only_if !== undefined
+
+/**
+ * A system Automation takes a "Run only if" sentence only when its handler comes with one: its
+ * run is then a judgment of the event. For any other handler a sentence would skip work the app
+ * relies on.
+ */
 const refuseSystemRunOnlyIf = (
   triggers: PersonalAutomationTriggers["triggers"],
   automationId: string
 ): Effect.Effect<void, AutomationStoreError> =>
-  triggers.some((trigger) => trigger.type === "event" && trigger.run_only_if !== undefined)
+  triggers.some(hasRunOnlyIf)
     ? Effect.fail(
         storeError(
           "update",
           "invalid",
-          "A system Automation's triggers take no run_only_if sentence",
+          "This system Automation's triggers take no run_only_if sentence",
           automationId
         )
       )

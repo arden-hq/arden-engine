@@ -3,10 +3,22 @@ import type {
   ConnectionItemFeedRow
 } from "../../persistence/automations/model.js"
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
+import type { ConnectionSource } from "../../persistence/connections/store.js"
+import type { AutomationEventType } from "@arden-hq/protocol/automations"
 import { gmailThreadTarget, hasReadyGmail } from "../../connections/items/gmail.js"
 import { calendarEventTarget } from "../../google/calendar-client.js"
 import { githubItemUrl } from "../../persistence/connections/item-url.js"
 import type { AutomationEventProducer } from "../event-producer.js"
+
+/**
+ * The event each stored item's source publishes. A new source adds its entry here; an Automation
+ * that listens to every arrival (Urgent events) then hears it with no change of its own.
+ */
+export const ITEM_EVENT_TYPES = {
+  gmail: "email.received",
+  github: "github.received",
+  calendar: "calendar.changed"
+} as const satisfies Record<ConnectionSource, AutomationEventType>
 
 export const connectionItemEvent = (
   row: ConnectionItemFeedRow
@@ -21,7 +33,7 @@ export const connectionItemEvent = (
   switch (row.source) {
     case "gmail":
       return {
-        eventType: "email.received",
+        eventType: ITEM_EVENT_TYPES.gmail,
         eventKey: row.itemId,
         producedBy: null,
         chainDepth: 0,
@@ -31,7 +43,7 @@ export const connectionItemEvent = (
     case "github": {
       const url = githubItemUrl(row.threadKey)
       return {
-        eventType: "github.received",
+        eventType: ITEM_EVENT_TYPES.github,
         eventKey: row.itemId,
         producedBy: null,
         chainDepth: 0,
@@ -42,7 +54,7 @@ export const connectionItemEvent = (
       return row.detail === undefined
         ? undefined
         : {
-            eventType: "calendar.changed",
+            eventType: ITEM_EVENT_TYPES.calendar,
             eventKey: row.itemId,
             producedBy: null,
             chainDepth: 0,

@@ -7,6 +7,7 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { serializeOperationalCause } from "../../runtime/operational-events.js"
 import { isUserAutomationPurpose, type JobPurpose } from "../job-classification.js"
+import { systemHandlerTellsOwner } from "../automations/model.js"
 import { taskDoor, type ArrivalEvent } from "./ending-arrival.js"
 import { tellChat, told, updateWeight, waitsOnOwner, type Readable } from "./owner-update.js"
 import { taskDoneBefore } from "./entity-events.js"
@@ -116,8 +117,12 @@ export const recordEnding = Effect.fn("RunEnding.record")(function* (
   const context: RunContext | undefined = damaged
     ? { origin: { kind: "chat", session_id: agent.parent, turn_id: "unrecorded" }, task: null }
     : loaded.context
+  // A system job's ending is read from its Automation, as its run's was: a handler that speaks to
+  // the owner keeps doing so when the job settles.
   const purpose: Purpose =
-    ending.kind === "occurrence" ? ending.purpose : yield* purposeOf(sql, work)
+    ending.kind === "occurrence" && !(ending.purpose === "system" && work?.kind === "automation")
+      ? ending.purpose
+      : yield* purposeOf(sql, work)
   const facts = yield* factsOf(sql, runId)
   const plain = damaged
     ? saidDamaged(ending)
@@ -211,9 +216,13 @@ const purposeOf = Effect.fn("RunEnding.purpose")(function* (
     case "unrecorded":
       return "chat"
     case "automation": {
-      const rows = yield* sql<{ readonly purpose: string }>`SELECT purpose FROM scheduled_tasks
-        WHERE task_id = ${origin.automation_id}`
-      return isUserAutomationPurpose(rows[0]?.purpose) ? "user_automation" : "system"
+      const rows = yield* sql<{
+        readonly purpose: string
+        readonly handler: string | null
+      }>`SELECT purpose, handler FROM scheduled_tasks WHERE task_id = ${origin.automation_id}`
+      return isUserAutomationPurpose(rows[0]?.purpose) || systemHandlerTellsOwner(rows[0]?.handler)
+        ? "user_automation"
+        : "system"
     }
   }
 })

@@ -230,6 +230,13 @@ export const PROMPT_CATALOG = Object.freeze({
     band: "background",
     slots: []
   }),
+  urgentEvents: definePrompt({
+    id: "memory.urgent-events",
+    revision: 1,
+    sourcePath: "memory/urgent-events.md",
+    band: "background",
+    slots: []
+  }),
   wikiMaintenance: definePrompt({
     id: "memory.wiki-maintenance",
     revision: 12,
@@ -453,6 +460,7 @@ export const PROMPT_TEXT = Object.freeze({
   memoryCapture: renderText(PROMPT_CATALOG.memoryCapture, { memory_filing_rule: memoryFilingRule }),
   wikiMaintenance: renderText(PROMPT_CATALOG.wikiMaintenance, {}),
   dailySummary: renderText(PROMPT_CATALOG.dailySummary, {}),
+  urgentEvents: renderText(PROMPT_CATALOG.urgentEvents, {}),
   chatSummary: renderText(PROMPT_CATALOG.chatSummary, {}),
   conversationCommunication: renderText(PROMPT_CATALOG.conversationCommunication, {}),
   executorCommunication: renderText(PROMPT_CATALOG.executorCommunication, {}),

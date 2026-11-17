@@ -65,7 +65,7 @@ const startChat = (
     return started
   })
 
-const claimAll = (workerId: string) =>
+export const claimAll = (workerId: string) =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* Effect.promise(async () =>
@@ -80,7 +80,7 @@ const claimAll = (workerId: string) =>
 
 type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
-const startJob = (lease: JobLease, id: string) =>
+export const startJob = (lease: JobLease, id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const automationId = lease.payload.automationId

@@ -134,7 +134,8 @@ it("a stored run's or attempt's depth is read in SQL in one file", () => {
   ).toEqual(["persistence/sqlite/run-cause.ts"])
 })
 
-it("the system Automations an event can wake are Tidy on a Memory change and chat summaries on a quiet chat", () => {
+// Urgent events only reads and tells the owner, so a wake at any depth starts no chain.
+it("the system Automations an event can wake are Tidy on a Memory change, chat summaries on a quiet chat and Urgent events on an arrival", () => {
   expect(
     SYSTEM_AUTOMATION_SPECS.flatMap((spec) =>
       spec.triggers.flatMap((trigger) =>
@@ -143,6 +144,9 @@ it("the system Automations an event can wake are Tidy on a Memory change and cha
     ).sort()
   ).toEqual([
     ["chat_summaries", "chat.quiet"],
+    ["urgent_events", "calendar.changed"],
+    ["urgent_events", "email.received"],
+    ["urgent_events", "github.received"],
     ["wiki_maintenance", "wiki.changed"]
   ])
 })

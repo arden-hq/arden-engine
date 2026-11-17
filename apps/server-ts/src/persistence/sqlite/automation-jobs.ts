@@ -146,6 +146,7 @@ const jobHandler = (
         : { handler: id, handlerItem: context.handler_item }
     case "managed_history_collection":
     case "chat_summaries":
+    case "urgent_events":
       return { handler: id }
   }
 }

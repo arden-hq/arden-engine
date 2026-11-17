@@ -13,6 +13,7 @@ import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { SummaryStore } from "../persistence/summaries/store.js"
 import { StructuredCompletion } from "../models/structured-completion.js"
 import { Decisions } from "../models/decisions/service.js"
+import { isStandingFactsPage } from "../memory/core-memory.js"
 import { screenEventWake } from "./prefilter.js"
 import { SpaceStore } from "../persistence/spaces/store.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
@@ -131,7 +132,25 @@ export class AutomationRuntime extends Context.Service<
         completion: yield* StructuredCompletion
       })
       const decisions = yield* Decisions
-      const screenWake = screenEventWake(decisions)
+      // "Urgent events" asks what needs the owner today: its check reads their standing pages.
+      const ownerProfile = (job: AutomationJobLeaseRef) =>
+        job.payload.handler !== "urgent_events"
+          ? Effect.succeed(undefined)
+          : wiki.snapshot().pipe(
+              Effect.map((snapshot) =>
+                snapshot.pages
+                  .filter(
+                    (page) =>
+                      page.page.lifecycle === "active" &&
+                      isStandingFactsPage({ path: page.resource.path, pageId: page.page.pageId })
+                  )
+                  .map((page) => page.page.body)
+                  .join("\n\n")
+              ),
+              Effect.map((profile) => (profile.trim() === "" ? undefined : profile)),
+              Effect.orElseSucceed(() => undefined)
+            )
+      const screenWake = screenEventWake(decisions, ownerProfile)
       const lifecycle = yield* ServerLifecycle
       yield* triggers.triggerCursor()
       const ready = yield* Deferred.make<void, AutomationStoreError>()

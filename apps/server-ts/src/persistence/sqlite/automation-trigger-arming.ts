@@ -39,7 +39,7 @@ export const rematchHeldEvents = Effect.fn("AutomationTriggerArming.rematchHeld"
       if (context._tag === "None") continue
       const event = eventFromSnapshot(context.value)
       if (event === undefined) continue
-      const { matched, runOnlyIf } = matchEvent(rules, options.triggers, event, options.purpose)
+      const { matched, runOnlyIf } = matchEvent(rules, options.triggers, event)
       if (matched.length === 0) {
         yield* sql`DELETE FROM automation_event_queue WHERE id = ${row.id}`
         continue

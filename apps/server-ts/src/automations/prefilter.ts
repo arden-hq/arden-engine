@@ -9,17 +9,24 @@ import type {
 
 const SCREEN_CONCURRENCY = 4
 
+/**
+ * `ownerOf` answers what is known about the owner for a job whose condition is about them
+ * ("it needs me today"); undefined for every other job, which is judged on the event alone.
+ */
 export const screenEventWake = (
-  decisions: Pick<Decisions["Service"], "decide">
+  decisions: Pick<Decisions["Service"], "decide">,
+  ownerOf: (job: AutomationJobLeaseRef) => Effect.Effect<string | undefined> = () =>
+    Effect.succeed(undefined)
 ): ((job: AutomationJobLeaseRef) => Effect.Effect<AutomationEventScreen | undefined>) =>
   Effect.fn("Automation.screenEventWake")(function* (job: AutomationJobLeaseRef) {
     const prefilter = job.payload.prefilter
     if (prefilter === null || job.payload.occurrence !== "event" || job.payload.chatRun !== null)
       return undefined
+    const owner = yield* ownerOf(job)
     const verdicts = yield* Effect.forEach(
       prefilter.events,
       (event) =>
-        judgeEvent(decisions, event).pipe(
+        judgeEvent(decisions, event, owner).pipe(
           Effect.map((skip) => ({ key: event.key, skip }) as const)
         ),
       { concurrency: SCREEN_CONCURRENCY }
@@ -36,7 +43,8 @@ export const screenEventWake = (
 
 const judgeEvent = Effect.fn("Automation.judgeEvent")(function* (
   decisions: Pick<Decisions["Service"], "decide">,
-  event: AutomationJobPrefilterEvent
+  event: AutomationJobPrefilterEvent,
+  owner: string | undefined
 ): Effect.fn.Return<StoredAutomationRunSkip | undefined> {
   if (event.sentences === null) return undefined
   const ask = (sentence: string) =>
@@ -46,7 +54,7 @@ const judgeEvent = Effect.fn("Automation.judgeEvent")(function* (
         kind: "predicate",
         instructions: `The event matches this condition: ${sentence}`
       },
-      state: { event: event.prompt },
+      state: owner === undefined ? { event: event.prompt } : { event: event.prompt, owner },
       default: true
     })
   const [head, ...tail] = event.sentences

@@ -96,7 +96,7 @@ export const makeAutomationEventDispatch = ({
       if (!listensFor({ pausedAt: row.paused_at, eventType: event.eventType })) continue
       const triggers = yield* listenerTriggers(row)
       if (triggers === undefined) continue
-      const { matched, runOnlyIf } = matchEvent(rules, triggers, event, row.purpose)
+      const { matched, runOnlyIf } = matchEvent(rules, triggers, event)
       if (matched.length === 0) continue
       const key = `${event.eventType}:${event.eventKey}`
       const triggeringChange = wikiChangedRevision(event)

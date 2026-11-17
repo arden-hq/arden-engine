@@ -23,7 +23,8 @@ export const SYSTEM_HANDLER_IDS = [
   "home_letter",
   "managed_history_collection",
   "wiki_maintenance",
-  "chat_summaries"
+  "chat_summaries",
+  "urgent_events"
 ] as const
 export type SystemHandlerId = (typeof SYSTEM_HANDLER_IDS)[number]
 
@@ -32,6 +33,14 @@ export type AutomationId = typeof AutomationId.Type
 
 export const HOME_LETTER_AUTOMATION_ID = AutomationId.make(HOME_LETTER_AUTOMATION_REF)
 export const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summary")
+export const URGENT_EVENTS_AUTOMATION_ID = AutomationId.make("builtin-urgent-events")
+
+/**
+ * The system handlers whose run speaks to the owner: its final reply is delivered and notified
+ * like a user Automation's. Every other system run works unseen and files its result elsewhere.
+ */
+export const systemHandlerTellsOwner = (handler: string | null | undefined): boolean =>
+  handler === ("urgent_events" satisfies SystemHandlerId)
 
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId

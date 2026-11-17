@@ -85,7 +85,7 @@ export type AutomationJobHandler =
   | { readonly handler: null; readonly spaceReviewInput?: SpaceReviewInput }
   | { readonly handler: "home_letter"; readonly homeLetterInput?: HomeLetterInput }
   | { readonly handler: HandlerItemOwnerId; readonly handlerItem?: HandlerItem }
-  | { readonly handler: "managed_history_collection" | "chat_summaries" }
+  | { readonly handler: "managed_history_collection" | "chat_summaries" | "urgent_events" }
 
 export type AutomationJobPayload = AutomationJobPayloadFields<string> & AutomationJobHandler
 
