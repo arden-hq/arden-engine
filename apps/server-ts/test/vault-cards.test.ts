@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest"
 
 import { makeVaultKeys, type VaultKeyBroker } from "../src/credentials/vault-keys.js"
 import { ActParametersSchema } from "../src/tools/browser-parameters.js"
+import { Effect } from "effect"
+import { BrowserClient } from "../src/browser/service.js"
+import { VaultKeys } from "../src/credentials/vault-keys.js"
 import {
+  vaultCardTools,
   CheckoutParametersSchema,
   frameCard,
   frameThere,
@@ -45,6 +49,18 @@ const PAY = {
 }
 
 describe("cards seen from the engine", () => {
+  it("the card tools are built: their metadata passes the server's own checks", () => {
+    const tools = Effect.runSync(
+      vaultCardTools.pipe(
+        Effect.provideService(VaultKeys, VaultKeys.of(makeVaultKeys(desktop([CARD])))),
+        // Building the tools asks nothing of the browser.
+        Effect.provideService(BrowserClient, BrowserClient.of(Object.create(null)))
+      )
+    )
+    expect(JSON.stringify(tools)).toContain("vault_checkout")
+    expect(tools).toHaveLength(3)
+  })
+
   it("vault_list gives the safe fields and the id, never a number or a code", async () => {
     const list = await makeVaultKeys(desktop([CARD])).list()
     const text = vaultListText(list)

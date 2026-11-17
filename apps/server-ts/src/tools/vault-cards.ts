@@ -384,6 +384,7 @@ const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
       approval_preview: "Type the saved card and click Pay.",
       source: "_browser",
       changes_state: true,
+      target: "reported",
       concurrency_group: "browser",
       destructive: false,
       // The user's approval is the pay card with Touch ID: the desktop types nothing without it.
@@ -392,7 +393,7 @@ const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
       open_world: true,
       code_mode: false
     },
-    execute: async (input, ctx) => {
+    execute: async (input, ctx, effects) => {
       const expectedRevision = claimObservedRevision(
         ctx.run.browserObservations,
         input.tab_ref,
@@ -412,7 +413,8 @@ const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
           fields: input.fields.map((item) => ({ nodeRef: item.node_ref, field: item.field })),
           payRef: input.pay_node_ref
         },
-        ctx.signal
+        ctx.signal,
+        { effects }
       )
       return { result: output.result, preview: output.preview }
     }
