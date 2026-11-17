@@ -61,7 +61,7 @@ const REFUSAL: Record<Extract<SiteSecretRequestDecision, { kind: "refuse" }>["re
   read_only: "Not asked: this run may not start a sign-in."
 }
 
-const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
+export const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
   const site = new URL(input.origin).host
   return {
     preview: `Sign in to ${site}`,
@@ -101,7 +101,7 @@ const savedNames = (output: BrowserOutput): ReadonlyArray<string> => {
 }
 
 /** The user name saved with a secret: not secret, so the agent may type it into the form. */
-const savedUserName = (output: BrowserOutput, name: string): string | undefined => {
+export const savedUserName = (output: BrowserOutput, name: string): string | undefined => {
   const users = output.data?.["users"]
   if (typeof users !== "object" || users === null || Array.isArray(users)) return undefined
   const user: unknown = Object.entries(users).find(([key]) => key === name)?.[1]
@@ -219,19 +219,26 @@ const makeBrowserAskSecretTool = (
             )
           }
           return {
-            result: [
-              `Saved for ${input.origin} as ${input.name}.`,
-              held.userName === undefined
-                ? "No user name is saved with it."
-                : `Its user name is ${held.userName}; type it into the user name field yourself if the form asks.`,
-              `Fill the password field with browser_act action fill, secret ${input.name}, and a fresh node_ref. You will not see the value.`
-            ].join(" "),
+            result: savedSecretResult(input, held.userName),
             preview: `Secret ${input.name} saved`
           }
       }
     }
   })
 }
+
+/** What the agent reads once a password is saved: the user name (not secret), never the value. */
+export const savedSecretResult = (
+  input: Pick<AskSecretInput, "origin" | "name">,
+  userName: string | undefined
+): string =>
+  [
+    `Saved for ${input.origin} as ${input.name}.`,
+    userName === undefined
+      ? "No user name is saved with it."
+      : `Its user name is ${userName}; type it into the user name field yourself if the form asks.`,
+    `Fill the password field with browser_act action fill, secret ${input.name}, and a fresh node_ref. You will not see the value.`
+  ].join(" ")
 
 export const browserAskSecretTools = Effect.gen(function* () {
   return [makeBrowserAskSecretTool(yield* BrowserClient, yield* VaultKeys)]

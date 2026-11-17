@@ -45,9 +45,9 @@ it("keeps every rule and its history, and takes a rule about one saved key", () 
       decision: "allow"
     }
   ])
-  database.exec(`INSERT INTO permission_rules (rule_id, list_kind, subject_kind, key_name, decision,
+  database.exec(`INSERT INTO permission_rules (rule_id, list_kind, subject_kind, key_name, key_id, decision,
       source_kind, created_at)
-    VALUES ('key-1', 'global', 'vault_key', 'Todoist', 'allow', 'settings', 'now')`)
+    VALUES ('key-1', 'global', 'vault_key', 'Todoist', 'k1', 'allow', 'settings', 'now')`)
   expect(() =>
     database.exec(`INSERT INTO permission_rules (rule_id, list_kind, subject_kind, decision, source_kind)
       VALUES ('key-2', 'global', 'vault_key', 'allow', 'settings')`)

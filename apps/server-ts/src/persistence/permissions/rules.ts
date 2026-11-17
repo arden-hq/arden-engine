@@ -29,10 +29,14 @@ export const RuleSubjectSchema = Schema.Union([
     kind: Schema.Literal("words"),
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000))
   }),
-  /** One saved key by its Vault name: "Always allow" on its card, in the run's Space. */
+  /**
+   * One saved key: "Always allow" on its card, in the run's Space. Matched by the key's id in
+   * the Vault, which a deleted key takes with it; the name is what the rule shows.
+   */
   Schema.Struct({
     kind: Schema.Literal("vault_key"),
-    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+    keyId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
   })
 ])
 export type RuleSubject = typeof RuleSubjectSchema.Type

@@ -252,6 +252,13 @@ export interface CreateToolsetOptions<
    * (tool media) are not truncated — cap those in the tool itself.
    */
   readonly truncate?: { readonly maxBytes: number; readonly maxLines?: number }
+  /**
+   * The host's last guard on what the model reads: applied to every result's
+   * `content`, `preview` and text in `model_content`, and to a thrown
+   * `ToolExecutionError`'s message, before truncation. A host that cannot
+   * check a text returns the text it shows instead.
+   */
+  readonly scrub?: (text: string) => Promise<string>
 }
 
 const pathKey = (segment: PropertyKey | StandardSchemaV1.PathSegment): PropertyKey =>
@@ -485,6 +492,31 @@ export const createToolset = <RunCtx, HostMeta extends object = Record<never, ne
     const content = truncateToolResult(result.content, truncate)
     return content === result.content ? result : { ...result, content }
   }
+  const scrub = options.scrub
+  const scrubResult = async (result: Required<ToolResult>): Promise<Required<ToolResult>> => {
+    if (scrub === undefined) return result
+    const [content, preview] = await Promise.all([scrub(result.content), scrub(result.preview)])
+    const modelContent = await Promise.all(
+      result.model_content.map(async (block) => {
+        if (block.type === "text") return { ...block, text: await scrub(block.text) }
+        if (block.type === "context" && typeof block.content === "string")
+          return { ...block, content: await scrub(block.content) }
+        return block
+      })
+    )
+    return { ...result, content, preview, model_content: modelContent }
+  }
+  const scrubFailure = async (failure: ToolExecutionError): Promise<ToolExecutionError> => {
+    if (scrub === undefined) return failure
+    const message = await scrub(failure.message)
+    if (message === failure.message) return failure
+    return new ToolExecutionError(message, {
+      ...(failure.preview === undefined ? {} : { preview: failure.preview }),
+      ...(failure.retryable === undefined ? {} : { retryable: failure.retryable }),
+      ...(failure.diagnosticRef === undefined ? {} : { diagnosticRef: failure.diagnosticRef }),
+      ...(failure.host === undefined ? {} : { host: failure.host })
+    })
+  }
   const scope = options.scope === undefined ? null : new Set(options.scope)
   const displayTitle = options.displayTitle
   const allEntries = tools.map((tool) => tool.entry(options.toJsonSchema, displayTitle))
@@ -541,32 +573,35 @@ export const createToolset = <RunCtx, HostMeta extends object = Record<never, ne
             )
           }
           return applyTruncation(
-            await tool.execute(
-              request.args,
-              {
-                toolCallId: request.toolCallId,
-                signal: request.signal ?? neverAborted,
-                ...(request.approval === undefined ? {} : { approval: request.approval }),
-                run,
-                messages: request.messages ?? [],
-                ...(request.beforeExecute === undefined
-                  ? {}
-                  : { beforeExecute: request.beforeExecute }),
-                ...(request.emit === undefined ? {} : { emit: request.emit })
-              },
-              {
-                ...(approvalDecision === undefined ? {} : { decision: approvalDecision }),
-                ...(options.approvalGate === undefined ? {} : { gate: options.approvalGate }),
-                ...(request.beforeExecute === undefined
-                  ? {}
-                  : { beforeExecute: request.beforeExecute }),
-                ...(request.phase === undefined ? {} : { phase: request.phase })
-              }
+            await scrubResult(
+              await tool.execute(
+                request.args,
+                {
+                  toolCallId: request.toolCallId,
+                  signal: request.signal ?? neverAborted,
+                  ...(request.approval === undefined ? {} : { approval: request.approval }),
+                  run,
+                  messages: request.messages ?? [],
+                  ...(request.beforeExecute === undefined
+                    ? {}
+                    : { beforeExecute: request.beforeExecute }),
+                  ...(request.emit === undefined ? {} : { emit: request.emit })
+                },
+                {
+                  ...(approvalDecision === undefined ? {} : { decision: approvalDecision }),
+                  ...(options.approvalGate === undefined ? {} : { gate: options.approvalGate }),
+                  ...(request.beforeExecute === undefined
+                    ? {}
+                    : { beforeExecute: request.beforeExecute }),
+                  ...(request.phase === undefined ? {} : { phase: request.phase })
+                }
+              )
             )
           )
         } catch (cause) {
-          if (cause instanceof PauseRequested || cause instanceof ToolExecutionError) throw cause
-          throw onExecuteError(cause, request)
+          if (cause instanceof PauseRequested) throw cause
+          if (cause instanceof ToolExecutionError) throw await scrubFailure(cause)
+          throw await scrubFailure(onExecuteError(cause, request))
         }
       }
     }

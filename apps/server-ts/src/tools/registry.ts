@@ -88,7 +88,7 @@ import { browserTaskTools } from "./browser-task.js"
 import { browserUploadTools } from "./browser-upload.js"
 import { chatFilesTools } from "./chat-files.js"
 import { browserPermissionTools } from "./browser-permission.js"
-import { vaultTools } from "./vault.js"
+import { vaultResultScrub, vaultTools } from "./vault.js"
 import { artifactDeleteTools } from "./artifact-delete.js"
 import { artifactExportTools } from "./artifact-export.js"
 import { artifactSaveTools } from "./artifact-save.js"
@@ -199,19 +199,16 @@ const policy = (metadata: ServerToolMetadata): ToolPolicy => ({
   idempotent: metadata.idempotent
 })
 
-const catalogEntry = (tool: ServerTool, description: string): ToolCatalogEntry => {
-  const metadata = tool.meta
-  return {
-    name: tool.definition.name,
-    displayName: metadata.display_name,
-    description,
-    kind: metadata.kind,
-    source: metadata.source,
-    effectivePolicy: policy(metadata),
-    defaultApproval: metadata.default_approval,
-    display: metadata.display ?? {}
-  }
-}
+const catalogEntry = (tool: ServerTool, description: string): ToolCatalogEntry => ({
+  name: tool.definition.name,
+  displayName: tool.meta.display_name,
+  description,
+  kind: tool.meta.kind,
+  source: tool.meta.source,
+  effectivePolicy: policy(tool.meta),
+  defaultApproval: tool.meta.default_approval,
+  display: tool.meta.display ?? {}
+})
 
 export interface RuleNames {
   readonly tool: (
@@ -414,6 +411,7 @@ export class ServerToolRegistry extends Context.Service<
       const outputs = yield* ManagedOutputs
 
       const procedureStore = yield* BrowserProcedureStore
+      const scrub = yield* vaultResultScrub
       const builtins = yield* builtinTools
       const missingRole = ROLE_TOOLS.find(
         (name) => !builtins.some((tool) => tool.definition.name === name)
@@ -699,6 +697,7 @@ export class ServerToolRegistry extends Context.Service<
           approvals,
           approvalGate,
           displayTitle: TOOL_DISPLAY_TITLE,
+          scrub,
           scope: scopeNames,
           refusal: refusalText(run.authority)
         })({

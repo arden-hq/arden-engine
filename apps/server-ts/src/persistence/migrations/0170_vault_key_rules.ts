@@ -3,7 +3,8 @@ import type { Migration } from "./index.js"
 
 /**
  * A permission rule may name one saved key: "Always allow" on a "Use your Todoist key?" card
- * saves `vault_key` with the key's name in `key_name`, in the run's Space. A CHECK names the
+ * saves `vault_key` with the key's id in the Vault in `key_id` (its name in `key_name`, as the
+ * rule shows it), in the run's Space. A CHECK names the
  * subject kinds, so the table is rebuilt; every rule is copied as it was.
  */
 export const VAULT_KEY_RULES_TABLE = `CREATE TABLE permission_rules (
@@ -22,6 +23,7 @@ export const VAULT_KEY_RULES_TABLE = `CREATE TABLE permission_rules (
       path TEXT CHECK(path IS NULL OR (length(path) BETWEEN 1 AND 1000 AND substr(path, 1, 1) = '/')),
       access TEXT CHECK(access IS NULL OR access IN ('read', 'change')),
       key_name TEXT CHECK(key_name IS NULL OR length(key_name) BETWEEN 1 AND 64),
+      key_id TEXT CHECK(key_id IS NULL OR length(key_id) BETWEEN 1 AND 64),
       decision TEXT NOT NULL CHECK(decision IN ('allow', 'ask', 'never')),
       source_kind TEXT NOT NULL CHECK(source_kind IN ('card', 'offer', 'settings', 'migrated')),
       source_run_id TEXT,
@@ -39,6 +41,7 @@ export const VAULT_KEY_RULES_TABLE = `CREATE TABLE permission_rules (
       CHECK((subject_kind = 'path') = (access IS NOT NULL)),
       CHECK(subject_kind != 'path' OR decision != 'ask'),
       CHECK((subject_kind = 'vault_key') = (key_name IS NOT NULL)),
+      CHECK((subject_kind = 'vault_key') = (key_id IS NOT NULL)),
       CHECK(origin IS NULL OR subject_kind = 'tool'),
       CHECK(subject_kind != 'host_commands' OR decision = 'ask'),
       CHECK((source_run_id IS NULL) = (source_tool_call_id IS NULL)),
@@ -53,7 +56,7 @@ export const VAULT_KEY_RULES_IDENTITY = `CREATE UNIQUE INDEX idx_permission_rule
       list_kind, COALESCE(space_id, ''), subject_kind, COALESCE(tool_name, ''),
       COALESCE(server_name, ''), COALESCE(executable_path, ''),
       COALESCE(argument_prefix_json, ''), COALESCE(words, ''), COALESCE(origin, ''),
-      COALESCE(path, ''), COALESCE(access, ''), COALESCE(key_name, ''))`
+      COALESCE(path, ''), COALESCE(access, ''), COALESCE(key_id, ''))`
 
 /** Dropping the old table drops its history triggers; they come back word for word. */
 const RULE_HISTORY = [

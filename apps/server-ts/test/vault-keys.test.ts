@@ -14,6 +14,8 @@ import { cardRuleSubjects } from "../src/persistence/sqlite/permissions.js"
 import { shellInvocation, shellRuntime } from "../src/tools/shell-policy.js"
 import { runCommandUntil } from "../src/tools/shell-run.js"
 import { keyUseDecision } from "../src/tools/vault.js"
+import { matchesVaultKey } from "../src/execution/rules.js"
+import { savedSecretResult, savedUserName, secretCard } from "../src/tools/browser-ask-secret.js"
 import { NO_PATH_RULES } from "./fixtures/local-policy.js"
 
 const REAL = "tdk_Real1234567890abcdefXYZ"
@@ -21,7 +23,9 @@ const REAL = "tdk_Real1234567890abcdefXYZ"
 /** A stand-in for the desktop: it holds the value, and answers only what the broker answers. */
 const desktop = (overrides: Partial<VaultKeyBroker> = {}): VaultKeyBroker => ({
   listVault: async () => ({
-    keys: [{ name: "Todoist", variable: "TODOIST_API_KEY", addresses: ["api.todoist.com"] }],
+    keys: [
+      { id: "k1", name: "Todoist", variable: "TODOIST_API_KEY", addresses: ["api.todoist.com"] }
+    ],
     passwords: [{ site: "https://github.com", name: "password", userName: "alex" }]
   }),
   keyEnvironment: async ({ names }) => ({
@@ -37,6 +41,7 @@ const desktop = (overrides: Partial<VaultKeyBroker> = {}): VaultKeyBroker => ({
       ranges.push([at, at + REAL.length])
     return { ranges }
   },
+  endKeySession: async () => ({ ended: true }),
   ...overrides
 })
 
@@ -45,7 +50,9 @@ describe("the Vault seen from the engine", () => {
     const leaky = makeVaultKeys(
       desktop({
         listVault: async () => ({
-          keys: [{ name: "Todoist", variable: "TODOIST_API_KEY", addresses: [], value: REAL }],
+          keys: [
+            { id: "k1", name: "Todoist", variable: "TODOIST_API_KEY", addresses: [], value: REAL }
+          ],
           passwords: []
         }),
         keyEnvironment: async () => ({
@@ -120,6 +127,27 @@ describe("the Vault seen from the engine", () => {
     expect(vault.takeAsk("chat", "c7")).toBe(true)
   })
 
+  it("ends the run's proxy session when its runner ends, only for a run that had keys", async () => {
+    const ended: Array<string> = []
+    const vault = makeVaultKeys(
+      desktop({
+        endKeySession: async (runId) => {
+          ended.push(runId)
+          return { ended: true }
+        }
+      })
+    )
+    await vault.end("run-0")
+    vault.grant("run-1", "Todoist")
+    await vault.end("run-1")
+    expect(ended).toEqual(["run-1"])
+    const failing = makeVaultKeys(
+      desktop({ endKeySession: () => Promise.reject(new Error("gone")) })
+    )
+    failing.grant("run-2", "Todoist")
+    await expect(failing.end("run-2")).resolves.toBeUndefined()
+  })
+
   it("without the desktop, lists nothing and scrubs nothing it cannot know", async () => {
     const vault = makeVaultKeys(undefined)
     await expect(vault.list()).rejects.toThrow("The Vault needs the Arden app")
@@ -128,7 +156,7 @@ describe("the Vault seen from the engine", () => {
 })
 
 describe("using a key", () => {
-  it("asks on the card unless a rule or the mode answers", () => {
+  it("needs the owner's card or a rule for this key, in every mode", () => {
     const decide = (
       rule: "allow" | "ask" | "never" | undefined,
       mode: "ask" | "allow" | "read_only",
@@ -139,7 +167,9 @@ describe("using a key", () => {
     expect(decide("allow", "ask")).toBe("allowed")
     expect(decide("never", "ask", true)).toBe("refuse")
     expect(decide(undefined, "read_only")).toBe("refuse")
-    expect(decide(undefined, "allow")).toBe("allowed")
+    // Never ask does not allow a key: its card still asks (and waits when nobody is there).
+    expect(decide(undefined, "allow")).toBe("ask")
+    expect(decide("allow", "allow")).toBe("allowed")
   })
 
   it("saves Always allow as this key, never the tool", () => {
@@ -147,9 +177,12 @@ describe("using a key", () => {
       cardRuleSubjects({
         toolName: "vault_use_key",
         serverName: undefined,
-        data: { reviewer: "user", vault_key: "Todoist" }
+        data: { reviewer: "user", vault_key: "Todoist", vault_key_id: "k1" }
       })
-    ).toEqual([{ kind: "vault_key", name: "Todoist" }])
+    ).toEqual([{ kind: "vault_key", name: "Todoist", keyId: "k1" }])
+    // A rule about the old key does not cover a new key given its name.
+    expect(matchesVaultKey("k2")({ kind: "vault_key", name: "Todoist", keyId: "k1" })).toBe(false)
+    expect(matchesVaultKey("k1")({ kind: "vault_key", name: "Todoist", keyId: "k1" })).toBe(true)
     expect(
       cardRuleSubjects({ toolName: "vault_use_key", serverName: undefined, data: {} })
     ).toBeUndefined()
@@ -249,4 +282,36 @@ describe("a command with keys", () => {
       }
     }
   )
+})
+
+describe("the sign-in password card", () => {
+  const input = {
+    tab_ref: "tab-1",
+    origin: "https://github.com",
+    name: "password",
+    purpose: "You asked me to check your pull requests."
+  }
+
+  it("says Save password and Not now", () => {
+    expect(secretCard(input).presentation).toMatchObject({
+      approve_label: "Save password",
+      reject_label: "Not now"
+    })
+  })
+
+  it("gives the agent the saved user name, never the value", () => {
+    const output = {
+      result: "",
+      preview: "",
+      data: { origin: "https://github.com", names: ["password"], users: { password: "alexmorgan" } }
+    }
+    const userName = savedUserName(output, "password")
+    expect(userName).toBe("alexmorgan")
+    expect(savedSecretResult(input, userName)).toBe(
+      "Saved for https://github.com as password. Its user name is alexmorgan; type it into the user name field yourself if the form asks. Fill the password field with browser_act action fill, secret password, and a fresh node_ref. You will not see the value."
+    )
+    expect(
+      savedUserName({ result: "", preview: "", data: { names: ["password"] } }, "password")
+    ).toBeUndefined()
+  })
 })

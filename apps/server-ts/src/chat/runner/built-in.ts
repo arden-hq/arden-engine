@@ -2,6 +2,7 @@ import { ContextExperiments } from "../../context/experiments.js"
 import { makeToolApprovalPolicy } from "../../tools/approval-policy.js"
 import { ApprovalPolicyStore } from "../../persistence/permissions/approval-policy.js"
 import { PermissionRules } from "../../persistence/permissions/rules.js"
+import { VaultKeys } from "../../credentials/vault-keys.js"
 import { DataRoot } from "../../runtime/data-root.js"
 import type { ModelRoute } from "../../models/provider.js"
 import { chatOutputOptions } from "../../models/structured-output.js"
@@ -171,174 +172,193 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
             )
       })
     )
+  const vaultKeys = yield* VaultKeys
   return (route: ModelRoute): ChatRunner =>
-    makeLoopChatRunner({
-      provider: route.provider,
-      modelContext: (model) => catalog.installed().models.get(model)?.context,
-      onRequestComplete: (input) =>
-        compaction.rememberRequest({ ...input, provider: route.provider }),
-      output: async (input) =>
-        input.outputSchema === null
-          ? undefined
-          : chatOutputOptions(input.outputSchema, route.structuredOutputDialect),
-      systemPrompt: async () => {
-        const [assistantName, current] = await Promise.all([
-          readAssistantName(),
-          Effect.runPromise(loadForRun(services.wiki))
-        ])
-        return chatSystemPrompt(assistantName, rulesFile, current)
-      },
-      ...(workFolder === undefined ? {} : { localInstructionDirectories: [workFolder] }),
-      localInstructions: async ({ sessionId, runId, signal, target, targetKind }) => {
-        const policy = await sessionPathPolicy(services, { sessionId, runId, signal })
-        if (target === undefined) return loadLocalInstructions({ policy })
-        const resolved = await resolveLocalPath(target, policy.cwd, {
-          allowMissing: targetKind === "file",
-          ...policyPathOptions(policy)
-        }).catch(() => undefined)
-        return resolved === undefined
-          ? undefined
-          : loadLocalInstructions({
-              policy,
-              target: resolved,
-              ...(targetKind === undefined ? {} : { targetKind })
+    endsKeySessions(
+      vaultKeys.end,
+      makeLoopChatRunner({
+        provider: route.provider,
+        modelContext: (model) => catalog.installed().models.get(model)?.context,
+        onRequestComplete: (input) =>
+          compaction.rememberRequest({ ...input, provider: route.provider }),
+        output: async (input) =>
+          input.outputSchema === null
+            ? undefined
+            : chatOutputOptions(input.outputSchema, route.structuredOutputDialect),
+        systemPrompt: async () => {
+          const [assistantName, current] = await Promise.all([
+            readAssistantName(),
+            Effect.runPromise(loadForRun(services.wiki))
+          ])
+          return chatSystemPrompt(assistantName, rulesFile, current)
+        },
+        ...(workFolder === undefined ? {} : { localInstructionDirectories: [workFolder] }),
+        localInstructions: async ({ sessionId, runId, signal, target, targetKind }) => {
+          const policy = await sessionPathPolicy(services, { sessionId, runId, signal })
+          if (target === undefined) return loadLocalInstructions({ policy })
+          const resolved = await resolveLocalPath(target, policy.cwd, {
+            allowMissing: targetKind === "file",
+            ...policyPathOptions(policy)
+          }).catch(() => undefined)
+          return resolved === undefined
+            ? undefined
+            : loadLocalInstructions({
+                policy,
+                target: resolved,
+                ...(targetKind === undefined ? {} : { targetKind })
+              })
+        },
+        recordLocalInstructions: ({ runId, sources }) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              const load = yield* loadForRun(services.wiki)
+              yield* chat.recordLocalInstructions({
+                runId,
+                sources: [...globalInstructionManifest(rulesFile, load), ...sources]
+              })
             })
-      },
-      recordLocalInstructions: ({ runId, sources }) =>
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const load = yield* loadForRun(services.wiki)
-            yield* chat.recordLocalInstructions({
-              runId,
-              sources: [...globalInstructionManifest(rulesFile, load), ...sources]
-            })
-          })
-        ),
-      toolset: (run) =>
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const policy = yield* services.runs.get(run.runId).pipe(Effect.flatMap(runPolicyOf))
-            const origin = yield* sessionOrigin(run.sessionId, run.automationId)
-            experiments.begin(run.sessionId, run.runId, origin.source === "personal")
-            const authority = yield* boundAuthority(services.runs, run)
-            const scoped = yield* registry.runToolset(
-              { ...run, policy, authority },
-              {
-                omitSkills: omittedSkills(origin),
-                declareTree:
-                  origin.source === "agent" ||
-                  (origin.source === "personal" && policy.execution.mode === "inline") ||
-                  (origin.source === "scheduled_task" && origin.fork)
-              }
-            )
-            if (origin.source === "scheduled_task" && origin.fork) return scoped
-            return systemHandlerForAutomation(run.automationId)?.tools?.(scoped) ?? scoped
-          })
-        ),
-      preloadTools: ({ sessionId, runId, automationId }) =>
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const origin = yield* sessionOrigin(sessionId, automationId)
-            if (origin.source === "scheduled_task" && origin.fork) {
-              const [primary] = authorityScopes(
-                yield* boundAuthority(services.runs, { runId, sessionId })
-              )
-              return registry.ownedTools([primary])
-            }
-            if (origin.source === "agent")
-              return registry.ownedTools(
-                authorityScopes(yield* boundAuthority(services.runs, { runId, sessionId }))
-              )
-            if (origin.source === "personal" && origin.special !== undefined)
-              return SPECIAL_CHAT_PRELOAD[origin.special.kind]
-            const base = typeof origin.header?.spaceId === "string" ? SPACE_CHAT_PRELOAD : []
-            if (origin.source !== "scheduled_task") return base
-            const carried = yield* automationQueue
-              .runEvents({ sessionId, chatRunId: runId })
-              .pipe(Effect.orElseSucceed(() => undefined))
-            const followUps = carried?.run === "this_run" ? eventTextTools(carried.events) : []
-            return [...new Set([...base, ...followUps])]
-          })
-        ),
-      config: {
-        maxIterations: maxRunSteps,
-        policy: {
-          fallbackResultText: (_messages, reason) => stoppedEarly(reason, maxRunSteps)
-        }
-      },
-      localTime: renderLocalTimeContext,
-      todoReminder: ({ sessionId, signal }) =>
-        Effect.runPromise(
-          services.todos.get(sessionId).pipe(
-            Effect.map(renderTodoReminder),
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Todo reminder unavailable", { sessionId, cause }).pipe(
-                Effect.as(undefined)
-              )
-            )
           ),
-          { signal }
-        ),
-      ownerWords: ({ sessionId, messageIds, signal }) =>
-        Effect.runPromise(transcript.ownerWordsIn(sessionId, messageIds), { signal }),
-      systemContext: (input) =>
-        Effect.runPromise(
-          sessionOrigin(input.sessionId, input.automationId).pipe(
-            Effect.flatMap((origin) => composeTurnContext(services, origin, input))
-          )
-        ),
-      onOrphanToolOutputs: ({ sessionId, runId, orphans }) =>
-        Effect.runFork(
-          Effect.logWarning("Sent orphaned tool outputs as context notes", {
-            sessionId,
-            runId,
-            orphans
-          })
-        ),
-      compact: (input) =>
-        Effect.runPromise(
-          compaction
-            .automatic({
-              sessionId: input.sessionId,
-              runId: input.runId,
-              inputTokens: input.inputTokens,
-              overflow: input.overflow,
-              pendingCallIds: input.pendingCallIds,
-              signal: input.signal
-            })
-            .pipe(
-              Effect.flatMap(
-                (messages): Effect.Effect<LoopChatCompactionResult, StoredMessageDecodeError> =>
-                  messages === null
-                    ? Effect.succeed({ kind: "unchanged" as const })
-                    : toChatRunnerMessages(input.sessionId, messages).pipe(
-                        Effect.map((replacement) => ({
-                          kind: "replacement" as const,
-                          messages: replacement
-                        }))
-                      )
-              ),
-              Effect.catchTag(
-                "ContextCompactionError",
-                (cause): Effect.Effect<LoopChatCompactionResult, ContextCompactionError> => {
-                  if (input.signal.aborted) return Effect.fail(cause)
-                  if (cause.reason === "conflict" || cause.reason === "not_found") {
-                    return Effect.succeed({ kind: "unchanged" as const })
-                  }
-                  if (cause.reason === "unavailable") {
-                    return Effect.logDebug("Automatic context compaction unavailable", cause).pipe(
-                      Effect.as({ kind: "unchanged" as const })
-                    )
-                  }
-                  if (cause.reason === "provider") {
-                    return Effect.logWarning("Automatic context compaction failed", cause).pipe(
-                      Effect.as({ kind: "disabled_for_run" as const })
-                    )
-                  }
-                  return Effect.fail(cause)
+        toolset: (run) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              const policy = yield* services.runs.get(run.runId).pipe(Effect.flatMap(runPolicyOf))
+              const origin = yield* sessionOrigin(run.sessionId, run.automationId)
+              experiments.begin(run.sessionId, run.runId, origin.source === "personal")
+              const authority = yield* boundAuthority(services.runs, run)
+              const scoped = yield* registry.runToolset(
+                { ...run, policy, authority },
+                {
+                  omitSkills: omittedSkills(origin),
+                  declareTree:
+                    origin.source === "agent" ||
+                    (origin.source === "personal" && policy.execution.mode === "inline") ||
+                    (origin.source === "scheduled_task" && origin.fork)
                 }
               )
+              if (origin.source === "scheduled_task" && origin.fork) return scoped
+              return systemHandlerForAutomation(run.automationId)?.tools?.(scoped) ?? scoped
+            })
+          ),
+        preloadTools: ({ sessionId, runId, automationId }) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              const origin = yield* sessionOrigin(sessionId, automationId)
+              if (origin.source === "scheduled_task" && origin.fork) {
+                const [primary] = authorityScopes(
+                  yield* boundAuthority(services.runs, { runId, sessionId })
+                )
+                return registry.ownedTools([primary])
+              }
+              if (origin.source === "agent")
+                return registry.ownedTools(
+                  authorityScopes(yield* boundAuthority(services.runs, { runId, sessionId }))
+                )
+              if (origin.source === "personal" && origin.special !== undefined)
+                return SPECIAL_CHAT_PRELOAD[origin.special.kind]
+              const base = typeof origin.header?.spaceId === "string" ? SPACE_CHAT_PRELOAD : []
+              if (origin.source !== "scheduled_task") return base
+              const carried = yield* automationQueue
+                .runEvents({ sessionId, chatRunId: runId })
+                .pipe(Effect.orElseSucceed(() => undefined))
+              const followUps = carried?.run === "this_run" ? eventTextTools(carried.events) : []
+              return [...new Set([...base, ...followUps])]
+            })
+          ),
+        config: {
+          maxIterations: maxRunSteps,
+          policy: {
+            fallbackResultText: (_messages, reason) => stoppedEarly(reason, maxRunSteps)
+          }
+        },
+        localTime: renderLocalTimeContext,
+        todoReminder: ({ sessionId, signal }) =>
+          Effect.runPromise(
+            services.todos.get(sessionId).pipe(
+              Effect.map(renderTodoReminder),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Todo reminder unavailable", { sessionId, cause }).pipe(
+                  Effect.as(undefined)
+                )
+              )
+            ),
+            { signal }
+          ),
+        ownerWords: ({ sessionId, messageIds, signal }) =>
+          Effect.runPromise(transcript.ownerWordsIn(sessionId, messageIds), { signal }),
+        systemContext: (input) =>
+          Effect.runPromise(
+            sessionOrigin(input.sessionId, input.automationId).pipe(
+              Effect.flatMap((origin) => composeTurnContext(services, origin, input))
             )
-        )
-    })
+          ),
+        onOrphanToolOutputs: ({ sessionId, runId, orphans }) =>
+          Effect.runFork(
+            Effect.logWarning("Sent orphaned tool outputs as context notes", {
+              sessionId,
+              runId,
+              orphans
+            })
+          ),
+        compact: (input) =>
+          Effect.runPromise(
+            compaction
+              .automatic({
+                sessionId: input.sessionId,
+                runId: input.runId,
+                inputTokens: input.inputTokens,
+                overflow: input.overflow,
+                pendingCallIds: input.pendingCallIds,
+                signal: input.signal
+              })
+              .pipe(
+                Effect.flatMap(
+                  (messages): Effect.Effect<LoopChatCompactionResult, StoredMessageDecodeError> =>
+                    messages === null
+                      ? Effect.succeed({ kind: "unchanged" as const })
+                      : toChatRunnerMessages(input.sessionId, messages).pipe(
+                          Effect.map((replacement) => ({
+                            kind: "replacement" as const,
+                            messages: replacement
+                          }))
+                        )
+                ),
+                Effect.catchTag(
+                  "ContextCompactionError",
+                  (cause): Effect.Effect<LoopChatCompactionResult, ContextCompactionError> => {
+                    if (input.signal.aborted) return Effect.fail(cause)
+                    if (cause.reason === "conflict" || cause.reason === "not_found") {
+                      return Effect.succeed({ kind: "unchanged" as const })
+                    }
+                    if (cause.reason === "unavailable") {
+                      return Effect.logDebug(
+                        "Automatic context compaction unavailable",
+                        cause
+                      ).pipe(Effect.as({ kind: "unchanged" as const }))
+                    }
+                    if (cause.reason === "provider") {
+                      return Effect.logWarning("Automatic context compaction failed", cause).pipe(
+                        Effect.as({ kind: "disabled_for_run" as const })
+                      )
+                    }
+                    return Effect.fail(cause)
+                  }
+                )
+              )
+          )
+      })
+    )
 })
+
+/**
+ * The run's saved keys stop working when its runner ends, however it ends (done, failed,
+ * stopped, or paused for a card: a resumed run gets new stand-ins). The proxy's own time limits
+ * only bound a run that never ends.
+ */
+const endsKeySessions = (end: (runId: string) => Promise<void>, runner: ChatRunner): ChatRunner =>
+  async function* (input) {
+    try {
+      yield* runner(input)
+    } finally {
+      await end(input.runId)
+    }
+  }

@@ -143,11 +143,11 @@ export const matchesTool =
     }
   }
 
-/** A rule about one saved key, by its Vault name. */
+/** A rule about one saved key, by its id in the Vault (a re-added key with the same name is another key). */
 export const matchesVaultKey =
-  (name: string) =>
+  (keyId: string) =>
   (subject: RuleSubject): boolean =>
-    subject.kind === "vault_key" && subject.name === name
+    subject.kind === "vault_key" && subject.keyId === keyId
 
 export const matchesCommand =
   (call: { readonly executable: string; readonly arguments: ReadonlyArray<string> }) =>

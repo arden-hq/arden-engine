@@ -162,7 +162,9 @@ export const cardRuleSubjects = (input: {
     return [{ kind: "tool", tool: input.toolName, server: input.serverName }]
   if (input.toolName === VAULT_USE_KEY_TOOL) {
     const key = Schema.decodeUnknownOption(VaultKeyApprovalDataSchema)(input.data)
-    return Option.isSome(key) ? [{ kind: "vault_key", name: key.value.vault_key }] : undefined
+    return Option.isSome(key)
+      ? [{ kind: "vault_key", name: key.value.vault_key, keyId: key.value.vault_key_id }]
+      : undefined
   }
   if (input.toolName !== COMMAND_TOOL) return undefined
   const words = Schema.decodeUnknownOption(WordsGrantApprovalDataSchema)(input.data)

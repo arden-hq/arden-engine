@@ -11,7 +11,9 @@ export const VAULT_USE_KEY_TOOL = "vault_use_key"
 
 /** The approval data a key's card carries: the key it asks about. */
 export const VaultKeyApprovalDataSchema = Schema.Struct({
-  vault_key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
+  vault_key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  /** The key's id in the Vault: a rule about it ends when the key is deleted. */
+  vault_key_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 })
 
 /** Which of this machine's services a command may reach through the key proxy. */
@@ -27,12 +29,16 @@ export interface VaultKeyBroker {
   }) => Promise<unknown>
   /** Where saved keys and passwords appear in the text: [start, end) ranges, never values. */
   readonly findSecrets: (text: string) => Promise<unknown>
+  /** The run ended: its proxy token and stand-ins stop working. */
+  readonly endKeySession: (runId: string) => Promise<unknown>
 }
 
 const Text = Schema.String.check(Schema.isMaxLength(2_048))
 
 const VaultListSchema = Schema.Struct({
-  keys: Schema.Array(Schema.Struct({ name: Text, variable: Text, addresses: Schema.Array(Text) })),
+  keys: Schema.Array(
+    Schema.Struct({ id: Text, name: Text, variable: Text, addresses: Schema.Array(Text) })
+  ),
   passwords: Schema.Array(
     Schema.Struct({ site: Text, name: Text, userName: Schema.optionalKey(Text) })
   )
@@ -89,6 +95,8 @@ export interface VaultKeysService {
   readonly environment: (runId: string, reach: KeyProxyReach) => Promise<KeyEnvironment | undefined>
   /** Command output with every saved key and password replaced. Throws when it cannot check. */
   readonly redact: (text: string) => Promise<string>
+  /** The run's runner ended: the desktop drops its proxy token and stand-ins. Never throws. */
+  readonly end: (runId: string) => Promise<void>
   /**
    * Counts one ask for a secret in a chat, once per tool call; false once the chat asked 5
    * times in 5 minutes.
@@ -145,6 +153,10 @@ export const makeVaultKeys = (
         if (start + SCRUB_WINDOW >= text.length) break
       }
       return replaceRanges(text, ranges)
+    },
+    end: async (runId) => {
+      if (broker === undefined || granted(runId).length === 0) return
+      await broker.endKeySession(runId).catch(() => undefined)
     },
     takeAsk: (sessionId, toolCallId) => {
       const at = now()

@@ -40,6 +40,7 @@ interface RuleRow {
   readonly path: string | null
   readonly access: "read" | "change" | null
   readonly key_name: string | null
+  readonly key_id: string | null
   readonly decision: PermissionRule["decision"]
   readonly source_kind: PermissionRule["source"]["kind"]
   readonly source_run_id: string | null
@@ -48,7 +49,7 @@ interface RuleRow {
 }
 
 const COLUMNS = `rule_id, list_kind, space_id, subject_kind, tool_name, server_name, executable_path,
-  argument_prefix_json, words, origin, path, access, key_name, decision, source_kind, source_run_id, created_at, from_rule_id`
+  argument_prefix_json, words, origin, path, access, key_name, key_id, decision, source_kind, source_run_id, created_at, from_rule_id`
 
 const error = (
   operation: PermissionRulesOperation,
@@ -89,7 +90,8 @@ const ruleFromRow = Effect.fn("SqlitePermissionRules.fromRow")(function* (row: R
     text: row.words ?? undefined,
     path: row.path ?? undefined,
     access: row.access ?? undefined,
-    name: row.key_name ?? undefined
+    name: row.key_name ?? undefined,
+    keyId: row.key_id ?? undefined
   }).pipe(Effect.mapError(corrupt))
   const list: RuleList =
     row.list_kind === "space" && row.space_id !== null
@@ -123,7 +125,8 @@ const identity = (input: Pick<RuleInput, "subject" | "list">) => {
     origin: subject.kind === "site" ? subject.origin : null,
     path: subject.kind === "path" ? subject.path : null,
     access: subject.kind === "path" ? subject.access : null,
-    key_name: subject.kind === "vault_key" ? subject.name : null
+    key_name: subject.kind === "vault_key" ? subject.name : null,
+    key_id: subject.kind === "vault_key" ? subject.keyId : null
   }
 }
 
@@ -162,7 +165,7 @@ export const saveRuleInTransaction = Effect.fn("SqlitePermissionRules.saveInTran
         AND executable_path IS ${key.executable_path}
         AND argument_prefix_json IS ${key.argument_prefix_json} AND words IS ${key.words}
         AND origin IS ${key.origin} AND path IS ${key.path} AND access IS ${key.access}
-        AND key_name IS ${key.key_name}
+        AND key_id IS ${key.key_id}
         AND (subject_kind != 'connector' OR server_name IS ${key.server_name})`
     const held = existing[0]
     const from = input.fromRuleId ?? null
@@ -172,11 +175,11 @@ export const saveRuleInTransaction = Effect.fn("SqlitePermissionRules.saveInTran
       held === undefined
         ? yield* sql<RuleRow>`INSERT INTO permission_rules (
             rule_id, list_kind, space_id, subject_kind, tool_name, server_name, executable_path,
-            argument_prefix_json, words, origin, path, access, key_name, decision, source_kind,
+            argument_prefix_json, words, origin, path, access, key_name, key_id, decision, source_kind,
             source_run_id, source_tool_call_id, source_question_id, created_at, from_rule_id
           ) VALUES (
             ${yield* nextId}, ${key.list_kind}, ${key.space_id}, ${key.subject_kind},
-            ${key.tool_name}, ${key.server_name}, ${key.executable_path}, ${key.argument_prefix_json}, ${key.words}, ${key.origin}, ${key.path}, ${key.access}, ${key.key_name}, ${input.decision},
+            ${key.tool_name}, ${key.server_name}, ${key.executable_path}, ${key.argument_prefix_json}, ${key.words}, ${key.origin}, ${key.path}, ${key.access}, ${key.key_name}, ${key.key_id}, ${input.decision},
             ${source.kind}, ${sourceRun}, ${sourceCall}, ${sourceQuestion}, ${now}, ${from}
           ) RETURNING ${sql.unsafe(COLUMNS)}`
         : yield* sql<RuleRow>`UPDATE permission_rules SET decision = ${input.decision},

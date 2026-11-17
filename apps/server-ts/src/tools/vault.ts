@@ -62,7 +62,11 @@ type KeyUse =
   | { readonly kind: "ask" }
   | { readonly kind: "refuse"; readonly reason: "never" | "read_only" }
 
-/** Whether the run may use a key now, must ask on its card, or may not use it. */
+/**
+ * Whether the run may use a key now, must ask on its card, or may not use it. Only the owner
+ * allows a key: on its card, or by a saved rule for this key in this Space. No approval mode
+ * allows one by itself; with nobody there, the card waits in the chat.
+ */
 export const keyUseDecision = (input: {
   readonly answered: boolean
   readonly rule: RuleDecision | undefined
@@ -70,9 +74,9 @@ export const keyUseDecision = (input: {
 }): KeyUse => {
   if (input.rule === "never") return { kind: "refuse", reason: "never" }
   if (input.answered || input.rule === "allow") return { kind: "allowed" }
-  const card = personCard(input.mode)
-  if (card === "read_only") return { kind: "refuse", reason: "read_only" }
-  return card === "ask" ? { kind: "ask" } : { kind: "allowed" }
+  return personCard(input.mode) === "read_only"
+    ? { kind: "refuse", reason: "read_only" }
+    : { kind: "ask" }
 }
 
 const USE_REFUSAL: Record<Extract<KeyUse, { kind: "refuse" }>["reason"], string> = {
@@ -105,7 +109,7 @@ const refuseSecretShaped = (reason: string): void => {
 }
 
 const useCard = (
-  key: { readonly name: string; readonly addresses: ReadonlyArray<string> },
+  key: { readonly id: string; readonly name: string; readonly addresses: ReadonlyArray<string> },
   reason: string
 ): ServerApprovalPrompt => ({
   preview: `Use your ${key.name} key`,
@@ -119,7 +123,7 @@ const useCard = (
     approve_label: DECISION_WORD.allowOnce,
     reject_label: DECISION_WORD.deny
   },
-  data: { reviewer: "user", vault_key: key.name }
+  data: { reviewer: "user", vault_key: key.name, vault_key_id: key.id }
 })
 
 const askCard = (input: {
@@ -201,9 +205,9 @@ const makeVaultUseKeyTool = (
   vault: VaultKeysService,
   rules: PermissionRules["Service"]
 ): ServerTool => {
-  const ruleFor = async (authority: RunAuthority, name: string) => {
+  const ruleFor = async (authority: RunAuthority, keyId: string) => {
     const read = await Effect.runPromise(readRunRules(rules, authority)).catch(() => undefined)
-    return read === undefined ? undefined : ruleDecision(read, matchesVaultKey(name))
+    return read === undefined ? undefined : ruleDecision(read, matchesVaultKey(keyId))
   }
   return defineServerTool({
     name: VAULT_USE_KEY_TOOL,
@@ -224,7 +228,8 @@ const makeVaultUseKeyTool = (
       changes_state: false,
       concurrency_group: null,
       destructive: null,
-      approval_bypass: true,
+      // No approval_bypass: the card is this call's own requirement, so Never ask does not waive
+      // it, and its reviewer is the owner, so Auto's helper does not answer it either.
       policy_scope: "external",
       code_mode: false
     },
@@ -234,7 +239,7 @@ const makeVaultUseKeyTool = (
       if (key === undefined) return undefined
       const decision = keyUseDecision({
         answered: false,
-        rule: await ruleFor(ctx.run.authority, key.name),
+        rule: await ruleFor(ctx.run.authority, key.id),
         mode: ctx.run.approvalMode
       })
       return decision.kind === "ask" ? useCard(key, input.reason) : undefined
@@ -248,8 +253,9 @@ const makeVaultUseKeyTool = (
           "No such key"
         )
       const decision = keyUseDecision({
-        answered: ctx.approval !== undefined,
-        rule: await ruleFor(ctx.run.authority, key.name),
+        // The card answered must be this key's: one replaced since is another key.
+        answered: ctx.approval?.data?.["vault_key_id"] === key.id,
+        rule: await ruleFor(ctx.run.authority, key.id),
         mode: ctx.run.approvalMode
       })
       switch (decision.kind) {
@@ -341,6 +347,19 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
     }
   })
 }
+
+const UNCHECKED_OUTPUT =
+  "[Arden could not check this output for saved keys and passwords, so it is not shown.]"
+
+/**
+ * The one scrub of what the model reads: every tool result in a run's toolset passes through it
+ * (`createToolset`'s `scrub`). A saved key or password in it becomes "[saved secret]"; text the
+ * Vault cannot check is withheld.
+ */
+export const vaultResultScrub = Effect.gen(function* () {
+  const vault = yield* VaultKeys
+  return (text: string): Promise<string> => vault.redact(text).catch(() => UNCHECKED_OUTPUT)
+})
 
 /** The Vault's tools, with the sign-in password card that shares their limit on asks. */
 export const vaultTools = Effect.gen(function* () {

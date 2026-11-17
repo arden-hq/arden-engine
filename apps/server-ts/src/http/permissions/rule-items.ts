@@ -65,10 +65,11 @@ export const subjectItem = (subject: RuleSubject, names: RuleNames): PermissionR
       }
     case "command":
       return { kind: "command", words: commandWords(subject.executable, subject.argumentPrefix) }
+    case "vault_key":
+      return { kind: "vault_key", name: subject.name, key_id: subject.keyId }
     case "host_commands":
     case "words":
     case "path":
-    case "vault_key":
       return subject
   }
 }

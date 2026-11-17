@@ -283,6 +283,7 @@ const composeServer = (
     mcp,
     google,
     browser,
+    vaultKeys,
     computer,
     tools,
     RegistryWorkflowHost.pipe(Layer.provide(tools)),
