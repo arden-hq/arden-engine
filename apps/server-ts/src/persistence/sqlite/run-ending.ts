@@ -233,9 +233,11 @@ const automationRunRepeats = Effect.fn("RunEnding.repeats")(function* (
 ) {
   const rows = yield* sql<{
     readonly triggers: string | null
+    readonly handler: string | null
     readonly source: string | null
     readonly again: number
-  }>`SELECT automation.triggers, json_extract(attempt.trigger_json, '$.source') AS source,
+  }>`SELECT automation.triggers, automation.handler,
+      json_extract(attempt.trigger_json, '$.source') AS source,
       EXISTS (SELECT 1 FROM automation_runs AS earlier
         WHERE earlier.task_id = attempt.task_id AND earlier.id < attempt.id
           AND COALESCE(json_extract(earlier.trigger_json, '$.source'), '') <> 'manual') AS again
@@ -245,6 +247,8 @@ const automationRunRepeats = Effect.fn("RunEnding.repeats")(function* (
     ORDER BY attempt.id DESC LIMIT 1`
   const row = rows[0]
   if (row === undefined || row.source === "manual") return false
+  // A handler that speaks to the owner replies only when it has something to tell them.
+  if (systemHandlerTellsOwner(row.handler)) return false
   return (
     row.again === 1 || (row.triggers !== null && automationRepeats(storedTriggers(row.triggers)))
   )

@@ -27,7 +27,7 @@ export const haltAutomation = Effect.fn("AutomationHalt.halt")(function* (option
       ? sql`COALESCE(paused_at, ${DateTime.formatIso(yield* DateTime.now)})`
       : sql`NULL`
   yield* sql`UPDATE scheduled_tasks
-    SET enabled = 0, next_run_at = NULL, paused_at = ${pausedAt}
+    SET enabled = 0, next_run_at = NULL, paused_at = ${pausedAt}, auto_resume_at = NULL
     WHERE task_id = ${automationId}`
   if (halt !== "hold")
     yield* revokeAutomationWork({

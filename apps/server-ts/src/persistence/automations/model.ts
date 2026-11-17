@@ -36,11 +36,17 @@ export const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summ
 export const URGENT_EVENTS_AUTOMATION_ID = AutomationId.make("builtin-urgent-events")
 
 /**
- * The system handlers whose run speaks to the owner: its final reply is delivered and notified
- * like a user Automation's. Every other system run works unseen and files its result elsewhere.
+ * The system handlers whose run speaks to the owner. Such a handler is treated as a user
+ * Automation where the owner is concerned: its final reply is delivered and notified, every
+ * reply counts as news, and a run the provider refuses pauses it and is tried again. Every other
+ * system run works unseen and files its result elsewhere.
  */
+export const OWNER_FACING_HANDLERS = [
+  "urgent_events"
+] as const satisfies ReadonlyArray<SystemHandlerId>
+
 export const systemHandlerTellsOwner = (handler: string | null | undefined): boolean =>
-  handler === ("urgent_events" satisfies SystemHandlerId)
+  OWNER_FACING_HANDLERS.some((facing) => facing === handler)
 
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId

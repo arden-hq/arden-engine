@@ -1,6 +1,7 @@
 import { jobHeldSince } from "./automation-running.js"
 import { freshRow } from "./automation-enqueue.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
+import { systemHandlerTellsOwner } from "../automations/model.js"
 import { readAutomationFollowup } from "./automation-followup.js"
 import { haltAutomation } from "./automation-halt.js"
 import { recordTaskReport } from "./work-events.js"
@@ -281,7 +282,7 @@ export const makeFencedOccurrences = ({
       })
     }
     const paused =
-      outcome === "failed" && userAutomation
+      outcome === "failed" && (userAutomation || systemHandlerTellsOwner(fenced.row.handler))
         ? yield* pauseOnGivingUp({
             sql,
             sessionEvents,

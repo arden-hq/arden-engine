@@ -81,90 +81,99 @@ it("the check of an event reads what is known about the owner when the job gives
   expect(withOwner?.passed).toEqual([])
 })
 
-it("an arrival wakes Urgent events with the owner's sentence, and its reply is one the owner is told", async () => {
+it("each arrival wakes Urgent events with the owner's sentence, and every alert is one the owner is told", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const catalog = yield* AutomationCatalog
       const triggers = yield* AutomationTriggers
       const chat = yield* ChatWriteStore
+      const queue = yield* AutomationQueue
       yield* catalog.seedSystemAutomations([urgentEventsHandler.spec])
-      const published = yield* triggers.publishSourceEvents({
-        eventType: "email.received",
-        source: "made-up",
-        cursor: "1",
-        events: [
-          {
+      // One made-up mail goes the whole way: published, claimed, run, finished, settled.
+      const alert = (id: string, title: string, reply: string) =>
+        Effect.gen(function* () {
+          const published = yield* triggers.publishSourceEvents({
             eventType: "email.received",
-            eventKey: "item-1",
-            producedBy: null,
-            chainDepth: 0,
-            context: {
-              item: {
-                item_id: "item-1",
-                title: "Interview on Tuesday",
-                sender: "A <a@x.test>",
-                received_at: "2026-11-18T09:00:00.000Z",
-                snippet: "Can you confirm?"
+            source: "made-up",
+            cursor: id,
+            events: [
+              {
+                eventType: "email.received",
+                eventKey: id,
+                producedBy: null,
+                chainDepth: 0,
+                context: {
+                  item: {
+                    item_id: id,
+                    title,
+                    sender: "A <a@x.test>",
+                    received_at: "2026-11-18T09:00:00.000Z",
+                    snippet: "Can you confirm?"
+                  }
+                }
               }
-            }
-          }
-        ]
-      })
-      expect(published.queued).toBe(1)
-      const [lease] = yield* claimAll("urgent")
-      if (lease === undefined) throw new Error("Urgent events was not claimed")
-      expect(lease.payload.handler).toBe("urgent_events")
-      expect(lease.payload.prefilter?.events.map((event) => event.sentences)).toEqual([
+            ]
+          })
+          expect(published.queued).toBe(1)
+          const [lease] = yield* claimAll(`urgent-${id}`)
+          if (lease === undefined) throw new Error("Urgent events was not claimed")
+          const { run, sessionId } = yield* startJob(lease, `alert-${id}`)
+          yield* chat.finish({
+            runId: run.runId,
+            messages: [
+              ...run.activeMessages,
+              {
+                message_id: `alert-${id}-answer`,
+                role: "assistant",
+                content: reply,
+                created_at: new Date().toISOString()
+              }
+            ]
+          })
+          // The job settles as the handler does after its run ends: only then is the ending decided.
+          yield* Effect.promise(async () =>
+            Promise.resolve(
+              queue.jobs.complete({
+                ...lease,
+                completedAt: lease.expiresAt - 1_000,
+                result: {
+                  status: "ended",
+                  outcome: "finished",
+                  result: reply,
+                  error: null,
+                  chatRunId: run.runId,
+                  chatSessionId: sessionId
+                }
+              })
+            )
+          )
+          return lease
+        })
+      const first = yield* alert(
+        "item-1",
+        "Interview on Tuesday",
+        "A recruiter asks you to confirm Tuesday."
+      )
+      expect(first.payload.handler).toBe("urgent_events")
+      expect(first.payload.prefilter?.events.map((event) => event.sentences)).toEqual([
         [
           urgentEventsHandler.spec.triggers[0]?.type === "event"
             ? urgentEventsHandler.spec.triggers[0].run_only_if
             : ""
         ]
       ])
-      expect(lease.payload.prefilter?.events[0]?.prompt).toContain("Interview on Tuesday")
-      const { run, sessionId } = yield* startJob(lease, "alert")
-      const at = new Date().toISOString()
-      yield* chat.finish({
-        runId: run.runId,
-        messages: [
-          ...run.activeMessages,
-          {
-            message_id: "alert-answer",
-            role: "assistant",
-            content: "A recruiter asks you to confirm Tuesday.",
-            created_at: at
-          }
-        ]
-      })
-      // The job settles as the handler does after its run ends: only then is the ending decided.
-      const queue = yield* AutomationQueue
-      yield* Effect.promise(async () =>
-        Promise.resolve(
-          queue.jobs.complete({
-            ...lease,
-            completedAt: lease.expiresAt - 1_000,
-            result: {
-              status: "ended",
-              outcome: "finished",
-              result: "A recruiter asks you to confirm Tuesday.",
-              error: null,
-              chatRunId: run.runId,
-              chatSessionId: sessionId
-            }
-          })
-        )
-      )
+      expect(first.payload.prefilter?.events[0]?.prompt).toContain("Interview on Tuesday")
+      // A later alert is news too: it is not held back as a repeat of the first.
+      yield* alert("item-2", "Offer expires today", "An offer needs your answer today.")
       const notices = yield* recentNotices(sql, { since: "2000-01-01T00:00:00.000Z", limit: 10 })
+      expect(notices.map((notice) => notice.text).toSorted()).toEqual([
+        "A recruiter asks you to confirm Tuesday.",
+        "An offer needs your answer today."
+      ])
       expect(notices).toMatchObject([
-        {
-          status: "finished",
-          shown: true,
-          purpose: "user_automation",
-          title: "Urgent events",
-          text: "A recruiter asks you to confirm Tuesday.",
-          automationId: urgentEventsHandler.spec.automationId
-        }
+        { status: "finished", shown: true, purpose: "user_automation", title: "Urgent events" },
+        { status: "finished", shown: true, purpose: "user_automation", title: "Urgent events" }
       ])
     })
   )

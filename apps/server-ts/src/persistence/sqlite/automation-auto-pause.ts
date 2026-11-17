@@ -7,7 +7,7 @@ import { haltAutomation } from "./automation-halt.js"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { recordAutomationEvent } from "./entity-events.js"
-import { userAutomationSql } from "./authority-sql.js"
+import { ownerFacingAutomationSql, userAutomationSql } from "./authority-sql.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 const FAILURES_BEFORE_GIVING_UP = 3
@@ -108,7 +108,7 @@ export const giveUpReason = (cause: GiveUpCause): string =>
   cause.kind === "lasting" ? cause.said : `it failed ${FAILURES_BEFORE_GIVING_UP} runs in a row`
 
 /**
- * Pauses a user Automation when `givesUp` holds for its failed run, and tells the owner through
+ * Pauses an owner-facing Automation when `givesUp` holds for its failed run, and tells the owner through
  * `recordAutomationEvent`. Answers whether the Automation was paused.
  */
 export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (options: {
@@ -122,7 +122,7 @@ export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (op
   const cause = yield* givesUp(sql, { ...options, item: null })
   if (cause === undefined) return false
   const live = yield* sql`SELECT task_id FROM scheduled_tasks
-    WHERE task_id = ${automationId} AND ${userAutomationSql()} AND enabled = 1`
+    WHERE task_id = ${automationId} AND ${ownerFacingAutomationSql()} AND enabled = 1`
   if (live.length === 0) return false
   yield* endStreak(sql, automationId)
   yield* haltAutomation({

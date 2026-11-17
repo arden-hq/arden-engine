@@ -19,6 +19,8 @@ export interface DayItem {
   readonly title: string
   readonly snippet: string
   readonly spaceName: string | undefined
+  /** A mail the owner sent themselves, kept because its thread belongs to a Space. */
+  readonly sentByOwner: boolean
 }
 
 /** What happened outside the chats between two instants (`end` exclusive), in time order. */

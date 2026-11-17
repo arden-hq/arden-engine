@@ -43,9 +43,11 @@ export const makeDayActivity = ({ reader }: Pick<PersistenceDeps, "reader">) => 
         readonly title: string
         readonly snippet: string
         readonly space_name: string | null
+        readonly sent_by_owner: number
       }>`
         SELECT MIN(item.item_id) AS item_id, item.source, MIN(item.received_at) AS received_at,
-          item.sender, item.title, item.snippet, MAX(space.name) AS space_name
+          item.sender, item.title, item.snippet, MAX(space.name) AS space_name,
+          MAX(COALESCE(json_extract(item.detail, '$.sent_by_owner'), 0)) AS sent_by_owner
         FROM connection_items AS item
         LEFT JOIN spaces AS space ON space.space_id = item.owner_space_id
         WHERE julianday(item.received_at) >= julianday(${start})
@@ -68,7 +70,8 @@ export const makeDayActivity = ({ reader }: Pick<PersistenceDeps, "reader">) => 
           sender: row.sender ?? undefined,
           title: row.title,
           snippet: row.snippet,
-          spaceName: row.space_name ?? undefined
+          spaceName: row.space_name ?? undefined,
+          sentByOwner: row.sent_by_owner === 1
         }))
       }
     },

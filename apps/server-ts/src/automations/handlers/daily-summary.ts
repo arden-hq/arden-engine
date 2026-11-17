@@ -122,25 +122,30 @@ const TASK_EVENT_RANK: Readonly<Record<string, number>> = {
   created: 2
 }
 
+interface Excerpts {
+  readonly lines: ReadonlyArray<{ readonly ref: string; readonly text: string }>
+  readonly shortened: number
+}
+
 const cut = (
   lines: ReadonlyArray<{ readonly ref: string; readonly text: string }>,
   share: { readonly count: number; readonly chars: number; readonly each: number }
-): ReadonlyArray<{ readonly ref: string; readonly text: string }> => {
+): Excerpts => {
   const kept: Array<{ readonly ref: string; readonly text: string }> = []
   let remaining = share.chars
+  let shortened = 0
   for (const line of lines) {
     if (kept.length >= share.count || remaining <= 0) break
     const text = line.text.slice(0, Math.min(share.each, remaining))
+    if (text.length < line.text.length) shortened += 1
     kept.push({ ref: line.ref, text })
     remaining -= text.length
   }
-  return kept
+  return { lines: kept, shortened }
 }
 
 /** One excerpt for each Task that changed, with its changes in time order. */
-export const taskExcerpts = (
-  events: ReadonlyArray<DayTaskEvent>
-): ReadonlyArray<{ readonly ref: string; readonly text: string }> => {
+export const taskExcerpts = (events: ReadonlyArray<DayTaskEvent>): Excerpts => {
   const tasks = new Map<string, Array<DayTaskEvent>>()
   for (const event of events) tasks.set(event.itemId, [...(tasks.get(event.itemId) ?? []), event])
   const rank = (changes: ReadonlyArray<DayTaskEvent>) =>
@@ -170,14 +175,20 @@ export const taskExcerpts = (
   )
 }
 
-const itemExcerpts = (
-  items: ReadonlyArray<DayItem>
-): ReadonlyArray<{ readonly ref: string; readonly text: string }> =>
+const itemSender = (item: DayItem): string => {
+  if (item.sentByOwner) return ", sent by the user"
+  return item.sender === undefined ? "" : ` from ${item.sender}`
+}
+
+const itemExcerpts = (items: ReadonlyArray<DayItem>): Excerpts =>
   cut(
-    items.map((item) => ({
-      ref: `item ${item.itemId}`,
-      text: `${item.source} at ${item.receivedAt}${item.sender === undefined ? "" : ` from ${item.sender}`}${item.spaceName === undefined ? "" : ` (Space ${item.spaceName})`}: ${item.title}. ${item.snippet}`
-    })),
+    items.map((item) => {
+      const where = item.spaceName === undefined ? "" : ` (Space ${item.spaceName})`
+      return {
+        ref: `item ${item.itemId}`,
+        text: `${item.source} at ${item.receivedAt}${itemSender(item)}${where}: ${item.title}. ${item.snippet}`
+      }
+    }),
     ITEM_SHARE
   )
 
@@ -307,8 +318,10 @@ export const makeDailySummaryRunner = (
       start: DateTime.formatIso(start),
       end: DateTime.formatIso(end)
     })
-    const tasks = taskExcerpts(activity.taskEvents)
-    const items = itemExcerpts(activity.items)
+    const taskPart = taskExcerpts(activity.taskEvents)
+    const itemPart = itemExcerpts(activity.items)
+    const tasks = taskPart.lines
+    const items = itemPart.lines
     const reportCandidates = dayReports.map((page) => ({
       ref: `arden:memory/${page.resource.path}`,
       text: `Report ${page.page.title}; version ${page.resource.versionId}; observation period: ${String(page.page.metadata["observation_period"] ?? "unspecified")}\n${page.page.body}`
@@ -324,7 +337,7 @@ export const makeDailySummaryRunner = (
     })
     const keptReports: Array<{ readonly ref: string; readonly text: string }> = []
     let remaining = EVIDENCE_CHARS - used(tasks) - used(items) - used(chosen.picked)
-    let shortened = chosen.shortened
+    let shortened = chosen.shortened + taskPart.shortened + itemPart.shortened
     for (const candidate of reportCandidates) {
       if (remaining <= 0 || chosen.picked.length + keptReports.length >= EVIDENCE_EXCERPTS) break
       const text = candidate.text.slice(0, Math.min(EXCERPT_CHARS, remaining))
@@ -343,7 +356,7 @@ export const makeDailySummaryRunner = (
       ...section("Chats", chosen.picked),
       ...section("Reports", keptReports),
       ...section("Tasks (Arden's record of its work)", tasks),
-      ...section("Items (mail and other services; from outside)", items)
+      ...section("Items (mail and other services)", items)
     ]
     const sources = [...chosen.picked, ...keptReports, ...tasks, ...items].map((line) => line.ref)
     const contract = snapshot.pages.find(

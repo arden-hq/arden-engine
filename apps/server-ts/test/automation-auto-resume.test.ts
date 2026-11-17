@@ -2,7 +2,8 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { automationRulesLayer } from "../src/automations/rules.js"
-import { AutomationRules } from "../src/persistence/automations/model.js"
+import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
+import { AutomationId, AutomationRules } from "../src/persistence/automations/model.js"
 import { resumeDueAutomations } from "../src/persistence/sqlite/automation-resume.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
@@ -37,37 +38,28 @@ it("an Automation paused by its provider is resumed when its wait is over", asyn
         readonly auto_resumes: number
       }>`SELECT task_id, enabled, next_run_at, auto_resume_at, auto_resumes
         FROM scheduled_tasks ORDER BY task_id`
-      expect(rows).toEqual([
-        // Runs at once for the run it missed; the try is counted.
-        {
-          task_id: "due-daily",
-          enabled: 1,
-          next_run_at: NOW,
-          auto_resume_at: null,
-          auto_resumes: 2
-        },
-        {
-          task_id: "due-listening",
-          enabled: 1,
-          next_run_at: null,
-          auto_resume_at: null,
-          auto_resumes: 2
-        },
-        {
-          task_id: "paused-by-owner",
-          enabled: 0,
-          next_run_at: null,
-          auto_resume_at: null,
-          auto_resumes: 1
-        },
-        {
-          task_id: "waiting",
-          enabled: 0,
-          next_run_at: null,
-          auto_resume_at: LATER,
-          auto_resumes: 1
-        }
-      ])
+      const of = (id: string) => rows.find((row) => row.task_id === id)
+      // Resumed with the next run its schedule gives, as the owner's resume does; the try is counted.
+      expect(of("due-daily")).toMatchObject({ enabled: 1, auto_resume_at: null, auto_resumes: 2 })
+      expect(Date.parse(of("due-daily")?.next_run_at ?? "")).toBeGreaterThan(Date.parse(NOW))
+      expect(of("due-listening")).toEqual({
+        task_id: "due-listening",
+        enabled: 1,
+        next_run_at: null,
+        auto_resume_at: null,
+        auto_resumes: 2
+      })
+      expect(of("paused-by-owner")).toMatchObject({ enabled: 0, auto_resumes: 1 })
+      expect(of("waiting")).toMatchObject({ enabled: 0, auto_resume_at: LATER })
+      // The owner keeps it off: Arden's booked try is cancelled.
+      const catalog = yield* AutomationCatalog
+      yield* catalog.update(AutomationId.make("waiting"), { enabled: false }, "owner")
+      yield* resumeDueAutomations({ sql, rules, now: "2026-11-08T00:00:00.000Z" })
+      const [kept] = yield* sql<{
+        readonly enabled: number
+        readonly auto_resume_at: string | null
+      }>`SELECT enabled, auto_resume_at FROM scheduled_tasks WHERE task_id = 'waiting'`
+      expect(kept).toEqual({ enabled: 0, auto_resume_at: null })
     }).pipe(Effect.provide(automationRulesLayer))
   )
 })

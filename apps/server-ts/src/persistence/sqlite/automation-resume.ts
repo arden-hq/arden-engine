@@ -1,7 +1,8 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { AutomationRules } from "../automations/model.js"
-import { userAutomationSql } from "./authority-sql.js"
+import { iso } from "../../runtime/clock.js"
+import { ownerFacingAutomationSql } from "./authority-sql.js"
 import { endAutoPause } from "./automation-auto-pause.js"
 import { listenerTriggers } from "./automation-schedule.js"
 import { restartMeasuredTriggers } from "./automation-trigger-arming.js"
@@ -28,10 +29,10 @@ const restartAutomationPositions = (sql: SqlClient.SqlClient, automationId: stri
   sql`DELETE FROM monitor_state WHERE namespace = ${automationPositionNamespace(automationId)}`
 
 /**
- * Resumes each user Automation whose provider pause has waited its time (`bookAutoResume`): the
- * try the owner would otherwise make by hand. One with a schedule runs at once, for the run it
- * missed; one that only listens takes up its waiting events. A run that is refused again pauses
- * it again with the next, longer wait.
+ * Resumes each owner-facing Automation whose provider pause has waited its time
+ * (`bookAutoResume`): the try the owner would otherwise make by hand, and with the same next run
+ * as theirs. One with a schedule runs at its next time; one that listens takes up its waiting
+ * events. A run that is refused again pauses it again with the next, longer wait.
  */
 export const resumeDueAutomations = Effect.fn("AutomationResume.resumeDue")(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -46,7 +47,7 @@ export const resumeDueAutomations = Effect.fn("AutomationResume.resumeDue")(func
   }>`
     SELECT task.task_id, task.triggers, task.auto_resumes
     FROM scheduled_tasks AS task
-    WHERE ${userAutomationSql("task")} AND task.enabled = 0
+    WHERE ${ownerFacingAutomationSql("task")} AND task.enabled = 0
       AND task.auto_resume_at IS NOT NULL AND task.auto_resume_at <= ${now}
       AND NOT EXISTS (
         SELECT 1 FROM sessions AS chat JOIN spaces AS space ON space.space_id = chat.space_id
@@ -55,15 +56,16 @@ export const resumeDueAutomations = Effect.fn("AutomationResume.resumeDue")(func
     ORDER BY task.auto_resume_at, task.task_id`
   for (const row of due) {
     const triggers = yield* listenerTriggers(row)
-    const scheduled =
-      triggers !== undefined &&
-      (yield* Effect.try(() => rules.triggers(triggers).times.length > 0).pipe(
-        Effect.orElseSucceed(() => false)
-      ))
+    const next =
+      triggers === undefined
+        ? null
+        : yield* Effect.try(() => rules.nextRunAt(rules.triggers(triggers), Date.parse(now))).pipe(
+            Effect.orElseSucceed(() => null)
+          )
     yield* resumeAutomation({
       sql,
       automationId: row.task_id,
-      nextRunAt: scheduled ? now : null
+      nextRunAt: next === null ? null : iso(next)
     })
     yield* sql`UPDATE scheduled_tasks SET auto_resumes = ${row.auto_resumes + 1}
       WHERE task_id = ${row.task_id}`

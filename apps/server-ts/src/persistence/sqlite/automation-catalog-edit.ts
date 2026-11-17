@@ -448,6 +448,10 @@ export const makeAutomationCatalogEdits = ({
         `
           if (enabled && row.enabled === 0)
             yield* resumeAutomation({ sql, automationId: validAutomationId, nextRunAt })
+          // The owner keeps a paused Automation off: Arden's own next try is cancelled.
+          else if (valid.enabled === false && row.enabled === 0)
+            yield* sql`UPDATE scheduled_tasks SET auto_resume_at = NULL
+              WHERE task_id = ${validAutomationId}`
           else if (!enabled && row.enabled === 1)
             yield* haltAutomation({
               sql,
