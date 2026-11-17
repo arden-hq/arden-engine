@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest"
-import { addressCovers, onThisMachine, readAddresses, variableOf } from "../src/vault-key.js"
+import {
+  addressCovers,
+  fitsCard,
+  onThisMachine,
+  readAddresses,
+  variableOf
+} from "../src/vault-key.js"
 
 describe("key rules", () => {
   test("a name gives the variable a command reads", () => {
@@ -60,5 +66,14 @@ describe("an address on this machine", () => {
         onThisMachine
       )
     ).toEqual([true, true, true, false, false])
+  })
+})
+
+describe("the add-a-key card's limit", () => {
+  test("is at most 3 addresses of at most 80 characters", () => {
+    expect(fitsCard(["api.todoist.com", "todoist.com", "sync.todoist.com"])).toBe(true)
+    expect(fitsCard(["a.com", "b.com", "c.com", "d.com"])).toBe(false)
+    expect(fitsCard([`${"a".repeat(40)}.${"b".repeat(40)}.com`])).toBe(false)
+    expect(fitsCard([])).toBe(false)
   })
 })

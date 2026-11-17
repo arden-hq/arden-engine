@@ -7,6 +7,22 @@
 
 import { isLoopbackHost } from "./url.js"
 
+/**
+ * What an agent may suggest on the chat's add-a-key card, and what that card saves: at most 3
+ * addresses, each at most 80 characters, so every one is in plain sight on the card.
+ */
+export const CARD_MAX_ADDRESSES = 3
+export const CARD_MAX_ADDRESS_LENGTH = 80
+
+/** Whether a list of addresses fits the add-a-key card's limit. */
+export function fitsCard(addresses: ReadonlyArray<string>): boolean {
+  return (
+    addresses.length >= 1 &&
+    addresses.length <= CARD_MAX_ADDRESSES &&
+    addresses.every((address) => address.length <= CARD_MAX_ADDRESS_LENGTH)
+  )
+}
+
 const MAX_KEY_NAME_LENGTH = 64
 const MAX_KEY_ADDRESSES = 16
 const MAX_ADDRESS_LENGTH = 260

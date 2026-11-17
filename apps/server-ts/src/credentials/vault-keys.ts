@@ -87,15 +87,21 @@ class VaultUnavailableError extends Error {
 export interface VaultKeysService {
   /** Names, kinds, addresses and user names; never a value. */
   readonly list: () => Promise<VaultList>
-  /** The run may now use this key in its commands (the user allowed it, or a rule does). */
-  readonly grant: (runId: string, name: string) => void
-  /** The keys a run may use, in the order they were allowed. */
+  /**
+   * The run may now use this key in its commands (the user allowed it, or a rule does), by the
+   * key's id: a key deleted and added again under its name is another key.
+   */
+  readonly grant: (runId: string, keyId: string) => void
+  /** The ids of the keys a run may use, in the order they were allowed. */
   readonly granted: (runId: string) => ReadonlyArray<string>
   /** Fake values, proxy and certificate details for a run's keys; undefined when it has none. */
   readonly environment: (runId: string, reach: KeyProxyReach) => Promise<KeyEnvironment | undefined>
   /** Command output with every saved key and password replaced. Throws when it cannot check. */
   readonly redact: (text: string) => Promise<string>
-  /** The run's runner ended: the desktop drops its proxy token and stand-ins. Never throws. */
+  /**
+   * The run's runner ended: its grants are forgotten here, and the desktop drops its proxy token
+   * and stand-ins. Never throws.
+   */
   readonly end: (runId: string) => Promise<void>
   /**
    * Counts one ask for a secret in a chat, once per tool call; false once the chat asked 5
@@ -126,16 +132,19 @@ export const makeVaultKeys = (
   const granted = (runId: string): ReadonlyArray<string> => grants.get(runId) ?? []
   return {
     list: async () => decodeList(await requireBroker().listVault(), strict),
-    grant: (runId, name) => {
+    grant: (runId, keyId) => {
       const held = grants.get(runId) ?? []
       grants.delete(runId)
-      grants.set(runId, held.includes(name) ? held : [...held, name])
+      grants.set(runId, held.includes(keyId) ? held : [...held, keyId])
       const oldest = grants.keys().next().value
       if (grants.size > MAX_RUNS && oldest !== undefined) grants.delete(oldest)
     },
     granted,
     environment: async (runId, reach) => {
-      const names = granted(runId)
+      const ids = granted(runId)
+      if (ids.length === 0) return undefined
+      const listed = decodeList(await requireBroker().listVault(), strict)
+      const names = listed.keys.filter((key) => ids.includes(key.id)).map((key) => key.name)
       if (names.length === 0) return undefined
       return decodeEnvironment(
         await requireBroker().keyEnvironment({ runId, names, reach }),
@@ -155,7 +164,9 @@ export const makeVaultKeys = (
       return replaceRanges(text, ranges)
     },
     end: async (runId) => {
-      if (broker === undefined || granted(runId).length === 0) return
+      const had = granted(runId).length > 0
+      grants.delete(runId)
+      if (broker === undefined || !had) return
       await broker.endKeySession(runId).catch(() => undefined)
     },
     takeAsk: (sessionId, toolCallId) => {

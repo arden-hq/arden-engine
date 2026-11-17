@@ -66,16 +66,36 @@ describe("the Vault seen from the engine", () => {
       })
     )
     await expect(leaky.list()).rejects.toThrow()
-    leaky.grant("run-1", "Todoist")
+    leaky.grant("run-1", "k1")
     await expect(leaky.environment("run-1", "remote")).rejects.toThrow()
+  })
+
+  it("grants by the key's id: a key added again under the same name is not allowed", async () => {
+    const vault = makeVaultKeys(
+      desktop({
+        listVault: async () => ({
+          keys: [
+            {
+              id: "k2",
+              name: "Todoist",
+              variable: "TODOIST_API_KEY",
+              addresses: ["api.todoist.com"]
+            }
+          ],
+          passwords: []
+        })
+      })
+    )
+    vault.grant("run-1", "k1")
+    expect(await vault.environment("run-1", "all")).toBeUndefined()
   })
 
   it("gives a run's commands only the keys the run was allowed", async () => {
     const vault = makeVaultKeys(desktop())
     expect(await vault.environment("run-1", "all")).toBeUndefined()
-    vault.grant("run-1", "Todoist")
-    vault.grant("run-1", "Todoist")
-    expect(vault.granted("run-1")).toEqual(["Todoist"])
+    vault.grant("run-1", "k1")
+    vault.grant("run-1", "k1")
+    expect(vault.granted("run-1")).toEqual(["k1"])
     expect(vault.granted("run-2")).toEqual([])
     const environment = await vault.environment("run-1", "all")
     expect(environment === undefined ? undefined : keyVariables(environment)).toEqual({
@@ -138,13 +158,16 @@ describe("the Vault seen from the engine", () => {
       })
     )
     await vault.end("run-0")
-    vault.grant("run-1", "Todoist")
+    vault.grant("run-1", "k1")
     await vault.end("run-1")
     expect(ended).toEqual(["run-1"])
+    // Ending a run also forgets what it was allowed.
+    expect(vault.granted("run-1")).toEqual([])
+    expect(await vault.environment("run-1", "all")).toBeUndefined()
     const failing = makeVaultKeys(
       desktop({ endKeySession: () => Promise.reject(new Error("gone")) })
     )
-    failing.grant("run-2", "Todoist")
+    failing.grant("run-2", "k1")
     await expect(failing.end("run-2")).resolves.toBeUndefined()
   })
 

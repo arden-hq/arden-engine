@@ -1,5 +1,5 @@
 import { listWords } from "@arden-hq/std/count"
-import { keyName, readAddresses } from "@arden-hq/std/vault-key"
+import { fitsCard, keyName, readAddresses } from "@arden-hq/std/vault-key"
 import { APPROVAL_FIELD_LABEL, type ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { Effect, Schema } from "effect"
@@ -264,7 +264,7 @@ const makeVaultUseKeyTool = (
         case "ask":
           throw toolRefusal("A key is allowed only on the user's card.", "Needs approval")
         case "allowed":
-          vault.grant(ctx.run.runId, key.name)
+          vault.grant(ctx.run.runId, key.id)
           return { result: usable(key), preview: `${key.name} key allowed` }
       }
     }
@@ -281,6 +281,11 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
       throw toolRefusal(
         "Each address must be a host such as api.todoist.com, or a local address with its port such as localhost:11434.",
         "Address refused"
+      )
+    if (!fitsCard(addresses.addresses))
+      throw toolRefusal(
+        "Suggest at most 3 addresses, each at most 80 characters: the service's main API hosts. The user can add more in Settings → Vault.",
+        "Too many addresses"
       )
     refuseSecretShaped(input.reason)
     return { name, addresses: addresses.addresses, reason: input.reason }
@@ -325,7 +330,7 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
       const ask = readAsk(input)
       const key = findKey(await listOrRefuse(vault), ask.name)
       if (key !== undefined) {
-        if (ctx.approval !== undefined) vault.grant(ctx.run.runId, key.name)
+        if (ctx.approval !== undefined) vault.grant(ctx.run.runId, key.id)
         return {
           result:
             ctx.approval === undefined
