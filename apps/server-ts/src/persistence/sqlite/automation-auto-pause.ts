@@ -12,9 +12,22 @@ import { sha256Hex } from "@arden-hq/std/hash"
 
 const FAILURES_BEFORE_GIVING_UP = 3
 
+/**
+ * How long a user Automation paused by its provider waits before each try Arden makes by itself.
+ * After the last one it stays paused until the owner resumes it.
+ */
+const AUTO_RESUME_WAIT_HOURS = [1, 6, 24, 72] as const
+
 export type GiveUpCause =
   | { readonly kind: "streak" }
-  | { readonly kind: "lasting"; readonly said: string; readonly next: string }
+  | {
+      readonly kind: "lasting"
+      readonly said: string
+      readonly next: string
+      /** Whether the refusal can end without the owner: a provider or sign-in outage can, a
+       *  request the provider will not take cannot. */
+      readonly retries: boolean
+    }
 
 /**
  * What an item job does when it gives up, by the kind of failure; a user Automation pauses on
@@ -55,7 +68,8 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
       next:
         refused.error_code === "model_unavailable"
           ? "Pick another model for it, then resume it."
-          : "Resume it once that's fixed."
+          : "Resume it once that's fixed.",
+      retries: refused.error_code !== "request_invalid"
     }
   }
   const streak = yield* sql<{ readonly failed_runs: number }>`UPDATE scheduled_tasks
@@ -69,6 +83,25 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
 /** Ends the failure streak: a run did its work, the Automation gave up, or the owner resumed it. */
 export const endStreak = (sql: SqlClient.SqlClient, automationId: string) =>
   sql`UPDATE scheduled_tasks SET failed_runs = 0, failed_item = NULL WHERE task_id = ${automationId}`
+
+/** A run did its work: the next provider pause starts its waits over. */
+export const endAutoResumes = (sql: SqlClient.SqlClient, automationId: string) =>
+  sql`UPDATE scheduled_tasks SET auto_resumes = 0
+    WHERE task_id = ${automationId} AND auto_resumes != 0`
+
+/** Books the next try of a paused Automation; answers whether one is left. */
+const bookAutoResume = Effect.fn("AutomationGiveUp.bookAutoResume")(function* (
+  sql: SqlClient.SqlClient,
+  automationId: string
+) {
+  const rows = yield* sql<{ readonly auto_resumes: number }>`
+    SELECT auto_resumes FROM scheduled_tasks WHERE task_id = ${automationId}`
+  const hours = AUTO_RESUME_WAIT_HOURS[rows[0]?.auto_resumes ?? 0]
+  if (hours === undefined) return false
+  const at = DateTime.formatIso(DateTime.add(yield* DateTime.now, { hours }))
+  yield* sql`UPDATE scheduled_tasks SET auto_resume_at = ${at} WHERE task_id = ${automationId}`
+  return true
+})
 
 /** Why a job gave up, for the line that tells the owner. */
 export const giveUpReason = (cause: GiveUpCause): string =>
@@ -98,6 +131,8 @@ export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (op
     automationId,
     halt: "pause"
   })
+  const triesAgain =
+    cause.kind === "lasting" && cause.retries ? yield* bookAutoResume(sql, automationId) : false
   yield* recordAutomationEvent(sql, {
     sessionEvents: options.sessionEvents,
     automationId,
@@ -106,7 +141,7 @@ export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (op
     text:
       cause.kind === "streak"
         ? `Paused after ${FAILURES_BEFORE_GIVING_UP} failed runs in a row. Resume it once the cause is fixed.`
-        : `Paused: ${cause.said} ${cause.next}`
+        : `Paused: ${cause.said} ${triesAgain ? "Arden will try it again by itself. " : ""}${cause.next}`
   })
   return true
 })

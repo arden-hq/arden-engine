@@ -221,7 +221,9 @@ describe("persistence schema", () => {
         "paused_at",
         "failed_runs",
         "failed_item",
-        "failed_attempt"
+        "failed_attempt",
+        "auto_resume_at",
+        "auto_resumes"
       ])
       database.exec(`INSERT INTO scheduled_tasks
         (task_id, automation_ref, prompt, triggers, created_at, tool_scope, purpose)

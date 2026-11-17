@@ -5,6 +5,7 @@ import { isUserAutomationPurpose } from "../job-classification.js"
 import { enqueue, holdForCooldown } from "./automation-enqueue.js"
 import { dropClosedAsks } from "./automation-ask-feed.js"
 import { parseLease } from "./automation-lease.js"
+import { resumeDueAutomations } from "./automation-resume.js"
 import { queueNextDueAt } from "./automation-next-due.js"
 import type { QueueContext } from "./automation-queue-context.js"
 import { reopenDeferredTasks } from "./work-lifecycle.js"
@@ -259,6 +260,7 @@ export const makeAutomationJobs = ({
         Effect.gen(function* () {
           for (const task of yield* reopenDeferredTasks({ sql, sessionEvents }, nowText))
             yield* spaceJobs.queueTaskWake(task.item_id, nowText, { kind: "continuation" })
+          yield* resumeDueAutomations({ sql, rules, now: nowText })
           yield* materializeDue(nowText)
           yield* spaceJobs.materializeDue(nowText)
           yield* dropClosedAsks(sql, nowText)
