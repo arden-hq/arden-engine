@@ -141,6 +141,10 @@ const askCard = (input: {
   data: { reviewer: "user", vault_key: input.name }
 })
 
+/** An address as a URL in an example: plain http for this machine, where a local service listens. */
+const exampleUrl = (address: string): string =>
+  /^(?:localhost|127\.|\[::1\])/.test(address) ? `http://${address}/...` : `https://${address}/...`
+
 /** What the agent is told once a key is allowed: the variable, where it goes, how to send it. */
 const usable = (key: {
   readonly name: string
@@ -149,7 +153,7 @@ const usable = (key: {
 }) =>
   [
     `You may use the ${key.name} key in this run's commands as $${key.variable}.`,
-    `The variable holds a stand-in, not the key: Arden swaps in the real key as the request leaves, only for ${listWords([...key.addresses])}, and only in a request header (for example curl -H "Authorization: Bearer $${key.variable}" https://${key.addresses[0] ?? ""}/...).`,
+    `The variable holds a stand-in, not the key: Arden swaps in the real key as the request leaves, only for ${listWords([...key.addresses])}, and only in a request header (for example curl -H "Authorization: Bearer $${key.variable}" ${exampleUrl(key.addresses[0] ?? "")}).`,
     "Run the command with access network or host; a sandboxed command has no network. Never print the variable or write it to a file: it is useless anywhere else, and the real key never reaches you."
   ].join(" ")
 
