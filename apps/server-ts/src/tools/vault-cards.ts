@@ -200,9 +200,8 @@ export const paymentAllowed = (card: Card, input: Pick<PayInput, "shop" | "tab_r
     `The user approved the payment with Touch ID. For the next ${APPROVAL_MINUTES} minutes, while ${input.tab_ref} stays on ${input.shop}, Arden types the ${cardTitle(card)} card for you with vault_checkout.`,
     "Fill every other field of the checkout first (name, address, postcode, email, and any field inside the payment frame that is not the card, such as a postcode there), and choose expiry lists with select. Then take one browser_snapshot.",
     `From that snapshot, call vault_checkout once with card_id "${card.id}", the refs of the card fields (number, expiry, security_code, name: an expiry split in two takes the month field and then the year field) and the ref of the shop's Pay button. Arden types the card and clicks Pay in that one call.`,
-    "While a form in the tab still holds the card, Arden reads no page of it; after the click, wait for the page with browser_wait (load, or the confirmation page's address), then take a snapshot to see the result. In that tab Arden types nothing else and takes no screenshot.",
-    "You never see the number or the security code. If a card field sits in a payment frame Arden does not know, vault_checkout says so before typing anything; ask with vault_allow_payment_frame, then call it again.",
-    "If the shop then asks for anything more (a bank's one-time code, an app confirmation, a second form), stop and tell the user what the shop asks for; never ask for it in the chat."
+    "From the first character typed, the tab belongs to the user: Arden cannot read or use it any more, and you cannot confirm the payment. Ask the user whether it went through, and what the shop says if it asks for anything more (for example a code from the bank). Never claim it succeeded, and never ask for a card number or a code in the chat.",
+    "You never see the number or the security code. If a card field sits in a payment frame Arden does not know, vault_checkout says so before typing anything; ask with vault_allow_payment_frame, then call it again."
   ].join(" ")
 
 const makeVaultPayTool = (
@@ -227,7 +226,7 @@ const makeVaultPayTool = (
       "Ask the user to pay at a shop's checkout with one of their saved cards (vault_list lists them by id, brand, last 4 digits and expiry).",
       "The user approves on a card in the chat with Touch ID; a payment always needs them, so with nobody there the card waits.",
       "Call it on the checkout page, once the order and its total are final, with the total and currency the page shows. Arden cannot check the amount against the page, so give exactly what the page says.",
-      "Before asking, fill every other field of the checkout (name, address, postcode, any field in the payment frame that is not the card). Once approved, take one snapshot and call vault_checkout with the refs of the card fields and of the Pay button: Arden types the card and clicks Pay in one call, and reads no page of the tab while a form still holds the card. You never see the number or the security code. After the card is typed nothing else can be typed in that tab; if the shop then asks for more (a bank's one-time code, a second form), stop and tell the user what it asks for.",
+      "Before asking, fill every other field of the checkout (name, address, postcode, any field in the payment frame that is not the card). Once approved, take one snapshot and call vault_checkout with the refs of the card fields and of the Pay button: Arden types the card and clicks Pay in one call. You never see the number or the security code. From then on the tab belongs to the user and Arden cannot read or use it: ask the user whether the payment went through and what the shop asks for, if anything (for example a code from the bank).",
       "Never type a card number or a security code yourself, never ask for one in the chat, and never pay with a card the user did not save."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(PayParametersSchema),
@@ -373,7 +372,7 @@ const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
     description: [
       "Type a saved card into the checkout and click the shop's Pay button, in one call, after the user approved vault_pay for this card and this tab.",
       "Take one browser_snapshot after every other field is filled; give the refs of the card fields and of the Pay button from it. Arden checks every card field before typing any, then types them and clicks Pay; you never see the number or the security code.",
-      "Afterwards wait for the page with browser_wait; while a form still holds the card, Arden reads no page of that tab."
+      "From the first character typed, the tab belongs to the user: Arden cannot read or use it any more, only close it. Then ask the user whether the payment went through, and what the shop says if it asks for anything more (for example a code from the bank). Never claim the payment succeeded."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CheckoutParametersSchema),
     metadata: {

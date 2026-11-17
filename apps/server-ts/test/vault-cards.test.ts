@@ -127,10 +127,11 @@ describe("cards seen from the engine", () => {
     const text = paymentAllowed(CARD, PAY)
     expect(text).toContain('call vault_checkout once with card_id "0123456789abcdef01234567"')
     expect(text).toContain("10 minutes")
-    expect(text).toContain("one-time code")
-    expect(text).toContain("never ask for it in the chat")
+    expect(text).toContain("a code from the bank")
+    expect(text).toContain("never ask for a card number or a code in the chat")
     expect(text).toContain("Fill every other field of the checkout first")
-    expect(text).toContain("stop and tell the user what the shop asks for")
+    expect(text).toContain("Ask the user whether it went through")
+    expect(text).toContain("Never claim it succeeded")
   })
 
   it("browser_act takes no card; vault_checkout takes card fields and the Pay button by ref, never a value", () => {
