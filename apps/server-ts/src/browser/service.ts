@@ -150,6 +150,13 @@ const BrowserOperationSchema = Schema.Union([
     type: Schema.Literal("site_secrets"),
     origin: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048))
   }),
+  /** Whether the tab's focused card field is in a frame from `frame`, directly in `shop`'s page. */
+  Schema.Struct({
+    type: Schema.Literal("card_frame"),
+    tabRef: TabRefSchema,
+    shop: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
+    frame: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048))
+  }),
   Schema.Struct({
     type: Schema.Literal("wait"),
     tabRef: TabRefSchema,

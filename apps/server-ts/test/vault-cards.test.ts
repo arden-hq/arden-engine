@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest"
 
 import { makeVaultKeys, type VaultKeyBroker } from "../src/credentials/vault-keys.js"
 import { ActParametersSchema } from "../src/tools/browser-parameters.js"
-import { frameCard, payCard, payDecision, paymentAllowed } from "../src/tools/vault-cards.js"
+import {
+  frameCard,
+  frameThere,
+  payCard,
+  payDecision,
+  paymentAllowed
+} from "../src/tools/vault-cards.js"
 import { vaultListText } from "../src/tools/vault.js"
 
 const CARD = {
@@ -91,6 +97,13 @@ describe("cards seen from the engine", () => {
     )
     expect(card.presentation.title).toBe("Give your card to pay.example.com?")
     expect(card.presentation.approve_label).toBe("Allow once")
+  })
+
+  it("the frame card is raised only when the desktop found the card field in that frame", () => {
+    expect(frameThere({ data: { matches: true } })).toBe(true)
+    expect(frameThere({ data: { matches: false } })).toBe(false)
+    expect(frameThere({ data: { matches: "true" } })).toBe(false)
+    expect(frameThere({})).toBe(false)
   })
 
   it("once paid, the agent is told how to fill and to stop at a bank's code", () => {

@@ -273,7 +273,18 @@ const makeVaultPayTool = (
   })
 }
 
-const makeAllowFrameTool = (vault: VaultKeysService): ServerTool =>
+/**
+ * Whether the desktop found the tab's focused card field in a frame from the address the card
+ * would name, placed directly in the shop's page. Anything else, the card is not raised.
+ */
+export const frameThere = (checked: {
+  readonly data?: Record<string, unknown> | undefined
+}): boolean => checked.data?.["matches"] === true
+
+const makeAllowFrameTool = (
+  vault: VaultKeysService,
+  browser: BrowserClient["Service"]
+): ServerTool =>
   defineServerTool({
     name: "vault_allow_payment_frame",
     description: [
@@ -299,6 +310,19 @@ const makeAllowFrameTool = (vault: VaultKeysService): ServerTool =>
       const card = findCard(await listOrRefuse(vault), input.card_id)
       if (payDecision({ answered: false, mode: ctx.run.approvalMode }).kind === "refuse")
         throw toolRefusal(READ_ONLY, DECISION_WORD.denied)
+      // The card says the shop's card fields come from this address, so the desktop checks that
+      // first: the focused card field is in a frame from it, directly in the shop's page.
+      const checked = await runBrowserForRun(
+        browser,
+        { run: ctx.run },
+        { type: "card_frame", tabRef: input.tab_ref, shop: input.shop, frame: input.frame },
+        ctx.signal
+      )
+      if (!frameThere(checked))
+        throw toolRefusal(
+          `The focused card field is not in a frame from ${input.frame} placed directly in ${input.shop}. Fill the card field again; ask only about the frame browser_act names.`,
+          "Frame not found"
+        )
       return frameCard(input, card)
     },
     execute: async (input, ctx) => {
@@ -316,7 +340,7 @@ const makeAllowFrameTool = (vault: VaultKeysService): ServerTool =>
 export const vaultCardTools = Effect.gen(function* () {
   const vault = yield* VaultKeys
   const browser = yield* BrowserClient
-  return [makeVaultPayTool(vault, browser), makeAllowFrameTool(vault)]
+  return [makeVaultPayTool(vault, browser), makeAllowFrameTool(vault, browser)]
 })
 
 /** vault_list's lines for cards: safe fields and the id the agent pays with. */
