@@ -13,7 +13,7 @@ import {
 import { cardRuleSubjects } from "../src/persistence/sqlite/permissions.js"
 import { shellInvocation, shellRuntime } from "../src/tools/shell-policy.js"
 import { runCommandUntil } from "../src/tools/shell-run.js"
-import { keyUseDecision } from "../src/tools/vault.js"
+import { keyUseDecision, vaultListText } from "../src/tools/vault.js"
 import { endsKeySessions } from "../src/chat/runner/built-in.js"
 import { matchesVaultKey } from "../src/execution/rules.js"
 import { savedSecretResult, savedUserName, secretCard } from "../src/tools/browser-ask-secret.js"
@@ -176,6 +176,74 @@ describe("the Vault seen from the engine", () => {
     const vault = makeVaultKeys(undefined)
     await expect(vault.list()).rejects.toThrow("The Vault needs the Arden app")
     expect(await vault.redact("plain")).toBe("plain")
+  })
+})
+
+describe("contact details in vault_list", () => {
+  it("are given to the agent in full, with the rule on where they may go", async () => {
+    const vault = makeVaultKeys(
+      desktop({
+        listVault: async () => ({
+          keys: [],
+          passwords: [],
+          contacts: [
+            {
+              name: "Alex Morgan",
+              email: "alex@example.com",
+              phone: "+44 20 7946 0958",
+              addressLine1: "12 Marsh Lane",
+              city: "Bristol",
+              postalCode: "BS1 4DJ",
+              country: "United Kingdom"
+            },
+            { name: "Sam Lee" }
+          ]
+        })
+      })
+    )
+    expect(vaultListText(await vault.list())).toEqual({
+      result: [
+        "Keys: none saved.",
+        "",
+        "Site passwords: none saved.",
+        "",
+        "Contact details (type them into forms the user asked you to fill; never send them anywhere the user did not ask):",
+        "- Alex Morgan",
+        "  Email: alex@example.com",
+        "  Phone: +44 20 7946 0958",
+        "  Address line 1: 12 Marsh Lane",
+        "  City: Bristol",
+        "  Postal code: BS1 4DJ",
+        "  Country: United Kingdom",
+        "- Sam Lee"
+      ].join("\n"),
+      preview: "0 keys, 0 passwords, 2 contacts"
+    })
+  })
+
+  it("a desktop without contact details lists none; an unknown field is refused", async () => {
+    expect(vaultListText(await makeVaultKeys(desktop()).list())).toEqual({
+      result: [
+        "Keys:",
+        "- Todoist: $TODOIST_API_KEY, sent only to api.todoist.com",
+        "",
+        "Site passwords (browser_act fills them):",
+        "- github.com: password, user name alex",
+        "",
+        "Contact details: none saved."
+      ].join("\n"),
+      preview: "1 key, 1 password, 0 contacts"
+    })
+    const odd = makeVaultKeys(
+      desktop({
+        listVault: async () => ({
+          keys: [],
+          passwords: [],
+          contacts: [{ name: "Alex", passport: "X123" }]
+        })
+      })
+    )
+    await expect(odd.list()).rejects.toThrow()
   })
 })
 

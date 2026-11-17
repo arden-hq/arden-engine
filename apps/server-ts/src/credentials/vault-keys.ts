@@ -1,9 +1,10 @@
 import { Context, Layer, Schema } from "effect"
 
 /**
- * The agent's side of the Vault. The keys and passwords live in the desktop's main process;
- * this server asks it, over the credential broker, for names, addresses, user names and fake
- * values only (`VaultKeyBroker`). A key's value never reaches this process.
+ * The agent's side of the Vault. The keys, passwords and contact details live in the desktop's
+ * main process; this server asks it, over the credential broker, for names, addresses, user
+ * names, fake values and contact details only (`VaultKeyBroker`). A key's value or a password
+ * never reaches this process.
  */
 
 /** The tool whose card is "Use your Todoist key?"; its "Always allow" saves a `vault_key` rule. */
@@ -41,6 +42,22 @@ const VaultListSchema = Schema.Struct({
   ),
   passwords: Schema.Array(
     Schema.Struct({ site: Text, name: Text, userName: Schema.optionalKey(Text) })
+  ),
+  /** Contact details, values included: they are not secret. A desktop without them sends none. */
+  contacts: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        name: Text,
+        email: Schema.optionalKey(Text),
+        phone: Schema.optionalKey(Text),
+        addressLine1: Schema.optionalKey(Text),
+        addressLine2: Schema.optionalKey(Text),
+        city: Schema.optionalKey(Text),
+        postalCode: Schema.optionalKey(Text),
+        region: Schema.optionalKey(Text),
+        country: Schema.optionalKey(Text)
+      })
+    )
   )
 })
 export type VaultList = typeof VaultListSchema.Type

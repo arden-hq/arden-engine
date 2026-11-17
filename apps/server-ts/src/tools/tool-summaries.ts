@@ -44,7 +44,8 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   browser_act: "Clicks, types and scrolls on a browser page.",
   browser_upload: "Uploads a file to a browser page.",
   browser_ask_secret: "Asks you for a site password on a card; only that site gets it.",
-  vault_list: "Lists your saved keys and site passwords by name, never their values.",
+  vault_list:
+    "Lists your saved keys and site passwords by name, never their values, and your contact details.",
   vault_use_key: "Asks to use a saved key in commands; only its own addresses get it.",
   vault_ask_key: "Asks you to add a missing key on a card; the agent never sees it.",
   browser_permission: "Lets a browser page use your location, if you allow it.",

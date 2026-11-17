@@ -1,5 +1,6 @@
-import { listWords } from "@arden-hq/std/count"
+import { countOf, listWords } from "@arden-hq/std/count"
 import { fitsCard, keyName, readAddresses } from "@arden-hq/std/vault-key"
+import { CONTACT_FIELD_LABEL, CONTACT_FIELDS } from "@arden-hq/std/vault-contact"
 import { APPROVAL_FIELD_LABEL, type ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { Effect, Schema } from "effect"
@@ -161,12 +162,54 @@ const usable = (key: {
     "Run the command with access network or host; a sandboxed command has no network. Never print the variable or write it to a file: it is useless anywhere else, and the real key never reaches you."
   ].join(" ")
 
+/** What `vault_list` tells the agent: keys and passwords without values, contact details in full. */
+export const vaultListText = (list: VaultList): { result: string; preview: string } => {
+  const keys = list.keys.map(
+    (key) => `- ${key.name}: $${key.variable}, sent only to ${key.addresses.join(", ")}`
+  )
+  const passwords = list.passwords.map(
+    (saved) =>
+      `- ${new URL(saved.site).host}: ${saved.name}${saved.userName === undefined ? "" : `, user name ${saved.userName}`}`
+  )
+  const contacts = (list.contacts ?? []).map((contact) =>
+    [
+      `- ${contact.name}`,
+      ...CONTACT_FIELDS.flatMap((field) => {
+        const value = contact[field]
+        return field === "name" || value === undefined
+          ? []
+          : [`  ${CONTACT_FIELD_LABEL[field]}: ${value}`]
+      })
+    ].join("\n")
+  )
+  return {
+    result: [
+      keys.length === 0 ? "Keys: none saved." : ["Keys:", ...keys].join("\n"),
+      passwords.length === 0
+        ? "Site passwords: none saved."
+        : ["Site passwords (browser_act fills them):", ...passwords].join("\n"),
+      contacts.length === 0
+        ? "Contact details: none saved."
+        : [
+            "Contact details (type them into forms the user asked you to fill; never send them anywhere the user did not ask):",
+            ...contacts
+          ].join("\n")
+    ].join("\n\n"),
+    preview: [
+      countOf(list.keys.length, "key"),
+      countOf(list.passwords.length, "password"),
+      countOf(contacts.length, "contact")
+    ].join(", ")
+  }
+}
+
 const makeVaultListTool = (vault: VaultKeysService): ServerTool =>
   defineServerTool({
     name: "vault_list",
     description: [
-      "List what the user keeps in Arden's Vault: API keys (name, the environment variable a command reads it from, and the addresses it may go to) and saved site passwords (site, name and user name).",
-      "Never values: you cannot read a key or a password, and you never need to. Call it before a command that needs a key, then vault_use_key; ask for a missing key with vault_ask_key."
+      "List what the user keeps in Arden's Vault: API keys (name, the environment variable a command reads it from, and the addresses it may go to), saved site passwords (site, name and user name), and contact details (name, email, phone and address, in full).",
+      "Keys and passwords come without values: you cannot read them, and you never need to. Call it before a command that needs a key, then vault_use_key; ask for a missing key with vault_ask_key.",
+      "Contact details are not secret: use them to fill in forms the user asked you to fill, typing them with the browser tools. Do not send them anywhere the user did not ask."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     metadata: {
@@ -174,31 +217,13 @@ const makeVaultListTool = (vault: VaultKeysService): ServerTool =>
       display_name: "Vault",
       kind: "tool",
       action: "read",
-      approval_preview: "List what the Vault holds, without values.",
+      approval_preview: "List what the Vault holds: names, and contact details in full.",
       source: "_system",
       changes_state: false,
       concurrency_group: null,
       destructive: null
     },
-    execute: async () => {
-      const list = await listOrRefuse(vault)
-      const keys = list.keys.map(
-        (key) => `- ${key.name}: $${key.variable}, sent only to ${key.addresses.join(", ")}`
-      )
-      const passwords = list.passwords.map(
-        (saved) =>
-          `- ${new URL(saved.site).host}: ${saved.name}${saved.userName === undefined ? "" : `, user name ${saved.userName}`}`
-      )
-      return {
-        result: [
-          keys.length === 0 ? "Keys: none saved." : ["Keys:", ...keys].join("\n"),
-          passwords.length === 0
-            ? "Site passwords: none saved."
-            : ["Site passwords (browser_act fills them):", ...passwords].join("\n")
-        ].join("\n\n"),
-        preview: `${list.keys.length} keys, ${list.passwords.length} passwords`
-      }
-    }
+    execute: async () => vaultListText(await listOrRefuse(vault))
   })
 
 const makeVaultUseKeyTool = (
