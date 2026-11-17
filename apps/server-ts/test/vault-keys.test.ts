@@ -236,9 +236,11 @@ describe("contact details in vault_list", () => {
         "  City: Bristol",
         "  Postal code: BS1 4DJ",
         "  Country: United Kingdom",
-        "- Sam Lee"
+        "- Sam Lee",
+        "",
+        "Cards: none saved."
       ].join("\n"),
-      preview: "0 keys, 0 passwords, 2 contacts"
+      preview: "0 keys, 0 passwords, 2 contacts, 0 cards"
     })
   })
 
@@ -251,9 +253,11 @@ describe("contact details in vault_list", () => {
         "Site passwords (browser_act fills them):",
         "- github.com: password, user name alex",
         "",
-        "Contact details: none saved."
+        "Contact details: none saved.",
+        "",
+        "Cards: none saved."
       ].join("\n"),
-      preview: "1 key, 1 password, 0 contacts"
+      preview: "1 key, 1 password, 0 contacts, 0 cards"
     })
     const odd = makeVaultKeys(
       desktop({

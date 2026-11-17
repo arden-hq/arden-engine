@@ -17,6 +17,15 @@ export const SitePermissionRequestRefSchema = Schema.String.check(
 )
 
 export const SiteSecretNameSchema = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,47}$/u))
+/** A saved card's id in the Vault, as vault_list gives it. */
+export const CardIdSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{24}$/u))
+/** Which of a saved card's fields the desktop types; the agent never gives the value. */
+export const CardFillFieldSchema = Schema.Literals([
+  "number",
+  "expiry",
+  "security_code",
+  "name"
+] as const)
 
 const BrowserTargetSchema = Schema.Struct({
   nodeRef: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^@e[1-9][0-9]*$/u))),
@@ -98,6 +107,7 @@ const BrowserOperationSchema = Schema.Union([
     target: Schema.optionalKey(BrowserTargetSchema),
     value: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20_000))),
     secret: Schema.optionalKey(SiteSecretNameSchema),
+    card: Schema.optionalKey(Schema.Struct({ id: CardIdSchema, field: CardFillFieldSchema })),
     values: Schema.optionalKey(
       Schema.Array(Schema.String.check(Schema.isMaxLength(20_000))).check(
         Schema.isMinLength(1),

@@ -5,6 +5,8 @@ import type { ActParametersSchema } from "./browser-parameters.js"
 
 export const actImpact = (input: typeof ActParametersSchema.Type): CallImpact => {
   if (input.secret !== undefined) return { kind: "locked", category: "passwords" }
+  // A card fill needs no card of its own: the owner approved it with Touch ID on the pay card,
+  // and the desktop types nothing without that approval open on this tab.
   switch (input.action) {
     case "scroll":
     case "hover":

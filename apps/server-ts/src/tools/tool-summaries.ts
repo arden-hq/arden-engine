@@ -45,9 +45,13 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   browser_upload: "Uploads a file to a browser page.",
   browser_ask_secret: "Asks you for a site password on a card; only that site gets it.",
   vault_list:
-    "Lists your saved keys and site passwords by name, never their values, and your contact details.",
+    "Lists your saved keys, site passwords and cards by name, never their values, and your contact details.",
   vault_use_key: "Asks to use a saved key in commands; only its own addresses get it.",
   vault_ask_key: "Asks you to add a missing key on a card; the agent never sees it.",
+  vault_pay:
+    "Asks you to pay at a shop with a saved card, with Touch ID; the agent never sees the card.",
+  vault_allow_payment_frame:
+    "Asks whether a payment form from an unknown company may get your card.",
   browser_permission: "Lets a browser page use your location, if you allow it.",
   browser_wait: "Waits for a browser page to load, change, show something, or finish a download.",
   browser_procedure: "Runs saved browser steps and confirms their result.",

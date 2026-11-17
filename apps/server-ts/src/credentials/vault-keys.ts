@@ -1,10 +1,10 @@
 import { Context, Layer, Schema } from "effect"
 
 /**
- * The agent's side of the Vault. The keys, passwords and contact details live in the desktop's
- * main process; this server asks it, over the credential broker, for names, addresses, user
- * names, fake values and contact details only (`VaultKeyBroker`). A key's value or a password
- * never reaches this process.
+ * The agent's side of the Vault. The keys, passwords, contact details and cards live in the
+ * desktop's main process; this server asks it, over the credential broker, for names, addresses,
+ * user names, fake values, contact details and cards' safe fields only (`VaultKeyBroker`). A
+ * key's value, a password, a card number or a security code never reaches this process.
  */
 
 /** The tool whose card is "Use your Todoist key?"; its "Always allow" saves a `vault_key` rule. */
@@ -57,6 +57,23 @@ const VaultListSchema = Schema.Struct({
         postalCode: Schema.optionalKey(Text),
         region: Schema.optionalKey(Text),
         country: Schema.optionalKey(Text)
+      })
+    )
+  ),
+  /**
+   * Payment cards by their safe fields only. Strict like the rest: a card that carried its number
+   * or security code would be refused, not read. A desktop without cards sends none.
+   */
+  cards: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Text.check(Schema.isPattern(/^[0-9a-f]{24}$/)),
+        brand: Schema.Literals(["Visa", "Mastercard", "American Express", "Card"] as const),
+        last4: Text.check(Schema.isPattern(/^[0-9]{4}$/)),
+        expiry: Text.check(Schema.isPattern(/^[0-9]{2}\/[0-9]{2}$/)),
+        nameOnCard: Text,
+        /** The name on the billing address's contact details, from the same list. */
+        billingName: Schema.optionalKey(Text)
       })
     )
   )

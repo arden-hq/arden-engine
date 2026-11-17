@@ -113,7 +113,19 @@ export const APPROVAL_FIELD_LABEL = Object.freeze({
   /** The addresses a key goes to, joined with ", ". */
   sendTo: "Send only to",
   /** Why the agent asks, in its own words. */
-  reason: "For"
+  reason: "For",
+  /** A saved card's safe title ("Visa ending 4242"), on the cards that pay with it. */
+  card: "Card",
+  /** The saved card's id in the Vault: what the desktop approves, never shown. */
+  cardId: "Card id",
+  /** The amount and its currency code as the agent gave them ("84.20 USD"). */
+  amount: "Amount",
+  /** The shop's origin, which the tab must be on. */
+  shop: "Shop",
+  /** The browser tab the payment happens in. */
+  tab: "Tab",
+  /** A payment frame's origin the card would be typed into. */
+  frame: "Frame"
 })
 
 export const APPROVAL_PRESENTATION_LIMITS = Object.freeze({

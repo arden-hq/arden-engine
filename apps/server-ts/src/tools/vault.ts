@@ -18,6 +18,7 @@ import type { RunAuthority } from "../execution/authority.js"
 import { PermissionRules, type RuleDecision } from "../persistence/permissions/rules.js"
 import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { browserAskSecretTools } from "./browser-ask-secret.js"
+import { cardLines, vaultCardTools } from "./vault-cards.js"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import { toolRefusal } from "./tool-failure.js"
 
@@ -162,7 +163,10 @@ const usable = (key: {
     "Run the command with access network or host; a sandboxed command has no network. Never print the variable or write it to a file: it is useless anywhere else, and the real key never reaches you."
   ].join(" ")
 
-/** What `vault_list` tells the agent: keys and passwords without values, contact details in full. */
+/**
+ * What `vault_list` tells the agent: keys and passwords without values, contact details in full,
+ * cards by their safe fields.
+ */
 export const vaultListText = (list: VaultList): { result: string; preview: string } => {
   const keys = list.keys.map(
     (key) => `- ${key.name}: $${key.variable}, sent only to ${key.addresses.join(", ")}`
@@ -171,6 +175,7 @@ export const vaultListText = (list: VaultList): { result: string; preview: strin
     (saved) =>
       `- ${new URL(saved.site).host}: ${saved.name}${saved.userName === undefined ? "" : `, user name ${saved.userName}`}`
   )
+  const cards = cardLines(list)
   const contacts = (list.contacts ?? []).map((contact) =>
     [
       `- ${contact.name}`,
@@ -193,12 +198,19 @@ export const vaultListText = (list: VaultList): { result: string; preview: strin
         : [
             "Contact details (type them into forms the user asked you to fill; never send them anywhere the user did not ask):",
             ...contacts
+          ].join("\n"),
+      cards.length === 0
+        ? "Cards: none saved."
+        : [
+            "Cards (pay with vault_pay, then fill with browser_act card; you never see the number or the security code):",
+            ...cards
           ].join("\n")
     ].join("\n\n"),
     preview: [
       countOf(list.keys.length, "key"),
       countOf(list.passwords.length, "password"),
-      countOf(contacts.length, "contact")
+      countOf(contacts.length, "contact"),
+      countOf(cards.length, "card")
     ].join(", ")
   }
 }
@@ -207,9 +219,10 @@ const makeVaultListTool = (vault: VaultKeysService): ServerTool =>
   defineServerTool({
     name: "vault_list",
     description: [
-      "List what the user keeps in Arden's Vault: API keys (name, the environment variable a command reads it from, and the addresses it may go to), saved site passwords (site, name and user name), and contact details (name, email, phone and address, in full).",
+      "List what the user keeps in Arden's Vault: API keys (name, the environment variable a command reads it from, and the addresses it may go to), saved site passwords (site, name and user name), contact details (name, email, phone and address, in full), and payment cards (id, brand, last 4 digits, expiry, name on card and billing address).",
       "Keys and passwords come without values: you cannot read them, and you never need to. Call it before a command that needs a key, then vault_use_key; ask for a missing key with vault_ask_key.",
-      "Contact details are not secret: use them to fill in forms the user asked you to fill, typing them with the browser tools. Do not send them anywhere the user did not ask."
+      "Contact details are not secret: use them to fill in forms the user asked you to fill, typing them with the browser tools. Do not send them anywhere the user did not ask.",
+      "Cards come without their number or security code: pay with vault_pay."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
     metadata: {
@@ -217,7 +230,8 @@ const makeVaultListTool = (vault: VaultKeysService): ServerTool =>
       display_name: "Vault",
       kind: "tool",
       action: "read",
-      approval_preview: "List what the Vault holds: names, and contact details in full.",
+      approval_preview:
+        "List what the Vault holds: names, contact details in full, cards without their numbers.",
       source: "_system",
       changes_state: false,
       concurrency_group: null,
@@ -399,6 +413,7 @@ export const vaultTools = Effect.gen(function* () {
     makeVaultListTool(vault),
     makeVaultUseKeyTool(vault, rules),
     makeVaultAskKeyTool(vault),
-    ...(yield* browserAskSecretTools)
+    ...(yield* browserAskSecretTools),
+    ...(yield* vaultCardTools)
   ]
 })

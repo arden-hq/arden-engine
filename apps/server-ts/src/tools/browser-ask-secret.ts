@@ -83,7 +83,8 @@ export const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
   }
 }
 
-const tabOrigin = (output: BrowserOutput, tabRef: string): string | undefined => {
+/** The origin of a tab in a browser_tabs answer, or undefined when the tab is not there. */
+export const tabOriginOf = (output: BrowserOutput, tabRef: string): string | undefined => {
   const tabs = output.data?.["tabs"]
   if (!Array.isArray(tabs)) return undefined
   for (const tab of tabs) {
@@ -118,7 +119,7 @@ const makeBrowserAskSecretTool = (
     signal: AbortSignal
   ) => {
     const tabs = await runBrowserForRun(browser, { run }, { type: "tabs" }, signal)
-    if (tabOrigin(tabs, input.tab_ref) !== input.origin) {
+    if (tabOriginOf(tabs, input.tab_ref) !== input.origin) {
       throw new ToolExecutionError(
         "The tab is no longer on that site. Check browser_tabs and ask with the tab's current origin.",
         { preview: "Site changed", retryable: false }

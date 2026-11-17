@@ -14,7 +14,8 @@ export const TOOL_DISPLAY_FACTS = {
   mail: ["send", "reply", "forward", "draft"],
   /** The approval card's own shape: a shell command, a file write with its
    *  patch, a site's standing grant, a sign-in secret, a saved key's use or a
-   *  missing key's ask, a Memory page patch read as words, or a new
+   *  missing key's ask, a payment with a saved card or a card for a payment
+   *  frame Arden does not know, a Memory page patch read as words, or a new
    *  automation's editable fields. */
   card: [
     "command",
@@ -23,6 +24,8 @@ export const TOOL_DISPLAY_FACTS = {
     "site_secret",
     "vault_key_use",
     "vault_key_ask",
+    "vault_card_pay",
+    "vault_card_frame",
     "page_patch",
     "automation",
     "calendar"
