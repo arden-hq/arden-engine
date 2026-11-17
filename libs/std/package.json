@@ -93,6 +93,11 @@
       "arden-source": "./src/vault-contact.ts",
       "types": "./dist/vault-contact.d.ts",
       "import": "./dist/vault-contact.js"
+    },
+    "./vault-card": {
+      "arden-source": "./src/vault-card.ts",
+      "types": "./dist/vault-card.d.ts",
+      "import": "./dist/vault-card.js"
     }
   },
   "files": [
