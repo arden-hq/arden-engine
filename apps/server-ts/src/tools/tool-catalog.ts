@@ -61,6 +61,7 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
     "browser_close"
   ],
   web_browser_sign_in: ["browser_ask_secret"],
+  vault: ["vault_list", "vault_use_key", "vault_ask_key"],
   web_browser_tasks: ["browser_task", "browser_procedure"],
   space: [
     "space_list",
@@ -265,6 +266,7 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
     ["snapshot_ref", "browser_snapshot", "browser_act", "browser_upload", "browser_task"]
   ),
   browser_permission: inputs(["request_ref", "browser_tabs"], ["tab_ref", "browser_tabs"]),
+  vault_use_key: inputs(["name", "vault_list"]),
   browser_ask_secret: inputs(
     ["tab_ref", "browser_tabs", "browser_snapshot"],
     ["origin", "browser_tabs", "browser_snapshot"]

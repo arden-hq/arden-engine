@@ -56,7 +56,8 @@ const PermissionRuleSubjectSchema = Schema.Union([
     kind: Schema.Literal("path"),
     path: boundedNonEmpty(1000),
     access: Schema.Literals(["read", "change"])
-  })
+  }),
+  Schema.Struct({ kind: Schema.Literal("vault_key"), name: boundedNonEmpty(64) })
 ])
 
 export const PermissionRuleItemSchema: Schema.Codec<PermissionRuleItem> = withExtras({

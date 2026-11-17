@@ -7,6 +7,7 @@ import {
   WordsGrantApprovalDataSchema
 } from "../permissions/command-policy.js"
 import { mcpSource, parseMcpSource } from "../../mcp/naming.js"
+import { VAULT_USE_KEY_TOOL, VaultKeyApprovalDataSchema } from "../../credentials/vault-keys.js"
 import {
   PermissionStore,
   PermissionStoreError,
@@ -159,6 +160,10 @@ export const cardRuleSubjects = (input: {
 }): ReadonlyArray<RuleSubject> | undefined => {
   if (input.serverName !== undefined)
     return [{ kind: "tool", tool: input.toolName, server: input.serverName }]
+  if (input.toolName === VAULT_USE_KEY_TOOL) {
+    const key = Schema.decodeUnknownOption(VaultKeyApprovalDataSchema)(input.data)
+    return Option.isSome(key) ? [{ kind: "vault_key", name: key.value.vault_key }] : undefined
+  }
   if (input.toolName !== COMMAND_TOOL) return undefined
   const words = Schema.decodeUnknownOption(WordsGrantApprovalDataSchema)(input.data)
   if (Option.isSome(words))
@@ -185,8 +190,10 @@ export const approvalPermissionContext = Effect.fn(
   if (home === undefined) return null
   const updatedAt = serverName === undefined ? null : yield* connectorUpdatedAt(sql, serverName)
   if (updatedAt === undefined) return null
+  // "Always allow" on a key's card means that key in this Space, never everywhere.
+  const ownOnly = subjects.every((subject) => subject.kind === "vault_key")
   const lists: ReadonlyArray<RuleList> =
-    home.list.kind === "global" ? [home.list] : [home.list, { kind: "global" }]
+    home.list.kind === "global" || ownOnly ? [home.list] : [home.list, { kind: "global" }]
   const places: RuleSavedIn[] = []
   for (const list of lists) {
     const saves = yield* allowsSave(sql, { subjects, list }).pipe(

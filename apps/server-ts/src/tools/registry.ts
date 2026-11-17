@@ -88,7 +88,7 @@ import { browserTaskTools } from "./browser-task.js"
 import { browserUploadTools } from "./browser-upload.js"
 import { chatFilesTools } from "./chat-files.js"
 import { browserPermissionTools } from "./browser-permission.js"
-import { browserAskSecretTools } from "./browser-ask-secret.js"
+import { vaultTools } from "./vault.js"
 import { artifactDeleteTools } from "./artifact-delete.js"
 import { artifactExportTools } from "./artifact-export.js"
 import { artifactSaveTools } from "./artifact-save.js"
@@ -159,7 +159,7 @@ const builtinTools = Effect.all([
   browserUploadTools,
   chatFilesTools,
   browserPermissionTools,
-  browserAskSecretTools,
+  vaultTools,
   artifactExportTools,
   artifactSaveTools,
   artifactDeleteTools,

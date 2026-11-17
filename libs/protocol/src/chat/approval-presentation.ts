@@ -105,7 +105,16 @@ export interface ApprovalPresentation {
   readonly image?: ApprovalPresentationImage
 }
 
-export const APPROVAL_FIELD_LABEL = Object.freeze({ site: "Site", secret: "Secret" })
+export const APPROVAL_FIELD_LABEL = Object.freeze({
+  site: "Site",
+  secret: "Secret",
+  /** A saved key's Vault name ("Todoist"), on the cards that use or ask for one. */
+  key: "Key",
+  /** The addresses a key goes to, joined with ", ". */
+  sendTo: "Send only to",
+  /** Why the agent asks, in its own words. */
+  reason: "For"
+})
 
 export const APPROVAL_PRESENTATION_LIMITS = Object.freeze({
   title: 160,

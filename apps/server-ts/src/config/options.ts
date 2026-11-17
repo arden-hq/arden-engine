@@ -1,3 +1,4 @@
+import type { VaultKeyBroker } from "../credentials/vault-keys.js"
 import type { ApprovalReviewSource, TranscriptionSource } from "../models/provider.js"
 import type { ModelProvider } from "@arden-hq/loop"
 import type { ApprovalMode } from "@arden-hq/protocol/permissions"
@@ -111,5 +112,7 @@ export interface PowerHost {
 export interface HostedServerOptions extends ServerOptions {
   readonly localAccess?: LocalAccess | undefined
   readonly browserBroker?: BrowserBroker | undefined
+  /** The desktop's Vault: key names, fake values and the output scrub, never a value. */
+  readonly vaultKeys?: VaultKeyBroker | undefined
   readonly power?: PowerHost | undefined
 }

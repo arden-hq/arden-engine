@@ -7,6 +7,7 @@ import type {
   McpTransportSecretTarget
 } from "./mcp/vault.js"
 import type { SecureDocumentTarget } from "./credentials/vault.js"
+import type { VaultKeyBroker } from "./credentials/vault-keys.js"
 import {
   createParentPortRpc,
   type ParentPortFailure,
@@ -20,6 +21,7 @@ const strict = { onExcessProperty: "error" } as const
 
 export interface CredentialVaultBridge {
   readonly vault: McpOAuthVault
+  readonly keys: VaultKeyBroker
   readonly handleMessage: (input: unknown) => boolean
   readonly close: () => void
 }
@@ -91,13 +93,20 @@ export const createCredentialVaultBridge = (
       requestVoid({ operation: "clear_document", target })
   }
 
+  const keys: VaultKeyBroker = {
+    listVault: () => request({ operation: "list_vault" }),
+    keyEnvironment: ({ runId, names, reach }) =>
+      request({ operation: "key_environment", runId, names, reach }),
+    findSecrets: (text) => request({ operation: "find_secrets", text })
+  }
+
   const close = (): void => {
     if (closed) return
     closed = true
     rpc.abortAll()
   }
 
-  return { vault, handleMessage: rpc.handleMessage, close }
+  return { vault, keys, handleMessage: rpc.handleMessage, close }
 }
 
 const vaultFailure = (failure: ParentPortFailure<undefined>): Error => {

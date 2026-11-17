@@ -296,10 +296,20 @@ const PROCESS_SANDBOX_RULES = [
 const confined = (policy: LocalPathPolicy): boolean =>
   policy.sandbox === "approved_local" || policy.sandbox === "code_agent"
 
+/**
+ * The key proxy listens on this machine, which the network rules close; a command with network
+ * may reach that one port. Without network it gets no keys, so the port stays closed.
+ */
+const keyProxyRules = (policy: LocalPathPolicy, keyProxy: KeyProxy | undefined) =>
+  policy.network === true && keyProxy !== undefined
+    ? [`(allow network-outbound (remote ip "localhost:${keyProxy.port}"))`]
+    : []
+
 const makeSandboxProfile = (
   policy: LocalPathPolicy,
   rule: SandboxRule,
-  locations: SandboxLocations
+  locations: SandboxLocations,
+  keyProxy: KeyProxy | undefined
 ): string =>
   [
     "(version 1)",
@@ -307,6 +317,7 @@ const makeSandboxProfile = (
     '(import "system.sb")',
     ...PROCESS_SANDBOX_RULES,
     ...(policy.network === true ? NETWORK_SANDBOX_RULES : []),
+    ...keyProxyRules(policy, keyProxy),
     ...sandboxFileRules(policy, rule, locations)
   ].join(" ")
 
@@ -350,6 +361,16 @@ const commandEnvironment = (
   policy: LocalPathPolicy,
   options: ShellRuntime,
   locations: SandboxLocations
+): NodeJS.ProcessEnv => ({
+  ...baseEnvironment(policy, options, locations),
+  // Last, so the user's own proxy and certificate variables never replace the key proxy's.
+  ...options.keyProxy?.variables
+})
+
+const baseEnvironment = (
+  policy: LocalPathPolicy,
+  options: ShellRuntime,
+  locations: SandboxLocations
 ): NodeJS.ProcessEnv => {
   switch (policy.sandbox) {
     case "host_approved":
@@ -371,6 +392,15 @@ const commandEnvironment = (
   }
 }
 
+/**
+ * The run's saved keys for one command: their stand-in values with the proxy and certificate
+ * variables (`keyVariables`), and the proxy's port on this machine.
+ */
+export interface KeyProxy {
+  readonly variables: Readonly<Record<string, string>>
+  readonly port: number
+}
+
 export interface ShellRuntime {
   readonly environment: NodeJS.ProcessEnv
   readonly loginPath: string | undefined
@@ -378,6 +408,7 @@ export interface ShellRuntime {
   readonly temporaryDirectory: string
   readonly platform: NodeJS.Platform
   readonly commandSandbox: CommandSandbox
+  readonly keyProxy: KeyProxy | undefined
 }
 
 export type ShellRuntimeOptions = Partial<ShellRuntime>
@@ -398,7 +429,8 @@ export const shellRuntime = (options: ShellRuntimeOptions): ShellRuntime => {
     commandSandbox:
       options.commandSandbox ??
       resolvedCommandSandbox() ??
-      (platform === "linux" ? "ready" : "not_linux")
+      (platform === "linux" ? "ready" : "not_linux"),
+    keyProxy: options.keyProxy
   }
 }
 
@@ -463,7 +495,13 @@ export const shellInvocation = (
       })
     return {
       executable: "/usr/bin/sandbox-exec",
-      args: ["-p", makeSandboxProfile(policy, rule, locations), "/bin/bash", "-c", command]
+      args: [
+        "-p",
+        makeSandboxProfile(policy, rule, locations, runtime.keyProxy),
+        "/bin/bash",
+        "-c",
+        command
+      ]
     }
   })()
   return { executable: shell.executable, args: shell.args, cwd, env }

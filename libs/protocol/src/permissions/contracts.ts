@@ -57,6 +57,8 @@ export type PermissionRuleSubject =
   | { readonly kind: "words"; readonly text: string }
   /** Files in one folder: `read` is using them, `change` is writing them. */
   | { readonly kind: "path"; readonly path: string; readonly access: PermissionPathAccess }
+  /** One saved key, by its Vault name ("Todoist"): the agent may use it without asking. */
+  | { readonly kind: "vault_key"; readonly name: string }
 
 export interface PermissionRuleItem extends JsonRecord {
   readonly id: string

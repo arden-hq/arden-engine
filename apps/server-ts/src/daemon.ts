@@ -284,6 +284,7 @@ const start = async (input: unknown): Promise<void> => {
       diagnostics,
       localAccess,
       browserBroker: browserBridge,
+      vaultKeys: credentialVaultBridge.keys,
       power,
       // A saved model server changed the list: the app reads it again, as
       // after a ChatGPT sign-in. The route is still the account's.

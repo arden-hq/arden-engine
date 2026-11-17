@@ -138,9 +138,16 @@ export const matchesTool =
       case "host_commands":
       case "words":
       case "path":
+      case "vault_key":
         return false
     }
   }
+
+/** A rule about one saved key, by its Vault name. */
+export const matchesVaultKey =
+  (name: string) =>
+  (subject: RuleSubject): boolean =>
+    subject.kind === "vault_key" && subject.name === name
 
 export const matchesCommand =
   (call: { readonly executable: string; readonly arguments: ReadonlyArray<string> }) =>

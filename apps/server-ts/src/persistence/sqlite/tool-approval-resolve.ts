@@ -621,6 +621,13 @@ export const saveCardRule = Effect.fn("SqliteToolExecutionStore.saveCardRule")(f
       "This approval cannot create a standing permission",
       decision
     )
+  if (decision.grantList === "global" && subjects.every((subject) => subject.kind === "vault_key"))
+    return yield* toolError(
+      "resolve",
+      "blocked",
+      "A key's Always allow holds in this Space only",
+      decision
+    )
   const list = yield* cardListNow(sql, approval, payload.grant_principal, decision)
   if (serverName !== undefined) {
     const updatedAt = yield* connectorUpdatedAt(sql, serverName).pipe(

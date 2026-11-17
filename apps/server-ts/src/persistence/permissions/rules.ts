@@ -28,6 +28,11 @@ export const RuleSubjectSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("words"),
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000))
+  }),
+  /** One saved key by its Vault name: "Always allow" on its card, in the run's Space. */
+  Schema.Struct({
+    kind: Schema.Literal("vault_key"),
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
   })
 ])
 export type RuleSubject = typeof RuleSubjectSchema.Type

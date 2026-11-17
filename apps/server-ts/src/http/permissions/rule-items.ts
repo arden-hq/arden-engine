@@ -68,6 +68,7 @@ export const subjectItem = (subject: RuleSubject, names: RuleNames): PermissionR
     case "host_commands":
     case "words":
     case "path":
+    case "vault_key":
       return subject
   }
 }

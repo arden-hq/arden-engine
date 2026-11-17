@@ -83,6 +83,11 @@
       "arden-source": "./src/url.ts",
       "types": "./dist/url.d.ts",
       "import": "./dist/url.js"
+    },
+    "./vault-key": {
+      "arden-source": "./src/vault-key.ts",
+      "types": "./dist/vault-key.d.ts",
+      "import": "./dist/vault-key.js"
     }
   },
   "files": [

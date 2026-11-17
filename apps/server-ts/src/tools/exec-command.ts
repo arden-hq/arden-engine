@@ -70,6 +70,8 @@ import { refusalPath } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
 import type { ToolContext } from "@arden-hq/loop"
 import { toolRefusal } from "./tool-failure.js"
+import { keyVariables, VaultKeys, type VaultKeysService } from "../credentials/vault-keys.js"
+import type { KeyProxy } from "./shell-policy.js"
 
 const DEFAULT_YIELD_MS = 10_000
 const MAX_EXEC_YIELD_MS = 30_000
@@ -139,6 +141,7 @@ const WriteParametersSchema = Schema.Struct({
 
 interface ShellToolServices extends LocalPathServices {
   readonly rules: PermissionRules["Service"]
+  readonly vault: VaultKeysService
   readonly artifacts?: ConversationArtifacts["Service"]
   readonly terminals: TerminalStore
   readonly commandSandbox?: boolean
@@ -210,7 +213,10 @@ const makeExecCommandTool = (
     execute: async (input, ctx, effects) => {
       const { cwd, policy, access } = await workingDirectory(services, input, ctx)
       await refuseNeverPaths(input.cmd, cwd, policy)
-      const shell = await runtime()
+      const shell = {
+        ...(await runtime()),
+        keyProxy: await keyProxyFor(services.vault, ctx.run.runId, access)
+      }
       const approvedCwd = ctx.approval?.data?.working_directory
       const approvedAccess = ctx.approval?.data?.access
       if (ctx.approval !== undefined && (approvedCwd !== cwd || approvedAccess !== access)) {
@@ -220,10 +226,11 @@ const makeExecCommandTool = (
         )
       }
       const preserveOutput = async (
-        bytes: Buffer,
+        raw: Buffer,
         truncated: boolean
       ): Promise<string | undefined> => {
-        if (services.artifacts === undefined || bytes.length === 0) return undefined
+        if (services.artifacts === undefined || raw.length === 0) return undefined
+        const bytes = await scrubbedBytes(services.vault, raw)
         const lineage = await Effect.runPromise(
           sessionLineage(services.sessions, ctx.run.sessionId)
         )
@@ -289,6 +296,7 @@ const makeExecCommandTool = (
         if (terminalId !== undefined) services.terminals.release(terminalId)
         if (!(cause instanceof CommandInterrupted)) throw cause
         const artifactRef = await preserveOutput(cause.output, cause.outputTruncated)
+        const message = await scrubbed(services.vault, cause.message)
         const reference =
           artifactRef === undefined
             ? ""
@@ -299,7 +307,7 @@ const makeExecCommandTool = (
             message: `Command output saved as artifact_ref ${artifactRef}`,
             data: { artifact_ref: artifactRef, truncated: cause.outputTruncated }
           })
-        throw new ToolExecutionError(`${cause.message}${reference}`, {
+        throw new ToolExecutionError(`${message}${reference}`, {
           preview: "Command interrupted",
           retryable: false
         })
@@ -311,7 +319,9 @@ const makeExecCommandTool = (
           result: [
             `Process running with session ID ${terminalId}.`,
             `Use write_stdin with session_id ${terminalId} to read new output, type input, or send "\\u0003" to stop it.`,
-            ...(outcome.output.length === 0 ? [] : ["Output so far:", outcome.output])
+            ...(outcome.output.length === 0
+              ? []
+              : ["Output so far:", await scrubbed(services.vault, outcome.output)])
           ].join("\n"),
           preview: "Still running",
           data: { cwd, access, session_id: terminalId, state: "running" }
@@ -322,7 +332,10 @@ const makeExecCommandTool = (
         if (outcome.exitCode === 0) effects.applied()
         else effects.failed()
       }
-      return exitedResult(outcome, { cwd, access, preserveOutput, ctx })
+      return exitedResult(
+        { ...outcome, output: await scrubbed(services.vault, outcome.output) },
+        { cwd, access, preserveOutput, ctx }
+      )
     }
   })
   return tool
@@ -529,7 +542,9 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
         result: [
           processState(input.session_id, read.exit),
           ...(read.omitted === 0 ? [] : [`[${read.omitted} earlier characters were dropped]`]),
-          read.output.length === 0 ? "(no new output)" : `Output:\n${read.output}`
+          read.output.length === 0
+            ? "(no new output)"
+            : `Output:\n${await scrubbed(services.vault, read.output)}`
         ].join("\n"),
         preview: read.exit === undefined ? "Still running" : exitPreview(read.exit),
         data: {
@@ -645,6 +660,48 @@ const commandCard = async (
   })
 }
 
+/**
+ * The run's keys for a command: stand-in values, the proxy and its certificate. None for a
+ * sandboxed command, which has no network to send them on. A run that was allowed a key and
+ * cannot get its stand-in does not run the command: it would go out without the key at best.
+ */
+const keyProxyFor = async (
+  vault: VaultKeysService,
+  runId: string,
+  access: "sandbox" | "network" | "host"
+): Promise<KeyProxy | undefined> => {
+  if (access === "sandbox" || vault.granted(runId).length === 0) return undefined
+  const environment = await vault
+    .environment(runId, access === "host" ? "all" : "remote")
+    .catch(() => {
+      throw toolRefusal(
+        "Arden could not prepare this run's saved keys, so the command did not run. Try again in a moment.",
+        "Keys unavailable"
+      )
+    })
+  if (environment === undefined) return undefined
+  const port = Number(new URL(environment.proxyUrl).port)
+  if (!Number.isInteger(port) || port < 1)
+    throw toolRefusal(
+      "Arden's key proxy is not running, so the command did not run.",
+      "Keys unavailable"
+    )
+  return { variables: keyVariables(environment), port }
+}
+
+const UNCHECKED_OUTPUT =
+  "[Arden could not check this output for saved keys and passwords, so it is not shown.]"
+
+/** Output with every saved key and password replaced, the last guard before the agent reads it. */
+const scrubbed = (vault: VaultKeysService, text: string): Promise<string> =>
+  vault.redact(text).catch(() => UNCHECKED_OUTPUT)
+
+const scrubbedBytes = async (vault: VaultKeysService, bytes: Buffer): Promise<Buffer> => {
+  const text = bytes.toString("utf8")
+  const checked = await scrubbed(vault, text)
+  return checked === text ? bytes : Buffer.from(checked, "utf8")
+}
+
 const processState = (id: number, exit: ProcessExit | undefined): string => {
   if (exit === undefined) return `Process running with session ID ${id}.`
   return exit.kind === "code"
@@ -661,6 +718,7 @@ export const shellTools = Effect.gen(function* () {
     spaces: yield* SpaceStore,
     runs: yield* RunQueries,
     rules: yield* PermissionRules,
+    vault: yield* VaultKeys,
     artifacts: yield* ConversationArtifacts,
     dataDir: (yield* DataRoot).dir,
     terminals: yield* TerminalSessions,

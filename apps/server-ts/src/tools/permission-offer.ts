@@ -524,6 +524,8 @@ const subjectWords = (subject: RuleSubject, tools: ReadonlyArray<ServerTool>): s
       return subject.text
     case "path":
       return `${PATH_ACTION[subject.access]} ${collapseHome(subject.path)}`
+    case "vault_key":
+      return `${RULE_ACTION.use} the ${subject.name} key`
   }
 }
 

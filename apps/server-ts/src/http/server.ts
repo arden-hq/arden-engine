@@ -15,6 +15,7 @@ import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
 import { BrowserClient } from "../browser/service.js"
+import { VaultKeys } from "../credentials/vault-keys.js"
 import { embeddingModelsLayer } from "../embedding/models.js"
 import { LOCAL_EMBEDDING_MODELS } from "../local-models/catalog.js"
 import { llamaServerLayer } from "../local-models/llama-server.js"
@@ -214,6 +215,7 @@ const composeServer = (
     oauthClient: options.googleOAuthClient
   })
   const browser = BrowserClient.layer(options.browserBroker).pipe(Layer.provide(storage))
+  const vaultKeys = VaultKeys.layer(options.vaultKeys)
   const computer = ComputerService.layer({
     pauseFile: root.computerPause,
     installRoot: root.computer
@@ -254,6 +256,7 @@ const composeServer = (
       Layer.provide(completion),
       Layer.provide(decisions),
       Layer.provide(browser),
+      Layer.provide(vaultKeys),
       Layer.provide(computer),
       Layer.provide(google),
       Layer.provide(mcp),

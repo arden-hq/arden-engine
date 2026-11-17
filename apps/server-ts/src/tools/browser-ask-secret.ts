@@ -7,6 +7,8 @@ import { OriginSchema, originIssues, runBrowserForRun, TabRefSchema } from "./br
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import { personCard } from "../execution/decide.js"
 import type { ServerRunContext } from "./run-context.js"
+import { looksLikeSecret, VaultKeys, type VaultKeysService } from "../credentials/vault-keys.js"
+import { toolRefusal } from "./tool-failure.js"
 
 const AskSecretParametersSchema = Schema.Struct({
   tab_ref: TabRefSchema.annotate({
@@ -74,7 +76,7 @@ const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
         label: "Password",
         text: "Type it on the card in the chat. Arden saves it for this site only."
       },
-      approve_label: "Save",
+      approve_label: "Save password",
       reject_label: "Not now"
     },
     data: { reviewer: "user", origin: input.origin, name: input.name }
@@ -98,7 +100,18 @@ const savedNames = (output: BrowserOutput): ReadonlyArray<string> => {
   return Array.isArray(names) ? names.filter((name) => typeof name === "string") : []
 }
 
-const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool => {
+/** The user name saved with a secret: not secret, so the agent may type it into the form. */
+const savedUserName = (output: BrowserOutput, name: string): string | undefined => {
+  const users = output.data?.["users"]
+  if (typeof users !== "object" || users === null || Array.isArray(users)) return undefined
+  const user: unknown = Object.entries(users).find(([key]) => key === name)?.[1]
+  return typeof user === "string" && user.length > 0 ? user : undefined
+}
+
+const makeBrowserAskSecretTool = (
+  browser: BrowserClient["Service"],
+  vault: VaultKeysService
+): ServerTool => {
   const requireTabOn = async (
     input: AskSecretInput,
     run: ServerRunContext,
@@ -112,15 +125,26 @@ const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool
       )
     }
   }
+  const saved = async (input: AskSecretInput, run: ServerRunContext, signal: AbortSignal) => {
+    const output = await runBrowserForRun(
+      browser,
+      { run },
+      { type: "site_secrets", origin: input.origin },
+      signal
+    )
+    return savedNames(output).includes(input.name)
+      ? { userName: savedUserName(output, input.name) }
+      : undefined
+  }
   const isSaved = async (input: AskSecretInput, run: ServerRunContext, signal: AbortSignal) =>
-    savedNames(
-      await runBrowserForRun(
-        browser,
-        { run },
-        { type: "site_secrets", origin: input.origin },
-        signal
+    (await saved(input, run, signal)) !== undefined
+  const refuseSecretShaped = (purpose: string) => {
+    if (looksLikeSecret(purpose))
+      throw toolRefusal(
+        "The purpose looks like it holds a secret. Write it again in plain words, with no password or token in it.",
+        "Purpose refused"
       )
-    ).includes(input.name)
+  }
 
   return defineServerTool({
     name: "browser_ask_secret",
@@ -149,6 +173,7 @@ const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool
       code_mode: false
     },
     approvalRequirement: async (input, ctx) => {
+      refuseSecretShaped(input.purpose)
       await requireTabOn(input, ctx.run, ctx.signal)
       const decision = siteSecretRequestDecision({
         mode: ctx.run.approvalMode,
@@ -156,17 +181,24 @@ const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool
         replace: input.replace === true,
         answered: false
       })
-      return decision.kind === "ask" ? secretCard(input) : undefined
+      if (decision.kind !== "ask") return undefined
+      if (!vault.takeAsk(ctx.run.sessionId, ctx.toolCallId))
+        throw toolRefusal(
+          "You asked the user for passwords or keys 5 times in 5 minutes. Stop asking; tell the user they can sign in themselves in the browser with Take control.",
+          "Too many asks"
+        )
+      return secretCard(input)
     },
     approvalPrompt: async (input, ctx) => {
       await requireTabOn(input, ctx.run, ctx.signal)
       return secretCard(input)
     },
     execute: async (input, ctx) => {
-      const saved = await isSaved(input, ctx.run, ctx.signal)
+      refuseSecretShaped(input.purpose)
+      const held = await saved(input, ctx.run, ctx.signal)
       const decision = siteSecretRequestDecision({
         mode: ctx.run.approvalMode,
-        saved,
+        saved: held !== undefined,
         replace: input.replace === true,
         answered: ctx.approval !== undefined
       })
@@ -180,14 +212,20 @@ const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool
           })
         case "saved":
         case "answered":
-          if (!saved) {
+          if (held === undefined) {
             throw new ToolExecutionError(
               `Nothing was saved for ${input.name} on ${input.origin}. Ask again only if the user wants to sign in.`,
               { preview: "Nothing saved", retryable: false }
             )
           }
           return {
-            result: `Saved for ${input.origin} as ${input.name}. Fill the password field with browser_act action fill, secret ${input.name}, and a fresh node_ref. You will not see the value.`,
+            result: [
+              `Saved for ${input.origin} as ${input.name}.`,
+              held.userName === undefined
+                ? "No user name is saved with it."
+                : `Its user name is ${held.userName}; type it into the user name field yourself if the form asks.`,
+              `Fill the password field with browser_act action fill, secret ${input.name}, and a fresh node_ref. You will not see the value.`
+            ].join(" "),
             preview: `Secret ${input.name} saved`
           }
       }
@@ -196,5 +234,5 @@ const makeBrowserAskSecretTool = (browser: BrowserClient["Service"]): ServerTool
 }
 
 export const browserAskSecretTools = Effect.gen(function* () {
-  return [makeBrowserAskSecretTool(yield* BrowserClient)]
+  return [makeBrowserAskSecretTool(yield* BrowserClient, yield* VaultKeys)]
 })
