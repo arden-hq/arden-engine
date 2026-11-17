@@ -1,3 +1,4 @@
+import type { JsonValue } from "@arden-hq/protocol"
 import type { SignalSource } from "@arden-hq/protocol/signals"
 import { Context, Effect, Schema } from "effect"
 import { storeErrorFields } from "../errors.js"
@@ -15,7 +16,12 @@ export interface FetchedConnectionItem {
   readonly sender: string | undefined
   readonly receivedAt: string
   readonly snippet: string
+  /** The source's own fields (a calendar change: its kind, start, attendees), or
+   *  undefined when title, sender and snippet say it all. JSON-safe. */
+  readonly detail: ConnectionItemDetail | undefined
 }
+
+export type ConnectionItemDetail = Readonly<Record<string, JsonValue>>
 
 type ConnectionItemRoute =
   | { readonly kind: "pending" }

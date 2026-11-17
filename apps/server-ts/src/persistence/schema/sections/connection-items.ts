@@ -38,6 +38,7 @@ export const connectionItemsSchemaSection = {
       CHECK(state = 'routed' OR (owner_space_id IS NULL AND route_basis IS NULL AND route_reason IS NULL)),
       CHECK(state = 'pending' OR (route_basis IS NOT NULL AND route_reason IS NOT NULL))
     )`,
+    "ALTER TABLE connection_items ADD COLUMN detail TEXT CHECK(detail IS NULL OR json_valid(detail))",
     `CREATE INDEX idx_connection_items_thread
       ON connection_items(source, account, thread_key)`,
     `CREATE INDEX idx_connection_items_owner

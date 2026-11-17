@@ -4,6 +4,7 @@ import type {
 } from "../../persistence/automations/model.js"
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
 import { gmailThreadTarget, hasReadyGmail } from "../../connections/items/gmail.js"
+import { calendarEventTarget } from "../../google/calendar-client.js"
 import { githubItemUrl } from "../../persistence/connections/item-url.js"
 import type { AutomationEventProducer } from "../event-producer.js"
 
@@ -37,6 +38,17 @@ export const connectionItemEvent = (
         context: { item: { ...item, ...(url === undefined ? {} : { url }) } }
       }
     }
+    case "calendar":
+      return row.detail === undefined
+        ? undefined
+        : {
+            eventType: "calendar.changed",
+            eventKey: row.itemId,
+            producedBy: null,
+            chainDepth: 0,
+            touches: { target: calendarEventTarget(row.threadKey), changedAt: row.receivedAt },
+            context: { event: row.detail }
+          }
     default:
       return undefined
   }

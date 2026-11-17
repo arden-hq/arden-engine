@@ -1,5 +1,5 @@
 import { SIGNAL_SOURCE_IDS } from "@arden-hq/protocol/signals"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
   ConnectionItemStore,
@@ -10,6 +10,7 @@ import {
   type RouteBasis,
   type RouteDecision
 } from "../connections/store.js"
+import { JsonObjectSchema } from "../json.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import { openHeldOnHome } from "./proposal-room.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
@@ -27,12 +28,19 @@ interface ItemRow {
   readonly received_at: string
   readonly snippet: string
   readonly fetched_at: string
+  readonly detail: string | null
   readonly state: "pending" | "routed"
   readonly owner_space_id: string | null
   readonly route_basis: RouteBasis | null
   readonly route_reason: string | null
   readonly routed_at: string | null
 }
+
+const decodeDetail = Schema.decodeUnknownOption(Schema.fromJsonString(JsonObjectSchema))
+
+/** The stored detail document, or undefined when the item has none. */
+export const itemDetailOf = (detail: string | null): ConnectionItem["detail"] =>
+  detail === null ? undefined : Option.getOrUndefined(decodeDetail(detail))
 
 const citesAny = (sql: SqlClient.SqlClient, itemIds: string) =>
   sql`EXISTS (SELECT 1 FROM json_each(task_proposals.sources_json) AS cited
@@ -56,6 +64,7 @@ const project = (row: ItemRow): ConnectionItem => ({
   sender: row.sender ?? undefined,
   receivedAt: row.received_at,
   snippet: row.snippet,
+  detail: itemDetailOf(row.detail),
   fetchedAt: row.fetched_at,
   route:
     row.state === "pending" || row.route_basis === null || row.routed_at === null
@@ -119,10 +128,11 @@ export const makeConnectionItemStore = ({
           let inserted = 0
           for (const [index, item] of input.items.entries()) {
             const rows = yield* sql`INSERT INTO connection_items (item_id, source, account,
-              external_id, thread_key, title, sender, received_at, snippet, fetched_at, state)
+              external_id, thread_key, title, sender, received_at, snippet, detail, fetched_at, state)
               VALUES (${`item_${ids[index]}`}, ${input.source}, ${input.account}, ${item.externalId},
                 ${item.threadKey}, ${item.title}, ${item.sender ?? null}, ${item.receivedAt},
-                ${item.snippet}, ${at}, 'pending')
+                ${item.snippet}, ${item.detail === undefined ? null : JSON.stringify(item.detail)},
+                ${at}, 'pending')
               ON CONFLICT(source, account, external_id) DO NOTHING RETURNING item_id`
             for (const row of rows)
               yield* sql`INSERT INTO connection_item_threads (item_id, source, account, thread_key)

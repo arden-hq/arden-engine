@@ -1,13 +1,14 @@
 /**
- * The outside sources Arden reads signals from: mail and GitHub notifications
- * today, more later (calendars, chat, trackers). A new source is one entry
+ * The outside sources Arden reads signals from: mail, GitHub notifications and
+ * calendar changes today, more later (chat, trackers). A new source is one entry
  * here and an adapter that fetches its items; storage takes any source id
  * (server migration 0047), and a client that does not know one yet shows its
  * id.
  */
 export const SIGNAL_SOURCES = {
   gmail: { label: "Gmail", brand: "gmail" },
-  github: { label: "GitHub", brand: "github" }
+  github: { label: "GitHub", brand: "github" },
+  calendar: { label: "Google Calendar", brand: "google-calendar" }
 } as const satisfies Record<string, { readonly label: string; readonly brand: string }>
 
 export type SignalSource = keyof typeof SIGNAL_SOURCES

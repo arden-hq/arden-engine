@@ -7,6 +7,9 @@ import {
   CONNECTION_ITEM_KEEP_DAYS,
   ConnectionItemStore
 } from "../../persistence/connections/store.js"
+import { hasReadyCalendar } from "../../automations/producers/calendar.js"
+import { watchedCalendars } from "../../automations/producers/calendar-sources.js"
+import { calendarItemAccount, fetchCalendar } from "./calendar.js"
 import { fetchGitHub, GITHUB_ACCOUNT } from "./github.js"
 import { fetchGmail, hasReadyGmail } from "./gmail.js"
 
@@ -69,6 +72,42 @@ export const connectionItemsRuntime = <R>(options: {
         })
       })
 
+      const calendar = Effect.gen(function* () {
+        const accounts = (yield* google.list()).accounts.filter(hasReadyCalendar)
+        for (const account of accounts) {
+          const calendarIds = yield* watchedCalendars(account).pipe(
+            Effect.provideService(GoogleConnections, google)
+          )
+          for (const calendarId of calendarIds) {
+            const stored = calendarItemAccount(account.id, calendarId)
+            yield* Effect.gen(function* () {
+              const cursor = yield* store.cursor("calendar", stored)
+              const fetched = yield* fetchCalendar({
+                google,
+                account,
+                calendarId,
+                cursor: cursor?.cursor
+              })
+              yield* store.saveFetch({
+                source: "calendar",
+                account: stored,
+                cursor: fetched.cursor,
+                pollAfter: undefined,
+                since: undefined,
+                items: fetched.items
+              })
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Calendar changes could not be fetched", {
+                  account: stored,
+                  cause
+                })
+              )
+            )
+          }
+        }
+      })
+
       const prune = Effect.gen(function* () {
         const before = DateTime.formatIso(
           DateTime.subtract(yield* DateTime.now, { days: CONNECTION_ITEM_KEEP_DAYS })
@@ -82,6 +121,9 @@ export const connectionItemsRuntime = <R>(options: {
         )
         yield* github.pipe(
           Effect.catchCause((cause) => Effect.logWarning("GitHub items fetch failed", cause))
+        )
+        yield* calendar.pipe(
+          Effect.catchCause((cause) => Effect.logWarning("Calendar changes fetch failed", cause))
         )
         yield* afterFetch
         yield* prune.pipe(

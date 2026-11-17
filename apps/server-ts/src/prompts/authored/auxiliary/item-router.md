@@ -1,4 +1,4 @@
-New items arrived from the user's mail and GitHub notifications. Each starts a thread no space owns yet. For each item, pick the one space listed below that it belongs on, or Home.
+New items arrived from the user's mail, GitHub notifications and calendar changes. Each starts a thread no space owns yet. For each item, pick the one space listed below that it belongs on, or Home.
 
 ## Rules
 

@@ -140,6 +140,7 @@ const toItem = (notification: Notification): FetchedConnectionItem => {
     title: clipLine(`${repository}: ${redactText(notification.subject.title, 300)}`, 300),
     sender: clipLine(repository, 200),
     receivedAt: notification.updated_at,
-    snippet: clipLine(`${words(notification.subject.type)}, ${words(notification.reason)}.`, 280)
+    snippet: clipLine(`${words(notification.subject.type)}, ${words(notification.reason)}.`, 280),
+    detail: undefined
   }
 }

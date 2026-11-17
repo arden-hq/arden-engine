@@ -203,6 +203,7 @@ const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (
     receivedAt: Number.isFinite(received)
       ? DateTime.formatIso(DateTime.makeUnsafe(received))
       : DateTime.formatIso(yield* DateTime.now),
-    snippet: redactText(message.snippet ?? "", 280)
+    snippet: redactText(message.snippet ?? "", 280),
+    detail: undefined
   }
 })

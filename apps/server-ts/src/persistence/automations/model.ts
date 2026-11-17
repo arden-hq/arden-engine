@@ -124,6 +124,7 @@ export interface ConnectionItemFeedRow {
   readonly sender: string | undefined
   readonly receivedAt: string
   readonly snippet: string
+  readonly detail: Readonly<Record<string, JsonValue>> | undefined
 }
 
 export interface EventChat {

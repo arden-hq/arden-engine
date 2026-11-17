@@ -9,6 +9,7 @@ import { storeError } from "./automation-rows.js"
 import { iso } from "../../runtime/clock.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
+import { itemDetailOf } from "./connection-items.js"
 
 const ITEMS_BATCH = 200
 
@@ -170,11 +171,12 @@ const itemRows = (
     readonly sender: string | null
     readonly received_at: string
     readonly snippet: string
+    readonly detail: string | null
     readonly fetched_at: string
     readonly watched: number
   }>`
     SELECT item.item_id, item.source, item.thread_key, item.title, item.sender,
-      item.received_at, item.snippet, item.fetched_at,
+      item.received_at, item.snippet, item.detail, item.fetched_at,
       (watch.watched_from IS NULL
         OR julianday(item.received_at) >= julianday(watch.watched_from)) AS watched
     FROM connection_items AS item
@@ -195,7 +197,8 @@ const itemRows = (
           title: row.title,
           sender: row.sender ?? undefined,
           receivedAt: row.received_at,
-          snippet: row.snippet
+          snippet: row.snippet,
+          detail: itemDetailOf(row.detail)
         }
       }))
     )

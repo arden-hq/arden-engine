@@ -62,6 +62,8 @@ import { dropSpaceOverview } from "./0167_drop_space_overview.js"
 import { usageDailyCost } from "./0168_usage_daily_cost.js"
 import { modelServerEndpoint } from "./0169_model_server_endpoint.js"
 import { vaultKeyRules } from "./0170_vault_key_rules.js"
+import { connectionItemDetail } from "./0171_connection_item_detail.js"
+import { calendarChangesCursor } from "./0172_calendar_changes_cursor.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -367,7 +369,9 @@ export const migrations: ReadonlyArray<Migration> = [
   dropSpaceOverview,
   usageDailyCost,
   modelServerEndpoint,
-  vaultKeyRules
+  vaultKeyRules,
+  connectionItemDetail,
+  calendarChangesCursor
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {
