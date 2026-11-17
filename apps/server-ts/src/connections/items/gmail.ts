@@ -169,6 +169,11 @@ const httpStatus = (error: unknown, statuses: ReadonlyArray<number>): boolean =>
 const fetchFailed = (cause: unknown): FetchError =>
   new FetchError({ source: "gmail", message: "Gmail fetch failed", cause })
 
+const SENT_LABEL = "SENT"
+
+/** The detail field of a mail the owner sent themselves. */
+export const SENT_BY_OWNER = "sent_by_owner"
+
 const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (
   input: {
     readonly store: Pick<ConnectionItemStore["Service"], "threadOwned">
@@ -181,8 +186,11 @@ const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (
   )
   const from = headers.get("from") ?? ""
   const subject = headers.get("subject") ?? ""
+  // A mail the owner sent is kept only in a thread a Space owns, where it tells the Space they
+  // replied; it never arrives, so it is marked and no Automation hears it as a new mail.
+  const sent = (message.labelIds ?? []).includes(SENT_LABEL)
   const kept =
-    keepMail({ labelIds: message.labelIds ?? [], subject }) ||
+    (!sent && keepMail({ labelIds: message.labelIds ?? [], subject })) ||
     (yield* input.store
       .threadOwned({ source: "gmail", account: input.account.id, threadKey: message.threadId })
       .pipe(
@@ -204,6 +212,6 @@ const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (
       ? DateTime.formatIso(DateTime.makeUnsafe(received))
       : DateTime.formatIso(yield* DateTime.now),
     snippet: redactText(message.snippet ?? "", 280),
-    detail: undefined
+    detail: sent ? { [SENT_BY_OWNER]: true } : undefined
   }
 })

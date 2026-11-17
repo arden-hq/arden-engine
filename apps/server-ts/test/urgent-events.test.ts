@@ -3,6 +3,8 @@ import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { dailySummaryHandler } from "../src/automations/handlers/daily-summary.js"
 import { urgentEventsHandler } from "../src/automations/handlers/urgent-events.js"
+import { connectionItemEvent } from "../src/automations/producers/connection-item.js"
+import { SENT_BY_OWNER } from "../src/connections/items/gmail.js"
 import { screenEventWake } from "../src/automations/prefilter.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import type { AutomationJobLeaseRef } from "../src/persistence/automations/store.js"
@@ -166,4 +168,19 @@ it("an arrival wakes Urgent events with the owner's sentence, and its reply is o
       ])
     })
   )
+})
+
+it("a mail the owner sent is no new mail for any Automation", () => {
+  const mail = {
+    itemId: "item-1",
+    source: "gmail",
+    threadKey: "thread-1",
+    title: "Re: Interview",
+    sender: "Me <me@x.test>",
+    receivedAt: "2026-11-18T09:00:00.000Z",
+    snippet: "Tuesday works.",
+    detail: undefined
+  }
+  expect(connectionItemEvent(mail)?.eventType).toBe("email.received")
+  expect(connectionItemEvent({ ...mail, detail: { [SENT_BY_OWNER]: true } })).toBeUndefined()
 })

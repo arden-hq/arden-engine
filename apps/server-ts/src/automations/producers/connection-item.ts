@@ -5,7 +5,7 @@ import type {
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
 import type { ConnectionSource } from "../../persistence/connections/store.js"
 import type { AutomationEventType } from "@arden-hq/protocol/automations"
-import { gmailThreadTarget, hasReadyGmail } from "../../connections/items/gmail.js"
+import { gmailThreadTarget, hasReadyGmail, SENT_BY_OWNER } from "../../connections/items/gmail.js"
 import { calendarEventTarget } from "../../google/calendar-client.js"
 import { githubItemUrl } from "../../persistence/connections/item-url.js"
 import type { AutomationEventProducer } from "../event-producer.js"
@@ -32,6 +32,7 @@ export const connectionItemEvent = (
   }
   switch (row.source) {
     case "gmail":
+      if (row.detail?.[SENT_BY_OWNER] === true) return undefined
       return {
         eventType: ITEM_EVENT_TYPES.gmail,
         eventKey: row.itemId,
