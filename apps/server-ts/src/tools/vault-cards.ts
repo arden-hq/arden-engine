@@ -191,9 +191,10 @@ export const paymentAllowed = (card: Card, input: Pick<PayInput, "shop" | "tab_r
   [
     `The user approved the payment with Touch ID. For the next ${APPROVAL_MINUTES} minutes, while ${input.tab_ref} stays on ${input.shop}, Arden types the ${cardTitle(card)} card for you:`,
     `browser_act action fill with card {"id": "${card.id}", "field": ...} and a fresh node_ref, one field at a time: number, expiry (a single field, or the month field and then the year field), security_code, name.`,
-    "Fill every other field first (billing address, email): once a card field is typed, Arden types nothing else on that page and takes no screenshot of it. Choose expiry lists with select before the first card field.",
+    "Fill every other field of the checkout first (name, address, postcode, email, and any field inside the payment frame that is not the card, such as a postcode there), and choose expiry lists with select; then the card fields; then click the shop's Pay button.",
+    "Once a card field is typed, the tab takes only whole-page snapshots, clicks by ref, the keys Enter, Tab and Escape, scrolling, waiting for the page, the card's own fields and closing: nothing else can be typed there, and no screenshot is taken.",
     "You never see the number or the security code. If a field sits in a payment frame Arden does not know, browser_act says so; ask with vault_allow_payment_frame.",
-    "Then press the shop's own pay button. If the shop or the bank asks for anything the Vault does not hold (a one-time code, an app confirmation), stop and tell the user; never ask for it in the chat."
+    "If the shop then asks for anything more (a bank's one-time code, an app confirmation, a second form), stop and tell the user what the shop asks for; never ask for it in the chat."
   ].join(" ")
 
 const makeVaultPayTool = (
@@ -218,7 +219,7 @@ const makeVaultPayTool = (
       "Ask the user to pay at a shop's checkout with one of their saved cards (vault_list lists them by id, brand, last 4 digits and expiry).",
       "The user approves on a card in the chat with Touch ID; a payment always needs them, so with nobody there the card waits.",
       "Call it on the checkout page, once the order and its total are final, with the total and currency the page shows. Arden cannot check the amount against the page, so give exactly what the page says.",
-      "Once approved, fill the card's fields with browser_act card; you never see the number or the security code.",
+      "Before asking, fill every other field of the checkout (name, address, postcode, any field in the payment frame that is not the card). Once approved, fill the card's fields with browser_act card, then click Pay; you never see the number or the security code. After the card is typed nothing else can be typed in that tab; if the shop then asks for more (a bank's one-time code, a second form), stop and tell the user what it asks for.",
       "Never type a card number or a security code yourself, never ask for one in the chat, and never pay with a card the user did not save."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(PayParametersSchema),

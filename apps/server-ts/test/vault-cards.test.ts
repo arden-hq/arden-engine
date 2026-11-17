@@ -112,6 +112,8 @@ describe("cards seen from the engine", () => {
     expect(text).toContain("10 minutes")
     expect(text).toContain("one-time code")
     expect(text).toContain("never ask for it in the chat")
+    expect(text).toContain("Fill every other field of the checkout first")
+    expect(text).toContain("stop and tell the user what the shop asks for")
   })
 
   it("browser_act takes a card field only as a fill, without a value", () => {
