@@ -1,4 +1,7 @@
-import type { CallFacts, ToolFacts } from "../execution/decide.js"
+import type { AskReason, CallFacts, ToolFacts } from "../execution/decide.js"
+import { parseMcpSource } from "../mcp/naming.js"
+import { COMMAND_TOOL } from "../persistence/permissions/command-policy.js"
+import type { RuleSubject } from "../persistence/permissions/rules.js"
 import { parseCommandSegments } from "./bash-permissions.js"
 import { isReadOnlyCommand } from "./bash-safe-commands.js"
 import type { ServerToolMetadataInput, ShellCommand } from "./define.js"
@@ -38,4 +41,26 @@ export const commandFacts = (
       : undefined,
     reads_only: isReadOnlyCommand(parseCommandSegments(shell.command), shell.cwd ?? home)
   }
+}
+
+/**
+ * The Allow rule a built-in tool's card may offer: the one that would have
+ * let this call run without a card. Only an ask from the tool's default, or
+ * from the owner's own Ask rule, is answered by a rule; a requirement, a lock,
+ * a boundary, an automation's standing change and a tool that always asks
+ * come before the rules are read. A delete asks every time. A connector tool
+ * and a command have their own subjects.
+ */
+export const cardGrantSubject = (input: {
+  readonly reason: AskReason
+  readonly definition: DecidedTool
+  readonly site: string | undefined
+}): RuleSubject | undefined => {
+  const { name, metadata } = input.definition
+  if (input.reason !== "default" && input.reason !== "override") return undefined
+  if (metadata.destructive === true || metadata.always_ask === true) return undefined
+  if (name === COMMAND_TOOL || parseMcpSource(metadata.source) !== undefined) return undefined
+  return input.site === undefined
+    ? { kind: "tool", tool: name, server: null }
+    : { kind: "site", tool: name, origin: input.site }
 }

@@ -6,6 +6,7 @@ import {
   CommandGrantApprovalDataSchema,
   WordsGrantApprovalDataSchema
 } from "../permissions/command-policy.js"
+import { toolGrantSubject } from "../permissions/tool-grant.js"
 import { mcpSource, parseMcpSource } from "../../mcp/naming.js"
 import { VAULT_USE_KEY_TOOL, VaultKeyApprovalDataSchema } from "../../credentials/vault-keys.js"
 import {
@@ -166,7 +167,10 @@ export const cardRuleSubjects = (input: {
       ? [{ kind: "vault_key", name: key.value.vault_key, keyId: key.value.vault_key_id }]
       : undefined
   }
-  if (input.toolName !== COMMAND_TOOL) return undefined
+  if (input.toolName !== COMMAND_TOOL) {
+    const subject = toolGrantSubject(input.toolName, input.data)
+    return subject === undefined ? undefined : [subject]
+  }
   const words = Schema.decodeUnknownOption(WordsGrantApprovalDataSchema)(input.data)
   if (Option.isSome(words))
     return [{ kind: "words", text: wordsRuleText(words.value.words_grant.text) }]

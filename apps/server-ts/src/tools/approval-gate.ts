@@ -19,9 +19,11 @@ import type {
 import { decide, waivesRequirement, type CallFacts, type DenyRule } from "../execution/decide.js"
 import { narrowerApprovalMode } from "@arden-hq/protocol/permissions"
 import { isRefusal, refusalError, withBreaker } from "./refusal.js"
-import { commandFacts, toolFacts } from "./approval-decision.js"
+import { cardGrantSubject, commandFacts, toolFacts } from "./approval-decision.js"
+import { TOOL_GRANT, toolGrantData } from "../persistence/permissions/tool-grant.js"
 import { toolRule, type LiveRead } from "./approval-policy.js"
 import { wordsRules } from "../execution/rules.js"
+import type { RuleSubject } from "../persistence/permissions/rules.js"
 import { COMMAND_TOOL } from "../persistence/permissions/command-policy.js"
 import { withHelperRule } from "./shell-policy.js"
 import { impactOf, shellCommandOf, siteOf, type ServerToolMetadataInput } from "./define.js"
@@ -195,11 +197,16 @@ export const makeApprovalGate =
         const note = cardNote(decision.reason, review?.why)
         const noted = note === undefined ? prompt : withWhy(prompt, note)
         const rule = review?.verdict === "ask" ? helperRule(review.why) : undefined
-        const card = withRunReads(
-          definition.name === COMMAND_TOOL && rule !== undefined
-            ? withHelperRule(noted, rule)
-            : noted,
-          ctx.run
+        const card = withToolGrant(
+          withRunReads(
+            definition.name === COMMAND_TOOL && rule !== undefined
+              ? withHelperRule(noted, rule)
+              : noted,
+            ctx.run
+          ),
+          decision.presentation.delivery === "pause"
+            ? cardGrantSubject({ reason: decision.reason, definition, site })
+            : undefined
         )
         if (decision.presentation.delivery === "chat") {
           const kept = await services.policy
@@ -301,14 +308,23 @@ const withRunReads = (prompt: ToolApprovalPrompt, run: ServerRunContext): ToolAp
   data: { ...prompt.data, [RUN_READS]: run.observations.snapshot() }
 })
 
+/** Only the gate says which rule a card may save: a tool's own data never does. */
+const withToolGrant = (
+  prompt: ToolApprovalPrompt,
+  subject: RuleSubject | undefined
+): ToolApprovalPrompt => {
+  const { [TOOL_GRANT]: _own, ...data } = prompt.data ?? {}
+  return { ...prompt, data: { ...data, ...(subject === undefined ? {} : toolGrantData(subject)) } }
+}
+
 const withAdoptedReads = <
   C extends { readonly run: ServerRunContext; readonly approval?: ToolApprovalContext }
 >(
   ctx: C
 ): C => {
-  if (ctx.approval?.data === undefined || !Object.hasOwn(ctx.approval.data, RUN_READS)) return ctx
+  if (ctx.approval?.data === undefined) return ctx
   const { data, ...approval } = ctx.approval
-  const { [RUN_READS]: carried, ...own } = data
+  const { [RUN_READS]: carried, [TOOL_GRANT]: _grant, ...own } = data
   const reads = Schema.decodeUnknownOption(ObservationSnapshotSchema)(carried)
   if (Option.isSome(reads)) ctx.run.observations.adopt(reads.value)
   return {

@@ -1,28 +1,15 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PauseRequested, ToolExecutionError } from "@arden-hq/loop"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import { readMutationReceipt } from "../src/persistence/tools/mutation-receipt.js"
 import { makeMacAppsTools } from "../src/tools/mac-apps.js"
+import {
+  makeFakeMacHelper,
+  type FakeMacAnswer,
+  type FakeMacHelper
+} from "./fixtures/fake-mac-helper.js"
 import { serverRunContext } from "./kit.js"
-
-// The fake helper: answers each "app verb" with the JSON in answers.json, or
-// with a fault on stderr and exit 1, and records every argument list it got.
-const FAKE_HELPER = `
-const { appendFileSync, readFileSync } = require("node:fs")
-const { join } = require("node:path")
-const args = process.argv.slice(2)
-appendFileSync(join(__dirname, "calls.jsonl"), JSON.stringify(args) + "\\n")
-const answer = JSON.parse(readFileSync(join(__dirname, "answers.json"), "utf8"))[args.slice(0, 2).join(" ")]
-if (answer === undefined || answer.fault !== undefined) {
-  process.stderr.write(JSON.stringify(answer?.fault ?? { error: "usage", message: "No answer." }) + "\\n")
-  process.exit(1)
-}
-if (answer.hangs === true) setTimeout(() => undefined, 60000)
-else process.stdout.write((answer.raw ?? JSON.stringify(answer.prints)) + "\\n")
-`
 
 const EVENT = {
   id: "EV-1|2026-11-18T09:30:00+04:00",
@@ -52,9 +39,7 @@ const CALENDARS = [
 ]
 const LISTS = [{ id: "LIST-1", title: "Errands", writable: true, default: true, account: "iCloud" }]
 
-type Answer = { prints: unknown } | { fault: unknown } | { raw: string } | { hangs: true }
-
-const ANSWERS: Record<string, Answer> = {
+const ANSWERS: Record<string, FakeMacAnswer> = {
   "calendar list": { prints: CALENDARS },
   "calendar events": {
     prints: {
@@ -84,34 +69,26 @@ const ANSWERS: Record<string, Answer> = {
   "contacts get": { prints: { id: "C-1", name: "Sam Lee" } }
 }
 
+let fake: FakeMacHelper
 let directory = ""
 let helper = ""
 
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "arden-mac-apps-"))
-  helper = join(directory, "arden-apple")
-  await writeFile(helper, `#!/bin/sh\nexec "${process.execPath}" "$0.cjs" "$@"\n`)
-  await writeFile(`${helper}.cjs`, FAKE_HELPER)
-  await chmod(helper, 0o755)
+  fake = await makeFakeMacHelper()
+  directory = fake.directory
+  helper = fake.path
 })
 
-afterAll(async () => {
-  await rm(directory, { recursive: true, force: true })
-})
+afterAll(() => fake.remove())
 
-const answer = (answers: typeof ANSWERS = {}) =>
-  writeFile(join(directory, "answers.json"), JSON.stringify({ ...ANSWERS, ...answers }))
+const answer = (answers: typeof ANSWERS = {}) => fake.answer({ ...ANSWERS, ...answers })
 
 beforeEach(async () => {
-  await rm(join(directory, "calls.jsonl"), { force: true })
+  await fake.forget()
   await answer()
 })
 
-const calls = async (): Promise<ReadonlyArray<ReadonlyArray<string>>> =>
-  (await readFile(join(directory, "calls.jsonl"), "utf8"))
-    .trim()
-    .split("\n")
-    .map((line): ReadonlyArray<string> => JSON.parse(line))
+const calls = () => fake.calls()
 
 const tool = (name: string, options: Parameters<typeof makeMacAppsTools>[0] = {}) => {
   const found = makeMacAppsTools({
