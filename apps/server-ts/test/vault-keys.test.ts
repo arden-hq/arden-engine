@@ -14,6 +14,7 @@ import { cardRuleSubjects } from "../src/persistence/sqlite/permissions.js"
 import { shellInvocation, shellRuntime } from "../src/tools/shell-policy.js"
 import { runCommandUntil } from "../src/tools/shell-run.js"
 import { keyUseDecision } from "../src/tools/vault.js"
+import { endsKeySessions } from "../src/chat/runner/built-in.js"
 import { matchesVaultKey } from "../src/execution/rules.js"
 import { savedSecretResult, savedUserName, secretCard } from "../src/tools/browser-ask-secret.js"
 import { NO_PATH_RULES } from "./fixtures/local-policy.js"
@@ -336,5 +337,32 @@ describe("the sign-in password card", () => {
     expect(
       savedUserName({ result: "", preview: "", data: { names: ["password"] } }, "password")
     ).toBeUndefined()
+  })
+})
+
+describe("a run's keys and its runner", () => {
+  const result = (stopReason: string) => ({ text: "", stop_reason: stopReason })
+  const run = async (events: ReadonlyArray<object>, fail = false) => {
+    const ended: Array<string> = []
+    const runner = endsKeySessions(
+      async (runId) => {
+        ended.push(runId)
+      },
+      async function* (_input: { readonly runId: string }) {
+        for (const event of events) yield event
+        if (fail) throw new Error("model failed")
+      }
+    )
+    await (async () => {
+      for await (const _event of runner({ runId: "run-1" })) void _event
+    })().catch(() => undefined)
+    return ended
+  }
+
+  it("end when the run ends, however it ends, and stay while it waits on a card", async () => {
+    expect(await run([result("end_turn")])).toEqual(["run-1"])
+    expect(await run([result("cancelled")])).toEqual(["run-1"])
+    expect(await run([], true)).toEqual(["run-1"])
+    expect(await run([result("paused")])).toEqual([])
   })
 })

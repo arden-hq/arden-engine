@@ -350,15 +350,23 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
 })
 
 /**
- * The run's saved keys stop working when its runner ends, however it ends (done, failed,
- * stopped, or paused for a card: a resumed run gets new stand-ins). The proxy's own time limits
- * only bound a run that never ends.
+ * The run's saved keys stop working when it ends: done, failed or stopped. A run that pauses for a
+ * card keeps them, because it resumes as the same run. The proxy's own time limits bound a run
+ * that never ends.
  */
-const endsKeySessions = (end: (runId: string) => Promise<void>, runner: ChatRunner): ChatRunner =>
+export const endsKeySessions = <I extends { readonly runId: string }, E extends object>(
+  end: (runId: string) => Promise<void>,
+  runner: (input: I) => AsyncIterable<E>
+): ((input: I) => AsyncIterable<E>) =>
   async function* (input) {
+    let paused = false
     try {
-      yield* runner(input)
+      for await (const event of runner(input)) {
+        if (!("_tag" in event) && "stop_reason" in event && event.stop_reason === "paused")
+          paused = true
+        yield event
+      }
     } finally {
-      await end(input.runId)
+      if (!paused) await end(input.runId)
     }
   }
