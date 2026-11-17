@@ -107,7 +107,6 @@ const BrowserOperationSchema = Schema.Union([
     target: Schema.optionalKey(BrowserTargetSchema),
     value: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20_000))),
     secret: Schema.optionalKey(SiteSecretNameSchema),
-    card: Schema.optionalKey(Schema.Struct({ id: CardIdSchema, field: CardFillFieldSchema })),
     values: Schema.optionalKey(
       Schema.Array(Schema.String.check(Schema.isMaxLength(20_000))).check(
         Schema.isMinLength(1),
@@ -149,6 +148,25 @@ const BrowserOperationSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("site_secrets"),
     origin: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048))
+  }),
+  /**
+   * The checkout with a saved card: the desktop types each card field by ref, then clicks the
+   * Pay button by ref. The values never come here.
+   */
+  Schema.Struct({
+    type: Schema.Literal("card_checkout"),
+    tabRef: TabRefSchema,
+    profileRef: ProfileRefSchema,
+    origin: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
+    expectedRevision: RevisionSchema,
+    card: CardIdSchema,
+    fields: Schema.Array(
+      Schema.Struct({
+        nodeRef: Schema.String.check(Schema.isPattern(/^@e[1-9][0-9]*$/u)),
+        field: CardFillFieldSchema
+      })
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(6)),
+    payRef: Schema.String.check(Schema.isPattern(/^@e[1-9][0-9]*$/u))
   }),
   /** Whether the tab's focused card field is in a frame from `frame`, directly in `shop`'s page. */
   Schema.Struct({

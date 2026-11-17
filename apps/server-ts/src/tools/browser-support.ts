@@ -281,6 +281,7 @@ const operationTabRef = (operation: BrowserRequest["operation"]): string | undef
     case "wait":
     case "permission":
     case "card_frame":
+    case "card_checkout":
       return operation.tabRef
     case "open":
       return operation.disposition === "current" ? operation.tabRef : undefined

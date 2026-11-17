@@ -305,7 +305,7 @@ const makeBrowserTools = ({
       name: "browser_act",
       description: [
         "Perform exactly one browser action authorized by the latest interactive snapshot of the same tab.",
-        "To enter a password, fill with secret (a name from browser_ask_secret), never value. To enter a saved card, fill with card (its id and the field) after vault_pay, never value.",
+        "To enter a password, fill with secret (a name from browser_ask_secret), never value. A saved card is typed only by vault_checkout, never with value.",
         "The tab's profile and origin must still match; once an approved action begins, its snapshot is consumed even if execution fails.",
         "It returns the page after the action as a fresh interactive snapshot, which authorizes the next browser_act; do not take another one.",
         "If the outcome is unknown, inspect before retrying."
@@ -406,7 +406,6 @@ const makeBrowserTools = ({
             ...(target === undefined ? {} : { target }),
             ...(input.value === undefined ? {} : { value: input.value }),
             ...(input.secret === undefined ? {} : { secret: input.secret }),
-            ...(input.card === undefined ? {} : { card: input.card }),
             ...(input.values === undefined ? {} : { values: input.values }),
             ...(input.direction === undefined ? {} : { direction: input.direction }),
             ...(input.amount === undefined ? {} : { amount: input.amount })

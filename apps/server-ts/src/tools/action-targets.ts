@@ -210,6 +210,7 @@ const browserHost = (operation: BrowserOperation): string | undefined => {
     case "wait":
     case "site_secrets":
     case "card_frame":
+    case "card_checkout":
       return undefined
   }
 }
@@ -245,6 +246,7 @@ const browserWords = (
     case "wait":
     case "site_secrets":
     case "card_frame":
+    case "card_checkout":
       return undefined
   }
 }

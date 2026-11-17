@@ -1,6 +1,6 @@
 import { Schema, SchemaTransformation } from "effect"
 
-import { CardFillFieldSchema, CardIdSchema, SiteSecretNameSchema } from "../browser/service.js"
+import { SiteSecretNameSchema } from "../browser/service.js"
 import {
   atNodeRef,
   OriginSchema,
@@ -242,7 +242,7 @@ export const ActParametersSchema = Schema.Struct({
   value: Schema.optionalKey(
     Schema.String.check(Schema.isMaxLength(20_000)).annotate({
       description:
-        "Text or key required for fill, type, and press (up to 20,000 characters). Never a password or a card number: use secret or card."
+        "Text or key required for fill, type, and press (up to 20,000 characters). Never a password or a card number: use secret, or vault_checkout for a card."
     })
   ),
   secret: Schema.optionalKey(
@@ -250,20 +250,6 @@ export const ActParametersSchema = Schema.Struct({
       description: [
         "Name of a secret saved for this site with browser_ask_secret; fill only, in place of value, with a node_ref target.",
         "Arden types it into the password field only while the tab is on the site it was saved for. You never see the value."
-      ].join(" ")
-    })
-  ),
-  card: Schema.optionalKey(
-    Schema.Struct({
-      id: CardIdSchema.annotate({ description: "The card's id from vault_list." }),
-      field: CardFillFieldSchema.annotate({
-        description:
-          "Which of the card's fields to type: number, expiry (one field, or a month or a year field), security_code, or name (the name on the card)."
-      })
-    }).annotate({
-      description: [
-        "A saved card's field to type, fill only, in place of value, with a node_ref target, after the user approved vault_pay for this card and this tab.",
-        "Arden types it only into a matching card field on the approved shop, or in its payment frame. You never see the number or the security code."
       ].join(" ")
     })
   ),
@@ -306,17 +292,7 @@ export const ActParametersSchema = Schema.Struct({
     ) {
       issues.push({ path: ["target"], issue: "this action requires a fresh node_ref" })
     }
-    if (input.card !== undefined) {
-      if (input.action !== "fill") {
-        issues.push({ path: ["card"], issue: "is available only for fill" })
-      }
-      if (input.value !== undefined || input.secret !== undefined) {
-        issues.push({ path: ["card"], issue: "is used alone, without value or secret" })
-      }
-      if (input.target !== undefined && input.target.node_ref === undefined) {
-        issues.push({ path: ["target"], issue: "a card fills a fresh node_ref" })
-      }
-    } else if (input.secret !== undefined) {
+    if (input.secret !== undefined) {
       if (input.action !== "fill") {
         issues.push({ path: ["secret"], issue: "is available only for fill" })
       }

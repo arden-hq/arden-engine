@@ -50,6 +50,8 @@ export const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   vault_ask_key: "Asks you to add a missing key on a card; the agent never sees it.",
   vault_pay:
     "Asks you to pay at a shop with a saved card, with Touch ID; the agent never sees the card.",
+  vault_checkout:
+    "Types your saved card into the checkout and clicks Pay; the agent never sees it.",
   vault_allow_payment_frame:
     "Asks whether a payment form from an unknown company may get your card.",
   browser_permission: "Lets a browser page use your location, if you allow it.",

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { makeVaultKeys, type VaultKeyBroker } from "../src/credentials/vault-keys.js"
 import { ActParametersSchema } from "../src/tools/browser-parameters.js"
 import {
+  CheckoutParametersSchema,
   frameCard,
   frameThere,
   payCard,
@@ -108,7 +109,7 @@ describe("cards seen from the engine", () => {
 
   it("once paid, the agent is told how to fill and to stop at a bank's code", () => {
     const text = paymentAllowed(CARD, PAY)
-    expect(text).toContain('card {"id": "0123456789abcdef01234567", "field": ...}')
+    expect(text).toContain('call vault_checkout once with card_id "0123456789abcdef01234567"')
     expect(text).toContain("10 minutes")
     expect(text).toContain("one-time code")
     expect(text).toContain("never ask for it in the chat")
@@ -116,8 +117,7 @@ describe("cards seen from the engine", () => {
     expect(text).toContain("stop and tell the user what the shop asks for")
   })
 
-  it("browser_act takes a card field only as a fill, without a value", () => {
-    const decode = Schema.decodeUnknownSync(ActParametersSchema)
+  it("browser_act takes no card; vault_checkout takes card fields and the Pay button by ref, never a value", () => {
     const act = {
       tab_ref: "tab-1",
       profile_ref: "default",
@@ -125,10 +125,39 @@ describe("cards seen from the engine", () => {
       snapshot_ref: "snap-0123456789ab",
       target: { node_ref: "@e3" }
     }
-    const card = { id: CARD.id, field: "number" }
-    expect(() => decode({ ...act, action: "fill", card })).not.toThrow()
-    expect(() => decode({ ...act, action: "fill", card, value: "4242424242424242" })).toThrow()
-    expect(() => decode({ ...act, action: "type", card })).toThrow()
-    expect(() => decode({ ...act, action: "fill", card: { id: CARD.id, field: "pin" } })).toThrow()
+    const decodeAct = Schema.decodeUnknownSync(ActParametersSchema)
+    expect(decodeAct({ ...act, action: "fill", value: "x" })).not.toHaveProperty("card")
+    expect(
+      decodeAct({ ...act, action: "fill", value: "x", card: { id: CARD.id, field: "number" } })
+    ).not.toHaveProperty("card")
+    const decode = Schema.decodeUnknownSync(CheckoutParametersSchema)
+    const checkout = {
+      tab_ref: "tab-1",
+      profile_ref: "default",
+      origin: "https://booking.com",
+      snapshot_ref: "snap-0123456789ab",
+      card_id: CARD.id,
+      fields: [
+        { node_ref: "e4", field: "number" },
+        { node_ref: "@e6", field: "security_code" }
+      ],
+      pay_node_ref: "e9"
+    }
+    expect(decode(checkout)).toMatchObject({
+      fields: [
+        { node_ref: "@e4", field: "number" },
+        { node_ref: "@e6", field: "security_code" }
+      ],
+      pay_node_ref: "@e9"
+    })
+    expect(() => decode({ ...checkout, fields: [] })).toThrow()
+    expect(() => decode({ ...checkout, fields: [{ node_ref: "@e4", field: "pin" }] })).toThrow()
+    expect(() =>
+      decode({ ...checkout, fields: [{ node_ref: "@e4", field: "number", value: "4242" }] })
+    ).not.toThrow()
+    expect(
+      decode({ ...checkout, fields: [{ node_ref: "@e4", field: "number", value: "4242" }] })
+        .fields[0]
+    ).not.toHaveProperty("value")
   })
 })

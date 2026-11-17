@@ -4,7 +4,7 @@ import { APPROVAL_FIELD_LABEL } from "@arden-hq/protocol/chat"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { Effect, Schema } from "effect"
 
-import { BrowserClient, CardIdSchema } from "../browser/service.js"
+import { BrowserClient, CardFillFieldSchema, CardIdSchema } from "../browser/service.js"
 import {
   looksLikeSecret,
   VaultKeys,
@@ -14,7 +14,15 @@ import {
 import { personCard } from "../execution/decide.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { tabOriginOf } from "./browser-ask-secret.js"
-import { runBrowserForRun, TabRefSchema } from "./browser-support.js"
+import {
+  claimObservedRevision,
+  OriginSchema,
+  originIssues,
+  ProfileRefSchema,
+  runBrowserForRun,
+  TabRefSchema
+} from "./browser-support.js"
+import { nodeRefSchema, SnapshotRefSchema } from "./browser-parameters.js"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
 import { toolRefusal } from "./tool-failure.js"
@@ -186,14 +194,14 @@ const refuseSecretShaped = (reason: string): void => {
 
 const READ_ONLY = "This run is read-only, so it may not pay."
 
-/** What the agent is told once the owner paid with Touch ID: how to fill, and what not to do. */
+/** What the agent is told once the owner paid with Touch ID: the one way to finish. */
 export const paymentAllowed = (card: Card, input: Pick<PayInput, "shop" | "tab_ref">): string =>
   [
-    `The user approved the payment with Touch ID. For the next ${APPROVAL_MINUTES} minutes, while ${input.tab_ref} stays on ${input.shop}, Arden types the ${cardTitle(card)} card for you:`,
-    `browser_act action fill with card {"id": "${card.id}", "field": ...} and a fresh node_ref, one field at a time: number, expiry (a single field, or the month field and then the year field), security_code, name.`,
-    "Fill every other field of the checkout first (name, address, postcode, email, and any field inside the payment frame that is not the card, such as a postcode there), and choose expiry lists with select; then the card fields; then click the shop's Pay button.",
-    "Once a card field is typed, the tab takes only whole-page snapshots, clicks by ref, the keys Enter, Tab and Escape, scrolling, waiting for the page, the card's own fields and closing: nothing else can be typed there, and no screenshot is taken.",
-    "You never see the number or the security code. If a field sits in a payment frame Arden does not know, browser_act says so; ask with vault_allow_payment_frame.",
+    `The user approved the payment with Touch ID. For the next ${APPROVAL_MINUTES} minutes, while ${input.tab_ref} stays on ${input.shop}, Arden types the ${cardTitle(card)} card for you with vault_checkout.`,
+    "Fill every other field of the checkout first (name, address, postcode, email, and any field inside the payment frame that is not the card, such as a postcode there), and choose expiry lists with select. Then take one browser_snapshot.",
+    `From that snapshot, call vault_checkout once with card_id "${card.id}", the refs of the card fields (number, expiry, security_code, name: an expiry split in two takes the month field and then the year field) and the ref of the shop's Pay button. Arden types the card and clicks Pay in that one call.`,
+    "While a form in the tab still holds the card, Arden reads no page of it; after the click, wait for the page with browser_wait (load, or the confirmation page's address), then take a snapshot to see the result. In that tab Arden types nothing else and takes no screenshot.",
+    "You never see the number or the security code. If a card field sits in a payment frame Arden does not know, vault_checkout says so before typing anything; ask with vault_allow_payment_frame, then call it again.",
     "If the shop then asks for anything more (a bank's one-time code, an app confirmation, a second form), stop and tell the user what the shop asks for; never ask for it in the chat."
   ].join(" ")
 
@@ -219,7 +227,7 @@ const makeVaultPayTool = (
       "Ask the user to pay at a shop's checkout with one of their saved cards (vault_list lists them by id, brand, last 4 digits and expiry).",
       "The user approves on a card in the chat with Touch ID; a payment always needs them, so with nobody there the card waits.",
       "Call it on the checkout page, once the order and its total are final, with the total and currency the page shows. Arden cannot check the amount against the page, so give exactly what the page says.",
-      "Before asking, fill every other field of the checkout (name, address, postcode, any field in the payment frame that is not the card). Once approved, fill the card's fields with browser_act card, then click Pay; you never see the number or the security code. After the card is typed nothing else can be typed in that tab; if the shop then asks for more (a bank's one-time code, a second form), stop and tell the user what it asks for.",
+      "Before asking, fill every other field of the checkout (name, address, postcode, any field in the payment frame that is not the card). Once approved, take one snapshot and call vault_checkout with the refs of the card fields and of the Pay button: Arden types the card and clicks Pay in one call, and reads no page of the tab while a form still holds the card. You never see the number or the security code. After the card is typed nothing else can be typed in that tab; if the shop then asks for more (a bank's one-time code, a second form), stop and tell the user what it asks for.",
       "Never type a card number or a security code yourself, never ask for one in the chat, and never pay with a card the user did not save."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(PayParametersSchema),
@@ -289,8 +297,8 @@ const makeAllowFrameTool = (
   defineServerTool({
     name: "vault_allow_payment_frame",
     description: [
-      "Ask the user whether a saved card may be typed into a payment frame from an address Arden does not know, after browser_act refused for that reason and named the frame.",
-      "Only during a payment the user approved with vault_pay. The user allows it once or denies; then fill the field again."
+      "Ask the user whether a saved card may be typed into a payment frame from an address Arden does not know, after vault_checkout refused for that reason and named the frame.",
+      "Only during a payment the user approved with vault_pay. The user allows it once or denies; then call vault_checkout again."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(FrameParametersSchema),
     metadata: {
@@ -321,7 +329,7 @@ const makeAllowFrameTool = (
       )
       if (!frameThere(checked))
         throw toolRefusal(
-          `The focused card field is not in a frame from ${input.frame} placed directly in ${input.shop}. Fill the card field again; ask only about the frame browser_act names.`,
+          `The focused card field is not in a frame from ${input.frame} placed directly in ${input.shop}. Ask only about the frame vault_checkout names.`,
           "Frame not found"
         )
       return frameCard(input, card)
@@ -331,17 +339,94 @@ const makeAllowFrameTool = (
       if (ctx.approval?.data?.["vault_card_id"] !== card.id)
         throw toolRefusal("A payment frame is allowed only on the user's card.", "Needs approval")
       return {
-        result: `The user allowed ${host(input.frame)} to get the ${cardTitle(card)} card for this payment. Fill the field again.`,
+        result: `The user allowed ${host(input.frame)} to get the ${cardTitle(card)} card for this payment. Call vault_checkout again.`,
         preview: `${host(input.frame)} allowed`
       }
     }
   })
 
-/** The agent's card tools: ask to pay, and ask about an unknown payment frame. */
+export const CheckoutParametersSchema = Schema.Struct({
+  tab_ref: TabRefSchema.annotate({ description: "The checkout's tab, as on vault_pay." }),
+  profile_ref: ProfileRefSchema.annotate({
+    description: "The tab's profile_ref from its snapshot."
+  }),
+  origin: OriginSchema.annotate({ description: "The shop's exact origin, as on vault_pay." }),
+  snapshot_ref: SnapshotRefSchema,
+  card_id: CardIdSchema.annotate({ description: "The card's id, as on vault_pay." }),
+  fields: Schema.Array(
+    Schema.Struct({
+      node_ref: nodeRefSchema("The card field's ref in that snapshot."),
+      field: CardFillFieldSchema.annotate({
+        description:
+          "Which of the card's fields it is: number, expiry (one field, or the month and then the year field), security_code, or name."
+      })
+    })
+  )
+    .check(Schema.isMinLength(1), Schema.isMaxLength(6))
+    .annotate({ description: "The card fields, in the order to type them." }),
+  pay_node_ref: nodeRefSchema("The ref of the shop's own Pay button in that snapshot.")
+}).check(Schema.makeFilter((input) => originIssues(input.origin)))
+
+const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
+  defineServerTool({
+    name: "vault_checkout",
+    description: [
+      "Type a saved card into the checkout and click the shop's Pay button, in one call, after the user approved vault_pay for this card and this tab.",
+      "Take one browser_snapshot after every other field is filled; give the refs of the card fields and of the Pay button from it. Arden checks every card field before typing any, then types them and clicks Pay; you never see the number or the security code.",
+      "Afterwards wait for the page with browser_wait; while a form still holds the card, Arden reads no page of that tab."
+    ].join(" "),
+    parameters: Schema.toStandardSchemaV1(CheckoutParametersSchema),
+    metadata: {
+      effect: "external",
+      display_name: "Pay at the shop",
+      kind: "browser",
+      action: "execute",
+      approval_preview: "Type the saved card and click Pay.",
+      source: "_browser",
+      changes_state: true,
+      concurrency_group: "browser",
+      destructive: false,
+      // The user's approval is the pay card with Touch ID: the desktop types nothing without it.
+      approval_bypass: true,
+      policy_scope: "external",
+      open_world: true,
+      code_mode: false
+    },
+    execute: async (input, ctx) => {
+      const expectedRevision = claimObservedRevision(
+        ctx.run.browserObservations,
+        input.tab_ref,
+        input.snapshot_ref,
+        ctx.toolCallId
+      )
+      const output = await runBrowserForRun(
+        browser,
+        ctx,
+        {
+          type: "card_checkout",
+          tabRef: input.tab_ref,
+          profileRef: input.profile_ref,
+          origin: input.origin,
+          expectedRevision,
+          card: input.card_id,
+          fields: input.fields.map((item) => ({ nodeRef: item.node_ref, field: item.field })),
+          payRef: input.pay_node_ref
+        },
+        ctx.signal
+      )
+      return { result: output.result, preview: output.preview }
+    }
+  })
+
+/** The agent's card tools: ask to pay, ask about an unknown payment frame, and pay. */
 export const vaultCardTools = Effect.gen(function* () {
   const vault = yield* VaultKeys
   const browser = yield* BrowserClient
-  return [makeVaultPayTool(vault, browser), makeAllowFrameTool(vault, browser)]
+  return [
+    makeVaultPayTool(vault, browser),
+    makeAllowFrameTool(vault, browser),
+    makeCheckoutTool(browser)
+  ]
 })
 
 /** vault_list's lines for cards: safe fields and the id the agent pays with. */

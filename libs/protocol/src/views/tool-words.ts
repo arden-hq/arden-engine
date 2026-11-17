@@ -245,6 +245,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   vault_ask_key: { verb: "Added a key", icon: "dot" },
   vault_pay: { verb: "Used a saved card", icon: "dot" },
   vault_allow_payment_frame: { verb: "Checked a payment form", icon: "dot" },
+  vault_checkout: { verb: "Used a saved card", icon: "browser" },
   browser_snapshot: { verb: "Read the page", icon: "browser", many: "Read pages" },
   browser_screenshot: { verb: "Took a screenshot", icon: "image", many: "Took screenshots" },
   browser_tabs: { verb: "Checked browser tabs", icon: "browser" },

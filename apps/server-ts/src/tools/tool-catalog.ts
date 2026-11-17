@@ -61,7 +61,14 @@ const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
     "browser_close"
   ],
   web_browser_sign_in: ["browser_ask_secret"],
-  vault: ["vault_list", "vault_use_key", "vault_ask_key", "vault_pay", "vault_allow_payment_frame"],
+  vault: [
+    "vault_list",
+    "vault_use_key",
+    "vault_ask_key",
+    "vault_pay",
+    "vault_allow_payment_frame",
+    "vault_checkout"
+  ],
   web_browser_tasks: ["browser_task", "browser_procedure"],
   space: [
     "space_list",
@@ -272,7 +279,12 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
     ["tab_ref", "browser_tabs"],
     ["shop", "browser_tabs"]
   ),
-  vault_allow_payment_frame: inputs(["card_id", "vault_list"], ["frame", "browser_act"]),
+  vault_allow_payment_frame: inputs(["card_id", "vault_list"], ["frame", "vault_checkout"]),
+  vault_checkout: inputs(
+    ["card_id", "vault_list"],
+    ["tab_ref", "browser_snapshot"],
+    ["snapshot_ref", "browser_snapshot"]
+  ),
   browser_ask_secret: inputs(
     ["tab_ref", "browser_tabs", "browser_snapshot"],
     ["origin", "browser_tabs", "browser_snapshot"]
