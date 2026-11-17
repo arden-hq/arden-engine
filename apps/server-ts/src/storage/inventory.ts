@@ -9,6 +9,17 @@ import { sha256Hex } from "@arden-hq/std/hash"
 
 const MAX_INVENTORY_ENTRIES = 100_000
 
+/** A file or folder below the root can be removed while the scan runs (a temp file, a finished
+ *  download). It is then no longer part of the storage, so the scan leaves it out. */
+const ifThere = async <A>(read: Promise<A>): Promise<A | null> => {
+  try {
+    return await read
+  } catch (cause) {
+    if (isErrnoCode(cause, "ENOENT")) return null
+    throw cause
+  }
+}
+
 export interface CategoryTally {
   totalBytes: number
   itemCount: number
@@ -107,8 +118,8 @@ export const scanInventoryUnsafe = async (
     if (visited > MAX_INVENTORY_ENTRIES) {
       throw new Error("Arden storage inventory is too large")
     }
-    const status = await lstat(next.path)
-    if (status.isSymbolicLink()) continue
+    const status = await ifThere(lstat(next.path))
+    if (status === null || status.isSymbolicLink()) continue
     if (status.isFile()) {
       const tally = tallies[next.category]
       tally.totalBytes = addSafe(tally.totalBytes, requireFileSize(status))
@@ -116,7 +127,7 @@ export const scanInventoryUnsafe = async (
       continue
     }
     if (!status.isDirectory()) continue
-    const entries = await readdir(next.path, { withFileTypes: true })
+    const entries = (await ifThere(readdir(next.path, { withFileTypes: true }))) ?? []
     for (const entry of entries) {
       directories.push({ path: join(next.path, entry.name), category: next.category })
     }
@@ -129,8 +140,8 @@ const scanUnitMemberUnsafe = async (
   path: string,
   name: string
 ): Promise<StorageUnitMember | null> => {
-  const rootStatus = await lstat(path)
-  if (rootStatus.isSymbolicLink()) return null
+  const rootStatus = await ifThere(lstat(path))
+  if (rootStatus === null || rootStatus.isSymbolicLink()) return null
   const kind = unitKind(rootStatus)
   if (kind === null) return null
 
@@ -161,14 +172,15 @@ const scanUnitMemberUnsafe = async (
   record(path, rootStatus)
 
   for (let directory = entries.pop(); directory !== undefined; directory = entries.pop()) {
-    const children = await readdir(directory, { withFileTypes: true })
+    const children = (await ifThere(readdir(directory, { withFileTypes: true }))) ?? []
     for (const child of children) {
       visited += 1
       if (visited > MAX_INVENTORY_ENTRIES) {
         throw new Error("Arden storage inventory is too large")
       }
       const childPath = join(directory, child.name)
-      const status = await lstat(childPath)
+      const status = await ifThere(lstat(childPath))
+      if (status === null) continue
       record(childPath, status)
       if (status.isSymbolicLink()) continue
       modifiedMilliseconds = Math.max(modifiedMilliseconds, status.mtimeMs)
