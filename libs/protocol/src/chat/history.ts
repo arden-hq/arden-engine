@@ -260,6 +260,11 @@ export interface TurnToolCallCount extends JsonRecord {
   /** How many of `count` the user turned down on their approval cards: they
    *  never ran. Absent from a server that predates it, which means none. */
   readonly rejected?: number
+  /** Where each of the `count` calls sits in the chat: the `seq` of the
+   *  message that made it, ascending. A reader compares them with the `seq` of
+   *  a reply to tell which calls came before that reply, without paging the
+   *  turn's work in. Absent from a server that predates it. */
+  readonly seqs?: ReadonlyArray<number>
 }
 
 export interface HistoryPage extends JsonRecord {

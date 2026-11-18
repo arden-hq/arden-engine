@@ -11,6 +11,7 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { makeTranscriptSearches } from "./transcript-search.js"
 import { makeToolResultInSession, type TranscriptRow } from "./transcript-tool-result.js"
+import { makeToolCallCounts } from "./transcript-tool-calls.js"
 import { questionAnswerPredicate } from "./steered-answer.js"
 import { RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import {
@@ -31,7 +32,6 @@ import {
 } from "../transcript/model.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
-import type { TurnToolCallCount } from "@arden-hq/protocol/chat"
 import { messageTurnIdSql } from "./message-turns.js"
 
 interface CountRow {
@@ -44,14 +44,6 @@ interface SequenceRow {
 
 interface TurnIdRow {
   readonly turn_id: string
-}
-
-interface ToolCallCountRow {
-  readonly turn_id: string
-  readonly name: string
-  readonly display_name: string | null
-  readonly count: number
-  readonly rejected: number
 }
 
 interface TurnOriginRow {
@@ -713,78 +705,6 @@ export const makeTranscriptQueries = ({
     "SqliteTranscriptQueries.turnIdsWithToolWork"
   )
 
-  const toolCallCounts = Effect.fn("SqliteTranscriptQueries.toolCallCounts")(function* (
-    sessionId: string,
-    turnIds: ReadonlyArray<string>
-  ) {
-    const counts = new Map<string, Array<TurnToolCallCount>>()
-    if (turnIds.length === 0) return counts
-    // CROSS JOIN keeps session_turns outermost, so each turn reads only its
-    // own (session_id, seq) range. With a plain JOIN SQLite drove the query
-    // from the transcript and parsed every message of the chat twice: 160 ms
-    // instead of 5 ms on a 22k-message chat.
-    const rows = yield* sql<ToolCallCountRow>`
-        SELECT turn_id, name, display_name, COUNT(*) AS count, SUM(rejected) AS rejected
-        FROM (
-          SELECT t.turn_id AS turn_id,
-                 json_extract(call.value, '$.function.name') AS name,
-                 json_extract(call.value, '$.display_name') AS display_name,
-                 m.seq AS seq,
-                 EXISTS (
-                   SELECT 1
-                   FROM tool_approvals AS a
-                   WHERE a.session_id = t.session_id
-                     AND a.tool_call_id = json_extract(call.value, '$.id')
-                     AND a.kind = 'tool_approval'
-                     AND a.status = 'rejected'
-                 ) AS rejected
-          FROM session_turns AS t
-          CROSS JOIN session_messages AS m
-            ON m.session_id = t.session_id
-           AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          JOIN json_each(m.message_json, '$.tool_calls') AS call
-          WHERE t.session_id = ${sessionId}
-            AND t.turn_id IN ${sql.in(turnIds)}
-            AND m.role = 'assistant'
-            AND ${messageTurnIdSql(sql, "m")} = t.turn_id
-            AND NOT ${conversationCallPredicate(sql)}
-          UNION ALL
-          SELECT t.turn_id,
-                 json_extract(call.value, '$.name'),
-                 NULL,
-                 m.seq,
-                 0
-          FROM session_turns AS t
-          CROSS JOIN session_messages AS m
-            ON m.session_id = t.session_id
-           AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
-          JOIN json_each(m.message_json, '$.provider_tool_calls') AS call
-          WHERE t.session_id = ${sessionId}
-            AND t.turn_id IN ${sql.in(turnIds)}
-            AND m.role = 'assistant'
-            AND ${messageTurnIdSql(sql, "m")} = t.turn_id
-        )
-        WHERE name IS NOT NULL
-        GROUP BY turn_id, name, display_name
-        ORDER BY turn_id, MIN(seq), name
-      `.pipe(
-      Effect.mapError((cause) =>
-        queryError("page", sessionId, "Could not count turn tool calls", cause)
-      )
-    )
-    for (const row of rows) {
-      const list = counts.get(row.turn_id) ?? []
-      list.push({
-        name: row.name,
-        display_name: row.display_name,
-        count: row.count,
-        rejected: row.rejected
-      })
-      counts.set(row.turn_id, list)
-    }
-    return counts
-  })
-
   const originsForTurns = Effect.fn("SqliteTranscriptQueries.originsForTurns")(function* (
     sessionId: string,
     turnIds: ReadonlyArray<string>
@@ -833,7 +753,7 @@ export const makeTranscriptQueries = ({
     toolResultInSession: makeToolResultInSession(sql, decodeRow),
     turnIdsWithWork,
     turnIdsWithToolWork,
-    toolCallCounts,
+    toolCallCounts: makeToolCallCounts(sql, conversationCallPredicate(sql)),
     originsForTurns,
     ...makeTranscriptSearches(sql, writer.sql, conversationMessagePredicate)
   })

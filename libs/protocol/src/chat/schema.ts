@@ -574,7 +574,8 @@ export const TurnShellSchema = withExtras({
         name: Schema.String,
         display_name: Schema.NullOr(Schema.String),
         count: NonNegativeIntSchema,
-        rejected: Schema.optionalKey(NonNegativeIntSchema)
+        rejected: Schema.optionalKey(NonNegativeIntSchema),
+        seqs: Schema.optionalKey(Schema.Array(NonNegativeIntSchema))
       })
     )
   ),
