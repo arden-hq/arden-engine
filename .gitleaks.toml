@@ -10,4 +10,10 @@ description = "Test fixtures: idempotency keys are random UUIDs, and the redacti
 condition = "AND"
 regexTarget = "line"
 paths = ['''apps/server-ts/test/.*\.test\.ts''']
-regexes = ['''idempotency_key: "[0-9a-f-]{36}"''', '''"SECRETPATHTOKEN", "0123456789abcdef0123"''']
+regexes = [
+  '''idempotency_key: "[0-9a-f-]{36}"''',
+  '''"SECRETPATHTOKEN", "0123456789abcdef0123"''',
+  # Vault tests: made-up keys the scrub and proxy tests must find and hide.
+  '''TODOIST_API_KEY: "gfq_[0-9A-Za-z]+"''',
+  '''"AKIAABCDEFGHIJKLMNOP"'''
+]
