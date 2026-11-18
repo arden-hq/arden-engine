@@ -24,9 +24,17 @@ const makeUrgentEventsRunner = (services: {
   Effect.fn("UrgentEventsRunner")(function* (job) {
     const sessionId =
       job.payload.chatRun?.sessionId ?? (yield* services.queue.prepareRunSession(job))
+    // The run judges by the owner's sentence, as the first check did: without it the run falls
+    // back on its own, stricter sense of what is urgent.
+    const rules = [
+      ...new Set(job.payload.prefilter?.events.flatMap((event) => event.sentences ?? []) ?? [])
+    ]
     const observed = yield* runByRule(services, job, {
       sessionId,
-      prompt: job.payload.prompt,
+      prompt:
+        rules.length === 0
+          ? job.payload.prompt
+          : `${job.payload.prompt}\n\n## The user's rule\n${rules.join("\n")}`,
       name: job.payload.name
     })
     const run = { chatRunId: observed.runId, chatSessionId: sessionId }
