@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
 import { dropDiscussions } from "../src/persistence/migrations/0036_drop_discussions.js"
+import { threadMetadataObject } from "../src/persistence/migrations/0174_thread_metadata_object.js"
 import { migrations } from "../src/persistence/migrations/index.js"
 
 const AT = "2026-09-20T00:00:00.000Z"
@@ -15,7 +16,7 @@ const migrated = (): DatabaseSync => {
   return database
 }
 
-it("migration 0036 keeps each discussion's brief as its chat's thread and drops the tables", () => {
+it("migration 0036, with 0174 after it, keeps each discussion's brief as its chat's thread and drops the tables", () => {
   const database = migrated()
   const brief = {
     purpose: "Compare the two runners",
@@ -62,6 +63,8 @@ it("migration 0036 keeps each discussion's brief as its chat's thread and drops 
   delivery.run("c".repeat(64), JSON.stringify({ kind: "result" }), "pending")
 
   dropDiscussions.up(database)
+  // SQLite 3.54 makes 0036 store the thread as a string; 0174 turns it back into the object.
+  threadMetadataObject.up(database)
 
   const metadata = (id: string): unknown => {
     const row = database.prepare("SELECT metadata FROM sessions WHERE session_id = ?").get(id)
@@ -99,4 +102,28 @@ it("migration 0036 keeps each discussion's brief as its chat's thread and drops 
     tables: [],
     broken: 0
   })
+})
+
+it("migration 0174 turns a thread stored as a string of JSON into the object and leaves the rest", () => {
+  const database = new DatabaseSync(":memory:")
+  database.exec("CREATE TABLE sessions (session_id TEXT PRIMARY KEY, metadata TEXT)")
+  const thread = { source_session_id: "source", purpose: "Compare", starts_with: ["A"] }
+  const insert = database.prepare("INSERT INTO sessions (session_id, metadata) VALUES (?, ?)")
+  insert.run("string", JSON.stringify({ kept: true, thread: JSON.stringify(thread) }))
+  insert.run("object", JSON.stringify({ thread }))
+  insert.run("words", JSON.stringify({ thread: "not json" }))
+  insert.run("list", JSON.stringify({ thread: "[1]" }))
+  insert.run("none", null)
+  insert.run("broken", '{"thread":"{')
+
+  threadMetadataObject.up(database)
+
+  const stored = (id: string): unknown =>
+    database.prepare("SELECT metadata FROM sessions WHERE session_id = ?").get(id)?.metadata
+  expect(JSON.parse(String(stored("string")))).toEqual({ kept: true, thread })
+  expect(JSON.parse(String(stored("object")))).toEqual({ thread })
+  expect(JSON.parse(String(stored("words")))).toEqual({ thread: "not json" })
+  expect(JSON.parse(String(stored("list")))).toEqual({ thread: "[1]" })
+  expect(stored("none")).toBeNull()
+  expect(stored("broken")).toBe('{"thread":"{')
 })
