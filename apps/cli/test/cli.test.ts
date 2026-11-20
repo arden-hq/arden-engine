@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { runCli, type CliClient, type CliDependencies } from "../src/index.js"
-import type { AppLauncher } from "../src/app-launch.js"
+import type { AppLauncher, InstalledApp } from "../src/app-launch.js"
 import type { StdinKind } from "../src/command.js"
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import type { RunQuestion } from "@arden-hq/protocol/runs"
@@ -239,11 +239,14 @@ describe("an Arden older than the CLI", () => {
 
 describe("starting the installed app", () => {
   const appAccess = "/home/test/.arden/cli-access.json"
-  const launching = (onOpen: (files: Map<string, string>) => void) => {
+  const launching = (
+    onOpen: (files: Map<string, string>) => void,
+    kind: InstalledApp["kind"] = "background"
+  ) => {
     const files = new Map<string, string>()
     const opened: Array<string> = []
     const launcher: AppLauncher = {
-      find: async () => "/Applications/Arden.app",
+      find: async () => ({ kind, path: "/Applications/Arden.app" }),
       open: async (appPath) => {
         opened.push(appPath)
         onOpen(files)
@@ -294,6 +297,29 @@ describe("starting the installed app", () => {
         message: `Arden did not start within 0 s: ${appAccess} names no running server`
       }
     })
+  })
+
+  it("never starts an Arden too old to start in the background", async () => {
+    const app = launching(() => undefined, "too_old")
+    const events: Array<string> = []
+    const io = testIo({ launcher: app.launcher })
+    const dependencies = { ...io.dependencies, ...started(events), readFile: app.readFile }
+    expect(await runCli(["sessions"], dependencies)).toBe(1)
+    const home = await mkdtemp(join(tmpdir(), "arden-cli-home-"))
+    try {
+      expect(await runCli(["hey"], { ...dependencies, homeDirectory: home })).toBe(0)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+    expect(app.opened).toEqual([])
+    expect(events).toEqual([`start ${join(home, ".arden-cli", "settings.json")} -`, "stop"])
+    expect(io.stderr()).toBe(
+      [
+        "arden: Arden is not running, and the installed Arden is too old to start from the command line. Open Arden, or update it.",
+        "arden: The installed Arden is too old to start in the background; this prompt runs on a server of its own, without your accounts.",
+        ""
+      ].join("\n")
+    )
   })
 
   it("leaves the app alone when ARDEN_DIR names another data folder", async () => {

@@ -172,25 +172,42 @@ export const resolveServer = async (
     return { url: parseServerUrl(explicit), headers: {} }
   }
   const found = await findServer(dependencies)
-  if (found === undefined) throw new ServerUnavailableError(NOT_RUNNING)
-  return found
+  switch (found.kind) {
+    case "found":
+      return found.connection
+    case "none":
+      throw new ServerUnavailableError(NOT_RUNNING)
+    case "too_old":
+      throw new ServerUnavailableError(TOO_OLD_TO_START)
+  }
 }
 
-export const findServer = async (
-  dependencies: CliDependencies
-): Promise<ServerConnection | undefined> => {
+export type FoundServer =
+  | { readonly kind: "found"; readonly connection: ServerConnection }
+  | { readonly kind: "none" }
+  | { readonly kind: "too_old" }
+
+const TOO_OLD_TO_START =
+  "Arden is not running, and the installed Arden is too old to start from the command line. Open Arden, or update it."
+
+export const TOO_OLD_FOR_PROMPT =
+  "The installed Arden is too old to start in the background; this prompt runs on a server of its own, without your accounts."
+
+export const findServer = async (dependencies: CliDependencies): Promise<FoundServer> => {
   const local = await findLocalServer(dependencies)
-  if (local !== undefined) return local
-  if ((dependencies.env[ARDEN_DIR_VARIABLE]?.trim() ?? "") !== "") return undefined
-  return startAppInBackground(dependencies)
+  if (local !== undefined) return { kind: "found", connection: local }
+  if ((dependencies.env[ARDEN_DIR_VARIABLE]?.trim() ?? "") !== "") return { kind: "none" }
+  const app = await dependencies.appLauncher.find()
+  if (app === undefined) return { kind: "none" }
+  if (app.kind === "too_old") return { kind: "too_old" }
+  return { kind: "found", connection: await startAppInBackground(app.path, dependencies) }
 }
 
 const startAppInBackground = async (
+  appPath: string,
   dependencies: CliDependencies
-): Promise<ServerConnection | undefined> => {
+): Promise<ServerConnection> => {
   const launcher = dependencies.appLauncher
-  const appPath = await launcher.find()
-  if (appPath === undefined) return undefined
   const folder = resolveArdenDir(dependencies.env, dependencies.homeDirectory)
   const stale = await accessIn(folder, dependencies).catch(() => undefined)
   dependencies.writeStderr("arden: Arden is not running; starting it in the background.\n")

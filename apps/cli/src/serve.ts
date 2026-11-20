@@ -13,11 +13,12 @@ import { fileURLToPath } from "node:url"
 
 import {
   findServer,
+  TOO_OLD_FOR_PROMPT,
+  type FoundServer,
   ProviderUnavailableError,
   ServerUnavailableError,
   UsageError,
   type CliDependencies,
-  type ServerConnection,
   type StartServer
 } from "./command.js"
 import { failureOf, runCommand, type RunOptions } from "./run.js"
@@ -233,14 +234,14 @@ export const promptCommand = async (
 ): Promise<number> => {
   if (options.urlArgument !== undefined || (dependencies.env["ARDEN_URL"]?.trim() ?? "") !== "")
     return runCommand(options, dependencies)
-  let found: ServerConnection | undefined
+  let found: FoundServer
   try {
     found = await findServer(dependencies)
-  } catch {
-    return runCommand(options, dependencies)
+  } catch (cause) {
+    return runCommand(options, { ...dependencies, connect: () => Promise.reject(cause) })
   }
-  if (found !== undefined) {
-    const connection = found
+  if (found.kind === "found") {
+    const connection = found.connection
     return runCommand(options, { ...dependencies, connect: async () => connection })
   }
   if (options.detach) {
@@ -249,6 +250,8 @@ export const promptCommand = async (
       connect: () => Promise.reject(new UsageError(DETACH_NEEDS_SERVER))
     })
   }
+  if (found.kind === "too_old" && options.output === "text")
+    dependencies.writeStderr(`arden: ${TOO_OLD_FOR_PROMPT}\n`)
   return execCommand({ config: undefined, logFile: undefined, run: options }, dependencies)
 }
 
