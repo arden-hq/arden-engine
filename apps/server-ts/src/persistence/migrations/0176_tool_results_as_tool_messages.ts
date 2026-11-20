@@ -12,10 +12,12 @@ export const toolResultsAsToolMessages: Migration = {
       SELECT message.message_rowid FROM chats JOIN session_messages AS message
         ON message.session_id = chats.session_id
         AND message.client_id >= 'async-result:' AND message.client_id < 'async-result;'
+        AND ${WRITTEN_BY_ARDEN}
       UNION ALL
       SELECT message.message_rowid FROM chats JOIN session_messages AS message
         ON message.session_id = chats.session_id
         AND message.client_id >= 'tool-media:' AND message.client_id < 'tool-media;'
+        AND ${WRITTEN_BY_ARDEN}
       UNION ALL
       SELECT message.message_rowid FROM chats JOIN session_messages AS message
         ON message.session_id = chats.session_id
@@ -33,6 +35,9 @@ export const toolResultsAsToolMessages: Migration = {
 }
 
 const CANDIDATE = "message_rowid IN (SELECT message_rowid FROM temp.tool_result_rows)"
+
+const WRITTEN_BY_ARDEN =
+  "message.role = 'user' AND json_extract(message.message_json, '$.is_meta') = 1"
 
 const lateResultsAsToolMessages = (database: DatabaseSync): void => {
   const callId = `COALESCE(json_extract(message_json, '$.content[0].metadata.tool_call_id'),
@@ -96,15 +101,6 @@ const mediaIntoToolResults = (database: DatabaseSync): void => {
     SET message_json = json_set(message_json, '$.model_content',
       json((SELECT model_content FROM tool_media WHERE result_rowid = session_messages.message_rowid)))
     WHERE message_rowid IN (SELECT result_rowid FROM tool_media)`)
-  const kept = ["chat_summaries", "memory_capture_unread"]
-  for (const table of kept)
-    database.exec(`CREATE TEMP TABLE kept_${table} AS SELECT * FROM ${table}
-      WHERE session_id IN (SELECT session_id FROM tool_media)`)
   removeTranscriptRows(database, "SELECT session_id, seq FROM tool_media")
-  for (const table of kept) {
-    database.exec(`DELETE FROM ${table} WHERE session_id IN (SELECT session_id FROM tool_media)`)
-    database.exec(`INSERT INTO ${table} SELECT * FROM temp.kept_${table}`)
-    database.exec(`DROP TABLE temp.kept_${table}`)
-  }
   database.exec("DROP TABLE temp.tool_media")
 }

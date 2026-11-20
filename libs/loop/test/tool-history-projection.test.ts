@@ -72,4 +72,35 @@ describe("projectToolHistory", () => {
       { role: "tool", tool_call_id: "bg", content: "B out" }
     ])
   })
+
+  it("keeps the receipt on a native route for a call the provider did not start in the background", () => {
+    const moved: ReadonlyArray<ChatMessage> = [
+      { role: "assistant", content: "", tool_calls: [call("slow")] },
+      {
+        role: "tool",
+        tool_call_id: "slow",
+        content: "running",
+        async_tool_launch: { call_id: "slow" }
+      },
+      { role: "assistant", content: "Started" },
+      { role: "tool", tool_call_id: "slow", content: "Done" }
+    ]
+    expect(projectToolHistory({ messages: moved, nativeAsync: true })).toEqual([
+      moved[0],
+      moved[1],
+      moved[2],
+      {
+        role: "user",
+        is_meta: true,
+        content: [
+          {
+            type: "context",
+            content_type: "async_tool_result",
+            content: "Done",
+            metadata: { tool_call_id: "slow", tool_name: "lookup" }
+          }
+        ]
+      }
+    ])
+  })
 })

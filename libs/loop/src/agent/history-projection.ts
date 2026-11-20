@@ -19,10 +19,11 @@ export const projectToolHistory = (options: {
     }
     const { model_content: media, ...result } = message
     const toolName = calls.get(message.tool_call_id)?.function.name ?? "unknown"
+    const carriedNatively = options.nativeAsync && calls.get(result.tool_call_id)?.async === true
     if (result.async_tool_launch !== undefined) {
       launched.add(result.async_tool_launch.call_id)
-      if (!options.nativeAsync) output.push(result)
-    } else if (launched.has(result.tool_call_id) && !options.nativeAsync) {
+      if (!carriedNatively) output.push(result)
+    } else if (launched.has(result.tool_call_id) && !carriedNatively) {
       output.push({
         role: "user",
         is_meta: true,

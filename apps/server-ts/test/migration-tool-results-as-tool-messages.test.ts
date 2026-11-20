@@ -238,3 +238,111 @@ it("migration 0176 stores every tool result as a tool message", () => {
   ).toEqual({ through_sequence: 9 })
   expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([])
 })
+
+const chat = (database: DatabaseSync, session: string, count: number) => {
+  database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+      active_message_count, visible_message_count, context_from_seq)
+    VALUES ('${session}', '${session}-ref', '${AT}', '${AT}', ${count}, ${count}, 0)`)
+  const row = database.prepare(`INSERT INTO session_messages
+      (session_id, message_id, seq, role, message_json, client_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, '${AT}')`)
+  return (seq: number, message: Record<string, unknown>, clientId: string | null = null) =>
+    row.run(
+      session,
+      String(message.message_id),
+      seq,
+      String(message.role),
+      JSON.stringify({ ...message, turn_id: "t" }),
+      clientId
+    )
+}
+
+const toolTurn = (add: ReturnType<typeof chat>) => {
+  add(0, { message_id: "u", role: "user", content: "Go" })
+  add(1, { message_id: "a", role: "assistant", content: "", tool_calls: [call("d")] })
+  add(2, { message_id: "r", role: "tool", tool_call_id: "d", content: "D out" })
+}
+
+const media = (add: ReturnType<typeof chat>, seq: number) =>
+  add(
+    seq,
+    {
+      message_id: `m${seq}`,
+      role: "user",
+      is_meta: true,
+      content: [mediaHeader("d"), IMAGE]
+    },
+    "tool-media:d"
+  )
+
+it("migration 0176 leaves a person's message alone whatever its client id", () => {
+  const database = migrated()
+  const add = chat(database, "person", 4)
+  toolTurn(add)
+  for (const [seq, prefix] of ["tool-media:", "async-result:"].entries())
+    add(3 + seq, { message_id: `p${seq}`, role: "user", content: "my words" }, `${prefix}d`)
+  const before = database
+    .prepare("SELECT seq, role, message_json FROM session_messages WHERE seq >= 3 ORDER BY seq")
+    .all()
+  toolResultsAsToolMessages.up(database)
+  expect(
+    database
+      .prepare("SELECT seq, role, message_json FROM session_messages WHERE seq >= 3 ORDER BY seq")
+      .all()
+  ).toEqual(before)
+})
+
+it("migration 0176 moves every position that named a removed message to the message kept before it", () => {
+  const database = migrated()
+  const inner = chat(database, "inner", 5)
+  toolTurn(inner)
+  media(inner, 3)
+  inner(4, { message_id: "after", role: "assistant", content: "Seen" })
+  const trailing = chat(database, "trailing", 4)
+  toolTurn(trailing)
+  media(trailing, 3)
+  database.exec(`UPDATE sessions SET context_from_seq = 4, active_message_count = 0,
+    visible_message_count = 0 WHERE session_id = 'trailing'`)
+  database.exec(`UPDATE memory_capture_unread SET read_seq = 1,
+      prepared_json = json_object('end', json_object('sequence', 3)), prepared_cut_seq = 3
+    WHERE session_id = 'inner'`)
+  database.exec("UPDATE memory_capture_unread SET read_seq = 3 WHERE session_id = 'trailing'")
+  database.exec(`INSERT INTO chat_summaries (session_id, title, summary, through_sequence, updated_at)
+    VALUES ('inner', 'T', 'S', 4, '${AT}'), ('trailing', 'T', 'S', 3, '${AT}')`)
+  database.exec(`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
+      assistant_message_id, last_seq, ended_at)
+    VALUES ('run-trailing', 'trailing', 'completed', '${AT}', '${AT}', 'a', 3, '${AT}')`)
+  database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, metadata)
+    VALUES ('fork', 'fork-ref', '${AT}', '${AT}', json_object('fork_origin', json_object(
+      'sourceSessionId', 'inner', 'throughSequence', 3, 'sourceMessageId', 'm3')))`)
+  toolResultsAsToolMessages.up(database)
+  const row = (sql: string) => ({ ...database.prepare(sql).get() })
+  expect(
+    row(`SELECT read_seq, prepared_json, prepared_cut_seq FROM memory_capture_unread
+      WHERE session_id = 'inner'`)
+  ).toEqual({ read_seq: 1, prepared_json: null, prepared_cut_seq: null })
+  expect(row("SELECT read_seq FROM memory_capture_unread WHERE session_id = 'trailing'")).toEqual({
+    read_seq: 2
+  })
+  expect(
+    database
+      .prepare("SELECT session_id, through_sequence FROM chat_summaries ORDER BY session_id")
+      .all()
+      .map((summary) => ({ ...summary }))
+  ).toEqual([
+    { session_id: "inner", through_sequence: 4 },
+    { session_id: "trailing", through_sequence: 2 }
+  ])
+  expect(row("SELECT last_seq FROM chat_runs WHERE run_id = 'run-trailing'")).toEqual({
+    last_seq: 2
+  })
+  expect(
+    row(`SELECT context_from_seq, active_message_count FROM sessions
+      WHERE session_id = 'trailing'`)
+  ).toEqual({ context_from_seq: 3, active_message_count: 0 })
+  expect(
+    row(`SELECT json_extract(metadata, '$.fork_origin.throughSequence') AS through_seq,
+        json_extract(metadata, '$.fork_origin.sourceMessageId') AS message_id
+      FROM sessions WHERE session_id = 'fork'`)
+  ).toEqual({ through_seq: 2, message_id: "r" })
+})
