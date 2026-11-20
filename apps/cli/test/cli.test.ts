@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -171,6 +171,110 @@ describe("arden run", () => {
       expect(io.connections()).toEqual([])
     }
   })
+
+  it("finds an arden serve on the default settings when the app is not running", async () => {
+    const files = { "/home/test/.arden-cli/data/cli-access.json": accessFile() }
+    const io = testIo({ files })
+    expect(await runCli(["run", "Prompt", "--output", "json"], io.dependencies)).toBe(0)
+    expect(io.connections()).toEqual([
+      { url: "http://127.0.0.1:51234/", headers: { "x-arden-local-capability": CAPABILITY } }
+    ])
+    const elsewhere = testIo({ files, env: { ARDEN_DIR: "/elsewhere" } })
+    expect(await runCli(["run", "Prompt", "--output", "json"], elsewhere.dependencies)).toBe(1)
+    expect(elsewhere.connections()).toEqual([])
+  })
+})
+
+describe("arden <prompt>", () => {
+  const withHome = async (run: (home: string) => Promise<void>): Promise<void> => {
+    const home = await mkdtemp(join(tmpdir(), "arden-cli-home-"))
+    try {
+      await run(home)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  }
+
+  it("sends to a running Arden, else runs the prompt on a server of its own", () =>
+    withHome(async (home) => {
+      const events: Array<string> = []
+      const running = testIo({ files: { "/home/test/.arden/cli-access.json": accessFile() } })
+      expect(
+        await runCli(["Say hello", "--output", "json"], {
+          ...running.dependencies,
+          ...started(events)
+        })
+      ).toBe(0)
+      expect(events).toEqual([])
+      expect(running.connections()).toHaveLength(1)
+      const idle = testIo()
+      expect(
+        await runCli(["Say", "hello", "--output", "json"], {
+          ...idle.dependencies,
+          ...started(events),
+          homeDirectory: home
+        })
+      ).toBe(0)
+      expect(events).toEqual([`start ${join(home, ".arden-cli", "settings.json")} -`, "stop"])
+      expect(jsonLines(idle.stdout())).toMatchObject([{ status: "completed" }])
+    }))
+
+  it("refuses one bare word and a detached Run with nothing running", async () => {
+    const events: Array<string> = []
+    const io = testIo()
+    const dependencies = { ...io.dependencies, ...started(events) }
+    expect(await runCli(["sesions"], dependencies)).toBe(2)
+    expect(await runCli(["Say hello", "--detach", "--output", "json"], dependencies)).toBe(2)
+    expect(events).toEqual([])
+    expect(jsonLines(io.stdout())).toMatchObject([
+      { error: { code: "invalid_input", message: expect.stringContaining("arden serve") } }
+    ])
+  })
+})
+
+describe("arden login", () => {
+  it("signs in through the browser, says so, and signs out", async () => {
+    const home = await mkdtemp(join(tmpdir(), "arden-cli-home-"))
+    try {
+      const opened: Array<string> = []
+      const io = testIo()
+      const dependencies: CliDependencies = {
+        ...io.dependencies,
+        homeDirectory: home,
+        openUrl: (url) => opened.push(url),
+        startLogin: async () => ({
+          url: "https://auth.test/oauth/authorize?state=s",
+          tokens: Promise.resolve({
+            access: "access",
+            refresh: "refresh",
+            expires: 1_800_000_000_000,
+            accountId: "account-1"
+          }),
+          cancel: () => undefined
+        })
+      }
+      expect(await runCli(["login", "--status"], dependencies)).toBe(1)
+      expect(await runCli(["login"], dependencies)).toBe(0)
+      expect(opened).toEqual(["https://auth.test/oauth/authorize?state=s"])
+      const file = join(home, ".arden-cli", "chatgpt-login.json")
+      expect((await stat(file)).mode & 0o777).toBe(0o600)
+      expect(await runCli(["login", "--status"], dependencies)).toBe(0)
+      expect(await runCli(["logout"], dependencies)).toBe(0)
+      expect(await runCli(["login", "--status"], dependencies)).toBe(1)
+      expect(io.stdout()).toBe(
+        [
+          "Not signed in. Run `arden login`.",
+          "Signed in with ChatGPT.",
+          "Signed in with ChatGPT.",
+          "Signed out.",
+          "Not signed in. Run `arden login`.",
+          ""
+        ].join("\n")
+      )
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("no empty chat is left behind", () => {
@@ -327,25 +431,22 @@ describe("arden wait", () => {
   })
 })
 
-describe("arden exec", () => {
-  const started = (events: Array<string>) => ({
-    startServer: async (input: {
-      readonly config: string
-      readonly logFile: string | undefined
-    }) => {
-      events.push(`start ${input.config} ${input.logFile ?? "-"}`)
-      return {
-        connection: {
-          url: new URL("http://127.0.0.1:51234/"),
-          headers: { "x-arden-local-capability": CAPABILITY }
-        },
-        stop: async () => {
-          events.push("stop")
-        }
+const started = (events: Array<string>) => ({
+  startServer: async (input: { readonly config: string; readonly logFile: string | undefined }) => {
+    events.push(`start ${input.config} ${input.logFile ?? "-"}`)
+    return {
+      connection: {
+        url: new URL("http://127.0.0.1:51234/"),
+        headers: { "x-arden-local-capability": CAPABILITY }
+      },
+      stop: async () => {
+        events.push("stop")
       }
     }
-  })
+  }
+})
 
+describe("arden exec", () => {
   it("starts the configured server, runs the prompt on it and stops it", async () => {
     const events: Array<string> = []
     const io = testIo()

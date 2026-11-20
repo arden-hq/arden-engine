@@ -1,5 +1,6 @@
 import { ConfiguredServerError, startConfiguredServer } from "@arden-hq/headless"
 import { errorMessage } from "@arden-hq/std/errors"
+import { ardenCliDir } from "@arden-hq/std/paths"
 import { spawn } from "node:child_process"
 import { createWriteStream, existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -7,10 +8,12 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
+  findLocalServer,
   ProviderUnavailableError,
   ServerUnavailableError,
   UsageError,
   type CliDependencies,
+  type ServerConnection,
   type StartServer
 } from "./command.js"
 import { runCommand, type RunOptions } from "./run.js"
@@ -71,11 +74,9 @@ const startServer: StartServer = async ({ config, logFile, env }) => {
   }
 }
 
-const DEFAULT_FOLDER = ".arden-cli"
-
 const settingsFile = async (config: string | undefined, home: string): Promise<string> => {
   if (config !== undefined) return config
-  const folder = join(home, DEFAULT_FOLDER)
+  const folder = ardenCliDir(home)
   const file = join(folder, "settings.json")
   if (existsSync(file)) return file
   const settings = { dataDirectory: join(folder, "data") }
@@ -162,3 +163,31 @@ export const execCommand = async (
     await server?.stop()
   }
 }
+
+export const promptCommand = async (
+  options: RunOptions,
+  dependencies: CliDependencies
+): Promise<number> => {
+  if (options.urlArgument !== undefined || (dependencies.env["ARDEN_URL"]?.trim() ?? "") !== "")
+    return runCommand(options, dependencies)
+  let found: ServerConnection | undefined
+  try {
+    found = await findLocalServer(dependencies)
+  } catch {
+    return runCommand(options, dependencies)
+  }
+  if (found !== undefined) {
+    const connection = found
+    return runCommand(options, { ...dependencies, connect: async () => connection })
+  }
+  if (options.detach) {
+    return runCommand(options, {
+      ...dependencies,
+      connect: () => Promise.reject(new UsageError(DETACH_NEEDS_SERVER))
+    })
+  }
+  return execCommand({ config: undefined, logFile: undefined, run: options }, dependencies)
+}
+
+const DETACH_NEEDS_SERVER =
+  "--detach leaves the Run going on a server, and none is running: start `arden serve` first"

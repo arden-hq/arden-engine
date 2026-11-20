@@ -17,12 +17,15 @@ The package is private. It has no release of its own. To test it, run `bun run -
 
 | Command | What it does |
 | --- | --- |
+| `arden <prompt>` | `arden run` when Arden or an `arden serve` is running, else `arden exec` with the default settings |
+| `arden login` | Sign in with ChatGPT in the browser; the sign-in stays in `~/.arden-cli/chatgpt-login.json` (mode 0600). `--status` says whether you are signed in |
+| `arden logout` | Forget that sign-in |
 | `arden run [prompt]` | Send a prompt and wait for the answer. Piped stdin joins the prompt in a `<stdin>` block |
 | `arden wait <run-id>` | Wait for a Run that is already going |
 | `arden sessions` | List recent chats |
 | `arden models` | List the models a new chat may run on: the ids `--model` takes |
-| `arden serve --config <file>` | Start a server of its own from a settings file; runs until stopped |
-| `arden exec --config <file> [prompt]` | Start that server, run one prompt on it, stop it |
+| `arden serve [--config <file>]` | Start a server of its own from a settings file (default `~/.arden-cli/settings.json`, written on first use); runs until stopped |
+| `arden exec [--config <file>] [prompt]` | Start that server, run one prompt on it, stop it |
 
 Run `arden --help` for every option.
 

@@ -278,7 +278,9 @@ export const modelsFor = async (
       initialCredential = await credentials.get({ signal: AbortSignal.timeout(5_000) })
     } catch (cause) {
       if (cause instanceof CodexLoginError)
-        throw new SettingsError(`No ChatGPT sign-in on this machine (run \`arden login\`): ${cause.message}`)
+        throw new SettingsError(
+          `No ChatGPT sign-in on this machine (run \`arden login\`): ${cause.message}`
+        )
       throw cause
     }
   }

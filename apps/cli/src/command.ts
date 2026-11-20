@@ -1,3 +1,4 @@
+import type { PendingChatGptLogin } from "@arden-hq/headless/chatgpt-login"
 import {
   createHeadlessClient,
   type ConfiguredServer,
@@ -5,7 +6,7 @@ import {
   type HeadlessClient
 } from "@arden-hq/headless"
 import { CLI_ACCESS_FILE, daemonDecoders, LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
-import { resolveArdenDir } from "@arden-hq/std/paths"
+import { ARDEN_DIR_VARIABLE, ardenCliDir, resolveArdenDir } from "@arden-hq/std/paths"
 import { join } from "node:path"
 
 export type CliClient = Pick<
@@ -56,6 +57,8 @@ export interface CliDependencies {
   readonly connect?: (() => Promise<ServerConnection>) | undefined
   /** Starts the configured server for `arden exec`; the default spawns it. */
   readonly startServer?: StartServer
+  readonly startLogin?: () => Promise<PendingChatGptLogin>
+  readonly openUrl?: (url: string) => void
 }
 
 export class UsageError extends Error {
@@ -121,7 +124,7 @@ const parseServerUrl = (value: string): URL => {
 }
 
 const NOT_RUNNING =
-  "Arden is not running. Open Arden, set --url (or ARDEN_URL) to a server, or ARDEN_DIR to the data folder of an `arden serve`."
+  "Arden is not running. Open Arden, start `arden serve`, or set --url (or ARDEN_URL) to a server, or ARDEN_DIR to the data folder of an `arden serve`."
 
 export const resolveServer = async (
   argument: string | undefined,
@@ -132,12 +135,36 @@ export const resolveServer = async (
   if (explicit !== undefined && explicit.length > 0) {
     return { url: parseServerUrl(explicit), headers: {} }
   }
-  const path = join(resolveArdenDir(dependencies.env, dependencies.homeDirectory), CLI_ACCESS_FILE)
+  const found = await findLocalServer(dependencies)
+  if (found === undefined) throw new ServerUnavailableError(NOT_RUNNING)
+  return found
+}
+
+export const findLocalServer = async (
+  dependencies: CliDependencies
+): Promise<ServerConnection | undefined> => {
+  const app = resolveArdenDir(dependencies.env, dependencies.homeDirectory)
+  const folders =
+    (dependencies.env[ARDEN_DIR_VARIABLE]?.trim() ?? "") === ""
+      ? [app, join(ardenCliDir(dependencies.homeDirectory), "data")]
+      : [app]
+  for (const folder of folders) {
+    const found = await serverIn(folder, dependencies)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+const serverIn = async (
+  folder: string,
+  dependencies: CliDependencies
+): Promise<ServerConnection | undefined> => {
+  const path = join(folder, CLI_ACCESS_FILE)
   let bytes: Uint8Array
   try {
     bytes = await dependencies.readFile(path)
   } catch {
-    throw new ServerUnavailableError(NOT_RUNNING)
+    return undefined
   }
   let access: ReturnType<typeof daemonDecoders.cliAccess>
   try {
@@ -145,7 +172,7 @@ export const resolveServer = async (
   } catch {
     throw new ServerUnavailableError(`Arden's access file is unreadable: ${path}`)
   }
-  if (!dependencies.isProcessAlive(access.pid)) throw new ServerUnavailableError(NOT_RUNNING)
+  if (!dependencies.isProcessAlive(access.pid)) return undefined
   return {
     url: parseServerUrl(access.serverUrl),
     headers: { [LOCAL_CAPABILITY_HEADER]: access.capability }

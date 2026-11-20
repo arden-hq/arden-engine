@@ -339,7 +339,8 @@ const ownedBehaviors = [
     exempt: [
       "apps/server-ts/src/tools/google-gmail-mime.ts",
       "apps/server-ts/src/tools/google-gmail-attachment.ts",
-      "apps/server-ts/src/mcp/vault.ts"
+      "apps/server-ts/src/mcp/vault.ts",
+      "libs/headless/src/chatgpt-login.ts"
     ],
     exemptDirs: [electronDir],
     nodeOnly: true

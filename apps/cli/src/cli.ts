@@ -18,8 +18,15 @@ import {
   type SessionTarget,
   type WaitOptions
 } from "./run.js"
+import { loginCommand, type LoginAction } from "./login.js"
 import { modelsCommand, type ModelsOptions } from "./models.js"
-import { execCommand, serveCommand, type ExecOptions, type ServeOptions } from "./serve.js"
+import {
+  execCommand,
+  promptCommand,
+  serveCommand,
+  type ExecOptions,
+  type ServeOptions
+} from "./serve.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 export type {
@@ -37,8 +44,13 @@ type ParsedCommand =
   | { readonly kind: "models"; readonly options: ModelsOptions }
   | { readonly kind: "serve"; readonly options: ServeOptions }
   | { readonly kind: "exec"; readonly options: ExecOptions }
+  | { readonly kind: "prompt"; readonly options: RunOptions }
+  | { readonly kind: "login"; readonly action: LoginAction }
 
 const HELP = `Usage:
+  arden <prompt> [options]
+  arden login [--status]
+  arden logout
   arden run [prompt] [options]
   arden wait <run-id> [options]
   arden sessions [options]
@@ -46,11 +58,20 @@ const HELP = `Usage:
   arden serve [--config <file>]
   arden exec [--config <file>] [prompt] [options]
 
-run, wait, sessions and models talk to the running Arden app (or --url /
-ARDEN_URL, or ARDEN_DIR=<data folder> for an arden serve). Chats started there
-appear in Arden like any other. serve and exec start a server of their own
-from a settings file, with its own data folder and model provider. Without
---config they use ~/.arden-cli/settings.json and write it on first use.
+arden <prompt> sends the prompt to a running Arden (arden run) and, when none
+is running, to a server of its own for this one prompt (arden exec). It takes
+the run options below.
+
+login signs in with ChatGPT in the browser and keeps the sign-in in
+~/.arden-cli; serve and exec use it. --status says whether you are signed in.
+logout forgets it.
+
+run, wait, sessions and models talk to the running Arden app, else to a running
+arden serve with the default settings (or --url / ARDEN_URL, or
+ARDEN_DIR=<data folder> for another arden serve). Chats started there appear in
+Arden like any other. serve and exec start a server of their own from a
+settings file, with its own data folder and model provider. Without --config
+they use ~/.arden-cli/settings.json and write it on first use.
 
 Run options:
   --session <id>          Send to this chat
@@ -89,7 +110,8 @@ Serve:
   OpenRouter names the variable that holds its key, and the model:
     "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1",
                   "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-6-luna"
-  Without a provider the server uses this machine's Codex sign-in (codex login).
+  Without a provider the server uses this machine's ChatGPT sign-in (arden login,
+  else codex login).
   A settings mistake, a provider that does not answer, or an unset key
   variable stops the start with exit status 2 and the reason.
 
@@ -132,7 +154,12 @@ const positiveCount = (value: string, name: string): number => {
   return count
 }
 
-const FLAGS: ReadonlySet<string> = new Set(["--continue", "--detach", "--no-wait-approval"])
+const FLAGS: ReadonlySet<string> = new Set([
+  "--continue",
+  "--detach",
+  "--no-wait-approval",
+  "--status"
+])
 
 interface ParsedArgs {
   readonly positionals: ReadonlyArray<string>
@@ -349,6 +376,34 @@ const parseModels = (args: ReadonlyArray<string>): ParsedCommand => {
   }
 }
 
+const LOGIN_OPTIONS: ReadonlySet<string> = new Set(["--status"])
+
+const parseLogin = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, LOGIN_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  const [extra] = parsed.positionals
+  if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
+  return { kind: "login", action: parsed.flags.has("--status") ? "status" : "sign_in" }
+}
+
+const parseLogout = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, new Set())
+  if (parsed === undefined) return { kind: "help" }
+  const [extra] = parsed.positionals
+  if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
+  return { kind: "login", action: "sign_out" }
+}
+
+const parsePrompt = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, RUN_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  const [word, ...more] = parsed.positionals
+  if (word !== undefined && more.length === 0 && /^[a-z]+$/.test(word)) {
+    throw new UsageError(`Unknown command: ${word}. To send it as a prompt: arden run ${word}`)
+  }
+  return { kind: "prompt", options: runOptionsOf(parsed) }
+}
+
 const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
   const [command, ...rest] = args
   switch (command) {
@@ -368,19 +423,40 @@ const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
       return parseServe(rest)
     case "exec":
       return parseExec(rest)
+    case "login":
+      return parseLogin(rest)
+    case "logout":
+      return parseLogout(rest)
     default:
-      throw new UsageError(`Unknown command: ${command}`)
+      return parsePrompt(args)
   }
+}
+
+const COMMANDS: ReadonlySet<string> = new Set([
+  "run",
+  "wait",
+  "sessions",
+  "models",
+  "serve",
+  "exec",
+  "login",
+  "logout"
+])
+
+const receiptCommand = (first: string | undefined): "run" | "wait" | undefined => {
+  if (first === "wait") return "wait"
+  if (first === "run" || first === "exec") return "run"
+  return first !== undefined && COMMANDS.has(first) ? undefined : "run"
 }
 
 const machineOutputFromArgs = (
   args: ReadonlyArray<string>
 ): { readonly command: "run" | "wait"; readonly output: "json" | "jsonl" } | undefined => {
   // An exec receipt is a run receipt: the same Run, on a server of its own.
-  const command = args[0] === "exec" ? "run" : args[0]
-  if (command !== "run" && command !== "wait") return undefined
+  const command = receiptCommand(args[0])
+  if (command === undefined) return undefined
   let output: string | undefined
-  for (let index = 1; ; index += 1) {
+  for (let index = 0; ; index += 1) {
     const argument = args[index]
     if (argument === undefined || argument === "--") break
     if (argument === "--output") output = args[index + 1]
@@ -422,5 +498,9 @@ export const runCli = async (
       return serveCommand(command.options, dependencies)
     case "exec":
       return execCommand(command.options, dependencies)
+    case "prompt":
+      return promptCommand(command.options, dependencies)
+    case "login":
+      return loginCommand(command.action, dependencies)
   }
 }

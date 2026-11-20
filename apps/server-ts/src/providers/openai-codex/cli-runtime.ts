@@ -1,7 +1,8 @@
 import { signedInCredentials, CodexLoginError } from "./cli-login.js"
 import { makeOpenAiCodexRuntime, type OpenAiCodexRuntime } from "./runtime.js"
 
-const NO_LOGIN = "No model provider: run `arden login` (or `codex login`), then start the server again."
+const NO_LOGIN =
+  "No model provider: run `arden login` (or `codex login`), then start the server again."
 
 export const loadCodexCliRuntime = async (): Promise<OpenAiCodexRuntime | undefined> => {
   const credentials = signedInCredentials()

@@ -1,6 +1,7 @@
 import { writeAtomic } from "@arden-hq/std/atomic-file"
+import { sha256Base64Url } from "@arden-hq/std/hash"
 import { isRecord } from "@arden-hq/std/json"
-import { createHash, randomBytes } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import { mkdir, readFile, rm } from "node:fs/promises"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { dirname, join } from "node:path"
@@ -91,8 +92,9 @@ export const startChatGptLogin = async ({
 } = {}): Promise<PendingChatGptLogin> => {
   const verifier = randomBytes(64).toString("base64url")
   const state = randomBytes(32).toString("base64url")
-  let settle: (outcome: { ok: true; tokens: ChatGptTokens } | { ok: false; error: Error }) => void =
-    () => undefined
+  let settle: (
+    outcome: { ok: true; tokens: ChatGptTokens } | { ok: false; error: Error }
+  ) => void = () => undefined
   const settled = new Promise<{ ok: true; tokens: ChatGptTokens } | { ok: false; error: Error }>(
     (resolve) => {
       settle = resolve
@@ -175,7 +177,7 @@ export const chatGptAuthorizeUrl = ({
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
     scope: "openid profile email offline_access",
-    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge: sha256Base64Url(verifier),
     code_challenge_method: "S256",
     id_token_add_organizations: "true",
     codex_cli_simplified_flow: "true",
@@ -252,9 +254,9 @@ export const chatGptCredentials = ({
   store,
   ...endpoint
 }: ChatGptEndpoint & { readonly store: ChatGptLoginStore }): {
-  readonly get: (request?: { readonly forceRefresh?: boolean }) => Promise<
-    ChatGptCredential | undefined
-  >
+  readonly get: (request?: {
+    readonly forceRefresh?: boolean
+  }) => Promise<ChatGptCredential | undefined>
 } => {
   const now = endpoint.now ?? Date.now
   let refreshing: Promise<ChatGptTokens> | undefined
@@ -350,9 +352,7 @@ const tokensFromResponse = (
   if (access === undefined || refresh === undefined) throw new ChatGptLoginError("token_exchange")
   const expiresIn = value["expires_in"]
   const seconds =
-    typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0
-      ? expiresIn
-      : 3_600
+    typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3_600
   return {
     access,
     refresh,
@@ -372,9 +372,7 @@ const claimsOf = (token: unknown): Readonly<Record<string, unknown>> | undefined
   return isRecord(claims) ? claims : undefined
 }
 
-const accountIdOf = (
-  claims: Readonly<Record<string, unknown>> | undefined
-): string | undefined => {
+const accountIdOf = (claims: Readonly<Record<string, unknown>> | undefined): string | undefined => {
   if (claims === undefined) return undefined
   const auth = claims["https://api.openai.com/auth"]
   const organizations = claims["organizations"]
