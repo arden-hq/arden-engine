@@ -28,6 +28,8 @@ export const interactionRole: Migration = {
       END`)
     convertTranscript(database)
     convertReceipts(database)
+    database.exec(`ALTER TABLE chat_idempotency_keys
+      ADD COLUMN request_hash_version INTEGER NOT NULL DEFAULT 1 CHECK(request_hash_version >= 1)`)
     convertRunStartEvents(database)
   }
 }

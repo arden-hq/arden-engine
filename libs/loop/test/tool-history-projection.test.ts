@@ -89,7 +89,6 @@ describe("projectToolHistory", () => {
       moved[2],
       {
         role: "user",
-        is_meta: true,
         content: [
           {
             type: "context",

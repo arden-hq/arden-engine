@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ChatReceiptStatus } from "@arden-hq/protocol/chat"
 import { ChatReceiptStatusSchema } from "@arden-hq/protocol/effect/chat"
-import { ChatWriteConflictError, type ChatWriteError } from "../chat/store.js"
+import { ChatWriteConflictError, REQUEST_HASH_VERSION, type ChatWriteError } from "../chat/store.js"
 import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../transcript/model.js"
 import { workflowDeliveryClientId } from "../chat/workflow-delivery.js"
 import { writeError } from "./chat-write-errors.js"
@@ -11,6 +11,7 @@ import { keyMessageJson } from "./chat-key-message.js"
 
 interface ReceiptRow {
   readonly request_hash: string
+  readonly request_hash_version: number
   readonly run_id: string | null
   readonly status: string
   readonly message_json: string | null
@@ -54,7 +55,7 @@ export const loadReceipt = Effect.fn("SqliteChatWriteStore.loadReceipt")(functio
   incomingMessage: StoredMessageEnvelope
 ): Effect.fn.Return<LoadedReceipt | null, ChatWriteError | ChatWriteConflictError> {
   const rows = yield* sql<ReceiptRow>`
-    SELECT request_hash, run_id, status, ${keyMessageJson(sql, "receipt")} AS message_json
+    SELECT request_hash, request_hash_version, run_id, status, ${keyMessageJson(sql, "receipt")} AS message_json
     FROM chat_idempotency_keys AS receipt
     WHERE session_id = ${sessionId} AND client_id = ${clientId}
     LIMIT 1
@@ -68,7 +69,10 @@ export const loadReceipt = Effect.fn("SqliteChatWriteStore.loadReceipt")(functio
   )
   const receipt = rows[0]
   if (receipt === undefined) return null
-  if (receipt.request_hash !== requestHash) {
+  if (
+    receipt.request_hash_version === REQUEST_HASH_VERSION &&
+    receipt.request_hash !== requestHash
+  ) {
     const identity = workflowDeliveryEnvelopeIdentity(incomingMessage)
     const expectedClientId = identity === null ? null : workflowDeliveryClientId(identity)
     const existing =
@@ -83,13 +87,13 @@ export const loadReceipt = Effect.fn("SqliteChatWriteStore.loadReceipt")(functio
             )
           )
     const existingIdentity = existing === null ? null : workflowDeliveryEnvelopeIdentity(existing)
-    if (
-      identity === null ||
-      existingIdentity === null ||
-      clientId !== expectedClientId ||
-      existingIdentity.workflowRef !== identity.workflowRef ||
-      existingIdentity.attempt !== identity.attempt
-    ) {
+    const sameDelivery =
+      identity !== null &&
+      existingIdentity !== null &&
+      clientId === expectedClientId &&
+      existingIdentity.workflowRef === identity.workflowRef &&
+      existingIdentity.attempt === identity.attempt
+    if (!sameDelivery) {
       return yield* new ChatWriteConflictError({
         sessionId,
         clientId,

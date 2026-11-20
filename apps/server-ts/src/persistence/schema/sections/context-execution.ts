@@ -116,7 +116,7 @@ export const contextExecutionSchemaSection = {
       status TEXT NOT NULL CHECK(status IN ('accepted', 'queued', 'running', 'ingested', 'completed', 'cancelled', 'error', 'failed', 'interrupted')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      expires_at TEXT,
+      expires_at TEXT, request_hash_version INTEGER NOT NULL DEFAULT 1 CHECK(request_hash_version >= 1),
       PRIMARY KEY (session_id, client_id),
       CHECK(status IN ('accepted', 'cancelled') OR run_id IS NOT NULL),
       CHECK(updated_at >= created_at),
