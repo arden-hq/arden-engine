@@ -130,7 +130,7 @@ it("a call still running at the budget gives the model a receipt and delivers it
   expect(toolMessages(requests[1] ?? [])).toEqual([
     {
       id: "slow",
-      content: expect.stringContaining('"status":"running"'),
+      content: expect.stringContaining("still running in the background"),
       launch: { call_id: "slow" }
     }
   ])

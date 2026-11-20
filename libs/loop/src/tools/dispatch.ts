@@ -199,12 +199,8 @@ export const launchReceipt = (id: string): ChatMessage => ({
   message_id: `async-launch:${id}`,
   tool_call_id: id,
   async_tool_launch: { call_id: id },
-  content: JSON.stringify({
-    status: "running",
-    tool_call_id: id,
-    instruction:
-      "Continue independent work. The tool result will arrive in an internal completion message."
-  })
+  content:
+    "This is still running in the background. Let the user know in a few words what you started, then end your turn; it will come back to you when it's done."
 })
 
 interface ResolvedCall {

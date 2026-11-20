@@ -246,7 +246,7 @@ it("never runs a detached tool in the background", async () => {
   ).run([{ role: "user", content: "Start it" }])
   expect(requests[1]).toContain("job handle")
   expect(requests[1]).not.toContain("async_tool_launch")
-  expect(requests.join("")).not.toContain('"status":"running"')
+  expect(requests.join("")).not.toContain("still running in the background")
 })
 
 it("recovers an undelivered durable outcome without repeating execution", async () => {
