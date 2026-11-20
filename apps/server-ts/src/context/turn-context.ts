@@ -25,7 +25,7 @@ import type { AgentMode } from "../sessions/agent-mode.js"
 import type { CliTools } from "../cli-tools/service.js"
 import type { SkillCatalog } from "../skills/service.js"
 import type { Wiki } from "../wiki/service.js"
-import { assembleMemoryContext, memoryReaderOf, spacePageSent } from "./memory-context.js"
+import { assembleMemoryContext, memoryReaderOf, prepareSpaceMemory } from "./memory-context.js"
 import type { ChatWriteStore } from "../persistence/chat/store.js"
 import { spaceConversationContextSnapshot } from "./space.js"
 import { spaceAsksContext } from "./space-asks.js"
@@ -377,6 +377,13 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     }),
     undefined
   )
+  const spaceMemory = space === undefined ? undefined : { view: space.view, page: space.page }
+  // The Space renders once, where it first did: here only when recall needs the page's sent
+  // prefix, otherwise at assembly, so a render that throws still throws after Memory is read.
+  const preparedSpace =
+    input.memory === undefined || spaceMemory?.page === undefined
+      ? undefined
+      : prepareSpaceMemory(spaceMemory)
   const sources = yield* input
     .measure(
       "memory",
@@ -386,9 +393,14 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
             sessionId: input.sessionId,
             recall: {
               query: input.query,
-              ...(space?.page === undefined
+              ...(preparedSpace?.page === undefined
                 ? {}
-                : { sent: { pageId: space.page.pageId, chars: spacePageSent(space.view) } })
+                : {
+                    sent: {
+                      pageId: preparedSpace.page.pageId,
+                      chars: preparedSpace.rendered.page?.sent ?? 0
+                    }
+                  })
             }
           }),
       undefined
@@ -405,7 +417,8 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
   const memoryContext = assembleMemoryContext({
     reader: input.reader,
     sources,
-    space: space === undefined ? undefined : { view: space.view, page: space.page },
+    space:
+      spaceMemory === undefined ? undefined : (preparedSpace ?? prepareSpaceMemory(spaceMemory)),
     revision: input.memory?.revision ?? null,
     query: input.query
   })
