@@ -1,5 +1,4 @@
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import type { RunContext, RunOrigin } from "@arden-hq/protocol/runs"
 import { automationRepeats } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
@@ -13,8 +12,7 @@ import { tellChat, told, updateWeight, waitsOnOwner, type Readable } from "./own
 import { taskDoneBefore } from "./entity-events.js"
 import type { EndedAutomationRun } from "./automation-run-outcome.js"
 import { runDoor, type SourceRunRow } from "./continuity-route.js"
-import { decodeJson } from "./json.js"
-import { chatRow, placeOf, type ChildAgent, type Place } from "./run-destination.js"
+import { addressOfRun, chatRow, type Place, type RunAddress } from "./run-destination.js"
 import { changedRunOutcome, newsRunOutcome, quietRunOutcome } from "./run-outcomes.js"
 import { readTaskState } from "../work/task-state.js"
 import { activeRunStatusList } from "./status-sets.js"
@@ -99,36 +97,22 @@ export const recordEnding = Effect.fn("RunEnding.record")(function* (
 ) {
   const runId = ending.kind === "run" ? ending.runId : ending.run.chatRunId
   if (runId === null) return undefined
-  const loaded = yield* readRun(sql, runId)
-  if (loaded === undefined) return undefined
-  const { source, contextError } = loaded
-  const origin: RunOrigin | undefined =
-    contextError === undefined ? (loaded.context?.origin ?? { kind: "unrecorded" }) : undefined
+  const address = yield* addressOfRun(sql, runId)
+  if (address === undefined) return undefined
+  const { origin, owner, place, agent } = address
   const owned = origin?.kind === "automation" || origin?.kind === "task" || origin?.kind === "space"
-  const belongsTo = contextError === undefined ? loaded.context?.belongs_to : undefined
-  const work = belongsTo ?? origin
-  const { place, agent } = yield* placeOf(sql, {
-    runId,
-    sessionId: source.session_id,
-    origin,
-    belongsTo
-  })
-  const damaged = contextError !== undefined && agent !== undefined
-  const context: RunContext | undefined = damaged
-    ? { origin: { kind: "chat", session_id: agent.parent, turn_id: "unrecorded" }, task: null }
-    : loaded.context
   // A system job's ending is read from its Automation, as its run's was: a handler that speaks to
   // the owner keeps doing so when the job settles.
   const purpose: Purpose =
-    ending.kind === "occurrence" && !(ending.purpose === "system" && work?.kind === "automation")
+    ending.kind === "occurrence" && !(ending.purpose === "system" && owner?.kind === "automation")
       ? ending.purpose
-      : yield* purposeOf(sql, work)
+      : yield* purposeOf(sql, owner)
   const facts = yield* factsOf(sql, runId)
-  const plain = damaged
+  const plain = address.damaged
     ? saidDamaged(ending)
     : saidOf({ ending, purpose, facts, agent: agent !== undefined })
   const twinExists = yield* entityTwinAt(sql, runId, place)
-  const ownTask = purpose === "task_execution" && work?.kind === "task" ? work : undefined
+  const ownTask = purpose === "task_execution" && owner?.kind === "task" ? owner : undefined
   const recurring =
     ownTask === undefined ? false : yield* taskDoneBefore(sql, ownTask.item_id, runId)
   const cancelledTask =
@@ -172,7 +156,7 @@ export const recordEnding = Effect.fn("RunEnding.record")(function* (
       place_kind, occurred_at, shown, decided, delivery_error)
     VALUES (${record.runId}, ${record.purpose}, ${record.status}, ${record.detail}, ${record.text},
       ${record.place}, ${record.placeKind}, ${record.occurredAt}, ${record.shown ? 1 : 0},
-      ${record.decided ? 1 : 0}, ${contextError ?? null})
+      ${record.decided ? 1 : 0}, ${address.record.kind === "corrupt" ? address.record.error : null})
     ON CONFLICT(run_id) DO UPDATE SET purpose = excluded.purpose, status = excluded.status,
       detail = excluded.detail, text = excluded.text, place = excluded.place,
       place_kind = excluded.place_kind, occurred_at = excluded.occurred_at,
@@ -184,11 +168,7 @@ export const recordEnding = Effect.fn("RunEnding.record")(function* (
   if (stored.length === 0 || !record.decided) return record
   yield* deliver(sql, {
     record,
-    place,
-    source,
-    context,
-    origin: damaged ? context?.origin : work,
-    mode: agent?.mode,
+    address,
     now: ending.kind === "run" ? ending.now : ending.run.endedAt
   }).pipe(
     Effect.catch((cause) => keepError(sql, runId, cause)),
@@ -202,7 +182,7 @@ const keepError = (sql: SqlClient.SqlClient, runId: string, cause: unknown) =>
     Effect.asVoid
   )
 
-const purposeOf = Effect.fn("RunEnding.purpose")(function* (
+export const purposeOf = Effect.fn("RunEnding.purpose")(function* (
   sql: SqlClient.SqlClient,
   origin: RunOrigin | undefined
 ): Effect.fn.Return<Purpose, SqlError> {
@@ -330,53 +310,14 @@ export const reconcileEndings = Effect.fn("RunEnding.reconcile")(function* (
   }
 })
 
-export const placeOfRun = Effect.fn("RunEnding.placeOfRun")(function* (
-  sql: SqlClient.SqlClient,
-  runId: string
-) {
-  const loaded = yield* readRun(sql, runId)
-  if (loaded === undefined) return undefined
-  const origin: RunOrigin | undefined =
-    loaded.contextError === undefined
-      ? (loaded.context?.origin ?? { kind: "unrecorded" })
-      : undefined
-  const belongsTo = loaded.contextError === undefined ? loaded.context?.belongs_to : undefined
-  const work = belongsTo ?? origin
-  const { place, agent } = yield* placeOf(sql, {
-    runId,
-    sessionId: loaded.source.session_id,
-    origin,
-    belongsTo
-  })
-  const damaged = loaded.contextError !== undefined && agent !== undefined
-  const context: RunContext | undefined = damaged
-    ? { origin: { kind: "chat", session_id: agent.parent, turn_id: "unrecorded" }, task: null }
-    : loaded.context
-  return {
-    place,
-    agent,
-    source: loaded.source,
-    context,
-    origin: damaged ? context?.origin : work,
-    purpose: yield* purposeOf(sql, work)
-  }
-})
-
+// A stored ending goes where its run's address points now, not where it pointed when it ended.
 const deliverStored = Effect.fn("RunEnding.deliverStored")(function* (
   sql: SqlClient.SqlClient,
   record: EndingRecord
 ) {
-  const placed = yield* placeOfRun(sql, record.runId)
-  if (placed === undefined) return
-  yield* deliver(sql, {
-    record,
-    place: placed.place,
-    source: placed.source,
-    context: placed.context,
-    origin: placed.origin,
-    mode: placed.agent?.mode,
-    now: record.occurredAt
-  })
+  const address = yield* addressOfRun(sql, record.runId)
+  if (address === undefined) return
+  yield* deliver(sql, { record, address, now: record.occurredAt })
 })
 
 interface Facts {
@@ -551,21 +492,15 @@ export const toldOutcomeOf = (
 
 const deliver = Effect.fn("RunEnding.deliver")(function* (
   sql: SqlClient.SqlClient,
-  input: {
-    readonly record: EndingRecord
-    readonly place: Place
-    readonly source: SourceRunRow
-    readonly context: RunContext | undefined
-    readonly origin: RunOrigin | undefined
-    readonly mode: ChildAgent["mode"] | undefined
-    readonly now: string
-  }
+  input: { readonly record: EndingRecord; readonly address: RunAddress; readonly now: string }
 ) {
-  const { record, place, source, context } = input
-  if (record.purpose === "task_execution" && input.origin?.kind === "task")
+  const { record, address } = input
+  const { place, source } = address
+  const { context, owner } = address.reply
+  if (record.purpose === "task_execution" && owner?.kind === "task")
     yield* tellCriteriaMet(sql, {
       runId: record.runId,
-      itemId: input.origin.item_id,
+      itemId: owner.item_id,
       place,
       source,
       occurredAt: record.occurredAt
@@ -574,7 +509,7 @@ const deliver = Effect.fn("RunEnding.deliver")(function* (
       Effect.catchDefect((defect) => Effect.logWarning("A met criterion was not told", defect))
     )
   if (record.placeKind === "parent") {
-    if (context === undefined || record.place === null || input.mode === undefined)
+    if (context === undefined || record.place === null || address.agent === undefined)
       return yield* Effect.fail(new Error("The worker outcome has no parent to return to"))
     const state = (yield* sql<{
       readonly status: ChatRunRecord["status"]
@@ -594,7 +529,7 @@ const deliver = Effect.fn("RunEnding.deliver")(function* (
     yield* enqueueRunDelivery({
       sql,
       eventId: `ending:run:${record.runId}`,
-      subject: `${workerNames[input.mode]} ${report.label}`,
+      subject: `${workerNames[address.agent.mode]} ${report.label}`,
       body: report.text,
       payload: {
         kind: "result",
@@ -609,7 +544,7 @@ const deliver = Effect.fn("RunEnding.deliver")(function* (
   }
   const weight = updateWeight({ kind: "ending", record, shown: record.shown })
   if (weight === undefined) return
-  if (place.kind !== "chat" || context === undefined || input.origin === undefined)
+  if (place.kind !== "chat" || context === undefined || owner === undefined)
     return yield* Effect.fail(new Error("The ending has no chat to be told in"))
   if (record.purpose === "task_execution" && (yield* oldPollTold(sql, record.runId))) return
   yield* tellChat({
@@ -621,7 +556,7 @@ const deliver = Effect.fn("RunEnding.deliver")(function* (
     sourceSessionRef: source.source_ref,
     destination: place.row,
     line: record.text,
-    door: yield* doorOf(sql, input.origin, source, context),
+    door: yield* doorOf(sql, owner, source, context),
     event:
       record.status === "finished" && record.detail === "step"
         ? "told"
@@ -756,20 +691,4 @@ export const doorOf = Effect.fn("RunEnding.door")(function* (
     return taskDoor(origin.item_id, task?.text ?? "Task")
   }
   return yield* runDoor(sql, "Open run", source, context)
-})
-
-const readRun = Effect.fn("RunEnding.readRun")(function* (sql: SqlClient.SqlClient, runId: string) {
-  const rows = yield* sql<SourceRunRow & { readonly context: string | null }>`
-    SELECT run.run_id, run.session_id, run.status, session.public_ref AS source_ref,
-      session.name AS source_name, json_extract(run.metadata_json, '$.run_context') AS context_json,
-      json_extract(run.metadata_json, '$.run_context') AS context
-    FROM chat_runs AS run JOIN sessions AS session ON session.session_id = run.session_id
-    WHERE run.run_id = ${runId}`
-  const row = rows[0]
-  if (row === undefined) return undefined
-  if (row.context === null) return { source: row, context: undefined, contextError: undefined }
-  const decoded = yield* decodeJson(RunContextSchema, row.context).pipe(Effect.result)
-  return decoded._tag === "Success"
-    ? { source: row, context: decoded.success, contextError: undefined }
-    : { source: row, context: undefined, contextError: "The run's context is corrupt" }
 })

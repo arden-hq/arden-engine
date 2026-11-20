@@ -1,8 +1,10 @@
-import type { RunOrigin } from "@arden-hq/protocol/runs"
+import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
+import type { RunContext, RunOrigin } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { readAgentSessionMetadata } from "../../sessions/agent-mode.js"
+import type { SourceRunRow } from "./continuity-route.js"
 import { decodeJson } from "./json.js"
 import { scriptOwnsRun } from "./run-owner.js"
 import { taskConversationSql } from "./task-conversation.js"
@@ -141,7 +143,82 @@ const readAgentChild = Effect.fn("RunDestination.agentChild")(function* (
   return { mode: agent?.mode ?? "work", parent: child.parent_session_id } satisfies ChildAgent
 })
 
-export const placeOf = Effect.fn("RunDestination.placeOf")(function* (
+/** What a run's own record says. */
+type RunRecord =
+  | { readonly kind: "recorded"; readonly context: RunContext }
+  /** No `run_context` was stored. */
+  | { readonly kind: "unrecorded" }
+  | { readonly kind: "corrupt"; readonly error: string }
+
+/** Where a run's outcome goes now, and on whose behalf: read once per ending, tell or replay. */
+export interface RunAddress {
+  readonly source: SourceRunRow
+  readonly record: RunRecord
+  /** Who started the run: the recorded origin, `unrecorded` with no record, none when corrupt. */
+  readonly origin: RunOrigin | undefined
+  /** Whose work it is: `belongs_to` when recorded, else `origin`. */
+  readonly owner: RunOrigin | undefined
+  readonly place: Place
+  readonly agent: ChildAgent | undefined
+  /** A child agent whose record is corrupt: its outcome goes to its parent as damaged. */
+  readonly damaged: boolean
+  /** What a delivery carries: the recorded context and owner, or a damaged child's parent chat. */
+  readonly reply: {
+    readonly context: RunContext | undefined
+    readonly owner: RunOrigin | undefined
+  }
+}
+
+export const addressOfRun = Effect.fn("RunDestination.addressOfRun")(function* (
+  sql: SqlClient.SqlClient,
+  runId: string
+): Effect.fn.Return<RunAddress | undefined, SqlError> {
+  const rows = yield* sql<SourceRunRow & { readonly context: string | null }>`
+    SELECT run.run_id, run.session_id, run.status, session.public_ref AS source_ref,
+      session.name AS source_name, json_extract(run.metadata_json, '$.run_context') AS context_json,
+      json_extract(run.metadata_json, '$.run_context') AS context
+    FROM chat_runs AS run JOIN sessions AS session ON session.session_id = run.session_id
+    WHERE run.run_id = ${runId}`
+  const source = rows[0]
+  if (source === undefined) return undefined
+  const record = yield* recordOf(source.context)
+  const context = record.kind === "recorded" ? record.context : undefined
+  const origin =
+    record.kind === "corrupt" ? undefined : (context?.origin ?? { kind: "unrecorded" as const })
+  const belongsTo = context?.belongs_to
+  const owner = belongsTo ?? origin
+  const { place, agent } = yield* placeOf(sql, {
+    runId,
+    sessionId: source.session_id,
+    origin,
+    belongsTo
+  })
+  const damaged = record.kind === "corrupt" && agent !== undefined
+  const fallback: RunContext | undefined = damaged
+    ? { origin: { kind: "chat", session_id: agent.parent, turn_id: "unrecorded" }, task: null }
+    : undefined
+  return {
+    source,
+    record,
+    origin,
+    owner,
+    place,
+    agent,
+    damaged,
+    reply:
+      fallback === undefined ? { context, owner } : { context: fallback, owner: fallback.origin }
+  } satisfies RunAddress
+})
+
+const recordOf = Effect.fn("RunDestination.recordOf")(function* (stored: string | null) {
+  if (stored === null) return { kind: "unrecorded" } satisfies RunRecord
+  const decoded = yield* decodeJson(RunContextSchema, stored).pipe(Effect.result)
+  return decoded._tag === "Success"
+    ? ({ kind: "recorded", context: decoded.success } satisfies RunRecord)
+    : ({ kind: "corrupt", error: "The run's context is corrupt" } satisfies RunRecord)
+})
+
+const placeOf = Effect.fn("RunDestination.placeOf")(function* (
   sql: SqlClient.SqlClient,
   run: {
     readonly runId: string
