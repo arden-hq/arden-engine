@@ -46,7 +46,9 @@ const askInTerminal = (prompt: string): Promise<string | undefined> =>
       process.emit("SIGINT")
     })
     lines.once("close", () => {
-      if (!answered) resolve(undefined)
+      if (answered) return
+      process.stderr.write("\n")
+      resolve(undefined)
     })
     lines.question(prompt, (answer) => {
       answered = true

@@ -537,6 +537,59 @@ describe("progress and asks at a terminal", () => {
     ])
   })
 
+  it("names the tool as progress does, and declines on its own server when the terminal ends", async () => {
+    const commandStart: HeadlessRunEvent = {
+      event: "TOOL_CALL_START",
+      data: {
+        type: "TOOL_CALL_START",
+        tool_call_id: "tool-1",
+        tool_call_name: "write_file",
+        display_name: "Write file"
+      }
+    }
+    const answers: Array<unknown> = []
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await options?.onEvent?.(commandStart)
+        await options?.onEvent?.(approvalNeeded("tool-1"))
+        return completedRun()
+      },
+      answerApproval: async (input) => {
+        answers.push(input)
+      }
+    }
+    const allowing = testIo({ client })
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...allowing.dependencies,
+        askInTerminal: askingWith(["1"]).askInTerminal
+      })
+    ).toBe(0)
+    expect(allowing.stderr()).toBe("arden: Allow once: Write file\n")
+    const waiting = testIo({ client })
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...waiting.dependencies,
+        askInTerminal: askingWith([]).askInTerminal
+      })
+    ).toBe(0)
+    expect(waiting.stderr()).toBe(
+      "arden: Write file waits for an answer in Arden. To decline instead, run again with --no-wait-approval.\n"
+    )
+    const events: Array<string> = []
+    const own = testIo({ client })
+    expect(
+      await runCli(["exec", "--config", "s.json", "Prompt"], {
+        ...own.dependencies,
+        ...started(events),
+        askInTerminal: askingWith([]).askInTerminal
+      })
+    ).toBe(0)
+    expect(own.stderr()).toBe("arden: declined Write file: no one is here to answer it\n")
+    expect(answers.at(-1)).toMatchObject({ toolId: "tool-1", approved: false })
+  })
+
   it("says how to answer when no one is at a terminal", async () => {
     const client: CliClient = {
       ...defaultClient(),

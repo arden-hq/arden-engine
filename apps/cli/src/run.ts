@@ -32,7 +32,7 @@ import { progressLines, requestResponder, type RunResponder } from "./terminal.j
 
 export type CliOutputFormat = "text" | "json" | "jsonl"
 
-export type ApprovalHandling = "wait" | "decline"
+export type ApprovalHandling = "wait" | "decline" | "ask_then_decline"
 
 export type SessionTarget =
   | { readonly kind: "new"; readonly space: string | undefined; readonly model: string | undefined }

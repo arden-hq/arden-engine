@@ -99,7 +99,11 @@ export const requestResponder = (input: {
   const say = (line: string): void => {
     if (input.output === "text") input.dependencies.writeStderr(`arden: ${line}\n`)
   }
-  const ask = input.handling === "wait" ? input.dependencies.askInTerminal : undefined
+  const ask = input.handling === "decline" ? undefined : input.dependencies.askInTerminal
+  const toolNames = new Map<string, string>()
+  const toolName = (toolId: string, fallback: string): string => toolNames.get(toolId) ?? fallback
+  const unanswered = (data: HeadlessRunEvent["data"], runId: string, name: string) =>
+    input.handling === "ask_then_decline" ? decline(data, runId) : wait(name)
   const choose = async <Choice extends string>(
     heading: string,
     choices: ReadonlyArray<readonly [Choice, string]>
@@ -132,11 +136,12 @@ export const requestResponder = (input: {
     ]
       .filter((line): line is string => typeof line === "string" && line.length > 0)
       .map((line) => `  ${clip(line)}`)
+    const name = toolName(data.tool_id, data.name)
     const choice = await choose(
-      [presentation?.title ?? `Arden asks to run ${data.name}.`, ...shown].join("\n"),
+      [presentation?.title ?? `Arden asks to run ${name}.`, ...shown].join("\n"),
       offered.map((value) => [value, APPROVAL_LABELS[value]] as const)
     )
-    if (choice === undefined) return wait(data.name)
+    if (choice === undefined) return unanswered(data, runId, name)
     await input.client.answerApproval({
       runId,
       toolId: data.tool_id,
@@ -144,7 +149,7 @@ export const requestResponder = (input: {
       approved: choice !== "deny",
       grantStanding: choice === "always_allow"
     })
-    say(`${APPROVAL_LABELS[choice]}: ${data.name}`)
+    say(`${APPROVAL_LABELS[choice]}: ${name}`)
   }
 
   const answerConnection = async (
@@ -155,7 +160,7 @@ export const requestResponder = (input: {
       `Arden needs ${data.label} connected: ${data.detail}`,
       (["connected", "skip"] as const).map((value) => [value, CONNECTION_LABELS[value]] as const)
     )
-    if (choice === undefined) return wait(data.label)
+    if (choice === undefined) return unanswered(data, runId, data.label)
     await input.client.answerConnection({
       runId,
       toolId: data.tool_id,
@@ -173,7 +178,7 @@ export const requestResponder = (input: {
 
   const decline = async (data: HeadlessRunEvent["data"], runId: string): Promise<void> => {
     if (data.type !== "approval_needed" && data.type !== "connection_needed") return
-    const name = data.type === "approval_needed" ? data.name : data.label
+    const name = data.type === "approval_needed" ? toolName(data.tool_id, data.name) : data.label
     try {
       if (data.type === "approval_needed") {
         await input.client.answerApproval({
@@ -264,6 +269,8 @@ export const requestResponder = (input: {
     },
     onEvent: async (event) => {
       const data = event.data
+      if (data.type === "TOOL_CALL_START")
+        toolNames.set(data.tool_call_id, data.display_name ?? data.tool_call_name)
       const runId = "run_id" in data && typeof data.run_id === "string" ? data.run_id : input.runId
       if (!runs.has(runId)) return
       if (data.type === "TOOL_CALL_RESULT") {
