@@ -17,7 +17,7 @@ const detail = await client.wait(run)
 - Sessions: `createSession`, `branchSession`, `listSessions`, `deleteSession`.
 - Runs: `submit`, `getRun`, `getRunEvents`, `wait`, `waitForRun`, `cancel`, `listRuns`.
 - Messages during a Run: `submit` steers the Run that is going (its result says `delivery: "steered"`); `queue`, `listQueued` and `cancelQueued` park a message until that Run ends.
-- Answers: `answerApproval` and `answerConnection` reply to a paused run.
+- Answers: `answerApproval` and `answerConnection` reply to a paused run; `answerQuestion(questionId, { client_id, answer })` answers a question the run asked (`ask_user`) and returns the question with its `continuation`.
 - Models: `listModels` returns the models a new chat may run on, grouped by provider; `createSession({ chat_model })` takes one of their ids.
 - Other: `health`, `listSpaces`.
 - A server of your own: `startConfiguredServer({ entry, config, env })` starts `main.js --config <settings file>` as a child process and resolves with its ready line (`ConfiguredServerReady` from `@arden-hq/protocol/daemon`, which also says the `provider`, `model` and `contextWindow` a new chat runs on), a `connection` (URL and the secret from its access file) and `stop`. A start that fails rejects with `ConfiguredServerError`, its `reason` read from the server's exit code (`CONFIGURED_SERVER_EXIT`): `"settings"` (exit 2: a settings mistake, an unset key variable, a model the provider does not list), `"provider"` (exit 3: the model server at `provider.baseUrl` did not answer), `"start"` otherwise; the message is the server's own.

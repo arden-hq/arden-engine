@@ -20,7 +20,10 @@ import { ProtocolError } from "@arden-hq/protocol"
 import {
   isTerminalRunStatus,
   runDecoders,
+  runEncoders,
   runRoutes,
+  type ResolveRunQuestionInput,
+  type RunQuestion,
   type RunDetail,
   type RunEventPage,
   type RunEventPageOptions,
@@ -41,7 +44,7 @@ import {
 import { retryableStatus } from "@arden-hq/std/retry"
 import { sleep } from "@arden-hq/std/sleep"
 
-export type { ModelCatalog, RunDetail, RunTerminalResult }
+export type { ModelCatalog, ResolveRunQuestionInput, RunDetail, RunQuestion, RunTerminalResult }
 
 /** One decoded frame of a run's session event stream. */
 export type HeadlessRunEvent = DecodedServerEventFrame
@@ -424,6 +427,15 @@ export class HeadlessClient {
       method: "POST",
       body: chatRequests.connectionResult(input)
     })
+  }
+
+  async answerQuestion(questionId: string, input: ResolveRunQuestionInput): Promise<RunQuestion> {
+    return runDecoders.question(
+      await this.#requestJson(runRoutes.answerQuestion(questionId), {
+        method: "POST",
+        body: runEncoders.answerQuestion(input)
+      })
+    )
   }
 
   async #waitFor(run: RunIdentity, options: WaitForRunOptions): Promise<RunDetail> {

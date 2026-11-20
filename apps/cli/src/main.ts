@@ -3,6 +3,7 @@
 import { fstatSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
+import { createInterface } from "node:readline"
 
 import { runCli } from "./cli.js"
 import { type CliDependencies, type StdinKind } from "./command.js"
@@ -35,6 +36,24 @@ const isProcessAlive = (pid: number): boolean => {
   }
 }
 
+const askInTerminal = (prompt: string): Promise<string | undefined> =>
+  new Promise((resolve) => {
+    const lines = createInterface({ input: process.stdin, output: process.stderr })
+    let answered = false
+    lines.once("SIGINT", () => {
+      lines.close()
+      process.emit("SIGINT")
+    })
+    lines.once("close", () => {
+      if (!answered) resolve(undefined)
+    })
+    lines.question(prompt, (answer) => {
+      answered = true
+      lines.close()
+      resolve(answer)
+    })
+  })
+
 const dependencies: CliDependencies = {
   env: process.env,
   homeDirectory: homedir(),
@@ -48,6 +67,8 @@ const dependencies: CliDependencies = {
   writeStderr: (value) => {
     process.stderr.write(value)
   },
+  askInTerminal:
+    process.stdin.isTTY === true && process.stderr.isTTY === true ? askInTerminal : undefined,
   onSigint: (listener) => {
     process.once("SIGINT", listener)
     return () => process.removeListener("SIGINT", listener)

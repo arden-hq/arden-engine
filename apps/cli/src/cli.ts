@@ -1,9 +1,4 @@
-import {
-  CLI_APPROVAL_MODES,
-  CLI_DEFAULT_APPROVAL_MODE,
-  isCliApprovalMode,
-  type CliApprovalMode
-} from "@arden-hq/protocol/permissions"
+import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 
 import { timeoutMilliseconds, UsageError, valueAfter, type CliDependencies } from "./command.js"
 import {
@@ -47,6 +42,21 @@ type ParsedCommand =
   | { readonly kind: "prompt"; readonly options: RunOptions }
   | { readonly kind: "login"; readonly action: LoginAction }
 
+const MODE_BY_NAME = {
+  "read-only": "read_only",
+  ask: "ask",
+  auto: "safe",
+  "never-ask": "allow"
+} as const satisfies Record<string, ApprovalMode>
+
+type ModeName = keyof typeof MODE_BY_NAME
+
+const MODE_NAMES: ReadonlyArray<string> = Object.keys(MODE_BY_NAME)
+
+const isModeName = (value: string): value is ModeName => value in MODE_BY_NAME
+
+const DEFAULT_MODE_NAME: ModeName = "auto"
+
 const HELP = `Usage:
   arden <prompt> [options]
   arden login [--status]
@@ -83,10 +93,11 @@ Run options:
   --image <path>          Attach a .png or .jpg image (repeatable)
   --output-schema <file>  A JSON Schema the final answer must match; json
                           output carries the parsed answer as result.data
-  --approval <mode>       ${CLI_APPROVAL_MODES.join(" or ")} (default: ${CLI_DEFAULT_APPROVAL_MODE});
-                          Auto and Never ask are set in the app
-  --no-wait-approval      Decline what needs approval instead of waiting for
-                          someone to answer it in Arden
+  --mode <mode>           ${MODE_NAMES.join(", ")} (default: ${DEFAULT_MODE_NAME}), as in
+                          the app: Read only, Ask every time, Auto (the Guardian
+                          decides and asks when unsure), Never ask
+  --no-wait-approval      Decline what needs approval instead of asking here
+                          or waiting for someone to answer it in Arden
   --detach                Print the run id and exit; the Run goes on in Arden
   --output <format>       text, json, or jsonl (default: text)
   --timeout <seconds>     Cancel the Run if it takes longer
@@ -141,9 +152,10 @@ const outputFormat = (value: string): CliOutputFormat => {
   throw new UsageError("--output must be text, json, or jsonl")
 }
 
-const approvalMode = (value: string): CliApprovalMode => {
-  if (isCliApprovalMode(value)) return value
-  throw new UsageError(`--approval must be ${CLI_APPROVAL_MODES.join(" or ")}`)
+const approvalMode = (value: string | undefined): ApprovalMode => {
+  const name = value ?? DEFAULT_MODE_NAME
+  if (isModeName(name)) return MODE_BY_NAME[name]
+  throw new UsageError(`--mode must be ${MODE_NAMES.join(", ")}`)
 }
 
 const positiveCount = (value: string, name: string): number => {
@@ -223,7 +235,7 @@ const RUN_OPTIONS: ReadonlySet<string> = new Set([
   "--recipe",
   "--image",
   "--output-schema",
-  "--approval",
+  "--mode",
   "--no-wait-approval",
   "--detach",
   "--output",
@@ -255,7 +267,7 @@ const approvalHandling = (parsed: ParsedArgs): ApprovalHandling =>
 const runOptionsOf = (parsed: ParsedArgs): RunOptions => {
   const output = outputFormat(single(parsed, "--output") ?? "text")
   const timeout = single(parsed, "--timeout")
-  const mode = single(parsed, "--approval")
+  const mode = approvalMode(single(parsed, "--mode"))
   const detach = parsed.flags.has("--detach")
   if (detach && timeout !== undefined) {
     throw new UsageError("--detach does not wait, so it takes no --timeout")
@@ -270,7 +282,7 @@ const runOptionsOf = (parsed: ParsedArgs): RunOptions => {
     recipe: single(parsed, "--recipe"),
     imagePaths: parsed.values.get("--image") ?? [],
     outputSchemaPath: single(parsed, "--output-schema"),
-    approvalMode: mode === undefined ? undefined : approvalMode(mode),
+    approvalMode: mode,
     approvals: approvalHandling(parsed),
     output,
     timeoutMs: timeout === undefined ? undefined : timeoutMilliseconds(timeout),
@@ -397,10 +409,6 @@ const parseLogout = (args: ReadonlyArray<string>): ParsedCommand => {
 const parsePrompt = (args: ReadonlyArray<string>): ParsedCommand => {
   const parsed = splitArgs(args, RUN_OPTIONS)
   if (parsed === undefined) return { kind: "help" }
-  const [word, ...more] = parsed.positionals
-  if (word !== undefined && more.length === 0 && /^[a-z]+$/.test(word)) {
-    throw new UsageError(`Unknown command: ${word}. To send it as a prompt: arden run ${word}`)
-  }
   return { kind: "prompt", options: runOptionsOf(parsed) }
 }
 

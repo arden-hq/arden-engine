@@ -13,6 +13,7 @@ export type CliClient = Pick<
   HeadlessClient,
   | "answerApproval"
   | "answerConnection"
+  | "answerQuestion"
   | "branchSession"
   | "cancel"
   | "createSession"
@@ -59,6 +60,7 @@ export interface CliDependencies {
   readonly startServer?: StartServer
   readonly startLogin?: () => Promise<PendingChatGptLogin>
   readonly openUrl?: (url: string) => void
+  readonly askInTerminal?: ((prompt: string) => Promise<string | undefined>) | undefined
 }
 
 export class UsageError extends Error {

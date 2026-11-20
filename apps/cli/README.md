@@ -28,7 +28,7 @@ It stays `private` until its first manual publish; then `just release` publishes
 
 | Command | What it does |
 | --- | --- |
-| `arden <prompt>` | `arden run` when Arden or an `arden serve` is running, else `arden exec` with the default settings |
+| `arden <prompt>` | Any first word that is not a command starts the prompt. `arden run` when Arden or an `arden serve` is running, else `arden exec` with the default settings |
 | `arden login` | Sign in with ChatGPT in the browser; the sign-in stays in `~/.arden-cli/chatgpt-login.json` (mode 0600). `--status` says whether you are signed in |
 | `arden logout` | Forget that sign-in |
 | `arden run [prompt]` | Send a prompt and wait for the answer. Piped stdin joins the prompt in a `<stdin>` block |
@@ -58,7 +58,7 @@ Run `arden --help` for every option.
 - The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, and `cost`, the US dollars the provider reported for the Run's model requests (OpenRouter does). A Run whose provider reported no cost (llama.cpp, Codex) has no `cost`; Arden never estimates one. The server README's "Cost" says what it covers.
 - `--model` takes an id `arden models` lists. Any other is refused before a chat is made (exit 2), with the ids the server has.
 - A prompt longer than one message takes (100,000 characters) is refused before the server is reached (exit 2).
-- `--approval` sets how the Run handles approvals. `--no-wait-approval` declines what needs an approval instead of waiting.
+- `--mode` takes the app's modes: `read-only`, `ask`, `auto` (the default: the Guardian decides and asks when unsure) and `never-ask`. At a terminal, approvals, connection requests and questions are asked there. Without one, `run` waits for an answer in Arden and `exec` declines; `--no-wait-approval` always declines.
 - Ctrl-C and `--timeout` stop the wait. The Run goes on in the server.
 
 ## A local model (llama.cpp) or OpenRouter

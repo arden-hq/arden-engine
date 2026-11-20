@@ -55,7 +55,7 @@ import {
 } from "../errors.js"
 import { ModelProviderService } from "../../models/provider.js"
 import { outputSchemaProblem } from "../../models/structured-output.js"
-import { CLI_DEFAULT_APPROVAL_MODE, isCliApprovalMode } from "@arden-hq/protocol/permissions"
+import { commandLineApprovalMode } from "@arden-hq/protocol/permissions"
 import { makeCaptureRouter, type RouterDecision } from "../../routing/capture.js"
 import { Decisions } from "../../models/decisions/service.js"
 import { SpaceStore } from "../../persistence/spaces/store.js"
@@ -179,10 +179,8 @@ export const ChatHandlers = HttpApiBuilder.group(
           sentFrom: (yield* LocalCaller) === "cli" ? ("cli" as const) : sentFrom
         }
       if ((yield* LocalCaller) !== "cli") return { approvalMode: requested, sentFrom }
-      if (requested !== undefined && !isCliApprovalMode(requested))
-        return yield* new HttpApiError.Forbidden({})
       return {
-        approvalMode: requested ?? CLI_DEFAULT_APPROVAL_MODE,
+        approvalMode: commandLineApprovalMode(requested),
         sentFrom: "cli" as const
       }
     })

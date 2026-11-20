@@ -9,7 +9,10 @@ type Requirement =
   /** The chat, or the chat of the run, is one the command line made. */
   | {
       readonly kind: "own"
-      readonly target: { readonly sessionId: string } | { readonly runId: string }
+      readonly target:
+        | { readonly sessionId: string }
+        | { readonly runId: string }
+        | { readonly questionId: string }
     }
   | { readonly kind: "refused" }
 
@@ -32,8 +35,6 @@ const ownChat = (sessionId: string | undefined): Requirement =>
   sessionId === undefined ? REFUSED : { kind: "own", target: { sessionId } }
 const ownRun = (runId: string | undefined): Requirement =>
   runId === undefined ? REFUSED : { kind: "own", target: { runId } }
-const declineOnly = (body: Readonly<Record<string, unknown>>): Requirement =>
-  body["approved"] === true ? REFUSED : ownRun(text(body["run_id"]))
 
 const COMMAND_LINE_ROUTES: ReadonlyArray<Route> = [
   { method: "GET", path: path("/health"), require: () => OPEN },
@@ -58,8 +59,22 @@ const COMMAND_LINE_ROUTES: ReadonlyArray<Route> = [
   { method: "GET", path: path("/chat/events/:id"), require: ([id]) => ownChat(id) },
   { method: "GET", path: path("/chat/runs/:id"), require: ([id]) => ownRun(id) },
   { method: "GET", path: path("/chat/runs/:id/events"), require: ([id]) => ownRun(id) },
-  { method: "POST", path: path("/tools/result"), require: (_, body) => declineOnly(body) },
-  { method: "POST", path: path("/connections/result"), require: (_, body) => declineOnly(body) },
+  {
+    method: "POST",
+    path: path("/tools/result"),
+    require: (_, body) => ownRun(text(body["run_id"]))
+  },
+  {
+    method: "POST",
+    path: path("/connections/result"),
+    require: (_, body) => ownRun(text(body["run_id"]))
+  },
+  {
+    method: "POST",
+    path: path("/chat/questions/:id/answer"),
+    require: ([id]) =>
+      id === undefined || id === "" ? REFUSED : { kind: "own", target: { questionId: id } }
+  },
   {
     method: "POST",
     path: path("/cancel"),

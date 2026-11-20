@@ -147,18 +147,29 @@ export const makeSessionLifecycle = ({
 > => {
   const sql = writer.sql
   const commandLineChat = Effect.fn("SqliteSessionStore.commandLineChat")(function* (
-    target: { readonly sessionId: string } | { readonly runId: string }
+    target:
+      | { readonly sessionId: string }
+      | { readonly runId: string }
+      | { readonly questionId: string }
   ): Effect.fn.Return<boolean, SessionStoreError> {
-    const rows = yield* (
-      "sessionId" in target
-        ? sql<{ readonly cli: number }>`
+    const query = () => {
+      if ("sessionId" in target)
+        return sql<{ readonly cli: number }>`
             SELECT json_extract(s.metadata, '$.cli.at') IS NOT NULL AS cli
             FROM sessions AS s WHERE s.session_id = ${target.sessionId}`
-        : sql<{ readonly cli: number }>`
+      if ("runId" in target)
+        return sql<{ readonly cli: number }>`
             SELECT json_extract(s.metadata, '$.cli.at') IS NOT NULL AS cli
             FROM chat_runs AS r JOIN sessions AS s ON s.session_id = r.session_id
             WHERE r.run_id = ${target.runId}`
-    ).pipe(
+      return sql<{ readonly cli: number }>`
+            SELECT json_extract(s.metadata, '$.cli.at') IS NOT NULL AS cli
+            FROM run_questions AS q
+            JOIN chat_runs AS r ON r.run_id = q.run_id
+            JOIN sessions AS s ON s.session_id = r.session_id
+            WHERE q.question_id = ${target.questionId}`
+    }
+    const rows = yield* query().pipe(
       Effect.mapError((cause) =>
         storeError("list", "storage", "Could not read the chat's maker", undefined, cause)
       )

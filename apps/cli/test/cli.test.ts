@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { runCli, type CliClient, type CliDependencies } from "../src/index.js"
 import type { StdinKind } from "../src/command.js"
-import { HeadlessHttpError } from "@arden-hq/headless"
+import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
+import type { RunQuestion } from "@arden-hq/protocol/runs"
 
 import {
   approvalNeeded,
@@ -21,6 +22,7 @@ import {
 interface TestIo {
   readonly dependencies: CliDependencies
   readonly stdout: () => string
+  readonly stderr: () => string
   readonly sigint: () => void
   readonly connections: () => ReadonlyArray<{ readonly url: string; readonly headers: unknown }>
 }
@@ -35,6 +37,7 @@ const testIo = (
   } = {}
 ): TestIo => {
   let stdout = ""
+  let stderr = ""
   let sigintListener: (() => void) | undefined
   const connections: Array<{ readonly url: string; readonly headers: unknown }> = []
   const dependencies: CliDependencies = {
@@ -51,7 +54,9 @@ const testIo = (
     writeStdout: (value) => {
       stdout += value
     },
-    writeStderr: () => {},
+    writeStderr: (value) => {
+      stderr += value
+    },
     onSigint: (listener) => {
       sigintListener = listener
       return () => {
@@ -66,6 +71,7 @@ const testIo = (
   return {
     dependencies,
     stdout: () => stdout,
+    stderr: () => stderr,
     sigint: () => sigintListener?.(),
     connections: () => connections
   }
@@ -219,16 +225,231 @@ describe("arden <prompt>", () => {
       expect(jsonLines(idle.stdout())).toMatchObject([{ status: "completed" }])
     }))
 
-  it("refuses one bare word and a detached Run with nothing running", async () => {
+  it("takes one word as the prompt, and refuses a detached Run with nothing running", async () => {
     const events: Array<string> = []
+    const running = testIo({ files: { "/home/test/.arden/cli-access.json": accessFile() } })
+    expect(await runCli(["hey"], running.dependencies)).toBe(0)
+    expect(running.stdout()).toBe("Final answer\n")
     const io = testIo()
     const dependencies = { ...io.dependencies, ...started(events) }
-    expect(await runCli(["sesions"], dependencies)).toBe(2)
     expect(await runCli(["Say hello", "--detach", "--output", "json"], dependencies)).toBe(2)
     expect(events).toEqual([])
     expect(jsonLines(io.stdout())).toMatchObject([
       { error: { code: "invalid_input", message: expect.stringContaining("arden serve") } }
     ])
+  })
+})
+
+const QUESTION: RunQuestion = {
+  question_id: "question-1",
+  run_id: "run-1",
+  turn_id: "turn-1",
+  session_id: "session-1",
+  destination_session_id: "session-1",
+  context: { origin: { kind: "chat", session_id: "session-1", turn_id: "turn-1" }, task: null },
+  content: {
+    prompt: "Which inbox?",
+    detail: null,
+    choices: [
+      { id: "work", label: "Work" },
+      { id: "home", label: "Home" }
+    ]
+  },
+  status: "open",
+  resolution: null,
+  continuation: null,
+  focus_choice: null,
+  permission_offer: null,
+  continuity_revision: null,
+  created_at: "2026-08-30T00:00:00.000Z"
+}
+
+const QUESTION_EVENT: HeadlessRunEvent = {
+  event: "TOOL_CALL_RESULT",
+  data: {
+    type: "TOOL_CALL_RESULT",
+    tool_call_id: "call-ask",
+    name: "ask_user",
+    run_id: "run-1",
+    session_id: "session-1",
+    data: { question: QUESTION }
+  }
+}
+
+describe("progress and asks at a terminal", () => {
+  const askingWith = (answers: Array<string>) => {
+    const prompts: Array<string> = []
+    return {
+      prompts,
+      askInTerminal: async (prompt: string) => {
+        prompts.push(prompt)
+        return answers.shift()
+      }
+    }
+  }
+
+  it("names each tool call and prints no start or end noise", async () => {
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await options?.onEvent?.(runEvent("RUN_STARTED"))
+        await options?.onEvent?.({
+          event: "TOOL_CALL_START",
+          data: {
+            type: "TOOL_CALL_START",
+            tool_call_id: "call-1",
+            tool_call_name: "gmail_search",
+            display_name: "Gmail",
+            display_title: "Search inbox"
+          }
+        })
+        await options?.onEvent?.({
+          event: "TOOL_CALL_END",
+          data: { type: "TOOL_CALL_END", tool_call_id: "call-1" }
+        })
+        await options?.onEvent?.({
+          event: "TOOL_CALL_START",
+          data: {
+            type: "TOOL_CALL_START",
+            tool_call_id: "call-2",
+            tool_call_name: "exec_command",
+            display_name: "Command"
+          }
+        })
+        await options?.onEvent?.({
+          event: "TOOL_CALL_ARGS",
+          data: { type: "TOOL_CALL_ARGS", tool_call_id: "call-2", delta: '{"command":' }
+        })
+        await options?.onEvent?.({
+          event: "TOOL_CALL_ARGS",
+          data: { type: "TOOL_CALL_ARGS", tool_call_id: "call-2", delta: '"ls -la"}' }
+        })
+        await options?.onEvent?.({
+          event: "TOOL_CALL_END",
+          data: { type: "TOOL_CALL_END", tool_call_id: "call-2" }
+        })
+        await options?.onEvent?.(runEvent("RUN_FINISHED"))
+        return completedRun()
+      }
+    }
+    const io = testIo({ client })
+    expect(await runCli(["run", "Prompt", ...URL_ARGS], io.dependencies)).toBe(0)
+    expect(io.stderr()).toBe("arden: Gmail · Search inbox\narden: Command · ls -la\n")
+  })
+
+  it("asks for an approval and a connection, and answers with the choice", async () => {
+    const approvals: Array<unknown> = []
+    const connections: Array<unknown> = []
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await options?.onEvent?.({
+          ...approvalNeeded("tool-1"),
+          data: {
+            ...approvalNeeded("tool-1").data,
+            rule_places: [{ kind: "everywhere" }]
+          }
+        })
+        await options?.onEvent?.({
+          event: "connection_needed",
+          data: {
+            type: "connection_needed",
+            run_id: "run-1",
+            tool_id: "tool-2",
+            integration_id: "google",
+            connection_id: "connection-1",
+            label: "Gmail",
+            reason: "not_configured",
+            detail: "Gmail is not connected.",
+            capability: "gmail.read",
+            action: "oauth",
+            settings_tab: "connections",
+            required_scopes: [],
+            source: "recovery"
+          }
+        })
+        return completedRun()
+      },
+      answerApproval: async (input) => {
+        approvals.push(input)
+      },
+      answerConnection: async (input) => {
+        connections.push(input)
+      }
+    }
+    const io = testIo({ client })
+    const asking = askingWith(["4", "2", "2"])
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...io.dependencies,
+        askInTerminal: asking.askInTerminal
+      })
+    ).toBe(0)
+    expect(asking.prompts).toEqual([
+      "Arden asks to run write_file.\n  1) Allow once\n  2) Always allow\n  3) Deny\nChoose 1-3: ",
+      "Type a number from 1 to 3: ",
+      "Arden needs Gmail connected: Gmail is not connected.\n  1) I connected it in Arden, go on\n  2) Skip it\nChoose 1-2: "
+    ])
+    expect(approvals).toEqual([
+      { runId: "run-1", toolId: "tool-1", result: "", approved: true, grantStanding: true }
+    ])
+    expect(connections).toEqual([
+      { runId: "run-1", toolId: "tool-2", connectionId: "connection-1", approved: false }
+    ])
+  })
+
+  it("says how to answer when no one is at a terminal", async () => {
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await options?.onEvent?.(approvalNeeded("tool-1"))
+        return completedRun()
+      }
+    }
+    const io = testIo({ client })
+    expect(await runCli(["run", "Prompt", ...URL_ARGS], io.dependencies)).toBe(0)
+    expect(io.stderr()).toBe(
+      "arden: write_file waits for an answer in Arden. To decline instead, run again with --no-wait-approval.\n"
+    )
+  })
+
+  it("answers a question and follows the Run the answer starts", async () => {
+    const answered: Array<unknown> = []
+    const followed: Array<string> = []
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await options?.onEvent?.(QUESTION_EVENT)
+        return completedRun("Asked")
+      },
+      answerQuestion: async (questionId, input) => {
+        answered.push({ questionId, answer: input.answer })
+        return {
+          ...QUESTION,
+          continuation: { kind: "started", run_id: "run-2", at: "2026-08-30T00:00:02.000Z" }
+        }
+      },
+      waitForRun: async (runId) => {
+        followed.push(runId)
+        return completedRun("Work inbox: 3 unread")
+      }
+    }
+    const io = testIo({ client })
+    const asking = askingWith(["1"])
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...io.dependencies,
+        askInTerminal: asking.askInTerminal
+      })
+    ).toBe(0)
+    expect(asking.prompts).toEqual([
+      "Arden asks: Which inbox?\n  1) Work\n  2) Home\n  3) Answer later in Arden\nChoose 1-3: "
+    ])
+    expect(answered).toEqual([
+      { questionId: "question-1", answer: { kind: "choice", choice_id: "work" } }
+    ])
+    expect(followed).toEqual(["run-2"])
+    expect(io.stdout()).toBe("Work inbox: 3 unread\n")
   })
 })
 
@@ -359,21 +580,56 @@ describe("approvals with no one at the terminal", () => {
     expect(answers).toEqual([])
   })
 
-  it("passes the approval mode with the message", async () => {
-    let mode: unknown
+  it("sends the app's mode for --mode, Auto when none is given", async () => {
+    const modes: Array<unknown> = []
     const client: CliClient = {
       ...defaultClient(),
       submit: async (input) => {
-        mode = input.approvalMode
+        modes.push(input.approvalMode)
         return defaultClient().submit(input)
       }
     }
     const io = testIo({ client })
-
+    for (const flags of [[], ["--mode", "read-only"], ["--mode", "ask"], ["--mode=never-ask"]]) {
+      expect(await runCli(["run", "Prompt", ...URL_ARGS, ...flags], io.dependencies)).toBe(0)
+    }
+    expect(modes).toEqual(["safe", "read_only", "ask", "allow"])
+    const refused = testIo({ client })
     expect(
-      await runCli(["run", "Prompt", ...URL_ARGS, "--approval", "read_only"], io.dependencies)
+      await runCli(
+        ["run", "Prompt", ...URL_ARGS, "--mode", "yolo", "--output", "json"],
+        refused.dependencies
+      )
+    ).toBe(2)
+    expect(jsonLines(refused.stdout())[0]).toMatchObject({
+      error: { code: "invalid_input", message: "--mode must be read-only, ask, auto, never-ask" }
+    })
+  })
+
+  it("declines an approval on a server of its own when no one is at a terminal", async () => {
+    const answers: Array<unknown> = []
+    const events: Array<string> = []
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await options?.onEvent?.(approvalNeeded("tool-1"))
+        return completedRun()
+      },
+      answerApproval: async (input) => {
+        answers.push(input)
+      }
+    }
+    const io = testIo({ client })
+    expect(
+      await runCli(["exec", "--config", "s.json", "Prompt"], {
+        ...io.dependencies,
+        ...started(events)
+      })
     ).toBe(0)
-    expect(mode).toBe("read_only")
+    expect(answers).toEqual([
+      expect.objectContaining({ runId: "run-1", toolId: "tool-1", approved: false })
+    ])
+    expect(io.stderr()).toBe("arden: declined write_file: no one is here to answer it\n")
   })
 })
 

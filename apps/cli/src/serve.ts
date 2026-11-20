@@ -158,7 +158,11 @@ export const execCommand = async (
     return server.connection
   }
   try {
-    return await runCommand(options.run, { ...dependencies, connect })
+    const run: RunOptions =
+      dependencies.askInTerminal === undefined
+        ? { ...options.run, approvals: "decline" }
+        : options.run
+    return await runCommand(run, { ...dependencies, connect })
   } finally {
     await server?.stop()
   }
