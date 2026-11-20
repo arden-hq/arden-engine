@@ -46,6 +46,8 @@ const sepNode = ":matches(Identifier[name='sep'], MemberExpression[property.name
 const ROLE_WORDS = "system|developer|user|interaction|assistant|tool"
 const ROLE_WORD = `/^(${ROLE_WORDS})$/`
 const SENDER = "/^(from|to)$/"
+const INTERACTION_KIND_WORD = "/^(assignment|instruction|completion)$/"
+const INTERACTION_OUTCOME_WORD = "/^(needs_attention)$/"
 const ownedBehaviors = [
   {
     selector: [
@@ -542,6 +544,10 @@ const ownedBehaviors = [
       `SwitchStatement[discriminant.property.name='role'] SwitchCase > Literal.test[value=${ROLE_WORD}]`,
       `BinaryExpression[operator=/^[!=]==$/][left.property.name='source']:matches([left.object.name=${SENDER}], [left.object.property.name=${SENDER}]) > Literal.right`,
       `SwitchStatement[discriminant.property.name='source']:matches([discriminant.object.name=${SENDER}], [discriminant.object.property.name=${SENDER}]) SwitchCase > Literal.test`,
+      `Property[key.name=${SENDER}] > ObjectExpression > Property[key.name='source'] > Literal.value`,
+      `ObjectExpression:has(Property[key.name='from'] > ObjectExpression > Property[key.name='source']) > Property[key.name=/^(kind|outcome)$/] > Literal.value`,
+      `BinaryExpression[operator=/^[!=]==$/][left.property.name='kind'] > Literal.right[value=${INTERACTION_KIND_WORD}]`,
+      `BinaryExpression[operator=/^[!=]==$/][left.property.name='outcome'] > Literal.right[value=${INTERACTION_OUTCOME_WORD}]`,
       `Property[key.name='role'] > Literal.value[value=${ROLE_WORD}]`,
       `TSPropertySignature[key.name='role'] TSLiteralType > Literal[value=${ROLE_WORD}]`
     ].join(", "),
