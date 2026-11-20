@@ -14,6 +14,11 @@ build:
     bun run build:server
     bun run build:cli
 
+# Run the arden command, for example `just arden exec "Say hello"`.
+[positional-arguments]
+arden *args:
+    @node apps/cli/dist/main.js "$@"
+
 # Build and run the server.
 server:
     bun run build:server

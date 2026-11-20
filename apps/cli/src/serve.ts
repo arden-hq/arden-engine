@@ -2,6 +2,8 @@ import { ConfiguredServerError, startConfiguredServer } from "@arden-hq/headless
 import { errorMessage } from "@arden-hq/std/errors"
 import { spawn } from "node:child_process"
 import { createWriteStream, existsSync } from "node:fs"
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
@@ -69,27 +71,46 @@ const startServer: StartServer = async ({ config, logFile, env }) => {
   }
 }
 
+const DEFAULT_FOLDER = ".arden-cli"
+
+const settingsFile = async (config: string | undefined, home: string): Promise<string> => {
+  if (config !== undefined) return config
+  const folder = join(home, DEFAULT_FOLDER)
+  const file = join(folder, "settings.json")
+  if (existsSync(file)) return file
+  const settings = { dataDirectory: join(folder, "data") }
+  try {
+    await mkdir(folder, { recursive: true })
+    await writeFile(file, `${JSON.stringify(settings, null, 2)}\n`, { flag: "wx" })
+  } catch (cause) {
+    throw new UsageError(`Cannot write the default settings file ${file}: ${errorMessage(cause)}`)
+  }
+  return file
+}
+
 export interface ServeOptions {
-  readonly config: string
+  readonly config: string | undefined
 }
 
 /**
  * `arden serve`: the configured server in the foreground. Its ready line goes
  * to stdout and its log to stderr, untouched; Ctrl-C or SIGTERM stops it.
  */
-export const serveCommand = (
+export const serveCommand = async (
   options: ServeOptions,
   dependencies: CliDependencies
-): Promise<number> =>
-  new Promise((resolve) => {
-    let entry: string
-    try {
-      entry = serverEntry(dependencies.env)
-    } catch (cause) {
-      dependencies.writeStderr(`arden: ${errorMessage(cause)}\n`)
-      return resolve(1)
-    }
-    const child = spawn(process.execPath, [entry, "--config", options.config], {
+): Promise<number> => {
+  let entry: string
+  let config: string
+  try {
+    entry = serverEntry(dependencies.env)
+    config = await settingsFile(options.config, dependencies.homeDirectory)
+  } catch (cause) {
+    dependencies.writeStderr(`arden: ${errorMessage(cause)}\n`)
+    return cause instanceof UsageError ? 2 : 1
+  }
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [entry, "--config", config], {
       env: dependencies.env,
       stdio: "inherit"
     })
@@ -109,9 +130,10 @@ export const serveCommand = (
     })
     child.once("exit", (code) => done(code ?? 1))
   })
+}
 
 export interface ExecOptions {
-  readonly config: string
+  readonly config: string | undefined
   readonly logFile: string | undefined
   readonly run: RunOptions
 }
@@ -128,7 +150,7 @@ export const execCommand = async (
   let server: Awaited<ReturnType<StartServer>> | undefined
   const connect = async () => {
     server = await (dependencies.startServer ?? startServer)({
-      config: options.config,
+      config: await settingsFile(options.config, dependencies.homeDirectory),
       logFile: options.logFile,
       env: dependencies.env
     })

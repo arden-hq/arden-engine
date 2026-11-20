@@ -43,13 +43,14 @@ const HELP = `Usage:
   arden wait <run-id> [options]
   arden sessions [options]
   arden models [options]
-  arden serve --config <file>
-  arden exec --config <file> [prompt] [options]
+  arden serve [--config <file>]
+  arden exec [--config <file>] [prompt] [options]
 
 run, wait, sessions and models talk to the running Arden app (or --url /
 ARDEN_URL, or ARDEN_DIR=<data folder> for an arden serve). Chats started there
 appear in Arden like any other. serve and exec start a server of their own
-from a settings file, with its own data folder and model provider.
+from a settings file, with its own data folder and model provider. Without
+--config they use ~/.arden-cli/settings.json and write it on first use.
 
 Run options:
   --session <id>          Send to this chat
@@ -255,12 +256,6 @@ const parseRun = (args: ReadonlyArray<string>): ParsedCommand => {
   return parsed === undefined ? { kind: "help" } : { kind: "run", options: runOptionsOf(parsed) }
 }
 
-const configOf = (parsed: ParsedArgs, command: string): string => {
-  const config = single(parsed, "--config")
-  if (config === undefined) throw new UsageError(`${command} requires --config <file>`)
-  return config
-}
-
 const SERVE_OPTIONS: ReadonlySet<string> = new Set(["--config"])
 
 const parseServe = (args: ReadonlyArray<string>): ParsedCommand => {
@@ -268,7 +263,7 @@ const parseServe = (args: ReadonlyArray<string>): ParsedCommand => {
   if (parsed === undefined) return { kind: "help" }
   const [extra] = parsed.positionals
   if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
-  return { kind: "serve", options: { config: configOf(parsed, "serve") } }
+  return { kind: "serve", options: { config: single(parsed, "--config") } }
 }
 
 const EXEC_OPTIONS: ReadonlySet<string> = new Set([
@@ -283,7 +278,7 @@ const parseExec = (args: ReadonlyArray<string>): ParsedCommand => {
   return {
     kind: "exec",
     options: {
-      config: configOf(parsed, "exec"),
+      config: single(parsed, "--config"),
       logFile: single(parsed, "--server-log"),
       run: runOptionsOf(parsed)
     }

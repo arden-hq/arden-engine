@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -364,7 +364,25 @@ describe("arden exec", () => {
     ])
   })
 
-  it("starts no server for a prompt it cannot send, and needs --config", async () => {
+  it("writes and uses a default settings file without --config", async () => {
+    const home = await mkdtemp(join(tmpdir(), "arden-cli-home-"))
+    try {
+      const events: Array<string> = []
+      const io = testIo()
+      const dependencies = { ...io.dependencies, ...started(events), homeDirectory: home }
+      expect(await runCli(["exec", "--output", "json", "hi"], dependencies)).toBe(0)
+      expect(await runCli(["exec", "--output", "json", "hi"], dependencies)).toBe(0)
+      const file = join(home, ".arden-cli", "settings.json")
+      expect(events).toEqual([`start ${file} -`, "stop", `start ${file} -`, "stop"])
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+        dataDirectory: join(home, ".arden-cli", "data")
+      })
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it("starts no server for a prompt it cannot send", async () => {
     const events: Array<string> = []
     const io = testIo()
     expect(
@@ -374,12 +392,8 @@ describe("arden exec", () => {
       })
     ).toBe(2)
     expect(events).toEqual([])
-    expect(await runCli(["exec", "--output", "json", "hi"], io.dependencies)).toBe(2)
     expect(await runCli(["exec", "--config", "s.json", "--detach", "hi"], io.dependencies)).toBe(2)
-    expect(jsonLines(io.stdout())).toMatchObject([
-      { error: { code: "invalid_input" } },
-      { error: { code: "invalid_input", message: "exec requires --config <file>" } }
-    ])
+    expect(jsonLines(io.stdout())).toMatchObject([{ error: { code: "invalid_input" } }])
   })
 
   it("reports a server that did not start, and stops the server when the Run fails", async () => {
