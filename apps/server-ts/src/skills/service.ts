@@ -47,6 +47,7 @@ import {
   type SkillMarketplaceSource
 } from "./marketplace.js"
 import { parseSkillMetadata } from "./metadata.js"
+import { countOf } from "@arden-hq/std/count"
 import {
   DEFAULT_RECIPE_SKILLS,
   defaultRecipeByName,
@@ -344,7 +345,11 @@ const compactCatalog = (
 const storageUnavailable = (operation: SkillOperation): SkillError =>
   skillError(operation, "storage", "Skills storage is unavailable")
 
-const listRoot = Effect.fn("Skills.listRoot")(function* (root: string, folderIsName: boolean) {
+const listRoot = Effect.fn("Skills.listRoot")(function* (
+  root: string,
+  folderIsName: boolean,
+  reported: Set<string>
+) {
   const entries = yield* storage("list", "Skills storage is unavailable", () =>
     readdir(root, { withFileTypes: true })
   ).pipe(
@@ -361,21 +366,24 @@ const listRoot = Effect.fn("Skills.listRoot")(function* (root: string, folderIsN
     )
     .map((entry) => entry.name)
     .sort()
-  const records = yield* Effect.forEach(
+  const results = yield* Effect.forEach(
     names,
     (name) =>
       loadRecord(root, name, "list", folderIsName).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Skipping unreadable Skill", {
-            root,
-            name,
-            reason: error.reason
-          }).pipe(Effect.as(null))
-        )
+        Effect.map((record) => ({ record })),
+        Effect.catch((error) => Effect.succeed({ skipped: `${name} (${error.message})` }))
       ),
     { concurrency: 8 }
   )
-  return records.filter((record): record is SkillRecord => record !== null)
+  const fresh = results.flatMap((result) =>
+    "skipped" in result && !reported.has(`${root}/${result.skipped}`) ? [result.skipped] : []
+  )
+  for (const skipped of fresh) reported.add(`${root}/${skipped}`)
+  if (fresh.length > 0)
+    yield* Effect.logWarning(
+      `Skipped ${countOf(fresh.length, "unreadable Skill")} in ${root}: ${fresh.join(", ")}`
+    )
+  return results.flatMap((result) => ("record" in result ? [result.record] : []))
 })
 
 const make = Effect.fn("Skills.make")(function* (
@@ -393,13 +401,14 @@ const make = Effect.fn("Skills.make")(function* (
     )
   }
   const readable: ReadonlyArray<string> = primary === null ? roots.extra : [primary, ...roots.extra]
+  const reported = new Set<string>()
 
   const records = Effect.fn("Skills.records")(function* () {
     const seenNames = new Set<string>()
     const seenIdentities = new Set<string>()
     const kept: Array<SkillRecord> = []
     for (const root of readable) {
-      const found = yield* listRoot(root, root === primary).pipe(
+      const found = yield* listRoot(root, root === primary, reported).pipe(
         Effect.catch((error) =>
           Effect.logWarning("Skills root unavailable", { root, reason: error.reason }).pipe(
             Effect.as([] as ReadonlyArray<SkillRecord>)
@@ -480,7 +489,9 @@ const make = Effect.fn("Skills.make")(function* (
   ) {
     for (const root of readable) {
       if (root !== primary) {
-        const shared = (yield* listRoot(root, false)).find((record) => record.skill.name === name)
+        const shared = (yield* listRoot(root, false, reported)).find(
+          (record) => record.skill.name === name
+        )
         if (shared !== undefined) return shared
         continue
       }

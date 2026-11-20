@@ -1,3 +1,4 @@
+import { commandLineRoute, type CommandLineRule } from "@arden-hq/protocol/daemon"
 import { Effect, Predicate } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
@@ -9,86 +10,62 @@ type Requirement =
   /** The chat, or the chat of the run, is one the command line made. */
   | {
       readonly kind: "own"
-      readonly target: { readonly sessionId: string } | { readonly runId: string }
+      readonly target:
+        | { readonly sessionId: string }
+        | { readonly runId: string }
+        | { readonly questionId: string }
     }
   | { readonly kind: "refused" }
 
-interface Route {
-  readonly method: "GET" | "POST" | "DELETE"
-  readonly path: RegExp
-  readonly require: (
-    params: ReadonlyArray<string>,
-    body: Readonly<Record<string, unknown>>
-  ) => Requirement
-}
-
 const OPEN: Requirement = { kind: "open" }
 const REFUSED: Requirement = { kind: "refused" }
-const SEGMENT = "([^/]+)"
-const path = (pattern: string): RegExp => new RegExp(`^${pattern.replaceAll(":id", SEGMENT)}$`)
 const text = (value: unknown): string | undefined =>
   Predicate.isString(value) && value.length > 0 ? value : undefined
 const ownChat = (sessionId: string | undefined): Requirement =>
   sessionId === undefined ? REFUSED : { kind: "own", target: { sessionId } }
 const ownRun = (runId: string | undefined): Requirement =>
   runId === undefined ? REFUSED : { kind: "own", target: { runId } }
-const declineOnly = (body: Readonly<Record<string, unknown>>): Requirement =>
-  body["approved"] === true ? REFUSED : ownRun(text(body["run_id"]))
+const ownQuestion = (questionId: string | undefined): Requirement =>
+  questionId === undefined ? REFUSED : { kind: "own", target: { questionId } }
 
-const COMMAND_LINE_ROUTES: ReadonlyArray<Route> = [
-  { method: "GET", path: path("/health"), require: () => OPEN },
-  { method: "GET", path: path("/spaces"), require: () => OPEN },
-  { method: "GET", path: path("/sessions"), require: () => OPEN },
-  {
-    method: "POST",
-    path: path("/sessions"),
-    require: (_, body) =>
-      (body["space_id"] === undefined || body["space_id"] === null) && body["origin"] === undefined
+const requirementOf = (
+  rule: CommandLineRule,
+  params: ReadonlyArray<string>,
+  body: Readonly<Record<string, unknown>>
+): Requirement => {
+  const [id] = params
+  switch (rule) {
+    case "open":
+      return OPEN
+    case "plain_new_chat":
+      return (body["space_id"] === undefined || body["space_id"] === null) &&
+        body["origin"] === undefined
         ? OPEN
         : REFUSED
-  },
-  { method: "POST", path: path("/sessions/:id/branch"), require: ([id]) => ownChat(id) },
-  { method: "DELETE", path: path("/sessions/:id"), require: ([id]) => ownChat(id) },
-  { method: "DELETE", path: path("/sessions/:id/permanent"), require: ([id]) => ownChat(id) },
-  {
-    method: "POST",
-    path: path("/chat/message"),
-    require: (_, body) => ownChat(text(body["session_id"]))
-  },
-  { method: "GET", path: path("/chat/events/:id"), require: ([id]) => ownChat(id) },
-  { method: "GET", path: path("/chat/runs/:id"), require: ([id]) => ownRun(id) },
-  { method: "GET", path: path("/chat/runs/:id/events"), require: ([id]) => ownRun(id) },
-  { method: "POST", path: path("/tools/result"), require: (_, body) => declineOnly(body) },
-  { method: "POST", path: path("/connections/result"), require: (_, body) => declineOnly(body) },
-  {
-    method: "POST",
-    path: path("/cancel"),
-    require: (_, body) => {
+    case "own_chat_in_path":
+      return ownChat(text(id))
+    case "own_run_in_path":
+      return ownRun(text(id))
+    case "own_question_in_path":
+      return ownQuestion(text(id))
+    case "own_chat_in_body":
+      return ownChat(text(body["session_id"]))
+    case "own_run_in_body":
+      return ownRun(text(body["run_id"]))
+    case "own_run_or_chat_in_body": {
       const runId = text(body["run_id"])
       return runId === undefined ? ownChat(text(body["session_id"])) : ownRun(runId)
     }
   }
-]
+}
 
 const commandLineRequirement = (
   method: string,
   pathname: string,
   body: Readonly<Record<string, unknown>>
 ): Requirement => {
-  for (const route of COMMAND_LINE_ROUTES) {
-    if (route.method !== method) continue
-    const match = route.path.exec(pathname)
-    if (match === null) continue
-    const params = match.slice(1).map((segment) => {
-      try {
-        return decodeURIComponent(segment)
-      } catch {
-        return ""
-      }
-    })
-    return route.require(params, body)
-  }
-  return REFUSED
+  const match = commandLineRoute(method, pathname)
+  return match === undefined ? REFUSED : requirementOf(match.route.rule, match.params, body)
 }
 
 const jsonBody = (source: string): Readonly<Record<string, unknown>> => {

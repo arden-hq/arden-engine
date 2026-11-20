@@ -1,5 +1,3 @@
-import { errorMessage } from "@arden-hq/std/errors"
-
 import { createCliClient, resolveServer, type CliDependencies } from "./command.js"
 import { failureOf } from "./run.js"
 
@@ -40,7 +38,8 @@ export const modelsCommand = async (
     }
     return 0
   } catch (cause) {
-    dependencies.writeStderr(`arden: ${errorMessage(cause)}\n`)
-    return failureOf(cause).exitCode
+    const failure = failureOf(cause)
+    dependencies.writeStderr(`arden: ${failure.error.message}\n`)
+    return failure.exitCode
   }
 }

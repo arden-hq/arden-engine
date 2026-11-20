@@ -15,6 +15,11 @@
       "arden-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./chatgpt-login": {
+      "arden-source": "./src/chatgpt-login.ts",
+      "types": "./dist/chatgpt-login.d.ts",
+      "import": "./dist/chatgpt-login.js"
     }
   },
   "files": [

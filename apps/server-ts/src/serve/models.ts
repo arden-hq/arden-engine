@@ -19,7 +19,7 @@ import {
   declaredModel,
   discoveryInput
 } from "../providers/chat-completions/route.js"
-import { codexCliCredentials, CodexLoginError } from "../providers/openai-codex/cli-login.js"
+import { CodexLoginError, signedInCredentials } from "../providers/openai-codex/cli-login.js"
 import { makeOpenAiCodexRuntime } from "../providers/openai-codex/runtime.js"
 import {
   makeOpenAiResponsesProvider,
@@ -273,12 +273,14 @@ export const modelsFor = async (
     const fixed = initialCredential
     credentials = { get: async () => fixed }
   } else {
-    credentials = codexCliCredentials({ env })
+    credentials = signedInCredentials({ env })
     try {
       initialCredential = await credentials.get({ signal: AbortSignal.timeout(5_000) })
     } catch (cause) {
       if (cause instanceof CodexLoginError)
-        throw new SettingsError(`No Codex sign-in on this machine: ${cause.message}`)
+        throw new SettingsError(
+          `No ChatGPT sign-in on this machine (run \`arden login\`): ${cause.message}`
+        )
       throw cause
     }
   }

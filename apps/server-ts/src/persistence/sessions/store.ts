@@ -179,7 +179,10 @@ export class SessionStore extends Context.Service<
     >
     readonly create: (session: NewSession) => Effect.Effect<CreatedSession, SessionStoreError>
     readonly commandLineChat: (
-      target: { readonly sessionId: string } | { readonly runId: string }
+      target:
+        | { readonly sessionId: string }
+        | { readonly runId: string }
+        | { readonly questionId: string }
     ) => Effect.Effect<boolean, SessionStoreError>
     readonly ensureSpaceConversation: (spaceId: string) => Effect.Effect<string, SessionStoreError>
     readonly branch: (

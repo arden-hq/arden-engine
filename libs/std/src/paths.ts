@@ -40,3 +40,5 @@ export const resolveArdenDir = (
   const configured = environment[ARDEN_DIR_VARIABLE]?.trim() ?? ""
   return configured === "" ? path.join(home, ".arden") : path.resolve(expandHome(configured, home))
 }
+
+export const ardenCliDir = (home: string = homedir()): string => path.join(home, ".arden-cli")

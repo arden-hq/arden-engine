@@ -24,7 +24,8 @@ const entry = async (name: string, body: string): Promise<string> => {
 }
 
 describe("startConfiguredServer", () => {
-  it("reads the ready line and the server's own access file, and stops it", async () => {
+  it("reads the ready line and the server's own access file, logs the rest, and stops it", async () => {
+    const logged: Array<string> = []
     const accessFile = join(directory, "cli-access.json")
     const ready = {
       type: "ready",
@@ -46,10 +47,12 @@ describe("startConfiguredServer", () => {
          writeFileSync(${JSON.stringify(accessFile)}, JSON.stringify({ version: 1, serverUrl: "http://127.0.0.1:51234/", capability: "${CAPABILITY}", pid: process.pid }))
          console.error("log line")
          console.log(${JSON.stringify(JSON.stringify(ready))})
+         setTimeout(() => console.log("after ready"), 50)
          setInterval(() => {}, 1000)`
       ),
       config: "settings.json",
-      env: { PATH: process.env["PATH"] }
+      env: { PATH: process.env["PATH"] },
+      onLog: (chunk) => logged.push(chunk)
     })
     expect({ ready: server.ready, connection: server.connection }).toEqual({
       ready,
@@ -58,7 +61,10 @@ describe("startConfiguredServer", () => {
         headers: { "x-arden-local-capability": CAPABILITY }
       }
     })
+    await new Promise((resolve) => setTimeout(resolve, 300))
     await server.stop()
+    expect(logged.join("")).toBe("log line\nafter ready\n")
+    expect(await server.exited).toBeNull()
   })
 
   it("rejects with the server's own reason: a settings mistake, a model server down, a failed start", async () => {

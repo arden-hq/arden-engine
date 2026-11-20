@@ -4,32 +4,39 @@ The `arden` command. It sends work to a running Arden server and prints the resu
 
 It builds on `@arden-hq/headless` for the API calls.
 
-## Build and run
+## Install and run
+
+From this repository:
 
 ```bash
-just build                          # from the repository root
-node apps/cli/dist/main.js run "Summarize my open tasks"
+bun install
+just build
+just arden login
+just arden "Say hello"
 ```
 
-The package is private. It has no release of its own. To test it, run `bun run --cwd apps/cli test`.
+Once it is on npm, the same is `npm install -g @arden-hq/cli`, then `arden login` and `arden "Say hello"`. It is not published yet. Tests: `bun run --cwd apps/cli test`.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
+| `arden <prompt>` | Any first word that is not a command starts the prompt. `arden run` on Arden (started in the background when installed but closed) or an `arden serve`, else `arden exec` with the default settings |
+| `arden login` | Sign in with ChatGPT in the browser; the sign-in stays in `~/.arden-cli/chatgpt-login.json` (mode 0600). `--status` says whether you are signed in |
+| `arden logout` | Forget that sign-in |
 | `arden run [prompt]` | Send a prompt and wait for the answer. Piped stdin joins the prompt in a `<stdin>` block |
 | `arden wait <run-id>` | Wait for a Run that is already going |
 | `arden sessions` | List recent chats |
 | `arden models` | List the models a new chat may run on: the ids `--model` takes |
-| `arden serve --config <file>` | Start a server of its own from a settings file; runs until stopped |
-| `arden exec --config <file> [prompt]` | Start that server, run one prompt on it, stop it |
+| `arden serve [--config <file>]` | Start a server of its own from a settings file (default `~/.arden-cli/settings.json`, written on first use); runs until stopped |
+| `arden exec [--config <file>] [prompt]` | Start that server, run one prompt on it, stop it |
 
 Run `arden --help` for every option.
 
 ## Rules
 
-- The server address is `--url` or `ARDEN_URL`.
-- `serve` and `exec` take a settings file (`apps/server-ts/src/serve/settings.ts` lists every field) and a data folder of their own, never `~/.arden`. Reach a `serve` server with `ARDEN_DIR=<its dataDirectory> arden run ...`.
+- The server is found in this order: `--url` or `ARDEN_URL`; `ARDEN_DIR`; the running Arden app (`~/.arden/cli-access.json`); a running `arden serve` on the default settings (`~/.arden-cli/data`); the installed Arden app, started in the background (`open -g -a Arden --args --background`, ready when its access file names a live server, up to 30 s). A bare prompt runs on a server of its own only when none of these is there. No CLI server ever opens the app's data folder; the server refuses `~/.arden` as a `dataDirectory`.
+- `serve` and `exec` take a settings file (`apps/server-ts/src/serve/settings.ts` lists every field) and a data folder of their own, never `~/.arden`.
 - `--output json` and `--output jsonl` print one `command_receipt`. Its `status` is `completed`, `submitted`, `failed`, `cancelled`, `interrupted` or `timed_out`.
 - Exit codes, for every command, `serve` and `exec` included:
 
@@ -41,15 +48,15 @@ Run `arden --help` for every option.
   | `3` | `serve` and `exec`: the model server named by `provider.baseUrl` did not answer at start (not running, or not at that address) | `provider_unavailable` |
   | `124` | timed out | |
   | `130` | interrupted | |
-- The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, and `cost`, the US dollars the provider reported for the Run's model requests (OpenRouter does). A Run whose provider reported no cost (llama.cpp, Codex) has no `cost`; Arden never estimates one. The server README's "Cost" says what it covers.
+- The receipt names the model that ran (`model_id`, `reasoning_effort`) and carries the server's `result` as sent: text, `usage` in tokens, and `cost`, the US dollars the provider reported for the Run's model requests (OpenRouter does). A Run whose provider reported no cost (llama.cpp, Codex) has no `cost`; Arden never estimates one. `apps/server-ts/docs/providers.md` says what it covers.
 - `--model` takes an id `arden models` lists. Any other is refused before a chat is made (exit 2), with the ids the server has.
 - A prompt longer than one message takes (100,000 characters) is refused before the server is reached (exit 2).
-- `--approval` sets how the Run handles approvals. `--no-wait-approval` declines what needs an approval instead of waiting.
+- `--mode` takes the app's modes: `read-only`, `ask`, `auto` (the default: the Guardian decides and asks when unsure) and `never-ask`. At a terminal, approvals, connection requests and questions are asked there. Without one, `run` waits for an answer in Arden and `exec` declines; `--no-wait-approval` always declines.
 - Ctrl-C and `--timeout` stop the wait. The Run goes on in the server.
 
 ## A local model (llama.cpp) or OpenRouter
 
-A settings file with a `chat-completions` provider runs on any OpenAI Chat Completions server. A local `llama-server` needs no key; the server finds out it is llama.cpp and reads the model's id, window and thinking switch from it. Give it a window of at least 32,768 tokens (`apps/server-ts/README.md` says why).
+A settings file with a `chat-completions` provider runs on any OpenAI Chat Completions server. A local `llama-server` needs no key; the server finds out it is llama.cpp and reads the model's id, window and thinking switch from it. Give it a window of at least 32,768 tokens (`apps/server-ts/docs/providers.md` says why).
 
 ```bash
 llama-server -m model.gguf --ctx-size 32768 --jinja --port 8080 &

@@ -1,9 +1,4 @@
-import {
-  CLI_APPROVAL_MODES,
-  CLI_DEFAULT_APPROVAL_MODE,
-  isCliApprovalMode,
-  type CliApprovalMode
-} from "@arden-hq/protocol/permissions"
+import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 
 import { timeoutMilliseconds, UsageError, valueAfter, type CliDependencies } from "./command.js"
 import {
@@ -18,8 +13,15 @@ import {
   type SessionTarget,
   type WaitOptions
 } from "./run.js"
+import { loginCommand, type LoginAction } from "./login.js"
 import { modelsCommand, type ModelsOptions } from "./models.js"
-import { execCommand, serveCommand, type ExecOptions, type ServeOptions } from "./serve.js"
+import {
+  execCommand,
+  promptCommand,
+  serveCommand,
+  type ExecOptions,
+  type ServeOptions
+} from "./serve.js"
 import { errorMessage } from "@arden-hq/std/errors"
 
 export type {
@@ -37,19 +39,50 @@ type ParsedCommand =
   | { readonly kind: "models"; readonly options: ModelsOptions }
   | { readonly kind: "serve"; readonly options: ServeOptions }
   | { readonly kind: "exec"; readonly options: ExecOptions }
+  | { readonly kind: "prompt"; readonly options: RunOptions }
+  | { readonly kind: "login"; readonly action: LoginAction }
+
+const MODE_BY_NAME = {
+  "read-only": "read_only",
+  ask: "ask",
+  auto: "safe",
+  "never-ask": "allow"
+} as const satisfies Record<string, ApprovalMode>
+
+type ModeName = keyof typeof MODE_BY_NAME
+
+const MODE_NAMES: ReadonlyArray<string> = Object.keys(MODE_BY_NAME)
+
+const isModeName = (value: string): value is ModeName => value in MODE_BY_NAME
+
+const DEFAULT_MODE_NAME: ModeName = "auto"
 
 const HELP = `Usage:
+  arden <prompt> [options]
+  arden login [--status]
+  arden logout
   arden run [prompt] [options]
   arden wait <run-id> [options]
   arden sessions [options]
   arden models [options]
-  arden serve --config <file>
-  arden exec --config <file> [prompt] [options]
+  arden serve [--config <file>] [--verbose]
+  arden exec [--config <file>] [prompt] [options]
 
-run, wait, sessions and models talk to the running Arden app (or --url /
-ARDEN_URL, or ARDEN_DIR=<data folder> for an arden serve). Chats started there
-appear in Arden like any other. serve and exec start a server of their own
-from a settings file, with its own data folder and model provider.
+arden <prompt> sends the prompt to Arden (arden run). When the Arden app is
+installed but not running, it starts it in the background first, so the
+prompt sees your accounts and chats. Without the app it runs on a server of
+its own for this one prompt (arden exec). It takes the run options below.
+
+login signs in with ChatGPT in the browser and keeps the sign-in in
+~/.arden-cli; serve and exec use it. --status says whether you are signed in.
+logout forgets it.
+
+run, wait, sessions and models talk to --url / ARDEN_URL, else ARDEN_DIR=<data
+folder>, else the running Arden app, else a running arden serve with the
+default settings, else the installed Arden app started in the background. Chats started there appear in
+Arden like any other. serve and exec start a server of their own from a
+settings file, with its own data folder and model provider. Without --config
+they use ~/.arden-cli/settings.json and write it on first use.
 
 Run options:
   --session <id>          Send to this chat
@@ -61,10 +94,11 @@ Run options:
   --image <path>          Attach a .png or .jpg image (repeatable)
   --output-schema <file>  A JSON Schema the final answer must match; json
                           output carries the parsed answer as result.data
-  --approval <mode>       ${CLI_APPROVAL_MODES.join(" or ")} (default: ${CLI_DEFAULT_APPROVAL_MODE});
-                          Auto and Never ask are set in the app
-  --no-wait-approval      Decline what needs approval instead of waiting for
-                          someone to answer it in Arden
+  --mode <mode>           ${MODE_NAMES.join(", ")} (default: ${DEFAULT_MODE_NAME}), as in
+                          the app: Read only, Ask every time, Auto (the Guardian
+                          decides and asks when unsure), Never ask
+  --no-wait-approval      Decline what needs approval instead of asking here
+                          or waiting for someone to answer it in Arden
   --detach                Print the run id and exit; the Run goes on in Arden
   --output <format>       text, json, or jsonl (default: text)
   --timeout <seconds>     Cancel the Run if it takes longer
@@ -77,9 +111,13 @@ Wait options:
   --timeout stop waiting; the Run goes on.
 
 Serve:
-  --config <file>         The settings file. Prints one JSON ready line on
-                          stdout, then runs until Ctrl-C or SIGTERM. Reach it
-                          with ARDEN_DIR=<its dataDirectory> arden run ...
+  --config <file>         The settings file (default ~/.arden-cli/settings.json).
+                          Prints where it runs, then runs until Ctrl-C or
+                          SIGTERM. Its log goes to server.log in its data
+                          folder. arden run finds it on the default settings;
+                          for another data folder, ARDEN_DIR=<it> arden run ...
+  --verbose               Stream the server's log here instead, and print its
+                          JSON ready line
 
   A settings file names its data folder and model provider, for example a
   local llama.cpp server, which needs no key:
@@ -88,7 +126,8 @@ Serve:
   OpenRouter names the variable that holds its key, and the model:
     "provider": { "kind": "chat-completions", "baseUrl": "https://openrouter.ai/api/v1",
                   "apiKeyEnv": "OPENROUTER_API_KEY" }, "model": "openai/gpt-6-luna"
-  Without a provider the server uses this machine's Codex sign-in (codex login).
+  Without a provider the server uses this machine's ChatGPT sign-in (arden login,
+  else codex login).
   A settings mistake, a provider that does not answer, or an unset key
   variable stops the start with exit status 2 and the reason.
 
@@ -118,9 +157,10 @@ const outputFormat = (value: string): CliOutputFormat => {
   throw new UsageError("--output must be text, json, or jsonl")
 }
 
-const approvalMode = (value: string): CliApprovalMode => {
-  if (isCliApprovalMode(value)) return value
-  throw new UsageError(`--approval must be ${CLI_APPROVAL_MODES.join(" or ")}`)
+const approvalMode = (value: string | undefined): ApprovalMode => {
+  const name = value ?? DEFAULT_MODE_NAME
+  if (isModeName(name)) return MODE_BY_NAME[name]
+  throw new UsageError(`--mode must be ${MODE_NAMES.join(", ")}`)
 }
 
 const positiveCount = (value: string, name: string): number => {
@@ -131,7 +171,13 @@ const positiveCount = (value: string, name: string): number => {
   return count
 }
 
-const FLAGS: ReadonlySet<string> = new Set(["--continue", "--detach", "--no-wait-approval"])
+const FLAGS: ReadonlySet<string> = new Set([
+  "--continue",
+  "--detach",
+  "--no-wait-approval",
+  "--status",
+  "--verbose"
+])
 
 interface ParsedArgs {
   readonly positionals: ReadonlyArray<string>
@@ -195,7 +241,7 @@ const RUN_OPTIONS: ReadonlySet<string> = new Set([
   "--recipe",
   "--image",
   "--output-schema",
-  "--approval",
+  "--mode",
   "--no-wait-approval",
   "--detach",
   "--output",
@@ -227,7 +273,7 @@ const approvalHandling = (parsed: ParsedArgs): ApprovalHandling =>
 const runOptionsOf = (parsed: ParsedArgs): RunOptions => {
   const output = outputFormat(single(parsed, "--output") ?? "text")
   const timeout = single(parsed, "--timeout")
-  const mode = single(parsed, "--approval")
+  const mode = approvalMode(single(parsed, "--mode"))
   const detach = parsed.flags.has("--detach")
   if (detach && timeout !== undefined) {
     throw new UsageError("--detach does not wait, so it takes no --timeout")
@@ -242,7 +288,7 @@ const runOptionsOf = (parsed: ParsedArgs): RunOptions => {
     recipe: single(parsed, "--recipe"),
     imagePaths: parsed.values.get("--image") ?? [],
     outputSchemaPath: single(parsed, "--output-schema"),
-    approvalMode: mode === undefined ? undefined : approvalMode(mode),
+    approvalMode: mode,
     approvals: approvalHandling(parsed),
     output,
     timeoutMs: timeout === undefined ? undefined : timeoutMilliseconds(timeout),
@@ -255,20 +301,17 @@ const parseRun = (args: ReadonlyArray<string>): ParsedCommand => {
   return parsed === undefined ? { kind: "help" } : { kind: "run", options: runOptionsOf(parsed) }
 }
 
-const configOf = (parsed: ParsedArgs, command: string): string => {
-  const config = single(parsed, "--config")
-  if (config === undefined) throw new UsageError(`${command} requires --config <file>`)
-  return config
-}
-
-const SERVE_OPTIONS: ReadonlySet<string> = new Set(["--config"])
+const SERVE_OPTIONS: ReadonlySet<string> = new Set(["--config", "--verbose"])
 
 const parseServe = (args: ReadonlyArray<string>): ParsedCommand => {
   const parsed = splitArgs(args, SERVE_OPTIONS)
   if (parsed === undefined) return { kind: "help" }
   const [extra] = parsed.positionals
   if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
-  return { kind: "serve", options: { config: configOf(parsed, "serve") } }
+  return {
+    kind: "serve",
+    options: { config: single(parsed, "--config"), verbose: parsed.flags.has("--verbose") }
+  }
 }
 
 const EXEC_OPTIONS: ReadonlySet<string> = new Set([
@@ -283,7 +326,7 @@ const parseExec = (args: ReadonlyArray<string>): ParsedCommand => {
   return {
     kind: "exec",
     options: {
-      config: configOf(parsed, "exec"),
+      config: single(parsed, "--config"),
       logFile: single(parsed, "--server-log"),
       run: runOptionsOf(parsed)
     }
@@ -354,6 +397,30 @@ const parseModels = (args: ReadonlyArray<string>): ParsedCommand => {
   }
 }
 
+const LOGIN_OPTIONS: ReadonlySet<string> = new Set(["--status"])
+
+const parseLogin = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, LOGIN_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  const [extra] = parsed.positionals
+  if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
+  return { kind: "login", action: parsed.flags.has("--status") ? "status" : "sign_in" }
+}
+
+const parseLogout = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, new Set())
+  if (parsed === undefined) return { kind: "help" }
+  const [extra] = parsed.positionals
+  if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
+  return { kind: "login", action: "sign_out" }
+}
+
+const parsePrompt = (args: ReadonlyArray<string>): ParsedCommand => {
+  const parsed = splitArgs(args, RUN_OPTIONS)
+  if (parsed === undefined) return { kind: "help" }
+  return { kind: "prompt", options: runOptionsOf(parsed) }
+}
+
 const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
   const [command, ...rest] = args
   switch (command) {
@@ -373,19 +440,40 @@ const parseArgs = (args: ReadonlyArray<string>): ParsedCommand => {
       return parseServe(rest)
     case "exec":
       return parseExec(rest)
+    case "login":
+      return parseLogin(rest)
+    case "logout":
+      return parseLogout(rest)
     default:
-      throw new UsageError(`Unknown command: ${command}`)
+      return parsePrompt(args)
   }
+}
+
+const COMMANDS: ReadonlySet<string> = new Set([
+  "run",
+  "wait",
+  "sessions",
+  "models",
+  "serve",
+  "exec",
+  "login",
+  "logout"
+])
+
+const receiptCommand = (first: string | undefined): "run" | "wait" | undefined => {
+  if (first === "wait") return "wait"
+  if (first === "run" || first === "exec") return "run"
+  return first !== undefined && COMMANDS.has(first) ? undefined : "run"
 }
 
 const machineOutputFromArgs = (
   args: ReadonlyArray<string>
 ): { readonly command: "run" | "wait"; readonly output: "json" | "jsonl" } | undefined => {
   // An exec receipt is a run receipt: the same Run, on a server of its own.
-  const command = args[0] === "exec" ? "run" : args[0]
-  if (command !== "run" && command !== "wait") return undefined
+  const command = receiptCommand(args[0])
+  if (command === undefined) return undefined
   let output: string | undefined
-  for (let index = 1; ; index += 1) {
+  for (let index = 0; ; index += 1) {
     const argument = args[index]
     if (argument === undefined || argument === "--") break
     if (argument === "--output") output = args[index + 1]
@@ -427,5 +515,9 @@ export const runCli = async (
       return serveCommand(command.options, dependencies)
     case "exec":
       return execCommand(command.options, dependencies)
+    case "prompt":
+      return promptCommand(command.options, dependencies)
+    case "login":
+      return loginCommand(command.action, dependencies)
   }
 }

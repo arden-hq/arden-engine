@@ -130,6 +130,9 @@ export const defaultClient = (): CliClient => ({
   deleteSession: async () => undefined,
   answerApproval: async () => undefined,
   answerConnection: async () => undefined,
+  answerQuestion: async () => {
+    throw new Error("answerQuestion is not stubbed")
+  },
   branchSession: async () => {
     throw new Error("branchSession is not stubbed")
   },

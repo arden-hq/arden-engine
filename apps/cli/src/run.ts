@@ -18,6 +18,8 @@ import { extname } from "node:path"
 import {
   createCliClient,
   NoModelError,
+  OlderServerError,
+  plainHttpMessage,
   resolveServer,
   ProviderUnavailableError,
   ServerUnavailableError,
@@ -26,10 +28,11 @@ import {
   type CliDependencies
 } from "./command.js"
 import { errorMessage } from "@arden-hq/std/errors"
+import { progressLines, requestResponder, type RunResponder } from "./terminal.js"
 
 export type CliOutputFormat = "text" | "json" | "jsonl"
 
-export type ApprovalHandling = "wait" | "decline"
+export type ApprovalHandling = "wait" | "decline" | "ask_then_decline"
 
 export type SessionTarget =
   | { readonly kind: "new"; readonly space: string | undefined; readonly model: string | undefined }
@@ -44,7 +47,7 @@ export interface RunOptions {
   readonly recipe: string | undefined
   readonly imagePaths: ReadonlyArray<string>
   readonly outputSchemaPath: string | undefined
-  readonly approvalMode: ChatApprovalMode | undefined
+  readonly approvalMode: ChatApprovalMode
   readonly approvals: ApprovalHandling
   readonly output: CliOutputFormat
   readonly timeoutMs: number | undefined
@@ -189,39 +192,26 @@ const receiptFromRun = (
   }
 }
 
-const humanProgressEvents: ReadonlySet<string> = new Set([
-  "RUN_STARTED",
-  "RUN_FINISHED",
-  "RUN_ERROR",
-  "run_cancelled",
-  "run_backgrounded",
-  "input_needed",
-  "TOOL_CALL_START",
-  "TOOL_CALL_END",
-  "task_started",
-  "task_finished"
-])
-
-const writeProgress = (
+const progressWriter = (
   dependencies: CliDependencies,
-  output: CliOutputFormat,
-  identity: ReceiptIdentity,
-  event: HeadlessRunEvent
-): void => {
-  if (output === "jsonl") {
-    dependencies.writeStderr(
-      `${JSON.stringify({
-        version: 1,
-        type: "run_event",
-        run_id: identity.runId,
-        session_id: identity.sessionId,
-        event: event.data
-      })}\n`
-    )
-    return
-  }
-  if (output === "text" && humanProgressEvents.has(event.data.type)) {
-    dependencies.writeStderr(`arden: ${event.data.type}\n`)
+  output: CliOutputFormat
+): ((identity: ReceiptIdentity, event: HeadlessRunEvent) => void) => {
+  const lineOf = progressLines()
+  return (identity, event) => {
+    if (output === "jsonl") {
+      dependencies.writeStderr(
+        `${JSON.stringify({
+          version: 1,
+          type: "run_event",
+          run_id: identity.runId,
+          session_id: identity.sessionId,
+          event: event.data
+        })}\n`
+      )
+      return
+    }
+    const line = output === "text" ? lineOf(event) : undefined
+    if (line !== undefined) dependencies.writeStderr(`arden: ${line}\n`)
   }
 }
 
@@ -246,61 +236,6 @@ const writeReceipt = (
     dependencies.writeStderr(`arden: ${receipt.error.message}\n`)
   }
   return receipt.exit_code
-}
-
-const DECLINED_NOTE =
-  "No one was at the command line to answer this, so it was declined. Carry on without it."
-
-const requestResponder = (input: {
-  readonly client: CliClient
-  readonly runId: string
-  readonly handling: ApprovalHandling
-  readonly output: CliOutputFormat
-  readonly dependencies: CliDependencies
-  readonly declined: Array<DeclinedRequest>
-}): ((event: HeadlessRunEvent) => Promise<void>) => {
-  const handled = new Set<string>()
-  const say = (line: string): void => {
-    if (input.output === "text") input.dependencies.writeStderr(`arden: ${line}\n`)
-  }
-  return async (event) => {
-    const data = event.data
-    if (data.type !== "approval_needed" && data.type !== "connection_needed") return
-    if (data.run_id !== undefined && data.run_id !== null && data.run_id !== input.runId) return
-    if (handled.has(data.tool_id)) return
-    handled.add(data.tool_id)
-    const name = data.type === "approval_needed" ? data.name : data.label
-    if (input.handling === "wait") {
-      say(`waiting for someone to answer in Arden: ${name}`)
-      return
-    }
-    try {
-      if (data.type === "approval_needed") {
-        await input.client.answerApproval({
-          runId: input.runId,
-          toolId: data.tool_id,
-          result: DECLINED_NOTE,
-          approved: false
-        })
-      } else {
-        await input.client.answerConnection({
-          runId: input.runId,
-          toolId: data.tool_id,
-          connectionId: data.connection_id,
-          result: DECLINED_NOTE,
-          approved: false
-        })
-      }
-      input.declined.push({
-        kind: data.type === "approval_needed" ? "approval" : "connection",
-        tool_id: data.tool_id,
-        name
-      })
-      say(`declined ${name}: no one is here to answer it`)
-    } catch (cause) {
-      say(`could not decline ${name}: ${errorMessage(cause)}`)
-    }
-  }
 }
 
 const promptFor = async (options: RunOptions, dependencies: CliDependencies): Promise<string> => {
@@ -447,16 +382,14 @@ const discardIfEmpty = async (client: CliClient, sessionId: string): Promise<voi
   } catch {}
 }
 
-const refusalMessage = (cause: HeadlessHttpError): string => {
-  try {
-    const body: unknown = JSON.parse(cause.detail)
-    if (typeof body === "object" && body !== null && "detail" in body) {
-      const detail = body.detail
-      if (typeof detail === "string" && detail.length > 0) return detail
-    }
-  } catch {}
-  return cause.message
-}
+const OLDER_ENGINE_COMMAND_LINE_MODES: ReadonlySet<ChatApprovalMode> = new Set(["read_only", "ask"])
+
+const submitted403 = (cause: unknown, mode: ChatApprovalMode): unknown =>
+  cause instanceof HeadlessHttpError &&
+  cause.status === 403 &&
+  !OLDER_ENGINE_COMMAND_LINE_MODES.has(mode)
+    ? new OlderServerError()
+    : cause
 
 export const failureOf = (
   cause: unknown
@@ -477,8 +410,11 @@ export const failureOf = (
   if (cause instanceof NoModelError) {
     return { error: { code: "no_model", message: cause.message }, exitCode: 1 }
   }
+  if (cause instanceof OlderServerError) {
+    return { error: { code: "server_outdated", message: cause.message }, exitCode: 1 }
+  }
   if (cause instanceof HeadlessHttpError) {
-    return { error: { code: "command_failed", message: refusalMessage(cause) }, exitCode: 1 }
+    return { error: { code: "command_failed", message: plainHttpMessage(cause) }, exitCode: 1 }
   }
   return { error: { code: "command_failed", message: errorMessage(cause) }, exitCode: 1 }
 }
@@ -489,6 +425,22 @@ class InterruptError extends Error {
   constructor() {
     super("Interrupted by SIGINT")
   }
+}
+
+const followAnswers = async (
+  responder: RunResponder,
+  first: RunDetail,
+  follow: (runId: string) => Promise<RunDetail>
+): Promise<RunDetail> => {
+  let detail = first
+  for (
+    let next = await responder.afterRun();
+    next !== undefined;
+    next = await responder.afterRun()
+  ) {
+    detail = await follow(next)
+  }
+  return detail
 }
 
 export const runCommand = async (
@@ -554,7 +506,9 @@ export const runCommand = async (
       .then(
         () => undefined,
         (cause) => {
-          dependencies.writeStderr(`arden: cancellation request failed: ${errorMessage(cause)}\n`)
+          dependencies.writeStderr(
+            `arden: cancellation request failed: ${failureOf(cause).error.message}\n`
+          )
         }
       )
       .finally(() => clearTimeout(timeout))
@@ -577,14 +531,18 @@ export const runCommand = async (
     if (resolved.created) unsent = resolved.sessionId
     if (interruptRequested) return stopped("interrupted", "Interrupted by SIGINT")
 
-    const accepted = await client.submit({
-      sessionId,
-      message: prompt,
-      ...(images.length === 0 ? {} : { images }),
-      ...(options.recipe === undefined ? {} : { recipe: options.recipe }),
-      ...(outputSchema === undefined ? {} : { outputSchema }),
-      ...(options.approvalMode === undefined ? {} : { approvalMode: options.approvalMode })
-    })
+    const accepted = await client
+      .submit({
+        sessionId,
+        message: prompt,
+        ...(images.length === 0 ? {} : { images }),
+        ...(options.recipe === undefined ? {} : { recipe: options.recipe }),
+        ...(outputSchema === undefined ? {} : { outputSchema }),
+        approvalMode: options.approvalMode
+      })
+      .catch((cause: unknown) => {
+        throw submitted403(cause, options.approvalMode)
+      })
     submitted = accepted
     unsent = undefined
     if (interruptRequested) {
@@ -595,6 +553,7 @@ export const runCommand = async (
       return finish(submittedReceipt(accepted))
     }
 
+    const writeProgress = progressWriter(dependencies, options.output)
     const respond = requestResponder({
       client,
       runId: accepted.runId,
@@ -603,14 +562,17 @@ export const runCommand = async (
       dependencies,
       declined
     })
-    const detail = await client.wait(accepted, {
+    const waiting = {
       signal: waitController.signal,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      onEvent: async (event) => {
-        writeProgress(dependencies, options.output, identity(), event)
-        await respond(event)
+      onEvent: async (event: HeadlessRunEvent) => {
+        writeProgress(identity(), event)
+        await respond.onEvent(event)
       }
-    })
+    }
+    const detail = await followAnswers(respond, await client.wait(accepted, waiting), (runId) =>
+      client.waitForRun(runId, waiting)
+    )
     if (interruptRequested) {
       await requestCancel()
       return stopped("interrupted", "Interrupted by SIGINT")
@@ -650,6 +612,7 @@ export const waitCommand = async (
   const controller = new AbortController()
   const declined: Array<DeclinedRequest> = []
   const removeSigint = dependencies.onSigint(() => controller.abort(new InterruptError()))
+  const writeProgress = progressWriter(dependencies, options.output)
   const respond = requestResponder({
     client,
     runId: options.runId,
@@ -659,14 +622,16 @@ export const waitCommand = async (
     declined
   })
   try {
-    const detail = await client.waitForRun(options.runId, {
-      signal: controller.signal,
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      onEvent: async (event) => {
-        writeProgress(dependencies, options.output, identity, event)
-        await respond(event)
-      }
-    })
+    const follow = (runId: string): Promise<RunDetail> =>
+      client.waitForRun(runId, {
+        signal: controller.signal,
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        onEvent: async (event) => {
+          writeProgress(identity, event)
+          await respond.onEvent(event)
+        }
+      })
+    const detail = await followAnswers(respond, await follow(options.runId), follow)
     return finish(receiptFromRun("wait", detail, declined))
   } catch (cause) {
     if (controller.signal.aborted || cause instanceof InterruptError) {
@@ -739,7 +704,8 @@ export const sessionsCommand = async (
     }
     return 0
   } catch (cause) {
-    dependencies.writeStderr(`arden: ${errorMessage(cause)}\n`)
-    return failureOf(cause).exitCode
+    const failure = failureOf(cause)
+    dependencies.writeStderr(`arden: ${failure.error.message}\n`)
+    return failure.exitCode
   }
 }

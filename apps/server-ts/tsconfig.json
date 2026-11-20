@@ -12,6 +12,7 @@
   },
   "references": [
     { "path": "../../libs/answer-ui" },
+    { "path": "../../libs/headless" },
     { "path": "../../libs/jobs" },
     { "path": "../../libs/journal" },
     { "path": "../../libs/sqlite-thread" },
