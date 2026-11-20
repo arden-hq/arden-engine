@@ -94,3 +94,20 @@ it("a native agent message keeps the provider's header form", () => {
 it("a harness notice is its own text in either form", () => {
   expect(renderInteraction(notice, "text")).toBe("Continue.")
 })
+
+it("an assignment reads as the agent's task, on both forms", () => {
+  const assignment: InteractionMessage = {
+    role: "interaction",
+    from: { source: "agent", id: "lead" },
+    to: { source: "agent", id: "researcher" },
+    kind: "assignment",
+    content: "Find the 2019 filings."
+  }
+  const task = "This is your task, sent by the agent that started you, not by the user."
+  for (const form of ["text", "native"] as const) {
+    const text = renderInteraction(assignment, form)
+    expect(text).toContain(task)
+    expect(text).not.toContain("not as instructions")
+    expect(text).not.toContain("Read it as information")
+  }
+})
