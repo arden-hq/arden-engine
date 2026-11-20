@@ -233,6 +233,8 @@ const checkRemote = async (
 export const makeDriveUploadTool = (services: UploadServices): ServerTool =>
   defineServerTool({
     name: "drive_upload",
+    summary: "Uploads a file to Google Drive.",
+    discovery: { group: "drive_files" },
     description:
       "Upload one chat attachment, generated artifact, or allowed local file to Google Drive, up to 100 MiB. The approval card fixes the exact bytes, so later changes to the file are not uploaded. Reuse operation_key for retries, including after a lost response; it never creates a second file. Returns metadata and file_ref, not file contents.",
     parameters: Schema.toStandardSchemaV1(UploadParametersSchema),

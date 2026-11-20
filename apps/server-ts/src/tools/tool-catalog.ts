@@ -6,239 +6,55 @@ import type { RunAuthority } from "../execution/authority.js"
 import { refusalPath } from "../execution/decide.js"
 import { renderRefusal } from "../execution/refusal.js"
 import { parseMcpSource } from "../mcp/naming.js"
-import type { ServerTool, ServerToolMetadata } from "./define.js"
+import { discoveryOf, type ServerTool, type ServerToolMetadata } from "./define.js"
 import { scopedRunToolNames } from "./tool-scopes.js"
 import { toolParametersJsonSchema } from "./tool-json-schema.js"
 import type { SpecialChat } from "../context/special-chat.js"
 
-const ALWAYS_LOADED: ReadonlySet<string> = new Set([
-  "exec_command",
-  "write_stdin",
-  "file_read",
-  "file_edit",
-  "file_write",
-  "file_search_text",
-  "file_list",
-  "file_find",
-  "code_mode",
-  "spawn_agent",
-  "agent_message",
-  "session_read",
-  "session_search_transcripts",
-  "wiki_read_page",
-  "wiki_search",
-  "skill",
-  "web_fetch",
-  "current_time",
-  "todo_update",
-  "ask_user",
-  "permission_offer",
-  "permissions_read"
-])
-
-/** Deferred tools by the job they do together. OpenAI advises fewer than 10 per namespace. */
-const TOOL_GROUPS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  // OpenAI reserves "browser": a run that loaded this group as `browser` was
-  // refused with HTTP 400 on its next request.
-  computer_control: [
-    "computer_repl",
-    "computer_launch",
-    "computer_clipboard_write",
-    "computer_read",
-    "computer_act",
-    "computer_reset"
-  ],
-  web_browser: [
-    "browser_open",
-    "browser_tabs",
-    "browser_snapshot",
-    "browser_act",
-    "browser_upload",
-    "browser_permission",
-    "browser_wait",
-    "browser_screenshot",
-    "browser_pointer",
-    "browser_close"
-  ],
-  web_browser_sign_in: ["browser_ask_secret"],
-  vault: [
-    "vault_list",
-    "vault_use_key",
-    "vault_ask_key",
-    "vault_pay",
-    "vault_allow_payment_frame",
-    "vault_checkout"
-  ],
-  web_browser_tasks: ["browser_task", "browser_procedure"],
-  space: [
-    "space_list",
-    "space_board_read",
-    "space_page_read",
-    "space_page_patch",
-    "space_page_write",
-    "space_create",
-    "space_settings_update",
-    "space_archive"
-  ],
-  tasks: [
-    "task_get",
-    "task_start",
-    "task_update",
-    "task_wait",
-    "task_finish",
-    "task_comment",
-    "task_save_result",
-    "task_move_here"
-  ],
-  task_inference: ["task_propose", "space_inference_review"],
-  task_contract: ["task_contract_propose", "task_criterion_met"],
-  wiki_upkeep: [
-    "wiki_list_pages",
-    "wiki_list_collections",
-    "wiki_links",
-    "wiki_list_changes",
-    "wiki_read_change",
-    "wiki_page_history",
-    "wiki_create_page",
-    "wiki_edit_page",
-    "wiki_patch_page"
-  ],
-  wiki_admin: [
-    "wiki_archive_page",
-    "wiki_merge_page",
-    "wiki_move_page",
-    "wiki_restore_page",
-    "wiki_create_directory",
-    "wiki_configure_reports",
-    "wiki_publish_report",
-    "memory_forget"
-  ],
-  email: [
-    "email_search",
-    "email_thread_search",
-    "email_read",
-    "email_thread_read",
-    "email_send",
-    "email_reply",
-    "email_forward",
-    "email_draft",
-    "email_attachment_save",
-    "google_accounts_list"
-  ],
-  email_organize: ["email_label_list", "email_update", "email_trash", "email_unsubscribe"],
-  calendar: [
-    "calendar_search",
-    "calendar_read_event",
-    "calendar_create_event",
-    "calendar_edit_event",
-    "calendar_delete_event",
-    "calendar_respond",
-    "calendar_list_calendars",
-    "calendar_free_busy"
-  ],
-  mac_calendar: [
-    "mac_calendar_list_calendars",
-    "mac_calendar_search",
-    "mac_calendar_read_event",
-    "mac_calendar_create_event",
-    "mac_calendar_edit_event",
-    "mac_calendar_delete_event"
-  ],
-  mac_reminders: [
-    "mac_reminders_list_lists",
-    "mac_reminders_search",
-    "mac_reminders_create",
-    "mac_reminders_edit",
-    "mac_reminders_complete",
-    "mac_reminders_delete"
-  ],
-  mac_contacts: ["mac_contacts_search", "mac_contacts_read"],
-  drive: [
-    "drive_search",
-    "drive_list_doc_tabs",
-    "drive_read_doc",
-    "drive_read_sheet",
-    "drive_create_doc",
-    "drive_edit_doc",
-    "drive_create_sheet",
-    "drive_update_sheet",
-    "drive_append_sheet_rows"
-  ],
-  drive_files: ["drive_upload", "drive_download", "drive_export", "drive_share_file"],
-  automations: [
-    "automation_list",
-    "automation_list_runs",
-    "automation_diagnose",
-    "automation_create",
-    "automation_update",
-    "automation_delete",
-    "automation_run",
-    "run_inspect",
-    "usage_report"
-  ],
-  sessions: [
-    "session_list",
-    "session_send_message",
-    "session_create",
-    "session_move",
-    "session_rename",
-    "session_archive",
-    "forward_message",
-    "thread_bring_back"
-  ],
-  connection_items: ["connection_items_state", "connection_item_read", "item_move"],
-  arden_settings: [
-    "directives_get",
-    "directives_set",
-    "usage_limits",
-    "model_catalog",
-    "skill_list",
-    "skill_create",
-    "skill_update",
-    "capability_propose",
-    "app_open"
-  ],
-  workflows: ["workflow_get", "workflow_retry", "workflow_cancel"],
-  output: [
-    "artifact_save",
-    "artifact_export",
-    "artifact_delete",
-    "answer_block_read",
-    "chat_files_list"
-  ],
-  run_outcome: ["report", "tell", "automation_followup"],
-  run_events: ["automation_run_events"],
-  research: ["claim_record", "evidence_record", "claim_check", "claim_review"],
-  onboarding: [
-    "browser_history_summary",
-    "agent_knowledge_scan",
-    "agent_knowledge_import",
-    "agent_knowledge_digest",
-    "approval_mode_set",
-    "show_tour",
-    "google_client_import"
-  ],
-  chat_summary: ["set_chat_summary"]
+/**
+ * Tools a chat starts with loaded: named tools, then every tool of the named groups
+ * (each tool's `discovery`). The loop loads only the deferred ones (preloadRecord).
+ */
+export interface ChatPreload {
+  readonly tools: ReadonlyArray<string>
+  readonly groups: ReadonlyArray<string>
 }
 
-export const SPECIAL_CHAT_PRELOAD: Readonly<Record<SpecialChat["kind"], ReadonlyArray<string>>> = {
-  capture: ["forward_message", "session_list", "session_move"],
-  onboarding: [
-    "ask_user",
-    "skill",
-    "wiki_read_page",
-    "wiki_create_page",
-    "wiki_edit_page",
-    "directives_get",
-    "directives_set",
-    ...(TOOL_GROUPS["onboarding"] ?? [])
-  ]
+export const SPECIAL_CHAT_PRELOAD: Readonly<Record<SpecialChat["kind"], ChatPreload>> = {
+  capture: { tools: ["forward_message", "session_list", "session_move"], groups: [] },
+  onboarding: {
+    tools: [
+      "ask_user",
+      "skill",
+      "wiki_read_page",
+      "wiki_create_page",
+      "wiki_edit_page",
+      "directives_get",
+      "directives_set"
+    ],
+    groups: ["onboarding"]
+  }
 }
 
-export const SPACE_CHAT_PRELOAD: ReadonlyArray<string> = [
-  ...(TOOL_GROUPS["space"] ?? []),
-  ...(TOOL_GROUPS["tasks"] ?? []),
-  ...(TOOL_GROUPS["task_inference"] ?? [])
+export const SPACE_CHAT_PRELOAD: ChatPreload = {
+  tools: [],
+  groups: ["space", "tasks", "task_inference"]
+}
+
+const groupOf = (tool: ServerTool): string | undefined => {
+  const discovery = discoveryOf(tool.definition)
+  return discovery === undefined || discovery === "always_loaded" ? undefined : discovery.group
+}
+
+/** A preload's tool names: its named tools, then its groups' tools in group order. */
+export const preloadToolNames = (
+  tools: ReadonlyArray<ServerTool>,
+  preload: ChatPreload
+): ReadonlyArray<string> => [
+  ...preload.tools,
+  ...preload.groups.flatMap((group) =>
+    tools.filter((tool) => groupOf(tool) === group).map((tool) => tool.definition.name)
+  )
 ]
 
 const inputs = (
@@ -418,19 +234,22 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   drive_create_sheet: inputs(["account_ref", "google_accounts_list"])
 }
 
-/** Names in the lists above that are not built-in tools or parameters; checked at startup. */
+/** Names in the lists above that are not built-in tools, groups or parameters; checked at startup. */
 export const catalogNameProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
   const params = new Map(
     tools.map((tool) => [tool.definition.name, topLevelParameters(tool)] as const)
   )
   const unknown = (where: string) => (name: string) =>
     params.has(name) ? [] : [`${where} names ${name}, which is not a built-in tool`]
+  const groups = new Set(tools.map(groupOf))
+  const unknownGroup = (where: string) => (group: string) =>
+    groups.has(group) ? [] : [`${where} names group ${group}, which no built-in tool has`]
   return [
-    ...[...ALWAYS_LOADED].flatMap(unknown("ALWAYS_LOADED")),
-    ...Object.entries(TOOL_GROUPS).flatMap(([group, names]) =>
-      names.flatMap(unknown(`TOOL_GROUPS.${group}`))
-    ),
-    ...Object.values(SPECIAL_CHAT_PRELOAD).flat().flatMap(unknown("SPECIAL_CHAT_PRELOAD")),
+    ...Object.entries(SPECIAL_CHAT_PRELOAD).flatMap(([kind, preload]) => [
+      ...preload.tools.flatMap(unknown(`SPECIAL_CHAT_PRELOAD.${kind}`)),
+      ...preload.groups.flatMap(unknownGroup(`SPECIAL_CHAT_PRELOAD.${kind}`))
+    ]),
+    ...SPACE_CHAT_PRELOAD.groups.flatMap(unknownGroup("SPACE_CHAT_PRELOAD")),
     ...Object.entries(INPUT_SOURCES).flatMap(([name, sources]) => [
       ...unknown("INPUT_SOURCES")(name),
       ...sources.flatMap((source) => [
@@ -454,7 +273,7 @@ export const treeToolNames = (
 ): ReadonlySet<string> =>
   new Set([
     ...scopedRunToolNames(tools, scopes, "all", [], { kind: "tree" }),
-    ...tools.map((tool) => tool.definition.name).filter((name) => GROUP_OF.has(name))
+    ...tools.filter((tool) => groupOf(tool) !== undefined).map((tool) => tool.definition.name)
   ])
 
 export const ownedToolNames = (
@@ -465,7 +284,7 @@ export const ownedToolNames = (
     .filter(
       (tool) =>
         tool.meta.invocation_only !== true &&
-        !ALWAYS_LOADED.has(tool.definition.name) &&
+        discoveryOf(tool.definition) !== "always_loaded" &&
         ownedByScopes(tool.meta, scopes)
     )
     .map((tool) => tool.definition.name)
@@ -501,31 +320,27 @@ const reachClause = (actor: RunAuthority["actor"]): string => {
 const BROAD_SCOPES: ReadonlySet<ToolScopeKey> = new Set(["all", "space"])
 const OUTCOME_RUN_SCOPES: ReadonlySet<ToolScopeKey> = new Set(["worker", "observer"])
 
-const GROUP_OF: ReadonlyMap<string, string> = new Map(
-  Object.entries(TOOL_GROUPS).flatMap(([group, names]) => names.map((name) => [name, group]))
-)
-
 export const applyToolCatalog = (
   entries: ReadonlyArray<ToolEntry>,
   context: {
     readonly scopes: ReadonlyArray<ToolScopeKey>
-    readonly metadata: ReadonlyMap<string, ServerToolMetadata>
+    readonly tools: ReadonlyMap<string, ServerTool>
   }
 ): ReadonlyArray<ToolEntry> => {
   const visible = entries.filter(
-    (entry) => context.metadata.get(entry.meta.name)?.invocation_only !== true
+    (entry) => context.tools.get(entry.meta.name)?.meta.invocation_only !== true
   )
   const [primary] = context.scopes
   if (primary === undefined || !BROAD_SCOPES.has(primary)) return visible
   return visible.map((entry) => {
     const name = entry.meta.name
-    const metadata = context.metadata.get(name)
+    const tool = context.tools.get(name)
     const sources = INPUT_SOURCES[name]
-    const group = toolGroup(name, metadata)
+    const group = toolGroup(tool)
     const deferred =
-      !ALWAYS_LOADED.has(name) &&
+      (tool === undefined || discoveryOf(tool.definition) !== "always_loaded") &&
       entry.meta.hosted !== true &&
-      !(metadata !== undefined && ownedByScopes(metadata, context.scopes))
+      !(tool !== undefined && ownedByScopes(tool.meta, context.scopes))
     return {
       ...entry,
       meta: {
@@ -538,10 +353,10 @@ export const applyToolCatalog = (
   })
 }
 
-const toolGroup = (name: string, metadata: ServerToolMetadata | undefined): string | undefined => {
-  const server = parseMcpSource(metadata?.source)?.serverName
+const toolGroup = (tool: ServerTool | undefined): string | undefined => {
+  const server = parseMcpSource(tool?.meta.source)?.serverName
   if (server !== undefined) return `mcp_${server.replace(/[^A-Za-z0-9_-]/g, "_")}`
-  return GROUP_OF.get(name)
+  return tool === undefined ? undefined : groupOf(tool)
 }
 
 const ownedByScopes = (

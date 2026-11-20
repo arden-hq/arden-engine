@@ -12,6 +12,8 @@ const failure = (error: WorkStoreError): ToolExecutionError =>
 const makeWorkOutputTool = ({ work }: { readonly work: WorkStore["Service"] }): ServerTool =>
   defineServerTool({
     name: "task_save_result",
+    summary: "Saves a Task’s report.",
+    discovery: { group: "tasks" },
     description:
       "Save a named Markdown report in the Task's Files so the user can open the complete result. This works without a Local folder or permission to edit Memory. Save the actual deliverable here when no other authorized destination is available. This does not mark the Task done or claim that a requested external write succeeded. Use the returned attachment_id as completion evidence. Repeating the same Task, name and content reuses the saved report.",
     parameters: Schema.toStandardSchemaV1(

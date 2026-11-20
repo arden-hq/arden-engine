@@ -1,9 +1,8 @@
 import { Effect, Predicate } from "effect"
 
-import type { ServerTool } from "./define.js"
+import { summaryOf, type ServerTool } from "./define.js"
 import { catalogNameProblems } from "./tool-catalog.js"
 import { toolParametersJsonSchema } from "./tool-json-schema.js"
-import { TOOL_SUMMARIES } from "./tool-summaries.js"
 
 /**
  * Rules every built-in tool must keep. The registry refuses to start when one
@@ -18,13 +17,9 @@ export const checkToolContract = (tools: ReadonlyArray<ServerTool>): Effect.Effe
 }
 
 const toolContractProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
-  const names = new Set(tools.map((tool) => tool.definition.name))
   return [
     ...tools.flatMap(readLabelProblems),
     ...tools.flatMap(summaryProblems),
-    ...Object.keys(TOOL_SUMMARIES)
-      .filter((name) => !names.has(name))
-      .map((name) => `TOOL_SUMMARIES has ${name}, which is not a built-in tool`),
     ...tools.flatMap(parameterProblems),
     ...tools.flatMap((tool) =>
       objectRootProblems(tool.definition.name, tool.entry(toolParametersJsonSchema).parameters)
@@ -43,10 +38,12 @@ const readLabelProblems = (tool: ServerTool): ReadonlyArray<string> =>
     : []
 
 // The public tool catalog shows this summary; without one it shows nothing.
-const summaryProblems = (tool: ServerTool): ReadonlyArray<string> =>
-  tool.meta.internal_catalog || TOOL_SUMMARIES[tool.definition.name] !== undefined
-    ? []
-    : [`${tool.definition.name} has no entry in TOOL_SUMMARIES`]
+const summaryProblems = (tool: ServerTool): ReadonlyArray<string> => {
+  if (tool.meta.internal_catalog) return []
+  const summary = summaryOf(tool.definition)
+  if (summary === undefined) return [`${tool.definition.name} has no summary`]
+  return summary.trim() === "" ? [`${tool.definition.name} has an empty summary`] : []
+}
 
 // Checks the schema the model receives, not the source. `.annotate` on a field
 // that transforms its input (Trim, a decoding default) or on a checked struct

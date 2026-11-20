@@ -102,6 +102,8 @@ const makeBrowserTools = ({
   return [
     defineServerTool({
       name: "browser_tabs",
+      summary: "Lists the pages open in Arden’s browser.",
+      discovery: { group: "web_browser" },
       description: [
         "List browser tabs in the shared Space or Home browser, including refs, profiles, URLs, and selection state.",
         "Start here when a tab_ref, profile_ref, or current origin is unknown; use browser_snapshot to inspect page content."
@@ -126,6 +128,8 @@ const makeBrowserTools = ({
     }),
     defineServerTool({
       name: "browser_open",
+      summary: "Opens a page in Arden’s browser.",
+      discovery: { group: "web_browser" },
       description: [
         "Open a URL in a new tab or navigate one exact tab in the shared browser.",
         "A local HTML file opens in a tab that stays in the file's folder; a file outside the Local folders asks the user first.",
@@ -172,6 +176,8 @@ const makeBrowserTools = ({
     }),
     defineServerTool({
       name: "browser_close",
+      summary: "Closes a page in Arden’s browser.",
+      discovery: { group: "web_browser" },
       description: [
         "Close one exact browser tab in the shared Space or Home browser.",
         "Closing a tab this run opened needs no approval; any other tab asks the user first.",
@@ -221,6 +227,8 @@ const makeBrowserTools = ({
     }),
     defineServerTool({
       name: "browser_snapshot",
+      summary: "Reads what is on a browser page.",
+      discovery: { group: "web_browser" },
       description: [
         "Read bounded page text or take an interactive snapshot with one-use @eN refs.",
         "Take an interactive snapshot before the first browser_act on a tab; each browser_act returns the next one. Each ends with a Snapshot ref, which the action built from it names. Use text for reading only.",
@@ -261,6 +269,8 @@ const makeBrowserTools = ({
     }),
     defineServerTool({
       name: "browser_screenshot",
+      summary: "Takes a picture of a browser page.",
+      discovery: { group: "web_browser" },
       description: [
         "Capture the visible part of one exact browser tab as PNG visual evidence and save a durable conversation artifact. For more of a long page, scroll with browser_act and capture again.",
         "Returns an image preview, artifact_ref, source URL, and capture time. Use artifact_export to copy it into project files; do not ask the user to save it manually.",
@@ -303,6 +313,8 @@ const makeBrowserTools = ({
     }),
     defineServerTool({
       name: "browser_act",
+      summary: "Clicks, types and scrolls on a browser page.",
+      discovery: { group: "web_browser" },
       description: [
         "Perform exactly one browser action authorized by the latest interactive snapshot of the same tab.",
         "To enter a password, fill with secret (a name from browser_ask_secret), never value. A saved card is typed only by vault_checkout, never with value.",
@@ -424,6 +436,8 @@ const makeBrowserTools = ({
     }),
     defineServerTool({
       name: "browser_wait",
+      summary: "Waits for a browser page to load, change, show something, or finish a download.",
+      discovery: { group: "web_browser" },
       description: [
         "Wait for one bounded condition on an exact browser tab: page load, URL, visible text, element, elapsed time, or a finished download.",
         "Except for download, waiting invalidates any prior action snapshot; set read to get the page in this call instead of a browser_snapshot. A download wait keeps refs and ignores read."

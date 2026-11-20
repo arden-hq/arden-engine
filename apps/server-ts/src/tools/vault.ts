@@ -218,6 +218,9 @@ export const vaultListText = (list: VaultList): { result: string; preview: strin
 const makeVaultListTool = (vault: VaultKeysService): ServerTool =>
   defineServerTool({
     name: "vault_list",
+    summary:
+      "Lists your saved keys, site passwords and cards by name, never their values, and your contact details.",
+    discovery: { group: "vault" },
     description: [
       "List what the user keeps in Arden's Vault: API keys (name, the environment variable a command reads it from, and the addresses it may go to), saved site passwords (site, name and user name), contact details (name, email, phone and address, in full), and payment cards (id, brand, last 4 digits, expiry, name on card and billing address).",
       "Keys and passwords come without values: you cannot read them, and you never need to. Call it before a command that needs a key, then vault_use_key; ask for a missing key with vault_ask_key.",
@@ -250,6 +253,8 @@ const makeVaultUseKeyTool = (
   }
   return defineServerTool({
     name: VAULT_USE_KEY_TOOL,
+    summary: "Asks to use a saved key in commands; only its own addresses get it.",
+    discovery: { group: "vault" },
     description: [
       "Ask to use one of the user's saved API keys in this run's commands. The user allows it once, always in this Space, or denies; a rule may answer without asking.",
       "Once allowed, every later exec_command in this run gets the key's environment variable (vault_list names it) holding a stand-in value, and Arden puts the real key in as the request leaves for the key's own addresses. You never see the key.",
@@ -331,6 +336,8 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
   }
   return defineServerTool({
     name: "vault_ask_key",
+    summary: "Asks you to add a missing key on a card; the agent never sees it.",
+    discovery: { group: "vault" },
     description: [
       "Ask the user to add an API key that is not in the Vault yet, on a secure card in the chat where they paste it.",
       "Never ask for a key, password or token in the chat, and never ask the user to paste one into a message or a file.",

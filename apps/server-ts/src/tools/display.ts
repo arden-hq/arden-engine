@@ -1,5 +1,7 @@
 import type { ToolDisplay } from "@arden-hq/protocol/tools"
 
+import type { ServerTool } from "./define.js"
+
 const RETIRED_TOOL_ALIASES: Readonly<Record<string, string>> = {
   bash: "exec_command"
 }
@@ -22,3 +24,11 @@ export const unlistedToolDisplay = (
     ])
   )
 })
+
+export const toolTitle = (tool: ServerTool, server: string | null): string => {
+  const name = tool.meta.display_name
+  const suffix = server === null ? "" : ` (${server})`
+  return suffix !== "" && name.endsWith(suffix)
+    ? name.slice(0, -suffix.length).replace(/[_-]+/gu, " ").trim()
+    : name
+}

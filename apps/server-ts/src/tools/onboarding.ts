@@ -97,6 +97,8 @@ const makeOnboardingTools = ({
 
   defineServerTool({
     name: "agent_knowledge_scan",
+    summary: "Finds notes other assistants keep on your Mac.",
+    discovery: { group: "onboarding" },
     description: [
       "List what the user taught other coding assistants on this Mac. Instructions: Claude Code (~/.claude/CLAUDE.md, ~/.claude/rules/*.md) and Codex (~/.codex/AGENTS.md, ~/.codex/memories/*.md).",
       "Separately, Claude Code's project memories (~/.claude/projects/*/memory/): per-repo working notes, imported only when the user asks for them.",
@@ -159,6 +161,8 @@ const makeOnboardingTools = ({
 
   defineServerTool({
     name: "agent_knowledge_import",
+    summary: "Copies other assistants’ notes into memory.",
+    discovery: { group: "onboarding" },
     description: [
       "Copy the user's Claude Code and Codex instructions (the files agent_knowledge_scan lists as instructions) into Memory as read-only reference pages under imported/claude-code/ and imported/codex/, in one change.",
       "Set include_project_memories only when the user asked for their per-repo project memories too.",
@@ -208,6 +212,8 @@ const makeOnboardingTools = ({
 
   defineServerTool({
     name: "agent_knowledge_digest",
+    summary: "Reads other assistants’ notes.",
+    discovery: { group: "onboarding" },
     description: [
       "Read what the user taught Claude Code and Codex: the text of their instruction files, then each Claude Code project memory folder's index, each under its file path, within about 12000 characters. Files past that are named, not read.",
       "Use it to learn how the user works and what they are building; cite a fact by its file path. Files that look like they hold secrets are named, never read."
@@ -232,6 +238,8 @@ const makeOnboardingTools = ({
 
   defineServerTool({
     name: "approval_mode_set",
+    summary: "Sets how often Arden asks before acting.",
+    discovery: { group: "onboarding" },
     description: [
       "Set how much this chat, and every new chat, checks with the user before acting, after the user chose it in the Getting started chat.",
       "Only the onboarding chat may call this; everywhere else the user changes it from the shield under the message box."
@@ -294,6 +302,8 @@ const makeOnboardingTools = ({
 
   defineServerTool({
     name: "show_tour",
+    summary: "Shows you around Arden.",
+    discovery: { group: "onboarding" },
     description:
       "Start the app's guided tour, which points at the real sidebar and message box. Use it when the user asks to be shown around. Returns at once; the app runs the tour.",
     parameters: Schema.toStandardSchemaV1(TourParametersSchema),
@@ -319,6 +329,8 @@ const makeOnboardingTools = ({
 
   defineServerTool({
     name: "google_client_import",
+    summary: "Sets up your Google sign-in.",
+    discovery: { group: "onboarding" },
     description: [
       "Import the user's own Google OAuth client (a Desktop app client JSON downloaded from Google Cloud) so Arden can connect Gmail, Calendar and Drive.",
       "Reads the newest client_secret_*.json in ~/Downloads unless a path is given; the file must be a Desktop app client of 64 KB or less.",

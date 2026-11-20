@@ -155,6 +155,8 @@ const proposalCard = (contract: TaskContract, change: ContractChange): RunQuesti
 const makeTaskContractTools = (services: TaskToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "task_contract_propose",
+    summary: "Proposes a rule, a done-when criterion or a decision for a Task.",
+    discovery: { group: "task_contract" },
     description:
       "Propose a change to a Task's contract from the owner's words in this turn: a standing rule, a done-when criterion, or a decision with the options it rejected; or the removal of a saved line. The owner sees a card with the line word for word, and with the saved line it contradicts when you name one in replaces; only their Save keeps it, as written: use the owner's exact words, and when they answer with other words, propose again with those. Propose when the owner states an order meant to hold for the Task, a measure of done, or a choice between options; not for one-off requests. You cannot change or remove a saved line yourself. Only the owner's own turn proposes: in a background run, ask the owner with ask_user, or wait on them with task_wait (waiting_on you), and the change is proposed in their turn. A rule about what Arden may do without asking is a permission: offer it with ask_user and permission, not here.",
     parameters: Schema.toStandardSchemaV1(ProposeParametersSchema),
@@ -223,6 +225,8 @@ const makeTaskContractTools = (services: TaskToolServices): ReadonlyArray<Server
   }),
   defineServerTool({
     name: "task_criterion_met",
+    summary: "Records the evidence that a Task's criterion is met.",
+    discovery: { group: "task_contract" },
     description:
       "Record that one done-when criterion of a Task's contract is met, citing evidence the server resolves from its own records: a tool call of this Task's runs that succeeded (a command only with exit code 0), a file that exists, a result saved in the Task, or a link a run fetched with web_fetch. Anything it cannot resolve is refused with the reason; uncertain evidence means the criterion is not met. task_finish refuses done while a criterion has no recorded evidence.",
     parameters: Schema.toStandardSchemaV1(MeetParametersSchema),

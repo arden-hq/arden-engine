@@ -194,6 +194,8 @@ export const gmailAttachmentTool = ({
 }): ServerTool =>
   defineServerTool({
     name: "email_attachment_save",
+    summary: "Saves an email attachment as a chat file, and to your Local folder when one is set.",
+    discovery: { group: "email" },
     description: [
       `Save one Gmail attachment as a reusable chat file and return its artifact_ref. When a Local folder is available, also save it under ${SAVE_DIRECTORY}/ and return the path.`,
       "Name the attachment by its file name or by its number in the order email_read lists them (1 is the first).",

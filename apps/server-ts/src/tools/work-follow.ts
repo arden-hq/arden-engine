@@ -11,6 +11,8 @@ const failure = (error: WorkStoreError): ToolExecutionError => toolFailure(error
 const makeTaskMoveHereTool = ({ work }: { readonly work: WorkStore["Service"] }): ServerTool =>
   defineServerTool({
     name: "task_move_here",
+    summary: "Moves a Task to this chat.",
+    discovery: { group: "tasks" },
     description:
       "Move an existing Task to the current chat when the user asks for its updates, questions or results here instead of where it is. The Task then belongs to this chat: everything it asks or reports comes here, and it works here when it runs in a chat. It keeps its Space and keeps working as before. Mentioning or linking a Task is not a request to move it.",
     parameters: Schema.toStandardSchemaV1(

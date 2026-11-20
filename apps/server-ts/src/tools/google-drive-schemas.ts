@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 
 import { optionalAccountRefDescription, requiredAccountRefDescription } from "./google-accounts.js"
+import { decodeGoogle } from "./google-request.js"
 
 export const MAX_DOCUMENT_CHARS = 200_000
 
@@ -139,3 +140,21 @@ export const SheetWriteParametersSchema = Schema.Struct({
       })
     )
 })
+
+/** What the Sheets API answers to a range read. */
+export const sheetRange = decodeGoogle(
+  Schema.Struct({
+    range: Schema.optionalKey(Schema.String),
+    values: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Unknown)))
+  }),
+  { service: "google_drive", label: "sheet range" }
+)
+
+/** What the Sheets API answers to a sheet write. */
+export const sheetUpdate = decodeGoogle(
+  Schema.Struct({
+    updatedRange: Schema.optionalKey(Schema.String),
+    updates: Schema.optionalKey(Schema.Struct({ updatedRange: Schema.optionalKey(Schema.String) }))
+  }),
+  { service: "google_drive", label: "sheet update" }
+)

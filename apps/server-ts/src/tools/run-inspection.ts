@@ -15,6 +15,8 @@ export const runInspectTool = (services: {
 }): ServerTool =>
   defineServerTool({
     name: "run_inspect",
+    summary: "Reads current progress and recorded run evidence.",
+    discovery: { group: "automations" },
     description:
       "Inspect current work by exact session_ref, or one stable Run by run_id. Choose exactly one. Returns observed progress, active approvals and pending input, the decided ending and a bounded worker report. A completed run or no_change report does not prove the assignment or external actions succeeded. Use the returned session_read actions reference for deeper evidence; missing receipts or removed traces limit diagnosis. Child inspection never acknowledges completion delivery.",
     parameters: Schema.toStandardSchemaV1(

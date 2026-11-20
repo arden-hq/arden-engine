@@ -348,6 +348,8 @@ const spaceListEntry = (space: ReturnType<typeof publicSpace>, limit: number | u
 const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "space_list",
+    summary: "Looks at your Spaces.",
+    discovery: { group: "space" },
     description: `List active Spaces with their exact ids, names, attached Wiki pages and current instructions. Instructions longer than ${MAX_LISTED_INSTRUCTIONS_CHARS} characters are cut off; pass space_id to read one Space's instructions in full.`,
     parameters: Schema.toStandardSchemaV1(SpaceListParametersSchema),
     metadata: {
@@ -387,6 +389,8 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
   }),
   defineServerTool({
     name: "space_page_read",
+    summary: "Reads a Space’s page.",
+    discovery: { group: "space" },
     description:
       "Read the attached Wiki page of a selected or current Space. If the body is cut off, continue with a larger offset.",
     parameters: Schema.toStandardSchemaV1(SpacePageReadParametersSchema),
@@ -427,6 +431,8 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
   }),
   defineServerTool({
     name: "space_page_patch",
+    summary: "Changes part of a Space’s page.",
+    discovery: { group: "space" },
     description:
       "Replace one exact block in a selected Space's attached Wiki page. Read the page first. Asks by default.",
     parameters: Schema.toStandardSchemaV1(SpacePagePatchParametersSchema),
@@ -479,6 +485,8 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
   }),
   defineServerTool({
     name: "space_page_write",
+    summary: "Rewrites a Space’s page.",
+    discovery: { group: "space" },
     description:
       "Replace the complete Markdown body of a selected Space's attached Wiki page. Read the page first. Asks by default.",
     parameters: Schema.toStandardSchemaV1(SpacePageWriteParametersSchema),
@@ -521,6 +529,8 @@ const makeSpaceTools = (services: SpaceToolServices): ReadonlyArray<ServerTool> 
   }),
   defineServerTool({
     name: "space_board_read",
+    summary: "Reads a Space’s Tasks.",
+    discovery: { group: "space" },
     description:
       "Read a Space's board: every open and deferred Task, up to five recently done or cancelled Tasks, and up to three comments per Task. Use item_id for Task links or app_open, and stable_key plus updated_at with the task_* tools. With task_key, also returns that Task's internal working context.",
     parameters: Schema.toStandardSchemaV1(

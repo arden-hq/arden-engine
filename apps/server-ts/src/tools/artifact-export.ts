@@ -96,6 +96,8 @@ const makeArtifactExportTool = (
 
   return defineServerTool({
     name: "artifact_export",
+    summary: "Copies a file Arden saved into a file on your Mac.",
+    discovery: { group: "output" },
     description: [
       "Copy a saved task artifact into a local file. This is how you read an artifact: export it, then use file_read.",
       "Takes an artifact_ref from artifact_save, browser_screenshot, exec_command or chat_files_list; never transcribe artifact bytes into a message.",

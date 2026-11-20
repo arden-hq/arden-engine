@@ -63,6 +63,8 @@ export const computerTools = Effect.gen(function* () {
     ...computerNativeTools(driver, control),
     defineServerTool({
       name: COMPUTER_TOOL,
+      summary: "Runs a short script that controls apps on your Mac.",
+      discovery: { group: "computer_control" },
       description:
         "Run a computer-use JavaScript cell in an isolated persistent session for this chat; the computer-use Skill has the cua API. state holds values and handles between calls; locals do not persist. Every child operation is authorized and recorded separately. Await every call and return compact JSON; screenshots are forwarded automatically. No filesystem, process, network or imports. Settled script errors preserve state. Cancellation, unfinished calls, 15 minutes of inactivity or restart discard the heap; reacquire and observe. At most 16 chats can hold a session at once. Never replay uncertain inputs.",
       parameters: Schema.toStandardSchemaV1(CellSchema),
@@ -154,6 +156,8 @@ export const computerTools = Effect.gen(function* () {
     }),
     defineServerTool({
       name: "computer_reset",
+      summary: "Stops controlling your Mac.",
+      discovery: { group: "computer_control" },
       description:
         "Stop native control, invalidate all native observations, and discard this chat's persistent computer script state. Use for takeover or recovery. Other native calls are cancelled; browser control remains governed by its own Take control button.",
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),

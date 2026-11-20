@@ -56,6 +56,7 @@ const makeSetChatSummaryTool = (services: {
 }): ServerTool =>
   defineServerTool({
     name: "set_chat_summary",
+    discovery: { group: "chat_summary" },
     description:
       "Save the summary of the chat this run was forked from: a short title, one or two sentences, and its topics, or say it holds nothing worth recalling. Used only by the Chat summaries Automation.",
     parameters: Schema.toStandardSchemaV1(ParametersSchema),

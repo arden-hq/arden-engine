@@ -74,6 +74,8 @@ export const makeDriveFileTools = ({
       })
     },
     name: "drive_share_file",
+    summary: "Grants someone access to a Drive file.",
+    discovery: { group: "drive_files" },
     description:
       "Explicitly grant one person read or edit access to a Drive file. Use separately from attaching the file to Calendar; attaching a link does not grant access. Existing equal or stronger access is left unchanged. Google emails a sharing notification only when the person had no access before; raising reader to writer sends none. Requires the user's approval.",
     parameters: Schema.toStandardSchemaV1(ShareParametersSchema),

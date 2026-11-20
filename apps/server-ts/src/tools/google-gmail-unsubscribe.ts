@@ -222,6 +222,8 @@ export const gmailUnsubscribeTool = ({
   }
   return defineServerTool({
     name: "email_unsubscribe",
+    summary: "Unsubscribes you from a sender.",
+    discovery: { group: "email_organize" },
     description: [
       "Unsubscribe from a mailing list using the message's own List-Unsubscribe header: a one-click HTTPS request, or an email to the sender's mailto address.",
       "If the message offers neither, nothing is done and Arden never opens a web page."

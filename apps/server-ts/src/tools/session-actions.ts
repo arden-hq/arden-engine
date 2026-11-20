@@ -410,6 +410,8 @@ const hasConnectionChoiceInRun = async (
 const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "session_send_message",
+    summary: "Sends a message to another chat.",
+    discovery: { group: "sessions" },
     description: [
       "Deliver one self-contained message to another active Session by exact session_ref.",
       "It reads there as your handoff from this chat, under a link to this chat; name chats by their titles, never by session_ref.",
@@ -482,6 +484,8 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
   }),
   defineServerTool({
     name: "forward_message",
+    summary: "Forwards what you handed over into the chat it belongs to.",
+    discovery: { group: "sessions" },
     description: [
       "Forward this chat's first message, unchanged, into the chat it belongs to, by exact session_ref",
       "from session_list: a capture the user handed over (screenshot and note) arrives there as the",
@@ -587,6 +591,8 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
   }),
   defineServerTool({
     name: "session_rename",
+    summary: "Renames a chat.",
+    discovery: { group: "sessions" },
     description: "Rename one active Session by exact session_ref. The sidebar updates durably.",
     parameters: Schema.toStandardSchemaV1(RenameParametersSchema),
     metadata: {
@@ -639,6 +645,8 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
   }),
   defineServerTool({
     name: "session_archive",
+    summary: "Archives chats.",
+    discovery: { group: "sessions" },
     description: [
       "Archive active Sessions by exact session_ref. Inside a Space, only that Space's chats can be archived; others are reported as not found.",
       "The current Session is archived once this turn and its agents finish, unless the user writes to it first. Skipped and reported: a Session with a live run, and this chat when archiving it would delete its Automations. Every requested ref is reported; restore from Settings → Archive."
@@ -732,6 +740,8 @@ const makeSessionActionTools = (services: SessionActionToolServices): ReadonlyAr
   }),
   defineServerTool({
     name: "app_open",
+    summary: "Opens a place in Arden for you.",
+    discovery: { group: "arden_settings" },
     description: [
       "Offer or open a current Arden destination: Home, Session, Settings, Automation, Task, Memory, or Space.",
       "mode offer (default) shows a card the user may open; mode open moves the user now and is only for when they asked to be taken there.",

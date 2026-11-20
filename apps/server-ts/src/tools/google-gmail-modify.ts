@@ -495,6 +495,8 @@ export const gmailModifyTools = ({
   return [
     defineServerTool({
       name: "email_label_list",
+      summary: "Lists your Gmail labels.",
+      discovery: { group: "email_organize" },
       description: [
         "List the Gmail labels of one account: name, id and type (system or user).",
         "Use the names or ids with email_update add_labels and remove_labels."
@@ -544,6 +546,8 @@ export const gmailModifyTools = ({
       google,
       grant: { ...MODIFY_GRANT, target: (input) => ({ accountRef: input.account_ref }) },
       name: "email_update",
+      summary: "Archives, marks, stars or labels email conversations.",
+      discovery: { group: "email_organize" },
       description: [
         "Change the mailbox state of Gmail conversations in one batch: archive, mark read or unread, star, mark important, add or remove existing labels.",
         `Pass up to ${MAX_THREADS} thread_refs and every change at once. The result carries a restore array; to undo exactly, call email_update again with account_ref and that restore alone, which gives every message its own earlier labels back.`,
@@ -650,6 +654,8 @@ export const gmailModifyTools = ({
       google,
       grant: { ...MODIFY_GRANT, target: (input) => ({ accountRef: input.account_ref }) },
       name: "email_trash",
+      summary: "Moves email conversations to Gmail Trash.",
+      discovery: { group: "email_organize" },
       description: [
         "Move Gmail conversations to Trash, where Gmail keeps them 30 days before deleting them.",
         `Pass up to ${MAX_THREADS} thread_refs. There is no permanent delete. Prefer email_update archive for mail the user may want again.`

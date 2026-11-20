@@ -149,6 +149,8 @@ const makeBrowserAskSecretTool = (
 
   return defineServerTool({
     name: "browser_ask_secret",
+    summary: "Asks you for a site password on a card; only that site gets it.",
+    discovery: { group: "web_browser_sign_in" },
     description: [
       "Ask the user for a password for the site open in a browser tab, on a secure card, when a sign-in form needs one.",
       "Never ask for a password in the chat. The user types it into the card; Arden saves it for that one site and you get only its name.",

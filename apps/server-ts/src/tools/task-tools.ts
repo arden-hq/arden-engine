@@ -557,6 +557,8 @@ export const taskWriteMetadata = (displayName: string, preview: string) =>
 const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "task_get",
+    summary: "Reads a Task.",
+    discovery: { group: "tasks" },
     description:
       "Read one Task: the Task this chat works on, one by key, or (in the user's own chats and their Automations) one by the item_id a Task event names. It returns what the Task asks, where it stands, and the key and updated_at the change tools take.",
     parameters: Schema.toStandardSchemaV1(TaskGetParametersSchema),
@@ -623,6 +625,8 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "task_start",
+    summary: "Starts a Task.",
+    discovery: { group: "tasks" },
     description: `Start one Task: on this chat's Space, in this chat when it is in no Space, or on a named Space. A key that names a live Task is refused (change that Task instead); a key that names an archived Task revives it. Only the user's own chats and their Automations start Tasks. ${TASK_SPACE_RULE}`,
     parameters: Schema.toStandardSchemaV1(StartParametersSchema),
     metadata: {
@@ -673,6 +677,8 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "task_update",
+    summary: "Changes a Task.",
+    discovery: { group: "tasks" },
     description:
       "Change one Task: its text, details, owner, where it runs, whether it is open or put aside, its due text, its token_budget, or its internal continuation_context. Change token_budget alone in its own call; raising or removing it asks the user. To wait on someone or book a later check use task_wait; to finish or cancel it use task_finish. A Task run may change only its own Task's details and continuation_context.",
     parameters: Schema.toStandardSchemaV1(UpdateParametersSchema),
@@ -703,6 +709,8 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "task_wait",
+    summary: "Makes a Task wait for someone or for later.",
+    discovery: { group: "tasks" },
     description:
       "Make one Task wait: on the user or something external until the one thing in block_reason happens, or until next_attempt_at. A Task run waiting on the user reuses its open question, or asks block_reason if none is open; their answer resumes the Task. Use ask_user when the user must decide; do not wait on recoverable failures or pending work.",
     parameters: Schema.toStandardSchemaV1(WaitParametersSchema),
@@ -728,6 +736,8 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "task_finish",
+    summary: "Finishes or cancels a Task.",
+    discovery: { group: "tasks" },
     description:
       "Finish one Task: done when its outcome is reached, with completion_result and completion_evidence (and completion_note if a write failed); cancelled when it duplicates another Task or no distinct outcome remains. If your todo list still has open items, the first done call changes nothing and lists them; a second done call in this run closes the Task anyway. A message alone never finishes a Task. Cancel it directly rather than asking the user to operate the Task menu.",
     parameters: Schema.toStandardSchemaV1(FinishParametersSchema),
@@ -755,6 +765,8 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "task_comment",
+    summary: "Adds a note to a Task.",
+    discovery: { group: "tasks" },
     description:
       "Add a note to one Task's history. A note is never the Task's result: a Task run's outcome is its final response, or completion_result when it finishes the Task. Comments never answer questions or wake work; use ask_user for a question.",
     parameters: Schema.toStandardSchemaV1(CommentParametersSchema),

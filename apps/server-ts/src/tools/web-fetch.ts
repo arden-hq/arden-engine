@@ -412,6 +412,8 @@ const formatContent = (
 const makeWebFetchTool = (): ServerTool =>
   defineServerTool({
     name: "web_fetch",
+    summary: "Reads a web page.",
+    discovery: "always_loaded",
     description: [
       "Fetch one public HTTP(S) page as readable markdown, text, or HTML.",
       "Redirects are followed only after validating every destination.",

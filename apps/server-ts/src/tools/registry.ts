@@ -1,7 +1,7 @@
 import { scopedRunToolNames, scopedToolNames } from "./tool-scopes.js"
 import { makeReviewPlans } from "./review-plans.js"
 import type { ToolScopeKey } from "../execution/policy.js"
-import type { ServerTool, ServerToolMetadata } from "./define.js"
+import { summaryOf, type ServerTool, type ServerToolMetadata } from "./define.js"
 import { makeToolApprovalPolicy, reachOf, toolRule } from "./approval-policy.js"
 import { ApprovalPolicyStore } from "../persistence/permissions/approval-policy.js"
 import { internalStateTools } from "./internal-state.js"
@@ -20,15 +20,21 @@ import {
   wordsRuleText,
   type RuleSubject
 } from "../persistence/permissions/rules.js"
-import { TOOL_SUMMARIES } from "./tool-summaries.js"
 import { checkToolContract } from "./tool-contract.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { capabilityTools } from "./capability.js"
 import { macTools } from "./mac-tools.js"
 import { codeModeTools } from "./code-mode.js"
-import { unlistedToolDisplay } from "./display.js"
-import { applyToolCatalog, ownedToolNames, refusalText, treeToolNames } from "./tool-catalog.js"
+import { toolTitle, unlistedToolDisplay } from "./display.js"
+import {
+  applyToolCatalog,
+  ownedToolNames,
+  preloadToolNames,
+  refusalText,
+  treeToolNames,
+  type ChatPreload
+} from "./tool-catalog.js"
 import { ModelProviderService } from "../models/provider.js"
 import { meteredModelCall } from "../models/call-usage.js"
 import { UsageStore } from "../persistence/usage/store.js"
@@ -217,14 +223,6 @@ export interface RuleNames {
   readonly connector: (server: string) => string | undefined
 }
 
-const toolTitle = (tool: ServerTool, server: string | null): string => {
-  const name = tool.meta.display_name
-  const suffix = server === null ? "" : ` (${server})`
-  return suffix !== "" && name.endsWith(suffix)
-    ? name.slice(0, -suffix.length).replace(/[_-]+/gu, " ").trim()
-    : name
-}
-
 export interface ScopedToolsetOptions {
   readonly intersectScopes?: ReadonlyArray<ToolScopeKey>
   readonly omitSkills?: ReadonlyArray<string>
@@ -311,6 +309,7 @@ export class ServerToolRegistry extends Context.Service<
     ) => Effect.Effect<Toolset>
     readonly workflowHost: (scope: ToolScopeKey, run: ServerToolRun) => ScriptHost
     readonly ownedTools: (scopes: ReadonlyArray<ToolScopeKey>) => ReadonlyArray<string>
+    readonly preloadTools: (preload: ChatPreload) => ReadonlyArray<string>
     readonly applyApprovalEdits: ApprovalEditsInput["apply"]
     readonly offersApprovalDraft: ApprovalAlternativeInput["offeredBy"]
   }
@@ -442,7 +441,7 @@ export class ServerToolRegistry extends Context.Service<
               tool,
               external.has(tool.definition.name)
                 ? tool.definition.description
-                : (TOOL_SUMMARIES[tool.definition.name] ?? "")
+                : (summaryOf(tool.definition) ?? "")
             )
           ),
           unlisted: unlistedToolDisplay(
@@ -740,10 +739,7 @@ export class ServerToolRegistry extends Context.Service<
         const guarded = withMiddleware(bound, [
           skillGuard(options.omitSkills === undefined ? {} : { omit: new Set(options.omitSkills) })
         ])
-        const catalogContext = {
-          scopes: options.declareTree === true ? (["all"] as const) : runScopeKeys,
-          metadata: new Map(current.map((tool) => [tool.definition.name, tool.meta]))
-        }
+        const catalogScopes = options.declareTree === true ? (["all"] as const) : runScopeKeys
         const declared =
           options.declareTree === true
             ? async () => {
@@ -762,7 +758,8 @@ export class ServerToolRegistry extends Context.Service<
         return {
           toolset: {
             ...guarded,
-            entries: async () => applyToolCatalog(await declared(), catalogContext)
+            entries: async () =>
+              applyToolCatalog(await declared(), { scopes: catalogScopes, tools: byName })
           },
           workflowHost: scriptHost
         }
@@ -803,6 +800,7 @@ export class ServerToolRegistry extends Context.Service<
           }),
           workflowHost: (scope, run) => bindTools(scope, {}, run, observedState()).workflowHost,
           ownedTools: (scopes) => ownedToolNames(builtins, scopes),
+          preloadTools: (preload) => preloadToolNames(builtins, preload),
           applyApprovalEdits: ({ toolName, requested, patch }) => {
             const editor = cardTool(toolName)?.approvalEditor
             return editor === undefined

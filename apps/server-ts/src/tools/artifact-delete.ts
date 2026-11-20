@@ -174,6 +174,8 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
 
   return defineServerTool({
     name: "artifact_delete",
+    summary: "Deletes a file Arden saved in a chat.",
+    discovery: { group: "output" },
     description: [
       "Delete files Arden saved in this chat: artifacts (artifact_save, screenshots, command output) and saved full outputs.",
       "Use it when such a file should not be kept; exec_command cannot remove Arden's own storage.",

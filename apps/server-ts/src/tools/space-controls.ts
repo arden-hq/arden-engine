@@ -83,6 +83,8 @@ const readCurrent = async (
 const makeSpaceControlTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "space_settings_update",
+    summary: "Changes a Space’s settings.",
+    discovery: { group: "space" },
     description:
       "Rename a Space or replace its instructions, when the user asks, from their own chat. Read the current instructions with space_list first (pass space_id when they are cut off) and pass its exact updated_at. Returns the saved Space. Folders Arden may use or change are rules: offer one with ask_user permission. Workers cannot change these settings.",
     parameters: Schema.toStandardSchemaV1(
@@ -149,6 +151,8 @@ const makeSpaceSetupTools = (
 ): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "space_create",
+    summary: "Creates a new Space.",
+    discovery: { group: "space" },
     description:
       "Create a Space explicitly requested by the user. Check space_list first to avoid duplicates. Folders Arden may use or change are rules: offer one with ask_user permission when the user asks. Do not ask for folders first: a file write elsewhere offers to keep its folder as a rule on its card. Ordinary Chat only.",
     parameters: Schema.toStandardSchemaV1(

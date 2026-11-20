@@ -155,6 +155,8 @@ const makeExecCommandTool = (
     shellRuntime({ commandSandbox: await resolveCommandSandbox(), ...options })
   const tool: ServerTool = defineServerTool({
     name: COMMAND_TOOL,
+    summary: "Runs a command in a terminal on your Mac.",
+    discovery: "always_loaded",
     description: [
       "Run one Bash command in a fresh local process.",
       "If it finishes within yield_time_ms you get its output; a non-zero exit fails the call with the output and the exit code. If it is still running (a dev server, a watcher, a long build, a prompt), you get the output so far and a session ID; the process keeps running and you can read it, type into it, or stop it with write_stdin.",
@@ -398,6 +400,8 @@ const makeWriteStdinTool = (services: ShellToolServices): ServerTool => {
   }
   return defineServerTool({
     name: "write_stdin",
+    summary: "Types into a command that is already running.",
+    discovery: "always_loaded",
     description: [
       "Type into, read, or stop a command that exec_command left running, by its session ID.",
       "Returns the output since your last read and whether the process is still running.",

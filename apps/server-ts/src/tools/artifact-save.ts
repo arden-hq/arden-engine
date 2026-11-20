@@ -72,6 +72,8 @@ const makeArtifactSaveTool = (
 ): ServerTool =>
   defineServerTool({
     name: "artifact_save",
+    summary: "Keeps a file Arden made in this chat's saved files.",
+    discovery: { group: "output" },
     description: [
       "Save a generated file as a durable task artifact and return its path.",
       "Use this for substantial JSON, CSV, reports, and other reusable outputs instead of placing their contents in agent messages.",

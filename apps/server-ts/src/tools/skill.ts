@@ -137,6 +137,8 @@ const failure = (error: SkillError): ToolExecutionError =>
 const makeSkillTool = ({ skills }: { readonly skills: SkillCatalog["Service"] }): ServerTool =>
   defineServerTool({
     name: SKILL_TOOL_NAME,
+    summary: "Loads a Skill’s instructions.",
+    discovery: "always_loaded",
     description: [
       "Load one Skill by its exact name from the Skills list: a built-in Skill before the first call to the tool group it names, or a local Skill when its description matches the request. A tool group without a listed Skill needs none.",
       "Call directly, outside code_mode. Read a linked resource only when relevant; reload if instructions were lost through compaction."
@@ -188,6 +190,8 @@ const makeSkillCreateTool = ({
 }): ServerTool =>
   defineServerTool({
     name: "skill_create",
+    summary: "Creates a Skill.",
+    discovery: { group: "arden_settings" },
     description: [
       "Create one reusable local Skill after the user reviews its full instructions. Built-in Skill names are reserved.",
       "Include only guidance that changes decisions; add supporting files only when useful.",
@@ -264,6 +268,8 @@ const makeSkillCreateTool = ({
 const makeSkillListTool = ({ skills }: { readonly skills: SkillCatalog["Service"] }): ServerTool =>
   defineServerTool({
     name: "skill_list",
+    summary: "Lists your Skills and Recipes.",
+    discovery: { group: "arden_settings" },
     description:
       "List enabled Skills: built-in Skills, local Skills and Recipes (a Recipe has a non-null recipe). Page by offset; optionally filter names and descriptions with literal text. Does not load instructions.",
     parameters: Schema.toStandardSchemaV1(
@@ -323,6 +329,8 @@ const makeSkillUpdateTool = ({
 }): ServerTool =>
   defineServerTool({
     name: "skill_update",
+    summary: "Changes a Skill.",
+    discovery: { group: "arden_settings" },
     description:
       "Replace an existing local SKILL.md or linked Markdown reference after reading that file with skill in this Run; a file changed since that read is refused. Previews the full replacement. Other files and enabled state stay unchanged; built-ins are immutable.",
     parameters: Schema.toStandardSchemaV1(

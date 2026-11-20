@@ -55,6 +55,8 @@ const contactLines = (contact: MacContactRecord): ReadonlyArray<string> => [
 export const makeMacContactsTools = ({ helper }: MacApps): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "mac_contacts_search",
+    summary: "Looks up people in the Contacts app on your Mac.",
+    discovery: { group: "mac_contacts" },
     description:
       "Look up people in this Mac's Contacts app by name, email address or phone number: each one's name, organization, emails and phones, and a contact_ref for mac_contacts_read. Contacts are read-only.",
     parameters: Schema.toStandardSchemaV1(ContactSearchParametersSchema),
@@ -86,6 +88,8 @@ export const makeMacContactsTools = ({ helper }: MacApps): ReadonlyArray<ServerT
   }),
   defineServerTool({
     name: "mac_contacts_read",
+    summary: "Reads one contact in the Contacts app on your Mac.",
+    discovery: { group: "mac_contacts" },
     description:
       "Open one contact of this Mac's Contacts app by its contact_ref: name, nickname, organization, job title, emails, phones, birthday, addresses and links.",
     parameters: Schema.toStandardSchemaV1(ContactReadSchema),

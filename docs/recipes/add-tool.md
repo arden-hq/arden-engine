@@ -17,6 +17,8 @@ const ParametersSchema = Schema.Struct({
 …
   return defineServerTool({
     name: "artifact_delete",
+    summary: "Deletes a file Arden saved in a chat.",
+    discovery: { group: "output" },
     description: ["Delete files Arden saved in this chat: …", …].join(" "),
     parameters: Schema.toStandardSchemaV1(ParametersSchema),
     metadata: {
@@ -40,6 +42,19 @@ const ParametersSchema = Schema.Struct({
 export const artifactDeleteTools = Effect.gen(function* () { … })
 ```
 
+- `summary` is one line for a person: the public tool catalog shows it, and an
+  approval card uses it when the tool has no `approval_preview`. `description` is
+  the model's text. Every tool the catalog lists needs a summary; a tool with
+  `internal_catalog: true` does not.
+- `discovery` says how a chat finds the tool. `{ group: "output" }`: it waits for
+  tool search, which loads it with the rest of its group. Pick an existing group
+  (`grep -rn 'group: "' apps/server-ts/src/tools`); OpenAI advises fewer than 10
+  tools per group. A new group is lowercase with `_`, and never `browser` (OpenAI
+  reserves it) or `mcp_…` (MCP servers' groups). `"always_loaded"`: the model has
+  it from the first turn; keep it for tools nearly every chat needs. A Space chat
+  starts with the `space`, `tasks` and `task_inference` groups loaded, and the
+  onboarding chat with `onboarding` (`SPACE_CHAT_PRELOAD`, `SPECIAL_CHAT_PRELOAD`
+  in `apps/server-ts/src/tools/tool-catalog.ts`).
 - On a field that changes its input (`Schema.Trim`, a decoding default), write
   `.pipe(Schema.annotateEncoded({ description }))`. `.annotate` is lost there.
 - No input: use `EmptyParametersSchema` from
@@ -55,18 +70,14 @@ In `apps/server-ts/src/tools/registry.ts`, import it and add it to `builtinTools
 (`import { artifactDeleteTools } from "./artifact-delete.js"`, then
 `artifactDeleteTools,` after `artifactSaveTools,`).
 
-## 3. Catalog, summary and words
+## 3. Catalog and words
 
-- `apps/server-ts/src/tools/tool-catalog.ts`: add the name to a `TOOL_GROUPS`
-  group (here `output`) so search finds it. Never name a group `browser`; OpenAI
-  reserves it. For each parameter that takes an id or link, add an
-  `INPUT_SOURCES` row: the parameter, then the tools that hand it out.
-- `apps/server-ts/src/tools/tool-summaries.ts`: one line for the public catalog.
+- `apps/server-ts/src/tools/tool-catalog.ts`: for each parameter that takes an id
+  or link, add an `INPUT_SOURCES` row: the parameter, then the tools that hand it out.
 - `libs/protocol/src/views/tool-words.ts`: the verb the app shows, starting with a word from `VERB_FORMS` in that file (typecheck refuses any other).
 
 ```ts
   artifact_delete: inputs(["refs", "artifact_save", "browser_screenshot", "exec_command"]),
-  artifact_delete: "Deletes a file Arden saved in a chat.",
   artifact_delete: { verb: "Deleted an artifact", icon: "dot", many: "Deleted artifacts" },
 ```
 
@@ -101,8 +112,10 @@ It boots the server, which checks every tool. It takes about 12 seconds and must
 show `Tests  1 passed (1)`. On a fault it shows `ServerError: Failed to
 start Arden server`; the lines under `Built-in tools break their contract:` say why:
 
-- `<tool> has no entry in TOOL_SUMMARIES`: step 3.
-- `TOOL_SUMMARIES has <tool>, which is not a built-in tool`: step 2 is missing.
+- `<tool> has no summary` or `<tool> has an empty summary`: add `summary` (step 1).
+- `Tool <tool> has an invalid discovery: …`: use `"always_loaded"` or
+  `{ group: "<name>" }` (step 1).
+- `INPUT_SOURCES names <tool>, which is not a built-in tool`: step 2 is missing.
 - `<tool>.<param> has no description`: use `annotateEncoded` (step 1).
 - `INPUT_SOURCES.<tool> names input <x>, which <tool> does not take`: a wrong
   or removed parameter in that row.
@@ -111,4 +124,5 @@ start Arden server`; the lines under `Built-in tools break their contract:` say 
   does not declare its target`: fix `action` or add `target: "reported"`.
 - `<tool> uses concurrency group <x>`: reuse a name in `CONCURRENCY_GROUPS`.
 
-It does not catch a tool missing from `TOOL_GROUPS` or from the words file; check both.
+It does not catch a tool with no `discovery` (deferred with no group, so search
+finds it only by its words) or one missing from the words file; check both.

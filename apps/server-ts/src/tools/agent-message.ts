@@ -15,6 +15,8 @@ const makeAgentMessageTool = (services: {
 }): ServerTool =>
   defineServerTool({
     name: "agent_message",
+    summary: "Sends a note to another agent that is working for you.",
+    discovery: "always_loaded",
     description:
       "Send a correction, question, or follow-up to your parent, child, or another agent in this conversation's family; interim news for whoever waits on your run goes through tell. Use its exact session_ref or arden:session/ link. A running recipient receives it at a model-step boundary; an idle recipient starts a continuation unless wake is false. A parent woken by a child's message keeps the permissions its task already had. Sending does not interrupt a running tool or widen anyone's permissions. Do not send acknowledgments or repeat automatically delivered final results.",
     parameters: Schema.toStandardSchemaV1(

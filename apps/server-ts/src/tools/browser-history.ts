@@ -222,6 +222,8 @@ export const makeBrowserHistorySummaryTool = ({
 } = {}): ServerTool =>
   defineServerTool({
     name: "browser_history_summary",
+    summary: "Reads a summary of your recent browsing.",
+    discovery: { group: "onboarding" },
     description: [
       "Summarize which websites the user visits most, from the History of every Chromium-family browser on this Mac (Chrome, Arc, Brave, Edge, Chromium, Helium).",
       `Returns up to ${MAX_DOMAINS} domains visited at least ${MIN_VISITS} times on ${MIN_DAYS} or more days in the last ${WINDOW_DAYS} days, with visit counts and up to ${MAX_PATHS} recurring sections each; never page titles or full URLs.`,

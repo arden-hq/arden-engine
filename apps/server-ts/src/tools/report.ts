@@ -61,6 +61,8 @@ interface ReportToolServices {
 const makeReportTool = ({ work, queue, sessions }: ReportToolServices): ServerTool =>
   defineServerTool({
     name: "report",
+    summary: "Reports back what a piece of work found, or that it could not finish.",
+    discovery: { group: "run_outcome" },
     description: [
       "Record a verdict on this Run: news, no_change or blocked. Your final reply is how the user hears what this Run did; a question or approval waiting on the user is its own record and needs no report.",
       RUN_VERDICTS.news,

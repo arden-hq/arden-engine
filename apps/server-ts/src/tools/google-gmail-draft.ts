@@ -368,6 +368,8 @@ export const gmailDraftTool = ({
     google,
     grant: { ...DRAFT_GRANT, target: (input) => ({ accountRef: draftAccountRef(input) }) },
     name: "email_draft",
+    summary: "Saves an email as a Gmail draft, without sending it.",
+    discovery: { group: "email" },
     description: [
       "Save a plain-text email as a draft in the user's Gmail Drafts; it is never sent.",
       "Pass reply_to_message_ref to draft a reply in that thread.",

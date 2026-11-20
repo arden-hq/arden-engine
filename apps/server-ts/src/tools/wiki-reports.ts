@@ -23,6 +23,8 @@ interface Services {
 const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_configure_reports",
+    summary: "Sets up memory reports.",
+    discovery: { group: "wiki_admin" },
     description:
       "Bind an empty Memory directory to one personal Automation for managed reports. Works only in a chat with the user. " +
       "Run during user-requested setup, after automation_create with enabled=false. Enable with automation_update only after configuration succeeds. Reuse its existing destination or choose sources/<workflow>. " +
@@ -112,6 +114,8 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
   }),
   defineServerTool({
     name: "wiki_publish_report",
+    summary: "Publishes a memory report.",
+    discovery: { group: "wiki_admin" },
     description:
       "Publish a report in this Automation's configured Memory destination: the rolling page each run replaces, or a dated page when the directory keeps a history. " +
       "Adds stable identity, revisions, source metadata, search and change events. Identical retries are unchanged; " +

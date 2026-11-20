@@ -12,6 +12,8 @@ const makeModelCatalogTool = ({
 }): ServerTool =>
   defineServerTool({
     name: "model_catalog",
+    summary: "Looks at which models you can use.",
+    discovery: { group: "arden_settings" },
     description:
       "List the model IDs and reasoning efforts currently available to Arden. Call before choosing a model for spawn_agent, a code_mode agent(), or an Automation; use an exact ID from this list. A Chat-attached Automation follows its Chat model.",
     parameters: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Never)),

@@ -33,6 +33,8 @@ const BringBackParametersSchema = Schema.Struct({
 const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "ask_user",
+    summary: "Asks you a question and waits for your answer.",
+    discovery: "always_loaded",
     description:
       'Ask one specific question in everyday language. Questions block by default. Only add timeout with an explicit first-choice fallback for work you already have authority to do; never time out a request for approval or permission. Ask for the concrete action or decision itself — "Reconnect Gmail for tim@example.com?", "Sign in to LinkedIn in the in-app browser, then answer Done" — never describe your own state ("I need some input"). When the answers are choices, the question names them: "Send the draft, or keep editing?", not "Still want this?"; put why you ask in detail. Keep answer labels short and concrete, such as \'Describe the task\' rather than \'Provide the specific objective\'. For a review or action on something outside the card, detail must include the actual material or a direct Markdown link labeled for the action. Reuse an exact destination returned by a tool; never ask the user to find the item or link only to its parent Task when a file link exists. The question stays open after this Run ends, in Chat, Task peek and the Inbox; a Task is optional. Never say where its card sits ("above", "below"). Do not poll or repeat the question. This records a question, never an approval to perform an external action; to offer a lasting permission change, use permission_offer.',
     parameters: Schema.toStandardSchemaV1(AskUserParametersSchema),
@@ -114,6 +116,8 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "permission_offer",
+    summary: "Offers you a lasting permission change to approve.",
+    discovery: "always_loaded",
     description:
       'Offer the person a lasting permission change after they say, in their own message in this turn, what you may or may not do ("you can call GitHub when you want", "you can always upload my CV", "stop asking me about clicks", "all granted"). When their words name what and whether, offer it at once; ask only what they left out with ask_user. Offer in any approval mode: a rule holds for every chat of its Space or everywhere. The card names the change and where it holds, and only their tap saves it, so never say it is saved before they answer. The offer does not wait: carry on with the work, and their answer arrives at your next step. If the offer is refused, say so; never ask a plain question in its place, since a plain answer saves nothing. Read rules with permissions_read before changing or removing one.',
     parameters: Schema.toStandardSchemaV1(PermissionOfferParametersSchema),
@@ -156,6 +160,8 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "permissions_read",
+    summary: "Reads what Arden may do without asking here.",
+    discovery: "always_loaded",
     description:
       "Read this chat's approval mode, the permission rules it follows (its Space's list and Everywhere, with each rule's id), and the tools whose own check still asks for some calls in this mode whatever the rules say. Call it before you tell the user what a mode or rule covers, and before you offer to change or remove a rule. Works only in the user's own chat.",
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -190,6 +196,8 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
   }),
   defineServerTool({
     name: "thread_bring_back",
+    summary: "Brings a thread that moved to another chat back here.",
+    discovery: { group: "sessions" },
     description:
       "Bring a thread that moved to another chat back into this chat, when the user asks to continue it here. thread_id is the id the Threads context names. The other chat stops working on it; continue the thread here afterwards. Never call it on your own initiative.",
     parameters: Schema.toStandardSchemaV1(BringBackParametersSchema),

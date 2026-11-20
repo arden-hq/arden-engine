@@ -51,6 +51,8 @@ const archivableSpace = async (
 const makeSpaceArchiveTool = (services: Services): ServerTool =>
   defineServerTool({
     name: "space_archive",
+    summary: "Archives a Space; you can restore it from Settings.",
+    discovery: { group: "space" },
     description: [
       "Archive a Space the user asked to put away, by exact space_id from space_list.",
       "Archiving hides the Space and its chats and stops its standing work; nothing is deleted, and the user can restore it from Settings → Archive.",

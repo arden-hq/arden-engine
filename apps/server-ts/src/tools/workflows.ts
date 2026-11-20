@@ -155,6 +155,8 @@ const formatScript = (detail: ScriptDetail, result: string | undefined): string 
 const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "workflow_get",
+    summary: "Checks on a multi-step job Arden started.",
+    discovery: { group: "workflows" },
     description: `Read one script that moved to the background: its status, attempt, version, the error that stopped it, each agent's status and session, and its result once it settled. The result is cut to its first ${groupedCount(MAX_RESULT_LENGTH)} characters.`,
     parameters: Schema.toStandardSchemaV1(GetParametersSchema),
     metadata: {
@@ -189,6 +191,8 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
   }),
   defineServerTool({
     name: WORKFLOW_RETRY_TOOL,
+    summary: "Runs a multi-step job again after it stopped.",
+    discovery: { group: "workflows" },
     description: [
       "Run a settled script again from the start, on the chat run it began on.",
       "Only the chat run that started it, or the person, can retry it. Use the version from workflow_get. Agents and calls that succeeded are reused; failed ones that changed nothing run again. A retry is refused while an earlier step may have changed something outside Arden: review that first."
@@ -240,6 +244,8 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
   }),
   defineServerTool({
     name: WORKFLOW_CANCEL_TOOL,
+    summary: "Stops a multi-step job that is still running.",
+    discovery: { group: "workflows" },
     description:
       "Stop a script that is still running, and its agents. Only the chat run that started it, or the person, can cancel it.",
     parameters: Schema.toStandardSchemaV1(CancelParametersSchema),

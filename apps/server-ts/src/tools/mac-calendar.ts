@@ -108,6 +108,8 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
   return [
     defineServerTool({
       name: "mac_calendar_list_calendars",
+      summary: "Lists the calendars in the Calendar app on your Mac.",
+      discovery: { group: "mac_calendar" },
       description:
         "List the calendars in this Mac's Calendar app, for every account the owner added to macOS (iCloud, Exchange, Google and others): each one's id, title, account, whether it can be changed, and which is the default for new events.",
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -142,6 +144,8 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
     }),
     defineServerTool({
       name: "mac_calendar_search",
+      summary: "Searches the Calendar app on your Mac.",
+      discovery: { group: "mac_calendar" },
       description: [
         "Search or list events in this Mac's Calendar app, soonest first, across every account the owner added to macOS.",
         "Covers the next 7 days unless from and to say otherwise, and at most four years at once. A repeating event appears once per occurrence.",
@@ -193,6 +197,8 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
     }),
     defineServerTool({
       name: "mac_calendar_read_event",
+      summary: "Reads one event in the Calendar app on your Mac.",
+      discovery: { group: "mac_calendar" },
       description:
         "Open one event of this Mac's Calendar app by its event_ref: time, calendar, place, notes, link, alerts, organizer and guests with their answers.",
       parameters: Schema.toStandardSchemaV1(EventReadSchema),
@@ -212,6 +218,8 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
     }),
     defineServerTool({
       name: "mac_calendar_create_event",
+      summary: "Adds an event to the Calendar app on your Mac.",
+      discovery: { group: "mac_calendar" },
       description: [
         "Create an event in this Mac's Calendar app, in the default calendar unless calendar_id names another.",
         "A start with a time makes a timed event, 1 hour long unless end says otherwise; a start given as a day, or all_day, makes an all-day event.",
@@ -269,6 +277,8 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
     }),
     defineServerTool({
       name: "mac_calendar_edit_event",
+      summary: "Changes an event in the Calendar app on your Mac.",
+      discovery: { group: "mac_calendar" },
       description: [
         "Change the event mac_calendar_search found: title, start, end, calendar, place, notes or link. Fields left out stay as they are.",
         "A new start alone moves the event and keeps its length; to switch between all-day and timed give both start and end in the new form.",
@@ -324,6 +334,8 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
     }),
     defineServerTool({
       name: "mac_calendar_delete_event",
+      summary: "Removes an event from the Calendar app on your Mac.",
+      discovery: { group: "mac_calendar" },
       description: [
         "Delete the event mac_calendar_search found from this Mac's Calendar app. It cannot be brought back from here.",
         'On a repeating event scope "this" (default) deletes one occurrence and "future" that one and every later one.'

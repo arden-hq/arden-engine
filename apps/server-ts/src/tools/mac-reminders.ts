@@ -87,6 +87,8 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
   return [
     defineServerTool({
       name: "mac_reminders_list_lists",
+      summary: "Lists the lists in the Reminders app on your Mac.",
+      discovery: { group: "mac_reminders" },
       description:
         "List the lists in this Mac's Reminders app: each one's id, title, account, whether it can be changed, and which is the default for new reminders.",
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -121,6 +123,8 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
     }),
     defineServerTool({
       name: "mac_reminders_search",
+      summary: "Searches the Reminders app on your Mac.",
+      discovery: { group: "mac_reminders" },
       description: [
         "Search or list reminders in this Mac's Reminders app: open ones, soonest due first, or finished ones with completed.",
         "Each result has the whole reminder: due date, list, priority, repeat rule, link and notes.",
@@ -163,6 +167,8 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
     }),
     defineServerTool({
       name: "mac_reminders_create",
+      summary: "Adds a reminder to the Reminders app on your Mac.",
+      discovery: { group: "mac_reminders" },
       description:
         "Add a reminder to this Mac's Reminders app, in the default list unless list_id names another. A due time alerts the owner then; repeat needs due.",
       parameters: Schema.toStandardSchemaV1(ReminderCreateSchema),
@@ -213,6 +219,8 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
     }),
     defineServerTool({
       name: "mac_reminders_edit",
+      summary: "Changes a reminder in the Reminders app on your Mac.",
+      discovery: { group: "mac_reminders" },
       description:
         "Change the reminder mac_reminders_search found: title, due, list, notes, priority or link. Fields left out stay as they are; an empty due, notes or url removes it. It cannot change the repeat rule.",
       parameters: Schema.toStandardSchemaV1(ReminderEditSchema),
@@ -258,6 +266,8 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
     }),
     defineServerTool({
       name: "mac_reminders_complete",
+      summary: "Marks a reminder done, or not done again.",
+      discovery: { group: "mac_reminders" },
       description:
         "Mark the reminder mac_reminders_search found as done, or with reopen as not done again. Finishing a repeating reminder finishes that occurrence and moves the reminder to its next due date.",
       parameters: Schema.toStandardSchemaV1(ReminderCompleteSchema),
@@ -299,6 +309,8 @@ export const makeMacRemindersTools = (apps: MacApps): ReadonlyArray<ServerTool> 
     }),
     defineServerTool({
       name: "mac_reminders_delete",
+      summary: "Removes a reminder from the Reminders app on your Mac.",
+      discovery: { group: "mac_reminders" },
       description:
         "Delete the reminder mac_reminders_search found from this Mac's Reminders app. It cannot be brought back from here; to finish one use mac_reminders_complete.",
       parameters: Schema.toStandardSchemaV1(ReminderDeleteSchema),

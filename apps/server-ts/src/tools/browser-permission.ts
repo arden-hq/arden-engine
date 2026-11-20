@@ -80,6 +80,8 @@ const DENIAL: Record<Extract<SitePermissionDecision, { kind: "deny" }>["reason"]
 const makeBrowserPermissionTool = (browser: BrowserClient["Service"]): ServerTool =>
   defineServerTool({
     name: "browser_permission",
+    summary: "Lets a browser page use your location, if you allow it.",
+    discovery: { group: "web_browser" },
     description: [
       "Ask the user to let a page in an Arden browser tab use the location.",
       "Call it only when a browser tool result reports a Permission request and the task needs it; pass its tab, request, origin and permissions exactly.",

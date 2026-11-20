@@ -171,6 +171,8 @@ const approvalRevision = (
 export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "file_write",
+    summary: "Creates or replaces a file.",
+    discovery: "always_loaded",
     description: [
       "Create or fully replace one UTF-8 file atomically. It may need the user's approval.",
       "The reviewed revision must still match when approval resumes; read and retry after a conflict.",
@@ -288,6 +290,8 @@ export const fileWriteTools = (services: LocalPathServices): ReadonlyArray<Serve
 
   defineServerTool({
     name: "file_edit",
+    summary: "Changes part of a file.",
+    discovery: "always_loaded",
     description: [
       "Replace one exact, unique text block in an existing UTF-8 file. It may need the user's approval. Files over 8 MiB are refused.",
       "Call file_read first; if old_text is missing or ambiguous, retry with current text and more surrounding context.",

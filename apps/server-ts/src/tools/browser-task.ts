@@ -468,6 +468,8 @@ const makeBrowserTaskTool = ({
 }): ServerTool =>
   defineServerTool({
     name: BROWSER_TASK_TOOL,
+    summary: "Hands several steps on a browser page to a faster model.",
+    discovery: { group: "web_browser_tasks" },
     description: [
       "Hand a bounded goal on one browser tab to a fast worker model: fill a form, go through a list, page through results.",
       "It runs the steps itself (each call passes the same approval gate and is recorded) and returns done, blocked or decide with a short report, and the page as it is now with a Snapshot ref for your next browser_act.",
