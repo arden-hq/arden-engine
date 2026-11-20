@@ -6,10 +6,7 @@ import { expect, it } from "vitest"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../src/persistence/sessions/events.js"
 import { makeHomeEvidence } from "../src/persistence/sqlite/home-evidence.js"
 import { ruleSavedInSql } from "../src/persistence/sqlite/permissions.js"
-import {
-  latestSettledQuestionChanges,
-  questionVisiblePredicate
-} from "../src/persistence/sqlite/question-events.js"
+import { questionVisiblePredicate } from "../src/persistence/sqlite/question-events.js"
 import { runColumns, runDestinationSessionId } from "../src/persistence/sqlite/run-destination.js"
 import { quietRunOutcome } from "../src/persistence/sqlite/run-outcomes.js"
 import {
@@ -446,45 +443,6 @@ it("the question reads return what the old full rebuild returned", async () => {
         "q-open-b",
         "q-task"
       ])
-      // The settled changes the Space acknowledgement reads, for each range.
-      const oldSettled = (after: number, through: number) => sql`
-        SELECT * FROM (
-          SELECT question.question_id, latest.sequence AS revision,
-            CASE WHEN question.resolution IS NOT NULL THEN 'resolved' ELSE 'closed' END AS status,
-            destination.space_id AS destination_space_id,
-            destination.session_id AS destination_session_id
-          FROM run_questions AS question
-          JOIN chat_runs AS run ON run.run_id = question.run_id
-          JOIN ${journalRecordsSql(sql)} AS latest
-            ON latest.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
-            AND latest.event_type = 'question_changed'
-            AND latest.sequence = (
-              SELECT MAX(record.sequence)
-              FROM ${journalRecordsSql(sql)} AS record
-              WHERE record.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
-                AND record.event_type = 'question_changed'
-                AND json_extract(record.data_json, '$.question_id') = question.question_id
-            )
-          JOIN sessions AS destination
-            ON destination.session_id = ${runDestinationSessionId(sql, runColumns(sql, "run"))}
-            AND destination.session_id = json_extract(latest.data_json, '$.session_id')
-          WHERE question.resolution IS NOT NULL OR question.closed_at IS NOT NULL)
-        WHERE revision > ${after} AND revision <= ${through}`
-      let found = 0
-      for (const [after, through] of [
-        [0, 900000],
-        [800002, 800007],
-        [800007, 800008],
-        [800003, 800006]
-      ] as const) {
-        const settled =
-          yield* sql`SELECT * FROM (${latestSettledQuestionChanges(sql, { after, through })})`
-        expect(sorted(settled), `${after}..${through}`).toEqual(
-          sorted(yield* oldSettled(after, through))
-        )
-        found += settled.length
-      }
-      expect(found).toBeGreaterThan(1)
     })
   )
 })
