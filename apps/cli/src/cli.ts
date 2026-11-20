@@ -68,17 +68,18 @@ const HELP = `Usage:
   arden serve [--config <file>] [--verbose]
   arden exec [--config <file>] [prompt] [options]
 
-arden <prompt> sends the prompt to a running Arden (arden run) and, when none
-is running, to a server of its own for this one prompt (arden exec). It takes
-the run options below.
+arden <prompt> sends the prompt to Arden (arden run). When the Arden app is
+installed but not running, it starts it in the background first, so the
+prompt sees your accounts and chats. Without the app it runs on a server of
+its own for this one prompt (arden exec). It takes the run options below.
 
 login signs in with ChatGPT in the browser and keeps the sign-in in
 ~/.arden-cli; serve and exec use it. --status says whether you are signed in.
 logout forgets it.
 
-run, wait, sessions and models talk to the running Arden app, else to a running
-arden serve with the default settings (or --url / ARDEN_URL, or
-ARDEN_DIR=<data folder> for another arden serve). Chats started there appear in
+run, wait, sessions and models talk to --url / ARDEN_URL, else ARDEN_DIR=<data
+folder>, else the running Arden app, else a running arden serve with the
+default settings, else the installed Arden app started in the background. Chats started there appear in
 Arden like any other. serve and exec start a server of their own from a
 settings file, with its own data folder and model provider. Without --config
 they use ~/.arden-cli/settings.json and write it on first use.

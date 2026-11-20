@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { createInterface } from "node:readline"
 
+import { macAppLauncher } from "./app-launch.js"
 import { runCli } from "./cli.js"
 import { type CliDependencies, type StdinKind } from "./command.js"
 import { errorMessage } from "@arden-hq/std/errors"
@@ -67,6 +68,7 @@ const dependencies: CliDependencies = {
   writeStderr: (value) => {
     process.stderr.write(value)
   },
+  appLauncher: macAppLauncher,
   askInTerminal:
     process.stdin.isTTY === true && process.stderr.isTTY === true ? askInTerminal : undefined,
   onSigint: (listener) => {

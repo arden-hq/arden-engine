@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { runCli, type CliClient, type CliDependencies } from "../src/index.js"
+import type { AppLauncher } from "../src/app-launch.js"
 import type { StdinKind } from "../src/command.js"
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import type { RunQuestion } from "@arden-hq/protocol/runs"
@@ -34,6 +35,7 @@ const testIo = (
     readonly stdin?: { readonly kind: StdinKind; readonly text: string }
     readonly files?: Readonly<Record<string, string>>
     readonly alive?: (pid: number) => boolean
+    readonly launcher?: AppLauncher
   } = {}
 ): TestIo => {
   let stdout = ""
@@ -51,6 +53,7 @@ const testIo = (
       return Buffer.from(text)
     },
     isProcessAlive: input.alive ?? (() => true),
+    appLauncher: input.launcher ?? NO_APP,
     writeStdout: (value) => {
       stdout += value
     },
@@ -75,6 +78,15 @@ const testIo = (
     sigint: () => sigintListener?.(),
     connections: () => connections
   }
+}
+
+const NO_APP: AppLauncher = {
+  find: async () => undefined,
+  open: async () => {
+    throw new Error("the tests never open an app")
+  },
+  pollMs: 1,
+  timeoutMs: 20
 }
 
 const URL_ARGS = ["--url", "http://arden.test"] as const
@@ -188,6 +200,73 @@ describe("arden run", () => {
     const elsewhere = testIo({ files, env: { ARDEN_DIR: "/elsewhere" } })
     expect(await runCli(["run", "Prompt", "--output", "json"], elsewhere.dependencies)).toBe(1)
     expect(elsewhere.connections()).toEqual([])
+  })
+})
+
+describe("starting the installed app", () => {
+  const appAccess = "/home/test/.arden/cli-access.json"
+  const launching = (onOpen: (files: Map<string, string>) => void) => {
+    const files = new Map<string, string>()
+    const opened: Array<string> = []
+    const launcher: AppLauncher = {
+      find: async () => "/Applications/Arden.app",
+      open: async (appPath) => {
+        opened.push(appPath)
+        onOpen(files)
+      },
+      pollMs: 1,
+      timeoutMs: 50
+    }
+    const readFile = async (path: string): Promise<Uint8Array> => {
+      const text = files.get(path)
+      if (text === undefined) throw new Error(`ENOENT: ${path}`)
+      return Buffer.from(text)
+    }
+    return { files, opened, launcher, readFile }
+  }
+
+  it("starts Arden in the background and sends the prompt to it, never a server of its own", async () => {
+    const app = launching((files) => files.set(appAccess, accessFile(4242)))
+    app.files.set(appAccess, accessFile(99))
+    const events: Array<string> = []
+    const io = testIo({ launcher: app.launcher, alive: (pid) => pid !== 99 })
+    expect(
+      await runCli(["hey", "--output", "json"], {
+        ...io.dependencies,
+        ...started(events),
+        readFile: app.readFile
+      })
+    ).toBe(0)
+    expect(app.opened).toEqual(["/Applications/Arden.app"])
+    expect(events).toEqual([])
+    expect(io.connections()).toEqual([
+      { url: "http://127.0.0.1:51234/", headers: { "x-arden-local-capability": CAPABILITY } }
+    ])
+    expect(io.stderr()).toBe("arden: Arden is not running; starting it in the background.\n")
+  })
+
+  it("says Arden did not start when no live access file appears", async () => {
+    const app = launching(() => undefined)
+    const io = testIo({ launcher: app.launcher })
+    expect(
+      await runCli(["run", "Prompt", "--output", "json"], {
+        ...io.dependencies,
+        readFile: app.readFile
+      })
+    ).toBe(1)
+    expect(jsonLines(io.stdout())[0]).toMatchObject({
+      error: {
+        code: "server_unavailable",
+        message: `Arden did not start within 0 s: ${appAccess} names no running server`
+      }
+    })
+  })
+
+  it("leaves the app alone when ARDEN_DIR names another data folder", async () => {
+    const app = launching(() => undefined)
+    const io = testIo({ launcher: app.launcher, env: { ARDEN_DIR: "/elsewhere" } })
+    expect(await runCli(["run", "Prompt", "--output", "json"], io.dependencies)).toBe(1)
+    expect(app.opened).toEqual([])
   })
 })
 

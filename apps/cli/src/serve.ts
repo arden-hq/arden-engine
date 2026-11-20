@@ -12,7 +12,7 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
-  findLocalServer,
+  findServer,
   ProviderUnavailableError,
   ServerUnavailableError,
   UsageError,
@@ -235,7 +235,7 @@ export const promptCommand = async (
     return runCommand(options, dependencies)
   let found: ServerConnection | undefined
   try {
-    found = await findLocalServer(dependencies)
+    found = await findServer(dependencies)
   } catch {
     return runCommand(options, dependencies)
   }

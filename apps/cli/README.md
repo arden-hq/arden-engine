@@ -28,7 +28,7 @@ It stays `private` until its first manual publish; then `just release` publishes
 
 | Command | What it does |
 | --- | --- |
-| `arden <prompt>` | Any first word that is not a command starts the prompt. `arden run` when Arden or an `arden serve` is running, else `arden exec` with the default settings |
+| `arden <prompt>` | Any first word that is not a command starts the prompt. `arden run` on Arden (started in the background when installed but closed) or an `arden serve`, else `arden exec` with the default settings |
 | `arden login` | Sign in with ChatGPT in the browser; the sign-in stays in `~/.arden-cli/chatgpt-login.json` (mode 0600). `--status` says whether you are signed in |
 | `arden logout` | Forget that sign-in |
 | `arden run [prompt]` | Send a prompt and wait for the answer. Piped stdin joins the prompt in a `<stdin>` block |
@@ -42,7 +42,7 @@ Run `arden --help` for every option.
 
 ## Rules
 
-- The server address is `--url` or `ARDEN_URL`.
+- The server is found in this order: `--url` or `ARDEN_URL`; `ARDEN_DIR`; the running Arden app (`~/.arden/cli-access.json`); a running `arden serve` on the default settings (`~/.arden-cli/data`); the installed Arden app, started in the background (`open -g -a Arden --args --background`, ready when its access file names a live server, up to 30 s). A bare prompt runs on a server of its own only when none of these is there. No CLI server ever opens the app's data folder; the server refuses `~/.arden` as a `dataDirectory`.
 - `serve` and `exec` take a settings file (`apps/server-ts/src/serve/settings.ts` lists every field) and a data folder of their own, never `~/.arden`. Reach a `serve` server with `ARDEN_DIR=<its dataDirectory> arden run ...`.
 - `--output json` and `--output jsonl` print one `command_receipt`. Its `status` is `completed`, `submitted`, `failed`, `cancelled`, `interrupted` or `timed_out`.
 - Exit codes, for every command, `serve` and `exec` included:

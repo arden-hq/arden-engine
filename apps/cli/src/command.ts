@@ -7,7 +7,10 @@ import {
 } from "@arden-hq/headless"
 import { CLI_ACCESS_FILE, daemonDecoders, LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { ARDEN_DIR_VARIABLE, ardenCliDir, resolveArdenDir } from "@arden-hq/std/paths"
+import { sleep } from "@arden-hq/std/sleep"
 import { join } from "node:path"
+
+import type { AppLauncher } from "./app-launch.js"
 
 export type CliClient = Pick<
   HeadlessClient,
@@ -60,6 +63,7 @@ export interface CliDependencies {
   readonly startServer?: StartServer
   readonly startLogin?: () => Promise<PendingChatGptLogin>
   readonly openUrl?: (url: string) => void
+  readonly appLauncher: AppLauncher
   readonly askInTerminal?: ((prompt: string) => Promise<string | undefined>) | undefined
 }
 
@@ -137,12 +141,47 @@ export const resolveServer = async (
   if (explicit !== undefined && explicit.length > 0) {
     return { url: parseServerUrl(explicit), headers: {} }
   }
-  const found = await findLocalServer(dependencies)
+  const found = await findServer(dependencies)
   if (found === undefined) throw new ServerUnavailableError(NOT_RUNNING)
   return found
 }
 
-export const findLocalServer = async (
+export const findServer = async (
+  dependencies: CliDependencies
+): Promise<ServerConnection | undefined> => {
+  const local = await findLocalServer(dependencies)
+  if (local !== undefined) return local
+  if ((dependencies.env[ARDEN_DIR_VARIABLE]?.trim() ?? "") !== "") return undefined
+  return startAppInBackground(dependencies)
+}
+
+const startAppInBackground = async (
+  dependencies: CliDependencies
+): Promise<ServerConnection | undefined> => {
+  const launcher = dependencies.appLauncher
+  const appPath = await launcher.find()
+  if (appPath === undefined) return undefined
+  const folder = resolveArdenDir(dependencies.env, dependencies.homeDirectory)
+  const stale = await accessIn(folder, dependencies).catch(() => undefined)
+  dependencies.writeStderr("arden: Arden is not running; starting it in the background.\n")
+  await launcher.open(appPath)
+  for (let waited = 0; waited < launcher.timeoutMs; waited += launcher.pollMs) {
+    const access = await accessIn(folder, dependencies).catch(() => undefined)
+    if (
+      access !== undefined &&
+      access.pid !== stale?.pid &&
+      dependencies.isProcessAlive(access.pid)
+    ) {
+      return connectionOf(access)
+    }
+    await sleep(launcher.pollMs)
+  }
+  throw new ServerUnavailableError(
+    `Arden did not start within ${Math.round(launcher.timeoutMs / 1_000)} s: ${join(folder, CLI_ACCESS_FILE)} names no running server`
+  )
+}
+
+const findLocalServer = async (
   dependencies: CliDependencies
 ): Promise<ServerConnection | undefined> => {
   const app = resolveArdenDir(dependencies.env, dependencies.homeDirectory)
@@ -161,6 +200,17 @@ const serverIn = async (
   folder: string,
   dependencies: CliDependencies
 ): Promise<ServerConnection | undefined> => {
+  const access = await accessIn(folder, dependencies)
+  if (access === undefined || !dependencies.isProcessAlive(access.pid)) return undefined
+  return connectionOf(access)
+}
+
+type CliAccess = ReturnType<typeof daemonDecoders.cliAccess>
+
+const accessIn = async (
+  folder: string,
+  dependencies: CliDependencies
+): Promise<CliAccess | undefined> => {
   const path = join(folder, CLI_ACCESS_FILE)
   let bytes: Uint8Array
   try {
@@ -168,15 +218,14 @@ const serverIn = async (
   } catch {
     return undefined
   }
-  let access: ReturnType<typeof daemonDecoders.cliAccess>
   try {
-    access = daemonDecoders.cliAccess(JSON.parse(Buffer.from(bytes).toString("utf8")))
+    return daemonDecoders.cliAccess(JSON.parse(Buffer.from(bytes).toString("utf8")))
   } catch {
     throw new ServerUnavailableError(`Arden's access file is unreadable: ${path}`)
   }
-  if (!dependencies.isProcessAlive(access.pid)) return undefined
-  return {
-    url: parseServerUrl(access.serverUrl),
-    headers: { [LOCAL_CAPABILITY_HEADER]: access.capability }
-  }
 }
+
+const connectionOf = (access: CliAccess): ServerConnection => ({
+  url: parseServerUrl(access.serverUrl),
+  headers: { [LOCAL_CAPABILITY_HEADER]: access.capability }
+})
