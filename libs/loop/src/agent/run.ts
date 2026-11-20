@@ -119,7 +119,6 @@ const launchPendingBackground = async (run: Run): Promise<void> => {
   await run.background.launch({
     calls: pendingBackground,
     metas: new Map(entries.map((entry) => [entry.meta.name, entry.meta])),
-    mode: "message",
     recovered,
     claimed
   })
@@ -557,8 +556,7 @@ const runToolTurn = async (
   )
   const backgroundOutput = await run.background.launch({
     calls: backgroundCalls,
-    metas: view.metas,
-    mode: view.asyncMode
+    metas: view.metas
   })
   const backgroundIds = new Set(backgroundCalls.map((call) => call.toolCall.id))
   const remaining = await runTools(

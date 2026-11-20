@@ -252,7 +252,6 @@ const convertMessages = (
             : [{ items: [{ role: compat.systemRole, content }], deferWhileCallsPending: true }]
         }
         case "user": {
-          if (message.async_tool_launch !== undefined) return []
           if (message.interaction !== undefined)
             return [
               {

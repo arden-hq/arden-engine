@@ -20,7 +20,9 @@ export const repairOrphanToolOutputs = (
       for (const call of message.tool_calls ?? []) open.add(call.id)
       return message
     }
-    if (message.role !== "tool" || open.delete(message.tool_call_id)) return message
+    if (message.role !== "tool") return message
+    if (message.async_tool_launch !== undefined && open.has(message.tool_call_id)) return message
+    if (open.delete(message.tool_call_id)) return message
     orphans.push({ callId: message.tool_call_id, messageId: message.message_id })
     return {
       role: "user",

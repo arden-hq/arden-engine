@@ -1,10 +1,6 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import {
-  asToolResultRecord,
-  asyncResultClientId,
-  type TranscriptMessageRecord
-} from "../transcript/model.js"
+import type { TranscriptMessageRecord } from "../transcript/model.js"
 import { TranscriptQueryError, type TranscriptQueryFailure } from "../transcript/queries.js"
 
 export interface TranscriptRow {
@@ -32,8 +28,7 @@ export const makeToolResultInSession = (
         WHERE session_id = ${sessionId}
           AND ((role = 'tool' AND instr(message_json, ${needle}) > 0
                 AND json_extract(message_json, '$.tool_call_id') = ${toolCallId}
-                AND json_extract(message_json, '$.async_tool_launch') IS NULL)
-            OR (role = 'user' AND client_id = ${asyncResultClientId(toolCallId)}))
+                AND json_extract(message_json, '$.async_tool_launch') IS NULL))
         ORDER BY seq DESC
         LIMIT 1
       `.pipe(
@@ -48,5 +43,5 @@ export const makeToolResultInSession = (
       )
     )
     const row = rows[0]
-    return row === undefined ? null : asToolResultRecord(yield* decodeRow(row))
+    return row === undefined ? null : yield* decodeRow(row)
   })

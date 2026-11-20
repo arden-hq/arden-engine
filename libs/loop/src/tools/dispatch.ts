@@ -198,7 +198,7 @@ export const launchReceipt = (id: string): ChatMessage => ({
   role: "tool",
   message_id: `async-launch:${id}`,
   tool_call_id: id,
-  async_tool_launch: { call_id: id, delivery: "message" },
+  async_tool_launch: { call_id: id },
   content: JSON.stringify({
     status: "running",
     tool_call_id: id,
@@ -329,6 +329,7 @@ const appendResults = (
   rawCalls: ReadonlyArray<ToolCall>,
   results: ReadonlyMap<string, string>,
   extras: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+  modelContent: ReadonlyMap<string, ReadonlyArray<ContentBlock>>,
   missingContent: string,
   skipIds: ReadonlySet<string>,
   receiptIds: ReadonlySet<string> = new Set()
@@ -339,41 +340,14 @@ const appendResults = (
       messages.push(launchReceipt(call.id))
       continue
     }
+    const media = modelContent.get(call.id) ?? []
     messages.push({
       ...extras.get(call.id),
       message_id: messageId("tool"),
       role: "tool",
       tool_call_id: call.id,
-      content: results.get(call.id) ?? missingContent
-    })
-  }
-}
-
-const appendModelContent = (
-  messages: ChatMessage[],
-  rawCalls: ReadonlyArray<ToolCall>,
-  content: ReadonlyMap<string, ReadonlyArray<ContentBlock>>
-): void => {
-  for (const call of rawCalls) {
-    const blocks = content.get(call.id)
-    if (blocks === undefined || blocks.length === 0) continue
-    messages.push({
-      message_id: messageId("tool-media"),
-      role: "user",
-      client_id: `tool-media:${call.id}`,
-      is_meta: true,
-      content: [
-        {
-          type: "context",
-          content_type: "tool_result_media",
-          content: `Media returned by tool ${call.function.name}.`,
-          metadata: {
-            tool_call_id: call.id,
-            tool_name: call.function.name
-          }
-        },
-        ...blocks
-      ] as unknown as ReadonlyArray<Record<string, unknown>>
+      content: results.get(call.id) ?? missingContent,
+      ...(media.length === 0 ? {} : { model_content: media })
     })
   }
 }
@@ -562,13 +536,9 @@ const backgroundSettlement = async (
     [resolved.call.toolCall],
     new Map([[id, event.result]]),
     new Map(Object.keys(event.message_extras).length > 0 ? [[id, event.message_extras]] : []),
+    new Map(event.model_content.length > 0 ? [[id, event.model_content]] : []),
     unexpectedMissingResult,
     new Set()
-  )
-  appendModelContent(
-    messages,
-    [resolved.call.toolCall],
-    new Map(event.model_content.length > 0 ? [[id, event.model_content]] : [])
   )
   return { output: { completions: [event], paused: [] }, messages }
 }
@@ -643,11 +613,11 @@ export const dispatchToolCalls = async (input: DispatchInput): Promise<DispatchO
       input.rawCalls,
       results,
       extras,
+      modelContent,
       aborted || input.signal.aborted ? "Tool call cancelled." : unexpectedMissingResult,
       pausedIds,
       backgroundedIds
     )
-    appendModelContent(input.messages, input.rawCalls, modelContent)
   }
 
   async function runBatch(): Promise<void> {

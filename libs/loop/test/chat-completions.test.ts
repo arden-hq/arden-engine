@@ -412,7 +412,6 @@ describe("Chat Completions request body", () => {
       { role: "user", content: "Steering while b runs" },
       { role: "tool", tool_call_id: "call-b", content: "B out" },
       { role: "assistant", content: "", reasoning_content: "Thinking only." },
-      { role: "user", content: "", async_tool_launch: { call_id: "call-b", delivery: "message" } },
       { role: "assistant", content: "Retrying.", tool_calls: [call("call-c")] },
       { role: "user", content: "Continue." }
     ]

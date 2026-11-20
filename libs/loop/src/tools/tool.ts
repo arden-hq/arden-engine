@@ -53,7 +53,6 @@ export interface ToolResultOutput {
   readonly data?: Readonly<Record<string, unknown>>
   /** Extra host metadata merged into the ToolFinished event. */
   readonly host?: Readonly<Record<string, unknown>>
-  /** Becomes the is_meta tool-media envelope. */
   readonly model_content?: ReadonlyArray<ModelContentBlock>
 }
 

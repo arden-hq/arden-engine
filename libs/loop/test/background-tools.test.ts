@@ -22,6 +22,24 @@ const call: ToolCall = {
   type: "function",
   function: { name: "lookup", arguments: "{}" }
 }
+const lateResults = (messages: ReadonlyArray<ChatMessage>): ReadonlyArray<string> => {
+  const launched = new Set<string>()
+  return messages.flatMap((message) => {
+    if (message.role === "tool") {
+      if (message.async_tool_launch !== undefined) {
+        launched.add(message.async_tool_launch.call_id)
+        return []
+      }
+      return launched.has(message.tool_call_id) ? [message.tool_call_id] : []
+    }
+    if (message.role !== "user" || !Array.isArray(message.content)) return []
+    return message.content.flatMap((block) =>
+      block.content_type === "async_tool_result"
+        ? [(block.metadata as { tool_call_id: string }).tool_call_id]
+        : []
+    )
+  })
+}
 const toolset = (execute: Toolset["execute"]): Toolset => ({
   entries: () => [
     {
@@ -85,13 +103,11 @@ it.each(["native", "message"] as const)(
     expect(executions).toBe(1)
     expect(checkpointChanges).toContain("append")
     expect(requests).toHaveLength(3)
-    const outputs = result.messages.filter((message) => message.role === "tool")
-    expect(outputs).toHaveLength(1)
-    if (mode === "native") expect(outputs[0]?.content).toBe("lookup result")
-    else
-      expect(
-        result.messages.filter((message) => message.client_id === "async-result:lookup-1")
-      ).toHaveLength(1)
+    const results = result.messages.filter(
+      (message) => message.role === "tool" && message.async_tool_launch === undefined
+    )
+    expect(results.map((message) => message.content)).toEqual(["lookup result"])
+    expect(lateResults(result.messages)).toEqual(["lookup-1"])
   }
 )
 
@@ -149,9 +165,7 @@ it("a message queued while the run waits on a background call steers it without 
   expect(cancelled).toBe(false)
   expect(result.text).toBe("Done")
   expect(step).toBe(4)
-  expect(
-    result.messages.filter((message) => message.client_id === "async-result:lookup-1")
-  ).toHaveLength(1)
+  expect(lateResults(result.messages)).toEqual(["lookup-1"])
 })
 
 it.each(["native", "message"] as const)(
@@ -242,7 +256,7 @@ it("recovers an undelivered durable outcome without repeating execution", async 
       role: "tool",
       tool_call_id: call.id,
       message_id: `async-launch:${call.id}`,
-      async_tool_launch: { call_id: call.id, delivery: "message" },
+      async_tool_launch: { call_id: call.id },
       content: "running"
     },
     { role: "assistant", content: "Independent work" }
@@ -264,9 +278,7 @@ it("recovers an undelivered durable outcome without repeating execution", async 
     }
   ).run(history)
   expect(executions).toBe(0)
-  expect(
-    result.messages.filter((message) => message.client_id === "async-result:lookup-1")
-  ).toHaveLength(1)
+  expect(lateResults(result.messages)).toEqual(["lookup-1"])
 })
 
 it("does not execute a background call if the launch checkpoint fails", async () => {
@@ -408,11 +420,12 @@ it.each(["native", "message"] as const)(
           stream: ({ messages }) => {
             step += 1
             if (step === 1) return [response(calls.slice(0, 3), "")]
-            const firstDelivered = messages.some((message) =>
+            const firstDelivered =
               mode === "native"
-                ? message.role === "tool" && message.tool_call_id === "first"
-                : message.client_id === "async-result:first"
-            )
+                ? messages.some(
+                    (message) => message.role === "tool" && message.tool_call_id === "first"
+                  )
+                : lateResults(messages).includes("first")
             if (firstDelivered && !retried) {
               retried = true
               return [response(calls.slice(3), "")]
@@ -443,8 +456,7 @@ it.each(["native", "message"] as const)(
     if (result === undefined || "_tag" in result) throw new Error("Expected the final result")
     expect(
       result.messages.flatMap((message) =>
-        (message.role === "user" || message.role === "tool") &&
-        message.async_tool_launch !== undefined
+        message.role === "tool" && message.async_tool_launch !== undefined
           ? [message.async_tool_launch.call_id]
           : []
       )
@@ -462,23 +474,13 @@ it.each(["native", "message"] as const)(
     }))
     const history: ChatMessage[] = [
       { role: "assistant", content: "", tool_calls: calls },
-      ...calls.map((item): ChatMessage =>
-        mode === "native"
-          ? {
-              role: "user",
-              content: [],
-              is_meta: true,
-              message_id: `async-launch:${item.id}`,
-              async_tool_launch: { call_id: item.id, delivery: mode }
-            }
-          : {
-              role: "tool",
-              content: "running",
-              tool_call_id: item.id,
-              message_id: `async-launch:${item.id}`,
-              async_tool_launch: { call_id: item.id, delivery: mode }
-            }
-      )
+      ...calls.map((item): ChatMessage => ({
+        role: "tool",
+        content: "running",
+        tool_call_id: item.id,
+        message_id: `async-launch:${item.id}`,
+        async_tool_launch: { call_id: item.id }
+      }))
     ]
     const result = await makeAgent(
       { model: "test", maxToolConcurrency: 1, backgroundGraceMs: 0, maxIterations: 8 },
@@ -493,13 +495,7 @@ it.each(["native", "message"] as const)(
         }
       }
     ).run(history)
-    const delivered = result.messages.flatMap((message) => {
-      if (mode === "native") return message.role === "tool" ? [message.tool_call_id] : []
-      return message.client_id?.startsWith("async-result:") === true
-        ? [message.client_id.slice("async-result:".length)]
-        : []
-    })
-    expect(delivered).toEqual(["saved-a", "saved-b", "saved-c"])
+    expect(lateResults(result.messages)).toEqual(["saved-a", "saved-b", "saved-c"])
     expect(result.stop_reason).toBe("end_turn")
   }
 )

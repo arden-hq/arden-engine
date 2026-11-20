@@ -222,37 +222,6 @@ export const TranscriptMessageRecordSchema = Schema.Struct({
 
 export type TranscriptMessageRecord = (typeof TranscriptMessageRecordSchema)["Type"]
 
-const ASYNC_RESULT = "async-result:"
-export const asyncResultClientId = (toolCallId: string): string => `${ASYNC_RESULT}${toolCallId}`
-
-export const asToolResultRecord = (record: TranscriptMessageRecord): TranscriptMessageRecord => {
-  if (record.role !== "user" || record.clientId?.startsWith(ASYNC_RESULT) !== true) return record
-  const toolCallId = record.clientId.slice(ASYNC_RESULT.length)
-  const content = record.envelope.content
-  const block = Array.isArray(content)
-    ? content.find(
-        (item) =>
-          typeof item === "object" &&
-          item !== null &&
-          !Array.isArray(item) &&
-          item.content_type === "async_tool_result"
-      )
-    : undefined
-  const result =
-    typeof block === "object" && block !== null && !Array.isArray(block) ? block.content : undefined
-  const { is_meta: _meta, ...envelope } = record.envelope
-  return {
-    ...record,
-    role: "tool",
-    envelope: {
-      ...envelope,
-      role: "tool",
-      tool_call_id: toolCallId,
-      content: result ?? ""
-    }
-  }
-}
-
 const TranscriptPageFields = Schema.Struct({
   records: Schema.Array(TranscriptMessageRecordSchema),
   hasMoreBefore: Schema.Boolean,

@@ -517,6 +517,13 @@ const ownedBehaviors = [
       "Permission decisions read Allow / Ask / Deny (Allow once, Always allow, Allowed, Denied): take them, and a rule's action sentence, from DECISION_WORD, RULE_DECISION_WORD, RULE_ACTION and PATH_ACTION in @arden-hq/protocol/permissions.",
     owners: ["libs/protocol/src/permissions/words.ts"],
     exemptDirs: [migrationsDir, electronDir]
+  },
+  {
+    pattern: String.raw`^(async-result|tool-media):`,
+    message:
+      "A tool result is a tool message: a background call's result is the tool message after its receipt (async_tool_launch), and media is the result's model_content. An id never says what a message is.",
+    owners: [],
+    exemptDirs: [migrationsDir]
   }
 ]
 export const exemptDirs = [

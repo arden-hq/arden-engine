@@ -14,10 +14,6 @@ export const incompleteToolStep = (
   const completedIds = new Set<string>()
   const rawToolCalls: ToolCall[] = []
   for (const message of [...messages].reverse()) {
-    if (message.role === "user" && message.async_tool_launch !== undefined) {
-      completedIds.add(message.async_tool_launch.call_id)
-      continue
-    }
     if (message.role === "tool") {
       completedIds.add(message.tool_call_id)
       continue

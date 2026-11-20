@@ -26,7 +26,6 @@ interface BackgroundJob {
 interface BackgroundLaunch {
   readonly calls: ReadonlyArray<PendingToolCall>
   readonly metas: ReadonlyMap<string, ToolMeta>
-  readonly mode: "native" | "message"
   readonly recovered?: ReadonlyMap<string, Required<ToolResult>>
   readonly claimed?: ReadonlyMap<string, HeldToolCall>
 }
@@ -115,22 +114,12 @@ export class BackgroundTools {
     for (const call of input.calls) {
       if (this.jobs.has(call.toolCall.id)) continue
       const id = call.toolCall.id
-      if (this.options.messages.some((message) => message.message_id === `async-launch:${id}`)) {
+      if (this.options.messages.some((message) => isLaunchReceipt(message, id))) {
         if (input.recovered === undefined)
           throw new AgentInvariantError(`Background tool call id was reused: ${id}`)
         continue
       }
-      this.options.messages.push(
-        input.mode === "native"
-          ? {
-              role: "user",
-              message_id: `async-launch:${id}`,
-              is_meta: true,
-              async_tool_launch: { call_id: id, delivery: "native" },
-              content: []
-            }
-          : launchReceipt(id)
-      )
+      this.options.messages.push(launchReceipt(id))
     }
     await this.options.checkpoint()
     for (const call of input.calls) {
@@ -147,7 +136,6 @@ export class BackgroundTools {
             )
       this.track(
         call,
-        backgroundDelivery(this.options.messages, id) ?? input.mode,
         this.options.clock() + this.options.graceMs,
         recovered
           .then((result) =>
@@ -165,12 +153,11 @@ export class BackgroundTools {
   }
 
   adopt(backgrounded: BackgroundedCall): void {
-    this.track(backgrounded.call, "message", 0, backgrounded.settled, this.options.stop)
+    this.track(backgrounded.call, 0, backgrounded.settled, this.options.stop)
   }
 
   private track(
     call: PendingToolCall,
-    delivery: "native" | "message",
     graceUntil: number,
     settled: Promise<CallSettlement>,
     stop: () => void
@@ -191,26 +178,7 @@ export class BackgroundTools {
         (outcome) => {
           job.state = {
             kind: "settled",
-            outcome: {
-              output: outcome.output,
-              messages: outcome.messages.map((message): ChatMessage => {
-                if (delivery === "native" || message.role !== "tool") return message
-                return {
-                  role: "user",
-                  message_id: `async-result:${id}`,
-                  client_id: `async-result:${id}`,
-                  is_meta: true,
-                  content: [
-                    {
-                      type: "context",
-                      content_type: "async_tool_result",
-                      content: message.content,
-                      metadata: { tool_call_id: id, tool_name: call.name }
-                    }
-                  ]
-                }
-              })
-            }
+            outcome
           }
         },
         (cause: unknown) => {
@@ -312,54 +280,26 @@ const outcomeResult = (outcome: CallSettlement, id: string): ToolResult | undefi
   }
 }
 
-const backgroundDelivery = (
-  messages: ReadonlyArray<ChatMessage>,
-  id: string
-): "native" | "message" | undefined => {
-  for (const message of messages) {
-    const launch = message.async_tool_launch
-    if (
-      typeof launch !== "object" ||
-      launch === null ||
-      !("call_id" in launch) ||
-      launch.call_id !== id ||
-      !("delivery" in launch)
-    )
-      continue
-    if (launch.delivery === "native" || launch.delivery === "message") return launch.delivery
-  }
-  return undefined
-}
+const isLaunchReceipt = (message: ChatMessage, id: string): boolean =>
+  message.role === "tool" && message.async_tool_launch?.call_id === id
 
-/** Receipts close portable wire calls but do not settle the underlying execution. */
 export const pendingBackgroundCalls = (
   messages: ReadonlyArray<ChatMessage>,
   options: { readonly displayTitle?: ToolDisplayTitle | undefined } = {}
 ): ReadonlyArray<PendingToolCall> => {
-  const outputs = new Set(
-    messages.flatMap((message) =>
-      message.role === "tool" && message.async_tool_launch === undefined
-        ? [message.tool_call_id]
-        : []
-    )
-  )
-  const delivered = new Set(
-    messages.flatMap((message) =>
-      typeof message.client_id === "string" ? [message.client_id] : []
-    )
-  )
+  const launched = new Set<string>()
+  const answered = new Set<string>()
+  for (const message of messages) {
+    if (message.role !== "tool") continue
+    if (message.async_tool_launch !== undefined) launched.add(message.async_tool_launch.call_id)
+    else answered.add(message.tool_call_id)
+  }
   return parseToolCalls(
     messages.flatMap((message) =>
       message.role === "assistant"
-        ? (message.tool_calls ?? []).filter((call) => {
-            const delivery = backgroundDelivery(messages, call.id)
-            return (
-              delivery !== undefined &&
-              (delivery === "native"
-                ? !outputs.has(call.id)
-                : !delivered.has(`async-result:${call.id}`))
-            )
-          })
+        ? (message.tool_calls ?? []).filter(
+            (call) => launched.has(call.id) && !answered.has(call.id)
+          )
         : []
     ),
     options.displayTitle

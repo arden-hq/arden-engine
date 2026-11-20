@@ -20,8 +20,6 @@ import {
   TranscriptQueryError
 } from "../transcript/queries.js"
 import {
-  asToolResultRecord,
-  asyncResultClientId,
   TranscriptMessageRecordSchema,
   TranscriptPageSchema,
   TranscriptPageQuerySchema,
@@ -662,15 +660,14 @@ export const makeTranscriptQueries = ({
           AND t.turn_id IN ${sql.in(turnIds)}
           AND ${messageTurnIdSql(sql, "m")} = t.turn_id
           AND ((m.role = 'tool' AND json_extract(m.message_json, '$.async_tool_launch') IS NULL
-                AND json_extract(m.message_json, '$.tool_call_id') IN ${sql.in(toolCallIds)})
-            OR (m.role = 'user' AND m.client_id IN ${sql.in(toolCallIds.map(asyncResultClientId))}))
+                AND json_extract(m.message_json, '$.tool_call_id') IN ${sql.in(toolCallIds)}))
         ORDER BY m.seq ASC
       `.pipe(
       Effect.mapError((cause) =>
         queryError("page", sessionId, "Could not hydrate turn-work results", cause)
       )
     )
-    return (yield* Effect.forEach(rows, decodeRow)).map(asToolResultRecord)
+    return yield* Effect.forEach(rows, decodeRow)
   })
 
   const turnIdsCarrying = (carrier: typeof workCarrierPredicate, label: string) =>

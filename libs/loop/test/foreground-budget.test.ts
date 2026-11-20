@@ -53,12 +53,32 @@ const toolMessages = (messages: ReadonlyArray<ChatMessage>) =>
       : []
   )
 
-const deliveries = (messages: ReadonlyArray<ChatMessage>) =>
-  messages.flatMap((message) =>
-    message.client_id?.startsWith("async-result:") === true && Array.isArray(message.content)
-      ? message.content.map((block) => ({ id: message.client_id, content: block.content }))
+const deliveries = (messages: ReadonlyArray<ChatMessage>) => {
+  const launched = new Set<string>()
+  return messages.flatMap((message) => {
+    if (message.role === "tool") {
+      if (message.async_tool_launch !== undefined) {
+        launched.add(message.async_tool_launch.call_id)
+        return []
+      }
+      return launched.has(message.tool_call_id)
+        ? [{ id: message.tool_call_id, content: message.content }]
+        : []
+    }
+    return message.role === "user" && Array.isArray(message.content)
+      ? message.content.flatMap((block) =>
+          block.content_type === "async_tool_result"
+            ? [
+                {
+                  id: (block.metadata as { tool_call_id: string }).tool_call_id,
+                  content: block.content
+                }
+              ]
+            : []
+        )
       : []
-  )
+  })
+}
 
 const flushTimers = () => new Promise<void>((resolve) => setTimeout(resolve, 5))
 
@@ -110,14 +130,12 @@ it("a call still running at the budget gives the model a receipt and delivers it
     {
       id: "slow",
       content: expect.stringContaining('"status":"running"'),
-      launch: { call_id: "slow", delivery: "message" }
+      launch: { call_id: "slow" }
     }
   ])
   expect(executions).toBe(1)
   expect(completed).toEqual(["slow"])
-  expect(deliveries(requests[2] ?? [])).toEqual([
-    { id: "async-result:slow", content: "slow result" }
-  ])
+  expect(deliveries(requests[2] ?? [])).toEqual([{ id: "slow", content: "slow result" }])
 })
 
 it("moving a state change to the background lets the next one start; a later write in its group still waits", async () => {
@@ -153,9 +171,7 @@ it("moving a state change to the background lets the next one start; a later wri
   const result = await running
   expect(whileSlowRuns).toEqual(["slow_write", "other_write"])
   expect(executed).toEqual(["slow_write", "other_write", "same_group_write"])
-  expect(deliveries(result.messages)).toEqual([
-    { id: "async-result:slow_write", content: "slow_write done" }
-  ])
+  expect(deliveries(result.messages)).toEqual([{ id: "slow_write", content: "slow_write done" }])
 })
 
 it("a call waiting on its approval gate never moves to the background, and the state change after it waits", async () => {
@@ -233,7 +249,7 @@ it("a restart while a backgrounded call runs recovers its outcome like any backg
       }
     }
   ).run(saved)
-  expect(deliveries(result.messages)).toEqual([{ id: "async-result:write", content: "uncertain" }])
+  expect(deliveries(result.messages)).toEqual([{ id: "write", content: "uncertain" }])
   expect(result.stop_reason).toBe("end_turn")
 })
 
@@ -270,9 +286,9 @@ it("a tool that declares nothing about the background, like an MCP tool, moves t
     }
   ).run([{ role: "user", content: "Go" }])
   expect(toolMessages(requests[1] ?? []).map((message) => message.launch)).toEqual([
-    { call_id: "logs", delivery: "message" }
+    { call_id: "logs" }
   ])
-  expect(deliveries(result.messages)).toEqual([{ id: "async-result:logs", content: "logs" }])
+  expect(deliveries(result.messages)).toEqual([{ id: "logs", content: "logs" }])
 })
 
 it("a pause is emitted at once while a background call runs on, and the resumed run delivers its result once", async () => {
@@ -327,9 +343,7 @@ it("a pause is emitted at once while a background call runs on, and the resumed 
   expect(pausedWhileRunning).toBe(true)
   expect(longSignal?.aborted).toBe(false)
   expect(longRuns).toBe(1)
-  expect(deliveries(resumed.messages)).toEqual([
-    { id: "async-result:long", content: "long result" }
-  ])
+  expect(deliveries(resumed.messages)).toEqual([{ id: "long", content: "long result" }])
   expect(resumed.stop_reason).toBe("end_turn")
 })
 
@@ -366,10 +380,10 @@ it("a moved call that later asks for approval pauses the run, and the resumed ru
   expect(paused.stop_reason).toBe("paused")
   expect(paused.paused_tools.map((tool) => tool.name)).toEqual(["slow"])
   expect(toolMessages(paused.messages).map((message) => message.launch)).toEqual([
-    { call_id: "slow", delivery: "message" }
+    { call_id: "slow" }
   ])
   expect(runs).toBe(2)
-  expect(deliveries(resumed.messages)).toEqual([{ id: "async-result:slow", content: "done" }])
+  expect(deliveries(resumed.messages)).toEqual([{ id: "slow", content: "done" }])
 })
 
 const pausedBesideLongCall = async () => {
@@ -438,7 +452,7 @@ it("approving while a held background call still runs delivers its result once, 
   const result = await resumed
   expect([...setup.held.keys()]).toEqual(["long"])
   expect(setup.longRuns()).toBe(1)
-  expect(deliveries(result.messages)).toEqual([{ id: "async-result:long", content: "long result" }])
+  expect(deliveries(result.messages)).toEqual([{ id: "long", content: "long result" }])
   expect(result.stop_reason).toBe("end_turn")
 })
 

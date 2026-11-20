@@ -426,9 +426,6 @@ export const hasResumableTail = (
   if (last === undefined) return false
   if (last.role === "tool" ? !certifiedToolTail : last.role !== "assistant" || hasToolIntent(last))
     return true
-  const delivered = new Set(
-    messages.flatMap((message) => (message.client_id === undefined ? [] : [message.client_id]))
-  )
   const toolOutputs = new Set(
     messages.flatMap((message) =>
       message.role === "tool" &&
@@ -459,18 +456,7 @@ export const hasResumableTail = (
       )
   )
   if (unfinishedCall) return true
-  return messages.some((message) => {
-    const launch = message.async_tool_launch
-    if (
-      !Predicate.isObject(launch) ||
-      typeof launch.call_id !== "string" ||
-      (launch.delivery !== "native" && launch.delivery !== "message")
-    )
-      return false
-    return launch.delivery === "message"
-      ? !delivered.has(`async-result:${launch.call_id}`)
-      : !toolOutputs.has(launch.call_id)
-  })
+  return [...launched].some((callId) => !toolOutputs.has(callId))
 }
 
 export const writeCommunicationEnvelopeInTransaction = Effect.fn(

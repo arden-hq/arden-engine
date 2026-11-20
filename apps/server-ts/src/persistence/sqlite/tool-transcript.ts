@@ -68,11 +68,8 @@ const error = (
     ...(cause === undefined ? {} : { cause })
   })
 
-const recoveryMessageId = (
-  kind: "tool" | "tool-media",
-  runId: string,
-  toolCallId: string
-): string => `${kind}-recovered-${sha256Hex(`${runId}\0${toolCallId}\0${kind}`)}`
+const recoveryMessageId = (runId: string, toolCallId: string): string =>
+  `tool-recovered-${sha256Hex(`${runId}\0${toolCallId}\0tool`)}`
 
 const loadToolCallPositions = Effect.fn("ToolTranscript.loadToolCallPositions")(function* (
   input: RecoverToolTranscriptInput
@@ -146,18 +143,6 @@ const existingToolOutputs = (
     message.role === "tool" ? decodeOptionalId(message.tool_call_id) : Option.none()
   )
 
-const existingToolMedia = (
-  messages: ReadonlyArray<StoredMessageEnvelope>
-): ReadonlyMap<string, ReadonlyArray<StoredMessageEnvelope>> =>
-  messagesByToolCallId(messages, (message) => {
-    if (message.role !== "user") return Option.none()
-    return Option.flatMap(decodeOptionalId(message.client_id), (clientId) =>
-      clientId.startsWith("tool-media:")
-        ? Option.some(clientId.slice("tool-media:".length))
-        : Option.none()
-    )
-  })
-
 const decodeEnvelope = Effect.fn("ToolTranscript.decodeEnvelope")(function* (
   input: RecoverToolTranscriptInput,
   candidate: unknown
@@ -173,19 +158,25 @@ const toolOutputEnvelope = (
 ): Effect.Effect<StoredMessageEnvelope, ChatWriteError> =>
   decodeEnvelope(input, {
     ...(execution.result.message_extras ?? {}),
-    message_id: recoveryMessageId("tool", input.runId, execution.toolCallId),
+    message_id: recoveryMessageId(input.runId, execution.toolCallId),
     role: "tool",
     created_at: execution.endedAt,
     tool_call_id: execution.toolCallId,
-    content: execution.result.content
+    content: execution.result.content,
+    ...mediaOf(execution)
   })
+
+const mediaOf = (execution: SettledRunToolExecution) =>
+  (execution.result.model_content?.length ?? 0) > 0
+    ? { model_content: execution.result.model_content }
+    : {}
 
 const missingToolOutputEnvelope = (
   input: RecoverToolTranscriptInput,
   toolCallId: string
 ): Effect.Effect<StoredMessageEnvelope, ChatWriteError> =>
   decodeEnvelope(input, {
-    message_id: recoveryMessageId("tool", input.runId, toolCallId),
+    message_id: recoveryMessageId(input.runId, toolCallId),
     role: "tool",
     created_at: input.terminalAt,
     tool_call_id: toolCallId,
@@ -195,61 +186,31 @@ const missingToolOutputEnvelope = (
         : "The tool was not executed because the assistant run ended before it started."
   })
 
-const toolMediaEnvelope = (
-  input: RecoverToolTranscriptInput,
-  execution: SettledRunToolExecution
-): Effect.Effect<StoredMessageEnvelope, ChatWriteError> =>
-  decodeEnvelope(input, {
-    message_id: recoveryMessageId("tool-media", input.runId, execution.toolCallId),
-    role: "user",
-    created_at: execution.endedAt,
-    client_id: `tool-media:${execution.toolCallId}`,
-    is_meta: true,
-    content: [
-      {
-        type: "context",
-        content_type: "tool_result_media",
-        content: `Media returned by tool ${execution.toolName}.`,
-        metadata: {
-          tool_call_id: execution.toolCallId,
-          tool_name: execution.toolName
-        }
-      },
-      ...(execution.result.model_content ?? [])
-    ]
-  })
-
 const validateExistingEnvelope = Effect.fn("ToolTranscript.validateExistingEnvelope")(function* (
   input: RecoverToolTranscriptInput,
-  kind: "output" | "media",
   toolCallId: string,
   existing: ReadonlyArray<StoredMessageEnvelope>,
   expected: StoredMessageEnvelope | undefined,
-  settled: boolean,
   confirmedOutcome: boolean
 ): Effect.fn.Return<boolean, ChatWriteError> {
   if (existing.length > 1) {
-    return yield* error(input, `Stored tool ${kind} is duplicated: ${toolCallId}`)
+    return yield* error(input, `Stored tool output is duplicated: ${toolCallId}`)
   }
   const actual = existing[0]
   if (actual === undefined) return false
-  if (expected === undefined) {
-    if (kind === "output") return true
-    if (settled) return true
-    return yield* error(input, `Stored tool ${kind} has no matching durable result: ${toolCallId}`)
-  }
+  if (expected === undefined) return true
   const comparable = {
     ...expected,
     message_id: actual.message_id,
     created_at: actual.created_at
   }
   if (!messageEquivalent(withoutTurnStamp(actual), withoutTurnStamp(comparable))) {
-    if (kind === "output" && confirmedOutcome && actual.content === UNCERTAIN_TOOL_RESULT.content) {
+    if (confirmedOutcome && actual.content === UNCERTAIN_TOOL_RESULT.content) {
       return true
     }
     return yield* error(
       input,
-      `Stored tool ${kind} disagrees with its durable result: ${toolCallId}`
+      `Stored tool output disagrees with its durable result: ${toolCallId}`
     )
   }
   return true
@@ -270,8 +231,7 @@ const matchingExecutionForPosition = (
 
 const decodeBackgroundLaunch = Schema.decodeUnknownOption(
   Schema.Struct({
-    call_id: Schema.NonEmptyString,
-    delivery: Schema.Literals(["native", "message"])
+    call_id: Schema.NonEmptyString
   })
 )
 
@@ -290,12 +250,11 @@ const recoverBackgroundToolMessages = Effect.fn("ToolTranscript.recoverBackgroun
       if (launch === undefined) continue
       if (ids.has(launch.call_id)) return yield* error(input, "Duplicate background tool launch")
       ids.add(launch.call_id)
-      const existing = input.activeMessages.filter((item) =>
-        launch.delivery === "native"
-          ? item.role === "tool" &&
-            item.tool_call_id === launch.call_id &&
-            item.async_tool_launch === undefined
-          : item.client_id === `async-result:${launch.call_id}`
+      const existing = input.activeMessages.filter(
+        (item) =>
+          item.role === "tool" &&
+          item.tool_call_id === launch.call_id &&
+          item.async_tool_launch === undefined
       )
       if (existing.length > 0) continue
       const execution = input.executions.find((item) => item.toolCallId === launch.call_id)
@@ -325,42 +284,17 @@ const recoverBackgroundToolMessages = Effect.fn("ToolTranscript.recoverBackgroun
       const content =
         execution?.result.content ??
         "Background execution was interrupted. Its outcome is unavailable; check the target state before retrying."
-      const recovered =
-        launch.delivery === "native"
-          ? {
-              message_id: recoveryMessageId("tool", input.runId, launch.call_id),
-              role: "tool",
-              tool_call_id: launch.call_id,
-              content
-            }
-          : {
-              message_id: `async-result:${launch.call_id}`,
-              role: "user",
-              client_id: `async-result:${launch.call_id}`,
-              is_meta: true,
-              content: [
-                {
-                  type: "context",
-                  content_type: "async_tool_result",
-                  content,
-                  metadata: { tool_call_id: launch.call_id, tool_name: call.function.name }
-                }
-              ]
-            }
       messages.push(
         yield* decodeEnvelope(input, {
           ...(execution?.result.message_extras ?? {}),
-          ...recovered,
+          message_id: recoveryMessageId(input.runId, launch.call_id),
+          role: "tool",
+          tool_call_id: launch.call_id,
+          content,
+          ...(execution === undefined ? {} : mediaOf(execution)),
           created_at: execution?.endedAt ?? input.terminalAt
         })
       )
-      if (
-        execution !== undefined &&
-        (execution.result.model_content?.length ?? 0) > 0 &&
-        !input.activeMessages.some((item) => item.client_id === `tool-media:${launch.call_id}`)
-      ) {
-        messages.push(yield* toolMediaEnvelope(input, execution))
-      }
     }
     return { messages, ids }
   }
@@ -396,11 +330,9 @@ export const recoverTerminalToolMessages = Effect.fn("ToolTranscript.recoverTerm
           : yield* toolOutputEnvelope(input, matchingExecution)
       const present = yield* validateExistingEnvelope(
         input,
-        "output",
         position.toolCallId,
         outputs.get(position.toolCallId) ?? [],
         expected,
-        execution !== undefined,
         execution?.confirmedOutcome === true
       )
       if (present) continue
@@ -411,26 +343,6 @@ export const recoverTerminalToolMessages = Effect.fn("ToolTranscript.recoverTerm
         )
       }
       recovered.push(expected ?? (yield* missingToolOutputEnvelope(input, position.toolCallId)))
-    }
-    for (const position of positions) {
-      const media = existingToolMedia(input.activeMessages.slice(position.messageIndex + 1))
-      const execution = matchingExecutionForPosition(position, executions.get(position.toolCallId))
-      const hasDurableMedia =
-        execution !== undefined &&
-        execution.result.model_content !== undefined &&
-        execution.result.model_content.length > 0
-      const expected = hasDurableMedia ? yield* toolMediaEnvelope(input, execution) : undefined
-      const present = yield* validateExistingEnvelope(
-        input,
-        "media",
-        position.toolCallId,
-        media.get(position.toolCallId) ?? [],
-        expected,
-        execution !== undefined,
-        false
-      )
-      if (present || expected === undefined) continue
-      recovered.push(expected)
     }
     return recovered
   }

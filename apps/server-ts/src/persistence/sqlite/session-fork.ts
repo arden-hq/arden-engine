@@ -26,74 +26,19 @@ export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(functi
         : []
     )
   )
-  const deliveredPortableResults = new Set(
-    kept.flatMap((message) =>
-      typeof message.client_id === "string" && message.client_id.startsWith("async-result:")
-        ? [message.client_id.slice("async-result:".length)]
-        : []
-    )
-  )
-  const launches = new Map<string, "native" | "message">()
-  for (const message of kept) {
-    const launch = message.async_tool_launch
-    if (
-      typeof launch === "object" &&
-      launch !== null &&
-      "call_id" in launch &&
-      typeof launch.call_id === "string" &&
-      "delivery" in launch &&
-      (launch.delivery === "native" || launch.delivery === "message")
-    )
-      launches.set(launch.call_id, launch.delivery)
-  }
   const open = kept.flatMap((message) => {
     if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) return []
     return message.tool_calls.flatMap((call: unknown) => {
       const id = typeof call === "object" && call !== null && "id" in call ? call.id : undefined
-      if (typeof id !== "string") return []
-      const delivery = launches.get(id)
-      const completed =
-        delivery === "message" ? deliveredPortableResults.has(id) : completedToolCalls.has(id)
-      if (completed) return []
-      const functionValue =
-        typeof call === "object" && call !== null && "function" in call ? call.function : undefined
-      const toolName =
-        typeof functionValue === "object" && functionValue !== null && "name" in functionValue
-          ? functionValue.name
-          : undefined
-      return [{ id, delivery, toolName: typeof toolName === "string" ? toolName : "tool" }]
+      return typeof id === "string" && !completedToolCalls.has(id) ? [id] : []
     })
   })
-  const closing = open.flatMap(
-    ({ id, delivery, toolName }): Readonly<Record<string, unknown>>[] => {
-      const content = input.closeOpenCall(id)
-      if (delivery === "message")
-        return [
-          {
-            message_id: `fork-close-async:${id}`,
-            client_id: `async-result:${id}`,
-            role: "user",
-            is_meta: true,
-            content: [
-              {
-                type: "context",
-                content_type: "async_tool_result",
-                content,
-                metadata: { tool_call_id: id, tool_name: toolName }
-              }
-            ]
-          }
-        ]
-      return [
-        {
-          message_id: `fork-close:${id}`,
-          role: "tool",
-          tool_call_id: id,
-          content
-        }
-      ]
-    }
-  )
+  const closing = open.map((id): Readonly<Record<string, unknown>> => ({
+    message_id: `fork-close:${id}`,
+    role: "tool",
+    tool_call_id: id,
+    content: input.closeOpenCall(id)
+  }))
   return yield* Effect.forEach([...kept, ...closing], (message, index) => {
     const { turn_id: _turn, ...fields } = message
     return Schema.decodeUnknownEffect(StoredMessageEnvelopeSchema)({

@@ -222,32 +222,18 @@ const earliestLaunch = (
   return index < 0 ? undefined : index
 }
 
-const CALL_CLIENT_ID = /^(?:async-result|tool-media):(.+)$/
-
-const referencedCallIds = (message: StoredMessageEnvelope): ReadonlyArray<string> => {
-  const launch = message.async_tool_launch
-  const client =
-    typeof message.client_id === "string" ? CALL_CLIENT_ID.exec(message.client_id) : null
-  return [
-    ...(message.role === "tool" && typeof message.tool_call_id === "string"
-      ? [message.tool_call_id]
-      : []),
-    ...(Predicate.isObject(launch) && typeof launch.call_id === "string" ? [launch.call_id] : []),
-    ...(client?.[1] === undefined ? [] : [client[1]])
-  ]
-}
+const referencedCallIds = (message: StoredMessageEnvelope): ReadonlyArray<string> =>
+  message.role === "tool" && typeof message.tool_call_id === "string" ? [message.tool_call_id] : []
 
 const openLaunches = (messages: ReadonlyArray<StoredMessageEnvelope>): ReadonlySet<string> => {
   const settled = new Set(
-    messages.flatMap((message) => {
-      if (message.role === "tool" && message.async_tool_launch === undefined)
-        return typeof message.tool_call_id === "string" ? [message.tool_call_id] : []
-      const client =
-        typeof message.client_id === "string" && message.client_id.startsWith("async-result:")
-          ? message.client_id.slice("async-result:".length)
-          : undefined
-      return client === undefined ? [] : [client]
-    })
+    messages.flatMap((message) =>
+      message.role === "tool" &&
+      message.async_tool_launch === undefined &&
+      typeof message.tool_call_id === "string"
+        ? [message.tool_call_id]
+        : []
+    )
   )
   return new Set(
     messages.flatMap((message) => {

@@ -172,7 +172,6 @@ const convertMessages = (
       continue
     }
     if (message.role === "user") {
-      if (message.async_tool_launch !== undefined) continue
       if (message.interaction !== undefined) {
         batches.push({
           items: [

@@ -68,8 +68,7 @@ export class StreamingTools {
     if (isBackgroundCall(call, meta, view.asyncMode)) {
       const output = await run.background.launch({
         calls: [call],
-        metas: view.metas,
-        mode: view.asyncMode
+        metas: view.metas
       })
       if (output.completions.length > 0 || output.paused.length > 0)
         this.pending.push(Promise.resolve({ kind: "completed", output, messages: [] }))

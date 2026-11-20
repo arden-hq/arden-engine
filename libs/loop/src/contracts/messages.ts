@@ -172,16 +172,13 @@ export type AssistantOutputPart =
  */
 interface MessageFields extends Metadata {
   readonly message_id?: string
-  /** Host idempotency key; the loop writes `tool-media:` and `async-result:` envelopes. */
   readonly client_id?: string
   /** A harness-written envelope rather than authored text. */
   readonly is_meta?: boolean
 }
 
-/** Durable record that a background call was launched and how its result returns. */
 export interface AsyncToolLaunch {
   readonly call_id: string
-  readonly delivery: "native" | "message"
 }
 
 export interface SystemMessage extends MessageFields {
@@ -214,7 +211,6 @@ export interface UserMessage extends MessageFields {
   /** One quoted message, or several. Stored histories hold either form; read it
    *  through `replyContexts`. */
   readonly replyTo?: ReplyContext | ReadonlyArray<ReplyContext>
-  readonly async_tool_launch?: AsyncToolLaunch
   /** On the correction `hooks.checkFinalText` appended: the assistant records
    *  of the answer it sent back. Durable with the history, so a host that
    *  resumes the run knows the check already ran and what it replaced. */
@@ -241,6 +237,7 @@ export interface ToolResultMessage extends MessageFields {
   readonly tool_call_id: string
   readonly content: string
   readonly async_tool_launch?: AsyncToolLaunch
+  readonly model_content?: ReadonlyArray<ContentBlock>
 }
 
 export type ChatMessage =
@@ -293,7 +290,7 @@ export type ProviderState = Readonly<Record<string, JsonValue>>
 
 /** Allocate opaque message identities with the platform Web Crypto API. */
 export const messageId = (
-  kind: "text" | "reasoning" | "tool" | "tool-media" | "tool-load" | "tool-change"
+  kind: "text" | "reasoning" | "tool" | "tool-load" | "tool-change"
 ): string => `${kind}-${globalThis.crypto.randomUUID()}`
 
 /**

@@ -132,15 +132,8 @@ describe("pause and durable recovery", () => {
         role: "tool",
         tool_call_id: "missing",
         content: "recovered from store",
-        replayed: true
-      })
-    )
-    expect(result.messages).toContainEqual(
-      expect.objectContaining({
-        role: "user",
-        client_id: "tool-media:missing",
-        is_meta: true,
-        content: expect.arrayContaining([recoveredContext])
+        replayed: true,
+        model_content: expect.arrayContaining([recoveredContext])
       })
     )
   })
@@ -247,10 +240,10 @@ describe("pause and durable recovery", () => {
           ]
         },
         {
-          role: "user",
-          is_meta: true,
-          content: [],
-          async_tool_launch: { call_id: "bg", delivery: "native" }
+          role: "tool",
+          tool_call_id: "bg",
+          content: "running",
+          async_tool_launch: { call_id: "bg" }
         },
         ...(bgOutput ? [{ role: "tool" as const, tool_call_id: "bg", content: "1 event" }] : [])
       ]

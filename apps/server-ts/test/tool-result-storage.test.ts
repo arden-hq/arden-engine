@@ -490,23 +490,8 @@ describe("tool result storage", () => {
           role: "tool",
           created_at: expect.any(String),
           tool_call_id: "large",
-          content: largeResult.content
-        },
-        {
-          message_id: expect.stringMatching(/^tool-media-recovered-/),
-          role: "user",
-          created_at: expect.any(String),
-          client_id: "tool-media:large",
-          is_meta: true,
-          content: [
-            {
-              type: "context",
-              content_type: "tool_result_media",
-              content: "Media returned by tool web_fetch.",
-              metadata: { tool_call_id: "large", tool_name: "web_fetch" }
-            },
-            IMAGE
-          ]
+          content: largeResult.content,
+          model_content: [IMAGE]
         }
       ])
     })
