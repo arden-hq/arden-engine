@@ -1,4 +1,4 @@
-import type { ChatMessage, ContentBlock, ToolCall } from "../contracts/messages.js"
+import type { ChatMessage, ContentBlock, ToolCall } from "../../contracts/messages.js"
 
 export const projectToolHistory = (options: {
   readonly messages: ReadonlyArray<ChatMessage>

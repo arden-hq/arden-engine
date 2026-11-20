@@ -8,6 +8,8 @@
 
 export { isAbortError, raceAbort } from "../../abort.js"
 export { contextBlockText } from "./content.js"
+export { isAgentMail, rendersAsText } from "../../contracts/interactions.js"
+export { projectToolHistory } from "./tool-results.js"
 export { reportedCost } from "./cost.js"
 export {
   HttpStatusError,

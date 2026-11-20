@@ -28,7 +28,7 @@ import {
 } from "../kit/index.js"
 import { OpenAiResponsesProviderError, statusFailureCode } from "./errors.js"
 import { asRecord, type RawResponseEvent } from "./items.js"
-import { makePayload } from "./request.js"
+import { makePayload, responsesRoute } from "./request.js"
 import { makeEventMapper } from "./response.js"
 
 export { OpenAiResponsesProviderError, statusFailureCode } from "./errors.js"
@@ -167,12 +167,13 @@ export const makeOpenAiResponsesProvider = (
     options.omitMaxOutputTokens === true
       ? async (model) => ({ ...(await declared(model)), outputLimit: "omitted" })
       : declared
-  const stream = (request: ModelProviderRequest) => {
+  const stream = async (request: ModelProviderRequest) => {
     const payloadRequest =
       options.omitMaxOutputTokens === true
         ? (({ maxOutputTokens: _, ...rest }) => rest)(request)
         : request
-    const payload = makePayload(payloadRequest, modelPrefix, defaultInstructions)
+    const route = responsesRoute(await capabilities(request.model))
+    const payload = makePayload(payloadRequest, modelPrefix, defaultInstructions, route)
     return streamResponse(request, resolved, JSON.stringify(payload))
   }
   return Object.freeze({

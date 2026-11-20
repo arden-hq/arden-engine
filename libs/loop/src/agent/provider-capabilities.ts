@@ -1,6 +1,4 @@
 import { UnsupportedStructuredOutputError } from "../errors.js"
-import { projectToolHistory } from "./history-projection.js"
-import { projectInteractions } from "./interactions.js"
 import { projectReplies } from "./replies.js"
 import { canRunInBackground, type ToolDeclaration, type ToolEntry } from "../contracts/tools.js"
 import type { ModelCapabilities, ModelProvider, ModelRequest } from "../contracts/provider.js"
@@ -46,15 +44,7 @@ export const prepareProviderRequest = async (options: {
   }
   const prepared = {
     ...request,
-    messages: projectReplies(
-      projectInteractions(
-        projectToolHistory({
-          messages: request.messages,
-          nativeAsync: capabilities.asyncTools === "native"
-        }),
-        capabilities.agentMessages === "native"
-      )
-    ),
+    messages: projectReplies(request.messages),
     tools: (capabilities.toolSearch === "client"
       ? request.tools
       : [...request.tools, ...request.deferredTools]

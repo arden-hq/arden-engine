@@ -1,13 +1,16 @@
 import type { AssistantMessage, ChatMessage, ProviderToolCall } from "../../contracts/messages.js"
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
-import type { ModelProviderRequest } from "../../contracts/provider.js"
+import type { ModelCapabilities, ModelProviderRequest } from "../../contracts/provider.js"
 import {
   contextBlockText,
   isToolSearchCall,
   MISSING_TOOL_OUTPUT,
   orderToolHistory,
   type ToolHistoryBatch,
-  type ToolHistoryWire
+  type ToolHistoryWire,
+  isAgentMail,
+  projectToolHistory,
+  rendersAsText
 } from "../kit/index.js"
 import { OpenAiResponsesProviderError } from "./errors.js"
 import { API, asRecord, WEB_SEARCH_TOOL_NAME, type InputItem } from "./items.js"
@@ -128,14 +131,29 @@ const userContent = (message: ChatMessage): string | ReadonlyArray<InputItem> =>
   })
 }
 
+export interface ResponsesRoute {
+  readonly agentMessages: "native" | "message"
+  readonly asyncTools: "native" | "message"
+}
+
+export const responsesRoute = (capabilities: ModelCapabilities): ResponsesRoute => ({
+  agentMessages: capabilities.agentMessages ?? "message",
+  asyncTools: capabilities.asyncTools ?? "message"
+})
+
 const convertMessages = (
-  messages: ReadonlyArray<ChatMessage>,
+  stored: ReadonlyArray<ChatMessage>,
   renderInteraction: ModelProviderRequest["renderInteraction"],
   toolSearch: ToolSearch | undefined,
-  asyncTools: ReadonlySet<string>
+  asyncTools: ReadonlySet<string>,
+  route: ResponsesRoute
 ): { readonly instructions?: string; readonly input: ReadonlyArray<InputItem> } => {
   const instructions: Array<string> = []
   const batches: Array<ToolHistoryBatch<InputItem>> = []
+  const messages = projectToolHistory({
+    messages: stored,
+    nativeAsync: route.asyncTools === "native"
+  })
 
   for (const message of messages) {
     if (message.role === "system") {
@@ -172,18 +190,28 @@ const convertMessages = (
       continue
     }
     if (message.role === "interaction") {
-      if (message.to === undefined)
-        throw new OpenAiResponsesProviderError("An agent message needs its recipient")
+      if (route.agentMessages === "native" && isAgentMail(message) && message.to !== undefined) {
+        batches.push({
+          items: [
+            {
+              type: "agent_message",
+              author: message.from.id,
+              recipient: message.to.id,
+              content: [{ type: "input_text", text: renderInteraction(message) }]
+            }
+          ],
+          deferWhileCallsPending: false
+        })
+        continue
+      }
       batches.push({
         items: [
           {
-            type: "agent_message",
-            author: message.from.id,
-            recipient: message.to.id,
-            content: [{ type: "input_text", text: renderInteraction(message) }]
+            role: "user",
+            content: rendersAsText(message) ? renderInteraction(message) : userContent(message)
           }
         ],
-        deferWhileCallsPending: false
+        deferWhileCallsPending: !rendersAsText(message)
       })
       continue
     }
@@ -331,10 +359,11 @@ const FUNCTION_CALL_HISTORY: ToolHistoryWire<InputItem> = {
 export const makePayload = (
   request: ModelProviderRequest,
   modelPrefix: string,
-  defaultInstructions: string | undefined
+  defaultInstructions: string | undefined,
+  route: ResponsesRoute
 ): ResponsesPayload => {
   try {
-    return buildPayload(request, modelPrefix, defaultInstructions)
+    return buildPayload(request, modelPrefix, defaultInstructions, route)
   } catch (error) {
     if (error instanceof OpenAiResponsesProviderError && error.code === "provider_error") {
       throw new OpenAiResponsesProviderError(error.message, "request_invalid")
@@ -346,7 +375,8 @@ export const makePayload = (
 const buildPayload = (
   request: ModelProviderRequest,
   modelPrefix: string,
-  defaultInstructions: string | undefined
+  defaultInstructions: string | undefined,
+  route: ResponsesRoute
 ): ResponsesPayload => {
   const asyncTools = new Set(
     [...request.tools, ...request.deferredTools].flatMap((tool) =>
@@ -357,7 +387,8 @@ const buildPayload = (
     request.messages,
     request.renderInteraction,
     request.toolSearch,
-    asyncTools
+    asyncTools,
+    route
   )
   const catalog = decodeTools(request.tools)
   const tools =

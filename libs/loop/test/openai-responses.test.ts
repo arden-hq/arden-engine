@@ -386,7 +386,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     expect(transport.requests).toHaveLength(1)
   })
 
-  it("rejects a function-call output without its matching call before transport", () => {
+  it("rejects a function-call output without its matching call before transport", async () => {
     const transport = makeTransport([])
     const provider = makeOpenAiResponsesProvider({ auth: staticAuth, fetch: transport.fetchImpl })
 
@@ -398,8 +398,8 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       ]
     }
 
-    expect(() => provider.stream(request)).toThrow(OpenAiResponsesProviderError)
-    expect(() => provider.stream(request)).toThrow(
+    await expect(provider.stream(request)).rejects.toThrow(OpenAiResponsesProviderError)
+    await expect(provider.stream(request)).rejects.toThrow(
       "Stored OpenAI tool history contains output without matching function call call-missing"
     )
     expect(transport.requests).toEqual([])

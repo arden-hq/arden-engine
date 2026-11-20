@@ -1,10 +1,12 @@
 import { expect, it } from "vitest"
-import type { ChatMessage, InteractionMessage } from "../src/index.js"
-import { projectInteractions } from "../src/agent/interactions.js"
+import type { InteractionMessage } from "../src/index.js"
+import { renderInteraction } from "../src/agent/interactions.js"
+import { makePayload as chatCompletionsPayload } from "../src/providers/chat-completions/request.js"
+import { DEFAULT_COMPAT } from "../src/providers/chat-completions/compat.js"
+import { makePayload as responsesPayload } from "../src/providers/openai-responses/request.js"
 
 const workflow: InteractionMessage = {
   role: "interaction",
-  message_id: "w",
   from: { source: "workflow", id: "wf-1" },
   to: { source: "agent", id: "researcher" },
   kind: "completion",
@@ -13,7 +15,6 @@ const workflow: InteractionMessage = {
 }
 const peer: InteractionMessage = {
   role: "interaction",
-  message_id: "p",
   from: { source: "agent", id: "lead" },
   to: { source: "agent", id: "researcher" },
   kind: "message",
@@ -21,22 +22,45 @@ const peer: InteractionMessage = {
 }
 const notice: InteractionMessage = {
   role: "interaction",
-  message_id: "n",
   from: { source: "harness", id: "output_limit" },
   kind: "instruction",
   content: "Continue."
 }
-
-it("sends harness notices as the user's turn with their own content", () => {
-  expect(projectInteractions([notice], false)).toEqual([
-    { role: "user", message_id: "n", content: "Continue." }
-  ])
+const request = (messages: ReadonlyArray<InteractionMessage>) => ({
+  model: "m",
+  messages: [{ role: "user" as const, content: "Go" }, ...messages],
+  tools: [],
+  deferredTools: [],
+  toolChoice: "auto" as const,
+  renderInteraction
 })
 
-it("renders agent and workflow mail as text, or keeps agent mail native", () => {
-  const projected: ReadonlyArray<ChatMessage> = projectInteractions([workflow, peer], true)
-  expect(projected[0]).toMatchObject({ role: "assistant", message_id: "w" })
-  expect(projected[0]?.content).toContain("From: workflow:wf-1")
-  expect(projected[0]?.content).toContain("Outcome: completed\n[1, 2]")
-  expect(projected[1]).toBe(peer)
+it("a chat-completions request ends on the user's turn when a workflow result came last", () => {
+  const { messages } = chatCompletionsPayload(request([notice, workflow]), {
+    providerId: "p",
+    label: "p",
+    compat: DEFAULT_COMPAT,
+    extraBody: {}
+  })
+  expect(messages.map((message) => message.role)).toEqual(["user", "user", "user"])
+  expect(messages[1]).toEqual({ role: "user", content: "Continue." })
+  expect(messages.at(-1)?.content).toContain("From: workflow:wf-1")
+})
+
+it("Responses sends mail between agents natively only where the route carries it", () => {
+  const native = responsesPayload(request([peer, workflow]), "", undefined, {
+    agentMessages: "native",
+    asyncTools: "message"
+  }).input
+  expect(native[1]).toMatchObject({
+    type: "agent_message",
+    author: "lead",
+    recipient: "researcher"
+  })
+  expect(native[2]).toMatchObject({ role: "user" })
+  const plain = responsesPayload(request([peer]), "", undefined, {
+    agentMessages: "message",
+    asyncTools: "message"
+  }).input
+  expect(plain[1]).toMatchObject({ role: "user" })
 })

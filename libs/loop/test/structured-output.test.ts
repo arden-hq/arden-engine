@@ -81,7 +81,7 @@ describe("structured output", () => {
     expect(result.object).toEqual({ verdict: "fixed" })
     expect(script.requests).toHaveLength(2)
     const correction = lastOf(defined(script.requests[1], "a correction request").messages)
-    expect(correction).toMatchObject({ role: "user", message_id: expect.any(String) })
+    expect(correction).toMatchObject({ role: "interaction", message_id: expect.any(String) })
     expect(correction.content).toContain("verdict: verdict must be a string")
     expect(result.messages.filter((message) => message.role === "user")).toHaveLength(1)
     expect(result.messages.filter((message) => message.role === "interaction")).toMatchObject([
@@ -141,7 +141,7 @@ describe("final text check", () => {
     expect(checked).toEqual(["first answer"])
     expect(script.requests).toHaveLength(2)
     const correction = lastOf(defined(script.requests[1], "a correction request").messages)
-    expect(correction).toMatchObject({ role: "user", content: "Line 3: fix the block." })
+    expect(correction).toMatchObject({ role: "interaction", content: "Line 3: fix the block." })
     const firstAnswer = defined(
       final.messages.find(
         (message) => message.role === "assistant" && message.content === "first answer"

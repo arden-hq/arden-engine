@@ -18,7 +18,7 @@ import {
 import { errorMessage } from "@arden-hq/std/errors"
 import { OpenAiResponsesProviderError } from "./errors.js"
 import { asRecord, type RawResponseEvent } from "./items.js"
-import { makePayload } from "./request.js"
+import { makePayload, responsesRoute } from "./request.js"
 import { makeEventMapper, responseCode, responseFailureMessage } from "./response.js"
 import {
   incrementalInput,
@@ -110,7 +110,12 @@ export const openResponsesSession = (options: {
       options.omitMaxOutputTokens === true
         ? (({ maxOutputTokens: _, ...rest }) => rest)(request)
         : request
-    const payload = makePayload(requestPayload, options.modelPrefix, options.defaultInstructions)
+    const payload = makePayload(
+      requestPayload,
+      options.modelPrefix,
+      options.defaultInstructions,
+      responsesRoute(capabilities)
+    )
     const delta =
       capabilities.steering === "native" || previous === undefined
         ? undefined
@@ -156,7 +161,8 @@ export const openResponsesSession = (options: {
         const input = makePayload(
           { ...request, messages, tools: [], deferredTools: [] },
           options.modelPrefix,
-          undefined
+          undefined,
+          responsesRoute(capabilities)
         ).input
         steeredInput = [...steeredInput, ...input]
         if (connection === undefined)

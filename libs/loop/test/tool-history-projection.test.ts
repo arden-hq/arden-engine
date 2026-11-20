@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ChatMessage, ToolCall } from "../src/index.js"
-import { projectToolHistory } from "../src/agent/history-projection.js"
+import { projectToolHistory } from "../src/providers/kit/tool-results.js"
 
 const call = (id: string, async?: true): ToolCall => ({
   id,

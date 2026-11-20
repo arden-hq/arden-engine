@@ -1619,14 +1619,14 @@ describe("Chat Completions client tool search", () => {
         requested_model: "gpt-6.1-sol"
       }
     }
-    expect(() =>
+    await expect(
       responses.stream(
         searchRequest({
           model: "gpt-6.1-sol",
           messages: [messages[0] as ChatMessage, ownTurnWithoutItems]
         })
       )
-    ).toThrow("Stored provider tool history requires matching OpenAI response items")
+    ).rejects.toThrow("Stored provider tool history requires matching OpenAI response items")
   })
 
   it("runs search, then the loaded tool, then the answer through makeAgent", async () => {

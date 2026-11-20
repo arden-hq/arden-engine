@@ -18,7 +18,9 @@ import {
   sameRoute,
   TOOL_SEARCH_TOOL_NAME,
   type ToolHistoryBatch,
-  type ToolHistoryWire
+  type ToolHistoryWire,
+  projectToolHistory,
+  rendersAsText
 } from "../kit/index.js"
 import type { ChatCompletionsCompat } from "./compat.js"
 import { ChatCompletionsProviderError } from "./errors.js"
@@ -225,8 +227,9 @@ const convertMessages = (
   context: PayloadContext
 ): ReadonlyArray<WireMessage> => {
   const { compat, label } = context
-  const leading = request.messages.findIndex((message) => message.role !== "system")
-  const instructionMessages = leading < 0 ? request.messages : request.messages.slice(0, leading)
+  const messages = projectToolHistory({ messages: request.messages, nativeAsync: false })
+  const leading = messages.findIndex((message) => message.role !== "system")
+  const instructionMessages = leading < 0 ? messages : messages.slice(0, leading)
   const instructions = instructionMessages
     .map((message) => textContent(message, label))
     .filter((text) => text.length > 0)
@@ -236,7 +239,7 @@ const convertMessages = (
     api: API,
     requested_model: request.model
   }
-  const batches = (leading < 0 ? [] : request.messages.slice(leading)).flatMap(
+  const batches = (leading < 0 ? [] : messages.slice(leading)).flatMap(
     (message): ReadonlyArray<ToolHistoryBatch<WireMessage>> => {
       switch (message.role) {
         // A system or developer message inside the conversation stays where
@@ -254,8 +257,15 @@ const convertMessages = (
         case "interaction":
           return [
             {
-              items: [{ role: "user", content: request.renderInteraction(message) }],
-              deferWhileCallsPending: false
+              items: [
+                {
+                  role: "user",
+                  content: rendersAsText(message)
+                    ? request.renderInteraction(message)
+                    : userContent(message.content, compat, label)
+                }
+              ],
+              deferWhileCallsPending: !rendersAsText(message)
             }
           ]
         case "user": {
