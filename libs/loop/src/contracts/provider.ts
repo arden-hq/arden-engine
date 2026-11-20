@@ -185,8 +185,10 @@ export interface ModelProviderRequest {
   readonly signal?: AbortSignal
 }
 
+export const MODEL_PROVIDER_PROTOCOL = 2
+
 export interface ModelProvider {
-  readonly protocolVersion: 1
+  readonly protocolVersion: typeof MODEL_PROVIDER_PROTOCOL
   /** Allocate connection-local state for one agent invocation. */
   readonly openSession?: () => MaybePromise<ModelProviderSession>
   /** Optional native features, resolved for the actual model/endpoint route. */

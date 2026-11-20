@@ -8,7 +8,8 @@ import {
   type ModelProviderRequest,
   type Result,
   type StandardSchemaV1,
-  type Toolset
+  type Toolset,
+  MODEL_PROVIDER_PROTOCOL
 } from "../src/index.js"
 import { defined, isRecord, lastOf } from "./kit.js"
 
@@ -59,7 +60,7 @@ const scripted = (contents: ReadonlyArray<string>) => {
   const remaining = [...contents]
   const requests: ModelProviderRequest[] = []
   const provider: ModelProvider = {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: () => ({ hostedTools: [], structuredOutput: "native" }),
     stream: (request) => {
       requests.push(request)

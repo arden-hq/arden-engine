@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
 import type { ModelProvider, ModelProviderRequest, Toolset } from "@arden-hq/loop"
@@ -65,7 +66,7 @@ const runStatus = async (server: ServerHandle, runId: string) =>
 const overflowingOnce = () => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     stream: (request) => {
       requests.push(request)
       if (requests.length === 1)

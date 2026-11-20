@@ -3,7 +3,11 @@ import { retryAfterHints } from "@arden-hq/std/retry"
 import { makeCodexApprovalReview } from "./approval-review.js"
 import type { ApprovalReviewSource, TranscriptionSource } from "../../models/provider.js"
 import { NodeHttpClient } from "@effect/platform-node"
-import { resolveModelCapabilities, type ModelProvider } from "@arden-hq/loop"
+import {
+  resolveModelCapabilities,
+  type ModelProvider,
+  MODEL_PROVIDER_PROTOCOL
+} from "@arden-hq/loop"
 import { Effect, Predicate } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -385,7 +389,7 @@ export const makeOpenAiCodexRuntime = async (
         transcribe(options, baseUrl, clientVersion ?? (await resolveVersion()), audio, signal)
     },
     provider: {
-      protocolVersion: 1,
+      protocolVersion: MODEL_PROVIDER_PROTOCOL,
       capabilities: (model) => resolveModelCapabilities({ provider: current.provider, model }),
       openSession: () =>
         current.provider.openSession?.() ?? {

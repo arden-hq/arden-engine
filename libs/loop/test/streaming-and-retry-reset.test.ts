@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "../src/index.js"
 import { describe, expect, it } from "vitest"
 
 import { runModelTurn } from "../src/agent/model-turn.js"
@@ -63,7 +64,7 @@ const run = (
     ...(options.signal === undefined ? {} : { signal: options.signal })
   }
   const promise = runModelTurn({
-    provider: { protocolVersion: 1, stream: () => items },
+    provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => items },
     request,
     history,
     metas: options.metas ?? new Map(),

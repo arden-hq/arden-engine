@@ -2,7 +2,8 @@ import {
   addCost,
   providerErrorCode,
   type ModelProvider,
-  type ProviderErrorCode
+  type ProviderErrorCode,
+  MODEL_PROVIDER_PROTOCOL
 } from "@arden-hq/loop"
 import { writeAtomicSync } from "@arden-hq/std/atomic-file"
 import { readFileSync } from "node:fs"
@@ -122,7 +123,7 @@ export const meteredProvider = (provider: ModelProvider, options: MeterOptions):
     }
   const { capabilities, openSession } = provider
   return {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     ...(capabilities === undefined
       ? {}
       : {

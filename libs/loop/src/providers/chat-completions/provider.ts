@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "../../contracts/provider.js"
 /**
  * OpenAI-compatible Chat Completions streaming provider: llama.cpp
  * `llama-server`, OpenRouter, and any server that speaks
@@ -127,7 +128,7 @@ export const makeChatCompletionsProvider = (
     })
   }
   return Object.freeze({
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: options.capabilities ?? (() => capabilities),
     stream
   })

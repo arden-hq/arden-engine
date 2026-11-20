@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
 import type { ModelCapabilities, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
@@ -39,7 +40,7 @@ const host = (outputCap?: number): ModelHost => ({
 const recording = (outputLimit: ModelCapabilities["outputLimit"] = undefined) => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: () => ({
       hostedTools: [],
       structuredOutput: "native",

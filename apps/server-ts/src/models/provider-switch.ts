@@ -1,7 +1,8 @@
 import {
   resolveModelCapabilities,
   type ModelProvider,
-  type ModelProviderSession
+  type ModelProviderSession,
+  MODEL_PROVIDER_PROTOCOL
 } from "@arden-hq/loop"
 import { ProviderError } from "@arden-hq/loop/provider-kit"
 import { Context, Effect, Layer, Semaphore, type Schema } from "effect"
@@ -151,7 +152,7 @@ const mixed = (
   }
   const openSession = host?.openSession
   return {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: (model) => resolveModelCapabilities({ provider: pick(model), model }),
     stream: (request) => pick(request.model).stream(request),
     ...(openSession === undefined || host === undefined

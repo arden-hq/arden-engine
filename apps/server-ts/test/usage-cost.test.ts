@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import type { ModelProvider, Toolset } from "@arden-hq/loop"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
@@ -132,7 +133,7 @@ const noTools: Toolset = {
 
 /** A provider whose every answer reports `cost`, or none when undefined. */
 const answering = (cost: number | undefined): ModelProvider => ({
-  protocolVersion: 1,
+  protocolVersion: MODEL_PROVIDER_PROTOCOL,
   stream: (request) => [
     {
       _tag: "Completed",

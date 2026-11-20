@@ -1,4 +1,8 @@
-import { resolveModelCapabilities, type ModelProvider } from "@arden-hq/loop"
+import {
+  resolveModelCapabilities,
+  type ModelProvider,
+  MODEL_PROVIDER_PROTOCOL
+} from "@arden-hq/loop"
 import { Effect } from "effect"
 import type { ModelProviderOptions } from "../config/options.js"
 import type { ApprovalReviewSource, TranscriptionSource } from "../models/provider.js"
@@ -102,7 +106,7 @@ const startLazyProvider = (
       return (await ready).refreshModelHost()
     },
     provider: {
-      protocolVersion: 1,
+      protocolVersion: MODEL_PROVIDER_PROTOCOL,
       capabilities: async (model) =>
         resolveModelCapabilities({ provider: (await ready).provider, model }),
       openSession: async () => {

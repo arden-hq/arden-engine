@@ -94,7 +94,7 @@ Rules:
 
 Hosts with queued input expose `hooks.hasPendingInput`. The loop checks it just before dispatch. When input waits, unstarted calls get a retryable refusal. Started calls keep running. The next model boundary adds the input to the same run. `ToolCallRequest.beforeExecute` and `ToolContext.beforeExecute` carry this check through locks, approval gates and nested tools. A custom toolset must call it after its own waits.
 
-Provider capabilities choose `asyncTools: "native" | "message"`. The message strategy returns a launch receipt, then adds an `is_meta` completion message. The host turns on native async and WebSocket steering for routes it has verified. Every other route uses message delivery and steering at step boundaries. Resolve capabilities for the actual route with `resolveModelCapabilities`. Do not assume that a private endpoint supports all native features.
+Provider capabilities choose `asyncTools: "native" | "message"`. The message strategy returns a launch receipt, then the late result arrives as a second tool message for the same call. The host turns on native async and WebSocket steering for routes it has verified. Every other route uses message delivery and steering at step boundaries. Resolve capabilities for the actual route with `resolveModelCapabilities`. Do not assume that a private endpoint supports all native features.
 
 A provider may implement `openSession()` for invocation-local transport state. The Responses provider takes a host `connectWebSocket` function. It then owns steering, successors and continuations. Without it, input enters at step boundaries.
 
@@ -102,12 +102,15 @@ A provider may implement `openSession()` for invocation-local transport state. T
 
 A `ModelProvider` has a `stream(request)` function. It returns tagged items: `TextDelta`, `ReasoningDelta`, `ToolCallDelta`, `ProviderToolCall`, `ProviderStreamRetry` and one final `Completed`. Providers import only the kit and the root contracts. They never import `agent/`, `tools/` or `internal/`. A dependency-cruiser rule holds this.
 
+`protocolVersion` is `MODEL_PROVIDER_PROTOCOL`, now 2. In version 2 the request carries history as stored: interactions keep their own role, and a background call has a receipt and a later result under one call id. The adapter converts them for its wire.
+
 The provider owns prompt caching, replay state and transport retry. The host owns credentials. A factory only calls `auth.headers()` for each connection attempt.
 
 One implementation per concern, in the kit, so every adapter behaves the same:
 
 - `streamSse` is the connection loop: auth headers per attempt, one forced refresh on a 401 before anything was emitted, the error body read into the failure, the idle timeout, and the bounded retry announced by `ProviderStreamRetry`. An adapter supplies the URL, the body and an event mapper.
 - `classifyRejection` maps a refusal to a `ProviderErrorCode`. It holds the one table of context-overflow and model-unavailable wordings for every server we talk to. An overflow is decided by a structured class first, then HTTP 413, then the server's own message on a 400; a status that names its class (auth, throttle, unavailable) is never an overflow by prose. A router's relayed upstream error (OpenRouter's `metadata.raw`) is parsed as that upstream's own error body, and only its code and message field are read.
+- `projectToolHistory` turns stored tool messages into what a wire carries: a late result becomes context, media becomes a message. Run it before `orderToolHistory`.
 - `orderToolHistory` puts each tool output right after its call, holds context back while calls are pending, and closes an interrupted call with a "not recorded" output.
 - `contextBlockText` is how a `context` block reads to a model on any wire.
 - `reportedCost` reads the spend a response's usage reports, in US dollars, in OpenRouter's shape (`cost`, plus the upstream bill for a key of the person's own). It goes on `Usage.cost`, never computed from a price table. A total is the sum of every response's cost, and undefined as soon as one response reported none (llama.cpp and Codex report none), so a reported total is the whole spend and a reported 0 stays apart from "not reported". `Result.cost` is still what a host's `costCalculator` or `costGetter` says, for `maxCost`.

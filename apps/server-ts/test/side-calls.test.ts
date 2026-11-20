@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import type { ModelCapabilities, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
 import type { ModelAssignment } from "@arden-hq/protocol/models"
 import { Effect, Layer, Schema } from "effect"
@@ -21,7 +22,7 @@ import { partialService } from "./kit.js"
 const recording = (answer: string, outputLimit: ModelCapabilities["outputLimit"] = undefined) => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: () => ({
       hostedTools: [],
       structuredOutput: "native",

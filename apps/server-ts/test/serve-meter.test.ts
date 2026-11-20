@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import type { ModelProvider } from "@arden-hq/loop"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -9,7 +10,7 @@ const usageItem = { usage: { prompt_tokens: 7, completion_tokens: 2, cache_read_
 
 const route = (): ModelProvider =>
   ({
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: async () => ({
       hostedTools: [],
       structuredOutput: "native",

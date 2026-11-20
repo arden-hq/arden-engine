@@ -6,7 +6,8 @@ import {
   type ModelProvider,
   type ModelProviderRequest,
   type ModelRequestMiddleware,
-  type ModelStreamItem
+  type ModelStreamItem,
+  MODEL_PROVIDER_PROTOCOL
 } from "../src/index.js"
 import { makeChatCompletionsProvider } from "../src/providers/chat-completions/provider.js"
 import { SemanticResponseError } from "../src/providers/kit/errors.js"
@@ -45,7 +46,7 @@ const overflowingOnce = (): {
   return {
     requests,
     shape: {
-      protocolVersion: 1,
+      protocolVersion: MODEL_PROVIDER_PROTOCOL,
       stream: (request): ReadonlyArray<ModelStreamItem> => {
         requests.push(request)
         if (requests.length === 1)

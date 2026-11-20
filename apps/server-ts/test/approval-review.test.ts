@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { approvalReviewAuthority } from "../src/tools/approval-review-authority.js"
 import { ModelProviderService } from "../src/models/provider.js"
 import type { CompletionResponse } from "@arden-hq/loop"
@@ -713,7 +714,7 @@ it("captures the selected provider for an in-flight review and removes it on sig
   await Effect.runPromise(
     Effect.gen(function* () {
       const routes = yield* ModelProviderService
-      const provider = { protocolVersion: 1 as const, stream: () => [] }
+      const provider = { protocolVersion: MODEL_PROVIDER_PROTOCOL as const, stream: () => [] }
       const first = {
         modelId: "first",
         complete: async () =>

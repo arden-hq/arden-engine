@@ -1,4 +1,8 @@
-import { resolveModelCapabilities, type ModelProvider } from "@arden-hq/loop"
+import {
+  resolveModelCapabilities,
+  type ModelProvider,
+  MODEL_PROVIDER_PROTOCOL
+} from "@arden-hq/loop"
 import { ProviderError } from "@arden-hq/loop/provider-kit"
 import { makeChatCompletionsProvider } from "@arden-hq/loop/providers/chat-completions"
 import type { ModelDefinition } from "../../models/host.js"
@@ -124,7 +128,7 @@ export const chatCompletionsProvider = (input: {
     return provider
   }
   return {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: (model) => resolveModelCapabilities({ provider: pick(model), model }),
     stream: (request) => pick(request.model).stream(request)
   }

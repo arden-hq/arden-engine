@@ -7,7 +7,8 @@ import {
   type ModelProviderRequest,
   type ToolCallRequest,
   type ToolEntry,
-  type Toolset
+  type Toolset,
+  MODEL_PROVIDER_PROTOCOL
 } from "../src/index.js"
 import { deferred } from "./kit.js"
 
@@ -45,7 +46,7 @@ describe("cancellation mid-stream", () => {
     const started = deferred()
     let providerSignal: AbortSignal | undefined
     const provider = {
-      protocolVersion: 1 as const,
+      protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
       stream: ({ signal }: ModelProviderRequest) => {
         providerSignal = signal
         started.resolve()
@@ -92,7 +93,7 @@ describe("cancellation mid-stream", () => {
       { model: "test-model", maxToolConcurrency: 2 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: () => [
             response({
               finishReason: "tool_calls",
@@ -158,7 +159,7 @@ describe("cancellation mid-stream", () => {
       { model: "test-model" },
       {
         provider: {
-          protocolVersion: 1 as const,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
           stream: () => [
             response({
               finishReason: "tool_calls",

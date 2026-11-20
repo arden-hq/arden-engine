@@ -10,7 +10,8 @@ import {
   type StandardSchemaV1,
   type ToolCall,
   type ToolMeta,
-  type Toolset
+  type Toolset,
+  MODEL_PROVIDER_PROTOCOL
 } from "../src/index.js"
 import { deferred } from "./kit.js"
 
@@ -39,7 +40,7 @@ const toolsetOf = (
 })
 
 const scripted = (calls: ReadonlyArray<ToolCall>, requests: Array<ReadonlyArray<ChatMessage>>) => ({
-  protocolVersion: 1 as const,
+  protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
   stream: (request: { readonly messages: ReadonlyArray<ChatMessage> }) => {
     requests.push(structuredClone([...request.messages]))
     return [requests.length === 1 ? response(calls, "") : response()]
@@ -106,7 +107,7 @@ it("a call still running at the budget gives the model a receipt and delivers it
     { model: "test", foregroundBudgetMs: 0, maxIterations: 8 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         stream: (request) => {
           requests.push(structuredClone([...request.messages]))
           if (requests.length === 1) return [response([callOf("slow")], "")]
@@ -218,7 +219,7 @@ it("a restart while a backgrounded call runs recovers its outcome like any backg
       { model: "test", foregroundBudgetMs: 0 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: () => {
             if (checkpoints.length === 0) return [response([callOf("write")], "")]
             stop.abort()
@@ -238,7 +239,7 @@ it("a restart while a backgrounded call runs recovers its outcome like any backg
   const result = await makeAgent(
     { model: "test" },
     {
-      provider: { protocolVersion: 1, stream: () => [response()] },
+      provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
       toolset: toolsetOf([{ name: "write", changes_state: true }], () => {
         throw new Error("a recovered call must not run again")
       }),
@@ -274,7 +275,7 @@ it("a tool that declares nothing about the background, like an MCP tool, moves t
     { model: "test", foregroundBudgetMs: 0, maxIterations: 8 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         stream: (request) => {
           requests.push(structuredClone([...request.messages]))
           if (requests.length === 1) return [response([callOf("logs", mcp.definition.name)], "")]
@@ -326,7 +327,7 @@ it("a pause is emitted at once while a background call runs on, and the resumed 
   const resumed = await makeAgent(
     { model: "test" },
     {
-      provider: { protocolVersion: 1, stream: () => [response()] },
+      provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
       toolset: tools,
       hooks: {
         recoverToolCalls: (calls) =>
@@ -362,7 +363,7 @@ it("a moved call that later asks for approval pauses the run, and the resumed ru
     { model: "test", foregroundBudgetMs: 0, maxIterations: 8 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         stream: (request) => {
           if (!request.messages.some((message) => message.role === "tool"))
             return [response([callOf("slow")], "")]
@@ -375,7 +376,10 @@ it("a moved call that later asks for approval pauses the run, and the resumed ru
   ).run([{ role: "user", content: "Go" }])
   const resumed = await makeAgent(
     { model: "test" },
-    { provider: { protocolVersion: 1, stream: () => [response()] }, toolset: tools }
+    {
+      provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
+      toolset: tools
+    }
   ).run(paused.messages)
   expect(paused.stop_reason).toBe("paused")
   expect(paused.paused_tools.map((tool) => tool.name)).toEqual(["slow"])
@@ -433,7 +437,7 @@ it("approving while a held background call still runs delivers its result once, 
   const resumed = makeAgent(
     { model: "test" },
     {
-      provider: { protocolVersion: 1, stream: () => [response()] },
+      provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
       toolset: setup.tools,
       hooks: {
         claimBackgroundCalls: (ids) =>

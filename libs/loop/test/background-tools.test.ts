@@ -6,7 +6,8 @@ import {
   type ChatMessage,
   type CompletionResponse,
   type ToolCall,
-  type Toolset
+  type Toolset,
+  MODEL_PROVIDER_PROTOCOL
 } from "../src/index.js"
 import { deferred } from "./kit.js"
 
@@ -66,7 +67,7 @@ it.each(["native", "message"] as const)(
       { model: "test", maxIterations: 8, backgroundGraceMs: 0 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           capabilities: () => ({ hostedTools: [], structuredOutput: "none", asyncTools: mode }),
           stream: (request) => {
             requests.push(structuredClone(request.messages))
@@ -121,7 +122,7 @@ it("a message queued while the run waits on a background call steers it without 
     { model: "test", maxIterations: 8, backgroundGraceMs: 0 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         capabilities: () => ({ hostedTools: [], structuredOutput: "none", asyncTools: "message" }),
         stream: (request) => {
           step += 1
@@ -177,7 +178,7 @@ it.each(["native", "message"] as const)(
         { model: "test", maxIterations: 8, backgroundGraceMs: 100 },
         {
           provider: {
-            protocolVersion: 1,
+            protocolVersion: MODEL_PROVIDER_PROTOCOL,
             capabilities: () => ({ hostedTools: [], structuredOutput: "none", asyncTools: mode }),
             stream: (request) => {
               requests.push(JSON.stringify(request.messages))
@@ -233,7 +234,7 @@ it("never runs a detached tool in the background", async () => {
     { model: "test", maxIterations: 4, backgroundGraceMs: 0 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         capabilities: () => ({ hostedTools: [], structuredOutput: "none", asyncTools: "message" }),
         stream: (request) => {
           requests.push(JSON.stringify(request.messages))
@@ -264,7 +265,7 @@ it("recovers an undelivered durable outcome without repeating execution", async 
   const result = await makeAgent(
     { model: "test" },
     {
-      provider: { protocolVersion: 1, stream: () => [response()] },
+      provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
       toolset: toolset(() => {
         executions += 1
         throw new Error("must recover")
@@ -287,7 +288,7 @@ it("does not execute a background call if the launch checkpoint fails", async ()
     makeAgent(
       { model: "test" },
       {
-        provider: { protocolVersion: 1, stream: () => [response([call])] },
+        provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response([call])] },
         toolset: toolset(() => {
           executions += 1
           return { content: "bad", preview: "bad" }
@@ -310,7 +311,7 @@ it("bounds a pending tool wait by the invocation wall-time limit and aborts its 
     { model: "test", maxWallTimeMs: 30 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         stream: () => [++step === 1 ? response([call], "") : response([], "Independent")]
       },
       toolset: toolset((request) => {
@@ -338,7 +339,7 @@ it.each(["native", "message"] as const)(
         },
         {
           provider: {
-            protocolVersion: 1,
+            protocolVersion: MODEL_PROVIDER_PROTOCOL,
             capabilities: () => ({ hostedTools: [], structuredOutput: "none", asyncTools: mode }),
             stream: (request) => {
               requests.push(structuredClone(request.messages))
@@ -415,7 +416,7 @@ it.each(["native", "message"] as const)(
       { model: "test", maxToolConcurrency: 1, backgroundGraceMs: 0, maxIterations: 8 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           capabilities: () => ({ hostedTools: [], structuredOutput: "none", asyncTools: mode }),
           stream: ({ messages }) => {
             step += 1
@@ -485,7 +486,7 @@ it.each(["native", "message"] as const)(
     const result = await makeAgent(
       { model: "test", maxToolConcurrency: 1, backgroundGraceMs: 0, maxIterations: 8 },
       {
-        provider: { protocolVersion: 1, stream: () => [response()] },
+        provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
         toolset: toolset(() => {
           throw new Error("Recovered outcomes must not execute")
         }),
@@ -507,7 +508,7 @@ it("waits for a pending result instead of spinning on empty provider continuatio
     { model: "test", maxIterations: 6, backgroundGraceMs: 0 },
     {
       provider: {
-        protocolVersion: 1,
+        protocolVersion: MODEL_PROVIDER_PROTOCOL,
         stream: (request) => {
           steps += 1
           if (steps === 1) return [response([call], "")]

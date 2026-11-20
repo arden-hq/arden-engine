@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "../../contracts/provider.js"
 import { openResponsesSession, type ConnectResponsesWebSocket } from "./websocket.js"
 export type { ConnectResponsesWebSocket, ResponsesWebSocket } from "./websocket.js"
 /**
@@ -177,7 +178,7 @@ export const makeOpenAiResponsesProvider = (
     return streamResponse(request, resolved, JSON.stringify(payload))
   }
   return Object.freeze({
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities,
     stream,
     ...(connectWebSocket === undefined

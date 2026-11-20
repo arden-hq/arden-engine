@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "../src/index.js"
 import type {
   CompletionResponse,
   ModelProvider,
@@ -80,7 +81,7 @@ export const scriptedProvider = (
   return {
     requests,
     shape: {
-      protocolVersion: 1,
+      protocolVersion: MODEL_PROVIDER_PROTOCOL,
       ...(capabilities === undefined ? {} : { capabilities }),
       stream: (request) => {
         requests.push(request)

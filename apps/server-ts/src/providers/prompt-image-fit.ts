@@ -4,6 +4,7 @@ import {
   resolveModelCapabilities,
   type ChatMessage,
   type ImageInputLimits,
+  type ContentBlock,
   type Metadata,
   type ModelProvider,
   type ModelProviderRequest
@@ -20,7 +21,11 @@ export interface FittedPromptImage {
     | { readonly kind: "omitted" }
 }
 
-type ImageCache = Map<string, ReadonlyArray<Metadata>>
+type FittedBlock =
+  | { readonly type: "image"; readonly media_type: string; readonly data: string }
+  | { readonly type: "text"; readonly text: string }
+
+type ImageCache = Map<string, ReadonlyArray<FittedBlock>>
 
 const CACHE_ENTRIES = 32
 const CACHE_ENCODED_BYTES = 24 * 1024 * 1024
@@ -73,7 +78,7 @@ export const withPromptImageFit = (
   }
 }
 
-const fitPromptImages = async (input: {
+export const fitPromptImages = async (input: {
   readonly messages: ReadonlyArray<ChatMessage>
   readonly limits: ImageInputLimits
   readonly cache?: ImageCache
@@ -85,10 +90,51 @@ const fitPromptImages = async (input: {
 }> => {
   const fitted: Array<FittedPromptImage> = []
   const cache = input.cache ?? new Map()
+  const fitBlocks = async <Block extends Metadata | ContentBlock>(
+    blocks: ReadonlyArray<Block>
+  ): Promise<ReadonlyArray<Block | FittedBlock> | undefined> => {
+    const content: Array<Block | FittedBlock> = []
+    let blocksChanged = false
+    for (const block of blocks) {
+      const image = oversized(block, input.limits)
+      if (image === undefined) {
+        content.push(block)
+        continue
+      }
+      blocksChanged = true
+      const digest = createHash("sha1").update(image.data).digest("hex")
+      const key = `${digest}:${image.mediaType}:${input.limits.patchSize}:${input.limits.fitSide}:${input.limits.fitPatches}:${input.limits.maxPatches}`
+      const cached = cache.get(key)
+      const fittedBlocks =
+        cached ??
+        (await fitBlock({
+          data: image.data,
+          mediaType: image.mediaType,
+          size: image.size,
+          limits: input.limits,
+          digest,
+          fitted,
+          resize: input.resize,
+          signal: input.signal
+        }))
+      input.signal?.throwIfAborted()
+      if (cached === undefined) remember(cache, key, fittedBlocks)
+      content.push(...fittedBlocks)
+    }
+    return blocksChanged ? content : undefined
+  }
   let changed = false
   const messages: ChatMessage[] = []
   for (const message of input.messages) {
     input.signal?.throwIfAborted()
+    if (message.role === "tool" && message.model_content !== undefined) {
+      const modelContent = await fitBlocks(message.model_content)
+      changed ||= modelContent !== undefined
+      messages.push(
+        modelContent === undefined ? message : { ...message, model_content: modelContent }
+      )
+      continue
+    }
     if (
       (message.role !== "user" && message.role !== "interaction") ||
       typeof message.content !== "object" ||
@@ -97,53 +143,22 @@ const fitPromptImages = async (input: {
       messages.push(message)
       continue
     }
-    const content: Metadata[] = []
-    let messageChanged = false
-    for (const block of message.content) {
-      const size = oversized(block, input.limits)
-      if (size === undefined || typeof block.data !== "string") {
-        content.push(block)
-        continue
-      }
-      messageChanged = true
-      const digest = createHash("sha1").update(block.data).digest("hex")
-      const key = `${digest}:${block.media_type}:${input.limits.patchSize}:${input.limits.fitSide}:${input.limits.fitPatches}:${input.limits.maxPatches}`
-      const cached = cache.get(key)
-      const blocks =
-        cached ??
-        (await fitBlock({
-          data: block.data,
-          mediaType: String(block.media_type),
-          size,
-          limits: input.limits,
-          digest,
-          fitted,
-          resize: input.resize,
-          signal: input.signal
-        }))
-      input.signal?.throwIfAborted()
-      if (cached === undefined) remember(cache, key, blocks)
-      content.push(...blocks)
-    }
-    changed ||= messageChanged
-    messages.push(messageChanged ? { ...message, content } : message)
+    const content = await fitBlocks(message.content)
+    changed ||= content !== undefined
+    messages.push(content === undefined ? message : { ...message, content })
   }
   return { messages: changed ? messages : input.messages, fitted }
 }
 
-const oversized = (block: Metadata, limits: ImageInputLimits): ImageSize | undefined => {
-  if (
-    block.type !== "image" ||
-    typeof block.data !== "string" ||
-    typeof block.media_type !== "string"
-  ) {
-    return undefined
-  }
-  const bytes = Buffer.from(
-    block.media_type === "image/png" ? block.data.slice(0, 44) : block.data,
-    "base64"
-  )
-  const size = imageSize(bytes, block.media_type)
+const oversized = (
+  block: Metadata | ContentBlock,
+  limits: ImageInputLimits
+): { readonly data: string; readonly mediaType: string; readonly size: ImageSize } | undefined => {
+  if (block.type !== "image" || !("data" in block) || !("media_type" in block)) return undefined
+  const { data, media_type: mediaType } = block
+  if (typeof data !== "string" || typeof mediaType !== "string") return undefined
+  const bytes = Buffer.from(mediaType === "image/png" ? data.slice(0, 44) : data, "base64")
+  const size = imageSize(bytes, mediaType)
   if (size === undefined) return undefined
   return fitsLimits(
     size,
@@ -151,7 +166,7 @@ const oversized = (block: Metadata, limits: ImageInputLimits): ImageSize | undef
     limits.patchSize
   )
     ? undefined
-    : size
+    : { data, mediaType, size }
 }
 
 const fitBlock = async (input: {
@@ -163,7 +178,7 @@ const fitBlock = async (input: {
   readonly fitted: Array<FittedPromptImage>
   readonly resize: PromptPngResize
   readonly signal?: AbortSignal | undefined
-}): Promise<ReadonlyArray<Metadata>> => {
+}): Promise<ReadonlyArray<FittedBlock>> => {
   const resized =
     input.mediaType === "image/png"
       ? await input.resize({ data: input.data, limits: input.limits, signal: input.signal })
@@ -195,16 +210,13 @@ const fitBlock = async (input: {
   ]
 }
 
-const remember = (cache: ImageCache, digest: string, blocks: ReadonlyArray<Metadata>): void => {
+const remember = (cache: ImageCache, digest: string, blocks: ReadonlyArray<FittedBlock>): void => {
   cache.set(digest, blocks)
   const bytes = () =>
     [...cache.values()].reduce(
       (total, entries) =>
         total +
-        entries.reduce(
-          (sum, entry) => sum + (typeof entry.data === "string" ? entry.data.length : 0),
-          0
-        ),
+        entries.reduce((sum, entry) => sum + (entry.type === "image" ? entry.data.length : 0), 0),
       0
     )
   while (cache.size > CACHE_ENTRIES || bytes() > CACHE_ENCODED_BYTES) {

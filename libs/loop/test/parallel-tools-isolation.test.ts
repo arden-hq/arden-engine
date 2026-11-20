@@ -8,7 +8,8 @@ import {
   type ToolCallRequest,
   type ToolEntry,
   type ToolMeta,
-  type Toolset
+  type Toolset,
+  MODEL_PROVIDER_PROTOCOL
 } from "../src/index.js"
 import { deferred, entryOf, lastOf } from "./kit.js"
 
@@ -53,7 +54,7 @@ describe("parallel tools with per-tool isolation", () => {
       { model: "test-model", maxToolConcurrency: 1 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: ({ messages }) =>
             messages.some((message) => message.role === "tool")
               ? [response({ content: "done" })]
@@ -108,7 +109,7 @@ describe("parallel tools with per-tool isolation", () => {
       { model: "test-model", maxToolConcurrency: 2 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: ({ messages }) =>
             messages.some((message) => message.role === "tool")
               ? [response({ content: "done" })]
@@ -165,7 +166,7 @@ describe("parallel tools with per-tool isolation", () => {
       { model: "test-model", maxToolConcurrency: 4 },
       {
         provider: {
-          protocolVersion: 1,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: ({ messages }) =>
             messages.some((message) => message.role === "tool")
               ? [response({ content: "done" })]
@@ -229,7 +230,7 @@ describe("parallel tools with per-tool isolation", () => {
       { model: "test-model" },
       {
         provider: {
-          protocolVersion: 1 as const,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
           stream: ({ messages }) =>
             messages.some((message) => message.role === "tool")
               ? [response({ content: "done" })]
@@ -323,7 +324,7 @@ describe("parallel tools with per-tool isolation", () => {
       { model: "test-model" },
       {
         provider: {
-          protocolVersion: 1 as const,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
           stream: () => {
             step += 1
             return step === 1
@@ -395,7 +396,7 @@ describe("parallel tools with per-tool isolation", () => {
       { model: "test-model" },
       {
         provider: {
-          protocolVersion: 1 as const,
+          protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
           stream: () => {
             step += 1
             return [response({ finishReason: "tool_calls", toolCalls: steps[step - 1] ?? [] })]

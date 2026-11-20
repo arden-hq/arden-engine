@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import type { ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import {
@@ -107,7 +108,7 @@ const codexHost: ModelHost = {
 const codexProvider = () => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     capabilities: () => ({ hostedTools: [], structuredOutput: "native" }),
     stream: (request) => {
       requests.push(request)

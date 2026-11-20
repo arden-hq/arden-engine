@@ -1,3 +1,4 @@
+import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { Schema } from "effect"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
@@ -69,7 +70,7 @@ const makeRig = (execute: (signal: AbortSignal) => Promise<ToolResult>) => {
   const requests: Array<ModelProviderRequest> = []
   let executions = 0
   const provider: ModelProvider = {
-    protocolVersion: 1,
+    protocolVersion: MODEL_PROVIDER_PROTOCOL,
     stream: (request) => {
       requests.push(request)
       return [
@@ -360,7 +361,7 @@ it(
       model: request.model
     })
     const provider: ModelProvider = {
-      protocolVersion: 1,
+      protocolVersion: MODEL_PROVIDER_PROTOCOL,
       stream: (request) => {
         if (!restarted) {
           initialRequests += 1
