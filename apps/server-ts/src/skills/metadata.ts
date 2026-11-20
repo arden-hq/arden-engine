@@ -8,16 +8,49 @@ import { parseDocument } from "yaml"
 
 import { skillError, type SkillOperation } from "./errors.js"
 
-const SkillMetadataSchema = Schema.Struct({
-  name: SkillNameSchema,
-  description: SkillDescriptionSchema,
-  version: Schema.optionalKey(SkillVersionSchema),
-  tool_group: Schema.optionalKey(
-    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))
-  ),
-  user_invocable: Schema.optionalKey(Schema.Boolean),
-  metadata: Schema.optionalKey(Schema.Unknown)
-})
+const ToolGroupSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))
+
+const isName = Schema.is(SkillNameSchema)
+const isDescription = Schema.is(SkillDescriptionSchema)
+const isVersion = Schema.is(SkillVersionSchema)
+const isToolGroup = Schema.is(ToolGroupSchema)
+
+export interface SkillMetadata {
+  readonly [field: string]: unknown
+  readonly name: string
+  readonly description: string
+  readonly version?: string
+  readonly tool_group?: string
+  readonly user_invocable?: boolean
+  readonly metadata?: unknown
+}
+
+const CHECKED_OPTIONAL_FIELDS: ReadonlySet<string> = new Set([
+  "version",
+  "tool_group",
+  "user_invocable"
+])
+
+const versionOf = (value: unknown): string | undefined => {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return `${value}.0.0`
+  if (typeof value !== "string") return undefined
+  const parts = value.trim().replace(/^v/, "").split(".")
+  const full = [...parts, "0", "0"].slice(0, 3).join(".")
+  return parts.length <= 3 && isVersion(full) ? full : undefined
+}
+
+const optionalFields = (
+  record: Readonly<Record<string, unknown>>
+): Pick<SkillMetadata, "version" | "tool_group" | "user_invocable"> => {
+  const version = versionOf(record["version"])
+  const toolGroup = record["tool_group"]
+  const userInvocable = record["user_invocable"]
+  return {
+    ...(version === undefined ? {} : { version }),
+    ...(isToolGroup(toolGroup) ? { tool_group: toolGroup } : {}),
+    ...(typeof userInvocable === "boolean" ? { user_invocable: userInvocable } : {})
+  }
+}
 
 export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
   source: string,
@@ -47,11 +80,23 @@ export const parseSkillMetadata = Effect.fn("Skills.parseMetadata")(function* (
     },
     catch: (cause) => skillError(operation, "invalid", "Skill metadata is invalid", cause)
   })
-  const metadata = yield* Schema.decodeUnknownEffect(SkillMetadataSchema)(value, {
-    onExcessProperty: "preserve"
-  }).pipe(
-    Effect.mapError((cause) => skillError(operation, "invalid", "Skill metadata is invalid", cause))
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return yield* skillError(operation, "invalid", "Skill metadata is not a mapping")
+  const record: Readonly<Record<string, unknown>> = { ...value }
+  const name = record["name"]
+  const description = record["description"]
+  if (!isName(name))
+    return yield* skillError(operation, "invalid", "Skill metadata `name` is missing or invalid")
+  if (!isDescription(description))
+    return yield* skillError(
+      operation,
+      "invalid",
+      "Skill metadata `description` is missing or invalid"
+    )
+  const rest = Object.fromEntries(
+    Object.entries(record).filter(([field]) => !CHECKED_OPTIONAL_FIELDS.has(field))
   )
+  const metadata: SkillMetadata = { ...rest, name, description, ...optionalFields(record) }
   if (directoryName !== null && metadata.name !== directoryName) {
     return yield* skillError(operation, "invalid", "Skill name does not match its directory")
   }
