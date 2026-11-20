@@ -1,6 +1,7 @@
 import type { PendingChatGptLogin } from "@arden-hq/headless/chatgpt-login"
 import {
   createHeadlessClient,
+  type HeadlessHttpError,
   type ConfiguredServer,
   type ConfiguredServerConnection,
   type HeadlessClient
@@ -73,6 +74,35 @@ export class UsageError extends Error {
 
 export class NoModelError extends Error {
   override readonly name = "NoModelError"
+}
+
+export class OlderServerError extends Error {
+  override readonly name = "OlderServerError"
+  constructor() {
+    super("This Arden is older than the CLI. Update Arden, or add --mode ask.")
+  }
+}
+
+export const plainHttpMessage = (cause: HeadlessHttpError): string => {
+  const detail = detailOf(cause.detail)
+  if (detail !== undefined) return detail
+  if (cause.status === 401 || cause.status === 403)
+    return "Arden does not let the command line do this."
+  if (cause.status === 404) return "Arden has no such chat, Run or question."
+  if (cause.status === 409)
+    return "Arden cannot do this right now; the chat is busy or already moved on."
+  if (cause.status >= 500) return "Arden hit an error. Try again, or look at its log."
+  return "Arden could not do this."
+}
+
+const detailOf = (text: string): string | undefined => {
+  try {
+    const body: unknown = JSON.parse(text)
+    if (typeof body !== "object" || body === null || !("detail" in body)) return undefined
+    return typeof body.detail === "string" && body.detail.length > 0 ? body.detail : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export class ServerUnavailableError extends Error {

@@ -1,4 +1,4 @@
-import type { HeadlessRunEvent } from "@arden-hq/headless"
+import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { runDecoders, type RunQuestion } from "@arden-hq/protocol/runs"
 import { errorMessage } from "@arden-hq/std/errors"
@@ -6,7 +6,7 @@ import { sleep } from "@arden-hq/std/sleep"
 import { clipLine, cutText } from "@arden-hq/std/text"
 import { randomUUID } from "node:crypto"
 
-import type { CliClient, CliDependencies } from "./command.js"
+import { plainHttpMessage, type CliClient, type CliDependencies } from "./command.js"
 import type { ApprovalHandling, CliOutputFormat, DeclinedRequest } from "./run.js"
 
 export const progressLines = (): ((event: HeadlessRunEvent) => string | undefined) => {
@@ -198,7 +198,7 @@ export const requestResponder = (input: {
       })
       say(`declined ${name}: no one is here to answer it`)
     } catch (cause) {
-      say(`could not decline ${name}: ${errorMessage(cause)}`)
+      say(`could not decline ${name}: ${plainError(cause)}`)
     }
   }
 
@@ -283,6 +283,9 @@ export const requestResponder = (input: {
     }
   }
 }
+
+const plainError = (cause: unknown): string =>
+  cause instanceof HeadlessHttpError ? plainHttpMessage(cause) : errorMessage(cause)
 
 const questionOf = (value: unknown): RunQuestion | undefined => {
   if (typeof value !== "object" || value === null || !("question" in value)) return undefined

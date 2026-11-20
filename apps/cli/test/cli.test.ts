@@ -203,6 +203,40 @@ describe("arden run", () => {
   })
 })
 
+describe("an Arden older than the CLI", () => {
+  const refusing = (status: number): CliClient => ({
+    ...defaultClient(),
+    submit: async () => {
+      throw new HeadlessHttpError(status, "POST", "/chat/message", "")
+    },
+    listSessions: async () => {
+      throw new HeadlessHttpError(500, "GET", "/sessions", "")
+    }
+  })
+
+  it("says to update Arden when it refuses the mode, and never prints an HTTP status", async () => {
+    const io = testIo({ client: refusing(403) })
+    expect(await runCli(["run", "Prompt", ...URL_ARGS], io.dependencies)).toBe(1)
+    expect(await runCli(["run", "Prompt", ...URL_ARGS, "--mode", "ask"], io.dependencies)).toBe(1)
+    expect(await runCli(["sessions", ...URL_ARGS], io.dependencies)).toBe(1)
+    expect(io.stderr()).toBe(
+      [
+        "arden: This Arden is older than the CLI. Update Arden, or add --mode ask.",
+        "arden: Arden does not let the command line do this.",
+        "arden: Arden hit an error. Try again, or look at its log.",
+        ""
+      ].join("\n")
+    )
+    const json = testIo({ client: refusing(403) })
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS, "--output", "json"], json.dependencies)
+    ).toBe(1)
+    expect(jsonLines(json.stdout())[0]).toMatchObject({
+      error: { code: "server_outdated" }
+    })
+  })
+})
+
 describe("starting the installed app", () => {
   const appAccess = "/home/test/.arden/cli-access.json"
   const launching = (onOpen: (files: Map<string, string>) => void) => {

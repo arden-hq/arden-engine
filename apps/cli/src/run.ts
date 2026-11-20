@@ -18,6 +18,8 @@ import { extname } from "node:path"
 import {
   createCliClient,
   NoModelError,
+  OlderServerError,
+  plainHttpMessage,
   resolveServer,
   ProviderUnavailableError,
   ServerUnavailableError,
@@ -380,16 +382,14 @@ const discardIfEmpty = async (client: CliClient, sessionId: string): Promise<voi
   } catch {}
 }
 
-const refusalMessage = (cause: HeadlessHttpError): string => {
-  try {
-    const body: unknown = JSON.parse(cause.detail)
-    if (typeof body === "object" && body !== null && "detail" in body) {
-      const detail = body.detail
-      if (typeof detail === "string" && detail.length > 0) return detail
-    }
-  } catch {}
-  return cause.message
-}
+const OLDER_ENGINE_COMMAND_LINE_MODES: ReadonlySet<ChatApprovalMode> = new Set(["read_only", "ask"])
+
+const submitted403 = (cause: unknown, mode: ChatApprovalMode): unknown =>
+  cause instanceof HeadlessHttpError &&
+  cause.status === 403 &&
+  !OLDER_ENGINE_COMMAND_LINE_MODES.has(mode)
+    ? new OlderServerError()
+    : cause
 
 export const failureOf = (
   cause: unknown
@@ -410,8 +410,11 @@ export const failureOf = (
   if (cause instanceof NoModelError) {
     return { error: { code: "no_model", message: cause.message }, exitCode: 1 }
   }
+  if (cause instanceof OlderServerError) {
+    return { error: { code: "server_outdated", message: cause.message }, exitCode: 1 }
+  }
   if (cause instanceof HeadlessHttpError) {
-    return { error: { code: "command_failed", message: refusalMessage(cause) }, exitCode: 1 }
+    return { error: { code: "command_failed", message: plainHttpMessage(cause) }, exitCode: 1 }
   }
   return { error: { code: "command_failed", message: errorMessage(cause) }, exitCode: 1 }
 }
@@ -503,7 +506,9 @@ export const runCommand = async (
       .then(
         () => undefined,
         (cause) => {
-          dependencies.writeStderr(`arden: cancellation request failed: ${errorMessage(cause)}\n`)
+          dependencies.writeStderr(
+            `arden: cancellation request failed: ${failureOf(cause).error.message}\n`
+          )
         }
       )
       .finally(() => clearTimeout(timeout))
@@ -526,14 +531,18 @@ export const runCommand = async (
     if (resolved.created) unsent = resolved.sessionId
     if (interruptRequested) return stopped("interrupted", "Interrupted by SIGINT")
 
-    const accepted = await client.submit({
-      sessionId,
-      message: prompt,
-      ...(images.length === 0 ? {} : { images }),
-      ...(options.recipe === undefined ? {} : { recipe: options.recipe }),
-      ...(outputSchema === undefined ? {} : { outputSchema }),
-      approvalMode: options.approvalMode
-    })
+    const accepted = await client
+      .submit({
+        sessionId,
+        message: prompt,
+        ...(images.length === 0 ? {} : { images }),
+        ...(options.recipe === undefined ? {} : { recipe: options.recipe }),
+        ...(outputSchema === undefined ? {} : { outputSchema }),
+        approvalMode: options.approvalMode
+      })
+      .catch((cause: unknown) => {
+        throw submitted403(cause, options.approvalMode)
+      })
     submitted = accepted
     unsent = undefined
     if (interruptRequested) {
@@ -695,7 +704,8 @@ export const sessionsCommand = async (
     }
     return 0
   } catch (cause) {
-    dependencies.writeStderr(`arden: ${errorMessage(cause)}\n`)
-    return failureOf(cause).exitCode
+    const failure = failureOf(cause)
+    dependencies.writeStderr(`arden: ${failure.error.message}\n`)
+    return failure.exitCode
   }
 }
