@@ -27,7 +27,9 @@ const arrivalSender = (delivery: RunDelivery): InteractionSender | undefined => 
   }
 }
 
-const toSendInput = (delivery: RunDelivery): ChatSendInput => {
+/** What an arrival is sent to its chat as. A replay must send exactly this, or its
+ *  request hash differs from the stored receipt's. */
+export const toSendInput = (delivery: RunDelivery): ChatSendInput => {
   const sender = arrivalSender(delivery)
   return {
     sessionId: delivery.payload.sessionId,
@@ -74,7 +76,7 @@ const deferDelivery = (
       )
     )
 
-const workArrivals = (
+export const workArrivals = (
   work: WorkStore["Service"],
   chat: ChatMessage["Service"]
 ): Outbox<ReadonlyArray<RunDelivery>, WorkStoreError, never> => ({
@@ -89,15 +91,7 @@ const workArrivals = (
             return deferDelivery(work, delivery, exit?.cause ?? Cause.die("No receipt")).pipe(
               Effect.as(false)
             )
-          const runId = exit.value.runId
-          return runId === null
-            ? Effect.succeed(false)
-            : work.acknowledgeDelivery(delivery.deliveryId, runId).pipe(
-                Effect.as(true),
-                Effect.catchCause((cause) =>
-                  deferDelivery(work, delivery, cause).pipe(Effect.as(false))
-                )
-              )
+          return Effect.succeed(exit.value.runId !== null)
         })
       ),
       Effect.map((delivered) => delivered.some(Boolean))

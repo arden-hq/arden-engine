@@ -150,6 +150,15 @@ export const enqueueRunDelivery = Effect.fn(function* (options: {
   return deliveryId
 })
 
+const arrivalText = (content: unknown): string =>
+  typeof content === "string" ? content : userContent(content).text
+
+/** A condition on `automation_deliveries`: the row is a Chat-turn arrival bound
+ *  for this chat with this text. It reads nothing and writes nothing. */
+export const arrivalIdentitySql = (sql: SqlClient.SqlClient, sessionId: string, content: unknown) =>
+  sql`payload IS NOT NULL AND ${turnDeliveryKindSql(sql, sql`payload`)}
+    AND json_extract(payload, '$.sessionId') = ${sessionId} AND body = ${arrivalText(content)}`
+
 export const readDeliveryForAdmission = Effect.fn(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly deliveryId: string
@@ -157,8 +166,7 @@ export const readDeliveryForAdmission = Effect.fn(function* (options: {
   readonly admittedWith: ReadonlyArray<string>
   readonly content: unknown
 }) {
-  const content =
-    typeof options.content === "string" ? options.content : userContent(options.content).text
+  const content = arrivalText(options.content)
   const rows = yield* options.sql<{
     readonly payload: string
     readonly body: string
@@ -668,23 +676,6 @@ export const makeWorkDeliverySql = ({
       )
     )
   })
-  const acknowledgeDelivery: WorkStore["Service"]["acknowledgeDelivery"] = Effect.fn(
-    function* (deliveryId, runId) {
-      const now = DateTime.formatIso(yield* DateTime.now)
-      yield* writer
-        .run(
-          sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${now},
-      destinations = ${JSON.stringify([`chat:${runId}`])}
-      WHERE delivery_id = ${deliveryId} AND status = 'pending'`
-        )
-        .pipe(
-          Effect.mapError((cause) =>
-            workError("storage", "Could not acknowledge the arrival", cause)
-          ),
-          Effect.asVoid
-        )
-    }
-  )
   const discardStoppedResults: WorkStore["Service"]["discardStoppedResults"] = Effect.fn(
     function* (runIds) {
       if (runIds.length === 0) return
@@ -784,7 +775,6 @@ export const makeWorkDeliverySql = ({
   })
   return {
     pendingDeliveries,
-    acknowledgeDelivery,
     discardStoppedResults,
     deferDelivery,
     revokedRuns,

@@ -137,10 +137,6 @@ export class WorkStore extends Context.Service<
       WorkStoreError
     >
     readonly pendingDeliveries: () => Effect.Effect<ReadonlyArray<RunDelivery>, WorkStoreError>
-    readonly acknowledgeDelivery: (
-      deliveryId: string,
-      runId: string
-    ) => Effect.Effect<void, WorkStoreError>
     readonly discardStoppedResults: (
       runIds: ReadonlyArray<string>
     ) => Effect.Effect<void, WorkStoreError>
