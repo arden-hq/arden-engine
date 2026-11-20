@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { createHash } from "node:crypto"
 
 import {
@@ -127,7 +128,7 @@ export const fitPromptImages = async (input: {
   const messages: ChatMessage[] = []
   for (const message of input.messages) {
     input.signal?.throwIfAborted()
-    if (message.role === "tool" && message.model_content !== undefined) {
+    if (message.role === ROLE.tool && message.model_content !== undefined) {
       const modelContent = await fitBlocks(message.model_content)
       changed ||= modelContent !== undefined
       messages.push(
@@ -136,7 +137,7 @@ export const fitPromptImages = async (input: {
       continue
     }
     if (
-      (message.role !== "user" && message.role !== "interaction") ||
+      (message.role !== ROLE.user && message.role !== ROLE.interaction) ||
       typeof message.content !== "object" ||
       message.content === null
     ) {

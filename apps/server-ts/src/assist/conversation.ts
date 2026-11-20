@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { transcriptSearchText } from "../persistence/transcript/search-text.js"
@@ -7,7 +8,7 @@ export const conversationLine = (
   message: StoredMessageEnvelope,
   maxChars: number
 ): ReadonlyArray<string> => {
-  if (message.role !== "assistant" && !isWrittenByPerson(message)) return []
+  if (message.role !== ROLE.assistant && !isWrittenByPerson(message)) return []
   const content = transcriptSearchText(message)
   return content === null ? [] : [`${message.role}: ${cutText(content, maxChars)}`]
 }

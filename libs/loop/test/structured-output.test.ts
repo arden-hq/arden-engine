@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -17,7 +18,7 @@ const response = (content: string) => ({
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content,
     tool_calls: null,
     reasoning_content: null
@@ -77,15 +78,15 @@ describe("structured output", () => {
       { model: "test-model" },
       { provider: script.provider, toolset: emptyToolset }
     )
-    const result = await agent.run([{ role: "user", content: "judge" }], { output })
+    const result = await agent.run([{ role: ROLE.user, content: "judge" }], { output })
 
     expect(result.object).toEqual({ verdict: "fixed" })
     expect(script.requests).toHaveLength(2)
     const correction = lastOf(defined(script.requests[1], "a correction request").messages)
-    expect(correction).toMatchObject({ role: "interaction", message_id: expect.any(String) })
+    expect(correction).toMatchObject({ role: ROLE.interaction, message_id: expect.any(String) })
     expect(correction.content).toContain("verdict: verdict must be a string")
-    expect(result.messages.filter((message) => message.role === "user")).toHaveLength(1)
-    expect(result.messages.filter((message) => message.role === "interaction")).toMatchObject([
+    expect(result.messages.filter((message) => message.role === ROLE.user)).toHaveLength(1)
+    expect(result.messages.filter((message) => message.role === ROLE.interaction)).toMatchObject([
       { from: { source: "harness", id: "output_schema" }, kind: "instruction" }
     ])
   })
@@ -96,7 +97,7 @@ describe("structured output", () => {
       { model: "test-model" },
       { provider: script.provider, toolset: emptyToolset }
     )
-    const failure = await agent.run([{ role: "user", content: "judge" }], { output }).then(
+    const failure = await agent.run([{ role: ROLE.user, content: "judge" }], { output }).then(
       () => null,
       (cause: unknown) => cause
     )
@@ -128,7 +129,7 @@ describe("final text check", () => {
     )
     const superseded: Array<{ messageIds: ReadonlyArray<string>; correctionId: string }> = []
     let result: Result | undefined
-    for await (const event of agent.stream([{ role: "user", content: "answer" }])) {
+    for await (const event of agent.stream([{ role: ROLE.user, content: "answer" }])) {
       if (!("_tag" in event)) result = event
       else if (event._tag === "FinalTextSuperseded")
         superseded.push({
@@ -142,17 +143,17 @@ describe("final text check", () => {
     expect(checked).toEqual(["first answer"])
     expect(script.requests).toHaveLength(2)
     const correction = lastOf(defined(script.requests[1], "a correction request").messages)
-    expect(correction).toMatchObject({ role: "interaction", content: "Line 3: fix the block." })
+    expect(correction).toMatchObject({ role: ROLE.interaction, content: "Line 3: fix the block." })
     const firstAnswer = defined(
       final.messages.find(
-        (message) => message.role === "assistant" && message.content === "first answer"
+        (message) => message.role === ROLE.assistant && message.content === "first answer"
       ),
       "the rejected answer"
     )
     expect(superseded).toEqual([
       { messageIds: [firstAnswer.message_id], correctionId: correction.message_id }
     ])
-    expect(final.messages.find((message) => message.role === "interaction")).toMatchObject({
+    expect(final.messages.find((message) => message.role === ROLE.interaction)).toMatchObject({
       message_id: correction.message_id,
       from: { source: "harness", id: "final_text_check" },
       rejected_message_ids: [firstAnswer.message_id]

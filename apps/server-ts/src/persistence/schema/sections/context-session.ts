@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { OperationalSchemaSection } from "../section.js"
 
 export const contextSessionSchemaSection = {
@@ -134,13 +135,13 @@ export const contextSessionSchemaSection = {
     ) WITHOUT ROWID`,
     `CREATE TRIGGER session_messages_role_insert
       BEFORE INSERT ON session_messages
-      WHEN NEW.role NOT IN ('system', 'developer', 'user', 'interaction', 'assistant', 'tool')
+      WHEN NEW.role NOT IN ('${ROLE.system}', '${ROLE.developer}', '${ROLE.user}', '${ROLE.interaction}', '${ROLE.assistant}', '${ROLE.tool}')
       BEGIN
         SELECT RAISE(ABORT, 'Unknown transcript message role');
       END`,
     `CREATE TRIGGER session_messages_role_update
       BEFORE UPDATE OF role ON session_messages
-      WHEN NEW.role NOT IN ('system', 'developer', 'user', 'interaction', 'assistant', 'tool')
+      WHEN NEW.role NOT IN ('${ROLE.system}', '${ROLE.developer}', '${ROLE.user}', '${ROLE.interaction}', '${ROLE.assistant}', '${ROLE.tool}')
       BEGIN
         SELECT RAISE(ABORT, 'Unknown transcript message role');
       END`,

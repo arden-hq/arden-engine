@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { deleteStreamInTransaction } from "@arden-hq/journal/effect"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -18,7 +19,7 @@ export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")
     ON CONFLICT(session_id) DO NOTHING`
   const attaching = yield* sql<{ readonly message_json: string }>`SELECT message_json
     FROM session_messages
-    WHERE session_id = ${sessionId} AND role IN ('user', 'interaction')
+    WHERE session_id = ${sessionId} AND role IN (${ROLE.user}, ${ROLE.interaction})
       AND instr(message_json, '/uploads/') > 0`
   for (const uploadId of uploadIdsIn(attaching.map((row) => row.message_json).join("\n"))) {
     yield* sql`INSERT INTO chat_upload_cleanup (upload_id, queued_at)

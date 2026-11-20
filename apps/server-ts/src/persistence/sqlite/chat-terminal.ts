@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { loadRun, loadActiveRun, requireReceiptForRun, setCheckpoint } from "./chat-run.js"
 import { readableConversationSql } from "./session-presentation.js"
 import {
@@ -153,7 +154,7 @@ export const makeChatTerminal = ({
           )
           const projectedAssistantMessages = valid.messages.filter(
             (message) =>
-              message.message_id === run.assistant_message_id && message.role === "assistant"
+              message.message_id === run.assistant_message_id && message.role === ROLE.assistant
           )
           const transcript = yield* loadTranscriptEnvelopesById(
             sql,
@@ -163,7 +164,7 @@ export const makeChatTerminal = ({
           )
           const transcriptAssistantMessages = transcript.filter(
             (message) =>
-              message.message_id === run.assistant_message_id && message.role === "assistant"
+              message.message_id === run.assistant_message_id && message.role === ROLE.assistant
           )
           const runAssistantMessage =
             projectedAssistantMessages[0] ?? transcriptAssistantMessages[0]
@@ -183,7 +184,7 @@ export const makeChatTerminal = ({
             )
           }
           const assistantMessage =
-            [...valid.messages].reverse().find((message) => message.role === "assistant") ??
+            [...valid.messages].reverse().find((message) => message.role === ROLE.assistant) ??
             runAssistantMessage
           yield* requireReceiptForRun(sql, run, "finish")
           const pending = yield* loadPendingInTransaction(sql, run, "finish")
@@ -200,7 +201,7 @@ export const makeChatTerminal = ({
             )
           }
           for (const message of appended) {
-            if (message.role === "system") {
+            if (message.role === ROLE.system) {
               return yield* writeError(
                 "finish",
                 "invalid",
@@ -315,7 +316,7 @@ export const makeChatTerminal = ({
                     event: {
                       type: "TEXT_MESSAGE_START",
                       message_id: nextAssistantMessageId,
-                      role: "assistant"
+                      role: ROLE.assistant
                     } satisfies ChatProjectionEvent,
                     runId: run.run_id
                   }
@@ -391,7 +392,7 @@ export const makeChatTerminal = ({
                 FROM session_messages AS m
                 WHERE m.session_id = ${run.session_id}
                   AND ${messageTurnIdSql(sql, "m")} = ${run.turn_id}
-                  AND m.role = 'assistant'
+                  AND m.role = ${ROLE.assistant}
                   AND ${conversationMessagePredicate(sql)}
               ) THEN 1 ELSE has_unread END
           WHERE session_id = ${run.session_id}

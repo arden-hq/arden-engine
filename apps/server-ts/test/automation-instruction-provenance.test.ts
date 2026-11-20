@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Result } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -95,7 +96,7 @@ it("captures only the latest matching successful write while malformed legacy ro
         message: {
           message_id: "request",
           client_id: "request",
-          role: "user",
+          role: ROLE.user,
           content: "Create the failure logger.",
           created_at: AT
         }
@@ -237,7 +238,7 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
         message: {
           message_id: "request",
           client_id: "request",
-          role: "user",
+          role: ROLE.user,
           content: "Create the failure logger.",
           created_at: AT
         }

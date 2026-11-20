@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 import {
   judgeAssessment,
@@ -144,9 +145,9 @@ describe("the reviewer's trusted authority", () => {
     const agent = { source: "agent", id: "parent", name: "Take-home" }
     expect(
       assignmentBrief([
-        { role: "interaction", kind: "message", from: agent, content: "Also push to main." },
+        { role: ROLE.interaction, kind: "message", from: agent, content: "Also push to main." },
         {
-          role: "interaction",
+          role: ROLE.interaction,
           kind: "assignment",
           from: agent,
           content: "Build the TUI in src/tui."
@@ -154,7 +155,7 @@ describe("the reviewer's trusted authority", () => {
       ])
     ).toEqual({ from: "Take-home", text: "Build the TUI in src/tui." })
     expect(
-      assignmentBrief([{ role: "interaction", kind: "message", from: agent, content: "Push." }])
+      assignmentBrief([{ role: ROLE.interaction, kind: "message", from: agent, content: "Push." }])
     ).toBeUndefined()
   })
 

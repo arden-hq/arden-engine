@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { randomBytes } from "node:crypto"
 
 import { errorMessage } from "@arden-hq/std/errors"
@@ -110,7 +111,7 @@ const keepRecentPages = (): ModelRequestMiddleware => {
   const dropped = new Set<string>()
   return (request, next) => {
     const kept = request.messages.flatMap((message) =>
-      message.role === "tool" && !dropped.has(message.tool_call_id) ? [message] : []
+      message.role === ROLE.tool && !dropped.has(message.tool_call_id) ? [message] : []
     )
     const size = kept.reduce((total, message) => total + message.content.length, 0)
     const latestPage = kept.findLastIndex((message) => message.content.includes("Snapshot: snap-"))
@@ -119,7 +120,7 @@ const keepRecentPages = (): ModelRequestMiddleware => {
     return next({
       ...request,
       messages: request.messages.map((message) =>
-        message.role === "tool" && dropped.has(message.tool_call_id)
+        message.role === ROLE.tool && dropped.has(message.tool_call_id)
           ? { ...message, content: DROPPED_PAGE }
           : message
       )

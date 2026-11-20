@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type {
   AssistantMessage,
   AssistantOutputPart,
@@ -222,7 +223,7 @@ export const assistantMessage = (
   const message = response.message
   return {
     message_id: messageId,
-    role: "assistant",
+    role: ROLE.assistant,
     content: message.content ?? "",
     ...(message.tool_calls === null || message.tool_calls.length === 0
       ? {}

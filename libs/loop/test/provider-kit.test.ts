@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { errorMessage } from "@arden-hq/std/errors"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -402,7 +403,7 @@ describe("a connection that fails", () => {
       })
     })
   const request = {
-    messages: [{ role: "user", content: "Hi" }],
+    messages: [{ role: ROLE.user, content: "Hi" }],
     renderInteraction: () => "",
     model: "m",
     tools: [],

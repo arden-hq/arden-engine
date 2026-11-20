@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ProviderMessage } from "../../contracts/provider.js"
 import type { InputItem } from "./items.js"
 import type { ResponsesPayload } from "./request.js"
@@ -24,7 +25,7 @@ export const responseContinuation = ({
 }): ResponseContinuation | undefined => {
   const output = responseItems(
     {
-      role: "assistant",
+      role: ROLE.assistant,
       tool_calls: message.tool_calls ?? [],
       ...(message.provider_state === undefined ? {} : { provider_state: message.provider_state })
     },

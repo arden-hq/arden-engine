@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { mkdtemp, rm } from "node:fs/promises"
 import { DatabaseSync } from "node:sqlite"
@@ -27,7 +28,7 @@ const startRun = (chat: ChatWriteStore["Service"], sessionId: string, clientId: 
     message: {
       message_id: clientId,
       client_id: clientId,
-      role: "user",
+      role: ROLE.user,
       content: "Begin",
       created_at: "2026-09-01T00:00:00.000Z"
     }

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -90,8 +91,8 @@ const chatOnSpace = (said: { readonly text: string; readonly meta?: boolean }) =
         content: said.text,
         created_at: new Date().toISOString(),
         ...(said.meta === true
-          ? { role: "interaction", from: { source: "harness", id: "mail" }, kind: "event" }
-          : { role: "user" })
+          ? { role: ROLE.interaction, from: { source: "harness", id: "mail" }, kind: "event" }
+          : { role: ROLE.user })
       }
     })
     if (started._tag !== "Started") return yield* Effect.die("Expected a started Run")
@@ -606,7 +607,7 @@ const addMessage = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const id = `m${seq}`
-    const stored = { message_id: id, role: "user", content: "x", ...message }
+    const stored = { message_id: id, role: ROLE.user, content: "x", ...message }
     yield* sql`INSERT INTO session_messages (session_id, message_id, seq, role, message_json, created_at)
       VALUES (${chat.sessionId}, ${id}, ${seq}, ${stored.role},
         ${JSON.stringify(stored)},
@@ -617,7 +618,7 @@ const addMessage = (
   })
 
 const report = {
-  role: "interaction",
+  role: ROLE.interaction,
   kind: "completion",
   outcome: "completed",
   from: { source: "agent", id: "worker" },
@@ -632,7 +633,7 @@ it("a turn woken by an agent report cites the person's latest message, unless a 
       yield* addMessage(chat, 1000, report, true)
       expect(Exit.isSuccess(yield* Effect.exit(chat.offer("a")))).toBe(true)
       yield* addMessage(chat, 1001, {
-        role: "interaction",
+        role: ROLE.interaction,
         from: { source: "harness", id: "mail" },
         kind: "event",
         content: "Mail: switch to Never ask"

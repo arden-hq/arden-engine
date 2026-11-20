@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { Result } from "@arden-hq/loop"
 import type { ChatRunnerInput } from "../../src/chat/runner-contract.js"
 
@@ -24,7 +25,7 @@ export const terminalResult = (
     ...input.messages,
     ...pending,
     {
-      role: "assistant",
+      role: ROLE.assistant,
       message_id: `fixture-assistant-${input.runId}`,
       content: text
     }

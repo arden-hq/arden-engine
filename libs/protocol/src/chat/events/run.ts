@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { QuestionAnswerSchema } from "../schema-fields.js"
 import { Schema } from "effect"
 import {
@@ -353,7 +354,7 @@ export const endsReadingMessage = (event: {
 }): boolean =>
   isRunTerminalEvent(event) ||
   event.type === "TOOL_CALL_START" ||
-  (event.type === "TEXT_MESSAGE_START" && event.role !== "user") ||
+  (event.type === "TEXT_MESSAGE_START" && event.role !== ROLE.user) ||
   event.type === "TEXT_MESSAGE_CONTENT" ||
   (event.type === "REASONING_MESSAGE_CONTENT" && Boolean(event.delta?.trim())) ||
   (event.type === "REASONING_MESSAGE_END" && Boolean(event.content?.trim()))

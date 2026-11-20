@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { cutText, foldSpace } from "@arden-hq/std/text"
 import type { WorkflowSourceRef } from "@arden-hq/protocol/workflows"
 import { Cause, Effect, Schema } from "effect"
@@ -173,9 +174,9 @@ const scriptResultRequest = (
     }),
     message: content,
     sender: {
-      kind: "completion",
-      from: { source: "workflow", id: payload.workflowRef },
-      to: { source: "agent", id: payload.sessionRef },
+      kind: INTERACTION_KIND.completion,
+      from: { source: INTERACTION_SOURCE.workflow, id: payload.workflowRef },
+      to: { source: INTERACTION_SOURCE.agent, id: payload.sessionRef },
       ...(payload.preview === null ? {} : { preview: payload.preview }),
       outcome: payload.status === "succeeded" ? "completed" : payload.status,
       caused_by: { type: "workflow", id: `${payload.workflowRef}:${payload.attempt}` }

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -279,7 +280,7 @@ describe("approval edits", () => {
             message: {
               message_id: "start",
               client_id: "start",
-              role: "user",
+              role: ROLE.user,
               content: "Remind me before calls",
               created_at: new Date().toISOString()
             }

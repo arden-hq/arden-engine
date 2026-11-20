@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
 import type { ModelCapabilities, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
@@ -52,7 +53,7 @@ const recording = (outputLimit: ModelCapabilities["outputLimit"] = undefined) =>
         {
           _tag: "Completed",
           message: {
-            role: "assistant",
+            role: ROLE.assistant,
             content: "Done.",
             tool_calls: null,
             reasoning_content: null
@@ -148,7 +149,7 @@ describe("a chat step's output limit", () => {
           {
             id: "m1",
             type: "message",
-            role: "assistant",
+            role: ROLE.assistant,
             content: [{ type: "output_text", text: "Done." }]
           }
         ]

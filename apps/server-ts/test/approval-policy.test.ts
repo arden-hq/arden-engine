@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { defaultImpact } from "../src/execution/impact.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -118,7 +119,7 @@ it("keeps disposable Side chat runs and their agents free of approval requests",
           message: {
             message_id: clientId,
             client_id: clientId,
-            role: "user",
+            role: ROLE.user,
             content: "Work",
             created_at: "2026-10-16T00:00:00.000Z"
           }
@@ -230,7 +231,7 @@ it("persists chat approval choices without resolving existing prompts or changin
           message: {
             message_id: "start",
             client_id: "start",
-            role: "user",
+            role: ROLE.user,
             content: "Publish",
             created_at: new Date().toISOString()
           }
@@ -334,7 +335,7 @@ it("escalates nested agent approvals to the parent Chat and resolves them there"
           message: {
             message_id: "start",
             client_id: "start",
-            role: "user",
+            role: ROLE.user,
             content: "Delegate",
             created_at: new Date().toISOString()
           }
@@ -471,7 +472,7 @@ it("refuses every tool call after a Task attempt loses authority", async () => {
           message: {
             message_id: "request",
             client_id: "request",
-            role: "user",
+            role: ROLE.user,
             content: "Track the review",
             created_at: "2026-09-17T00:00:00.000Z"
           }
@@ -567,7 +568,7 @@ it("uses its chat's editable mode for an automation and its running descendants"
           message: {
             message_id: "automation",
             client_id: "automation",
-            role: "interaction",
+            role: ROLE.interaction,
             kind: "assignment",
             from: {
               source: "automation",

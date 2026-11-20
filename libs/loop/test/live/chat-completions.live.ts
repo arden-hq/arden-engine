@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 /**
  * Live check of the Chat Completions provider against a real server, through
  * the real `makeAgent` loop. Not part of `vitest run`; run it by hand:
@@ -203,7 +204,7 @@ const agentWith = (toolset: Toolset) =>
   )
 
 const assistants = (messages: ReadonlyArray<ChatMessage>) =>
-  messages.flatMap((message) => (message.role === "assistant" ? [message] : []))
+  messages.flatMap((message) => (message.role === ROLE.assistant ? [message] : []))
 
 const check = (condition: boolean, detail: string): void => {
   if (!condition) throw new Error(detail)
@@ -214,7 +215,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
     "plain-answer",
     async () => {
       const result = await agentWith(noTools).run([
-        { role: "user", content: "Reply with the single word: pong" }
+        { role: ROLE.user, content: "Reply with the single word: pong" }
       ])
       check(/pong/i.test(result.text), `text was ${JSON.stringify(result.text)}`)
       const origin = assistants(result.messages).at(-1)?.origin
@@ -228,13 +229,16 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       const calls: Array<string> = []
       const agent = agentWith(weatherToolset(calls))
       const first = await agent.run([
-        { role: "user", content: "Use the weather tool for Paris, then tell me the temperature." }
+        {
+          role: ROLE.user,
+          content: "Use the weather tool for Paris, then tell me the temperature."
+        }
       ])
       check(calls.length >= 1, "the model never called the tool")
       check(/21/.test(first.text), `answer did not use the result: ${JSON.stringify(first.text)}`)
       const second = await agent.run([
         ...first.messages,
-        { role: "user", content: "Which city did you just check? One word." }
+        { role: ROLE.user, content: "Which city did you just check? One word." }
       ])
       check(/paris/i.test(second.text), `second turn: ${JSON.stringify(second.text)}`)
       return `calls=${JSON.stringify(calls)} first=${JSON.stringify(first.text)} second=${JSON.stringify(second.text)}`
@@ -246,7 +250,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       const calls: Array<string> = []
       const result = await agentWith(weatherToolset(calls)).run([
         {
-          role: "user",
+          role: ROLE.user,
           content:
             "Call the weather tool for Paris and for Rome in the same turn, then compare them."
         }
@@ -267,7 +271,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
         // reasons only with CHAT_COMPLETIONS_EFFORT set; Claude Sonnet 5.5 at
         // any effort and GPT-6 Astra at `low` still answer this one unthought.
         {
-          role: "user",
+          role: ROLE.user,
           content:
             "A train leaves at 9:47 and arrives at 13:12 the same day. Work it out step by step, then answer with the trip length in minutes."
         }
@@ -301,7 +305,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
         }
       }
       const result = await agentWith(noTools).run(
-        [{ role: "user", content: "Give the city Paris with temperature 21 as JSON." }],
+        [{ role: ROLE.user, content: "Give the city Paris with temperature 21 as JSON." }],
         {
           output: {
             schema,
@@ -323,7 +327,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
     async () => {
       const result = await agentWith(noTools).run([
         {
-          role: "user",
+          role: ROLE.user,
           content: [
             { type: "text", text: "What single color fills this image? One word." },
             { type: "image", media_type: "image/png", data: RED_PNG }
@@ -342,7 +346,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       let outcome = "ended without error"
       try {
         for await (const event of agentWith(noTools).stream(
-          [{ role: "user", content: "Write a 400-word story about a lighthouse." }],
+          [{ role: ROLE.user, content: "Write a 400-word story about a lighthouse." }],
           { signal: controller.signal }
         )) {
           if ("_tag" in event && (event._tag === "TextDelta" || event._tag === "ReasoningDelta")) {
@@ -366,7 +370,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
     "context-overflow",
     async () => {
       try {
-        await agentWith(noTools).run([{ role: "user", content: "word ".repeat(overflowWords) }])
+        await agentWith(noTools).run([{ role: ROLE.user, content: "word ".repeat(overflowWords) }])
       } catch (error) {
         const code = providerErrorCode(error)
         check(
@@ -385,7 +389,7 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
       timings.length = 0
       const result = await agentWith(catalogToolset(calls)).run([
         {
-          role: "user",
+          role: ROLE.user,
           content: "What is the shipping status of my order 4471? I need the tracking code."
         }
       ])
@@ -448,12 +452,12 @@ const cases: ReadonlyArray<readonly [string, () => Promise<string>]> = [
     "mid-conversation-system-and-developer",
     async () => {
       const result = await agentWith(noTools).run([
-        { role: "system", content: "You are terse." },
-        { role: "user", content: "Say hello." },
-        { role: "assistant", content: "Hello." },
-        { role: "system", content: "From now on, answer only in French." },
-        { role: "developer", content: "End every answer with the word FIN." },
-        { role: "user", content: "Say good morning." }
+        { role: ROLE.system, content: "You are terse." },
+        { role: ROLE.user, content: "Say hello." },
+        { role: ROLE.assistant, content: "Hello." },
+        { role: ROLE.system, content: "From now on, answer only in French." },
+        { role: ROLE.developer, content: "End every answer with the word FIN." },
+        { role: ROLE.user, content: "Say good morning." }
       ])
       check(result.text.length > 0, "empty answer")
       return `text=${JSON.stringify(result.text)}`

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import { renderInteraction } from "../src/agent/interactions.js"
@@ -62,7 +63,7 @@ const call = (id: string, city = "Paris") => ({
 
 const request = (overrides: Partial<ModelProviderRequest> = {}): ModelProviderRequest => ({
   model: GEMMA,
-  messages: [{ role: "user", content: "Hi." }],
+  messages: [{ role: ROLE.user, content: "Hi." }],
   renderInteraction,
   tools: [],
   deferredTools: [],
@@ -93,7 +94,7 @@ describe("Chat Completions stream mapping", () => {
     const { provider: cc, transport } = provider([
       () =>
         sseResponse([
-          llamaChunk({ role: "assistant", content: null }),
+          llamaChunk({ role: ROLE.assistant, content: null }),
           llamaChunk({ reasoning_content: "Two " }),
           llamaChunk({ reasoning_content: "cities." }),
           llamaChunk({ content: "Checking both." }),
@@ -157,7 +158,7 @@ describe("Chat Completions stream mapping", () => {
       {
         _tag: "Completed",
         message: {
-          role: "assistant",
+          role: ROLE.assistant,
           content: "Checking both.",
           tool_calls: [call("Z7zb"), call("gQg6", "Rome")],
           reasoning_content: "Two cities.",
@@ -214,7 +215,7 @@ describe("Chat Completions stream mapping", () => {
       {
         _tag: "Completed",
         message: {
-          role: "assistant",
+          role: ROLE.assistant,
           content: null,
           tool_calls: [call("whole")],
           reasoning_content: null,
@@ -392,28 +393,28 @@ describe("Chat Completions request body", () => {
   it("orders a multi-turn tool history: outputs follow calls, context waits, an interrupted call is closed", async () => {
     const { provider: cc, transport } = provider([answered("Ok.")])
     const history: ReadonlyArray<ChatMessage> = [
-      { role: "system", content: "Base prompt." },
-      { role: "system", content: "Background note." },
+      { role: ROLE.system, content: "Base prompt." },
+      { role: ROLE.system, content: "Background note." },
       {
-        role: "user",
+        role: ROLE.user,
         content: [
           { type: "text", text: "Check both." },
           { type: "context", content_type: "page", content: "Body", metadata: { slug: "home" } }
         ]
       },
       {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "",
         reasoning_content: "Plan.",
         tool_calls: [call("call-a"), call("call-b", "Rome")]
       },
-      { role: "tool", tool_call_id: "call-a", content: "A out" },
-      { role: "developer", content: "Current run context" },
-      { role: "user", content: "Steering while b runs" },
-      { role: "tool", tool_call_id: "call-b", content: "B out" },
-      { role: "assistant", content: "", reasoning_content: "Thinking only." },
-      { role: "assistant", content: "Retrying.", tool_calls: [call("call-c")] },
-      { role: "user", content: "Continue." }
+      { role: ROLE.tool, tool_call_id: "call-a", content: "A out" },
+      { role: ROLE.developer, content: "Current run context" },
+      { role: ROLE.user, content: "Steering while b runs" },
+      { role: ROLE.tool, tool_call_id: "call-b", content: "B out" },
+      { role: ROLE.assistant, content: "", reasoning_content: "Thinking only." },
+      { role: ROLE.assistant, content: "Retrying.", tool_calls: [call("call-c")] },
+      { role: ROLE.user, content: "Continue." }
     ]
 
     await collect(cc.stream(request({ messages: history, tools: [weather] })))
@@ -421,22 +422,22 @@ describe("Chat Completions request body", () => {
     expect(transport.requests[0]?.body).toEqual({
       model: GEMMA,
       messages: [
-        { role: "system", content: "Base prompt.\n\nBackground note." },
+        { role: ROLE.system, content: "Base prompt.\n\nBackground note." },
         {
-          role: "user",
+          role: ROLE.user,
           content: [
             { type: "text", text: "Check both." },
             { type: "text", text: '<page slug="home">\nBody\n</page>' }
           ]
         },
-        { role: "assistant", content: "", tool_calls: [call("call-a"), call("call-b", "Rome")] },
-        { role: "tool", tool_call_id: "call-a", content: "A out" },
-        { role: "tool", tool_call_id: "call-b", content: "B out" },
-        { role: "system", content: "Current run context" },
-        { role: "user", content: "Steering while b runs" },
-        { role: "assistant", content: "Retrying.", tool_calls: [call("call-c")] },
-        { role: "tool", tool_call_id: "call-c", content: MISSING_TOOL_OUTPUT },
-        { role: "user", content: "Continue." }
+        { role: ROLE.assistant, content: "", tool_calls: [call("call-a"), call("call-b", "Rome")] },
+        { role: ROLE.tool, tool_call_id: "call-a", content: "A out" },
+        { role: ROLE.tool, tool_call_id: "call-b", content: "B out" },
+        { role: ROLE.system, content: "Current run context" },
+        { role: ROLE.user, content: "Steering while b runs" },
+        { role: ROLE.assistant, content: "Retrying.", tool_calls: [call("call-c")] },
+        { role: ROLE.tool, tool_call_id: "call-c", content: MISSING_TOOL_OUTPUT },
+        { role: ROLE.user, content: "Continue." }
       ],
       stream: true,
       stream_options: { include_usage: true },
@@ -447,10 +448,10 @@ describe("Chat Completions request body", () => {
   const flagged = {
     model: GEMMA,
     messages: [
-      { role: "system", content: "Base." },
-      { role: "user", content: "Hi." },
-      { role: "assistant", content: "Hello." },
-      { role: "user", content: "Again." }
+      { role: ROLE.system, content: "Base." },
+      { role: ROLE.user, content: "Hi." },
+      { role: ROLE.assistant, content: "Hello." },
+      { role: ROLE.user, content: "Again." }
     ] satisfies ReadonlyArray<ChatMessage>,
     tools: [weather],
     toolChoice: "required" as const,
@@ -500,7 +501,7 @@ describe("Chat Completions request body", () => {
         messages: [
           ...flagged.messages.slice(0, 3),
           {
-            role: "user",
+            role: ROLE.user,
             content: [
               { type: "image", media_type: "image/png", data: "iVBOR" },
               { type: "text", text: "Again." }
@@ -513,13 +514,13 @@ describe("Chat Completions request body", () => {
         model: GEMMA,
         messages: [
           {
-            role: "developer",
+            role: ROLE.developer,
             content: [{ type: "text", text: "Base.", cache_control: { type: "ephemeral" } }]
           },
-          { role: "user", content: "Hi." },
-          { role: "assistant", content: "Hello." },
+          { role: ROLE.user, content: "Hi." },
+          { role: ROLE.assistant, content: "Hello." },
           {
-            role: "user",
+            role: ROLE.user,
             content: [
               { type: "image_url", image_url: { url: "data:image/png;base64,iVBOR" } },
               { type: "text", text: "Again.", cache_control: { type: "ephemeral" } }
@@ -577,7 +578,7 @@ describe("Chat Completions request body", () => {
   it("tells a model without image input that an image was left out, instead of failing every request", async () => {
     const { provider: cc, transport } = provider([answered("I cannot see it.")])
     const image: ChatMessage = {
-      role: "user",
+      role: ROLE.user,
       content: [
         { type: "text", text: "What is this?" },
         { type: "image", media_type: "image/png", data: "iVBOR" }
@@ -586,7 +587,7 @@ describe("Chat Completions request body", () => {
     await collect(cc.stream(request({ messages: [image] })))
     expect(sentMessages(transport.requests[0]?.body)).toEqual([
       {
-        role: "user",
+        role: ROLE.user,
         content: [
           { type: "text", text: "What is this?" },
           { type: "text", text: "(image omitted: this model does not take image input)" }
@@ -617,7 +618,7 @@ describe("OpenRouter reasoning_details", () => {
         () =>
           sseResponse([
             routerChunk({
-              role: "assistant",
+              role: ROLE.assistant,
               content: "",
               reasoning: "Plan",
               reasoning_details: [{ type: "reasoning.summary", summary: "Plan", index: 0, format }]
@@ -658,7 +659,7 @@ describe("OpenRouter reasoning_details", () => {
     expect(completed).toEqual({
       _tag: "Completed",
       message: {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "Done.",
         tool_calls: null,
         reasoning_content: "Plan it.",
@@ -686,15 +687,15 @@ describe("OpenRouter reasoning_details", () => {
     })
 
     const stored: AssistantMessage = {
-      role: "assistant",
+      role: ROLE.assistant,
       content: "Done.",
       provider_state: defined(completed.message.provider_state, "provider state"),
       origin: defined(completed.message.origin, "an origin")
     }
     const messages: ReadonlyArray<ChatMessage> = [
-      { role: "user", content: "Q" },
+      { role: ROLE.user, content: "Q" },
       stored,
-      { role: "user", content: "Next" }
+      { role: ROLE.user, content: "Next" }
     ]
     const other = provider([answered("Again.")], {
       providerId: "other-router",
@@ -710,9 +711,9 @@ describe("OpenRouter reasoning_details", () => {
       (sent) => (sentMessages(sent.body) as ReadonlyArray<unknown>)[1]
     )
     expect(replayed).toEqual([
-      { role: "assistant", content: "Done.", reasoning_details: details },
-      { role: "assistant", content: "Done." },
-      { role: "assistant", content: "Done." }
+      { role: ROLE.assistant, content: "Done.", reasoning_details: details },
+      { role: ROLE.assistant, content: "Done." },
+      { role: ROLE.assistant, content: "Done." }
     ])
   })
 
@@ -747,7 +748,7 @@ describe("OpenRouter reasoning_details", () => {
           sseResponse([
             chunk({
               content: "",
-              role: "assistant",
+              role: ROLE.assistant,
               reasoning: "I'm comparing the city",
               reasoning_details: [
                 {
@@ -811,9 +812,9 @@ describe("OpenRouter reasoning_details", () => {
       "chat-completions": { reasoning_details: [thinking] }
     })
     const messages: ReadonlyArray<ChatMessage> = [
-      { role: "user", content: "Q" },
+      { role: ROLE.user, content: "Q" },
       completed.message,
-      { role: "tool", tool_call_id: "toolu_01WYJTGCTKXaWEYTCuggotAr", content: "Sunny, 21C" }
+      { role: ROLE.tool, tool_call_id: "toolu_01WYJTGCTKXaWEYTCuggotAr", content: "Sunny, 21C" }
     ]
     await collect(router.provider.stream(request({ model: nitro, tools: [weather], messages })))
     await collect(router.provider.stream(request({ model: claude, tools: [weather], messages })))
@@ -836,7 +837,7 @@ describe("OpenRouter usage", () => {
     choices: [
       {
         index: 0,
-        delta: { content: "", role: "assistant" },
+        delta: { content: "", role: ROLE.assistant },
         finish_reason: "stop",
         native_finish_reason: "end_turn"
       }
@@ -1012,7 +1013,7 @@ describe("OpenRouter usage", () => {
             execute: () => ({ content: "Sunny.", preview: "Sunny." })
           }
         }
-      ).run([{ role: "user", content: "Weather?" }])
+      ).run([{ role: ROLE.user, content: "Weather?" }])
     }
     const known = await run([toolCall(0.0004), answer(0.0001)])
     expect(known.usage).toEqual({
@@ -1166,16 +1167,16 @@ it("persists the origin through a makeAgent run and decodes it back", async () =
         execute: () => ({ content: "", preview: "" })
       }
     }
-  ).run([{ role: "user", content: "Hi." }])
+  ).run([{ role: ROLE.user, content: "Hi." }])
 
   const assistant = defined(
-    result.messages.find((message) => message.role === "assistant"),
+    result.messages.find((message) => message.role === ROLE.assistant),
     "an assistant message"
   )
   expect(assistant).toEqual({
     message_id: expect.any(String),
     client_id: expect.any(String),
-    role: "assistant",
+    role: ROLE.assistant,
     content: "Hi there.",
     output_parts: [{ type: "text", text: "Hi there." }],
     origin: { provider: "llama.cpp", api: "chat-completions", model: GEMMA, requested_model: GEMMA }
@@ -1241,7 +1242,7 @@ describe("Chat Completions client tool search", () => {
     const { provider: cc } = provider([
       () =>
         sseResponse([
-          llamaChunk({ role: "assistant", content: null }),
+          llamaChunk({ role: ROLE.assistant, content: null }),
           searchChunk("srch", '{"query":'),
           llamaChunk({ tool_calls: [{ index: 0, function: { arguments: '"shell"}' } }] }),
           llamaChunk({}, "tool_calls"),
@@ -1269,7 +1270,7 @@ describe("Chat Completions client tool search", () => {
         _tag: "Completed",
         continuation: true,
         message: {
-          role: "assistant",
+          role: ROLE.assistant,
           content: null,
           tool_calls: null,
           reasoning_content: null,
@@ -1332,7 +1333,7 @@ describe("Chat Completions client tool search", () => {
     const completed = completionOf(items)
     expect(completed).toMatchObject({ continuation: true, finish_reason: "tool_calls" })
     expect(completed.message).toEqual({
-      role: "assistant",
+      role: ROLE.assistant,
       content: "Both.",
       tool_calls: [call("w1")],
       reasoning_content: null,
@@ -1412,22 +1413,22 @@ describe("Chat Completions client tool search", () => {
     ])
     const first = completionOf(await collect(cc.stream(searchRequest())))
     const stored: AssistantMessage = {
-      role: "assistant",
+      role: ROLE.assistant,
       content: "",
       provider_tool_calls: defined(first.message.provider_tool_calls ?? undefined, "a search"),
       output_parts: defined(first.message.output_parts ?? undefined, "output parts"),
       origin: defined(first.message.origin, "an origin")
     }
     await collect(
-      cc.stream(searchRequest({ messages: [{ role: "user", content: "List files." }, stored] }))
+      cc.stream(searchRequest({ messages: [{ role: ROLE.user, content: "List files." }, stored] }))
     )
 
     expect(transport.requests[1]?.body).toEqual({
       model: GEMMA,
       messages: [
-        { role: "user", content: "List files." },
+        { role: ROLE.user, content: "List files." },
         {
-          role: "assistant",
+          role: ROLE.assistant,
           content: "",
           tool_calls: [
             {
@@ -1437,7 +1438,7 @@ describe("Chat Completions client tool search", () => {
             }
           ]
         },
-        { role: "tool", tool_call_id: "srch", content: SHELL_LOADED }
+        { role: ROLE.tool, tool_call_id: "srch", content: SHELL_LOADED }
       ],
       stream: true,
       stream_options: { include_usage: true },
@@ -1447,7 +1448,7 @@ describe("Chat Completions client tool search", () => {
 
   it("keeps the tools a Responses search loaded, and follows compaction and removal records", async () => {
     const responsesTurn: AssistantMessage = {
-      role: "assistant",
+      role: ROLE.assistant,
       content: "",
       provider_tool_calls: [
         {
@@ -1483,29 +1484,31 @@ describe("Chat Completions client tool search", () => {
     }
     const { provider: cc, transport } = provider([answered("Ok."), answered("Ok.")])
     await collect(
-      cc.stream(searchRequest({ messages: [{ role: "user", content: "Mail Bo." }, responsesTurn] }))
+      cc.stream(
+        searchRequest({ messages: [{ role: ROLE.user, content: "Mail Bo." }, responsesTurn] })
+      )
     )
     const compacted: ReadonlyArray<ChatMessage> = [
-      { role: "user", content: "Summary of earlier work." },
+      { role: ROLE.user, content: "Summary of earlier work." },
       {
-        role: "developer",
+        role: ROLE.developer,
         content: "Tools still loaded from earlier in this conversation: mail_send, shell_run.",
         loaded_tools: ["shell_run", "mail_send"]
       },
       {
-        role: "developer",
+        role: ROLE.developer,
         content: "Tools changed in this conversation. No longer available: shell_run.",
         removed_tools: ["shell_run"]
       },
-      { role: "user", content: "Go on." }
+      { role: ROLE.user, content: "Go on." }
     ]
     await collect(cc.stream(searchRequest({ messages: compacted })))
 
     expect(transport.requests.map((sent) => recordOf(sent.body).messages)).toEqual([
       [
-        { role: "user", content: "Mail Bo." },
+        { role: ROLE.user, content: "Mail Bo." },
         {
-          role: "assistant",
+          role: ROLE.assistant,
           content: "",
           tool_calls: [
             {
@@ -1515,19 +1518,19 @@ describe("Chat Completions client tool search", () => {
             }
           ]
         },
-        { role: "tool", tool_call_id: "tsc_1", content: "Loaded: mail_send" }
+        { role: ROLE.tool, tool_call_id: "tsc_1", content: "Loaded: mail_send" }
       ],
       [
-        { role: "user", content: "Summary of earlier work." },
+        { role: ROLE.user, content: "Summary of earlier work." },
         {
-          role: "system",
+          role: ROLE.system,
           content: "Tools still loaded from earlier in this conversation: mail_send, shell_run."
         },
         {
-          role: "system",
+          role: ROLE.system,
           content: "Tools changed in this conversation. No longer available: shell_run."
         },
-        { role: "user", content: "Go on." }
+        { role: ROLE.user, content: "Go on." }
       ]
     ])
     expect(transport.requests.map((sent) => recordOf(sent.body).tools)).toEqual([
@@ -1538,7 +1541,7 @@ describe("Chat Completions client tool search", () => {
 
   it("replays a search answered here on the Responses wire as native search items", async () => {
     const chatTurn: AssistantMessage = {
-      role: "assistant",
+      role: ROLE.assistant,
       content: "Looking.",
       provider_tool_calls: [
         {
@@ -1569,14 +1572,14 @@ describe("Chat Completions client tool search", () => {
       fetch: transport.fetch
     })
     const messages: ReadonlyArray<ChatMessage> = [
-      { role: "user", content: "List files." },
+      { role: ROLE.user, content: "List files." },
       chatTurn,
-      { role: "user", content: "Again." }
+      { role: ROLE.user, content: "Again." }
     ]
     await collect(responses.stream(searchRequest({ model: "gpt-6.1-sol", messages })))
     expect(recordOf(transport.requests[0]?.body).input).toEqual([
-      { role: "user", content: "List files." },
-      { role: "assistant", content: "Looking." },
+      { role: ROLE.user, content: "List files." },
+      { role: ROLE.assistant, content: "Looking." },
       {
         type: "tool_search_call",
         call_id: "srch",
@@ -1607,7 +1610,7 @@ describe("Chat Completions client tool search", () => {
           }
         ]
       },
-      { role: "user", content: "Again." }
+      { role: ROLE.user, content: "Again." }
     ])
 
     const ownTurnWithoutItems: AssistantMessage = {
@@ -1676,7 +1679,7 @@ describe("Chat Completions client tool search", () => {
           }
         }
       }
-    ).run([{ role: "user", content: "List my files." }])
+    ).run([{ role: ROLE.user, content: "List my files." }])
 
     expect(result.text).toBe("Two files: a.txt and b.txt.")
     expect(executed).toEqual(['shell_run {"command":"ls"}'])
@@ -1694,9 +1697,9 @@ describe("Chat Completions client tool search", () => {
     ])
     // The first message is the loop's background-tools note.
     expect((sentMessages(sent[2]) as ReadonlyArray<unknown>).slice(1)).toEqual([
-      { role: "user", content: "List my files." },
+      { role: ROLE.user, content: "List my files." },
       {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "",
         tool_calls: [
           {
@@ -1707,12 +1710,12 @@ describe("Chat Completions client tool search", () => {
         ]
       },
       {
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "srch",
         content: SHELL_LOADED
       },
       {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "",
         tool_calls: [
           {
@@ -1722,7 +1725,7 @@ describe("Chat Completions client tool search", () => {
           }
         ]
       },
-      { role: "tool", tool_call_id: "run1", content: "a.txt\nb.txt" }
+      { role: ROLE.tool, tool_call_id: "run1", content: "a.txt\nb.txt" }
     ])
   })
 })

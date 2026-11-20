@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText, firstLine } from "@arden-hq/std/text"
 import { captureMutationVersions } from "./mutation-links.js"
 import { assertRunTaskAuthority } from "./run-task-authority.js"
@@ -333,7 +334,7 @@ export const makeWorkCaptureSql = (options: {
       const origin = yield* sql<{ readonly message_id: string }>`
         SELECT message_id FROM session_messages
         WHERE session_id = ${options.sessionId} AND message_id = ${turnId}
-          AND role IN ('user', 'interaction')
+          AND role IN (${ROLE.user}, ${ROLE.interaction})
       `.pipe(
         Effect.mapError((cause) =>
           workError("storage", "Could not read the originating user message", cause)

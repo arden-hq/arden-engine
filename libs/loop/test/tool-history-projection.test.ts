@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 import type { ChatMessage, ToolCall } from "../src/index.js"
 import { projectToolHistory } from "../src/providers/kit/tool-results.js"
@@ -11,16 +12,16 @@ const call = (id: string, async?: true): ToolCall => ({
 const IMAGE = { type: "image", media_type: "image/png", data: "iVBORw0KGgo" } as const
 
 const stored: ReadonlyArray<ChatMessage> = [
-  { role: "user", content: "Go" },
-  { role: "assistant", content: "", tool_calls: [call("sync"), call("bg", true)] },
-  { role: "tool", tool_call_id: "sync", content: "S out", model_content: [IMAGE] },
-  { role: "tool", tool_call_id: "bg", content: "running", async_tool_launch: { call_id: "bg" } },
-  { role: "assistant", content: "Waiting" },
-  { role: "tool", tool_call_id: "bg", content: "B out" }
+  { role: ROLE.user, content: "Go" },
+  { role: ROLE.assistant, content: "", tool_calls: [call("sync"), call("bg", true)] },
+  { role: ROLE.tool, tool_call_id: "sync", content: "S out", model_content: [IMAGE] },
+  { role: ROLE.tool, tool_call_id: "bg", content: "running", async_tool_launch: { call_id: "bg" } },
+  { role: ROLE.assistant, content: "Waiting" },
+  { role: ROLE.tool, tool_call_id: "bg", content: "B out" }
 ]
 
 const media = (id: string) => ({
-  role: "user",
+  role: ROLE.user,
   content: [
     {
       type: "context",
@@ -35,19 +36,19 @@ const media = (id: string) => ({
 describe("projectToolHistory", () => {
   it("gives a message route the receipt as output and the late result as context", () => {
     expect(projectToolHistory({ messages: stored, nativeAsync: false })).toEqual([
-      { role: "user", content: "Go" },
-      { role: "assistant", content: "", tool_calls: [call("sync"), call("bg")] },
-      { role: "tool", tool_call_id: "sync", content: "S out" },
+      { role: ROLE.user, content: "Go" },
+      { role: ROLE.assistant, content: "", tool_calls: [call("sync"), call("bg")] },
+      { role: ROLE.tool, tool_call_id: "sync", content: "S out" },
       media("sync"),
       {
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "bg",
         content: "running",
         async_tool_launch: { call_id: "bg" }
       },
-      { role: "assistant", content: "Waiting" },
+      { role: ROLE.assistant, content: "Waiting" },
       {
-        role: "user",
+        role: ROLE.user,
         content: [
           {
             type: "context",
@@ -62,12 +63,12 @@ describe("projectToolHistory", () => {
 
   it("gives a native route the late result as the call's output and no receipt", () => {
     expect(projectToolHistory({ messages: stored, nativeAsync: true })).toEqual([
-      { role: "user", content: "Go" },
-      { role: "assistant", content: "", tool_calls: [call("sync"), call("bg", true)] },
-      { role: "tool", tool_call_id: "sync", content: "S out" },
+      { role: ROLE.user, content: "Go" },
+      { role: ROLE.assistant, content: "", tool_calls: [call("sync"), call("bg", true)] },
+      { role: ROLE.tool, tool_call_id: "sync", content: "S out" },
       media("sync"),
-      { role: "assistant", content: "Waiting" },
-      { role: "tool", tool_call_id: "bg", content: "B out" }
+      { role: ROLE.assistant, content: "Waiting" },
+      { role: ROLE.tool, tool_call_id: "bg", content: "B out" }
     ])
   })
 
@@ -105,16 +106,16 @@ describe("projectToolHistory", () => {
     const histories: ReadonlyArray<ReadonlyArray<ChatMessage>> = [
       stored,
       [
-        { role: "assistant", content: "", tool_calls: [call("slow"), call("quick")] },
-        { role: "tool", tool_call_id: "quick", content: "Q out" },
+        { role: ROLE.assistant, content: "", tool_calls: [call("slow"), call("quick")] },
+        { role: ROLE.tool, tool_call_id: "quick", content: "Q out" },
         {
-          role: "tool",
+          role: ROLE.tool,
           tool_call_id: "slow",
           content: "running",
           async_tool_launch: { call_id: "slow" }
         },
-        { role: "tool", tool_call_id: "slow", content: "Done", model_content: [IMAGE] },
-        { role: "assistant", content: "Both back" }
+        { role: ROLE.tool, tool_call_id: "slow", content: "Done", model_content: [IMAGE] },
+        { role: ROLE.assistant, content: "Both back" }
       ]
     ]
     for (const history of histories)

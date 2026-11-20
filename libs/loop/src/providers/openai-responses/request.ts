@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AssistantMessage, ChatMessage, ProviderToolCall } from "../../contracts/messages.js"
 import type { ToolDeclaration, ToolSearch } from "../../contracts/tools.js"
 import type { ModelCapabilities, ModelProviderRequest } from "../../contracts/provider.js"
@@ -156,12 +157,16 @@ const convertMessages = (
   })
 
   for (const message of messages) {
-    if (message.role === "system") {
+    if (message.role === ROLE.system) {
       const content = textContent(message)
       if (content.length > 0) instructions.push(content)
       continue
     }
-    if (message.role === "developer" && toolSearch !== undefined && message.loaded_tools?.length) {
+    if (
+      message.role === ROLE.developer &&
+      toolSearch !== undefined &&
+      message.loaded_tools?.length
+    ) {
       batches.push({
         items: clientSearchExchange(
           `tool-load-${message.message_id ?? message.loaded_tools.join(",")}`,
@@ -173,14 +178,14 @@ const convertMessages = (
       })
       continue
     }
-    if (message.role === "developer") {
+    if (message.role === ROLE.developer) {
       const content = textContent(message)
       if (content.length > 0) {
         batches.push({
           items: [
             {
               type: "message",
-              role: "developer",
+              role: ROLE.developer,
               content: [{ type: "input_text", text: content }]
             }
           ],
@@ -189,7 +194,7 @@ const convertMessages = (
       }
       continue
     }
-    if (message.role === "interaction") {
+    if (message.role === ROLE.interaction) {
       if (route.agentMessages === "native" && isAgentMail(message) && message.to !== undefined) {
         batches.push({
           items: [
@@ -207,7 +212,7 @@ const convertMessages = (
       batches.push({
         items: [
           {
-            role: "user",
+            role: ROLE.user,
             content: rendersAsText(message)
               ? renderInteraction(message, "text")
               : userContent(message)
@@ -217,14 +222,14 @@ const convertMessages = (
       })
       continue
     }
-    if (message.role === "user") {
+    if (message.role === ROLE.user) {
       batches.push({
-        items: [{ role: "user", content: userContent(message) }],
+        items: [{ role: ROLE.user, content: userContent(message) }],
         deferWhileCallsPending: true
       })
       continue
     }
-    if (message.role === "tool") {
+    if (message.role === ROLE.tool) {
       batches.push({
         items: [
           {
@@ -259,7 +264,7 @@ const convertMessages = (
     const content = textContent(message)
     batches.push({
       items: [
-        ...(content.length > 0 ? [{ role: "assistant", content }] : []),
+        ...(content.length > 0 ? [{ role: ROLE.assistant, content }] : []),
         ...foreignToolSearches(providerCalls, toolSearch),
         ...(message.tool_calls ?? []).map((call) => ({
           type: "function_call",

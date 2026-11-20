@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import type { RunContext } from "@arden-hq/protocol/runs"
 import type { InteractionSender } from "@arden-hq/protocol/chat"
 import { Effect, Option, Schema } from "effect"
@@ -150,8 +151,8 @@ export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
   sessionId: string
 ) {
   if (
-    sender?.kind !== "message" ||
-    sender.from.source !== "agent" ||
+    sender?.kind !== INTERACTION_KIND.message ||
+    sender.from.source !== INTERACTION_SOURCE.agent ||
     sender.caused_by?.type !== "tool_call"
   )
     return undefined

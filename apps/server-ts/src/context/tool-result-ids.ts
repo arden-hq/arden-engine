@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage } from "@arden-hq/loop"
 
 // Providers carry the call id out of band (the Responses API's `call_id`), so
@@ -15,7 +16,7 @@ export const labelToolResults = (
   messages: ReadonlyArray<ChatMessage>
 ): ReadonlyArray<ChatMessage> =>
   messages.map((message) =>
-    message.role === "tool" && looksLikeJson(message.content)
+    message.role === ROLE.tool && looksLikeJson(message.content)
       ? { ...message, content: `${toolResultIdLine(message.tool_call_id)}\n${message.content}` }
       : message
   )
@@ -28,7 +29,7 @@ export const seenToolResult = (
     const message = messages[index]
     if (message === undefined) continue
     if (
-      message.role === "tool" &&
+      message.role === ROLE.tool &&
       message.tool_call_id === toolCallId &&
       message.async_tool_launch === undefined
     )

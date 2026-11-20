@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import type { ChatMessage } from "@arden-hq/loop"
 import { utcStamp } from "@arden-hq/std/time"
@@ -20,10 +21,13 @@ export const ownerInstructionsDue = (messages: ReadonlyArray<ChatMessage>): bool
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message === undefined) continue
-    if (message.role === "developer" && message.arden_context_source === OWNER_INSTRUCTIONS_SOURCE)
+    if (
+      message.role === ROLE.developer &&
+      message.arden_context_source === OWNER_INSTRUCTIONS_SOURCE
+    )
       return false
     if (isHandoff(message)) return true
-    if (message.role !== "assistant") continue
+    if (message.role !== ROLE.assistant) continue
     turns += 1
     if (turns >= RECITAL_TURNS) return true
   }

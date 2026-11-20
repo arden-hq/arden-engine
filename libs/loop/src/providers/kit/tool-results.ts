@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage, ContentBlock, ToolCall } from "../../contracts/messages.js"
 
 export const projectToolHistory = (options: {
@@ -8,12 +9,12 @@ export const projectToolHistory = (options: {
   const launched = new Set<string>()
   const output: ChatMessage[] = []
   for (const message of options.messages) {
-    if (message.role === "assistant") {
+    if (message.role === ROLE.assistant) {
       for (const call of message.tool_calls ?? []) calls.set(call.id, call)
       output.push(options.nativeAsync ? message : withoutAsyncFlags(message))
       continue
     }
-    if (message.role !== "tool") {
+    if (message.role !== ROLE.tool) {
       output.push(message)
       continue
     }
@@ -25,7 +26,7 @@ export const projectToolHistory = (options: {
       if (!carriedNatively) output.push(result)
     } else if (launched.has(result.tool_call_id) && !carriedNatively) {
       output.push({
-        role: "user",
+        role: ROLE.user,
         content: [
           {
             type: "context",
@@ -42,7 +43,9 @@ export const projectToolHistory = (options: {
   return output
 }
 
-const withoutAsyncFlags = (message: Extract<ChatMessage, { role: "assistant" }>): ChatMessage => {
+const withoutAsyncFlags = (
+  message: Extract<ChatMessage, { role: typeof ROLE.assistant }>
+): ChatMessage => {
   const calls = message.tool_calls ?? []
   if (!calls.some((call) => call.async !== undefined)) return message
   return {
@@ -59,7 +62,7 @@ const mediaMessage = (
   toolName: string,
   media: ReadonlyArray<ContentBlock>
 ): ChatMessage => ({
-  role: "user",
+  role: ROLE.user,
   content: [
     {
       type: "context",

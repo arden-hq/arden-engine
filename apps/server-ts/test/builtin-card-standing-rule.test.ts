@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -136,7 +137,7 @@ describe("Always allow on a built-in tool's card", () => {
             message: {
               message_id: "request",
               client_id: "request",
-              role: "user",
+              role: ROLE.user,
               content: "Remind me",
               created_at: new Date().toISOString()
             }

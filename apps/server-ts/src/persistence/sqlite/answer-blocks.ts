@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { savedBlockState } from "@arden-hq/answer-ui/state"
 import { DateTime, Effect, Predicate, Schema } from "effect"
 import { answerBlockBodies } from "@arden-hq/protocol/chat"
@@ -112,7 +113,7 @@ export const makeAnswerBlockStore = ({
       LIMIT 1
     `.pipe(Effect.mapError((cause) => fail("storage", "Could not read the message", cause)))
     const message = messages[0]
-    if (message === undefined || message.role !== "assistant")
+    if (message === undefined || message.role !== ROLE.assistant)
       return yield* fail("not_found", "No assistant message with this id in this chat")
     const envelope = yield* decodeJson(MessageEnvelopeSchema, message.message_json).pipe(
       Effect.mapError((cause) => fail("corrupt", "The stored message is corrupt", cause))

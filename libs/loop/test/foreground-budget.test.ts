@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 import {
   PauseRequested,
@@ -19,7 +20,7 @@ const response = (calls: ReadonlyArray<ToolCall> = [], content = "Done"): Comple
   model: "test",
   usage: { completion_tokens: 1 },
   _tag: "Completed",
-  message: { role: "assistant", content, tool_calls: calls, reasoning_content: null },
+  message: { role: ROLE.assistant, content, tool_calls: calls, reasoning_content: null },
   finish_reason: calls.length > 0 ? "tool_calls" : "stop"
 })
 
@@ -49,7 +50,7 @@ const scripted = (calls: ReadonlyArray<ToolCall>, requests: Array<ReadonlyArray<
 
 const toolMessages = (messages: ReadonlyArray<ChatMessage>) =>
   messages.flatMap((message) =>
-    message.role === "tool"
+    message.role === ROLE.tool
       ? [{ id: message.tool_call_id, content: message.content, launch: message.async_tool_launch }]
       : []
   )
@@ -57,7 +58,7 @@ const toolMessages = (messages: ReadonlyArray<ChatMessage>) =>
 const deliveries = (messages: ReadonlyArray<ChatMessage>) => {
   const launched = new Set<string>()
   return messages.flatMap((message) => {
-    if (message.role === "tool") {
+    if (message.role === ROLE.tool) {
       if (message.async_tool_launch !== undefined) {
         launched.add(message.async_tool_launch.call_id)
         return []
@@ -66,7 +67,7 @@ const deliveries = (messages: ReadonlyArray<ChatMessage>) => {
         ? [{ id: message.tool_call_id, content: message.content }]
         : []
     }
-    return message.role === "user" && Array.isArray(message.content)
+    return message.role === ROLE.user && Array.isArray(message.content)
       ? message.content.flatMap((block) =>
           block.content_type === "async_tool_result"
             ? [
@@ -91,7 +92,7 @@ it("a call that settles within the budget returns its result inline", async () =
       provider: scripted([callOf("lookup")], requests),
       toolset: toolsetOf([{ name: "lookup" }], async () => ({ content: "found", preview: "ok" }))
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   expect(toolMessages(result.messages)).toEqual([
     { id: "lookup", content: "found", launch: undefined }
   ])
@@ -125,7 +126,7 @@ it("a call still running at the budget gives the model a receipt and delivers it
       })
     }
   )
-  for await (const event of agent.stream([{ role: "user", content: "Go" }]))
+  for await (const event of agent.stream([{ role: ROLE.user, content: "Go" }]))
     if ("_tag" in event && event._tag === "ToolCompleted") completed.push(event.tool_id)
   expect(toolMessages(requests[1] ?? [])).toEqual([
     {
@@ -164,7 +165,7 @@ it("moving a state change to the background lets the next one start; a later wri
         }
       )
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   await otherRan.promise
   await flushTimers()
   const whileSlowRuns = [...executed]
@@ -198,7 +199,7 @@ it("a call waiting on its approval gate never moves to the background, and the s
         }
       )
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   await gateEntered.promise
   await flushTimers()
   const duringReview = [...executed]
@@ -233,7 +234,7 @@ it("a restart while a backgrounded call runs recovers its outcome like any backg
           }
         }
       }
-    ).run([{ role: "user", content: "Go" }], { signal: stop.signal })
+    ).run([{ role: ROLE.user, content: "Go" }], { signal: stop.signal })
   ).rejects.toThrow()
   const saved = checkpoints.at(-1) ?? []
   const result = await makeAgent(
@@ -285,7 +286,7 @@ it("a tool that declares nothing about the background, like an MCP tool, moves t
       },
       toolset: createToolset([mcp], { toJsonSchema: () => ({ type: "object" }) })(undefined)
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   expect(toolMessages(requests[1] ?? []).map((message) => message.launch)).toEqual([
     { call_id: "logs" }
   ])
@@ -320,7 +321,7 @@ it("a pause is emitted at once while a background call runs on, and the resumed 
   const paused = await makeAgent(
     { model: "test", foregroundBudgetMs: 0 },
     { provider: scripted([callOf("long"), callOf("ask")], []), toolset: tools }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   const pausedWhileRunning = longRuns === 1 && outcomes.size === 0
   finish.resolve()
   await longDone.promise
@@ -365,7 +366,7 @@ it("a moved call that later asks for approval pauses the run, and the resumed ru
       provider: {
         protocolVersion: MODEL_PROVIDER_PROTOCOL,
         stream: (request) => {
-          if (!request.messages.some((message) => message.role === "tool"))
+          if (!request.messages.some((message) => message.role === ROLE.tool))
             return [response([callOf("slow")], "")]
           finish.resolve()
           return [response([], "Waiting on it")]
@@ -373,7 +374,7 @@ it("a moved call that later asks for approval pauses the run, and the resumed ru
       },
       toolset: tools
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   const resumed = await makeAgent(
     { model: "test" },
     {
@@ -421,7 +422,7 @@ const pausedBesideLongCall = async () => {
         }
       }
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   return {
     paused,
     tools,
@@ -492,7 +493,7 @@ it("a pause whose host fails to hold its running background calls stops them", a
         }
       }
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   await expect(run).rejects.toThrow("holdBackgroundCalls failed: registry unavailable")
   finish.resolve()
   expect(longSignal?.aborted).toBe(true)

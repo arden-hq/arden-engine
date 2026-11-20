@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DatabaseSync } from "node:sqlite"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -87,57 +88,63 @@ describe("persistence schema", () => {
                 0,
                 "user",
                 null,
-                { role: "user", content: "Inspect it", turn_id: "user-1" }
+                { role: ROLE.user, content: "Inspect it", turn_id: "user-1" }
               ],
               [
                 "assistant-1",
                 1,
                 "assistant",
                 null,
-                { role: "assistant", content: null, turn_id: "user-1" }
+                { role: ROLE.assistant, content: null, turn_id: "user-1" }
               ],
               [
                 "tool-1",
                 2,
                 "tool",
                 null,
-                { role: "tool", tool_call_id: "call-1", content: "ok", turn_id: "user-1" }
+                { role: ROLE.tool, tool_call_id: "call-1", content: "ok", turn_id: "user-1" }
               ],
               [
                 "media-1",
                 3,
                 "user",
                 "tool-media:call-1",
-                { role: "user", is_meta: true, content: [], turn_id: "user-1" }
+                { role: ROLE.user, is_meta: true, content: [], turn_id: "user-1" }
               ],
               [
                 "assistant-2",
                 4,
                 "assistant",
                 null,
-                { role: "assistant", content: "Done", turn_id: "user-1" }
+                { role: ROLE.assistant, content: "Done", turn_id: "user-1" }
               ],
               [
                 "user-focus",
                 5,
                 "user",
                 "focus:g-1:run-1",
-                { role: "user", is_meta: true, content: "Continue", turn_id: "user-focus" }
+                { role: ROLE.user, is_meta: true, content: "Continue", turn_id: "user-focus" }
               ],
               [
                 "assistant-focus",
                 6,
                 "assistant",
                 null,
-                { role: "assistant", content: "More", turn_id: "user-focus" }
+                { role: ROLE.assistant, content: "More", turn_id: "user-focus" }
               ],
-              ["user-2", 7, "user", "user-2", { role: "user", content: "Next", turn_id: "user-2" }],
+              [
+                "user-2",
+                7,
+                "user",
+                "user-2",
+                { role: ROLE.user, content: "Next", turn_id: "user-2" }
+              ],
               [
                 "assistant-3",
                 8,
                 "assistant",
                 null,
-                { role: "assistant", content: "Next done", turn_id: "user-2" }
+                { role: ROLE.assistant, content: "Next done", turn_id: "user-2" }
               ]
             ] as const
             for (const [messageId, sequence, role, clientId, message] of rows) {

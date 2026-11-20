@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import { markdownWords, type CommunicationArrival } from "@arden-hq/protocol/chat"
 import { CommunicationEnvelopeSchema } from "@arden-hq/protocol/effect/chat"
@@ -286,9 +287,9 @@ export const chatEventsMessage = (options: {
   readonly lines: ReadonlyArray<string>
 }): StoredMessageEnvelope => ({
   message_id: options.messageId,
-  role: "interaction",
-  from: { source: "harness", id: "chat_events" },
-  kind: "event",
+  role: ROLE.interaction,
+  from: { source: INTERACTION_SOURCE.harness, id: "chat_events" },
+  kind: INTERACTION_KIND.event,
   created_at: options.createdAt,
   chat_events: true,
   content: [

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { clipLine } from "@arden-hq/std/text"
 import type {
   AssistantOutputPart,
@@ -134,7 +135,7 @@ const completion = (
   return {
     _tag: "Completed",
     message: {
-      role: "assistant",
+      role: ROLE.assistant,
       content: responseText(response),
       tool_calls: calls.length === 0 ? null : calls,
       reasoning_content: reasoningText(response),
@@ -272,7 +273,7 @@ export const makeEventMapper = ({
         normalizeOutputItem(
           {
             type: "message",
-            role: "assistant",
+            role: ROLE.assistant,
             content: [{ type: "output_text", text: outputText }]
           },
           `${SYNTHETIC_OUTPUT_ID_PREFIX}text-${fallbackSequence++}`

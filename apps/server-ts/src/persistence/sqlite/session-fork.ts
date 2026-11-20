@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 import { SessionForkOriginSchema } from "@arden-hq/protocol/effect/common"
 import type { SessionForkOrigin } from "@arden-hq/protocol/sessions"
@@ -16,10 +17,10 @@ export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(functi
   readonly operation: "spawn_agent" | "fork_session"
   readonly presentation: "preserve" | "inherited"
 }): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ChatWriteError> {
-  const kept = input.history.filter((message) => message.role !== "system")
+  const kept = input.history.filter((message) => message.role !== ROLE.system)
   const completedToolCalls = new Set(
     kept.flatMap((message) =>
-      message.role === "tool" &&
+      message.role === ROLE.tool &&
       message.async_tool_launch === undefined &&
       typeof message.tool_call_id === "string"
         ? [message.tool_call_id]
@@ -27,7 +28,7 @@ export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(functi
     )
   )
   const open = kept.flatMap((message) => {
-    if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) return []
+    if (message.role !== ROLE.assistant || !Array.isArray(message.tool_calls)) return []
     return message.tool_calls.flatMap((call: unknown) => {
       const id = typeof call === "object" && call !== null && "id" in call ? call.id : undefined
       return typeof id === "string" && !completedToolCalls.has(id) ? [id] : []
@@ -35,7 +36,7 @@ export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(functi
   })
   const closing = open.map((id): Readonly<Record<string, unknown>> => ({
     message_id: `fork-close:${id}`,
-    role: "tool",
+    role: ROLE.tool,
     tool_call_id: id,
     content: input.closeOpenCall(id)
   }))

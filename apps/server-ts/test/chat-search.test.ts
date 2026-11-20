@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -16,7 +17,7 @@ const searchScenario = Effect.fn("searchScenario")(function* (query: string, lim
   let seq = 0
   const say = Effect.fn("say")(function* (sessionId: string, messageId: string, content: string) {
     seq += 1
-    const message = { message_id: messageId, role: "assistant" as const, content, created_at: AT }
+    const message = { message_id: messageId, role: ROLE.assistant, content, created_at: AT }
     yield* sql`INSERT INTO session_messages (
       session_id, message_id, seq, role, message_json, created_at, search_text
     ) VALUES (

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { makeTurnInputs } from "./transcript-turn-inputs.js"
 import { makeResolveReference } from "./transcript-reference.js"
 import { disposableForkSql } from "../schema/fork-disposition.js"
@@ -105,10 +106,10 @@ export const conversationMessagePredicate = (sql: SqlClient.SqlClient) =>
   sql`
     ${ownMessagePredicate(sql)} AND
     (
-      m.role = 'user'
+      m.role = ${ROLE.user}
       OR
       (
-        m.role = 'interaction'
+        m.role = ${ROLE.interaction}
         AND (
           json_extract(m.message_json, '$.from.source') IN ('automation', 'agent', 'workflow')
           OR ${agentResultMessagePredicate(sql)}
@@ -117,7 +118,7 @@ export const conversationMessagePredicate = (sql: SqlClient.SqlClient) =>
       )
       OR
       (
-        m.role = 'assistant'
+        m.role = ${ROLE.assistant}
         AND m.search_text IS NOT NULL
         AND json_extract(m.message_json, '$.compaction') IS NULL
       )
@@ -126,7 +127,7 @@ export const conversationMessagePredicate = (sql: SqlClient.SqlClient) =>
         -- A call whose result is conversation content (a card, a proposal, a
         -- navigation request) keeps its carrier in the conversation stream
         -- even when it says nothing else.
-        m.role = 'assistant'
+        m.role = ${ROLE.assistant}
         AND json_extract(m.message_json, '$.compaction') IS NULL
         AND EXISTS (
           SELECT 1
@@ -141,7 +142,7 @@ const toolWorkCarrierMessagePredicate = (sql: SqlClient.SqlClient) =>
   sql`
     ${ownMessagePredicate(sql)} AND
     (
-      m.role = 'assistant'
+      m.role = ${ROLE.assistant}
       AND (
         COALESCE(json_array_length(m.message_json, '$.provider_tool_calls'), 0) > 0
         OR EXISTS (
@@ -157,7 +158,7 @@ const workCarrierMessagePredicate = (sql: SqlClient.SqlClient) =>
   sql`
     ${ownMessagePredicate(sql)} AND
     (
-      m.role = 'assistant'
+      m.role = ${ROLE.assistant}
       AND json_extract(m.message_json, '$.superseded') IS NULL
       AND (
         length(trim(COALESCE(json_extract(m.message_json, '$.reasoning_content'), ''))) > 0
@@ -192,7 +193,7 @@ export const makeTranscriptQueries = ({
       )
     )
     const agentResult =
-      row.role === "interaction"
+      row.role === ROLE.interaction
         ? yield* agentResultPresentation(sql, row.session_id, row.message_id).pipe(
             Effect.mapError((cause) =>
               corruption(row.session_id, "Could not read agent result", cause)
@@ -606,7 +607,7 @@ export const makeTranscriptQueries = ({
           AND m.seq BETWEEN t.message_start_seq AND t.message_end_seq
         WHERE t.session_id = ${sessionId}
           AND t.turn_id = ${turnId}
-          AND m.role = 'assistant'
+          AND m.role = ${ROLE.assistant}
           AND ${messageTurnIdSql(sql, "m")} = ${turnId}
           AND instr(json_extract(m.message_json, '$.tool_calls'), ${needle}) > 0
         ORDER BY m.seq ASC
@@ -652,7 +653,7 @@ export const makeTranscriptQueries = ({
         WHERE t.session_id = ${sessionId}
           AND t.turn_id IN ${sql.in(turnIds)}
           AND ${messageTurnIdSql(sql, "m")} = t.turn_id
-          AND ((m.role = 'tool' AND json_extract(m.message_json, '$.async_tool_launch') IS NULL
+          AND ((m.role = ${ROLE.tool} AND json_extract(m.message_json, '$.async_tool_launch') IS NULL
                 AND json_extract(m.message_json, '$.tool_call_id') IN ${sql.in(toolCallIds)}))
         ORDER BY m.seq ASC
       `.pipe(

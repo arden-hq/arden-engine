@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -39,7 +40,7 @@ const delegatedReview = Effect.fn("delegatedReview")(function* (
     message: {
       message_id: "request",
       client_id: "request",
-      role: "user",
+      role: ROLE.user,
       content: REQUEST,
       created_at: AT
     }

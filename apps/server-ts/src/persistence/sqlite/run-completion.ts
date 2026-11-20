@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { StoredMessageEnvelope } from "../transcript/model.js"
@@ -14,5 +15,5 @@ export const completedRunReply = Effect.fn("RunCompletion.reply")(function* (
     SELECT completion_message_id FROM chat_runs WHERE run_id = ${runId}
   `
   if (rows[0]?.completion_message_id !== last.message_id) return undefined
-  return hasResumableTail(messages, last.role === "tool") ? undefined : last
+  return hasResumableTail(messages, last.role === ROLE.tool) ? undefined : last
 })

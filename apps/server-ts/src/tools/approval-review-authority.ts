@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Buffer } from "node:buffer"
 import { isUserAutomation, type Actor } from "../execution/authority.js"
 import { Effect, Predicate } from "effect"
@@ -47,7 +48,7 @@ export const assignmentBrief = (
   envelopes: ReadonlyArray<Readonly<Record<string, unknown>>>
 ): DelegationBrief | undefined => {
   for (const envelope of envelopes) {
-    if (envelope["role"] !== "interaction" || envelope["kind"] !== "assignment") continue
+    if (envelope["role"] !== ROLE.interaction || envelope["kind"] !== "assignment") continue
     const content = envelope["content"]
     if (!Predicate.isString(content)) continue
     const from = envelope["from"]

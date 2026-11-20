@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type {
   AssistantMessage,
   ChatMessage,
@@ -55,7 +56,7 @@ export class StreamedCallHistory {
       ...(calls.length > 0 ? {} : { continuation: true }),
       usage: { completion_tokens: 0 },
       message: {
-        role: "assistant",
+        role: ROLE.assistant,
         content: this.text.join(""),
         tool_calls: calls,
         reasoning_content: null,

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { openRunSince } from "./automation-running.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import type { SpaceAgentAvailability, SpaceDetail, SpacesOverview } from "@arden-hq/protocol/spaces"
@@ -133,7 +134,7 @@ export const makeSpaceReads = (
                d.inference_policy, d.mark, d.created_at, d.updated_at, d.archived_at,
                ${openRunSince(reader, reader`worker.task_id`)} AS running_since, d.pinned_position,
                (SELECT m.search_text FROM session_messages AS m
-                WHERE m.session_id = latest.session_id AND m.role = 'assistant'
+                WHERE m.session_id = latest.session_id AND m.role = ${ROLE.assistant}
                   AND TRIM(COALESCE(m.search_text, '')) <> ''
                 ORDER BY m.seq DESC LIMIT 1) AS last_text
         FROM spaces AS d
@@ -145,7 +146,7 @@ export const makeSpaceReads = (
             AND s.parent_message_id IS NULL
             AND EXISTS (
               SELECT 1 FROM session_messages AS m
-              WHERE m.session_id = s.session_id AND m.role = 'assistant'
+              WHERE m.session_id = s.session_id AND m.role = ${ROLE.assistant}
                 AND TRIM(COALESCE(m.search_text, '')) <> ''
             )
           ORDER BY s.last_activity DESC, s.session_id DESC LIMIT 1
@@ -186,7 +187,7 @@ export const makeSpaceReads = (
             AND s.parent_session_id IS NULL
             AND s.parent_message_id IS NULL
             AND s.has_unread = 1
-            AND m.role = 'assistant'
+            AND m.role = ${ROLE.assistant}
         )
         SELECT space_id, session_id, created_at, search_text, subject
         FROM ranked
@@ -361,7 +362,7 @@ export const makeSpaceReads = (
       const sessionRows = yield* reader<SessionDetailRow>`
         SELECT s.session_id, s.public_ref, s.name, s.last_activity,
           (SELECT m.search_text FROM session_messages AS m
-            WHERE m.session_id = s.session_id AND m.role = 'assistant'
+            WHERE m.session_id = s.session_id AND m.role = ${ROLE.assistant}
             ORDER BY m.seq DESC LIMIT 1) AS last_text,
           (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary
         FROM sessions AS s

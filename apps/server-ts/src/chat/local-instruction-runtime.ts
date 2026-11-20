@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isWithin } from "@arden-hq/std/paths"
 import type {
   ChatMessage,
@@ -100,7 +101,7 @@ export const makeLocalInstructionRuntime = ({
     directoriesInitialized = true
     const latest = messages.findLast(
       (message) =>
-        message.role === "developer" && message.arden_context_source === "local_instructions"
+        message.role === ROLE.developer && message.arden_context_source === "local_instructions"
     )
     const evidence = decodeEvidence(latest?.arden_local_instruction_evidence)
     if (Option.isNone(evidence)) return
@@ -117,14 +118,14 @@ export const makeLocalInstructionRuntime = ({
     const messages = request.messages ?? []
     const callIndex = messages.findLastIndex(
       (message) =>
-        message.role === "assistant" &&
+        message.role === ROLE.assistant &&
         message.tool_calls?.some((call) => call.id === request.toolCallId)
     )
     const previous = messages
       .slice(0, Math.max(0, callIndex))
       .findLast(
         (message) =>
-          message.role === "developer" && message.arden_context_source === "local_instructions"
+          message.role === ROLE.developer && message.arden_context_source === "local_instructions"
       )
     if (previous === undefined) return undefined
     const evidence = decodeEvidence(previous.arden_local_instruction_evidence)

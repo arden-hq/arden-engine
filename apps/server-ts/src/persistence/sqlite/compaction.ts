@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import {
@@ -383,7 +384,7 @@ export const makeContextCompactionStore = ({
         const messages = yield* loadMessages(reader, valid, "snapshot")
         const ownerWords = yield* makeOwnerWordsIn(reader)(
           valid.sessionId,
-          messages.flatMap((message) => (message.role === "user" ? [message.message_id] : []))
+          messages.flatMap((message) => (message.role === ROLE.user ? [message.message_id] : []))
         ).pipe(
           Effect.mapError((cause) =>
             error("snapshot", "storage", "Could not read the owner's words", { ...valid, cause })

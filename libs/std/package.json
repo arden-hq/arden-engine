@@ -34,6 +34,11 @@
       "types": "./dist/json.d.ts",
       "import": "./dist/json.js"
     },
+    "./message-vocabulary": {
+      "arden-source": "./src/message-vocabulary.ts",
+      "types": "./dist/message-vocabulary.d.ts",
+      "import": "./dist/message-vocabulary.js"
+    },
     "./hash": {
       "arden-source": "./src/hash.ts",
       "types": "./dist/hash.d.ts",

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -125,7 +126,7 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
               ...run.activeMessages,
               {
                 message_id: `alert-${id}-answer`,
-                role: "assistant",
+                role: ROLE.assistant,
                 content: reply,
                 created_at: new Date().toISOString()
               }

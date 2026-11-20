@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type {
   AssistantOutputPart,
   ChatMessage,
@@ -120,7 +121,7 @@ export interface ProviderStreamRetry {
 }
 
 export interface ProviderMessage {
-  readonly role: "assistant"
+  readonly role: typeof ROLE.assistant
   readonly content: string | null
   readonly tool_calls: ReadonlyArray<ToolCall> | null
   readonly reasoning_content: string | null

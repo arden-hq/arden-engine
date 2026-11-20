@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { DatabaseSync } from "node:sqlite"
 import { JOURNAL_HEAD_SEQUENCE_SQL } from "@arden-hq/journal/effect"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
@@ -257,7 +258,7 @@ const schemaTransitions = [
       database.exec(`ALTER TABLE sessions ADD COLUMN ${visibleMessageCountColumn}`)
       database.exec(`UPDATE sessions SET visible_message_count = (
         SELECT COUNT(*) FROM json_each(messages) AS message
-        WHERE json_extract(message.value, '$.role') NOT IN ('system', 'developer'))`)
+        WHERE json_extract(message.value, '$.role') NOT IN ('${ROLE.system}', '${ROLE.developer}'))`)
       createFrom(database, next, "index:idx_sessions_list")
     }
   },

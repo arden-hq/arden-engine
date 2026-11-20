@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 
@@ -106,7 +107,7 @@ export const makeScriptResults = ({
     const stamped = message.workflow_delivery
     if (typeof stamped !== "object" || stamped === null || Array.isArray(stamped)) return false
     return (
-      message.role === "interaction" &&
+      message.role === ROLE.interaction &&
       message.message_id === clientId &&
       message.client_id === clientId &&
       "workflow_ref" in stamped &&

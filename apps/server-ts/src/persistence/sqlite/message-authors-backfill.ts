@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -42,7 +43,7 @@ export const messageAuthorsBackfill: Backfill = {
     }>`
       SELECT message_rowid, session_id, message_id, message_json FROM session_messages
       WHERE message_rowid > ${after} AND message_rowid <= ${last}
-        AND role = 'user' AND author IS NULL`
+        AND role = ${ROLE.user} AND author IS NULL`
     const proofs = new Map<string, ReadonlySet<string>>()
     for (const row of unset) {
       const message = parsed(row.message_json)

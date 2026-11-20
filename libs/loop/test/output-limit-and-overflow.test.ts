@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -18,7 +19,7 @@ const response = (content: string, finishReason: "stop" | "length" = "stop") => 
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content,
     tool_calls: [],
     reasoning_content: null
@@ -65,7 +66,7 @@ describe("a reply cut off at the output limit", () => {
       { provider: model.shape, toolset: emptyToolset }
     )
 
-    const result = await agent.run([{ role: "user", content: "write a lot" }])
+    const result = await agent.run([{ role: ROLE.user, content: "write a lot" }])
 
     expect(result.stop_reason).toBe("end_turn")
     expect(result.text).toBe("part two")
@@ -89,7 +90,7 @@ describe("a reply cut off at the output limit", () => {
       { provider: model.shape, toolset: emptyToolset }
     )
 
-    const result = await agent.run([{ role: "user", content: "write a lot" }])
+    const result = await agent.run([{ role: ROLE.user, content: "write a lot" }])
 
     expect(result.stop_reason).toBe("max_output_length")
     expect(result.text).toBe("three")
@@ -106,7 +107,7 @@ describe("a request the provider refuses as too long", () => {
       overflowSeen.push(prepared.contextOverflow === true)
       if (prepared.contextOverflow !== true) return prepared
       const { contextOverflow: _, ...answered } = prepared
-      const messages = [{ role: "user" as const, content: "summary of the long chat" }]
+      const messages = [{ role: ROLE.user, content: "summary of the long chat" }]
       return { ...answered, messages, compactionReplacement: messages }
     }
     const mintedTurns: Array<number> = []
@@ -123,9 +124,9 @@ describe("a request the provider refuses as too long", () => {
     )
 
     const result = await agent.run([
-      { role: "user", content: "a very long chat" },
-      { role: "assistant", content: "a very long answer" },
-      { role: "user", content: "go on" }
+      { role: ROLE.user, content: "a very long chat" },
+      { role: ROLE.assistant, content: "a very long answer" },
+      { role: ROLE.user, content: "go on" }
     ])
 
     expect(overflowSeen).toEqual([false, true])
@@ -147,7 +148,7 @@ describe("a request the provider refuses as too long", () => {
       { provider: model.shape, toolset: emptyToolset }
     )
 
-    const failure = await agent.run([{ role: "user", content: "a very long chat" }]).then(
+    const failure = await agent.run([{ role: ROLE.user, content: "a very long chat" }]).then(
       () => undefined,
       (cause: unknown) => cause
     )
@@ -173,7 +174,7 @@ describe("a call the output limit cut off after it was announced", () => {
     const stream = makeAgent(
       { model: "test-model", maxIterations: 2 },
       { provider, toolset: weatherToolset }
-    ).stream([{ role: "user", content: "Weather?" }])
+    ).stream([{ role: ROLE.user, content: "Weather?" }])
     let text: string | undefined
     for await (const event of stream) {
       if (!("_tag" in event)) {
@@ -276,7 +277,7 @@ describe("a call the output limit cut off after it was announced", () => {
                   {
                     id: "m",
                     type: "message",
-                    role: "assistant",
+                    role: ROLE.assistant,
                     content: [{ type: "output_text", text: "Sunny." }]
                   }
                 ]

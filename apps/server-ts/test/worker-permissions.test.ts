@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -109,7 +110,7 @@ it.each(["space", "automation", "system"] as const)(
               created_at: new Date().toISOString(),
               ...(lease
                 ? {
-                    role: "interaction",
+                    role: ROLE.interaction,
                     kind: "assignment",
                     from: {
                       source: "automation",
@@ -123,7 +124,7 @@ it.each(["space", "automation", "system"] as const)(
                       prompt: "Review"
                     }
                   }
-                : { role: "user" })
+                : { role: ROLE.user })
             }
           })
           const spawn = {

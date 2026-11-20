@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -133,7 +134,7 @@ it("refuses to remove an Automation during its chat run, and keeps the run", asy
         message: {
           message_id: "removed",
           client_id: "removed",
-          role: "interaction",
+          role: ROLE.interaction,
           kind: "assignment",
           from: { source: "automation", id: automation.task_id, name: automation.name },
           content: "Review",

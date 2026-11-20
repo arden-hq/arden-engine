@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { Metadata } from "../../contracts/messages.js"
 import type {
   ModelProvider,
@@ -122,7 +123,7 @@ export const openResponsesSession = (options: {
         : incrementalInput(payload, previous)
     const additionalInput = continuationInput(payload.input, priorInput, steeredInput)
     const automatic = next === "automatic"
-    const carry = automatic ? additionalInput.filter((item) => item.role === "user") : []
+    const carry = automatic ? additionalInput.filter((item) => item.role === ROLE.user) : []
     const deferredOutputs =
       automatic && additionalInput.some((item) => item.type === "function_call_output")
     const onAbort = () => connection?.socket.close()
@@ -499,7 +500,7 @@ const continuationInput = (
     seen.set(key, (seen.get(key) ?? 0) + 1)
   }
   return input.filter((item) => {
-    if (item.role !== "user" && item.type !== "function_call_output") return false
+    if (item.role !== ROLE.user && item.type !== "function_call_output") return false
     const key = JSON.stringify(item)
     const count = seen.get(key) ?? 0
     if (count === 0) return true

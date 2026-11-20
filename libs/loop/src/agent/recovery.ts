@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { parseToolCalls } from "../tools/dispatch.js"
 import type { ChatMessage, ToolCall } from "../contracts/messages.js"
 import type { PendingToolCall, ToolDisplayTitle } from "../contracts/tools.js"
@@ -14,11 +15,11 @@ export const incompleteToolStep = (
   const completedIds = new Set<string>()
   const rawToolCalls: ToolCall[] = []
   for (const message of [...messages].reverse()) {
-    if (message.role === "tool") {
+    if (message.role === ROLE.tool) {
       completedIds.add(message.tool_call_id)
       continue
     }
-    if (message.role !== "assistant") continue
+    if (message.role !== ROLE.assistant) continue
     rawToolCalls.unshift(...(message.tool_calls ?? []))
   }
   const pendingCalls = parseToolCalls(rawToolCalls, displayTitle).filter(

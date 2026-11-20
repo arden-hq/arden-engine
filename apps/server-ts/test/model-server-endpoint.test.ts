@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import {
@@ -116,7 +117,7 @@ const codexProvider = () => {
         {
           _tag: "Completed",
           message: {
-            role: "assistant",
+            role: ROLE.assistant,
             content: "Fine.",
             tool_calls: null,
             reasoning_content: null

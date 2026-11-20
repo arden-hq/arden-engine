@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { timerSleep } from "../lib/timer-sleep.js"
 import { Cause, Effect, Exit, Layer } from "effect"
 import { arrivalBatches } from "./arrival-batches.js"
@@ -20,7 +21,10 @@ const arrivalSender = (delivery: RunDelivery): InteractionSender | undefined => 
   const personsAnswer =
     payload.kind === "answer" && payload.timeout !== true && payload.questionId !== null
   if (personsAnswer || delivery.forwardedFrom !== undefined) return undefined
-  return { kind: "event", from: { source: "harness", id: payload.kind } }
+  return {
+    kind: INTERACTION_KIND.event,
+    from: { source: INTERACTION_SOURCE.harness, id: payload.kind }
+  }
 }
 
 const toSendInput = (delivery: RunDelivery): ChatSendInput => {

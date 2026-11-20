@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AgentInvariantError } from "../errors.js"
 import { raceAbort } from "../abort.js"
 import { launchReceipt, parseToolCalls } from "../tools/dispatch.js"
@@ -281,7 +282,7 @@ const outcomeResult = (outcome: CallSettlement, id: string): ToolResult | undefi
 }
 
 const isLaunchReceipt = (message: ChatMessage, id: string): boolean =>
-  message.role === "tool" && message.async_tool_launch?.call_id === id
+  message.role === ROLE.tool && message.async_tool_launch?.call_id === id
 
 export const pendingBackgroundCalls = (
   messages: ReadonlyArray<ChatMessage>,
@@ -290,13 +291,13 @@ export const pendingBackgroundCalls = (
   const launched = new Set<string>()
   const answered = new Set<string>()
   for (const message of messages) {
-    if (message.role !== "tool") continue
+    if (message.role !== ROLE.tool) continue
     if (message.async_tool_launch !== undefined) launched.add(message.async_tool_launch.call_id)
     else answered.add(message.tool_call_id)
   }
   return parseToolCalls(
     messages.flatMap((message) =>
-      message.role === "assistant"
+      message.role === ROLE.assistant
         ? (message.tool_calls ?? []).filter(
             (call) => launched.has(call.id) && !answered.has(call.id)
           )

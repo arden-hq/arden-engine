@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { messageId, type ChatMessage, type ToolCall } from "../contracts/messages.js"
 import { harnessNotice } from "./harness-notice.js"
 import {
@@ -115,7 +116,7 @@ const appendDenials = (
   for (const call of calls) {
     messages.push({
       message_id: messageId("tool"),
-      role: "tool",
+      role: ROLE.tool,
       tool_call_id: call.id,
       content
     })
@@ -160,7 +161,7 @@ export const withBudgetReminder = (
   reminder: string
 ): ReadonlyArray<ChatMessage> => {
   const first = messages[0]
-  if (first?.role !== "system") return [{ role: "system", content: reminder }, ...messages]
+  if (first?.role !== ROLE.system) return [{ role: ROLE.system, content: reminder }, ...messages]
   const content = first.content
   const system =
     typeof content === "string"

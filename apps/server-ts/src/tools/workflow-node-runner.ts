@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import { ToolExecutionError, type ToolResult, type Toolset } from "@arden-hq/loop"
 import { chatDecoders } from "@arden-hq/protocol/chat"
@@ -87,7 +88,7 @@ const childResult = async (
         }),
         { signal }
       )
-      const assistant = [...page.records].reverse().find((record) => record.role === "assistant")
+      const assistant = [...page.records].reverse().find((record) => record.role === ROLE.assistant)
       const content = assistant?.envelope.content
       if (typeof content !== "string") throw new Error("Workflow child produced no text result")
       return content

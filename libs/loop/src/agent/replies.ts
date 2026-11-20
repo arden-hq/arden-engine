@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage, ReplyContext, UserMessage } from "../contracts/messages.js"
 
 /** Every message a human reply quotes, in the order they were quoted. */
@@ -8,7 +9,7 @@ export const replyContexts = (replyTo: UserMessage["replyTo"]): ReadonlyArray<Re
 
 export const projectReplies = (messages: ReadonlyArray<ChatMessage>): ReadonlyArray<ChatMessage> =>
   messages.map((message) => {
-    if (message.role !== "user" || message.replyTo === undefined) return message
+    if (message.role !== ROLE.user || message.replyTo === undefined) return message
     const { replyTo, ...stored } = message
     const content = contentParts(message.content)
     return {

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type {
   SessionTriageAction,
   SessionTriageDecision,
@@ -59,7 +60,7 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
 
     const fresh = freshTriage(yield* storedTriage(session), chatState(session), dependencies.zone)
     if (fresh !== undefined) return fresh
-    if (!session.messages.some((message) => message.role === "assistant")) return NO_TRIAGE
+    if (!session.messages.some((message) => message.role === ROLE.assistant)) return NO_TRIAGE
     if (yield* dependencies.sessions.blockingWork(sessionId)) return NO_TRIAGE
 
     const transcript = triageTranscript(session.messages)

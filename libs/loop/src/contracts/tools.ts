@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type {
   ChatMessage,
   ContentBlock,
@@ -121,11 +122,11 @@ export interface ToolSearchResult {
 export const loadedToolNames = (messages: ReadonlyArray<ChatMessage>): Set<string> => {
   const loaded = new Set<string>()
   for (const message of messages) {
-    if (message.role === "developer") {
+    if (message.role === ROLE.developer) {
       for (const name of message.loaded_tools ?? []) loaded.add(name)
       for (const name of message.removed_tools ?? []) loaded.delete(name)
     }
-    if (message.role === "assistant") {
+    if (message.role === ROLE.assistant) {
       for (const call of message.provider_tool_calls ?? []) {
         for (const name of call.loaded_tool_names ?? []) loaded.add(name)
       }

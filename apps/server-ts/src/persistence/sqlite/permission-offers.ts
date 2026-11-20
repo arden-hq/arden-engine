@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ResolveRunQuestionInput } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
@@ -25,7 +26,7 @@ import { workError } from "./work-records.js"
 const OfferChoicesSchema = Schema.Array(OfferChoiceSchema)
 
 const deliveredSql = (sql: SqlClient.SqlClient, message: Statement.Fragment): Statement.Fragment =>
-  sql`(${message}.role = 'interaction'
+  sql`(${message}.role = ${ROLE.interaction}
     AND json_extract(${message}.message_json, '$.from.source') IN ('agent', 'workflow', 'tool')
     AND json_extract(${message}.message_json, '$.from_chat') IS NULL
     AND json_extract(${message}.message_json, '$.sent_from') IS NULL)`
@@ -56,7 +57,7 @@ export const ownMessageThisTurn = (sql: SqlClient.SqlClient, runId: string) =>
         AND NOT EXISTS (
           SELECT 1 FROM session_messages AS between_
           WHERE between_.session_id = run.session_id
-            AND between_.role IN ('user', 'interaction')
+            AND between_.role IN (${ROLE.user}, ${ROLE.interaction})
             AND between_.seq > message.seq AND between_.seq <= turn.seq
             AND NOT ${deliveredSql(sql, sql`between_`)}
         )

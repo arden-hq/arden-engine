@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { InvalidModelResponseError, ModelProviderError, ProtocolContractError } from "../errors.js"
 import {
   INTERACTION_KINDS,
@@ -59,12 +60,18 @@ const checkInteraction = (message: Record<string, unknown>): void => {
     from.id.length === 0
   )
     fail("messages", "an interaction needs who it is from")
-  if (to !== undefined && (!isRecord(to) || to.source !== "agent" || typeof to.id !== "string"))
+  if (
+    to !== undefined &&
+    (!isRecord(to) || to.source !== INTERACTION_SOURCE.agent || typeof to.id !== "string")
+  )
     fail("messages", "an interaction's recipient must be an agent")
   if (typeof message.content !== "string" && !isBlockArray(message.content))
     fail("messages", "interaction content must be a string or content-block array")
   if (!isOneOf(INTERACTION_KINDS, message.kind)) fail("messages", "interaction kind is invalid")
-  if (message.kind === "completion" && !isOneOf(INTERACTION_OUTCOMES, message.outcome))
+  if (
+    message.kind === INTERACTION_KIND.completion &&
+    !isOneOf(INTERACTION_OUTCOMES, message.outcome)
+  )
     fail("messages", "completion interaction outcome is invalid")
   const cause = message.caused_by
   if (
@@ -82,7 +89,7 @@ const checkReplyContext = (value: unknown): void => {
     !isRecord(value) ||
     typeof value.messageId !== "string" ||
     value.messageId.length === 0 ||
-    (value.role !== "user" && value.role !== "assistant") ||
+    (value.role !== ROLE.user && value.role !== ROLE.assistant) ||
     typeof value.content !== "string"
   ) {
     fail("messages", "replyTo needs a message id, role, and content")
@@ -131,16 +138,16 @@ const checkMessage = (value: unknown): void => {
   const message = value
   checkMessageId(message)
   switch (message.role) {
-    case "system":
-    case "developer": {
+    case ROLE.system:
+    case ROLE.developer: {
       if (typeof message.content !== "string" && !isBlockArray(message.content)) {
         fail("messages", `${message.role} content must be a string or content-block array`)
       }
       return
     }
-    case "interaction":
+    case ROLE.interaction:
       return checkInteraction(message)
-    case "user": {
+    case ROLE.user: {
       if ("replyTo" in message) checkReplyContexts(message.replyTo)
       if (
         "content" in message &&
@@ -152,7 +159,7 @@ const checkMessage = (value: unknown): void => {
       }
       return
     }
-    case "assistant": {
+    case ROLE.assistant: {
       if (
         "content" in message &&
         message.content !== null &&
@@ -183,7 +190,7 @@ const checkMessage = (value: unknown): void => {
       }
       return
     }
-    case "tool": {
+    case ROLE.tool: {
       if (typeof message.tool_call_id !== "string")
         fail("messages", "tool message needs a tool_call_id")
       if (typeof message.content !== "string")
@@ -351,10 +358,10 @@ const checkCompletion = (value: Record<string, unknown>): CompletionResponse => 
     ...(value.message as Record<string, unknown>)
   }
   if (
-    message.role !== "system" &&
-    message.role !== "user" &&
-    message.role !== "assistant" &&
-    message.role !== "tool"
+    message.role !== ROLE.system &&
+    message.role !== ROLE.user &&
+    message.role !== ROLE.assistant &&
+    message.role !== ROLE.tool
   )
     invalidItem("completion message role must be a chat role")
   if (message.content !== null && typeof message.content !== "string") {
@@ -493,7 +500,7 @@ export const parseModelItem = (raw: unknown): ParsedStreamItem => {
         finish_reason: "tool_calls",
         usage: { completion_tokens: 0 }
       })
-      if (response.message.role !== "assistant")
+      if (response.message.role !== ROLE.assistant)
         return invalidItem("completed output must be assistant content")
       for (const call of response.message.tool_calls ?? []) {
         if (call.id.length === 0 || call.function.name.length === 0)
@@ -516,7 +523,7 @@ export const parseModelItem = (raw: unknown): ParsedStreamItem => {
 
 /** Terminal-response validation. Ported 1:1 from the previous runtime. */
 export const validateCompletion = (response: CompletionResponse): CompletionResponse => {
-  if (response.message.role !== "assistant") {
+  if (response.message.role !== ROLE.assistant) {
     throw new InvalidModelResponseError("model response role must be assistant")
   }
   if (response.finish_reason === null) {

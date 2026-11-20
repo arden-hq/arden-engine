@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { contentParts } from "./content.js"
 import {
   answerBlockLabel,
@@ -9,7 +10,7 @@ import type { StoredMessageEnvelope } from "./model.js"
 
 export const transcriptSearchText = (message: StoredMessageEnvelope): string | null => {
   if (
-    message.role === "developer" ||
+    message.role === ROLE.developer ||
     message.superseded === true ||
     typeof message.forked_from === "string" ||
     isChatEventsMessage(message)

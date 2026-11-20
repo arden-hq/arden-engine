@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 
 import type {
@@ -45,14 +46,17 @@ interface WireToolCall {
 }
 
 type WireMessage =
-  | { readonly role: "system" | "developer" | "user"; readonly content: Content }
   | {
-      readonly role: "assistant"
+      readonly role: typeof ROLE.system | typeof ROLE.developer | typeof ROLE.user
+      readonly content: Content
+    }
+  | {
+      readonly role: typeof ROLE.assistant
       readonly content: Content
       readonly tool_calls?: ReadonlyArray<WireToolCall>
       readonly reasoning_details?: ReadonlyArray<JsonValue>
     }
-  | { readonly role: "tool"; readonly tool_call_id: string; readonly content: Content }
+  | { readonly role: typeof ROLE.tool; readonly tool_call_id: string; readonly content: Content }
 
 interface WireTool {
   readonly type: "function"
@@ -214,11 +218,15 @@ const historyWire = (label: string): ToolHistoryWire<WireMessage> => ({
   // completion message for a route with `asyncTools: "message"`, so no call
   // reaches this wire unanswered by design.
   calls: (item) =>
-    item.role === "assistant"
+    item.role === ROLE.assistant
       ? (item.tool_calls ?? []).map((call) => ({ id: call.id, async: false }))
       : [],
-  answers: (item) => (item.role === "tool" ? { id: item.tool_call_id } : undefined),
-  missingOutput: (callId) => ({ role: "tool", tool_call_id: callId, content: MISSING_TOOL_OUTPUT }),
+  answers: (item) => (item.role === ROLE.tool ? { id: item.tool_call_id } : undefined),
+  missingOutput: (callId) => ({
+    role: ROLE.tool,
+    tool_call_id: callId,
+    content: MISSING_TOOL_OUTPUT
+  }),
   fail: (message) => new ChatCompletionsProviderError(`${label}: ${message}`)
 })
 
@@ -228,7 +236,7 @@ const convertMessages = (
 ): ReadonlyArray<WireMessage> => {
   const { compat, label } = context
   const messages = projectToolHistory({ messages: request.messages, nativeAsync: false })
-  const leading = messages.findIndex((message) => message.role !== "system")
+  const leading = messages.findIndex((message) => message.role !== ROLE.system)
   const instructionMessages = leading < 0 ? messages : messages.slice(0, leading)
   const instructions = instructionMessages
     .map((message) => textContent(message, label))
@@ -247,19 +255,19 @@ const convertMessages = (
         // anywhere, and llama.cpp renders it in place (checked against
         // gemma-4 on 2026-11-15). A `developer` message's `loaded_tools` are
         // declared as tools (`declaredTools`); its `content` says so in text.
-        case "system":
-        case "developer": {
+        case ROLE.system:
+        case ROLE.developer: {
           const content = textContent(message, label)
           return content.length === 0
             ? []
             : [{ items: [{ role: compat.systemRole, content }], deferWhileCallsPending: true }]
         }
-        case "interaction":
+        case ROLE.interaction:
           return [
             {
               items: [
                 {
-                  role: "user",
+                  role: ROLE.user,
                   content: rendersAsText(message)
                     ? request.renderInteraction(message, "text")
                     : userContent(message.content, compat, label)
@@ -268,20 +276,20 @@ const convertMessages = (
               deferWhileCallsPending: !rendersAsText(message)
             }
           ]
-        case "user": {
+        case ROLE.user: {
           return [
             {
-              items: [{ role: "user", content: userContent(message.content, compat, label) }],
+              items: [{ role: ROLE.user, content: userContent(message.content, compat, label) }],
               deferWhileCallsPending: true
             }
           ]
         }
-        case "tool":
+        case ROLE.tool:
           return [
             {
               items: [
                 {
-                  role: "tool",
+                  role: ROLE.tool,
                   tool_call_id: message.tool_call_id,
                   content: textContent(message, label)
                 }
@@ -289,7 +297,7 @@ const convertMessages = (
               deferWhileCallsPending: false
             }
           ]
-        case "assistant": {
+        case ROLE.assistant: {
           const item = assistantItem(message, route, label)
           if (item === undefined) return []
           return [
@@ -317,7 +325,7 @@ const searchesOf = (message: AssistantMessage): ReadonlyArray<ProviderToolCall> 
   (message.provider_tool_calls ?? []).filter(isToolSearchCall)
 
 const searchResultItem = (call: ProviderToolCall): WireMessage => ({
-  role: "tool",
+  role: ROLE.tool,
   tool_call_id: call.id,
   content: call.result === undefined || call.result.length === 0 ? MISSING_TOOL_OUTPUT : call.result
 })
@@ -366,7 +374,7 @@ const assistantItem = (
   const details = replayedReasoningDetails(message, route)
   if (content.length === 0 && calls.length === 0 && details === undefined) return undefined
   return {
-    role: "assistant",
+    role: ROLE.assistant,
     content,
     ...(calls.length === 0 ? {} : { tool_calls: calls }),
     ...(details === undefined ? {} : { reasoning_details: details })
@@ -452,12 +460,14 @@ const withCacheBreakpoints = (body: ChatCompletionsPayload): ChatCompletionsPayl
   )
   const firstInstruction = body.messages
     .flatMap((message, index) =>
-      message.role === "system" || message.role === "developer" ? [index] : []
+      message.role === ROLE.system || message.role === ROLE.developer ? [index] : []
     )
     .at(0)
   const lastTurn = body.messages
     .flatMap((message, index) =>
-      (message.role === "user" || message.role === "assistant" || message.role === "tool") &&
+      (message.role === ROLE.user ||
+        message.role === ROLE.assistant ||
+        message.role === ROLE.tool) &&
       markedContent(message.content) !== undefined
         ? [index]
         : []

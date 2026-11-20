@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type {
   AssistantMessage,
   ModelProvider,
@@ -37,7 +38,7 @@ export const replayedAssistant = ({
   ...carried
 }: ProviderMessage): AssistantMessage => ({
   ...carried,
-  role: "assistant",
+  role: ROLE.assistant,
   content: content ?? "",
   tool_calls: tool_calls ?? [],
   output_parts: output_parts ?? [],
@@ -63,7 +64,7 @@ export const replayPrefix = (
   const historyIds = new Set(input.history.map((message) => message.message_id))
   const replay = saved.request.messages.filter(
     (message) =>
-      message.role !== "system" ||
+      message.role !== ROLE.system ||
       (message.message_id !== undefined && historyIds.has(message.message_id))
   )
   if (

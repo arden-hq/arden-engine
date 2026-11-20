@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -22,7 +23,7 @@ const response = (
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content: options.content ?? null,
     tool_calls: (options.toolCalls ?? []).map((call) => ({
       id: call.id,
@@ -82,7 +83,7 @@ describe("budgets, limits, and forced finalization", () => {
       },
       { provider: model.shape, toolset: tools.shape, budget }
     )
-    const final = await agent.run([{ role: "user", content: "use evidence" }])
+    const final = await agent.run([{ role: ROLE.user, content: "use evidence" }])
     expect(final.stop_reason).toBe("max_token_budget")
     expect(final.text).toBe("final answer")
     expect(model.requests).toHaveLength(2)
@@ -106,7 +107,7 @@ describe("budgets, limits, and forced finalization", () => {
         toolset: tools.shape
       }
     )
-    const result = await agent.run([{ role: "user", content: "go" }])
+    const result = await agent.run([{ role: ROLE.user, content: "go" }])
     expect(result.stop_reason).toBe("no_progress")
     expect(model.requests).toHaveLength(2)
   })

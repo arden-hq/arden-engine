@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 import {
   createTool,
@@ -15,7 +16,7 @@ const response = (calls: ReadonlyArray<ToolCall> = [], content = "Done"): Comple
   model: "test",
   usage: { completion_tokens: 1 },
   _tag: "Completed",
-  message: { role: "assistant", content, tool_calls: calls, reasoning_content: null },
+  message: { role: ROLE.assistant, content, tool_calls: calls, reasoning_content: null },
   finish_reason: calls.length > 0 ? "tool_calls" : "stop"
 })
 const call: ToolCall = {
@@ -26,14 +27,14 @@ const call: ToolCall = {
 const lateResults = (messages: ReadonlyArray<ChatMessage>): ReadonlyArray<string> => {
   const launched = new Set<string>()
   return messages.flatMap((message) => {
-    if (message.role === "tool") {
+    if (message.role === ROLE.tool) {
       if (message.async_tool_launch !== undefined) {
         launched.add(message.async_tool_launch.call_id)
         return []
       }
       return launched.has(message.tool_call_id) ? [message.tool_call_id] : []
     }
-    if (message.role !== "user" || !Array.isArray(message.content)) return []
+    if (message.role !== ROLE.user || !Array.isArray(message.content)) return []
     return message.content.flatMap((block) =>
       block.content_type === "async_tool_result"
         ? [(block.metadata as { tool_call_id: string }).tool_call_id]
@@ -98,14 +99,14 @@ it.each(["native", "message"] as const)(
       }
     )
     const result = await agent.run([
-      { role: "user", content: "Look it up and do independent work" }
+      { role: ROLE.user, content: "Look it up and do independent work" }
     ])
     expect(result.text).toBe("Done")
     expect(executions).toBe(1)
     expect(checkpointChanges).toContain("append")
     expect(requests).toHaveLength(3)
     const results = result.messages.filter(
-      (message) => message.role === "tool" && message.async_tool_launch === undefined
+      (message) => message.role === ROLE.tool && message.async_tool_launch === undefined
     )
     expect(results.map((message) => message.content)).toEqual(["lookup result"])
     expect(lateResults(result.messages)).toEqual(["lookup-1"])
@@ -129,7 +130,7 @@ it("a message queued while the run waits on a background call steers it without 
           if (step === 1) return [response([call], "")]
           if (step === 2) {
             setTimeout(() => {
-              queued.push({ role: "user", message_id: "question", content: "why u stopped?" })
+              queued.push({ role: ROLE.user, message_id: "question", content: "why u stopped?" })
               wake?.()
             }, 0)
             return [response([], "Waiting on the lookup")]
@@ -162,7 +163,7 @@ it("a message queued while the run waits on a background call steers it without 
       }
     }
   )
-  const result = await agent.run([{ role: "user", content: "Run the long lookup" }])
+  const result = await agent.run([{ role: ROLE.user, content: "Run the long lookup" }])
   expect(cancelled).toBe(false)
   expect(result.text).toBe("Done")
   expect(step).toBe(4)
@@ -192,7 +193,7 @@ it.each(["native", "message"] as const)(
             return { content: "lookup result", preview: "Found" }
           })
         }
-      ).run([{ role: "user", content: "Look it up" }])
+      ).run([{ role: ROLE.user, content: "Look it up" }])
 
     await run(5)
     expect(requests).toHaveLength(2)
@@ -243,7 +244,7 @@ it("never runs a detached tool in the background", async () => {
       },
       toolset: detached
     }
-  ).run([{ role: "user", content: "Start it" }])
+  ).run([{ role: ROLE.user, content: "Start it" }])
   expect(requests[1]).toContain("job handle")
   expect(requests[1]).not.toContain("async_tool_launch")
   expect(requests.join("")).not.toContain("still running in the background")
@@ -252,15 +253,15 @@ it("never runs a detached tool in the background", async () => {
 it("recovers an undelivered durable outcome without repeating execution", async () => {
   let executions = 0
   const history: ChatMessage[] = [
-    { role: "assistant", content: "", tool_calls: [call] },
+    { role: ROLE.assistant, content: "", tool_calls: [call] },
     {
-      role: "tool",
+      role: ROLE.tool,
       tool_call_id: call.id,
       message_id: `async-launch:${call.id}`,
       async_tool_launch: { call_id: call.id },
       content: "running"
     },
-    { role: "assistant", content: "Independent work" }
+    { role: ROLE.assistant, content: "Independent work" }
   ]
   const result = await makeAgent(
     { model: "test" },
@@ -299,7 +300,7 @@ it("does not execute a background call if the launch checkpoint fails", async ()
           }
         }
       }
-    ).run([{ role: "user", content: "Go" }])
+    ).run([{ role: ROLE.user, content: "Go" }])
   ).rejects.toThrow("disk unavailable")
   expect(executions).toBe(0)
 })
@@ -319,7 +320,7 @@ it("bounds a pending tool wait by the invocation wall-time limit and aborts its 
         return new Promise(() => undefined)
       })
     }
-  ).run([{ role: "user", content: "Go" }])
+  ).run([{ role: ROLE.user, content: "Go" }])
   expect(result.stop_reason).toBe("max_wall_time")
   expect(signal?.aborted).toBe(true)
 })
@@ -377,12 +378,12 @@ it.each(["native", "message"] as const)(
             getPendingMessages: () => {
               if (scenario !== "new input" || step < 2 || delivered) return []
               delivered = true
-              return [{ role: "user", content: "Another question" }]
+              return [{ role: ROLE.user, content: "Another question" }]
             }
           }
         }
       )
-      const result = await agent.run([{ role: "user", content: "Explain findings" }])
+      const result = await agent.run([{ role: ROLE.user, content: "Explain findings" }])
       expect({ text: result.text, stop: result.stop_reason, turns: step }).toEqual({
         text: {
           quiet: "",
@@ -395,7 +396,7 @@ it.each(["native", "message"] as const)(
       })
       expect(JSON.stringify(requests[2])).toContain("Saved artifact")
       if (scenario === "new input")
-        expect(requests[2]).toContainEqual({ role: "user", content: "Another question" })
+        expect(requests[2]).toContainEqual({ role: ROLE.user, content: "Another question" })
     }
   }
 )
@@ -424,7 +425,7 @@ it.each(["native", "message"] as const)(
             const firstDelivered =
               mode === "native"
                 ? messages.some(
-                    (message) => message.role === "tool" && message.tool_call_id === "first"
+                    (message) => message.role === ROLE.tool && message.tool_call_id === "first"
                   )
                 : lateResults(messages).includes("first")
             if (firstDelivered && !retried) {
@@ -440,7 +441,7 @@ it.each(["native", "message"] as const)(
         })
       }
     )
-    for await (const event of agent.stream([{ role: "user", content: "Go" }])) events.push(event)
+    for await (const event of agent.stream([{ role: ROLE.user, content: "Go" }])) events.push(event)
     const completions = events.flatMap((event) =>
       "_tag" in event && event._tag === "ToolCompleted"
         ? [{ id: event.tool_id, error: event.is_error, retryable: event.retryable }]
@@ -457,7 +458,7 @@ it.each(["native", "message"] as const)(
     if (result === undefined || "_tag" in result) throw new Error("Expected the final result")
     expect(
       result.messages.flatMap((message) =>
-        message.role === "tool" && message.async_tool_launch !== undefined
+        message.role === ROLE.tool && message.async_tool_launch !== undefined
           ? [message.async_tool_launch.call_id]
           : []
       )
@@ -474,9 +475,9 @@ it.each(["native", "message"] as const)(
       async: mode === "native"
     }))
     const history: ChatMessage[] = [
-      { role: "assistant", content: "", tool_calls: calls },
+      { role: ROLE.assistant, content: "", tool_calls: calls },
       ...calls.map((item): ChatMessage => ({
-        role: "tool",
+        role: ROLE.tool,
         content: "running",
         tool_call_id: item.id,
         message_id: `async-launch:${item.id}`,
@@ -529,7 +530,7 @@ it("waits for a pending result instead of spinning on empty provider continuatio
         }
       }
     }
-  ).run([{ role: "user", content: "Look it up" }])
+  ).run([{ role: ROLE.user, content: "Look it up" }])
   expect({ steps, text: result.text, stop: result.stop_reason }).toEqual({
     steps: 3,
     text: "Done",

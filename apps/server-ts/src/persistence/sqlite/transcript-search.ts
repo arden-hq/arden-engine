@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { stripCitationMarkers } from "@arden-hq/protocol/chat"
 import {
   AgentResultSchema,
@@ -334,7 +335,7 @@ const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInternalSea
     }
   ) {
     const envelope = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json)
-    if (envelope.role !== "interaction") return false
+    if (envelope.role !== ROLE.interaction) return false
     const sender = Option.getOrUndefined(
       Schema.decodeUnknownOption(InteractionSenderSchema)(envelope)
     )

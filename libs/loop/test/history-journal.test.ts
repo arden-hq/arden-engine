@@ -1,8 +1,9 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 import { makeHistoryJournal } from "../src/agent/history-journal.js"
 
 it("checkpoints appended history, invalidates the cursor on replacement, and retries a failed write", async () => {
-  const history = makeHistoryJournal([{ message_id: "first", role: "user", content: "Start" }])
+  const history = makeHistoryJournal([{ message_id: "first", role: ROLE.user, content: "Start" }])
   const changes: Array<{ readonly kind: string; readonly start?: number; readonly ids: string[] }> =
     []
   const record = (change: Parameters<Parameters<typeof history.checkpoint>[0]>[1]) => {
@@ -13,7 +14,7 @@ it("checkpoints appended history, invalidates the cursor on replacement, and ret
     })
   }
   await history.checkpoint(async (_messages, change) => record(change))
-  const source = { message_id: "second", role: "assistant" as const, content: "Working" }
+  const source = { message_id: "second", role: ROLE.assistant, content: "Working" }
   history.messages.push(source)
   source.content = "Caller changed its own object"
   expect(history.messages[1]?.content).toBe("Working")
@@ -24,7 +25,7 @@ it("checkpoints appended history, invalidates the cursor on replacement, and ret
     })
   ).rejects.toThrow("write failed")
   await history.checkpoint(async (_messages, change) => record(change))
-  history.messages[0] = { message_id: "first", role: "user", content: "Replaced" }
+  history.messages[0] = { message_id: "first", role: ROLE.user, content: "Replaced" }
   await history.checkpoint(async (_messages, change) => record(change))
 
   expect(changes).toEqual([
@@ -41,7 +42,7 @@ it("checkpoints appended history, invalidates the cursor on replacement, and ret
 })
 
 it("serializes checkpoint acknowledgements while later appends remain available", async () => {
-  const history = makeHistoryJournal([{ message_id: "first", role: "user", content: "Start" }])
+  const history = makeHistoryJournal([{ message_id: "first", role: ROLE.user, content: "Start" }])
   let release = () => {}
   const first = history.checkpoint(
     () =>
@@ -49,7 +50,7 @@ it("serializes checkpoint acknowledgements while later appends remain available"
         release = resolve
       })
   )
-  history.messages.push({ message_id: "second", role: "assistant", content: "Working" })
+  history.messages.push({ message_id: "second", role: ROLE.assistant, content: "Working" })
   const seen: string[] = []
   const second = history.checkpoint(async (_messages, change) => {
     seen.push(`${change.kind}:${change.messages.map((message) => message.message_id).join(",")}`)

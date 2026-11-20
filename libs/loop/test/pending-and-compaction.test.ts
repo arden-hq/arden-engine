@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import { makeAgent, type ChatMessage, type ModelStreamItem } from "../src/index.js"
@@ -7,7 +8,7 @@ const response = (options: { content?: string | null; completionTokens?: number 
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content: options.content ?? null,
     tool_calls: [],
     reasoning_content: null
@@ -58,16 +59,16 @@ describe("pending messages and compaction", () => {
             order.push("drain")
             if (!pending) return []
             pending = false
-            return [{ role: "user", content: "new input" }]
+            return [{ role: ROLE.user, content: "new input" }]
           }
         }
       }
     )
 
     const output = await agent.run([
-      { role: "user", content: "begin" },
+      { role: ROLE.user, content: "begin" },
       {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "",
         tool_calls: [
           {
@@ -81,16 +82,16 @@ describe("pending messages and compaction", () => {
 
     expect(order.slice(0, 2)).toEqual(["checkpoint", "drain"])
     expect(checkpoints[0]).toMatchObject([
-      { role: "user", content: "begin" },
-      { role: "assistant", tool_calls: [{ id: "call-inspect" }] },
-      { role: "tool", tool_call_id: "call-inspect", content: "inspected" }
+      { role: ROLE.user, content: "begin" },
+      { role: ROLE.assistant, tool_calls: [{ id: "call-inspect" }] },
+      { role: ROLE.tool, tool_call_id: "call-inspect", content: "inspected" }
     ])
     expect(model.requests[0]?.messages).toMatchObject([
-      { role: "system" },
-      { role: "user", content: "begin" },
-      { role: "assistant", tool_calls: [{ id: "call-inspect" }] },
-      { role: "tool", tool_call_id: "call-inspect", content: "inspected" },
-      { role: "user", content: "new input" }
+      { role: ROLE.system },
+      { role: ROLE.user, content: "begin" },
+      { role: ROLE.assistant, tool_calls: [{ id: "call-inspect" }] },
+      { role: ROLE.tool, tool_call_id: "call-inspect", content: "inspected" },
+      { role: ROLE.user, content: "new input" }
     ])
     expect(output.text).toBe("continued")
   })

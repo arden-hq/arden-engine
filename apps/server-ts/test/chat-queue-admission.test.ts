@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { decodeServerEventStreamBuffer, encodeServerEventFrame } from "@arden-hq/protocol"
 import { ChatEventStore } from "../src/persistence/events/store.js"
 import { WorkStore } from "../src/persistence/work/store.js"
@@ -43,7 +44,7 @@ it("rolls back queue consumption on rejected admission and replays accepted admi
           message: {
             message_id: "parked",
             client_id: "parked",
-            role: "user" as const,
+            role: ROLE.user,
             content: "Keep this",
             created_at: new Date().toISOString()
           }
@@ -103,7 +104,7 @@ it("denies one exact visible approval and admits its reason once", async () => {
         message: {
           message_id: "start",
           client_id: "start",
-          role: "user",
+          role: ROLE.user,
           content: "Work",
           created_at: "2026-10-28T00:00:00.000Z"
         }
@@ -136,7 +137,7 @@ it("denies one exact visible approval and admits its reason once", async () => {
         message: {
           message_id: "reply",
           client_id: "reply",
-          role: "user" as const,
+          role: ROLE.user,
           content: "Keep the originals",
           created_at: "2026-10-28T00:01:00.000Z"
         }
@@ -204,7 +205,7 @@ it("atomically denies a deferred card and admits one ordinary reason", async () 
         message: {
           message_id: "start",
           client_id: "start",
-          role: "user",
+          role: ROLE.user,
           content: "Work",
           created_at: "2026-10-28T00:00:00.000Z"
         }
@@ -233,7 +234,7 @@ it("atomically denies a deferred card and admits one ordinary reason", async () 
           ...run.activeMessages,
           {
             message_id: "answer",
-            role: "assistant",
+            role: ROLE.assistant,
             content: "Please review the proposed action",
             created_at: "2026-10-28T00:00:30.000Z"
           }
@@ -249,7 +250,7 @@ it("atomically denies a deferred card and admits one ordinary reason", async () 
         message: {
           message_id: "reply",
           client_id: "reply",
-          role: "user" as const,
+          role: ROLE.user,
           content: "Keep the original",
           created_at: "2026-10-28T00:01:00.000Z"
         }
@@ -299,7 +300,7 @@ it("replays an approval reply after reopening the database without denying its s
           message: {
             message_id: "start",
             client_id: "start",
-            role: "user",
+            role: ROLE.user,
             content: "Work",
             created_at: "2026-10-28T00:00:00.000Z"
           }
@@ -327,7 +328,7 @@ it("replays an approval reply after reopening the database without denying its s
           message: {
             message_id: "reply",
             client_id: "reply",
-            role: "user" as const,
+            role: ROLE.user,
             content: "Keep it private",
             created_at: "2026-10-28T00:01:00.000Z"
           }
@@ -379,7 +380,7 @@ it("routes a visible child's denial reason once to each recipient", async () => 
         message: {
           message_id: "parent",
           client_id: "parent",
-          role: "user",
+          role: ROLE.user,
           content: "Research",
           created_at: new Date().toISOString()
         }
@@ -418,7 +419,7 @@ it("routes a visible child's denial reason once to each recipient", async () => 
         message: {
           message_id: "reply",
           client_id: "reply",
-          role: "user" as const,
+          role: ROLE.user,
           content: "Keep that file private",
           created_at: new Date().toISOString()
         }
@@ -469,7 +470,7 @@ it.each([true, false])(
           message: {
             message_id: "answer",
             client_id: "answer",
-            role: "user",
+            role: ROLE.user,
             content: "Continue here",
             is_meta: answer,
             created_at: "2026-11-02T00:00:00Z",

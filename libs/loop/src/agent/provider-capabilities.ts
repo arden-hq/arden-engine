@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { UnsupportedStructuredOutputError } from "../errors.js"
 import { projectReplies } from "./replies.js"
 import { canRunInBackground, type ToolDeclaration, type ToolEntry } from "../contracts/tools.js"
@@ -66,7 +67,7 @@ export const prepareProviderRequest = async (options: {
         ...prepared,
         messages: [
           {
-            role: "system" as const,
+            role: ROLE.system,
             content: [
               "A tool call still running after a few seconds moves to the background: you get a running receipt, and its result arrives later in an internal completion message.",
               ...(offeredBackground.length === 0

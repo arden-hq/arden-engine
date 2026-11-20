@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { OperationalSchemaSection } from "../section.js"
 
 export const sessionFilesSchemaSection = {
@@ -73,7 +74,7 @@ export const sessionFilesSchemaSection = {
     )`,
     `CREATE TRIGGER chat_upload_unlisted_ai
       AFTER INSERT ON session_messages
-      WHEN new.role IN ('user', 'interaction') AND instr(new.message_json, '/uploads/') > 0 BEGIN
+      WHEN new.role IN ('${ROLE.user}', '${ROLE.interaction}') AND instr(new.message_json, '/uploads/') > 0 BEGIN
         INSERT OR IGNORE INTO chat_upload_unlisted(message_rowid) VALUES (new.message_rowid);
       END`,
     `CREATE TRIGGER chat_upload_unlisted_au

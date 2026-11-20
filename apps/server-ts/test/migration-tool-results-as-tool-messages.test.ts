@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
@@ -51,20 +52,20 @@ const seed = (database: DatabaseSync) => {
       JSON.stringify({ ...message, turn_id: "t" }),
       clientId
     )
-  add("lab", 0, { message_id: "u", role: "user", content: "Go" })
+  add("lab", 0, { message_id: "u", role: ROLE.user, content: "Go" })
   add("lab", 1, {
     message_id: "a",
-    role: "assistant",
+    role: ROLE.assistant,
     content: "",
     tool_calls: [call("sync"), call("bg"), { ...call("native"), async: true }]
   })
-  add("lab", 2, { message_id: "r-sync", role: "tool", tool_call_id: "sync", content: "S out" })
+  add("lab", 2, { message_id: "r-sync", role: ROLE.tool, tool_call_id: "sync", content: "S out" })
   add(
     "lab",
     3,
     {
       message_id: "m-sync",
-      role: "user",
+      role: ROLE.user,
       is_meta: true,
       client_id: "tool-media:sync",
       content: [mediaHeader("sync"), IMAGE]
@@ -73,25 +74,25 @@ const seed = (database: DatabaseSync) => {
   )
   add("lab", 4, {
     message_id: "async-launch:bg",
-    role: "tool",
+    role: ROLE.tool,
     tool_call_id: "bg",
     async_tool_launch: { call_id: "bg", delivery: "message" },
     content: "running"
   })
   add("lab", 5, {
     message_id: "async-launch:native",
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     async_tool_launch: { call_id: "native", delivery: "native" },
     content: []
   })
-  add("lab", 6, { message_id: "w", role: "assistant", content: "Waiting" })
+  add("lab", 6, { message_id: "w", role: ROLE.assistant, content: "Waiting" })
   add(
     "lab",
     7,
     {
       message_id: "async-result:bg",
-      role: "user",
+      role: ROLE.user,
       is_meta: true,
       client_id: "async-result:bg",
       content: [
@@ -108,19 +109,24 @@ const seed = (database: DatabaseSync) => {
   add(
     "lab",
     8,
-    { message_id: "m-bg", role: "user", is_meta: true, content: [IMAGE] },
+    { message_id: "m-bg", role: ROLE.user, is_meta: true, content: [IMAGE] },
     "tool-media:bg"
   )
-  add("lab", 9, { message_id: "r-native", role: "tool", tool_call_id: "native", content: "N out" })
-  add("edge", 0, { message_id: "eu", role: "user", content: "Go" })
-  add("edge", 1, { message_id: "ea", role: "assistant", content: "", tool_calls: [call("d")] })
-  add("edge", 2, { message_id: "er", role: "tool", tool_call_id: "d", content: "D out" })
+  add("lab", 9, {
+    message_id: "r-native",
+    role: ROLE.tool,
+    tool_call_id: "native",
+    content: "N out"
+  })
+  add("edge", 0, { message_id: "eu", role: ROLE.user, content: "Go" })
+  add("edge", 1, { message_id: "ea", role: ROLE.assistant, content: "", tool_calls: [call("d")] })
+  add("edge", 2, { message_id: "er", role: ROLE.tool, tool_call_id: "d", content: "D out" })
   add(
     "edge",
     3,
     {
       message_id: "em",
-      role: "user",
+      role: ROLE.user,
       is_meta: true,
       client_id: "tool-media:d",
       content: [mediaHeader("d"), IMAGE]
@@ -153,15 +159,15 @@ it("migration 0176 stores every tool result as a tool message", () => {
         return { seq: row.seq, role: row.role, client_id: row.client_id, message }
       })
   expect(rows("lab")).toEqual([
-    expect.objectContaining({ seq: 0, role: "user" }),
-    expect.objectContaining({ seq: 1, role: "assistant" }),
+    expect.objectContaining({ seq: 0, role: ROLE.user }),
+    expect.objectContaining({ seq: 1, role: ROLE.assistant }),
     {
       seq: 2,
-      role: "tool",
+      role: ROLE.tool,
       client_id: null,
       message: {
         message_id: "r-sync",
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "sync",
         content: "S out",
         model_content: [IMAGE]
@@ -169,11 +175,11 @@ it("migration 0176 stores every tool result as a tool message", () => {
     },
     {
       seq: 4,
-      role: "tool",
+      role: ROLE.tool,
       client_id: null,
       message: {
         message_id: "async-launch:bg",
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "bg",
         async_tool_launch: { call_id: "bg" },
         content: "running"
@@ -181,11 +187,11 @@ it("migration 0176 stores every tool result as a tool message", () => {
     },
     {
       seq: 5,
-      role: "tool",
+      role: ROLE.tool,
       client_id: null,
       message: {
         message_id: "async-launch:native",
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "native",
         async_tool_launch: { call_id: "native" },
         content: JSON.stringify({
@@ -195,20 +201,20 @@ it("migration 0176 stores every tool result as a tool message", () => {
         })
       }
     },
-    expect.objectContaining({ seq: 6, role: "assistant" }),
+    expect.objectContaining({ seq: 6, role: ROLE.assistant }),
     {
       seq: 7,
-      role: "tool",
+      role: ROLE.tool,
       client_id: null,
       message: {
         message_id: "async-result:bg",
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "bg",
         content: "B out",
         model_content: [IMAGE]
       }
     },
-    expect.objectContaining({ seq: 9, role: "tool" })
+    expect.objectContaining({ seq: 9, role: ROLE.tool })
   ])
   expect(rows("edge").map((row) => row.seq)).toEqual([0, 1, 2])
   expect(

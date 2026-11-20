@@ -1,4 +1,18 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { JsonRecord } from "../common/json.js"
+export {
+  INTERACTION_KINDS,
+  INTERACTION_OUTCOMES,
+  INTERACTION_SOURCES,
+  type InteractionKind,
+  type InteractionOutcome,
+  type InteractionSource
+} from "@arden-hq/std/message-vocabulary"
+import type {
+  InteractionKind,
+  InteractionOutcome,
+  InteractionSource
+} from "@arden-hq/std/message-vocabulary"
 import type { ChatUpdate, CommunicationEnvelope } from "./communication.js"
 import type { SessionRuntimeSnapshot } from "./runtime.js"
 
@@ -33,9 +47,6 @@ export interface HistoryImage extends JsonRecord {
   readonly data: string
 }
 
-export const INTERACTION_SOURCES = ["agent", "workflow", "tool", "automation", "harness"] as const
-export type InteractionSource = (typeof INTERACTION_SOURCES)[number]
-
 export interface InteractionActor extends JsonRecord {
   readonly source: InteractionSource
   readonly id: string
@@ -43,7 +54,7 @@ export interface InteractionActor extends JsonRecord {
 }
 
 export interface InteractionRecipient extends JsonRecord {
-  readonly source: "agent"
+  readonly source: typeof INTERACTION_SOURCE.agent
   readonly id: string
 }
 
@@ -53,25 +64,8 @@ export interface InteractionReference extends JsonRecord {
   readonly id: string
 }
 
-export const INTERACTION_KINDS = [
-  "message",
-  "assignment",
-  "instruction",
-  "event",
-  "completion"
-] as const
-export type InteractionKind = (typeof INTERACTION_KINDS)[number]
-
 /** `interrupted`: the sender stopped because Arden restarted — routine, not
  *  a failure. */
-export const INTERACTION_OUTCOMES = [
-  "completed",
-  "failed",
-  "cancelled",
-  "needs_attention",
-  "interrupted"
-] as const
-export type InteractionOutcome = (typeof INTERACTION_OUTCOMES)[number]
 
 export type InteractionSender = {
   readonly from: InteractionActor
@@ -80,7 +74,7 @@ export type InteractionSender = {
   readonly caused_by?: InteractionReference
 } & (
   | { readonly kind: Exclude<InteractionKind, "completion"> }
-  | { readonly kind: "completion"; readonly outcome: InteractionOutcome }
+  | { readonly kind: typeof INTERACTION_KIND.completion; readonly outcome: InteractionOutcome }
 )
 
 export type Interaction = InteractionSender & { readonly content: string }
@@ -194,7 +188,7 @@ interface HistoryMessageBase extends JsonRecord {
   /** The messages this one quotes, in the order they were quoted. */
   readonly reply_to?: ReadonlyArray<{
     readonly message_id: string
-    readonly role: "user" | "assistant"
+    readonly role: typeof ROLE.user | typeof ROLE.assistant
     readonly content: string
   }>
   /** The Recipe a user message was started from, by its Skill name. */
@@ -223,19 +217,19 @@ interface HistoryMessageBase extends JsonRecord {
 export type HistoryMessage = HistoryMessageBase &
   (
     | {
-        readonly role: "user"
+        readonly role: typeof ROLE.user
         readonly images?: ReadonlyArray<HistoryImage>
       }
     | ({
-        readonly role: "interaction"
+        readonly role: typeof ROLE.interaction
         readonly images?: never
       } & InteractionSender)
     | {
-        readonly role: "assistant"
+        readonly role: typeof ROLE.assistant
         readonly images?: never
       }
     | {
-        readonly role: "tool"
+        readonly role: typeof ROLE.tool
         readonly images?: never
         readonly is_error?: boolean
         readonly retryable?: boolean | null

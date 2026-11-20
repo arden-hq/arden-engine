@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { randomUUID } from "node:crypto"
 import type { RunEnding } from "./tool-receipts.js"
@@ -241,7 +242,11 @@ export const continueFinishedRunInTransaction = Effect.fn("SqlitePersistence.con
       })
     }
     events.push({
-      event: { type: "TEXT_MESSAGE_START", message_id: nextAssistantMessageId, role: "assistant" },
+      event: {
+        type: "TEXT_MESSAGE_START",
+        message_id: nextAssistantMessageId,
+        role: ROLE.assistant
+      },
       runId: run.run_id
     })
     const committed = yield* chatEvents.appendInTransaction({

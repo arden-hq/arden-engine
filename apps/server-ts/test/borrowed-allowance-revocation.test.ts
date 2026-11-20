@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -99,7 +100,7 @@ const wakeStoppedWorker = Effect.fn("wakeStoppedWorker")(function* (
     message: {
       message_id: "request",
       client_id: "request",
-      role: "user",
+      role: ROLE.user,
       content: "Run them",
       created_at: AT
     }

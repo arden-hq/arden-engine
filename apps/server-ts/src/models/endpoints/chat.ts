@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
   providerErrorCode,
   ToolChoice,
@@ -449,7 +450,7 @@ const askOnce = async (input: {
   const { model } = input
   try {
     for await (const item of await input.provider.stream({
-      messages: [{ role: "user", content: "Reply with the word OK." }],
+      messages: [{ role: ROLE.user, content: "Reply with the word OK." }],
       model: model.id,
       maxOutputTokens: CHECK_OUTPUT_TOKENS,
       ...(model.reasoningEfforts.includes("none") ? { reasoningEffort: "none" } : {}),

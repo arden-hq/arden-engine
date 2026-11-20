@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import type { ToolCall } from "@arden-hq/loop"
 import { Effect, Option, Schema } from "effect"
@@ -61,12 +62,12 @@ export const makeRunPurpose = (input: {
         conversation: [
           ...inputs
             .filter((message) => {
-              if (message.role !== "interaction") return true
+              if (message.role !== ROLE.interaction) return true
               const sender = Schema.decodeUnknownOption(InteractionSenderSchema)(message)
               return (
                 Option.isSome(sender) &&
-                sender.value.kind !== "completion" &&
-                sender.value.from.source !== "tool"
+                sender.value.kind !== INTERACTION_KIND.completion &&
+                sender.value.from.source !== INTERACTION_SOURCE.tool
               )
             })
             .map((message) => ({
@@ -76,7 +77,7 @@ export const makeRunPurpose = (input: {
           ...(request.batch.length > 0
             ? [
                 {
-                  role: "assistant",
+                  role: ROLE.assistant,
                   content: "null",
                   tool_calls: request.batch.map((call) => ({
                     id: call.id,

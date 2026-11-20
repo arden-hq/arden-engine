@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage, JsonObject, ModelRequest } from "@arden-hq/loop"
 import { randomUUID } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
@@ -46,7 +47,7 @@ export const appendDeveloperContext = ({
 }): ModelRequest => {
   const previous = request.messages.reduce<ChatMessage | undefined>(
     (last, message) =>
-      message.role === "developer" && message.arden_context_source === source ? message : last,
+      message.role === ROLE.developer && message.arden_context_source === source ? message : last,
     undefined
   )
   if (previous === undefined && content.trim().length === 0) return request
@@ -59,7 +60,7 @@ export const appendDeveloperContext = ({
   const messages: ReadonlyArray<ChatMessage> = [
     ...request.messages,
     {
-      role: "developer",
+      role: ROLE.developer,
       message_id: `${input.runId}:context:${source}:${randomUUID()}`,
       created_at: currentIso(),
       turn_id: input.turnId,

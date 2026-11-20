@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import {
   makeAgent,
@@ -180,7 +181,7 @@ const initialMessages = async (
 ): Promise<ReadonlyArray<ChatMessage>> => {
   const resolved = typeof systemPrompt === "function" ? await systemPrompt() : systemPrompt
   return [
-    ...(resolved === undefined ? [] : [{ role: "system" as const, content: resolved }]),
+    ...(resolved === undefined ? [] : [{ role: ROLE.system, content: resolved }]),
     ...toLoopMessages(input.messages)
   ]
 }
@@ -201,9 +202,9 @@ const withStableSystemPrefix = (
   current: ReadonlyArray<ChatMessage>,
   replacement: ReadonlyArray<ChatMessage>
 ): ReadonlyArray<ChatMessage> => {
-  const firstNonSystem = current.findIndex((message) => message.role !== "system")
+  const firstNonSystem = current.findIndex((message) => message.role !== ROLE.system)
   const prefix = firstNonSystem < 0 ? current : current.slice(0, firstNonSystem)
-  return [...prefix, ...replacement.filter((message) => message.role !== "system")]
+  return [...prefix, ...replacement.filter((message) => message.role !== ROLE.system)]
 }
 
 type CompactionState = "active" | "disabled_for_run"
@@ -251,7 +252,7 @@ const makeMessageIdMinter = (
   const claimed = new Set([
     ...mintedMessageIds,
     ...messages.flatMap((message) =>
-      message.role === "assistant" && typeof message.message_id === "string"
+      message.role === ROLE.assistant && typeof message.message_id === "string"
         ? [message.message_id]
         : []
     )
@@ -361,7 +362,7 @@ const makeTodoReminderMiddleware =
     const messages: ReadonlyArray<ChatMessage> = [
       ...prepared.messages,
       {
-        role: "developer",
+        role: ROLE.developer,
         message_id: `${input.runId}:context:${TODO_REMINDER_SOURCE}:${randomUUID()}`,
         created_at: currentIso(),
         turn_id: input.turnId,
@@ -383,7 +384,7 @@ const ownerInstructionsMiddleware =
     const owned = await load({
       sessionId: input.sessionId,
       messageIds: prepared.messages.flatMap((message) =>
-        message.role === "user" && typeof message.message_id === "string"
+        message.role === ROLE.user && typeof message.message_id === "string"
           ? [message.message_id]
           : []
       ),
@@ -394,7 +395,7 @@ const ownerInstructionsMiddleware =
     const messages: ReadonlyArray<ChatMessage> = [
       ...prepared.messages,
       {
-        role: "developer",
+        role: ROLE.developer,
         message_id: `${input.runId}:context:${OWNER_INSTRUCTIONS_SOURCE}:${randomUUID()}`,
         created_at: currentIso(),
         turn_id: input.turnId,
@@ -408,7 +409,7 @@ const ownerInstructionsMiddleware =
 const NO_RUNTIME_CONTEXT: RuntimeContext = { sections: [], endNote: undefined }
 
 const isRuntimeRecord = (message: ChatMessage): boolean =>
-  message.role === "developer" && message.arden_context_source === "runtime"
+  message.role === ROLE.developer && message.arden_context_source === "runtime"
 
 const appendRuntimeContext = (
   request: ModelRequest,
@@ -432,7 +433,7 @@ const appendRuntimeContext = (
   const messages: ReadonlyArray<ChatMessage> = [
     ...request.messages,
     {
-      role: "developer",
+      role: ROLE.developer,
       message_id: `${input.runId}:context:runtime:${randomUUID()}`,
       created_at: currentIso(),
       turn_id: input.turnId,
@@ -456,13 +457,13 @@ const makeSystemContextMiddleware = (
     const messages = toLoopMessages(prepared.messages)
     const userIndex = messages.reduce(
       (last, message, index) =>
-        message.role === "user" || message.role === "interaction" ? index : last,
+        message.role === ROLE.user || message.role === ROLE.interaction ? index : last,
       -1
     )
     const user = userIndex < 0 ? undefined : messages[userIndex]
     const catalogCalls = new Set(
       prepared.messages.flatMap((message) =>
-        message.role === "assistant"
+        message.role === ROLE.assistant
           ? (message.tool_calls ?? [])
               .filter(
                 (call) =>
@@ -473,7 +474,7 @@ const makeSystemContextMiddleware = (
       )
     )
     const completedCatalogCalls = prepared.messages.flatMap((message) =>
-      message.role === "tool" && catalogCalls.has(message.tool_call_id)
+      message.role === ROLE.tool && catalogCalls.has(message.tool_call_id)
         ? [message.tool_call_id]
         : []
     )
@@ -749,8 +750,8 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
       if (!("_tag" in event) && event.stop_reason === "end_turn" && !input.signal.aborted) {
         const last = event.messages.at(-1)
         if (
-          last?.role === "tool" ||
-          (last?.role === "assistant" && (last.tool_calls?.length ?? 0) === 0)
+          last?.role === ROLE.tool ||
+          (last?.role === ROLE.assistant && (last.tool_calls?.length ?? 0) === 0)
         ) {
           await input.checkpointMessages(event.messages, context, last.message_id)
         }

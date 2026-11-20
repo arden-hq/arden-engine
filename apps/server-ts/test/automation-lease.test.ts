@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -51,7 +52,7 @@ it("can send a Chat message after an automation adds a transcript-only headline"
         message: {
           message_id: "reply",
           client_id: "reply",
-          role: "user",
+          role: ROLE.user,
           content: "Continue",
           created_at: new Date().toISOString()
         }
@@ -172,7 +173,7 @@ it("rejects expired ownership before another worker reclaims it", async () => {
             message: {
               message_id: "expired",
               client_id: "expired",
-              role: "interaction",
+              role: ROLE.interaction,
               kind: "assignment",
               from: { source: "automation", id: automation.task_id, name: automation.name },
               content: "Review",
@@ -288,7 +289,7 @@ it.each([
             message: {
               message_id: "first",
               client_id: "first",
-              role: "interaction",
+              role: ROLE.interaction,
               kind: "assignment",
               from: { source: "automation", id: automation.task_id, name: automation.name },
               content: "Review",

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { PermissionRules } from "../src/persistence/permissions/rules.js"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -85,7 +86,7 @@ const startRun = (place: Place) =>
       message: {
         message_id: "request",
         client_id: "request",
-        role: "user",
+        role: ROLE.user,
         content: "Edit margin",
         created_at: new Date().toISOString()
       }

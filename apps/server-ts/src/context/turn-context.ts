@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { requestedSkillsContext } from "./requested-skills.js"
 import { ContextExperiments } from "./experiments.js"
 import type { ToolApprovalPolicy } from "../tools/approval-policy.js"
@@ -102,7 +103,7 @@ export const isLiveChat = (
   userFacing: boolean
 ): boolean => {
   if (origin.source !== "personal" || !userFacing) return false
-  const latest = messages.findLast((message) => message.role === "user")
+  const latest = messages.findLast((message) => message.role === ROLE.user)
   return !(latest !== undefined && "sent_from" in latest && latest.sent_from === "cli")
 }
 

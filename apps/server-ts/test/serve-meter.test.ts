@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider } from "@arden-hq/loop"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -22,7 +23,7 @@ const route = (): ModelProvider =>
   }) as unknown as ModelProvider
 
 const request: Parameters<ModelProvider["stream"]>[0] = {
-  messages: [{ role: "system", content: "" }],
+  messages: [{ role: ROLE.system, content: "" }],
   renderInteraction: () => "",
   model: "m",
   tools: [],

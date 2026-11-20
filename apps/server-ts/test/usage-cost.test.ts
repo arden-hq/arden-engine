@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider, Toolset } from "@arden-hq/loop"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
@@ -46,7 +47,7 @@ it("keeps the cost providers report beside usage, and leaves a total unknown whe
           message: {
             message_id: `${name}-start`,
             client_id: `${name}-start`,
-            role: "user",
+            role: ROLE.user,
             content: "Work",
             created_at: new Date().toISOString()
           }
@@ -137,7 +138,12 @@ const answering = (cost: number | undefined): ModelProvider => ({
   stream: (request) => [
     {
       _tag: "Completed",
-      message: { role: "assistant", content: "Done.", tool_calls: null, reasoning_content: null },
+      message: {
+        role: ROLE.assistant,
+        content: "Done.",
+        tool_calls: null,
+        reasoning_content: null
+      },
       finish_reason: "stop",
       usage: { prompt_tokens: 2, completion_tokens: 1, ...(cost === undefined ? {} : { cost }) },
       model: request.model

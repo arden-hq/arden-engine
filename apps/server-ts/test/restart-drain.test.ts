@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Schema } from "effect"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
@@ -41,7 +42,7 @@ const modelHost = {
 
 const textReply = (request: ModelProviderRequest, content: string): CompletionResponse => ({
   _tag: "Completed",
-  message: { role: "assistant", content, tool_calls: null, reasoning_content: null },
+  message: { role: ROLE.assistant, content, tool_calls: null, reasoning_content: null },
   finish_reason: "stop",
   usage: { prompt_tokens: 2, completion_tokens: 1 },
   model: request.model
@@ -50,7 +51,7 @@ const textReply = (request: ModelProviderRequest, content: string): CompletionRe
 const toolCallReply = (request: ModelProviderRequest): CompletionResponse => ({
   _tag: "Completed",
   message: {
-    role: "assistant",
+    role: ROLE.assistant,
     content: null,
     tool_calls: [
       {
@@ -74,7 +75,7 @@ const makeRig = (execute: (signal: AbortSignal) => Promise<ToolResult>) => {
     stream: (request) => {
       requests.push(request)
       return [
-        request.messages.some((message) => message.role === "tool")
+        request.messages.some((message) => message.role === ROLE.tool)
           ? textReply(request, "Continued after the restart.")
           : toolCallReply(request)
       ]
@@ -317,7 +318,7 @@ it(
       expect(finished.tool?.status).toBe("uncertain")
       expect(rig.executions()).toBe(1)
       const reply = rig.requests.at(-1)
-      const toolMessage = reply?.messages.find((message) => message.role === "tool")
+      const toolMessage = reply?.messages.find((message) => message.role === ROLE.tool)
       expect(typeof toolMessage?.content === "string" ? toolMessage.content : "").toContain(
         "may or may not have taken effect"
       )
@@ -345,7 +346,7 @@ it(
     const call = (request: ModelProviderRequest, id: string, name: string): CompletionResponse => ({
       _tag: "Completed",
       message: {
-        role: "assistant",
+        role: ROLE.assistant,
         content: null,
         tool_calls: [
           {

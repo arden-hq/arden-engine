@@ -1,3 +1,4 @@
+import { INTERACTION_OUTCOME } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import type { InteractionOutcome } from "@arden-hq/protocol/chat"
 import type { EndingRecord } from "./ending.js"
@@ -35,14 +36,14 @@ const completionOf = ({
   const text = ending?.text.trim() === "" ? "" : (ending?.text ?? "")
   if (status === "cancelled" || ending?.status === "cancelled")
     return {
-      outcome: "cancelled",
+      outcome: INTERACTION_OUTCOME.cancelled,
       label: "cancelled",
       text: text || "Worker cancelled.",
       reportState: ending?.detail === "damaged" ? "damaged" : "available"
     }
   if (status === "interrupted" && stopReason === "server_restart")
     return {
-      outcome: "interrupted",
+      outcome: INTERACTION_OUTCOME.interrupted,
       label: "interrupted",
       text:
         text ||
@@ -51,23 +52,31 @@ const completionOf = ({
     }
   if (status === "error" || status === "interrupted" || ending?.status === "failed")
     return {
-      outcome: "failed",
+      outcome: INTERACTION_OUTCOME.failed,
       label: "failed",
       text: text || "Worker failed without an error report.",
       reportState: ending?.detail === "damaged" ? "damaged" : "available"
     }
   if (ending?.detail === "damaged")
-    return { outcome: "needs_attention", label: "needs attention", text, reportState: "damaged" }
+    return {
+      outcome: INTERACTION_OUTCOME.needsAttention,
+      label: "needs attention",
+      text,
+      reportState: "damaged"
+    }
   if (ending?.status === "waiting")
     return {
-      outcome: "needs_attention",
+      outcome: INTERACTION_OUTCOME.needsAttention,
       label: "waiting",
       text: text || "Worker is waiting for an answer or approval.",
       reportState: "waiting"
     }
   if (ending?.status === "silent" && ending.detail === "no_change")
     return {
-      outcome: stopReason === null || stopReason === "end_turn" ? "completed" : "needs_attention",
+      outcome:
+        stopReason === null || stopReason === "end_turn"
+          ? INTERACTION_OUTCOME.completed
+          : INTERACTION_OUTCOME.needsAttention,
       label: "reported no change",
       text: [`No change reported.${noChangeReason === undefined ? "" : ` ${noChangeReason}`}`, text]
         .filter((line) => line !== "")
@@ -80,12 +89,22 @@ const completionOf = ({
     (ending.status === "silent" && ending.detail === "empty")
   )
     return {
-      outcome: "needs_attention",
+      outcome: INTERACTION_OUTCOME.needsAttention,
       label: "missing report",
       text: "Worker ended without a completion report. Inspect its run before claiming the assignment is complete.",
       reportState: "missing"
     }
   if (ending.status !== "finished" || (stopReason !== null && stopReason !== "end_turn"))
-    return { outcome: "needs_attention", label: "needs attention", text, reportState: "available" }
-  return { outcome: "completed", label: "completed", text, reportState: "available" }
+    return {
+      outcome: INTERACTION_OUTCOME.needsAttention,
+      label: "needs attention",
+      text,
+      reportState: "available"
+    }
+  return {
+    outcome: INTERACTION_OUTCOME.completed,
+    label: "completed",
+    text,
+    reportState: "available"
+  }
 }

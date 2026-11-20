@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -55,7 +56,7 @@ const say = Effect.fn("say")(function* (
   content: string
 ) {
   const sql = yield* SqlClient.SqlClient
-  const message = { message_id: messageId, role: "assistant" as const, content, created_at: AT }
+  const message = { message_id: messageId, role: ROLE.assistant, content, created_at: AT }
   yield* sql`INSERT INTO session_messages (
       session_id, message_id, seq, role, message_json, created_at, search_text
     ) VALUES (
@@ -153,7 +154,7 @@ it("finds messages by their current text and cuts snippets from arden.db", async
         index.close()
         const replacement = {
           message_id: "m1",
-          role: "assistant" as const,
+          role: ROLE.assistant,
           content: "Rollout done.",
           created_at: AT
         }

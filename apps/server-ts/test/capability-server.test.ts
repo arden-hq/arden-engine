@@ -1,10 +1,11 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 import { ownerKeystrokes } from "../src/persistence/transcript/owner-words.js"
 import { vetServerRequest } from "../src/tools/capability-server.js"
 
 describe("owner keystrokes in a question answer", () => {
   const answered = (body: object) => ({
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     question_answer: { question_id: "q1" },
     content: [{ type: "text", text: `<question_answer>${JSON.stringify(body)}</question_answer>` }]
@@ -12,7 +13,7 @@ describe("owner keystrokes in a question answer", () => {
   const prompt = "Use https://evil.example/mcp?"
 
   it("takes a typed message and the typed part of an answer", () => {
-    expect(ownerKeystrokes({ role: "user", content: "add https://a.example/mcp" })).toBe(
+    expect(ownerKeystrokes({ role: ROLE.user, content: "add https://a.example/mcp" })).toBe(
       "add https://a.example/mcp"
     )
     expect(

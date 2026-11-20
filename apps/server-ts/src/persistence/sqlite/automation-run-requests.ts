@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { recordBlockedAutomationInTransaction } from "./run-sidecar-mutations.js"
 import { parseLease } from "./automation-lease.js"
 import { appendSessionTurn, currentSessionTurnId } from "./turns.js"
@@ -263,9 +264,9 @@ export const makeAutomationRunRequests = ({
             ${trunk}, ${headlineId}, ${headlineSeq}, 'interaction',
             ${JSON.stringify({
               message_id: headlineId,
-              role: "interaction",
-              from: { source: "harness", id: "automation_headline" },
-              kind: "event",
+              role: ROLE.interaction,
+              from: { source: INTERACTION_SOURCE.harness, id: "automation_headline" },
+              kind: INTERACTION_KIND.event,
               created_at: now,
               content: text,
               turn_id: headlineTurnId

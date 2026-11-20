@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "../src/index.js"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import { runModelTurn } from "../src/agent/model-turn.js"
@@ -9,7 +10,7 @@ import type { ModelProviderRequest, ModelStreamItem } from "../src/contracts/pro
 import type { AgentEvent } from "../src/contracts/events.js"
 import { deferred, firstTagged, tagged } from "./kit.js"
 
-const userMessage = (content = "hello"): ChatMessage => ({ role: "user", content })
+const userMessage = (content = "hello"): ChatMessage => ({ role: ROLE.user, content })
 
 const response = (
   options: {
@@ -29,7 +30,7 @@ const response = (
   model: "fixture-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content: options.content ?? null,
     tool_calls: (options.toolCalls ?? []).map((call) => ({
       id: call.id,
@@ -127,7 +128,7 @@ describe("streaming projection and provider retry reset", () => {
     expect(firstTagged(harness.events, "TextEnded").content).toBe("hello world")
     expect(output.lastTextId).toBe(firstTagged(harness.events, "TextStarted").message_id)
     expect(harness.history).toHaveLength(2)
-    expect(harness.history[1]).toMatchObject({ role: "assistant", content: "hello world" })
+    expect(harness.history[1]).toMatchObject({ role: ROLE.assistant, content: "hello world" })
     expect(harness.history[1]).toMatchObject({
       output_parts: [{ type: "text", text: "hello world" }]
     })
@@ -173,7 +174,7 @@ describe("streaming projection and provider retry reset", () => {
     ).toEqual(['{"value":', "1}"])
     expect(output.streamedToolInputIds).toEqual(new Set(["call-1"]))
     expect(harness.history[1]).toMatchObject({
-      role: "assistant",
+      role: ROLE.assistant,
       tool_calls: [
         { id: "call-1", type: "function", function: { name: "echo", arguments: '{"value":1}' } }
       ],

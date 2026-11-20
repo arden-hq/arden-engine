@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 import { makeAgent } from "../src/index.js"
 
@@ -67,7 +68,7 @@ const makeTransport = (handlers: ReadonlyArray<(signal: AbortSignal | undefined)
 
 const baseRequest: ModelProviderRequest = {
   model: "gpt-5.4",
-  messages: [{ role: "user", content: "Hi." }],
+  messages: [{ role: ROLE.user, content: "Hi." }],
   renderInteraction,
   tools: [],
   deferredTools: [],
@@ -88,7 +89,7 @@ const simpleCompleted = {
     {
       id: "msg-1",
       type: "message",
-      role: "assistant",
+      role: ROLE.assistant,
       content: [{ type: "output_text", text: "Recovered." }],
       status: "completed"
     }
@@ -152,7 +153,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
                 {
                   id: "msg-map",
                   type: "message",
-                  role: "assistant",
+                  role: ROLE.assistant,
                   content: [{ type: "output_text", text: "Done." }],
                   status: "completed"
                 }
@@ -227,7 +228,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
           execute: () => ({ content: "", preview: "" })
         }
       }
-    ).run([{ role: "user", content: "Hi." }])
+    ).run([{ role: ROLE.user, content: "Hi." }])
     expect(result.usage).toEqual({
       prompt_tokens: 3,
       completion_tokens: 2,
@@ -393,8 +394,8 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     const request: ModelProviderRequest = {
       ...baseRequest,
       messages: [
-        { role: "user", content: "Check Yerevan." },
-        { role: "tool", tool_call_id: "call-missing", content: "Rain" }
+        { role: ROLE.user, content: "Check Yerevan." },
+        { role: ROLE.tool, tool_call_id: "call-missing", content: "Rain" }
       ]
     }
 
@@ -419,10 +420,10 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       provider.stream({
         ...baseRequest,
         messages: [
-          { role: "user", content: "Check both." },
-          { role: "assistant", content: "", tool_calls: [toolCall("call-foreground")] },
+          { role: ROLE.user, content: "Check both." },
+          { role: ROLE.assistant, content: "", tool_calls: [toolCall("call-foreground")] },
           {
-            role: "user",
+            role: ROLE.user,
             client_id: "async-result:call-background",
             content: [
               {
@@ -433,8 +434,8 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
               }
             ]
           },
-          { role: "tool", tool_call_id: "call-foreground", content: "Foreground output" },
-          { role: "user", content: "Continue." }
+          { role: ROLE.tool, tool_call_id: "call-foreground", content: "Foreground output" },
+          { role: ROLE.user, content: "Continue." }
         ]
       })
     )
@@ -447,7 +448,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       "user",
       "user"
     ])
-    expect(input[3]).toMatchObject({ role: "user", content: expect.any(Array) })
+    expect(input[3]).toMatchObject({ role: ROLE.user, content: expect.any(Array) })
   })
 
   it("defers current developer context and user steering until pending tool outputs arrive", async () => {
@@ -462,16 +463,16 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     const request: ModelProviderRequest = {
       ...baseRequest,
       messages: [
-        { role: "user", content: "Check both." },
+        { role: ROLE.user, content: "Check both." },
         {
-          role: "assistant" as const,
+          role: ROLE.assistant,
           content: "",
           tool_calls: [toolCall("call-first"), toolCall("call-second")]
         },
-        { role: "tool", tool_call_id: "call-first", content: "First output" },
-        { role: "developer", content: "Current run context" },
-        { role: "user", client_id: "tool-media:call-first", content: "Ordinary user text" },
-        { role: "tool", tool_call_id: "call-second", content: "Second output" }
+        { role: ROLE.tool, tool_call_id: "call-first", content: "First output" },
+        { role: ROLE.developer, content: "Current run context" },
+        { role: ROLE.user, client_id: "tool-media:call-first", content: "Ordinary user text" },
+        { role: ROLE.tool, tool_call_id: "call-second", content: "Second output" }
       ]
     }
 
@@ -492,10 +493,10 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       },
       {
         type: "message",
-        role: "developer",
+        role: ROLE.developer,
         content: [{ type: "input_text", text: "Current run context" }]
       },
-      { role: "user", content: "Ordinary user text" }
+      { role: ROLE.user, content: "Ordinary user text" }
     ])
   })
 })
@@ -548,7 +549,7 @@ it("dispatches completed SSE calls before response.completed and replays fragmen
       }
     }
   )
-  const running = agent.run([{ role: "user", content: "weather" }])
+  const running = agent.run([{ role: ROLE.user, content: "weather" }])
   await started.promise
   expect(executions).toBe(1)
   const stream = await control.promise
@@ -617,7 +618,7 @@ it("preserves completed fragments at an output limit without executing truncated
       }
     }
   )
-  expect((await agent.run([{ role: "user", content: "weather" }])).stop_reason).toBe("end_turn")
+  expect((await agent.run([{ role: ROLE.user, content: "weather" }])).stop_reason).toBe("end_turn")
   expect(executions).toBe(0)
   const input = recordsOf(recordOf(transport.requests[1]?.body).input)
   expect(input.filter((item) => item.type === "function_call")).toEqual([])
@@ -660,7 +661,7 @@ it.each([false, true, undefined])(
           }
         }
       }
-    ).run([{ role: "user", content: "Continue" }])
+    ).run([{ role: ROLE.user, content: "Continue" }])
     expect({
       text: result.text,
       stop: result.stop_reason,

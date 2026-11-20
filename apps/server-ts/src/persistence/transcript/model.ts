@@ -1,3 +1,4 @@
+import { INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 import { DateTime, Option, Schema } from "effect"
 import { JsonObjectSchema } from "../json.js"
@@ -54,22 +55,22 @@ export type MessageAuthor = "owner" | "answer" | "copy" | "automation" | "agent"
 
 /** The author a writer's own marks give its message; null for the roles Arden writes. */
 export const messageAuthor = (message: Readonly<Record<string, unknown>>): MessageAuthor | null => {
-  if (message.role !== "user" && message.role !== "interaction") return null
+  if (message.role !== ROLE.user && message.role !== ROLE.interaction) return null
   if (message.forked_from !== undefined) return "copy"
-  if (message.role === "user") {
+  if (message.role === ROLE.user) {
     if (message.sent_from !== undefined) return "agent"
     return message.question_answer === undefined ? "owner" : "answer"
   }
   const from = message.from
   if (!isRecord(from)) return "unknown"
   switch (from.source) {
-    case "automation":
+    case INTERACTION_SOURCE.automation:
       return "automation"
-    case "harness":
+    case INTERACTION_SOURCE.harness:
       return "app"
-    case "agent":
-    case "workflow":
-    case "tool":
+    case INTERACTION_SOURCE.agent:
+    case INTERACTION_SOURCE.workflow:
+    case INTERACTION_SOURCE.tool:
       return "agent"
     default:
       return "unknown"
@@ -79,13 +80,13 @@ export const messageAuthor = (message: Readonly<Record<string, unknown>>): Messa
 export const isWrittenByPerson = (message: {
   readonly role: string
   readonly question_answer?: unknown
-}): boolean => message.role === "user" && message.question_answer === undefined
+}): boolean => message.role === ROLE.user && message.question_answer === undefined
 
 export const visibleMessageCount = (messages: ReadonlyArray<StoredMessageEnvelope>): number =>
   messages.filter(
     (message) =>
-      message.role !== "system" &&
-      message.role !== "developer" &&
+      message.role !== ROLE.system &&
+      message.role !== ROLE.developer &&
       typeof message.forked_from !== "string"
   ).length
 
@@ -158,7 +159,7 @@ export const TranscriptMessageDraftSchema = TranscriptMessageDraftFields.check(
         ? (encoded as Readonly<Record<string, Schema.Json | undefined>>)
         : null
     if (receipt !== null) {
-      if (message.role !== "assistant") {
+      if (message.role !== ROLE.assistant) {
         issues.push({ path: ["role"], issue: "a session handoff must be an assistant message" })
       }
       if (receipt.compactionId !== message.messageId) {

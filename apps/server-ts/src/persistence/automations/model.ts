@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AutomationEvent, JsonValue } from "@arden-hq/protocol"
 import type {
   AutomationEventType,
@@ -97,7 +98,7 @@ export interface QuietChat {
   readonly spaceName: string | null
   readonly messages: ReadonlyArray<{
     readonly seq: number
-    readonly role: "user" | "assistant"
+    readonly role: typeof ROLE.user | typeof ROLE.assistant
     readonly createdAt: string
     readonly text: string
   }>

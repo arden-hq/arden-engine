@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
   createTool,
   createToolset,
@@ -266,9 +267,9 @@ export class StructuredCompletion extends Context.Service<
         user: string,
         images: ReadonlyArray<CompletionImage> = []
       ): ReadonlyArray<ChatMessage> => [
-        { role: "system", content: withUntrustedDataRule(system) },
+        { role: ROLE.system, content: withUntrustedDataRule(system) },
         {
-          role: "user",
+          role: ROLE.user,
           content:
             images.length === 0
               ? user

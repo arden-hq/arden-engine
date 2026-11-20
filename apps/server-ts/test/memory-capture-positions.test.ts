@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { createToolset } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -31,7 +32,7 @@ const turn = Effect.fn("turn")(function* (
     clientId: id,
     requestHash: id,
     assistantMessageId: `${id}-answer`,
-    message: { message_id: id, client_id: id, role: "user", content: id, created_at: AT }
+    message: { message_id: id, client_id: id, role: ROLE.user, content: id, created_at: AT }
   })
   if (started._tag !== "Started") throw new Error(`Turn ${id} did not start: ${started._tag}`)
   yield* chat.finish({
@@ -39,7 +40,7 @@ const turn = Effect.fn("turn")(function* (
     messages: [
       ...started.activeMessages,
       ...relayed,
-      { message_id: `${id}-answer`, role: "assistant", content: `Noted ${id}`, created_at: AT }
+      { message_id: `${id}-answer`, role: ROLE.assistant, content: `Noted ${id}`, created_at: AT }
     ]
   })
 })
@@ -138,7 +139,7 @@ it("keeps a skipped batch unread, rests it a day, and then reads it again", asyn
 it("stores the owner's typed turn as theirs and an agent's message in it as not", async () => {
   const relayed = {
     message_id: "relayed",
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "agent", id: "w" },
     kind: "message",
     content: "Done",

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import { withoutTurnStamp } from "../transcript/model.js"
 import {
@@ -301,7 +302,7 @@ export const makeSessionBranch = ({
             )
             if (target < 0) return undefined
             end = target + 1
-            while (end < projection.length && projection[end]?.role === "tool") end += 1
+            while (end < projection.length && projection[end]?.role === ROLE.tool) end += 1
           }
 
           const selectedMessages = projection.slice(0, end)
@@ -581,7 +582,7 @@ export const makeSessionBranch = ({
         )
         OR EXISTS (
           SELECT 1 FROM session_messages AS own
-          WHERE own.session_id = fork.child_session_id AND own.role IN ('user', 'interaction')
+          WHERE own.session_id = fork.child_session_id AND own.role IN (${ROLE.user}, ${ROLE.interaction})
             AND NOT EXISTS (
               SELECT 1 FROM session_messages AS copied
               WHERE copied.session_id = fork.source_session_id AND copied.message_id = own.message_id

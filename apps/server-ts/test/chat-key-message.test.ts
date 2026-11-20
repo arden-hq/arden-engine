@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -17,7 +18,7 @@ const input = (sessionId: string, clientId: string, content: string) => ({
   message: {
     message_id: clientId,
     client_id: clientId,
-    role: "user" as const,
+    role: ROLE.user,
     content,
     created_at: AT
   }
@@ -68,7 +69,9 @@ it("keeps an admitted message once: on its key until it is in the transcript, th
       pending: true,
       nameSeed: { text: "Plan the pantry shelves", images: [] }
     },
-    drained: [expect.objectContaining({ message_id: "second", client_id: "second", role: "user" })],
+    drained: [
+      expect.objectContaining({ message_id: "second", client_id: "second", role: ROLE.user })
+    ],
     afterDrain: {
       copies: { first: false, second: false },
       retrySecond: { _tag: "Existing", runId: result.started.runId, status: "ingested" },
@@ -120,7 +123,7 @@ it("backfills in chunks, once, and leaves keys whose message is not in the trans
         const json = JSON.stringify({
           message_id: id,
           client_id: id,
-          role: "user",
+          role: ROLE.user,
           content: id,
           created_at: AT
         })
@@ -131,7 +134,7 @@ it("backfills in chunks, once, and leaves keys whose message is not in the trans
         const json = JSON.stringify({
           message_id: id,
           client_id: id,
-          role: "user",
+          role: ROLE.user,
           content: id,
           created_at: AT
         })

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { latestSessionRunQuery } from "./session-latest-run.js"
 import { sessionOriginQuery } from "./session-origin.js"
 import { sessionPresentations } from "./session-presentation.js"
@@ -386,7 +387,7 @@ export const makeSessionListing = ({
              parent_message_id,
              (SELECT message.search_text FROM session_messages AS message
               WHERE message.session_id = sessions.session_id
-                AND message.role IN ('user', 'interaction')
+                AND message.role IN (${ROLE.user}, ${ROLE.interaction})
                 AND TRIM(COALESCE(message.search_text, '')) <> ''
               ORDER BY message.seq LIMIT 1) AS first_text
       FROM sessions

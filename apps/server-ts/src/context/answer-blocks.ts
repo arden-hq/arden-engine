@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { replaceAnswerBlocks } from "@arden-hq/protocol/chat"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { compactAnswerBlock } from "../persistence/transcript/content.js"
@@ -16,10 +17,10 @@ export const projectAnswerBlocks = <Message extends HistoryMessage>(
 ): ReadonlyArray<Message> => {
   const latestUser = messages.findLastIndex((message) => isWrittenByPerson(message))
   const latestAnswer = messages.findLastIndex(
-    (message, index) => index < latestUser && message.role === "assistant" && hasText(message)
+    (message, index) => index < latestUser && message.role === ROLE.assistant && hasText(message)
   )
   return messages.map((message, index) =>
-    message.role !== "assistant" || index === latestAnswer || index > latestUser
+    message.role !== ROLE.assistant || index === latestAnswer || index > latestUser
       ? message
       : withCompactBlocks(message)
   )

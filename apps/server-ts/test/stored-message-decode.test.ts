@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Exit } from "effect"
 import { describe, expect, it } from "vitest"
 import { StoredMessageDecodeError } from "../src/chat/message-errors.js"
@@ -7,17 +8,17 @@ import type { StoredMessageEnvelope } from "../src/persistence/transcript/model.
 const createdAt = "2026-09-26T10:00:00.000Z"
 
 const stored: ReadonlyArray<StoredMessageEnvelope> = [
-  { message_id: "system", role: "system", created_at: createdAt, content: "You are Arden." },
+  { message_id: "system", role: ROLE.system, created_at: createdAt, content: "You are Arden." },
   {
     message_id: "developer",
-    role: "developer",
+    role: ROLE.developer,
     created_at: createdAt,
     content: [{ type: "text", text: "Runtime context" }],
     turn_id: "user"
   },
   {
     message_id: "user",
-    role: "user",
+    role: ROLE.user,
     created_at: createdAt,
     client_id: "client-1",
     turn_id: "user",
@@ -30,11 +31,11 @@ const stored: ReadonlyArray<StoredMessageEnvelope> = [
       },
       { type: "text", text: "Continue." }
     ],
-    replyTo: { messageId: "earlier", role: "assistant", content: "Earlier answer" }
+    replyTo: { messageId: "earlier", role: ROLE.assistant, content: "Earlier answer" }
   },
   {
     message_id: "steer",
-    role: "user",
+    role: ROLE.user,
     created_at: createdAt,
     applied_at: createdAt,
     content: "Also check the logs.",
@@ -47,7 +48,7 @@ const stored: ReadonlyArray<StoredMessageEnvelope> = [
   },
   {
     message_id: "assistant",
-    role: "assistant",
+    role: ROLE.assistant,
     created_at: createdAt,
     content: "Checking.",
     reasoning_content: "Look first.",
@@ -63,7 +64,7 @@ const stored: ReadonlyArray<StoredMessageEnvelope> = [
   },
   {
     message_id: "tool",
-    role: "tool",
+    role: ROLE.tool,
     created_at: createdAt,
     tool_call_id: "call-1",
     content: "done"
@@ -80,14 +81,14 @@ describe("stored message decoding", () => {
   it("decodes a reply that quotes several messages, and refuses one that quotes none", () => {
     const quoting = (replyTo: StoredMessageEnvelope["replyTo"]): StoredMessageEnvelope => ({
       message_id: "quoting",
-      role: "user",
+      role: ROLE.user,
       created_at: createdAt,
       content: "Compare these.",
       replyTo
     })
     const several = quoting([
-      { messageId: "earlier", role: "assistant", content: "Earlier answer" },
-      { messageId: "later", role: "assistant", content: "Later answer" }
+      { messageId: "earlier", role: ROLE.assistant, content: "Earlier answer" },
+      { messageId: "later", role: ROLE.assistant, content: "Later answer" }
     ])
 
     expect(Effect.runSync(toChatRunnerMessages("session-1", [several]))).toStrictEqual([
@@ -111,7 +112,7 @@ describe("stored message decoding", () => {
     const exit = Effect.runSyncExit(
       toChatRunnerMessages("session-1", [
         ...stored.slice(0, 2),
-        { message_id: "broken-tool", role: "tool", created_at: createdAt, content: "orphan" }
+        { message_id: "broken-tool", role: ROLE.tool, created_at: createdAt, content: "orphan" }
       ])
     )
 

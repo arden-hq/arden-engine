@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelCapabilities, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
 import type { ModelAssignment } from "@arden-hq/protocol/models"
 import { Effect, Layer, Schema } from "effect"
@@ -34,7 +35,7 @@ const recording = (answer: string, outputLimit: ModelCapabilities["outputLimit"]
         {
           _tag: "Completed",
           message: {
-            role: "assistant",
+            role: ROLE.assistant,
             content: answer,
             tool_calls: null,
             reasoning_content: null
@@ -228,7 +229,7 @@ describe("a side call's effort and output limit", () => {
           {
             id: "m1",
             type: "message",
-            role: "assistant",
+            role: ROLE.assistant,
             content: [{ type: "output_text", text: "Lisbon trip" }]
           }
         ]

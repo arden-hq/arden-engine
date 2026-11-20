@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { countOf } from "@arden-hq/std/count"
 import { storedSender } from "../transcript/interaction.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
@@ -527,12 +528,12 @@ export const makeAgentSpawner = ({
           const childMessage: StoredMessageEnvelope = {
             message_id: childClientId,
             client_id: childClientId,
-            role: "interaction",
+            role: ROLE.interaction,
             content: task,
             ...storedSender({
-              kind: "assignment",
-              from: { source: "agent", id: parent.public_ref, name: parent.name },
-              to: { source: "agent", id: childRef },
+              kind: INTERACTION_KIND.assignment,
+              from: { source: INTERACTION_SOURCE.agent, id: parent.public_ref, name: parent.name },
+              to: { source: INTERACTION_SOURCE.agent, id: childRef },
               caused_by: { type: "tool_call", id: valid.parent.toolCallId }
             }),
             created_at: timestamp
@@ -720,7 +721,7 @@ export const makeAgentSpawner = ({
                         event: {
                           type: "TEXT_MESSAGE_START",
                           message_id: childAssistantMessageId,
-                          role: "assistant"
+                          role: ROLE.assistant
                         } satisfies ChatProjectionEvent,
                         runId: childRunId
                       }

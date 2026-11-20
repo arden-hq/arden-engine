@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { CompletionResponse, ModelProviderRequest, ModelStreamItem } from "@arden-hq/loop"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { afterEach, describe, expect, it } from "vitest"
@@ -61,7 +62,7 @@ const collect = async (
 
 const baseRequest: ModelProviderRequest = {
   model: "gpt-5.4",
-  messages: [{ role: "user", content: "Hi." }],
+  messages: [{ role: ROLE.user, content: "Hi." }],
   renderInteraction: (interaction) => interaction.content,
   tools: [],
   deferredTools: [],
@@ -77,7 +78,7 @@ const terminalWithoutIds = {
     },
     {
       type: "message",
-      role: "assistant",
+      role: ROLE.assistant,
       phase: "final_answer",
       content: [{ type: "output_text", text: "Done." }]
     },
@@ -91,7 +92,7 @@ const terminalWithoutIds = {
     {
       id: "msg-real",
       type: "message",
-      role: "assistant",
+      role: ROLE.assistant,
       content: [{ type: "output_text", text: " Kept." }],
       status: "completed"
     }
@@ -109,7 +110,7 @@ const simpleCompleted = {
     {
       id: "msg-1",
       type: "message",
-      role: "assistant",
+      role: ROLE.assistant,
       content: [{ type: "output_text", text: "Recovered." }],
       status: "completed"
     }
@@ -309,7 +310,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       {
         id: "arden-synthetic-output-1",
         type: "message",
-        role: "assistant",
+        role: ROLE.assistant,
         content: [{ type: "output_text", text: "Done.", annotations: [], logprobs: [] }],
         status: "completed",
         phase: "final_answer"
@@ -324,7 +325,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       {
         id: "msg-real",
         type: "message",
-        role: "assistant",
+        role: ROLE.assistant,
         content: [{ type: "output_text", text: " Kept.", annotations: [], logprobs: [] }],
         status: "completed"
       }
@@ -334,21 +335,21 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       await provider.stream({
         ...baseRequest,
         messages: [
-          { role: "user", content: "Hi." },
+          { role: ROLE.user, content: "Hi." },
           {
-            role: "assistant",
+            role: ROLE.assistant,
             content: "Done. Kept.",
             ...(stored === undefined ? {} : { provider_state: { "openai-responses": stored } })
           },
-          { role: "user", content: "More." }
+          { role: ROLE.user, content: "More." }
         ]
       })
     )
 
     const replayed = (bodies[1] as { input: ReadonlyArray<unknown> }).input
     expect(replayed).toEqual([
-      { role: "user", content: "Hi." },
-      { role: "assistant", content: "Done.", phase: "final_answer" },
+      { role: ROLE.user, content: "Hi." },
+      { role: ROLE.assistant, content: "Done.", phase: "final_answer" },
       {
         type: "reasoning",
         id: "rs-real",
@@ -358,11 +359,11 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       {
         id: "msg-real",
         type: "message",
-        role: "assistant",
+        role: ROLE.assistant,
         content: [{ type: "output_text", text: " Kept.", annotations: [], logprobs: [] }],
         status: "completed"
       },
-      { role: "user", content: "More." }
+      { role: ROLE.user, content: "More." }
     ])
   })
 

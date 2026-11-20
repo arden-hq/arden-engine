@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { isConversationalInput } from "@arden-hq/loop"
 import { isForegroundRunStatus } from "@arden-hq/protocol/runs"
@@ -196,7 +197,7 @@ export const makeChatCheckpoint = ({
                 )
           const appended = yield* validateInput(MessageListSchema, tail, "checkpoint")
           yield* rejectTranscriptIds(sql, run, appended, "checkpoint")
-          if (appended.some((message) => message.role === "system")) {
+          if (appended.some((message) => message.role === ROLE.system)) {
             return yield* writeError(
               "checkpoint",
               "invalid",
@@ -234,7 +235,7 @@ export const makeChatCheckpoint = ({
               (yield* loadLastActiveMessageFor(sql, run.session_id, "checkpoint"))
             if (
               last?.message_id !== valid.completionMessageId ||
-              (last.role !== "tool" && (last.role !== "assistant" || hasToolIntent(last)))
+              (last.role !== ROLE.tool && (last.role !== ROLE.assistant || hasToolIntent(last)))
             ) {
               return yield* writeError(
                 "checkpoint",

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatActivitySql } from "./person-written-sql.js"
 import type { EventAutomationTrigger } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
@@ -29,7 +30,7 @@ export const loadQuietChat = Effect.fn("SqliteAutomationStore.loadQuietChat")(fu
   if (chat === undefined) return null
   const messages = yield* sql<{
     readonly seq: number
-    readonly role: "user" | "assistant"
+    readonly role: typeof ROLE.user | typeof ROLE.assistant
     readonly created_at: string
     readonly text: string | null
   }>`

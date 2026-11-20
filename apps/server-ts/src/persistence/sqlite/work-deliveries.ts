@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { RunDelivery } from "../deliveries/model.js"
@@ -6,6 +7,7 @@ import { RunDeliveryPayloadSchema, type RunDeliveryPayload } from "../deliveries
 import { WorkStoreError, type WorkStore } from "../work/store.js"
 import { decodeJson } from "./json.js"
 import { userContent } from "../transcript/user-content.js"
+import { updateInteraction } from "../deliveries/update-interaction.js"
 import { executionBudgetExpired } from "./execution-budgets.js"
 import { captureRunTask, runAuthorityState } from "./run-context.js"
 import { workError } from "./work-records.js"
@@ -29,9 +31,6 @@ import { liftChat } from "./session-unread.js"
 import { parentCompletion } from "../runs/parent-completion.js"
 import type { EndingRecord } from "../runs/ending.js"
 import type { ChatRunRecord } from "../runs/model.js"
-import { doorRef } from "../transcript/chat-events.js"
-import type { Interaction } from "@arden-hq/protocol/chat"
-import type { ChatUpdate } from "@arden-hq/protocol/chat"
 import { sha256Hex } from "@arden-hq/std/hash"
 
 const unroutableSummary =
@@ -95,28 +94,6 @@ const steersRun = (
   payload: string | Statement.Fragment,
   runId: Statement.Fragment
 ) => sql`(${childAgentResult(sql, payload)}) OR (${answerToAskingRun(sql, payload, runId)})`
-
-const updateInteraction = (
-  payload: Extract<RunDeliveryPayload, { readonly kind: "update" }>,
-  body: string
-): Interaction => ({
-  kind: "completion",
-  from: {
-    source: "agent",
-    id: doorRef(payload.update.door, null),
-    name: payload.update.door.label
-  },
-  to: { source: "agent", id: payload.sessionId },
-  content: body,
-  outcome: updateOutcome(payload.update)
-})
-
-const updateOutcome = (
-  update: ChatUpdate
-): Extract<Interaction, { readonly kind: "completion" }>["outcome"] => {
-  if (update.weight === "news") return "completed"
-  return update.event === "failed" ? "failed" : "needs_attention"
-}
 
 const threadDeliveryOwner = Effect.fn("WorkDeliveries.threadOwner")(function* (
   sql: SqlClient.SqlClient,
@@ -583,13 +560,13 @@ export const makeWorkDeliverySql = ({
                 body: row.body,
                 payload,
                 interaction: {
-                  kind: "message" as const,
+                  kind: INTERACTION_KIND.message,
                   from: {
-                    source: "agent" as const,
+                    source: INTERACTION_SOURCE.agent,
                     id: owner.source_ref,
                     name: owner.source_name
                   },
-                  to: { source: "agent" as const, id: owner.target_ref },
+                  to: { source: INTERACTION_SOURCE.agent, id: owner.target_ref },
                   content: row.body
                 }
               }))
@@ -661,24 +638,24 @@ export const makeWorkDeliverySql = ({
                 interaction:
                   payload.progress === true
                     ? {
-                        kind: "message" as const,
+                        kind: INTERACTION_KIND.message,
                         from: {
-                          source: "agent" as const,
+                          source: INTERACTION_SOURCE.agent,
                           id: identity.source_ref,
                           name: identity.source_name
                         },
-                        to: { source: "agent" as const, id: identity.destination_ref },
+                        to: { source: INTERACTION_SOURCE.agent, id: identity.destination_ref },
                         content: `Update from the worker:\n${row.body}`,
                         caused_by: { type: "run" as const, id: payload.runIds[0] }
                       }
                     : {
-                        kind: "completion" as const,
+                        kind: INTERACTION_KIND.completion,
                         from: {
-                          source: "agent" as const,
+                          source: INTERACTION_SOURCE.agent,
                           id: identity.source_ref,
                           name: identity.source_name
                         },
-                        to: { source: "agent" as const, id: identity.destination_ref },
+                        to: { source: INTERACTION_SOURCE.agent, id: identity.destination_ref },
                         content: row.body,
                         outcome: report.outcome,
                         caused_by: { type: "run" as const, id: payload.runIds[0] }

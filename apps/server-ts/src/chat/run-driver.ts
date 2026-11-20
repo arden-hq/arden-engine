@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { ContextExperiments } from "../context/experiments.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import type { ChatApprovalMode, ChatRunErrorCode } from "@arden-hq/protocol/chat"
@@ -410,7 +411,9 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
     }
 
     const messages = yield* projector.result(result)
-    const terminalMessage = [...messages].reverse().find((message) => message.role === "assistant")
+    const terminalMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === ROLE.assistant)
     const terminalTextId = terminalTextAnchor(messages)
     const totals = accumulateRunTotals(input.totals, result)
     const usage = runTotalsUsage(totals)

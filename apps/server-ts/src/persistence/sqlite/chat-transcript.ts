@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { CommunicationEnvelope } from "@arden-hq/protocol/chat"
 import { CommunicationEnvelopeSchema } from "@arden-hq/protocol/effect/chat"
 import { Effect, Predicate, Schema } from "effect"
@@ -245,7 +246,7 @@ export const loadMintedMessageIds = Effect.fn("SqliteChatWriteStore.loadMintedMe
       SELECT message_id
       FROM session_messages
       WHERE session_id = ${sessionId}
-        AND role = 'assistant'
+        AND role = ${ROLE.assistant}
         AND (message_id = ${assistantMessageId}
           OR substr(message_id, 1, ${mintedPrefix.length}) = ${mintedPrefix})
       ORDER BY seq
@@ -414,7 +415,7 @@ export const appendMessagesInTransaction = Effect.fn("SqliteChatWriteStore.appen
 )
 
 export const hasToolIntent = (message: StoredMessageEnvelope | undefined): boolean =>
-  message?.role === "assistant" &&
+  message?.role === ROLE.assistant &&
   Array.isArray(message.tool_calls) &&
   message.tool_calls.length > 0
 
@@ -424,11 +425,15 @@ export const hasResumableTail = (
 ): boolean => {
   const last = messages[messages.length - 1]
   if (last === undefined) return false
-  if (last.role === "tool" ? !certifiedToolTail : last.role !== "assistant" || hasToolIntent(last))
+  if (
+    last.role === ROLE.tool
+      ? !certifiedToolTail
+      : last.role !== ROLE.assistant || hasToolIntent(last)
+  )
     return true
   const toolOutputs = new Set(
     messages.flatMap((message) =>
-      message.role === "tool" &&
+      message.role === ROLE.tool &&
       message.async_tool_launch === undefined &&
       message.tool_call_id !== undefined
         ? [message.tool_call_id]
@@ -445,7 +450,7 @@ export const hasResumableTail = (
   )
   const unfinishedCall = messages.some(
     (message) =>
-      message.role === "assistant" &&
+      message.role === ROLE.assistant &&
       Array.isArray(message.tool_calls) &&
       message.tool_calls.some(
         (call) =>
@@ -479,9 +484,9 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
   const message = yield* Schema.decodeUnknownEffect(StoredMessageEnvelopeSchema)({
     message_id: options.messageId,
     turn_id: options.messageId,
-    role: "interaction",
-    from: { source: "harness", id: "communication" },
-    kind: "event",
+    role: ROLE.interaction,
+    from: { source: INTERACTION_SOURCE.harness, id: "communication" },
+    kind: INTERACTION_KIND.event,
     content: "",
     communication,
     created_at: options.createdAt

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Option, Schema } from "effect"
 import { ChatWriteError } from "../chat/store.js"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
@@ -78,7 +79,7 @@ const loadToolCallPositions = Effect.fn("ToolTranscript.loadToolCallPositions")(
   const latestIds = new Set<string>()
   for (const [messageIndex, message] of [...input.activeMessages.entries()].reverse()) {
     if (
-      message.role !== "assistant" ||
+      message.role !== ROLE.assistant ||
       message.tool_calls === undefined ||
       message.tool_calls === null
     )
@@ -140,7 +141,7 @@ const existingToolOutputs = (
   messages: ReadonlyArray<StoredMessageEnvelope>
 ): ReadonlyMap<string, ReadonlyArray<StoredMessageEnvelope>> =>
   messagesByToolCallId(messages, (message) =>
-    message.role === "tool" ? decodeOptionalId(message.tool_call_id) : Option.none()
+    message.role === ROLE.tool ? decodeOptionalId(message.tool_call_id) : Option.none()
   )
 
 const decodeEnvelope = Effect.fn("ToolTranscript.decodeEnvelope")(function* (
@@ -159,7 +160,7 @@ const toolOutputEnvelope = (
   decodeEnvelope(input, {
     ...(execution.result.message_extras ?? {}),
     message_id: recoveryMessageId(input.runId, execution.toolCallId),
-    role: "tool",
+    role: ROLE.tool,
     created_at: execution.endedAt,
     tool_call_id: execution.toolCallId,
     content: execution.result.content,
@@ -177,7 +178,7 @@ const missingToolOutputEnvelope = (
 ): Effect.Effect<StoredMessageEnvelope, ChatWriteError> =>
   decodeEnvelope(input, {
     message_id: recoveryMessageId(input.runId, toolCallId),
-    role: "tool",
+    role: ROLE.tool,
     created_at: input.terminalAt,
     tool_call_id: toolCallId,
     content:
@@ -252,7 +253,7 @@ const recoverBackgroundToolMessages = Effect.fn("ToolTranscript.recoverBackgroun
       ids.add(launch.call_id)
       const existing = input.activeMessages.filter(
         (item) =>
-          item.role === "tool" &&
+          item.role === ROLE.tool &&
           item.tool_call_id === launch.call_id &&
           item.async_tool_launch === undefined
       )
@@ -260,7 +261,7 @@ const recoverBackgroundToolMessages = Effect.fn("ToolTranscript.recoverBackgroun
       const execution = input.executions.find((item) => item.toolCallId === launch.call_id)
       const calls = yield* Effect.forEach(
         input.activeMessages.filter(
-          (item) => item.role === "assistant" && Array.isArray(item.tool_calls)
+          (item) => item.role === ROLE.assistant && Array.isArray(item.tool_calls)
         ),
         (item) =>
           Schema.decodeUnknownEffect(RuntimeToolCallsSchema)(item.tool_calls).pipe(
@@ -288,7 +289,7 @@ const recoverBackgroundToolMessages = Effect.fn("ToolTranscript.recoverBackgroun
         yield* decodeEnvelope(input, {
           ...(execution?.result.message_extras ?? {}),
           message_id: recoveryMessageId(input.runId, launch.call_id),
-          role: "tool",
+          role: ROLE.tool,
           tool_call_id: launch.call_id,
           content,
           ...(execution === undefined ? {} : mediaOf(execution)),

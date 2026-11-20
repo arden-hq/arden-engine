@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { readDefaultApprovalMode } from "./default-approval-mode.js"
 import { agentResultPresentation } from "./agent-result-presentation.js"
 import { DateTime, Effect, Option, Schema } from "effect"
@@ -285,7 +286,7 @@ export const makeChatAdmission = ({
       yield* settleTypedReply({ sql, sessionEvents, chatEvents, input: valid, now: timestamp })
 
       const priorActivityMs =
-        valid.message.role === "interaction"
+        valid.message.role === ROLE.interaction
           ? null
           : yield* latestVisibleActivityMs({ sql, sessionId: valid.sessionId })
       const agentResult =
@@ -410,14 +411,14 @@ export const makeChatAdmission = ({
             )))
       const held =
         model !== undefined &&
-        valid.message.role === "interaction" &&
+        valid.message.role === ROLE.interaction &&
         valid.automation === undefined &&
         valid.continuesTask === undefined &&
         delivery?.kind !== "answer" &&
         holdsUnattendedInput(yield* readLastEndedRun(sql, valid.sessionId), model.modelId)
       if (model === undefined || held) {
         if (!held) {
-          if (interactionSender?.from.source !== "agent")
+          if (interactionSender?.from.source !== INTERACTION_SOURCE.agent)
             return yield* conflict("Only an agent message may be stored without waking")
           yield* handoffSender(sql, interactionSender, valid.sessionId)
         }
@@ -606,7 +607,7 @@ export const makeChatAdmission = ({
             )
       const runPolicy = handedPolicy(ownPolicy, handed)
       if (
-        valid.message.role !== "interaction" &&
+        valid.message.role !== ROLE.interaction &&
         valid.automation === undefined &&
         agent === null
       ) {
@@ -717,13 +718,14 @@ export const makeChatAdmission = ({
               event: {
                 type: "TEXT_MESSAGE_START",
                 message_id: valid.assistantMessageId,
-                role: "assistant"
+                role: ROLE.assistant
               } satisfies ChatProjectionEvent,
               runId
             },
             ...(valid.announce === true ||
             delivery?.kind === "connection" ||
-            (interactionSender?.kind === "message" && interactionSender.from.source === "agent")
+            (interactionSender?.kind === INTERACTION_KIND.message &&
+              interactionSender.from.source === INTERACTION_SOURCE.agent)
               ? [{ event: transcriptChanged, runId }]
               : [])
           ]
@@ -743,7 +745,7 @@ export const makeChatAdmission = ({
         valid.automation === undefined &&
         valid.deliveryId === undefined &&
         agent === null &&
-        valid.message.role !== "interaction" &&
+        valid.message.role !== ROLE.interaction &&
         feedsActivityTriggers({
           sessionType: session.session_type,
           originAutomationId: session.origin_automation_id

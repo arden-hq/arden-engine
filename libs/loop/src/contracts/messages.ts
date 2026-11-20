@@ -1,4 +1,18 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 export type JsonPrimitive = string | number | boolean | null
+export {
+  INTERACTION_KINDS,
+  INTERACTION_OUTCOMES,
+  INTERACTION_SOURCES,
+  type InteractionKind,
+  type InteractionOutcome,
+  type InteractionSource
+} from "@arden-hq/std/message-vocabulary"
+import type {
+  InteractionKind,
+  InteractionOutcome,
+  InteractionSource
+} from "@arden-hq/std/message-vocabulary"
 export type JsonValue =
   | JsonPrimitive
   | ReadonlyArray<JsonValue>
@@ -102,9 +116,6 @@ export interface ToolCall {
 
 export type AssistantTextPhase = "commentary" | "final_answer"
 
-export const INTERACTION_SOURCES = ["agent", "workflow", "tool", "automation", "harness"] as const
-export type InteractionSource = (typeof INTERACTION_SOURCES)[number]
-
 export interface InteractionActor extends JsonObject {
   readonly source: InteractionSource
   readonly id: string
@@ -112,7 +123,7 @@ export interface InteractionActor extends JsonObject {
 }
 
 export interface InteractionRecipient extends JsonObject {
-  readonly source: "agent"
+  readonly source: typeof INTERACTION_SOURCE.agent
   readonly id: string
 }
 
@@ -124,28 +135,11 @@ export interface InteractionReference extends JsonObject {
 /** Immutable model-facing snapshot of the message a human replied to. */
 export interface ReplyContext extends JsonObject {
   readonly messageId: string
-  readonly role: "user" | "assistant"
+  readonly role: typeof ROLE.user | typeof ROLE.assistant
   readonly content: string
 }
 
-export const INTERACTION_KINDS = [
-  "message",
-  "assignment",
-  "instruction",
-  "event",
-  "completion"
-] as const
-export type InteractionKind = (typeof INTERACTION_KINDS)[number]
-
 /** `interrupted`: the sender stopped because the host restarted. */
-export const INTERACTION_OUTCOMES = [
-  "completed",
-  "failed",
-  "cancelled",
-  "needs_attention",
-  "interrupted"
-] as const
-export type InteractionOutcome = (typeof INTERACTION_OUTCOMES)[number]
 
 export type AssistantOutputPart =
   | {
@@ -177,13 +171,13 @@ export interface AsyncToolLaunch {
 }
 
 export interface SystemMessage extends MessageFields {
-  readonly role: "system"
+  readonly role: typeof ROLE.system
   readonly content: string | ReadonlyArray<Metadata>
 }
 
 /** Current high-priority context that belongs in the request timeline, not the stable base prompt. */
 interface DeveloperMessage extends MessageFields {
-  readonly role: "developer"
+  readonly role: typeof ROLE.developer
   readonly content: string | ReadonlyArray<Metadata>
   /**
    * Deferred tools that stay loaded after a compaction removed the history
@@ -199,7 +193,7 @@ interface DeveloperMessage extends MessageFields {
 }
 
 export interface UserMessage extends MessageFields {
-  readonly role: "user"
+  readonly role: typeof ROLE.user
   readonly content?: string | null | ReadonlyArray<Metadata>
   /** One quoted message, or several. Stored histories hold either form; read it
    *  through `replyContexts`. */
@@ -207,7 +201,7 @@ export interface UserMessage extends MessageFields {
 }
 
 export type InteractionMessage = MessageFields & {
-  readonly role: "interaction"
+  readonly role: typeof ROLE.interaction
   readonly from: InteractionActor
   readonly to?: InteractionRecipient
   readonly content: string | ReadonlyArray<Metadata>
@@ -219,11 +213,11 @@ export type InteractionMessage = MessageFields & {
   readonly rejected_message_ids?: ReadonlyArray<string>
 } & (
     | { readonly kind: Exclude<InteractionKind, "completion"> }
-    | { readonly kind: "completion"; readonly outcome: InteractionOutcome }
+    | { readonly kind: typeof INTERACTION_KIND.completion; readonly outcome: InteractionOutcome }
   )
 
 export interface AssistantMessage extends MessageFields {
-  readonly role: "assistant"
+  readonly role: typeof ROLE.assistant
   readonly content?: string | null | ReadonlyArray<Metadata>
   readonly tool_calls?: ReadonlyArray<ToolCall>
   /** Calls the provider executed upstream, persisted with their results. */
@@ -238,7 +232,7 @@ export interface AssistantMessage extends MessageFields {
 }
 
 export interface ToolResultMessage extends MessageFields {
-  readonly role: "tool"
+  readonly role: typeof ROLE.tool
   readonly tool_call_id: string
   readonly content: string
   readonly async_tool_launch?: AsyncToolLaunch

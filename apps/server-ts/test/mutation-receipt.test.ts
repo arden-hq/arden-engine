@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { createTool, failedToolResult, ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -172,7 +173,7 @@ describe("mutation receipts", () => {
             message: {
               message_id: "client-1",
               client_id: "client-1",
-              role: "user",
+              role: ROLE.user,
               content: "Test mutation receipts",
               created_at: "2026-08-30T00:00:00.000Z"
             }
@@ -283,7 +284,7 @@ describe("mutation receipts", () => {
             message: {
               message_id: "client-1",
               client_id: "client-1",
-              role: "user",
+              role: ROLE.user,
               content: "Read the timeline",
               created_at: "2026-10-24T00:00:00.000Z"
             }

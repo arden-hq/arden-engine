@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isRecord } from "@arden-hq/std/json"
 
 import type {
@@ -278,7 +279,7 @@ export const makeChunkMapper = (options: {
     const completed: CompletionResponse = {
       _tag: "Completed",
       message: {
-        role: "assistant",
+        role: ROLE.assistant,
         content: text.length === 0 ? null : text,
         tool_calls: toolCalls.length === 0 ? null : toolCalls,
         reasoning_content: reasoning.length === 0 ? null : reasoning,

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { countOf } from "@arden-hq/std/count"
 import { ANSWER_UI_FENCE } from "@arden-hq/answer-ui/fence"
 import { ToolExecutionError } from "@arden-hq/loop"
@@ -47,13 +48,15 @@ const findAnswer = Effect.fn("answerBlockRead.findAnswer")(function* (
       limit: LATEST_WINDOW
     })
     return page.records.findLast(
-      (record) => record.role === "assistant" && messageText(record).includes(ANSWER_UI_FENCE)
+      (record) => record.role === ROLE.assistant && messageText(record).includes(ANSWER_UI_FENCE)
     )
   }
   const sequence = yield* transcript.resolveReference(sessionId, messageId)
   if (sequence === null) return undefined
   const page = yield* transcript.page({ _tag: "Around", sessionId, sequence, limit: 1 })
-  return page.records.find((record) => record.sequence === sequence && record.role === "assistant")
+  return page.records.find(
+    (record) => record.sequence === sequence && record.role === ROLE.assistant
+  )
 })
 
 const notFound = (message: string) =>

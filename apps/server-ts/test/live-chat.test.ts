@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 import type { ChatRunnerMessage } from "../src/chat/runner-contract.js"
 import { isLiveChat, type SessionOrigin } from "../src/context/turn-context.js"
@@ -8,8 +9,8 @@ const personal: SessionOrigin = {
   starting: undefined,
   special: undefined
 }
-const fromApp: ChatRunnerMessage = { role: "user", content: "hi" }
-const fromCommandLine: ChatRunnerMessage = { role: "user", content: "hi", sent_from: "cli" }
+const fromApp: ChatRunnerMessage = { role: ROLE.user, content: "hi" }
+const fromCommandLine: ChatRunnerMessage = { role: ROLE.user, content: "hi", sent_from: "cli" }
 
 it("a chat keeps itself free for the next message only when a person is in it", () => {
   // A person typing in the app.

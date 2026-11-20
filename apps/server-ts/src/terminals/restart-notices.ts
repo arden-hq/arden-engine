@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -96,8 +97,12 @@ export const noticeInput = (notice: TerminalNotice): ChatSendInput => ({
   approvalMode: notice.approvalMode,
   message: notice.content,
   sender: {
-    kind: "completion",
-    from: { source: "tool", id: `exec_command:${notice.id}`, name: notice.command },
+    kind: INTERACTION_KIND.completion,
+    from: {
+      source: INTERACTION_SOURCE.tool,
+      id: `exec_command:${notice.id}`,
+      name: notice.command
+    },
     outcome: notice.outcome,
     caused_by: { type: "tool_call", id: notice.toolCallId }
   }

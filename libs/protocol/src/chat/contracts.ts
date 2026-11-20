@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatProjectionEvent } from "./events/stream.js"
 import type { ApprovalMode } from "../permissions/modes.js"
 import type { JsonRecord, JsonValue } from "../common/json.js"
@@ -61,7 +62,7 @@ export interface ChatImageInput {
 /** Snapshot shown to the model with a human reply. */
 export interface ChatReplyContext extends JsonRecord {
   readonly messageId: string
-  readonly role: "user" | "assistant"
+  readonly role: typeof ROLE.user | typeof ROLE.assistant
   readonly content: string
 }
 

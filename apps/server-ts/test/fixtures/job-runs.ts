@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { AutomationId } from "../../src/persistence/automations/model.js"
@@ -10,8 +11,8 @@ const message = (id: string, isMeta: boolean) => ({
   content: "Made-up words",
   created_at: new Date().toISOString(),
   ...(isMeta
-    ? { role: "interaction" as const, from: { source: "harness", id: "notice" }, kind: "event" }
-    : { role: "user" as const })
+    ? { role: ROLE.interaction, from: { source: "harness", id: "notice" }, kind: "event" }
+    : { role: ROLE.user })
 })
 
 const startChat = (
@@ -39,7 +40,7 @@ const startChat = (
         ...(options.automation === undefined
           ? {}
           : {
-              role: "interaction" as const,
+              role: ROLE.interaction,
               kind: "assignment",
               from: {
                 source: "automation",

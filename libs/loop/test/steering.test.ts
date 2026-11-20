@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 import {
   makeAgent,
@@ -41,7 +42,7 @@ const terminal = (id: string, output: ReadonlyArray<Metadata>, type = "response.
 const text = (id: string, value: string) => ({
   type: "message",
   id,
-  role: "assistant",
+  role: ROLE.assistant,
   status: "completed",
   content: [{ type: "output_text", text: value }]
 })
@@ -133,13 +134,13 @@ it.each(["automatic", "tool", "failed"] as const)(
             : emptyTools,
         hooks: {
           getPendingMessages: () =>
-            ++pendingChecks === 2 ? [{ role: "user", content: "Keep it small" }] : [],
+            ++pendingChecks === 2 ? [{ role: ROLE.user, content: "Keep it small" }] : [],
           onCheckpoint: (messages) => {
             checkpoints.push(structuredClone([...messages]))
           }
         }
       }
-    ).run([{ role: "user", content: "Make a plan" }])
+    ).run([{ role: ROLE.user, content: "Make a plan" }])
     expect(result.text).toBe("Updated")
     expect(result.messages.filter((message) => message.content === "Keep it small")).toHaveLength(1)
     expect(closed).toBe(true)
@@ -147,7 +148,7 @@ it.each(["automatic", "tool", "failed"] as const)(
       {
         type: "response.steer",
         previous_response_id: "r1",
-        input: [{ role: "user", content: "Keep it small" }]
+        input: [{ role: ROLE.user, content: "Keep it small" }]
       }
     ])
     expect(sent.filter((event) => event.type === "response.create")).toHaveLength(
@@ -200,13 +201,13 @@ it("retains input after an accepted steer disconnects, without replaying the res
         toolset: emptyTools,
         hooks: {
           getPendingMessages: () =>
-            ++checks === 2 ? [{ role: "user", content: "Correction" }] : [],
+            ++checks === 2 ? [{ role: ROLE.user, content: "Correction" }] : [],
           onCheckpoint: (messages) => {
             checkpoint = structuredClone(messages)
           }
         }
       }
-    ).run([{ role: "user", content: "Plan" }])
+    ).run([{ role: ROLE.user, content: "Plan" }])
   ).rejects.toThrow("disconnected")
   expect(sent.map((event) => event.type)).toEqual(["response.create", "response.steer"])
   expect(checkpoint.map((message) => message.content)).toEqual(["Plan", "Correction"])
@@ -228,7 +229,7 @@ it("falls back to SSE after its configured handshake attempt budget", async () =
     }
   })
   const result = await makeAgent({ model: "gpt-6-astra" }, { provider, toolset: emptyTools }).run([
-    { role: "user", content: "Go" }
+    { role: ROLE.user, content: "Go" }
   ])
   expect(result.text).toBe("Fallback")
   expect(posts).toBe(1)

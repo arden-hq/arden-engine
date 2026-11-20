@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Schema } from "effect"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
 import { HandlerItemRefSchema } from "../automations/handler-item.js"
@@ -66,10 +67,10 @@ export const chatAdmissionInputSchema = Schema.Struct({
     if (input.modelId !== undefined && input.modelRole !== undefined) {
       issues.push({ path: ["modelId"], issue: "cannot be combined with modelRole" })
     }
-    if (input.message.role !== "user" && input.message.role !== "interaction") {
+    if (input.message.role !== ROLE.user && input.message.role !== ROLE.interaction) {
       issues.push({ path: ["message", "role"], issue: "must be a user or interaction message" })
     }
-    if (input.automation !== undefined && input.message.role !== "interaction") {
+    if (input.automation !== undefined && input.message.role !== ROLE.interaction) {
       issues.push({ path: ["message", "role"], issue: "an Automation's prompt is an interaction" })
     }
     if (input.message.message_id !== input.clientId) {

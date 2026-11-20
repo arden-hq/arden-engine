@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { abortError, isAbortError, raceAbort } from "../abort.js"
 import {
   makeFairReadWriteLock,
@@ -195,7 +196,7 @@ export interface BackgroundedCall {
 
 /** The portable receipt that closes a background call on the wire; its result arrives later. */
 export const launchReceipt = (id: string): ChatMessage => ({
-  role: "tool",
+  role: ROLE.tool,
   message_id: `async-launch:${id}`,
   tool_call_id: id,
   async_tool_launch: { call_id: id },
@@ -340,7 +341,7 @@ const appendResults = (
     messages.push({
       ...extras.get(call.id),
       message_id: messageId("tool"),
-      role: "tool",
+      role: ROLE.tool,
       tool_call_id: call.id,
       content: results.get(call.id) ?? missingContent,
       ...(media.length === 0 ? {} : { model_content: media })

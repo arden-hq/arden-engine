@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -105,9 +106,13 @@ const makeAgentMessageTool = (services: {
           wake: input.wake ?? true,
           message: input.message,
           sender: {
-            kind: "message",
-            from: { source: "agent", id: result.source.publicRef, name: result.sourceName },
-            to: { source: "agent", id: result.destination.publicRef },
+            kind: INTERACTION_KIND.message,
+            from: {
+              source: INTERACTION_SOURCE.agent,
+              id: result.source.publicRef,
+              name: result.sourceName
+            },
+            to: { source: INTERACTION_SOURCE.agent, id: result.destination.publicRef },
             caused_by: { type: "tool_call", id: ctx.toolCallId }
           }
         })

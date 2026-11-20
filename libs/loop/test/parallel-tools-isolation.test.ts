@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -23,7 +24,7 @@ const response = (
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content: options.content ?? null,
     tool_calls: (options.toolCalls ?? []).map((call) => ({
       id: call.id,
@@ -56,7 +57,7 @@ describe("parallel tools with per-tool isolation", () => {
         provider: {
           protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: ({ messages }) =>
-            messages.some((message) => message.role === "tool")
+            messages.some((message) => message.role === ROLE.tool)
               ? [response({ content: "done" })]
               : [
                   response({
@@ -83,7 +84,8 @@ describe("parallel tools with per-tool isolation", () => {
       }
     )
     const running = (async () => {
-      for await (const event of agent.stream([{ role: "user", content: "go" }])) events.push(event)
+      for await (const event of agent.stream([{ role: ROLE.user, content: "go" }]))
+        events.push(event)
     })()
     await first.promise
     await tick()
@@ -111,7 +113,7 @@ describe("parallel tools with per-tool isolation", () => {
         provider: {
           protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: ({ messages }) =>
-            messages.some((message) => message.role === "tool")
+            messages.some((message) => message.role === ROLE.tool)
               ? [response({ content: "done" })]
               : [
                   response({
@@ -142,7 +144,7 @@ describe("parallel tools with per-tool isolation", () => {
         }
       }
     )
-    const running = agent.run([{ role: "user", content: "go" }])
+    const running = agent.run([{ role: ROLE.user, content: "go" }])
     await first.promise
     await new Promise<void>((resolve) => setImmediate(resolve))
     try {
@@ -168,7 +170,7 @@ describe("parallel tools with per-tool isolation", () => {
         provider: {
           protocolVersion: MODEL_PROVIDER_PROTOCOL,
           stream: ({ messages }) =>
-            messages.some((message) => message.role === "tool")
+            messages.some((message) => message.role === ROLE.tool)
               ? [response({ content: "done" })]
               : [
                   response({
@@ -195,7 +197,7 @@ describe("parallel tools with per-tool isolation", () => {
         }
       }
     )
-    const running = agent.run([{ role: "user", content: "go" }])
+    const running = agent.run([{ role: ROLE.user, content: "go" }])
     await first.promise
     await new Promise<void>((resolve) => setImmediate(resolve))
     const beforeRelease = [...executed]
@@ -232,7 +234,7 @@ describe("parallel tools with per-tool isolation", () => {
         provider: {
           protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
           stream: ({ messages }) =>
-            messages.some((message) => message.role === "tool")
+            messages.some((message) => message.role === ROLE.tool)
               ? [response({ content: "done" })]
               : [
                   response({
@@ -251,7 +253,8 @@ describe("parallel tools with per-tool isolation", () => {
 
     const events: AgentStreamEvent[] = []
     const consume = (async () => {
-      for await (const event of agent.stream([{ role: "user", content: "go" }])) events.push(event)
+      for await (const event of agent.stream([{ role: ROLE.user, content: "go" }]))
+        events.push(event)
     })()
     await tick()
     await tick()
@@ -349,7 +352,7 @@ describe("parallel tools with per-tool isolation", () => {
       }
     )
     const events: AgentStreamEvent[] = []
-    for await (const event of agent.stream([{ role: "user", content: "go" }])) events.push(event)
+    for await (const event of agent.stream([{ role: ROLE.user, content: "go" }])) events.push(event)
     const completed = events.filter(
       (event): event is Extract<AgentEvent, { _tag: "ToolCompleted" }> =>
         "_tag" in event && event._tag === "ToolCompleted"
@@ -406,7 +409,7 @@ describe("parallel tools with per-tool isolation", () => {
       }
     )
     const events: AgentStreamEvent[] = []
-    for await (const event of agent.stream([{ role: "user", content: "go" }])) events.push(event)
+    for await (const event of agent.stream([{ role: ROLE.user, content: "go" }])) events.push(event)
     const completed = events.filter(
       (event): event is Extract<AgentEvent, { _tag: "ToolCompleted" }> =>
         "_tag" in event && event._tag === "ToolCompleted"

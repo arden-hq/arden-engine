@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import {
   SessionStoreError,
@@ -236,7 +237,7 @@ export const makeSessionContext = ({
             let remaining = valid.turns ?? 1
             for (let index = projection.length - 1; index >= 0; index -= 1) {
               const role = projection[index]?.role
-              if (role !== "user" && role !== "interaction") continue
+              if (role !== ROLE.user && role !== ROLE.interaction) continue
               remaining -= 1
               if (remaining === 0) {
                 target = index
@@ -346,7 +347,7 @@ export const makeSessionContext = ({
             }
             const message: StoredMessageEnvelope = {
               message_id: compactionId,
-              role: "assistant",
+              role: ROLE.assistant,
               created_at: DateTime.formatIso(yield* DateTime.now),
               content: previous.content ?? "",
               compaction

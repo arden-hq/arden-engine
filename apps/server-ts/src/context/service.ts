@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { randomUUID } from "node:crypto"
 import { ModelCatalog } from "../models/catalog.js"
 import { ServerConfig } from "../config/service.js"
@@ -167,7 +168,7 @@ const makeHandoff = Effect.fn("ContextCompaction.makeHandoff")(function* (
   const content = handoffContent({ ...snapshot, summary })
   const envelope: StoredMessageEnvelope = {
     message_id: messageId,
-    role: "assistant",
+    role: ROLE.assistant,
     created_at: createdAtText,
     content,
     compaction: {
@@ -187,7 +188,7 @@ const makeHandoff = Effect.fn("ContextCompaction.makeHandoff")(function* (
   }
   return {
     messageId,
-    role: "assistant",
+    role: ROLE.assistant,
     envelope,
     clientId: null,
     createdAt,

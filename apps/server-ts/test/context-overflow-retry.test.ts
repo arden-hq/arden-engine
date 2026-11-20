@@ -1,4 +1,5 @@
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
 import type { ModelProvider, ModelProviderRequest, Toolset } from "@arden-hq/loop"
@@ -75,7 +76,7 @@ const overflowingOnce = () => {
         {
           _tag: "Completed",
           message: {
-            role: "assistant",
+            role: ROLE.assistant,
             content: "Done.",
             tool_calls: null,
             reasoning_content: null
@@ -111,7 +112,7 @@ it(
             return input.overflow
               ? {
                   kind: "replacement",
-                  messages: input.messages.filter((message) => message.role !== "system")
+                  messages: input.messages.filter((message) => message.role !== ROLE.system)
                 }
               : { kind: "unchanged" }
           }

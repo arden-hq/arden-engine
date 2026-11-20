@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { TranscriptMessageRecord } from "../transcript/model.js"
@@ -26,7 +27,7 @@ export const makeToolResultInSession = (
         SELECT session_id, message_id, seq, role, message_json, client_id, created_at
         FROM session_messages
         WHERE session_id = ${sessionId}
-          AND ((role = 'tool' AND instr(message_json, ${needle}) > 0
+          AND ((role = ${ROLE.tool} AND instr(message_json, ${needle}) > 0
                 AND json_extract(message_json, '$.tool_call_id') = ${toolCallId}
                 AND json_extract(message_json, '$.async_tool_launch') IS NULL))
         ORDER BY seq DESC

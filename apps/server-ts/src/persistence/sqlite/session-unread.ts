@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -15,7 +16,7 @@ export const turnTouchesRecencySql = (
   OR EXISTS (SELECT 1 FROM session_messages AS m
     WHERE m.session_id = ${options.sessionId}
       AND ${messageTurnIdSql(sql, "m")} = ${options.turnId}
-      AND m.role = 'assistant'
+      AND m.role = ${ROLE.assistant}
       AND ${conversationMessagePredicate(sql)}))`
 
 export const liftChat = Effect.fn("SessionUnread.liftChat")(function* (

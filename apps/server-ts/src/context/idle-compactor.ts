@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Clock, Effect, Exit } from "effect"
 import { ModelCatalog } from "../models/catalog.js"
 import { ModelProviderService } from "../models/provider.js"
@@ -83,13 +84,13 @@ export const makeIdleCompactor = Effect.fn("ContextCompaction.makeIdleCompactor"
       if (cachedRequest === undefined) return skip("request no longer a prefix of the chat")
       const replayCount = cachedRequest.messages.filter(
         (message) =>
-          message.role !== "system" ||
+          message.role !== ROLE.system ||
           snapshot.messages.some((stored) => stored.message_id === message.message_id)
       ).length
       const terminal = snapshot.messages.at(-1)
       if (
         snapshot.messages.length !== replayCount + 1 ||
-        terminal?.role !== "assistant" ||
+        terminal?.role !== ROLE.assistant ||
         terminal.content !== candidate.response.message.content
       )
         return skip("chat changed after the request")

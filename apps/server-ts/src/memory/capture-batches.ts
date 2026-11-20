@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { RunOrigin } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
 
@@ -71,7 +72,7 @@ export const makeMemoryCaptureBatches = (input: {
     excerpt: CaptureExcerpt,
     captureNow: Date
   ): string => {
-    if (excerpt.record.role === "assistant" && excerpt.evidence.kind === "human") {
+    if (excerpt.record.role === ROLE.assistant && excerpt.evidence.kind === "human") {
       return "Assistant context only"
     }
     switch (excerpt.evidence.kind) {
@@ -318,7 +319,7 @@ const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
   const owned = yield* transcript
     .ownerWordsIn(
       input.sessionId,
-      records.flatMap((record) => (record.role === "user" ? [record.messageId] : []))
+      records.flatMap((record) => (record.role === ROLE.user ? [record.messageId] : []))
     )
     .pipe(Effect.mapError(failed("Could not read Memory source provenance")))
   const selected = selectExcerpts(records, origins, owned, input.start, input.stop)
@@ -328,8 +329,8 @@ const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
     reviewable: selected.excerpts.some(
       (excerpt) =>
         excerpt.evidence.kind !== "unknown" &&
-        (excerpt.record.role === "user" ||
-          excerpt.record.role === "interaction" ||
+        (excerpt.record.role === ROLE.user ||
+          excerpt.record.role === ROLE.interaction ||
           excerpt.evidence.kind !== "human")
     )
   }
@@ -353,7 +354,7 @@ const evidenceKind = (
     case "space":
       return { kind: "space", spaceId: origin.space_id, occurrenceId: origin.occurrence_id }
     case "chat":
-      return record.role === "assistant" ? { kind: "human" } : { kind: "unknown" }
+      return record.role === ROLE.assistant ? { kind: "human" } : { kind: "unknown" }
     case "unrecorded":
     case undefined:
       return { kind: "unknown" }
@@ -382,7 +383,11 @@ const selectExcerpts = (
   let characters = 0
   let read: TranscriptMessageRecord | undefined
   for (const record of records) {
-    if (record.role !== "user" && record.role !== "interaction" && record.role !== "assistant") {
+    if (
+      record.role !== ROLE.user &&
+      record.role !== ROLE.interaction &&
+      record.role !== ROLE.assistant
+    ) {
       read = record
       continue
     }

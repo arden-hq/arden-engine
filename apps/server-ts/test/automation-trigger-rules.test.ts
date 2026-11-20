@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AutomationTriggerInputSchema } from "@arden-hq/protocol/effect/automations"
 import type { AutomationEvent } from "@arden-hq/protocol"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
@@ -140,7 +141,7 @@ it("your message in a chat an Automation owns is not personal input", async () =
             message: {
               message_id: `${sessionId}-input`,
               client_id: `${sessionId}-input`,
-              role: "user",
+              role: ROLE.user,
               content: "Anything new?",
               created_at: new Date().toISOString()
             }
@@ -183,7 +184,13 @@ it("a completed run in your chat counts once, however often the chat changes aft
               clientId: id,
               requestHash: id,
               assistantMessageId: `answer-${id}`,
-              message: { message_id: id, client_id: id, role: "user", content: id, created_at: at }
+              message: {
+                message_id: id,
+                client_id: id,
+                role: ROLE.user,
+                content: id,
+                created_at: at
+              }
             })
             .pipe(
               Effect.flatMap((started) =>
@@ -195,7 +202,7 @@ it("a completed run in your chat counts once, however often the chat changes aft
           runId: answered.runId,
           messages: [
             ...answered.activeMessages,
-            { message_id: "answer-answered", role: "assistant", content: "Done", created_at: at }
+            { message_id: "answer-answered", role: ROLE.assistant, content: "Done", created_at: at }
           ]
         })
         yield* readState.mark(sessionId)

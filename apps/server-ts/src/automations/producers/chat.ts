@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { clipLine } from "@arden-hq/std/text"
 import type { AutomationTriggerEvent, QuietChat } from "../../persistence/automations/model.js"
 import type { AutomationEventProducer } from "../event-producer.js"
@@ -21,7 +22,7 @@ const quietStretch = (messages: QuietChat["messages"]): QuietStretch | undefined
   for (const message of messages) {
     if (Date.parse(first.createdAt) - Date.parse(message.createdAt) >= QUIET_GAP_MINUTES * 60_000)
       break
-    if (message.role === "user") yours.unshift(message.text)
+    if (message.role === ROLE.user) yours.unshift(message.text)
     first = message
   }
   return { firstSeq: first.seq, lastSeq: last.seq, lastAt: last.createdAt, yourMessages: yours }

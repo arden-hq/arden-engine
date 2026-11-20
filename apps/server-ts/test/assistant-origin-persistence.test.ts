@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AssistantMessage, ProviderMessage } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { expect, it } from "vitest"
@@ -17,7 +18,7 @@ const providerState = { "chat-completions": { reasoning: "kept" } }
 
 it("an assistant record keeps its origin and provider state through the transcript and back", async () => {
   const answer: AssistantMessage = {
-    role: "assistant",
+    role: ROLE.assistant,
     message_id: "answer",
     content: "Done.",
     output_parts: [{ type: "text", text: "Done." }],
@@ -46,7 +47,7 @@ it("an assistant record keeps its origin and provider state through the transcri
 
 it("a replayed answer carries every field of the provider's message", () => {
   const message: ProviderMessage = {
-    role: "assistant",
+    role: ROLE.assistant,
     content: null,
     tool_calls: null,
     reasoning_content: "Thought.",
@@ -56,7 +57,7 @@ it("a replayed answer carries every field of the provider's message", () => {
     origin
   }
   expect(replayedAssistant(message)).toEqual({
-    role: "assistant",
+    role: ROLE.assistant,
     content: "",
     tool_calls: [],
     output_parts: [{ type: "reasoning", text: "Thought." }],

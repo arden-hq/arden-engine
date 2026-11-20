@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 import { checkChatEndpoint, type ChatEndpointTarget } from "../src/models/endpoints/chat.js"
 
@@ -109,7 +110,7 @@ describe("the model server Check", () => {
         model: "gemma-32k",
         max_tokens: 32,
         reasoning_effort: "none",
-        messages: [{ role: "user", content: "Reply with the word OK." }]
+        messages: [{ role: ROLE.user, content: "Reply with the word OK." }]
       })
     ])
     expect(server.bodies[0]).not.toHaveProperty("tools")

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { ACTIVE_RUN_STATUSES } from "@arden-hq/protocol/runs"
 import { disposableForkSql } from "../schema/fork-disposition.js"
@@ -336,7 +337,7 @@ const recoverChatRunInTransaction = Effect.fn("SqlitePersistence.recoverChatRun"
     }
     const message = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json)
     if (
-      (message.role !== "user" && message.role !== "interaction") ||
+      (message.role !== ROLE.user && message.role !== ROLE.interaction) ||
       message.message_id !== row.message_id ||
       message.client_id !== row.client_id ||
       knownIds.has(message.message_id)

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
@@ -230,7 +231,7 @@ describe("bash permissions", () => {
               message: {
                 message_id: "client-bash-settlement",
                 client_id: "client-bash-settlement",
-                role: "user",
+                role: ROLE.user,
                 content: "Use Prime",
                 created_at: "2026-08-31T00:00:00.000Z"
               }

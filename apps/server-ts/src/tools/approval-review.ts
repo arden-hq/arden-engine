@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText, foldSpace } from "@arden-hq/std/text"
 import { errorMessage, redactedFailureText } from "@arden-hq/std/errors"
 import {
@@ -251,11 +252,11 @@ const clip = (text: string, max: number): string =>
 const recentWork = (messages: ApprovalReviewInput["messages"]): string => {
   const results = new Map<string, string>()
   for (const message of messages)
-    if (message.role === "tool") results.set(message.tool_call_id, message.content)
+    if (message.role === ROLE.tool) results.set(message.tool_call_id, message.content)
   const steps: string[] = []
   for (let index = messages.length - 1; index >= 0 && steps.length < MAX_RECENT_STEPS; index -= 1) {
     const message = messages[index]
-    if (message?.role !== "assistant") continue
+    if (message?.role !== ROLE.assistant) continue
     const calls = message.tool_calls ?? []
     for (let call = calls.length - 1; call >= 0 && steps.length < MAX_RECENT_STEPS; call -= 1) {
       const entry = calls[call]
@@ -409,7 +410,7 @@ const ownMessages = (messages: ApprovalReviewInput["messages"]): TrustedAuthorit
   delegationRequests: [],
   delegationWords: [],
   ownerWords: messages.flatMap((message) =>
-    message.role === "user" && typeof message.content === "string" ? [message.content] : []
+    message.role === ROLE.user && typeof message.content === "string" ? [message.content] : []
   ),
   automationPrompt: undefined,
   briefs: [],

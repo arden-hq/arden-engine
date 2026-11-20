@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { journalHeadSequenceSql } from "@arden-hq/journal/effect"
 import { isWrittenByPerson } from "../transcript/model.js"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
@@ -339,7 +340,7 @@ export const makeSessionQueries = ({
       FROM session_messages AS message
       JOIN sessions AS session ON session.session_id = message.session_id
       WHERE message.session_id = ${sessionId}
-        AND message.role IN ('user', 'interaction')
+        AND message.role IN (${ROLE.user}, ${ROLE.interaction})
         AND message.created_at >= session.started_at
       ORDER BY message.seq ASC
     `.pipe(

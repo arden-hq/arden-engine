@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage } from "@arden-hq/loop"
 import type { EffectiveSessionTodoResponse } from "@arden-hq/protocol/sessions/todos"
 import { isOpenTodo } from "../persistence/todos/items.js"
@@ -11,9 +12,9 @@ export const todoReminderDue = (messages: ReadonlyArray<ChatMessage>): boolean =
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message === undefined) continue
-    if (message.role === "developer" && message.arden_context_source === TODO_REMINDER_SOURCE)
+    if (message.role === ROLE.developer && message.arden_context_source === TODO_REMINDER_SOURCE)
       return false
-    if (message.role !== "assistant") continue
+    if (message.role !== ROLE.assistant) continue
     if ((message.tool_calls ?? []).some((call) => call.function.name === "todo_update"))
       return false
     turns += 1

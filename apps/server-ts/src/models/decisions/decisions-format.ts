@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 
 import { type DecisionEndpoint, postDecisionRequest } from "./endpoint.js"
@@ -45,7 +46,7 @@ const decisionsRequest = (model: string, input: DecisionInput) => ({
   model,
   input: [
     {
-      role: "user",
+      role: ROLE.user,
       content: [
         { type: "input_text", text: stateText(input) },
         ...input.images.map((image) => ({

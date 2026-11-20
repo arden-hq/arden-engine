@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -40,7 +41,7 @@ const run = <A>(test: (sql: SqlClient.SqlClient) => Effect.Effect<A, unknown>): 
 
 const arrival = (id: string, forkedFrom?: string) => ({
   message_id: `arrival:${id}`,
-  role: "user",
+  role: ROLE.user,
   created_at: ARRIVED,
   is_meta: true,
   update: {

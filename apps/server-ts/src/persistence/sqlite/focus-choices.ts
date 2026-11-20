@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
 import { isWrittenByPerson } from "../transcript/model.js"
 import {
@@ -320,9 +321,9 @@ const triggeringMessage = Effect.fn("FocusChoice.triggeringMessage")(function* (
     JOIN session_messages AS message ON message.session_id = ${row.source_session_id}
       AND ${messageTurnIdSql(sql, "message")} = json_extract(run.metadata_json, '$.turn_id')
     WHERE question.question_id = ${row.question_id}
-      AND ((message.role = 'user'
+      AND ((message.role = ${ROLE.user}
           AND json_type(message.message_json, '$.question_answer') IS NULL)
-        OR (message.role = 'interaction'
+        OR (message.role = ${ROLE.interaction}
           AND json_type(message.message_json, '$.forwarded_from') = 'object'))
     ORDER BY message.seq`
   for (const row of rows) {

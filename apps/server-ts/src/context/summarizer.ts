@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
   resolveModelCapabilities,
   ToolChoice,
@@ -90,9 +91,9 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
   const standalone: ModelProviderRequest = {
     model: input.model,
     messages: [
-      { role: "system", content: withUntrustedDataRule(PROMPT_TEXT.compaction) },
+      { role: ROLE.system, content: withUntrustedDataRule(PROMPT_TEXT.compaction) },
       {
-        role: "user",
+        role: ROLE.user,
         content: fitSource(
           input.sourceText,
           input.priorSummary,
@@ -147,7 +148,7 @@ const complete = async (
     let response: CompletionResponse | undefined
     const messages: ReadonlyArray<ChatMessage> = [
       ...request.messages,
-      { role: "user", content: instruction }
+      { role: ROLE.user, content: instruction }
     ]
     for await (const item of await provider.stream({
       ...request,

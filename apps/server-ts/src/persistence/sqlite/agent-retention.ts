@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../transcript/model.js"
@@ -44,7 +45,7 @@ const retentionError = (cause: unknown): StorageStartupError =>
 
 const minimalResult = (message: StoredMessageEnvelope): StoredMessageEnvelope => ({
   message_id: message.message_id,
-  role: "assistant",
+  role: ROLE.assistant,
   created_at: message.created_at,
   ...(message.content === undefined ? {} : { content: message.content })
 })
@@ -68,7 +69,7 @@ const loadResult = Effect.fn("SqliteAgentRetention.loadResult")(function* (
     )
   }
   const decoded = yield* decodeJson(StoredMessageEnvelopeSchema, stored.message_json)
-  if (decoded.role !== "assistant") {
+  if (decoded.role !== ROLE.assistant) {
     return yield* retentionError(
       new Error(`Completed Session ${row.session_id} has an invalid final result`)
     )

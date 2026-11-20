@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -20,7 +21,7 @@ const response = (
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content: options.content ?? null,
     tool_calls: (options.toolCalls ?? []).map((call) => ({
       id: call.id,
@@ -108,16 +109,16 @@ describe("pause and durable recovery", () => {
       }
     )
     const messages: ChatMessage[] = [
-      { role: "user", content: "resume" },
+      { role: ROLE.user, content: "resume" },
       {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "",
         tool_calls: [
           { id: "done", type: "function", function: { name: "first", arguments: "{}" } },
           { id: "missing", type: "function", function: { name: "finish", arguments: "{}" } }
         ]
       },
-      { role: "tool", tool_call_id: "done", content: "already done" }
+      { role: ROLE.tool, tool_call_id: "done", content: "already done" }
     ]
     const result = await agent.run(messages)
 
@@ -129,7 +130,7 @@ describe("pause and durable recovery", () => {
     expect(recoverRequests).toEqual([["missing"]])
     expect(result.messages).toContainEqual(
       expect.objectContaining({
-        role: "tool",
+        role: ROLE.tool,
         tool_call_id: "missing",
         content: "recovered from store",
         replayed: true,
@@ -176,9 +177,9 @@ describe("pause and durable recovery", () => {
       { provider: model.shape, toolset: seededShape }
     )
     const messages: ChatMessage[] = [
-      { role: "user", content: "resume" },
+      { role: ROLE.user, content: "resume" },
       {
-        role: "assistant",
+        role: ROLE.assistant,
         content: "",
         tool_calls: [
           { id: "pending", type: "function", function: { name: "deferred", arguments: "{}" } },
@@ -230,9 +231,9 @@ describe("pause and durable recovery", () => {
         { provider: model.shape, toolset: tools.shape }
       )
       const messages: ChatMessage[] = [
-        { role: "user", content: "remind me before calls" },
+        { role: ROLE.user, content: "remind me before calls" },
         {
-          role: "assistant",
+          role: ROLE.assistant,
           content: "",
           tool_calls: [
             { id: "bg", type: "function", function: { name: "search", arguments: "{}" } },
@@ -240,18 +241,18 @@ describe("pause and durable recovery", () => {
           ]
         },
         {
-          role: "tool",
+          role: ROLE.tool,
           tool_call_id: "bg",
           content: "running",
           async_tool_launch: { call_id: "bg" }
         },
-        ...(bgOutput ? [{ role: "tool" as const, tool_call_id: "bg", content: "1 event" }] : [])
+        ...(bgOutput ? [{ role: ROLE.tool, tool_call_id: "bg", content: "1 event" }] : [])
       ]
       const result = await agent.run(messages)
 
       expect(tools.calls.map((call) => call.toolCallId)).toEqual(calls)
       expect(result.messages).toContainEqual(
-        expect.objectContaining({ role: "tool", tool_call_id: "gated", content: "done" })
+        expect.objectContaining({ role: ROLE.tool, tool_call_id: "gated", content: "done" })
       )
       expect(result.text).toBe("created")
     }

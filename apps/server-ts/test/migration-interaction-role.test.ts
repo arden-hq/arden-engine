@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
@@ -16,17 +17,17 @@ const migrated = (): DatabaseSync => {
 }
 
 const OLD: ReadonlyArray<Record<string, unknown>> = [
-  { message_id: "typed", role: "user", content: "Find jobs" },
+  { message_id: "typed", role: ROLE.user, content: "Find jobs" },
   {
     message_id: "answer",
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     question_answer: { question_id: "q" },
     content: "Yes"
   },
   {
     message_id: "peer",
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     content: "Check the archive",
     interaction: {
@@ -39,7 +40,7 @@ const OLD: ReadonlyArray<Record<string, unknown>> = [
   },
   {
     message_id: "worker",
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     content: "Found 42 mentors",
     interaction: {
@@ -51,7 +52,7 @@ const OLD: ReadonlyArray<Record<string, unknown>> = [
   },
   {
     message_id: "workflow",
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     content: "[1]",
     interaction: {
@@ -64,25 +65,25 @@ const OLD: ReadonlyArray<Record<string, unknown>> = [
   },
   {
     message_id: "job",
-    role: "user",
+    role: ROLE.user,
     content: "Review",
     automation: { task_id: "auto-1", name: "Weekly", prompt: "Review", context_mode: "fresh" }
   },
-  { message_id: "nudge", role: "user", is_meta: true, client_id: "goal:x", content: "Continue" },
+  { message_id: "nudge", role: ROLE.user, is_meta: true, client_id: "goal:x", content: "Continue" },
   {
     message_id: "card",
-    role: "user",
+    role: ROLE.user,
     is_meta: true,
     content: "",
     communication: { kind: "arrival" }
   },
   {
     message_id: "headline:child::i1",
-    role: "assistant",
+    role: ROLE.assistant,
     is_meta: true,
     content: "Woken to continue"
   },
-  { message_id: "context", role: "developer", is_meta: true, content: "Local time" }
+  { message_id: "context", role: ROLE.developer, is_meta: true, content: "Local time" }
 ]
 
 it("migration 0177 gives everything the person did not write the interaction role", () => {
@@ -107,16 +108,16 @@ it("migration 0177 gives everything the person did not write the interaction rol
       .all()
       .map((row) => [String(row.message_id), JSON.parse(String(row.message_json))])
   )
-  expect(rows.typed).toEqual({ message_id: "typed", role: "user", content: "Find jobs" })
+  expect(rows.typed).toEqual({ message_id: "typed", role: ROLE.user, content: "Find jobs" })
   expect(rows.answer).toEqual({
     message_id: "answer",
-    role: "user",
+    role: ROLE.user,
     question_answer: { question_id: "q" },
     content: "Yes"
   })
   expect(rows.peer).toEqual({
     message_id: "peer",
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "agent", id: "lead", name: "Lead" },
     to: { source: "agent", id: "me" },
     kind: "message",
@@ -124,36 +125,40 @@ it("migration 0177 gives everything the person did not write the interaction rol
     content: "Check the archive"
   })
   expect(rows.worker).toMatchObject({
-    role: "interaction",
+    role: ROLE.interaction,
     content: "Update from the worker:\nFound 42 mentors",
     preview: "Found 42 mentors"
   })
   expect(rows.workflow).toMatchObject({
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "workflow", id: "wf-1" },
     kind: "completion",
     outcome: "completed"
   })
   expect(rows.job).toMatchObject({
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "automation", id: "auto-1", name: "Weekly" },
     kind: "assignment",
     automation: { task_id: "auto-1" }
   })
   expect(rows.nudge).toMatchObject({
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "harness", id: "goal:x" },
     kind: "event"
   })
   expect(rows.card).toMatchObject({
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "harness", id: "communication" }
   })
   expect(rows["headline:child::i1"]).toMatchObject({
-    role: "interaction",
+    role: ROLE.interaction,
     from: { source: "harness", id: "automation_headline" }
   })
-  expect(rows.context).toEqual({ message_id: "context", role: "developer", content: "Local time" })
+  expect(rows.context).toEqual({
+    message_id: "context",
+    role: ROLE.developer,
+    content: "Local time"
+  })
   const columnRoles = database
     .prepare("SELECT role FROM session_messages ORDER BY seq")
     .all()
@@ -163,7 +168,7 @@ it("migration 0177 gives everything the person did not write the interaction rol
     JSON.parse(
       String(database.prepare("SELECT message_json FROM chat_idempotency_keys").get()?.message_json)
     )
-  ).toMatchObject({ role: "interaction", from: { source: "agent", id: "lead" } })
+  ).toMatchObject({ role: ROLE.interaction, from: { source: "agent", id: "lead" } })
   expect(() =>
     insert.run("bad", 99, "person", JSON.stringify({ message_id: "bad", role: "person" }))
   ).toThrow("Unknown transcript message role")

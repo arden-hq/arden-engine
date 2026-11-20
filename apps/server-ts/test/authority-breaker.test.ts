@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { JsonObject } from "@arden-hq/loop"
 import { Effect, Layer } from "effect"
 import { expect, it } from "vitest"
@@ -24,7 +25,7 @@ it("counts a run's rule refusals per tool and its reviews' endings from durable 
         message: {
           message_id: "start",
           client_id: "start",
-          role: "user",
+          role: ROLE.user,
           content: "Work",
           created_at: "2026-10-06T00:00:00.000Z"
         }

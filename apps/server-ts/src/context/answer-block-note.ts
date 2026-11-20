@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { answerBlockText, readAnswerBlock } from "@arden-hq/answer-ui"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { blockHasControls, type AnswerBlockState } from "@arden-hq/answer-ui/state"
@@ -12,7 +13,7 @@ export const latestAnswer = (
   const userIndex = messages.findLastIndex((message) => isWrittenByPerson(message))
   for (let index = userIndex - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message?.role !== "assistant" || typeof message.content !== "string") continue
+    if (message?.role !== ROLE.assistant || typeof message.content !== "string") continue
     if (message.content.trim() === "") continue
     return message.message_id === undefined
       ? undefined

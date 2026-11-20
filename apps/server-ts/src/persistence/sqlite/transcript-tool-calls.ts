@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { TurnToolCallCount } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
@@ -51,7 +52,7 @@ export const makeToolCallCounts = (
         JOIN json_each(m.message_json, '$.tool_calls') AS call
         WHERE t.session_id = ${sessionId}
           AND t.turn_id IN ${sql.in(turnIds)}
-          AND m.role = 'assistant'
+          AND m.role = ${ROLE.assistant}
           AND ${messageTurnIdSql(sql, "m")} = t.turn_id
           AND NOT ${conversationCall}
         UNION ALL
@@ -67,7 +68,7 @@ export const makeToolCallCounts = (
         JOIN json_each(m.message_json, '$.provider_tool_calls') AS call
         WHERE t.session_id = ${sessionId}
           AND t.turn_id IN ${sql.in(turnIds)}
-          AND m.role = 'assistant'
+          AND m.role = ${ROLE.assistant}
           AND ${messageTurnIdSql(sql, "m")} = t.turn_id
       )
       WHERE name IS NOT NULL

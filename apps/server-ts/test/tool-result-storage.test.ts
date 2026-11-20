@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ToolResult } from "@arden-hq/loop"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { engineOrderedJson } from "@arden-hq/std/json"
@@ -113,7 +114,7 @@ const startRun = Effect.gen(function* () {
     message: {
       message_id: "client-1",
       client_id: "client-1",
-      role: "user",
+      role: ROLE.user,
       content: "Read the page",
       created_at: "2026-11-13T00:00:00.000Z"
     }
@@ -454,7 +455,7 @@ describe("tool result storage", () => {
                     appendedMessages: [
                       {
                         message_id: "assistant-1",
-                        role: "assistant",
+                        role: ROLE.assistant,
                         created_at: "2026-11-13T00:00:01.000Z",
                         content: null,
                         tool_calls: [
@@ -487,7 +488,7 @@ describe("tool result storage", () => {
       expect(recovered).toEqual([
         {
           message_id: expect.stringMatching(/^tool-recovered-/),
-          role: "tool",
+          role: ROLE.tool,
           created_at: expect.any(String),
           tool_call_id: "large",
           content: largeResult.content,

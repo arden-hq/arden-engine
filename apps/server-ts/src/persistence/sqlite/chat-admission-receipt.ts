@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ChatReceiptStatus } from "@arden-hq/protocol/chat"
@@ -30,7 +31,7 @@ interface WorkflowDeliveryEnvelopeIdentity {
 const workflowDeliveryEnvelopeIdentity = (
   message: StoredMessageEnvelope
 ): WorkflowDeliveryEnvelopeIdentity | null => {
-  if (message.role !== "interaction") return null
+  if (message.role !== ROLE.interaction) return null
   const value = message.workflow_delivery
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null
   const fields = value as Readonly<Record<string, unknown>>

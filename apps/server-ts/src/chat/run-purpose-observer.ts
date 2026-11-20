@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ToolCall, ToolStarted } from "@arden-hq/loop"
 import type { ToolRun } from "./durable-tools.js"
 import type { RunPurposeInput } from "./run-purpose.js"
@@ -84,10 +85,10 @@ export const makeRunPurposeObserver = ({
       if (stopped || seen.has(event.tool_id)) return
       const assistant = latest.findLast(
         (message) =>
-          message.role === "assistant" &&
+          message.role === ROLE.assistant &&
           message.tool_calls?.some((call) => call.id === event.tool_id)
       )
-      const batch = (assistant?.role === "assistant" ? assistant.tool_calls : undefined) ?? [
+      const batch = (assistant?.role === ROLE.assistant ? assistant.tool_calls : undefined) ?? [
         {
           id: event.tool_id,
           type: "function",

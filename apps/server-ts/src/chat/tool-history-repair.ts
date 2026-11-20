@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage } from "@arden-hq/loop"
 
 export interface OrphanToolOutput {
@@ -16,18 +17,18 @@ export const repairOrphanToolOutputs = (
   const open = new Set<string>()
   const orphans: Array<OrphanToolOutput> = []
   const repaired = messages.map((message): ChatMessage => {
-    if (message.role === "assistant") {
+    if (message.role === ROLE.assistant) {
       for (const call of message.tool_calls ?? []) open.add(call.id)
       return message
     }
-    if (message.role !== "tool") return message
+    if (message.role !== ROLE.tool) return message
     if (message.async_tool_launch !== undefined && open.has(message.tool_call_id)) return message
     if (open.delete(message.tool_call_id)) return message
     orphans.push({ callId: message.tool_call_id, messageId: message.message_id })
     return {
-      role: "interaction",
-      from: { source: "harness", id: "earlier_tool_result" },
-      kind: "event",
+      role: ROLE.interaction,
+      from: { source: INTERACTION_SOURCE.harness, id: "earlier_tool_result" },
+      kind: INTERACTION_KIND.event,
       ...(message.message_id === undefined ? {} : { message_id: message.message_id }),
       content: [
         {

@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { InteractionSender } from "@arden-hq/protocol/chat"
 import { InteractionSenderSchema } from "@arden-hq/protocol/effect/chat"
 import { Option, Schema } from "effect"
@@ -7,7 +8,7 @@ export const senderOf = (message: {
   readonly role: string
   readonly content?: unknown
 }): InteractionSender | undefined =>
-  message.role === "interaction"
+  message.role === ROLE.interaction
     ? Option.getOrUndefined(Schema.decodeUnknownOption(InteractionSenderSchema)(message))
     : undefined
 
@@ -22,7 +23,7 @@ export const storedSender = (sender: InteractionSender) => ({
   },
   ...(sender.to === undefined ? {} : { to: { source: sender.to.source, id: sender.to.id } }),
   kind: sender.kind,
-  ...(sender.kind === "completion" ? { outcome: sender.outcome } : {}),
+  ...(sender.kind === INTERACTION_KIND.completion ? { outcome: sender.outcome } : {}),
   ...(sender.preview === undefined ? {} : { preview: sender.preview }),
   ...(sender.caused_by === undefined
     ? {}

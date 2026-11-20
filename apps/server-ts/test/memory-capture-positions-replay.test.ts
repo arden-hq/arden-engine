@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -79,7 +80,7 @@ const replay = Effect.fn("replay")(function* (sql: SqlClient.SqlClient) {
           VALUES (${chat.session_id}, 'replay-turn', ${chat.next_seq}, 'user',
             ${JSON.stringify({
               message_id: "replay-turn",
-              role: "user",
+              role: ROLE.user,
               content: "replay",
               created_at: "2026-11-14T00:00:00.000Z"
             })}, '2026-11-14T00:00:00.000Z', 'replay')`

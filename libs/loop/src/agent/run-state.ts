@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { StreamingTools, type StreamedToolResults } from "./streaming-tools.js"
 import { BackgroundTools } from "./background-tools.js"
 import { makeRunBudget } from "./budget.js"
@@ -428,7 +429,7 @@ export const prepare = async (
   }
 }
 
-type DeveloperRecord = ChatMessage & { readonly role: "developer" }
+type DeveloperRecord = ChatMessage & { readonly role: typeof ROLE.developer }
 
 const appendOnlyToolRecord = (
   kind: "tool-change" | "tool-load",
@@ -439,7 +440,7 @@ const appendOnlyToolRecord = (
     | undefined = undefined
 ): DeveloperRecord => ({
   message_id: messageId(kind),
-  role: "developer",
+  role: ROLE.developer,
   content,
   ...tools
 })
@@ -526,7 +527,7 @@ export const callModel = async (run: Run, view: StepView, instruction: string | 
             await run.history.checkpoint((current, change) =>
               hookCall("onCheckpoint", () => wiring.hooks.onCheckpoint?.(current, change))
             )
-          return pending.filter((message): message is UserMessage => message.role === "user")
+          return pending.filter((message): message is UserMessage => message.role === ROLE.user)
         })
     },
     messages: requestMessages,

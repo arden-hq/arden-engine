@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Layer } from "effect"
 import { expect, it } from "vitest"
 import { ChatMessage } from "../src/chat/message.js"
@@ -60,7 +61,7 @@ it("resumes the last denied approval with one reason and never executes the reje
         message: {
           message_id: "start",
           client_id: "start",
-          role: "user",
+          role: ROLE.user,
           content: "Work",
           created_at: new Date().toISOString()
         }

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isBackgroundCall } from "./streaming-tools.js"
 import { harnessNotice } from "./harness-notice.js"
 import { pendingBackgroundCalls } from "./background-tools.js"
@@ -363,7 +364,7 @@ const callModelPastOverflow = async (run: Run, view: StepView) => {
     if (
       providerErrorCode(cause) !== "context_length_exceeded" ||
       run.signal.aborted ||
-      run.messages.slice(turnStart).some((message) => message.role === "assistant")
+      run.messages.slice(turnStart).some((message) => message.role === ROLE.assistant)
     )
       throw cause
     const shortened = await prepare(run, { contextOverflow: true })
@@ -445,7 +446,7 @@ const settleTextTurn = async (
       const rejected = messages
         .slice(turnStart)
         .flatMap((record) =>
-          record.role === "assistant" && typeof record.message_id === "string"
+          record.role === ROLE.assistant && typeof record.message_id === "string"
             ? [record.message_id]
             : []
         )

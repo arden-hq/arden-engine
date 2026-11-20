@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -39,7 +40,7 @@ describe("Save as draft on an approval card", () => {
             message: {
               message_id: "start",
               client_id: "start",
-              role: "user",
+              role: ROLE.user,
               content: "Write to Tom",
               created_at: new Date().toISOString()
             }

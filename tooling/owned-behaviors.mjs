@@ -43,6 +43,9 @@ const startsWithCall = "CallExpression[callee.property.name='startsWith']"
 const replaceCall = "CallExpression[callee.property.name=/^replace(All)?$/]"
 const sepNode = ":matches(Identifier[name='sep'], MemberExpression[property.name='sep'])"
 /** @type {OwnedBehavior[]} */
+const ROLE_WORDS = "system|developer|user|interaction|assistant|tool"
+const ROLE_WORD = `/^(${ROLE_WORDS})$/`
+const SENDER = "/^(from|to)$/"
 const ownedBehaviors = [
   {
     selector: [
@@ -530,6 +533,28 @@ const ownedBehaviors = [
     message:
       "Who wrote a message is its role: `user` is the person, `interaction` is anyone else (its `from.source` says who). There is no meta flag.",
     owners: [],
+    exemptDirs: [migrationsDir]
+  },
+  {
+    selector: [
+      `BinaryExpression[operator=/^[!=]==$/][left.property.name='role'] > Literal.right[value=${ROLE_WORD}]`,
+      `BinaryExpression[operator=/^[!=]==$/][right.property.name='role'] > Literal.left[value=${ROLE_WORD}]`,
+      `SwitchStatement[discriminant.property.name='role'] SwitchCase > Literal.test[value=${ROLE_WORD}]`,
+      `BinaryExpression[operator=/^[!=]==$/][left.property.name='source']:matches([left.object.name=${SENDER}], [left.object.property.name=${SENDER}]) > Literal.right`,
+      `SwitchStatement[discriminant.property.name='source']:matches([discriminant.object.name=${SENDER}], [discriminant.object.property.name=${SENDER}]) SwitchCase > Literal.test`,
+      `Property[key.name='role'] > Literal.value[value=${ROLE_WORD}]`,
+      `TSPropertySignature[key.name='role'] TSLiteralType > Literal[value=${ROLE_WORD}]`
+    ].join(", "),
+    message:
+      "Roles, interaction sources, kinds and outcomes are named constants: use ROLE, INTERACTION_SOURCE, INTERACTION_KIND and INTERACTION_OUTCOME from @arden-hq/std/message-vocabulary.",
+    owners: ["libs/std/src/message-vocabulary.ts"],
+    exemptDirs: [migrationsDir]
+  },
+  {
+    pattern: String.raw`role'?\)?\s*(=|<>|!=|(not\s+)?in\s*\()\s*'(${ROLE_WORDS})'`,
+    message:
+      "SQL reads a message role through ROLE from @arden-hq/std/message-vocabulary: interpolate the constant, never write the role.",
+    owners: ["libs/std/src/message-vocabulary.ts"],
     exemptDirs: [migrationsDir]
   }
 ]

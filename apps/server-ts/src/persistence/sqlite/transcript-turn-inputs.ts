@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { TranscriptMessageRecord } from "../transcript/model.js"
@@ -25,7 +26,7 @@ export const makeTurnInputs = ({
       FROM session_messages AS m
       WHERE m.session_id = ${sessionId}
         AND ${messageTurnIdSql(sql, "m")} = ${turnId}
-        AND m.role IN ('user', 'interaction')
+        AND m.role IN (${ROLE.user}, ${ROLE.interaction})
         AND json_extract(m.message_json, '$.superseded') IS NULL
         AND (m.message_id = ${turnId}
           OR json_extract(m.message_json, '$.applied_at') IS NOT NULL)

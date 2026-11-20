@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { expect, it } from "vitest"
 
 import { decodeServerEvent } from "@arden-hq/protocol"
@@ -141,7 +142,7 @@ it("encodes queue order without reordering identities and rejects ambiguous memb
 it("sends the quoted messages of a reply as a list, one or several, up to the limit", () => {
   const quote = (n: number): ChatReplyContext => ({
     messageId: `answer-${n}`,
-    role: "assistant",
+    role: ROLE.assistant,
     content: `Quoted line ${n}`
   })
   const sent = (replyTo: ChatReplyContext | ReadonlyArray<ChatReplyContext>): unknown =>
@@ -150,7 +151,7 @@ it("sends the quoted messages of a reply as a list, one or several, up to the li
     ).reply_to
   const wire = (n: number) => ({
     message_id: `answer-${n}`,
-    role: "assistant",
+    role: ROLE.assistant,
     content: `Quoted line ${n}`
   })
 

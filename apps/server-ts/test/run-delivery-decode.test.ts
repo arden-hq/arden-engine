@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { HistoryMessageSchema } from "@arden-hq/protocol/effect/chat"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
@@ -71,7 +72,7 @@ describe("run delivery payloads", () => {
 
 it("a history message keeps the update that opened its turn", () => {
   const message = {
-    role: "user",
+    role: ROLE.user,
     content: "Automation failed",
     message_id: "arrival:abc",
     turn_id: "arrival:abc",

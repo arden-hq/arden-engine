@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { DatabaseSync } from "node:sqlite"
 
 export interface ColumnPosition {
@@ -59,7 +60,7 @@ const tableIn = (table: string): string =>
 export const removeTranscriptRows = (database: DatabaseSync, selection: string): void => {
   database.exec(`CREATE TEMP TABLE removed_transcript_rows AS
     SELECT message.session_id, message.seq, message.message_id,
-      message.role NOT IN ('system', 'developer')
+      message.role NOT IN ('${ROLE.system}', '${ROLE.developer}')
         AND json_type(message.message_json, '$.forked_from') IS NOT 'text' AS visible,
       session.context_from_seq IS NOT NULL
         AND (message.seq >= session.context_from_seq OR message.seq = session.context_head_seq)

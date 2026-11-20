@@ -1,3 +1,9 @@
+import {
+  INTERACTION_KIND,
+  INTERACTION_OUTCOME,
+  INTERACTION_SOURCE,
+  ROLE
+} from "@arden-hq/std/message-vocabulary"
 import { answerBlockText } from "@arden-hq/answer-ui"
 import {
   answerBlockLabel,
@@ -50,7 +56,7 @@ export function conversationPage({
   const sentTo = new Map<string, Set<string>>()
   for (const message of history.messages) {
     items.push(...messageItems(message, lookups))
-    for (const call of message.role === "assistant" ? (message.tool_calls ?? []) : []) {
+    for (const call of message.role === ROLE.assistant ? (message.tool_calls ?? []) : []) {
       const sent = sentItem(call, lookups)
       if (sent === undefined) continue
       const seen = sentTo.get(message.turn_id) ?? new Set<string>()
@@ -86,8 +92,9 @@ export function conversationLookupKeys(history: HistoryResponse): {
     if (internalWorkMessage(message)) continue
     linkRefs(message.content)
     if (message.from_chat !== undefined) sessionIds.add(message.from_chat.session_id)
-    if (message.role === "interaction" && message.from.source === "agent") refs.add(message.from.id)
-    for (const call of message.role === "assistant" ? (message.tool_calls ?? []) : []) {
+    if (message.role === ROLE.interaction && message.from.source === INTERACTION_SOURCE.agent)
+      refs.add(message.from.id)
+    for (const call of message.role === ROLE.assistant ? (message.tool_calls ?? []) : []) {
       const send = sendOf(call)
       if (send !== undefined) refs.add(send.ref)
     }
@@ -100,7 +107,7 @@ function messageItems(
   lookups: ConversationLookups
 ): MobileConversationItem[] {
   const at = message.created_at ?? ""
-  if (message.role === "assistant") {
+  if (message.role === ROLE.assistant) {
     if (message.content.trim() === "") return []
     return [
       {
@@ -115,9 +122,9 @@ function messageItems(
   }
   if (internalWorkMessage(message)) return []
   if (message.forwarded_from !== undefined) return [userItem(message)]
-  if (message.role === "user")
+  if (message.role === ROLE.user)
     return message.question_answer === undefined ? [userItem(message)] : []
-  if (message.role !== "interaction") return []
+  if (message.role !== ROLE.interaction) return []
   if (message.automation !== undefined) {
     return [
       {
@@ -172,7 +179,7 @@ function userItem(message: HistoryMessage): MobileConversationItem {
     id: message.message_id,
     client_id: message.client_id ?? null,
     text: sent.text,
-    photos: message.role === "user" ? (message.images?.length ?? 0) : 0,
+    photos: message.role === ROLE.user ? (message.images?.length ?? 0) : 0,
     files: sent.files.map((file) => file.name),
     reply_to:
       quoted === undefined
@@ -188,16 +195,18 @@ function userItem(message: HistoryMessage): MobileConversationItem {
 
 const senderOf = (sender: InteractionSender): "agent" | "workflow" | "command" => {
   if (isCommandArrival(sender)) return "command"
-  return sender.from.source === "workflow" ? "workflow" : "agent"
+  return sender.from.source === INTERACTION_SOURCE.workflow ? "workflow" : "agent"
 }
 
 const failed = (sender: InteractionSender): boolean =>
-  sender.kind === "completion" && sender.outcome !== "completed" && sender.outcome !== "interrupted"
+  sender.kind === INTERACTION_KIND.completion &&
+  sender.outcome !== INTERACTION_OUTCOME.completed &&
+  sender.outcome !== INTERACTION_OUTCOME.interrupted
 
 function internalWorkMessage(message: HistoryMessage): boolean {
   return isInternalWorkMessage({
     role: message.role,
-    sender: message.role === "interaction" ? message : undefined,
+    sender: message.role === ROLE.interaction ? message : undefined,
     communication: message.communication,
     update: message.update,
     agentResult: message.agent_result,

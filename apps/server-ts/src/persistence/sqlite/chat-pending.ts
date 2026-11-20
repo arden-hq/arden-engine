@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { QuestionAnswerSchema } from "@arden-hq/protocol/effect/chat"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { Effect, Option, Schema } from "effect"
@@ -68,7 +69,7 @@ export const loadPendingInTransaction = Effect.fn("SqliteChatWriteStore.loadPend
         )
       )
       if (
-        (message.role !== "user" && message.role !== "interaction") ||
+        (message.role !== ROLE.user && message.role !== ROLE.interaction) ||
         message.message_id !== row.message_id ||
         message.client_id !== row.client_id
       ) {

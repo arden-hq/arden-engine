@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
 import { DateTime, Effect, Predicate } from "effect"
 import type { SessionStore } from "../../persistence/sessions/store.js"
@@ -239,8 +240,9 @@ export const makeDailySummaryRunner = (
           )
           for (const record of [...page.records].reverse()) {
             const time = DateTime.toEpochMillis(record.createdAt)
-            if (time >= endMs || record.role === "system" || record.role === "developer") continue
-            if (record.role === "tool") continue
+            if (time >= endMs || record.role === ROLE.system || record.role === ROLE.developer)
+              continue
+            if (record.role === ROLE.tool) continue
             if (time < startMs) continue
             const text =
               record.envelope.question_answer !== undefined
@@ -249,7 +251,7 @@ export const makeDailySummaryRunner = (
             if (text.trim().length === 0) continue
             found.push({
               messageId: record.messageId,
-              owner: record.role === "user",
+              owner: record.role === ROLE.user,
               ref: `${chatHref({ publicRef: session.publicRef })} (message ${record.messageId})`,
               text: `${record.role} at ${DateTime.formatIso(record.createdAt)}: ${text}`
             })

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { SemanticResponseError } from "../kit/index.js"
 import { isRecord } from "@arden-hq/std/json"
 
@@ -31,7 +32,7 @@ interface ReasoningTextPart {
 interface MessageOutputItem {
   readonly id: string
   readonly type: "message"
-  readonly role: "assistant"
+  readonly role: typeof ROLE.assistant
   readonly content: ReadonlyArray<OutputTextPart | RefusalPart>
   readonly status: ItemStatus
   readonly phase?: MessagePhase | null
@@ -169,7 +170,7 @@ export const normalizeOutputItem = (value: unknown, fallbackId: string): OutputI
     return {
       id: stringValue(raw.id) ?? fallbackId,
       type: "message",
-      role: "assistant",
+      role: ROLE.assistant,
       content,
       status: itemStatus(raw.status),
       ...(phase === undefined ? {} : { phase })

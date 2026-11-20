@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage, Result as LoopResult } from "@arden-hq/loop"
 import { Effect, Result, Schema } from "effect"
 import {
@@ -52,7 +53,7 @@ interface ProjectedMessage {
 const decodeEnvelope = Schema.decodeUnknownResult(StoredMessageEnvelopeSchema)
 
 const hasToolCalls = (message: ChatMessage): boolean =>
-  message.role === "assistant" &&
+  message.role === ROLE.assistant &&
   ((Array.isArray(message.tool_calls) && message.tool_calls.length > 0) ||
     (Array.isArray(message.provider_tool_calls) && message.provider_tool_calls.length > 0))
 
@@ -80,7 +81,7 @@ export const makeResultHistoryProjector = (
   for (const message of input.initialMessages) {
     initialMessageIds.add(message.message_id)
     knownCreatedAt.set(message.message_id, message.created_at)
-    if (message.role === "interaction" && message.automation !== undefined) {
+    if (message.role === ROLE.interaction && message.automation !== undefined) {
       automationMessages.set(message.message_id, message)
     }
   }
@@ -103,13 +104,13 @@ export const makeResultHistoryProjector = (
   ): Result.Result<ReadonlyArray<StoredMessageEnvelope>, ResultHistoryError> => {
     const timestamp = currentIso()
     const visible = source.filter(
-      (message) => message.role !== "system" || automationMessages.has(message.message_id ?? "")
+      (message) => message.role !== ROLE.system || automationMessages.has(message.message_id ?? "")
     )
     const lastIndex = visible.length - 1
     const last = visible[lastIndex]
     const terminalIndex =
       last !== undefined &&
-      last.role === "assistant" &&
+      last.role === ROLE.assistant &&
       !hasToolCalls(last) &&
       isNonEmptyString(last.message_id) &&
       !initialMessageIds.has(last.message_id)
@@ -131,7 +132,7 @@ export const makeResultHistoryProjector = (
 
       if (
         !rootAssigned &&
-        raw.role === "assistant" &&
+        raw.role === ROLE.assistant &&
         !isSessionHandoff(raw) &&
         !initialMessageIds.has(sourceId)
       ) {
@@ -162,7 +163,7 @@ export const makeResultHistoryProjector = (
       const synthetic = decodeEnvelope({
         message_id: messageId,
         client_id: messageId,
-        role: "assistant",
+        role: ROLE.assistant,
         created_at: knownCreatedAt.get(messageId) ?? timestamp,
         content: terminalText ?? ""
       })
@@ -214,7 +215,7 @@ export const makeResultHistoryProjector = (
       return Result.fail(error)
     }
     for (const raw of change.messages) {
-      if (raw.role === "system" && !automationMessages.has(raw.message_id ?? "")) continue
+      if (raw.role === ROLE.system && !automationMessages.has(raw.message_id ?? "")) continue
       const sourceId = raw.message_id
       if (!isNonEmptyString(sourceId)) {
         return fail(
@@ -225,7 +226,7 @@ export const makeResultHistoryProjector = (
       }
       if (
         !rootAssigned &&
-        raw.role === "assistant" &&
+        raw.role === ROLE.assistant &&
         !isSessionHandoff(raw) &&
         !initialMessageIds.has(sourceId)
       ) {

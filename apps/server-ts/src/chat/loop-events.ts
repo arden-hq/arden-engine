@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AgentEvent, StopReason } from "@arden-hq/loop"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { chatDecoders, isEphemeralChatEvent } from "@arden-hq/protocol/chat"
@@ -53,7 +54,7 @@ export const answerFixInHistory = (
   messages.flatMap((message) => {
     const rejected = message.rejected_message_ids
     if (
-      message.role !== "interaction" ||
+      message.role !== ROLE.interaction ||
       typeof message.message_id !== "string" ||
       !Array.isArray(rejected) ||
       rejected.length === 0 ||
@@ -74,14 +75,14 @@ interface TerminalCandidate {
 export const terminalTextAnchor = (messages: ReadonlyArray<TerminalCandidate>): string | null => {
   let anchor: string | null = null
   for (const message of [...messages].reverse()) {
-    if (message.role !== "assistant") break
+    if (message.role !== ROLE.assistant) break
     if (typeof message.content === "string" && message.content.length > 0) {
       anchor = message.message_id
     }
   }
   return (
     anchor ??
-    [...messages].reverse().find((message) => message.role === "assistant")?.message_id ??
+    [...messages].reverse().find((message) => message.role === ROLE.assistant)?.message_id ??
     null
   )
 }
@@ -150,7 +151,7 @@ export const makeLoopEventMapper = (
     return {
       type: "TEXT_MESSAGE_START",
       message_id: messageId,
-      role: "assistant"
+      role: ROLE.assistant
     }
   }
   const textContent = (messageId: string, content: string): ReadonlyArray<ChatEventBatch> => {

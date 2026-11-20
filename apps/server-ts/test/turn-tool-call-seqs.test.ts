@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -11,7 +12,7 @@ const AT = "2026-11-19T09:00:00.000Z"
 
 const calls = (id: string, ...names: ReadonlyArray<string>): StoredMessageEnvelope => ({
   message_id: id,
-  role: "assistant",
+  role: ROLE.assistant,
   created_at: AT,
   content: null,
   tool_calls: names.map((name, index) => ({
@@ -23,7 +24,7 @@ const calls = (id: string, ...names: ReadonlyArray<string>): StoredMessageEnvelo
 
 const says = (id: string, content: string): StoredMessageEnvelope => ({
   message_id: id,
-  role: "assistant",
+  role: ROLE.assistant,
   created_at: AT,
   content
 })
@@ -44,7 +45,7 @@ it("says where each of a turn's tool calls sits, so a reader can tell which came
         message: {
           message_id: "ask",
           client_id: "ask",
-          role: "user",
+          role: ROLE.user,
           content: "ask",
           created_at: AT
         }

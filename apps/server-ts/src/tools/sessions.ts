@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { countOf } from "@arden-hq/std/count"
 import {
@@ -346,7 +347,7 @@ const messageToolName = (envelope: Readonly<Record<string, unknown>>): string | 
 
 const rowRole = (record: TranscriptMessageRecord): string => {
   const name = messageToolName(record.envelope)
-  return record.role === "tool" && name !== undefined ? `${record.role}(${name})` : record.role
+  return record.role === ROLE.tool && name !== undefined ? `${record.role}(${name})` : record.role
 }
 
 const messageText = (record: TranscriptMessageRecord): string => {
@@ -381,7 +382,7 @@ const turnRefOf = (record: TranscriptMessageRecord): string =>
 
 const writtenText = (record: TranscriptMessageRecord): string | undefined => {
   const envelope = record.envelope
-  if (!isWrittenByPerson(envelope) && record.role !== "assistant") return undefined
+  if (!isWrittenByPerson(envelope) && record.role !== ROLE.assistant) return undefined
   const text = compactAnswerBlocks(authoredText(envelope.content))
   const quoted = passage(text)
   return quoted !== undefined && quoted.length >= 40 ? quoted : undefined
@@ -406,7 +407,7 @@ const readSource = (
         )[0]
   const chosen =
     centred ??
-    [...written].reverse().find((entry) => entry.record.role === "assistant") ??
+    [...written].reverse().find((entry) => entry.record.role === ROLE.assistant) ??
     written.at(-1)
   const turn = chosen === undefined ? undefined : turnRefOf(chosen.record)
   return {
@@ -640,7 +641,8 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       )
       const roles = input.role_filter === undefined ? undefined : new Set(input.role_filter)
       const records = page.records.filter(
-        (record) => record.role !== "developer" && (roles === undefined || roles.has(record.role))
+        (record) =>
+          record.role !== ROLE.developer && (roles === undefined || roles.has(record.role))
       )
       const source_refs = [
         readSource(input.session_ref, session, records, input.around_seq, ctx.run.sessionId),

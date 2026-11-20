@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { mkdtemp, rm } from "node:fs/promises"
 import { DatabaseSync } from "node:sqlite"
 import { tmpdir } from "node:os"
@@ -48,7 +49,7 @@ it("keeps an upload a stored message names and frees it when the message goes", 
           message: {
             message_id: "upload-user",
             client_id: "upload-user",
-            role: "user",
+            role: ROLE.user,
             content: `Look at /tmp/arden/uploads/${NAMED}/photo.png`,
             created_at: "2026-09-01T00:00:00.000Z"
           }

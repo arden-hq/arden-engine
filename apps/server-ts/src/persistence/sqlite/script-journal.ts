@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { Effect, Option, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -88,7 +89,7 @@ const readScriptChildren = Effect.fn("ScriptJournal.children")(function* (
       (SELECT CASE WHEN json_type(message.message_json, '$.content') = 'text'
                    THEN json_extract(message.message_json, '$.content') END
        FROM session_messages AS message
-       WHERE message.session_id = child.session_id AND message.role = 'assistant'
+       WHERE message.session_id = child.session_id AND message.role = ${ROLE.assistant}
        ORDER BY message.seq DESC
        LIMIT 1) AS content
     FROM sessions AS child

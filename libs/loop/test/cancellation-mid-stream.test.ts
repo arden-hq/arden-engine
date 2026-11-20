@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -22,7 +23,7 @@ const response = (
   model: "test-model",
   _tag: "Completed" as const,
   message: {
-    role: "assistant" as const,
+    role: ROLE.assistant,
     content: options.content ?? null,
     tool_calls: (options.toolCalls ?? []).map((call) => ({
       id: call.id,
@@ -75,7 +76,7 @@ describe("cancellation mid-stream", () => {
       }
     )
     const controller = new AbortController()
-    const run = agent.run([{ role: "user", content: "hello" }], { signal: controller.signal })
+    const run = agent.run([{ role: ROLE.user, content: "hello" }], { signal: controller.signal })
     await started.promise
     controller.abort()
 
@@ -120,7 +121,7 @@ describe("cancellation mid-stream", () => {
       }
     )
     const controller = new AbortController()
-    const running = agent.run([{ role: "user", content: "go" }], { signal: controller.signal })
+    const running = agent.run([{ role: ROLE.user, content: "go" }], { signal: controller.signal })
     await started.promise
     controller.abort()
     try {
@@ -183,7 +184,7 @@ describe("cancellation mid-stream", () => {
     const controller = new AbortController()
     const events: AgentStreamEvent[] = []
     const consume = (async () => {
-      for await (const event of agent.stream([{ role: "user", content: "go" }], {
+      for await (const event of agent.stream([{ role: ROLE.user, content: "go" }], {
         signal: controller.signal
       })) {
         events.push(event)
@@ -197,7 +198,7 @@ describe("cancellation mid-stream", () => {
     for (const id of ["t1", "t2"]) {
       expect(finishMessages).toContainEqual(
         expect.objectContaining({
-          role: "tool",
+          role: ROLE.tool,
           tool_call_id: id,
           content: "Tool call cancelled."
         })

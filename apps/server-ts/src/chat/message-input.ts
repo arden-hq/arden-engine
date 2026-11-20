@@ -1,3 +1,4 @@
+import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { HandlerItemRef } from "../persistence/automations/handler-item.js"
 import type { JobLeaseRef } from "@arden-hq/jobs"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
@@ -93,8 +94,8 @@ export const taskContinuation = (input: {
     ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
     message: content,
     sender: {
-      kind: "instruction",
-      from: { source: "harness", id: `task:${input.itemId}` },
+      kind: INTERACTION_KIND.instruction,
+      from: { source: INTERACTION_SOURCE.harness, id: `task:${input.itemId}` },
       caused_by: { type: "message", id: input.sourceId }
     },
     continuesTask: {
@@ -110,7 +111,10 @@ export const onboardingKickoff = (sessionId: string): ChatSendInput => {
     sessionId,
     clientId: `onboarding:${sessionId}`,
     message: content,
-    sender: { kind: "instruction", from: { source: "harness", id: "onboarding" } }
+    sender: {
+      kind: INTERACTION_KIND.instruction,
+      from: { source: INTERACTION_SOURCE.harness, id: "onboarding" }
+    }
   }
 }
 
@@ -149,8 +153,8 @@ export const makeInputMessage = Effect.fn("ChatMessage.makeInputMessage")(functi
   const message: StoredMessageEnvelope = {
     message_id: input.clientId,
     ...(input.sender === undefined
-      ? { role: "user" }
-      : { role: "interaction", ...storedSender(input.sender) }),
+      ? { role: ROLE.user }
+      : { role: ROLE.interaction, ...storedSender(input.sender) }),
     created_at: DateTime.formatIso(createdAt),
     client_id: input.clientId,
     ...(input.recipe === undefined ? {} : { recipe: input.recipe }),
@@ -204,13 +208,13 @@ export const makeAutomationMessage = Effect.fn("ChatMessage.makeAutomationMessag
   return {
     message_id: input.clientId,
     client_id: input.clientId,
-    role: "interaction" as const,
+    role: ROLE.interaction,
     from: {
-      source: "automation" as const,
+      source: INTERACTION_SOURCE.automation,
       id: input.automation.automationId,
       name: input.automation.name
     },
-    kind: "assignment" as const,
+    kind: INTERACTION_KIND.assignment,
     created_at: DateTime.formatIso(createdAt),
     content: input.prompt,
     automation: {
@@ -244,7 +248,7 @@ export const validateInput = Effect.fn("ChatMessage.validateInput")(function* (
     return
   }
   if (
-    input.sender?.from.source !== "workflow" ||
+    input.sender?.from.source !== INTERACTION_SOURCE.workflow ||
     workflowDelivery.workflowRef.trim().length === 0 ||
     !Number.isSafeInteger(workflowDelivery.attempt) ||
     workflowDelivery.attempt < 1 ||

@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { HistoryResponse, TurnWorkResponse } from "@arden-hq/protocol/chat"
 import { snapshotJsonBytes as bytes } from "./snapshot-encoding.js"
 
@@ -16,7 +17,7 @@ export const boundActiveWorkTail = (
   capacity = ACTIVE_WORK_TAIL_BYTES
 ): TurnWorkResponse => {
   if (bytes(work) <= capacity) return work
-  const carriers = work.messages.filter((message) => message.role !== "tool")
+  const carriers = work.messages.filter((message) => message.role !== ROLE.tool)
   const ownerByCall = new Map<string, string>()
   const costByCarrier = new Map<string, number>()
   for (const carrier of carriers) {
@@ -26,7 +27,7 @@ export const boundActiveWorkTail = (
     }
   }
   for (const message of work.messages) {
-    if (message.role !== "tool" || message.tool_call_id === undefined) continue
+    if (message.role !== ROLE.tool || message.tool_call_id === undefined) continue
     const owner = ownerByCall.get(message.tool_call_id)
     if (owner !== undefined)
       costByCarrier.set(owner, (costByCarrier.get(owner) ?? 0) + bytes(message) + 1)
@@ -50,7 +51,7 @@ export const boundActiveWorkTail = (
   return {
     ...work,
     messages: work.messages.filter((message) => {
-      if (message.role !== "tool") return !removed.has(message.message_id)
+      if (message.role !== ROLE.tool) return !removed.has(message.message_id)
       const owner =
         message.tool_call_id === undefined ? undefined : ownerByCall.get(message.tool_call_id)
       return owner !== undefined && !removed.has(owner)

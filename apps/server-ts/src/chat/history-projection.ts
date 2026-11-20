@@ -1,3 +1,9 @@
+import {
+  INTERACTION_KIND,
+  INTERACTION_OUTCOME,
+  INTERACTION_SOURCE,
+  ROLE
+} from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import { TRANSCRIPT_RESULT_PREVIEW_CHARS } from "../persistence/transcript/model.js"
 import { previewLine } from "../persistence/transcript/preview-line.js"
@@ -145,7 +151,7 @@ export const pinnedConversationCalls = (
 ): ReadonlyMap<string, ReadonlyArray<string>> => {
   const pinnedByTurn = new Map<string, Array<string>>()
   for (const record of records) {
-    if (record.role !== "assistant") continue
+    if (record.role !== ROLE.assistant) continue
     const ids = historyToolCalls(record.envelope.tool_calls)
       .filter(conversationCall)
       .map((call) => call.id)
@@ -170,8 +176,8 @@ export const toolResultTexts = (
 }
 
 export const isConversationRecord = (record: TranscriptMessageRecord): boolean =>
-  record.role !== "system" &&
-  record.role !== "developer" &&
+  record.role !== ROLE.system &&
+  record.role !== ROLE.developer &&
   !isSessionHandoff(record.envelope) &&
   typeof record.envelope.forked_from !== "string"
 
@@ -224,11 +230,11 @@ const compactArguments = (raw: string): { readonly text: string; readonly change
 export const compactTurnWork = (response: TurnWorkResponse): TurnWorkResponse => ({
   ...response,
   messages: response.messages.map((message) => {
-    if (message.role === "tool") {
+    if (message.role === ROLE.tool) {
       const content = compactText(message.content)
       return content === message.content ? message : { ...message, content, compact: true }
     }
-    if (message.role !== "assistant" || message.tool_calls === undefined) return message
+    if (message.role !== ROLE.assistant || message.tool_calls === undefined) return message
     let changed = false
     const toolCalls = message.tool_calls.map((call) => {
       const compacted = compactArguments(call.arguments)
@@ -291,37 +297,40 @@ const projectMessage = (
   parentSource?: HistoryMessage["from_chat"],
   assignment?: AgentAssignment
 ): ProjectedMessage | null => {
-  if (record.role === "system" || record.role === "developer") return null
+  if (record.role === ROLE.system || record.role === ROLE.developer) return null
   if (typeof record.envelope.forked_from === "string") return null
   if (isChatEventsMessage(record.envelope)) return null
   const envelope: Readonly<Record<string, unknown>> = record.envelope
   const contentValue = envelope.content
   const storedContent = contentText(contentValue)
   const assistant =
-    record.role === "assistant"
+    record.role === ROLE.assistant
       ? projectAssistant(envelope, surface, resultMetadata, pinnedResults)
       : null
-  const keepsStoredContent = surface === "conversation" || record.role === "tool"
+  const keepsStoredContent = surface === "conversation" || record.role === ROLE.tool
   const content = assistant?.content ?? (keepsStoredContent ? storedContent : "")
   const context = surface === "conversation" ? contentContext(contentValue) : []
   const toolCallId =
-    record.role === "tool" && Predicate.isString(envelope.tool_call_id)
+    record.role === ROLE.tool && Predicate.isString(envelope.tool_call_id)
       ? envelope.tool_call_id
       : undefined
   const metadata = toolCallId === undefined ? undefined : resultMetadata.get(toolCallId)
   const persistedIsError = Predicate.isBoolean(envelope.is_error) ? envelope.is_error : undefined
-  const isError = record.role === "tool" ? (metadata?.isError ?? persistedIsError) : undefined
+  const isError = record.role === ROLE.tool ? (metadata?.isError ?? persistedIsError) : undefined
   const persistedRetryable =
-    record.role === "tool" &&
+    record.role === ROLE.tool &&
     (envelope.retryable === null || Predicate.isBoolean(envelope.retryable))
       ? envelope.retryable
       : undefined
   const retryable = metadata === undefined ? persistedRetryable : metadata.retryable
   const outcome =
-    record.role === "tool" ? Option.getOrUndefined(decodeToolOutcome(envelope.outcome)) : undefined
+    record.role === ROLE.tool
+      ? Option.getOrUndefined(decodeToolOutcome(envelope.outcome))
+      : undefined
   const data = metadata?.data ?? envelope.data
   const automation =
-    surface === "conversation" && (record.role === "interaction" || record.role === "assistant")
+    surface === "conversation" &&
+    (record.role === ROLE.interaction || record.role === ROLE.assistant)
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(
             Schema.Struct({
@@ -334,16 +343,17 @@ const projectMessage = (
         )
       : undefined
   const communication =
-    surface === "conversation" && record.role === "interaction"
+    surface === "conversation" && record.role === ROLE.interaction
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(CommunicationEnvelopeSchema)(envelope.communication)
         )
       : undefined
   const update =
-    record.role === "interaction"
+    record.role === ROLE.interaction
       ? Option.getOrUndefined(Schema.decodeUnknownOption(ChatUpdateSchema)(envelope.update))
       : undefined
-  const legacyRestart = record.role === "interaction" && isLegacyRestartInterruption(storedContent)
+  const legacyRestart =
+    record.role === ROLE.interaction && isLegacyRestartInterruption(storedContent)
   const decodedResult = Option.getOrUndefined(
     Schema.decodeUnknownOption(AgentResultSchema)(envelope.agent_result)
   )
@@ -357,12 +367,12 @@ const projectMessage = (
     agentResult = { ...storedResult, preview: resultPreview }
   }
   const decodedSender =
-    record.role === "interaction"
+    record.role === ROLE.interaction
       ? Option.getOrUndefined(Schema.decodeUnknownOption(InteractionSenderSchema)(envelope))
       : undefined
   const assignmentTask =
-    decodedSender?.kind === "assignment" &&
-    decodedSender.from.source === "agent" &&
+    decodedSender?.kind === INTERACTION_KIND.assignment &&
+    decodedSender.from.source === INTERACTION_SOURCE.agent &&
     decodedSender.to !== undefined &&
     decodedSender.from.id === assignment?.fromSessionRef &&
     decodedSender.to.id === assignment?.toSessionRef &&
@@ -372,37 +382,37 @@ const projectMessage = (
       : undefined
   if (
     surface === "conversation" &&
-    decodedSender?.kind === "assignment" &&
-    decodedSender.from.source === "agent" &&
+    decodedSender?.kind === INTERACTION_KIND.assignment &&
+    decodedSender.from.source === INTERACTION_SOURCE.agent &&
     decodedSender.to !== undefined &&
     assignmentTask === undefined
   )
     return null
   const sender =
-    decodedSender?.kind === "completion" && legacyRestart
-      ? { ...decodedSender, outcome: "interrupted" as const }
+    decodedSender?.kind === INTERACTION_KIND.completion && legacyRestart
+      ? { ...decodedSender, outcome: INTERACTION_OUTCOME.interrupted }
       : decodedSender
   const replyTo = Option.getOrUndefined(
     Schema.decodeUnknownOption(StoredReplySchema)(envelope.replyTo)
   )
   const recipe =
-    record.role === "user"
+    record.role === ROLE.user
       ? Option.getOrUndefined(Schema.decodeUnknownOption(SkillNameSchema)(envelope.recipe))
       : undefined
   const questionAnswer =
-    record.role === "user"
+    record.role === ROLE.user
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(QuestionAnswerSchema)(envelope.question_answer)
         )
       : undefined
   const connection =
-    record.role === "interaction"
+    record.role === ROLE.interaction
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(ConnectionArrivalSchema)(envelope.connection)
         )
       : undefined
   const fromChat =
-    record.role === "interaction"
+    record.role === ROLE.interaction
       ? (Option.getOrUndefined(
           Schema.decodeUnknownOption(ChatHandoffSourceSchema)(envelope.from_chat)
         ) ??
@@ -411,13 +421,13 @@ const projectMessage = (
           : undefined))
       : undefined
   const forwardedFrom =
-    record.role === "user" || record.role === "interaction"
+    record.role === ROLE.user || record.role === ROLE.interaction
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(ChatForwardedSourceSchema)(envelope.forwarded_from)
         )
       : undefined
   const sentFrom =
-    record.role === "user"
+    record.role === ROLE.user
       ? Option.getOrUndefined(Schema.decodeUnknownOption(ChatSentFromSchema)(envelope.sent_from))
       : undefined
   const projected = {
@@ -441,7 +451,7 @@ const projectMessage = (
     ...(isError === undefined ? {} : { is_error: isError }),
     ...(retryable === undefined ? {} : { retryable }),
     ...(outcome === undefined ? {} : { outcome }),
-    ...(record.role !== "tool" || data === undefined ? {} : { data }),
+    ...(record.role !== ROLE.tool || data === undefined ? {} : { data }),
     ...(replyTo === undefined
       ? {}
       : {
@@ -467,23 +477,24 @@ const projectMessage = (
   const warnings = [
     ...(assistant?.warnings ?? []),
     ...(surface === "conversation" &&
-    record.role === "interaction" &&
+    record.role === ROLE.interaction &&
     envelope.communication !== undefined &&
     communication === undefined
       ? ["communication envelope is invalid; dropped"]
       : [])
   ]
-  if (record.role === "interaction") {
+  if (record.role === ROLE.interaction) {
     if (sender === undefined) return null
-    return { message: { ...projected, ...sender, role: "interaction" }, warnings }
+    return { message: { ...projected, ...sender, role: ROLE.interaction }, warnings }
   }
-  if (record.role === "assistant") return { message: { ...projected, role: "assistant" }, warnings }
-  if (record.role === "tool") return { message: { ...projected, role: "tool" }, warnings }
+  if (record.role === ROLE.assistant)
+    return { message: { ...projected, role: ROLE.assistant }, warnings }
+  if (record.role === ROLE.tool) return { message: { ...projected, role: ROLE.tool }, warnings }
   const images = contentImages(contentValue)
   return {
     message: {
       ...projected,
-      role: "user",
+      role: ROLE.user,
       ...(images.length === 0 ? {} : { images })
     },
     warnings
@@ -652,7 +663,7 @@ export const historyToolCallIds = (records: ReadonlyArray<TranscriptMessageRecor
     records.flatMap((record) => [
       ...storedToolCallIds(record.envelope.provider_tool_calls),
       ...storedToolCallIds(record.envelope.tool_calls),
-      ...(record.role === "tool" && Predicate.isString(record.envelope.tool_call_id)
+      ...(record.role === ROLE.tool && Predicate.isString(record.envelope.tool_call_id)
         ? [record.envelope.tool_call_id]
         : [])
     ])

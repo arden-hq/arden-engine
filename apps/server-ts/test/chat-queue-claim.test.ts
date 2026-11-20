@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
@@ -13,7 +14,7 @@ const startInput = (sessionId: string, clientId: string) => ({
   message: {
     message_id: clientId,
     client_id: clientId,
-    role: "user" as const,
+    role: ROLE.user,
     content: clientId,
     created_at: "2026-11-07T00:00:00.000Z"
   }

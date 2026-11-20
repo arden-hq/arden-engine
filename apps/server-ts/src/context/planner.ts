@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Predicate } from "effect"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 
@@ -165,21 +166,23 @@ const hasExactStoredCallCount = (value: unknown, parsedCount: number): boolean =
   return Array.isArray(value) && value.length === parsedCount
 }
 
-const isRuntimeContext = (message: StoredMessageEnvelope): boolean => message.role === "developer"
+const isRuntimeContext = (message: StoredMessageEnvelope): boolean =>
+  message.role === ROLE.developer
 
 const serializeMessage = (message: StoredMessageEnvelope, owned: ReadonlySet<string>): string => {
   if (isRuntimeContext(message)) return ""
   const body = (
-    message.role === "assistant"
+    message.role === ROLE.assistant
       ? assistantBody(message).map(compactAnswerBlocks)
       : [textContent(message.content)]
   )
     .filter(Boolean)
     .join("\n")
   if (body.length === 0) return ""
-  const name = message.role === "tool" && typeof message.name === "string" ? ` ${message.name}` : ""
+  const name =
+    message.role === ROLE.tool && typeof message.name === "string" ? ` ${message.name}` : ""
   const role =
-    message.role === "user" && !(owned.has(message.message_id) && ownerText(message).length > 0)
+    message.role === ROLE.user && !(owned.has(message.message_id) && ownerText(message).length > 0)
       ? "context"
       : message.role
   return `${role}${name}: ${body}`
@@ -209,9 +212,9 @@ const chooseTurnBoundary = (
 }
 
 const isToolContinuation = (message: StoredMessageEnvelope): boolean =>
-  message.role === "tool" ||
-  message.role === "interaction" ||
-  (message.role === "user" && !isWrittenByPerson(message))
+  message.role === ROLE.tool ||
+  message.role === ROLE.interaction ||
+  (message.role === ROLE.user && !isWrittenByPerson(message))
 
 const earliestLaunch = (
   messages: ReadonlyArray<StoredMessageEnvelope>,
@@ -220,18 +223,20 @@ const earliestLaunch = (
   if (callIds.size === 0) return undefined
   const index = messages.findIndex(
     (message) =>
-      message.role === "assistant" && toolCalls(message).some((call) => callIds.has(call.id))
+      message.role === ROLE.assistant && toolCalls(message).some((call) => callIds.has(call.id))
   )
   return index < 0 ? undefined : index
 }
 
 const referencedCallIds = (message: StoredMessageEnvelope): ReadonlyArray<string> =>
-  message.role === "tool" && typeof message.tool_call_id === "string" ? [message.tool_call_id] : []
+  message.role === ROLE.tool && typeof message.tool_call_id === "string"
+    ? [message.tool_call_id]
+    : []
 
 const openLaunches = (messages: ReadonlyArray<StoredMessageEnvelope>): ReadonlySet<string> => {
   const settled = new Set(
     messages.flatMap((message) =>
-      message.role === "tool" &&
+      message.role === ROLE.tool &&
       message.async_tool_launch === undefined &&
       typeof message.tool_call_id === "string"
         ? [message.tool_call_id]
@@ -256,7 +261,7 @@ const closeToolUnits = (
 ): number => {
   const callIndex = new Map<string, number>()
   messages.forEach((message, index) => {
-    if (message.role !== "assistant") return
+    if (message.role !== ROLE.assistant) return
     for (const call of toolCalls(message))
       if (!callIndex.has(call.id)) callIndex.set(call.id, index)
   })

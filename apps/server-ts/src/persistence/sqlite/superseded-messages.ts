@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -62,7 +63,7 @@ export const supersedeMessagesInTransaction = Effect.fn("SqlitePersistence.super
     return {
       active: input.active.filter((message) => !gone.has(message.message_id)),
       answerIds: marked
-        .filter((message) => message.role === "assistant")
+        .filter((message) => message.role === ROLE.assistant)
         .map((message) => message.message_id)
     } satisfies SupersededMessages
   }

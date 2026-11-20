@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { AssistantMessage, ChatMessage } from "../../contracts/messages.js"
 import { SemanticResponseError } from "../kit/index.js"
 import { OpenAiResponsesProviderError } from "./errors.js"
@@ -97,7 +98,7 @@ export const responseItems = (
   message: ChatMessage,
   asyncTools: ReadonlySet<string>
 ): ReadonlyArray<InputItem> | undefined => {
-  if (message.role !== "assistant") return undefined
+  if (message.role !== ROLE.assistant) return undefined
   const stored = storedResponseItems(message)
   if (stored === undefined) return undefined
   const nativeAsync = new Set(
@@ -146,7 +147,7 @@ export const responseItems = (
       }
       return [
         {
-          role: "assistant",
+          role: ROLE.assistant,
           content: messageItemText(item),
           ...(item.phase === undefined ? {} : { phase: item.phase })
         }

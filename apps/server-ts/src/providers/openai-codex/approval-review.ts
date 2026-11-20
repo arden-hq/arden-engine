@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { ToolChoice } from "@arden-hq/loop"
 import type { ApprovalReviewSource } from "../../models/provider.js"
 import {
@@ -20,8 +21,8 @@ export const makeCodexApprovalReview = (
       signal.throwIfAborted()
       for await (const item of await provider.stream({
         messages: [
-          { role: "system", content: system },
-          { role: "user", content: user }
+          { role: ROLE.system, content: system },
+          { role: ROLE.user, content: user }
         ],
         model: modelId,
         reasoningEffort: "low",
