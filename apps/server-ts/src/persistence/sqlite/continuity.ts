@@ -1,4 +1,3 @@
-import { settledQuestionDrawn, type RunQuestion } from "@arden-hq/protocol/runs"
 import type { CommunicationEnvelope } from "@arden-hq/protocol/chat"
 import { Clock, DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -8,7 +7,6 @@ import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { CommunicationStore, CommunicationStoreError } from "../continuity/store.js"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { communicationError } from "./continuity-route.js"
-import { latestSettledQuestionChanges } from "./question-events.js"
 import { writeCommunicationEnvelopeInTransaction } from "./chat-transcript.js"
 import type { PersistenceDeps } from "./deps.js"
 import { nextOutboxAttemptAt } from "../../runtime/outbox.js"
@@ -103,11 +101,6 @@ export const makeCommunicationStore = ({
                 record.kind === "arrival" ? [record.arrival_id] : []
               )
             )
-            const renderedQuestions = new Map(
-              input.rendered.flatMap((record) =>
-                record.kind === "question" ? [[record.question_id, record.revision] as const] : []
-              )
-            )
             let arrivalTarget = current.arrivals_through
             let questionTarget = current.question_changes_through
             for (const record of input.rendered) {
@@ -174,30 +167,6 @@ export const makeCommunicationStore = ({
               return yield* communicationError(
                 "conflict",
                 "Arrival acknowledgement has a visible gap"
-              )
-            }
-            const settledQuestions = yield* sql<{
-              readonly question_id: string
-              readonly revision: number
-              readonly status: RunQuestion["status"]
-            }>`SELECT question_id, revision, status
-        FROM (${latestSettledQuestionChanges(sql, {
-          after: current.question_changes_through,
-          through: questionTarget
-        })}) AS settled
-        JOIN space_conversations AS conversation ON conversation.space_id = ${spaceId}
-        WHERE destination_space_id = ${spaceId}
-          AND destination_session_id = conversation.session_id`
-            if (
-              settledQuestions.some(
-                (row) =>
-                  settledQuestionDrawn(row) &&
-                  renderedQuestions.get(row.question_id) !== row.revision
-              )
-            ) {
-              return yield* communicationError(
-                "conflict",
-                "Question acknowledgement has a visible gap"
               )
             }
             const now = DateTime.formatIso(yield* DateTime.now)
