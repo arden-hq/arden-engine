@@ -42,7 +42,6 @@ export interface ChatGptLoginStore {
 
 export type ChatGptLoginFailure =
   | "callback_port"
-  | "state_mismatch"
   | "denied"
   | "token_exchange"
   | "refresh_rejected"
@@ -52,7 +51,6 @@ export type ChatGptLoginFailure =
 
 const FAILURE_MESSAGES: Record<ChatGptLoginFailure, string> = {
   callback_port: `Sign-in could not start: port ${CHATGPT_CALLBACK_PORT} is in use.`,
-  state_mismatch: "Sign-in verification failed. Try again.",
   denied: "The ChatGPT sign-in was cancelled in the browser.",
   token_exchange: "The ChatGPT sign-in did not complete. Try again.",
   refresh_rejected: "The ChatGPT sign-in has expired. Sign in again.",
@@ -107,8 +105,16 @@ export const startChatGptLogin = async ({
   })
   const answer = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const callback = new URL(request.url ?? "/", redirectUri)
-    if (request.method !== "GET" || callback.pathname !== CALLBACK_PATH || completing) {
+    if (request.method !== "GET" || callback.pathname !== CALLBACK_PATH) {
       response.writeHead(404).end()
+      return
+    }
+    if (callback.searchParams.get("state") !== state) {
+      respond(response, false)
+      return
+    }
+    if (completing) {
+      response.writeHead(409).end()
       return
     }
     completing = true
@@ -122,10 +128,9 @@ export const startChatGptLogin = async ({
     }
   }
   const tokensFromCallback = async (params: URLSearchParams): Promise<ChatGptTokens> => {
-    if (params.get("state") !== state) throw new ChatGptLoginError("state_mismatch")
     if (params.get("error") !== null) throw new ChatGptLoginError("denied")
     const code = params.get("code")
-    if (code === null || code === "") throw new ChatGptLoginError("state_mismatch")
+    if (code === null || code === "") throw new ChatGptLoginError("token_exchange")
     return exchangeChatGptCode({ code, redirectUri, verifier, issuer, fetch: fetchImpl, now })
   }
   try {
@@ -267,10 +272,11 @@ export const chatGptCredentials = ({
         return next
       })
       .catch(async (cause: unknown) => {
-        if (cause instanceof ChatGptLoginError && cause.reason === "refresh_rejected") {
-          const stored = await store.read().catch(() => undefined)
-          if (stored?.refresh === current.refresh) await store.remove()
-        }
+        if (!(cause instanceof ChatGptLoginError) || cause.reason !== "refresh_rejected")
+          throw cause
+        const stored = await store.read().catch(() => undefined)
+        if (stored !== undefined && stored.refresh !== current.refresh) return stored
+        if (stored !== undefined) await store.remove()
         throw cause
       })
       .finally(() => {

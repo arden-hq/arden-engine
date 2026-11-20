@@ -29,9 +29,11 @@ let server: Server | undefined
 let folder = ""
 let requests: Array<TokenRequest> = []
 let reply: { status: number; body: unknown } = { status: 200, body: {} }
+let beforeReply: () => Promise<void> = async () => undefined
 
 beforeEach(async () => {
   requests = []
+  beforeReply = async () => undefined
   folder = await mkdtemp(join(tmpdir(), "arden-chatgpt-login-"))
   const listening = createServer((request, response) => {
     let body = ""
@@ -44,8 +46,10 @@ beforeEach(async () => {
         return
       }
       requests.push({ contentType: request.headers["content-type"], body })
-      response.writeHead(reply.status, { "Content-Type": "application/json" })
-      response.end(JSON.stringify(reply.body))
+      void beforeReply().then(() => {
+        response.writeHead(reply.status, { "Content-Type": "application/json" })
+        response.end(JSON.stringify(reply.body))
+      })
     })
   })
   await new Promise<void>((resolve) => listening.listen(0, "127.0.0.1", resolve))
@@ -99,15 +103,23 @@ describe("startChatGptLogin", () => {
     ).toBe(authorize.searchParams.get("code_challenge"))
   })
 
-  it("refuses a callback whose state is not the one it sent", async () => {
-    const login = await startChatGptLogin({ issuer, port: 0 })
-    const callback = new URL(new URL(login.url).searchParams.get("redirect_uri") ?? "")
+  it("turns away a callback with another state and keeps waiting for its own", async () => {
+    reply = { status: 200, body: { access_token: "access-1", refresh_token: "refresh-1" } }
+    const login = await startChatGptLogin({ issuer, port: 0, now: () => NOW })
+    const authorize = new URL(login.url)
+    const callback = new URL(authorize.searchParams.get("redirect_uri") ?? "")
     callback.searchParams.set("code", "code-1")
     callback.searchParams.set("state", "forged")
-    const refused = expect(login.tokens).rejects.toEqual(new ChatGptLoginError("state_mismatch"))
     expect((await fetch(callback)).status).toBe(400)
-    await refused
     expect(requests).toEqual([])
+    callback.searchParams.set("state", authorize.searchParams.get("state") ?? "")
+    expect((await fetch(callback)).status).toBe(200)
+    expect(await login.tokens).toEqual({
+      access: "access-1",
+      refresh: "refresh-1",
+      expires: NOW + 3_600_000,
+      accountId: undefined
+    })
   })
 })
 
@@ -148,6 +160,22 @@ describe("chatGptCredentials", () => {
     const credentials = chatGptCredentials({ store, issuer, now: () => NOW })
     await expect(credentials.get()).rejects.toEqual(new ChatGptLoginError("refresh_rejected"))
     expect(await store.read()).toBeUndefined()
+  })
+
+  it("uses the login another process refreshed when its own refresh token was spent", async () => {
+    const store = chatGptLoginFile(folder)
+    await store.write(expired)
+    const other: ChatGptTokens = {
+      access: "other-access",
+      refresh: "other-refresh",
+      expires: NOW + 3_600_000,
+      accountId: "account-1"
+    }
+    beforeReply = () => store.write(other)
+    reply = { status: 400, body: { error: { code: "refresh_token_reused" } } }
+    const credentials = chatGptCredentials({ store, issuer, now: () => NOW })
+    expect(await credentials.get()).toEqual({ accessToken: "other-access", accountId: "account-1" })
+    expect(await store.read()).toEqual(other)
   })
 
   it("keeps a login through a refresh that fails for another reason", async () => {

@@ -478,6 +478,7 @@ describe("arden exec", () => {
       expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
         dataDirectory: join(home, ".arden-cli", "data")
       })
+      expect((await stat(join(home, ".arden-cli"))).mode & 0o777).toBe(0o700)
     } finally {
       await rm(home, { recursive: true, force: true })
     }

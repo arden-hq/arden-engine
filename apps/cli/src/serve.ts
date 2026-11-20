@@ -81,7 +81,7 @@ const settingsFile = async (config: string | undefined, home: string): Promise<s
   if (existsSync(file)) return file
   const settings = { dataDirectory: join(folder, "data") }
   try {
-    await mkdir(folder, { recursive: true })
+    await mkdir(folder, { recursive: true, mode: 0o700 })
     await writeFile(file, `${JSON.stringify(settings, null, 2)}\n`, { flag: "wx" })
   } catch (cause) {
     throw new UsageError(`Cannot write the default settings file ${file}: ${errorMessage(cause)}`)
