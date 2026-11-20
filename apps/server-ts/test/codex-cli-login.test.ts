@@ -2,7 +2,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, it } from "vitest"
-import { codexCliCredentials, CodexLoginError } from "../src/providers/openai-codex/cli-login.js"
+import { chatGptLoginFile } from "@arden-hq/headless/chatgpt-login"
+import { ardenCliDir } from "@arden-hq/std/paths"
+import {
+  codexCliCredentials,
+  CodexLoginError,
+  signedInCredentials
+} from "../src/providers/openai-codex/cli-login.js"
 
 const NOW = Date.parse("2026-11-08T00:00:00Z")
 
@@ -68,5 +74,28 @@ it("reads the file again on every get", () =>
         JSON.stringify({ tokens: { access_token: jwt({ exp: NOW / 1000 + 120 }) } })
       )
       expect((await read(home)).accessToken).not.toBe(first.accessToken)
+    }
+  ))
+
+const signedIn = (home: string) =>
+  signedInCredentials({ env: { CODEX_HOME: home }, home, now: () => NOW }).get({
+    signal: new AbortController().signal
+  })
+
+it("prefers Arden's own sign-in, and falls back to the Codex login without one", () =>
+  withHome(
+    JSON.stringify({ tokens: { access_token: jwt({ exp: NOW / 1000 + 3600 }) } }),
+    async (home) => {
+      expect(await signedIn(home)).toEqual({ accessToken: jwt({ exp: NOW / 1000 + 3600 }) })
+      await chatGptLoginFile(ardenCliDir(home)).write({
+        access: "arden-access",
+        refresh: "arden-refresh",
+        expires: NOW + 3_600_000,
+        accountId: "acct-2"
+      })
+      expect(await signedIn(home)).toEqual({
+        accessToken: "arden-access",
+        headers: { "chatgpt-account-id": "acct-2" }
+      })
     }
   ))

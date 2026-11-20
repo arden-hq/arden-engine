@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@arden-hq/answer-ui": "workspace:*",
+    "@arden-hq/headless": "workspace:*",
     "@arden-hq/jobs": "workspace:*",
     "@arden-hq/journal": "workspace:*",
     "@arden-hq/loop": "workspace:*",

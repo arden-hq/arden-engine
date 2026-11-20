@@ -13,7 +13,7 @@ Import by subpath, for example `import { sleep } from "@arden-hq/std/sleep"`. Th
 | `errors` | `toError`, `errorMessage`, `redactedFailureText` |
 | `hash` | SHA-256 as hex, base64url or bytes, and `hashFile` |
 | `json` | `isRecord`, `canonicalJson`, `sameJson` |
-| `paths` | `isWithin`, `expandHome`, `collapseHome`, `resolveArdenDir` |
+| `paths` | `isWithin`, `expandHome`, `collapseHome`, `resolveArdenDir`, `ardenCliDir` (`~/.arden-cli`) |
 | `process` | `signalProcessGroup`, `terminate` |
 | `retry` | `retryableStatus`, backoff delays, `Retry-After` parsing |
 | `sleep` | `sleep(ms, signal?)` |

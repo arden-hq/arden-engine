@@ -47,7 +47,7 @@ const ProviderSchema = Schema.Union([
     apiKeyEnv: Schema.optionalKey(text),
     server: Schema.optionalKey(Schema.Literals(CHAT_COMPLETIONS_SERVERS))
   }),
-  /** The Codex sign-in on this machine (`codex login`). The default. */
+  /** The ChatGPT sign-in on this machine: `arden login`, else `codex login`. The default. */
   Schema.Struct({ kind: Schema.Literal("codex-login") })
 ])
 

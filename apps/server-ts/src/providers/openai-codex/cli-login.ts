@@ -1,3 +1,10 @@
+import {
+  ChatGptLoginError,
+  chatGptCredentials,
+  chatGptLoginFile,
+  type ChatGptEndpoint
+} from "@arden-hq/headless/chatgpt-login"
+import { ardenCliDir } from "@arden-hq/std/paths"
 import { Encoding, Result, Schema } from "effect"
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
@@ -51,7 +58,10 @@ const parseCodexAuth = (text: string, now: number): OpenAiCredentialSnapshot => 
 }
 
 export const codexCliCredentials = (
-  options: { readonly env?: NodeJS.ProcessEnv; readonly now?: () => number } = {}
+  options: {
+    readonly env?: NodeJS.ProcessEnv | undefined
+    readonly now?: (() => number) | undefined
+  } = {}
 ): OpenAiCredentialSource => {
   const read = async (): Promise<OpenAiCredentialSnapshot> => {
     const file = join(codexHome(options.env), "auth.json")
@@ -61,4 +71,33 @@ export const codexCliCredentials = (
     return parseCodexAuth(text, (options.now ?? Date.now)())
   }
   return { get: read }
+}
+
+export const signedInCredentials = (
+  options: ChatGptEndpoint & {
+    readonly env?: NodeJS.ProcessEnv | undefined
+    readonly home?: string | undefined
+  } = {}
+): OpenAiCredentialSource => {
+  const { env, home, ...endpoint } = options
+  const arden = chatGptCredentials({ ...endpoint, store: chatGptLoginFile(ardenCliDir(home)) })
+  const codex = codexCliCredentials({ env, now: endpoint.now })
+  return {
+    get: async (request) => {
+      const credential = await arden
+        .get({ forceRefresh: request.forceRefresh ?? false })
+        .catch((cause: unknown) => {
+          if (cause instanceof ChatGptLoginError)
+            throw new CodexLoginError(`${cause.message} Run \`arden login\`.`)
+          throw cause
+        })
+      if (credential === undefined) return codex.get(request)
+      return credential.accountId === undefined
+        ? { accessToken: credential.accessToken }
+        : {
+            accessToken: credential.accessToken,
+            headers: { "chatgpt-account-id": credential.accountId }
+          }
+    }
+  }
 }
