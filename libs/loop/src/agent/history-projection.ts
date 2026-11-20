@@ -26,7 +26,6 @@ export const projectToolHistory = (options: {
     } else if (launched.has(result.tool_call_id) && !carriedNatively) {
       output.push({
         role: "user",
-        is_meta: true,
         content: [
           {
             type: "context",
@@ -61,7 +60,6 @@ const mediaMessage = (
   media: ReadonlyArray<ContentBlock>
 ): ChatMessage => ({
   role: "user",
-  is_meta: true,
   content: [
     {
       type: "context",

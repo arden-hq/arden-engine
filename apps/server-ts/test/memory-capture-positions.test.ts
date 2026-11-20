@@ -138,10 +138,10 @@ it("keeps a skipped batch unread, rests it a day, and then reads it again", asyn
 it("stores the owner's typed turn as theirs and an agent's message in it as not", async () => {
   const relayed = {
     message_id: "relayed",
-    role: "user",
-    is_meta: true,
+    role: "interaction",
+    from: { source: "agent", id: "w" },
+    kind: "message",
     content: "Done",
-    interaction: { kind: "message", from: { type: "agent", id: "w" }, content: "Done" },
     created_at: AT
   } as const
   const owned = await withTempDatabase(

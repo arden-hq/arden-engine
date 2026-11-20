@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { makeUserMessage } from "../src/chat/message-input.js"
+import { makeInputMessage } from "../src/chat/message-input.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
@@ -62,7 +62,7 @@ const delegatedReview = Effect.fn("delegatedReview")(function* (
     clientId: `session-send:${parent.runId}:send`,
     toolCallId: "send"
   })
-  const message = yield* makeUserMessage({ ...handoff, sessionId: target.sessionId })
+  const message = yield* makeInputMessage({ ...handoff, sessionId: target.sessionId })
   const recipient = yield* chat.receive({
     sessionId: target.sessionId,
     clientId: handoff.clientId,

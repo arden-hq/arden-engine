@@ -1,11 +1,15 @@
-import type { ChatApprovalMode, ChatImageInput, ChatReceipt } from "@arden-hq/protocol/chat"
+import type {
+  ChatApprovalMode,
+  ChatImageInput,
+  ChatReceipt,
+  InteractionSender
+} from "@arden-hq/protocol/chat"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
 import type {
   AgentStreamEvent,
   ChatMessage,
   HeldToolCall,
   ImageInput,
-  Interaction,
   JsonObject,
   ToolResult
 } from "@arden-hq/loop"
@@ -69,13 +73,11 @@ export interface ChatRunnerSendMessageRequest {
   readonly message: string
   /** A handed capture's screenshot, moved into the chat it belongs to (`forward_message`). */
   readonly images?: ReadonlyArray<ChatImageInput>
-  readonly interaction?: Interaction
+  readonly sender?: InteractionSender
   /** A plain user message no client drew as it was sent; its chat's viewers reload. */
   readonly announce?: true
   /** The chat this message is handed over from: it reads there as Arden's handoff. */
   readonly fromChat?: { readonly sessionId: string; readonly sessionRef: string }
-  /** Server-owned invisible input used for automatic background results. */
-  readonly isMeta?: true
   /** Server-owned durable identity for one Workflow result delivery. */
   readonly workflowDelivery?: {
     readonly workflowRef: string

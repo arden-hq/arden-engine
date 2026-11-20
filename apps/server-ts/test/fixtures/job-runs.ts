@@ -7,10 +7,11 @@ import { ChatWriteStore, type TaskStepCause } from "../../src/persistence/chat/s
 const message = (id: string, isMeta: boolean) => ({
   message_id: id,
   client_id: id,
-  role: "user" as const,
   content: "Made-up words",
   created_at: new Date().toISOString(),
-  ...(isMeta ? { is_meta: true } : {})
+  ...(isMeta
+    ? { role: "interaction" as const, from: { source: "harness", id: "notice" }, kind: "event" }
+    : { role: "user" as const })
 })
 
 const startChat = (
@@ -38,6 +39,13 @@ const startChat = (
         ...(options.automation === undefined
           ? {}
           : {
+              role: "interaction" as const,
+              kind: "assignment",
+              from: {
+                source: "automation",
+                id: options.automation.automationId,
+                name: "Made-up job"
+              },
               content: "Made-up prompt",
               automation: {
                 task_id: options.automation.automationId,

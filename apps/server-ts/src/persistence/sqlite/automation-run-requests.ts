@@ -258,18 +258,19 @@ export const makeAutomationRunRequests = ({
             yield* sql`
           INSERT INTO session_messages (
             session_id, message_id, seq, role, message_json, client_id,
-            created_at, search_text
+            created_at, search_text, author
           ) VALUES (
-            ${trunk}, ${headlineId}, ${headlineSeq}, 'assistant',
+            ${trunk}, ${headlineId}, ${headlineSeq}, 'interaction',
             ${JSON.stringify({
               message_id: headlineId,
-              role: "assistant",
-              is_meta: true,
+              role: "interaction",
+              from: { source: "harness", id: "automation_headline" },
+              kind: "event",
               created_at: now,
               content: text,
               turn_id: headlineTurnId
             })},
-            NULL, ${now}, ${text}
+            NULL, ${now}, ${text}, 'app'
           )
         `
             yield* hideFromActiveContext(sql, trunk, headlineSeq)

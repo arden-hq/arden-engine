@@ -1,4 +1,5 @@
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { transcriptSearchText } from "../persistence/transcript/search-text.js"
 import { cutText } from "@arden-hq/std/text"
 
@@ -6,8 +7,7 @@ export const conversationLine = (
   message: StoredMessageEnvelope,
   maxChars: number
 ): ReadonlyArray<string> => {
-  if (message.role !== "user" && message.role !== "assistant") return []
-  if (message.is_meta === true) return []
+  if (message.role !== "assistant" && !isWrittenByPerson(message)) return []
   const content = transcriptSearchText(message)
   return content === null ? [] : [`${message.role}: ${cutText(content, maxChars)}`]
 }

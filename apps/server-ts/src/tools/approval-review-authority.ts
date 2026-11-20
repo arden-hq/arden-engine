@@ -47,16 +47,15 @@ export const assignmentBrief = (
   envelopes: ReadonlyArray<Readonly<Record<string, unknown>>>
 ): DelegationBrief | undefined => {
   for (const envelope of envelopes) {
-    const interaction = envelope["interaction"]
-    if (envelope["role"] !== "user" || !Predicate.isObject(interaction)) continue
-    if (interaction["kind"] !== "assignment" || !Predicate.isString(interaction["content"]))
-      continue
-    const from = interaction["from"]
+    if (envelope["role"] !== "interaction" || envelope["kind"] !== "assignment") continue
+    const content = envelope["content"]
+    if (!Predicate.isString(content)) continue
+    const from = envelope["from"]
     const name =
-      Predicate.isObject(from) && Predicate.isString(from["display_name"])
-        ? from["display_name"]
+      Predicate.isObject(from) && Predicate.isString(from["name"])
+        ? from["name"]
         : "the agent that started this run"
-    return { from: name, text: interaction["content"] }
+    return { from: name, text: content }
   }
   return undefined
 }

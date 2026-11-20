@@ -7,10 +7,10 @@ import type {
   ChatReceipt,
   ChatUpdate,
   ConnectionArrival,
-  HistoryMessage
+  HistoryMessage,
+  InteractionSender
 } from "@arden-hq/protocol/chat"
 import type { ModelRole } from "@arden-hq/protocol/models"
-import type { Interaction } from "@arden-hq/loop"
 import { DateTime, Effect, Schema } from "effect"
 import { ChatUpdateSchema } from "@arden-hq/protocol/effect/chat"
 import type {
@@ -19,6 +19,7 @@ import type {
   TaskStepCause
 } from "../persistence/chat/store.js"
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
+import { storedSender } from "../persistence/transcript/interaction.js"
 import {
   isWorkflowDeliveryClientId,
   workflowDeliveryClientId
@@ -33,8 +34,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly wake?: boolean
   readonly deliveryId?: string
   readonly clientId: string
-  readonly isMeta?: true
-  readonly interaction?: Interaction
+  readonly sender?: InteractionSender
   readonly workflowDelivery?: {
     readonly workflowRef: string
     readonly attempt: number
@@ -92,14 +92,11 @@ export const taskContinuation = (input: {
     clientId: `task:${input.itemId}:${input.sourceId}`,
     ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
     message: content,
-    interaction: {
+    sender: {
       kind: "instruction",
-      from: { type: "harness", id: `task:${input.itemId}` },
-      to: { type: "agent", id: input.sessionId },
-      content,
-      causedBy: { type: "message", id: input.sourceId }
+      from: { source: "harness", id: `task:${input.itemId}` },
+      caused_by: { type: "message", id: input.sourceId }
     },
-    isMeta: true,
     continuesTask: {
       itemId: input.itemId,
       ...(input.afterRunId === undefined ? {} : { afterRunId: input.afterRunId })
@@ -113,18 +110,16 @@ export const onboardingKickoff = (sessionId: string): ChatSendInput => {
     sessionId,
     clientId: `onboarding:${sessionId}`,
     message: content,
-    interaction: {
-      kind: "instruction",
-      from: { type: "harness", id: "onboarding" },
-      to: { type: "agent", id: sessionId },
-      content
-    },
-    isMeta: true
+    sender: { kind: "instruction", from: { source: "harness", id: "onboarding" } }
   }
 }
 
 export const isNamingInput = (input: ChatSendInput): boolean => {
-  if (input.isMeta === true || input.modelRole === "background" || input.modelId !== undefined) {
+  if (
+    input.sender !== undefined ||
+    input.modelRole === "background" ||
+    input.modelId !== undefined
+  ) {
     return false
   }
   const hasImages = (input.images?.length ?? 0) > 0
@@ -134,7 +129,7 @@ export const isNamingInput = (input: ChatSendInput): boolean => {
 
 const encodeUpdate = Schema.encodeEffect(Schema.toCodecJson(ChatUpdateSchema))
 
-export const makeUserMessage = Effect.fn("ChatMessage.makeUserMessage")(function* (
+export const makeInputMessage = Effect.fn("ChatMessage.makeInputMessage")(function* (
   input: ChatSendInput
 ) {
   const createdAt = yield* DateTime.now
@@ -153,11 +148,11 @@ export const makeUserMessage = Effect.fn("ChatMessage.makeUserMessage")(function
         ]
   const message: StoredMessageEnvelope = {
     message_id: input.clientId,
-    role: "user",
+    ...(input.sender === undefined
+      ? { role: "user" }
+      : { role: "interaction", ...storedSender(input.sender) }),
     created_at: DateTime.formatIso(createdAt),
     client_id: input.clientId,
-    ...(input.isMeta === true ? { is_meta: true } : {}),
-    ...(input.interaction === undefined ? {} : { interaction: input.interaction }),
     ...(input.recipe === undefined ? {} : { recipe: input.recipe }),
     ...(input.sentFrom === undefined ? {} : { sent_from: input.sentFrom }),
     ...(input.replyTo === undefined
@@ -209,7 +204,13 @@ export const makeAutomationMessage = Effect.fn("ChatMessage.makeAutomationMessag
   return {
     message_id: input.clientId,
     client_id: input.clientId,
-    role: "user" as const,
+    role: "interaction" as const,
+    from: {
+      source: "automation" as const,
+      id: input.automation.automationId,
+      name: input.automation.name
+    },
+    kind: "assignment" as const,
     created_at: DateTime.formatIso(createdAt),
     content: input.prompt,
     automation: {
@@ -231,13 +232,6 @@ export const validateInput = Effect.fn("ChatMessage.validateInput")(function* (
       sessionId: input.sessionId
     })
   }
-  if (input.interaction !== undefined && input.isMeta !== true) {
-    return yield* new ChatMessageError({
-      reason: "invalid",
-      message: "A model interaction must be server-owned",
-      sessionId: input.sessionId
-    })
-  }
   const workflowDelivery = input.workflowDelivery
   if (workflowDelivery === undefined) {
     if (isWorkflowDeliveryClientId(input.clientId)) {
@@ -250,7 +244,7 @@ export const validateInput = Effect.fn("ChatMessage.validateInput")(function* (
     return
   }
   if (
-    input.isMeta !== true ||
+    input.sender?.from.source !== "workflow" ||
     workflowDelivery.workflowRef.trim().length === 0 ||
     !Number.isSafeInteger(workflowDelivery.attempt) ||
     workflowDelivery.attempt < 1 ||
@@ -272,8 +266,7 @@ export const requestHash = (input: ChatSendInput): string =>
       modelId: input.modelId ?? null,
       modelRole: input.modelRole ?? null,
       approvalMode: input.approvalMode ?? DEFAULT_APPROVAL_MODE,
-      isMeta: input.isMeta === true,
-      interaction: input.interaction ?? null,
+      sender: input.sender ?? null,
       replyTo: input.replyTo === undefined ? null : storedReply(input.replyTo),
       ...(input.approvalReply === undefined ? {} : { approvalReply: input.approvalReply }),
       recipe: input.recipe ?? null,

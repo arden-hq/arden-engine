@@ -286,9 +286,10 @@ export const chatEventsMessage = (options: {
   readonly lines: ReadonlyArray<string>
 }): StoredMessageEnvelope => ({
   message_id: options.messageId,
-  role: "user",
+  role: "interaction",
+  from: { source: "harness", id: "chat_events" },
+  kind: "event",
   created_at: options.createdAt,
-  is_meta: true,
   chat_events: true,
   content: [
     {

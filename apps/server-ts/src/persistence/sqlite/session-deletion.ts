@@ -18,7 +18,8 @@ export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")
     ON CONFLICT(session_id) DO NOTHING`
   const attaching = yield* sql<{ readonly message_json: string }>`SELECT message_json
     FROM session_messages
-    WHERE session_id = ${sessionId} AND role = 'user' AND instr(message_json, '/uploads/') > 0`
+    WHERE session_id = ${sessionId} AND role IN ('user', 'interaction')
+      AND instr(message_json, '/uploads/') > 0`
   for (const uploadId of uploadIdsIn(attaching.map((row) => row.message_json).join("\n"))) {
     yield* sql`INSERT INTO chat_upload_cleanup (upload_id, queued_at)
       VALUES (${uploadId}, ${now})

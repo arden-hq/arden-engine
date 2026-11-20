@@ -1,10 +1,23 @@
 import { Schema } from "effect"
 import { optionalString } from "../common/schema.js"
 
+import {
+  INTERACTION_KINDS,
+  INTERACTION_OUTCOMES,
+  INTERACTION_SOURCES,
+  type Interaction,
+  type InteractionSender
+} from "./history.js"
+
 export const InteractionActorSchema = Schema.Struct({
-  type: Schema.Literals(["agent", "workflow", "tool", "harness", "user"] as const),
+  source: Schema.Literals(INTERACTION_SOURCES),
   id: Schema.NonEmptyString,
-  display_name: optionalString
+  name: optionalString
+})
+
+export const InteractionRecipientSchema = Schema.Struct({
+  source: Schema.Literal("agent"),
+  id: Schema.NonEmptyString
 })
 
 export const InteractionReferenceSchema = Schema.Struct({
@@ -12,33 +25,34 @@ export const InteractionReferenceSchema = Schema.Struct({
   id: Schema.NonEmptyString
 })
 
-const interactionParties = {
+const senderFields = {
   from: InteractionActorSchema,
-  to: InteractionActorSchema,
-  content: Schema.String,
-  /** One plain line for the row when `content` is written for the recipient. */
+  to: Schema.optionalKey(InteractionRecipientSchema),
   preview: optionalString,
-  causedBy: Schema.optionalKey(InteractionReferenceSchema)
+  caused_by: Schema.optionalKey(InteractionReferenceSchema)
 }
 
-/** Mirrors `Interaction` in libs/loop: the stored provenance of a delivered
- *  message. A completion also carries the sender's outcome. */
-export const InteractionSchema = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literals(["message", "assignment", "event", "instruction"] as const),
-    ...interactionParties
-  }),
-  Schema.Struct({
+const kinds = INTERACTION_KINDS.filter(
+  (kind): kind is Exclude<(typeof INTERACTION_KINDS)[number], "completion"> => kind !== "completion"
+)
+
+export const interactionSenderFields = [
+  { kind: Schema.Literals(kinds), ...senderFields },
+  {
     kind: Schema.Literal("completion"),
-    outcome: Schema.Literals([
-      "completed",
-      "failed",
-      "cancelled",
-      "needs_attention",
-      "interrupted"
-    ] as const),
-    ...interactionParties
-  })
+    outcome: Schema.Literals(INTERACTION_OUTCOMES),
+    ...senderFields
+  }
+] as const
+
+export const InteractionSenderSchema: Schema.Codec<InteractionSender> = Schema.Union([
+  Schema.Struct(interactionSenderFields[0]),
+  Schema.Struct(interactionSenderFields[1])
+])
+
+export const InteractionSchema: Schema.Codec<Interaction> = Schema.Union([
+  Schema.Struct({ ...interactionSenderFields[0], content: Schema.String }),
+  Schema.Struct({ ...interactionSenderFields[1], content: Schema.String })
 ])
 
 export const AgentResultSchema = Schema.Struct({

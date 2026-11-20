@@ -424,7 +424,6 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
           {
             role: "user",
             client_id: "async-result:call-background",
-            is_meta: true,
             content: [
               {
                 type: "context",

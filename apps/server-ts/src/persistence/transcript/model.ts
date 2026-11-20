@@ -13,6 +13,7 @@ export const MessageRoleSchema = Schema.Literals([
   "system",
   "developer",
   "user",
+  "interaction",
   "assistant",
   "tool"
 ] as const)
@@ -53,17 +54,32 @@ export type MessageAuthor = "owner" | "answer" | "copy" | "automation" | "agent"
 
 /** The author a writer's own marks give its message; null for the roles Arden writes. */
 export const messageAuthor = (message: Readonly<Record<string, unknown>>): MessageAuthor | null => {
-  if (message.role !== "user") return null
+  if (message.role !== "user" && message.role !== "interaction") return null
   if (message.forked_from !== undefined) return "copy"
-  if (message.automation !== undefined) return "automation"
-  const interaction = message.interaction
-  if (isRecord(interaction) && isRecord(interaction.from) && interaction.from.type === "harness")
-    return "app"
-  if (interaction !== undefined || message.from_chat !== undefined) return "agent"
-  if (message.sent_from !== undefined) return "agent"
-  if (message.is_meta !== true) return "owner"
-  return message.question_answer === undefined ? "app" : "answer"
+  if (message.role === "user") {
+    if (message.sent_from !== undefined) return "agent"
+    return message.question_answer === undefined ? "owner" : "answer"
+  }
+  const from = message.from
+  if (!isRecord(from)) return "unknown"
+  switch (from.source) {
+    case "automation":
+      return "automation"
+    case "harness":
+      return "app"
+    case "agent":
+    case "workflow":
+    case "tool":
+      return "agent"
+    default:
+      return "unknown"
+  }
 }
+
+export const isWrittenByPerson = (message: {
+  readonly role: string
+  readonly question_answer?: unknown
+}): boolean => message.role === "user" && message.question_answer === undefined
 
 export const visibleMessageCount = (messages: ReadonlyArray<StoredMessageEnvelope>): number =>
   messages.filter(

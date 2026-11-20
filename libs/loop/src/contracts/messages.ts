@@ -102,12 +102,18 @@ export interface ToolCall {
 
 export type AssistantTextPhase = "commentary" | "final_answer"
 
-export type InteractionActorType = "agent" | "workflow" | "tool" | "harness" | "user"
+export const INTERACTION_SOURCES = ["agent", "workflow", "tool", "automation", "harness"] as const
+export type InteractionSource = (typeof INTERACTION_SOURCES)[number]
 
 export interface InteractionActor extends JsonObject {
-  readonly type: InteractionActorType
+  readonly source: InteractionSource
   readonly id: string
-  readonly display_name?: string
+  readonly name?: string
+}
+
+export interface InteractionRecipient extends JsonObject {
+  readonly source: "agent"
+  readonly id: string
 }
 
 export interface InteractionReference extends JsonObject {
@@ -122,15 +128,14 @@ export interface ReplyContext extends JsonObject {
   readonly content: string
 }
 
-interface InteractionBase extends JsonObject {
-  readonly from: InteractionActor
-  readonly to: InteractionActor
-  readonly content: string
-  /** One plain line for a person's row when `content` is written for the
-   *  recipient model; the row falls back to `content`. */
-  readonly preview?: string
-  readonly causedBy?: InteractionReference
-}
+export const INTERACTION_KINDS = [
+  "message",
+  "assignment",
+  "instruction",
+  "event",
+  "completion"
+] as const
+export type InteractionKind = (typeof INTERACTION_KINDS)[number]
 
 /** `interrupted`: the sender stopped because the host restarted. */
 export const INTERACTION_OUTCOMES = [
@@ -140,15 +145,7 @@ export const INTERACTION_OUTCOMES = [
   "needs_attention",
   "interrupted"
 ] as const
-type InteractionOutcome = (typeof INTERACTION_OUTCOMES)[number]
-
-/** Provider-neutral communication delivered by the harness. */
-export type Interaction =
-  | (InteractionBase & { readonly kind: "message" | "assignment" | "event" | "instruction" })
-  | (InteractionBase & {
-      readonly kind: "completion"
-      readonly outcome: InteractionOutcome
-    })
+export type InteractionOutcome = (typeof INTERACTION_OUTCOMES)[number]
 
 export type AssistantOutputPart =
   | {
@@ -173,8 +170,6 @@ export type AssistantOutputPart =
 interface MessageFields extends Metadata {
   readonly message_id?: string
   readonly client_id?: string
-  /** A harness-written envelope rather than authored text. */
-  readonly is_meta?: boolean
 }
 
 export interface AsyncToolLaunch {
@@ -206,16 +201,26 @@ interface DeveloperMessage extends MessageFields {
 export interface UserMessage extends MessageFields {
   readonly role: "user"
   readonly content?: string | null | ReadonlyArray<Metadata>
-  /** Durable carrier; provider preparation derives the actual model role/item. */
-  readonly interaction?: Interaction
   /** One quoted message, or several. Stored histories hold either form; read it
    *  through `replyContexts`. */
   readonly replyTo?: ReplyContext | ReadonlyArray<ReplyContext>
+}
+
+export type InteractionMessage = MessageFields & {
+  readonly role: "interaction"
+  readonly from: InteractionActor
+  readonly to?: InteractionRecipient
+  readonly content: string | ReadonlyArray<Metadata>
+  readonly preview?: string
+  readonly caused_by?: InteractionReference
   /** On the correction `hooks.checkFinalText` appended: the assistant records
    *  of the answer it sent back. Durable with the history, so a host that
    *  resumes the run knows the check already ran and what it replaced. */
   readonly rejected_message_ids?: ReadonlyArray<string>
-}
+} & (
+    | { readonly kind: Exclude<InteractionKind, "completion"> }
+    | { readonly kind: "completion"; readonly outcome: InteractionOutcome }
+  )
 
 export interface AssistantMessage extends MessageFields {
   readonly role: "assistant"
@@ -244,11 +249,12 @@ export type ChatMessage =
   | SystemMessage
   | DeveloperMessage
   | UserMessage
+  | InteractionMessage
   | AssistantMessage
   | ToolResultMessage
 export type ModelMessage = ChatMessage
 
-export type Role = "system" | "developer" | "user" | "assistant" | "tool"
+export type Role = ChatMessage["role"]
 
 export interface ProviderToolCall {
   readonly id: string

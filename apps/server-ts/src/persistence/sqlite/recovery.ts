@@ -336,7 +336,7 @@ const recoverChatRunInTransaction = Effect.fn("SqlitePersistence.recoverChatRun"
     }
     const message = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json)
     if (
-      message.role !== "user" ||
+      (message.role !== "user" && message.role !== "interaction") ||
       message.message_id !== row.message_id ||
       message.client_id !== row.client_id ||
       knownIds.has(message.message_id)

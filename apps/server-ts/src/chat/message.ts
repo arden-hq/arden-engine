@@ -68,7 +68,7 @@ import {
   automationRequestHash,
   taskContinuation,
   makeAutomationMessage,
-  makeUserMessage,
+  makeInputMessage,
   receipt,
   requestHash,
   validateInput,
@@ -370,7 +370,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
                 })
             )
           )
-          const message = yield* makeUserMessage(input)
+          const message = yield* makeInputMessage(input)
           const assistantMessageId = randomUUID()
           const commit = yield* store
             .prepareReceive({

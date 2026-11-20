@@ -253,8 +253,8 @@ export const withCausedBelongsTo = Effect.fn("RunContext.withCausedBelongsTo")(f
   input: {
     readonly sessionId: string
     readonly causingRunId: string | undefined
-    readonly interaction:
-      | { readonly causedBy?: RunCause; readonly from: { readonly id: string } }
+    readonly sender:
+      | { readonly caused_by?: RunCause; readonly from: { readonly id: string } }
       | undefined
   }
 ): Effect.fn.Return<RunContext, WorkStoreError> {
@@ -262,9 +262,9 @@ export const withCausedBelongsTo = Effect.fn("RunContext.withCausedBelongsTo")(f
   const belongsTo = yield* causedRunBelongsTo(sql, {
     sessionId: input.sessionId,
     cause:
-      input.interaction?.causedBy ??
+      input.sender?.caused_by ??
       (input.causingRunId === undefined ? undefined : { type: "run", id: input.causingRunId }),
-    senderRef: input.interaction?.from.id
+    senderRef: input.sender?.from.id
   })
   return belongsTo === undefined ? context : { ...context, belongs_to: belongsTo }
 })

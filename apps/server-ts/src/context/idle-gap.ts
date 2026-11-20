@@ -1,4 +1,5 @@
 import { ageWords } from "@arden-hq/std/time"
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { Predicate } from "effect"
 
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
@@ -9,7 +10,6 @@ const IDLE_GAP_THRESHOLD_MS = 30 * 60 * 1_000
 interface ConversationMessage {
   readonly role: string
   readonly content?: unknown
-  readonly is_meta?: unknown
 }
 
 const isIdleGap = (value: unknown): boolean =>
@@ -36,7 +36,7 @@ export const withIdleGapContext = ({
   readonly elapsedMs: number | null
 }): StoredMessageEnvelope => {
   const cleaned = withoutIdleGap(message)
-  if (cleaned.is_meta === true || elapsedMs === null) return cleaned
+  if (!isWrittenByPerson(cleaned) || elapsedMs === null) return cleaned
   const text = idleGapText(elapsedMs)
   if (text === null) return cleaned
   const context = {
@@ -62,9 +62,7 @@ export const withIdleGapContext = ({
 export const projectCurrentIdleGap = <Message extends ConversationMessage>(
   messages: ReadonlyArray<Message>
 ): ReadonlyArray<Message> => {
-  const latestUser = messages.findLastIndex(
-    (message) => message.role === "user" && message.is_meta !== true
-  )
+  const latestUser = messages.findLastIndex((message) => isWrittenByPerson(message))
   return messages.map((message, index) =>
     index === latestUser ? message : withoutIdleGap(message)
   )

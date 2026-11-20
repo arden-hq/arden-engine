@@ -332,7 +332,8 @@ export const makeWorkCaptureSql = (options: {
       )
       const origin = yield* sql<{ readonly message_id: string }>`
         SELECT message_id FROM session_messages
-        WHERE session_id = ${options.sessionId} AND message_id = ${turnId} AND role = 'user'
+        WHERE session_id = ${options.sessionId} AND message_id = ${turnId}
+          AND role IN ('user', 'interaction')
       `.pipe(
         Effect.mapError((cause) =>
           workError("storage", "Could not read the originating user message", cause)

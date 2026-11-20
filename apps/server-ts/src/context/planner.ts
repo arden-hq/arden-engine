@@ -1,4 +1,5 @@
 import { Predicate } from "effect"
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 import { ownerText } from "../persistence/transcript/owner-words.js"
@@ -208,7 +209,9 @@ const chooseTurnBoundary = (
 }
 
 const isToolContinuation = (message: StoredMessageEnvelope): boolean =>
-  message.role === "tool" || (message.role === "user" && message.is_meta === true)
+  message.role === "tool" ||
+  message.role === "interaction" ||
+  (message.role === "user" && !isWrittenByPerson(message))
 
 const earliestLaunch = (
   messages: ReadonlyArray<StoredMessageEnvelope>,
@@ -284,11 +287,11 @@ export const planCompaction = (
   const conversationSize = tailSize(0)
   const targetTailSize = Math.max(1, Math.ceil(conversationSize * keepRatio))
   const userStarts = messages.flatMap((message, index) =>
-    message.role === "user" && message.is_meta !== true ? [index] : []
+    isWrittenByPerson(message) ? [index] : []
   )
   const last = messages.at(-1)
   const preferredStarts =
-    last?.role === "user" && last.is_meta !== true ? userStarts.slice(0, -1) : userStarts
+    last !== undefined && isWrittenByPerson(last) ? userStarts.slice(0, -1) : userStarts
   let tailStart = chooseTurnBoundary(preferredStarts, tailSize, targetTailSize)
   const latestTurnStart = preferredStarts.at(-1)
   const latestTurnExceedsTarget =

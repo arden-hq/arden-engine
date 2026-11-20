@@ -53,7 +53,7 @@ export const answerFixInHistory = (
   messages.flatMap((message) => {
     const rejected = message.rejected_message_ids
     if (
-      message.role !== "user" ||
+      message.role !== "interaction" ||
       typeof message.message_id !== "string" ||
       !Array.isArray(rejected) ||
       rejected.length === 0 ||

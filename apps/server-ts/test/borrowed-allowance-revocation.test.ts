@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { makeUserMessage } from "../src/chat/message-input.js"
+import { makeInputMessage } from "../src/chat/message-input.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
@@ -145,7 +145,7 @@ const wakeStoppedWorker = Effect.fn("wakeStoppedWorker")(function* (
     clientId: handoff.clientId,
     requestHash: handoff.clientId,
     assistantMessageId: "woken-response",
-    message: yield* makeUserMessage({ ...handoff, isMeta: true, sessionId: worker.sessionId }),
+    message: yield* makeInputMessage({ ...handoff, isMeta: true, sessionId: worker.sessionId }),
     wake: true
   })
   if (woken._tag !== "Started") return yield* Effect.die("The worker did not start")

@@ -479,9 +479,10 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
   const message = yield* Schema.decodeUnknownEffect(StoredMessageEnvelopeSchema)({
     message_id: options.messageId,
     turn_id: options.messageId,
-    role: "user",
+    role: "interaction",
+    from: { source: "harness", id: "communication" },
+    kind: "event",
     content: "",
-    is_meta: true,
     communication,
     created_at: options.createdAt
   })
@@ -524,7 +525,7 @@ export const writeCommunicationEnvelopeInTransaction = Effect.fn(
   yield* options.sql`INSERT INTO session_messages (
       session_id, message_id, seq, role, message_json, client_id, created_at, search_text, author
     ) VALUES (
-      ${options.sessionId}, ${options.messageId}, ${sequence}, 'user', ${messageJson}, NULL,
+      ${options.sessionId}, ${options.messageId}, ${sequence}, 'interaction', ${messageJson}, NULL,
       ${options.createdAt}, NULL, ${messageAuthor(message)}
     )`
   yield* hideFromActiveContext(options.sql, options.sessionId, sequence)

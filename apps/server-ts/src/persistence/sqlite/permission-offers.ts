@@ -25,7 +25,8 @@ import { workError } from "./work-records.js"
 const OfferChoicesSchema = Schema.Array(OfferChoiceSchema)
 
 const deliveredSql = (sql: SqlClient.SqlClient, message: Statement.Fragment): Statement.Fragment =>
-  sql`(json_extract(${message}.message_json, '$.interaction') IS NOT NULL
+  sql`(${message}.role = 'interaction'
+    AND json_extract(${message}.message_json, '$.from.source') IN ('agent', 'workflow', 'tool')
     AND json_extract(${message}.message_json, '$.from_chat') IS NULL
     AND json_extract(${message}.message_json, '$.sent_from') IS NULL)`
 
@@ -54,7 +55,8 @@ export const ownMessageThisTurn = (sql: SqlClient.SqlClient, runId: string) =>
         AND ${ownerWordsSql(sql, sql`message`)}
         AND NOT EXISTS (
           SELECT 1 FROM session_messages AS between_
-          WHERE between_.session_id = run.session_id AND between_.role = 'user'
+          WHERE between_.session_id = run.session_id
+            AND between_.role IN ('user', 'interaction')
             AND between_.seq > message.seq AND between_.seq <= turn.seq
             AND NOT ${deliveredSql(sql, sql`between_`)}
         )

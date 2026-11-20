@@ -30,7 +30,7 @@ import { parentCompletion } from "../runs/parent-completion.js"
 import type { EndingRecord } from "../runs/ending.js"
 import type { ChatRunRecord } from "../runs/model.js"
 import { doorRef } from "../transcript/chat-events.js"
-import type { Interaction } from "@arden-hq/loop"
+import type { Interaction } from "@arden-hq/protocol/chat"
 import type { ChatUpdate } from "@arden-hq/protocol/chat"
 import { sha256Hex } from "@arden-hq/std/hash"
 
@@ -102,11 +102,11 @@ const updateInteraction = (
 ): Interaction => ({
   kind: "completion",
   from: {
-    type: "agent",
+    source: "agent",
     id: doorRef(payload.update.door, null),
-    display_name: payload.update.door.label
+    name: payload.update.door.label
   },
-  to: { type: "agent", id: payload.sessionId },
+  to: { source: "agent", id: payload.sessionId },
   content: body,
   outcome: updateOutcome(payload.update)
 })
@@ -585,11 +585,11 @@ export const makeWorkDeliverySql = ({
                 interaction: {
                   kind: "message" as const,
                   from: {
-                    type: "agent" as const,
+                    source: "agent" as const,
                     id: owner.source_ref,
-                    display_name: owner.source_name
+                    name: owner.source_name
                   },
-                  to: { type: "agent" as const, id: owner.target_ref },
+                  to: { source: "agent" as const, id: owner.target_ref },
                   content: row.body
                 }
               }))
@@ -663,25 +663,25 @@ export const makeWorkDeliverySql = ({
                     ? {
                         kind: "message" as const,
                         from: {
-                          type: "agent" as const,
+                          source: "agent" as const,
                           id: identity.source_ref,
-                          display_name: identity.source_name
+                          name: identity.source_name
                         },
-                        to: { type: "agent" as const, id: identity.destination_ref },
+                        to: { source: "agent" as const, id: identity.destination_ref },
                         content: `Update from the worker:\n${row.body}`,
-                        causedBy: { type: "run" as const, id: payload.runIds[0] }
+                        caused_by: { type: "run" as const, id: payload.runIds[0] }
                       }
                     : {
                         kind: "completion" as const,
                         from: {
-                          type: "agent" as const,
+                          source: "agent" as const,
                           id: identity.source_ref,
-                          display_name: identity.source_name
+                          name: identity.source_name
                         },
-                        to: { type: "agent" as const, id: identity.destination_ref },
+                        to: { source: "agent" as const, id: identity.destination_ref },
                         content: row.body,
                         outcome: report.outcome,
-                        causedBy: { type: "run" as const, id: payload.runIds[0] }
+                        caused_by: { type: "run" as const, id: payload.runIds[0] }
                       }
               })
             })

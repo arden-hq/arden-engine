@@ -1,4 +1,5 @@
 import { messageId, type ChatMessage, type ToolCall } from "../contracts/messages.js"
+import { harnessNotice } from "./harness-notice.js"
 import {
   callEndsTurn,
   type PendingToolCall,
@@ -145,14 +146,13 @@ export const appendOutputLimitContinuation = (
     "Not run: the reply was cut off at the output token limit before this call was sent. " +
       "Make the call again, with shorter arguments if it was long."
   )
-  messages.push({
-    role: "user",
-    message_id: messageId("text"),
-    is_meta: true,
-    content:
+  messages.push(
+    harnessNotice(
+      "output_limit",
       "Your last reply was cut off at the output token limit. Continue from where it stopped " +
-      "and do not repeat what you already wrote. Split the remaining work into smaller steps."
-  })
+        "and do not repeat what you already wrote. Split the remaining work into smaller steps."
+    )
+  )
 }
 
 export const withBudgetReminder = (

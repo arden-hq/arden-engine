@@ -25,8 +25,9 @@ export const repairOrphanToolOutputs = (
     if (open.delete(message.tool_call_id)) return message
     orphans.push({ callId: message.tool_call_id, messageId: message.message_id })
     return {
-      role: "user",
-      is_meta: true,
+      role: "interaction",
+      from: { source: "harness", id: "earlier_tool_result" },
+      kind: "event",
       ...(message.message_id === undefined ? {} : { message_id: message.message_id }),
       content: [
         {

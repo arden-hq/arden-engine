@@ -1,4 +1,5 @@
 import { canDenyApprovalByReply } from "@arden-hq/protocol/chat"
+import { isWrittenByPerson } from "../transcript/model.js"
 import { ChatWriteConflictError } from "../chat/store.js"
 import { makeToolApprovalResolveInTransaction } from "./tool-approval-resolve.js"
 import { makeDeferredDecisionInTransaction } from "./deferred-tool-calls.js"
@@ -24,8 +25,10 @@ const isTypedReply = (input: TypedInput): boolean =>
   input.automation === undefined &&
   input.modelRole === undefined &&
   input.announce === undefined &&
-  input.message["is_meta"] !== true &&
-  input.message["interaction"] === undefined &&
+  isWrittenByPerson({
+    role: String(input.message["role"]),
+    question_answer: input.message["question_answer"]
+  }) &&
   input.message["from_chat"] === undefined &&
   input.message["sent_from"] === undefined
 

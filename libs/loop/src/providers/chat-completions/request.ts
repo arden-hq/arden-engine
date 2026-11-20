@@ -251,14 +251,14 @@ const convertMessages = (
             ? []
             : [{ items: [{ role: compat.systemRole, content }], deferWhileCallsPending: true }]
         }
+        case "interaction":
+          return [
+            {
+              items: [{ role: "user", content: request.renderInteraction(message) }],
+              deferWhileCallsPending: false
+            }
+          ]
         case "user": {
-          if (message.interaction !== undefined)
-            return [
-              {
-                items: [{ role: "user", content: request.renderInteraction(message.interaction) }],
-                deferWhileCallsPending: false
-              }
-            ]
           return [
             {
               items: [{ role: "user", content: userContent(message.content, compat, label) }],

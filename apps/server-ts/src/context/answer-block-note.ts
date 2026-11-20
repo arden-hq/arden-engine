@@ -1,4 +1,5 @@
 import { answerBlockText, readAnswerBlock } from "@arden-hq/answer-ui"
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { blockHasControls, type AnswerBlockState } from "@arden-hq/answer-ui/state"
 import type { ChatRunnerMessage } from "../chat/runner-contract.js"
 import { answerBlockBodies } from "@arden-hq/protocol/chat"
@@ -8,9 +9,7 @@ const HEADING = "Answer block values"
 export const latestAnswer = (
   messages: ReadonlyArray<ChatRunnerMessage>
 ): { readonly messageId: string; readonly text: string } | undefined => {
-  const userIndex = messages.findLastIndex(
-    (message) => message.role === "user" && message.is_meta !== true
-  )
+  const userIndex = messages.findLastIndex((message) => isWrittenByPerson(message))
   for (let index = userIndex - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message?.role !== "assistant" || typeof message.content !== "string") continue

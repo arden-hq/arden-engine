@@ -581,7 +581,7 @@ export const makeSessionBranch = ({
         )
         OR EXISTS (
           SELECT 1 FROM session_messages AS own
-          WHERE own.session_id = fork.child_session_id AND own.role = 'user'
+          WHERE own.session_id = fork.child_session_id AND own.role IN ('user', 'interaction')
             AND NOT EXISTS (
               SELECT 1 FROM session_messages AS copied
               WHERE copied.session_id = fork.source_session_id AND copied.message_id = own.message_id

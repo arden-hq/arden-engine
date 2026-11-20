@@ -1,10 +1,10 @@
 import { replaceAnswerBlocks } from "@arden-hq/protocol/chat"
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { compactAnswerBlock } from "../persistence/transcript/content.js"
 
 interface HistoryMessage {
   readonly role: string
   readonly content?: unknown
-  readonly is_meta?: unknown
   readonly message_id?: unknown
 }
 
@@ -14,9 +14,7 @@ const answerBlockReference = (messageId: string, block: number): string =>
 export const projectAnswerBlocks = <Message extends HistoryMessage>(
   messages: ReadonlyArray<Message>
 ): ReadonlyArray<Message> => {
-  const latestUser = messages.findLastIndex(
-    (message) => message.role === "user" && message.is_meta !== true
-  )
+  const latestUser = messages.findLastIndex((message) => isWrittenByPerson(message))
   const latestAnswer = messages.findLastIndex(
     (message, index) => index < latestUser && message.role === "assistant" && hasText(message)
   )

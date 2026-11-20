@@ -68,6 +68,7 @@ import { automationAutoResume } from "./0173_automation_auto_resume.js"
 import { threadMetadataObject } from "./0174_thread_metadata_object.js"
 import { activeContextWindowOnly } from "./0175_active_context_window_only.js"
 import { toolResultsAsToolMessages } from "./0176_tool_results_as_tool_messages.js"
+import { interactionRole } from "./0177_interaction_role.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -379,7 +380,8 @@ export const migrations: ReadonlyArray<Migration> = [
   automationAutoResume,
   threadMetadataObject,
   activeContextWindowOnly,
-  toolResultsAsToolMessages
+  toolResultsAsToolMessages,
+  interactionRole
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

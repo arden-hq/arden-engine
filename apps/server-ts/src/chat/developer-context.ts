@@ -63,7 +63,6 @@ export const appendDeveloperContext = ({
       message_id: `${input.runId}:context:${source}:${randomUUID()}`,
       created_at: currentIso(),
       turn_id: input.turnId,
-      is_meta: true,
       ...metadata,
       arden_context_source: source,
       content: rendered

@@ -95,14 +95,11 @@ export const noticeInput = (notice: TerminalNotice): ChatSendInput => ({
   clientId: notice.clientId,
   approvalMode: notice.approvalMode,
   message: notice.content,
-  isMeta: true,
-  interaction: {
+  sender: {
     kind: "completion",
-    from: { type: "tool", id: `exec_command:${notice.id}`, display_name: notice.command },
-    to: { type: "agent", id: notice.sessionId },
-    content: notice.content,
+    from: { source: "tool", id: `exec_command:${notice.id}`, name: notice.command },
     outcome: notice.outcome,
-    causedBy: { type: "tool_call", id: notice.toolCallId }
+    caused_by: { type: "tool_call", id: notice.toolCallId }
   }
 })
 

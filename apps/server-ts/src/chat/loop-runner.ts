@@ -1,5 +1,5 @@
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import {
-  isHumanMessage,
   makeAgent,
   pendingBackgroundCalls,
   resolveModelCapabilities,
@@ -365,7 +365,6 @@ const makeTodoReminderMiddleware =
         message_id: `${input.runId}:context:${TODO_REMINDER_SOURCE}:${randomUUID()}`,
         created_at: currentIso(),
         turn_id: input.turnId,
-        is_meta: true,
         arden_context_source: TODO_REMINDER_SOURCE,
         content: reminder
       }
@@ -399,7 +398,6 @@ const ownerInstructionsMiddleware =
         message_id: `${input.runId}:context:${OWNER_INSTRUCTIONS_SOURCE}:${randomUUID()}`,
         created_at: currentIso(),
         turn_id: input.turnId,
-        is_meta: true,
         arden_context_source: OWNER_INSTRUCTIONS_SOURCE,
         content: recital
       }
@@ -438,7 +436,6 @@ const appendRuntimeContext = (
       message_id: `${input.runId}:context:runtime:${randomUUID()}`,
       created_at: currentIso(),
       turn_id: input.turnId,
-      is_meta: true,
       arden_context_source: "runtime",
       arden_context_update: update.kind,
       arden_context_state: update.state,
@@ -458,7 +455,8 @@ const makeSystemContextMiddleware = (
     const prepared = await next(request)
     const messages = toLoopMessages(prepared.messages)
     const userIndex = messages.reduce(
-      (last, message, index) => (message.role === "user" ? index : last),
+      (last, message, index) =>
+        message.role === "user" || message.role === "interaction" ? index : last,
       -1
     )
     const user = userIndex < 0 ? undefined : messages[userIndex]
@@ -718,7 +716,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
           waitForPendingMessages: input.waitForPendingMessages,
           hasPendingInput: input.peekPendingInput,
           isOwnerMessage: (message) =>
-            isHumanMessage(message) && !("sent_from" in message && message.sent_from === "cli"),
+            isWrittenByPerson(message) && !("sent_from" in message && message.sent_from === "cli"),
           holdBackgroundCalls: (calls) => input.tools.holdBackground(calls),
           claimBackgroundCalls: (toolCallIds) => input.tools.claimBackground(toolCallIds),
           ...(answerFixInHistory(input.messages, input.assistantMessageId).length > 0

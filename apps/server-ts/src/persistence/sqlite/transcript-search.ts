@@ -5,7 +5,7 @@ import {
   ChatHandoffSourceSchema,
   ChatUpdateSchema,
   CommunicationEnvelopeSchema,
-  InteractionSchema
+  InteractionSenderSchema
 } from "@arden-hq/protocol/effect/chat"
 import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
@@ -334,9 +334,9 @@ const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInternalSea
     }
   ) {
     const envelope = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json)
-    if (envelope.role !== "user") return false
-    const interaction = Option.getOrUndefined(
-      Schema.decodeUnknownOption(InteractionSchema)(envelope.interaction)
+    if (envelope.role !== "interaction") return false
+    const sender = Option.getOrUndefined(
+      Schema.decodeUnknownOption(InteractionSenderSchema)(envelope)
     )
     const fromChat = Option.getOrUndefined(
       Schema.decodeUnknownOption(ChatHandoffSourceSchema)(envelope.from_chat)
@@ -344,7 +344,7 @@ const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInternalSea
     const forwardedFrom = Option.getOrUndefined(
       Schema.decodeUnknownOption(ChatForwardedSourceSchema)(envelope.forwarded_from)
     )
-    const instructionSource = isAgentInstruction(interaction, {
+    const instructionSource = isAgentInstruction(sender, {
       parentSessionRef: row.parent_session_ref ?? undefined
     })
       ? (row.parent_session_ref ?? undefined)
@@ -353,7 +353,7 @@ const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInternalSea
     if (
       isInternalWorkMessage({
         role: envelope.role,
-        interaction,
+        sender,
         communication: Option.getOrUndefined(
           Schema.decodeUnknownOption(CommunicationEnvelopeSchema)(envelope.communication)
         ),
@@ -369,7 +369,6 @@ const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInternalSea
       })
     )
       return true
-    if (envelope.is_meta !== true) return false
     return isInternalWorkMessage({
       role: envelope.role,
       agentResult: yield* agentResultPresentation(sql, row.session_id, row.message_id)

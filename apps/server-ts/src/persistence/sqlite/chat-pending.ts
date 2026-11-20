@@ -68,7 +68,7 @@ export const loadPendingInTransaction = Effect.fn("SqliteChatWriteStore.loadPend
         )
       )
       if (
-        message.role !== "user" ||
+        (message.role !== "user" && message.role !== "interaction") ||
         message.message_id !== row.message_id ||
         message.client_id !== row.client_id
       ) {

@@ -1,4 +1,5 @@
 import { journalHeadSequenceSql } from "@arden-hq/journal/effect"
+import { isWrittenByPerson } from "../transcript/model.js"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import type {
   BrowserScope,
@@ -272,7 +273,7 @@ export const makeSessionQueries = ({
   )
 
   const nameSeed = (envelope: StoredMessageEnvelope): SessionNameSeed | null => {
-    if (envelope.role !== "user" || envelope.is_meta === true) return null
+    if (!isWrittenByPerson(envelope)) return null
     const content = envelope.content
     const blocks: ReadonlyArray<Readonly<Record<string, unknown>>> = Array.isArray(content)
       ? content.filter(
@@ -338,7 +339,7 @@ export const makeSessionQueries = ({
       FROM session_messages AS message
       JOIN sessions AS session ON session.session_id = message.session_id
       WHERE message.session_id = ${sessionId}
-        AND message.role = 'user'
+        AND message.role IN ('user', 'interaction')
         AND message.created_at >= session.started_at
       ORDER BY message.seq ASC
     `.pipe(

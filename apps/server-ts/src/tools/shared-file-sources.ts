@@ -1,4 +1,5 @@
 import { splitAttachedFiles } from "@arden-hq/protocol/chat"
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { Effect, Option, Schema } from "effect"
 import path from "node:path"
 
@@ -59,7 +60,7 @@ export const transcriptFiles = async (
       )
       for (const record of page.records) {
         const message = record.envelope
-        if (message.role !== "user" || message.is_meta === true) continue
+        if (!isWrittenByPerson(message)) continue
         if (Array.isArray(message.content)) {
           for (const [index, block] of message.content.entries()) {
             const image = Schema.decodeUnknownOption(AttachedImageSchema)(block)

@@ -134,13 +134,13 @@ export const contextSessionSchemaSection = {
     ) WITHOUT ROWID`,
     `CREATE TRIGGER session_messages_role_insert
       BEFORE INSERT ON session_messages
-      WHEN NEW.role NOT IN ('system', 'developer', 'user', 'assistant', 'tool')
+      WHEN NEW.role NOT IN ('system', 'developer', 'user', 'interaction', 'assistant', 'tool')
       BEGIN
         SELECT RAISE(ABORT, 'Unknown transcript message role');
       END`,
     `CREATE TRIGGER session_messages_role_update
       BEFORE UPDATE OF role ON session_messages
-      WHEN NEW.role NOT IN ('system', 'developer', 'user', 'assistant', 'tool')
+      WHEN NEW.role NOT IN ('system', 'developer', 'user', 'interaction', 'assistant', 'tool')
       BEGIN
         SELECT RAISE(ABORT, 'Unknown transcript message role');
       END`,

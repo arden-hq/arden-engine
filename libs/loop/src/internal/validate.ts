@@ -1,5 +1,9 @@
 import { InvalidModelResponseError, ModelProviderError, ProtocolContractError } from "../errors.js"
-import { INTERACTION_OUTCOMES } from "../contracts/messages.js"
+import {
+  INTERACTION_KINDS,
+  INTERACTION_OUTCOMES,
+  INTERACTION_SOURCES
+} from "../contracts/messages.js"
 import type {
   AssistantOutputPart,
   ChatMessage,
@@ -43,36 +47,34 @@ const isMessageOrigin = (value: unknown): value is MessageOrigin =>
   typeof value.model === "string" &&
   typeof value.requested_model === "string"
 
-const checkInteraction = (value: unknown): void => {
-  if (!isRecord(value)) fail("messages", "interaction must be an object")
-  const actor = (candidate: unknown): boolean =>
-    isRecord(candidate) &&
-    ["agent", "workflow", "tool", "harness", "user"].includes(String(candidate.type)) &&
-    typeof candidate.id === "string" &&
-    candidate.id.length > 0
-  if (!actor(value.from) || !actor(value.to) || typeof value.content !== "string") {
-    fail("messages", "interaction needs valid actors and content")
-  }
+const isOneOf = <T extends string>(values: ReadonlyArray<T>, value: unknown): value is T =>
+  values.some((candidate) => candidate === value)
+
+const checkInteraction = (message: Record<string, unknown>): void => {
+  const { from, to } = message
   if (
-    !["message", "assignment", "completion", "event", "instruction"].includes(String(value.kind))
-  ) {
-    fail("messages", "interaction kind is invalid")
-  }
-  if (
-    value.kind === "completion" &&
-    !INTERACTION_OUTCOMES.some((outcome) => outcome === value.outcome)
-  ) {
+    !isRecord(from) ||
+    !isOneOf(INTERACTION_SOURCES, from.source) ||
+    typeof from.id !== "string" ||
+    from.id.length === 0
+  )
+    fail("messages", "an interaction needs who it is from")
+  if (to !== undefined && (!isRecord(to) || to.source !== "agent" || typeof to.id !== "string"))
+    fail("messages", "an interaction's recipient must be an agent")
+  if (typeof message.content !== "string" && !isBlockArray(message.content))
+    fail("messages", "interaction content must be a string or content-block array")
+  if (!isOneOf(INTERACTION_KINDS, message.kind)) fail("messages", "interaction kind is invalid")
+  if (message.kind === "completion" && !isOneOf(INTERACTION_OUTCOMES, message.outcome))
     fail("messages", "completion interaction outcome is invalid")
-  }
+  const cause = message.caused_by
   if (
-    value.causedBy !== undefined &&
-    (!isRecord(value.causedBy) ||
-      !["message", "run", "tool_call", "workflow"].includes(String(value.causedBy.type)) ||
-      typeof value.causedBy.id !== "string" ||
-      value.causedBy.id.length === 0)
-  ) {
+    cause !== undefined &&
+    (!isRecord(cause) ||
+      !["message", "run", "tool_call", "workflow"].includes(String(cause.type)) ||
+      typeof cause.id !== "string" ||
+      cause.id.length === 0)
+  )
     fail("messages", "interaction reference is invalid")
-  }
 }
 
 const checkReplyContext = (value: unknown): void => {
@@ -136,11 +138,9 @@ const checkMessage = (value: unknown): void => {
       }
       return
     }
+    case "interaction":
+      return checkInteraction(message)
     case "user": {
-      if ("interaction" in message && "replyTo" in message) {
-        fail("messages", "user messages cannot be both interactions and replies")
-      }
-      if ("interaction" in message) checkInteraction(message.interaction)
       if ("replyTo" in message) checkReplyContexts(message.replyTo)
       if (
         "content" in message &&

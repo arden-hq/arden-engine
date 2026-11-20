@@ -73,6 +73,7 @@ import { ServerEventSchema } from "../events/schema.js"
 import { GmailSendReceiptSchema } from "./gmail-receipt.js"
 
 export * from "./contracts.js"
+export { INTERACTION_KINDS, INTERACTION_OUTCOMES, INTERACTION_SOURCES } from "./history.js"
 export type { ToolResultValueResponse } from "./schema.js"
 export * from "./runtime.js"
 export {

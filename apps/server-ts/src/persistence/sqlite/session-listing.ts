@@ -385,7 +385,8 @@ export const makeSessionListing = ({
              parent_session_id, parent_run_id, parent_tool_call_id,
              parent_message_id,
              (SELECT message.search_text FROM session_messages AS message
-              WHERE message.session_id = sessions.session_id AND message.role = 'user'
+              WHERE message.session_id = sessions.session_id
+                AND message.role IN ('user', 'interaction')
                 AND TRIM(COALESCE(message.search_text, '')) <> ''
               ORDER BY message.seq LIMIT 1) AS first_text
       FROM sessions

@@ -440,7 +440,6 @@ const appendOnlyToolRecord = (
 ): DeveloperRecord => ({
   message_id: messageId(kind),
   role: "developer",
-  is_meta: true,
   content,
   ...tools
 })
@@ -527,9 +526,7 @@ export const callModel = async (run: Run, view: StepView, instruction: string | 
             await run.history.checkpoint((current, change) =>
               hookCall("onCheckpoint", () => wiring.hooks.onCheckpoint?.(current, change))
             )
-          return pending.filter(
-            (message): message is UserMessage => message.role === "user" && message.is_meta !== true
-          )
+          return pending.filter((message): message is UserMessage => message.role === "user")
         })
     },
     messages: requestMessages,

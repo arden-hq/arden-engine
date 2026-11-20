@@ -12,7 +12,6 @@ import { SqlClient } from "effect/unstable/sql"
 import { makeTranscriptSearches } from "./transcript-search.js"
 import { makeToolResultInSession, type TranscriptRow } from "./transcript-tool-result.js"
 import { makeToolCallCounts } from "./transcript-tool-calls.js"
-import { questionAnswerPredicate } from "./steered-answer.js"
 import { RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import {
   TranscriptDataCorruptionError,
@@ -106,19 +105,14 @@ export const conversationMessagePredicate = (sql: SqlClient.SqlClient) =>
   sql`
     ${ownMessagePredicate(sql)} AND
     (
+      m.role = 'user'
+      OR
       (
-        m.role = 'user'
+        m.role = 'interaction'
         AND (
-          COALESCE(json_extract(m.message_json, '$.is_meta'), 0) <> 1
-          OR json_extract(m.message_json, '$.automation') IS NOT NULL
-          -- A message the harness delivered for another sender (an agent, a
-          -- Workflow completion) is a row in the conversation, not a hidden
-          -- carrier. The harness's own instructions stay out.
-          OR COALESCE(json_extract(m.message_json, '$.interaction.from.type'), '')
-            IN ('agent', 'workflow')
+          json_extract(m.message_json, '$.from.source') IN ('automation', 'agent', 'workflow')
           OR ${agentResultMessagePredicate(sql)}
           OR ${communicationDrawnSql(sql)}
-          OR ${questionAnswerPredicate(sql)}
         )
       )
       OR
@@ -126,7 +120,6 @@ export const conversationMessagePredicate = (sql: SqlClient.SqlClient) =>
         m.role = 'assistant'
         AND m.search_text IS NOT NULL
         AND json_extract(m.message_json, '$.compaction') IS NULL
-        AND COALESCE(json_extract(m.message_json, '$.is_meta'), 0) <> 1
       )
       OR
       (
@@ -199,7 +192,7 @@ export const makeTranscriptQueries = ({
       )
     )
     const agentResult =
-      row.role === "user" && envelope.is_meta === true
+      row.role === "interaction"
         ? yield* agentResultPresentation(sql, row.session_id, row.message_id).pipe(
             Effect.mapError((cause) =>
               corruption(row.session_id, "Could not read agent result", cause)

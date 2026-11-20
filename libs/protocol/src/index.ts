@@ -28,9 +28,12 @@ export type {
   AgentResult,
   Interaction,
   InteractionActor,
-  InteractionActorType,
+  InteractionKind,
   InteractionOutcome,
-  InteractionReference
+  InteractionRecipient,
+  InteractionReference,
+  InteractionSender,
+  InteractionSource
 } from "./chat/history.js"
 export type { EventUsage, CommonServerEventFields } from "./common/event-fields.js"
 export type {

@@ -106,7 +106,7 @@ export const makeScriptResults = ({
     const stamped = message.workflow_delivery
     if (typeof stamped !== "object" || stamped === null || Array.isArray(stamped)) return false
     return (
-      message.is_meta === true &&
+      message.role === "interaction" &&
       message.message_id === clientId &&
       message.client_id === clientId &&
       "workflow_ref" in stamped &&

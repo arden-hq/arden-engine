@@ -80,7 +80,7 @@ export const makeResultHistoryProjector = (
   for (const message of input.initialMessages) {
     initialMessageIds.add(message.message_id)
     knownCreatedAt.set(message.message_id, message.created_at)
-    if (message.role === "user" && message.automation !== undefined) {
+    if (message.role === "interaction" && message.automation !== undefined) {
       automationMessages.set(message.message_id, message)
     }
   }

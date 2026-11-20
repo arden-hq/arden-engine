@@ -1,4 +1,5 @@
 import { Option, Schema } from "effect"
+import { isWrittenByPerson } from "../transcript/model.js"
 import type { StoredMessageEnvelope } from "../transcript/model.js"
 
 export const CaptureForwardSchema = Schema.Struct({
@@ -44,7 +45,7 @@ export interface HandedCapture {
 export const handedCapture = (
   messages: ReadonlyArray<StoredMessageEnvelope>
 ): HandedCapture | undefined => {
-  const first = messages.find((message) => message.role === "user" && message["is_meta"] !== true)
+  const first = messages.find(isWrittenByPerson)
   if (first === undefined) return undefined
   const content = Schema.decodeUnknownOption(HandedContentSchema)(first["content"])
   if (Option.isNone(content)) return undefined

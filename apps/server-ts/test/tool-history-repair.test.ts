@@ -19,5 +19,5 @@ it("still turns a result whose call is gone into context", () => {
     { role: "tool", tool_call_id: "gone", message_id: "m", content: "old" }
   ])
   expect(repaired.orphans).toEqual([{ callId: "gone", messageId: "m" }])
-  expect(repaired.messages[0]?.role).toBe("user")
+  expect(repaired.messages[0]?.role).toBe("interaction")
 })

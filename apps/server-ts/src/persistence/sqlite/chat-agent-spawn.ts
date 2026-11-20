@@ -1,4 +1,5 @@
 import { countOf } from "@arden-hq/std/count"
+import { storedSender } from "../transcript/interaction.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import type { RunContext } from "@arden-hq/protocol/runs"
 import type { PersistedChildAgentMetadata } from "@arden-hq/protocol/chat"
@@ -526,15 +527,14 @@ export const makeAgentSpawner = ({
           const childMessage: StoredMessageEnvelope = {
             message_id: childClientId,
             client_id: childClientId,
-            role: "user",
+            role: "interaction",
             content: task,
-            interaction: {
+            ...storedSender({
               kind: "assignment",
-              from: { type: "agent", id: parent.public_ref, display_name: parent.name },
-              to: { type: "agent", id: childRef },
-              content: task,
-              causedBy: { type: "tool_call", id: valid.parent.toolCallId }
-            },
+              from: { source: "agent", id: parent.public_ref, name: parent.name },
+              to: { source: "agent", id: childRef },
+              caused_by: { type: "tool_call", id: valid.parent.toolCallId }
+            }),
             created_at: timestamp
           }
           const childRunContext: RunContext = yield* withCausedBelongsTo(
@@ -548,7 +548,7 @@ export const makeAgentSpawner = ({
                 spaceId: parent.space_id
               })
             },
-            { sessionId: childSessionId, causingRunId: parent.run_id, interaction: undefined }
+            { sessionId: childSessionId, causingRunId: parent.run_id, sender: undefined }
           ).pipe(
             Effect.mapError((cause) =>
               writeError("spawn_agent", "invalid", cause.message, { runId: parent.run_id, cause })

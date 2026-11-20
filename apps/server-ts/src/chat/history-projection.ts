@@ -22,10 +22,20 @@ import {
   CommunicationEnvelopeSchema,
   ConnectionArrivalSchema,
   GmailSendReceiptSchema,
-  InteractionSchema,
+  InteractionActorSchema,
+  InteractionRecipientSchema,
+  InteractionReferenceSchema,
+  InteractionSenderSchema,
   QuestionAnswerSchema
 } from "@arden-hq/protocol/effect/chat"
-import type { Interaction } from "@arden-hq/loop"
+import type {
+  InteractionActor,
+  InteractionKind,
+  InteractionOutcome,
+  InteractionRecipient,
+  InteractionReference
+} from "@arden-hq/loop"
+import type { InteractionOutcome as ProtocolOutcome } from "@arden-hq/protocol/chat"
 import type { Agrees, Assert } from "@arden-hq/protocol/common"
 import { DateTime, Effect, Option, Predicate, Schema } from "effect"
 import type { ChatRunRecord } from "../persistence/runs/model.js"
@@ -41,7 +51,13 @@ import { isAgentInstruction } from "@arden-hq/protocol/views"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 
 /** @internal */
-export type InteractionAgrees = Assert<Agrees<(typeof InteractionSchema)["Type"], Interaction>>
+export type InteractionAgrees = [
+  Assert<Agrees<(typeof InteractionActorSchema)["Type"], InteractionActor>>,
+  Assert<Agrees<(typeof InteractionRecipientSchema)["Type"], InteractionRecipient>>,
+  Assert<Agrees<(typeof InteractionReferenceSchema)["Type"], InteractionReference>>,
+  Assert<Agrees<(typeof InteractionSenderSchema)["Type"]["kind"], InteractionKind>>,
+  Assert<Agrees<ProtocolOutcome, InteractionOutcome>>
+]
 
 const ReplyContextSchema = Schema.Struct({
   messageId: Schema.NonEmptyString,
@@ -305,7 +321,7 @@ const projectMessage = (
     record.role === "tool" ? Option.getOrUndefined(decodeToolOutcome(envelope.outcome)) : undefined
   const data = metadata?.data ?? envelope.data
   const automation =
-    surface === "conversation" && (record.role === "user" || record.role === "assistant")
+    surface === "conversation" && (record.role === "interaction" || record.role === "assistant")
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(
             Schema.Struct({
@@ -318,16 +334,16 @@ const projectMessage = (
         )
       : undefined
   const communication =
-    surface === "conversation" && record.role === "user"
+    surface === "conversation" && record.role === "interaction"
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(CommunicationEnvelopeSchema)(envelope.communication)
         )
       : undefined
   const update =
-    record.role === "user"
+    record.role === "interaction"
       ? Option.getOrUndefined(Schema.decodeUnknownOption(ChatUpdateSchema)(envelope.update))
       : undefined
-  const legacyRestart = record.role === "user" && isLegacyRestartInterruption(storedContent)
+  const legacyRestart = record.role === "interaction" && isLegacyRestartInterruption(storedContent)
   const decodedResult = Option.getOrUndefined(
     Schema.decodeUnknownOption(AgentResultSchema)(envelope.agent_result)
   )
@@ -340,39 +356,32 @@ const projectMessage = (
   if (storedResult !== undefined && resultPreview !== null) {
     agentResult = { ...storedResult, preview: resultPreview }
   }
-  const decodedInteraction = Option.getOrUndefined(
-    Schema.decodeUnknownOption(InteractionSchema)(envelope.interaction)
-  )
+  const decodedSender =
+    record.role === "interaction"
+      ? Option.getOrUndefined(Schema.decodeUnknownOption(InteractionSenderSchema)(envelope))
+      : undefined
   const assignmentTask =
-    record.role === "user" &&
-    decodedInteraction?.kind === "assignment" &&
-    decodedInteraction.from.type === "agent" &&
-    decodedInteraction.to.type === "agent" &&
-    decodedInteraction.from.id === assignment?.fromSessionRef &&
-    decodedInteraction.to.id === assignment?.toSessionRef &&
-    decodedInteraction.causedBy?.type === "tool_call" &&
-    decodedInteraction.causedBy.id === assignment?.toolCallId
+    decodedSender?.kind === "assignment" &&
+    decodedSender.from.source === "agent" &&
+    decodedSender.to !== undefined &&
+    decodedSender.from.id === assignment?.fromSessionRef &&
+    decodedSender.to.id === assignment?.toSessionRef &&
+    decodedSender.caused_by?.type === "tool_call" &&
+    decodedSender.caused_by.id === assignment?.toolCallId
       ? assignment?.task
       : undefined
   if (
     surface === "conversation" &&
-    record.role === "user" &&
-    decodedInteraction?.kind === "assignment" &&
-    decodedInteraction.from.type === "agent" &&
-    decodedInteraction.to.type === "agent" &&
+    decodedSender?.kind === "assignment" &&
+    decodedSender.from.source === "agent" &&
+    decodedSender.to !== undefined &&
     assignmentTask === undefined
   )
     return null
-  const interaction =
-    decodedInteraction === undefined
-      ? undefined
-      : {
-          ...decodedInteraction,
-          ...(decodedInteraction.kind === "completion" && legacyRestart
-            ? { outcome: "interrupted" as const, content: RESTART_INTERRUPTION }
-            : {}),
-          ...(assignmentTask === undefined ? {} : { content: assignmentTask })
-        }
+  const sender =
+    decodedSender?.kind === "completion" && legacyRestart
+      ? { ...decodedSender, outcome: "interrupted" as const }
+      : decodedSender
   const replyTo = Option.getOrUndefined(
     Schema.decodeUnknownOption(StoredReplySchema)(envelope.replyTo)
   )
@@ -387,22 +396,22 @@ const projectMessage = (
         )
       : undefined
   const connection =
-    record.role === "user"
+    record.role === "interaction"
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(ConnectionArrivalSchema)(envelope.connection)
         )
       : undefined
   const fromChat =
-    record.role === "user"
+    record.role === "interaction"
       ? (Option.getOrUndefined(
           Schema.decodeUnknownOption(ChatHandoffSourceSchema)(envelope.from_chat)
         ) ??
-        (isAgentInstruction(interaction, { parentSessionRef: parentSource?.session_ref })
+        (isAgentInstruction(sender, { parentSessionRef: parentSource?.session_ref })
           ? parentSource
           : undefined))
       : undefined
   const forwardedFrom =
-    record.role === "user"
+    record.role === "user" || record.role === "interaction"
       ? Option.getOrUndefined(
           Schema.decodeUnknownOption(ChatForwardedSourceSchema)(envelope.forwarded_from)
         )
@@ -433,7 +442,6 @@ const projectMessage = (
     ...(retryable === undefined ? {} : { retryable }),
     ...(outcome === undefined ? {} : { outcome }),
     ...(record.role !== "tool" || data === undefined ? {} : { data }),
-    ...(envelope.is_meta === true ? { is_meta: true } : {}),
     ...(replyTo === undefined
       ? {}
       : {
@@ -450,7 +458,6 @@ const projectMessage = (
     ...(forwardedFrom === undefined ? {} : { forwarded_from: forwardedFrom }),
     ...(sentFrom === undefined ? {} : { sent_from: sentFrom }),
     ...(agentResult === undefined ? {} : { agent_result: agentResult }),
-    ...(interaction === undefined ? {} : { interaction }),
     ...(envelope.compact === true ? { compact: true } : {}),
     turn_id: record.envelope.turn_id,
     ...(automation === undefined ? {} : { automation }),
@@ -460,13 +467,18 @@ const projectMessage = (
   const warnings = [
     ...(assistant?.warnings ?? []),
     ...(surface === "conversation" &&
-    record.role === "user" &&
+    record.role === "interaction" &&
     envelope.communication !== undefined &&
     communication === undefined
       ? ["communication envelope is invalid; dropped"]
       : [])
   ]
-  if (record.role !== "user") return { message: { ...projected, role: record.role }, warnings }
+  if (record.role === "interaction") {
+    if (sender === undefined) return null
+    return { message: { ...projected, ...sender, role: "interaction" }, warnings }
+  }
+  if (record.role === "assistant") return { message: { ...projected, role: "assistant" }, warnings }
+  if (record.role === "tool") return { message: { ...projected, role: "tool" }, warnings }
   const images = contentImages(contentValue)
   return {
     message: {

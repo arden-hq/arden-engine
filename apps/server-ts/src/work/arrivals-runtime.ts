@@ -1,6 +1,7 @@
 import { timerSleep } from "../lib/timer-sleep.js"
 import { Cause, Effect, Exit, Layer } from "effect"
 import { arrivalBatches } from "./arrival-batches.js"
+import type { InteractionSender } from "@arden-hq/protocol/chat"
 import type { ChatSendInput } from "../chat/message-input.js"
 import { ChatMessage } from "../chat/message.js"
 import type { RunDelivery } from "../persistence/deliveries/model.js"
@@ -8,25 +9,41 @@ import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { serializeOperationalCause } from "../runtime/operational-events.js"
 import { pollEverySecond, runOutbox, type Outbox } from "../runtime/outbox.js"
 
-const toSendInput = (delivery: RunDelivery): ChatSendInput => ({
-  sessionId: delivery.payload.sessionId,
-  clientId: `arrival:${delivery.deliveryId}`,
-  deliveryId: delivery.deliveryId,
-  message: delivery.body,
-  isMeta: true,
-  ...(delivery.forwardedFrom === undefined ? {} : { forwardedFrom: delivery.forwardedFrom }),
-  ...(delivery.payload.kind === "answer" &&
-  delivery.payload.timeout !== true &&
-  delivery.payload.questionId !== null
-    ? { questionAnswer: { questionId: delivery.payload.questionId } }
-    : {}),
-  ...(delivery.payload.kind === "connection" ? { connection: delivery.payload.connection } : {}),
-  ...(delivery.payload.kind === "update" ? { update: delivery.payload.update } : {}),
-  ...(delivery.interaction === undefined ? {} : { interaction: delivery.interaction }),
-  ...(delivery.images === undefined || delivery.images.length === 0
-    ? {}
-    : { images: delivery.images })
-})
+const arrivalSender = (delivery: RunDelivery): InteractionSender | undefined => {
+  if (delivery.interaction !== undefined) {
+    const { content, ...sender } = delivery.interaction
+    return content === delivery.body || sender.preview !== undefined
+      ? sender
+      : { ...sender, preview: delivery.body }
+  }
+  const { payload } = delivery
+  const personsAnswer =
+    payload.kind === "answer" && payload.timeout !== true && payload.questionId !== null
+  if (personsAnswer || delivery.forwardedFrom !== undefined) return undefined
+  return { kind: "event", from: { source: "harness", id: payload.kind } }
+}
+
+const toSendInput = (delivery: RunDelivery): ChatSendInput => {
+  const sender = arrivalSender(delivery)
+  return {
+    sessionId: delivery.payload.sessionId,
+    clientId: `arrival:${delivery.deliveryId}`,
+    deliveryId: delivery.deliveryId,
+    message: delivery.interaction?.content ?? delivery.body,
+    ...(sender === undefined ? {} : { sender }),
+    ...(delivery.forwardedFrom === undefined ? {} : { forwardedFrom: delivery.forwardedFrom }),
+    ...(delivery.payload.kind === "answer" &&
+    delivery.payload.timeout !== true &&
+    delivery.payload.questionId !== null
+      ? { questionAnswer: { questionId: delivery.payload.questionId } }
+      : {}),
+    ...(delivery.payload.kind === "connection" ? { connection: delivery.payload.connection } : {}),
+    ...(delivery.payload.kind === "update" ? { update: delivery.payload.update } : {}),
+    ...(delivery.images === undefined || delivery.images.length === 0
+      ? {}
+      : { images: delivery.images })
+  }
+}
 
 const deferDelivery = (
   work: WorkStore["Service"],

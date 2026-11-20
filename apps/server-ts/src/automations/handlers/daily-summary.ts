@@ -239,7 +239,8 @@ export const makeDailySummaryRunner = (
           )
           for (const record of [...page.records].reverse()) {
             const time = DateTime.toEpochMillis(record.createdAt)
-            if (time >= endMs || (record.role !== "user" && record.role !== "assistant")) continue
+            if (time >= endMs || record.role === "system" || record.role === "developer") continue
+            if (record.role === "tool") continue
             if (time < startMs) continue
             const text =
               record.envelope.question_answer !== undefined

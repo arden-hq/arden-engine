@@ -25,7 +25,7 @@ export const makeTurnInputs = ({
       FROM session_messages AS m
       WHERE m.session_id = ${sessionId}
         AND ${messageTurnIdSql(sql, "m")} = ${turnId}
-        AND m.role = 'user'
+        AND m.role IN ('user', 'interaction')
         AND json_extract(m.message_json, '$.superseded') IS NULL
         AND (m.message_id = ${turnId}
           OR json_extract(m.message_json, '$.applied_at') IS NOT NULL)

@@ -10,7 +10,8 @@ export const chatUploadMessagesBackfill: Backfill = {
   chunk: Effect.fn("ChatUploadMessages.backfillChunk")(function* ({ cursor, limit }) {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{ readonly message_rowid: number; readonly names: number }>`
-      SELECT message_rowid, (role = 'user' AND instr(message_json, '/uploads/') > 0) AS names
+      SELECT message_rowid,
+        (role IN ('user', 'interaction') AND instr(message_json, '/uploads/') > 0) AS names
       FROM session_messages
       WHERE message_rowid > ${Number(cursor ?? 0)}
       ORDER BY message_rowid LIMIT ${limit}
@@ -66,7 +67,7 @@ export const listUploadRefsChunk = Effect.fn("ChatUploadRefs.listChunk")(functio
     WHERE message_rowid IN ${sql.in(ids)}`
   yield* sql`DELETE FROM chat_upload_refs WHERE message_rowid IN ${sql.in(ids)}`
   for (const message of messages) {
-    if (message.role !== "user") continue
+    if (message.role !== "user" && message.role !== "interaction") continue
     for (const uploadId of uploadIdsIn(message.message_json)) {
       yield* sql`INSERT OR IGNORE INTO chat_upload_refs (upload_id, message_rowid)
         VALUES (${uploadId}, ${message.message_rowid})`

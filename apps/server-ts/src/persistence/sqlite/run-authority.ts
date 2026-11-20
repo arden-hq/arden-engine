@@ -1,5 +1,5 @@
 import type { RunContext } from "@arden-hq/protocol/runs"
-import type { InteractionSchema } from "@arden-hq/protocol/effect/chat"
+import type { InteractionSender } from "@arden-hq/protocol/chat"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -146,13 +146,13 @@ export const delegateAuthority = Effect.fn("RunAuthority.delegate")(function* (
 
 export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
   sql: SqlClient.SqlClient,
-  interaction: typeof InteractionSchema.Type | undefined,
+  sender: InteractionSender | undefined,
   sessionId: string
 ) {
   if (
-    interaction?.kind !== "message" ||
-    interaction.from.type !== "agent" ||
-    interaction.causedBy?.type !== "tool_call"
+    sender?.kind !== "message" ||
+    sender.from.source !== "agent" ||
+    sender.caused_by?.type !== "tool_call"
   )
     return undefined
   const rows = yield* sql<{
@@ -167,7 +167,7 @@ export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
     FROM tool_calls AS call
     JOIN sessions AS source ON source.session_id = call.session_id
     JOIN chat_runs AS run ON run.run_id = call.run_id
-    WHERE source.public_ref = ${interaction.from.id} AND call.tool_call_id = ${interaction.causedBy.id}
+    WHERE source.public_ref = ${sender.from.id} AND call.tool_call_id = ${sender.caused_by.id}
     ORDER BY call.started_at DESC LIMIT 1`
   const row = rows[0]
   if (row?.policy == null)

@@ -1,3 +1,4 @@
+import { chatActivitySql } from "./person-written-sql.js"
 import type { EventAutomationTrigger } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -34,8 +35,7 @@ export const loadQuietChat = Effect.fn("SqliteAutomationStore.loadQuietChat")(fu
   }>`
     SELECT seq, role, created_at, search_text AS text FROM session_messages
     WHERE session_id = ${sessionId}
-      AND role IN ('user', 'assistant')
-      AND json_extract(message_json, '$.is_meta') IS NOT 1
+      AND ${chatActivitySql(sql, sql`message_json`)}
     ORDER BY seq DESC
     LIMIT 200
   `

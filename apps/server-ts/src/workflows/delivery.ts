@@ -172,16 +172,14 @@ const scriptResultRequest = (
       attempt: payload.attempt
     }),
     message: content,
-    interaction: {
+    sender: {
       kind: "completion",
-      from: { type: "workflow", id: payload.workflowRef },
-      to: { type: "agent", id: payload.sessionRef },
-      content,
+      from: { source: "workflow", id: payload.workflowRef },
+      to: { source: "agent", id: payload.sessionRef },
       ...(payload.preview === null ? {} : { preview: payload.preview }),
       outcome: payload.status === "succeeded" ? "completed" : payload.status,
-      causedBy: { type: "workflow", id: `${payload.workflowRef}:${payload.attempt}` }
+      caused_by: { type: "workflow", id: `${payload.workflowRef}:${payload.attempt}` }
     },
-    isMeta: true,
     workflowDelivery: {
       workflowRef: payload.workflowRef,
       attempt: payload.attempt

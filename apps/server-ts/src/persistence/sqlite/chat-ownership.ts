@@ -1,3 +1,4 @@
+import { writtenByPersonSql } from "./person-written-sql.js"
 import { Effect } from "effect"
 import { Statement, type SqlClient } from "effect/unstable/sql"
 import { keyMessageJson } from "./chat-key-message.js"
@@ -83,7 +84,7 @@ const chatSettled = Effect.fn("Chat.settled")(function* (
           ON request.session_id = run.session_id AND request.client_id = run.client_id
             AND request.run_id = run.run_id
         WHERE run.session_id = chat.session_id
-          AND json_extract(${keyMessageJson(sql, "request")}, '$.is_meta') IS NOT 1
+          AND ${writtenByPersonSql(sql, keyMessageJson(sql, "request"))}
           AND json_extract(run.metadata_json, '$.automation') IS NULL
         ORDER BY run.started_at DESC, run.run_id DESC LIMIT 1) AS owner_turn_id,
       (SELECT COUNT(*) FROM owned JOIN session_queued_messages AS queued

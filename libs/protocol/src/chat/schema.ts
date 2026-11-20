@@ -47,7 +47,7 @@ export * from "./events/tool.js"
 export * from "./events/approval.js"
 export * from "./events/session.js"
 export * from "./interaction.js"
-import { AgentResultSchema, InteractionSchema } from "./interaction.js"
+import { AgentResultSchema, interactionSenderFields } from "./interaction.js"
 import { SkillNameSchema } from "../skills/schema.js"
 import {
   runLifecycleEventSchemas,
@@ -471,7 +471,6 @@ const historyMessageFields = {
   communication: Schema.optionalKey(CommunicationEnvelopeSchema),
   update: Schema.optionalKey(ChatUpdateSchema),
   agent_result: Schema.optionalKey(AgentResultSchema),
-  interaction: Schema.optionalKey(InteractionSchema),
   content: Schema.String,
   context: Schema.optionalKey(Schema.Array(ContextBlockSchema)),
   reasoning_content: optionalString,
@@ -489,7 +488,6 @@ const historyMessageFields = {
   /** A steer's stamp: when the running turn took it in, as opposed to when it
    *  was sent. Absent on rows that started their turn and on older rows. */
   applied_at: optionalString,
-  is_meta: optionalBoolean,
   reply_to: Schema.optionalKey(Schema.Array(ReplyContextSchema)),
   recipe: Schema.optionalKey(SkillNameSchema),
   /** On the hidden row that carries a Run question's answer to the run: which
@@ -530,6 +528,16 @@ export const HistoryMessageSchema: Schema.Codec<HistoryMessage> = Schema.Union([
     role: Schema.Literal("user"),
     images: Schema.optionalKey(Schema.Array(HistoryImageSchema))
   }),
+  withExtras({
+    ...historyMessageFields,
+    ...interactionSenderFields[0],
+    role: Schema.Literal("interaction")
+  }).check(noImages),
+  withExtras({
+    ...historyMessageFields,
+    ...interactionSenderFields[1],
+    role: Schema.Literal("interaction")
+  }).check(noImages),
   withExtras({
     ...historyMessageFields,
     role: Schema.Literal("assistant")

@@ -133,7 +133,9 @@ it("refuses to remove an Automation during its chat run, and keeps the run", asy
         message: {
           message_id: "removed",
           client_id: "removed",
-          role: "user",
+          role: "interaction",
+          kind: "assignment",
+          from: { source: "automation", id: automation.task_id, name: automation.name },
           content: "Review",
           created_at: new Date(now).toISOString(),
           automation: {

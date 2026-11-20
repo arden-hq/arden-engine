@@ -81,13 +81,12 @@ describe("structured output", () => {
     expect(result.object).toEqual({ verdict: "fixed" })
     expect(script.requests).toHaveLength(2)
     const correction = lastOf(defined(script.requests[1], "a correction request").messages)
-    expect(correction).toMatchObject({
-      role: "user",
-      message_id: expect.any(String),
-      is_meta: true
-    })
+    expect(correction).toMatchObject({ role: "user", message_id: expect.any(String) })
     expect(correction.content).toContain("verdict: verdict must be a string")
-    expect(result.messages.filter((message) => message.role === "user")).toHaveLength(2)
+    expect(result.messages.filter((message) => message.role === "user")).toHaveLength(1)
+    expect(result.messages.filter((message) => message.role === "interaction")).toMatchObject([
+      { from: { source: "harness", id: "output_schema" }, kind: "instruction" }
+    ])
   })
 
   it("fails with the typed StructuredOutputError when the correction is still invalid", async () => {
@@ -142,11 +141,7 @@ describe("final text check", () => {
     expect(checked).toEqual(["first answer"])
     expect(script.requests).toHaveLength(2)
     const correction = lastOf(defined(script.requests[1], "a correction request").messages)
-    expect(correction).toMatchObject({
-      role: "user",
-      is_meta: true,
-      content: "Line 3: fix the block."
-    })
+    expect(correction).toMatchObject({ role: "user", content: "Line 3: fix the block." })
     const firstAnswer = defined(
       final.messages.find(
         (message) => message.role === "assistant" && message.content === "first answer"
@@ -156,6 +151,10 @@ describe("final text check", () => {
     expect(superseded).toEqual([
       { messageIds: [firstAnswer.message_id], correctionId: correction.message_id }
     ])
-    expect(correction).toMatchObject({ rejected_message_ids: [firstAnswer.message_id] })
+    expect(final.messages.find((message) => message.role === "interaction")).toMatchObject({
+      message_id: correction.message_id,
+      from: { source: "harness", id: "final_text_check" },
+      rejected_message_ids: [firstAnswer.message_id]
+    })
   })
 })

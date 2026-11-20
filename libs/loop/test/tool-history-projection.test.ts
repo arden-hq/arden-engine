@@ -21,7 +21,6 @@ const stored: ReadonlyArray<ChatMessage> = [
 
 const media = (id: string) => ({
   role: "user",
-  is_meta: true,
   content: [
     {
       type: "context",
@@ -49,7 +48,6 @@ describe("projectToolHistory", () => {
       { role: "assistant", content: "Waiting" },
       {
         role: "user",
-        is_meta: true,
         content: [
           {
             type: "context",

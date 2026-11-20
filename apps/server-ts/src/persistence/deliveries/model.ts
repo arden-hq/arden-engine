@@ -2,7 +2,7 @@ import { AnswerWithdrawalReasonSchema, RunContextSchema } from "@arden-hq/protoc
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { ChatUpdateSchema, ConnectionArrivalSchema } from "@arden-hq/protocol/effect/chat"
 import { Schema } from "effect"
-import type { Interaction } from "@arden-hq/loop"
+import type { Interaction } from "@arden-hq/protocol/chat"
 import type { ChatImageInput, HistoryMessage } from "@arden-hq/protocol/chat"
 
 const deliveryFields = {

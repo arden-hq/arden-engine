@@ -171,21 +171,23 @@ const convertMessages = (
       }
       continue
     }
+    if (message.role === "interaction") {
+      if (message.to === undefined)
+        throw new OpenAiResponsesProviderError("An agent message needs its recipient")
+      batches.push({
+        items: [
+          {
+            type: "agent_message",
+            author: message.from.id,
+            recipient: message.to.id,
+            content: [{ type: "input_text", text: renderInteraction(message) }]
+          }
+        ],
+        deferWhileCallsPending: false
+      })
+      continue
+    }
     if (message.role === "user") {
-      if (message.interaction !== undefined) {
-        batches.push({
-          items: [
-            {
-              type: "agent_message",
-              author: message.interaction.from.id,
-              recipient: message.interaction.to.id,
-              content: [{ type: "input_text", text: renderInteraction(message.interaction) }]
-            }
-          ],
-          deferWhileCallsPending: false
-        })
-        continue
-      }
       batches.push({
         items: [{ role: "user", content: userContent(message) }],
         deferWhileCallsPending: true

@@ -235,7 +235,8 @@ export const makeSessionContext = ({
           } else {
             let remaining = valid.turns ?? 1
             for (let index = projection.length - 1; index >= 0; index -= 1) {
-              if (projection[index]?.role !== "user") continue
+              const role = projection[index]?.role
+              if (role !== "user" && role !== "interaction") continue
               remaining -= 1
               if (remaining === 0) {
                 target = index

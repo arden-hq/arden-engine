@@ -33,14 +33,18 @@ export interface HistoryImage extends JsonRecord {
   readonly data: string
 }
 
-export type InteractionActorType = "agent" | "workflow" | "tool" | "harness" | "user"
+export const INTERACTION_SOURCES = ["agent", "workflow", "tool", "automation", "harness"] as const
+export type InteractionSource = (typeof INTERACTION_SOURCES)[number]
 
-/** Who a message is from or to. The server checks it agrees with `InteractionActor` in libs/loop. */
 export interface InteractionActor extends JsonRecord {
-  readonly type: InteractionActorType
+  readonly source: InteractionSource
   readonly id: string
-  /** Stable human-readable identity supplied by the sender's owner. */
-  readonly display_name?: string
+  readonly name?: string
+}
+
+export interface InteractionRecipient extends JsonRecord {
+  readonly source: "agent"
+  readonly id: string
 }
 
 /** What produced the interaction: the run, tool call, message or workflow. */
@@ -49,33 +53,37 @@ export interface InteractionReference extends JsonRecord {
   readonly id: string
 }
 
+export const INTERACTION_KINDS = [
+  "message",
+  "assignment",
+  "instruction",
+  "event",
+  "completion"
+] as const
+export type InteractionKind = (typeof INTERACTION_KINDS)[number]
+
 /** `interrupted`: the sender stopped because Arden restarted — routine, not
  *  a failure. */
-export type InteractionOutcome =
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "needs_attention"
-  | "interrupted"
+export const INTERACTION_OUTCOMES = [
+  "completed",
+  "failed",
+  "cancelled",
+  "needs_attention",
+  "interrupted"
+] as const
+export type InteractionOutcome = (typeof INTERACTION_OUTCOMES)[number]
 
-interface InteractionBase extends JsonRecord {
+export type InteractionSender = {
   readonly from: InteractionActor
-  readonly to: InteractionActor
-  readonly content: string
-  /** One plain line for the row when `content` is written for the recipient. */
+  readonly to?: InteractionRecipient
   readonly preview?: string
-  readonly causedBy?: InteractionReference
-}
+  readonly caused_by?: InteractionReference
+} & (
+  | { readonly kind: Exclude<InteractionKind, "completion"> }
+  | { readonly kind: "completion"; readonly outcome: InteractionOutcome }
+)
 
-/** The stored provenance of one delivered message: who sent it and why.
- *  The server checks it agrees with `Interaction` in libs/loop; the client
- *  reads the sender from here rather than sniffing ids or flags. */
-export type Interaction =
-  | (InteractionBase & { readonly kind: "message" | "assignment" | "event" | "instruction" })
-  | (InteractionBase & {
-      readonly kind: "completion"
-      readonly outcome: InteractionOutcome
-    })
+export type Interaction = InteractionSender & { readonly content: string }
 
 /** An agent's report retained for the parent's model input and inspection. */
 export interface AgentResult extends JsonRecord {
@@ -167,8 +175,6 @@ interface HistoryMessageBase extends JsonRecord {
   readonly update?: ChatUpdate
   readonly agent_result?: AgentResult
   readonly content: string
-  /** Who sent this message, when the harness delivered it on someone's behalf. */
-  readonly interaction?: Interaction
   /** Context blocks are retained in server history even when UI projections omit them. */
   readonly context?: ReadonlyArray<HistoryContextBlock>
   readonly reasoning_content?: string
@@ -185,7 +191,6 @@ interface HistoryMessageBase extends JsonRecord {
   readonly created_at?: string
   /** A steer's stamp: when the running turn took it in; absent on rows that started their turn. */
   readonly applied_at?: string
-  readonly is_meta?: boolean
   /** The messages this one quotes, in the order they were quoted. */
   readonly reply_to?: ReadonlyArray<{
     readonly message_id: string
@@ -221,6 +226,10 @@ export type HistoryMessage = HistoryMessageBase &
         readonly role: "user"
         readonly images?: ReadonlyArray<HistoryImage>
       }
+    | ({
+        readonly role: "interaction"
+        readonly images?: never
+      } & InteractionSender)
     | {
         readonly role: "assistant"
         readonly images?: never

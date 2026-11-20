@@ -1,12 +1,10 @@
+import { isWrittenByPerson } from "./model.js"
 import { Option, Predicate, Schema } from "effect"
-import { isHumanMessage } from "@arden-hq/loop"
 import { answerBlockText } from "@arden-hq/answer-ui"
 import { answerBlockTitle, replaceAnswerBlocks } from "@arden-hq/protocol/chat"
 import { cutText } from "@arden-hq/std/text"
 import type { StoredMessageEnvelope } from "./model.js"
 import { ownerText } from "./owner-words.js"
-
-export { isHumanMessage } from "@arden-hq/loop"
 
 const ContentPartSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
@@ -70,13 +68,11 @@ export const evidenceText = (content: unknown): string =>
 export interface ContentEnvelope {
   readonly role: string
   readonly content?: unknown
-  readonly is_meta?: unknown
-  readonly automation?: unknown
-  readonly interaction?: unknown
+  readonly question_answer?: unknown
 }
 
 export const latestHumanText = (messages: ReadonlyArray<ContentEnvelope>): string | undefined => {
-  const message = messages.findLast(isHumanMessage)
+  const message = messages.findLast(isWrittenByPerson)
   return message === undefined ? undefined : authoredText(message.content)
 }
 

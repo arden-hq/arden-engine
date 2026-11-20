@@ -12,17 +12,11 @@ export const chatHandoff = (input: {
   return {
     clientId: input.clientId,
     message: input.message,
-    isMeta: true,
-    interaction: {
+    sender: {
       kind: "message",
-      from: {
-        type: "agent",
-        id: input.source.publicRef,
-        ...(name ? { display_name: name } : {})
-      },
-      to: { type: "agent", id: input.targetRef },
-      content: input.message,
-      causedBy: { type: "tool_call", id: input.toolCallId }
+      from: { source: "agent", id: input.source.publicRef, ...(name ? { name } : {}) },
+      to: { source: "agent", id: input.targetRef },
+      caused_by: { type: "tool_call", id: input.toolCallId }
     },
     fromChat: { sessionId: input.source.sessionId, sessionRef: input.source.publicRef }
   }

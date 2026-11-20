@@ -1,7 +1,7 @@
 import { cutText } from "@arden-hq/std/text"
 import type { ToolCall } from "@arden-hq/loop"
 import { Effect, Option, Schema } from "effect"
-import { InteractionSchema } from "@arden-hq/protocol/effect/chat"
+import { InteractionSenderSchema } from "@arden-hq/protocol/effect/chat"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { ChatWriteStore } from "../persistence/chat/store.js"
 import type { ChatEventStore } from "../persistence/events/store.js"
@@ -61,10 +61,12 @@ export const makeRunPurpose = (input: {
         conversation: [
           ...inputs
             .filter((message) => {
-              const interaction = Schema.decodeUnknownOption(InteractionSchema)(message.interaction)
+              if (message.role !== "interaction") return true
+              const sender = Schema.decodeUnknownOption(InteractionSenderSchema)(message)
               return (
-                Option.isNone(interaction) ||
-                (interaction.value.kind !== "completion" && interaction.value.from.type !== "tool")
+                Option.isSome(sender) &&
+                sender.value.kind !== "completion" &&
+                sender.value.from.source !== "tool"
               )
             })
             .map((message) => ({

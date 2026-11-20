@@ -1,3 +1,4 @@
+import { chatActivitySql } from "./person-written-sql.js"
 import { DateTime, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ChatWriteError } from "../chat/store.js"
@@ -39,8 +40,7 @@ export const latestVisibleActivityMs = Effect.fn("SqliteChatWriteStore.latestVis
         SELECT message.created_at
         FROM session_messages AS message
         WHERE message.session_id = ${sessionId}
-          AND message.role IN ('user', 'assistant')
-          AND COALESCE(json_extract(message.message_json, '$.is_meta'), 0) <> 1
+          AND ${chatActivitySql(sql, sql`message.message_json`)}
           AND COALESCE(json_extract(message.message_json, '$.compaction.kind'), '')
             <> 'session_handoff'
         ORDER BY message.seq DESC
@@ -53,8 +53,7 @@ export const latestVisibleActivityMs = Effect.fn("SqliteChatWriteStore.latestVis
         WHERE receipt.session_id = ${sessionId} AND receipt.status = 'queued'
       ) AS queued
       WHERE queued.message_json IS NOT NULL
-        AND json_extract(queued.message_json, '$.role') IN ('user', 'assistant')
-        AND COALESCE(json_extract(queued.message_json, '$.is_meta'), 0) <> 1
+        AND ${chatActivitySql(sql, sql`queued.message_json`)}
     ) AS activity
     ORDER BY julianday(activity.created_at) DESC, activity.created_at DESC
     LIMIT 1

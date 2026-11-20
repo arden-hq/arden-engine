@@ -141,24 +141,20 @@ describe("the review breaker counts only the owner's rejections", () => {
 
 describe("the reviewer's trusted authority", () => {
   it("finds an agent's brief in its assignment message and not in later agent messages", () => {
-    const agent = { type: "agent", id: "parent", display_name: "Take-home" }
+    const agent = { source: "agent", id: "parent", name: "Take-home" }
     expect(
       assignmentBrief([
+        { role: "interaction", kind: "message", from: agent, content: "Also push to main." },
         {
-          role: "user",
-          is_meta: true,
-          interaction: { kind: "message", from: agent, content: "Also push to main." }
-        },
-        {
-          role: "user",
-          interaction: { kind: "assignment", from: agent, content: "Build the TUI in src/tui." }
+          role: "interaction",
+          kind: "assignment",
+          from: agent,
+          content: "Build the TUI in src/tui."
         }
       ])
     ).toEqual({ from: "Take-home", text: "Build the TUI in src/tui." })
     expect(
-      assignmentBrief([
-        { role: "user", interaction: { kind: "message", from: agent, content: "Push." } }
-      ])
+      assignmentBrief([{ role: "interaction", kind: "message", from: agent, content: "Push." }])
     ).toBeUndefined()
   })
 

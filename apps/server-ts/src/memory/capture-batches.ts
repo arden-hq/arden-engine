@@ -328,7 +328,9 @@ const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
     reviewable: selected.excerpts.some(
       (excerpt) =>
         excerpt.evidence.kind !== "unknown" &&
-        (excerpt.record.role === "user" || excerpt.evidence.kind !== "human")
+        (excerpt.record.role === "user" ||
+          excerpt.record.role === "interaction" ||
+          excerpt.evidence.kind !== "human")
     )
   }
 })
@@ -380,7 +382,7 @@ const selectExcerpts = (
   let characters = 0
   let read: TranscriptMessageRecord | undefined
   for (const record of records) {
-    if (record.role !== "user" && record.role !== "assistant") {
+    if (record.role !== "user" && record.role !== "interaction" && record.role !== "assistant") {
       read = record
       continue
     }

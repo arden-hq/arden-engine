@@ -524,6 +524,13 @@ const ownedBehaviors = [
       "A tool result is a tool message: a background call's result is the tool message after its receipt (async_tool_launch), and media is the result's model_content. An id never says what a message is.",
     owners: [],
     exemptDirs: [migrationsDir]
+  },
+  {
+    selector: "Identifier[name='is_meta'], Literal[value='is_meta'], Literal[value=/\\$\\.is_meta/]",
+    message:
+      "Who wrote a message is its role: `user` is the person, `interaction` is anyone else (its `from.source` says who). There is no meta flag.",
+    owners: [],
+    exemptDirs: [migrationsDir]
   }
 ]
 export const exemptDirs = [

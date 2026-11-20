@@ -1,4 +1,5 @@
 import { isBackgroundCall } from "./streaming-tools.js"
+import { harnessNotice } from "./harness-notice.js"
 import { pendingBackgroundCalls } from "./background-tools.js"
 import { isAbortError } from "../abort.js"
 import { decorateToolResult, type DispatchOutput } from "../tools/dispatch.js"
@@ -450,10 +451,7 @@ const settleTextTurn = async (
         )
       const correctionId = messageId("text")
       messages.push({
-        role: "user",
-        message_id: correctionId,
-        is_meta: true,
-        content: correction,
+        ...harnessNotice("final_text_check", correction, correctionId),
         rejected_message_ids: rejected
       })
       await run.emit({
@@ -473,12 +471,7 @@ const settleTextTurn = async (
     if ("issues" in validated) {
       if (!state.outputCorrectionUsed) {
         state.outputCorrectionUsed = true
-        messages.push({
-          role: "user",
-          message_id: messageId("text"),
-          is_meta: true,
-          content: correctionContent(validated.issues)
-        })
+        messages.push(harnessNotice("output_schema", correctionContent(validated.issues)))
         state.step += 1
         await stepFinished(run)
         return "continue"

@@ -3,7 +3,7 @@ import { agentResultPresentation } from "./agent-result-presentation.js"
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import type { RunContext } from "@arden-hq/protocol/runs"
-import { InteractionSchema, QuestionAnswerSchema } from "@arden-hq/protocol/effect/chat"
+import { QuestionAnswerSchema } from "@arden-hq/protocol/effect/chat"
 import {
   ChatWriteConflictError,
   type ChatWriteStore,
@@ -15,7 +15,8 @@ import type { ModelCatalog } from "../../models/catalog.js"
 import type { IntelligenceSettingsStore, LimitSettingsStore } from "../settings/store.js"
 import type { ChatRules } from "../chat/rules.js"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
-import { isHumanMessage } from "../transcript/content.js"
+import { senderOf, startedBy } from "../transcript/interaction.js"
+import { isWrittenByPerson } from "../transcript/model.js"
 import { dropPendingArchive } from "./pending-archive.js"
 import { chatAdmissionInputSchema } from "./chat-admission-input.js"
 import { AutomationId } from "../automations/model.js"
@@ -284,7 +285,7 @@ export const makeChatAdmission = ({
       yield* settleTypedReply({ sql, sessionEvents, chatEvents, input: valid, now: timestamp })
 
       const priorActivityMs =
-        valid.message.is_meta === true
+        valid.message.role === "interaction"
           ? null
           : yield* latestVisibleActivityMs({ sql, sessionId: valid.sessionId })
       const agentResult =
@@ -333,10 +334,8 @@ export const makeChatAdmission = ({
       const questionAnswer = Option.getOrUndefined(
         Schema.decodeUnknownOption(QuestionAnswerSchema)(acceptedMessage.question_answer)
       )
-      const interaction = Option.getOrUndefined(
-        Schema.decodeUnknownOption(InteractionSchema)(acceptedMessage.interaction)
-      )
-      if (valid.automation === undefined && isHumanMessage(acceptedMessage))
+      const interactionSender = senderOf(acceptedMessage)
+      if (valid.automation === undefined && isWrittenByPerson(acceptedMessage))
         yield* dropPendingArchive(sql, valid.sessionId)
       const activeRuns = yield* sql<{
         readonly run_id: string
@@ -411,16 +410,16 @@ export const makeChatAdmission = ({
             )))
       const held =
         model !== undefined &&
-        valid.message.is_meta === true &&
+        valid.message.role === "interaction" &&
         valid.automation === undefined &&
         valid.continuesTask === undefined &&
         delivery?.kind !== "answer" &&
         holdsUnattendedInput(yield* readLastEndedRun(sql, valid.sessionId), model.modelId)
       if (model === undefined || held) {
         if (!held) {
-          if (valid.message.is_meta !== true || interaction?.from.type !== "agent")
+          if (interactionSender?.from.source !== "agent")
             return yield* conflict("Only an agent message may be stored without waking")
-          yield* handoffSender(sql, interaction, valid.sessionId)
+          yield* handoffSender(sql, interactionSender, valid.sessionId)
         }
         yield* appendMessagesInTransaction(
           sql,
@@ -512,7 +511,7 @@ export const makeChatAdmission = ({
         delivery?.kind === "answer" && delivery.timeout !== true && agent === null
       const sender =
         occurrence === undefined && delivery === undefined
-          ? yield* handoffSender(sql, interaction, valid.sessionId)
+          ? yield* handoffSender(sql, interactionSender, valid.sessionId)
           : undefined
       const handed =
         sender?.kind === "delegation" && sender.tool === "agent_message" && agent !== null
@@ -555,7 +554,7 @@ export const makeChatAdmission = ({
       runContext = yield* withCausedBelongsTo(sql, runContext, {
         sessionId: valid.sessionId,
         causingRunId: delivery?.kind === "update" ? undefined : delivery?.runIds[0],
-        interaction
+        sender: interactionSender
       }).pipe(Effect.mapError(arrivalConflict))
       const scheduledPreviousRuns =
         occurrence === undefined
@@ -606,7 +605,11 @@ export const makeChatAdmission = ({
               )
             )
       const runPolicy = handedPolicy(ownPolicy, handed)
-      if (valid.message.is_meta !== true && valid.automation === undefined && agent === null) {
+      if (
+        valid.message.role !== "interaction" &&
+        valid.automation === undefined &&
+        agent === null
+      ) {
         yield* sql`UPDATE sessions SET metadata = json_set(COALESCE(metadata, '{}'), '$.approval_mode', ${approvalMode})
           WHERE session_id = ${valid.sessionId} AND ${userChatSql()}
             AND json_type(metadata, '$.approval_mode') IS NULL`
@@ -696,7 +699,7 @@ export const makeChatAdmission = ({
                 ...(agentResult === undefined
                   ? {}
                   : { is_meta_run: true, agent_result: agentResult }),
-                ...(interaction === undefined ? {} : { interaction }),
+                ...startedBy(interactionSender, acceptedMessage.content),
                 ...(delivery?.kind === "update" ? { update: delivery.update } : {}),
                 ...(automationRun === undefined
                   ? {}
@@ -720,7 +723,7 @@ export const makeChatAdmission = ({
             },
             ...(valid.announce === true ||
             delivery?.kind === "connection" ||
-            (interaction?.kind === "message" && interaction.from.type === "agent")
+            (interactionSender?.kind === "message" && interactionSender.from.source === "agent")
               ? [{ event: transcriptChanged, runId }]
               : [])
           ]
@@ -740,7 +743,7 @@ export const makeChatAdmission = ({
         valid.automation === undefined &&
         valid.deliveryId === undefined &&
         agent === null &&
-        valid.message.is_meta !== true &&
+        valid.message.role !== "interaction" &&
         feedsActivityTriggers({
           sessionType: session.session_type,
           originAutomationId: session.origin_automation_id

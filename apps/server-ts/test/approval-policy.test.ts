@@ -567,7 +567,13 @@ it("uses its chat's editable mode for an automation and its running descendants"
           message: {
             message_id: "automation",
             client_id: "automation",
-            role: "user",
+            role: "interaction",
+            kind: "assignment",
+            from: {
+              source: "automation",
+              id: lease.payload.automationId,
+              name: lease.payload.name
+            },
             content: "Publish",
             automation: {
               context_mode: "continue",

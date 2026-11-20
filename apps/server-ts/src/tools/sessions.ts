@@ -1,9 +1,9 @@
+import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { countOf } from "@arden-hq/std/count"
 import {
   authoredText,
   compactAnswerBlocks,
-  evidenceText,
-  isHumanMessage
+  evidenceText
 } from "../persistence/transcript/content.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { ToolExecutionError } from "@arden-hq/loop"
@@ -87,7 +87,13 @@ const ContentCharsSchema = Schema.Int.check(
   })
   .pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_CONTENT_CHARS)))
 
-const MessageRoleSchema = Schema.Literals(["system", "user", "assistant", "tool"] as const)
+const MessageRoleSchema = Schema.Literals([
+  "system",
+  "user",
+  "interaction",
+  "assistant",
+  "tool"
+] as const)
 
 const ReadParametersSchema = Schema.Struct({
   session_ref: SessionRefSchema,
@@ -375,7 +381,7 @@ const turnRefOf = (record: TranscriptMessageRecord): string =>
 
 const writtenText = (record: TranscriptMessageRecord): string | undefined => {
   const envelope = record.envelope
-  if (!isHumanMessage(envelope) && record.role !== "assistant") return undefined
+  if (!isWrittenByPerson(envelope) && record.role !== "assistant") return undefined
   const text = compactAnswerBlocks(authoredText(envelope.content))
   const quoted = passage(text)
   return quoted !== undefined && quoted.length >= 40 ? quoted : undefined

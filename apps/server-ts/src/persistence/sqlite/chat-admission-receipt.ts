@@ -29,7 +29,7 @@ interface WorkflowDeliveryEnvelopeIdentity {
 const workflowDeliveryEnvelopeIdentity = (
   message: StoredMessageEnvelope
 ): WorkflowDeliveryEnvelopeIdentity | null => {
-  if (message.is_meta !== true) return null
+  if (message.role !== "interaction") return null
   const value = message.workflow_delivery
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null
   const fields = value as Readonly<Record<string, unknown>>

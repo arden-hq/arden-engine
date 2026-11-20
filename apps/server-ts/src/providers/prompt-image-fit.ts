@@ -90,7 +90,7 @@ const fitPromptImages = async (input: {
   for (const message of input.messages) {
     input.signal?.throwIfAborted()
     if (
-      message.role !== "user" ||
+      (message.role !== "user" && message.role !== "interaction") ||
       typeof message.content !== "object" ||
       message.content === null
     ) {

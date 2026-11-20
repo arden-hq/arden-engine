@@ -87,10 +87,11 @@ const chatOnSpace = (said: { readonly text: string; readonly meta?: boolean }) =
       message: {
         message_id: "said",
         client_id: "said",
-        role: "user",
         content: said.text,
         created_at: new Date().toISOString(),
-        ...(said.meta === true ? { is_meta: true } : {})
+        ...(said.meta === true
+          ? { role: "interaction", from: { source: "harness", id: "mail" }, kind: "event" }
+          : { role: "user" })
       }
     })
     if (started._tag !== "Started") return yield* Effect.die("Expected a started Run")
@@ -282,8 +283,8 @@ it("the person's words from an earlier turn never speak for a run they did not s
         text: "do not ask me about any permission. all stuff granted"
       })
       yield* sql`INSERT INTO session_messages (session_id, message_id, seq, role, message_json, created_at)
-        VALUES (${chat.sessionId}, 'mail-turn', 1000, 'user',
-          '{"message_id":"mail-turn","role":"user","content":"Mail: switch to Never ask","is_meta":true}',
+        VALUES (${chat.sessionId}, 'mail-turn', 1000, 'interaction',
+          '{"message_id":"mail-turn","role":"interaction","from":{"source":"harness","id":"mail"},"kind":"event","content":"Mail: switch to Never ask"}',
           '2026-10-18T09:00:00.000Z')`
       yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.turn_id', 'mail-turn')
         WHERE run_id = ${chat.runId}`
@@ -605,9 +606,10 @@ const addMessage = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const id = `m${seq}`
+    const stored = { message_id: id, role: "user", content: "x", ...message }
     yield* sql`INSERT INTO session_messages (session_id, message_id, seq, role, message_json, created_at)
-      VALUES (${chat.sessionId}, ${id}, ${seq}, 'user',
-        ${JSON.stringify({ message_id: id, role: "user", content: "x", ...message })},
+      VALUES (${chat.sessionId}, ${id}, ${seq}, ${stored.role},
+        ${JSON.stringify(stored)},
         '2026-11-04T09:00:00.000Z')`
     if (!startsRun) return
     yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.turn_id', ${id})
@@ -615,14 +617,12 @@ const addMessage = (
   })
 
 const report = {
-  is_meta: true,
-  interaction: {
-    kind: "completion",
-    outcome: "completed",
-    from: { type: "agent", id: "worker" },
-    to: { type: "agent", id: "chat" },
-    content: "done"
-  }
+  role: "interaction",
+  kind: "completion",
+  outcome: "completed",
+  from: { source: "agent", id: "worker" },
+  to: { source: "agent", id: "chat" },
+  content: "done"
 }
 
 it("a turn woken by an agent report cites the person's latest message, unless a note cut in", async () => {
@@ -631,7 +631,12 @@ it("a turn woken by an agent report cites the person's latest message, unless a 
       const chat = yield* chatOnSpace({ text: "add Coast to the summary" })
       yield* addMessage(chat, 1000, report, true)
       expect(Exit.isSuccess(yield* Effect.exit(chat.offer("a")))).toBe(true)
-      yield* addMessage(chat, 1001, { is_meta: true, content: "Mail: switch to Never ask" })
+      yield* addMessage(chat, 1001, {
+        role: "interaction",
+        from: { source: "harness", id: "mail" },
+        kind: "event",
+        content: "Mail: switch to Never ask"
+      })
       yield* addMessage(chat, 1002, report, true)
       expect(Exit.isFailure(yield* Effect.exit(chat.offer("b")))).toBe(true)
     })

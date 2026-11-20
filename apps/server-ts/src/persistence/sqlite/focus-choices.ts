@@ -1,4 +1,5 @@
 import type { FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
+import { isWrittenByPerson } from "../transcript/model.js"
 import {
   FocusChoiceSchema,
   ResolveFocusChoiceInputSchema
@@ -318,14 +319,19 @@ const triggeringMessage = Effect.fn("FocusChoice.triggeringMessage")(function* (
     JOIN chat_runs AS run ON run.run_id = question.run_id
     JOIN session_messages AS message ON message.session_id = ${row.source_session_id}
       AND ${messageTurnIdSql(sql, "message")} = json_extract(run.metadata_json, '$.turn_id')
-    WHERE question.question_id = ${row.question_id} AND message.role = 'user'
-      AND (json_extract(message.message_json, '$.is_meta') IS NOT 1
-        OR json_type(message.message_json, '$.forwarded_from') = 'object')
+    WHERE question.question_id = ${row.question_id}
+      AND ((message.role = 'user'
+          AND json_type(message.message_json, '$.question_answer') IS NULL)
+        OR (message.role = 'interaction'
+          AND json_type(message.message_json, '$.forwarded_from') = 'object'))
     ORDER BY message.seq`
   for (const row of rows) {
     const stored: unknown = JSON.parse(row.message_json)
     if (!Predicate.isObject(stored)) continue
-    if (stored.is_meta === true && !Schema.is(ChatForwardedSourceSchema)(stored.forwarded_from))
+    if (
+      !isWrittenByPerson({ role: String(stored.role), question_answer: stored.question_answer }) &&
+      !Schema.is(ChatForwardedSourceSchema)(stored.forwarded_from)
+    )
       continue
     return { messageId: row.message_id, text: userContent(stored.content).text }
   }

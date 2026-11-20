@@ -66,8 +66,11 @@ export const chatAdmissionInputSchema = Schema.Struct({
     if (input.modelId !== undefined && input.modelRole !== undefined) {
       issues.push({ path: ["modelId"], issue: "cannot be combined with modelRole" })
     }
-    if (input.message.role !== "user") {
-      issues.push({ path: ["message", "role"], issue: "must be a user message" })
+    if (input.message.role !== "user" && input.message.role !== "interaction") {
+      issues.push({ path: ["message", "role"], issue: "must be a user or interaction message" })
+    }
+    if (input.automation !== undefined && input.message.role !== "interaction") {
+      issues.push({ path: ["message", "role"], issue: "an Automation's prompt is an interaction" })
     }
     if (input.message.message_id !== input.clientId) {
       issues.push({ path: ["message", "message_id"], issue: "must equal clientId" })

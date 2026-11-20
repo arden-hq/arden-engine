@@ -9,7 +9,7 @@ import {
   type HistoryMessage,
   type HistoryResponse,
   type HistoryToolCall,
-  type Interaction
+  type InteractionSender
 } from "@arden-hq/protocol/chat"
 import type { MobileConversation, MobileConversationItem } from "@arden-hq/protocol/mobile"
 import type { RunProgress } from "@arden-hq/protocol/runs"
@@ -86,7 +86,7 @@ export function conversationLookupKeys(history: HistoryResponse): {
     if (internalWorkMessage(message)) continue
     linkRefs(message.content)
     if (message.from_chat !== undefined) sessionIds.add(message.from_chat.session_id)
-    if (message.interaction?.from.type === "agent") refs.add(message.interaction.from.id)
+    if (message.role === "interaction" && message.from.source === "agent") refs.add(message.from.id)
     for (const call of message.role === "assistant" ? (message.tool_calls ?? []) : []) {
       const send = sendOf(call)
       if (send !== undefined) refs.add(send.ref)
@@ -101,7 +101,7 @@ function messageItems(
 ): MobileConversationItem[] {
   const at = message.created_at ?? ""
   if (message.role === "assistant") {
-    if (message.is_meta === true || message.content.trim() === "") return []
+    if (message.content.trim() === "") return []
     return [
       {
         kind: "reply",
@@ -113,8 +113,11 @@ function messageItems(
       }
     ]
   }
-  if (message.role !== "user" || internalWorkMessage(message)) return []
+  if (internalWorkMessage(message)) return []
   if (message.forwarded_from !== undefined) return [userItem(message)]
+  if (message.role === "user")
+    return message.question_answer === undefined ? [userItem(message)] : []
+  if (message.role !== "interaction") return []
   if (message.automation !== undefined) {
     return [
       {
@@ -142,31 +145,22 @@ function messageItems(
       }
     ]
   }
-  const interaction = message.interaction
-  if (interaction !== undefined && isSenderArrival(interaction)) {
-    if (isCorrespondence(interaction)) return []
-    const sender = senderOf(interaction)
-    const body = interaction.content.trim() || message.content
-    return [
-      {
-        kind: "sender",
-        id: message.message_id,
-        sender,
-        name:
-          sender === "workflow"
-            ? null
-            : interaction.from.display_name?.trim() || interaction.from.id,
-        preview: previewMarkup(interaction.preview?.trim() || body) ?? "",
-        body: phoneLinks(body, lookups),
-        failed: failed(message),
-        session_id:
-          sender === "agent" ? (lookups.sessionIds.get(interaction.from.id) ?? null) : null,
-        at
-      }
-    ]
-  }
-  if (message.is_meta === true || message.question_answer !== undefined) return []
-  return [userItem(message)]
+  if (!isSenderArrival(message) || isCorrespondence(message)) return []
+  const sender = senderOf(message)
+  const body = message.content
+  return [
+    {
+      kind: "sender",
+      id: message.message_id,
+      sender,
+      name: sender === "workflow" ? null : message.from.name?.trim() || message.from.id,
+      preview: previewMarkup(message.preview?.trim() || body) ?? "",
+      body: phoneLinks(body, lookups),
+      failed: failed(message),
+      session_id: sender === "agent" ? (lookups.sessionIds.get(message.from.id) ?? null) : null,
+      at
+    }
+  ]
 }
 
 function userItem(message: HistoryMessage): MobileConversationItem {
@@ -192,24 +186,18 @@ function userItem(message: HistoryMessage): MobileConversationItem {
   }
 }
 
-const senderOf = (interaction: Interaction): "agent" | "workflow" | "command" => {
-  if (isCommandArrival(interaction)) return "command"
-  return interaction.from.type === "workflow" ? "workflow" : "agent"
+const senderOf = (sender: InteractionSender): "agent" | "workflow" | "command" => {
+  if (isCommandArrival(sender)) return "command"
+  return sender.from.source === "workflow" ? "workflow" : "agent"
 }
 
-const failed = (message: HistoryMessage): boolean => {
-  const interaction = message.interaction
-  return (
-    interaction?.kind === "completion" &&
-    interaction.outcome !== "completed" &&
-    interaction.outcome !== "interrupted"
-  )
-}
+const failed = (sender: InteractionSender): boolean =>
+  sender.kind === "completion" && sender.outcome !== "completed" && sender.outcome !== "interrupted"
 
 function internalWorkMessage(message: HistoryMessage): boolean {
   return isInternalWorkMessage({
     role: message.role,
-    interaction: message.interaction,
+    sender: message.role === "interaction" ? message : undefined,
     communication: message.communication,
     update: message.update,
     agentResult: message.agent_result,

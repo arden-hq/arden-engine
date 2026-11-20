@@ -1,3 +1,4 @@
+import { writtenByPersonSql } from "./person-written-sql.js"
 import { readChatSettled, settledFingerprint } from "./chat-ownership.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
@@ -365,7 +366,7 @@ export const makeSpaceReviewStore = ({
               AND json_extract(source.source, '$.session_id') = session.session_id)
             OR EXISTS (SELECT 1 FROM space_chat_links AS link WHERE link.space_id = ${current.space_id}
               AND link.session_id = session.session_id AND link.run_id = run.run_id))
-          AND run.status = 'completed' AND json_extract(${keyMessageJson(sql, "request")}, '$.is_meta') IS NOT 1
+          AND run.status = 'completed' AND ${writtenByPersonSql(sql, keyMessageJson(sql, "request"))}
           AND json_extract(run.metadata_json, '$.automation') IS NULL
           AND json_extract(run.metadata_json, '$.turn_id') IS NOT NULL
         ORDER BY session.session_id, run.started_at, run.run_id`

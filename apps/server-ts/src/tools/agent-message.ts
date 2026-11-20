@@ -102,19 +102,13 @@ const makeAgentMessageTool = (services: {
         ctx.run.sendMessage({
           sessionId: result.target.sessionId,
           clientId: `agent-message:${ctx.run.runId}:${ctx.toolCallId}`,
-          isMeta: true,
           wake: input.wake ?? true,
           message: input.message,
-          interaction: {
+          sender: {
             kind: "message",
-            from: {
-              type: "agent",
-              id: result.source.publicRef,
-              display_name: result.sourceName
-            },
-            to: { type: "agent", id: result.destination.publicRef },
-            content: input.message,
-            causedBy: { type: "tool_call", id: ctx.toolCallId }
+            from: { source: "agent", id: result.source.publicRef, name: result.sourceName },
+            to: { source: "agent", id: result.destination.publicRef },
+            caused_by: { type: "tool_call", id: ctx.toolCallId }
           }
         })
       )

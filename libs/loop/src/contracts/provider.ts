@@ -1,7 +1,7 @@
 import type {
   AssistantOutputPart,
   ChatMessage,
-  Interaction,
+  InteractionMessage,
   MaybePromise,
   MessageOrigin,
   ProviderState,
@@ -166,11 +166,7 @@ export interface ModelProviderRequest {
   /** Invocation-scoped pending user input. Adapters may poll only while generating. */
   readonly steering?: { readonly take: () => Promise<ReadonlyArray<UserMessage>> }
   readonly messages: ReadonlyArray<ChatMessage>
-  /**
-   * The loop's text for an interaction a provider carries natively (a user
-   * message that kept its `interaction`). Providers place it; they never word it.
-   */
-  readonly renderInteraction: (interaction: Interaction) => string
+  readonly renderInteraction: (message: InteractionMessage) => string
   readonly model: string
   readonly maxOutputTokens?: number
   readonly tools: ReadonlyArray<ToolDeclaration>

@@ -105,11 +105,17 @@ it.each(["space", "automation", "system"] as const)(
             message: {
               message_id: "request",
               client_id: "request",
-              role: "user",
               content: "Review",
               created_at: new Date().toISOString(),
               ...(lease
                 ? {
+                    role: "interaction",
+                    kind: "assignment",
+                    from: {
+                      source: "automation",
+                      id: lease.payload.automationId,
+                      name: lease.payload.name
+                    },
                     automation: {
                       context_mode: "continue",
                       task_id: lease.payload.automationId,
@@ -117,7 +123,7 @@ it.each(["space", "automation", "system"] as const)(
                       prompt: "Review"
                     }
                   }
-                : {})
+                : { role: "user" })
             }
           })
           const spawn = {
