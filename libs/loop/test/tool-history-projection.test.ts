@@ -100,4 +100,30 @@ describe("projectToolHistory", () => {
       }
     ])
   })
+
+  it("never changes what it gave for a message once later messages arrive", () => {
+    const histories: ReadonlyArray<ReadonlyArray<ChatMessage>> = [
+      stored,
+      [
+        { role: "assistant", content: "", tool_calls: [call("slow"), call("quick")] },
+        { role: "tool", tool_call_id: "quick", content: "Q out" },
+        {
+          role: "tool",
+          tool_call_id: "slow",
+          content: "running",
+          async_tool_launch: { call_id: "slow" }
+        },
+        { role: "tool", tool_call_id: "slow", content: "Done", model_content: [IMAGE] },
+        { role: "assistant", content: "Both back" }
+      ]
+    ]
+    for (const history of histories)
+      for (const nativeAsync of [false, true]) {
+        const full = projectToolHistory({ messages: history, nativeAsync })
+        for (let end = 0; end <= history.length; end += 1) {
+          const prefix = projectToolHistory({ messages: history.slice(0, end), nativeAsync })
+          expect(full.slice(0, prefix.length)).toEqual(prefix)
+        }
+      }
+  })
 })
