@@ -22,7 +22,7 @@ just build
 just arden exec "Say hello"
 ```
 
-It is released with the other engine packages (`just release`). To test it, run `bun run --cwd apps/cli test`.
+It stays `private` until its first manual publish; then `just release` publishes it with the other engine packages. To test it, run `bun run --cwd apps/cli test`.
 
 ## Commands
 
