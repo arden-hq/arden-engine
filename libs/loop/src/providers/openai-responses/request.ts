@@ -197,7 +197,7 @@ const convertMessages = (
               type: "agent_message",
               author: message.from.id,
               recipient: message.to.id,
-              content: [{ type: "input_text", text: renderInteraction(message) }]
+              content: [{ type: "input_text", text: renderInteraction(message, "native") }]
             }
           ],
           deferWhileCallsPending: false
@@ -208,7 +208,9 @@ const convertMessages = (
         items: [
           {
             role: "user",
-            content: rendersAsText(message) ? renderInteraction(message) : userContent(message)
+            content: rendersAsText(message)
+              ? renderInteraction(message, "text")
+              : userContent(message)
           }
         ],
         deferWhileCallsPending: !rendersAsText(message)

@@ -166,7 +166,7 @@ export interface ModelProviderRequest {
   /** Invocation-scoped pending user input. Adapters may poll only while generating. */
   readonly steering?: { readonly take: () => Promise<ReadonlyArray<UserMessage>> }
   readonly messages: ReadonlyArray<ChatMessage>
-  readonly renderInteraction: (message: InteractionMessage) => string
+  readonly renderInteraction: (message: InteractionMessage, form: "native" | "text") => string
   readonly model: string
   readonly maxOutputTokens?: number
   readonly tools: ReadonlyArray<ToolDeclaration>

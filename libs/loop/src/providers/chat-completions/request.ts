@@ -261,7 +261,7 @@ const convertMessages = (
                 {
                   role: "user",
                   content: rendersAsText(message)
-                    ? request.renderInteraction(message)
+                    ? request.renderInteraction(message, "text")
                     : userContent(message.content, compat, label)
                 }
               ],
