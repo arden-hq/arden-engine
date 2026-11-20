@@ -19,6 +19,7 @@ export interface ConfiguredServer {
   readonly connection: ConfiguredServerConnection
   /** Asks the server to stop (SIGTERM, SIGKILL after 10 s) and waits until it has. Never throws. */
   readonly stop: () => Promise<void>
+  readonly exited: Promise<number | null>
 }
 
 export type { ConfiguredServerReady }
@@ -86,6 +87,9 @@ export const startConfiguredServer = (
       }
     )
     const stop = () => stopChild(child)
+    const exited = new Promise<number | null>((resolveExit) => {
+      child.once("exit", (code) => resolveExit(code))
+    })
     let lastWords = ""
     child.stderr.setEncoding("utf8")
     child.stderr.on("data", (chunk: string) => {
@@ -105,10 +109,15 @@ export const startConfiguredServer = (
     let pending = ""
     child.stdout.setEncoding("utf8")
     child.stdout.on("data", (chunk: string) => {
-      if (settled || pending.includes("\n")) return
+      if (settled || pending.includes("\n")) {
+        options.onLog?.(chunk)
+        return
+      }
       pending += chunk
       const end = pending.indexOf("\n")
       if (end === -1) return
+      const rest = pending.slice(end + 1)
+      if (rest !== "") options.onLog?.(rest)
       const ready = readyFrom(pending.slice(0, end))
       if (ready === undefined) {
         fail(new ConfiguredServerError("start", "The Arden server printed no ready line"))
@@ -119,7 +128,7 @@ export const startConfiguredServer = (
           if (settled) return
           settled = true
           options.signal?.removeEventListener("abort", onAbort)
-          resolve({ ready, connection, stop })
+          resolve({ ready, connection, stop, exited })
         },
         (cause: unknown) => fail(new ConfiguredServerError("start", errorMessage(cause)))
       )

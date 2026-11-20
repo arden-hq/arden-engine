@@ -65,7 +65,7 @@ const HELP = `Usage:
   arden wait <run-id> [options]
   arden sessions [options]
   arden models [options]
-  arden serve [--config <file>]
+  arden serve [--config <file>] [--verbose]
   arden exec [--config <file>] [prompt] [options]
 
 arden <prompt> sends the prompt to a running Arden (arden run) and, when none
@@ -110,9 +110,13 @@ Wait options:
   --timeout stop waiting; the Run goes on.
 
 Serve:
-  --config <file>         The settings file. Prints one JSON ready line on
-                          stdout, then runs until Ctrl-C or SIGTERM. Reach it
-                          with ARDEN_DIR=<its dataDirectory> arden run ...
+  --config <file>         The settings file (default ~/.arden-cli/settings.json).
+                          Prints where it runs, then runs until Ctrl-C or
+                          SIGTERM. Its log goes to server.log in its data
+                          folder. arden run finds it on the default settings;
+                          for another data folder, ARDEN_DIR=<it> arden run ...
+  --verbose               Stream the server's log here instead, and print its
+                          JSON ready line
 
   A settings file names its data folder and model provider, for example a
   local llama.cpp server, which needs no key:
@@ -170,7 +174,8 @@ const FLAGS: ReadonlySet<string> = new Set([
   "--continue",
   "--detach",
   "--no-wait-approval",
-  "--status"
+  "--status",
+  "--verbose"
 ])
 
 interface ParsedArgs {
@@ -295,14 +300,17 @@ const parseRun = (args: ReadonlyArray<string>): ParsedCommand => {
   return parsed === undefined ? { kind: "help" } : { kind: "run", options: runOptionsOf(parsed) }
 }
 
-const SERVE_OPTIONS: ReadonlySet<string> = new Set(["--config"])
+const SERVE_OPTIONS: ReadonlySet<string> = new Set(["--config", "--verbose"])
 
 const parseServe = (args: ReadonlyArray<string>): ParsedCommand => {
   const parsed = splitArgs(args, SERVE_OPTIONS)
   if (parsed === undefined) return { kind: "help" }
   const [extra] = parsed.positionals
   if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`)
-  return { kind: "serve", options: { config: single(parsed, "--config") } }
+  return {
+    kind: "serve",
+    options: { config: single(parsed, "--config"), verbose: parsed.flags.has("--verbose") }
+  }
 }
 
 const EXEC_OPTIONS: ReadonlySet<string> = new Set([

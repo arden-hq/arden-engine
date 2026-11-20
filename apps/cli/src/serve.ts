@@ -1,8 +1,12 @@
-import { ConfiguredServerError, startConfiguredServer } from "@arden-hq/headless"
+import {
+  ConfiguredServerError,
+  startConfiguredServer,
+  type ConfiguredServer
+} from "@arden-hq/headless"
 import { errorMessage } from "@arden-hq/std/errors"
 import { ardenCliDir } from "@arden-hq/std/paths"
 import { spawn } from "node:child_process"
-import { createWriteStream, existsSync } from "node:fs"
+import { createWriteStream, existsSync, type WriteStream } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -16,7 +20,7 @@ import {
   type ServerConnection,
   type StartServer
 } from "./command.js"
-import { runCommand, type RunOptions } from "./run.js"
+import { failureOf, runCommand, type RunOptions } from "./run.js"
 
 const NOT_INSTALLED =
   "The Arden server is not installed beside this command. Install @arden-hq/server, or set ARDEN_SERVER_ENTRY to its dist/main.js."
@@ -62,15 +66,19 @@ const startServer: StartServer = async ({ config, logFile, env }) => {
     }
   } catch (cause) {
     log?.end()
-    if (!(cause instanceof ConfiguredServerError)) throw cause
-    switch (cause.reason) {
-      case "settings":
-        throw new UsageError(cause.message)
-      case "provider":
-        throw new ProviderUnavailableError(cause.message)
-      case "start":
-        throw new ServerUnavailableError(cause.message)
-    }
+    throw startFailure(cause)
+  }
+}
+
+const startFailure = (cause: unknown): unknown => {
+  if (!(cause instanceof ConfiguredServerError)) return cause
+  switch (cause.reason) {
+    case "settings":
+      return new UsageError(cause.message)
+    case "provider":
+      return new ProviderUnavailableError(cause.message)
+    case "start":
+      return new ServerUnavailableError(cause.message)
   }
 }
 
@@ -91,12 +99,9 @@ const settingsFile = async (config: string | undefined, home: string): Promise<s
 
 export interface ServeOptions {
   readonly config: string | undefined
+  readonly verbose: boolean
 }
 
-/**
- * `arden serve`: the configured server in the foreground. Its ready line goes
- * to stdout and its log to stderr, untouched; Ctrl-C or SIGTERM stops it.
- */
 export const serveCommand = async (
   options: ServeOptions,
   dependencies: CliDependencies
@@ -110,7 +115,62 @@ export const serveCommand = async (
     dependencies.writeStderr(`arden: ${errorMessage(cause)}\n`)
     return cause instanceof UsageError ? 2 : 1
   }
-  return new Promise((resolve) => {
+  return options.verbose
+    ? serveInForeground(entry, config, dependencies)
+    : serveQuietly(entry, config, dependencies)
+}
+
+const serveQuietly = async (
+  entry: string,
+  config: string,
+  dependencies: CliDependencies
+): Promise<number> => {
+  let early = ""
+  let log: WriteStream | undefined
+  const onLog = (chunk: string): void => {
+    if (log === undefined) early += chunk
+    else log.write(chunk)
+  }
+  let server: ConfiguredServer
+  try {
+    server = await startConfiguredServer({ entry, config, env: dependencies.env, onLog })
+  } catch (cause) {
+    const failure = startFailure(cause)
+    dependencies.writeStderr(`arden: ${errorMessage(failure)}\n`)
+    return failureOf(failure).exitCode
+  }
+  const logFile = join(server.ready.dataDirectory, SERVER_LOG_FILE)
+  log = createWriteStream(logFile, { flags: "a" })
+  log.write(early)
+  dependencies.writeStdout(
+    `Arden is running at ${server.ready.url}. Send prompts from another terminal: arden "…"\nIts log goes to ${logFile}. Ctrl-C stops it.\n`
+  )
+  let stopping = false
+  const stopped = new Promise<"stopped">((resolve) => {
+    const stop = (): void => {
+      stopping = true
+      process.removeListener("SIGINT", stop)
+      process.removeListener("SIGTERM", stop)
+      void server.stop().then(() => resolve("stopped"))
+    }
+    process.once("SIGINT", stop)
+    process.once("SIGTERM", stop)
+  })
+  const outcome = await Promise.race([stopped, server.exited])
+  log.end()
+  if (outcome === "stopped" || stopping) return 0
+  dependencies.writeStderr(`arden: The Arden server stopped (exit ${outcome}); see ${logFile}\n`)
+  return outcome === null || outcome === 0 ? 1 : outcome
+}
+
+const SERVER_LOG_FILE = "server.log"
+
+const serveInForeground = (
+  entry: string,
+  config: string,
+  dependencies: CliDependencies
+): Promise<number> =>
+  new Promise((resolve) => {
     const child = spawn(process.execPath, [entry, "--config", config], {
       env: dependencies.env,
       stdio: "inherit"
@@ -131,7 +191,6 @@ export const serveCommand = async (
     })
     child.once("exit", (code) => done(code ?? 1))
   })
-}
 
 export interface ExecOptions {
   readonly config: string | undefined
