@@ -4,14 +4,25 @@ The `arden` command. It sends work to a running Arden server and prints the resu
 
 It builds on `@arden-hq/headless` for the API calls.
 
-## Build and run
+## Install and run
 
 ```bash
-just build                          # from the repository root
-node apps/cli/dist/main.js run "Summarize my open tasks"
+npm install -g @arden-hq/cli
+arden login
+arden "Say hello"
 ```
 
-The package is private. It has no release of its own. To test it, run `bun run --cwd apps/cli test`.
+It installs `@arden-hq/server` with it, which `serve`, `exec` and a bare prompt start.
+
+From this repository:
+
+```bash
+bun install
+just build
+just arden exec "Say hello"
+```
+
+It is released with the other engine packages (`just release`). To test it, run `bun run --cwd apps/cli test`.
 
 ## Commands
 

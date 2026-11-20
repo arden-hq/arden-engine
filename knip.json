@@ -9,7 +9,8 @@
     },
     "libs/*": {
       "entry": ["scripts/*.ts", "test/live/*.live.ts"],
-      "project": ["src/**/*.ts!", "test/**/*.ts"]
+      "project": ["src/**/*.ts!", "test/**/*.ts"],
+      "ignoreDependencies": ["@effect/platform-node-shared"]
     },
     "apps/cli": {
       "project": ["src/**/*.{ts,tsx}!", "test/**/*.{ts,tsx}"]
@@ -22,7 +23,8 @@
         "src/providers/openai-responses/index.ts!",
         "scripts/**/*.{mjs,ts,cjs}"
       ],
-      "project": ["src/**/*.ts!", "test/**/*.ts", "scripts/**/*.{mjs,ts,cjs}"]
+      "project": ["src/**/*.ts!", "test/**/*.ts", "scripts/**/*.{mjs,ts,cjs}"],
+      "ignoreDependencies": ["@effect/platform-node-shared"]
     },
     "apps/relay": {
       "entry": ["src/bun/main.ts!", "src/cloudflare/worker.ts!", "scripts/**/*.{mjs,ts}"],

@@ -2,30 +2,44 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@arden-hq/cli",
   "version": "0.3.0",
-  "private": true,
   "description": "Command-line client for an Arden server",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.16"
   },
   "bin": {
     "arden": "./dist/main.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -b",
     "clean": "node ../../tooling/clean-dist.mjs",
     "typecheck": "tsc -p tsconfig.check.json --noEmit --pretty false --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/apps-cli.tsbuildinfo",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "bun run clean && bun run build"
   },
   "dependencies": {
     "@arden-hq/headless": "workspace:*",
     "@arden-hq/protocol": "workspace:*",
+    "@arden-hq/server": "workspace:*",
     "@arden-hq/std": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arden-hq/arden-engine.git",
+    "directory": "apps/cli"
   }
 }
