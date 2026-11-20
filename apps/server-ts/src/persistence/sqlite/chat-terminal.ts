@@ -35,7 +35,6 @@ import { settleTerminalToolsInTransaction } from "./tool-terminal.js"
 import { supersedeMessagesInTransaction } from "./superseded-messages.js"
 import { conversationMessagePredicate } from "./transcript.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
-import { transactWithActiveContext } from "./active-context-stage.js"
 import { appendRunSettledInTransaction } from "./run-settled.js"
 import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
 import { messageTurnIdSql } from "./message-turns.js"
@@ -134,169 +133,284 @@ export const makeChatTerminal = ({
     const now = yield* DateTime.now
     const timestamp = DateTime.formatIso(now)
 
-    return yield* transactWithActiveContext(
-      writer,
-      "interactive",
-      { runId: valid.runId },
-      Effect.gen(function* () {
-        const run = yield* loadRun(sql, valid.runId, "finish")
-        if (isTerminalRunStatus(run.status)) {
-          return yield* writeError("finish", "terminal", "Chat run is already terminal", {
-            sessionId: run.session_id,
-            runId: run.run_id
-          })
-        }
-        const session = yield* loadSession(sql, run.session_id, "finish")
-        const activeMessages = yield* loadActiveMessages(sql, run.session_id, "finish")
-        const appended = yield* historyTail(
-          sql,
-          { sessionId: run.session_id, runId: run.run_id },
-          valid.messages,
-          "finish"
-        )
-        const projectedAssistantMessages = valid.messages.filter(
-          (message) =>
-            message.message_id === run.assistant_message_id && message.role === "assistant"
-        )
-        const transcript = yield* loadTranscriptEnvelopesById(
-          sql,
-          run.session_id,
-          [...appended.map((message) => message.message_id), run.assistant_message_id],
-          "finish"
-        )
-        const transcriptAssistantMessages = transcript.filter(
-          (message) =>
-            message.message_id === run.assistant_message_id && message.role === "assistant"
-        )
-        const runAssistantMessage = projectedAssistantMessages[0] ?? transcriptAssistantMessages[0]
-        if (
-          projectedAssistantMessages.length > 1 ||
-          transcriptAssistantMessages.length > 1 ||
-          runAssistantMessage === undefined
-        ) {
-          return yield* writeError(
-            "finish",
-            "invalid",
-            "Chat history must contain the run assistant message",
-            {
+    return yield* writer
+      .transactInteractive(
+        Effect.gen(function* () {
+          const run = yield* loadRun(sql, valid.runId, "finish")
+          if (isTerminalRunStatus(run.status)) {
+            return yield* writeError("finish", "terminal", "Chat run is already terminal", {
               sessionId: run.session_id,
               runId: run.run_id
-            }
+            })
+          }
+          const session = yield* loadSession(sql, run.session_id, "finish")
+          const activeMessages = yield* loadActiveMessages(sql, run.session_id, "finish")
+          const appended = yield* historyTail(
+            sql,
+            { sessionId: run.session_id, runId: run.run_id },
+            valid.messages,
+            "finish"
           )
-        }
-        const assistantMessage =
-          [...valid.messages].reverse().find((message) => message.role === "assistant") ??
-          runAssistantMessage
-        yield* requireReceiptForRun(sql, run, "finish")
-        const pending = yield* loadPendingInTransaction(sql, run, "finish")
-        const transcriptIds = new Set(transcript.map((message) => message.message_id))
-        if (appended.some((message) => transcriptIds.has(message.message_id))) {
-          return yield* writeError(
-            "finish",
-            "invalid",
-            "Chat history cannot reorder transcript messages",
-            {
-              sessionId: run.session_id,
-              runId: run.run_id
-            }
+          const projectedAssistantMessages = valid.messages.filter(
+            (message) =>
+              message.message_id === run.assistant_message_id && message.role === "assistant"
           )
-        }
-        for (const message of appended) {
-          if (message.role === "system") {
+          const transcript = yield* loadTranscriptEnvelopesById(
+            sql,
+            run.session_id,
+            [...appended.map((message) => message.message_id), run.assistant_message_id],
+            "finish"
+          )
+          const transcriptAssistantMessages = transcript.filter(
+            (message) =>
+              message.message_id === run.assistant_message_id && message.role === "assistant"
+          )
+          const runAssistantMessage =
+            projectedAssistantMessages[0] ?? transcriptAssistantMessages[0]
+          if (
+            projectedAssistantMessages.length > 1 ||
+            transcriptAssistantMessages.length > 1 ||
+            runAssistantMessage === undefined
+          ) {
             return yield* writeError(
               "finish",
               "invalid",
-              "Chat history cannot append system messages",
+              "Chat history must contain the run assistant message",
               {
                 sessionId: run.session_id,
                 runId: run.run_id
               }
             )
           }
-        }
-        if (
-          pending.messages.some((message) =>
-            valid.messages.some((known) => known.message_id === message.message_id)
-          )
-        ) {
-          return yield* writeError(
-            "finish",
-            "invalid",
-            "Chat history already contains a queued message",
-            {
-              sessionId: run.session_id,
-              runId: run.run_id
-            }
-          )
-        }
-        const recoveredTools = yield* settleTerminalToolsInTransaction(sql, {
-          ending: "run_ended",
-          operation: "finish",
-          sessionId: run.session_id,
-          runId: run.run_id,
-          turnId: run.turn_id,
-          terminalAt: timestamp,
-          activeMessages,
-          appendedMessages: appended,
-          sessionEvents
-        })
-        const news = yield* takeChatEventsBeforeQueued(sql, {
-          run,
-          queued: pending.messages.length,
-          now,
-          operation: "finish"
-        })
-        const superseded = yield* supersedeMessagesInTransaction(sql, {
-          sessionId: run.session_id,
-          messageIds: valid.supersededMessageIds ?? [],
-          active: [
-            ...activeMessages,
-            ...(yield* appendMessagesInTransaction(
-              sql,
-              run.session_id,
-              [...appended, ...recoveredTools, ...news, ...pending.messages],
-              timestamp,
+          const assistantMessage =
+            [...valid.messages].reverse().find((message) => message.role === "assistant") ??
+            runAssistantMessage
+          yield* requireReceiptForRun(sql, run, "finish")
+          const pending = yield* loadPendingInTransaction(sql, run, "finish")
+          const transcriptIds = new Set(transcript.map((message) => message.message_id))
+          if (appended.some((message) => transcriptIds.has(message.message_id))) {
+            return yield* writeError(
               "finish",
-              run.turn_id
-            ))
-          ]
-        }).pipe(
-          Effect.mapError((cause) =>
-            writeError("finish", "storage", "Could not mark the replaced answer", {
-              sessionId: run.session_id,
-              runId: run.run_id,
-              cause
-            })
-          )
-        )
-        const projection = superseded.active
-        const replacedEvents =
-          superseded.answerIds.length === 0
-            ? []
-            : [
+              "invalid",
+              "Chat history cannot reorder transcript messages",
+              {
+                sessionId: run.session_id,
+                runId: run.run_id
+              }
+            )
+          }
+          for (const message of appended) {
+            if (message.role === "system") {
+              return yield* writeError(
+                "finish",
+                "invalid",
+                "Chat history cannot append system messages",
                 {
-                  event: {
-                    type: "final_text_superseded",
-                    run_id: run.run_id,
-                    message_ids: [...superseded.answerIds],
-                    state: "replaced"
-                  } satisfies ChatProjectionEvent,
+                  sessionId: run.session_id,
                   runId: run.run_id
                 }
-              ]
-        if (pending.messages.length > 0) {
-          yield* markPendingIngested(sql, run, timestamp, "finish")
-          yield* announceAnswers({ sql, sessionEvents, messages: pending.messages })
-          const nextAssistantMessageId = yield* nextId
+              )
+            }
+          }
+          if (
+            pending.messages.some((message) =>
+              valid.messages.some((known) => known.message_id === message.message_id)
+            )
+          ) {
+            return yield* writeError(
+              "finish",
+              "invalid",
+              "Chat history already contains a queued message",
+              {
+                sessionId: run.session_id,
+                runId: run.run_id
+              }
+            )
+          }
+          const recoveredTools = yield* settleTerminalToolsInTransaction(sql, {
+            ending: "run_ended",
+            operation: "finish",
+            sessionId: run.session_id,
+            runId: run.run_id,
+            turnId: run.turn_id,
+            terminalAt: timestamp,
+            activeMessages,
+            appendedMessages: appended,
+            sessionEvents
+          })
+          const news = yield* takeChatEventsBeforeQueued(sql, {
+            run,
+            queued: pending.messages.length,
+            now,
+            operation: "finish"
+          })
+          const superseded = yield* supersedeMessagesInTransaction(sql, {
+            sessionId: run.session_id,
+            messageIds: valid.supersededMessageIds ?? [],
+            active: [
+              ...activeMessages,
+              ...(yield* appendMessagesInTransaction(
+                sql,
+                run.session_id,
+                [...appended, ...recoveredTools, ...news, ...pending.messages],
+                timestamp,
+                "finish",
+                run.turn_id
+              ))
+            ]
+          }).pipe(
+            Effect.mapError((cause) =>
+              writeError("finish", "storage", "Could not mark the replaced answer", {
+                sessionId: run.session_id,
+                runId: run.run_id,
+                cause
+              })
+            )
+          )
+          const projection = superseded.active
+          const replacedEvents =
+            superseded.answerIds.length === 0
+              ? []
+              : [
+                  {
+                    event: {
+                      type: "final_text_superseded",
+                      run_id: run.run_id,
+                      message_ids: [...superseded.answerIds],
+                      state: "replaced"
+                    } satisfies ChatProjectionEvent,
+                    runId: run.run_id
+                  }
+                ]
+          if (pending.messages.length > 0) {
+            yield* markPendingIngested(sql, run, timestamp, "finish")
+            yield* announceAnswers({ sql, sessionEvents, messages: pending.messages })
+            const nextAssistantMessageId = yield* nextId
+            const committed = yield* chatEvents
+              .appendInTransaction({
+                sessionId: run.session_id,
+                events: [
+                  ...pending.events,
+                  {
+                    event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
+                    runId: run.run_id
+                  },
+                  ...(valid.terminalTextEnded === true
+                    ? []
+                    : [
+                        {
+                          event: {
+                            type: "TEXT_MESSAGE_END",
+                            message_id: assistantMessage.message_id,
+                            session_id: run.session_id,
+                            ...(typeof assistantMessage.content === "string"
+                              ? { content: assistantMessage.content }
+                              : {})
+                          } satisfies ChatProjectionEvent,
+                          runId: run.run_id
+                        }
+                      ]),
+                  ...replacedEvents,
+                  {
+                    event: {
+                      type: "TEXT_MESSAGE_START",
+                      message_id: nextAssistantMessageId,
+                      role: "assistant"
+                    } satisfies ChatProjectionEvent,
+                    runId: run.run_id
+                  }
+                ]
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  writeError("finish", "storage", "Could not continue the run after queued input", {
+                    sessionId: run.session_id,
+                    runId: run.run_id,
+                    cause
+                  })
+                )
+              )
+            yield* sql`
+            UPDATE chat_runs
+            SET assistant_message_id = ${nextAssistantMessageId},
+                updated_at = ${timestamp}
+            WHERE run_id = ${run.run_id}
+          `
+            yield* setCheckpoint(
+              sql,
+              chatEvents,
+              run.session_id,
+              run.run_id,
+              committed.headSequence,
+              "finish"
+            )
+            yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
+            return {
+              _tag: "Continued",
+              activeMessages: projection,
+              assistantMessageId: nextAssistantMessageId,
+              eventSequence: committed.headSequence,
+              committed
+            } satisfies ChatWriteFinishResult
+          }
+
+          const metadata = yield* decodeJson(JsonObjectSchema, session.metadata ?? "{}").pipe(
+            Effect.mapError((cause) =>
+              writeError("finish", "corrupt", "Session metadata is corrupt", {
+                sessionId: run.session_id,
+                runId: run.run_id,
+                cause
+              })
+            )
+          )
+          const nextMetadata = { ...metadata }
+          if (valid.lastInputTokens !== undefined) {
+            if (valid.lastInputTokens === null || valid.lastInputTokens === 0) {
+              delete nextMetadata.last_input_tokens
+            } else {
+              nextMetadata.last_input_tokens = valid.lastInputTokens
+            }
+          }
+          const metadataJson = yield* encodeJson(JsonObjectSchema, nextMetadata).pipe(
+            Effect.mapError((cause) =>
+              writeError("finish", "invalid", "Session metadata cannot be encoded", {
+                sessionId: run.session_id,
+                runId: run.run_id,
+                cause
+              })
+            )
+          )
+          yield* sql`
+          UPDATE sessions
+          SET metadata = ${metadataJson},
+              last_activity = CASE
+              WHEN ${turnTouchesRecencySql(sql, { sessionId: run.session_id, turnId: run.turn_id })}
+              THEN ${timestamp} ELSE last_activity END,
+              has_unread = CASE WHEN ${readableConversationSql(sql)} AND EXISTS (
+                SELECT 1
+                FROM session_messages AS m
+                WHERE m.session_id = ${run.session_id}
+                  AND ${messageTurnIdSql(sql, "m")} = ${run.turn_id}
+                  AND m.role = 'assistant'
+                  AND ${conversationMessagePredicate(sql)}
+              ) THEN 1 ELSE has_unread END
+          WHERE session_id = ${run.session_id}
+        `
+
+          const terminalResultJson = JSON.stringify(valid.result ?? null)
+
           const committed = yield* chatEvents
             .appendInTransaction({
               sessionId: run.session_id,
               events: [
-                ...pending.events,
-                {
-                  event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
-                  runId: run.run_id
-                },
+                ...(recoveredTools.length === 0
+                  ? []
+                  : [
+                      {
+                        event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
+                        runId: run.run_id
+                      }
+                    ]),
                 ...(valid.terminalTextEnded === true
                   ? []
                   : [
@@ -315,9 +429,15 @@ export const makeChatTerminal = ({
                 ...replacedEvents,
                 {
                   event: {
-                    type: "TEXT_MESSAGE_START",
-                    message_id: nextAssistantMessageId,
-                    role: "assistant"
+                    type: "RUN_FINISHED",
+                    run_id: run.run_id,
+                    session_id: run.session_id,
+                    turn_id: run.turn_id,
+                    message_count: projection.length,
+                    ...(valid.usage === undefined ? {} : { usage: valid.usage }),
+                    ...(valid.lastInputTokens === undefined
+                      ? {}
+                      : { context_input_tokens: valid.lastInputTokens })
                   } satisfies ChatProjectionEvent,
                   runId: run.run_id
                 }
@@ -325,7 +445,7 @@ export const makeChatTerminal = ({
             })
             .pipe(
               Effect.mapError((cause) =>
-                writeError("finish", "storage", "Could not continue the run after queued input", {
+                writeError("finish", "storage", "Could not commit terminal events", {
                   sessionId: run.session_id,
                   runId: run.run_id,
                   cause
@@ -333,128 +453,6 @@ export const makeChatTerminal = ({
               )
             )
           yield* sql`
-            UPDATE chat_runs
-            SET assistant_message_id = ${nextAssistantMessageId},
-                updated_at = ${timestamp}
-            WHERE run_id = ${run.run_id}
-          `
-          yield* setCheckpoint(
-            sql,
-            chatEvents,
-            run.session_id,
-            run.run_id,
-            committed.headSequence,
-            "finish"
-          )
-          yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
-          return {
-            _tag: "Continued",
-            activeMessages: projection,
-            assistantMessageId: nextAssistantMessageId,
-            eventSequence: committed.headSequence,
-            committed
-          } satisfies ChatWriteFinishResult
-        }
-
-        const metadata = yield* decodeJson(JsonObjectSchema, session.metadata ?? "{}").pipe(
-          Effect.mapError((cause) =>
-            writeError("finish", "corrupt", "Session metadata is corrupt", {
-              sessionId: run.session_id,
-              runId: run.run_id,
-              cause
-            })
-          )
-        )
-        const nextMetadata = { ...metadata }
-        if (valid.lastInputTokens !== undefined) {
-          if (valid.lastInputTokens === null || valid.lastInputTokens === 0) {
-            delete nextMetadata.last_input_tokens
-          } else {
-            nextMetadata.last_input_tokens = valid.lastInputTokens
-          }
-        }
-        const metadataJson = yield* encodeJson(JsonObjectSchema, nextMetadata).pipe(
-          Effect.mapError((cause) =>
-            writeError("finish", "invalid", "Session metadata cannot be encoded", {
-              sessionId: run.session_id,
-              runId: run.run_id,
-              cause
-            })
-          )
-        )
-        yield* sql`
-          UPDATE sessions
-          SET metadata = ${metadataJson},
-              last_activity = CASE
-              WHEN ${turnTouchesRecencySql(sql, { sessionId: run.session_id, turnId: run.turn_id })}
-              THEN ${timestamp} ELSE last_activity END,
-              has_unread = CASE WHEN ${readableConversationSql(sql)} AND EXISTS (
-                SELECT 1
-                FROM session_messages AS m
-                WHERE m.session_id = ${run.session_id}
-                  AND ${messageTurnIdSql(sql, "m")} = ${run.turn_id}
-                  AND m.role = 'assistant'
-                  AND ${conversationMessagePredicate(sql)}
-              ) THEN 1 ELSE has_unread END
-          WHERE session_id = ${run.session_id}
-        `
-
-        const terminalResultJson = JSON.stringify(valid.result ?? null)
-
-        const committed = yield* chatEvents
-          .appendInTransaction({
-            sessionId: run.session_id,
-            events: [
-              ...(recoveredTools.length === 0
-                ? []
-                : [
-                    {
-                      event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
-                      runId: run.run_id
-                    }
-                  ]),
-              ...(valid.terminalTextEnded === true
-                ? []
-                : [
-                    {
-                      event: {
-                        type: "TEXT_MESSAGE_END",
-                        message_id: assistantMessage.message_id,
-                        session_id: run.session_id,
-                        ...(typeof assistantMessage.content === "string"
-                          ? { content: assistantMessage.content }
-                          : {})
-                      } satisfies ChatProjectionEvent,
-                      runId: run.run_id
-                    }
-                  ]),
-              ...replacedEvents,
-              {
-                event: {
-                  type: "RUN_FINISHED",
-                  run_id: run.run_id,
-                  session_id: run.session_id,
-                  turn_id: run.turn_id,
-                  message_count: projection.length,
-                  ...(valid.usage === undefined ? {} : { usage: valid.usage }),
-                  ...(valid.lastInputTokens === undefined
-                    ? {}
-                    : { context_input_tokens: valid.lastInputTokens })
-                } satisfies ChatProjectionEvent,
-                runId: run.run_id
-              }
-            ]
-          })
-          .pipe(
-            Effect.mapError((cause) =>
-              writeError("finish", "storage", "Could not commit terminal events", {
-                sessionId: run.session_id,
-                runId: run.run_id,
-                cause
-              })
-            )
-          )
-        yield* sql`
           UPDATE chat_runs
           SET status = 'completed', stop_reason = ${valid.stopReason ?? null}, updated_at = ${timestamp},
               ended_at = ${timestamp}, error_code = NULL, error_message = NULL,
@@ -465,33 +463,34 @@ export const makeChatTerminal = ({
               )
           WHERE run_id = ${run.run_id}
         `
-        if (valid.result !== undefined) yield* recordFinalRunUsage(sql, run.run_id)
-        yield* sql`
+          if (valid.result !== undefined) yield* recordFinalRunUsage(sql, run.run_id)
+          yield* sql`
           UPDATE chat_idempotency_keys
           SET status = 'completed', updated_at = ${timestamp}
           WHERE session_id = ${run.session_id} AND client_id = ${run.client_id}
         `
-        yield* setCheckpoint(
-          sql,
-          chatEvents,
-          run.session_id,
-          run.run_id,
-          committed.headSequence,
-          "finish"
-        )
-        yield* appendRunSettledInTransaction(sql, sessionEvents, run.run_id)
-        yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
-        const reply = typeof assistantMessage.content === "string" ? assistantMessage.content : ""
-        yield* settleRun(
-          { sql, sessionEvents, chatEvents },
-          { runId: run.run_id, now: timestamp, terminal: { status: "completed", result: reply } }
-        )
-        return {
-          _tag: "Completed",
-          committed
-        } satisfies ChatWriteFinishResult
-      })
-    ).pipe(Effect.mapError(mapFailure("finish", { runId: valid.runId })))
+          yield* setCheckpoint(
+            sql,
+            chatEvents,
+            run.session_id,
+            run.run_id,
+            committed.headSequence,
+            "finish"
+          )
+          yield* appendRunSettledInTransaction(sql, sessionEvents, run.run_id)
+          yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
+          const reply = typeof assistantMessage.content === "string" ? assistantMessage.content : ""
+          yield* settleRun(
+            { sql, sessionEvents, chatEvents },
+            { runId: run.run_id, now: timestamp, terminal: { status: "completed", result: reply } }
+          )
+          return {
+            _tag: "Completed",
+            committed
+          } satisfies ChatWriteFinishResult
+        })
+      )
+      .pipe(Effect.mapError(mapFailure("finish", { runId: valid.runId })))
   })
 
   const fail = Effect.fn("SqliteChatWriteStore.fail")(function* (
@@ -501,128 +500,127 @@ export const makeChatTerminal = ({
     const now = yield* DateTime.now
     const timestamp = DateTime.formatIso(now)
 
-    return yield* transactWithActiveContext(
-      writer,
-      "interactive",
-      { runId: valid.runId },
-      Effect.gen(function* () {
-        const run = yield* loadRun(sql, valid.runId, "fail")
-        if (isTerminalRunStatus(run.status)) {
-          return yield* writeError("fail", "terminal", "Chat run is already terminal", {
+    return yield* writer
+      .transactInteractive(
+        Effect.gen(function* () {
+          const run = yield* loadRun(sql, valid.runId, "fail")
+          if (isTerminalRunStatus(run.status)) {
+            return yield* writeError("fail", "terminal", "Chat run is already terminal", {
+              sessionId: run.session_id,
+              runId: run.run_id
+            })
+          }
+          yield* requireReceiptForRun(sql, run, "fail")
+          yield* rejectUncertainMutationTerminal(sql, run, "fail")
+          const pending = yield* loadPendingInTransaction(sql, run, "fail")
+          const activeMessages = yield* loadActiveMessages(sql, run.session_id, "fail")
+          const recoveredTools = yield* settleTerminalToolsInTransaction(sql, {
+            ending: "run_ended",
+            operation: "fail",
             sessionId: run.session_id,
-            runId: run.run_id
+            runId: run.run_id,
+            turnId: run.turn_id,
+            terminalAt: timestamp,
+            activeMessages,
+            appendedMessages: [],
+            sessionEvents
           })
-        }
-        yield* requireReceiptForRun(sql, run, "fail")
-        yield* rejectUncertainMutationTerminal(sql, run, "fail")
-        const pending = yield* loadPendingInTransaction(sql, run, "fail")
-        const activeMessages = yield* loadActiveMessages(sql, run.session_id, "fail")
-        const recoveredTools = yield* settleTerminalToolsInTransaction(sql, {
-          ending: "run_ended",
-          operation: "fail",
-          sessionId: run.session_id,
-          runId: run.run_id,
-          turnId: run.turn_id,
-          terminalAt: timestamp,
-          activeMessages,
-          appendedMessages: [],
-          sessionEvents
-        })
-        const terminalMessages = [...recoveredTools, ...pending.messages]
-        if (terminalMessages.length > 0) {
-          yield* appendMessagesInTransaction(
-            sql,
-            run.session_id,
-            terminalMessages,
-            timestamp,
-            "fail",
-            run.turn_id
-          )
-          yield* announceAnswers({ sql, sessionEvents, messages: pending.messages })
-        }
-        const committed = yield* chatEvents
-          .appendInTransaction({
-            sessionId: run.session_id,
-            events: [
-              ...(terminalMessages.length === 0
-                ? []
-                : [
-                    {
-                      event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
-                      runId: run.run_id
-                    }
-                  ]),
-              {
-                event: {
-                  type: "TEXT_MESSAGE_END",
-                  message_id: run.assistant_message_id,
-                  session_id: run.session_id
-                } satisfies ChatProjectionEvent,
-                runId: run.run_id
-              },
-              {
-                event: {
-                  type: "RUN_ERROR",
-                  run_id: run.run_id,
-                  session_id: run.session_id,
-                  turn_id: run.turn_id,
-                  code: valid.code,
-                  message: valid.message
-                } satisfies ChatProjectionEvent,
-                runId: run.run_id
-              }
-            ]
-          })
-          .pipe(
-            Effect.mapError((cause) =>
-              writeError("fail", "storage", "Could not commit terminal events", {
-                sessionId: run.session_id,
-                runId: run.run_id,
-                cause
-              })
+          const terminalMessages = [...recoveredTools, ...pending.messages]
+          if (terminalMessages.length > 0) {
+            yield* appendMessagesInTransaction(
+              sql,
+              run.session_id,
+              terminalMessages,
+              timestamp,
+              "fail",
+              run.turn_id
             )
-          )
-        yield* sql`
+            yield* announceAnswers({ sql, sessionEvents, messages: pending.messages })
+          }
+          const committed = yield* chatEvents
+            .appendInTransaction({
+              sessionId: run.session_id,
+              events: [
+                ...(terminalMessages.length === 0
+                  ? []
+                  : [
+                      {
+                        event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
+                        runId: run.run_id
+                      }
+                    ]),
+                {
+                  event: {
+                    type: "TEXT_MESSAGE_END",
+                    message_id: run.assistant_message_id,
+                    session_id: run.session_id
+                  } satisfies ChatProjectionEvent,
+                  runId: run.run_id
+                },
+                {
+                  event: {
+                    type: "RUN_ERROR",
+                    run_id: run.run_id,
+                    session_id: run.session_id,
+                    turn_id: run.turn_id,
+                    code: valid.code,
+                    message: valid.message
+                  } satisfies ChatProjectionEvent,
+                  runId: run.run_id
+                }
+              ]
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                writeError("fail", "storage", "Could not commit terminal events", {
+                  sessionId: run.session_id,
+                  runId: run.run_id,
+                  cause
+                })
+              )
+            )
+          yield* sql`
         UPDATE chat_runs
         SET status = 'error', stop_reason = ${valid.code}, updated_at = ${timestamp},
             ended_at = ${timestamp},
             error_code = ${valid.code}, error_message = ${valid.message}
         WHERE run_id = ${run.run_id}
       `
-        yield* sql`
+          yield* sql`
         UPDATE sessions
         SET last_activity = CASE
               WHEN ${turnTouchesRecencySql(sql, { sessionId: run.session_id, turnId: run.turn_id })}
               THEN ${timestamp} ELSE last_activity END
         WHERE session_id = ${run.session_id}
       `
-        yield* sql`
+          yield* sql`
         UPDATE chat_idempotency_keys
         SET status = 'error', updated_at = ${timestamp}
         WHERE session_id = ${run.session_id}
           AND (client_id = ${run.client_id} OR (run_id = ${run.run_id} AND status = 'queued'))
       `
-        yield* setCheckpoint(
-          sql,
-          chatEvents,
-          run.session_id,
-          run.run_id,
-          committed.headSequence,
-          "fail"
-        )
-        yield* appendRunSettledInTransaction(sql, sessionEvents, run.run_id)
-        yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
-        yield* settleRun(
-          { sql, sessionEvents, chatEvents },
-          {
-            runId: run.run_id,
-            now: timestamp,
-            terminal: { status: "failed", error: valid.message }
-          }
-        )
-        return { committed }
-      })
-    ).pipe(Effect.mapError(mapFailure("fail", { runId: valid.runId })))
+          yield* setCheckpoint(
+            sql,
+            chatEvents,
+            run.session_id,
+            run.run_id,
+            committed.headSequence,
+            "fail"
+          )
+          yield* appendRunSettledInTransaction(sql, sessionEvents, run.run_id)
+          yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
+          yield* settleRun(
+            { sql, sessionEvents, chatEvents },
+            {
+              runId: run.run_id,
+              now: timestamp,
+              terminal: { status: "failed", error: valid.message }
+            }
+          )
+          return { committed }
+        })
+      )
+      .pipe(Effect.mapError(mapFailure("fail", { runId: valid.runId })))
   })
 
   const cancel = Effect.fn("SqliteChatWriteStore.cancel")(function* (
@@ -633,132 +631,131 @@ export const makeChatTerminal = ({
     const now = yield* DateTime.now
     const timestamp = DateTime.formatIso(now)
 
-    return yield* transactWithActiveContext(
-      writer,
-      "interactive",
-      target.sessionId === undefined ? { runId: target.runId } : { sessionId: target.sessionId },
-      Effect.gen(function* () {
-        const run = yield* loadActiveRun(sql, target)
-        yield* requireReceiptForRun(sql, run, "cancel")
-        const fenced = yield* fenceRunCancellation({
-          sql,
-          sessionEvents,
-          runId: run.run_id,
-          now: timestamp
-        })
-        const pending = yield* loadPendingInTransaction(sql, run, "cancel")
-        const activeMessages = yield* loadActiveMessages(sql, run.session_id, "cancel")
-        const recoveredTools = yield* settleTerminalToolsInTransaction(sql, {
-          ending: "run_ended",
-          operation: "cancel",
-          sessionId: run.session_id,
-          runId: run.run_id,
-          turnId: run.turn_id,
-          terminalAt: timestamp,
-          activeMessages,
-          appendedMessages: [],
-          sessionEvents
-        })
-        const terminalMessages = [...recoveredTools, ...pending.messages]
-        if (terminalMessages.length > 0) {
-          yield* appendMessagesInTransaction(
+    return yield* writer
+      .transactInteractive(
+        Effect.gen(function* () {
+          const run = yield* loadActiveRun(sql, target)
+          yield* requireReceiptForRun(sql, run, "cancel")
+          const fenced = yield* fenceRunCancellation({
             sql,
-            run.session_id,
-            terminalMessages,
-            timestamp,
-            "cancel",
-            run.turn_id
-          )
-          yield* announceAnswers({ sql, sessionEvents, messages: pending.messages })
-        }
-        const committed = yield* chatEvents
-          .appendInTransaction({
-            sessionId: run.session_id,
-            events: [
-              ...(terminalMessages.length === 0
-                ? []
-                : [
-                    {
-                      event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
-                      runId: run.run_id
-                    }
-                  ]),
-              {
-                event: {
-                  type: "TEXT_MESSAGE_END",
-                  message_id: run.assistant_message_id,
-                  session_id: run.session_id
-                } satisfies ChatProjectionEvent,
-                runId: run.run_id
-              },
-              {
-                event: {
-                  type: "run_cancelled",
-                  run_id: run.run_id,
-                  session_id: run.session_id,
-                  turn_id: run.turn_id
-                } satisfies ChatProjectionEvent,
-                runId: run.run_id
-              }
-            ]
+            sessionEvents,
+            runId: run.run_id,
+            now: timestamp
           })
-          .pipe(
-            Effect.mapError((cause) =>
-              writeError("cancel", "storage", "Could not commit cancellation", {
-                sessionId: run.session_id,
-                runId: run.run_id,
-                cause
-              })
+          const pending = yield* loadPendingInTransaction(sql, run, "cancel")
+          const activeMessages = yield* loadActiveMessages(sql, run.session_id, "cancel")
+          const recoveredTools = yield* settleTerminalToolsInTransaction(sql, {
+            ending: "run_ended",
+            operation: "cancel",
+            sessionId: run.session_id,
+            runId: run.run_id,
+            turnId: run.turn_id,
+            terminalAt: timestamp,
+            activeMessages,
+            appendedMessages: [],
+            sessionEvents
+          })
+          const terminalMessages = [...recoveredTools, ...pending.messages]
+          if (terminalMessages.length > 0) {
+            yield* appendMessagesInTransaction(
+              sql,
+              run.session_id,
+              terminalMessages,
+              timestamp,
+              "cancel",
+              run.turn_id
             )
-          )
-        yield* sql`
+            yield* announceAnswers({ sql, sessionEvents, messages: pending.messages })
+          }
+          const committed = yield* chatEvents
+            .appendInTransaction({
+              sessionId: run.session_id,
+              events: [
+                ...(terminalMessages.length === 0
+                  ? []
+                  : [
+                      {
+                        event: { type: "transcript_changed" } satisfies ChatProjectionEvent,
+                        runId: run.run_id
+                      }
+                    ]),
+                {
+                  event: {
+                    type: "TEXT_MESSAGE_END",
+                    message_id: run.assistant_message_id,
+                    session_id: run.session_id
+                  } satisfies ChatProjectionEvent,
+                  runId: run.run_id
+                },
+                {
+                  event: {
+                    type: "run_cancelled",
+                    run_id: run.run_id,
+                    session_id: run.session_id,
+                    turn_id: run.turn_id
+                  } satisfies ChatProjectionEvent,
+                  runId: run.run_id
+                }
+              ]
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                writeError("cancel", "storage", "Could not commit cancellation", {
+                  sessionId: run.session_id,
+                  runId: run.run_id,
+                  cause
+                })
+              )
+            )
+          yield* sql`
         UPDATE chat_runs
         SET status = 'cancelled', stop_reason = 'cancelled', updated_at = ${timestamp},
             ended_at = ${timestamp}, error_code = NULL, error_message = NULL
         WHERE run_id = ${run.run_id}
       `
-        yield* sql`
+          yield* sql`
         UPDATE sessions
         SET last_activity = CASE
               WHEN ${turnTouchesRecencySql(sql, { sessionId: run.session_id, turnId: run.turn_id })}
               THEN ${timestamp} ELSE last_activity END
         WHERE session_id = ${run.session_id}
       `
-        yield* sql`
+          yield* sql`
         UPDATE chat_idempotency_keys
         SET status = 'cancelled', updated_at = ${timestamp}
         WHERE session_id = ${run.session_id}
           AND (client_id = ${run.client_id} OR (run_id = ${run.run_id} AND status = 'queued'))
       `
-        yield* setCheckpoint(
-          sql,
-          chatEvents,
-          run.session_id,
-          run.run_id,
-          committed.headSequence,
-          "cancel"
-        )
-        yield* appendRunSettledInTransaction(sql, sessionEvents, run.run_id)
-        yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
-        yield* settleRun(
-          { sql, sessionEvents, chatEvents },
-          { runId: run.run_id, now: timestamp, terminal: { status: "cancelled" } }
-        )
-        return {
-          runId: run.run_id,
-          sessionId: run.session_id,
-          descendantRunIds: fenced.activeRunIds.filter((runId) => runId !== run.run_id),
-          committed
-        } satisfies ChatWriteCancelResult
-      })
-    ).pipe(
-      Effect.mapError(
-        mapFailure("cancel", {
-          ...(target.runId === undefined ? {} : { runId: target.runId }),
-          ...(target.sessionId === undefined ? {} : { sessionId: target.sessionId })
+          yield* setCheckpoint(
+            sql,
+            chatEvents,
+            run.session_id,
+            run.run_id,
+            committed.headSequence,
+            "cancel"
+          )
+          yield* appendRunSettledInTransaction(sql, sessionEvents, run.run_id)
+          yield* sessionEvents.appendInTransaction("session_activity", run.session_id)
+          yield* settleRun(
+            { sql, sessionEvents, chatEvents },
+            { runId: run.run_id, now: timestamp, terminal: { status: "cancelled" } }
+          )
+          return {
+            runId: run.run_id,
+            sessionId: run.session_id,
+            descendantRunIds: fenced.activeRunIds.filter((runId) => runId !== run.run_id),
+            committed
+          } satisfies ChatWriteCancelResult
         })
       )
-    )
+      .pipe(
+        Effect.mapError(
+          mapFailure("cancel", {
+            ...(target.runId === undefined ? {} : { runId: target.runId }),
+            ...(target.sessionId === undefined ? {} : { sessionId: target.sessionId })
+          })
+        )
+      )
   })
 
   return { finish, fail, cancel, recordLateOutcome }

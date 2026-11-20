@@ -20,23 +20,17 @@ export class ActiveContextError extends Schema.TaggedError<ActiveContextError>()
 
 type ActiveContextFailure = ActiveContextError | SqlError.SqlError
 
-const MessageListSchema = Schema.Array(StoredMessageEnvelopeSchema)
-
 interface BoundsRow {
   readonly context_from_seq: number | null
   readonly context_head_seq: number | null
   readonly active_message_count: number
-  readonly messages: string | null
 }
 
-type Bounds =
-  | {
-      readonly kind: "window"
-      readonly from: number
-      readonly head: number | null
-      readonly count: number
-    }
-  | { readonly kind: "array"; readonly messages: string | null; readonly count: number }
+interface Bounds {
+  readonly from: number
+  readonly head: number | null
+  readonly count: number
+}
 
 interface ActiveRow {
   readonly seq: number
@@ -52,8 +46,7 @@ const loadBounds = Effect.fn("ActiveContext.loadBounds")(function* (
   sessionId: string
 ): Effect.fn.Return<Bounds, ActiveContextFailure> {
   const rows = yield* sql<BoundsRow>`
-    SELECT context_from_seq, context_head_seq, active_message_count,
-      CASE WHEN context_from_seq IS NULL THEN messages END AS messages
+    SELECT context_from_seq, context_head_seq, active_message_count
     FROM sessions WHERE session_id = ${sessionId}
   `
   const row = rows[0]
@@ -64,14 +57,14 @@ const loadBounds = Effect.fn("ActiveContext.loadBounds")(function* (
       sessionId
     })
   }
-  return row.context_from_seq === null
-    ? { kind: "array", messages: row.messages, count: row.active_message_count }
-    : {
-        kind: "window",
-        from: row.context_from_seq,
-        head: row.context_head_seq,
-        count: row.active_message_count
-      }
+  if (row.context_from_seq === null) {
+    return yield* new ActiveContextError({
+      reason: "corrupt",
+      message: "This chat has no active context window",
+      sessionId
+    })
+  }
+  return { from: row.context_from_seq, head: row.context_head_seq, count: row.active_message_count }
 })
 
 const windowRows = <Row extends object>(
@@ -130,34 +123,11 @@ const requireCount = (
         })
       )
 
-const decodeArray = Effect.fn("ActiveContext.decodeArray")(function* (
-  sessionId: string,
-  bounds: Extract<Bounds, { kind: "array" }>
-): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ActiveContextError> {
-  const messages =
-    bounds.messages === null
-      ? []
-      : yield* decodeJson(MessageListSchema, bounds.messages).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ActiveContextError({
-                reason: "corrupt",
-                message: "Session projection is corrupt",
-                sessionId,
-                cause
-              })
-          )
-        )
-  yield* requireCount(sessionId, bounds.count, messages.length)
-  return messages
-})
-
 export const loadActiveContext = Effect.fn("ActiveContext.load")(function* (
   sql: SqlClient.SqlClient,
   sessionId: string
 ): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ActiveContextFailure> {
   const bounds = yield* loadBounds(sql, sessionId)
-  if (bounds.kind === "array") return yield* decodeArray(sessionId, bounds)
   const rows = yield* windowRows<ActiveRow>(sql, sessionId, bounds, "envelopes")
   yield* requireCount(sessionId, bounds.count, rows.length)
   return yield* Effect.forEach(rows, (row) => decodeRow(sessionId, row))
@@ -168,9 +138,6 @@ export const loadActiveIds = Effect.fn("ActiveContext.loadIds")(function* (
   sessionId: string
 ): Effect.fn.Return<ReadonlyArray<string>, ActiveContextFailure> {
   const bounds = yield* loadBounds(sql, sessionId)
-  if (bounds.kind === "array") {
-    return (yield* decodeArray(sessionId, bounds)).map((message) => message.message_id)
-  }
   const rows = yield* windowRows<Pick<ActiveRow, "message_id">>(sql, sessionId, bounds, "ids")
   yield* requireCount(sessionId, bounds.count, rows.length)
   return rows.map((row) => row.message_id)
@@ -181,7 +148,6 @@ export const loadLastActiveMessage = Effect.fn("ActiveContext.loadLast")(functio
   sessionId: string
 ): Effect.fn.Return<StoredMessageEnvelope | undefined, ActiveContextFailure> {
   const bounds = yield* loadBounds(sql, sessionId)
-  if (bounds.kind === "array") return (yield* decodeArray(sessionId, bounds)).at(-1)
   const row = yield* newestRow(sql, sessionId, bounds)
   if (row === undefined) {
     yield* requireCount(sessionId, bounds.count, 0)
@@ -197,7 +163,6 @@ export const loadActiveTail = Effect.fn("ActiveContext.loadTail")(function* (
 ): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ActiveContextFailure> {
   if (limit <= 0) return []
   const bounds = yield* loadBounds(sql, sessionId)
-  if (bounds.kind === "array") return (yield* decodeArray(sessionId, bounds)).slice(-limit)
   const rows = yield* sql<ActiveRow>`
     SELECT m.seq, m.message_id, m.role, m.message_json, m.client_id, m.created_at
     FROM session_messages AS m
@@ -221,8 +186,7 @@ export const hideFromActiveContext = Effect.fn("ActiveContext.hide")(function* (
   sql: SqlClient.SqlClient,
   sessionId: string,
   seq: number
-): Effect.fn.Return<void, ActiveContextFailure> {
-  yield* requireActiveContextWindow(sql, sessionId)
+): Effect.fn.Return<void, SqlError.SqlError> {
   yield* sql`INSERT OR IGNORE INTO session_context_hidden (session_id, seq)
     VALUES (${sessionId}, ${seq})`
 })
@@ -289,7 +253,7 @@ const writeWindow = Effect.fn("ActiveContext.writeWindow")(function* (
   const from = listed[0] ?? (window.head === null ? (newest[0]?.seq ?? -1) + 1 : window.head + 1)
   yield* sql`
     UPDATE sessions
-    SET context_from_seq = ${from}, context_head_seq = ${window.head}, messages = NULL,
+    SET context_from_seq = ${from}, context_head_seq = ${window.head},
         active_message_count = ${window.count},
         visible_message_count = COALESCE(${window.visible}, visible_message_count)
     WHERE session_id = ${sessionId}
@@ -301,33 +265,6 @@ const writeWindow = Effect.fn("ActiveContext.writeWindow")(function* (
     WHERE m.session_id = ${sessionId} AND m.seq >= ${from}
       AND m.seq NOT IN (SELECT value FROM json_each(${JSON.stringify(window.seqs)}))
   `
-})
-
-export const requireActiveContextWindow = Effect.fn("ActiveContext.requireWindow")(function* (
-  sql: SqlClient.SqlClient,
-  sessionId: string
-): Effect.fn.Return<void, ActiveContextFailure> {
-  const rows = yield* sql<{
-    readonly context_from_seq: number | null
-    readonly valid: number | null
-  }>`
-    SELECT context_from_seq, json_valid(messages) AS valid
-    FROM sessions WHERE session_id = ${sessionId}
-  `
-  const row = rows[0]
-  if (row === undefined || row.context_from_seq !== null) return
-  if (row.valid === 0) {
-    return yield* new ActiveContextError({
-      reason: "corrupt",
-      message: "Session projection is corrupt",
-      sessionId
-    })
-  }
-  return yield* new ActiveContextError({
-    reason: "invalid",
-    message: "Legacy context was not prepared before the write transaction",
-    sessionId
-  })
 })
 
 const ascending = (values: ReadonlyArray<number>): boolean =>

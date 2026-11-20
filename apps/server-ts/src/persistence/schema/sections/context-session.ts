@@ -9,7 +9,6 @@ export const contextSessionSchemaSection = {
     "session_messages",
     "session_turns",
     "session_context_hidden",
-    "session_context_stage",
     "chat_event_cursors",
     "chat_event_deliveries",
     "answer_block_state",
@@ -25,7 +24,6 @@ export const contextSessionSchemaSection = {
     "idx_sessions_parent_activity",
     "idx_sessions_agent_origin",
     "idx_sessions_list",
-    "idx_sessions_context_unconverted",
     "idx_sessions_fork_origin_backfill",
     "idx_session_fork_requests_preparing_source",
     "idx_message_turns_turn",
@@ -47,7 +45,6 @@ export const contextSessionSchemaSection = {
     "message_turns_ai",
     "message_turns_au",
     "message_turns_ad",
-    "sessions_legacy_context_revision",
     "sessions_archive_drops_pending",
     "chat_positions_cut_at_removal",
     "memory_capture_owner_chat_starts",
@@ -75,7 +72,7 @@ export const contextSessionSchemaSection = {
       has_unread INTEGER NOT NULL DEFAULT 0 CHECK(has_unread IN (0, 1)),
       visible_message_count INTEGER NOT NULL DEFAULT 0,
       metadata TEXT,
-      messages TEXT, context_from_seq INTEGER, context_head_seq INTEGER, legacy_context_revision INTEGER NOT NULL DEFAULT 0,
+      messages TEXT, context_from_seq INTEGER, context_head_seq INTEGER,
       CHECK(
         (session_type = 'agent'
           AND parent_session_id IS NOT NULL
@@ -135,25 +132,6 @@ export const contextSessionSchemaSection = {
       seq INTEGER NOT NULL,
       PRIMARY KEY (session_id, seq)
     ) WITHOUT ROWID`,
-    `CREATE TABLE session_context_stage (
-      session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-      source_revision INTEGER NOT NULL,
-      context_generation INTEGER NOT NULL,
-      source_count INTEGER NOT NULL,
-      from_seq INTEGER NOT NULL,
-      head_seq INTEGER,
-      active_count INTEGER NOT NULL,
-      newest_seq INTEGER NOT NULL,
-      last_seq INTEGER NOT NULL DEFAULT -1
-    )`,
-    `CREATE TRIGGER sessions_legacy_context_revision
-      AFTER UPDATE OF messages ON sessions
-      WHEN OLD.context_from_seq IS NULL AND NEW.context_from_seq IS NULL
-        AND OLD.messages IS NOT NEW.messages
-      BEGIN
-        UPDATE sessions SET legacy_context_revision = legacy_context_revision + 1
-        WHERE session_id = NEW.session_id;
-      END`,
     `CREATE TRIGGER session_messages_role_insert
       BEFORE INSERT ON session_messages
       WHEN NEW.role NOT IN ('system', 'developer', 'user', 'assistant', 'tool')
@@ -209,8 +187,6 @@ export const contextSessionSchemaSection = {
       WHERE session_type = 'agent'`,
     `CREATE INDEX idx_sessions_list
       ON sessions(archived_at, session_type, last_activity DESC, session_id DESC)`,
-    `CREATE INDEX idx_sessions_context_unconverted
-      ON sessions(session_id) WHERE context_from_seq IS NULL`,
     `CREATE TABLE message_turns (
       message_rowid INTEGER PRIMARY KEY,
       turn_id TEXT

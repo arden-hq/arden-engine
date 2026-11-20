@@ -18,7 +18,6 @@ import { appendSessionTurn } from "./turns.js"
 import { writeError, type ChatWriteOperation } from "./chat-write-errors.js"
 import {
   ActiveContextError,
-  requireActiveContextWindow,
   hideFromActiveContext,
   loadActiveContext,
   loadActiveIds,
@@ -328,9 +327,6 @@ export const appendMessagesInTransaction = Effect.fn("SqliteChatWriteStore.appen
   ): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ChatWriteError> {
     const first = batch[0]
     if (first === undefined) return []
-    yield* requireActiveContextWindow(sql, sessionId).pipe(
-      Effect.mapError(contextError(operation, sessionId))
-    )
     const nextMessageSequence = yield* sql<{ readonly value: number }>`
     SELECT COALESCE(MAX(seq) + 1, 0) AS value
     FROM session_messages

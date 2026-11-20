@@ -2,7 +2,6 @@ import { recordBlockedAutomationInTransaction } from "./run-sidecar-mutations.js
 import { parseLease } from "./automation-lease.js"
 import { appendSessionTurn, currentSessionTurnId } from "./turns.js"
 import { hideFromActiveContext } from "./active-context.js"
-import { transactWithActiveContext } from "./active-context-stage.js"
 import { Clock, Effect, Schema } from "effect"
 import { ChatRunErrorCodeSchema } from "@arden-hq/protocol/effect/chat"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
@@ -220,12 +219,10 @@ export const makeAutomationRunRequests = ({
     const childId = `${trunk}::i${lease.payload.automationRunId}`
     const headlineId = `headline:${childId}`
     const now = iso(yield* Clock.currentTimeMillis)
-    yield* transactWithActiveContext(
-      writer,
-      "ordinary",
-      { sessionId: trunk },
-      Effect.gen(function* () {
-        const live = yield* sql<{ readonly id: number }>`
+    yield* writer
+      .transact(
+        Effect.gen(function* () {
+          const live = yield* sql<{ readonly id: number }>`
         SELECT r.id FROM automation_runs AS r
         WHERE r.id = ${parsed.runId}
           AND r.task_id = ${lease.payload.automationId}
@@ -238,27 +235,27 @@ export const makeAutomationRunRequests = ({
           )
         LIMIT 1
       `
-        if (live[0] === undefined) {
-          return yield* storeError(
-            "prepare_run_session",
-            "conflict",
-            "The lease is no longer current, so no run Session was prepared",
-            lease.payload.automationId
-          )
-        }
-        const seen = yield* sql<{ readonly message_id: string }>`
+          if (live[0] === undefined) {
+            return yield* storeError(
+              "prepare_run_session",
+              "conflict",
+              "The lease is no longer current, so no run Session was prepared",
+              lease.payload.automationId
+            )
+          }
+          const seen = yield* sql<{ readonly message_id: string }>`
         SELECT message_id FROM session_messages
         WHERE session_id = ${trunk} AND message_id = ${headlineId} LIMIT 1
       `
-        if (seen[0] === undefined) {
-          const next = yield* sql<{ readonly value: number }>`
+          if (seen[0] === undefined) {
+            const next = yield* sql<{ readonly value: number }>`
           SELECT COALESCE(MAX(seq) + 1, 0) AS value FROM session_messages
           WHERE session_id = ${trunk}
         `
-          const text = HEADLINE_BY_SOURCE[lease.payload.occurrence]
-          const headlineTurnId = (yield* currentSessionTurnId(sql, trunk)) ?? headlineId
-          const headlineSeq = next[0]?.value ?? 0
-          yield* sql`
+            const text = HEADLINE_BY_SOURCE[lease.payload.occurrence]
+            const headlineTurnId = (yield* currentSessionTurnId(sql, trunk)) ?? headlineId
+            const headlineSeq = next[0]?.value ?? 0
+            yield* sql`
           INSERT INTO session_messages (
             session_id, message_id, seq, role, message_json, client_id,
             created_at, search_text
@@ -275,71 +272,72 @@ export const makeAutomationRunRequests = ({
             NULL, ${now}, ${text}
           )
         `
-          yield* hideFromActiveContext(sql, trunk, headlineSeq)
-          yield* appendSessionTurn(sql, {
-            sessionId: trunk,
-            turnId: headlineTurnId,
-            firstSequence: headlineSeq,
-            messages: [{ message_id: headlineId, created_at: now }]
-          })
-          yield* sql`
+            yield* hideFromActiveContext(sql, trunk, headlineSeq)
+            yield* appendSessionTurn(sql, {
+              sessionId: trunk,
+              turnId: headlineTurnId,
+              firstSequence: headlineSeq,
+              messages: [{ message_id: headlineId, created_at: now }]
+            })
+            yield* sql`
           UPDATE sessions
           SET last_activity = ${now}
           WHERE session_id = ${trunk}
         `
-        }
-        const child = yield* sql<{ readonly session_id: string }>`
+          }
+          const child = yield* sql<{ readonly session_id: string }>`
         SELECT session_id FROM sessions WHERE session_id = ${childId} LIMIT 1
       `
-        if (child[0] === undefined) {
-          const sources = yield* sql<{
-            readonly space_id: string | null
-            readonly chat_model: string | null
-          }>`
+          if (child[0] === undefined) {
+            const sources = yield* sql<{
+              readonly space_id: string | null
+              readonly chat_model: string | null
+            }>`
           SELECT COALESCE(task.owner_space_id, trunk.space_id) AS space_id, trunk.chat_model
           FROM sessions AS trunk JOIN scheduled_tasks AS task ON task.task_id = ${lease.payload.automationId}
           WHERE trunk.session_id = ${trunk}
         `
-          const source = sources[0]
-          if (source === undefined) {
-            return yield* storeError(
-              "prepare_run_session",
-              "not_found",
-              "The Automation trunk Session is missing, so no run Session was created",
-              lease.payload.automationId
-            )
+            const source = sources[0]
+            if (source === undefined) {
+              return yield* storeError(
+                "prepare_run_session",
+                "not_found",
+                "The Automation trunk Session is missing, so no run Session was created",
+                lease.payload.automationId
+              )
+            }
+            yield* insertSession({
+              sql,
+              session: {
+                type: "chat",
+                sessionId: childId,
+                publicRef: friendlySessionRef(childId),
+                startedAt: now,
+                name: null,
+                metadata: "{}",
+                spaceId: source.space_id,
+                chatModel: source.chat_model,
+                originAutomationId: lease.payload.automationId,
+                parent: { sessionId: trunk, messageId: headlineId }
+              },
+              lifecycle: { kind: "silent", reason: "run_session" }
+            })
           }
-          yield* insertSession({
-            sql,
-            session: {
-              type: "chat",
-              sessionId: childId,
-              publicRef: friendlySessionRef(childId),
-              startedAt: now,
-              name: null,
-              metadata: "{}",
-              spaceId: source.space_id,
-              chatModel: source.chat_model,
-              originAutomationId: lease.payload.automationId,
-              parent: { sessionId: trunk, messageId: headlineId }
-            },
-            lifecycle: { kind: "silent", reason: "run_session" }
-          })
-        }
-      })
-    ).pipe(
-      Effect.mapError((cause) =>
-        cause instanceof AutomationStoreError
-          ? cause
-          : storeError(
-              "prepare_run_session",
-              "storage",
-              "Could not prepare the run Session",
-              lease.payload.automationId,
-              cause
-            )
+        })
       )
-    )
+      .pipe(
+        Effect.mapError((cause) =>
+          cause instanceof AutomationStoreError
+            ? cause
+            : storeError(
+                "prepare_run_session",
+                "storage",
+                "Could not prepare the run Session",
+                lease.payload.automationId,
+                cause
+              )
+        )
+      )
     return childId
   })
 

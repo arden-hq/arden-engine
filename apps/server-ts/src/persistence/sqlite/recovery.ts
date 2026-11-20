@@ -18,7 +18,6 @@ import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../tran
 import { completedRunReply } from "./run-completion.js"
 import { scriptOwnsRun } from "./run-owner.js"
 import { loadActiveContext } from "./active-context.js"
-import { transactWithActiveContext } from "./active-context-stage.js"
 import {
   markRunToolExecutionsUncertainInTransaction,
   settleToolExecutionInTransaction,
@@ -579,10 +578,7 @@ const recoverEachChatRun = Effect.fn("SqlitePersistence.recoverEachChatRun")(fun
     const runs = yield* writer.transact(select(where)).pipe(Effect.mapError(recoveryError))
     if (runs.length === 0) break
     for (const candidate of runs) {
-      const recover = transactWithActiveContext(
-        writer,
-        "ordinary",
-        { sessionId: candidate.session_id },
+      const recover = writer.transact(
         Effect.gen(function* () {
           const [run] = yield* select(sql`run.run_id = ${candidate.run_id}`)
           if (run === undefined) return { settled: false }

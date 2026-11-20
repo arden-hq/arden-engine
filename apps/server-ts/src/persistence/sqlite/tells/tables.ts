@@ -90,9 +90,6 @@ export const tableTells = {
   session_messages: { silent: transcript },
   session_turns: { silent: transcript },
   session_context_hidden: { silent: transcript },
-  session_context_stage: {
-    silent: "Internal resumable conversion state; active context tells at cutover."
-  },
   chat_event_cursors: { silent: internal },
   session_pending_archives: {
     silent: "No screen shows the wish; the archive it leads to is told as the chat's change."

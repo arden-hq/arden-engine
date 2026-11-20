@@ -10,7 +10,6 @@ import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { communicationError } from "./continuity-route.js"
 import { latestSettledQuestionChanges } from "./question-events.js"
 import { writeCommunicationEnvelopeInTransaction } from "./chat-transcript.js"
-import { transactWithActiveContext } from "./active-context-stage.js"
 import type { PersistenceDeps } from "./deps.js"
 import { nextOutboxAttemptAt } from "../../runtime/outbox.js"
 import { type CommunicationDeliveryPayload } from "./continuity-payload.js"
@@ -238,24 +237,7 @@ export const makeCommunicationStore = ({
   const deliverEnvelope: CommunicationStore["Service"]["deliverEnvelope"] = Effect.fn(
     function* (delivery) {
       return yield* mapStorage(
-        transactWithActiveContext(
-          writer,
-          "ordinary",
-          {
-            lookup: Effect.fn("Communication.deliveryContext")(function* (
-              connection: SqlClient.SqlClient
-            ) {
-              const row = (yield* connection<{ readonly payload: string }>`
-              SELECT payload FROM automation_deliveries
-              WHERE delivery_id = ${delivery.deliveryId} AND status = 'pending'
-            `)[0]
-              if (row === undefined) return undefined
-              const payload = decodePayload(row.payload)
-              return payload.visible && payload.arrival !== undefined
-                ? payload.destinationSessionId
-                : undefined
-            })
-          },
+        writer.transact(
           Effect.gen(function* () {
             const row = (yield* sql<{
               readonly payload: string

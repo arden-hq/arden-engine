@@ -19,7 +19,6 @@ import { transcriptSearchText } from "../transcript/search-text.js"
 import { announceAnswers } from "./chat-pending.js"
 import { hasResumableTail } from "./chat-transcript.js"
 import { decodeJson, encodeJson } from "./json.js"
-import { requireActiveContextWindow } from "./active-context.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { appendSessionTurn } from "./turns.js"
 import type { RunTerminal } from "./run-ending.js"
@@ -166,7 +165,6 @@ export const appendRecoveredMessagesInTransaction = Effect.fn(
   timestamp: string
 ) {
   if (messages.length === 0) return []
-  yield* requireActiveContextWindow(sql, run.session_id)
   const sequenceRows = yield* sql<{ readonly value: number }>`
     SELECT COALESCE(MAX(seq) + 1, 0) AS value
     FROM session_messages
