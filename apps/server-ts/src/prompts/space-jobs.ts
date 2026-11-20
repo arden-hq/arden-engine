@@ -11,7 +11,7 @@ import { cutText, foldSpace } from "@arden-hq/std/text"
 import { memoryHref } from "../lib/memory-link.js"
 import { joinPromptSections, renderPromptSection } from "./format.js"
 import { renderTaskStateSection } from "./task-state.js"
-import { PROMPT_TEXT } from "./catalog.js"
+import { PROMPTS } from "./catalog.js"
 
 const SPACE_NAME_LIMIT = 500
 const SPACE_INSTRUCTIONS_LIMIT = 4_000
@@ -153,7 +153,7 @@ const renderTaskWorkerPrompt = (task: TaskWorkerSnapshot | undefined): string =>
         )
   const stalled = task.stalledRuns
   return requiredPromptSections([
-    renderPromptSection("Completion audit", PROMPT_TEXT.taskAudit),
+    renderPromptSection("Completion audit", PROMPTS.taskAudit),
     renderPromptSection(
       "Task",
       task.space === undefined

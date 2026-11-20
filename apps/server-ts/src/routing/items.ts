@@ -7,7 +7,7 @@ import type {
   RouteDecision
 } from "../persistence/connections/store.js"
 import type { PersistedSpace } from "../persistence/spaces/store.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { clean, makeRouterSpaces, type RouterCandidateDependencies } from "./candidates.js"
 
 const BATCH = 20
@@ -118,7 +118,7 @@ export const makeItemRouter = (dependencies: ItemRouterDependencies) => {
         .runTool({
           role: "helper",
           usage: { kind: "item_routing", owner: { type: "none" } },
-          system: PROMPT_TEXT.itemRouter,
+          system: PROMPTS.itemRouter,
           user: [listed, "", renderItems(batch)].join("\n"),
           maxOutputTokens: 2_000,
           result: {

@@ -27,7 +27,7 @@ import {
 } from "../persistence/chat/workflow-delivery.js"
 import { chatReplyContexts } from "@arden-hq/protocol/chat"
 import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
-import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { ChatMessageError } from "./message-errors.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
@@ -83,10 +83,10 @@ export const taskContinuation = (input: {
     .replaceAll(/\s+/g, " ")
     .replace(/[\\[\]]/g, "\\$&")
   const content = [
-    PROMPT_TEXT.taskAudit,
-    PROMPT_CATALOG.taskContinuation.render({
+    PROMPTS.taskAudit,
+    PROMPTS.taskContinuation({
       task_link: `[${label}](arden:task/${encodeURIComponent(input.itemId)})`
-    }).text
+    })
   ].join("\n\n")
   return {
     sessionId: input.sessionId,
@@ -106,7 +106,7 @@ export const taskContinuation = (input: {
 }
 
 export const onboardingKickoff = (sessionId: string): ChatSendInput => {
-  const content = PROMPT_CATALOG.onboardingKickoff.render({}).text
+  const content = PROMPTS.onboardingKickoff
   return {
     sessionId,
     clientId: `onboarding:${sessionId}`,

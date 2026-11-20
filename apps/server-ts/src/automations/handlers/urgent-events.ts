@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import type { ChatMessage } from "../../chat/message.js"
 import type { AutomationQueue } from "../../persistence/automations/queue.js"
 import { URGENT_EVENTS_AUTOMATION_ID } from "../../persistence/automations/model.js"
-import { PROMPT_TEXT } from "../../prompts/catalog.js"
+import { PROMPTS } from "../../prompts/catalog.js"
 import { runByRule } from "../job-run.js"
 import { ITEM_EVENT_TYPES } from "../producers/connection-item.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
@@ -49,7 +49,7 @@ export const urgentEventsHandler: SystemAutomationHandler<"urgent_events"> = {
     name: "Urgent events",
     description:
       "Tell you at once when a mail, a notification or a calendar change needs you today.",
-    prompt: PROMPT_TEXT.urgentEvents,
+    prompt: PROMPTS.urgentEvents,
     handler: "urgent_events",
     // Every service whose arrivals are stored as items, so a new one is heard at once.
     triggers: Object.values(ITEM_EVENT_TYPES).map((event_type) => ({

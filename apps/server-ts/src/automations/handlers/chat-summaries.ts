@@ -7,7 +7,7 @@ import type {
   AutomationJobResult
 } from "../../persistence/automations/store.js"
 import type { SummaryStore } from "../../persistence/summaries/store.js"
-import { PROMPT_TEXT } from "../../prompts/catalog.js"
+import { PROMPTS } from "../../prompts/catalog.js"
 import { runByRule } from "../job-run.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler, SystemHandlerServices } from "../system-handler.js"
@@ -74,7 +74,7 @@ export const chatSummariesHandler: SystemAutomationHandler<"chat_summaries"> = {
     automationId: CHAT_SUMMARIES_AUTOMATION_ID,
     name: "Chat summaries",
     description: "Keep a short summary of each chat, so Arden can link back to it later.",
-    prompt: PROMPT_TEXT.chatSummary,
+    prompt: PROMPTS.chatSummary,
     handler: "chat_summaries",
     triggers: [
       {

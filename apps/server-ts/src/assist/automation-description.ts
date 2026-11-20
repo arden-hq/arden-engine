@@ -2,7 +2,7 @@ import { Effect } from "effect"
 
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { AutomationCatalog } from "../persistence/automations/catalog.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { cutText } from "@arden-hq/std/text"
 import type { AutomationId } from "../persistence/automations/model.js"
 
@@ -23,7 +23,7 @@ export const makeAutomationDescription = (dependencies: AutomationDescriptionDep
     const description = yield* dependencies.completion.runText({
       role: "helper",
       usage: { kind: "automation_description", owner: { type: "none" } },
-      system: PROMPT_TEXT.automationDescription,
+      system: PROMPTS.automationDescription,
       user: JSON.stringify({
         title: automation.name,
         instructions: cutText(automation.prompt, AUTOMATION_DESCRIPTION_INPUT_MAX_CHARS)

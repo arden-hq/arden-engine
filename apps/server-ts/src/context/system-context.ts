@@ -6,7 +6,7 @@ import type { AutomationOriginPolicy } from "../persistence/automations/catalog.
 import type { SessionRunReference } from "../persistence/runs/queries.js"
 import type { AgentChildReference, SessionHistoryHeader } from "../persistence/sessions/model.js"
 import { isSpaceWorkJob } from "../persistence/job-classification.js"
-import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
 import { machineTimeZone } from "@arden-hq/std/time"
 import type { AutomationId } from "../persistence/automations/model.js"
@@ -18,14 +18,14 @@ import { chatHref } from "../sessions/chat-href.js"
 const CHAT_TASK_DETAILS_LIMIT = 20_000
 const CHAT_TASK_LINE_LIMIT = 2_000
 
-const AUTOMATION_SUFFIX = PROMPT_TEXT.automationRun
+const AUTOMATION_SUFFIX = PROMPTS.automationRun
 
-const WORKER_SUFFIX = PROMPT_TEXT.workerRun
+const WORKER_SUFFIX = PROMPTS.workerRun
 
-const FORK_SUFFIX = renderPromptSection("Working in a copy", PROMPT_TEXT.automationFork)
+const FORK_SUFFIX = renderPromptSection("Working in a copy", PROMPTS.automationFork)
 const REPORT_ELSEWHERE_SUFFIX = renderPromptSection(
   "Reporting to the chat",
-  PROMPT_TEXT.automationReportElsewhere
+  PROMPTS.automationReportElsewhere
 )
 
 export const renderAgentFamilyContext = (
@@ -66,7 +66,7 @@ export const renderAgentFamilyContext = (
               return `- [${child.name ?? child.publicRef}](${chatHref({ publicRef: child.publicRef })}): purpose ${child.purpose === null ? "not recorded" : JSON.stringify(child.purpose)}; ${assignment}; ${current}; ${ending}.`
             })
           ].join("\n"),
-      PROMPT_TEXT.agentFamily
+      PROMPTS.agentFamily
     ].join("\n")
   )
 }
@@ -124,7 +124,7 @@ export const renderExecutionContext = (
 
 export const renderResearchAgentContext = (enabled: boolean): string | undefined => {
   if (!enabled) return undefined
-  return renderPromptSection("Research evidence protocol", PROMPT_TEXT.researchEvidence)
+  return renderPromptSection("Research evidence protocol", PROMPTS.researchEvidence)
 }
 
 export const renderChatTaskContext = (current: ChatTaskContext | undefined): string | undefined => {
@@ -153,8 +153,8 @@ export const renderChatTaskContext = (current: ChatTaskContext | undefined): str
         ])
   ].join("\n")
   const body = [
-    PROMPT_CATALOG.chatTask.render({ task_state: state }).text,
-    ...(working ? [PROMPT_TEXT.chatTaskOpen] : [])
+    PROMPTS.chatTask({ task_state: state }),
+    ...(working ? [PROMPTS.chatTaskOpen] : [])
   ].join("\n")
   return renderPromptSection("Task in this chat", body)
 }
@@ -169,7 +169,7 @@ export const renderTodoOverrideContext = (todo: TodoSnapshot | null): string | u
   ].join("\n")
   return renderPromptSection(
     "Todo list (edited by the user)",
-    PROMPT_CATALOG.todoOverride.render({ todo_state: todoState }).text
+    PROMPTS.todoOverride({ todo_state: todoState })
   )
 }
 
@@ -179,7 +179,7 @@ export const renderCliToolsContext = (report: CliToolsReport | undefined): strin
     .sort((left, right) => (left.command < right.command ? -1 : 1))
     .map(describeCliTool)
     .join("; ")
-  return PROMPT_CATALOG.cliTools.render({ tools }).text
+  return PROMPTS.cliTools({ tools })
 }
 
 const describeCliTool = (tool: CliTool): string => {

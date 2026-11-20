@@ -2,7 +2,7 @@ import type { SkillRecipeDraft } from "@arden-hq/protocol/skills"
 import { Effect, Schema } from "effect"
 
 import type { StructuredCompletion } from "../models/structured-completion.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 
 const TITLE_MAX_CHARS = 80
 
@@ -20,7 +20,7 @@ export const makeRecipeDraft = (dependencies: RecipeDraftDependencies) =>
     const draft = yield* dependencies.completion.run({
       role: "helper",
       usage: { kind: "recipe_draft", owner: { type: "none" } },
-      system: PROMPT_TEXT.recipeDraft,
+      system: PROMPTS.recipeDraft,
       user: JSON.stringify({ message: text }),
       output: DraftOutputSchema,
       outputName: "recipe_draft",

@@ -9,7 +9,7 @@ import {
 } from "@arden-hq/loop"
 import { withUntrustedDataRule } from "../models/instructions.js"
 import { outputLimitDelivery, sideCallOutputLimit } from "../models/side-call.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { HANDOFF_BYTES_PER_TOKEN, handoffContent } from "./handoff.js"
 
 const MAX_PROMPT_HEADROOM_TOKENS = 2_000
@@ -87,11 +87,11 @@ export const summarizeContext = async (input: SummarizeContextInput): Promise<st
   const maxBytes = maxOutputTokens * HANDOFF_BYTES_PER_TOKEN
   const summaryBytes = maxBytes - Buffer.byteLength(handoffContent({ ...input, summary: "" }))
   if (summaryBytes <= 0) throw new Error("Compaction budget cannot fit its recovery reference")
-  const instruction = `${withUntrustedDataRule(PROMPT_TEXT.compaction)}\n\nReturn only the handoff, targeting at most ${Math.floor(summaryBytes / 20)} words and never exceeding ${summaryBytes} UTF-8 bytes. The full transcript is recoverable through session_search_transcripts and session_read using session_ref ${JSON.stringify(input.sessionRef)}. Include short, distinctive lookup hints for omitted details. Recent messages will also be retained verbatim, so keep their detail concise. Do not call tools.`
+  const instruction = `${withUntrustedDataRule(PROMPTS.compaction)}\n\nReturn only the handoff, targeting at most ${Math.floor(summaryBytes / 20)} words and never exceeding ${summaryBytes} UTF-8 bytes. The full transcript is recoverable through session_search_transcripts and session_read using session_ref ${JSON.stringify(input.sessionRef)}. Include short, distinctive lookup hints for omitted details. Recent messages will also be retained verbatim, so keep their detail concise. Do not call tools.`
   const standalone: ModelProviderRequest = {
     model: input.model,
     messages: [
-      { role: ROLE.system, content: withUntrustedDataRule(PROMPT_TEXT.compaction) },
+      { role: ROLE.system, content: withUntrustedDataRule(PROMPTS.compaction) },
       {
         role: ROLE.user,
         content: fitSource(

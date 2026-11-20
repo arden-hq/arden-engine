@@ -1,5 +1,5 @@
 import type { TaskStateView } from "../persistence/work/task-state.js"
-import { PROMPT_CATALOG } from "./catalog.js"
+import { PROMPTS } from "./catalog.js"
 import { renderPromptSection } from "./format.js"
 import { chatHref } from "../sessions/chat-href.js"
 
@@ -41,7 +41,4 @@ const recordText = (state: TaskStateView | undefined): string => {
 }
 
 export const renderTaskStateSection = (state: TaskStateView | undefined): string =>
-  renderPromptSection(
-    "Task state record",
-    PROMPT_CATALOG.taskState.render({ record: recordText(state) }).text
-  )
+  renderPromptSection("Task state record", PROMPTS.taskState({ record: recordText(state) }))

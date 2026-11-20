@@ -4,7 +4,7 @@ import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect } from "effect"
 import { pathToFileURL } from "node:url"
 
-import { PROMPT_CATALOG } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 import {
   sessionPathPolicy,
@@ -120,6 +120,6 @@ export const effectiveAccessContext = async (
     })
   return renderPromptSection(
     "Effective prerequisites",
-    PROMPT_CATALOG.effectiveAccess.render({ folders, memory, permissions }).text
+    PROMPTS.effectiveAccess({ folders, memory, permissions })
   )
 }

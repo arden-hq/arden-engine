@@ -3,7 +3,7 @@ import { readFile, rm } from "node:fs/promises"
 import { dirname } from "node:path"
 
 import { isErrnoCode } from "../fs/private-store.js"
-import { PROMPT_CATALOG } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { baseSystemPrompt } from "../models/instructions.js"
 import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
 import { isRulesPage } from "../wiki/code-owned-pages.js"
@@ -112,9 +112,7 @@ export const chatSystemPrompt = (
         : renderPromptSection(
             "Global instructions",
             [
-              PROMPT_CATALOG.globalInstructions.render({
-                assistant_name: JSON.stringify(assistantName)
-              }).text,
+              PROMPTS.globalInstructions({ assistant_name: JSON.stringify(assistantName) }),
               renderInstructionSource(file, "loaded", rules)
             ].join("\n\n")
           )

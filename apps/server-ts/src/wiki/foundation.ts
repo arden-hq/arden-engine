@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { readdir } from "node:fs/promises"
 import { resolve } from "node:path"
 
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { RULES_PAGE_PATH, RULES_PAGE_TITLE } from "./code-owned-pages.js"
@@ -39,7 +39,7 @@ Create me.md when confirmed profile facts or cross-context preferences are avail
 
 ## Filing
 
-${PROMPT_TEXT.memoryFilingRule}
+${PROMPTS.memoryFilingRule}
 
 Each directory README describes its purpose, producers, consumers, boundaries and retention.
 For dated collections, add a Records section: filename convention, timezone, original source links

@@ -1,7 +1,7 @@
 import { utcStamp } from "@arden-hq/std/time"
 import { Option, Schema } from "effect"
 import { StoredThreadSchema } from "../persistence/sessions/thread.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { ThreadRecord } from "../persistence/focus-choices/store.js"
 import { chatHref } from "../sessions/chat-href.js"
@@ -11,7 +11,7 @@ export const renderThreadContext = (input: unknown): string | undefined => {
   if (Option.isNone(decoded)) return undefined
   return renderPromptSection(
     "Thread starting context",
-    JSON.stringify({ ...decoded.value, status: PROMPT_TEXT.threadStatus })
+    JSON.stringify({ ...decoded.value, status: PROMPTS.threadStatus })
   )
 }
 

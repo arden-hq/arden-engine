@@ -1,37 +1,13 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-import {
-  compilePromptTemplate,
-  renderPromptTemplate,
-  type PromptTemplate
-} from "@arden-hq/prompt-template"
-import { sha256Hex } from "@arden-hq/std/hash"
+import { compilePromptTemplate, renderPromptTemplate } from "@arden-hq/prompt-template"
 
 import { MONITOR_VERDICT_RULE } from "./run-verdicts.js"
 
-type PromptBand = "auxiliary" | "background" | "fragment" | "stable" | "turn_context"
-
-export interface AuthoredPrompt<Slot extends string> {
+interface PromptOptions<Slot extends string> {
   readonly id: string
-  readonly revision: number
   readonly sourcePath: string
-  readonly band: PromptBand
-  readonly template: PromptTemplate
-  readonly sourceSha256: string
-  readonly render: (values: Readonly<Record<Slot, string>>) => RenderedPrompt
-}
-
-export interface RenderedPrompt {
-  readonly text: string
-  readonly renderedSha256: string
-}
-
-interface DefinePromptOptions<Slot extends string> {
-  readonly id: string
-  readonly revision: number
-  readonly sourcePath: string
-  readonly band: PromptBand
   readonly slots: readonly Slot[]
 }
 
@@ -56,9 +32,11 @@ const readAuthoredSource = (sourcePath: string): string => {
   return body
 }
 
-const definePrompt = <const Slot extends string>(
-  options: DefinePromptOptions<Slot>
-): AuthoredPrompt<Slot> => {
+// The template is compiled once here and kept in the closure: the template
+// library accepts only the object it compiled.
+const templatePrompt = <const Slot extends string>(
+  options: PromptOptions<Slot>
+): ((values: Readonly<Record<Slot, string>>) => string) => {
   const template = compilePromptTemplate({ source: readAuthoredSource(options.sourcePath) })
   const declaredSlots = options.slots
   const slotsMatch =
@@ -69,421 +47,295 @@ const definePrompt = <const Slot extends string>(
       `Authored prompt '${options.id}' slots [${template.slots.join(", ")}] do not match its catalog declaration [${declaredSlots.join(", ")}].`
     )
   }
-  return Object.freeze({
-    id: options.id,
-    revision: options.revision,
-    sourcePath: options.sourcePath,
-    band: options.band,
-    template,
-    sourceSha256: sha256Hex(template.source),
-    render: (values: Readonly<Record<Slot, string>>) => {
-      const text = renderPromptTemplate({ template, values })
-      return Object.freeze({ text, renderedSha256: sha256Hex(text) })
-    }
-  })
+  return (values) => renderPromptTemplate({ template, values })
 }
 
-const renderText = <Slot extends string>(
-  prompt: AuthoredPrompt<Slot>,
-  values: Readonly<Record<Slot, string>>
-): string => prompt.render(values).text
+const fixedPrompt = <const Slot extends string>(
+  options: PromptOptions<Slot> & {
+    readonly values: Readonly<Record<NoInfer<Slot>, string>>
+  }
+): string => templatePrompt<Slot>(options)(options.values)
 
-const untrustedData = definePrompt({
+const untrustedDataRule = fixedPrompt({
   id: "guidelines.untrusted-data",
-  revision: 4,
   sourcePath: "guidelines/untrusted-data.md",
-  band: "fragment",
-  slots: []
+  slots: [],
+  values: {}
 })
 
-const untrustedDataRule = renderText(untrustedData, {})
-
-const memoryFiling = definePrompt({
+const memoryFilingRule = fixedPrompt({
   id: "memory.filing",
-  revision: 3,
   sourcePath: "memory/filing.md",
-  band: "fragment",
-  slots: []
+  slots: [],
+  values: {}
 })
 
-const memoryFilingRule = renderText(memoryFiling, {})
-
-export const PROMPT_CATALOG = Object.freeze({
-  untrustedData,
-  memoryFiling,
-  chatBase: definePrompt({
-    id: "chat.base",
-    revision: 27,
-    sourcePath: "chat/base.md",
-    band: "stable",
-    slots: ["assistant_name", "untrusted_data_rule"]
-  }),
-  automationRun: definePrompt({
-    id: "surfaces.automation-run",
-    revision: 9,
-    sourcePath: "surfaces/automation.md",
-    band: "turn_context",
-    slots: ["monitor_verdict_rule"]
-  }),
-  workerRun: definePrompt({
-    id: "surfaces.worker-run",
-    revision: 4,
-    sourcePath: "surfaces/worker.md",
-    band: "turn_context",
-    slots: []
-  }),
-  compaction: definePrompt({
-    id: "auxiliary.compaction",
-    revision: 7,
-    sourcePath: "auxiliary/compaction.md",
-    band: "auxiliary",
-    slots: []
-  }),
-  itemRouter: definePrompt({
-    id: "auxiliary.item-router",
-    revision: 2,
-    sourcePath: "auxiliary/item-router.md",
-    band: "auxiliary",
-    slots: []
-  }),
-  ruleCompiler: definePrompt({
-    id: "auxiliary.rule-compiler",
-    revision: 1,
-    sourcePath: "auxiliary/rule-compiler.md",
-    band: "auxiliary",
-    slots: ["tools", "connectors", "home"]
-  }),
-  chatOutcomeRouter: definePrompt({
-    id: "auxiliary.chat-outcome-router",
-    revision: 1,
-    sourcePath: "auxiliary/chat-outcome-router.md",
-    band: "auxiliary",
-    slots: []
-  }),
-  runPurpose: definePrompt({
-    id: "auxiliary.run-purpose",
-    revision: 3,
-    sourcePath: "auxiliary/run-purpose.md",
-    band: "auxiliary",
-    slots: ["untrusted_data_rule"]
-  }),
-  sessionNaming: definePrompt({
-    id: "auxiliary.session-naming",
-    revision: 6,
-    sourcePath: "auxiliary/session-naming.md",
-    band: "auxiliary",
-    slots: ["untrusted_data_rule"]
-  }),
-  letterSubject: definePrompt({
-    id: "auxiliary.letter-subject",
-    revision: 3,
-    sourcePath: "auxiliary/letter-subject.md",
-    band: "auxiliary",
-    slots: ["untrusted_data_rule"]
-  }),
-  sessionTriage: definePrompt({
-    id: "auxiliary.session-triage",
-    revision: 3,
-    sourcePath: "auxiliary/session-triage.md",
-    band: "auxiliary",
-    slots: []
-  }),
-  automationDescription: definePrompt({
-    id: "auxiliary.automation-description",
-    revision: 2,
-    sourcePath: "auxiliary/automation-description.md",
-    band: "auxiliary",
-    slots: ["untrusted_data_rule"]
-  }),
-  recipeDraft: definePrompt({
-    id: "auxiliary.recipe-draft",
-    revision: 1,
-    sourcePath: "auxiliary/recipe-draft.md",
-    band: "auxiliary",
-    slots: ["untrusted_data_rule"]
-  }),
-  spaceInstructions: definePrompt({
-    id: "auxiliary.space-instructions",
-    revision: 3,
-    sourcePath: "auxiliary/space-instructions.md",
-    band: "auxiliary",
-    slots: ["untrusted_data_rule"]
-  }),
-  memoryCapture: definePrompt({
-    id: "memory.capture",
-    revision: 11,
-    sourcePath: "memory/capture.md",
-    band: "background",
-    slots: ["memory_filing_rule"]
-  }),
-  chatSummary: definePrompt({
-    id: "memory.chat-summary",
-    revision: 3,
-    sourcePath: "memory/chat-summary.md",
-    band: "background",
-    slots: []
-  }),
-  dailySummary: definePrompt({
-    id: "memory.daily-summary",
-    revision: 1,
-    sourcePath: "memory/daily-summary.md",
-    band: "background",
-    slots: []
-  }),
-  urgentEvents: definePrompt({
-    id: "memory.urgent-events",
-    revision: 1,
-    sourcePath: "memory/urgent-events.md",
-    band: "background",
-    slots: []
-  }),
-  wikiMaintenance: definePrompt({
-    id: "memory.wiki-maintenance",
-    revision: 12,
-    sourcePath: "memory/wiki-maintenance.md",
-    band: "background",
-    slots: []
-  }),
-  taskContinuation: definePrompt({
-    id: "chat.task-continuation",
-    revision: 1,
-    sourcePath: "chat/task-continuation.md",
-    band: "turn_context",
-    slots: ["task_link"]
-  }),
-  communication: definePrompt({
-    id: "context.communication",
-    revision: 2,
-    sourcePath: "context/communication.md",
-    band: "turn_context",
-    slots: ["role_guidance"]
-  }),
-  conversationCommunication: definePrompt({
-    id: "context.conversation-communication",
-    revision: 3,
-    sourcePath: "context/conversation-communication.md",
-    band: "turn_context",
-    slots: []
-  }),
-  executorCommunication: definePrompt({
-    id: "context.executor-communication",
-    revision: 1,
-    sourcePath: "context/executor-communication.md",
-    band: "turn_context",
-    slots: []
-  }),
-  agentFamily: definePrompt({
-    id: "context.agent-family",
-    revision: 2,
-    sourcePath: "context/agent-family.md",
-    band: "turn_context",
-    slots: []
-  }),
-  researchEvidence: definePrompt({
-    id: "context.research-evidence",
-    revision: 1,
-    sourcePath: "context/research-evidence.md",
-    band: "turn_context",
-    slots: []
-  }),
-  chatTask: definePrompt({
-    id: "context.chat-task",
-    revision: 1,
-    sourcePath: "context/chat-task.md",
-    band: "turn_context",
-    slots: ["task_state"]
-  }),
-  taskState: definePrompt({
-    id: "context.task-state",
-    revision: 1,
-    sourcePath: "context/task-state.md",
-    band: "turn_context",
-    slots: ["record"]
-  }),
-  chatTaskOpen: definePrompt({
-    id: "context.chat-task-open",
-    revision: 1,
-    sourcePath: "context/chat-task-open.md",
-    band: "turn_context",
-    slots: []
-  }),
-  taskContract: definePrompt({
-    id: "context.task-contract",
-    revision: 1,
-    sourcePath: "context/task-contract.md",
-    band: "turn_context",
-    slots: []
-  }),
-  taskAudit: definePrompt({
-    id: "context.task-audit",
-    revision: 1,
-    sourcePath: "context/task-audit.md",
-    band: "turn_context",
-    slots: []
-  }),
-  todoOverride: definePrompt({
-    id: "context.todo-override",
-    revision: 1,
-    sourcePath: "context/todo-override.md",
-    band: "turn_context",
-    slots: ["todo_state"]
-  }),
-  globalInstructions: definePrompt({
-    id: "context.global-instructions",
-    revision: 1,
-    sourcePath: "context/global-instructions.md",
-    band: "turn_context",
-    slots: ["assistant_name"]
-  }),
-  effectiveAccess: definePrompt({
-    id: "context.effective-access",
-    revision: 2,
-    sourcePath: "context/effective-access.md",
-    band: "turn_context",
-    slots: ["folders", "permissions", "memory"]
-  }),
-  spaceAuthority: definePrompt({
-    id: "context.space-authority",
-    revision: 2,
-    sourcePath: "context/space-authority.md",
-    band: "turn_context",
-    slots: []
-  }),
-  spaceThreads: definePrompt({
-    id: "context.space-threads",
-    revision: 4,
-    sourcePath: "context/space-threads.md",
-    band: "turn_context",
-    slots: []
-  }),
-  cliTools: definePrompt({
-    id: "context.cli-tools",
-    revision: 1,
-    sourcePath: "context/cli-tools.md",
-    band: "turn_context",
-    slots: ["tools"]
-  }),
-  spaceNavigation: definePrompt({
-    id: "context.space-navigation",
-    revision: 6,
-    sourcePath: "context/space-navigation.md",
-    band: "turn_context",
-    slots: []
-  }),
-  capture: definePrompt({
-    id: "context.capture",
-    revision: 4,
-    sourcePath: "context/capture.md",
-    band: "turn_context",
-    slots: []
-  }),
-  onboarding: definePrompt({
-    id: "context.onboarding",
-    revision: 3,
-    sourcePath: "context/onboarding.md",
-    band: "turn_context",
-    slots: []
-  }),
-  onboardingKickoff: definePrompt({
-    id: "chat.onboarding-kickoff",
-    revision: 2,
-    sourcePath: "chat/onboarding-kickoff.md",
-    band: "turn_context",
-    slots: []
-  }),
-  automationFork: definePrompt({
-    id: "context.automation-fork",
-    revision: 2,
-    sourcePath: "context/automation-fork.md",
-    band: "turn_context",
-    slots: []
-  }),
-  automationReportElsewhere: definePrompt({
-    id: "context.automation-report-elsewhere",
-    revision: 2,
-    sourcePath: "context/automation-report-elsewhere.md",
-    band: "turn_context",
-    slots: ["monitor_verdict_rule"]
-  }),
-  threadStatus: definePrompt({
-    id: "context.thread-status",
-    revision: 1,
-    sourcePath: "context/thread-status.md",
-    band: "turn_context",
-    slots: []
-  }),
-  localInstructions: definePrompt({
-    id: "context.local-instructions",
-    revision: 2,
-    sourcePath: "context/local-instructions.md",
-    band: "turn_context",
-    slots: ["root"]
-  }),
-  localInstructionsTruncated: definePrompt({
-    id: "context.local-instructions-truncated",
-    revision: 1,
-    sourcePath: "context/local-instructions-truncated.md",
-    band: "fragment",
-    slots: []
-  })
+const renderChatBase = templatePrompt({
+  id: "chat.base",
+  sourcePath: "chat/base.md",
+  slots: ["assistant_name", "untrusted_data_rule"]
 })
 
-export const PROMPT_TEXT = Object.freeze({
+export const PROMPTS = Object.freeze({
   untrustedDataRule,
   memoryFilingRule,
-  automationRun: renderText(PROMPT_CATALOG.automationRun, {
-    monitor_verdict_rule: MONITOR_VERDICT_RULE
+  chatBase: ({ assistantName }: { readonly assistantName: string }): string =>
+    renderChatBase({
+      assistant_name: JSON.stringify(assistantName),
+      untrusted_data_rule: untrustedDataRule
+    }),
+  automationRun: fixedPrompt({
+    id: "surfaces.automation-run",
+    sourcePath: "surfaces/automation.md",
+    slots: ["monitor_verdict_rule"],
+    values: { monitor_verdict_rule: MONITOR_VERDICT_RULE }
   }),
-  workerRun: renderText(PROMPT_CATALOG.workerRun, {}),
-  compaction: renderText(PROMPT_CATALOG.compaction, {}),
-  itemRouter: renderText(PROMPT_CATALOG.itemRouter, {}),
-  chatOutcomeRouter: renderText(PROMPT_CATALOG.chatOutcomeRouter, {}),
-  runPurpose: renderText(PROMPT_CATALOG.runPurpose, {
-    untrusted_data_rule: untrustedDataRule
+  workerRun: fixedPrompt({
+    id: "surfaces.worker-run",
+    sourcePath: "surfaces/worker.md",
+    slots: [],
+    values: {}
   }),
-  sessionNaming: renderText(PROMPT_CATALOG.sessionNaming, {
-    untrusted_data_rule: untrustedDataRule
+  compaction: fixedPrompt({
+    id: "auxiliary.compaction",
+    sourcePath: "auxiliary/compaction.md",
+    slots: [],
+    values: {}
   }),
-  letterSubject: renderText(PROMPT_CATALOG.letterSubject, {
-    untrusted_data_rule: untrustedDataRule
+  itemRouter: fixedPrompt({
+    id: "auxiliary.item-router",
+    sourcePath: "auxiliary/item-router.md",
+    slots: [],
+    values: {}
   }),
-  sessionTriage: renderText(PROMPT_CATALOG.sessionTriage, {}),
-  automationDescription: renderText(PROMPT_CATALOG.automationDescription, {
-    untrusted_data_rule: untrustedDataRule
+  ruleCompiler: templatePrompt({
+    id: "auxiliary.rule-compiler",
+    sourcePath: "auxiliary/rule-compiler.md",
+    slots: ["tools", "connectors", "home"]
   }),
-  recipeDraft: renderText(PROMPT_CATALOG.recipeDraft, {
-    untrusted_data_rule: untrustedDataRule
+  chatOutcomeRouter: fixedPrompt({
+    id: "auxiliary.chat-outcome-router",
+    sourcePath: "auxiliary/chat-outcome-router.md",
+    slots: [],
+    values: {}
   }),
-  spaceInstructions: renderText(PROMPT_CATALOG.spaceInstructions, {
-    untrusted_data_rule: untrustedDataRule
+  runPurpose: fixedPrompt({
+    id: "auxiliary.run-purpose",
+    sourcePath: "auxiliary/run-purpose.md",
+    slots: ["untrusted_data_rule"],
+    values: { untrusted_data_rule: untrustedDataRule }
   }),
-  memoryCapture: renderText(PROMPT_CATALOG.memoryCapture, { memory_filing_rule: memoryFilingRule }),
-  wikiMaintenance: renderText(PROMPT_CATALOG.wikiMaintenance, {}),
-  dailySummary: renderText(PROMPT_CATALOG.dailySummary, {}),
-  urgentEvents: renderText(PROMPT_CATALOG.urgentEvents, {}),
-  chatSummary: renderText(PROMPT_CATALOG.chatSummary, {}),
-  conversationCommunication: renderText(PROMPT_CATALOG.conversationCommunication, {}),
-  executorCommunication: renderText(PROMPT_CATALOG.executorCommunication, {}),
-  agentFamily: renderText(PROMPT_CATALOG.agentFamily, {}),
-  researchEvidence: renderText(PROMPT_CATALOG.researchEvidence, {}),
-  chatTaskOpen: renderText(PROMPT_CATALOG.chatTaskOpen, {}),
-  taskContract: renderText(PROMPT_CATALOG.taskContract, {}),
-  taskAudit: renderText(PROMPT_CATALOG.taskAudit, {}),
-  spaceAuthority: renderText(PROMPT_CATALOG.spaceAuthority, {}),
-  spaceNavigation: renderText(PROMPT_CATALOG.spaceNavigation, {}),
-  spaceThreads: renderText(PROMPT_CATALOG.spaceThreads, {}),
-  capture: renderText(PROMPT_CATALOG.capture, {}),
-  onboarding: renderText(PROMPT_CATALOG.onboarding, {}),
-  threadStatus: renderText(PROMPT_CATALOG.threadStatus, {}),
-  automationFork: renderText(PROMPT_CATALOG.automationFork, {}),
-  automationReportElsewhere: renderText(PROMPT_CATALOG.automationReportElsewhere, {
-    monitor_verdict_rule: MONITOR_VERDICT_RULE
+  sessionNaming: fixedPrompt({
+    id: "auxiliary.session-naming",
+    sourcePath: "auxiliary/session-naming.md",
+    slots: ["untrusted_data_rule"],
+    values: { untrusted_data_rule: untrustedDataRule }
   }),
-  localInstructionsTruncated: renderText(PROMPT_CATALOG.localInstructionsTruncated, {})
-})
-
-export const renderChatBasePrompt = (assistantName: string): RenderedPrompt =>
-  PROMPT_CATALOG.chatBase.render({
-    assistant_name: JSON.stringify(assistantName),
-    untrusted_data_rule: untrustedDataRule
+  letterSubject: fixedPrompt({
+    id: "auxiliary.letter-subject",
+    sourcePath: "auxiliary/letter-subject.md",
+    slots: ["untrusted_data_rule"],
+    values: { untrusted_data_rule: untrustedDataRule }
+  }),
+  sessionTriage: fixedPrompt({
+    id: "auxiliary.session-triage",
+    sourcePath: "auxiliary/session-triage.md",
+    slots: [],
+    values: {}
+  }),
+  automationDescription: fixedPrompt({
+    id: "auxiliary.automation-description",
+    sourcePath: "auxiliary/automation-description.md",
+    slots: ["untrusted_data_rule"],
+    values: { untrusted_data_rule: untrustedDataRule }
+  }),
+  recipeDraft: fixedPrompt({
+    id: "auxiliary.recipe-draft",
+    sourcePath: "auxiliary/recipe-draft.md",
+    slots: ["untrusted_data_rule"],
+    values: { untrusted_data_rule: untrustedDataRule }
+  }),
+  spaceInstructions: fixedPrompt({
+    id: "auxiliary.space-instructions",
+    sourcePath: "auxiliary/space-instructions.md",
+    slots: ["untrusted_data_rule"],
+    values: { untrusted_data_rule: untrustedDataRule }
+  }),
+  memoryCapture: fixedPrompt({
+    id: "memory.capture",
+    sourcePath: "memory/capture.md",
+    slots: ["memory_filing_rule"],
+    values: { memory_filing_rule: memoryFilingRule }
+  }),
+  chatSummary: fixedPrompt({
+    id: "memory.chat-summary",
+    sourcePath: "memory/chat-summary.md",
+    slots: [],
+    values: {}
+  }),
+  dailySummary: fixedPrompt({
+    id: "memory.daily-summary",
+    sourcePath: "memory/daily-summary.md",
+    slots: [],
+    values: {}
+  }),
+  urgentEvents: fixedPrompt({
+    id: "memory.urgent-events",
+    sourcePath: "memory/urgent-events.md",
+    slots: [],
+    values: {}
+  }),
+  wikiMaintenance: fixedPrompt({
+    id: "memory.wiki-maintenance",
+    sourcePath: "memory/wiki-maintenance.md",
+    slots: [],
+    values: {}
+  }),
+  taskContinuation: templatePrompt({
+    id: "chat.task-continuation",
+    sourcePath: "chat/task-continuation.md",
+    slots: ["task_link"]
+  }),
+  communication: templatePrompt({
+    id: "context.communication",
+    sourcePath: "context/communication.md",
+    slots: ["role_guidance"]
+  }),
+  conversationCommunication: fixedPrompt({
+    id: "context.conversation-communication",
+    sourcePath: "context/conversation-communication.md",
+    slots: [],
+    values: {}
+  }),
+  executorCommunication: fixedPrompt({
+    id: "context.executor-communication",
+    sourcePath: "context/executor-communication.md",
+    slots: [],
+    values: {}
+  }),
+  agentFamily: fixedPrompt({
+    id: "context.agent-family",
+    sourcePath: "context/agent-family.md",
+    slots: [],
+    values: {}
+  }),
+  researchEvidence: fixedPrompt({
+    id: "context.research-evidence",
+    sourcePath: "context/research-evidence.md",
+    slots: [],
+    values: {}
+  }),
+  chatTask: templatePrompt({
+    id: "context.chat-task",
+    sourcePath: "context/chat-task.md",
+    slots: ["task_state"]
+  }),
+  taskState: templatePrompt({
+    id: "context.task-state",
+    sourcePath: "context/task-state.md",
+    slots: ["record"]
+  }),
+  chatTaskOpen: fixedPrompt({
+    id: "context.chat-task-open",
+    sourcePath: "context/chat-task-open.md",
+    slots: [],
+    values: {}
+  }),
+  taskContract: fixedPrompt({
+    id: "context.task-contract",
+    sourcePath: "context/task-contract.md",
+    slots: [],
+    values: {}
+  }),
+  taskAudit: fixedPrompt({
+    id: "context.task-audit",
+    sourcePath: "context/task-audit.md",
+    slots: [],
+    values: {}
+  }),
+  todoOverride: templatePrompt({
+    id: "context.todo-override",
+    sourcePath: "context/todo-override.md",
+    slots: ["todo_state"]
+  }),
+  globalInstructions: templatePrompt({
+    id: "context.global-instructions",
+    sourcePath: "context/global-instructions.md",
+    slots: ["assistant_name"]
+  }),
+  effectiveAccess: templatePrompt({
+    id: "context.effective-access",
+    sourcePath: "context/effective-access.md",
+    slots: ["folders", "permissions", "memory"]
+  }),
+  spaceAuthority: fixedPrompt({
+    id: "context.space-authority",
+    sourcePath: "context/space-authority.md",
+    slots: [],
+    values: {}
+  }),
+  spaceThreads: fixedPrompt({
+    id: "context.space-threads",
+    sourcePath: "context/space-threads.md",
+    slots: [],
+    values: {}
+  }),
+  cliTools: templatePrompt({
+    id: "context.cli-tools",
+    sourcePath: "context/cli-tools.md",
+    slots: ["tools"]
+  }),
+  spaceNavigation: fixedPrompt({
+    id: "context.space-navigation",
+    sourcePath: "context/space-navigation.md",
+    slots: [],
+    values: {}
+  }),
+  capture: fixedPrompt({
+    id: "context.capture",
+    sourcePath: "context/capture.md",
+    slots: [],
+    values: {}
+  }),
+  onboarding: fixedPrompt({
+    id: "context.onboarding",
+    sourcePath: "context/onboarding.md",
+    slots: [],
+    values: {}
+  }),
+  onboardingKickoff: fixedPrompt({
+    id: "chat.onboarding-kickoff",
+    sourcePath: "chat/onboarding-kickoff.md",
+    slots: [],
+    values: {}
+  }),
+  automationFork: fixedPrompt({
+    id: "context.automation-fork",
+    sourcePath: "context/automation-fork.md",
+    slots: [],
+    values: {}
+  }),
+  automationReportElsewhere: fixedPrompt({
+    id: "context.automation-report-elsewhere",
+    sourcePath: "context/automation-report-elsewhere.md",
+    slots: ["monitor_verdict_rule"],
+    values: { monitor_verdict_rule: MONITOR_VERDICT_RULE }
+  }),
+  threadStatus: fixedPrompt({
+    id: "context.thread-status",
+    sourcePath: "context/thread-status.md",
+    slots: [],
+    values: {}
+  }),
+  localInstructions: templatePrompt({
+    id: "context.local-instructions",
+    sourcePath: "context/local-instructions.md",
+    slots: ["root"]
+  }),
+  localInstructionsTruncated: fixedPrompt({
+    id: "context.local-instructions-truncated",
+    sourcePath: "context/local-instructions-truncated.md",
+    slots: [],
+    values: {}
   })
+})

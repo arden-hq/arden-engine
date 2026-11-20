@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { cutText } from "@arden-hq/std/text"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
@@ -31,7 +31,7 @@ export const makeLetterSubject = (dependencies: LetterSubjectDependencies) =>
     const subject = yield* dependencies.completion.runText({
       role: "helper",
       usage: { kind: "letter_subject", owner: { type: "session", sessionId: input.sessionId } },
-      system: PROMPT_TEXT.letterSubject,
+      system: PROMPTS.letterSubject,
       user: JSON.stringify({ message: cutText(text, LETTER_SUBJECT_INPUT_MAX_CHARS) }),
       maxOutputTokens: 80,
       maxCharacters: 120,

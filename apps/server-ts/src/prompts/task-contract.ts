@@ -4,7 +4,7 @@ import {
   type ContractLine,
   type TaskContract
 } from "../persistence/work/contract.js"
-import { PROMPT_TEXT } from "./catalog.js"
+import { PROMPTS } from "./catalog.js"
 import { renderPromptSection } from "./format.js"
 
 const KIND_HEADING: Record<ContractLine["kind"], string> = {
@@ -19,7 +19,7 @@ export const renderTaskContract = (contract: TaskContract): string | undefined =
     const lines = contract.lines.filter((line) => line.kind === kind)
     return lines.length === 0 ? [] : [`${KIND_HEADING[kind]}:`, ...lines.map(lineEntry)]
   })
-  return renderPromptSection("Task contract", [PROMPT_TEXT.taskContract, ...groups].join("\n"))
+  return renderPromptSection("Task contract", [PROMPTS.taskContract, ...groups].join("\n"))
 }
 
 const lineEntry = (line: ContractLine): string => {

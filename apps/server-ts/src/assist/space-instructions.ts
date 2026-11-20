@@ -3,7 +3,7 @@ import { Effect } from "effect"
 
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import type { Wiki } from "../wiki/service.js"
 
 const TASK_LIMIT = 40
@@ -30,7 +30,7 @@ export const makeSpaceInstructions = (dependencies: SpaceInstructionsDependencie
     const instructions = yield* dependencies.completion.runText({
       role: "helper",
       usage: { kind: "space_instructions", owner: { type: "space", spaceId } },
-      system: PROMPT_TEXT.spaceInstructions,
+      system: PROMPTS.spaceInstructions,
       user: spaceBrief(
         space.name,
         space.page_path,

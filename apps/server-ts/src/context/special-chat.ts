@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { cutText } from "@arden-hq/std/text"
 import { renderPromptSection } from "../prompts/format.js"
 
@@ -16,11 +16,11 @@ export const readSpecialChat = (
   metadata: Readonly<Record<string, unknown>>
 ): SpecialChat | undefined => {
   if (marked(metadata["capture"]))
-    return { kind: "capture", context: renderPromptSection("Handed capture", PROMPT_TEXT.capture) }
+    return { kind: "capture", context: renderPromptSection("Handed capture", PROMPTS.capture) }
   if (marked(metadata["onboarding"]))
     return {
       kind: "onboarding",
-      context: renderPromptSection("Getting started", PROMPT_TEXT.onboarding)
+      context: renderPromptSection("Getting started", PROMPTS.onboarding)
     }
   return undefined
 }

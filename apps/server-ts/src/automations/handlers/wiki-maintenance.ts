@@ -3,7 +3,7 @@ import type { Wiki } from "../../wiki/service.js"
 import type { ReaderPosition } from "../../persistence/reader-position.js"
 import { AutomationId } from "../../persistence/automations/model.js"
 import type { HandlerItemDataOf } from "../../persistence/automations/handler-item.js"
-import { PROMPT_TEXT } from "../../prompts/catalog.js"
+import { PROMPTS } from "../../prompts/catalog.js"
 import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
@@ -53,7 +53,7 @@ export const wikiMaintenanceHandler: SystemAutomationHandler<"wiki_maintenance">
     automationId: WIKI_MAINTENANCE_AUTOMATION_ID,
     name: "Wiki Maintenance",
     description: "Reconcile cross-page Wiki consistency after each Wiki commit.",
-    prompt: PROMPT_TEXT.wikiMaintenance,
+    prompt: PROMPTS.wikiMaintenance,
     handler: "wiki_maintenance",
     triggers: [{ type: "event", event_type: "wiki.changed" }],
     enabled: true,
