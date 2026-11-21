@@ -5,7 +5,6 @@ export type AppSettingsTabId =
   | "usage"
   | "tools"
   | "skills"
-  | "recipes"
   | "permissions"
   | "appearance"
   | "storage"

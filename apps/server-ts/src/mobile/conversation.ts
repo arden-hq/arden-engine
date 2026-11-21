@@ -188,7 +188,6 @@ function userItem(message: HistoryMessage): MobileConversationItem {
             role: quoted.role,
             text: previewLine(withFileNames(quoted.content)) ?? quoted.content
           },
-    recipe: message.recipe ?? null,
     sent_from: message.sent_from ?? null
   }
 }

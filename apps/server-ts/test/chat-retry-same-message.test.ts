@@ -70,8 +70,8 @@ it("a request fingerprint changes only with a new fingerprint version", () => {
   }).toMatchInlineSnapshot(`
     {
       "automation": "21ab213946bf3c5bbaaff38245216b6e6112128847b9c1419672bdd5433a7c60",
-      "send": "a9d912d51489e058d0a0862a33130d662a0a7341ac1f49f9f3207edf183325b4",
-      "version": 2,
+      "send": "53931106fd834a194bc4cebf1ceb4c835559b0bbc9fd4373612ddf275695ed55",
+      "version": 3,
     }
   `)
 })

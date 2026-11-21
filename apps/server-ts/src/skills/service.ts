@@ -2,7 +2,6 @@ import type {
   MarketplaceSkill,
   Skill,
   SkillContent,
-  SkillRecipe,
   SkillInstallReceipt,
   SkillRemoveReceipt,
   SkillToggleReceipt
@@ -10,9 +9,6 @@ import type {
 import {
   SkillDescriptionSchema,
   SkillNameSchema,
-  SkillRecipeSpaceIdSchema,
-  SkillRecipeSchema,
-  SkillRecipeTitleSchema,
   SkillVersionSchema
 } from "@arden-hq/protocol/effect/skills"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
@@ -48,21 +44,10 @@ import {
 } from "./marketplace.js"
 import { parseSkillMetadata } from "./metadata.js"
 import { countOf } from "@arden-hq/std/count"
-import {
-  DEFAULT_RECIPE_SKILLS,
-  defaultRecipeByName,
-  recipeDescription,
-  recipeName,
-  recipeOf,
-  recipeSource
-} from "./recipes.js"
-import { atomicCompareAndSwap } from "../storage/local-paths.js"
 import { renderPromptSection } from "../prompts/format.js"
-import { sha256Hex } from "@arden-hq/std/hash"
 
 const SKILL_FILE = "SKILL.md"
 const DISABLED_FILE = ".disabled"
-const HIDDEN_RECIPES_FILE = ".hidden-recipes"
 const MAX_SKILL_BYTES = 512 * 1024
 const MAX_CATALOG_CHARS = 32_000
 const MAX_RESOURCE_FILES = 128
@@ -86,11 +71,6 @@ const SkillResourcePathSchema = Schema.String.check(
       : "must be inside scripts, references, or assets"
   })
 )
-
-const CreateRecipeSchema = Schema.Struct({
-  title: SkillRecipeTitleSchema,
-  space_id: Schema.NullOr(SkillRecipeSpaceIdSchema)
-})
 
 const SkillResourceFileSchema = Schema.Struct({
   path: SkillResourcePathSchema,
@@ -152,8 +132,7 @@ const builtInSkill = (skill: BuiltInSkill): Skill => ({
   version: skill.version,
   enabled: true,
   builtin: true,
-  ...(skill.userInvocable ? { invocable: true as const } : {}),
-  recipe: null
+  ...(skill.userInvocable ? { invocable: true as const } : {})
 })
 
 const builtInLoaded = (skill: BuiltInSkill): SkillLoadedContent => ({
@@ -166,13 +145,7 @@ const builtInLoaded = (skill: BuiltInSkill): SkillLoadedContent => ({
   enabled: true
 })
 
-const BUILT_IN_LIST: ReadonlyArray<Skill> = [
-  ...BUILT_IN_SKILLS.map(builtInSkill),
-  ...DEFAULT_RECIPE_SKILLS.map((entry) => entry.skill)
-]
-
-const isShippedName = (name: string): boolean =>
-  isBuiltInSkillName(name) || defaultRecipeByName(name) !== undefined
+const BUILT_IN_LIST: ReadonlyArray<Skill> = BUILT_IN_SKILLS.map(builtInSkill)
 
 const reservedName = (operation: SkillOperation, name: string): SkillError =>
   skillError(operation, "invalid", `Skill name ${name} is reserved for a built-in Skill`)
@@ -189,7 +162,6 @@ export interface SkillCreateInput {
   readonly description: string
   readonly body: string
   readonly version?: string
-  readonly recipe?: { readonly title: string; readonly space_id: string | null }
   readonly files?: ReadonlyArray<{
     readonly path: string
     readonly content: string
@@ -279,8 +251,7 @@ const loadRecord = Effect.fn("Skills.loadRecord")(function* (
       description: metadata.description,
       version: metadata.version ?? null,
       enabled: !(yield* disabled(directory, operation)),
-      builtin: false,
-      recipe: recipeOf(metadata.metadata, content)
+      builtin: false
     },
     content,
     directory,
@@ -311,9 +282,7 @@ const compactCatalog = (
 ): string | undefined => {
   const omit = options.omit ?? new Set<string>()
   const builtins = BUILT_IN_SKILLS.filter((skill) => !omit.has(skill.name))
-  const local = skills.filter(
-    (skill) => !skill.builtin && skill.enabled && skill.recipe === null && !omit.has(skill.name)
-  )
+  const local = skills.filter((skill) => !skill.builtin && skill.enabled && !omit.has(skill.name))
   if (builtins.length === 0 && local.length === 0) return undefined
   const sections: Array<string> = []
   if (builtins.length > 0) {
@@ -362,7 +331,7 @@ const listRoot = Effect.fn("Skills.listRoot")(function* (
       (entry) =>
         (entry.isDirectory() || entry.isSymbolicLink()) &&
         !entry.name.startsWith(".") &&
-        !isShippedName(entry.name)
+        !isBuiltInSkillName(entry.name)
     )
     .map((entry) => entry.name)
     .sort()
@@ -431,56 +400,9 @@ const make = Effect.fn("Skills.make")(function* (
     path: record.directory
   })
 
-  const hiddenRecipes = Effect.fn("Skills.hiddenRecipes")(function* () {
-    if (primary === null) return new Set<string>()
-    const text = yield* storage("list", "Hidden Recipes are unavailable", () =>
-      readFile(join(primary, HIDDEN_RECIPES_FILE), "utf8")
-    ).pipe(
-      Effect.catch((error) =>
-        error.reason === "not_found" ? Effect.succeed("") : Effect.fail(error)
-      )
-    )
-    return new Set(
-      text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((name) => defaultRecipeByName(name) !== undefined)
-    )
-  })
-
-  const setDefaultRecipeEnabled = Effect.fn("Skills.setDefaultRecipeEnabled")(function* (
-    name: string,
-    enabled: boolean
-  ) {
-    if (primary === null) return yield* storageUnavailable("set_enabled")
-    const hidden = yield* hiddenRecipes()
-    if (enabled) hidden.delete(name)
-    else hidden.add(name)
-    const text = [...hidden]
-      .sort()
-      .map((entry) => `${entry}\n`)
-      .join("")
-    yield* storage("set_enabled", "Recipe state could not be changed", () =>
-      writeFile(join(primary, HIDDEN_RECIPES_FILE), text)
-    )
-    return { name, enabled } satisfies SkillToggleReceipt
-  })
-
   const list = Effect.fn("Skills.list")(function* () {
     const local = (yield* records()).map(located)
-    const hidden = yield* hiddenRecipes().pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Hidden Recipes unavailable", { reason: error.reason }).pipe(
-          Effect.as(new Set<string>())
-        )
-      )
-    )
-    return [
-      ...local,
-      ...BUILT_IN_LIST.map((skill) =>
-        hidden.has(skill.name) ? { ...skill, enabled: false } : skill
-      )
-    ]
+    return [...local, ...BUILT_IN_LIST]
   })
 
   const findRecord = Effect.fn("Skills.findRecord")(function* (
@@ -508,18 +430,6 @@ const make = Effect.fn("Skills.make")(function* (
   const load = Effect.fn("Skills.load")(function* (name: string) {
     const builtin = builtInSkillByName(name)
     if (builtin !== undefined) return builtInLoaded(builtin)
-    const recipe = defaultRecipeByName(name)
-    if (recipe !== undefined) {
-      return {
-        name: recipe.skill.name,
-        description: recipe.skill.description,
-        version: recipe.skill.version,
-        content: recipe.content,
-        directory: null,
-        builtin: true,
-        enabled: true
-      } satisfies SkillLoadedContent
-    }
     const record = yield* findRecord(name, "content")
     return {
       name: record.skill.name,
@@ -548,7 +458,7 @@ const make = Effect.fn("Skills.make")(function* (
     const name = yield* Schema.decodeUnknownEffect(SkillNameSchema)(input.name).pipe(
       Effect.mapError((cause) => skillError("create", "invalid", "Skill name is invalid", cause))
     )
-    if (isShippedName(name)) return yield* reservedName("create", name)
+    if (isBuiltInSkillName(name)) return yield* reservedName("create", name)
     const description = yield* Schema.decodeUnknownEffect(SkillDescriptionSchema)(
       input.description.trim()
     ).pipe(
@@ -568,23 +478,7 @@ const make = Effect.fn("Skills.make")(function* (
     ).pipe(
       Effect.mapError((cause) => skillError("create", "invalid", "Skill files are invalid", cause))
     )
-    const recipe =
-      input.recipe === undefined
-        ? undefined
-        : yield* Schema.decodeUnknownEffect(CreateRecipeSchema)(input.recipe).pipe(
-            Effect.mapError((cause) => skillError("create", "invalid", "Recipe is invalid", cause))
-          )
-    const skillContent =
-      recipe === undefined
-        ? `---\n${stringify({ name, description, version }, { lineWidth: 0 }).trimEnd()}\n---\n\n${body}\n`
-        : recipeSource({
-            name,
-            description,
-            version,
-            title: recipe.title,
-            space_id: recipe.space_id,
-            prompt: body
-          })
+    const skillContent = `---\n${stringify({ name, description, version }, { lineWidth: 0 }).trimEnd()}\n---\n\n${body}\n`
     if (new TextEncoder().encode(skillContent).byteLength > MAX_SKILL_BYTES) {
       return yield* skillError("create", "invalid", "Skill content is too large")
     }
@@ -624,68 +518,8 @@ const make = Effect.fn("Skills.make")(function* (
     return (yield* loadRecord(primary, name, "create")).skill
   })
 
-  const decodeRecipe = (operation: SkillOperation, input: SkillRecipe) =>
-    Schema.decodeUnknownEffect(SkillRecipeSchema)(input).pipe(
-      Effect.mapError((cause) => skillError(operation, "invalid", "Recipe is invalid", cause))
-    )
-
-  const createRecipe = Effect.fn("Skills.createRecipe")(function* (input: SkillRecipe) {
-    const recipe = yield* decodeRecipe("create", input)
-    const taken = new Set([
-      ...(yield* records()).map((record) => record.skill.name),
-      ...BUILT_IN_LIST.map((skill) => skill.name)
-    ])
-    return yield* create({
-      name: recipeName(recipe.title, taken),
-      description: recipeDescription(recipe.prompt),
-      body: recipe.prompt,
-      recipe: { title: recipe.title, space_id: recipe.space_id }
-    })
-  })
-
-  const updateRecipe = Effect.fn("Skills.updateRecipe")(function* (
-    name: string,
-    input: SkillRecipe
-  ) {
-    if (isShippedName(name)) return yield* builtInUnchangeable("update", name)
-    const recipe = yield* decodeRecipe("update", input)
-    const record = yield* findRecord(name, "update")
-    if (record.root !== primary || primary === null) {
-      return yield* skillError(
-        "update",
-        "invalid",
-        `Skill ${name} lives in ${record.root}, which Arden shares with other agents`
-      )
-    }
-    if (record.skill.recipe === null) {
-      return yield* skillError("update", "invalid", `Skill ${name} is not a Recipe`)
-    }
-    const source = recipeSource({
-      name,
-      description: recipeDescription(recipe.prompt),
-      version: record.skill.version ?? "1.0.0",
-      title: recipe.title,
-      space_id: recipe.space_id,
-      prompt: recipe.prompt
-    })
-    yield* Effect.tryPromise({
-      try: () =>
-        atomicCompareAndSwap(join(record.directory, SKILL_FILE), source, sha256Hex(record.content)),
-      catch: (cause) =>
-        skillError(
-          "update",
-          "invalid",
-          "Recipe changed or could not be saved; reload it before retrying",
-          cause
-        )
-    })
-    return (yield* loadRecord(primary, name, "update")).skill
-  })
-
   const setEnabled = Effect.fn("Skills.setEnabled")(function* (name: string, enabled: boolean) {
-    if (defaultRecipeByName(name) !== undefined)
-      return yield* setDefaultRecipeEnabled(name, enabled)
-    if (isShippedName(name)) return yield* builtInUnchangeable("set_enabled", name)
+    if (isBuiltInSkillName(name)) return yield* builtInUnchangeable("set_enabled", name)
     const record = yield* findRecord(name, "set_enabled")
     if (record.skill.enabled === enabled) return { name, enabled } satisfies SkillToggleReceipt
     const marker = join(record.directory, DISABLED_FILE)
@@ -702,7 +536,7 @@ const make = Effect.fn("Skills.make")(function* (
   })
 
   const remove = Effect.fn("Skills.remove")(function* (name: string) {
-    if (isShippedName(name)) return yield* builtInUnchangeable("remove", name)
+    if (isBuiltInSkillName(name)) return yield* builtInUnchangeable("remove", name)
     const record = yield* findRecord(name, "remove")
     if (record.root !== primary) {
       return yield* skillError(
@@ -737,7 +571,7 @@ const make = Effect.fn("Skills.make")(function* (
       ),
     installMarketplace: (id) => {
       const name = id.slice(id.lastIndexOf("/") + 1)
-      if (isShippedName(name)) return Effect.fail(reservedName("install", name))
+      if (isBuiltInSkillName(name)) return Effect.fail(reservedName("install", name))
       if (primary === null) return Effect.fail(storageUnavailable("install"))
       return requireDirectory(primary, "install").pipe(
         Effect.flatMap(() => marketplace.install(primary, id))
@@ -755,8 +589,6 @@ const make = Effect.fn("Skills.make")(function* (
         })
       ),
     create,
-    createRecipe,
-    updateRecipe,
     update: (input) =>
       load(input.name).pipe(
         Effect.flatMap((loaded) => updateSkillInstructions(loaded, input)),
@@ -791,8 +623,6 @@ export class SkillCatalog extends Context.Service<
     readonly update: (input: SkillUpdateInput) => Effect.Effect<SkillLoadedContent, SkillError>
     readonly reference: (name: string, resource: string) => Effect.Effect<string, SkillError>
     readonly create: (input: SkillCreateInput) => Effect.Effect<Skill, SkillError>
-    readonly createRecipe: (input: SkillRecipe) => Effect.Effect<Skill, SkillError>
-    readonly updateRecipe: (name: string, input: SkillRecipe) => Effect.Effect<Skill, SkillError>
     readonly setEnabled: (
       name: string,
       enabled: boolean

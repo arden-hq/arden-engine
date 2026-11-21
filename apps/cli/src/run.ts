@@ -44,7 +44,6 @@ export interface RunOptions {
   readonly promptArgument: string | undefined
   readonly urlArgument: string | undefined
   readonly target: SessionTarget
-  readonly recipe: string | undefined
   readonly imagePaths: ReadonlyArray<string>
   readonly outputSchemaPath: string | undefined
   readonly approvalMode: ChatApprovalMode
@@ -536,7 +535,6 @@ export const runCommand = async (
         sessionId,
         message: prompt,
         ...(images.length === 0 ? {} : { images }),
-        ...(options.recipe === undefined ? {} : { recipe: options.recipe }),
         ...(outputSchema === undefined ? {} : { outputSchema }),
         approvalMode: options.approvalMode
       })

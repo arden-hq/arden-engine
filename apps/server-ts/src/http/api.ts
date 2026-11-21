@@ -1,5 +1,4 @@
 import { SourceTitlesApi } from "./source-titles/api.js"
-import { ProcessesApi } from "./processes/api.js"
 import { ComputerApi } from "./computer/api.js"
 import { HttpApi } from "effect/unstable/httpapi"
 import { HealthApi } from "./health/api.js"
@@ -70,7 +69,6 @@ export class ArdenApi extends HttpApi.make("arden-server")
   .add(InboxApi)
   .add(WikiApi)
   .add(TerminalsApi)
-  .add(ProcessesApi)
   .add(SourceTitlesApi)
   .add(MobileApi)
   .add(RelayApi)

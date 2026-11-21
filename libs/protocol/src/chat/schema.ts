@@ -48,7 +48,6 @@ export * from "./events/approval.js"
 export * from "./events/session.js"
 export * from "./interaction.js"
 import { AgentResultSchema, interactionSenderFields } from "./interaction.js"
-import { SkillNameSchema } from "../skills/schema.js"
 import {
   runLifecycleEventSchemas,
   textStreamEventSchemas,
@@ -174,8 +173,6 @@ export const ChatRequestSchema = withExtras({
   approval_mode: Schema.optionalKey(Schema.Literals(APPROVAL_MODES)),
   images: Schema.optionalKey(Schema.Array(ChatImageSchema)),
   reply_to: Schema.optionalKey(ReplyContextsSchema),
-  /** The Recipe the user started this message from, by its Skill name. */
-  recipe: Schema.optionalKey(SkillNameSchema),
   /** The UI surface that wrote this message's words; the person only confirmed it. */
   sent_from: Schema.optionalKey(ChatSentFromSchema),
   /** Sent as a capture (quick-capture window or iPhone): raises `capture.arrived`. */
@@ -489,7 +486,6 @@ const historyMessageFields = {
    *  was sent. Absent on rows that started their turn and on older rows. */
   applied_at: optionalString,
   reply_to: Schema.optionalKey(Schema.Array(ReplyContextSchema)),
-  recipe: Schema.optionalKey(SkillNameSchema),
   /** On the hidden row that carries a Run question's answer to the run: which
    *  question. A mid-run answer is where the question's card sits. */
   question_answer: Schema.optionalKey(QuestionAnswerSchema),

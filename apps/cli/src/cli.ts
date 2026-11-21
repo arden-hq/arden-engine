@@ -90,7 +90,6 @@ Run options:
   --fork <id>             Send to a copy of this chat; the original stays as it was
   --space <name|id>        Start the new chat in this Space
   --model <id>            Start the new chat on this model (arden models lists them)
-  --recipe <name>         Start from this Recipe (Skill)
   --image <path>          Attach a .png or .jpg image (repeatable)
   --output-schema <file>  A JSON Schema the final answer must match; json
                           output carries the parsed answer as result.data
@@ -238,7 +237,6 @@ const RUN_OPTIONS: ReadonlySet<string> = new Set([
   "--fork",
   "--space",
   "--model",
-  "--recipe",
   "--image",
   "--output-schema",
   "--mode",
@@ -285,7 +283,6 @@ const runOptionsOf = (parsed: ParsedArgs): RunOptions => {
     promptArgument: parsed.positionals.length === 0 ? undefined : parsed.positionals.join(" "),
     urlArgument: single(parsed, "--url"),
     target: sessionTarget(parsed),
-    recipe: single(parsed, "--recipe"),
     imagePaths: parsed.values.get("--image") ?? [],
     outputSchemaPath: single(parsed, "--output-schema"),
     approvalMode: mode,

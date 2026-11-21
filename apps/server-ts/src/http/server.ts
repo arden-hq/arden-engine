@@ -1,7 +1,6 @@
 import { contextExperimentsLayer } from "../context/experiments.js"
 import { SourceTitleHandlers } from "./source-titles/handlers.js"
 import { retryingFetch } from "@arden-hq/loop/provider-kit"
-import { ProcessHandlers } from "./processes/handlers.js"
 import { join } from "node:path"
 import { ComputerService } from "../computer/service.js"
 import { ComputerHandlers } from "./computer/handlers.js"
@@ -425,7 +424,6 @@ const composeServer = (
       BrowserProcedureHandlers,
       WikiHandlers,
       TerminalHandlers,
-      ProcessHandlers,
       SourceTitleHandlers,
       MobileHandlers,
       RelayHandlers,

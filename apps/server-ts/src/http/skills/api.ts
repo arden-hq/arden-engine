@@ -7,16 +7,12 @@ import {
   SkillInstallReceiptSchema,
   SkillListResponseSchema,
   SkillNameSchema,
-  SkillRecipeDraftRequestSchema,
-  SkillRecipeDraftSchema,
-  SkillRecipeSchema,
   SkillRemoveReceiptSchema,
-  SkillSchema,
   SkillToggleReceiptSchema
 } from "@arden-hq/protocol/effect/skills"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/unstable/httpapi"
 
-import { completionErrors, StoreInvalid } from "../errors.js"
+import { StoreInvalid } from "../errors.js"
 
 const skillErrors = [
   HttpApiError.NotFoundNoContent,
@@ -42,22 +38,6 @@ export class SkillsApi extends HttpApiGroup.make("skills", { topLevel: true }).a
   HttpApiEndpoint.post("installMarketplace", "/skills/marketplace/install", {
     payload: MarketplaceSkillInstallInputSchema,
     success: SkillInstallReceiptSchema,
-    error: skillErrors
-  }),
-  HttpApiEndpoint.post("createRecipe", "/skills/recipes", {
-    payload: SkillRecipeSchema,
-    success: SkillSchema,
-    error: skillErrors
-  }),
-  HttpApiEndpoint.post("draftRecipe", "/skills/recipes/draft", {
-    payload: SkillRecipeDraftRequestSchema,
-    success: SkillRecipeDraftSchema,
-    error: completionErrors
-  }),
-  HttpApiEndpoint.put("updateRecipe", "/skills/recipes/:name", {
-    params: { name: SkillNameSchema },
-    payload: SkillRecipeSchema,
-    success: SkillSchema,
     error: skillErrors
   }),
   HttpApiEndpoint.get("content", "/skills/:name/content", {

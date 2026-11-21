@@ -147,12 +147,6 @@ export const PROMPTS = Object.freeze({
     slots: ["untrusted_data_rule"],
     values: { untrusted_data_rule: untrustedDataRule }
   }),
-  recipeDraft: fixedPrompt({
-    id: "auxiliary.recipe-draft",
-    sourcePath: "auxiliary/recipe-draft.md",
-    slots: ["untrusted_data_rule"],
-    values: { untrusted_data_rule: untrustedDataRule }
-  }),
   spaceInstructions: fixedPrompt({
     id: "auxiliary.space-instructions",
     sourcePath: "auxiliary/space-instructions.md",

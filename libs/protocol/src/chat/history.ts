@@ -191,8 +191,6 @@ interface HistoryMessageBase extends JsonRecord {
     readonly role: typeof ROLE.user | typeof ROLE.assistant
     readonly content: string
   }>
-  /** The Recipe a user message was started from, by its Skill name. */
-  readonly recipe?: string
   /** The Run question whose answer this hidden row carries to the run. */
   readonly question_answer?: { readonly question_id: string }
   /** On a hidden-context row that tells the agent a connection card was answered. */

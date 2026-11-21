@@ -155,8 +155,6 @@ export const MobileConversationItemSchema = Schema.Union([
     reply_to: Schema.NullOr(
       Schema.Struct({ role: Schema.Literals(["user", "assistant"]), text: Schema.String })
     ),
-    /** The Recipe the message was started from, by its name. */
-    recipe: Schema.NullOr(Schema.String),
     /** The UI surface that wrote the message's words for the person to confirm. */
     sent_from: Schema.NullOr(ChatSentFromSchema)
   }),

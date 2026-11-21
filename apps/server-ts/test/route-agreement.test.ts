@@ -1,4 +1,3 @@
-import { processRoutes } from "@arden-hq/protocol/processes"
 import { readdirSync } from "node:fs"
 import { HttpApi } from "effect/unstable/httpapi"
 import { expect, it } from "vitest"
@@ -193,7 +192,6 @@ const tables: Readonly<Record<string, RouteTable>> = {
     item: () => focusChoiceRoutes.item(spaceId, "question-1"),
     resolve: () => focusChoiceRoutes.resolve(spaceId, "question-1")
   }),
-  processRoutes: table(processRoutes, { output: () => processRoutes.output("process-1") }),
   terminalRoutes: table(terminalRoutes, {
     list: () => terminalRoutes.list(sessionId),
     item: () => terminalRoutes.item(sessionId, 1),
@@ -209,7 +207,6 @@ const tables: Readonly<Record<string, RouteTable>> = {
   limitSettingsRoutes: table(limitSettingsRoutes, {}),
   skillRoutes: table(skillRoutes, {
     marketplaceSearch: () => skillRoutes.marketplaceSearch("notes"),
-    recipe: () => skillRoutes.recipe("recipe-1"),
     item: () => skillRoutes.item("skill-1"),
     content: () => skillRoutes.content("skill-1")
   }),
