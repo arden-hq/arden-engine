@@ -20,6 +20,7 @@ import type { RunAuthority } from "../execution/authority.js"
 import type { EffectTarget, EffectTargetOrigin, ToolEffect } from "../execution/tool-effect.js"
 import type { CodeAgentWorkspace } from "../sessions/agent-mode.js"
 import type { AutomationId } from "../persistence/automations/model.js"
+import type { ToolCallPlan } from "../persistence/work/task-direction.js"
 
 /** Full plain message history exposed to a host model runner. */
 export type ChatRunnerMessage = ChatMessage
@@ -35,6 +36,10 @@ export interface ChatRunnerToolRequest {
   /** Server-owned tool source. Custom runners may omit it; omitted sources
    * can never create standing permissions. */
   readonly source?: string
+  /** Where the call's plan comes from: the model turn that asked for it, or the call that
+   * made it. Every server caller says; a custom runner that omits it gives a call with no
+   * plan, which a Task run never lets act. */
+  readonly plan?: ToolCallPlan
 }
 
 interface ChatRunnerSpawnAgentRequestBase {
@@ -104,6 +109,12 @@ export interface ChatRunnerToolOperationContext {
     readonly feedback: string | null
     readonly data?: JsonObject
   }
+  /**
+   * Checks that the call's stored plan still matches its Task's current direction. Call it
+   * after every wait, just before the effect (`ToolCallRequest.beforeExecute`): undefined
+   * when the call may start, else the result it gets instead.
+   */
+  readonly admit: () => Promise<ToolResult | undefined>
 }
 
 /** Plain host boundary for durable tool execution and exact-result recovery. */

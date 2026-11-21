@@ -60,6 +60,7 @@ it("invalidates browser authority when a recovered call failed before reporting 
   await expect(
     host.call({
       toolCallId: "script:code:failed",
+      parentToolCallId: "script",
       name: "browser_act",
       args: { tab_ref: tab },
       signal: new AbortController().signal,
@@ -139,6 +140,7 @@ it.each(["snapshot", "action-page"] as const)(
     }
     const request = {
       toolCallId: "script:code:page",
+      parentToolCallId: "script",
       name: "browser_snapshot",
       args: { tab_ref: tab },
       signal: new AbortController().signal,
@@ -194,6 +196,7 @@ it.each([
     await expect(
       host.call({
         toolCallId: "script:code:lookup",
+        parentToolCallId: "script",
         name: "lookup",
         args: {},
         signal: new AbortController().signal,
@@ -271,6 +274,7 @@ it("splits the display title off a script's call before the durable row and the 
   ])
   const result = await host.call({
     toolCallId: "script-call",
+    parentToolCallId: "script",
     name: "automation_list",
     args: { [TOOL_DISPLAY_TITLE.argument]: "Listing automations", status: "active" },
     signal: new AbortController().signal,
@@ -330,6 +334,7 @@ it("retains inference admission through a running script's later nested calls", 
     parameters: Schema.toStandardSchemaV1(Schema.Struct({})),
     execute: async (_input, ctx) => {
       const request = {
+        parentToolCallId: ctx.toolCallId,
         name: "lookup",
         args: {},
         signal: ctx.signal,

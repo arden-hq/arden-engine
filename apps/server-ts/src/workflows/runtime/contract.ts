@@ -8,6 +8,9 @@ export interface CodeModeCallRequest {
   readonly beforeExecute?: ToolCallRequest["beforeExecute"]
   readonly onResult?: (result: ToolResult) => void
   readonly onSettled?: (facts: NestedCallFacts) => void
+  /** The call this nested call is part of (a `code_mode`, `browser_task` or `computer_repl`
+   * call, or a detached script's origin call). The nested call keeps its stored plan. */
+  readonly parentToolCallId: string
   readonly toolCallId: string
   readonly name: string
   readonly args: Readonly<Record<string, unknown>>

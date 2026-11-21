@@ -35,6 +35,7 @@ import {
 } from "./define.js"
 import { defaultImpact } from "../execution/impact.js"
 import { NOT_RUN_HOST } from "../persistence/tools/mutation-receipt.js"
+import { taskDirectionReview } from "../persistence/work/task-direction.js"
 import { ObservationSnapshotSchema, type ServerRunContext } from "./run-context.js"
 
 type ApprovalFact =
@@ -62,7 +63,7 @@ export interface ApprovalGatePolicy {
     readonly args: unknown
     readonly changesState: boolean
     readonly prompt: ToolApprovalPrompt
-  }) => Promise<void>
+  }) => Promise<"published" | "needs_review">
   readonly offer: (input: {
     readonly run: ServerRunContext
     readonly toolCallId: string
@@ -73,6 +74,11 @@ export interface ApprovalGatePolicy {
     readonly run: ServerRunContext
     readonly name: string
   }) => Promise<number>
+  /** Whether this started call's stored plan still matches its Task (`admitPlanned`). */
+  readonly planned: (call: {
+    readonly runId: string
+    readonly toolCallId: string
+  }) => Promise<"current" | "needs_review">
 }
 
 export const makeApprovalGate =
@@ -152,6 +158,15 @@ export const makeApprovalGate =
         })
       )
     if (decision.kind === "ask") {
+      // Never ask the owner about a change planned for a direction the Task no longer has.
+      // After any denial; the call is checked again just before its effect.
+      if (
+        definition.metadata.changes_state &&
+        ctx.approval === undefined &&
+        (await services.policy.planned({ runId: ctx.run.runId, toolCallId: ctx.toolCallId })) ===
+          "needs_review"
+      )
+        throw taskDirectionReview()
       const prompt =
         required ??
         (definition.approvalPrompt === undefined
@@ -224,10 +239,12 @@ export const makeApprovalGate =
               prompt: card
             })
             .then(
-              () => true,
-              () => false
+              (outcome) => outcome,
+              () => "failed" as const
             )
-          throw kept ? waitsInChat() : unattendedRefusal()
+          // The card store checks the plan again where it publishes: B may have come since.
+          if (kept === "needs_review") throw taskDirectionReview()
+          throw kept === "published" ? waitsInChat() : unattendedRefusal()
         }
         throw new PauseRequested("approval", card.preview, card)
       }

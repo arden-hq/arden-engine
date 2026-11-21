@@ -232,11 +232,13 @@ export const gatePolicy = (
   reach: () => ({ available: true, unattended_scope: false }),
   defer: async (input) => {
     options.deferred?.push(input.name)
+    return "published"
   },
   offer: async (input) => {
     options.offered?.push(input.name)
   },
-  refusals: async () => 0
+  refusals: async () => 0,
+  planned: async () => "current"
 })
 
 export const decodeRows = <S extends Schema.Top & Schema.ConstraintDecoder<unknown>>(

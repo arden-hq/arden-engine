@@ -50,6 +50,8 @@ import type { AutomationId } from "../persistence/automations/model.js"
 import { renderCaptureSpaces, type SpecialChat } from "./special-chat.js"
 import { renderTaskContract, renderTaskProgress } from "../prompts/task-contract.js"
 import type { TaskContract } from "../persistence/work/contract.js"
+import type { TaskWorkerSnapshot } from "../persistence/automations/job-prompt.js"
+import { taskDirectionReceipt } from "../persistence/work/task-direction.js"
 import { renderTaskStateSection } from "../prompts/task-state.js"
 
 export type SessionOrigin =
@@ -269,12 +271,21 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   const authorityLine = renderAuthority(authority)
   const authorityText =
     authorityLine === undefined ? undefined : renderPromptSection("Run authority", authorityLine)
+  // A Task run is shown its own Task's contract and state record: the same read its
+  // direction receipt is made from, so what the model sees is what its calls are checked
+  // against. A chat with no Task run shows the chat's Task.
   const contractSections = taskContractSections(
-    context.chatTask?.task.contract ?? context.task?.contract
+    context.task?.contract ?? context.chatTask?.task.contract
   )
-  const { contract: _contract, ...continuation } = context.task ?? { contract: undefined }
+  // Title and detail are the direction section's; the continuation keeps the rest.
+  const {
+    contract: _contract,
+    text: _text,
+    body: _body,
+    ...continuation
+  } = context.task ?? { contract: undefined, text: undefined, body: undefined }
   const continuationShown = origin.source !== "scheduled_task" && context.task !== undefined
-  const stateTask = context.chatTask?.task ?? context.task
+  const stateTask = context.task ?? context.chatTask?.task
   return {
     sections: [
       ...(memoryContext?.core ?? []),
@@ -300,6 +311,7 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
         "Research agent",
         renderResearchAgentContext(origin.source === "agent" && origin.mode === "research")
       ),
+      ...taskDirectionSection(context.task),
       ...contractSections.lines,
       ...textSection("Task in this chat", renderChatTaskContext(context.chatTask)),
       ...contractSections.progress,
@@ -445,6 +457,36 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     )
   return { space, memoryContext }
 })
+
+/**
+ * The run's own Task (its binding) as its owner has it now. Its receipt is what a call this
+ * turn asks for is checked against before its effect (tool admission).
+ */
+const taskDirectionSection = (
+  task: Pick<TaskWorkerSnapshot, "itemId" | "text" | "body" | "contract"> | undefined
+): ReadonlyArray<RuntimeSection> =>
+  task === undefined
+    ? []
+    : [
+        {
+          kind: "direction",
+          key: "Task direction",
+          text: renderPromptSection(
+            "Task direction",
+            [
+              "The Task this run works on, as its owner has it now. Its contract lines, if any, are in the Task contract section. When this differs from earlier messages, this is current.",
+              `Title: ${JSON.stringify(task.text)}`,
+              `Detail: ${JSON.stringify(task.body ?? "")}`
+            ].join("\n")
+          ),
+          receipt: taskDirectionReceipt({
+            itemId: task.itemId,
+            text: task.text,
+            body: task.body,
+            lines: task.contract.lines
+          })
+        }
+      ]
 
 const taskContractSections = (
   contract: TaskContract | undefined

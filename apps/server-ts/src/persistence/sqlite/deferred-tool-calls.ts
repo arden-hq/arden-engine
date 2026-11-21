@@ -27,6 +27,7 @@ import { COMMAND_TOOL } from "../permissions/command-policy.js"
 import { approvalPermissionContext } from "./permissions.js"
 import { saveCardRule } from "./tool-approval-resolve.js"
 import { followUpRecordableStatusList } from "./status-sets.js"
+import { readCallPlan } from "./task-direction.js"
 
 interface DeferredRow {
   readonly run_id: string
@@ -119,9 +120,13 @@ export const makeDeferredToolCalls = ({
     )
     const draft = yield* pendingDecisionDraft(card, "pause", "deferred")
     const at = DateTime.formatIso(yield* DateTime.now)
-    yield* writer
+    return yield* writer
       .transact(
         Effect.gen(function* () {
+          // The gate's own check may be old by now: a card is never published for a plan
+          // its Task no longer has. Read in the transaction that publishes it.
+          if ((yield* readCallPlan(sql, identity)) === "needs_review")
+            return "needs_review" as const
           const inserted = yield* sql`INSERT INTO deferred_tool_calls (run_id, session_id,
             tool_call_id, tool_name, action, scope, preview, diff, payload_json, arguments_json,
             changes_state, status, requested_at)
@@ -129,7 +134,7 @@ export const makeDeferredToolCalls = ({
             ${card.action}, ${card.scope}, ${card.preview}, ${card.diff ?? null}, ${payload},
             ${args}, ${call.changesState ? 1 : 0}, 'pending', ${at})
           ON CONFLICT (run_id, tool_call_id) DO NOTHING RETURNING tool_call_id`
-          if (inserted.length === 0) return
+          if (inserted.length === 0) return "published" as const
           const routes = yield* loadPendingDecisionRoutes(
             sql,
             "deferred",
@@ -144,6 +149,7 @@ export const makeDeferredToolCalls = ({
             toolCallId: call.toolCallId,
             toolName: call.toolName
           })
+          return "published" as const
         })
       )
       .pipe(

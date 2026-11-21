@@ -28,6 +28,7 @@ import type {
 } from "@arden-hq/protocol/runs"
 import { Context, Effect, Schema } from "effect"
 import type { TaskInferenceReview } from "./inference.js"
+import type { TaskDirectionChanged } from "./task-direction.js"
 import type { AutomationId } from "../automations/model.js"
 import type { TodoListItem } from "@arden-hq/protocol"
 import type { FinishRecord, OriginalRequest } from "../todos/items.js"
@@ -226,9 +227,10 @@ export class WorkStore extends Context.Service<
       expectedUpdatedAt: string,
       patch: UpdateSpaceTaskPatch,
       runId?: string,
+      /** The durable call asking: its stored plan is checked in the write's transaction. */
       toolCallId?: string,
       actor?: "user"
-    ) => Effect.Effect<SpaceTask, WorkStoreError>
+    ) => Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged>
     readonly stop: (
       address: TaskAddress,
       expectedUpdatedAt: string
@@ -236,8 +238,9 @@ export class WorkStore extends Context.Service<
     readonly comment: (
       address: TaskAddress,
       input: CreateSpaceTaskCommentInput,
-      runId?: string
-    ) => Effect.Effect<SpaceTaskComment, WorkStoreError>
+      runId?: string,
+      toolCallId?: string
+    ) => Effect.Effect<SpaceTaskComment, WorkStoreError | TaskDirectionChanged>
     readonly finishCheck: (options: {
       readonly runId: string
       readonly itemId: string
@@ -250,14 +253,15 @@ export class WorkStore extends Context.Service<
       spaceId?: string,
       runId?: string,
       toolCallId?: string
-    ) => Effect.Effect<SpaceTask, WorkStoreError>
+    ) => Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged>
     readonly commentFromJob: (
       originAutomationId: AutomationId,
       key: string,
       input: CreateSpaceTaskCommentInput,
       spaceId?: string,
-      runId?: string
-    ) => Effect.Effect<SpaceTaskComment, WorkStoreError>
+      runId?: string,
+      toolCallId?: string
+    ) => Effect.Effect<SpaceTaskComment, WorkStoreError | TaskDirectionChanged>
     readonly createAttachment: (
       address: TaskAddress,
       input: CreateSpaceTaskAttachmentRequest,
