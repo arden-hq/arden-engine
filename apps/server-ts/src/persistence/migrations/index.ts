@@ -69,6 +69,11 @@ import { threadMetadataObject } from "./0174_thread_metadata_object.js"
 import { activeContextWindowOnly } from "./0175_active_context_window_only.js"
 import { toolResultsAsToolMessages } from "./0176_tool_results_as_tool_messages.js"
 import { interactionRole } from "./0177_interaction_role.js"
+import { taskHoldStartedAt } from "./0178_task_hold_started_at.js"
+import { taskHoldStartLegacy } from "./0179_task_hold_start_legacy.js"
+import { spaceReviewOwner } from "./0180_space_review_owner.js"
+import { toolCallPlannedFrom } from "./0181_tool_call_planned_from.js"
+import { spaceReviewChatsSessionIndex } from "./0182_space_review_chats_session_index.js"
 import { domainMutationLinks } from "./0090_domain_mutation_links.js"
 import { effectTargetLabels } from "./0091_effect_target_labels.js"
 import { manyCallTargets } from "./0092_many_call_targets.js"
@@ -381,7 +386,12 @@ export const migrations: ReadonlyArray<Migration> = [
   threadMetadataObject,
   activeContextWindowOnly,
   toolResultsAsToolMessages,
-  interactionRole
+  interactionRole,
+  taskHoldStartedAt,
+  taskHoldStartLegacy,
+  spaceReviewOwner,
+  toolCallPlannedFrom,
+  spaceReviewChatsSessionIndex
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

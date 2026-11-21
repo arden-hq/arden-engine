@@ -23,8 +23,7 @@ import {
   type SpaceBindingRow
 } from "../spaces/store.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
-import { renameOwnedJob } from "./job-labels.js"
-import { spaceJobId } from "../space-job-id.js"
+import { followSpaceName } from "./owner-chat.js"
 import { nextId } from "./deps.js"
 import type { PersistenceDeps } from "./deps.js"
 import { pauseForArchivedSpace } from "./automation-auto-pause.js"
@@ -264,8 +263,7 @@ export const makeSpaceStore = ({
       `
           const next = updated[0]
           if (next === undefined) return null
-          if (current.name !== name)
-            yield* renameOwnedJob(sql, spaceJobId(validSpaceId), `${name} worker`)
+          if (current.name !== name) yield* followSpaceName(sql, validSpaceId, current.name, name)
           if (valid.instructions !== undefined)
             yield* spaceJobs.queueOwnerSpaceChangeWake(validSpaceId, now, runId)
           else yield* spaceJobs.syncSpace(validSpaceId, now)

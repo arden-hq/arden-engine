@@ -24,6 +24,7 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { nextId, type Writer } from "./deps.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { iso } from "../../runtime/clock.js"
+import { hasOwner, ownerJoin } from "./automation-rows.js"
 
 const failure = (message: string, cause?: unknown) =>
   new AutomationStoreError({
@@ -40,12 +41,13 @@ const load = Effect.fn("HandlerItem.load")(function* (
   const parsed = parseLease(lease)
   const rows = yield* sql<{ readonly context: string; readonly handler: string | null }>`
     SELECT queue.context, task.handler FROM automation_event_queue AS queue
-    JOIN scheduled_tasks AS task ON task.task_id = queue.task_id
+    ${ownerJoin(sql)}
     JOIN automation_runs AS run ON run.id = ${parsed.runId} AND run.task_id = queue.task_id
     WHERE queue.id = ${parsed.queueId} AND queue.claimed_at IS NOT NULL
       AND run.claim_count = ${parsed.claimAttempt}
       AND queue.lease_expires_at > ${iso(yield* Clock.currentTimeMillis)} AND run.status = 'running'
-      AND json_extract(queue.context, '$.automation_run_id') = run.id`
+      AND json_extract(queue.context, '$.automation_run_id') = run.id
+      AND ${hasOwner(sql)}`
   const row = rows[0]
   if (!row) return yield* failure("The handler lease is no longer current")
   return {

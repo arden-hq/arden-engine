@@ -13,7 +13,7 @@ import {
   widerAxes,
   type AdmissionFacts,
   type AgentRequest,
-  type AutomationFacts,
+  type ExecutionOwner,
   type RunAuthority
 } from "../src/execution/authority.js"
 import type { RunCapability, RunPolicy, SessionResourceReach } from "../src/execution/policy.js"
@@ -41,24 +41,29 @@ const personTurn = (sessionId: string, task: RunContext["task"] = null): RunCont
   task
 })
 
+// The call sites below are the tracked ones; this names the typed owner each one meant.
 const automation = (
   id: string,
-  purpose: AutomationFacts["purpose"],
-  overrides: Partial<AutomationFacts> = {}
-): AutomationFacts => ({
-  automation_id: id,
-  purpose,
-  handler: null,
-  owner_space_id: null,
-  ...overrides
-})
+  purpose: "user_automation" | "system" | "space_review" | "task_execution",
+  overrides: { readonly handler?: string; readonly owner_space_id?: string } = {}
+): ExecutionOwner => {
+  switch (purpose) {
+    case "user_automation":
+    case "system":
+      return { kind: "automation", key: id, purpose, handler: overrides.handler ?? null }
+    case "space_review":
+      return { kind: "space_review", key: id, spaceId: overrides.owner_space_id ?? "space-a" }
+    case "task_execution":
+      return { kind: "task", key: id, spaceId: overrides.owner_space_id ?? null }
+  }
+}
 
 const facts = (overrides: Partial<AdmissionFacts>): AdmissionFacts => ({
   sessionId: "chat-1",
   context: personTurn("chat-1"),
   policy: policy(),
-  originAutomation: null,
-  chatAutomation: null,
+  originOwner: null,
+  chatOwner: null,
   ...overrides
 })
 
@@ -82,13 +87,13 @@ describe("deriveAuthority", () => {
         sessionId: "auto-chat",
         context: personTurn("auto-chat"),
         policy: policy({ authority_session_id: "auto-chat" }),
-        chatAutomation: automation("auto-1", "user_automation")
+        chatOwner: automation("auto-1", "user_automation")
       }),
       "person in a Space thread": facts({
         sessionId: "thread",
         context: personTurn("thread"),
         policy: policy({ space: space("space-a") }),
-        chatAutomation: automation("review-a", "space_review", { owner_space_id: "space-a" })
+        chatOwner: automation("review-a", "space_review", { owner_space_id: "space-a" })
       }),
       "user Automation run": facts({
         sessionId: "auto-chat",
@@ -100,8 +105,8 @@ describe("deriveAuthority", () => {
           authority_session_id: "auto-chat",
           execution: { mode: "worker", observe: false }
         }),
-        originAutomation: automation("auto-1", "user_automation"),
-        chatAutomation: automation("auto-1", "user_automation")
+        originOwner: automation("auto-1", "user_automation"),
+        chatOwner: automation("auto-1", "user_automation")
       }),
       "user Automation run in a continued chat": facts({
         sessionId: "auto-chat",
@@ -110,7 +115,7 @@ describe("deriveAuthority", () => {
           task: null
         },
         policy: policy({ authority_session_id: "auto-chat" }),
-        originAutomation: automation("auto-1", "user_automation")
+        originOwner: automation("auto-1", "user_automation")
       }),
       "Memory Capture": facts({
         sessionId: "capture-chat",
@@ -119,8 +124,8 @@ describe("deriveAuthority", () => {
           task: null
         },
         policy: policy({ authority_session_id: "capture-chat" }),
-        originAutomation: automation("builtin-capture", "system", { handler: "memory_capture" }),
-        chatAutomation: automation("builtin-capture", "system", { handler: "memory_capture" })
+        originOwner: automation("builtin-capture", "system", { handler: "memory_capture" }),
+        chatOwner: automation("builtin-capture", "system", { handler: "memory_capture" })
       }),
       "Task worker": facts({
         sessionId: "task-chat",
@@ -129,7 +134,7 @@ describe("deriveAuthority", () => {
           task: { item_id: "task-1", generation: 3 }
         },
         policy: policy({ space: space("space-a"), execution: { mode: "worker", observe: false } }),
-        chatAutomation: automation("tasks-a", "task_execution", { owner_space_id: "space-a" })
+        chatOwner: automation("tasks-a", "task_execution", { owner_space_id: "space-a" })
       }),
       "Space review": facts({
         sessionId: "thread",
@@ -138,7 +143,7 @@ describe("deriveAuthority", () => {
           task: null
         },
         policy: policy({ space: space("space-a"), execution: { mode: "worker", observe: true } }),
-        chatAutomation: automation("review-a", "space_review", { owner_space_id: "space-a" })
+        chatOwner: automation("review-a", "space_review", { owner_space_id: "space-a" })
       }),
       "unrecorded origin": facts({ context: { origin: { kind: "unrecorded" }, task: null } })
     }
@@ -273,7 +278,7 @@ const taskWorker = deriveAuthority(
       task: { item_id: "task-1", generation: 1 }
     },
     policy: policy({ space: space("space-a"), execution: { mode: "worker", observe: false } }),
-    chatAutomation: automation("tasks-a", "task_execution", { owner_space_id: "space-a" })
+    chatOwner: automation("tasks-a", "task_execution", { owner_space_id: "space-a" })
   })
 )
 const spaceChat = deriveAuthority(
@@ -397,7 +402,7 @@ describe("narrow", () => {
             origin: { kind: "automation", automation_id: "auto-1", occurrence_id: "o1" },
             task: null
           },
-          originAutomation: automation("auto-1", "system", { handler: "memory_capture" })
+          originOwner: automation("auto-1", "system", { handler: "memory_capture" })
         })
       )
     ]
@@ -448,7 +453,7 @@ describe("the run's cause", () => {
         },
         task: null
       },
-      originAutomation: automation("auto-1", "user_automation")
+      originOwner: automation("auto-1", "user_automation")
     })
   )
   const cause = (authority: RunAuthority) => ({

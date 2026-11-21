@@ -1,10 +1,6 @@
 import type { AutomationContextMode, AutomationRun } from "@arden-hq/protocol/automations"
 import { haltAutomation } from "./automation-halt.js"
-import {
-  AutomationRunSchema,
-  AutomationRunSkipSchema,
-  AutomationToolScopeSchema
-} from "@arden-hq/protocol/effect/automations"
+import { AutomationRunSchema, AutomationRunSkipSchema } from "@arden-hq/protocol/effect/automations"
 import { Clock, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -13,7 +9,6 @@ import {
   type AutomationOriginPolicy
 } from "../automations/catalog.js"
 import { AutomationStoreError } from "../automations/store.js"
-import { JobPurposeSchema, type JobPurpose } from "../job-classification.js"
 import { decodeJson } from "./json.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
 import type { SpaceJobRecoveryCursor } from "./space-job-recovery.js"
@@ -23,6 +18,7 @@ import { deleteAutomationRow } from "./automation-removal.js"
 import {
   automationRowSelect,
   makeAutomationRowReads,
+  readWorkOwner,
   type AutomationStoreDeps
 } from "./automation-rows.js"
 import {
@@ -268,29 +264,26 @@ export const makeAutomationCatalog = ({
     automationId: string
   ) {
     const validAutomationId = yield* automationIdEffect(automationId, "get")
-    const rows = yield* sql<{
-      readonly tool_scope: string
-      readonly auto_approve: number
-      readonly purpose: JobPurpose
-      readonly handler: string | null
-      readonly thread_id: string | null
-    }>`
-      SELECT tool_scope, auto_approve, handler, purpose, thread_id
-      FROM scheduled_tasks
-      WHERE task_id = ${validAutomationId}
-      LIMIT 1
-    `.pipe(
+    const owner = yield* readWorkOwner(sql, validAutomationId).pipe(
       Effect.mapError((cause) =>
-        storeError(
-          "get",
-          "storage",
-          "Could not load Automation-origin policy",
-          validAutomationId,
-          cause
-        )
+        Schema.isSchemaError(cause)
+          ? storeError(
+              "get",
+              "corrupt",
+              "Stored Automation-origin policy is corrupt",
+              validAutomationId,
+              cause
+            )
+          : storeError(
+              "get",
+              "storage",
+              "Could not load Automation-origin policy",
+              validAutomationId,
+              cause
+            )
       )
     )
-    if (rows[0] === undefined) {
+    if (owner === undefined) {
       return yield* storeError(
         "get",
         "not_found",
@@ -298,44 +291,26 @@ export const makeAutomationCatalog = ({
         validAutomationId
       )
     }
-    const toolScope = yield* Schema.decodeUnknownEffect(AutomationToolScopeSchema)(
-      rows[0].tool_scope
-    ).pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          "get",
-          "corrupt",
-          "Stored Automation-origin policy is corrupt",
-          validAutomationId,
-          cause
-        )
-      )
-    )
-    const identity = yield* Schema.decodeUnknownEffect(
-      Schema.Struct({
-        purpose: JobPurposeSchema,
-        handler: Schema.NullOr(Schema.String)
-      })
-    )({
-      purpose: rows[0].purpose,
-      handler: rows[0].handler
-    }).pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          "get",
-          "corrupt",
-          "Stored Automation-origin identity is corrupt",
-          validAutomationId,
-          cause
-        )
-      )
-    )
-    return {
-      ...identity,
-      toolScope,
-      autoApprove: rows[0].auto_approve === 1,
-      threadId: rows[0].thread_id
-    } satisfies AutomationOriginPolicy
+    switch (owner.kind) {
+      case "automation":
+        return {
+          purpose: owner.purpose,
+          handler: owner.authored.handler,
+          threadId: owner.authored.chatId
+        } satisfies AutomationOriginPolicy
+      case "space_review":
+        return {
+          purpose: "space_review",
+          handler: null,
+          threadId: owner.chatId
+        } satisfies AutomationOriginPolicy
+      case "task":
+        return {
+          purpose: "task_execution",
+          handler: null,
+          threadId: owner.chatId
+        } satisfies AutomationOriginPolicy
+    }
   })
 
   const setGeneratedDescription = Effect.fn("SqliteAutomationStore.setGeneratedDescription")(

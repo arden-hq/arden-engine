@@ -60,15 +60,21 @@ export const cooldownEnd = Effect.fn("AutomationQueue.cooldownEnd")(function* (
   sql: SqlClient.SqlClient,
   automationId: string
 ) {
+  // An Automation's cooldown is on its definition, a Space review's in its
+  // settings. A Task has none.
   const rows = yield* sql<{ readonly minutes: number | null; readonly ended: string | null }>`
-    SELECT task.cooldown_minutes AS minutes,
+    SELECT COALESCE(
+        (SELECT task.cooldown_minutes FROM scheduled_tasks AS task
+          WHERE task.task_id = ${automationId} AND task.purpose IN ('user_automation', 'system')),
+        (SELECT setting.cooldown_minutes FROM space_review_settings AS setting
+          WHERE substr(${automationId}, 1, 6) = 'space:'
+            AND setting.space_id = substr(${automationId}, 7))) AS minutes,
       -- Newest first through idx_automation_runs_task_ended, stopping at the
       -- first run that counts, instead of reading every run of the Automation.
       (SELECT run.ended_at FROM automation_runs AS run
-        WHERE run.task_id = task.task_id AND run.ended_at IS NOT NULL
+        WHERE run.task_id = ${automationId} AND run.ended_at IS NOT NULL
           AND ${countsAsRun(sql, sql`run`)}
-        ORDER BY run.ended_at DESC LIMIT 1) AS ended
-    FROM scheduled_tasks AS task WHERE task.task_id = ${automationId}`
+        ORDER BY run.ended_at DESC LIMIT 1) AS ended`
   const row = rows[0]
   if (row === undefined || row.minutes === null || row.minutes <= 0 || row.ended === null)
     return undefined
@@ -103,8 +109,15 @@ export const enqueue = Effect.fn("AutomationQueue.enqueue")(function* (
       RETURNING task_id`
     if (claimed.length === 0) return false
   }
+  // What the owner is decides its batch window: an Automation's definition, or
+  // the Space a review's key names. A Task has no window.
   const jobs = yield* sql<{ readonly purpose: string; readonly handler: string | null }>`
-    SELECT purpose, handler FROM scheduled_tasks WHERE task_id = ${entry.automationId}`
+    SELECT purpose, handler FROM scheduled_tasks
+    WHERE task_id = ${entry.automationId} AND purpose IN ('user_automation', 'system')
+    UNION ALL
+    SELECT 'space_review', NULL FROM spaces
+    WHERE substr(${entry.automationId}, 1, 6) = 'space:'
+      AND space_id = substr(${entry.automationId}, 7)`
   const job = jobs[0]
   const window =
     job === undefined || runsAtOnce(entry.source) || entry.dueAt !== undefined

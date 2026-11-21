@@ -2,11 +2,12 @@ import type { SessionPresentation } from "@arden-hq/protocol"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { JobPurpose } from "../job-classification.js"
+import { ownerJoin } from "./automation-rows.js"
 
+// A Space review's chat is named by its key (`space:<space>`), whether or not its Space is still there.
 export const readableConversationSql = (sql: SqlClient.SqlClient) =>
   sql`(session_type = 'chat' AND parent_session_id IS NULL AND parent_message_id IS NULL
-    AND NOT EXISTS (SELECT 1 FROM scheduled_tasks AS worker_job
-      WHERE worker_job.task_id = origin_automation_id AND worker_job.purpose = 'space_review'))`
+    AND COALESCE(substr(origin_automation_id, 1, 6), '') != 'space:')`
 
 interface PresentationRow {
   readonly conversation_space_id: string | null
@@ -30,16 +31,23 @@ export const sessionPresentations = Effect.fn("Sessions.presentation")(function*
   ids: ReadonlyArray<string>
 ) {
   if (ids.length === 0) return new Map<string, SessionPresentation>()
+  const ownerSpace = sql`COALESCE(task.owner_space_id, item.space_id,
+    CASE WHEN substr(s.origin_automation_id, 1, 6) = 'space:' THEN substr(s.origin_automation_id, 7) END)`
   const rows = yield* sql<PresentationRow>`
     SELECT conversation.space_id AS conversation_space_id, s.session_id, s.session_type, s.name, s.parent_session_id, s.parent_message_id,
-      parent.name AS parent_name, job.purpose, job.task_id, job.name AS job_name,
-      job.owner_space_id, job.owner_task_id, space.name AS space_name, item.text AS task_name
+      parent.name AS parent_name,
+      -- A Task's or a review's chat stays its worker chat after its owner is
+      -- deleted: the key says so.
+      COALESCE(task.purpose,
+        CASE WHEN substr(s.origin_automation_id, 1, 5) = 'task:' THEN 'task_execution'
+          WHEN substr(s.origin_automation_id, 1, 6) = 'space:' THEN 'space_review' END) AS purpose,
+      task.task_id, task.name AS job_name, ${ownerSpace} AS owner_space_id,
+      item.item_id AS owner_task_id, space.name AS space_name, item.text AS task_name
     FROM sessions AS s
     LEFT JOIN space_conversations AS conversation ON conversation.session_id = s.session_id
     LEFT JOIN sessions AS parent ON parent.session_id = s.parent_session_id
-    LEFT JOIN scheduled_tasks AS job ON job.task_id = s.origin_automation_id
-    LEFT JOIN spaces AS space ON space.space_id = job.owner_space_id
-    LEFT JOIN space_tasks AS item ON item.item_id = job.owner_task_id
+    ${ownerJoin(sql, sql`s.origin_automation_id`)}
+    LEFT JOIN spaces AS space ON space.space_id = ${ownerSpace}
     WHERE s.session_id IN ${sql.in(ids)}
   `
   return new Map(rows.map((row) => [row.session_id, presentation(row)]))

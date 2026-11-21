@@ -4,6 +4,7 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { WorkStore, WorkStoreError, TaskExecutionReceipt } from "../work/store.js"
 import { workActivitySql } from "./work-activity.js"
 import { workError } from "./work-records.js"
+import { taskStandsSql } from "./task-wake.js"
 
 export const makeWorkExecution = (sql: SqlClient.SqlClient): WorkStore["Service"]["execution"] =>
   Effect.fn("Work.execution")(function* (itemId): Effect.fn.Return<
@@ -20,9 +21,8 @@ export const makeWorkExecution = (sql: SqlClient.SqlClient): WorkStore["Service"
         task.next_attempt_at,
         (task.owner = 'worker' AND (task.space_id IS NULL
           OR space.archived_at IS NULL)) AS can_run,
-        EXISTS (SELECT 1 FROM scheduled_tasks AS job JOIN automation_event_queue AS pending
-          ON pending.task_id = job.task_id WHERE job.owner_task_id = task.item_id
-            AND job.enabled = 1) AS queued
+        (${taskStandsSql(sql, "task")} AND EXISTS (SELECT 1 FROM automation_event_queue AS pending
+          WHERE pending.task_id = 'task:' || task.item_id)) AS queued
       FROM space_tasks AS task LEFT JOIN spaces AS space ON space.space_id = task.space_id
       WHERE task.item_id = ${itemId}`.pipe(
       Effect.mapError((cause) => workError("storage", "Could not read Task execution", cause))

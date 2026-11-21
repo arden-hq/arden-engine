@@ -2,7 +2,6 @@ import type { RecordedHistoryInput, RecordedHistoryPage, RecordedHistoryError } 
 import type {
   Automation,
   AutomationRun,
-  AutomationToolScope,
   CreateAutomationInput,
   SystemAutomationSetting,
   UpdateAutomationInput
@@ -32,11 +31,14 @@ export interface AutomationInstructionRevision {
   readonly source: AutomationWriteSource | undefined
 }
 
+/**
+ * What a chat made for one owner says of that owner: what kind of job it is,
+ * the handler set on it, and the chat set on it. What its runs may do is the
+ * run policy's to say (`captureRunPolicy`), not this.
+ */
 export interface AutomationOriginPolicy {
   readonly purpose: JobPurpose
   readonly handler: string | null
-  readonly toolScope: AutomationToolScope
-  readonly autoApprove: boolean
   readonly threadId: string | null
 }
 

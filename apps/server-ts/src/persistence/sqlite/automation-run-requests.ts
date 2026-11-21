@@ -27,7 +27,8 @@ import {
   systemSpecOf,
   type AutomationStoreDeps
 } from "./automation-rows.js"
-import { storeError, automationIdEffect } from "./automation-rows.js"
+import { storeError, automationIdEffect, readWorkOwner, type WorkOwner } from "./automation-rows.js"
+import { attemptRunSessionId } from "./owner-chat.js"
 import { enqueue } from "./automation-enqueue.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 import { activeRunStatusList } from "./status-sets.js"
@@ -68,6 +69,23 @@ const HEADLINE_BY_SOURCE: Readonly<Record<AutomationQueueSource, string>> = {
   idle: "Checked in after a quiet period",
   count: "Checked in after enough activity",
   wake: "Woken to continue"
+}
+
+/**
+ * Where a run chat goes, from its trunk row and the owner as stored now. An
+ * Automation's child is where its trunk is (its definition names no Space). A
+ * Space review's is in its Space, and its trunk must be the review's private chat.
+ */
+const childSource = (
+  trunkRow: { readonly space_id: string | null; readonly chat_model: string | null } | undefined,
+  owner: WorkOwner | undefined,
+  trunk: string
+) => {
+  if (trunkRow === undefined) return undefined
+  if (owner?.kind === "automation") return trunkRow
+  if (owner?.kind === "space_review" && owner.chatId === trunk)
+    return { ...trunkRow, space_id: owner.spaceId }
+  return undefined
 }
 
 export const makeAutomationRunRequests = ({
@@ -217,7 +235,7 @@ export const makeAutomationRunRequests = ({
       )
     }
     const parsed = parseLease(lease)
-    const childId = `${trunk}::i${lease.payload.automationRunId}`
+    const childId = attemptRunSessionId(trunk, lease.payload.automationRunId)
     const headlineId = `headline:${childId}`
     const now = iso(yield* Clock.currentTimeMillis)
     yield* writer
@@ -291,15 +309,15 @@ export const makeAutomationRunRequests = ({
         SELECT session_id FROM sessions WHERE session_id = ${childId} LIMIT 1
       `
           if (child[0] === undefined) {
+            const owner = yield* readWorkOwner(sql, lease.payload.automationId)
             const sources = yield* sql<{
               readonly space_id: string | null
               readonly chat_model: string | null
             }>`
-          SELECT COALESCE(task.owner_space_id, trunk.space_id) AS space_id, trunk.chat_model
-          FROM sessions AS trunk JOIN scheduled_tasks AS task ON task.task_id = ${lease.payload.automationId}
+          SELECT trunk.space_id, trunk.chat_model FROM sessions AS trunk
           WHERE trunk.session_id = ${trunk}
         `
-            const source = sources[0]
+            const source = childSource(sources[0], owner, trunk)
             if (source === undefined) {
               return yield* storeError(
                 "prepare_run_session",

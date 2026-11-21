@@ -11,19 +11,17 @@ import {
   orphanAgentAuthority,
   unrecordedAuthority,
   type AgentRequest,
-  type AutomationFacts,
+  type ExecutionOwner,
   type RunAuthority
 } from "../../execution/authority.js"
 import { RunPolicySchema, meetCapabilities, type RunPolicy } from "../../execution/policy.js"
 import type { AgentSessionMetadata } from "../../sessions/agent-mode.js"
-import { JobPurposeSchema } from "../job-classification.js"
 import { runPolicyRevoked } from "./run-policy.js"
 import { executionBudgetExpired } from "./execution-budgets.js"
 import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { decodeJson } from "./json.js"
 import { writeError } from "./chat-write-errors.js"
-
-const isJobPurpose = Schema.is(JobPurposeSchema)
+import { readWorkOwner } from "./automation-rows.js"
 
 export const readRunAuthority = Effect.fn("RunAuthority.read")(function* (
   sql: SqlClient.SqlClient,
@@ -39,24 +37,29 @@ const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(RunAuthori
 export const storedAuthority = (json: string | null): RunAuthority | undefined =>
   json === null ? undefined : Option.getOrUndefined(decodeStored(json))
 
-const automationFacts = Effect.fn("RunAuthority.automationFacts")(function* (
+/** The stored owner of one key; null when there is none or it no longer decodes. */
+const executionOwner = Effect.fn("RunAuthority.executionOwner")(function* (
   sql: SqlClient.SqlClient,
-  automationId: string | null
+  key: string | null
 ) {
-  if (automationId === null) return null
-  const rows = yield* sql<{
-    readonly purpose: string
-    readonly handler: string | null
-    readonly owner_space_id: string | null
-  }>`SELECT purpose, handler, owner_space_id FROM scheduled_tasks WHERE task_id = ${automationId}`
-  const row = rows[0]
-  if (row === undefined || !isJobPurpose(row.purpose)) return null
-  return {
-    automation_id: automationId,
-    purpose: row.purpose,
-    handler: row.handler,
-    owner_space_id: row.owner_space_id
-  } satisfies AutomationFacts
+  if (key === null) return null
+  const owner = yield* readWorkOwner(sql, key).pipe(
+    Effect.catchIf(Schema.isSchemaError, () => Effect.succeed(undefined))
+  )
+  if (owner === undefined) return null
+  switch (owner.kind) {
+    case "automation":
+      return {
+        kind: owner.kind,
+        key: owner.key,
+        purpose: owner.purpose,
+        handler: owner.authored.handler
+      } satisfies ExecutionOwner
+    case "space_review":
+      return { kind: owner.kind, key: owner.key, spaceId: owner.spaceId } satisfies ExecutionOwner
+    case "task":
+      return { kind: owner.kind, key: owner.key, spaceId: owner.spaceId } satisfies ExecutionOwner
+  }
 })
 
 export const spawnerRun = (sql: SqlClient.SqlClient, sessionId: string) =>
@@ -111,11 +114,11 @@ const chatAuthority = Effect.fn("RunAuthority.chat")(function* (
     sessionId: input.sessionId,
     context: input.context,
     policy: input.policy,
-    originAutomation: yield* automationFacts(
+    originOwner: yield* executionOwner(
       sql,
       origin.kind === "automation" ? origin.automation_id : null
     ),
-    chatAutomation: yield* automationFacts(sql, input.chatAutomationId)
+    chatOwner: yield* executionOwner(sql, input.chatAutomationId)
   })
 })
 

@@ -10,7 +10,7 @@ import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-layer.js"
-import { readSpaceJobContext } from "../src/persistence/sqlite/space-job-context.js"
+import { readTaskWorkerContext } from "../src/persistence/sqlite/space-job-context.js"
 import { makeSpaceJobSql } from "../src/persistence/sqlite/space-jobs.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
@@ -90,7 +90,7 @@ it("persists the state record atomically, keeps it out of public updates, and re
             }
           )
           .pipe(Effect.flip)
-        expect(stale.reason).toBe("conflict")
+        expect(stale).toMatchObject({ _tag: "WorkStoreError", reason: "conflict" })
         expect(
           yield* sql`SELECT json_extract(continuation_context, '$.next') AS next, due_at FROM space_tasks WHERE item_id = ${task.item_id}`
         ).toEqual([{ next: "[]", due_at: null }])
@@ -128,13 +128,13 @@ it("persists the state record atomically, keeps it out of public updates, and re
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const work = yield* WorkStore
-        const snapshot = yield* readSpaceJobContext(sql, taskJobId(saved.item_id))
-        if (snapshot?.kind !== "task_execution" || snapshot.task === undefined)
-          throw new Error("Task snapshot missing")
+        // Changed from the tracked test: the Task's own read, not the read by job key.
+        const snapshot = yield* readTaskWorkerContext(sql, saved.item_id)
+        if (snapshot === undefined) throw new Error("Task snapshot missing")
         expect({
-          context: snapshot.task.state?.record,
-          due: snapshot.task.dueAt,
-          next: snapshot.task.nextAttemptAt
+          context: snapshot.state?.record,
+          due: snapshot.dueAt,
+          next: snapshot.nextAttemptAt
         }).toMatchObject({
           context: record,
           due: "end of next week",
@@ -158,7 +158,7 @@ it("persists the state record atomically, keeps it out of public updates, and re
             "answer-run"
           )
           .pipe(Effect.flip)
-        expect(fenced.reason).toBe("conflict")
+        expect(fenced).toMatchObject({ _tag: "WorkStoreError", reason: "conflict" })
         expect((yield* work.taskContext(saved.item_id))?.state?.record).toMatchObject(record)
         yield* sql`UPDATE space_tasks SET generation = generation - 1 WHERE item_id = ${saved.item_id}`
         yield* inUnitOfWork(
@@ -177,9 +177,9 @@ it("persists the state record atomically, keeps it out of public updates, and re
         yield* work.update({ kind: "item", itemId: current.item_id }, current.updated_at, {
           continuation_context: null
         })
-        const cleared = yield* readSpaceJobContext(sql, taskJobId(saved.item_id))
-        if (cleared?.kind !== "task_execution") throw new Error("Task snapshot missing")
-        expect(cleared.task?.state).toBeUndefined()
+        const cleared = yield* readTaskWorkerContext(sql, saved.item_id)
+        if (cleared === undefined) throw new Error("Task snapshot missing")
+        expect(cleared.state).toBeUndefined()
       }).pipe(Effect.provide(storage()))
     )
   } finally {

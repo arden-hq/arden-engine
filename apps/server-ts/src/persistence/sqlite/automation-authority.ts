@@ -49,8 +49,8 @@ export const revokeAutomationWork = Effect.fn("AutomationAuthority.revoke")(func
     readonly purpose: JobPurpose
     readonly chat_run_id: string | null
     readonly chat_session_id: string | null
-  }>`SELECT attempt.id, task.purpose, attempt.chat_run_id, attempt.chat_session_id
-    FROM automation_runs AS attempt JOIN scheduled_tasks AS task ON task.task_id = attempt.task_id
+  }>`SELECT attempt.id, attempt.purpose, attempt.chat_run_id, attempt.chat_session_id
+    FROM automation_runs AS attempt
     WHERE attempt.task_id = ${automationId} AND attempt.status = 'running'
       AND NOT EXISTS (SELECT 1 FROM chat_runs AS run
         WHERE json_extract(run.metadata_json, '$.run_context.origin') = json(attempt.origin))`

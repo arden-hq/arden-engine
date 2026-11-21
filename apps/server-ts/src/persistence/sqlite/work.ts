@@ -58,7 +58,7 @@ import { makeWorkVisibility } from "./work-visibility.js"
 import type { PersistenceDeps } from "./deps.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { stampTaskState, taskStateWrite } from "../work/task-state.js"
-import { userAutomationSql } from "./authority-sql.js"
+import { readWorkOwner } from "./automation-rows.js"
 
 const utcInstant = (value: string | null): string | null =>
   value === null ? null : new Date(value).toISOString()
@@ -613,29 +613,32 @@ export const makeWorkStore = ({
     },
     WorkStoreError
   > {
-    const rows = yield* sql<{
-      readonly space_id: string | null
-      readonly stable_key: string | null
-      readonly item_id: string | null
-    }>`
-      SELECT coalesce(job.owner_space_id, chat.space_id) AS space_id, item.stable_key,
-             job.owner_task_id AS item_id
-      FROM scheduled_tasks AS job
-      LEFT JOIN space_tasks AS item ON item.item_id = job.owner_task_id
-      LEFT JOIN sessions AS chat ON ${userAutomationSql("job")}
-        AND chat.session_id = job.thread_id AND chat.archived_at IS NULL
-      WHERE job.task_id = ${originAutomationId}
-        AND job.purpose IN ('user_automation', 'space_review', 'task_execution')
-        AND (job.purpose != 'task_execution' OR item.item_id IS NOT NULL)
-    `.pipe(
-      Effect.mapError((cause) => workError("storage", "Could not resolve job ownership", cause))
-    )
-    const job = rows[0]
-    if (!job) return yield* workError("invalid", "This job cannot change Tasks")
-    return {
-      spaceId: job.space_id ?? undefined,
-      stableKey: job.stable_key,
-      itemId: job.item_id
+    const storage = (cause: unknown) =>
+      workError("storage", "Could not resolve job ownership", cause)
+    const owner = yield* readWorkOwner(sql, originAutomationId).pipe(Effect.mapError(storage))
+    if (owner === undefined) return yield* workError("invalid", "This job cannot change Tasks")
+    switch (owner.kind) {
+      case "task": {
+        const items = yield* sql<{ readonly stable_key: string | null }>`
+          SELECT stable_key FROM space_tasks WHERE item_id = ${owner.itemId}
+        `.pipe(Effect.mapError(storage))
+        return {
+          spaceId: owner.spaceId ?? undefined,
+          stableKey: items[0]?.stable_key ?? null,
+          itemId: owner.itemId
+        }
+      }
+      case "space_review":
+        return { spaceId: owner.spaceId, stableKey: null, itemId: null }
+      case "automation": {
+        if (owner.purpose === "system")
+          return yield* workError("invalid", "This job cannot change Tasks")
+        const chats = yield* sql<{ readonly space_id: string | null }>`
+          SELECT space_id FROM sessions
+          WHERE session_id = ${owner.authored.chatId} AND archived_at IS NULL
+        `.pipe(Effect.mapError(storage))
+        return { spaceId: chats[0]?.space_id ?? undefined, stableKey: null, itemId: null }
+      }
     }
   })
 

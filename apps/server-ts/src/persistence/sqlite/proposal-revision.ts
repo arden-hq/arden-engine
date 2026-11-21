@@ -19,6 +19,7 @@ import type { Writer } from "./deps.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { restartOfferWait } from "./proposal-room.js"
+import { spaceJobId } from "../space-job-id.js"
 
 const failure = (
   reason: TaskProposalStoreError["reason"],
@@ -99,12 +100,11 @@ export const makeProposalRevision = (options: {
               message: "This Space is archived"
             })
           }
+          // The Space's own review: the run works under its key.
           const authority = yield* sql`SELECT 1 FROM chat_runs AS run
-          JOIN scheduled_tasks AS job
-            ON job.task_id = json_extract(run.metadata_json, '$.automation.task_id')
           WHERE run.run_id = ${request.runId} AND run.session_id = ${request.sessionId}
-            AND ${runMayActSql(sql, "run")} AND job.purpose = 'space_review'
-            AND job.owner_space_id = ${request.spaceId}
+            AND ${runMayActSql(sql, "run")}
+            AND json_extract(run.metadata_json, '$.automation.task_id') = ${spaceJobId(request.spaceId)}
             AND json_extract(run.metadata_json, '$.run_context.origin.kind') = 'space'
             AND json_extract(run.metadata_json, '$.run_context.origin.space_id') = ${request.spaceId}`
           if (authority.length === 0) {

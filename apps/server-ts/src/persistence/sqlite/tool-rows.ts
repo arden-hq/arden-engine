@@ -18,18 +18,7 @@ import {
 } from "./tool-result-storage.js"
 import { TOOL_STATUSES, type ToolStatus } from "./status-sets.js"
 
-export type ToolOperation =
-  | "begin"
-  | "complete"
-  | "pause"
-  | "uncertain"
-  | "target"
-  | "require_outcome_decision"
-  | "recover"
-  | "resolve"
-  | "history"
-  | "pending_approvals"
-  | "pending_connections"
+export type ToolOperation = ToolExecutionStoreError["operation"]
 
 const isToolStatus = (status: string): status is ToolStatus =>
   (TOOL_STATUSES as readonly string[]).includes(status)

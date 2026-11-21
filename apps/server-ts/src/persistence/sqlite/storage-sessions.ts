@@ -95,6 +95,9 @@ const loadRows = (sql: SqlClient.SqlClient, scope: CandidateScope) => sql<Candid
                SELECT 1 FROM scheduled_tasks AS task
                WHERE task.thread_id = s.session_id
              ) OR EXISTS (
+               SELECT 1 FROM space_review_chats AS review_chat
+               WHERE review_chat.session_id = s.session_id
+             ) OR EXISTS (
                SELECT 1 FROM automation_runs AS run
                WHERE run.chat_session_id = s.session_id
              ) OR EXISTS (
