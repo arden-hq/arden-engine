@@ -10,7 +10,7 @@ import { ArdenApi } from "../api.js"
 import { CapabilityOfferStore } from "../../persistence/capability-offers/store.js"
 import { LocalCaller } from "../middleware/local-only.js"
 import { McpRejected, McpUnavailable } from "./api.js"
-import { StoreInvalid, storeErrorToHttp } from "../errors.js"
+import { failInternal, storeErrorToHttp, StoreInvalid } from "../errors.js"
 
 const mapError = (error: McpConnectionError) => {
   if (error.reason === "auth_required") return new StoreInvalid({ detail: error.message })
@@ -92,9 +92,7 @@ export const McpHandlers = HttpApiBuilder.group(
         "listOffers",
         Effect.fn("McpHandlers.listOffers")(function* ({ params }) {
           if ((yield* LocalCaller) !== "desktop") return yield* new HttpApiError.Forbidden({})
-          const rows = yield* offers
-            .list(params.sessionId)
-            .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+          const rows = yield* offers.list(params.sessionId).pipe(Effect.catch(failInternal("Mcp")))
           return {
             offers: rows.map((row) => ({
               tool_call_id: row.toolCallId,
@@ -110,7 +108,7 @@ export const McpHandlers = HttpApiBuilder.group(
           if ((yield* LocalCaller) !== "desktop") return yield* new HttpApiError.Forbidden({})
           const result = yield* offers
             .decline({ sessionId: payload.session_id, toolCallId: payload.tool_call_id })
-            .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+            .pipe(Effect.catch(failInternal("Mcp")))
           if (result === "unknown") return yield* new HttpApiError.NotFound({})
           return { outcome: result }
         })

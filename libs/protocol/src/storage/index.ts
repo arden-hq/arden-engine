@@ -14,7 +14,9 @@ import {
   decodeStorageCleanupPlanEffect,
   decodeStorageCleanupRunForPlanEffect,
   StorageOverviewResponseSchema,
+  StorageSettingsResponseSchema,
   mapOverview,
+  mapSettings,
   encodeStorageCleanupContextEffect,
   encodeStorageCleanupRequestEffect,
   encodeStorageSettingsPatchEffect,
@@ -31,6 +33,11 @@ export const storageDecoders = {
     StorageOverviewResponseSchema,
     mapOverview,
     "Invalid Storage overview"
+  ),
+  settings: projectedDecoderFor(
+    StorageSettingsResponseSchema,
+    mapSettings,
+    "Invalid Storage settings"
   )
 } as const
 

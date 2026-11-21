@@ -17,7 +17,7 @@ import { drainScriptResults } from "../../workflows/delivery.js"
 import { WorkflowHost } from "../../workflows/host.js"
 import { ScriptRunner } from "../../workflows/script-runner.js"
 import { ArdenApi } from "../api.js"
-import { type StoreConflict, StoreInvalid, storeErrorToHttp } from "../errors.js"
+import { failInternal, storeErrorToHttp, StoreInvalid, type StoreConflict } from "../errors.js"
 
 type ScriptHttpError =
   | HttpApiError.NotFound
@@ -66,9 +66,7 @@ export const ScriptHandlers = HttpApiBuilder.group(
         "get",
         Effect.fn("ScriptHandlers.get")(function* ({ params, query }) {
           const record = yield* owned(params.workflowRef, query.session_id)
-          return yield* scriptDetail(journal, record).pipe(
-            Effect.mapError(() => new HttpApiError.InternalServerError({}))
-          )
+          return yield* scriptDetail(journal, record).pipe(Effect.catch(failInternal("Scripts")))
         })
       )
       .handle(

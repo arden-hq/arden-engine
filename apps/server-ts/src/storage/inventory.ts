@@ -7,8 +7,6 @@ import { classifyStorageRootEntry, type StorageRootBucket } from "./catalog.js"
 import { isErrnoCode } from "../fs/private-store.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-const MAX_INVENTORY_ENTRIES = 100_000
-
 /** A file or folder below the root can be removed while the scan runs (a temp file, a finished
  *  download). It is then no longer part of the storage, so the scan leaves it out. */
 const ifThere = async <A>(read: Promise<A>): Promise<A | null> => {
@@ -104,7 +102,6 @@ export const scanInventoryUnsafe = async (
   const tallies = emptyTallies()
   const directories: Array<{ readonly path: string; readonly category: RootBucket }> = []
   const rootEntries = await readdir(root, { withFileTypes: true })
-  let visited = 0
 
   for (const entry of rootEntries) {
     directories.push({
@@ -114,10 +111,6 @@ export const scanInventoryUnsafe = async (
   }
 
   for (let next = directories.pop(); next !== undefined; next = directories.pop()) {
-    visited += 1
-    if (visited > MAX_INVENTORY_ENTRIES) {
-      throw new Error("Arden storage inventory is too large")
-    }
     const status = await ifThere(lstat(next.path))
     if (status === null || status.isSymbolicLink()) continue
     if (status.isFile()) {
@@ -148,7 +141,6 @@ const scanUnitMemberUnsafe = async (
   let sizeBytes = rootStatus.isFile() ? requireFileSize(rootStatus) : 0
   let modifiedMilliseconds = rootStatus.mtimeMs
   const entries = rootStatus.isDirectory() ? [path] : []
-  let visited = 1
   const fingerprintEntries: Array<{
     readonly path: string
     readonly type: string
@@ -174,10 +166,6 @@ const scanUnitMemberUnsafe = async (
   for (let directory = entries.pop(); directory !== undefined; directory = entries.pop()) {
     const children = (await ifThere(readdir(directory, { withFileTypes: true }))) ?? []
     for (const child of children) {
-      visited += 1
-      if (visited > MAX_INVENTORY_ENTRIES) {
-        throw new Error("Arden storage inventory is too large")
-      }
       const childPath = join(directory, child.name)
       const status = await ifThere(lstat(childPath))
       if (status === null) continue
@@ -232,9 +220,6 @@ export const scanStorageUnitsUnsafe = async (root: string): Promise<ReadonlyArra
     throw new Error("Arden storage root is not a directory")
   }
   const entries = await readdir(root, { withFileTypes: true })
-  if (entries.length > MAX_INVENTORY_ENTRIES) {
-    throw new Error("Arden storage inventory is too large")
-  }
   const names = new Set(entries.map((entry) => entry.name))
   const units: Array<StorageUnit> = []
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {

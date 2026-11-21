@@ -16,7 +16,7 @@ import { ChatEventStore } from "../../persistence/events/store.js"
 import { RunQueries } from "../../persistence/runs/queries.js"
 import { UsageStore, UsageStoreError } from "../../persistence/usage/store.js"
 import { ArdenApi } from "../api.js"
-import { storeErrorToHttp } from "../errors.js"
+import { failInternal, storeErrorToHttp } from "../errors.js"
 import { currentMillis } from "../../runtime/clock.js"
 
 /** Joins a start time and a Run id into the list's `next` cursor. A start
@@ -34,14 +34,14 @@ const runDetail = Effect.fn("RunHandlers.runDetail")(function* (
     storedResult === undefined || storedResult === null
       ? null
       : yield* Schema.decodeUnknownEffect(RunTerminalResultSchema)(storedResult).pipe(
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Runs"))
         )
   const localInstructions =
     run.metadata.local_instructions === undefined
       ? undefined
       : yield* Schema.decodeUnknownEffect(Schema.Array(RunLocalInstructionSourceSchema))(
           run.metadata.local_instructions
-        ).pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+        ).pipe(Effect.catch(failInternal("Runs")))
   return {
     version: 1 as const,
     run_id: run.runId,
@@ -61,7 +61,7 @@ const runDetail = Effect.fn("RunHandlers.runDetail")(function* (
       run.metadata.late_result_at === undefined || run.metadata.late_result_at === null
         ? null
         : yield* Schema.decodeUnknownEffect(Schema.String)(run.metadata.late_result_at).pipe(
-            Effect.mapError(() => new HttpApiError.InternalServerError({}))
+            Effect.catch(failInternal("Runs"))
           ),
     error:
       run.errorCode === null || run.errorMessage === null
@@ -70,9 +70,6 @@ const runDetail = Effect.fn("RunHandlers.runDetail")(function* (
     ...(localInstructions === undefined ? {} : { local_instructions: localInstructions })
   } satisfies RunDetail
 })
-
-const internalError = (_error: unknown): HttpApiError.InternalServerError =>
-  new HttpApiError.InternalServerError({})
 
 export const RunHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -114,7 +111,7 @@ export const RunHandlers = HttpApiBuilder.group(
               activeOnly: query.active === "true",
               limit: query.limit ?? RUN_LIST_PAGE_MAX
             })
-            .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+            .pipe(Effect.catch(failInternal("Runs")))
           const last = snapshot.runs.at(-1)
           return {
             runs: snapshot.runs.map((run) => ({
@@ -155,16 +152,16 @@ export const RunHandlers = HttpApiBuilder.group(
               approvals_pending: run.approvalsPending
             }))
           }
-        }).pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+        }).pipe(Effect.catch(failInternal("Runs")))
       )
       .handle(
         "detail",
         Effect.fn("RunHandlers.detail")(function* ({ params }) {
-          const run = yield* queries.get(params.runId).pipe(Effect.mapError(internalError))
+          const run = yield* queries.get(params.runId).pipe(Effect.catch(failInternal("Runs")))
           if (run === null) return yield* new HttpApiError.NotFound({})
           const memory = yield* queries
             .memoryContext(run.runId)
-            .pipe(Effect.mapError(internalError))
+            .pipe(Effect.catch(failInternal("Runs")))
           const detail = yield* runDetail(run)
           return memory.length === 0 ? detail : { ...detail, memory_context: memory }
         })
@@ -174,7 +171,7 @@ export const RunHandlers = HttpApiBuilder.group(
         Effect.fn("RunHandlers.progress")(function* ({ params }) {
           const progress = yield* queries
             .progress(params.runId)
-            .pipe(Effect.mapError(internalError))
+            .pipe(Effect.catch(failInternal("Runs")))
           if (progress === null) return yield* new HttpApiError.NotFound({})
           return {
             ...progress,
@@ -191,7 +188,7 @@ export const RunHandlers = HttpApiBuilder.group(
               afterSequence: query.after_sequence ?? 0,
               limit: query.limit ?? 100
             })
-            .pipe(Effect.mapError(internalError))
+            .pipe(Effect.catch(failInternal("Runs")))
           if (page === null) return yield* new HttpApiError.NotFound({})
           return {
             run_id: page.runId,
@@ -222,7 +219,7 @@ export const RunHandlers = HttpApiBuilder.group(
             settings.ardenLimitPercent ?? 100,
             now
           )
-        }).pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+        }).pipe(Effect.catch(failInternal("Runs")))
       )
       .handle("usage", ({ query }) =>
         usage

@@ -7,6 +7,7 @@ import {
   StorageFilesSchema,
   StorageOverviewResponseSchema,
   StorageRetentionSchema,
+  StorageSettingsResponseSchema,
   StorageSettingsPatchRequestSchema
 } from "@arden-hq/protocol/effect/storage"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/unstable/httpapi"
@@ -37,6 +38,10 @@ export class StorageApi extends HttpApiGroup.make("storage", { topLevel: true })
   HttpApiEndpoint.post("tidy", "/storage/tidy", {
     success: StorageOverviewResponseSchema,
     error: [HttpApiError.InternalServerErrorNoContent]
+  }),
+  HttpApiEndpoint.get("settings", "/storage/settings", {
+    success: StorageSettingsResponseSchema,
+    error: storeErrors
   }),
   HttpApiEndpoint.patch("updateSettings", "/storage/settings", {
     payload: StorageSettingsPatchRequestSchema,

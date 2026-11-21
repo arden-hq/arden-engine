@@ -5,7 +5,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
 import { IntelligenceSettingsStore } from "../../persistence/settings/store.js"
 import { ArdenApi } from "../api.js"
-import { storeErrorToHttp } from "../errors.js"
+import { failInternal, storeErrorToHttp } from "../errors.js"
 
 const response = (settings: IntelligenceSettings) => ({
   assistant_name: settings.assistantName,
@@ -24,10 +24,9 @@ export const IntelligenceSettingsHandlers = HttpApiBuilder.group(
     const store = yield* IntelligenceSettingsStore
     return handlers
       .handle("settings", () =>
-        store.settings().pipe(
-          Effect.map(response),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
-        )
+        store
+          .settings()
+          .pipe(Effect.map(response), Effect.catch(failInternal("Intelligence settings")))
       )
       .handle("updateSettings", ({ payload }) =>
         Effect.gen(function* () {

@@ -1,12 +1,24 @@
-import type { StorageCleanupPlan, StorageOverview } from "@arden-hq/protocol/storage"
+import type {
+  StorageCleanupPlan,
+  StorageOverview,
+  StorageSettings
+} from "@arden-hq/protocol/storage"
 import { Effect } from "effect"
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 
 import { StoragePolicyStore } from "../../persistence/storage/store.js"
 import { StorageMaintenance } from "../../storage/service.js"
 import { BackfillStore } from "../../persistence/backfills/store.js"
 import { ArdenApi } from "../api.js"
-import { failStore } from "../errors.js"
+import { failInternal, failStore } from "../errors.js"
+
+const settingsResponse = (settings: StorageSettings) => ({
+  max_space_gib: settings.maxSpaceGiB,
+  allow_archived_session_deletion: settings.allowArchivedSessionDeletion,
+  allow_inactive_session_deletion: settings.allowInactiveSessionDeletion,
+  inactive_session_days: settings.inactiveSessionDays,
+  minimum_current_sessions: settings.minimumCurrentSessions
+})
 
 const overviewResponse = (overview: StorageOverview) => ({
   status: {
@@ -23,13 +35,7 @@ const overviewResponse = (overview: StorageOverview) => ({
       detail: category.detail
     }))
   },
-  settings: {
-    max_space_gib: overview.settings.maxSpaceGiB,
-    allow_archived_session_deletion: overview.settings.allowArchivedSessionDeletion,
-    allow_inactive_session_deletion: overview.settings.allowInactiveSessionDeletion,
-    inactive_session_days: overview.settings.inactiveSessionDays,
-    minimum_current_sessions: overview.settings.minimumCurrentSessions
-  }
+  settings: settingsResponse(overview.settings)
 })
 
 const cleanupPlanResponse = (id: string, plan: StorageCleanupPlan) => ({
@@ -53,9 +59,6 @@ const cleanupPlanResponse = (id: string, plan: StorageCleanupPlan) => ({
   created_at: plan.createdAt
 })
 
-const internalError = (): HttpApiError.InternalServerError =>
-  new HttpApiError.InternalServerError({})
-
 export const StorageHandlers = HttpApiBuilder.group(
   ArdenApi,
   "storage",
@@ -67,17 +70,17 @@ export const StorageHandlers = HttpApiBuilder.group(
       .handle("backfills", () =>
         backfills.progress().pipe(
           Effect.map((list) => ({ backfills: list })),
-          Effect.mapError(internalError)
+          Effect.catch(failInternal("Storage"))
         )
       )
-      .handle("files", () => storage.files().pipe(Effect.mapError(internalError)))
+      .handle("files", () => storage.files().pipe(Effect.catch(failInternal("Storage"))))
       .handle("retention", () =>
         policy.retention().pipe(
           Effect.map((value) => ({
             agent_trace_days: value.agentTraceDays,
             wiki_history_days: value.wikiHistoryDays
           })),
-          Effect.mapError(internalError)
+          Effect.catch(failInternal("Storage"))
         )
       )
       .handle("updateRetention", ({ payload }) =>
@@ -91,14 +94,17 @@ export const StorageHandlers = HttpApiBuilder.group(
               agent_trace_days: value.agentTraceDays,
               wiki_history_days: value.wikiHistoryDays
             })),
-            Effect.mapError(internalError)
+            Effect.catch(failInternal("Storage"))
           )
       )
       .handle("overview", () =>
-        storage.overview().pipe(Effect.map(overviewResponse), Effect.mapError(internalError))
+        storage.overview().pipe(Effect.map(overviewResponse), Effect.catch(failInternal("Storage")))
+      )
+      .handle("settings", () =>
+        policy.settings().pipe(Effect.map(settingsResponse), Effect.catch(failStore))
       )
       .handle("tidy", () =>
-        storage.tidy().pipe(Effect.map(overviewResponse), Effect.mapError(internalError))
+        storage.tidy().pipe(Effect.map(overviewResponse), Effect.catch(failInternal("Storage")))
       )
       .handle("updateSettings", ({ payload }) =>
         storage
@@ -119,7 +125,7 @@ export const StorageHandlers = HttpApiBuilder.group(
           })
           .pipe(
             Effect.map(({ id, plan }) => cleanupPlanResponse(id, plan)),
-            Effect.mapError(internalError)
+            Effect.catch(failInternal("Storage"))
           )
       )
       .handle("executeCleanup", ({ payload }) =>

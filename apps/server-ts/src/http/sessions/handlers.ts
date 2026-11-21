@@ -32,6 +32,7 @@ import {
 import { ArdenApi } from "../api.js"
 import {
   completionErrorToHttp,
+  failInternal,
   failStore,
   orNotFound,
   StoreConflict,
@@ -187,7 +188,7 @@ export const SessionHandlers = HttpApiBuilder.group(
     ) {
       const header = yield* sessions
         .loadHistoryHeader(sessionId)
-        .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+        .pipe(Effect.catch(failInternal("Sessions")))
       if (header === null) return null
       return yield* sessionLineage(sessions, sessionId).pipe(
         Effect.map((lineage) => lineage.map((entry) => entry.sessionId)),
@@ -262,7 +263,7 @@ export const SessionHandlers = HttpApiBuilder.group(
     return handlers
       .handle("browserScope", ({ payload }) =>
         sessions.browserScope(payload).pipe(
-          Effect.mapError(() => new HttpApiError.InternalServerError({})),
+          Effect.catch(failInternal("Sessions")),
           Effect.flatMap((snapshot) =>
             snapshot === undefined
               ? Effect.fail(new HttpApiError.NotFound({}))
@@ -365,7 +366,7 @@ export const SessionHandlers = HttpApiBuilder.group(
       .handle("archived", () =>
         store.listArchived().pipe(
           Effect.map((sessions) => ({ sessions: sessions.map(archivedSessionToWire) })),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Sessions"))
         )
       )
       .handle("rename", ({ params, payload }) =>
@@ -436,7 +437,7 @@ export const SessionHandlers = HttpApiBuilder.group(
             })),
             truncated: found.truncated
           })),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Sessions"))
         )
       )
       .handle("search", ({ query }) =>

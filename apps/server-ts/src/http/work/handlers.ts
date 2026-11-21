@@ -4,12 +4,12 @@ import {
   StopSpaceTaskResponseSchema
 } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
-import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { addressedHomeLetter } from "../../automations/home-letter-links.js"
 import { ChatMessage, type ChatMessageShape } from "../../chat/message.js"
 import { WorkStore, type TaskAddress } from "../../persistence/work/store.js"
 import { ArdenApi } from "../api.js"
-import { failStore, orNotFound } from "../errors.js"
+import { failInternal, failStore, orNotFound } from "../errors.js"
 import { stopTaskRuns } from "../../work/stop-task-runs.js"
 
 const textEncoder = new TextEncoder()
@@ -59,7 +59,7 @@ export const WorkHandlers = HttpApiBuilder.group(
       .handle("homeLetter", () =>
         addressedHomeLetter(home).pipe(
           Effect.tapCause((cause) => Effect.logError("Home letter failed", cause)),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Work"))
         )
       )
       .handle("homePresence", ({ payload }) =>
@@ -146,7 +146,7 @@ export const WorkHandlers = HttpApiBuilder.group(
           Effect.catch(failStore),
           Effect.flatMap((response) =>
             Schema.decodeUnknownEffect(StopSpaceTaskResponseSchema)(response).pipe(
-              Effect.mapError(() => new HttpApiError.InternalServerError({}))
+              Effect.catch(failInternal("Work"))
             )
           )
         )
@@ -158,7 +158,7 @@ export const WorkHandlers = HttpApiBuilder.group(
       )
       .handle("attachment", ({ params }) =>
         store.attachment(params.attachmentId).pipe(
-          Effect.mapError(() => new HttpApiError.InternalServerError({})),
+          Effect.catch(failInternal("Work")),
           Effect.flatMap(orNotFound),
           Effect.map((attachment) =>
             HttpApiSchema.withHeaders({
@@ -186,7 +186,7 @@ export const WorkHandlers = HttpApiBuilder.group(
             Effect.catch(failStore),
             Effect.flatMap((page) =>
               Schema.decodeUnknownEffect(SpaceWorkPageSchema)(page).pipe(
-                Effect.mapError(() => new HttpApiError.InternalServerError({}))
+                Effect.catch(failInternal("Work"))
               )
             )
           )
