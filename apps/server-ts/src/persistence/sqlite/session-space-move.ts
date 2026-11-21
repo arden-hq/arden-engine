@@ -7,10 +7,11 @@ import { assertIndependentConversation } from "./space-conversation.js"
 import { storeError } from "./session-rows.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
+import { mainSpaceId } from "./main-space.js"
 
 type ConversationMove =
-  | { readonly kind: "moved"; readonly spaceName: string | undefined }
-  | { readonly kind: "on_run_end"; readonly spaceName: string | undefined }
+  | { readonly kind: "moved"; readonly spaceName: string }
+  | { readonly kind: "on_run_end"; readonly spaceName: string }
   | { readonly kind: "missing" }
 
 interface MoveRequest {
@@ -24,7 +25,7 @@ interface MoveRequest {
 export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(function* ({
   sql,
   sessionId,
-  spaceId,
+  spaceId: requested,
   askingRunId,
   mutation
 }: MoveRequest) {
@@ -46,8 +47,8 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
     )
   }
 
-  const spaceName =
-    spaceId === undefined ? undefined : yield* liveSpaceName(sql, sessionId, spaceId)
+  const spaceId = requested ?? (yield* mainSpaceId(sql))
+  const spaceName = yield* liveSpaceName(sql, sessionId, spaceId)
   const active = yield* activeWork(sql, sessionId)
   if (active.length > 0) {
     if (askingRunId !== undefined && active.every((run) => run.run_id === askingRunId)) {
@@ -65,8 +66,8 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
   const moved = yield* sql<{ readonly session_id: string }>`
     WITH RECURSIVE ${conversationSubtree(sql, sessionId)}
     UPDATE sessions
-    SET space_id = ${spaceId ?? null}
-    WHERE session_id IN (SELECT session_id FROM subtree) AND space_id IS NOT ${spaceId ?? null}
+    SET space_id = ${spaceId}
+    WHERE session_id IN (SELECT session_id FROM subtree) AND space_id IS NOT ${spaceId}
     RETURNING session_id
   `
   if (moved.length === 0) return { kind: "moved", spaceName } satisfies ConversationMove

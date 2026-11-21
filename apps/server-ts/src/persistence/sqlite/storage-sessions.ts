@@ -142,7 +142,8 @@ const loadRows = (sql: SqlClient.SqlClient, scope: CandidateScope) => sql<Candid
          tree.session_ids AS tree_session_ids,
          tree.has_active_work,
          tree.has_automation_or_task,
-         CASE WHEN s.space_id IS NULL THEN 0 ELSE 1 END AS has_space,
+         CASE WHEN s.space_id IS NULL OR EXISTS (SELECT 1 FROM spaces AS main
+           WHERE main.space_id = s.space_id AND main.kind = 'main') THEN 0 ELSE 1 END AS has_space,
          tree.has_linked_session,
          CASE WHEN EXISTS (
            SELECT 1

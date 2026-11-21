@@ -115,7 +115,7 @@ export const noSpace = async (
   return new ToolExecutionError(
     `${
       requestedSpaceId === undefined
-        ? "This chat is in no Space, so name the Space."
+        ? "This Automation chat is in no Space, so name the Space."
         : `No active Space exists with id '${requestedSpaceId}'.`
     } ${spaceChoices(spaces)}`,
     {

@@ -56,7 +56,7 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
   Effect.fn("SessionTriage.decide")(function* (sessionId: string) {
     const session = yield* dependencies.sessions.load(sessionId)
     if (session === null) return undefined
-    if (!looseChat(session)) return NO_TRIAGE
+    if (!mainChat(session)) return NO_TRIAGE
 
     const fresh = freshTriage(yield* storedTriage(session), chatState(session), dependencies.zone)
     if (fresh !== undefined) return fresh
@@ -66,10 +66,9 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
     const transcript = triageTranscript(session.messages)
     if (transcript.length === 0) return NO_TRIAGE
 
-    const candidates = (yield* dependencies.spaces.list()).map((space): SessionTriageTarget => ({
-      space_id: space.space_id,
-      title: space.name
-    }))
+    const candidates = (yield* dependencies.spaces.list())
+      .filter((space) => space.kind !== "main")
+      .map((space): SessionTriageTarget => ({ space_id: space.space_id, title: space.name }))
     const output = yield* dependencies.completion.runTool({
       role: "helper",
       usage: { kind: "chat_triage", owner: { type: "session", sessionId } },
@@ -128,7 +127,7 @@ export const makeSessionTriageAction = (dependencies: SessionTriageDependencies)
         return NO_TRIAGE
       }
       case "accept": {
-        if (stored.outcome !== "suggested" || !looseChat(session)) {
+        if (stored.outcome !== "suggested" || !mainChat(session)) {
           return yield* staleSuggestion()
         }
         if (yield* dependencies.sessions.blockingWork(sessionId)) {
@@ -223,8 +222,8 @@ const movedTo = (target: SessionTriageTarget, rationale: string): SessionTriageD
   rationale
 })
 
-const looseChat = (session: SessionHeaderSnapshot): boolean =>
-  session.header.spaceId === null &&
+const mainChat = (session: SessionHeaderSnapshot): boolean =>
+  session.header.spaceKind === "main" &&
   session.header.sessionType === "chat" &&
   session.header.parentSessionId === null &&
   !Object.hasOwn(session.metadata, "capture") &&

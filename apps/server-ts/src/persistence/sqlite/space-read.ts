@@ -81,6 +81,8 @@ interface WorkEventDetailRow {
   readonly created_at: string
 }
 
+const SPACE_DETAIL_CHAT_LIMIT = 50
+
 const WORKER_STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1_000
 
 const workerAvailability = (
@@ -364,11 +366,20 @@ export const makeSpaceReads = (
             ORDER BY m.seq DESC LIMIT 1) AS last_text,
           (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary
         FROM sessions AS s
-        WHERE s.space_id = ${validSpaceId}
+        WHERE s.session_id IN (
+          SELECT conversation.session_id FROM space_conversations AS conversation
+          WHERE conversation.space_id = ${validSpaceId}
+          UNION
+          SELECT * FROM (SELECT recent.session_id FROM sessions AS recent
+            WHERE recent.space_id = ${validSpaceId}
+              AND recent.archived_at IS NULL
+              AND recent.session_type = 'chat'
+              AND recent.parent_session_id IS NULL
+              AND recent.parent_message_id IS NULL
+            ORDER BY recent.last_activity DESC, recent.session_id DESC
+            LIMIT ${SPACE_DETAIL_CHAT_LIMIT})
+        )
           AND s.archived_at IS NULL
-          AND s.session_type = 'chat'
-          AND s.parent_session_id IS NULL
-          AND s.parent_message_id IS NULL
         ORDER BY s.last_activity DESC, s.session_id DESC
       `.pipe(
         Effect.mapError((cause) =>

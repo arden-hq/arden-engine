@@ -3,10 +3,11 @@ import { Schema } from "effect"
 import { boundary } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
 import type { ServerRunContext } from "./run-context.js"
+import type { SessionHistoryHeader } from "../persistence/sessions/model.js"
 
 export const BrowseScopeSchema = Schema.Literals(["space", "all_spaces"] as const).annotate({
   description:
-    "space (default): this chat's Space only; a chat on no Space already sees every chat. all_spaces: every Space and chats on none."
+    "space (default): this chat's Space only; a chat in the Main Space already sees every chat. all_spaces: every Space and chats on none."
 })
 
 type BrowseScope = typeof BrowseScopeSchema.Type
@@ -28,3 +29,7 @@ export const permittedBrowseScope = (
 
 export const spaceLabel = (spaceName: string | undefined): string =>
   spaceName === undefined ? "no Space" : `Space ${quoted(spaceName)}`
+
+export const seesEveryChat = (
+  header: Pick<SessionHistoryHeader, "spaceId" | "spaceKind">
+): boolean => header.spaceId === null || header.spaceKind === "main"

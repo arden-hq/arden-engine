@@ -1,3 +1,4 @@
+import { mainSpaceIdSql } from "./main-space.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { latestSessionRunQuery } from "./session-latest-run.js"
 import { sessionOriginQuery } from "./session-origin.js"
@@ -247,7 +248,7 @@ export const makeSessionListing = ({
     const offset = input.offset ?? 0
     const sort = input.sort ?? "activity"
     let spaceFilter = reader``
-    if (input.inbox === true) spaceFilter = reader`AND s.space_id IS NULL`
+    if (input.inbox === true) spaceFilter = reader`AND s.space_id = ${mainSpaceIdSql(reader)}`
     else if (input.spaceId !== undefined) spaceFilter = reader`AND s.space_id = ${input.spaceId}`
     let agentFilter = reader``
     if (input.scope === "primary")

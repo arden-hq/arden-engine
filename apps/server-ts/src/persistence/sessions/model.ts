@@ -5,6 +5,7 @@ import { JsonObjectSchema, type JsonObject } from "../json.js"
 import { AutomationId } from "../automations/model.js"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
 import { SessionForkOriginSchema } from "@arden-hq/protocol/effect/common"
+import { SpaceKindSchema } from "@arden-hq/protocol/effect/spaces"
 
 export const SessionHistoryHeaderSchema = Schema.Struct({
   originJobPurpose: Schema.NullOr(JobPurposeSchema),
@@ -20,6 +21,7 @@ export const SessionHistoryHeaderSchema = Schema.Struct({
   parentToolCallId: Schema.NullOr(Schema.NonEmptyString),
   parentMessageId: Schema.NullOr(Schema.NonEmptyString),
   spaceId: Schema.NullOr(Schema.NonEmptyString),
+  spaceKind: Schema.NullOr(SpaceKindSchema),
   chatModel: Schema.NullOr(Schema.NonEmptyString),
   activeMessageCount: Schema.Natural,
   lastInputTokens: Schema.NullOr(Schema.Natural),

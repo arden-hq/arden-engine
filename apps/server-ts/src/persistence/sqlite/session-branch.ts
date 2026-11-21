@@ -34,6 +34,8 @@ import {
 } from "./session-rows.js"
 import { openDeferredCallStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
+import { mainSpaceId } from "./main-space.js"
+import { SpaceId } from "../space-job-id.js"
 
 const BranchOptionsSchema = Schema.Struct({
   disposition: Schema.optionalKey(Schema.UndefinedOr(Schema.Literals(["retained", "disposable"]))),
@@ -379,23 +381,28 @@ export const makeSessionBranch = ({
           )
           const name = valid.name ?? (source.name === null ? null : `${source.name} (branch)`)
 
+          const branchSpaceId =
+            source.space_id === null ? yield* mainSpaceId(sql) : SpaceId.make(source.space_id)
+          const branch = {
+            sessionId: branchId,
+            publicRef: friendlySessionRef(branchId),
+            startedAt: timestamp,
+            name,
+            metadata: metadataJson,
+            spaceId: branchSpaceId,
+            chatModel: null,
+            originAutomationId: null
+          }
           yield* insertSession({
             sql,
-            session: {
-              type: "chat",
-              sessionId: branchId,
-              publicRef: friendlySessionRef(branchId),
-              startedAt: timestamp,
-              name,
-              metadata: metadataJson,
-              spaceId: source.space_id,
-              chatModel: null,
-              originAutomationId: null,
-              parent:
-                valid.disposition === "disposable"
-                  ? { sessionId: validSessionId, messageId: null }
-                  : null
-            },
+            session:
+              valid.disposition === "disposable"
+                ? {
+                    ...branch,
+                    type: "chat",
+                    parent: { sessionId: validSessionId, messageId: null }
+                  }
+                : { ...branch, type: "chat", parent: null },
             lifecycle: { kind: "silent", reason: "branch" }
           }).pipe(
             Effect.mapError((cause) =>

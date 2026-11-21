@@ -269,7 +269,8 @@ describe("bash permissions", () => {
                 runId: started.runId,
                 toolCallId: identity.toolCallId,
                 approved: true,
-                grantStanding: true
+                grantStanding: true,
+                grantList: "global"
               })
               .pipe(Effect.result)
             if (outcome === "rollback") {
@@ -295,7 +296,8 @@ describe("bash permissions", () => {
                 runId: repeated.runId,
                 toolCallId: repeated.toolCallId,
                 approved: true,
-                grantStanding: true
+                grantStanding: true,
+                grantList: "global"
               })
             }
             expect(yield* savedCommands).toEqual(outcome === "commit" ? prime : [])
@@ -303,7 +305,7 @@ describe("bash permissions", () => {
           }).pipe(Effect.provide(layer))
         )
 
-        expect(result).toMatchObject([{ rule_places: [{ kind: "everywhere" }] }])
+        expect(result).toMatchObject([{ rule_places: [{ kind: "space" }, { kind: "everywhere" }] }])
         if (outcome === "commit") {
           const reopened = await Effect.runPromise(savedCommands.pipe(Effect.provide(layer)))
           expect(reopened).toEqual(prime)

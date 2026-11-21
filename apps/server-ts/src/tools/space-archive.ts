@@ -43,7 +43,7 @@ const archivableSpace = async (
     )
   if (isOwnSpace(ctx, space.space_id))
     throw refuse(
-      `This chat is on ${quoted(space.name)}, and archiving a Space archives its chats. The user can archive it from the sidebar, or ask in a chat on another Space or Home.`
+      `This chat is on ${quoted(space.name)}, and archiving a Space archives its chats. The user can archive it from the sidebar, or ask in a chat on another Space.`
     )
   return space
 }

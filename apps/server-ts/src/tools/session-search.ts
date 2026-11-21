@@ -11,7 +11,12 @@ import { SummaryStore, type ChatSummary } from "../persistence/summaries/store.j
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { chatSummaryText } from "./chat-summary.js"
 import { toolFailure } from "./tool-failure.js"
-import { BrowseScopeSchema, spaceLabel, permittedBrowseScope } from "./session-browse-scope.js"
+import {
+  BrowseScopeSchema,
+  seesEveryChat,
+  spaceLabel,
+  permittedBrowseScope
+} from "./session-browse-scope.js"
 
 const QueryInputSchema = Schema.String.check(
   Schema.isMinLength(1),
@@ -187,7 +192,7 @@ const makeSessionSearchTool = ({
         (input.session_ref === undefined &&
           (await Effect.runPromise(
             queries.loadHistoryHeader(ctx.run.sessionId).pipe(
-              Effect.map((header) => header?.spaceId === null),
+              Effect.map((header) => header !== null && seesEveryChat(header)),
               Effect.orElseSucceed(() => false)
             ),
             { signal: ctx.signal }

@@ -133,7 +133,7 @@ export interface CreatedSession {
 
 export interface OwnChatMove {
   readonly when: "now" | "run_end"
-  readonly spaceName: string | undefined
+  readonly spaceName: string
 }
 
 export interface BranchOptions {
