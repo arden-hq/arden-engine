@@ -11,7 +11,10 @@ import { SessionStore } from "../src/persistence/sessions/store.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { loadActiveContext } from "../src/persistence/sqlite/active-context.js"
 import { recentNotices } from "../src/persistence/sqlite/notices.js"
+import { tellChat } from "../src/persistence/sqlite/owner-update.js"
+import { chatRow } from "../src/persistence/sqlite/run-destination.js"
 import { postDeliveryId } from "../src/persistence/sqlite/run-post.js"
+import { taskDoor } from "../src/persistence/sqlite/ending-arrival.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
@@ -292,6 +295,57 @@ it("an undecodable post and one whose chat was archived are withdrawn, and the w
         reason: "destination_archived"
       })
       expect(yield* (yield* PostStore).pendingDeliveries()).toEqual([])
+    })
+  )
+})
+
+it("a Task update quotes the post that started it, only in that post's chat", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, post, drain } = yield* setup
+      const work = yield* WorkStore
+      const sessions = yield* SessionStore
+      const posted = yield* post(1, { text: "Bill due", task: { title: "Pay", brief: "Pay it." } })
+      yield* drain
+      const task = (yield* sql<{ readonly item_id: string }>`SELECT item_id FROM space_tasks`)[0]
+      if (task === undefined) return yield* Effect.die("no Task")
+      const other = yield* sessions.create({ name: "Other" })
+      const tell = (sessionId: string, key: string) =>
+        Effect.gen(function* () {
+          const destination = yield* chatRow(sql, sessionId)
+          if (destination === undefined) return yield* Effect.die("no chat")
+          yield* tellChat({
+            sql,
+            weight: "news",
+            occurrenceKey: key,
+            source: { kind: "entity", key },
+            sourceRunId: "run-1",
+            sourceSessionRef: destination.public_ref,
+            destination,
+            line: "Paid.",
+            door: taskDoor(task.item_id, "Pay"),
+            event: "finished",
+            occurredAt: AT
+          })
+        })
+      yield* tell(posted.sessionId, "in-post-chat")
+      yield* tell(other.sessionId, "elsewhere")
+      const pending = yield* work.pendingDeliveries()
+      expect(
+        pending.map((delivery) => [
+          delivery.payload.sessionId,
+          delivery.payload.kind === "update" ? delivery.payload.replyTo : "not an update"
+        ])
+      ).toEqual(
+        expect.arrayContaining([
+          [
+            posted.sessionId,
+            { messageId: posted.messageId, role: ROLE.assistant, content: "Bill due" }
+          ],
+          [other.sessionId, undefined]
+        ])
+      )
+      expect(pending).toHaveLength(2)
     })
   )
 })

@@ -1,6 +1,10 @@
 import { AnswerWithdrawalReasonSchema, RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
-import { ChatUpdateSchema, ConnectionArrivalSchema } from "@arden-hq/protocol/effect/chat"
+import {
+  ChatReplyContextSchema,
+  ChatUpdateSchema,
+  ConnectionArrivalSchema
+} from "@arden-hq/protocol/effect/chat"
 import { Schema } from "effect"
 import type { Interaction } from "@arden-hq/protocol/chat"
 import type { ChatImageInput, HistoryMessage } from "@arden-hq/protocol/chat"
@@ -68,6 +72,7 @@ export const RunDeliveryPayloadSchema = Schema.Union([
       Schema.Struct({ kind: Schema.Literal("entity"), key: Schema.NonEmptyString })
     ]),
     update: ChatUpdateSchema,
+    replyTo: Schema.optionalKey(ChatReplyContextSchema),
     occurredAt: IsoDateTimeStringSchema,
     withdrawal: Schema.optionalKey(
       Schema.Struct({

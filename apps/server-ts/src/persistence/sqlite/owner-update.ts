@@ -1,3 +1,4 @@
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatUpdate, CommunicationDoor } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -95,6 +96,10 @@ const enqueueUpdate = Effect.fn("OwnerUpdate.enqueue")(function* (options: {
       ? ((yield* sql<{ readonly stable_key: string | null }>`SELECT stable_key FROM space_tasks
           WHERE item_id = ${door.item_id}`)[0]?.stable_key ?? null)
       : null
+  const replyTo =
+    door.kind === "task"
+      ? yield* originQuote(sql, door.item_id, options.destination.session_id)
+      : undefined
   yield* enqueueRunDelivery({
     sql,
     eventId: options.occurrenceKey,
@@ -105,8 +110,31 @@ const enqueueUpdate = Effect.fn("OwnerUpdate.enqueue")(function* (options: {
       sessionId: options.destination.session_id,
       source: options.source,
       update,
+      ...(replyTo === undefined ? {} : { replyTo }),
       occurredAt: options.occurredAt
     },
     now: options.occurredAt
   })
+})
+
+const originQuote = Effect.fn("OwnerUpdate.originQuote")(function* (
+  sql: SqlClient.SqlClient,
+  itemId: string,
+  sessionId: string
+) {
+  const rows = yield* sql<{
+    readonly message_id: string
+    readonly role: string
+    readonly content: unknown
+  }>`SELECT origin.message_id, origin.role,
+      json_extract(origin.message_json, '$.content') AS content
+    FROM space_tasks AS task
+    JOIN session_messages AS origin
+      ON origin.session_id = ${sessionId} AND origin.message_id = task.origin_message_id
+    WHERE task.item_id = ${itemId}`
+  const row = rows[0]
+  if (row === undefined || typeof row.content !== "string" || row.content.trim() === "")
+    return undefined
+  if (row.role !== ROLE.user && row.role !== ROLE.assistant) return undefined
+  return { messageId: row.message_id, role: row.role, content: row.content }
 })
