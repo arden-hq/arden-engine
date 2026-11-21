@@ -302,8 +302,26 @@ export const makeWorkCaptureSql = (options: {
       )
   })
 
-  const create: WorkStore["Service"]["create"] = (scope, input) =>
-    createFor(scope, input, "user", [], { basis: "explicit", reason: "Created by you." })
+  const create: WorkStore["Service"]["create"] = Effect.fn("Work.create")(function* (scope, input) {
+    const capture = { basis: "explicit", reason: "Created by you." } as const
+    if (scope.kind !== "chat") return yield* createFor(scope, input, "user", [], capture)
+    const chats = yield* sql<{ readonly space_id: string | null }>`
+      SELECT space_id FROM sessions WHERE session_id = ${scope.sessionId}`.pipe(
+      Effect.mapError((cause) => workError("storage", "Could not read the chat", cause))
+    )
+    const spaceId = chats[0]?.space_id ?? null
+    return spaceId === null
+      ? yield* createFor(scope, input, "user", [], capture)
+      : yield* createFor(
+          { kind: "space", spaceId },
+          input,
+          "user",
+          [],
+          capture,
+          undefined,
+          scope.sessionId
+        )
+  })
 
   const createFromChat: WorkStore["Service"]["createFromChat"] = Effect.fn("Work.createFromChat")(
     function* (options) {

@@ -464,3 +464,31 @@ it("two replies queued under a root that was cleared: the first stands alone, th
     })
   )
 })
+
+it("replies queued in the same millisecond deliver in the order they were queued", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, thread, post, drain, message } = yield* setup
+      const sessions = yield* SessionStore
+      const later = [3, 4, 5, 6, 7, 8, 9, 10].find(
+        (attempt) => postDeliveryId(attempt) < postDeliveryId(2)
+      )
+      if (later === undefined) return yield* Effect.die("no attempt hashes below attempt 2")
+      yield* thread("mail-1", "t1")
+      yield* thread("mail-2", "t1")
+      yield* thread("mail-3", "t1")
+      const root = yield* post(1, { itemIds: ["mail-1"] })
+      yield* drain
+      const earlier = yield* post(2, { itemIds: ["mail-2"] })
+      const after = yield* post(later, { itemIds: ["mail-3"] })
+      yield* sql`UPDATE automation_deliveries SET created_at = ${AT}
+        WHERE delivery_id IN (${postDeliveryId(2)}, ${postDeliveryId(later)})`
+      yield* sessions.clear(root.sessionId)
+      expect(yield* drain).toBe(2)
+      expect((yield* message(earlier.sessionId, earlier.messageId))?.replyTo).toBeUndefined()
+      expect((yield* message(after.sessionId, after.messageId))?.replyTo).toMatchObject({
+        messageId: earlier.messageId
+      })
+    })
+  )
+})

@@ -4,6 +4,7 @@ import { recordedHistoryReader } from "./recorded-history.js"
 import {
   DEFAULT_TASK_INFERENCE_POLICY,
   type CreateSpaceInput,
+  type SpaceKind,
   type SpaceArchiveResponse,
   type UpdateSpaceInput
 } from "@arden-hq/protocol/spaces"
@@ -17,6 +18,7 @@ import { DateTime, Effect, Schema } from "effect"
 import {
   SpaceStore,
   SpaceStoreError,
+  archiveRefusal,
   type FreeSpacePage,
   type PersistedSpace,
   type SpaceBindingRow
@@ -482,7 +484,7 @@ export const makeSpaceStore = ({
             id: validSpaceId,
             identity: mutation
           })
-          const active = yield* sql<{ readonly kind: string }>`
+          const active = yield* sql<{ readonly kind: SpaceKind }>`
         SELECT kind FROM spaces
         WHERE space_id = ${validSpaceId} AND archived_at IS NULL
         LIMIT 1
@@ -492,14 +494,9 @@ export const makeSpaceStore = ({
             )
           )
           if (active[0] === undefined) return null
-          if (active[0].kind === "main") {
-            return yield* storeError(
-              "archive",
-              "conflict",
-              "The Main Space cannot be archived.",
-              validSpaceId
-            )
-          }
+          const refusal = archiveRefusal(active[0])
+          if (refusal !== undefined)
+            return yield* storeError("archive", "conflict", refusal, validSpaceId)
           const busy = yield* sql`SELECT 1 FROM sessions AS s
             WHERE s.space_id = ${validSpaceId} AND s.archived_at IS NULL
               AND ${chatHasActiveWork(sql, sql`s`)} LIMIT 1`

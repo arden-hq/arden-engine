@@ -1,6 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { ChatStop } from "../src/chat/chat-stop.js"
+import { ChatMessage } from "../src/chat/message.js"
+import { TerminalSessions } from "../src/terminals/service.js"
+import { ScriptRunner } from "../src/workflows/script-runner.js"
 import { errorMessage } from "@arden-hq/std/errors"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
@@ -24,7 +28,7 @@ import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { spaceArchiveTools } from "../src/tools/space-archive.js"
 import { spaceConversationContextSnapshot } from "../src/context/space.js"
 import { renderCaptureSpaces } from "../src/context/special-chat.js"
-import { serverRunContext } from "./kit.js"
+import { partialService, serverRunContext } from "./kit.js"
 import { deriveAuthority, type RunAuthority } from "../src/execution/authority.js"
 import { decide } from "../src/execution/decide.js"
 import { defaultImpact } from "../src/execution/impact.js"
@@ -656,6 +660,62 @@ it("space_archive refuses Main before it asks anyone", async () => {
         }
       })
       expect(refused).toBe("The Main Space cannot be archived.")
+    })
+  )
+})
+
+it("ending Main with stop refuses before it stops any of Main's chats", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const main = yield* mainSpace
+      const refused = yield* Effect.gen(function* () {
+        const stop = yield* ChatStop
+        return yield* stop.endSpace({ spaceId: main.space_id, stop: true }).pipe(Effect.flip)
+      }).pipe(
+        Effect.provide(
+          ChatStop.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(
+                  ChatMessage,
+                  partialService<ChatMessage["Service"]>("ChatMessage", {})
+                ),
+                Layer.succeed(RunQueries, partialService<RunQueries["Service"]>("RunQueries", {})),
+                Layer.succeed(
+                  TerminalSessions,
+                  partialService<TerminalSessions["Service"]>("TerminalSessions", {})
+                ),
+                Layer.succeed(
+                  ScriptRunner,
+                  partialService<ScriptRunner["Service"]>("ScriptRunner", {})
+                ),
+                Layer.succeed(SessionStore, yield* SessionStore),
+                Layer.succeed(SessionQueries, yield* SessionQueries),
+                Layer.succeed(SpaceStore, yield* SpaceStore),
+                Layer.succeed(WorkStore, yield* WorkStore)
+              )
+            )
+          )
+        )
+      )
+      expect(refused).toMatchObject({
+        reason: "conflict",
+        message: "The Main Space cannot be archived."
+      })
+    })
+  )
+})
+
+it("a Task filed by chat id for a chat in Main lands on Main with the chat as its home", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const main = yield* mainSpace
+      const chat = yield* (yield* SessionStore).create({ name: "Loose" })
+      const task = yield* (yield* WorkStore).create(
+        { kind: "chat", sessionId: chat.sessionId },
+        { key: "reply", text: "Reply to Ana", runs_in: "chat" }
+      )
+      expect(task).toMatchObject({ space_id: main.space_id, home_session_id: chat.sessionId })
     })
   )
 })

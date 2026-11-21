@@ -6,6 +6,7 @@ import type {
   Space,
   SpaceArchiveResponse,
   SpaceDetail,
+  SpaceKind,
   SpacesOverview,
   UpdateSpaceInput
 } from "@arden-hq/protocol/spaces"
@@ -38,6 +39,9 @@ export const spaceChoices = (
   spaces.length === 0
     ? "There is no active Space."
     : `Pass space_id, one of: ${spaces.map((space) => `${space.name} (${space.space_id})`).join(", ")}.`
+
+export const archiveRefusal = (space: { readonly kind: SpaceKind }): string | undefined =>
+  space.kind === "main" ? "The Main Space cannot be archived." : undefined
 
 export class SpaceStoreError extends Schema.TaggedError<SpaceStoreError>()("SpaceStoreError", {
   ...storeErrorFields({

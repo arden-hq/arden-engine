@@ -3,7 +3,7 @@ import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { requireChat } from "./space-controls.js"
-import { SpaceStore, type PersistedSpace } from "../persistence/spaces/store.js"
+import { SpaceStore, archiveRefusal, type PersistedSpace } from "../persistence/spaces/store.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import type { ServerRunContext } from "./run-context.js"
 import { recordApplied } from "../execution/tool-effect.js"
@@ -41,7 +41,8 @@ const archivableSpace = async (
     throw refuse(
       `${quoted(space.name)} is already archived. The user can restore it from Settings → Archive.`
     )
-  if (space.kind === "main") throw refuse("The Main Space cannot be archived.")
+  const refusal = archiveRefusal(space)
+  if (refusal !== undefined) throw refuse(refusal)
   if (isOwnSpace(ctx, space.space_id))
     throw refuse(
       `This chat is on ${quoted(space.name)}, and archiving a Space archives its chats. The user can archive it from the sidebar, or ask in a chat on another Space.`

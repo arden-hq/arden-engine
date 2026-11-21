@@ -216,7 +216,7 @@ export const makePostStore = ({
         AND NOT EXISTS (SELECT 1 FROM automation_deliveries AS earlier
           WHERE earlier.delivery_id = json_extract(delivery.payload, '$.waitsFor')
             AND earlier.status = 'pending')
-      ORDER BY delivery.created_at, delivery.delivery_id LIMIT 32`.pipe(
+      ORDER BY delivery.created_at, delivery.rowid LIMIT 32`.pipe(
       Effect.mapError(storage("Could not read pending posts"))
     )
     return rows.map((row) => ({ deliveryId: row.delivery_id, attempt: row.attempt_count }))

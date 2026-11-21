@@ -78,7 +78,7 @@ const lastSpaces = Effect.fn("CaptureRouter.lastSpaces")(function* (dependencies
       query: SessionListQuery
     ) => Effect.Effect<ReadonlyArray<Pick<SessionListEntry, "lastActivity">>, unknown>
   }
-}): Effect.fn.Return<Extract<RouterDecision, { readonly kind: "space" }>, unknown> {
+}): Effect.fn.Return<RouterDecision, unknown> {
   const spaces = (yield* dependencies.spaces.list()).filter((space) => space.kind !== "main")
   const active = yield* Effect.forEach(spaces, (space) =>
     dependencies.sessions
@@ -91,7 +91,7 @@ const lastSpaces = Effect.fn("CaptureRouter.lastSpaces")(function* (dependencies
       )
   )
   const [first, ...rest] = active.toSorted((a, b) => b.at.localeCompare(a.at))
-  if (first === undefined) return yield* Effect.die("No Space to file a capture under")
+  if (first === undefined) return { kind: "keep" }
   return {
     kind: "space",
     spaceId: first.space.space_id,
