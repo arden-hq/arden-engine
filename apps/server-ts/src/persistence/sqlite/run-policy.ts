@@ -22,6 +22,7 @@ import { RunAuthoritySchema } from "../../execution/authority.js"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
+import { runAuthorityChatSql } from "./run-authority-chat.js"
 import {
   createExecutionBudget,
   readBudgetRemaining,
@@ -42,11 +43,12 @@ const failure = (message: string, cause?: unknown) =>
 export const runPolicyRevoked = (
   sql: SqlClient.SqlClient,
   metadata: Statement.Fragment,
+  sessionId: Statement.Fragment,
   workerOnly = true
 ) => sql`(
-  (json_extract(${metadata}, '$.run_policy.authority_session_id') IS NOT NULL
+  (json_type(${metadata}, '$.run_policy') = 'object'
     AND NOT EXISTS (SELECT 1 FROM sessions AS authority_session
-      WHERE authority_session.session_id = json_extract(${metadata}, '$.run_policy.authority_session_id')
+      WHERE authority_session.session_id = ${runAuthorityChatSql(sql, metadata, sessionId)}
         AND authority_session.space_id IS json_extract(${metadata}, '$.run_policy.space.space_id')
         AND authority_session.archived_at IS NULL
         AND (json_extract(${metadata}, '$.run_policy.authority_generation') IS NULL
@@ -115,7 +117,7 @@ const sessionResourceReach = Effect.fn("RunPolicy.sessionResourceReach")(functio
       readonly revoked: number
     }>`
       SELECT json_extract(metadata_json, '$.run_policy') AS policy, authority_json,
-        ${runPolicyRevoked(sql, sql`metadata_json`, false)} AS revoked FROM chat_runs
+        ${runPolicyRevoked(sql, sql`metadata_json`, sql`session_id`, false)} AS revoked FROM chat_runs
       WHERE session_id = ${current.source_session_id} AND authority_json IS NOT NULL
       ORDER BY started_at DESC, run_id DESC LIMIT 1`
     if (recent[0]?.revoked !== undefined && recent[0].revoked !== 0)
@@ -204,7 +206,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     if (options.parentRunId !== undefined) {
       const rows = yield* sql<{ readonly policy: string | null; readonly revoked: number }>`
         SELECT json_extract(metadata_json, '$.run_policy') AS policy,
-          ${runPolicyRevoked(sql, sql`metadata_json`, false)} AS revoked
+          ${runPolicyRevoked(sql, sql`metadata_json`, sql`session_id`, false)} AS revoked
         FROM chat_runs WHERE run_id = ${options.parentRunId}
       `
       const row = rows[0]
@@ -364,7 +366,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
       )
         return yield* failure("Continuation cannot change its Automation instructions")
       instructionRevisionId = previousRevision ?? instructionRevisionId
-      authoritySessionId = previous.authority_session_id ?? authoritySessionId
+      authoritySessionId = runAuthorityChat(previous, authoritySessionId)
       if (previous.space?.space_id !== space?.space_id)
         return yield* failure("Continuation cannot change its Space authority")
       capabilities = [

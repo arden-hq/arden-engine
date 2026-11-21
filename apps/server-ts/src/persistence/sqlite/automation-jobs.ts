@@ -499,7 +499,7 @@ export const makeAutomationJobs = ({
             }>`
             SELECT attempt.chat_run_id, attempt.chat_session_id, attempt.context_mode,
               attempt.claim_count,
-              ${runAuthorityState(sql, sql`chat.metadata_json`, sql`chat.run_id`)} AS authority
+              ${runAuthorityState(sql, sql`chat.metadata_json`, sql`chat.run_id`, sql`chat.session_id`)} AS authority
             FROM automation_runs AS attempt LEFT JOIN chat_runs AS chat ON chat.run_id = attempt.chat_run_id
             WHERE attempt.id = ${automationRunId} LIMIT 1
           `
@@ -707,7 +707,7 @@ export const makeAutomationJobs = ({
             readonly authority: RunAuthorityState | null
           }>`
       SELECT attempt.chat_run_id, attempt.chat_session_id, attempt.context_mode,
-        ${runAuthorityState(sql, sql`chat.metadata_json`, sql`chat.run_id`)} AS authority
+        ${runAuthorityState(sql, sql`chat.metadata_json`, sql`chat.run_id`, sql`chat.session_id`)} AS authority
       FROM automation_runs AS attempt LEFT JOIN chat_runs AS chat ON chat.run_id = attempt.chat_run_id
       WHERE attempt.id = ${parsed.runId} AND attempt.status = 'running'
         AND attempt.claim_count = ${parsed.claimAttempt}

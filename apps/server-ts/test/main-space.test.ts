@@ -18,6 +18,7 @@ import { listedSessionToWire } from "../src/http/wire/sessions.js"
 import { looseChats } from "../src/mobile/spaces.js"
 import { makeCaptureRouter } from "../src/routing/capture.js"
 import { WorkStore } from "../src/persistence/work/store.js"
+import { runPolicyRevoked } from "../src/persistence/sqlite/run-policy.js"
 import { SummaryStore } from "../src/persistence/summaries/store.js"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../src/persistence/sessions/events.js"
@@ -901,6 +902,26 @@ it("a second onboarding_finish that changes nothing reports no change", async ()
         content: "Getting started already ended.",
         host: { mutation_receipt: { outcome: "no_op" } }
       })
+    })
+  )
+})
+
+it("revocation reads a run with no recorded authority chat as its own chat's run", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const main = yield* mainSpace
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, space_id)
+        VALUES ('in-main', 'in-main', ${AT}, ${AT}, ${main.space_id}),
+          ('no-space', 'no-space', ${AT}, ${AT}, NULL)`
+      const metadata = JSON.stringify({ run_policy: { space: null } })
+      const revoked = (sessionId: string) =>
+        sql<{ readonly revoked: number }>`SELECT ${runPolicyRevoked(
+          sql,
+          sql`json(${metadata})`,
+          sql`${sessionId}`
+        )} AS revoked`.pipe(Effect.map((rows) => rows[0]?.revoked))
+      expect([yield* revoked("in-main"), yield* revoked("no-space")]).toEqual([1, 0])
     })
   )
 })

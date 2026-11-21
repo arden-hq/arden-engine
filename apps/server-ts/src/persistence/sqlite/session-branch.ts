@@ -35,6 +35,7 @@ import {
 import { openDeferredCallStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
 import { ownerChatSpace } from "./main-space.js"
+import { runAuthorityChatSql } from "./run-authority-chat.js"
 
 const BranchOptionsSchema = Schema.Struct({
   disposition: Schema.optionalKey(Schema.UndefinedOr(Schema.Literals(["retained", "disposable"]))),
@@ -210,9 +211,11 @@ export const makeSessionBranch = ({
             AND json_type(run.metadata_json, '$.run_policy') = 'object'
           ORDER BY run.started_at DESC, run.run_id DESC LIMIT 1
         )
-        LEFT JOIN sessions AS authority ON authority.session_id = COALESCE(
-          json_extract(latest_policy.metadata_json, '$.run_policy.authority_session_id'), source.session_id
-        )
+        LEFT JOIN sessions AS authority ON authority.session_id = ${runAuthorityChatSql(
+          sql,
+          sql`latest_policy.metadata_json`,
+          sql`COALESCE(latest_policy.session_id, source.session_id)`
+        )}
         WHERE source.session_id = ${validSessionId} AND source.archived_at IS NULL
         LIMIT 1
       `.pipe(

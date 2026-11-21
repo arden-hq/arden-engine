@@ -200,7 +200,7 @@ export const makeApprovalPolicyStore = ({
     const follows = input.authority.approval.follows
     const key = input.authority.owns.automation_id
     const rows = yield* sql<{ readonly state: RunAuthorityState }>`
-      SELECT ${runAuthorityState(sql, sql`r.metadata_json`, sql`r.run_id`)} AS state
+      SELECT ${runAuthorityState(sql, sql`r.metadata_json`, sql`r.run_id`, sql`r.session_id`)} AS state
       FROM chat_runs r WHERE r.run_id = ${input.runId}`
     const row = rows[0]
     if (!row)
