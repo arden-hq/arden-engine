@@ -11,7 +11,7 @@ import type {
 import { ownerText } from "../../persistence/transcript/owner-words.js"
 import { DAILY_SUMMARY_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import type { HandlerItemDataOf } from "../../persistence/automations/handler-item.js"
-import { PROMPT_TEXT } from "../../prompts/catalog.js"
+import { PROMPTS } from "../../prompts/catalog.js"
 import { markdownValue } from "../../prompts/format.js"
 import type { Wiki } from "../../wiki/service.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../../wiki/authority.js"
@@ -456,7 +456,7 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
     name: "Daily summary",
     description:
       "Retain a short daily note from recorded Chats, Tasks, items and available reports.",
-    prompt: PROMPT_TEXT.dailySummary,
+    prompt: PROMPTS.dailySummary,
     handler: "daily_summary",
     triggers: [{ type: "time", at: "00:15", days: "daily" }],
     enabled: true,

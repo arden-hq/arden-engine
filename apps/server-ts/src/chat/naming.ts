@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { splitAttachedFiles } from "@arden-hq/protocol/chat"
 
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { cutText } from "@arden-hq/std/text"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SessionNameImage } from "../persistence/sessions/model.js"
@@ -45,7 +45,7 @@ export const makeSessionNaming = (dependencies: SessionNamingDependencies) =>
     const name = yield* dependencies.completion.runText({
       role: "helper",
       usage: { kind: "chat_title", owner: { type: "session", sessionId: input.sessionId } },
-      system: PROMPT_TEXT.sessionNaming,
+      system: PROMPTS.sessionNaming,
       user: JSON.stringify({
         first_user_message: firstMessage,
         ...(sent.files.length === 0 ? {} : { attached_files: sent.files.map((file) => file.name) }),

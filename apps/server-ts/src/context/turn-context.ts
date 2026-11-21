@@ -5,7 +5,7 @@ import type { ToolApprovalPolicy } from "../tools/approval-policy.js"
 import type { PermissionRules } from "../persistence/permissions/rules.js"
 import { Effect, Exit } from "effect"
 import { latestHumanText } from "../persistence/transcript/content.js"
-import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 
 import type { ChatRunnerMessage } from "../chat/runner-contract.js"
@@ -260,11 +260,11 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   )
   const communication = renderPromptSection(
     "Communication",
-    PROMPT_CATALOG.communication.render({
+    PROMPTS.communication({
       role_guidance: isLiveChat(origin, input.messages, services.userFacing ?? true)
-        ? PROMPT_TEXT.conversationCommunication
-        : PROMPT_TEXT.executorCommunication
-    }).text
+        ? PROMPTS.conversationCommunication
+        : PROMPTS.executorCommunication
+    })
   )
   const authorityLine = renderAuthority(authority)
   const authorityText =

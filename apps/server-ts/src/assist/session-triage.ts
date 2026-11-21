@@ -21,7 +21,7 @@ import {
   type StoredTriage
 } from "../persistence/sessions/triage.js"
 import { type StoredMessageEnvelope, visibleMessageCount } from "../persistence/transcript/model.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import type { Wiki } from "../wiki/service.js"
 import { createSpaceWithPage } from "../wiki/space-page.js"
 import { conversationLine, newestWithinBudget } from "./conversation.js"
@@ -73,7 +73,7 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
     const output = yield* dependencies.completion.runTool({
       role: "helper",
       usage: { kind: "chat_triage", owner: { type: "session", sessionId } },
-      system: PROMPT_TEXT.sessionTriage,
+      system: PROMPTS.sessionTriage,
       user: JSON.stringify({ conversation: transcript, spaces: candidates }),
       result: {
         schema: TriageOutputSchema,

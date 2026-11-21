@@ -1,7 +1,7 @@
-import { PROMPT_TEXT, renderChatBasePrompt } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { joinPromptSections, renderPromptSection } from "../prompts/format.js"
 
-const UNTRUSTED_DATA_RULE = PROMPT_TEXT.untrustedDataRule
+const UNTRUSTED_DATA_RULE = PROMPTS.untrustedDataRule
 
 export const withUntrustedDataRule = (instructions: string): string => {
   if (instructions.includes(UNTRUSTED_DATA_RULE)) return instructions
@@ -17,4 +17,4 @@ export const withUntrustedDataRule = (instructions: string): string => {
 }
 
 export const baseSystemPrompt = (assistantName: string): string =>
-  withUntrustedDataRule(renderChatBasePrompt(assistantName).text)
+  withUntrustedDataRule(PROMPTS.chatBase({ assistantName }))

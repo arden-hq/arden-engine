@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import type { Memory } from "../../memory/service.js"
 import { AutomationId } from "../../persistence/automations/model.js"
-import { PROMPT_TEXT } from "../../prompts/catalog.js"
+import { PROMPTS } from "../../prompts/catalog.js"
 import { runItemLoop, type ItemLoopServices } from "../item-loop.js"
 import type { AutomationRunner } from "../runner.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
@@ -58,7 +58,7 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     automationId: MEMORY_CAPTURE_AUTOMATION_ID,
     name: "Memory Capture",
     description: "Update the Markdown Wiki from recent chat evidence.",
-    prompt: PROMPT_TEXT.memoryCapture,
+    prompt: PROMPTS.memoryCapture,
     handler: "memory_capture",
     triggers: [
       { type: "idle", idle_minutes: 10 },

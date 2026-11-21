@@ -2,7 +2,7 @@ import { isWithin } from "@arden-hq/std/paths"
 import { open, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 
-import { PROMPT_CATALOG, PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { renderPromptSection } from "../prompts/format.js"
 import type { SessionPathPolicy } from "../storage/local-paths.js"
 import { sha256Hex } from "@arden-hq/std/hash"
@@ -180,7 +180,7 @@ const readSource = async (
           scope,
           digest: sha256Hex(content),
           status: truncated ? "truncated" : "loaded",
-          content: truncated ? `${content}\n${PROMPT_TEXT.localInstructionsTruncated}` : content
+          content: truncated ? `${content}\n${PROMPTS.localInstructionsTruncated}` : content
         },
         bytesUsed: bytesRead
       }
@@ -208,7 +208,7 @@ export const renderLocalInstructions = (
   return renderPromptSection(
     "Local folder instructions",
     [
-      PROMPT_CATALOG.localInstructions.render({ root: JSON.stringify(snapshot.root) }).text,
+      PROMPTS.localInstructions({ root: JSON.stringify(snapshot.root) }),
       ...snapshot.sources.map((source) =>
         renderInstructionSource(source.path, source.status, source.content)
       )

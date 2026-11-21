@@ -8,7 +8,7 @@ import type { ChatWriteStore } from "../persistence/chat/store.js"
 import type { ChatEventStore } from "../persistence/events/store.js"
 import type { RunQueries } from "../persistence/runs/queries.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import {
   whileRunActive,
   advanceEventSequence,
@@ -56,7 +56,7 @@ export const makeRunPurpose = (input: {
     const result = yield* input.completion.runTool({
       role: "helper",
       usage: { kind: "run_activity", owner: { type: "session", sessionId: request.run.sessionId } },
-      system: PROMPT_TEXT.runPurpose,
+      system: PROMPTS.runPurpose,
       user: JSON.stringify({
         current_task: previousPurpose,
         conversation: [

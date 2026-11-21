@@ -3,7 +3,7 @@ import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
 import type { WorkStore } from "../persistence/work/store.js"
 import type { MemoryTurn } from "../memory/service.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import type { SpacePageInput } from "./memory-context.js"
 import type { SpaceView } from "./space-render.js"
 import { cutText } from "@arden-hq/std/text"
@@ -11,12 +11,12 @@ import { renderPromptSection } from "../prompts/format.js"
 
 const SPACE_CONTEXT_AUTHORITY = renderPromptSection(
   "Space context authority",
-  PROMPT_TEXT.spaceAuthority
+  PROMPTS.spaceAuthority
 )
 
 const SPACE_THREADS = renderPromptSection(
   "Before you answer: is this a new thread?",
-  PROMPT_TEXT.spaceThreads
+  PROMPTS.spaceThreads
 )
 
 interface SpaceConversationContextSnapshot {

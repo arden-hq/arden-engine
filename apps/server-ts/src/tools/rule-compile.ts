@@ -11,7 +11,7 @@ import {
   type RuleDecision,
   type RuleSubject
 } from "../persistence/permissions/rules.js"
-import { PROMPT_CATALOG } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 
 export type CompiledSubject = Exclude<
   NewPermissionRule["subject"],
@@ -119,12 +119,12 @@ export const compileWords = Effect.fn("RuleCompile.compile")(function* (input: {
   ) => Effect.Effect<ReadonlyArray<RuleSubject>, PermissionRulesError>
   readonly signal?: AbortSignal
 }) {
-  const system = PROMPT_CATALOG.ruleCompiler.render({
+  const system = PROMPTS.ruleCompiler({
     tools: input.tools.map((tool) => `- ${tool.name}: ${tool.title}`).join("\n") || "(none)",
     connectors:
       input.connectors.map((server) => `- ${server.name}: ${server.title}`).join("\n") || "(none)",
     home: homedir()
-  }).text
+  })
   const output = yield* input.structured
     .run({
       role: input.role,

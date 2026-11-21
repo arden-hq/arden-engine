@@ -1,6 +1,6 @@
 import { isTaskUnfinished, taskActivityWords, type SpaceTask } from "@arden-hq/protocol/spaces/work"
 import { Schema } from "effect"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
 import { byteLength, clipLine, cutBytes, cutText } from "@arden-hq/std/text"
 import { chatHref } from "../sessions/chat-href.js"
@@ -81,7 +81,7 @@ export const renderSpaceContext = (
       ? []
       : [`The Space's own conversation: ${chatLine(view.conversation).slice(2)}`])
   ].join("\n")
-  const navigation = PROMPT_TEXT.spaceNavigation
+  const navigation = PROMPTS.spaceNavigation
   const instructionsTitle = "\n\nSpace instructions:\n"
   const roomInHead =
     maxBytes - byteLength(intro) - byteLength(instructionsTitle) - byteLength(navigation) - 4

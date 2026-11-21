@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect"
 import type { StructuredCompletion } from "../models/structured-completion.js"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { TaskProposalStore } from "../persistence/proposals/store.js"
-import { PROMPT_TEXT } from "../prompts/catalog.js"
+import { PROMPTS } from "../prompts/catalog.js"
 import { clean, loadOfferSpaces, renderOfferSpaces } from "./candidates.js"
 
 const OutcomeAnswerSchema = Schema.Struct({
@@ -57,7 +57,7 @@ export const makeChatOutcomeLinker = (dependencies: ChatOutcomeDependencies) =>
     const answer = yield* dependencies.completion.runTool({
       role: "helper",
       usage: { kind: "item_routing", owner: { type: "none" } },
-      system: PROMPT_TEXT.chatOutcomeRouter,
+      system: PROMPTS.chatOutcomeRouter,
       user: [
         "Spaces:",
         listing.text,
