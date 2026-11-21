@@ -1,6 +1,6 @@
 # Arden engine
 
-The open-source agent server behind Arden. It runs on your own computer.
+The open-source agent server behind [Arden](https://fromarden.com).
 
 ## Get started
 
