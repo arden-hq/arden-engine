@@ -41,6 +41,7 @@ const archivableSpace = async (
     throw refuse(
       `${quoted(space.name)} is already archived. The user can restore it from Settings → Archive.`
     )
+  if (space.kind === "main") throw refuse("The Main Space cannot be archived.")
   if (isOwnSpace(ctx, space.space_id))
     throw refuse(
       `This chat is on ${quoted(space.name)}, and archiving a Space archives its chats. The user can archive it from the sidebar, or ask in a chat on another Space.`

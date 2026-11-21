@@ -359,32 +359,47 @@ export const makeSpaceReads = (
       const conversation = yield* reader<{ readonly session_id: string }>`
         SELECT session_id FROM space_conversations WHERE space_id = ${validSpaceId}
       `
-      const sessionRows = yield* reader<SessionDetailRow>`
-        SELECT s.session_id, s.public_ref, s.name, s.last_activity,
+      const sessionColumns = reader`s.session_id, s.public_ref, s.name, s.last_activity,
           (SELECT m.search_text FROM session_messages AS m
             WHERE m.session_id = s.session_id AND m.role = ${ROLE.assistant}
             ORDER BY m.seq DESC LIMIT 1) AS last_text,
-          (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary
+          (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary`
+      const recentRows = yield* reader<SessionDetailRow>`
+        SELECT ${sessionColumns}
         FROM sessions AS s
-        WHERE s.session_id IN (
-          SELECT conversation.session_id FROM space_conversations AS conversation
-          WHERE conversation.space_id = ${validSpaceId}
-          UNION
-          SELECT * FROM (SELECT recent.session_id FROM sessions AS recent
-            WHERE recent.space_id = ${validSpaceId}
-              AND recent.archived_at IS NULL
-              AND recent.session_type = 'chat'
-              AND recent.parent_session_id IS NULL
-              AND recent.parent_message_id IS NULL
-            ORDER BY recent.last_activity DESC, recent.session_id DESC
-            LIMIT ${SPACE_DETAIL_CHAT_LIMIT})
-        )
+        WHERE s.space_id = ${validSpaceId}
           AND s.archived_at IS NULL
+          AND s.session_type = 'chat'
+          AND s.parent_session_id IS NULL
+          AND s.parent_message_id IS NULL
         ORDER BY s.last_activity DESC, s.session_id DESC
+        LIMIT ${SPACE_DETAIL_CHAT_LIMIT}
       `.pipe(
         Effect.mapError((cause) =>
           storeError("detail", "storage", "Could not load Space sessions", validSpaceId, cause)
         )
+      )
+      const conversationId = conversation[0]?.session_id
+      const conversationRows =
+        conversationId === undefined || recentRows.some((row) => row.session_id === conversationId)
+          ? []
+          : yield* reader<SessionDetailRow>`
+              SELECT ${sessionColumns} FROM sessions AS s
+              WHERE s.session_id = ${conversationId} AND s.archived_at IS NULL`.pipe(
+              Effect.mapError((cause) =>
+                storeError(
+                  "detail",
+                  "storage",
+                  "Could not load Space sessions",
+                  validSpaceId,
+                  cause
+                )
+              )
+            )
+      const sessionRows = [...recentRows, ...conversationRows].toSorted(
+        (left, right) =>
+          right.last_activity.localeCompare(left.last_activity) ||
+          right.session_id.localeCompare(left.session_id)
       )
       const sessions = sessionRows.map((row) => ({
         session_id: row.session_id,

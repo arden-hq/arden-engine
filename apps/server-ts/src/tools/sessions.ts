@@ -240,11 +240,16 @@ const transcriptFailure = (error: TranscriptQueryFailure): ToolExecutionError =>
     error.reason === "corrupt" ? "Transcript data is corrupt" : "Transcript unavailable"
   )
 
+interface CurrentScope {
+  readonly spaceId: string | undefined
+  readonly browse: SessionListQuery
+}
+
 const currentScope = async (
   queries: SessionQueries["Service"],
   run: Pick<ServerRunContext, "sessionId" | "authority">,
   signal: AbortSignal
-): Promise<SessionListQuery> => {
+): Promise<CurrentScope> => {
   const header = await Effect.runPromise(
     queries.loadHistoryHeader(run.sessionId).pipe(Effect.mapError(queryFailure)),
     { signal }
@@ -256,8 +261,11 @@ const currentScope = async (
     })
   }
   return {
-    scope: "all",
-    ...(header.spaceId === null || seesEveryChat(header, run) ? {} : { spaceId: header.spaceId })
+    spaceId: header.spaceId ?? undefined,
+    browse: {
+      scope: "all",
+      ...(header.spaceId === null || seesEveryChat(header, run) ? {} : { spaceId: header.spaceId })
+    }
   }
 }
 
@@ -471,7 +479,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
     execute: async (input, ctx) => {
       const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const scope: SessionListQuery =
-        permittedBrowseScope(input.scope, ctx.run) === "all_spaces" ? { scope: "all" } : own
+        permittedBrowseScope(input.scope, ctx.run) === "all_spaces" ? { scope: "all" } : own.browse
       const page = await Effect.runPromise(
         services.store
           .list({

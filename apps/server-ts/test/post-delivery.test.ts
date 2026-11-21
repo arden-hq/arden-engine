@@ -440,3 +440,27 @@ it("a Task title on two lines is refused before the post is queued", async () =>
     })
   )
 })
+
+it("two replies queued under a root that was cleared: the first stands alone, the second quotes it", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { thread, post, drain, message } = yield* setup
+      const sessions = yield* SessionStore
+      yield* thread("mail-1", "t1")
+      yield* thread("mail-2", "t1")
+      yield* thread("mail-3", "t1")
+      const first = yield* post(1, { itemIds: ["mail-1"] })
+      expect(yield* drain).toBe(1)
+      const second = yield* post(2, { itemIds: ["mail-2"] })
+      const third = yield* post(3, { itemIds: ["mail-3"] })
+      yield* sessions.clear(first.sessionId)
+      expect(yield* drain).toBe(2)
+      expect((yield* message(second.sessionId, second.messageId))?.replyTo).toBeUndefined()
+      expect((yield* message(third.sessionId, third.messageId))?.replyTo).toEqual({
+        messageId: second.messageId,
+        role: ROLE.assistant,
+        content: "Post 2"
+      })
+    })
+  )
+})
