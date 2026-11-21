@@ -28,7 +28,6 @@ export const PostDeliveryPayloadSchema = Schema.Struct({
   messageId: Schema.NonEmptyString,
   text: PostTextSchema,
   itemIds: Schema.Array(Schema.NonEmptyString),
-  waitsFor: Schema.optionalKey(Schema.NonEmptyString),
   task: Schema.optionalKey(PostTaskSchema),
   withdrawal: Schema.optionalKey(
     Schema.Struct({

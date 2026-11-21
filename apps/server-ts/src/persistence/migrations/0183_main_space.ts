@@ -29,7 +29,6 @@ export const EVENT_THREADS_TABLE = `CREATE TABLE event_threads (
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       delivery_id TEXT NOT NULL,
-      last_delivery_id TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (source, account, thread_key)
     )`
@@ -101,17 +100,6 @@ const moveOwnerChats = (database: DatabaseSync, mainId: string): void => {
       WHERE space_id IS NULL AND session_id IN (SELECT session_id FROM moved)`
     )
     .run(mainId, mainId)
-  database
-    .prepare(
-      `UPDATE sessions SET metadata = json_remove(metadata, '$.fork_resources')
-      WHERE space_id = ?
-        AND CASE WHEN json_valid(metadata) THEN json_type(metadata, '$.fork_resources') END
-          IS NOT NULL
-        AND EXISTS (SELECT 1 FROM sessions AS source
-          WHERE source.session_id = json_extract(sessions.metadata, '$.fork_resources.source_session_id')
-            AND source.space_id IS NULL)`
-    )
-    .run(mainId)
   const moving = `space_id IS NULL
     AND home_session_id IN (SELECT session_id FROM sessions WHERE space_id = ?)`
   const tasks = database
@@ -198,6 +186,41 @@ const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
           (SELECT session_id FROM sessions WHERE space_id = ?)`
     )
     .run(mainId, mainId)
+  const unshared = database
+    .prepare(
+      `SELECT branch.session_id,
+        json_extract(branch.metadata, '$.fork_resources.source_session_id') AS source_id
+      FROM sessions AS branch
+      WHERE branch.space_id = ?
+        AND CASE WHEN json_valid(branch.metadata)
+          THEN json_type(branch.metadata, '$.fork_resources') END IS NOT NULL
+        AND EXISTS (SELECT 1 FROM sessions AS source
+          WHERE source.session_id = json_extract(branch.metadata, '$.fork_resources.source_session_id')
+            AND source.space_id IS NULL)`
+    )
+    .all(mainId)
+  const withoutSource = (column: string, path: string) => `CASE
+    WHEN json_type(${column}, '${path}') = 'array' THEN json_set(${column}, '${path}',
+      (SELECT json_group_array(json(grant.value)) FROM json_each(${column}, '${path}') AS grant
+        WHERE json_extract(grant.value, '$.session_id') IS NOT ?))
+    ELSE ${column} END`
+  const dropGrants = database.prepare(
+    `UPDATE chat_runs SET
+      metadata_json = ${withoutSource("metadata_json", "$.run_policy.resource_sessions")},
+      authority_json = CASE WHEN authority_json IS NULL THEN NULL
+        ELSE ${withoutSource("authority_json", "$.reach.resource_sessions")} END
+    WHERE session_id = ?
+      OR json_extract(metadata_json, '$.run_policy.authority_session_id') = ?`
+  )
+  const dropShare = database.prepare(
+    "UPDATE sessions SET metadata = json_remove(metadata, '$.fork_resources') WHERE session_id = ?"
+  )
+  for (const branch of unshared) {
+    const source = String(branch.source_id)
+    const sessionId = String(branch.session_id)
+    dropGrants.run(source, source, sessionId, sessionId)
+    dropShare.run(sessionId)
+  }
   database.exec(RUN_CONTEXT_GUARD)
   database.exec(RUN_AUTHORITY_GUARD)
 }

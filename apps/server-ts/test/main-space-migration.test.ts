@@ -267,7 +267,7 @@ it("M1 moves the Space of every run whose chat moved, settled or live", () => {
   database.close()
 })
 
-it("M1 drops the resource share of a moved branch whose source stays outside Main", () => {
+it("M1 drops the resource share, and its runs' grants, of a moved branch whose source stays outside Main", () => {
   const database = migratedTo(183, (database) => {
     database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
         session_type, origin_automation_id, metadata)
@@ -277,7 +277,38 @@ it("M1 drops the resource share of a moved branch whose source stays outside Mai
           '{"fork_resources":{"version":1,"source_session_id":"daily"},"cli":1}'),
         ('of-loose', 'of-loose', '${AT}', '${AT}', 'chat', NULL,
           '{"fork_resources":{"version":1,"source_session_id":"loose"}}')`)
+    const grants = JSON.stringify([{ session_id: "daily" }, { session_id: "loose" }])
+    database
+      .prepare(
+        `INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at, ended_at,
+          assistant_message_id, metadata_json, authority_json)
+        VALUES ('branch-run', 'of-daily', 'completed', ?, ?, ?, 'a1', ?, ?)`
+      )
+      .run(
+        AT,
+        AT,
+        AT,
+        JSON.stringify({
+          run_policy: {
+            authority_session_id: "of-daily",
+            space: null,
+            resource_sessions: JSON.parse(grants)
+          }
+        }),
+        JSON.stringify({
+          owns: { space_id: null },
+          reach: { resource_sessions: JSON.parse(grants) }
+        })
+      )
   })
+  expect(
+    database
+      .prepare(
+        `SELECT json_extract(metadata_json, '$.run_policy.resource_sessions') AS policy,
+          json_extract(authority_json, '$.reach.resource_sessions') AS reach FROM chat_runs`
+      )
+      .all()
+  ).toEqual([{ policy: '[{"session_id":"loose"}]', reach: '[{"session_id":"loose"}]' }])
   expect(
     database
       .prepare(

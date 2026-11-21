@@ -122,7 +122,7 @@ it("no Space, an unknown Space or an archived Space posts in Main; the same atte
         new Set(mainChat.map((row) => row.session_id))
       )
       expect(yield* post(1, { spaceId: gone.space_id, text: "Again" })).toEqual(places[0])
-      expect(yield* drain).toBe(3)
+      expect((yield* drain) + (yield* drain) + (yield* drain)).toBe(3)
       expect(yield* post(1, { text: "After delivery" })).toEqual(places[0])
       expect(yield* sql`SELECT 1 FROM automation_deliveries`).toHaveLength(3)
     })
@@ -518,6 +518,48 @@ it("a reply waits for the reply queued before it, even while that one is retried
       yield* posts.defer({ deliveryId: postDeliveryId(2), attempt: 0 }, "failed once")
       expect(yield* drain).toBe(0)
       expect(yield* delivery(3)).toMatchObject({ status: "pending" })
+    })
+  )
+})
+
+it("posts to one chat go out in queue order; a post to another chat is never held by them", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { spaces, thread, post, drain, delivery, posts } = yield* setup
+      const taxes = yield* spaces.create({ name: "Taxes" })
+      yield* thread("mail-1", "t1")
+      yield* thread("mail-2", "t2")
+      yield* thread("mail-3", "t1")
+      yield* thread("mail-4", "t2")
+      yield* post(1, { itemIds: ["mail-1"] })
+      yield* post(2, { itemIds: ["mail-2"] })
+      yield* posts.defer({ deliveryId: postDeliveryId(1), attempt: 0 }, "failed once")
+      const both = yield* post(3, { itemIds: ["mail-3", "mail-4"] })
+      yield* post(4, { spaceId: taxes.space_id })
+      expect(yield* drain).toBe(1)
+      expect(yield* delivery(4)).toMatchObject({ status: "delivered" })
+      expect([
+        (yield* delivery(2))?.status,
+        (yield* delivery(3))?.status,
+        both.sessionId === (yield* post(1)).sessionId
+      ]).toEqual(["pending", "pending", true])
+    })
+  )
+})
+
+it("a thread whose pending post's Space was archived takes the next post to Main", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, spaces, main, thread, post } = yield* setup
+      const taxes = yield* spaces.create({ name: "Taxes" })
+      yield* thread("mail-1", "t1")
+      yield* thread("mail-2", "t1")
+      yield* post(1, { itemIds: ["mail-1"], spaceId: taxes.space_id })
+      yield* spaces.archive(taxes.space_id)
+      const next = yield* post(2, { itemIds: ["mail-2"] })
+      expect(
+        yield* sql`SELECT space_id FROM sessions WHERE session_id = ${next.sessionId}`
+      ).toEqual([{ space_id: main.space_id }])
     })
   )
 })
