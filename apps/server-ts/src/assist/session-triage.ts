@@ -93,8 +93,8 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
     if (decision.decision === "move" && output.confident) {
       const moved = yield* dependencies.store
         .moveToSpace(sessionId, decision.target.space_id)
-        .pipe(Effect.catchTag("SessionStoreError", () => Effect.succeed(false)))
-      if (moved) {
+        .pipe(Effect.catchTag("SessionStoreError", () => Effect.succeed(undefined)))
+      if (moved !== undefined) {
         yield* dependencies.store.saveTriage(sessionId, {
           outcome: "filed",
           ...checked,
@@ -212,8 +212,10 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
   }
 })
 
-const requireMoved = (moved: boolean) =>
-  moved ? Effect.void : Effect.fail(staleSuggestion("This Chat can no longer be filed"))
+const requireMoved = (moved: string | undefined) =>
+  moved !== undefined
+    ? Effect.void
+    : Effect.fail(staleSuggestion("This Chat can no longer be filed"))
 
 const movedTo = (target: SessionTriageTarget, rationale: string): SessionTriageDecision => ({
   decision: "moved",

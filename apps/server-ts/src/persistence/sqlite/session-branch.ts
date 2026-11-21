@@ -510,7 +510,7 @@ export const makeSessionBranch = ({
             name: name ?? undefined,
             startedAt: timestamp,
             lastActivity: timestamp,
-            spaceId: source.space_id ?? undefined,
+            spaceId: branchSpaceId,
             forkOrigin
           }
         })

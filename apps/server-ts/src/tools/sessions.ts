@@ -782,13 +782,13 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
           return {
             result: `Moved this chat to ${moved.spaceName}.`,
             preview: `Moved to ${moved.spaceName}`,
-            data: { space_id: input.space_id, when: moved.when }
+            data: { space_id: moved.spaceId, when: moved.when }
           }
         case "run_end":
           return {
             result: `This chat moves to ${moved.spaceName} as soon as this reply ends; nothing more to do. Tell the user it is moving to ${moved.spaceName} when you finish.`,
             preview: `Moving to ${moved.spaceName} after this reply`,
-            data: { space_id: input.space_id, when: moved.when }
+            data: { space_id: moved.spaceId, when: moved.when }
           }
       }
     }

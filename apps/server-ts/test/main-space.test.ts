@@ -9,6 +9,12 @@ import { seesEveryChat } from "../src/tools/session-browse-scope.js"
 import { makeSessionTriage, makeSessionTriageAction } from "../src/assist/session-triage.js"
 import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-transcript.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { listedSessionToWire } from "../src/http/wire/sessions.js"
+import { looseChats } from "../src/mobile/spaces.js"
+import { makeCaptureRouter } from "../src/routing/capture.js"
+import { WorkStore } from "../src/persistence/work/store.js"
+import { SummaryStore } from "../src/persistence/summaries/store.js"
+import { installCapture } from "../src/persistence/sqlite/tells/capture.js"
 import { serverRunContext } from "./kit.js"
 import { deriveAuthority, type RunAuthority } from "../src/execution/authority.js"
 import { decide } from "../src/execution/decide.js"
@@ -79,7 +85,7 @@ it("a chat made, moved or branched with no Space lands in Main and sees every Sp
       expect([loose.spaceId, capture.spaceId]).toEqual([main.space_id, main.space_id])
 
       const filed = yield* sessions.create({ name: "Filed", spaceId: work.space_id })
-      expect(yield* sessions.moveToSpace(filed.sessionId, undefined)).toBe(true)
+      expect(yield* sessions.moveToSpace(filed.sessionId, undefined)).toBe(main.space_id)
       expect(yield* spaceOf(filed.sessionId)).toBe(main.space_id)
 
       yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
@@ -91,6 +97,7 @@ it("a chat made, moved or branched with no Space lands in Main and sees every Sp
         yield* spaceOf(kept?.sessionId ?? ""),
         yield* spaceOf(side?.sessionId ?? "")
       ]).toEqual([main.space_id, main.space_id])
+      expect([kept?.spaceId, side?.spaceId]).toEqual([main.space_id, main.space_id])
 
       const inMain = yield* queries.loadHistoryHeader(loose.sessionId)
       const inWork = yield* queries.loadHistoryHeader(
@@ -322,6 +329,58 @@ it("onboarding_finish runs in a Read only chat", async () => {
         }
       )
       expect(decision.kind).toBe("allow")
+    })
+  )
+})
+
+it("the phone's loose list shows Main's chats but not Main's own conversation", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const main = yield* mainSpace
+      const bound = yield* sessions.ensureSpaceConversation(main.space_id)
+      const chat = yield* sessions.create({ name: "Loose" })
+      const listed = (yield* sessions.list({ inbox: true, scope: "primary" })).map(
+        listedSessionToWire
+      )
+      expect(looseChats(listed).map((row) => row.session_id)).toEqual([chat.sessionId])
+      expect(listed.map((row) => row.session_id)).toContain(bound)
+    })
+  )
+})
+
+it("an unmatched capture is kept in its own chat when Main is the only Space", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const route = makeCaptureRouter({
+        spaces: yield* SpaceStore,
+        work: yield* WorkStore,
+        sessions: yield* SessionStore,
+        summaries: yield* SummaryStore,
+        decisions: { decide: () => Effect.die("nothing to choose between") }
+      })
+      expect(yield* route({ image: { mediaType: "image/png", data: "AAAA" }, note: "" })).toEqual({
+        kind: "keep"
+      })
+    })
+  )
+})
+
+it("ending Getting started is a session change clients hear about", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const sql = yield* SqlClient.SqlClient
+      const chat = yield* sessions.create({ origin: "onboarding" })
+      yield* installCapture(sql)
+      yield* sql`UPDATE sessions SET metadata = json_set(metadata, '$.unwatched', 1)
+        WHERE session_id = ${chat.sessionId}`
+      expect(yield* sql`SELECT kind FROM temp.told_touches`).toEqual([])
+      yield* sql`UPDATE sessions SET metadata = json_remove(metadata, '$.onboarding')
+        WHERE session_id = ${chat.sessionId}`
+      expect(yield* sql`SELECT kind, id FROM temp.told_touches`).toEqual([
+        { kind: "session", id: chat.sessionId }
+      ])
     })
   )
 })

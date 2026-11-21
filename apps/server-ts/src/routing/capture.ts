@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import type { SpaceKind } from "@arden-hq/protocol/spaces"
 
 import type { CompletionImage } from "../models/structured-completion.js"
 import type { SessionListEntry, SessionListQuery } from "../persistence/sessions/store.js"
@@ -78,7 +79,7 @@ const lastSpaces = Effect.fn("CaptureRouter.lastSpaces")(function* (dependencies
     ) => Effect.Effect<ReadonlyArray<Pick<SessionListEntry, "lastActivity">>, unknown>
   }
 }): Effect.fn.Return<Extract<RouterDecision, { readonly kind: "space" }>, unknown> {
-  const spaces = yield* dependencies.spaces.list()
+  const spaces = (yield* dependencies.spaces.list()).filter((space) => space.kind !== "main")
   const active = yield* Effect.forEach(spaces, (space) =>
     dependencies.sessions
       .list({ spaceId: space.space_id, scope: "primary", sort: "activity", limit: 1 })
@@ -102,6 +103,7 @@ const lastSpaces = Effect.fn("CaptureRouter.lastSpaces")(function* (dependencies
 
 interface SpaceActivity {
   readonly space_id: string
+  readonly kind: SpaceKind
   readonly name: string
   readonly updated_at: string
 }

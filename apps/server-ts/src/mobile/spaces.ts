@@ -53,7 +53,7 @@ export function looseChats(sessions: ReadonlyArray<SessionListItem>): MobileLoos
   return sessions
     .filter(
       (session) =>
-        isConversation(session) && session.session_type !== "channel" && !session.space_id
+        isConversation(session) && session.session_type !== "channel" && !isSpaceHome(session)
     )
     .map((session) => ({
       session_id: session.session_id,

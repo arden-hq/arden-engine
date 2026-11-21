@@ -343,7 +343,7 @@ export const makeSessionLifecycle = ({
   const moveToSpace = Effect.fn("SqliteSessionStore.moveToSpace")(function* (
     sessionId: string,
     spaceId: string | undefined
-  ): Effect.fn.Return<boolean, SessionStoreError> {
+  ): Effect.fn.Return<string | undefined, SessionStoreError> {
     const validSessionId = yield* Schema.decodeUnknownEffect(sessionIdSchema)(sessionId).pipe(
       Effect.mapError((cause) =>
         storeError("move", "invalid", "Session id must not be empty", sessionId, cause)
@@ -367,7 +367,7 @@ export const makeSessionLifecycle = ({
         })
       )
       .pipe(Effect.mapError(moveFailure(validSessionId)))
-    return moved.kind !== "missing"
+    return moved.kind === "missing" ? undefined : moved.spaceId
   })
 
   const moveFromRun = Effect.fn("SqliteSessionStore.moveFromRun")(function* (
@@ -399,9 +399,9 @@ export const makeSessionLifecycle = ({
       case "missing":
         return undefined
       case "moved":
-        return { when: "now", spaceName: moved.spaceName }
+        return { when: "now", spaceId: moved.spaceId, spaceName: moved.spaceName }
       case "on_run_end":
-        return { when: "run_end", spaceName: moved.spaceName }
+        return { when: "run_end", spaceId: moved.spaceId, spaceName: moved.spaceName }
     }
   })
 

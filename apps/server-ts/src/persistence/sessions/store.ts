@@ -134,6 +134,7 @@ export interface CreatedSession {
 
 export interface OwnChatMove {
   readonly when: "now" | "run_end"
+  readonly spaceId: string
   readonly spaceName: string
 }
 
@@ -213,7 +214,7 @@ export class SessionStore extends Context.Service<
     readonly moveToSpace: (
       sessionId: string,
       spaceId: string | undefined
-    ) => Effect.Effect<boolean, SessionStoreError>
+    ) => Effect.Effect<string | undefined, SessionStoreError>
     readonly moveFromRun: (
       runId: string,
       spaceId: string | undefined,

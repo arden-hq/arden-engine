@@ -26,7 +26,8 @@ it("moves every owner chat with no Space into Main, with its chat Tasks and thei
           ('loose-old', 'loose-old', ${AT}, ${AT}, 'chat', NULL, NULL, NULL, NULL, NULL, ${AT}),
           ('filed', 'filed', ${AT}, ${AT}, 'chat', 'work', NULL, NULL, NULL, NULL, NULL),
           ('automation', 'automation', ${AT}, ${AT}, 'channel', NULL, 'daily', NULL, NULL, NULL, NULL),
-          ('automation-run', 'automation-run', ${AT}, ${AT}, 'chat', NULL, 'daily', 'automation', NULL, NULL, NULL)`
+          ('automation-run', 'automation-run', ${AT}, ${AT}, 'chat', NULL, 'daily', 'automation', NULL, NULL, NULL),
+          ('worker', 'worker', ${AT}, ${AT}, 'channel', NULL, 'task:first', NULL, NULL, NULL, NULL)`
       yield* sql`INSERT INTO space_tasks (item_id, space_id, home_session_id, stable_key, text,
           status, owner, runs_in, created_at, updated_at)
         VALUES ('first', NULL, 'loose', ${LONG_KEY}, 'Reply', 'open', 'worker', 'chat', ${AT}, ${AT}),
@@ -78,7 +79,8 @@ it("moves every owner chat with no Space into Main, with its chat Tasks and thei
       { session_id: "filed", space_id: "work" },
       { session_id: "loose", space_id: "main" },
       { session_id: "loose-agent", space_id: "main" },
-      { session_id: "loose-old", space_id: "main" }
+      { session_id: "loose-old", space_id: "main" },
+      { session_id: "worker", space_id: "main" }
     ],
     tasks: [
       { item_id: "automation-task", space_id: null, stable_key: "reply" },

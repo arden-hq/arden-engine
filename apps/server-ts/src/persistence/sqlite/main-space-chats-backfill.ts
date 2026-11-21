@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { Backfill, BackfillContext } from "./backfills/backfill.js"
 import { mainSpaceId } from "./main-space.js"
+import { taskJobId } from "../space-job-id.js"
 
 const CHATS_PER_CHUNK = 200
 
@@ -46,6 +47,8 @@ export const mainSpaceChatsBackfill: Backfill<unknown, BackfillContext> = {
           WHERE item_id = ${task.item_id}`
       }
       const itemIds = tasks.map((task) => task.item_id)
+      yield* sql`UPDATE sessions SET space_id = ${main}
+        WHERE space_id IS NULL AND origin_automation_id IN ${sql.in(itemIds.map(taskJobId))}`
       for (const table of ["space_task_events", "space_task_comments", "space_task_attachments"])
         yield* sql`UPDATE ${sql(table)} SET space_id = ${main}
           WHERE space_id IS NULL AND item_id IN ${sql.in(itemIds)}`

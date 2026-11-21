@@ -74,9 +74,14 @@ export const tableTells = {
     columns: [...sessionColumns, "metadata"],
     compare: [
       ...sessionColumns.map((column) => `{row}.${column}`),
-      ...[...sessionPermissionPaths, "$.triage", "$.fork", "$.thread", "$.capture"].map((path) =>
-        metadataPath(path)
-      )
+      ...[
+        ...sessionPermissionPaths,
+        "$.triage",
+        "$.fork",
+        "$.thread",
+        "$.capture",
+        "$.onboarding"
+      ].map((path) => metadataPath(path))
     ],
     nameChanged: "OLD.name IS NOT NEW.name",
     unlistedChanged: sessionPermissionPaths

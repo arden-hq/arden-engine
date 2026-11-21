@@ -10,8 +10,8 @@ import { sessionDescendants } from "./tree-walk.js"
 import { mainSpaceId } from "./main-space.js"
 
 type ConversationMove =
-  | { readonly kind: "moved"; readonly spaceName: string }
-  | { readonly kind: "on_run_end"; readonly spaceName: string }
+  | { readonly kind: "moved"; readonly spaceId: string; readonly spaceName: string }
+  | { readonly kind: "on_run_end"; readonly spaceId: string; readonly spaceName: string }
   | { readonly kind: "missing" }
 
 interface MoveRequest {
@@ -53,7 +53,7 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
   if (active.length > 0) {
     if (askingRunId !== undefined && active.every((run) => run.run_id === askingRunId)) {
       yield* holdMove(sql, askingRunId, sessionId, spaceId, mutation)
-      return { kind: "on_run_end", spaceName } satisfies ConversationMove
+      return { kind: "on_run_end", spaceId, spaceName } satisfies ConversationMove
     }
     return yield* storeError(
       "move",
@@ -70,7 +70,7 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
     WHERE session_id IN (SELECT session_id FROM subtree) AND space_id IS NOT ${spaceId}
     RETURNING session_id
   `
-  if (moved.length === 0) return { kind: "moved", spaceName } satisfies ConversationMove
+  if (moved.length === 0) return { kind: "moved", spaceId, spaceName } satisfies ConversationMove
   const operationId = yield* nextId
   const memberIds = moved.map((row) => row.session_id)
   yield* sql`INSERT INTO session_membership_changes (session_id, version, operation_id)
@@ -84,7 +84,7 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
         AND EXISTS (SELECT 1 FROM tool_calls WHERE run_id = ${mutation.runId}
           AND tool_call_id = ${mutation.toolCallId} AND changes_state = 1)`
   }
-  return { kind: "moved", spaceName } satisfies ConversationMove
+  return { kind: "moved", spaceId, spaceName } satisfies ConversationMove
 })
 
 export const applySpaceMoveAtRunEnd = Effect.fn("SessionSpaceMove.applyAtRunEnd")(
