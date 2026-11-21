@@ -3,7 +3,8 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { serializeOperationalCause } from "../../runtime/operational-events.js"
 import { TELL_LIMIT, TELL_TEXT_LIMIT, type TellOutcome } from "../work/store.js"
-import { doorOf, placeOfRun, tellShown, workerNames } from "./run-ending.js"
+import { doorOf, purposeOf, tellShown, workerNames } from "./run-ending.js"
+import { addressOfRun } from "./run-destination.js"
 import { tellChat, updateWeight } from "./owner-update.js"
 import { enqueueRunDelivery } from "./work-deliveries.js"
 
@@ -26,9 +27,10 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
     FROM run_tells WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}`
   if (known[0] !== undefined)
     return { kind: "again", n: known[0].n, chatId: known[0].place ?? undefined }
-  const placed = yield* placeOfRun(sql, input.runId)
-  if (placed === undefined) return { kind: "refused", reason: NOWHERE }
-  const { place } = placed
+  const address = yield* addressOfRun(sql, input.runId)
+  if (address === undefined) return { kind: "refused", reason: NOWHERE }
+  const { place, agent, source } = address
+  const { context, owner } = address.reply
   if (place.kind === "own") return { kind: "refused", reason: OWN_CHAT }
   if (place.kind !== "chat" && place.kind !== "parent") return { kind: "refused", reason: NOWHERE }
   const count =
@@ -41,7 +43,7 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
     }
   const n = count + 1
   const now = DateTime.formatIso(yield* DateTime.now)
-  const shown = tellShown({ purpose: placed.purpose, placeKind: place.kind })
+  const shown = tellShown({ purpose: yield* purposeOf(sql, address.owner), placeKind: place.kind })
   yield* sql`INSERT INTO run_tells (run_id, n, tool_call_id, text, place, place_kind, occurred_at,
       shown, delivery_error)
     VALUES (${input.runId}, ${n}, ${input.toolCallId}, ${text}, ${place.sessionId}, ${place.kind},
@@ -49,17 +51,17 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
   const key = `tell:${input.runId}:${n}`
   const delivered = Effect.gen(function* () {
     if (place.kind === "parent") {
-      if (placed.context === undefined || placed.agent === undefined)
+      if (context === undefined || agent === undefined)
         return yield* Effect.fail(new Error("The worker has no parent to tell"))
       yield* enqueueRunDelivery({
         sql,
         eventId: key,
-        subject: `${workerNames[placed.agent.mode]} update`,
+        subject: `${workerNames[agent.mode]} update`,
         body: text,
         payload: {
           kind: "result",
           sessionId: place.sessionId,
-          context: placed.context,
+          context,
           runIds: [input.runId],
           questionId: null,
           progress: true
@@ -68,7 +70,7 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
       })
       return
     }
-    if (place.kind !== "chat" || placed.context === undefined || placed.origin === undefined)
+    if (place.kind !== "chat" || context === undefined || owner === undefined)
       return yield* Effect.fail(new Error("There is no chat to tell"))
     const weight = updateWeight({ kind: "tell", shown })
     if (weight === undefined) return
@@ -78,10 +80,10 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
       occurrenceKey: key,
       source: { kind: "tell", runId: input.runId, n },
       sourceRunId: input.runId,
-      sourceSessionRef: placed.source.source_ref,
+      sourceSessionRef: source.source_ref,
       destination: place.row,
       line: text,
-      door: yield* doorOf(sql, placed.origin, placed.source, placed.context),
+      door: yield* doorOf(sql, owner, source, context),
       event: "told",
       occurredAt: now
     })
