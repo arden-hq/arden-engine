@@ -465,7 +465,7 @@ it("two replies queued under a root that was cleared: the first stands alone, th
       const second = yield* post(2, { itemIds: ["mail-2"] })
       const third = yield* post(3, { itemIds: ["mail-3"] })
       yield* sessions.clear(first.sessionId)
-      expect(yield* drain).toBe(2)
+      expect((yield* drain) + (yield* drain)).toBe(2)
       expect((yield* message(second.sessionId, second.messageId))?.replyTo).toBeUndefined()
       expect((yield* message(third.sessionId, third.messageId))?.replyTo).toEqual({
         messageId: second.messageId,
@@ -495,11 +495,29 @@ it("replies queued in the same millisecond deliver in the order they were queued
       yield* sql`UPDATE automation_deliveries SET created_at = ${AT}
         WHERE delivery_id IN (${postDeliveryId(2)}, ${postDeliveryId(later)})`
       yield* sessions.clear(root.sessionId)
-      expect(yield* drain).toBe(2)
+      expect((yield* drain) + (yield* drain)).toBe(2)
       expect((yield* message(earlier.sessionId, earlier.messageId))?.replyTo).toBeUndefined()
       expect((yield* message(after.sessionId, after.messageId))?.replyTo).toMatchObject({
         messageId: earlier.messageId
       })
+    })
+  )
+})
+
+it("a reply waits for the reply queued before it, even while that one is retried later", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { thread, post, drain, delivery, posts } = yield* setup
+      yield* thread("mail-1", "t1")
+      yield* thread("mail-2", "t1")
+      yield* thread("mail-3", "t1")
+      yield* post(1, { itemIds: ["mail-1"] })
+      yield* drain
+      yield* post(2, { itemIds: ["mail-2"] })
+      yield* post(3, { itemIds: ["mail-3"] })
+      yield* posts.defer({ deliveryId: postDeliveryId(2), attempt: 0 }, "failed once")
+      expect(yield* drain).toBe(0)
+      expect(yield* delivery(3)).toMatchObject({ status: "pending" })
     })
   )
 })

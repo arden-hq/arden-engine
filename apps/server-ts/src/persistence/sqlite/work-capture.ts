@@ -310,7 +310,8 @@ export const makeWorkCaptureSql = (options: {
         Effect.gen(function* () {
           const chats = yield* sql<{ readonly space_id: string | null }>`
             SELECT space_id FROM sessions
-            WHERE session_id = ${scope.sessionId} AND archived_at IS NULL`
+            WHERE session_id = ${scope.sessionId} AND archived_at IS NULL
+              AND session_type = 'chat'`
           const chat = chats[0]
           if (chat === undefined) return yield* workError("not_found", "Chat not found")
           const target: TaskScope =

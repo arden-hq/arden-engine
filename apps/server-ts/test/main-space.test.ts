@@ -752,3 +752,54 @@ it("a branch of a chat in no Space cannot share its resources", async () => {
     })
   )
 })
+
+it("continuing an Automation's copy of a chat in no Space puts the chat in Main", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* SessionStore
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, origin_automation_id, context_from_seq)
+        VALUES ('daily-chat', 'daily-chat', ${AT}, ${AT}, 'channel', 'daily', 0)`
+      yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers,
+          created_at, purpose, thread_id, context_mode)
+        VALUES ('daily', 'daily', 'Daily', 'Check', '[]', ${AT}, 'user_automation',
+          'daily-chat', 'continue')`
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, origin_automation_id, parent_session_id, metadata, context_from_seq)
+        VALUES ('copy', 'copy', ${AT}, ${AT}, 'chat', 'daily', 'daily-chat',
+          '{"fork_origin":{"sourceSessionId":"daily-chat"}}', 0)`
+      expect(yield* sessions.continueRun("copy")).toBe(true)
+      expect(yield* spaceOf("copy")).toBe((yield* mainSpace).space_id)
+    })
+  )
+})
+
+it("a Task filed by the id of an agent session is refused", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const chat = yield* (yield* SessionStore).create({ name: "Parent" })
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, space_id, parent_session_id, parent_run_id, parent_tool_call_id)
+        VALUES ('agent', 'agent', ${AT}, ${AT}, 'agent', ${chat.spaceId ?? null},
+          ${chat.sessionId}, 'run', 'call')`
+      const refused = yield* (yield* WorkStore)
+        .create({ kind: "chat", sessionId: "agent" }, { key: "reply", text: "Reply" })
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({ reason: "not_found" })
+    })
+  )
+})
+
+it("a new database records Main's creation like an upgraded one", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const main = yield* mainSpace
+      expect(
+        yield* sql`SELECT version, kind FROM space_revisions WHERE space_id = ${main.space_id}`
+      ).toEqual([{ version: 1, kind: "created" }])
+    })
+  )
+})

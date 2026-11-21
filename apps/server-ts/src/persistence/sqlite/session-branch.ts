@@ -34,8 +34,7 @@ import {
 } from "./session-rows.js"
 import { openDeferredCallStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
-import { mainSpaceId } from "./main-space.js"
-import { SpaceId } from "../space-job-id.js"
+import { ownerChatSpace } from "./main-space.js"
 
 const BranchOptionsSchema = Schema.Struct({
   disposition: Schema.optionalKey(Schema.UndefinedOr(Schema.Literals(["retained", "disposable"]))),
@@ -388,8 +387,7 @@ export const makeSessionBranch = ({
               "This chat is in no Space, so a branch of it cannot share its resources. Branch it without sharing.",
               validSessionId
             )
-          const branchSpaceId =
-            source.space_id === null ? yield* mainSpaceId(sql) : SpaceId.make(source.space_id)
+          const branchSpaceId = yield* ownerChatSpace(sql, source.space_id)
           const branch = {
             sessionId: branchId,
             publicRef: friendlySessionRef(branchId),

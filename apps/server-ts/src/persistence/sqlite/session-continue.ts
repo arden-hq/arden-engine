@@ -1,3 +1,4 @@
+import { ownerChatSpace } from "./main-space.js"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { DateTime, Effect, Schema } from "effect"
 import { SessionStoreError, type SessionStore } from "../sessions/store.js"
@@ -39,6 +40,7 @@ export const makeSessionContinue = ({
             readonly copy: number
             readonly working: number
             readonly automation_name: string | null
+            readonly space_id: string | null
           }>`
             SELECT
               (s.session_type = 'chat' AND s.parent_session_id IS NOT NULL
@@ -47,7 +49,7 @@ export const makeSessionContinue = ({
                 AND ${userAutomationSql("automation")}) AS copy,
               EXISTS (SELECT 1 FROM chat_runs AS run WHERE run.session_id = s.session_id
                 AND run.status IN ${activeRunStatusList}) AS working,
-              automation.name AS automation_name
+              automation.name AS automation_name, s.space_id
             FROM sessions AS s
             LEFT JOIN scheduled_tasks AS automation ON automation.task_id = s.origin_automation_id
             WHERE s.session_id = ${validSessionId} AND s.archived_at IS NULL`
@@ -87,6 +89,7 @@ export const makeSessionContinue = ({
           yield* startCaptureAfterCopies(sql, validSessionId)
           yield* sql`UPDATE sessions
             SET parent_session_id = NULL, parent_message_id = NULL, origin_automation_id = NULL,
+              space_id = ${yield* ownerChatSpace(sql, row.space_id)},
               name = COALESCE(name, ${row.automation_name}),
               visible_message_count = ${visibleMessageCount(projection)},
               last_activity = ${DateTime.formatIso(yield* DateTime.now)}

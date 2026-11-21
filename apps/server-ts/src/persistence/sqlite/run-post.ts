@@ -1,3 +1,4 @@
+import type { Statement } from "effect/unstable/sql"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { sha256Hex } from "@arden-hq/std/hash"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
@@ -26,7 +27,7 @@ import { makeWorkEvents } from "./work-events.js"
 
 interface ThreadHit {
   readonly session_id: string
-  readonly delivery_id: string
+  readonly waits_for: string | null
 }
 
 interface DeliveryRow {
@@ -69,25 +70,33 @@ export const makePostStore = ({
     } satisfies PostedMessage
   })
 
-  const liveMapping = (mapped: string) => sql`(
+  const pendingDelivery = (deliveryId: Statement.Fragment) => sql`EXISTS (
+    SELECT 1 FROM automation_deliveries AS earlier
+    WHERE earlier.delivery_id = ${deliveryId} AND earlier.status = 'pending')`
+
+  const rootLive = (mapped: string) => sql`(
     EXISTS (SELECT 1 FROM sessions AS chat
       WHERE chat.session_id = ${sql(mapped)}.session_id
         AND chat.archived_at IS NULL AND chat.space_id IS NOT NULL)
     AND (EXISTS (SELECT 1 FROM session_messages AS message
           WHERE message.session_id = ${sql(mapped)}.session_id
             AND message.message_id = ${sql(mapped)}.message_id)
-      OR EXISTS (SELECT 1 FROM automation_deliveries AS earlier
-          WHERE earlier.delivery_id = ${sql(mapped)}.delivery_id AND earlier.status = 'pending')))`
+      OR ${pendingDelivery(sql`${sql(mapped)}.delivery_id`)}))`
+
+  const threadLive = (mapped: string) => sql`(
+    ${rootLive(mapped)} OR ${pendingDelivery(sql`${sql(mapped)}.last_delivery_id`)})`
 
   const threadHit = (threads: string) =>
     sql<ThreadHit>`
-      SELECT mapped.session_id, mapped.delivery_id
+      SELECT mapped.session_id,
+        CASE WHEN ${pendingDelivery(sql`mapped.last_delivery_id`)}
+          THEN mapped.last_delivery_id END AS waits_for
       FROM event_threads AS mapped
       JOIN json_each(${threads}) AS thread
         ON mapped.source = json_extract(thread.value, '$.source')
        AND mapped.account = json_extract(thread.value, '$.account')
        AND mapped.thread_key = json_extract(thread.value, '$.thread_key')
-      WHERE ${liveMapping("mapped")}
+      WHERE ${threadLive("mapped")}
       ORDER BY mapped.updated_at DESC
       LIMIT 1`
 
@@ -98,7 +107,12 @@ export const makePostStore = ({
       Effect.map((rows) => JSON.stringify(rows))
     )
 
-  const mapThreads = (
+  const threadMatch = (threads: string, mapped: string) => sql`${sql(mapped)}.source IN (
+    SELECT json_extract(thread.value, '$.source') FROM json_each(${threads}) AS thread
+    WHERE json_extract(thread.value, '$.account') = ${sql(mapped)}.account
+      AND json_extract(thread.value, '$.thread_key') = ${sql(mapped)}.thread_key)`
+
+  const queueOnThreads = (
     threads: string,
     post: {
       readonly sessionId: string
@@ -108,16 +122,36 @@ export const makePostStore = ({
     }
   ) => sql`
     INSERT INTO event_threads (source, account, thread_key, session_id, message_id,
-      delivery_id, updated_at)
+      delivery_id, last_delivery_id, updated_at)
     SELECT json_extract(thread.value, '$.source'), json_extract(thread.value, '$.account'),
       json_extract(thread.value, '$.thread_key'), ${post.sessionId}, ${post.messageId},
-      ${post.deliveryId}, ${post.at}
+      ${post.deliveryId}, ${post.deliveryId}, ${post.at}
     FROM json_each(${threads}) AS thread
     WHERE true
     ON CONFLICT (source, account, thread_key) DO UPDATE SET
-      session_id = excluded.session_id, message_id = excluded.message_id,
-      delivery_id = excluded.delivery_id, updated_at = excluded.updated_at
-    WHERE NOT ${liveMapping("event_threads")}`
+      last_delivery_id = excluded.last_delivery_id,
+      session_id = CASE WHEN ${threadLive("event_threads")}
+        THEN event_threads.session_id ELSE excluded.session_id END,
+      message_id = CASE WHEN ${threadLive("event_threads")}
+        THEN event_threads.message_id ELSE excluded.message_id END,
+      delivery_id = CASE WHEN ${threadLive("event_threads")}
+        THEN event_threads.delivery_id ELSE excluded.delivery_id END,
+      updated_at = CASE WHEN ${threadLive("event_threads")}
+        THEN event_threads.updated_at ELSE excluded.updated_at END`
+
+  const rootOnThreads = (
+    threads: string,
+    post: {
+      readonly sessionId: string
+      readonly messageId: string
+      readonly deliveryId: string
+      readonly at: string
+    }
+  ) => sql`
+    UPDATE event_threads AS mapped
+    SET session_id = ${post.sessionId}, message_id = ${post.messageId},
+      delivery_id = ${post.deliveryId}, updated_at = ${post.at}
+    WHERE ${threadMatch(threads, "mapped")} AND NOT ${rootLive("mapped")}`
 
   const parentOf = (
     threads: string,
@@ -168,7 +202,7 @@ export const makePostStore = ({
           const hit = (yield* threadHit(threads))[0]
           const place =
             hit === undefined ? yield* spaceChat(input.spaceId) : { sessionId: hit.session_id }
-          yield* mapThreads(threads, {
+          yield* queueOnThreads(threads, {
             sessionId: place.sessionId,
             messageId,
             deliveryId,
@@ -182,7 +216,7 @@ export const makePostStore = ({
             messageId,
             text: input.text,
             itemIds: [...input.itemIds],
-            ...(hit === undefined ? {} : { waitsFor: hit.delivery_id }),
+            ...(hit === undefined || hit.waits_for === null ? {} : { waitsFor: hit.waits_for }),
             ...(input.task === undefined ? {} : { task: input.task })
           }
           yield* sql`INSERT INTO automation_deliveries (
@@ -319,7 +353,7 @@ export const makePostStore = ({
       sessionId: payload.sessionId,
       events: [{ event: { type: "transcript_changed" } satisfies ChatProjectionEvent }]
     })
-    yield* mapThreads(threads, {
+    yield* rootOnThreads(threads, {
       sessionId: payload.sessionId,
       messageId: payload.messageId,
       deliveryId,

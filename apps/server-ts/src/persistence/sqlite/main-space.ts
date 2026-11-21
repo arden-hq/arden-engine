@@ -10,5 +10,12 @@ export const mainSpaceId = Effect.fn("MainSpace.id")(function* (sql: SqlClient.S
   return SpaceId.make(row.space_id)
 })
 
+export const ownerChatSpace = Effect.fn("MainSpace.ownerChatSpace")(function* (
+  sql: SqlClient.SqlClient,
+  spaceId: string | null
+) {
+  return spaceId === null ? yield* mainSpaceId(sql) : SpaceId.make(spaceId)
+})
+
 export const mainSpaceIdSql = (sql: SqlClient.SqlClient): Statement.Fragment =>
   sql`(SELECT main.space_id FROM spaces AS main WHERE main.kind = 'main')`
