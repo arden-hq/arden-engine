@@ -1,6 +1,5 @@
 import { freshRow } from "./automation-enqueue.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
-import { systemHandlerTellsOwner } from "../automations/model.js"
 import { readAutomationFollowup } from "./automation-followup.js"
 import { haltAutomation } from "./automation-halt.js"
 import { recordTaskReport } from "./work-events.js"
@@ -304,10 +303,7 @@ export const makeFencedOccurrences = ({
       })
     }
     const paused =
-      definition !== undefined &&
-      outcome === "failed" &&
-      (userAutomation ||
-        (automation !== undefined && systemHandlerTellsOwner(automation.authored.handler)))
+      definition !== undefined && outcome === "failed" && userAutomation
         ? yield* pauseOnGivingUp({
             sql,
             sessionEvents,

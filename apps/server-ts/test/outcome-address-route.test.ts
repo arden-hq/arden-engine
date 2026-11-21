@@ -255,7 +255,7 @@ it("records where each run's ending and tells go, and replays stored endings", a
   })
   expect(ending("r-unrecorded")?.["place_kind"]).toBe("own")
   expect(capture.endings["r-missing"]).toBeUndefined()
-  expect(ending("r-occ-urgent")?.["purpose"]).toBe("user_automation")
+  expect(ending("r-occ-urgent")?.["purpose"]).toBe("system")
   expect(ending("r-occ-override")?.["purpose"]).toBe("user_automation")
   expect(ending("r-system")?.["purpose"]).toBe("system")
   expect(ending("r-move")?.["place"]).toBe("thread-a")

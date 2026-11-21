@@ -352,3 +352,25 @@ it("the Home letter still publishes through the shared tool call reader", async 
     })
   )
 })
+
+it("Events keeps listening after runs that fail one after another", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, arrive, settle } = yield* setup
+      for (const itemId of ["mail-1", "mail-2", "mail-3", "mail-4"])
+        yield* settle(yield* arrive(itemId), {
+          status: "ended",
+          outcome: "failed",
+          result: null,
+          error: "The model is down.",
+          chatRunId: null,
+          chatSessionId: null
+        })
+      expect(
+        yield* sql`SELECT enabled, paused_at FROM scheduled_tasks
+          WHERE task_id = ${eventsHandler.spec.automationId}`
+      ).toEqual([{ enabled: 1, paused_at: null }])
+      expect(yield* sql`SELECT 1 FROM entity_events WHERE event = 'paused'`).toEqual([])
+    })
+  )
+})

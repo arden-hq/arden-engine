@@ -6,7 +6,6 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { serializeOperationalCause } from "../../runtime/operational-events.js"
 import { isUserAutomationPurpose, type JobPurpose } from "../job-classification.js"
-import { systemHandlerTellsOwner } from "../automations/model.js"
 import { taskDoor, type ArrivalEvent } from "./ending-arrival.js"
 import { tellChat, told, updateWeight, waitsOnOwner, type Readable } from "./owner-update.js"
 import { taskDoneBefore } from "./entity-events.js"
@@ -198,11 +197,8 @@ export const purposeOf = Effect.fn("RunEnding.purpose")(function* (
     case "automation": {
       const rows = yield* sql<{
         readonly purpose: string
-        readonly handler: string | null
-      }>`SELECT purpose, handler FROM scheduled_tasks WHERE task_id = ${origin.automation_id}`
-      return isUserAutomationPurpose(rows[0]?.purpose) || systemHandlerTellsOwner(rows[0]?.handler)
-        ? "user_automation"
-        : "system"
+      }>`SELECT purpose FROM scheduled_tasks WHERE task_id = ${origin.automation_id}`
+      return isUserAutomationPurpose(rows[0]?.purpose) ? "user_automation" : "system"
     }
   }
 })
@@ -213,10 +209,9 @@ const automationRunRepeats = Effect.fn("RunEnding.repeats")(function* (
 ) {
   const rows = yield* sql<{
     readonly triggers: string | null
-    readonly handler: string | null
     readonly source: string | null
     readonly again: number
-  }>`SELECT automation.triggers, automation.handler,
+  }>`SELECT automation.triggers,
       json_extract(attempt.trigger_json, '$.source') AS source,
       EXISTS (SELECT 1 FROM automation_runs AS earlier
         WHERE earlier.task_id = attempt.task_id AND earlier.id < attempt.id
@@ -227,8 +222,6 @@ const automationRunRepeats = Effect.fn("RunEnding.repeats")(function* (
     ORDER BY attempt.id DESC LIMIT 1`
   const row = rows[0]
   if (row === undefined || row.source === "manual") return false
-  // A handler that speaks to the owner replies only when it has something to tell them.
-  if (systemHandlerTellsOwner(row.handler)) return false
   return (
     row.again === 1 || (row.triggers !== null && automationRepeats(storedTriggers(row.triggers)))
   )
