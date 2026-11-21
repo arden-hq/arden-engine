@@ -13,6 +13,7 @@ import { AutomationTriggersSchema, scheduleEffect, writtenTriggers } from "./aut
 import { encodeJson } from "./json.js"
 import { insertSession } from "./session-insert.js"
 import { haltAutomation } from "./automation-halt.js"
+import { resumeOnTriggers } from "./automation-resume.js"
 import { renameOwnedJob } from "./job-labels.js"
 import { iso } from "../../runtime/clock.js"
 
@@ -25,6 +26,7 @@ interface StoredSystemAutomation {
   readonly last_run_at: string | null
   readonly next_run_at: string | null
   readonly thread_id: string | null
+  readonly auto_resume_at: string | null
 }
 
 const seedError = (message: string, automationId: string | undefined, cause?: unknown) =>
@@ -111,7 +113,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
           for (const [index, { spec, schedule, triggers, lastId }] of schedules.entries()) {
             const rows = yield* sql<StoredSystemAutomation>`
                 SELECT task_id, enabled, purpose, triggers, triggers_source,
-                       last_run_at, next_run_at, thread_id
+                       last_run_at, next_run_at, thread_id, auto_resume_at
                 FROM scheduled_tasks
                 WHERE task_id = ${spec.automationId}
                 LIMIT 1
@@ -171,7 +173,8 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
               continue
             }
 
-            const enabled = spec.enabled && row.enabled === 1
+            const resumes = spec.enabled && row.enabled === 0 && row.auto_resume_at !== null
+            const enabled = spec.enabled && (row.enabled === 1 || resumes)
             const fixed = spec.promptEdit === "fixed" ? 1 : 0
             const userOwnsTriggers = row.triggers_source === "manual" && row.triggers !== triggers
             const current = { ...row, triggers_source: userOwnsTriggers ? "manual" : null }
@@ -204,6 +207,16 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                 WHERE task_id = ${spec.automationId}
               `
             yield* renameOwnedJob(sql, spec.automationId, spec.name)
+            if (resumes)
+              yield* resumeOnTriggers({
+                sql,
+                rules,
+                row: {
+                  task_id: spec.automationId,
+                  triggers: userOwnsTriggers ? row.triggers : triggers
+                },
+                now: timestamp
+              })
             if (!enabled && row.enabled === 1)
               yield* haltAutomation({
                 sql,

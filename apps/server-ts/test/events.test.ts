@@ -128,6 +128,66 @@ it("seeding over Urgent events names the row and its chat Events, keeps the rule
   )
 })
 
+it("seeding resumes an Events row that paused itself, with its own schedule, and leaves one turned off", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      const events = eventsHandler.spec.automationId
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      yield* catalog.update(
+        events,
+        {
+          triggers: [
+            { type: "time", at: "08:00", days: "daily" },
+            { type: "event", event_type: "email.received", run_only_if: SENTENCE }
+          ]
+        },
+        "owner"
+      )
+      const pause = (autoResumeAt: string | null) =>
+        sql`UPDATE scheduled_tasks SET enabled = 0, next_run_at = NULL,
+            paused_at = '2026-11-18T09:00:00.000Z', auto_resume_at = ${autoResumeAt},
+            auto_resumes = 1, failed_runs = 2
+          WHERE task_id = ${events}`
+      const state = sql<{
+        readonly enabled: number
+        readonly armed: number
+        readonly paused_at: string | null
+        readonly auto_resume_at: string | null
+        readonly auto_resumes: number
+        readonly failed_runs: number
+      }>`SELECT enabled, next_run_at IS NOT NULL AS armed, paused_at, auto_resume_at,
+          auto_resumes, failed_runs
+        FROM scheduled_tasks WHERE task_id = ${events}`
+      yield* pause("2026-11-18T10:00:00.000Z")
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      expect(yield* state).toEqual([
+        {
+          enabled: 1,
+          armed: 1,
+          paused_at: null,
+          auto_resume_at: null,
+          auto_resumes: 0,
+          failed_runs: 0
+        }
+      ])
+      yield* pause(null)
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      expect(yield* state).toEqual([
+        {
+          enabled: 0,
+          armed: 0,
+          paused_at: "2026-11-18T09:00:00.000Z",
+          auto_resume_at: null,
+          auto_resumes: 1,
+          failed_runs: 2
+        }
+      ])
+    })
+  )
+})
+
 it("an Events run reads with the read-only scope and adds only post_message", async () => {
   const added = await (eventsHandler.tools ?? ((base) => base))(
     createToolset([], {

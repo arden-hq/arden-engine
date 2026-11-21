@@ -1,8 +1,28 @@
-import type { DatabaseSync } from "node:sqlite"
+import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
-import { migratedTo } from "./fixtures/migrated-to.js"
+import { baselineStatements } from "../src/persistence/migrations/0001_baseline.js"
+import { migrations } from "../src/persistence/migrations/index.js"
+import { pendingMigrationSteps } from "../src/persistence/migrations/runner.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
+
+const migratedTo = (version: number, seed: (database: DatabaseSync) => void) => {
+  const database = new DatabaseSync(":memory:")
+  for (const statement of baselineStatements) database.exec(statement)
+  database.exec("PRAGMA user_version = 1")
+  for (const step of pendingMigrationSteps(
+    { kind: "pending", from: 1, bridge: undefined },
+    migrations.filter((migration) => migration.version < version)
+  ))
+    step.run(database)
+  seed(database)
+  for (const step of pendingMigrationSteps(
+    { kind: "pending", from: version - 1, bridge: undefined },
+    migrations
+  ))
+    step.run(database)
+  return database
+}
 
 const space = (database: DatabaseSync, id: string, name: string, archived = false) =>
   database

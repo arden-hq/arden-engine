@@ -55,19 +55,29 @@ export const resumeDueAutomations = Effect.fn("AutomationResume.resumeDue")(func
       )
     ORDER BY task.auto_resume_at, task.task_id`
   for (const row of due) {
-    const triggers = yield* listenerTriggers(row)
-    const next =
-      triggers === undefined
-        ? null
-        : yield* Effect.try(() => rules.nextRunAt(rules.triggers(triggers), Date.parse(now))).pipe(
-            Effect.orElseSucceed(() => null)
-          )
-    yield* resumeAutomation({
-      sql,
-      automationId: row.task_id,
-      nextRunAt: next === null ? null : iso(next)
-    })
+    yield* resumeOnTriggers({ sql, rules, row, now })
     yield* sql`UPDATE scheduled_tasks SET auto_resumes = ${row.auto_resumes + 1}
       WHERE task_id = ${row.task_id}`
   }
+})
+
+export const resumeOnTriggers = Effect.fn("AutomationResume.resumeOnTriggers")(function* (options: {
+  readonly sql: SqlClient.SqlClient
+  readonly rules: AutomationRules["Service"]
+  readonly row: { readonly task_id: string; readonly triggers: string }
+  readonly now: string
+}) {
+  const { rules, row, now } = options
+  const triggers = yield* listenerTriggers(row)
+  const next =
+    triggers === undefined
+      ? null
+      : yield* Effect.try(() => rules.nextRunAt(rules.triggers(triggers), Date.parse(now))).pipe(
+          Effect.orElseSucceed(() => null)
+        )
+  yield* resumeAutomation({
+    sql: options.sql,
+    automationId: row.task_id,
+    nextRunAt: next === null ? null : iso(next)
+  })
 })
