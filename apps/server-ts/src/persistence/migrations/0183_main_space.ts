@@ -63,34 +63,6 @@ const freeMainName = (database: DatabaseSync): string => {
   }
 }
 
-const freeKey = (base: string, taken: Set<string>): string => {
-  if (!taken.has(base)) return base
-  for (let index = 2; ; index += 1) {
-    const candidate = `${base}-${index}`
-    if (!taken.has(candidate)) return candidate
-  }
-}
-
-const moveChatTasks = (database: DatabaseSync, mainId: string): void => {
-  const tasks = database
-    .prepare(
-      `SELECT item_id, stable_key FROM space_tasks
-      WHERE space_id IS NULL
-        AND home_session_id IN (SELECT session_id FROM sessions WHERE space_id = ?)
-      ORDER BY created_at, item_id`
-    )
-    .all(mainId)
-  const taken = new Set<string>()
-  const move = database.prepare(
-    "UPDATE space_tasks SET space_id = ?, stable_key = ? WHERE item_id = ?"
-  )
-  for (const task of tasks) {
-    const key = freeKey(String(task.stable_key), taken)
-    taken.add(key)
-    move.run(mainId, key, String(task.item_id))
-  }
-}
-
 const up = (database: DatabaseSync): void => {
   database.exec(SPACE_KIND_COLUMN)
   database.exec(MAIN_SPACE_INDEX)
@@ -102,15 +74,6 @@ const up = (database: DatabaseSync): void => {
       WHERE NOT EXISTS (SELECT 1 FROM spaces WHERE kind = 'main')`
     )
     .run(freeMainName(database))
-  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()
-  if (main === undefined) throw new Error("The Main Space was not created")
-  const mainId = String(main.space_id)
-  database
-    .prepare(
-      "UPDATE sessions SET space_id = ? WHERE space_id IS NULL AND origin_automation_id IS NULL"
-    )
-    .run(mainId)
-  moveChatTasks(database, mainId)
   database.exec(EVENT_THREADS_TABLE)
   database.exec("ALTER TABLE entity_events RENAME TO entity_events_prior")
   database.exec(ENTITY_EVENTS_TABLE)
