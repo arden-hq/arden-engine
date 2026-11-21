@@ -100,7 +100,10 @@ export class SpaceStore extends Context.Service<
       spaceId: string,
       page: FreeSpacePage | null
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
-    readonly detail: (spaceId: string) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
+    readonly detail: (
+      spaceId: string,
+      options?: { readonly recentChats?: number }
+    ) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
     readonly recordLetterSubject: (
       sessionId: string,
       messageId: string,

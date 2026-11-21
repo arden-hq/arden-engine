@@ -803,3 +803,104 @@ it("a new database records Main's creation like an upgraded one", async () => {
     })
   )
 })
+
+it("the Space detail lists every chat; only the model context keeps the 50 newest", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const main = yield* mainSpace
+      for (let index = 0; index < 55; index += 1) yield* sessions.create({ name: `Chat ${index}` })
+      const detail = yield* (yield* SpaceStore).detail(main.space_id)
+      expect(detail?.sessions).toHaveLength(55)
+    })
+  )
+})
+
+it("continuing an Automation copy moves its agents too, and waits while one of them runs", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* SessionStore
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, origin_automation_id, context_from_seq)
+        VALUES ('daily-chat', 'daily-chat', ${AT}, ${AT}, 'channel', 'daily', 0)`
+      yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers,
+          created_at, purpose, thread_id, context_mode)
+        VALUES ('daily', 'daily', 'Daily', 'Check', '[]', ${AT}, 'user_automation',
+          'daily-chat', 'continue')`
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, origin_automation_id, parent_session_id, metadata, context_from_seq)
+        VALUES ('copy', 'copy', ${AT}, ${AT}, 'chat', 'daily', 'daily-chat',
+          '{"fork_origin":{"sourceSessionId":"daily-chat"}}', 0)`
+      yield* sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
+          ended_at, assistant_message_id)
+        VALUES ('spawner', 'copy', 'completed', ${AT}, ${AT}, ${AT}, 'answer')`
+      yield* sql`UPDATE chat_runs SET metadata_json = '{"turn_id":"turn"}' WHERE run_id = 'spawner'`
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, origin_automation_id, parent_session_id, parent_run_id,
+          parent_tool_call_id, context_from_seq)
+        VALUES ('agent', 'agent', ${AT}, ${AT}, 'agent', 'daily', 'copy', 'spawner', 'call', 0)`
+      yield* sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
+          assistant_message_id)
+        VALUES ('agent-run', 'agent', 'running', ${AT}, ${AT}, 'agent-answer')`
+      expect(yield* sessions.continueRun("copy").pipe(Effect.flip)).toMatchObject({
+        reason: "conflict"
+      })
+      yield* sql`UPDATE chat_runs SET status = 'completed', ended_at = updated_at
+        WHERE run_id = 'agent-run'`
+      expect(yield* sessions.continueRun("copy")).toBe(true)
+      const main = (yield* mainSpace).space_id
+      expect([yield* spaceOf("copy"), yield* spaceOf("agent")]).toEqual([main, main])
+    })
+  )
+})
+
+it("a Task filed by the id of a side chat is refused", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const chat = yield* sessions.create({ name: "Main chat" })
+      const side = yield* sessions.branch(chat.sessionId, { disposition: "disposable" })
+      const refused = yield* (yield* WorkStore)
+        .create({ kind: "chat", sessionId: side?.sessionId ?? "" }, { key: "reply", text: "Reply" })
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({ reason: "invalid", message: "This chat cannot hold a Task." })
+    })
+  )
+})
+
+it("a second onboarding_finish that changes nothing reports no change", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const queries = yield* SessionQueries
+      const chat = yield* sessions.create({ origin: "onboarding" })
+      const marked = yield* queries.loadHeaderSnapshot(chat.sessionId)
+      if (marked === null) return yield* Effect.die("no chat")
+      yield* sessions.finishOnboarding(chat.sessionId)
+      const tool = makeOnboardingFinishTool({
+        sessions: partialService<SessionQueries["Service"]>("SessionQueries", {
+          loadHeaderSnapshot: () => Effect.succeed(marked)
+        }),
+        store: sessions
+      })
+      const result = yield* Effect.promise(() =>
+        Promise.resolve(
+          tool.execute(
+            {},
+            {
+              toolCallId: "call",
+              signal: new AbortController().signal,
+              run: serverRunContext({ sessionId: chat.sessionId, runId: "run" }),
+              messages: []
+            }
+          )
+        )
+      )
+      expect(result).toMatchObject({
+        content: "Getting started already ended.",
+        host: { mutation_receipt: { outcome: "no_op" } }
+      })
+    })
+  )
+})

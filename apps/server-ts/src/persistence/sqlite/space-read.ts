@@ -81,8 +81,6 @@ interface WorkEventDetailRow {
   readonly created_at: string
 }
 
-const SPACE_DETAIL_CHAT_LIMIT = 50
-
 const WORKER_STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1_000
 
 const workerAvailability = (
@@ -331,7 +329,8 @@ export const makeSpaceReads = (
   })
 
   const detail = Effect.fn("SqliteSpaceStore.detail")(function* (
-    spaceId: string
+    spaceId: string,
+    options?: { readonly recentChats?: number }
   ): Effect.fn.Return<SpaceDetail | null, SpaceStoreError> {
     const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
       Effect.mapError((cause) =>
@@ -373,7 +372,7 @@ export const makeSpaceReads = (
           AND s.parent_session_id IS NULL
           AND s.parent_message_id IS NULL
         ORDER BY s.last_activity DESC, s.session_id DESC
-        LIMIT ${SPACE_DETAIL_CHAT_LIMIT}
+        LIMIT ${options?.recentChats ?? -1}
       `.pipe(
         Effect.mapError((cause) =>
           storeError("detail", "storage", "Could not load Space sessions", validSpaceId, cause)

@@ -123,23 +123,24 @@ export const makeOnboardingFinishTool = ({
           retryable: false
         })
       }
-      await recordApplied(
-        effects,
-        Effect.runPromise(
-          store.finishOnboarding(ctx.run.sessionId).pipe(
+      const finished = await Effect.runPromise(
+        store
+          .finishOnboarding(ctx.run.sessionId)
+          .pipe(
             Effect.mapError((error) =>
               toolFailure(
-                {
-                  reason: error.reason,
-                  message: `Getting started did not end: ${error.message}`
-                },
+                { reason: error.reason, message: `Getting started did not end: ${error.message}` },
                 "Not ended"
               )
             )
           ),
-          { signal: ctx.signal }
-        )
+        { signal: ctx.signal }
       )
+      if (!finished) {
+        effects.unchanged()
+        return { result: "Getting started already ended.", preview: "Already ended" }
+      }
+      effects.applied()
       return {
         result: "Getting started ended.",
         preview: "Getting started ended",

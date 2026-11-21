@@ -19,6 +19,8 @@ const SPACE_THREADS = renderPromptSection(
   PROMPTS.spaceThreads
 )
 
+const SPACE_CONTEXT_CHATS = 50
+
 interface SpaceConversationContextSnapshot {
   readonly authority: string
   readonly view: SpaceView
@@ -48,7 +50,7 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
     if (spaceId === undefined) return undefined
     const space = yield* spaces.get(spaceId)
     if (space === null) return undefined
-    const detail = yield* spaces.detail(spaceId)
+    const detail = yield* spaces.detail(spaceId, { recentChats: SPACE_CONTEXT_CHATS })
     const conversation = detail?.sessions.find(
       (session) => session.session_id === detail.conversation_session_id
     )

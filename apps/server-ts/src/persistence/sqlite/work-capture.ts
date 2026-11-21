@@ -314,6 +314,8 @@ export const makeWorkCaptureSql = (options: {
               AND session_type = 'chat'`
           const chat = chats[0]
           if (chat === undefined) return yield* workError("not_found", "Chat not found")
+          if (chat.space_id !== null && !(yield* isOrdinaryChat(sql, scope.sessionId)))
+            return yield* workError("invalid", "This chat cannot hold a Task.")
           const target: TaskScope =
             chat.space_id === null ? scope : { kind: "space", spaceId: chat.space_id }
           return yield* createInTransaction({
