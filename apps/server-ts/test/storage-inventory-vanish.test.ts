@@ -1,33 +1,31 @@
+import * as real from "node:fs/promises"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import {
+  scanInventoryUnsafe,
+  scanStorageUnitsUnsafe,
+  type ScanFileSystem
+} from "../src/storage/inventory.js"
 
-// Names that "vanish": listed by readdir, gone by the time the scan reads them.
-const vanished = vi.hoisted(() => new Set<string>())
-
-vi.mock("node:fs/promises", async (original) => {
-  const real = await original<typeof import("node:fs/promises")>()
-  const gone = (path: unknown): boolean =>
-    typeof path === "string" && [...vanished].some((name) => path.endsWith(name))
-  const missing = (path: unknown): Error =>
-    Object.assign(new Error(`ENOENT: no such file or directory, '${String(path)}'`), {
-      code: "ENOENT"
-    })
-  return {
-    ...real,
-    lstat: (async (path: never, ...rest: Array<never>) => {
-      if (gone(path)) throw missing(path)
-      return real.lstat(path, ...rest)
-    }) as typeof real.lstat,
-    readdir: (async (path: never, ...rest: Array<never>) => {
-      if (gone(path)) throw missing(path)
-      return real.readdir(path, ...rest)
-    }) as typeof real.readdir
-  }
-})
-
-const { scanInventoryUnsafe, scanStorageUnitsUnsafe } = await import("../src/storage/inventory.js")
+const vanished = new Set<string>()
+const gone = (path: unknown): boolean =>
+  typeof path === "string" && [...vanished].some((name) => path.endsWith(name))
+const missing = (path: unknown): Error =>
+  Object.assign(new Error(`ENOENT: no such file or directory, '${String(path)}'`), {
+    code: "ENOENT"
+  })
+const vanishing: ScanFileSystem = {
+  lstat: (async (path: never, ...rest: Array<never>) => {
+    if (gone(path)) throw missing(path)
+    return real.lstat(path, ...rest)
+  }) as typeof real.lstat,
+  readdir: (async (path: never, ...rest: Array<never>) => {
+    if (gone(path)) throw missing(path)
+    return real.readdir(path, ...rest)
+  }) as typeof real.readdir
+}
 
 describe("storage scan while files come and go", () => {
   let root: string
@@ -47,18 +45,18 @@ describe("storage scan while files come and go", () => {
   })
 
   it("leaves out a file, a folder and a top entry that vanish, and keeps the rest", async () => {
-    const before = await scanStorageUnitsUnsafe(root)
+    const before = await scanStorageUnitsUnsafe(root, vanishing)
     expect(before.map((unit) => unit.name).sort()).toEqual(["kept", "top.tmp"])
 
     vanished.add("temp.part").add("leaving").add("top.tmp")
-    const after = await scanStorageUnitsUnsafe(root)
+    const after = await scanStorageUnitsUnsafe(root, vanishing)
     expect(after.map((unit) => unit.name)).toEqual(["kept"])
     expect(after[0]?.sizeBytes).toBe(4)
   })
 
   it("the totals scan leaves them out too", async () => {
     vanished.add("temp.part").add("leaving").add("top.tmp")
-    const tallies = await scanInventoryUnsafe(root, null)
+    const tallies = await scanInventoryUnsafe(root, null, vanishing)
     const bytes = Object.values(tallies).reduce((total, tally) => total + tally.totalBytes, 0)
     expect(bytes).toBe(4)
   })

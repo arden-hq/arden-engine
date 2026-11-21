@@ -116,7 +116,12 @@ const noSilentInternalError = {
   message:
     "A 500 logs its reason: Effect.catch(failInternal(\"What\")) from http/errors.ts, not a bare InternalServerError."
 }
-const baseRestricted: Restriction[] = [noEnum, noForTestExport, noInlineErrorMessage, noSilentInternalError]
+const noModuleMock = {
+  selector: "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/]",
+  message:
+    "No vi.mock: unit tests share one module cache in shuffled order (isolate: false), so a module mock depends on which file loaded the module first. Pass the dependency in (see ScanFileSystem in storage/inventory.ts)."
+}
+const baseRestricted: Restriction[] = [noEnum, noForTestExport, noInlineErrorMessage, noSilentInternalError, noModuleMock]
 const restricted: Restriction[] = [...baseRestricted, ...domainWords, noDefaultFolders]
 const restrictedSyntax = (...more: Restriction[]) => ({
   "arden/restricted-syntax": ["error", ...restricted, ...more] as const
