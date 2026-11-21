@@ -97,7 +97,7 @@ export const makeOnboardingFinishTool = ({
     discovery: { group: "onboarding" },
     description: [
       "End Getting started in this chat, after the user answered the last step or said they are done.",
-      "From then on this is an ordinary chat: the Getting started steps no longer apply here.",
+      "After this, the Getting started steps no longer apply here.",
       "Only the onboarding chat may call this."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
