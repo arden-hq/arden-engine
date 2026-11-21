@@ -91,14 +91,15 @@ const enqueueUpdate = Effect.fn("OwnerUpdate.enqueue")(function* (options: {
     line,
     door
   }
+  const taskItem = door.kind === "task" || door.kind === "artifact" ? door.item_id : undefined
   const stableKey =
-    door.kind === "task" || door.kind === "artifact"
-      ? ((yield* sql<{ readonly stable_key: string | null }>`SELECT stable_key FROM space_tasks
-          WHERE item_id = ${door.item_id}`)[0]?.stable_key ?? null)
-      : null
+    taskItem === undefined
+      ? null
+      : ((yield* sql<{ readonly stable_key: string | null }>`SELECT stable_key FROM space_tasks
+          WHERE item_id = ${taskItem}`)[0]?.stable_key ?? null)
   const replyTo =
-    door.kind === "task"
-      ? yield* originQuote(sql, door.item_id, options.destination.session_id)
+    taskItem !== undefined
+      ? yield* originQuote(sql, taskItem, options.destination.session_id)
       : undefined
   yield* enqueueRunDelivery({
     sql,

@@ -381,6 +381,13 @@ export const makeSessionBranch = ({
           )
           const name = valid.name ?? (source.name === null ? null : `${source.name} (branch)`)
 
+          if (valid.shareResources === true && source.space_id === null)
+            return yield* storeError(
+              "branch",
+              "invalid",
+              "This chat is in no Space, so a branch of it cannot share its resources. Branch it without sharing.",
+              validSessionId
+            )
           const branchSpaceId =
             source.space_id === null ? yield* mainSpaceId(sql) : SpaceId.make(source.space_id)
           const branch = {

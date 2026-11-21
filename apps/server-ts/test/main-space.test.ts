@@ -719,3 +719,36 @@ it("a Task filed by chat id for a chat in Main lands on Main with the chat as it
     })
   )
 })
+
+it("a Task filed by the id of an archived chat is refused", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const chat = yield* sessions.create({ name: "Old" })
+      yield* sessions.archive(chat.sessionId)
+      const refused = yield* (yield* WorkStore)
+        .create({ kind: "chat", sessionId: chat.sessionId }, { key: "reply", text: "Reply" })
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({ reason: "not_found" })
+    })
+  )
+})
+
+it("a branch of a chat in no Space cannot share its resources", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* SessionStore
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+          session_type, origin_automation_id, context_from_seq)
+        VALUES ('automation-chat', 'automation-chat', ${AT}, ${AT}, 'channel', 'daily', 0)`
+      const refused = yield* sessions
+        .branch("automation-chat", { disposition: "retained", shareResources: true })
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({ operation: "branch", reason: "invalid" })
+      expect(yield* sessions.branch("automation-chat", { disposition: "retained" })).toMatchObject({
+        spaceId: (yield* mainSpace).space_id
+      })
+    })
+  )
+})

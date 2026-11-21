@@ -305,22 +305,33 @@ export const makeWorkCaptureSql = (options: {
   const create: WorkStore["Service"]["create"] = Effect.fn("Work.create")(function* (scope, input) {
     const capture = { basis: "explicit", reason: "Created by you." } as const
     if (scope.kind !== "chat") return yield* createFor(scope, input, "user", [], capture)
-    const chats = yield* sql<{ readonly space_id: string | null }>`
-      SELECT space_id FROM sessions WHERE session_id = ${scope.sessionId}`.pipe(
-      Effect.mapError((cause) => workError("storage", "Could not read the chat", cause))
-    )
-    const spaceId = chats[0]?.space_id ?? null
-    return spaceId === null
-      ? yield* createFor(scope, input, "user", [], capture)
-      : yield* createFor(
-          { kind: "space", spaceId },
-          input,
-          "user",
-          [],
-          capture,
-          undefined,
-          scope.sessionId
+    return yield* writer
+      .transact(
+        Effect.gen(function* () {
+          const chats = yield* sql<{ readonly space_id: string | null }>`
+            SELECT space_id FROM sessions
+            WHERE session_id = ${scope.sessionId} AND archived_at IS NULL`
+          const chat = chats[0]
+          if (chat === undefined) return yield* workError("not_found", "Chat not found")
+          const target: TaskScope =
+            chat.space_id === null ? scope : { kind: "space", spaceId: chat.space_id }
+          return yield* createInTransaction({
+            scope: target,
+            input: { ...input, key: input.key ?? (yield* freeKey(target, input.text)) },
+            actor: "user",
+            taskSources: [],
+            capture,
+            fromChat: scope.sessionId
+          })
+        })
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          cause instanceof WorkStoreError
+            ? cause
+            : workError("storage", "Could not complete Space task creation", cause)
         )
+      )
   })
 
   const createFromChat: WorkStore["Service"]["createFromChat"] = Effect.fn("Work.createFromChat")(

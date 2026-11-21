@@ -1,4 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import type { CommunicationDoor } from "@arden-hq/protocol/chat"
 import { noticeTier } from "@arden-hq/protocol/notifications"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -338,7 +339,11 @@ it("a Task update quotes the post that started it, only in that post's chat", as
       const task = (yield* sql<{ readonly item_id: string }>`SELECT item_id FROM space_tasks`)[0]
       if (task === undefined) return yield* Effect.die("no Task")
       const other = yield* sessions.create({ name: "Other" })
-      const tell = (sessionId: string, key: string) =>
+      const tell = (
+        sessionId: string,
+        key: string,
+        door: CommunicationDoor = taskDoor(task.item_id, "Pay")
+      ) =>
         Effect.gen(function* () {
           const destination = yield* chatRow(sql, sessionId)
           if (destination === undefined) return yield* Effect.die("no chat")
@@ -351,7 +356,7 @@ it("a Task update quotes the post that started it, only in that post's chat", as
             sourceSessionRef: destination.public_ref,
             destination,
             line: "Paid.",
-            door: taskDoor(task.item_id, "Pay"),
+            door,
             event: "finished",
             occurredAt: AT
           })
@@ -365,23 +370,29 @@ it("a Task update quotes the post that started it, only in that post's chat", as
         posted.messageId
       )
       yield* tell(posted.sessionId, "in-post-chat")
+      yield* tell(posted.sessionId, "artifact-in-post-chat", {
+        kind: "artifact",
+        label: "receipt.pdf",
+        item_id: task.item_id,
+        attachment_id: 1,
+        href: `arden:task/${encodeURIComponent(task.item_id)}`
+      })
       yield* tell(other.sessionId, "elsewhere")
       const pending = yield* work.pendingDeliveries()
+      const quote = { messageId: posted.messageId, role: ROLE.assistant, content: "Bill due" }
       expect(
-        pending.map((delivery) => [
-          delivery.payload.sessionId,
-          delivery.payload.kind === "update" ? delivery.payload.replyTo : "not an update"
-        ])
-      ).toEqual(
-        expect.arrayContaining([
-          [
-            posted.sessionId,
-            { messageId: posted.messageId, role: ROLE.assistant, content: "Bill due" }
-          ],
-          [other.sessionId, undefined]
-        ])
-      )
-      expect(pending).toHaveLength(2)
+        pending
+          .flatMap((delivery) =>
+            delivery.payload.kind === "update"
+              ? [[delivery.payload.update.key, delivery.payload.replyTo]]
+              : []
+          )
+          .toSorted((left, right) => String(left[0]).localeCompare(String(right[0])))
+      ).toEqual([
+        ["artifact-in-post-chat", quote],
+        ["elsewhere", undefined],
+        ["in-post-chat", quote]
+      ])
     })
   )
 })
