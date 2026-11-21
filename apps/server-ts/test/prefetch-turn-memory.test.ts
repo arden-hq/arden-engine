@@ -65,7 +65,7 @@ const run = async (
           get: () => Effect.succeed(GARDEN),
           detail: () => Effect.succeed(null)
         }),
-        summaries: partialService("SummaryStore", { spaceChats: () => Effect.succeed([]) }),
+        summaries: partialService("SummaryStore", { chats: () => Effect.succeed(new Map()) }),
         work: partialService("WorkStore", {
           questions: () => Effect.succeed({ questions: [], next_cursor: null })
         }),

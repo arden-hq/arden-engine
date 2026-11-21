@@ -31,7 +31,6 @@ interface ThreadHit {
 }
 
 interface DeliveryRow {
-  readonly task_id: string | null
   readonly payload: string
 }
 
@@ -149,6 +148,7 @@ export const makePostStore = ({
             WHERE NOT ${liveMapping("event_threads")}`
           const payload: PostDeliveryPayload = {
             kind: "post",
+            automationId: input.automationId,
             runId: input.runId,
             sessionId: place.sessionId,
             messageId,
@@ -238,7 +238,7 @@ export const makePostStore = ({
     deliveryId: string
   ) {
     const row = (yield* sql<DeliveryRow>`
-      SELECT task_id, payload FROM automation_deliveries
+      SELECT payload FROM automation_deliveries
       WHERE delivery_id = ${deliveryId} AND status = 'pending'`)[0]
     if (row === undefined) return false
     const now = iso(yield* Clock.currentTimeMillis)
@@ -295,15 +295,18 @@ export const makePostStore = ({
       sessionId: payload.sessionId,
       events: [{ event: { type: "transcript_changed" } satisfies ChatProjectionEvent }]
     })
-    if (row.task_id !== null)
-      yield* recordAutomationPosted(sql, {
-        sessionEvents,
-        automationId: row.task_id,
-        key: payload.messageId,
-        sessionId: payload.sessionId,
-        text: payload.text,
-        occurredAt: now
-      })
+    if (payload.replyTo !== undefined && quote === undefined)
+      yield* sql`UPDATE event_threads
+        SET message_id = ${payload.messageId}, delivery_id = ${deliveryId}, updated_at = ${now}
+        WHERE session_id = ${payload.sessionId} AND message_id = ${payload.replyTo.messageId}`
+    yield* recordAutomationPosted(sql, {
+      sessionEvents,
+      automationId: payload.automationId,
+      key: payload.messageId,
+      sessionId: payload.sessionId,
+      text: payload.text,
+      occurredAt: now
+    })
     if (chat.space_id !== null) yield* createTask(payload, chat.space_id)
     return true
   })

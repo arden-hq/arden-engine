@@ -19,7 +19,9 @@ import { journalRecordsSql } from "@arden-hq/journal/effect"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../src/persistence/sessions/events.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { runInspectTool } from "../src/tools/run-inspection.js"
-import { runPolicyRevoked } from "../src/persistence/sqlite/run-policy.js"
+import { captureRunPolicy, runPolicyRevoked } from "../src/persistence/sqlite/run-policy.js"
+import { spaceConversationContextSnapshot } from "../src/context/space.js"
+import { renderCaptureSpaces } from "../src/context/special-chat.js"
 import { serverRunContext } from "./kit.js"
 import { deriveAuthority, type RunAuthority } from "../src/execution/authority.js"
 import { decide } from "../src/execution/decide.js"
@@ -491,5 +493,132 @@ it("moving a run's chat from no Space into Main keeps the run; into another Spac
       expect(yield* revoked(main.space_id)).toBe(0)
       expect(yield* revoked(work.space_id)).toBe(1)
     })
+  )
+})
+
+it("a run from before the upgrade continues after its chat moved into Main", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const main = yield* mainSpace
+      const chat = yield* (yield* SessionStore).create({})
+      const before = {
+        authority_session_id: chat.sessionId,
+        budget_id: "budget",
+        execution: { mode: "inline", observe: false },
+        capabilities: ["all"],
+        auto_approve: false,
+        approval_mode: "ask",
+        google_accounts: null,
+        space: null
+      }
+      yield* sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
+          ended_at, assistant_message_id, metadata_json)
+        VALUES ('before', ${chat.sessionId}, 'completed', ${AT}, ${AT}, ${AT}, 'answer',
+          ${JSON.stringify({ run_policy: before })})`
+      const next = yield* captureRunPolicy(sql, {
+        runId: "next",
+        sessionId: chat.sessionId,
+        spaceId: main.space_id,
+        mode: "inline",
+        approvalMode: "ask",
+        previousRunId: "before"
+      }).pipe(Effect.result)
+      expect(next).toMatchObject({ _tag: "Success" })
+    })
+  )
+})
+
+it("a Space name already in use is a conflict, and triage then leaves the other Space alone", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const queries = yield* SessionQueries
+      const spaces = yield* SpaceStore
+      const sql = yield* SqlClient.SqlClient
+      const chat = yield* sessions.create({ name: "Notes" })
+      yield* appendMessagesInTransaction(
+        sql,
+        chat.sessionId,
+        [
+          { message_id: "ask", role: ROLE.user, content: "Hi", created_at: AT },
+          { message_id: "answer", role: ROLE.assistant, content: "Hello", created_at: AT }
+        ],
+        AT,
+        "post",
+        "ask"
+      )
+      const dependencies = {
+        completion: {
+          runTool: <S extends Schema.ConstraintDecoder<unknown>>(request: {
+            readonly result: { readonly schema: S }
+          }) =>
+            Schema.decodeUnknownEffect(request.result.schema)({
+              decision: "create",
+              target: null,
+              new_title: "Projects",
+              confident: true,
+              rationale: "Work"
+            }).pipe(Effect.orDie)
+        },
+        sessions: queries,
+        spaces,
+        wiki: { ensureSpacePage: () => Effect.die("no Memory in this test") },
+        store: sessions
+      }
+      expect(yield* makeSessionTriage(dependencies)(chat.sessionId)).toMatchObject({
+        decision: "create"
+      })
+      const projects = yield* spaces.create({ name: "Projects" })
+      expect(yield* spaces.create({ name: "projects" }).pipe(Effect.flip)).toMatchObject({
+        reason: "conflict"
+      })
+      const accepted = yield* makeSessionTriageAction(dependencies)(chat.sessionId, "accept").pipe(
+        Effect.flip
+      )
+      expect(accepted).toMatchObject({ reason: "stale" })
+      expect((yield* spaces.get(projects.space_id))?.archived_at).toBeNull()
+      expect(yield* spaceOf(chat.sessionId)).toBe((yield* mainSpace).space_id)
+    })
+  )
+})
+
+it("Space context reads summaries only for the chats it lists", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const spaces = yield* SpaceStore
+      const main = yield* mainSpace
+      for (let index = 0; index < 55; index += 1) yield* sessions.create({ name: `Chat ${index}` })
+      const asked: Array<number> = []
+      yield* spaceConversationContextSnapshot({
+        spaceId: main.space_id,
+        sessionId: "none",
+        spaces,
+        summaries: {
+          chats: (ids) => {
+            asked.push(ids.length)
+            return Effect.succeed(new Map())
+          }
+        },
+        memory: undefined,
+        work: yield* WorkStore
+      })
+      expect(asked).toEqual([50])
+    })
+  )
+})
+
+it("the capture list leaves Main out and says whether this chat is in Main", () => {
+  const spaces = [
+    { space_id: "main", kind: "main" as const, name: "Main space", instructions: null },
+    { space_id: "taxes", kind: "ordinary" as const, name: "Main", instructions: "Tax papers" }
+  ]
+  const inMain = renderCaptureSpaces({ spaces, chatInMain: true })
+  expect(inMain).toContain("This chat is in the Main Space.")
+  expect(inMain).toContain("- Main (space_id taxes): Tax papers")
+  expect(inMain).not.toContain("space_id main")
+  expect(renderCaptureSpaces({ spaces, chatInMain: false })).toContain(
+    "This chat is already on a Space."
   )
 })

@@ -200,6 +200,28 @@ it("a post whose earlier message was cleared away is delivered without the quote
       const delivered = yield* message(second.sessionId, second.messageId)
       expect(delivered).toMatchObject({ role: ROLE.assistant, content: "Post 2" })
       expect(delivered?.replyTo).toBeUndefined()
+      const travel = yield* (yield* SpaceStore).create({ name: "Travel" })
+      yield* thread("mail-3", "t1")
+      const third = yield* post(3, { itemIds: ["mail-3"], spaceId: travel.space_id })
+      expect(third.sessionId).toBe(second.sessionId)
+      yield* drain
+      expect((yield* message(third.sessionId, third.messageId))?.replyTo).toMatchObject({
+        messageId: second.messageId
+      })
+    })
+  )
+})
+
+it("a post still brings its notice when its Automation was removed while it waited", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, post, drain } = yield* setup
+      const posted = yield* post(1)
+      yield* sql`DELETE FROM scheduled_tasks WHERE task_id = ${automationId}`
+      expect(yield* drain).toBe(1)
+      expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toMatchObject([
+        { key: posted.messageId, status: "posted" }
+      ])
     })
   )
 })
