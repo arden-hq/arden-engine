@@ -49,6 +49,7 @@ export const noticeTier = (record: NoticeRecord): NoticeTier | undefined => {
     case "blocked":
     case "failed":
     case "paused":
+    case "posted":
       return "needs_you"
     case "cancelled":
     case "silent":

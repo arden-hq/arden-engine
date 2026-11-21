@@ -260,6 +260,7 @@ export const tableTells = {
   connection_threads: { silent: pipeline },
   connection_cursors: { silent: pipeline },
   connection_item_threads: { silent: pipeline },
+  event_threads: { silent: pipeline },
   task_proposals: { tell: "proposal", id: "{row}.proposal_id", scope: "{row}.space_id" },
   space_task_mutation_links: { silent: history },
   task_proposal_mutation_links: { silent: history },

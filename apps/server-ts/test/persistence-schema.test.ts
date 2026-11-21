@@ -393,7 +393,7 @@ describe("persistence schema", () => {
           autoVacuum: database.prepare("PRAGMA auto_vacuum").get(),
           rows: database
             .prepare(
-              "SELECT space_id AS id, name FROM spaces UNION ALL SELECT session_id, name FROM sessions"
+              "SELECT space_id AS id, name FROM spaces WHERE kind = 'ordinary' UNION ALL SELECT session_id, name FROM sessions"
             )
             .all()
         }

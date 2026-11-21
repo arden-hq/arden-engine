@@ -17,7 +17,6 @@ import { DateTime, Effect, Schema } from "effect"
 import {
   SpaceStore,
   SpaceStoreError,
-  KEEP_ONE_SPACE,
   type FreeSpacePage,
   type PersistedSpace,
   type SpaceBindingRow
@@ -84,7 +83,7 @@ export const makeSpaceStore = ({
         Effect.gen(function* () {
           const existing = yield* sql<SpaceRow>`
         SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-               inference_policy, mark, created_at, updated_at, archived_at
+               inference_policy, mark, kind, created_at, updated_at, archived_at
         FROM spaces
         WHERE name_key = ${nameKey} AND archived_at IS NULL
         LIMIT 1
@@ -111,7 +110,7 @@ export const makeSpaceStore = ({
           NULL, NULL, ${JSON.stringify(DEFAULT_TASK_INFERENCE_POLICY)}, ${timestamp}, ${timestamp}, NULL
         )
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, created_at, updated_at, archived_at
+                  inference_policy, mark, kind, created_at, updated_at, archived_at
       `.pipe(
             Effect.mapError((cause) =>
               storeError("create", "storage", "Could not create Space", spaceId, cause)
@@ -144,7 +143,7 @@ export const makeSpaceStore = ({
     )
     const rows = yield* sql<SpaceRow>`
       SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-             inference_policy, mark, created_at, updated_at, archived_at
+             inference_policy, mark, kind, created_at, updated_at, archived_at
       FROM spaces
       WHERE space_id = ${validSpaceId}
         AND (${includeArchived ? 1 : 0} = 1 OR archived_at IS NULL)
@@ -193,7 +192,7 @@ export const makeSpaceStore = ({
             )
           const rows = yield* sql<SpaceRow & { readonly policy_generation: number }>`
         SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-               inference_policy, mark, created_at, updated_at, archived_at,
+               inference_policy, mark, kind, created_at, updated_at, archived_at,
                policy_generation
         FROM spaces
         WHERE space_id = ${validSpaceId} AND archived_at IS NULL
@@ -259,7 +258,7 @@ export const makeSpaceStore = ({
             updated_at = ${updatedAt}
         WHERE space_id = ${validSpaceId} AND archived_at IS NULL
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, created_at, updated_at, archived_at
+                  inference_policy, mark, kind, created_at, updated_at, archived_at
       `
           const next = updated[0]
           if (next === undefined) return null
@@ -319,7 +318,7 @@ export const makeSpaceStore = ({
           AND (instructions_source IS NULL OR instructions_source = 'generated')
           AND instructions IS NOT ${valid}
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, created_at, updated_at, archived_at
+                  inference_policy, mark, kind, created_at, updated_at, archived_at
       `
             const next = updated[0]
             if (next === undefined) return yield* get(validSpaceId)
@@ -444,7 +443,7 @@ export const makeSpaceStore = ({
         SET page_id = ${pageId}, page_path = ${pagePath}, updated_at = ${now}
         WHERE space_id = ${spaceId} AND archived_at IS NULL
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, created_at, updated_at, archived_at
+                  inference_policy, mark, kind, created_at, updated_at, archived_at
       `
           yield* spaceJobs.syncSpace(spaceId, now)
           return rows[0] === undefined ? null : yield* decodeRow(rows[0], "page")
@@ -477,8 +476,8 @@ export const makeSpaceStore = ({
             id: validSpaceId,
             identity: mutation
           })
-          const active = yield* sql<{ readonly space_id: string }>`
-        SELECT space_id FROM spaces
+          const active = yield* sql<{ readonly kind: string }>`
+        SELECT kind FROM spaces
         WHERE space_id = ${validSpaceId} AND archived_at IS NULL
         LIMIT 1
       `.pipe(
@@ -487,14 +486,13 @@ export const makeSpaceStore = ({
             )
           )
           if (active[0] === undefined) return null
-          const others = yield* sql`SELECT 1 FROM spaces
-            WHERE space_id <> ${validSpaceId} AND archived_at IS NULL LIMIT 1`.pipe(
-            Effect.mapError((cause) =>
-              storeError("archive", "storage", "Could not read Spaces", validSpaceId, cause)
+          if (active[0].kind === "main") {
+            return yield* storeError(
+              "archive",
+              "conflict",
+              "The Main Space cannot be archived.",
+              validSpaceId
             )
-          )
-          if (others.length === 0) {
-            return yield* storeError("archive", "conflict", KEEP_ONE_SPACE, validSpaceId)
           }
           const busy = yield* sql`SELECT 1 FROM sessions AS s
             WHERE s.space_id = ${validSpaceId} AND s.archived_at IS NULL
@@ -567,7 +565,7 @@ export const makeSpaceStore = ({
         Effect.gen(function* () {
           const archived = yield* sql<SpaceRow>`
         SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-               inference_policy, mark, created_at, updated_at, archived_at
+               inference_policy, mark, kind, created_at, updated_at, archived_at
         FROM spaces
         WHERE space_id = ${validSpaceId} AND archived_at IS NOT NULL
         LIMIT 1
@@ -596,7 +594,7 @@ export const makeSpaceStore = ({
           page_path = ${page?.pagePath ?? null}, updated_at = ${now}
         WHERE space_id = ${validSpaceId} AND archived_at IS NOT NULL
         RETURNING space_id, name, instructions, instructions_source, page_path, page_id,
-                  inference_policy, mark, created_at, updated_at, archived_at
+                  inference_policy, mark, kind, created_at, updated_at, archived_at
       `
           const next = restored[0]
           if (next === undefined) return null

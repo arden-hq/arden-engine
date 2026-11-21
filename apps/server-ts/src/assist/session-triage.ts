@@ -10,7 +10,7 @@ import {
   type StructuredCompletion,
   StructuredCompletionError
 } from "../models/structured-completion.js"
-import { isKeepOneSpace, type SpaceStore } from "../persistence/spaces/store.js"
+import type { SpaceStore } from "../persistence/spaces/store.js"
 import type { ActiveSessionSnapshot, SessionHeaderSnapshot } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { type SessionStore, SessionStoreError } from "../persistence/sessions/store.js"
@@ -167,7 +167,7 @@ export const makeSessionTriageAction = (dependencies: SessionTriageDependencies)
   })
 
 const retireCreatedSpace = (dependencies: SessionTriageDependencies, spaceId: string) =>
-  dependencies.spaces.archive(spaceId).pipe(Effect.catchIf(isKeepOneSpace, () => Effect.void))
+  dependencies.spaces.archive(spaceId)
 
 const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
   dependencies: SessionTriageDependencies,

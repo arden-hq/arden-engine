@@ -1,4 +1,9 @@
 import type { OperationalSchemaSection } from "../section.js"
+import {
+  MAIN_SPACE_INDEX,
+  MAIN_SPACE_INSERT,
+  SPACE_KIND_COLUMN
+} from "../../migrations/0183_main_space.js"
 
 export const contextWorkSchemaSection = {
   name: "context.work",
@@ -8,7 +13,8 @@ export const contextWorkSchemaSection = {
     "idx_spaces_archived_updated",
     "idx_spaces_active_name_key",
     "idx_spaces_page_path",
-    "idx_spaces_page_id"
+    "idx_spaces_page_id",
+    "idx_spaces_main"
   ],
   triggers: [],
   statements: [
@@ -31,6 +37,9 @@ export const contextWorkSchemaSection = {
     "CREATE INDEX idx_spaces_archived_updated ON spaces(archived_at, updated_at DESC)",
     "CREATE UNIQUE INDEX idx_spaces_active_name_key ON spaces(name_key) WHERE archived_at IS NULL",
     "CREATE UNIQUE INDEX idx_spaces_page_path ON spaces(page_path) WHERE page_path IS NOT NULL",
-    "CREATE UNIQUE INDEX idx_spaces_page_id ON spaces(page_id) WHERE page_id IS NOT NULL"
+    "CREATE UNIQUE INDEX idx_spaces_page_id ON spaces(page_id) WHERE page_id IS NOT NULL",
+    SPACE_KIND_COLUMN,
+    MAIN_SPACE_INDEX,
+    MAIN_SPACE_INSERT
   ]
 } as const satisfies OperationalSchemaSection

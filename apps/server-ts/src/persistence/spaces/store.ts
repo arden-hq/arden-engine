@@ -39,13 +39,6 @@ export const spaceChoices = (
     ? "There is no active Space."
     : `Pass space_id, one of: ${spaces.map((space) => `${space.name} (${space.space_id})`).join(", ")}.`
 
-export const KEEP_ONE_SPACE = "Keep at least one Space"
-
-export const isKeepOneSpace = (error: {
-  readonly reason: string
-  readonly message: string
-}): boolean => error.reason === "conflict" && error.message === KEEP_ONE_SPACE
-
 export class SpaceStoreError extends Schema.TaggedError<SpaceStoreError>()("SpaceStoreError", {
   ...storeErrorFields({
     operations: [

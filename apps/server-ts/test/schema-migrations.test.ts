@@ -534,7 +534,7 @@ describe("schema migrations", () => {
       runMigrations(database, { kind: "pending", from: 112, bridge: undefined })
       return database
         .prepare(
-          "SELECT session_id, archived_at FROM sessions WHERE space_id IS NOT NULL ORDER BY session_id"
+          "SELECT session_id, archived_at FROM sessions WHERE space_id IN ('old', 'open') ORDER BY session_id"
         )
         .all()
     })
