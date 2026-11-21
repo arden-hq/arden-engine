@@ -13,6 +13,8 @@ export const makeGoogleAccountListTool = (services: {
 }): ServerTool =>
   defineServerTool({
     name: "google_accounts_list",
+    summary: "Lists the Google accounts you connected.",
+    discovery: { group: "email" },
     description:
       "List connected Google account ids and emails, with each service's status: ready, or needs_auth (reconnect in Settings before using that service). A run limited to certain accounts sees only those. Listing does not grant access or contact Google.",
     parameters: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Never)),

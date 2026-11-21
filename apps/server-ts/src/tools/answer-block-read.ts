@@ -68,6 +68,8 @@ const makeAnswerBlockReadTool = (services: {
 }): ServerTool =>
   defineServerTool({
     name: "answer_block_read",
+    summary: "Reads an earlier interactive block in this chat and what you set on it.",
+    discovery: { group: "output" },
     description:
       "Read the full source of an earlier interactive block in this chat, and the values the person set on it, to change or reuse it. Older blocks appear in your history as one compact line naming their message_id and block number.",
     parameters: Schema.toStandardSchemaV1(ParametersSchema),

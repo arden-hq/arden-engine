@@ -153,6 +153,8 @@ const offerCandidates = (
 const makeCapabilityProposeTool = (services: CapabilityToolServices): ServerTool =>
   defineServerTool({
     name: "capability_propose",
+    summary: "Suggests a new ability Arden could add.",
+    discovery: { group: "arden_settings" },
     description: [
       "Offer the user a connection that would unblock what they asked for, shown as a card in chat.",
       "Call this only when you cannot proceed without one — never to list options.",

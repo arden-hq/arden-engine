@@ -13,6 +13,8 @@ const makeAutomationFollowupTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "automation_followup",
+    summary: "Stops a running automation or sets its next check.",
+    discovery: { group: "run_outcome" },
     description:
       "Control only this running Automation's future checks. Use stop when the authorized outcome is confirmed or checking is no longer needed: its job is done, and it is removed with its chat archived. Use check_again with a future ISO timestamp for the next check, including from a one-time run. Only this Automation's own run holds it. Applied when this run, and any agents it started, finish successfully; a later user pause or settings change wins. Does not change instructions, permissions, or other Automations. Do not use automation_update from a scheduled worker.",
     parameters: Schema.toStandardSchemaV1(

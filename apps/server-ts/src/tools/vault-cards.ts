@@ -222,6 +222,9 @@ const makeVaultPayTool = (
   }
   return defineServerTool({
     name: "vault_pay",
+    summary:
+      "Asks you to pay at a shop with a saved card, with Touch ID; the agent never sees the card.",
+    discovery: { group: "vault" },
     description: [
       "Ask the user to pay at a shop's checkout with one of their saved cards (vault_list lists them by id, brand, last 4 digits and expiry).",
       "The user approves on a card in the chat with Touch ID; a payment always needs them, so with nobody there the card waits.",
@@ -295,6 +298,8 @@ const makeAllowFrameTool = (
 ): ServerTool =>
   defineServerTool({
     name: "vault_allow_payment_frame",
+    summary: "Asks whether a payment form from an unknown company may get your card.",
+    discovery: { group: "vault" },
     description: [
       "Ask the user whether a saved card may be typed into a payment frame from an address Arden does not know, after vault_checkout refused for that reason and named the frame.",
       "Only during a payment the user approved with vault_pay. The user allows it once or denies; then call vault_checkout again."
@@ -369,6 +374,8 @@ export const CheckoutParametersSchema = Schema.Struct({
 const makeCheckoutTool = (browser: BrowserClient["Service"]): ServerTool =>
   defineServerTool({
     name: "vault_checkout",
+    summary: "Types your saved card into the checkout and clicks Pay; the agent never sees it.",
+    discovery: { group: "vault" },
     description: [
       "Type a saved card into the checkout and click the shop's Pay button, in one call, after the user approved vault_pay for this card and this tab.",
       "Take one browser_snapshot after every other field is filled; give the refs of the card fields and of the Pay button from it. Arden checks every card field before typing any, then types them and clicks Pay; you never see the number or the security code.",

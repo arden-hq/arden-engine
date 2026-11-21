@@ -251,6 +251,8 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
   return [
     defineServerTool({
       name: "automation_create",
+      summary: "Sets up a new automation.",
+      discovery: { group: "automations" },
       description: [
         "Create one Automation with time, event, idle, or chat-turn count triggers; several event triggers are allowed.",
         "Chain Automations only when the user asks: the later one gets an automation.run_ended trigger. A chain is one step deep (a run it started never starts another), and an Automation never wakes itself.",
@@ -341,6 +343,8 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     }),
     defineServerTool({
       name: "automation_list",
+      summary: "Looks at your automations.",
+      discovery: { group: "automations" },
       description:
         "List every user and built-in system Automation by stable ref, with no limit. Each entry has its full instructions, schedule, chat, history, effective model, action mode and current status. A system Automation also shows the settings it accepts and those changed from their default.",
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -390,6 +394,8 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     }),
     defineServerTool({
       name: "automation_list_runs",
+      summary: "Looks at an automation’s past runs.",
+      discovery: { group: "automations" },
       description:
         "List recent runs for one Automation by exact automation_ref. A run skipped by its run_only_if sentence appears with its event; that is expected, not a failure.",
       parameters: Schema.toStandardSchemaV1(RunsParametersSchema),
@@ -428,6 +434,8 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     }),
     defineServerTool({
       name: "automation_update",
+      summary: "Changes an automation’s instructions or schedule.",
+      discovery: { group: "automations" },
       description: [
         "Update one Automation by exact automation_ref.",
         "Use chat=current, chat=own or chat_ref to move future runs to another chat; history chooses whether each run starts fresh or reads that chat. Runs act with the action mode of their chat, or of their own chat when they start fresh in one of the user's. Four changes each go in a call of their own: action_mode, the plan limits (pause_at_percent and max_tokens_per_run together), reset_to_default, and a model change when the runs read one of the user's chats. Other changes edit instructions, model, triggers or schedule. Sending triggers replaces the list: send each trigger to keep with its id (t1, t2) from the Automation's text; a field you leave out keeps its stored value, such as an old field condition, and null clears it.",
@@ -652,6 +660,8 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     }),
     defineServerTool({
       name: "automation_delete",
+      summary: "Removes an automation.",
+      discovery: { group: "automations" },
       description:
         "End one Automation by exact automation_ref when its job is finished or the user no longer wants it: it is removed and its own chat, with its reports, is archived. To stop it only for now, pause it with automation_update enabled=false instead. Built-in system Automations cannot be deleted; pause them. Asks by default.",
       parameters: Schema.toStandardSchemaV1(RefParametersSchema),
@@ -703,6 +713,8 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
     }),
     defineServerTool({
       name: "automation_run",
+      summary: "Starts an automation right now.",
+      discovery: { group: "automations" },
       description:
         "Queue one run of an Automation now. An enabled Automation starts as soon as a worker is free. A paused one is queued but waits until it is resumed; this does not resume it or its schedule. Refused while it is already running. Returns before the run ends; check automation_list_runs for the outcome. A system Automation that needs its trigger's input (Chat summaries) has no manual run. Uses the user's approval settings.",
       parameters: Schema.toStandardSchemaV1(RefParametersSchema),

@@ -77,6 +77,8 @@ const makeBrowserUploadTool = (services: UploadServices): ServerTool => {
   const files = createSharedFileAccess(services)
   return defineServerTool({
     name: "browser_upload",
+    summary: "Uploads a file to a browser page.",
+    discovery: { group: "web_browser" },
     description: [
       "Put one or more files into a file field on a page, authorized by the latest interactive snapshot of the same tab (like browser_act).",
       "Files can be images the user attached in this chat, files Arden made (artifact_ref or managed-output reference), or files on this Mac by path.",

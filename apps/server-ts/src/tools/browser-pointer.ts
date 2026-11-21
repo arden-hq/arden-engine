@@ -70,6 +70,8 @@ export const browserPointerTools: Effect.Effect<
   return [
     defineServerTool({
       name: "browser_pointer",
+      summary: "Clicks or drags a visual control on a browser page.",
+      discovery: { group: "web_browser" },
       description:
         "Click or drag visual controls that have no usable snapshot ref. First inspect browser_screenshot and copy its screenshot_ref, tab_ref, profile_ref and origin. Coordinates are fractions of the whole image: x from left, y from top, each >=0 and <1. One screenshot permits one action; capture again after navigation, scrolling, resizing, zoom, takeover or another action. Prefer browser_act for accessible controls. Inspect the result; never blindly repeat an uncertain action.",
       parameters: Schema.toStandardSchemaV1(Parameters),

@@ -254,8 +254,11 @@ export const makeBuiltInChatRunners = Effect.fn("Chat.builtInRunners")(function*
                   authorityScopes(yield* boundAuthority(services.runs, { runId, sessionId }))
                 )
               if (origin.source === "personal" && origin.special !== undefined)
-                return SPECIAL_CHAT_PRELOAD[origin.special.kind]
-              const base = typeof origin.header?.spaceId === "string" ? SPACE_CHAT_PRELOAD : []
+                return registry.preloadTools(SPECIAL_CHAT_PRELOAD[origin.special.kind])
+              const base =
+                typeof origin.header?.spaceId === "string"
+                  ? registry.preloadTools(SPACE_CHAT_PRELOAD)
+                  : []
               if (origin.source !== "scheduled_task") return base
               const carried = yield* automationQueue
                 .runEvents({ sessionId, chatRunId: runId })

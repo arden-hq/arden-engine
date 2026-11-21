@@ -25,6 +25,8 @@ const makeTellTool = ({
 }): ServerTool =>
   defineServerTool({
     name: "tell",
+    summary: "Tells you about progress while it keeps working.",
+    discovery: { group: "run_outcome" },
     description: [
       "Say something now to the person, or to the agent that started you, while you keep working: a milestone reached or a finding they should hear before you finish.",
       "It goes to the same place your final reply goes.",

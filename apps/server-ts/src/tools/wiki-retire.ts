@@ -35,6 +35,8 @@ export const makeWikiRetireTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_archive_page",
+    summary: "Archives a memory page.",
+    discovery: { group: "wiki_admin" },
     description:
       "Recoverably archive one active Wiki page that no other page replaces. Read it first; revision history is retained. When another page now holds its content, use wiki_merge_page instead, so links keep working. Asks by default.",
     parameters: Schema.toStandardSchemaV1(ArchiveParametersSchema),
@@ -81,6 +83,8 @@ export const makeWikiRetireTools = ({
   }),
   defineServerTool({
     name: "wiki_merge_page",
+    summary: "Merges a memory page into another.",
+    discovery: { group: "wiki_admin" },
     description:
       "Retire one active Wiki page whose content another page now holds. Read both pages first and move anything unique into the other page before merging. The retired path redirects to the other page, so links keep working, and wiki_restore_page can bring the page back. Asks by default, except in Memory runs.",
     parameters: Schema.toStandardSchemaV1(MergeParametersSchema),

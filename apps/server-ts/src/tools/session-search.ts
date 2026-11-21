@@ -156,6 +156,8 @@ const makeSessionSearchTool = ({
 }): ServerTool =>
   defineServerTool({
     name: "session_search_transcripts",
+    summary: "Searches your past chats.",
+    discovery: "always_loaded",
     description: [
       "Full-text search across unarchived chat transcripts, one result per chat: its best-matching message and how many of its messages match, chats ranked by relevance. With session_ref it lists that chat's matching messages instead, archived or not.",
       "Old and manually created chats are included.",

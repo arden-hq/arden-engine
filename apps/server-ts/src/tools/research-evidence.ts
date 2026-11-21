@@ -236,6 +236,7 @@ const renderReview = (page: ResearchReviewPage): string => {
 const makeResearchEvidenceTools = (services: ResearchToolServices): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "claim_record",
+    discovery: { group: "research" },
     description: [
       "Record one atomic, qualified claim before gathering evidence.",
       "Then read sources, call evidence_record for exact spans, counter-search, call claim_check, and finish with claim_review."
@@ -296,6 +297,7 @@ const makeResearchEvidenceTools = (services: ResearchToolServices): ReadonlyArra
   }),
   defineServerTool({
     name: "evidence_record",
+    discovery: { group: "research" },
     description: [
       "Bind an exact canonical-text span of an already captured source snapshot to a recorded claim.",
       "Every successful read tool result in a research run ends with its snapshot_ref; this tool does not fetch anything.",
@@ -359,6 +361,7 @@ const makeResearchEvidenceTools = (services: ResearchToolServices): ReadonlyArra
   }),
   defineServerTool({
     name: "claim_check",
+    discovery: { group: "research" },
     description: [
       "Independently check each selected evidence span against its claim in an isolated no-tool verifier.",
       "It makes one model call per evidence span, one after another, so many spans take a while.",
@@ -482,6 +485,7 @@ const makeResearchEvidenceTools = (services: ResearchToolServices): ReadonlyArra
   }),
   defineServerTool({
     name: "claim_review",
+    discovery: { group: "research" },
     description: [
       "Read a bounded page of claims with evidence, independent checks, contradictions, and gaps.",
       "Review unresolved states before synthesis and abstain when support remains insufficient."

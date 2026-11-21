@@ -26,9 +26,14 @@ import { wordsRules } from "../execution/rules.js"
 import type { RuleSubject } from "../persistence/permissions/rules.js"
 import { COMMAND_TOOL } from "../persistence/permissions/command-policy.js"
 import { withHelperRule } from "./shell-policy.js"
-import { impactOf, shellCommandOf, siteOf, type ServerToolMetadataInput } from "./define.js"
+import {
+  impactOf,
+  shellCommandOf,
+  siteOf,
+  summaryOf,
+  type ServerToolMetadataInput
+} from "./define.js"
 import { defaultImpact } from "../execution/impact.js"
-import { TOOL_SUMMARIES } from "./tool-summaries.js"
 import { NOT_RUN_HOST } from "../persistence/tools/mutation-receipt.js"
 import { ObservationSnapshotSchema, type ServerRunContext } from "./run-context.js"
 
@@ -153,7 +158,7 @@ export const makeApprovalGate =
           ? {
               preview:
                 definition.metadata.approval_preview ??
-                TOOL_SUMMARIES[definition.name] ??
+                summaryOf(definition) ??
                 definition.description
             }
           : await definition.approvalPrompt(input, ctx))

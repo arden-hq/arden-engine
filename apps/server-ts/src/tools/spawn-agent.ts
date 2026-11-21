@@ -300,6 +300,8 @@ const makeSpawnAgentTool = (
 ): ServerTool =>
   defineServerTool({
     name: SPAWN_AGENT_TOOL,
+    summary: "Starts a separate agent to handle one part of the work.",
+    discovery: "always_loaded",
     description: [
       "Start an independent child agent for one task: research for evidence-only work, code to write and test code in a Local folder, or work for other authorized actions.",
       "Research and code parents can spawn children only in their own mode, within the configured depth limit and inherited permissions.",

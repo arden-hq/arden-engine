@@ -166,6 +166,8 @@ export const makeWikiPageHistoryTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_page_history",
+    summary: "Looks at a memory page’s past versions.",
+    discovery: { group: "wiki_upkeep" },
     description:
       "List newest-first saved changes of one Wiki page by exact path, including a page that was merged into another. Pass a listed time as `at` to wiki_read_change to see that change, or to wiki_restore_page to bring that version back.",
     parameters: Schema.toStandardSchemaV1(HistoryParametersSchema),
@@ -227,6 +229,8 @@ export const makeWikiPageHistoryTools = ({
   }),
   defineServerTool({
     name: "wiki_restore_page",
+    summary: "Brings back an earlier version of a memory page.",
+    discovery: { group: "wiki_admin" },
     description:
       "Restore one Wiki page to how it was at a time wiki_page_history lists, while preserving its current path. Read the page or list its history first. A page that was merged into another comes back as its own page; give its old path. Asks by default.",
     parameters: Schema.toStandardSchemaV1(RestoreParametersSchema),

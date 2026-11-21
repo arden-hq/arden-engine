@@ -351,6 +351,8 @@ export const gmailSendTools = ({
   return [
     defineServerTool({
       name: "email_send",
+      summary: "Sends an email.",
+      discovery: { group: "email" },
       description: [
         "Send a new plain-text or HTML email from an explicit connected Gmail account.",
         "The user cannot edit an HTML email or save it as a draft from the approval card.",
@@ -497,6 +499,8 @@ export const gmailSendTools = ({
     }),
     defineServerTool({
       name: "email_reply",
+      summary: "Replies to an email.",
+      discovery: { group: "email" },
       description: [
         "Send a plain-text reply in the source message's existing Gmail thread, with optional reply-all recipient reconstruction.",
         "Use email_send for a new conversation."

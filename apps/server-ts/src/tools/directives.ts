@@ -115,6 +115,8 @@ const makeDirectivesTools = ({
   return [
     defineServerTool({
       name: "directives_get",
+      summary: "Reads your standing instructions.",
+      discovery: { group: "arden_settings" },
       description: `Read the user's global instructions, the ${RULES_PAGE_PATH} page at the root of Memory that applies to every chat, before replacing them.`,
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
       metadata: {
@@ -141,6 +143,8 @@ const makeDirectivesTools = ({
     }),
     defineServerTool({
       name: "directives_set",
+      summary: "Changes your standing instructions.",
+      discovery: { group: "arden_settings" },
       description: [
         `Replace the user's global instructions (their ${RULES_PAGE_PATH}) with the complete Markdown you pass; empty text clears them.`,
         "Call directives_get first; the change fails if they changed since that read.",

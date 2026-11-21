@@ -70,6 +70,8 @@ export const makeCalendarLookupTools = ({
       google,
       grant: { ...LIST_CALENDARS_GRANT, target: (input) => ({ accountRef: input.account_ref }) },
       name: "calendar_list_calendars",
+      summary: "Lists your calendars.",
+      discovery: { group: "calendar" },
       description:
         "List the Google Calendars a connected account can see: id, name, your access role (owner, writer, reader, freeBusyReader), whether it is the primary calendar, and its time zone. Pass an id as calendar_id to the other Calendar tools. Arden asks the user once to allow this.",
       parameters: Schema.toStandardSchemaV1(listCalendarsParametersSchema(emails)),
@@ -137,6 +139,8 @@ export const makeCalendarLookupTools = ({
       google,
       grant: { ...FREE_BUSY_GRANT, target: (input) => ({ accountRef: input.account_ref }) },
       name: "calendar_free_busy",
+      summary: "Checks when calendars are busy.",
+      discovery: { group: "calendar" },
       description: [
         "Read when calendars are busy in a time window (not what the events are): your own calendars, or other people's by email address.",
         "Pass find_slots (duration_minutes, timezone, optional working_start/working_end) to also get the stretches inside working hours when every known calendar is free.",

@@ -483,6 +483,8 @@ const makeWikiTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_list_pages",
+    summary: "Lists memory pages.",
+    discovery: { group: "wiki_upkeep" },
     description: [
       "List wiki pages and child directories inside one exact wiki directory.",
       "Empty directory means the wiki root. Link a page as [Title](path.md) when the user should open it. The answer's Sources footer already names what was read, so do not add a 'Source:' line."
@@ -545,6 +547,8 @@ const makeWikiTools = ({
 
   defineServerTool({
     name: "wiki_read_page",
+    summary: "Reads a memory page.",
+    discovery: "always_loaded",
     description: [
       "Read the current body of one wiki page by exact path, paginated by line. A moved or merged path reads the page that replaced it. This read is what wiki_edit_page, wiki_move_page, wiki_archive_page, wiki_merge_page and wiki_restore_page require first.",
       "After the body it lists the page_ref, any observation period, producer and original source references, the Core Memory size limit when one applies, and a README's child pages.",
@@ -663,6 +667,8 @@ const makeWikiTools = ({
 
   defineServerTool({
     name: "wiki_create_page",
+    summary: "Adds a memory page.",
+    discovery: { group: "wiki_upkeep" },
     description: [
       "Create a new wiki page at an exact relative POSIX .md path inside an existing wiki directory.",
       `Read the root and target directory README, search for an existing owner, and supply useful content. Do not create empty placeholders. Fails if the path or page name already exists, unless that page already has exactly this title and body; then nothing changes. ${STANDING_LIMIT_NOTE}`
@@ -735,6 +741,8 @@ const makeWikiTools = ({
 
   defineServerTool({
     name: "wiki_edit_page",
+    summary: "Changes a memory page.",
+    discovery: { group: "wiki_upkeep" },
     description: [
       "Replace the Markdown body, aliases and/or observation_period of one existing wiki page, or of up to 12 pages saved together as edits.",
       "The page title, identity, producer attribution, source references and other metadata stay unchanged. Read each page first to base the edit on its",

@@ -14,6 +14,8 @@ export const browserProcedureTools = Effect.gen(function* () {
   return [
     defineServerTool({
       name: "browser_procedure",
+      summary: "Runs saved browser steps and confirms their result.",
+      discovery: { group: "web_browser_tasks" },
       description:
         "Run saved browser steps that browser_open or browser_snapshot listed for this tab. Supply this task's input values, never copied example values. It uses the same browser tools, approvals and current page; its independent read-back must confirm the result. If the steps do not fit or stop, it says so and you continue from the current page with browser_task or ordinary browser tools.",
       parameters: Schema.toStandardSchemaV1(

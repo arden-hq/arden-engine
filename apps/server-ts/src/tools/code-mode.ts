@@ -104,6 +104,8 @@ type Settled =
 const makeCodeModeTool = (services: CodeModeServices): ServerTool =>
   defineServerTool({
     name: CODE_MODE_TOOL,
+    summary: "Runs several steps at once as a short script.",
+    discovery: "always_loaded",
     description: [
       "Run deterministic JavaScript that composes tools and agents. Use a script for three or more calls with logic between them, a fan-out over many items, or cutting a large output down to what matters. For one call whose output you need as is, call the tool directly.",
       "tools.call(name, args) resolves to { content, preview, data }. Use the bare tool name, such as tools.call('wiki_read_page', { ... }), never a prefix like functions. or space. content is text for the model and may carry line numbers or footers; never JSON.parse it. data is the structured result; for a text or JSON body, data.text is the raw body (web_fetch, file_read, wiki_read_page, browser_snapshot) and data.json is the parsed value when it is JSON; browser_act's data.page is the page after the action, with its snapshot_ref; session_read gives data.messages. describe(name) returns a tool's input schema.",

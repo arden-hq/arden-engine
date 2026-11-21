@@ -201,6 +201,8 @@ const makeWikiOperationTools = ({
 }: WikiOperationDeps): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_search",
+    summary: "Searches memory.",
+    discovery: "always_loaded",
     description:
       "Search Memory pages. Write what you are looking for in a few words; pages are found by their words and by their meaning, best match first, and the query does not have to appear as an exact phrase. Each result says how long ago the page last changed. Read a result before changing it.",
     parameters: Schema.toStandardSchemaV1(SearchParametersSchema),
@@ -263,6 +265,8 @@ const makeWikiOperationTools = ({
   }),
   defineServerTool({
     name: "wiki_list_changes",
+    summary: "Looks at recent changes to memory.",
+    discovery: { group: "wiki_upkeep" },
     description:
       "List bounded newest-first Memory changes since an inclusive timestamp, with each one's time, changed paths and provenance. Open one with wiki_read_change, a changed page and that time.",
     parameters: Schema.toStandardSchemaV1(ListChangesParametersSchema),
@@ -330,6 +334,8 @@ const makeWikiOperationTools = ({
   ...makeWikiPageHistoryTools({ wiki, runs, sessions }),
   defineServerTool({
     name: "wiki_links",
+    summary: "Lists one memory page's links and backlinks.",
+    discovery: { group: "wiki_upkeep" },
     description:
       "List one Wiki page's outgoing links, with each target's path or unresolved status, and the pages that link to it. A merged path reads the page that replaced it.",
     parameters: Schema.toStandardSchemaV1(LinksParametersSchema),
@@ -384,6 +390,8 @@ const makeWikiOperationTools = ({
   }),
   defineServerTool({
     name: "wiki_create_directory",
+    summary: "Adds a folder to memory.",
+    discovery: { group: "wiki_admin" },
     description: [
       "Create one managed Wiki directory with a complete README contract.",
       "The parent must already exist for nested paths. If <path>.md owns the name and is safe to move,",
@@ -446,6 +454,8 @@ const makeWikiOperationTools = ({
   }),
   defineServerTool({
     name: "wiki_patch_page",
+    summary: "Changes part of a memory page.",
+    discovery: { group: "wiki_upkeep" },
     description:
       "Replace one exact text block in an active Wiki page body. The old text must match exactly once; no prior read is needed. " +
       `Aim for ${WIKI_PAGE_BUDGET_CHARS} characters. Condense repetition before splitting; ` +
@@ -532,6 +542,8 @@ const makeWikiOperationTools = ({
   ...makeWikiRetireTools({ wiki, runs }),
   defineServerTool({
     name: "wiki_move_page",
+    summary: "Moves or renames a memory page.",
+    discovery: { group: "wiki_admin" },
     description:
       "Move one active Wiki page and rewrite exact links to it while preserving identity and content. Read it first. Asks by default.",
     parameters: Schema.toStandardSchemaV1(MoveParametersSchema),

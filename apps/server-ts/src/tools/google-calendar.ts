@@ -76,6 +76,8 @@ export const makeCalendarTools = ({
   return [
     defineServerTool({
       name: "calendar_read_event",
+      summary: "Reads one calendar event.",
+      discovery: { group: "calendar" },
       description:
         "Open one event of a connected account's Google Calendar (the primary one unless calendar_id names another) by its event id: time, place, organizer, attendees with responses, description, and attachments with the attachment_ref values calendar_edit_event needs to remove one. Use it for a calendar Automation event, or for an event from calendar_search by passing the event_ref's account, calendar and id; use calendar_search to find events by text or time.",
       parameters: Schema.toStandardSchemaV1(ReadParametersSchema),
@@ -121,6 +123,8 @@ export const makeCalendarTools = ({
     }),
     defineServerTool({
       name: "calendar_search",
+      summary: "Searches your calendar.",
+      discovery: { group: "calendar" },
       description: [
         "Search or list expanded events from a connected account's Google Calendar (the primary one unless calendar_id names another), ordered by start time.",
         "Returns event_ref values for calendar_edit_event, calendar_delete_event and calendar_respond.",
@@ -241,6 +245,8 @@ export const makeCalendarTools = ({
         })
       }),
       name: "calendar_create_event",
+      summary: "Adds an event to your calendar.",
+      discovery: { group: "calendar" },
       description: [
         "Create an event in a connected account's Google Calendar (the primary one unless calendar_id names a calendar you may write to); attendees receive invitations.",
         "Timed by default; all_day makes it an all-day event on dates. recurrence makes it repeat, add_meet adds a Google Meet link, reminders sets popup reminders, attachments attaches Drive files.",
@@ -368,6 +374,8 @@ export const makeCalendarTools = ({
         }
       }),
       name: "calendar_edit_event",
+      summary: "Changes a calendar event.",
+      discovery: { group: "calendar" },
       description: [
         "Partially edit the event identified by calendar_search (on whichever calendar its event_ref names); time changes require both start and end (all_day: dates, end optional), and providing attendees replaces the list.",
         "Guests other than the user are emailed about any edit.",
@@ -514,6 +522,8 @@ export const makeCalendarTools = ({
         }
       }),
       name: "calendar_delete_event",
+      summary: "Removes a calendar event.",
+      discovery: { group: "calendar" },
       description: [
         "Delete the event identified by calendar_search (on whichever calendar its event_ref names) and send cancellation updates to guests other than the user.",
         'On a recurring event scope "this" (default) deletes one occurrence and "series" the whole series.',
@@ -578,6 +588,8 @@ export const makeCalendarTools = ({
         }
       }),
       name: "calendar_respond",
+      summary: "Answers a calendar invitation.",
+      discovery: { group: "calendar" },
       description: [
         "Answer an invitation: accepted, declined or tentative, with an optional note to the organizer.",
         "Changes only your own response; the organizer is told. Refused if you were not invited or you are the organizer.",

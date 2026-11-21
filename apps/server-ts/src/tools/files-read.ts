@@ -273,6 +273,8 @@ export const fileReadTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "file_read",
+    summary: "Reads a file on your Mac or one Arden made.",
+    discovery: "always_loaded",
     description: [
       "Read a known UTF-8 file with compact 1-based line numbers (number|text) by default; set line_numbers=false for plain text. Partial reads include the next 1-based offset when more content remains. To find something in a large file, set grep (a regular expression) instead of reading it all: it searches the whole file (offset, limit and line_numbers are ignored) and returns only the matching lines with grep_context lines around them.",
       "A PDF reads as its text, with a [Page N of M] line before each page, paged by the same offset and limit. A PNG, JPEG, GIF, WebP or HEIC image is shown to you as an image when this model takes images. Other binary files (Word, Excel, ZIP and the like) are refused; convert them with exec_command.",
@@ -410,6 +412,8 @@ export const fileReadTools = ({
 
   defineServerTool({
     name: "file_list",
+    summary: "Lists what is in a folder.",
+    discovery: "always_loaded",
     description: [
       "List one directory's immediate children with type, size, and modification time. A symbolic link shows kind other and its target's size. Folders the owner's rules hide are left out of the list and the total.",
       "Continue with next_cursor and the same path/include_hidden values; use file_find for recursive discovery."
@@ -493,6 +497,8 @@ export const fileReadTools = ({
 
   defineServerTool({
     name: "file_find",
+    summary: "Finds files by name.",
+    discovery: "always_loaded",
     description: [
       "Find file paths recursively by glob. Files listed in .gitignore and other ignore files are skipped, as are .git, node_modules, .venv, __pycache__ and folders the owner's rules hide.",
       "Results are capped without a cursor, so narrow path/pattern when has_more is true. A search stops with an error after 20 seconds. Use file_search_text to inspect contents."
@@ -565,6 +571,8 @@ export const fileReadTools = ({
 
   defineServerTool({
     name: "file_search_text",
+    summary: "Searches inside files for text.",
+    discovery: "always_loaded",
     description: [
       "Search local UTF-8 files for literal text, including hidden files by default, in content, files-only, or count mode.",
       "Files listed in .gitignore and other ignore files are not searched, nor are .git, node_modules, .venv, __pycache__ and folders the owner's rules hide. A search stops with an error after 20 seconds.",

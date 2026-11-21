@@ -32,6 +32,8 @@ const makeAutomationRunEventsTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "automation_run_events",
+    summary: "Lists the events an automation run woke for.",
+    discovery: { group: "run_events" },
     description:
       "List every event this Automation run woke for, newest first and paged, optionally of one type, each with the call that opens it. Use it when the run's event list says more events are not shown; in an Automation's chat after its run, it lists that chat's latest run.",
     parameters: Schema.toStandardSchemaV1(RunEventsParametersSchema),

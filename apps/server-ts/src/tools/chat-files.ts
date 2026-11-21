@@ -28,6 +28,8 @@ const makeChatFilesListTool = (services: SharedFileServices): ServerTool => {
   const files = createSharedFileAccess(services)
   return defineServerTool({
     name: "chat_files_list",
+    summary: "Lists this chat's reusable files and screenshots.",
+    discovery: { group: "output" },
     description: [
       "List this chat's attached screenshots, attached file paths, and reusable generated or downloaded files.",
       "Returns metadata and stable artifact_ref values that email, Drive, and browser upload tools accept.",

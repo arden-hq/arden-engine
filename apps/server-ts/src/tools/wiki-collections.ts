@@ -12,6 +12,8 @@ const NO_MEMORY = "empty"
 const makeWikiCollectionsTool = ({ wiki }: { readonly wiki: Wiki["Service"] }): ServerTool =>
   defineServerTool({
     name: "wiki_list_collections",
+    summary: "Looks at how memory is organized.",
+    discovery: { group: "wiki_upkeep" },
     description:
       "Discover Memory collections and what questions they help answer. " +
       "Returns current directory contracts, record conventions and page counts, not activity coverage. " +

@@ -97,6 +97,8 @@ const todoFailure = (error: TodoStoreError): ToolExecutionError =>
 const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): ServerTool =>
   defineServerTool({
     name: "todo_update",
+    summary: "Keeps a checklist of steps while it works.",
+    discovery: "always_loaded",
     description: [
       "Replace the visible todo list for multi-step work.",
       "Keep at most one item in_progress and mark every item completed only after verification, or cancelled with a reason; only a list where every item is completed retires the sidebar state; a cancelled item keeps it shown."

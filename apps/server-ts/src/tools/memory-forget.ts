@@ -129,6 +129,8 @@ const makeMemoryForgetTools = ({
   return [
     defineServerTool({
       name: "memory_forget",
+      summary: "Forgets lines of your memory everywhere they appear, or undoes that.",
+      discovery: { group: "wiki_admin" },
       description: [
         "Forget lines of Memory the user says are wrong: removes every copy of each line from every page in one change and opens a numbered entry,",
         "so no later write but the user's own can put those lines back. undo closes an entry.",

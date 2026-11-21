@@ -12,6 +12,8 @@ import {
   ReadDocParametersSchema,
   ReadSheetParametersSchema,
   searchParametersSchema,
+  sheetRange,
+  sheetUpdate,
   SheetWriteParametersSchema
 } from "./google-drive-schemas.js"
 import type { EffectTarget } from "../execution/tool-effect.js"
@@ -23,6 +25,8 @@ import { sha256Base64Url } from "@arden-hq/std/hash"
 import { decodeOpaque, encodeOpaque } from "../lib/opaque-ref.js"
 import { toolRefusal } from "./tool-failure.js"
 
+// Kept in this module, not exported: its inferred type names @standard-schema/spec, which
+// a declaration emit (`tsc -b`) cannot name from here.
 const SheetWriteStandardSchema = Schema.toStandardSchemaV1(SheetWriteParametersSchema)
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3/files"
@@ -69,14 +73,6 @@ const fileList = decodeGoogle(
   { service: "google_drive", label: "file list" }
 )
 
-const sheetRange = decodeGoogle(
-  Schema.Struct({
-    range: Schema.optionalKey(Schema.String),
-    values: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Unknown)))
-  }),
-  { service: "google_drive", label: "sheet range" }
-)
-
 const createdDocument = decodeGoogle(
   Schema.Struct({ documentId: Schema.NonEmptyString, title: Schema.optionalKey(Schema.String) }),
   { service: "google_drive", label: "document" }
@@ -92,14 +88,6 @@ const createdSpreadsheet = decodeGoogle(
 )
 
 /** `values.update` answers with `updatedRange`; `values.append` nests it under `updates`. */
-const sheetUpdate = decodeGoogle(
-  Schema.Struct({
-    updatedRange: Schema.optionalKey(Schema.String),
-    updates: Schema.optionalKey(Schema.Struct({ updatedRange: Schema.optionalKey(Schema.String) }))
-  }),
-  { service: "google_drive", label: "sheet update" }
-)
-
 const DrivePageRefSchema = Schema.Struct({
   version: Schema.Literal(1),
   fingerprint: Schema.String,
@@ -233,6 +221,8 @@ export const makeDriveTools = ({
   return [
     defineServerTool({
       name: "drive_search",
+      summary: "Searches your Google Drive.",
+      discovery: { group: "drive" },
       description: [
         "Search non-trashed files and folders in My Drive and files shared with the user, by name or indexed content, newest modified first.",
         "Shared drives are not searched.",
@@ -338,6 +328,8 @@ export const makeDriveTools = ({
     }),
     defineServerTool({
       name: "drive_list_doc_tabs",
+      summary: "Lists the tabs in a Google Doc.",
+      discovery: { group: "drive" },
       description: [
         "List a Google Doc's tab hierarchy and exact tab_id values without returning document text.",
         "Use drive_read_doc with a tab_id to read one tab."
@@ -406,6 +398,8 @@ export const makeDriveTools = ({
     }),
     defineServerTool({
       name: "drive_read_doc",
+      summary: "Reads a Google Doc.",
+      discovery: { group: "drive" },
       description: [
         "Read text from all tabs of a Google Doc, or from one tab chosen with drive_list_doc_tabs.",
         "Returns 20,000 characters per call by default; pass next_cursor to read on. Only the first 200,000 characters can be read.",
@@ -506,6 +500,8 @@ export const makeDriveTools = ({
     }),
     defineServerTool({
       name: "drive_read_sheet",
+      summary: "Reads a Google Sheet.",
+      discovery: { group: "drive" },
       description: [
         "Read the values in one A1 range of a Google Sheet, such as Sheet1!A1:D50.",
         "Returns every value in the range with no truncation or paging, so keep the range small."
@@ -563,6 +559,8 @@ export const makeDriveTools = ({
     }),
     defineServerTool({
       name: "drive_create_doc",
+      summary: "Creates a Google Doc.",
+      discovery: { group: "drive" },
       description: [
         "Create an empty Google Doc in the root of My Drive for an explicit connected account.",
         "Use drive_edit_doc afterward to add content. Asks by default."
@@ -615,6 +613,8 @@ export const makeDriveTools = ({
     }),
     defineServerTool({
       name: "drive_edit_doc",
+      summary: "Changes a Google Doc.",
+      discovery: { group: "drive" },
       description: [
         "Append text at the end of a Google Doc's first tab, or replace every exact case-sensitive match of text in all tabs.",
         "A replace that matches nothing changes nothing and fails. Asks by default; replace is destructive."
@@ -694,6 +694,8 @@ export const makeDriveTools = ({
     }),
     defineServerTool({
       name: "drive_create_sheet",
+      summary: "Creates a Google Sheet.",
+      discovery: { group: "drive" },
       description: [
         "Create an empty Google Sheet in the root of My Drive for an explicit connected account.",
         "Use drive_update_sheet or drive_append_sheet_rows afterward. Asks by default."
@@ -748,6 +750,11 @@ export const makeDriveTools = ({
     ...(["drive_update_sheet", "drive_append_sheet_rows"] as const).map((name) =>
       defineServerTool<typeof SheetWriteStandardSchema>({
         name,
+        summary:
+          name === "drive_update_sheet"
+            ? "Writes values into part of a Google Sheet."
+            : "Adds rows to the end of a table in a Google Sheet.",
+        discovery: { group: "drive" },
         description:
           name === "drive_update_sheet"
             ? "Write a row-major value matrix to an exact Google Sheet A1 range. Use drive_append_sheet_rows to add after an existing table. Asks by default."

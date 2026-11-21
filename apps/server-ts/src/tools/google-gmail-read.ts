@@ -134,6 +134,8 @@ export const gmailReadTools = ({
   return [
     defineServerTool({
       name: "email_search",
+      summary: "Searches your email.",
+      discovery: { group: "email" },
       description: [
         "Search individual Gmail messages with Gmail query syntax; the default query is the last 7 days.",
         "Returns message_ref values for email_read, email_reply, email_forward, email_draft, email_attachment_save and email_unsubscribe, and thread_ref values for email_thread_read, email_update and email_trash.",
@@ -281,6 +283,8 @@ export const gmailReadTools = ({
     }),
     defineServerTool({
       name: "email_thread_search",
+      summary: "Searches your email conversations.",
+      discovery: { group: "email" },
       description: [
         "Search distinct Gmail conversations with Gmail query syntax; the default query is the last 7 days.",
         "Returns one thread_ref per conversation, for email_thread_read, email_update and email_trash.",
@@ -430,6 +434,8 @@ export const gmailReadTools = ({
     }),
     defineServerTool({
       name: "email_read",
+      summary: "Reads an email.",
+      discovery: { group: "email" },
       description: [
         "Read headers, attachment names, and up to 200,000 characters of body for one Gmail message_ref.",
         "Use email_thread_read to read the complete conversation in chronological order."
@@ -510,6 +516,8 @@ export const gmailReadTools = ({
     }),
     defineServerTool({
       name: "email_thread_read",
+      summary: "Reads an email conversation.",
+      discovery: { group: "email" },
       description: [
         "Read one chronological Gmail conversation page, capped near 36 KiB with each message body capped at 16 KiB.",
         "Continue with next_page_ref when present; use email_read when only one message is needed."

@@ -109,6 +109,10 @@ export const makeDriveDownloadTools = ({
         })
       },
       name: exportFile ? "drive_export" : "drive_download",
+      summary: exportFile
+        ? "Exports a Google document as a reusable file."
+        : "Downloads a Google Drive file for reuse.",
+      discovery: { group: "drive_files" },
       description: exportFile
         ? "Export a native Google Doc, Sheet or Slide to a chosen file format, up to 10 MiB. Other Google file types cannot be exported. Search lists metadata first; export only when content is needed. Returns a reusable artifact_ref and metadata, never base64 file contents. CSV and TSV export only the first sheet."
         : "Download an ordinary Drive file, up to 100 MiB, only when its content is needed. Search and Calendar reads list metadata first. Returns a reusable artifact_ref, filename, MIME type, size and digest. Use drive_export for native Google Docs, Sheets and Slides.",

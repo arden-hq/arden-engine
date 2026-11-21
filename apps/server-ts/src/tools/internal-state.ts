@@ -40,6 +40,8 @@ const metadata = {
 const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "automation_diagnose",
+    summary: "Checks how the automation workers and queue are running.",
+    discovery: { group: "automations" },
     description:
       "Inspect live shared worker capacity, queue leases/retries, overdue schedules and active chats. Optionally focus on an exact automation_ref from automation_list or page context. Tasks, Space workers, Automations and system jobs share this pool; sub-agents use a separate limit. Diagnose before proposing a schedule reset. Overdue alone does not prove stopped dispatch; report unknown causes as unknown. Read recent outcomes with automation_list_runs and linked runs with run_inspect.",
     parameters: Schema.toStandardSchemaV1(
@@ -116,6 +118,8 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
   }),
   defineServerTool({
     name: "usage_limits",
+    summary: "Checks how much of your plan is left.",
+    discovery: { group: "arden_settings" },
     description:
       "Read the model plan and available Codex credits: each window's percent used and reset time, its pace against the Arden limit, the provider-reported credit balance, the user's limits (Arden limit, background limit, keep going until, per-Automation limits) and the Runs waiting on a limit. The percent and credits are the provider's own meter, shared with Codex CLI and ChatGPT on the same account; never convert Arden's tokens into them. A waiting Run is paused, not stuck or failed, and resumes when its limit allows. Use usage_report for token history.",
     parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -170,6 +174,8 @@ const makeInternalStateTools = (services: Services): ReadonlyArray<ServerTool> =
   }),
   defineServerTool({
     name: "usage_report",
+    summary: "Reads how much Arden has used.",
+    discovery: { group: "automations" },
     description:
       "Read Arden's recorded token usage by UTC calendar days, with totals, daily totals, the top 20 groups, the top 12 sessions, and usage for each Automation and other background work. Use through_day for historical or page-selected windows. Includes usage receipts from unfinished/failed runs when available. Tokens are not billed money or subscription quota; `money` is the dollars providers reported, only when every recorded call has them; cache reads may be cheaper but are not necessarily free. cache_read_percent_of_input is cache-read tokens divided by all recorded input tokens, not a provider cache hit rate. Arden does not record reasoning tokens separately. Use session_read and run_inspect before claiming why usage was high. Empty data means no recorded usage, not proven zero spending.",
     parameters: Schema.toStandardSchemaV1(

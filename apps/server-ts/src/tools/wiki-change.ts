@@ -167,6 +167,8 @@ const makeWikiChangeTools = ({
 }): ReadonlyArray<ServerTool> => [
   defineServerTool({
     name: "wiki_read_change",
+    summary: "Reads one change to memory.",
+    discovery: { group: "wiki_upkeep" },
     description:
       "Open one saved Memory change by the page it changed: every page that change touched and their diff text, paged, starting at the named page. Reads the page's latest change, or the one in effect at a listed time. In a Space review, a listed page read with no time shows everything that changed on it since the previous review, as one diff. Use wiki_read_page for a page's current text.",
     parameters: Schema.toStandardSchemaV1(ReadChangeParametersSchema),

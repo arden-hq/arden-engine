@@ -162,6 +162,8 @@ export const gmailForwardTool = ({
   }
   return defineServerTool({
     name: "email_forward",
+    summary: "Forwards an email with its attachments.",
+    discovery: { group: "email" },
     description: [
       "Forward one Gmail message, with its attachments, to new recipients and an optional note.",
       "Use email_reply to answer the sender."
