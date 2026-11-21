@@ -66,36 +66,53 @@ const freeMainName = (database: DatabaseSync): string => {
 
 const TASK_KEY_MAX = 80
 
+const suffixed = (base: string, index: number): string => {
+  const suffix = `-${index}`
+  return `${base.slice(0, TASK_KEY_MAX - suffix.length)}${suffix}`
+}
+
 const moveOwnerChats = (database: DatabaseSync, mainId: string): void => {
   database
     .prepare(
       "UPDATE sessions SET space_id = ? WHERE space_id IS NULL AND origin_automation_id IS NULL"
     )
     .run(mainId)
+  database
+    .prepare(
+      `UPDATE sessions SET space_id = ?
+      WHERE space_id IS NULL AND origin_automation_id IS NOT NULL AND session_type = 'chat'
+        AND parent_session_id IS NOT NULL
+        AND COALESCE(json_extract(metadata, '$.fork_origin.sourceSessionId'),
+          json_extract(metadata, '$.fork_of.source_session_id'))
+          IN (SELECT session_id FROM sessions WHERE space_id = ?)`
+    )
+    .run(mainId, mainId)
   const moving = `space_id IS NULL
     AND home_session_id IN (SELECT session_id FROM sessions WHERE space_id = ?)`
-  const repeats = database
+  const tasks = database
     .prepare(
-      `SELECT item_id, stable_key FROM (
-        SELECT item_id, stable_key, ROW_NUMBER() OVER (
-          PARTITION BY stable_key ORDER BY created_at, item_id) AS rank
-        FROM space_tasks WHERE ${moving})
-      WHERE rank > 1`
+      `SELECT item_id, stable_key FROM space_tasks WHERE ${moving} ORDER BY created_at, item_id`
     )
     .all(mainId)
-  const holds = database.prepare(
-    `SELECT 1 FROM space_tasks WHERE stable_key = ? AND ${moving} LIMIT 1`
-  )
+  const taken = new Set(tasks.map((task) => String(task.stable_key)))
+  const kept = new Set<string>()
+  const nextIndex = new Map<string, number>()
   const rekey = database.prepare("UPDATE space_tasks SET stable_key = ? WHERE item_id = ?")
-  for (const repeat of repeats) {
-    const base = String(repeat.stable_key)
-    for (let index = 2; ; index += 1) {
-      const suffix = `-${index}`
-      const candidate = `${base.slice(0, TASK_KEY_MAX - suffix.length)}${suffix}`
-      if (holds.get(candidate, mainId) !== undefined) continue
-      rekey.run(candidate, String(repeat.item_id))
-      break
+  for (const task of tasks) {
+    const base = String(task.stable_key)
+    if (!kept.has(base)) {
+      kept.add(base)
+      continue
     }
+    let index = nextIndex.get(base) ?? 2
+    let candidate = suffixed(base, index)
+    while (taken.has(candidate)) {
+      index += 1
+      candidate = suffixed(base, index)
+    }
+    taken.add(candidate)
+    nextIndex.set(base, index + 1)
+    rekey.run(candidate, String(task.item_id))
   }
   database.prepare(`UPDATE space_tasks SET space_id = ? WHERE ${moving}`).run(mainId, mainId)
   for (const table of ["space_task_events", "space_task_comments", "space_task_attachments"])

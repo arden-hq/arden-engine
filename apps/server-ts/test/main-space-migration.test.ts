@@ -184,3 +184,28 @@ it("M1 moves a pre-upgrade run's captured Space and authority into Main with its
   ).toThrow(/Run authority is immutable/)
   database.close()
 })
+
+it("M1 moves an Automation's copy of a moved chat with it, not a copy of the Automation's own chat", () => {
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+        session_type, origin_automation_id, parent_session_id, metadata)
+      VALUES ('loose', 'loose', '${AT}', '${AT}', 'chat', NULL, NULL, NULL),
+        ('daily', 'daily', '${AT}', '${AT}', 'channel', 'daily', NULL, NULL),
+        ('copy-of-loose', 'copy-of-loose', '${AT}', '${AT}', 'chat', 'daily', 'loose',
+          '{"fork_origin":{"sourceSessionId":"loose"}}'),
+        ('copy-of-daily', 'copy-of-daily', '${AT}', '${AT}', 'chat', 'daily', 'daily',
+          '{"fork_origin":{"sourceSessionId":"daily"}}')`)
+  })
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
+  expect(
+    database
+      .prepare("SELECT session_id, space_id = ? AS in_main FROM sessions ORDER BY session_id")
+      .all(main)
+  ).toEqual([
+    { session_id: "copy-of-daily", in_main: null },
+    { session_id: "copy-of-loose", in_main: 1 },
+    { session_id: "daily", in_main: null },
+    { session_id: "loose", in_main: 1 }
+  ])
+  database.close()
+})
