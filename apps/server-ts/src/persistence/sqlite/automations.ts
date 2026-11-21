@@ -12,6 +12,7 @@ import { makeAutomationCatalog } from "./automation-catalog.js"
 import { makeAutomationDiagnostics } from "./automation-diagnostics.js"
 import { makeHandlerItems } from "./automation-handler-item.js"
 import { makeHomeLetterInputs } from "./automation-home-input.js"
+import { makeHandlerToolResults } from "./automation-handler-tool.js"
 import type { DayActivity } from "../automations/day-activity.js"
 import { makeDayActivity } from "./day-activity.js"
 import { makeEventScreens, makeRunEvents } from "./automation-event-batch.js"
@@ -50,6 +51,7 @@ export const makeAutomationStores = (
     catalog,
     queue: AutomationQueue.of({
       ...makeAutomationRunRequests(deps),
+      ...makeHandlerToolResults(deps),
       setFollowup: makeAutomationFollowup(deps),
       runEvents: makeRunEvents(deps),
       ...makeForkSessions(deps),

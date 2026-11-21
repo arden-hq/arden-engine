@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { HomeLetterBodySchema } from "@arden-hq/protocol/effect/runs"
 import type { ChatMessage } from "../../chat/message.js"
 import type { AutomationQueue } from "../../persistence/automations/queue.js"
@@ -10,7 +10,8 @@ import type { HomeLetterInputs } from "../../persistence/automations/home-letter
 import type { HomeStore } from "../../persistence/home/store.js"
 import { HOME_LETTER_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import { HOME_LETTER_PROMPT, HOME_LETTER_RULES, homeLetterInput } from "../home-letter-prompt.js"
-import { withHomeLetterTool } from "../home-letter-tool.js"
+import { HOME_LETTER_TOOL, withHomeLetterTool } from "../home-letter-tool.js"
+import { handlerToolResult } from "../handler-tool-result.js"
 import { runByRule } from "../job-run.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler } from "../system-handler.js"
@@ -56,8 +57,13 @@ const makeHomeLetterRunner = (services: {
     const run = { chatRunId: runId, chatSessionId: sessionId }
     if (observed.status !== "completed")
       return jobResult.failed(observed.error, observed.result, run)
-    const decoded: unknown = JSON.parse(observed.result ?? "null")
-    const body = yield* Schema.decodeUnknownEffect(HomeLetterBodySchema)(decoded)
+    const body = yield* handlerToolResult(services.queue, {
+      runId,
+      tool: HOME_LETTER_TOOL,
+      schema: HomeLetterBodySchema
+    })
+    if (body === undefined)
+      return jobResult.failed("The run wrote no Home letter", observed.result, run)
     const published = yield* services.home.publishHomeLetter({
       runId,
       snapshot: input.snapshot,
