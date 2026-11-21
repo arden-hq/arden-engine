@@ -39,7 +39,15 @@ export const contextWorkSchemaSection = {
     "CREATE UNIQUE INDEX idx_spaces_page_path ON spaces(page_path) WHERE page_path IS NOT NULL",
     "CREATE UNIQUE INDEX idx_spaces_page_id ON spaces(page_id) WHERE page_id IS NOT NULL",
     SPACE_KIND_COLUMN,
-    MAIN_SPACE_INDEX,
-    MAIN_SPACE_INSERT
+    MAIN_SPACE_INDEX
   ]
+} as const satisfies OperationalSchemaSection
+
+export const mainSpaceSeedSection = {
+  name: "context.work.main_space",
+  storageDomain: "work",
+  tables: [],
+  indexes: [],
+  triggers: [],
+  statements: [MAIN_SPACE_INSERT]
 } as const satisfies OperationalSchemaSection

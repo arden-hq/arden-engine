@@ -7,7 +7,7 @@ import { spaceReviewSchemaSection } from "./sections/space-review.js"
 import { automationSchemaSection } from "./sections/automation.js"
 import { capabilitiesSchemaSection } from "./sections/capabilities.js"
 import { contextSettingsSchemaSection } from "./sections/context-settings.js"
-import { contextWorkSchemaSection } from "./sections/context-work.js"
+import { contextWorkSchemaSection, mainSpaceSeedSection } from "./sections/context-work.js"
 import { contextSessionSchemaSection } from "./sections/context-session.js"
 import { contextExecutionSchemaSection } from "./sections/context-execution.js"
 import { contextModelSchemaSection } from "./sections/context-model.js"
@@ -59,7 +59,8 @@ const sections = [
   taskProposalsSchemaSection,
   workHistorySchemaSection,
   contextHistorySchemaSection,
-  authorityHistorySchemaSection
+  authorityHistorySchemaSection,
+  mainSpaceSeedSection
 ] as const satisfies ReadonlyArray<OperationalSchemaSection>
 
 export const databaseSchema = {

@@ -239,19 +239,17 @@ it("M1 moves every chat under a moved chat, and survives unreadable old metadata
   database.close()
 })
 
-it("M1 moves the Space of runs that can still continue, not of settled history", () => {
+it("M1 moves the Space of every run whose chat moved, settled or live", () => {
   const policy = JSON.stringify({ run_policy: { authority_session_id: "loose", space: null } })
   const database = migratedTo(183, (database) => {
     database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity)
       VALUES ('loose', 'loose', '${AT}', '${AT}')`)
     const run = database.prepare(`INSERT INTO chat_runs (run_id, session_id, status, started_at,
         updated_at, ended_at, assistant_message_id, metadata_json)
-      VALUES (?, 'loose', 'completed', ?, ?, ?, ?, ?)`)
-    run.run("old", "2026-11-01T00:00:00.000Z", AT, AT, "a1", policy)
-    run.run("asked", "2026-11-02T00:00:00.000Z", AT, AT, "a2", policy)
-    run.run("latest", "2026-11-03T00:00:00.000Z", AT, AT, "a3", policy)
-    database.exec(`INSERT INTO run_questions (question_id, run_id, tool_call_id, content, created_at)
-      VALUES ('q', 'asked', 'call', '{}', '${AT}')`)
+      VALUES (?, 'loose', ?, ?, ?, ?, ?, ?)`)
+    run.run("settled", "completed", "2026-11-01T00:00:00.000Z", AT, AT, "a1", policy)
+    run.run("older", "completed", "2026-11-02T00:00:00.000Z", AT, AT, "a2", policy)
+    run.run("live", "pending", "2026-11-03T00:00:00.000Z", AT, null, "a3", policy)
   })
   const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
   expect(
@@ -262,9 +260,36 @@ it("M1 moves the Space of runs that can still continue, not of settled history",
       )
       .all(main)
   ).toEqual([
-    { run_id: "asked", in_main: 1 },
-    { run_id: "latest", in_main: 1 },
-    { run_id: "old", in_main: null }
+    { run_id: "live", in_main: 1 },
+    { run_id: "older", in_main: 1 },
+    { run_id: "settled", in_main: 1 }
+  ])
+  database.close()
+})
+
+it("M1 drops the resource share of a moved branch whose source stays outside Main", () => {
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+        session_type, origin_automation_id, metadata)
+      VALUES ('daily', 'daily', '${AT}', '${AT}', 'channel', 'daily', NULL),
+        ('loose', 'loose', '${AT}', '${AT}', 'chat', NULL, NULL),
+        ('of-daily', 'of-daily', '${AT}', '${AT}', 'chat', NULL,
+          '{"fork_resources":{"version":1,"source_session_id":"daily"},"cli":1}'),
+        ('of-loose', 'of-loose', '${AT}', '${AT}', 'chat', NULL,
+          '{"fork_resources":{"version":1,"source_session_id":"loose"}}')`)
+  })
+  expect(
+    database
+      .prepare(
+        `SELECT session_id, metadata FROM sessions WHERE session_id LIKE 'of-%' ORDER BY session_id`
+      )
+      .all()
+  ).toEqual([
+    { session_id: "of-daily", metadata: '{"cli":1}' },
+    {
+      session_id: "of-loose",
+      metadata: '{"fork_resources":{"version":1,"source_session_id":"loose"}}'
+    }
   ])
   database.close()
 })
