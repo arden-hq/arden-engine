@@ -1,3 +1,4 @@
+import { mainSpaceIdSql } from "./main-space.js"
 import { Effect, Option, Schema } from "effect"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import {
@@ -46,7 +47,9 @@ export const runPolicyRevoked = (
   (json_extract(${metadata}, '$.run_policy.authority_session_id') IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM sessions AS authority_session
       WHERE authority_session.session_id = json_extract(${metadata}, '$.run_policy.authority_session_id')
-        AND authority_session.space_id IS json_extract(${metadata}, '$.run_policy.space.space_id')
+        AND (authority_session.space_id IS json_extract(${metadata}, '$.run_policy.space.space_id')
+          OR (json_extract(${metadata}, '$.run_policy.space.space_id') IS NULL
+            AND authority_session.space_id = ${mainSpaceIdSql(sql)}))
         AND authority_session.archived_at IS NULL
         AND (json_extract(${metadata}, '$.run_policy.authority_generation') IS NULL
           OR COALESCE(json_extract(authority_session.metadata, '$.policy_generation'), 0)

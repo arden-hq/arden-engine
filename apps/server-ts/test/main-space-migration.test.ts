@@ -58,3 +58,74 @@ it("M1 keeps every entity event and lets a post be recorded", () => {
   ])
   database.close()
 })
+
+const LONG_KEY = "k".repeat(80)
+
+it("M1 moves every owner chat into Main with its chat Tasks, their records and worker channels", () => {
+  const database = migratedTo(183, (database) => {
+    space(database, "work", "Work")
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+        session_type, space_id, origin_automation_id, parent_session_id, parent_run_id,
+        parent_tool_call_id, archived_at)
+      VALUES ('loose', 'loose', '${AT}', '${AT}', 'chat', NULL, NULL, NULL, NULL, NULL, NULL),
+        ('loose-agent', 'loose-agent', '${AT}', '${AT}', 'agent', NULL, NULL, 'loose', 'run', 'call', NULL),
+        ('loose-old', 'loose-old', '${AT}', '${AT}', 'chat', NULL, NULL, NULL, NULL, NULL, '${AT}'),
+        ('filed', 'filed', '${AT}', '${AT}', 'chat', 'work', NULL, NULL, NULL, NULL, NULL),
+        ('automation', 'automation', '${AT}', '${AT}', 'channel', NULL, 'daily', NULL, NULL, NULL, NULL),
+        ('automation-run', 'automation-run', '${AT}', '${AT}', 'chat', NULL, 'daily', 'automation', NULL, NULL, NULL),
+        ('worker', 'worker', '${AT}', '${AT}', 'channel', NULL, 'task:first', NULL, NULL, NULL, NULL)`)
+    database.exec(`INSERT INTO space_tasks (item_id, space_id, home_session_id, stable_key, text,
+        status, owner, runs_in, created_at, updated_at)
+      VALUES ('first', NULL, 'loose', '${LONG_KEY}', 'Reply', 'open', 'worker', 'chat', '${AT}', '${AT}'),
+        ('second', NULL, 'loose-old', '${LONG_KEY}', 'Reply', 'open', 'worker', 'chat', '${AT}', '${AT}'),
+        ('automation-task', NULL, 'automation', 'reply', 'Reply', 'open', 'worker', 'chat', '${AT}', '${AT}')`)
+    database.exec(`INSERT INTO space_task_comments (space_id, item_id, author, body, created_at)
+      VALUES (NULL, 'first', 'user', 'Note', '${AT}')`)
+    database.exec(`INSERT INTO space_task_events (space_id, item_id, event_type, summary, created_at)
+      VALUES (NULL, 'second', 'created', 'Reply', '${AT}')`)
+    database.exec(`INSERT INTO space_task_attachments (space_id, item_id, name, media_type, data,
+        size, created_by, created_at)
+      VALUES (NULL, 'first', 'a.txt', 'text/plain', X'61', 1, 'user', '${AT}')`)
+  })
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
+  const named = (rows: ReadonlyArray<Record<string, unknown>>) =>
+    rows.map((row) => ({ ...row, space_id: row.space_id === main ? "main" : row.space_id }))
+  expect(
+    named(database.prepare("SELECT session_id, space_id FROM sessions ORDER BY session_id").all())
+  ).toEqual([
+    { session_id: "automation", space_id: null },
+    { session_id: "automation-run", space_id: null },
+    { session_id: "filed", space_id: "work" },
+    { session_id: "loose", space_id: "main" },
+    { session_id: "loose-agent", space_id: "main" },
+    { session_id: "loose-old", space_id: "main" },
+    { session_id: "worker", space_id: "main" }
+  ])
+  expect(
+    named(
+      database
+        .prepare("SELECT item_id, space_id, stable_key FROM space_tasks ORDER BY item_id")
+        .all()
+    )
+  ).toEqual([
+    { item_id: "automation-task", space_id: null, stable_key: "reply" },
+    { item_id: "first", space_id: "main", stable_key: LONG_KEY },
+    { item_id: "second", space_id: "main", stable_key: `${"k".repeat(78)}-2` }
+  ])
+  expect(
+    named(
+      database
+        .prepare(
+          `SELECT 'comment' AS kind, space_id FROM space_task_comments
+          UNION ALL SELECT 'event', space_id FROM space_task_events
+          UNION ALL SELECT 'attachment', space_id FROM space_task_attachments ORDER BY kind`
+        )
+        .all()
+    )
+  ).toEqual([
+    { kind: "attachment", space_id: "main" },
+    { kind: "comment", space_id: "main" },
+    { kind: "event", space_id: "main" }
+  ])
+  database.close()
+})

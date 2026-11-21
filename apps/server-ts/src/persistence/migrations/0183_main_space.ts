@@ -28,6 +28,7 @@ export const EVENT_THREADS_TABLE = `CREATE TABLE event_threads (
       thread_key TEXT NOT NULL CHECK(length(thread_key) > 0),
       session_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
+      delivery_id TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (source, account, thread_key)
     )`
@@ -63,6 +64,57 @@ const freeMainName = (database: DatabaseSync): string => {
   }
 }
 
+const TASK_KEY_MAX = 80
+
+const freeKey = (base: string, taken: ReadonlySet<string>): string => {
+  if (!taken.has(base)) return base
+  for (let index = 2; ; index += 1) {
+    const suffix = `-${index}`
+    const candidate = `${base.slice(0, TASK_KEY_MAX - suffix.length)}${suffix}`
+    if (!taken.has(candidate)) return candidate
+  }
+}
+
+const moveOwnerChats = (database: DatabaseSync, mainId: string): void => {
+  database
+    .prepare(
+      "UPDATE sessions SET space_id = ? WHERE space_id IS NULL AND origin_automation_id IS NULL"
+    )
+    .run(mainId)
+  const tasks = database
+    .prepare(
+      `SELECT item_id, stable_key FROM space_tasks
+      WHERE space_id IS NULL
+        AND home_session_id IN (SELECT session_id FROM sessions WHERE space_id = ?)
+      ORDER BY created_at, item_id`
+    )
+    .all(mainId)
+  const taken = new Set<string>()
+  const moveTask = database.prepare(
+    "UPDATE space_tasks SET space_id = ?, stable_key = ? WHERE item_id = ?"
+  )
+  for (const task of tasks) {
+    const key = freeKey(String(task.stable_key), taken)
+    taken.add(key)
+    moveTask.run(mainId, key, String(task.item_id))
+  }
+  const moved = JSON.stringify(tasks.map((task) => String(task.item_id)))
+  for (const table of ["space_task_events", "space_task_comments", "space_task_attachments"])
+    database
+      .prepare(
+        `UPDATE ${table} SET space_id = ?
+        WHERE space_id IS NULL AND item_id IN (SELECT value FROM json_each(?))`
+      )
+      .run(mainId, moved)
+  database
+    .prepare(
+      `UPDATE sessions SET space_id = ?
+      WHERE space_id IS NULL
+        AND origin_automation_id IN (SELECT 'task:' || value FROM json_each(?))`
+    )
+    .run(mainId, moved)
+}
+
 const up = (database: DatabaseSync): void => {
   database.exec(SPACE_KIND_COLUMN)
   database.exec(MAIN_SPACE_INDEX)
@@ -74,6 +126,9 @@ const up = (database: DatabaseSync): void => {
       WHERE NOT EXISTS (SELECT 1 FROM spaces WHERE kind = 'main')`
     )
     .run(freeMainName(database))
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()
+  if (main === undefined) throw new Error("The Main Space was not created")
+  moveOwnerChats(database, String(main.space_id))
   database.exec(EVENT_THREADS_TABLE)
   database.exec("ALTER TABLE entity_events RENAME TO entity_events_prior")
   database.exec(ENTITY_EVENTS_TABLE)
