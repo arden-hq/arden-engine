@@ -14,7 +14,7 @@ import type { AutomationEventProducer } from "../event-producer.js"
  * The event each stored item's source publishes. A new source adds its entry here and its event to
  * `ITEM_EVENTS`; Events, which listens to every arrival, then hears it with no change of its own.
  */
-export const ITEM_EVENT_TYPES = {
+const ITEM_EVENT_TYPES = {
   gmail: "email.received",
   github: "github.received",
   calendar: "calendar.changed"
