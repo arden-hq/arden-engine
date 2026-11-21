@@ -8,10 +8,6 @@ import { iso } from "../src/runtime/clock.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { LATER, claim, makeAutomation, makeTask, requestRun, tryRenew } from "./work-fixtures.js"
 
-// Bounded repair, finding 3: when a worker took hold of a Task. A renewal moves
-// `claimed_at` (the heartbeat) and must not move the hold start. Overlay only.
-
-/** What the queue list says of the one queued row: its hold start and its heartbeat. */
 const seen = Effect.gen(function* () {
   const { queue } = yield* (yield* AutomationCatalog).diagnostics()
   return queue.map((row) => ({ held: row.held_by_worker_since, claimed: row.claimed_at }))
@@ -111,13 +107,10 @@ it("a Task's hold start survives a renewal and its own reclaim, and ends with th
   expect(outcome).toEqual({
     waiting: [{ held: null, claimed: null }],
     claimed: [{ held: iso(T0), claimed: iso(T0) }],
-    // The heartbeat moved. The hold start did not.
     renewed: [{ held: iso(T0), claimed: iso(T0 + 1_000) }],
-    // The lease ran out and nothing released the row: the owner is still held.
     expired: [{ held: iso(T0), claimed: iso(T0 + 1_000) }],
     reclaimed: [expiredAt, [{ held: iso(T0), claimed: iso(expiredAt) }]],
     released: [{ held: null, claimed: null }],
-    // A hold after a release is a new hold.
     heldAgain: [{ held: iso(T3), claimed: iso(T3) }],
     retrying: [{ held: null, claimed: null }],
     afterRetry: [{ held: iso(T4), claimed: iso(T4) }],
@@ -152,7 +145,6 @@ it("the hold start is the queue row's own fact for a Task, and a definition keep
       for (const lease of leases)
         yield* Effect.promise(async () => queue.jobs.release({ ...lease, releasedAt: LATER + 1 }))
       const released = yield* stored
-      // No store path writes a hold start on a row nobody holds; the table refuses it too.
       const unheld = yield* sql`UPDATE automation_event_queue SET hold_started_at = ${iso(LATER)}
         WHERE task_id = ${key}`.pipe(
         Effect.match({ onFailure: () => "refused", onSuccess: () => "written" })

@@ -129,9 +129,6 @@ export const makeApprovalPolicyStore = ({
     if (!row)
       return yield* new ApprovalPolicyError({ reason: "not_found", message: "Chat not found" })
     if (row.disposable === 1) return { kind: "inherited", approval_mode: "ask" }
-    // A chat made for a job is governed by that job's owner as stored now: an
-    // Automation's definition, a Task, or a Space review (ownerPolicy). An old
-    // definition row of a Task or a review is never read.
     const owner =
       row.origin_automation_id === null
         ? undefined
@@ -147,8 +144,6 @@ export const makeApprovalPolicyStore = ({
       if (owner === undefined)
         return yield* invalid("Automation permission settings are unavailable")
       const job = ownerPolicy(owner)
-      // The wire keeps its one job shape: `auto_approve` says whether runs act
-      // without asking by default, and `approval_mode` is the Space's mode it follows.
       return {
         kind: "automation",
         automation_id: row.origin_automation_id,
@@ -210,8 +205,6 @@ export const makeApprovalPolicyStore = ({
     const row = rows[0]
     if (!row)
       return yield* new ApprovalPolicyError({ reason: "not_found", message: "Run not found" })
-    // A job's run is held to its owner's scope as stored now (ownerPolicy). A
-    // user's Automation works as its chat does, so it has no scope of its own.
     const owner =
       key !== null &&
       ["automation", "task_worker", "space_review"].includes(rootOf(input.authority.actor))
@@ -226,7 +219,6 @@ export const makeApprovalPolicyStore = ({
     return { state: row.state, mode, noApproval, currentScope }
   }, Effect.mapError(storage))
 
-  /** A stored mode, or `fallback` where none is stored. */
   const storedMode = (setting: Statement.Fragment, fallback: string) =>
     sql<{ readonly mode: string | null }>`SELECT ${setting} AS mode`.pipe(
       Effect.flatMap((rows) =>
@@ -234,14 +226,8 @@ export const makeApprovalPolicyStore = ({
       )
     )
 
-  /** What a Space's work follows: the owner's default approval mode. */
   const spaceDefaultMode = () => storedMode(defaultModeSql(sql), DEFAULT_APPROVAL_MODE)
 
-  /**
-   * The mode one source says now. `automation` names a job by its key (the stored
-   * name of this variant): its owner decides, by ownerPolicy. A job with no owner
-   * left asks.
-   */
   const sourceMode = Effect.fn("ApprovalPolicy.sourceMode")(function* (
     source: SingleApprovalSource
   ) {

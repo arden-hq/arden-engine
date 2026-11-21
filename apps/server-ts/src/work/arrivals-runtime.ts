@@ -27,8 +27,6 @@ const arrivalSender = (delivery: RunDelivery): InteractionSender | undefined => 
   }
 }
 
-/** What an arrival is sent to its chat as. A replay must send exactly this, or its
- *  request hash differs from the stored receipt's. */
 export const toSendInput = (delivery: RunDelivery): ChatSendInput => {
   const sender = arrivalSender(delivery)
   return {

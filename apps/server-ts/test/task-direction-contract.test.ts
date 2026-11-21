@@ -18,9 +18,6 @@ import {
 } from "../src/persistence/work/task-direction.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// A started call is checked against the Task direction its model turn was shown, stored
-// with the call. Real SQLite store, made-up rows.
-
 const AT = "2026-11-20T08:00:00.000Z"
 
 const seed = (sql: SqlClient.SqlClient) =>
@@ -55,8 +52,6 @@ const call = (runId: string, toolCallId: string) =>
     toolCallId,
     toolName: "task_get",
     arguments: {},
-    // Read calls, so several may be started at once; which calls are checked is the
-    // caller's choice (durable-tools.ts checks state-changing ones).
     changesState: false,
     effect: "none"
   }) satisfies ToolExecutionIdentity
@@ -127,7 +122,6 @@ it("a call another call made keeps that call's stored plan, never a newer one", 
         plan: { kind: "call", toolCallId: "script" }
       })
       const nestedBefore = yield* tools.admitPlanned(call("run-task", "script:code:1"))
-      // The goal changes to B: later calls, even started from a turn shown B, copy A.
       yield* sql`UPDATE space_tasks SET text = 'Goal B' WHERE item_id = 'task-1'`
       yield* tools.begin(call("run-task", "script:workflow:1"), {
         plan: { kind: "call", toolCallId: "script" }
@@ -163,7 +157,6 @@ it("a call another call made keeps that call's stored plan, never a newer one", 
     { id: "script:code:1", plan: stored.planA },
     { id: "script:workflow:1", plan: stored.planA },
     { id: deferredFollowUpId("script:code:1"), plan: stored.planA },
-    // A parent that was never stored gives no plan: a legacy call, reviewed.
     { id: "orphan", plan: null }
   ])
   expect(stored.nestedBefore).toBe("current")
@@ -186,9 +179,7 @@ it("a Task write checks its call's plan inside the write's own transaction", asy
       yield* tools.begin(call("run-task", "note-a"), {
         plan: { kind: "turn", shown: yield* shownNow(sql) }
       })
-      // The call's own check before its effect passes ...
       const admitted = yield* tools.admitPlanned(call("run-task", "note-a"))
-      // ... then the owner commits goal B before the store writes.
       const before = yield* work.get(task)
       yield* work.update(task, before.updated_at, { text: "Goal B" }, undefined, undefined, "user")
       const stale = yield* work
@@ -198,7 +189,6 @@ it("a Task write checks its call's plan inside the write's own transaction", asy
       yield* tools.begin(call("run-task", "update-a"), {
         plan: { kind: "turn", shown: undefined }
       })
-      // A stale plan and a stale updated_at: the plan is checked first.
       const staleBoth = yield* work
         .update(task, before.updated_at, { body: "A details" }, "run-task", "update-a")
         .pipe(Effect.flip)
@@ -206,7 +196,6 @@ it("a Task write checks its call's plan inside the write's own transaction", asy
         plan: { kind: "turn", shown: yield* shownNow(sql) }
       })
       const fresh = yield* work.comment(task, { body: "B note" }, "run-task", "note-b")
-      // No call named: the owner's own write and a run's write without a call are not checked.
       const unnamed = yield* work.comment(task, { body: "run note" }, "run-task")
       const comments = yield* sql<{ readonly body: string }>`
         SELECT body FROM space_task_comments WHERE item_id = 'task-1' ORDER BY rowid`
@@ -254,7 +243,6 @@ it("a card is published only for a plan its Task still has, checked where it is 
       yield* tools.begin(call("run-task", "write-a"), {
         plan: { kind: "turn", shown: yield* shownNow(sql) }
       })
-      // The gate's own check says current; then the owner commits B before `defer`.
       const checked = yield* tools.admitPlanned(call("run-task", "write-a"))
       yield* sql`UPDATE space_tasks SET text = 'Goal B' WHERE item_id = 'task-1'`
       const stale = yield* cards.defer(card("write-a"))

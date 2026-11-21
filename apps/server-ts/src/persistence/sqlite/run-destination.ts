@@ -143,26 +143,19 @@ const readAgentChild = Effect.fn("RunDestination.agentChild")(function* (
   return { mode: agent?.mode ?? "work", parent: child.parent_session_id } satisfies ChildAgent
 })
 
-/** What a run's own record says. */
 type RunRecord =
   | { readonly kind: "recorded"; readonly context: RunContext }
-  /** No `run_context` was stored. */
   | { readonly kind: "unrecorded" }
   | { readonly kind: "corrupt"; readonly error: string }
 
-/** Where a run's outcome goes now, and on whose behalf: read once per ending, tell or replay. */
 export interface RunAddress {
   readonly source: SourceRunRow
   readonly record: RunRecord
-  /** Who started the run: the recorded origin, `unrecorded` with no record, none when corrupt. */
   readonly origin: RunOrigin | undefined
-  /** Whose work it is: `belongs_to` when recorded, else `origin`. */
   readonly owner: RunOrigin | undefined
   readonly place: Place
   readonly agent: ChildAgent | undefined
-  /** A child agent whose record is corrupt: its outcome goes to its parent as damaged. */
   readonly damaged: boolean
-  /** What a delivery carries: the recorded context and owner, or a damaged child's parent chat. */
   readonly reply: {
     readonly context: RunContext | undefined
     readonly owner: RunOrigin | undefined

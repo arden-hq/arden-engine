@@ -119,11 +119,6 @@ export const RunAuthoritySchema = Schema.Struct({
 })
 export type RunAuthority = typeof RunAuthoritySchema.Type
 
-/**
- * Who a run works for, as stored when the run is admitted. `key` is the id the
- * queue and the run's chat know the owner by. Each kind has only its own facts:
- * a handler belongs to an Automation, a Space to a review or a Task.
- */
 export type ExecutionOwner =
   | {
       readonly kind: "automation"
@@ -138,9 +133,7 @@ export interface AdmissionFacts {
   readonly sessionId: string
   readonly context: RunContext
   readonly policy: RunPolicy
-  /** The owner the run's origin names. */
   readonly originOwner: ExecutionOwner | null
-  /** The owner the run's chat was made for. */
   readonly chatOwner: ExecutionOwner | null
   readonly resourceSessions?: ReadonlyArray<SessionResourceReach>
 }
@@ -223,7 +216,6 @@ const rootActor = (facts: AdmissionFacts): Actor => {
   }
 }
 
-/** What an origin that names an Automation says of its actor, by the owner stored for it. */
 const automationActorFacts = (
   owner: ExecutionOwner | null
 ): { readonly purpose: JobPurpose; readonly handler: string | null } => {
@@ -257,8 +249,6 @@ const approvalSource = (
     case "space_review":
       return { kind: "space_thread", space_id: owner.spaceId }
     case "task":
-      // A Task in a Space follows that Space. One outside any Space has no
-      // setting of its own to follow, so it is named by its key.
       return owner.spaceId === null
         ? { kind: "automation", automation_id: owner.key }
         : { kind: "space_thread", space_id: owner.spaceId }

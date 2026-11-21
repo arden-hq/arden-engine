@@ -71,7 +71,6 @@ export const makeToolExecutions = ({
   | "target"
 > => {
   const sql = writer.sql
-  /** The run's binding, in begin's transaction: undefined when it may act. */
   const notAdmitted = Effect.fn("SqliteToolExecutionStore.notAdmitted")(function* (
     identity: ToolExecutionIdentity
   ) {
@@ -113,7 +112,6 @@ export const makeToolExecutions = ({
               )
             )
           )
-    // A call another call made keeps that call's stored plan, read in this transaction.
     const planned =
       options.plan?.kind === "call"
         ? sql`(SELECT planned_from_json FROM tool_calls

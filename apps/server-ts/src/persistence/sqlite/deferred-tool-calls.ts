@@ -123,8 +123,6 @@ export const makeDeferredToolCalls = ({
     return yield* writer
       .transact(
         Effect.gen(function* () {
-          // The gate's own check may be old by now: a card is never published for a plan
-          // its Task no longer has. Read in the transaction that publishes it.
           if ((yield* readCallPlan(sql, identity)) === "needs_review")
             return "needs_review" as const
           const inserted = yield* sql`INSERT INTO deferred_tool_calls (run_id, session_id,

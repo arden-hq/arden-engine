@@ -18,10 +18,6 @@ import { SkillCatalog } from "../src/skills/service.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService } from "./kit.js"
 
-// The contract lines and state record a Task run is shown, and the receipt its calls are
-// checked against, come from one read of the run's own Task, even when the chat has
-// another Task. Real context builder on a temp database; made-up rows.
-
 const AT = "2026-11-20T08:00:00.000Z"
 
 const seed = (sql: SqlClient.SqlClient) =>
@@ -74,7 +70,6 @@ const seed = (sql: SqlClient.SqlClient) =>
       FROM chat_runs WHERE run_id = 'run-task'`
   })
 
-/** The Task sections the real context builder gives one run in the chat. */
 const composed = (runId: string) =>
   withTempDatabase(
     Effect.gen(function* () {
@@ -136,7 +131,6 @@ it("a Task run's contract lines, state record and plan receipt are the run's own
   expect(outcome.state).toContain("BOUND_NEXT")
   expect(outcome.state).not.toContain("CHAT_NEXT")
   expect(outcome.receipt).toEqual(outcome.expected)
-  // The chat's own Task is still shown as the Task in this chat.
   expect(outcome.chatTask).toContain("Chat goal")
 })
 

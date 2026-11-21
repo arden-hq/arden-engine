@@ -260,9 +260,6 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     if (options.automationId !== undefined) {
       budgetTask = { kind: "none" }
       const owner = yield* readWorkOwner(sql, options.automationId)
-      // What the owner's row does not say: the chat the run reads from, the
-      // default approval setting, and whether this attempt is a run by hand
-      // that is already claimed.
       const around = yield* sql<{
         readonly default_mode: string
         readonly chat_mode: string | null
@@ -291,12 +288,9 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
         !(ownerIsOn(owner) || facts.claimed_by_hand === 1)
       )
         return yield* failure("The Automation is disabled or unavailable")
-      // In a Space the default approval setting decides. Where it does not
-      // decode, the owner's own rule does.
       const inSpaceMode = (ownRule: ApprovalMode): ApprovalMode =>
         isApprovalMode(facts.default_mode) ? facts.default_mode : ownRule
       if (owner.kind === "automation" && isUserAutomationPurpose(owner.purpose)) {
-        // A user's Automation works as its set chat does.
         if (facts.chat_id === null) return yield* failure("The execution Chat is unavailable")
         capability = "all"
         authoritySessionId = facts.chat_id
@@ -447,11 +441,6 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
   )
 })
 
-/**
- * Whose Task budget a run may spend: a named Task's, or that of the Task
- * running in the run's own chat. A scheduled Automation or Space review spends
- * no Task's budget, whatever its key looks like.
- */
 type BudgetTask =
   | { readonly kind: "task"; readonly itemId: string }
   | { readonly kind: "home_chat"; readonly sessionId: string }

@@ -100,7 +100,6 @@ export const makeProposalRevision = (options: {
               message: "This Space is archived"
             })
           }
-          // The Space's own review: the run works under its key.
           const authority = yield* sql`SELECT 1 FROM chat_runs AS run
           WHERE run.run_id = ${request.runId} AND run.session_id = ${request.sessionId}
             AND ${runMayActSql(sql, "run")}

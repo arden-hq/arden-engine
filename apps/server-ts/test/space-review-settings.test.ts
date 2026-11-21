@@ -8,11 +8,6 @@ import { freePage } from "./fixtures/free-space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { makeTask } from "./work-fixtures.js"
 
-// Migrated expectation (space-review-owner): the baseline wrote model, cooldown and an
-// unused prompt into the review's definition row and read them back. A review has no
-// definition row now. Its settings are `space_review_settings`, which only migration
-// 180 fills from an old row, so the test writes that row as 180 would. The checks on
-// the owner are the baseline's: the settings a run consumes, and nothing authored.
 it("a Space review owner carries only the review settings a run consumes", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
@@ -25,7 +20,6 @@ it("a Space review owner carries only the review settings a run consumes", async
         VALUES ('space-1', 'review-model', 7)`
       const stored = yield* sql<{ readonly task_id: string }>`SELECT task_id FROM scheduled_tasks`
       const owner = yield* readWorkOwner(sql, spaceJobId("space-1"))
-      // Zero is a valid cooldown (NonNegativeInt), kept as stored.
       yield* sql`UPDATE space_review_settings SET cooldown_minutes = 0 WHERE space_id = 'space-1'`
       return { stored, defaults, owner, zero: yield* readWorkOwner(sql, spaceJobId("space-1")) }
     })

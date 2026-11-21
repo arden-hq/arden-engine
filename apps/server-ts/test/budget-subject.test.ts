@@ -7,10 +7,6 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 import { startJob } from "./fixtures/job-runs.js"
 import { claim, makeAutomation, makeTask, requestRun, storeUnderKey } from "./work-fixtures.js"
 
-// Bounded repair, finding 4: a run spends a Task's budget only when its owner
-// is that Task. The owner's key looking like a Task's key says nothing. Overlay only.
-
-/** The budget the run was admitted with, and the budget the Task keeps. */
 const budgets = (runId: string, itemId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -49,7 +45,6 @@ it("an Automation stored under a Task's key does not spend the Task's budget", a
       const task = yield* makeTask
       const key = taskJobId(task.item_id)
       yield* ensureTaskBudget(sql, task.item_id, 7)
-      // The Task's own wake goes: the run below is the Automation's, asked for by hand.
       yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${key}`
       yield* storeUnderKey(yield* makeAutomation, key)
       yield* requestRun(key)

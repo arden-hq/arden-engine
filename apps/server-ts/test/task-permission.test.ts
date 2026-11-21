@@ -9,12 +9,6 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 import { startJob } from "./fixtures/job-runs.js"
 import { claim, makeTask } from "./work-fixtures.js"
 
-// A Task worker's permissions, read through the native ApprovalPolicyStore for a
-// real Task (in a Space, and loose) whose private worker was claimed and started.
-// Every row is made up. What the native server did (tracked space-jobs.ts upsertJob):
-// tool scope `space` for every Task; auto approve on for a Task in a Space, off for a
-// loose one. A Task in a Space follows its Space (the default approval mode); a loose
-// Task asks.
 const OWNER_CHAT = "owner-chat"
 
 type Kind = "space" | "loose"
@@ -29,10 +23,6 @@ const makeLooseTask = Effect.gen(function* () {
   )
 })
 
-/**
- * The old definition row a 179 server kept for the Task, made stale on purpose: every
- * tool, auto approve on, and another Space. No reader may take it as the Task's policy.
- */
 const poison = (itemId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -82,14 +72,11 @@ const permissionCase = (kind: Kind, poisoned: boolean) =>
         }
       })
     const atDefault = yield* read()
-    // The owner changes the default approval mode; a Task in a Space follows it now.
     yield* policy.setDefaultMode("allow")
     const atAllow = yield* read()
     const setByHand = yield* tried(
       policy.setSession({ sessionId: started.sessionId, mode: "allow" })
     )
-    // The person finishes the Task while its worker runs: the run's authority ends,
-    // whatever the mode says.
     const [current] = yield* sql<{ readonly updated_at: string }>`
       SELECT updated_at FROM space_tasks WHERE item_id = ${task.item_id}`
     yield* (yield* WorkStore).update(

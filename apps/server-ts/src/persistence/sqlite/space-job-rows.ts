@@ -12,7 +12,6 @@ export interface SpaceRow {
   readonly page_path: string | null
   readonly inference_enabled: number
   readonly archived_at: string | null
-  /** Its review may run (`reviewMayRunSql`): 1 or 0. */
   readonly review_may_run: number
 }
 

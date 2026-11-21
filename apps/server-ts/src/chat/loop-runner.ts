@@ -481,8 +481,6 @@ const makeSystemContextMiddleware = (
         ? [message.tool_call_id]
         : []
     )
-    // A call refused because its Task's direction changed makes the next request read the
-    // context again, so the model is shown the direction as it is now.
     const key = JSON.stringify([
       userIndex,
       user?.message_id,
@@ -533,10 +531,6 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
       window === undefined
         ? undefined
         : chatStepOutputLimit({ context: window, delivery: outputLimitDelivery(capabilities) })
-    /**
-     * This run's calls, its scripts' nested calls included, refused because their Task's
-     * direction changed. The context cache key: the next request shows the Task as it is now.
-     */
     let directionReviews = 0
     const counted = (result: ToolResult): ToolResult => {
       if (result.host?.["not_run"] === DIRECTION_REVIEW_HOST.not_run) directionReviews += 1
@@ -584,7 +578,6 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
       request: ToolCallRequest,
       operation: (request: ToolCallRequest) => Promise<ToolResult> | ToolResult
     ): Promise<ToolResult> => {
-      // `messages` is the live history: read the producing turn before any await.
       const shown =
         request.messages === undefined
           ? undefined

@@ -9,8 +9,6 @@ import {
 } from "../src/tools/tool-catalog.js"
 import { EmptyParametersSchema } from "../src/tools/automation-tool-schema.js"
 
-// How a broad-scope run finds a tool is written on the tool (`discovery`), and the
-// catalog, the chat preloads and the boot check read it there. Made-up tools; no server.
 const tool = (
   name: string,
   extra: { readonly discovery?: unknown; readonly source?: string; readonly hosted?: true } = {}
@@ -46,8 +44,6 @@ it("the fact is the definition's own field, and no model entry or event metadata
     "always_loaded"
   )
   expect(discoveryOf(tool("made_up_none").definition)).toBeUndefined()
-  // The model's entry carries metadata as `meta.host`, which the loop copies into each
-  // call's ToolStarted event; neither has the field.
   const entry = grouped.entry(schema)
   expect(JSON.stringify(entry)).not.toContain("discovery")
   expect(Object.keys(entry.meta.host ?? {})).not.toContain("discovery")
@@ -78,7 +74,6 @@ it("a broad run defers by the definition's fact; MCP tools get their server's gr
     tool("made_up_grouped", { discovery: { group: "made_up" } }),
     tool("made_up_none"),
     tool("made_up_hosted", { hosted: true }),
-    // Made-up MCP metadata: the group is the server name, sanitized; never `discovery`.
     tool("mcp__my_server__lookup", { source: "mcp:my.server/1" })
   ]
   const entries = tools.map((each) => each.entry(schema))
@@ -98,7 +93,6 @@ it("a broad run defers by the definition's fact; MCP tools get their server's gr
     { name: "made_up_hosted", deferred: false, group: undefined },
     { name: "mcp__my_server__lookup", deferred: true, group: "mcp_my_server_1" }
   ])
-  // A narrow scope defers nothing and adds no group.
   expect(applyToolCatalog(entries, context("worker"))).toEqual(entries)
 })
 

@@ -32,8 +32,6 @@ export const withArrivalsDatabase = async (
   }
 }
 
-/** The real Chat sender over the real stores of one database file. Only the
- *  model runner is supplied by the test. */
 export const arrivalsLayer = (options: {
   readonly filename: string
   readonly runner: ChatRunner
@@ -59,7 +57,6 @@ export const arrivalsLayer = (options: {
     Layer.provideMerge(SqliteClient.layer({ filename: options.filename }))
   )
 
-/** A model turn that stays open until its run is stopped. */
 export const openTurn: ChatRunner = async function* ({ signal }) {
   await new Promise<void>((resolve) => {
     signal.addEventListener("abort", () => resolve(), { once: true })
@@ -67,7 +64,6 @@ export const openTurn: ChatRunner = async function* ({ signal }) {
   throw new Error("The test closed this turn")
 }
 
-/** The server takes one admission, then stops before it launches the run. */
 export const stopsAfterOneAdmission = Layer.effect(
   ServerLifecycle,
   Effect.gen(function* () {
@@ -77,8 +73,6 @@ export const stopsAfterOneAdmission = Layer.effect(
   })
 )
 
-/** A chat whose last turn ended on a lasting model error holds unattended
- *  input: the next arrival is stored without a run. */
 export const holdChat = Effect.fn(function* (
   sql: SqlClient.SqlClient,
   chat: ChatWriteStore["Service"],
@@ -107,9 +101,6 @@ export const insertOriginChat = (sql: SqlClient.SqlClient) => sql`INSERT INTO se
     session_id, public_ref, name, started_at, last_activity, session_type
   ) VALUES ('origin', 'origin-ref', 'Origin', ${at}, ${at}, 'chat')`
 
-/** One finished worker run under `parentId`, with its pending arrival bound
- *  for `sessionId`. A worker whose parent is the destination steers that
- *  chat's open turn; any other worker waits for it. */
 export const insertPendingArrival = Effect.fn(function* (
   sql: SqlClient.SqlClient,
   input: {
@@ -131,7 +122,6 @@ export const insertPendingArrival = Effect.fn(function* (
     ${source}, ${`${source}-ref`}, ${source}, ${at}, ${at},
     'agent', ${input.parentId}, ${`${source}-parent-run`}, ${`${source}-spawn`}
   )`
-  // An answer is withdrawn once the asking run has no allowance left.
   const budgetId = `${runId}-budget`
   yield* sql`INSERT INTO execution_budgets (budget_id) VALUES (${budgetId})`
   yield* sql`INSERT INTO chat_runs (
@@ -157,8 +147,6 @@ export const insertPendingArrival = Effect.fn(function* (
   return deliveryId
 })
 
-/** What the arrivals adapter sends for a worker result: its own mapping, so a
- *  replay built here has the same request hash as the admission it replays. */
 export const resultSendInput = (delivery: RunDelivery): ChatSendInput => toSendInput(delivery)
 
 export const readDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
@@ -176,9 +164,6 @@ export const readDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
 
 export const strandedAt = "2026-11-01T00:00:05.000Z"
 
-/** Seeds a state the schema permits: the receipt is stored and the arrival
- *  row is pending again, with retry fields set. The test writes this state
- *  itself; nothing here shows the server can reach it. */
 export const strandDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
   sql`UPDATE automation_deliveries SET status = 'pending', delivered_at = NULL,
       destinations = '[]', attempt_count = 3, next_attempt_at = ${strandedAt},
@@ -195,7 +180,6 @@ export const stranded = (sessionId: string) => ({
   session_id: sessionId
 })
 
-/** How many receipts, transcript messages and runs one arrival left in a chat. */
 export const admissionCounts = Effect.fn(function* (
   sql: SqlClient.SqlClient,
   sessionId: string,

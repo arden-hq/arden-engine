@@ -60,8 +60,6 @@ export const cooldownEnd = Effect.fn("AutomationQueue.cooldownEnd")(function* (
   sql: SqlClient.SqlClient,
   automationId: string
 ) {
-  // An Automation's cooldown is on its definition, a Space review's in its
-  // settings. A Task has none.
   const rows = yield* sql<{ readonly minutes: number | null; readonly ended: string | null }>`
     SELECT COALESCE(
         (SELECT task.cooldown_minutes FROM scheduled_tasks AS task
@@ -109,8 +107,6 @@ export const enqueue = Effect.fn("AutomationQueue.enqueue")(function* (
       RETURNING task_id`
     if (claimed.length === 0) return false
   }
-  // What the owner is decides its batch window: an Automation's definition, or
-  // the Space a review's key names. A Task has no window.
   const jobs = yield* sql<{ readonly purpose: string; readonly handler: string | null }>`
     SELECT purpose, handler FROM scheduled_tasks
     WHERE task_id = ${entry.automationId} AND purpose IN ('user_automation', 'system')

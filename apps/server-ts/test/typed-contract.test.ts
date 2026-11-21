@@ -10,10 +10,6 @@ import { sessionPresentations } from "../src/persistence/sqlite/session-presenta
 import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// New in typed-execution: what each migrated reader says of a Task, and what
-// settlement does when the Task's row is gone. Overlay only; the tracked
-// modules keep a definition copy for a Task, so these do not run as a control.
-
 const LATER = Date.now() + 60 * 60_000
 
 const claim = (workerId: string, limit: number, now = LATER) =>
@@ -79,7 +75,6 @@ it("each reader of a Task's owner reads the Task's own row", async () => {
         enabled: 1,
         internalRef: true,
         held: null,
-        // The Task's private chat is there before the first claim, and the claim keeps it.
         chat: outcome.chat
       }
     ],
@@ -109,7 +104,6 @@ it("an attempt whose Task row is gone still ends, and its chat is still a Task w
       const [lease] = yield* claim("first", 10)
       if (lease === undefined || lease.payload.sessionId === null)
         throw new Error("The Task was not claimed with a chat")
-      // The row is removed under the running attempt, as no store method would.
       yield* sql`DELETE FROM space_tasks WHERE item_id = ${task.item_id}`
       const afterDelete = yield* sql<{ readonly status: string }>`
         SELECT status FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
@@ -156,10 +150,8 @@ it("an attempt whose Task row is gone still ends, and its chat is still a Task w
     })
   )
   expect(outcome).toEqual({
-    // Nothing closes the attempt or its queue row when the row is deleted by hand.
     afterDelete: ["running"],
     queuedAfterDelete: 1,
-    // The fence is the queue row and the attempt, so the ending is still recorded.
     settled: "settled",
     attempt: [
       {

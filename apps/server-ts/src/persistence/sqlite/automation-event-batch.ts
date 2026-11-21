@@ -508,7 +508,6 @@ export const makeEventScreens = (
           const { run_only_if: _top, ...context } = fenced.context
           const triggerContext = renderEvents(
             screened,
-            // The cooldown set on the owner now; a Task and a deleted owner have none.
             textOptions(
               fenced.context,
               input.now,

@@ -12,10 +12,6 @@ import { freePage } from "./fixtures/free-space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { LATER, claim, type Lease } from "./work-fixtures.js"
 
-// The run chat the normal worker uses for a Space review: `prepareRunSession` makes a
-// per-attempt child chat under the review's private trunk, and the chat run starts
-// there under the lease. Every row is made up. The guard makes any write of a review
-// definition row fail; the second case keeps an old row, as migration 180 does.
 const REVIEW = spaceJobId("space-1")
 
 const guardDefinitions = Effect.gen(function* () {
@@ -26,7 +22,6 @@ const guardDefinitions = Effect.gen(function* () {
       BEGIN SELECT RAISE(ABORT, 'reject_synthetic_space_review: a Space review definition row was written'); END`)
 })
 
-/** Starts the review's chat run in one chat under one lease, as `startAutomationRun` does. */
 const startIn = (lease: Lease, sessionId: string, id: string) =>
   Effect.gen(function* () {
     const chat = yield* ChatWriteStore
@@ -108,8 +103,6 @@ const runnerCase = (keepOldRow: boolean) =>
     const prepared = yield* prepare(first)
     const preparedAgain = yield* prepare(first)
     const child = prepared.kind === "prepared" ? (prepared.sessionId ?? "") : ""
-    // A forged sibling: a chat under the same trunk, for the review's key, named for
-    // another attempt. Admission must refuse it.
     yield* sql`INSERT INTO sessions (session_id, public_ref, name, started_at, last_activity,
         session_type, origin_automation_id, parent_session_id, space_id)
       VALUES (${`${trunk}::i999999`}, 'forged-ref', NULL, '2026-11-01T00:00:00.000Z',
@@ -158,8 +151,6 @@ const runnerCase = (keepOldRow: boolean) =>
         }
       })
     )
-    // A second change: a new attempt, its own child under the same trunk. The first
-    // attempt's child is refused to it.
     yield* editByHand(task.item_id, "Edited by hand again")
     const second = (yield* claim("second", 10, LATER + 2 * 60 * 60_000)).find(
       (lease) => lease.payload.automationId === REVIEW

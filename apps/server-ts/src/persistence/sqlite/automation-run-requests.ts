@@ -71,11 +71,6 @@ const HEADLINE_BY_SOURCE: Readonly<Record<AutomationQueueSource, string>> = {
   wake: "Woken to continue"
 }
 
-/**
- * Where a run chat goes, from its trunk row and the owner as stored now. An
- * Automation's child is where its trunk is (its definition names no Space). A
- * Space review's is in its Space, and its trunk must be the review's private chat.
- */
 const childSource = (
   trunkRow: { readonly space_id: string | null; readonly chat_model: string | null } | undefined,
   owner: WorkOwner | undefined,

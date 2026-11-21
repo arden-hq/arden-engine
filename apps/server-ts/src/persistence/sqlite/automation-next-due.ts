@@ -19,7 +19,6 @@ export const queueNextDueAt = Effect.fn("SqliteAutomationStore.nextDueAt")(funct
           SELECT lease_expires_at FROM automation_event_queue
           WHERE claimed_at IS NOT NULL AND lease_expires_at > ${at}
           UNION ALL
-          -- Only an Automation has a schedule; an old Task or review row is none.
           SELECT next_run_at FROM scheduled_tasks
           WHERE purpose IN ('user_automation', 'system') AND enabled = 1 AND next_run_at > ${at}
           UNION ALL

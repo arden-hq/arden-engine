@@ -227,7 +227,6 @@ export class WorkStore extends Context.Service<
       expectedUpdatedAt: string,
       patch: UpdateSpaceTaskPatch,
       runId?: string,
-      /** The durable call asking: its stored plan is checked in the write's transaction. */
       toolCallId?: string,
       actor?: "user"
     ) => Effect.Effect<SpaceTask, WorkStoreError | TaskDirectionChanged>

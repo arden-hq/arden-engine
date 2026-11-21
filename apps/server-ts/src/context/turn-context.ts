@@ -271,13 +271,9 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
   const authorityLine = renderAuthority(authority)
   const authorityText =
     authorityLine === undefined ? undefined : renderPromptSection("Run authority", authorityLine)
-  // A Task run is shown its own Task's contract and state record: the same read its
-  // direction receipt is made from, so what the model sees is what its calls are checked
-  // against. A chat with no Task run shows the chat's Task.
   const contractSections = taskContractSections(
     context.task?.contract ?? context.chatTask?.task.contract
   )
-  // Title and detail are the direction section's; the continuation keeps the rest.
   const {
     contract: _contract,
     text: _text,
@@ -390,8 +386,6 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
     undefined
   )
   const spaceMemory = space === undefined ? undefined : { view: space.view, page: space.page }
-  // The Space renders once, where it first did: here only when recall needs the page's sent
-  // prefix, otherwise at assembly, so a render that throws still throws after Memory is read.
   const preparedSpace =
     input.memory === undefined || spaceMemory?.page === undefined
       ? undefined
@@ -458,10 +452,6 @@ export const prefetchTurnMemory = Effect.fn("Context.prefetchTurnMemory")(functi
   return { space, memoryContext }
 })
 
-/**
- * The run's own Task (its binding) as its owner has it now. Its receipt is what a call this
- * turn asks for is checked against before its effect (tool admission).
- */
 const taskDirectionSection = (
   task: Pick<TaskWorkerSnapshot, "itemId" | "text" | "body" | "contract"> | undefined
 ): ReadonlyArray<RuntimeSection> =>

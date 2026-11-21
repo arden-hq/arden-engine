@@ -106,8 +106,6 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
       coalesce(json_extract(a.origin, '$.automation_id'), json_extract(a.origin, '$.item_id'),
         json_extract(a.origin, '$.space_id')) AS entity
     FROM automation_runs a
-    -- Only an Automation owns its definition row. A Task is named by its own row, and a
-    -- Space review's key names its Space; a definition row kept under either is not read.
     LEFT JOIN scheduled_tasks job ON job.task_id = a.task_id
       AND job.purpose IN ('user_automation', 'system')
     LEFT JOIN space_tasks task ON task.item_id = a.item_id

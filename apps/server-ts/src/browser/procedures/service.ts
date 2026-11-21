@@ -460,7 +460,6 @@ export class BrowserProcedures extends Context.Service<
               args,
               changesState: false,
               source: "_code",
-              // The procedure's script keeps the plan of the browser_procedure call.
               plan: { kind: "call", toolCallId: ctx.toolCallId }
             },
             async () => {

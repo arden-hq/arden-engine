@@ -38,10 +38,6 @@ import {
 const FIRST_LOOK = Duration.days(3)
 const LATE_SLACK = Duration.days(2)
 
-/**
- * The job whose chat asks: an Automation's definition, or the Space a review's key
- * names. A review's old definition row is not read.
- */
 const askingOwnerJoin = (sql: SqlClient.SqlClient) => sql`
     LEFT JOIN scheduled_tasks AS job ON job.task_id = asking.origin_automation_id
       AND job.purpose != 'space_review'

@@ -1,18 +1,5 @@
 import type { Migration } from "./index.js"
 
-/**
- * A Task's queue row that a worker held across migration 178 gets back the hold start
- * its Task's old job definition stored (`scheduled_tasks.job_held_since`). The next
- * claim of that row overwrites the old value, so it is read here, before any work.
- *
- * Only a stored start is carried. The row must be held, name one Task that exists,
- * name the running attempt of that Task, and be the only held row of that Task; the
- * stored start must not be later than the row's last heartbeat. Any other row keeps
- * NULL: its start is not known, and neither `claimed_at` nor the attempt's start says it.
- *
- * Writes `hold_started_at` and nothing else. At most one row per held Task matches,
- * so this is a migration and not a backfill.
- */
 export const taskHoldStartLegacy: Migration = {
   version: 179,
   name: "task_hold_start_legacy",

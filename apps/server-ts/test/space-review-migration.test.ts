@@ -4,9 +4,6 @@ import { baselineStatements } from "../src/persistence/migrations/0001_baseline.
 import { BASELINE_VERSION, migrations } from "../src/persistence/migrations/index.js"
 import { pendingMigrationSteps } from "../src/persistence/migrations/runner.js"
 
-// Migration 180 on a schema-179 database that the old review rows describe. Every row
-// is made up. The rows are written with SQL in the shape the 179 server wrote them
-// (space-jobs.ts upsertJob and the claim), because no 179 server runs in this test.
 const T0 = "2026-11-02T10:00:00.000Z"
 const T1 = "2026-11-02T10:00:30.000Z"
 const LATER = "2026-11-02T10:01:30.000Z"
@@ -28,7 +25,6 @@ const seed179 = (database: DatabaseSync) => {
   const chat =
     database.prepare(`INSERT INTO sessions (session_id, public_ref, name, started_at, last_activity, session_type, origin_automation_id)
     VALUES (?, ?, ?, ?, ?, 'channel', ?)`)
-  // Two channels for the configured review. The old row names the NEWER one.
   chat.run(
     "older-chat",
     "older-ref",
@@ -81,9 +77,7 @@ const seed179 = (database: DatabaseSync) => {
     "plain-chat",
     "plain"
   )
-  // A cooldown of zero is a valid stored setting (NonNegativeInt in the protocol).
   review.run("space:zero", "internal-job~zero", "Zero worker", null, "fresh", null, 0, null, "zero")
-  // A review row whose Space is gone, and one whose chat is gone: nothing to carry.
   review.run(
     "space:gone",
     "internal-job~gone",
@@ -95,7 +89,6 @@ const seed179 = (database: DatabaseSync) => {
     "plain-chat",
     "gone"
   )
-  // The configured review is held: a claimed row, its running attempt, the hold start T0 on the old row.
   const attempt = database
     .prepare(`INSERT INTO automation_runs (task_id, automation_ref, origin, purpose, context_mode,
       started_at, status, claim_count)

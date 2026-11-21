@@ -116,7 +116,6 @@ export const WorkHandlers = HttpApiBuilder.group(
       .handle("comment", ({ params, payload }) =>
         store
           .comment({ kind: "item", itemId: params.itemId }, payload)
-          // The owner's own write names no tool call, so it has no plan to go stale.
           .pipe(Effect.catchTag("TaskDirectionChanged", Effect.die), Effect.catch(failStore))
       )
       .handle("update", ({ params, payload }) => {

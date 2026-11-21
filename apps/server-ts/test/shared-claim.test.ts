@@ -26,7 +26,6 @@ const makeTask = Effect.gen(function* () {
     { kind: "space", spaceId: "space-1" },
     { key: "background", text: "In the background" }
   )
-  // The review's own wake is not under test here.
   yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${spaceJobId("space-1")}`
   return task
 })
@@ -102,7 +101,6 @@ it("a Task's older second wake waits for its running one, and does not hold an A
       const key = taskJobId(task.item_id)
       const [running] = yield* claim("first", 10)
       if (running === undefined) throw new Error("The Task was not claimed")
-      // The owner's edit is the second wake; it is made older than every other row.
       yield* (yield* WorkStore).update({ kind: "item", itemId: task.item_id }, task.updated_at, {
         text: "In the background, edited"
       })
@@ -112,7 +110,6 @@ it("a Task's older second wake waits for its running one, and does not hold an A
       if (waiting.length !== 1) throw new Error(`Expected one waiting wake, got ${waiting.length}`)
       const authored = yield* makeAutomation
       const whileRunning = yield* claim("second", 10)
-      // An expired lease still keeps the sibling out; only the same row comes back.
       const ofTask = (leases: Effect.Success<ReturnType<typeof claim>>) =>
         leases.filter((lease) => lease.payload.automationId === key)
       const afterExpiry = ofTask(yield* claim("third", 10, running.expiresAt + 1))

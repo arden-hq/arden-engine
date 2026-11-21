@@ -310,7 +310,6 @@ export const reconcileEndings = Effect.fn("RunEnding.reconcile")(function* (
   }
 })
 
-// A stored ending goes where its run's address points now, not where it pointed when it ended.
 const deliverStored = Effect.fn("RunEnding.deliverStored")(function* (
   sql: SqlClient.SqlClient,
   record: EndingRecord

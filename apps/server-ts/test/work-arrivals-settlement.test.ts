@@ -80,8 +80,6 @@ describe("the work arrivals adapter", () => {
             createdAt: "2026-11-01T00:00:04.000Z"
           })
 
-          // The busy chat's batch has delivered arrivals; the held chat's
-          // batch only stored a message, which starts no run.
           expect(yield* drainOutbox(workArrivals(work, chat))).toBe(1)
 
           const admitted = yield* receipts(sql, busy.sessionId)
@@ -116,7 +114,6 @@ describe("the work arrivals adapter", () => {
             )
           ).toEqual([refused])
 
-          // The same arrival sent alone has no batch to exempt the open turn.
           const alone = yield* insertPendingArrival(sql, {
             name: "alone",
             sessionId: busy.sessionId,

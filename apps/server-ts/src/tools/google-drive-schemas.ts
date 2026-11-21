@@ -141,7 +141,6 @@ export const SheetWriteParametersSchema = Schema.Struct({
     )
 })
 
-/** What the Sheets API answers to a range read. */
 export const sheetRange = decodeGoogle(
   Schema.Struct({
     range: Schema.optionalKey(Schema.String),
@@ -150,7 +149,6 @@ export const sheetRange = decodeGoogle(
   { service: "google_drive", label: "sheet range" }
 )
 
-/** What the Sheets API answers to a sheet write. */
 export const sheetUpdate = decodeGoogle(
   Schema.Struct({
     updatedRange: Schema.optionalKey(Schema.String),

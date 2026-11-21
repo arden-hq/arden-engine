@@ -236,12 +236,6 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     )
     if (begun._tag === "NotAdmitted") {
       if (begun.authority === "settling") return failedToolResult(SETTLING)
-      // The attempt may not act again. It stops the way a cancelled run stops, so no tool
-      // failure holds its chat and a later attempt there can run. A detached call (an
-      // approved card) belongs to a run that already ended: only the call is refused.
-      // cancelAgent already treats an ended run (not_found) as stopped, and commits before
-      // it aborts: any other failure means the stop was not recorded, which is a durable
-      // failure, not a stop.
       if (!options.detached)
         yield* host.cancelAgent({ runId: run.runId }).pipe(
           Effect.catchCause((cause) =>
@@ -280,8 +274,6 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     const complete = (result: ToolResult) =>
       toolStore.complete(identity, result).pipe(Effect.catchCause(() => uncertain))
 
-    // A state-changing call starts only if the plan stored with it still matches its Task's
-    // direction. A read never acts, so it is never refused for a changed Task.
     const admit = (): Promise<ToolResult | undefined> =>
       request.changesState
         ? runPromise(

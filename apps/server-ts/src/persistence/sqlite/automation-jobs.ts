@@ -179,7 +179,6 @@ export const makeAutomationJobs = ({
     const due = yield* sql<{ readonly task_id: string; readonly next_run_at: string }>`
       SELECT task_id, next_run_at
       FROM scheduled_tasks AS task
-      -- Only an Automation has a schedule; an old Task or review row is none.
       WHERE purpose IN ('user_automation', 'system') AND enabled = 1
         AND next_run_at IS NOT NULL
         AND next_run_at <= ${now}
@@ -264,10 +263,6 @@ export const makeAutomationJobs = ({
                 OR admitted.chat_run_id IS NOT NULL
                 OR (json_extract(queue.context, '$.person_change_at') IS NOT NULL
                   AND NOT ${hasPendingTaskApproval(sql, sql`item.item_id`)}))
-              -- One owner works one row at a time. An Automation's definition
-              -- says so in job_held_since. A Task and a review say so with the
-              -- claimed row itself: no other wake of it starts, and that row
-              -- alone comes back when its lease runs out.
               AND CASE WHEN task.task_id IS NOT NULL THEN
                 (queue.claimed_at IS NULL AND ${jobHeldSince(sql, "task")} IS NULL)
                 OR
@@ -320,7 +315,6 @@ export const makeAutomationJobs = ({
                 candidate.task_id
               )
             }
-            // A new candidate has no attempt yet: the claim below writes it from the owner.
             const bound =
               candidate.bound === null
                 ? undefined
@@ -333,8 +327,6 @@ export const makeAutomationJobs = ({
             let sessionId: string | null
             switch (owner.kind) {
               case "task":
-                // A Task's attempt keeps the private chat it was given. Only a new
-                // attempt may be given a new one.
                 sessionId =
                   candidate.admitted_session_id ??
                   owner.chatId ??
@@ -347,8 +339,6 @@ export const makeAutomationJobs = ({
                   }))
                 break
               case "space_review":
-                // A review always works in its own private chat. One that has
-                // none, or whose chat was archived, is given a new one.
                 sessionId =
                   work.chatId !== null && (yield* isLiveChat(work.chatId))
                     ? work.chatId
@@ -403,9 +393,6 @@ export const makeAutomationJobs = ({
             }
             const stamp = nextLeaseStamp(input.now, candidate.claimed_at)
             const startedAt = work.heldSince ?? nowText
-            // A Task's or a review's hold starts with the claim of a free row.
-            // Taking back a row whose lease ran out keeps the start it has,
-            // unknown included.
             const rowHoldStart = candidate.claimed_at === null ? nowText : candidate.hold_started_at
             yield* sql`
             UPDATE automation_event_queue
@@ -612,8 +599,6 @@ export const makeAutomationJobs = ({
     return yield* writer
       .transact(
         Effect.gen(function* () {
-          // Only an Automation's definition holds its rows. An old definition
-          // row of a Task or a review holds nothing, so its rows are left alone.
           const released = yield* sql<{ readonly id: number }>`
         UPDATE automation_event_queue
         SET claimed_at = NULL, hold_started_at = NULL, lease_expires_at = NULL
@@ -712,8 +697,6 @@ export const makeAutomationJobs = ({
           }
           const bound = yield* decodeOwnedAttempt(row, owner, "renew")
           const work = claimedWork(owner)
-          // A Task's attempt works in the chat it is pinned to. A definition's
-          // works in the chat set on it now.
           const sessionId = owner.kind === "task" ? row.admitted_session_id : work.chatId
           if (sessionId === null && work.handler === null) throw new JobLeaseLostError(input.id)
           const context = yield* decodeQueueContext(row, "renew")

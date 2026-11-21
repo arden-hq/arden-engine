@@ -42,7 +42,6 @@ export interface SpaceMemoryInput {
   readonly page: SpacePageInput | undefined
 }
 
-/** A Space with its one render: the recall prefix and the sent text both read it. */
 export interface PreparedSpaceMemory extends SpaceMemoryInput {
   readonly rendered: ReturnType<typeof renderSpaceContext>
 }

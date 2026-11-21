@@ -35,12 +35,6 @@ export interface ToolExecutionApprovalContext {
 export type ToolExecutionBeginResult =
   | { readonly _tag: "Started"; readonly approval?: ToolExecutionApprovalContext }
   | { readonly _tag: "Recovered"; readonly outcome: ToolExecutionOutcome }
-  /**
-   * The run's Task binding may no longer act, so nothing was recorded or run. An expected
-   * answer, not a failed write. "settling": the run finished its own Task and may only
-   * reply. "revoked": the attempt lost its authority (the Task was stopped, held, taken
-   * back or reassigned, or the run's policy or budget ended).
-   */
   | { readonly _tag: "NotAdmitted"; readonly authority: "settling" | "revoked" }
 
 export interface ToolApprovalPrompt {
@@ -206,16 +200,9 @@ export class ToolExecutionStore extends Context.Service<
       identity: ToolExecutionIdentity,
       options?: {
         readonly backgrounded?: ReadonlySet<string>
-        /** Stored once with a new call; omitted, the call has no plan (`ToolCallPlan`). */
         readonly plan?: ToolCallPlan
       }
     ) => Effect.Effect<ToolExecutionBeginResult, ToolExecutionStoreError>
-    /**
-     * Whether a started call's stored plan still matches its run's Task as it is now.
-     * "current" also for a run with no Task. "needs_review" when the direction changed, or
-     * when a Task run's call has no stored plan (it was never shown one): the call must not
-     * start, and a new model turn decides again.
-     */
     readonly admitPlanned: (
       call: Pick<ToolExecutionIdentity, "runId" | "toolCallId">
     ) => Effect.Effect<"current" | "needs_review", ToolExecutionStoreError>

@@ -37,7 +37,6 @@ const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(RunAuthori
 export const storedAuthority = (json: string | null): RunAuthority | undefined =>
   json === null ? undefined : Option.getOrUndefined(decodeStored(json))
 
-/** The stored owner of one key; null when there is none or it no longer decodes. */
 const executionOwner = Effect.fn("RunAuthority.executionOwner")(function* (
   sql: SqlClient.SqlClient,
   key: string | null

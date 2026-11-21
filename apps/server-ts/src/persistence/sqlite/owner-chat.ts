@@ -7,25 +7,15 @@ import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
 import { spaceJobId } from "../space-job-id.js"
 
-/**
- * The run chat one attempt gets under its owner's private trunk
- * (`prepareRunSession`): one per attempt, made once, so a reclaim finds it again.
- */
 export const attemptRunSessionId = (trunk: string, attemptId: number): string =>
   `${trunk}::i${attemptId}`
 
-/** `attemptRunSessionId` in SQL, for a trunk and an attempt id named in the query. */
 export const attemptRunSessionIdSql = (
   sql: SqlClient.SqlClient,
   trunk: Statement.Fragment,
   attemptId: Statement.Fragment
 ): Statement.Fragment => sql`(${trunk} || '::i' || ${attemptId})`
 
-/**
- * Records a Space review's private chat (`space_review_chats`). Its sync gives it
- * one only when it has none ("keep"). A claim that finds that chat archived gives
- * it a new one ("replace"). Nothing else writes the pointer.
- */
 export const recordReviewChat = (
   sql: SqlClient.SqlClient,
   spaceId: string,
@@ -39,12 +29,6 @@ export const recordReviewChat = (
         ON CONFLICT(space_id) DO UPDATE SET session_id = excluded.session_id`
   ).pipe(Effect.asVoid)
 
-/**
- * A Space rename renames its review's private chats that still carry the name the
- * review had (`<old Space name> worker`). A chat a person renamed keeps its name, as
- * `chatsFollowJobName` (job-labels.ts) does for a job's chats. Called where the old
- * and the new Space name are both known: the rename itself.
- */
 export const followSpaceName = (
   sql: SqlClient.SqlClient,
   spaceId: string,
@@ -59,10 +43,6 @@ export const makeOwnerChats = (
   sql: SqlClient.SqlClient,
   sessionEvents: SessionLifecycleEvents["Service"]
 ) => {
-  /**
-   * A new private chat for one owner. An Automation records it as its set chat
-   * and a review as its private chat. A Task's is the oldest live one for its key.
-   */
   const openChat = Effect.fn("SqliteAutomationStore.openChat")(function* (chat: {
     readonly owner: WorkOwner
     readonly name: string

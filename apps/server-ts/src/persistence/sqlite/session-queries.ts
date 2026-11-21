@@ -142,8 +142,6 @@ export const makeSessionQueries = ({
         corruption(row.session_id, "Session metadata.last_input_tokens is corrupt", cause)
       )
     )
-    // A Space review is named by its key and owned by its Space; its old definition
-    // row is not read. Any other job keeps the purpose its row stores.
     const reviewOwner =
       row.origin_automation_id === null
         ? undefined
