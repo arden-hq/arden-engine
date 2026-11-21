@@ -17,7 +17,6 @@ import {
   type TurnWorkResponse
 } from "@arden-hq/protocol/chat"
 import { ToolOutcomeSchema } from "@arden-hq/protocol/effect/common"
-import { SkillNameSchema } from "@arden-hq/protocol/effect/skills"
 import {
   AgentResultSchema,
   ChatHandoffSourceSchema,
@@ -395,10 +394,6 @@ const projectMessage = (
   const replyTo = Option.getOrUndefined(
     Schema.decodeUnknownOption(StoredReplySchema)(envelope.replyTo)
   )
-  const recipe =
-    record.role === ROLE.user
-      ? Option.getOrUndefined(Schema.decodeUnknownOption(SkillNameSchema)(envelope.recipe))
-      : undefined
   const questionAnswer =
     record.role === ROLE.user
       ? Option.getOrUndefined(
@@ -461,7 +456,6 @@ const projectMessage = (
             content: quoted.content
           }))
         }),
-    ...(recipe === undefined ? {} : { recipe }),
     ...(questionAnswer === undefined ? {} : { question_answer: questionAnswer }),
     ...(connection === undefined ? {} : { connection }),
     ...(fromChat === undefined ? {} : { from_chat: fromChat }),

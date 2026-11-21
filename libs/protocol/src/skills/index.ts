@@ -1,12 +1,10 @@
 import { decoderFor, runBoundary, strict } from "../common/boundary.js"
-import type { SkillRecipe, SkillRecipeDraftRequest } from "./contracts.js"
 import {
   MarketplaceSkillListResponseSchema,
   SkillContentSchema,
   SkillSchema,
   SkillInstallReceiptSchema,
   SkillListResponseSchema,
-  SkillRecipeDraftSchema,
   SkillRemoveReceiptSchema,
   SkillToggleReceiptSchema,
   encodeMarketplaceSkillInstallRequestEffect,
@@ -14,9 +12,6 @@ import {
   encodeSetSkillEnabledRequestEffect,
   encodeSkillContentPathEffect,
   encodeSkillItemPathEffect,
-  encodeSkillRecipeDraftRequestEffect,
-  encodeSkillRecipePathEffect,
-  encodeSkillRecipeRequestEffect,
   SKILL_NAME_PATTERN
 } from "./schema.js"
 
@@ -26,7 +21,6 @@ export * from "./contracts.js"
 export const skillDecoders = {
   list: decoderFor(SkillListResponseSchema, "Invalid skill list", strict),
   skill: decoderFor(SkillSchema, "Invalid skill", strict),
-  recipeDraft: decoderFor(SkillRecipeDraftSchema, "Invalid recipe draft", strict),
   marketplace: decoderFor(
     MarketplaceSkillListResponseSchema,
     "Invalid skill marketplace response",
@@ -40,16 +34,6 @@ export const skillDecoders = {
 
 /** Semantic inputs become strict reusable JSON request bodies. */
 export const skillRequests = {
-  recipe(recipe: SkillRecipe): string {
-    return runBoundary(encodeSkillRecipeRequestEffect(recipe), "Invalid recipe request", "encode")
-  },
-  recipeDraft(request: SkillRecipeDraftRequest): string {
-    return runBoundary(
-      encodeSkillRecipeDraftRequestEffect(request),
-      "Invalid recipe draft request",
-      "encode"
-    )
-  },
   installMarketplace(id: string): string {
     return runBoundary(
       encodeMarketplaceSkillInstallRequestEffect({ id }),
@@ -78,11 +62,6 @@ export const skillRoutes = {
     )
   },
   marketplaceInstall: "/skills/marketplace/install",
-  recipes: "/skills/recipes",
-  recipeDraft: "/skills/recipes/draft",
-  recipe(name: string): string {
-    return runBoundary(encodeSkillRecipePathEffect(name), "Invalid recipe route", "encode")
-  },
   item(name: string): string {
     return runBoundary(encodeSkillItemPathEffect(name), "Invalid skill route", "encode")
   },

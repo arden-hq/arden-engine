@@ -5,8 +5,6 @@ import type {
   SkillContent,
   SkillInstallReceipt,
   SkillListResponse,
-  SkillRecipeDraft,
-  SkillRecipeDraftRequest,
   SkillRemoveReceipt,
   SkillToggleReceipt
 } from "./contracts.js"
@@ -88,32 +86,6 @@ export const SkillContentBodySchema = Schema.String.check(
   )
 )
 
-export const SkillRecipeTitleSchema = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(80),
-  Schema.makeFilter((value) => (value === value.trim() ? undefined : "must be trimmed"))
-)
-
-export const SkillRecipeSpaceIdSchema = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(128)
-)
-
-export const SkillRecipeSchema = Schema.Struct({
-  title: SkillRecipeTitleSchema,
-  prompt: SkillContentBodySchema.check(Schema.isMinLength(1)),
-  space_id: Schema.NullOr(SkillRecipeSpaceIdSchema)
-})
-
-export const SkillRecipeDraftRequestSchema: Schema.Codec<SkillRecipeDraftRequest> = Schema.Struct({
-  text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_000))
-})
-
-export const SkillRecipeDraftSchema: Schema.Codec<SkillRecipeDraft> = Schema.Struct({
-  title: SkillRecipeTitleSchema,
-  prompt: SkillContentBodySchema.check(Schema.isMinLength(1))
-})
-
 export const SkillSchema: Schema.Codec<Skill> = Schema.Struct({
   name: SkillNameSchema,
   description: SkillDescriptionSchema,
@@ -122,8 +94,7 @@ export const SkillSchema: Schema.Codec<Skill> = Schema.Struct({
   builtin: Schema.Boolean,
   invocable: Schema.optionalKey(Schema.Literal(true)),
   origin: Schema.optionalKey(Schema.Literals(["arden", "shared"] as const)),
-  path: Schema.optionalKey(Schema.String),
-  recipe: Schema.NullOr(SkillRecipeSchema)
+  path: Schema.optionalKey(Schema.String)
 })
 
 export const SkillListResponseSchema: Schema.Codec<SkillListResponse> = Schema.Struct({
@@ -208,14 +179,6 @@ export const encodeSetSkillEnabledRequestEffect = (value: unknown) =>
     Effect.map(JSON.stringify)
   )
 
-export const encodeSkillRecipeRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(SkillRecipeSchema)(value, strict).pipe(Effect.map(JSON.stringify))
-
-export const encodeSkillRecipeDraftRequestEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(SkillRecipeDraftRequestSchema)(value, strict).pipe(
-    Effect.map(JSON.stringify)
-  )
-
 export const encodeMarketplaceSkillInstallRequestEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(MarketplaceSkillInstallInputSchema)(value, strict).pipe(
     Effect.map(JSON.stringify)
@@ -232,11 +195,6 @@ export const encodeMarketplaceSkillSearchPathEffect = (value: unknown) =>
 export const encodeSkillItemPathEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(SkillNameSchema)(value).pipe(
     Effect.map((name) => `${skillsCollectionPath}/${encodeURIComponent(name)}`)
-  )
-
-export const encodeSkillRecipePathEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(SkillNameSchema)(value).pipe(
-    Effect.map((name) => `${skillsCollectionPath}/recipes/${encodeURIComponent(name)}`)
   )
 
 export const encodeSkillContentPathEffect = (value: unknown) =>

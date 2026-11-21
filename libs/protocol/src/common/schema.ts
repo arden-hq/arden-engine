@@ -142,7 +142,6 @@ export const AppSettingsTabIdSchema = Schema.Literals([
   "usage",
   "tools",
   "skills",
-  "recipes",
   "permissions",
   "appearance",
   "storage",

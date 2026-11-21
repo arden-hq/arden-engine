@@ -1,26 +1,5 @@
 import type { JsonRecord } from "../common/json.js"
 
-/** A Skill the user sends instead of one Arden loads: its body is a prompt, and
- *  `{name}` spans in it are blanks the user fills in the composer. */
-export interface SkillRecipe extends JsonRecord {
-  readonly title: string
-  readonly prompt: string
-  /** The Space whose new chats offer it first; null offers it everywhere. */
-  readonly space_id: string | null
-}
-
-/** What "Generate recipe" sends: the message the user wants to reuse. */
-export interface SkillRecipeDraftRequest extends JsonRecord {
-  readonly text: string
-}
-
-/** The Helper's draft of a Recipe from a message: a title, and the message with
- *  what changes between uses swapped for `{name}` blanks. Nothing is saved yet. */
-export interface SkillRecipeDraft extends JsonRecord {
-  readonly title: string
-  readonly prompt: string
-}
-
 /** One locally installed skill. Filesystem details stay server-owned. */
 export interface Skill extends JsonRecord {
   readonly name: string
@@ -28,7 +7,7 @@ export interface Skill extends JsonRecord {
   /** Human-authored semantic version. Exact loaded bytes remain identified by SHA-256. */
   readonly version: string | null
   readonly enabled: boolean
-  /** Ships with the app: a built-in Skill (always enabled) or a starter Recipe (the user may hide it). Never removable. */
+  /** Ships with the app: a built-in Skill (always enabled). Never removable. */
   readonly builtin: boolean
   /** A built-in Skill the user may also call from the / menu. Local Skills always can. */
   readonly invocable?: true
@@ -37,8 +16,6 @@ export interface Skill extends JsonRecord {
   readonly origin?: "arden" | "shared"
   /** The Skill's directory as discovered, so the user can find and edit it. Absent on built-ins. */
   readonly path?: string
-  /** Present when this Skill is a Recipe. The model's Skills list never includes one. */
-  readonly recipe: SkillRecipe | null
 }
 
 export interface SkillListResponse extends JsonRecord {

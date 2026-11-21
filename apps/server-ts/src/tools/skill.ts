@@ -1,9 +1,5 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import {
-  SkillNameSchema,
-  SkillRecipeSpaceIdSchema,
-  SkillVersionSchema
-} from "@arden-hq/protocol/effect/skills"
+import { SkillNameSchema, SkillVersionSchema } from "@arden-hq/protocol/effect/skills"
 import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
@@ -57,24 +53,6 @@ const CreateParametersSchema = Schema.Struct({
       description: [
         "Reusable Markdown instructions after frontmatter. Start with a heading.",
         "Keep shared guidance here and route substantial conditional detail to references."
-      ].join(" ")
-    })
-  ),
-  recipe: Schema.optionalKey(
-    Schema.Struct({
-      title: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(80)).pipe(
-        Schema.annotateEncoded({
-          description: "Short name the user sees on the Recipe, such as Check a posting."
-        })
-      ),
-      space_id: Schema.NullOr(SkillRecipeSpaceIdSchema).annotate({
-        description: "The Space whose new chats offer it first; null offers it everywhere."
-      })
-    }).annotate({
-      description: [
-        "Make this a Recipe: a prompt the user sends from the composer, not instructions for you.",
-        "body is then the prompt itself, written as the user would say it; mark what they fill in with {short name} blanks.",
-        "Recipes never appear in your Skills list."
       ].join(" ")
     })
   ),
@@ -195,8 +173,7 @@ const makeSkillCreateTool = ({
     description: [
       "Create one reusable local Skill after the user reviews its full instructions. Built-in Skill names are reserved.",
       "Include only guidance that changes decisions; add supporting files only when useful.",
-      "The Skill is available as /<name> from the next model step.",
-      "With recipe, it saves a Recipe instead: body is a prompt the user sends, not instructions for you."
+      "The Skill is available as /<name> from the next model step."
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(CreateParametersSchema),
     metadata: {
@@ -221,7 +198,6 @@ const makeSkillCreateTool = ({
           { label: "Name", value: input.name },
           { label: "Version", value: input.version ?? "1.0.0" },
           { label: "Description", value: input.description },
-          ...(input.recipe === undefined ? [] : [{ label: "Recipe", value: input.recipe.title }]),
           { label: "Files", value: String(input.files?.length ?? 0) }
         ],
         body: { label: "Contents", text: approvalBody(input) }
@@ -245,17 +221,9 @@ const makeSkillCreateTool = ({
         kind: "target",
         resourceRef: skillRef(created.name, undefined),
         domain: "resource",
-        title: created.recipe?.title ?? created.name,
+        title: created.name,
         href: SKILLS_HREF
       })
-      if (created.recipe !== null) {
-        return {
-          result: `Saved Recipe ${JSON.stringify(created.recipe.title)}. The user sees it in new chats and in the / menu.`,
-          preview: `Saved Recipe ${created.recipe.title}`,
-          data: { skill: created },
-          host
-        }
-      }
       return {
         result: `Created /${created.name} v${created.version}. It is available on the next model step.`,
         preview: `Created /${created.name} v${created.version}`,
@@ -268,10 +236,10 @@ const makeSkillCreateTool = ({
 const makeSkillListTool = ({ skills }: { readonly skills: SkillCatalog["Service"] }): ServerTool =>
   defineServerTool({
     name: "skill_list",
-    summary: "Lists your Skills and Recipes.",
+    summary: "Lists your Skills.",
     discovery: { group: "arden_settings" },
     description:
-      "List enabled Skills: built-in Skills, local Skills and Recipes (a Recipe has a non-null recipe). Page by offset; optionally filter names and descriptions with literal text. Does not load instructions.",
+      "List enabled Skills: built-in Skills and local Skills. Page by offset; optionally filter names and descriptions with literal text. Does not load instructions.",
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         query: Schema.optionalKey(

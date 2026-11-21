@@ -232,7 +232,7 @@ export const parseVersion = (output: string): string | null => {
 
 export const skillFor = (entry: CliToolEntry, skills: ReadonlyArray<Skill>): CliToolSkill => {
   for (const name of entry.skills) {
-    const skill = skills.find((candidate) => candidate.name === name && candidate.recipe === null)
+    const skill = skills.find((candidate) => candidate.name === name)
     if (skill === undefined) continue
     return skill.builtin
       ? { kind: "built_in", name: skill.name }

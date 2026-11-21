@@ -157,7 +157,6 @@ export const makeInputMessage = Effect.fn("ChatMessage.makeInputMessage")(functi
       : { role: ROLE.interaction, ...storedSender(input.sender) }),
     created_at: DateTime.formatIso(createdAt),
     client_id: input.clientId,
-    ...(input.recipe === undefined ? {} : { recipe: input.recipe }),
     ...(input.sentFrom === undefined ? {} : { sent_from: input.sentFrom }),
     ...(input.replyTo === undefined
       ? {}
@@ -273,7 +272,6 @@ export const requestHash = (input: ChatSendInput): string =>
       sender: input.sender ?? null,
       replyTo: input.replyTo === undefined ? null : storedReply(input.replyTo),
       ...(input.approvalReply === undefined ? {} : { approvalReply: input.approvalReply }),
-      recipe: input.recipe ?? null,
       ...(input.sentFrom === undefined ? {} : { sentFrom: input.sentFrom }),
       outputSchema: input.outputSchema ?? null,
       workflowDelivery: input.workflowDelivery ?? null,

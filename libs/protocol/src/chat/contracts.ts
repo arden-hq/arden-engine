@@ -92,8 +92,6 @@ export interface ChatMessageInput {
   readonly approvalReply?: { readonly runId: string; readonly toolId: string }
   /** Approval policy captured for the run started by this message. */
   readonly approvalMode?: ChatApprovalMode
-  /** The Recipe the user started this message from, by its Skill name. */
-  readonly recipe?: string
   /** The UI surface that wrote this message's words; the person only confirmed it. */
   readonly sentFrom?: ChatSentFrom
   /** Sent as a capture: from the quick-capture window, or from iPhone. Raises `capture.arrived`. */

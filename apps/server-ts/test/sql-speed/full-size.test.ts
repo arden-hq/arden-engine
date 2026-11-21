@@ -253,8 +253,6 @@ const routeCalls = (
     "/sessions/:sessionId/terminals/:terminalId/output": [
       `/sessions/${ids.chat}/terminals/${MISSING}/output`
     ],
-    "/processes": ["/processes"],
-    "/processes/output": [`/processes/output${q({ key: MISSING })}`],
     "/mobile/home": ["/mobile/home"],
     "/mobile/spaces": ["/mobile/spaces"],
     "/mobile/sessions/:sessionId/conversation": [ids.chat, ids.fork].map(

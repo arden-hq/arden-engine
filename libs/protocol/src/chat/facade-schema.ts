@@ -6,7 +6,6 @@ import {
   withExtras
 } from "../common/schema.js"
 import { ACTIVE_RUN_STATUSES } from "../runs/status.js"
-import { SkillNameSchema } from "../skills/schema.js"
 import { CHAT_QUEUE_LIMIT, CHAT_REPLY_QUOTES_MAX, chatReplyContexts } from "./contracts.js"
 import type {
   ActiveRunSummary,
@@ -100,7 +99,6 @@ export const ChatMessageInputSchema = Schema.Struct({
       Schema.NonEmptyArray(ReplyContextInputSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
     ])
   ),
-  recipe: Schema.optionalKey(SkillNameSchema),
   sentFrom: Schema.optionalKey(ChatSentFromSchema),
   capture: Schema.optionalKey(ChatCaptureViaSchema),
   outputSchema: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json))
@@ -357,7 +355,6 @@ export const encodeChatMessageRequestEffect = (value: unknown) =>
                 }
               }),
           ...(input.approvalMode === undefined ? {} : { approval_mode: input.approvalMode }),
-          ...(input.recipe === undefined ? {} : { recipe: input.recipe }),
           ...(input.sentFrom === undefined ? {} : { sent_from: input.sentFrom }),
           ...(input.capture === undefined ? {} : { capture: input.capture }),
           ...(input.outputSchema === undefined ? {} : { output_schema: input.outputSchema }),

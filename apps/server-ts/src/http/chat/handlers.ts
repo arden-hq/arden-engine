@@ -260,7 +260,6 @@ export const ChatHandlers = HttpApiBuilder.group(
                       }
                     }),
                 ...(approvalMode === undefined ? {} : { approvalMode }),
-                ...(payload.recipe === undefined ? {} : { recipe: payload.recipe }),
                 ...(sentFrom === undefined ? {} : { sentFrom }),
                 ...(payload.output_schema === undefined
                   ? {}

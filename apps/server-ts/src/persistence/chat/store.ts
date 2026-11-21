@@ -33,7 +33,7 @@ export interface TaskStepCause {
   readonly afterRunId?: string
 }
 
-export const REQUEST_HASH_VERSION = 2
+export const REQUEST_HASH_VERSION = 3
 
 export interface ChatWriteStartInput {
   readonly approvalReply?: { readonly runId: string; readonly toolId: string }
