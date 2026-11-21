@@ -19,21 +19,7 @@ const MessageListSchema = Schema.Array(StoredMessageEnvelopeSchema)
 export const messageListEquivalent = Schema.toEquivalence(MessageListSchema)
 
 export const storeError = (
-  operation:
-    | "list"
-    | "list_archived"
-    | "create"
-    | "branch"
-    | "rename"
-    | "move"
-    | "archive"
-    | "restore"
-    | "continue"
-    | "delete"
-    | "clear"
-    | "revert"
-    | "triage"
-    | "capture",
+  operation: SessionStoreError["operation"],
   reason: "invalid" | "not_found" | "conflict" | "storage",
   message: string,
   sessionId?: string,

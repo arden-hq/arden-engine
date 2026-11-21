@@ -289,6 +289,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   agent_knowledge_import: { verb: "Imported notes", icon: "brain" },
   agent_knowledge_digest: { verb: "Read notes from other assistants", icon: "brain" },
   approval_mode_set: { verb: "Set how I ask", icon: "wrench" },
+  onboarding_finish: { verb: "Finished getting started", icon: "dot" },
   show_tour: { verb: "Showed you around", icon: "dot" },
   google_client_import: { verb: "Saved your Google key", icon: "wrench" }
 }

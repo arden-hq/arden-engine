@@ -101,6 +101,22 @@ it("a chat made, moved or branched with no Space lands in Main and sees every Sp
   )
 })
 
+it("Getting started ends once, and only in the chat that has it", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const queries = yield* SessionQueries
+      const onboarding = yield* sessions.create({ origin: "onboarding" })
+      const plain = yield* sessions.create({})
+      expect(yield* sessions.finishOnboarding(onboarding.sessionId)).toBe(true)
+      expect(yield* sessions.finishOnboarding(onboarding.sessionId)).toBe(false)
+      expect(yield* sessions.finishOnboarding(plain.sessionId)).toBe(false)
+      const header = yield* queries.loadHeaderSnapshot(onboarding.sessionId)
+      expect(header?.metadata).toEqual({})
+    })
+  )
+})
+
 it("triage files a chat from Main into another Space and undo brings it back to Main", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
