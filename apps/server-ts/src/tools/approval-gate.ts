@@ -74,7 +74,6 @@ export interface ApprovalGatePolicy {
     readonly run: ServerRunContext
     readonly name: string
   }) => Promise<number>
-  /** Whether this started call's stored plan still matches its Task (`admitPlanned`). */
   readonly planned: (call: {
     readonly runId: string
     readonly toolCallId: string
@@ -158,8 +157,6 @@ export const makeApprovalGate =
         })
       )
     if (decision.kind === "ask") {
-      // Never ask the owner about a change planned for a direction the Task no longer has.
-      // After any denial; the call is checked again just before its effect.
       if (
         definition.metadata.changes_state &&
         ctx.approval === undefined &&
@@ -242,7 +239,6 @@ export const makeApprovalGate =
               (outcome) => outcome,
               () => "failed" as const
             )
-          // The card store checks the plan again where it publishes: B may have come since.
           if (kept === "needs_review") throw taskDirectionReview()
           throw kept === "published" ? waitsInChat() : unattendedRefusal()
         }

@@ -128,7 +128,6 @@ it("persists the state record atomically, keeps it out of public updates, and re
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const work = yield* WorkStore
-        // Changed from the tracked test: the Task's own read, not the read by job key.
         const snapshot = yield* readTaskWorkerContext(sql, saved.item_id)
         if (snapshot === undefined) throw new Error("Task snapshot missing")
         expect({

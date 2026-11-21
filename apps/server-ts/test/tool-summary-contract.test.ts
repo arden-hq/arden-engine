@@ -5,8 +5,6 @@ import { defineServerTool, summaryOf } from "../src/tools/define.js"
 import { checkToolContract } from "../src/tools/tool-contract.js"
 import { EmptyParametersSchema } from "../src/tools/automation-tool-schema.js"
 
-// The short catalog text is written on the tool (`summary`), and the boot check reads it
-// there. Made-up tools; no server.
 const tool = (name: string, extra: { readonly summary?: string; readonly internal?: true }) =>
   defineServerTool({
     name,
@@ -47,19 +45,15 @@ it("a public tool needs its own non-empty summary; an internal one needs none", 
 
 it("the summary is the definition's own field, and no model entry or event metadata carries it", () => {
   const kept = tool("made_up_kept", { summary: "Does one made-up thing." })
-  // Owned where the tool is written: the same definition object the loop keeps.
   expect(Object.getOwnPropertyDescriptor(kept.definition, "summary")?.value).toBe(
     "Does one made-up thing."
   )
   expect(summaryOf(kept.definition)).toBe("Does one made-up thing.")
-  // The model's entry: its own long description, and metadata as `meta.host`, which
-  // the loop copies into each call's ToolStarted event.
   const entry = kept.entry(() => ({ type: "object", properties: {} }))
   expect(entry.description).toBe("The long text the model reads for made_up_kept.")
   expect(JSON.stringify(entry)).not.toContain("Does one made-up thing.")
   expect(Object.keys(entry.meta.host ?? {})).not.toContain("summary")
   expect(Object.keys(kept.meta)).not.toContain("summary")
-  // A tool written with no summary (an MCP or internal tool) has none to read.
   expect(summaryOf(tool("made_up_internal", { internal: true }).definition)).toBeUndefined()
 })
 

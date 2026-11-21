@@ -22,7 +22,6 @@ export const runQuotaClass = Effect.fn("PlanQuota.runClass")(function* (
       COALESCE(job.task_id, CASE WHEN review.space_id IS NOT NULL
         THEN json_extract(run.metadata_json, '$.automation.task_id') END) AS automation_id
     FROM chat_runs AS run
-    -- A Space review has no definition: its key names its Space.
     LEFT JOIN scheduled_tasks AS job
       ON job.task_id = json_extract(run.metadata_json, '$.automation.task_id')
         AND job.purpose != 'space_review'

@@ -7,10 +7,6 @@ import { reconcileEndings, recordEnding } from "../src/persistence/sqlite/run-en
 import { recordTell } from "../src/persistence/sqlite/run-tell.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// Where a run's outcome goes, end to end, on real migrated SQLite: the real ending, tell
-// and stored-ending replay entries, fixed ids and a fixed clock (TestClock at 0 for tells).
-// The expectations are the audience facts that must not move.
-
 const T = "2026-11-20T08:00:00.000Z"
 const ENDED = "2026-11-20T08:05:00.000Z"
 
@@ -122,7 +118,6 @@ const seed = (sql: SqlClient.SqlClient) =>
           VALUES ('${run}', '${session}', 'completed', '${T}', '${ENDED}', '${ENDED}',
             '${metadata}', 'am-${run}', ${client === undefined ? "NULL" : `'${client}'`})`
       ),
-      // auto-repeat ran on its schedule before: its next ending repeats.
       `INSERT INTO automation_runs (id, task_id, automation_ref, started_at, ended_at, status,
           outcome, trigger_json)
         VALUES (1, 'auto-repeat', 'ref-auto-repeat', '${T}', '${T}', 'completed', 'finished',
@@ -131,7 +126,6 @@ const seed = (sql: SqlClient.SqlClient) =>
           status, outcome, trigger_json)
         VALUES (2, 'auto-repeat', 'ref-auto-repeat', 'r-auto-repeat', '${T}', '${ENDED}', 'completed',
           'finished', '{"source":"schedule"}')`,
-      // The Task's own event already told task-home: the ending is its twin.
       `INSERT INTO entity_events (key, entity, entity_id, event, run_id, text, place, place_kind,
           occurred_at, shown)
         VALUES ('task-done:1', 'task', 'task-1', 'done', 'r-task', 'Done.', 'task-home', 'chat',
@@ -169,8 +163,6 @@ it("records where each run's ending and tells go, and replays stored endings", a
       for (const [run] of runs.filter(([run]) => !run.startsWith("r-occ")))
         endings[run] = yield* recordEnding(sql, completed(run, `Result of ${run}.`))
       endings["r-missing"] = yield* recordEnding(sql, completed("r-missing", "Lost."))
-      // An occurrence of a system job whose handler speaks to the owner, and an occurrence
-      // whose purpose overrides its Automation's.
       endings["r-occ-urgent"] = yield* recordEnding(sql, {
         kind: "occurrence",
         purpose: "system",
@@ -181,7 +173,6 @@ it("records where each run's ending and tells go, and replays stored endings", a
         purpose: "user_automation",
         run: occurrence("r-occ-override", 12)
       })
-      // The same ending again: no second delivery.
       endings["r-agent-work again"] = yield* recordEnding(
         sql,
         completed("r-agent-work", "Result of r-agent-work.")
@@ -210,7 +201,6 @@ it("records where each run's ending and tells go, and replays stored endings", a
         toolCallId: "tell-1",
         text: "Note from r-agent-work."
       })
-      // auto-move's chat changes before its stored ending is replayed: replay reads now.
       yield* sql`UPDATE scheduled_tasks SET thread_id = 'thread-b' WHERE task_id = 'auto-move'`
       yield* reconcileEndings(sql)
       yield* reconcileEndings(sql)
@@ -249,7 +239,6 @@ it("records where each run's ending and tells go, and replays stored endings", a
           `${row.payload.kind}:${JSON.stringify(row.payload.runIds ?? row.payload.sourceRunId ?? row.payload.source)}`
       )
       .toSorted()
-  // A child's result and its tells go to its parent only, never as an owner update.
   expect(kinds("owner-chat")).toEqual([
     'result:["r-agent-code"]',
     'result:["r-agent-damaged"]',
@@ -258,9 +247,7 @@ it("records where each run's ending and tells go, and replays stored endings", a
     'result:["r-agent-work"]',
     'result:["r-agent-work"]'
   ])
-  // The script's own agent is not also told to the parent as an ordinary agent.
   expect(ending("r-agent-script")?.["place_kind"]).toBe("sender")
-  // A damaged child keeps its parent and says it is damaged; a damaged plain run stays own.
   expect(ending("r-agent-damaged")).toMatchObject({ place_kind: "parent", detail: "damaged" })
   expect(ending("r-plain-damaged")).toMatchObject({
     place_kind: "own",
@@ -268,17 +255,14 @@ it("records where each run's ending and tells go, and replays stored endings", a
   })
   expect(ending("r-unrecorded")?.["place_kind"]).toBe("own")
   expect(capture.endings["r-missing"]).toBeUndefined()
-  // The occurrence of an owner-facing system handler speaks to the owner; an override stays.
   expect(ending("r-occ-urgent")?.["purpose"]).toBe("user_automation")
   expect(ending("r-occ-override")?.["purpose"]).toBe("user_automation")
   expect(ending("r-system")?.["purpose"]).toBe("system")
-  // A replayed ending goes where its Automation's chat is now.
   expect(ending("r-move")?.["place"]).toBe("thread-a")
   expect(deliveriesTo("thread-b").length).toBe(1)
   expect(
     deliveriesTo("thread-a").some((row) => JSON.stringify(row.payload).includes("r-move"))
   ).toBe(false)
-  // The Task's ending is its event's twin: not shown again.
   expect(ending("r-task")?.["shown"]).toBe(0)
   expect(capture.tells["r-agent-work again"]).toMatchObject({ kind: "again", n: 1 })
 })

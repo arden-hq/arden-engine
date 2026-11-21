@@ -35,9 +35,6 @@ export const makeSpaceJobRecovery = (options: {
         return next === undefined ? { stage: "reviews", after: undefined } : { stage, after: next }
       }
       case "reviews": {
-        // A review whose Space is gone or archived ends the work under its key.
-        // One whose Space only does not let it run holds with no write: its
-        // claim reads the Space.
         const rows = yield* sql<{ readonly task_id: string }>`
         WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
         SELECT keyed.task_id FROM (
@@ -56,8 +53,6 @@ export const makeSpaceJobRecovery = (options: {
         return next === undefined ? { stage: "tasks", after: undefined } : { stage, after: next }
       }
       case "tasks": {
-        // A Task's standing is read when its wake is claimed, so only a Task
-        // with queued wakes or admitted work under its key needs a look.
         const rows = yield* sql<{ readonly item_id: string }>`
         WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
         SELECT item.item_id

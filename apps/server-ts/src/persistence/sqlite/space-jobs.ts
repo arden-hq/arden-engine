@@ -142,10 +142,6 @@ export const makeSpaceJobSql = (
       }
     }
   })
-  /**
-   * A Task or a Space review has no stored job to switch off. Stopping one ends
-   * the work under its key: the wakes still waiting and the runs it was given.
-   */
   const stopWork = Effect.fn("SpaceJobSql.stopWork")(function* (
     automationId: string,
     settlingRunId?: string
@@ -195,7 +191,6 @@ export const makeSpaceJobSql = (
   const stopTask = (itemId: string, settlingRunId?: string) =>
     stopWork(taskJobId(itemId), settlingRunId)
 
-  /** Gives a live Task its private chat. Whether it may run is read from the Task at the claim. */
   const syncTask = Effect.fn("SpaceJobSql.syncTask")(function* (itemId: string, now: string) {
     const task = yield* readJobTask(sql, itemId)
     const id = taskJobId(itemId)
@@ -213,13 +208,6 @@ export const makeSpaceJobSql = (
     } satisfies JobState
   })
 
-  /**
-   * A review is owned by its Space, so there is no definition to write. A Space
-   * that is gone or archived ends the review's work. One with inference off holds:
-   * its waiting wakes stay, and no claim takes them while the Space does not let
-   * the review run (`reviewMayRunSql`). Otherwise the review gets its private chat,
-   * named after the Space, when it has none.
-   */
   const syncSpaceReview = Effect.fn("SpaceJobSql.syncSpaceReview")(function* (
     spaceId: string,
     now: string
@@ -231,7 +219,6 @@ export const makeSpaceJobSql = (
       return null
     }
     if (current.inference_enabled !== 1) return null
-    // A Space rename renames the chat (`followSpaceName`); a sync only names a new one.
     const name = `${current.name} worker`
     const chats = yield* sql`SELECT 1 FROM space_review_chats WHERE space_id = ${spaceId}`
     if (chats.length === 0)

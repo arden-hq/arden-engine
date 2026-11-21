@@ -32,8 +32,6 @@ const readAuthoredSource = (sourcePath: string): string => {
   return body
 }
 
-// The template is compiled once here and kept in the closure: the template
-// library accepts only the object it compiled.
 const templatePrompt = <const Slot extends string>(
   options: PromptOptions<Slot>
 ): ((values: Readonly<Record<Slot, string>>) => string) => {

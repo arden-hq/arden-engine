@@ -153,8 +153,6 @@ export const enqueueRunDelivery = Effect.fn(function* (options: {
 const arrivalText = (content: unknown): string =>
   typeof content === "string" ? content : userContent(content).text
 
-/** A condition on `automation_deliveries`: the row is a Chat-turn arrival bound
- *  for this chat with this text. It reads nothing and writes nothing. */
 export const arrivalIdentitySql = (sql: SqlClient.SqlClient, sessionId: string, content: unknown) =>
   sql`payload IS NOT NULL AND ${turnDeliveryKindSql(sql, sql`payload`)}
     AND json_extract(payload, '$.sessionId') = ${sessionId} AND body = ${arrivalText(content)}`

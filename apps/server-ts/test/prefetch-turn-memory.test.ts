@@ -45,7 +45,6 @@ const GARDEN: PersistedSpace = {
   archived_at: null
 }
 
-/** With `spacePage`, the chat is in a Space whose Memory page has that content. */
 const run = async (
   sources: MemoryTurn["sources"] | undefined,
   reader: RunMemoryReader,

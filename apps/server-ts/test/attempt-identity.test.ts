@@ -21,10 +21,6 @@ import {
   tryRenew
 } from "./work-fixtures.js"
 
-// Bounded repair, finding 1: what an attempt was started as (its purpose, its
-// origin and its Task binding) is read as one value before a claim, a renewal
-// or an admission hands out work. Overlay only.
-
 const ITEM = "work:space-1:background"
 const CORRUPT = "Stored Automation run identity is corrupt"
 
@@ -92,7 +88,6 @@ it.each(cases)(
       admitted: "refused: Scheduled attempt identity is corrupt",
       reclaimed: `refused: ${CORRUPT}`,
       chatRuns: 0,
-      // The fence is untouched: the refused reclaim did not count as a claim.
       attempts: [{ status: "running", claim_count: 1 }]
     })
   }
@@ -132,7 +127,6 @@ it("a sound Task attempt renews, comes back after its lease and is admitted, as 
   expect(outcome).toEqual({
     first: [true, "task_execution"],
     renewed: [true, "task_execution"],
-    // The same attempt and chat; a new claim count makes a new token.
     reclaimed: [true, false, "task_execution", true],
     admitted: "started",
     origins: [{ kind: "task", item_id: ITEM }]
@@ -200,7 +194,6 @@ it("a renewal does not take its purpose from a new owner under the attempt's key
       const key = taskJobId(task.item_id)
       const [lease] = yield* claim("first", 10)
       if (lease === undefined) throw new Error("The Task was not claimed")
-      // A definition now sits under the Task's key and wins over the Task's own row.
       yield* storeUnderKey(yield* makeAutomation, key)
       const renewed = yield* tryRenew(lease, LATER + 1_000)
       return renewed.kind === "refused"

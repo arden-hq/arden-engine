@@ -39,9 +39,6 @@ export const assertAutomationLease = Effect.fn("AutomationLease.assert")(functio
     new WorkStoreError({ reason: "conflict", message: "The Automation lease is no longer current" })
   const parsed = yield* Effect.try({ try: () => parseLease(options.lease), catch: failure })
   if (parsed.runId !== options.attemptId) return yield* failure()
-  // What the attempt was started as is read before its lease, so a corrupt
-  // attempt is refused as corrupt whatever the lease says. An attempt that is
-  // not running is the lease check's to refuse.
   yield* readScheduledIdentity({
     sql,
     automationId: options.automationId,
@@ -50,10 +47,6 @@ export const assertAutomationLease = Effect.fn("AutomationLease.assert")(functio
   const live = yield* sql`SELECT 1 FROM automation_event_queue AS queue
     JOIN automation_runs AS attempt ON attempt.id = ${options.attemptId} AND attempt.task_id = queue.task_id
     ${ownerJoin(sql)}
-    -- An Automation's run may use its own chat or the chat it is set to. A Task
-    -- has no setting to follow: only the private chat its attempt was given. A
-    -- review works in its private trunk (space_review_chats) or in the one child
-    -- chat prepareRunSession made for this attempt under that trunk.
     LEFT JOIN space_review_chats AS review_chat ON review_chat.space_id = review_space.space_id
     JOIN sessions AS session ON session.session_id = ${options.sessionId}
       AND ((task.task_id IS NOT NULL

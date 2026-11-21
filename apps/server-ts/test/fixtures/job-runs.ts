@@ -91,7 +91,6 @@ type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
 export const startJob = (lease: JobLease, id: string) =>
   Effect.gen(function* () {
     const automationId = lease.payload.automationId
-    // A Task has no stored job row, so the chat is the one the lease names.
     const job = { thread_id: lease.payload.sessionId }
     if (job.thread_id === null) throw new Error(`${automationId} has no chat`)
     const run = yield* startChat(job.thread_id, id, {

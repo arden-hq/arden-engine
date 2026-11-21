@@ -32,11 +32,6 @@ export const haltAutomation = Effect.fn("AutomationHalt.halt")(function* (option
   yield* haltWork(options)
 })
 
-/**
- * Stops the work under one key: its running runs and the wakes it drops. A Task
- * and a Space review have no definition to switch off, so this is all their
- * stop does; whether they may run again is read from their own row at a claim.
- */
 export const haltWork = Effect.fn("AutomationHalt.haltWork")(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: SessionLifecycleEvents["Service"]

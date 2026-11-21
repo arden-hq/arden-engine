@@ -11,10 +11,6 @@ import { WorkStore } from "../src/persistence/work/store.js"
 import { freePage } from "./fixtures/free-space-page.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// The readers a review's reference, its chat header and the schedulers use. Every
-// row is made up. One case has no old review row; the other keeps a POISONED one:
-// the review's own reference, a stale name, on, and a due schedule, which a reader
-// that still took the old row as the owner would show or act on.
 const REVIEW = spaceJobId("space-1")
 const DUE = "2030-01-01T00:00:00.000Z"
 
@@ -59,7 +55,6 @@ const readersCase = (poisoned: boolean) =>
 
     const focused = yield* catalog.diagnostics(internalRef(REVIEW))
     const header = yield* (yield* SessionQueries).loadHeaderSnapshot(chat.session_id)
-    // The schedulers: the next due time and the claim after the old row's due time.
     const nextDue = yield* Effect.promise(async () =>
       queue.jobs.nextDueAt(Date.parse("2029-12-31T00:00:00.000Z"))
     )
@@ -140,7 +135,6 @@ it("a Space's last check is the latest counted run its review or Tasks completed
         "completed",
         "finished"
       )
-      // Newer, but not counted (superseded), not completed (failed), or another Space's.
       yield* run(
         task,
         "2026-11-04T00:00:00.000Z",
@@ -169,8 +163,6 @@ it("a Space's last check is the latest completion, even when a clock change reor
       const spaces = yield* SpaceStore
       yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
         VALUES ('space-1', 'space-1', 'space-1', '{"enabled":true}', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`
-      // One job, two counted completed runs. The wall clock went back during the first,
-      // so it started last but ended first.
       for (const [started, ended] of [
         ["2026-11-20T10:00:10.000Z", "2026-11-20T10:00:01.000Z"],
         ["2026-11-20T10:00:02.000Z", "2026-11-20T10:00:03.000Z"]

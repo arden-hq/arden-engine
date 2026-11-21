@@ -90,10 +90,6 @@ export const makeFencedOccurrences = ({
     now: number
   ) {
     const parsed = parseLease(input)
-    // The fence is the claim and the attempt alone: an unexpired claim on this
-    // row, by this running attempt, at this claim count. Whether the owner is
-    // still stored is not part of it, so an attempt ends its own account after
-    // its owner is deleted.
     const rows = yield* sql<
       Pick<QueueEntry, "task_id" | "source" | "context"> & {
         readonly owner: string | null
@@ -125,11 +121,8 @@ export const makeFencedOccurrences = ({
     return {
       parsed,
       queue: { task_id: row.task_id, source: row.source },
-      // The chat the attempt is pinned to now. Admission sets it while it runs.
       pinned: { chatRunId: row.chat_run_id, chatSessionId: row.chat_session_id },
-      // What the attempt was started as, which no edit of the owner can change.
       bound: yield* decodeBoundAttempt(row, operation),
-      // The owner as stored now; undefined when it has been deleted.
       owner: yield* decodeOwner(row, operation),
       context: yield* decodeQueueContext(row, operation)
     }
@@ -186,9 +179,6 @@ export const makeFencedOccurrences = ({
     const { purpose } = fenced.bound
     const taskItemId = purpose === "task_execution" ? fenced.bound.itemId : null
     const internalSpaceJob = isSpaceWorkJob(fenced.bound)
-    // The on switch and the worker hold belong to an Automation's definition. A
-    // Task and a review have none, and a deleted owner has none left. Triggers
-    // and a schedule are an Automation's alone: a review is woken, never scheduled.
     const definition = isDefinition(fenced.owner) ? fenced.owner : undefined
     const automation = definition?.kind === "automation" ? definition : undefined
     const triggers =
@@ -280,9 +270,6 @@ export const makeFencedOccurrences = ({
       run
     })
     const told = toldOutcomeOf(endingRecord, run)
-    // What follows a run for its definition (its event log, the Automations
-    // it wakes, the pause after giving up, a review's retry) has nowhere to go
-    // once the definition is deleted.
     if (
       definition !== undefined &&
       userAutomation &&
@@ -416,7 +403,6 @@ export const makeAutomationJobSettlement = ({
 }: Pick<AutomationStoreDeps, "writer" | "sessionEvents" | "rules" | "diagnostics">) => {
   const sql = writer.sql
   const { loadFenced, settleFenced } = makeFencedOccurrences({ writer, sessionEvents, rules })
-  /** An Automation's hold is on its definition. A Task's or a review's went with its row's claim. */
   const releaseDefinitionHold = (owner: WorkOwner | undefined) =>
     isDefinition(owner)
       ? sql`UPDATE scheduled_tasks SET job_held_since = NULL WHERE task_id = ${owner.key}`.pipe(

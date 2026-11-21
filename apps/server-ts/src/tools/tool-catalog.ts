@@ -11,10 +11,6 @@ import { scopedRunToolNames } from "./tool-scopes.js"
 import { toolParametersJsonSchema } from "./tool-json-schema.js"
 import type { SpecialChat } from "../context/special-chat.js"
 
-/**
- * Tools a chat starts with loaded: named tools, then every tool of the named groups
- * (each tool's `discovery`). The loop loads only the deferred ones (preloadRecord).
- */
 export interface ChatPreload {
   readonly tools: ReadonlyArray<string>
   readonly groups: ReadonlyArray<string>
@@ -46,7 +42,6 @@ const groupOf = (tool: ServerTool): string | undefined => {
   return discovery === undefined || discovery === "always_loaded" ? undefined : discovery.group
 }
 
-/** A preload's tool names: its named tools, then its groups' tools in group order. */
 export const preloadToolNames = (
   tools: ReadonlyArray<ServerTool>,
   preload: ChatPreload
@@ -234,7 +229,6 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   drive_create_sheet: inputs(["account_ref", "google_accounts_list"])
 }
 
-/** Names in the lists above that are not built-in tools, groups or parameters; checked at startup. */
 export const catalogNameProblems = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> => {
   const params = new Map(
     tools.map((tool) => [tool.definition.name, topLevelParameters(tool)] as const)

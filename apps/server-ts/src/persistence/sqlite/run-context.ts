@@ -56,10 +56,6 @@ export const runAuthorityState = (
   ELSE 'revoked'
 END)`
 
-/**
- * A run's authority and Task, read in the caller's transaction. Undefined when the run
- * does not exist. Only a storage fault fails it: "settling" and "revoked" are answers.
- */
 export const readRunAuthority = Effect.fn("RunContext.readRunAuthority")(function* (
   sql: SqlClient.SqlClient,
   runId: string
@@ -347,10 +343,6 @@ export const captureChildTask = Effect.fn("RunContext.captureChildTask")(functio
   })
 })
 
-/**
- * What a running scheduled attempt was started as: its purpose, origin and Task
- * binding as one value. Undefined when the attempt is not running under the key.
- */
 export const readScheduledIdentity = Effect.fn("RunContext.readScheduledIdentity")(
   function* (options: {
     readonly sql: SqlClient.SqlClient

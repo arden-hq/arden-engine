@@ -297,7 +297,6 @@ describe("a replayed arrival admission", () => {
           yield* insertOriginChat(sql)
           const { sessionId } = yield* sessions.create({ name: "Workflow chat" })
           const workflowDelivery = { workflowRef: "workflow-fixture", attempt: 1 }
-          // The sender a Workflow result carries (workflows/delivery.ts).
           const result = {
             sessionId,
             clientId: workflowDeliveryClientId(workflowDelivery),

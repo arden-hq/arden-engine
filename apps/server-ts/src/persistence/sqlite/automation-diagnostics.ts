@@ -10,7 +10,6 @@ import { decodeOwner, hasOwner, ownerJoin, ownerJson, type WorkOwner } from "./a
 import { internalRef } from "./space-jobs.js"
 import { spaceJobId } from "../space-job-id.js"
 
-/** What the queue list shows of a job's owner. */
 const shownOwner = (
   owner: WorkOwner,
   holdStartedAt: string | null
@@ -28,7 +27,6 @@ const shownOwner = (
         session_id: owner.authored.chatId
       }
     case "space_review":
-      // A review has no stored reference either.
       return {
         automation_ref: internalRef(owner.key),
         name: owner.name,
@@ -37,7 +35,6 @@ const shownOwner = (
         session_id: owner.chatId
       }
     case "task":
-      // A Task has no stored reference; its runs carry this one.
       return {
         automation_ref: internalRef(owner.key),
         name: owner.text,
@@ -60,9 +57,6 @@ export const makeAutomationDiagnostics = ({
     return yield* writer
       .snapshot(
         Effect.gen(function* () {
-          // A reference names an Automation's definition, or a Space review: its
-          // reference is derived from its key (`internalRef`), so the Spaces are
-          // read and no old review row is.
           let reviewKey: string | null = null
           if (automationRef !== undefined) {
             const found = yield* sql`SELECT 1 FROM scheduled_tasks
@@ -140,7 +134,6 @@ export const makeAutomationDiagnostics = ({
       (SELECT c.status FROM chat_runs c WHERE c.session_id = t.thread_id
         AND c.status IN ${activeRunStatusList} ORDER BY c.started_at DESC LIMIT 1) AS active_chat_status
       FROM scheduled_tasks t
-      -- Only an Automation has a schedule; an old Task or review row is no schedule.
       WHERE t.purpose IN ('user_automation', 'system')
         AND (t.automation_ref = ${automationRef ?? null}
           OR (t.enabled = 1 AND t.next_run_at <= ${now}))

@@ -9,10 +9,6 @@ import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { claimAll } from "./fixtures/job-runs.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
-// New in typed-execution: the record of a screened event reads the fenced
-// attempt, which no test in the selection reached. It runs the same on tracked
-// modules, so `--native` is its control.
-
 it("a screened event wake of an authored Automation records its skip under the claim", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
@@ -50,7 +46,6 @@ it("a screened event wake of an authored Automation records its skip under the c
           backend: "test",
           probability: 0.9
         })
-      // The same stand-in for the decision service as the tracked urgent-events test.
       const decisions = { decide } as unknown as Parameters<typeof screenEventWake>[0]
       const screen = yield* screenEventWake(decisions)(lease)
       if (screen === undefined) throw new Error("The wake was not screened")
@@ -79,8 +74,6 @@ it("a screened event wake of an authored Automation records its skip under the c
     owner: true,
     skippedKeys: 1,
     kind: "skip",
-    // The one event stays the wake's batch, and the claim is still held: the
-    // caller settles it as skipped.
     events: 1,
     hasText: true,
     attempt: ["running"]

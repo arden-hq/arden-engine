@@ -7,9 +7,6 @@ import { ToolExecutionStore, type ToolExecutionIdentity } from "../src/persisten
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 
-// The tool start answers a run's lost Task authority as a typed result inside its own
-// transaction, and keeps every other refusal an error. Real SQLite store, made-up rows.
-
 const AT = "2026-11-20T07:00:00.000Z"
 
 const seed = (sql: SqlClient.SqlClient) =>
@@ -17,10 +14,8 @@ const seed = (sql: SqlClient.SqlClient) =>
     yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type)
       VALUES ('session-1', 'chat~1', ${AT}, ${AT}, 'chat')`
     yield* sql`INSERT INTO execution_budgets (budget_id) VALUES ('budget-1')`
-    // Open and worker-owned: an attempt bound to it may act.
     yield* sql`INSERT INTO space_tasks (item_id, stable_key, text, status, owner, created_at, updated_at)
       VALUES ('task-open', 'open', 'Open Task', 'open', 'worker', ${AT}, ${AT})`
-    // Finished by the run that is still replying: that run is "settling".
     yield* sql`INSERT INTO space_tasks (item_id, stable_key, text, status, owner, created_at, updated_at)
       VALUES ('task-done', 'done', 'Done Task', 'done', 'worker', ${AT}, ${AT})`
     yield* sql`INSERT INTO space_task_events (item_id, run_ref, event_type, summary, created_at)
@@ -89,7 +84,6 @@ it("a run whose Task authority ended is not admitted, records nothing, and is no
   })
 })
 
-/** A plain chat run (no Task) whose run_policy names `budgetId`. */
 const seedPlainRun = (sql: SqlClient.SqlClient, runId: string, budgetId: string) =>
   sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
       metadata_json, assistant_message_id)

@@ -8,7 +8,6 @@ interface ActionsInput {
   readonly action_turn_id?: string
 }
 
-/** `session_read`'s actions view: one page of recorded calls, with the arguments to continue. */
 export const actionsPage = (input: ActionsInput, page: SessionToolEvidencePage) => {
   const scope = {
     session_ref: input.session_ref,

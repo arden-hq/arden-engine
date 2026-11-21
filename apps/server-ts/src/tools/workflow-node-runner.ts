@@ -279,7 +279,6 @@ export const makeWorkflowNodeRunner = (
               changesState: true,
               effect: "arden_db",
               source: "_agents",
-              // A launched agent keeps the plan of the script that launched it.
               plan: { kind: "call", toolCallId: request.parentToolCallId }
             },
             (context) =>

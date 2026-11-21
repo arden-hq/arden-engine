@@ -26,7 +26,6 @@ export type RuntimeSection =
       readonly text: string
       readonly space: SpaceView
     }
-  /** The run's Task as its owner has it now; its receipt rides in the runtime state. */
   | {
       readonly kind: "direction"
       readonly key: string
@@ -117,11 +116,6 @@ export const presentedRuntimeState = (
 
 const decodeState = Schema.decodeUnknownOption(RuntimeStateSchema)
 
-/**
- * The Task direction shown to the model turn that asked for `toolCallId`: the runtime
- * record just before the assistant message holding that call. Undefined when that turn was
- * shown none, or the call is not in `messages` (a nested call).
- */
 export const producingTaskDirection = (
   messages: ReadonlyArray<ChatMessage>,
   toolCallId: string

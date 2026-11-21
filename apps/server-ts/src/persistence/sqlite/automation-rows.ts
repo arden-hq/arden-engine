@@ -70,7 +70,6 @@ export type AutomationRow = JobClassification & {
   readonly instruction_revision_id: number | null
 }
 
-/** One queue row as it was asked for. A claim does not change these. */
 export interface QueueEntry {
   readonly id: number
   readonly task_id: string
@@ -79,17 +78,8 @@ export interface QueueEntry {
   readonly created_at: string
 }
 
-/**
- * The live claim on a queue row: who holds it now and until when. Every claim,
- * renewal, release and retry rewrites it, so nothing here names the attempt.
- */
 export interface QueueClaim {
   readonly claimed_at: string | null
-  /**
-   * When a worker took hold of a Task's or a Space review's row. A renewal and
-   * a reclaim keep it; a release, retry or deferral clears it. NULL for an
-   * Automation's row, whose definition keeps its own hold start.
-   */
   readonly hold_started_at: string | null
   readonly lease_expires_at: string | null
   readonly attempt_count: number
@@ -103,12 +93,6 @@ export const queueColumns = (sql: SqlClient.SqlClient): Statement.Fragment => sq
 
 const ContextModeSchema = Schema.Literals(["fresh", "continue", "fork"])
 
-/**
- * What an attempt was started as. The claim writes it once and a trigger on
- * `automation_runs` refuses any change, so it holds while the owner is edited
- * or deleted. The chat the attempt is pinned to and its claim count are not
- * here: they change while it runs.
- */
 const BoundAttemptSchema = Schema.Struct({
   purpose: JobPurposeSchema,
   origin: Schema.fromJsonString(RunOriginSchema),
@@ -119,10 +103,6 @@ const BoundAttemptSchema = Schema.Struct({
 })
 export type BoundAttempt = typeof BoundAttemptSchema.Type
 
-/**
- * `attempt` names the `automation_runs` row in the query. The origin stays the
- * stored text, so text that is not JSON fails the decode and not the query.
- */
 export const boundAttemptJson = (sql: SqlClient.SqlClient, attempt: string): Statement.Fragment => {
   const run = sql.literal(attempt)
   return sql`json_object('purpose', ${run}.purpose, 'origin', ${run}.origin,
@@ -131,7 +111,6 @@ export const boundAttemptJson = (sql: SqlClient.SqlClient, attempt: string): Sta
     'contextMode', ${run}.context_mode)`
 }
 
-/** What a person or the system wrote to set an Automation up. Only an Automation has it. */
 const AuthoredConfigSchema = Schema.Struct({
   ref: Schema.String,
   name: Schema.String,
@@ -139,7 +118,6 @@ const AuthoredConfigSchema = Schema.Struct({
   model: Schema.NullOr(Schema.String),
   contextMode: ContextModeSchema,
   chatId: Schema.NullOr(Schema.String),
-  /** The key the set chat was made for; null when the chat row is gone. */
   chatOrigin: Schema.NullOr(Schema.String),
   handler: Schema.NullOr(Schema.String),
   triggers: Schema.String,
@@ -147,13 +125,11 @@ const AuthoredConfigSchema = Schema.Struct({
   instructionRevisionId: Schema.NullOr(Schema.Number)
 })
 
-/** What a definition's runs may do without asking. */
 const DefinitionPolicySchema = Schema.Struct({
   toolScope: AutomationToolScopeSchema,
   autoApprove: Schema.Boolean
 })
 
-/** Where a definition's schedule and its worker hold stand now. */
 const DefinitionStateSchema = Schema.Struct({
   enabled: Schema.Boolean,
   heldSince: Schema.NullOr(Schema.String),
@@ -171,43 +147,27 @@ const AutomationOwnerSchema = Schema.Struct({
   state: DefinitionStateSchema
 })
 
-/**
- * What a Space review's runs use that its Space does not say
- * (`space_review_settings`; the defaults when it has no row). A review has no
- * prompt of its own, no handler, no triggers and no instruction revision: its
- * prompt is built from the Space, and its chat is always its own.
- */
 const ReviewSettingsSchema = Schema.Struct({
   model: Schema.NullOr(Schema.String),
   contextMode: ContextModeSchema,
   cooldownMinutes: Schema.NullOr(Schema.Number)
 })
 
-/** A Space review is owned by its Space: the row in `spaces` that its key names. */
 const SpaceReviewOwnerSchema = Schema.Struct({
   ...SpaceReviewSubjectSchema.fields,
   key: AutomationId,
-  /** Named after its Space, as its private chat is. */
   name: Schema.String,
   settings: ReviewSettingsSchema,
-  /** Its private chat (`space_review_chats`); null until it is given one. */
   chatId: Schema.NullOr(Schema.String),
-  /** Its Space has inference on, a page, and is not archived. */
   mayRun: Schema.Boolean
 })
 
-/**
- * A Task is its own owner: the row in `space_tasks`. It has no settings to
- * author, so there is no prompt, model, handler or tool scope here.
- */
 const TaskOwnerSchema = Schema.Struct({
   ...TaskSubjectSchema.fields,
   key: AutomationId,
   spaceId: Schema.NullOr(SpaceId),
   text: Schema.String,
-  /** The Task is open, the worker's, not held, and its Space is not archived. */
   stands: Schema.Boolean,
-  /** Its private chat: the oldest live channel made for its key. */
   chatId: Schema.NullOr(Schema.String)
 })
 
@@ -219,12 +179,6 @@ const WorkOwnerSchema = Schema.Union([
 export type WorkOwner = typeof WorkOwnerSchema.Type
 export type DefinitionOwner = Extract<WorkOwner, { readonly kind: "automation" }>
 
-/**
- * Which stored row a key names. Only an Automation has a definition. A Task is
- * the row in `space_tasks` and a Space review the row in `spaces` that the key
- * names. Old definition rows of Tasks and reviews are kept for the ids that
- * point at them, and name no owner. The key is `queue.task_id` unless given.
- */
 export const ownerJoin = (
   sql: SqlClient.SqlClient,
   key: Statement.Fragment = sql`queue.task_id`
@@ -240,36 +194,23 @@ export const ownerJoin = (
 export const hasOwner = (sql: SqlClient.SqlClient): Statement.Fragment =>
   sql`(task.task_id IS NOT NULL OR item.item_id IS NOT NULL OR review_space.space_id IS NOT NULL)`
 
-/** The Space a review's key (`space:<space>`, `spaceJobId`) names; NULL for any other key. */
 export const reviewSpaceIdSql = (
   sql: SqlClient.SqlClient,
   key: Statement.Fragment
 ): Statement.Fragment => sql`CASE WHEN substr(${key}, 1, 6) = 'space:' THEN substr(${key}, 7) END`
 
-/** A review is named after its Space, as its private chat is (`syncSpaceReview`). */
 export const reviewNameSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment =>
   sql`${sql.literal(space)}.name || ' worker'`
 
-/**
- * When a job's runs act without asking. `own`: by the owner's own switch. `space`:
- * as its Space says, which is the owner's default approval mode.
- */
 type OwnerApproval =
   | { readonly kind: "own"; readonly autoApprove: boolean }
   | { readonly kind: "space" }
 
-/** What a job's runs may do, as its owner says now. */
 export interface OwnerPolicy {
   readonly toolScope: AutomationToolScope
   readonly approval: OwnerApproval
 }
 
-/**
- * The one reading of a job's policy. An Automation has its own scope and switch on
- * its definition. A Space review and a Task have the Space tools and no setting of
- * their own: a review and a Task in a Space follow the Space; a Task outside any
- * Space asks first. Nothing here is stored for a review or a Task.
- */
 export const ownerPolicy = (owner: WorkOwner): OwnerPolicy => {
   switch (owner.kind) {
     case "automation":
@@ -287,7 +228,6 @@ export const ownerPolicy = (owner: WorkOwner): OwnerPolicy => {
   }
 }
 
-/** A Space's review may run: inference on, a page bound, and not archived. */
 export const reviewMayRunSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment => {
   const row = sql.literal(space)
   return sql`(json_extract(${row}.inference_policy, '$.enabled') = 1
@@ -297,10 +237,6 @@ export const reviewMayRunSql = (sql: SqlClient.SqlClient, space: string): Statem
 const jsonBool = (sql: SqlClient.SqlClient, value: Statement.Fragment): Statement.Fragment =>
   sql`json(CASE WHEN ${value} THEN 'true' ELSE 'false' END)`
 
-/**
- * The owner that `ownerJoin` found, as one tagged value; NULL when the key
- * names no stored row. Each kind carries only the facts it has.
- */
 export const ownerJson = (
   sql: SqlClient.SqlClient,
   key: Statement.Fragment = sql`queue.task_id`
@@ -345,7 +281,6 @@ END`
 
 const decodeOwnerJson = Schema.decodeUnknownEffect(Schema.fromJsonString(WorkOwnerSchema))
 
-/** The owner in a row read with `ownerJson`, or undefined when the key names none. */
 export const decodeOwner = (
   row: { readonly task_id: string; readonly owner: string | null },
   operation: StoreOperation
@@ -366,11 +301,6 @@ export const decodeOwner = (
 
 const decodeBoundJson = Schema.decodeUnknownEffect(Schema.fromJsonString(BoundAttemptSchema))
 
-/**
- * The attempt identity in a row read with `boundAttemptJson`. Its purpose, its
- * origin and its Task binding are one value: they must name the same work, and
- * that work must be the one stored under the row's key.
- */
 export const decodeBoundAttempt = (
   row: { readonly task_id: string; readonly bound: string },
   operation: StoreOperation
@@ -420,11 +350,6 @@ const boundAgrees = (bound: BoundAttempt, key: string): boolean => {
   }
 }
 
-/**
- * What an attempt that already exists was started as. A reclaim and a renewal
- * hand it out again from here, not from the owner as stored now, and refuse
- * an owner under its key that is other work.
- */
 export const decodeOwnedAttempt = Effect.fn("AutomationRows.decodeOwnedAttempt")(function* (
   row: { readonly task_id: string; readonly bound: string },
   owner: WorkOwner,
@@ -442,7 +367,6 @@ export const decodeOwnedAttempt = Effect.fn("AutomationRows.decodeOwnedAttempt")
   return bound
 })
 
-/** The owner of one key, for a reader that has no queue row. */
 export const readWorkOwner = Effect.fn("AutomationRows.readWorkOwner")(function* (
   sql: SqlClient.SqlClient,
   key: string
@@ -457,10 +381,6 @@ export const readWorkOwner = Effect.fn("AutomationRows.readWorkOwner")(function*
 export const isDefinition = (owner: WorkOwner | undefined): owner is DefinitionOwner =>
   owner?.kind === "automation"
 
-/**
- * An Automation is on while enabled. A Task is on while it stands, and a
- * review while its Space lets it run.
- */
 export const ownerIsOn = (owner: WorkOwner): boolean => {
   switch (owner.kind) {
     case "automation":
@@ -472,7 +392,6 @@ export const ownerIsOn = (owner: WorkOwner): boolean => {
   }
 }
 
-/** The classification the run origin and the event batch are written from. */
 export const classificationOf = (owner: WorkOwner): JobClassification => {
   switch (owner.kind) {
     case "automation":

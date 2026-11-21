@@ -7,10 +7,6 @@ import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { claim, makeTask } from "./work-fixtures.js"
 
-// A Task's background usage is named by the Task as it is now. An old definition row an
-// earlier server kept under the Task's key is not its owner and does not name it.
-// Real SQLite store, made-up rows.
-
 it("a Task attempt's usage carries the Task's current name, not a kept old row's", async () => {
   const rows = await withTempDatabase(
     Effect.gen(function* () {
@@ -21,7 +17,6 @@ it("a Task attempt's usage carries the Task's current name, not a kept old row's
       yield* work.update({ kind: "item", itemId: task.item_id }, current.updated_at, {
         text: "Renamed by the owner"
       })
-      // The kept row's name is whatever it held when it stopped being the owner.
       yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, description, prompt, context_mode,
           triggers, enabled, created_at, auto_approve, builtin, tool_scope, triggers_source, purpose,
           owner_space_id, owner_task_id)

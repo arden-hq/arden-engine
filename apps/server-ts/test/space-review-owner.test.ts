@@ -15,12 +15,9 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 import { startJob } from "./fixtures/job-runs.js"
 import { LATER, claim, makeAutomation, requestRun, type Lease } from "./work-fixtures.js"
 
-// Derived from space-review-wakes.test.ts. Every row is made up and lives in a temp
-// database. The guard below makes any write of a Space review definition row fail,
-// so the review must wake, claim, start and settle without one. SQLite has no
-// "BEFORE INSERT OR UPDATE", so the guard is two triggers with the same condition.
 const REVIEW = spaceJobId("space-1")
 
+// SQLite has no "BEFORE INSERT OR UPDATE", so the guard is two triggers with the same condition.
 const guardDefinitions = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   for (const event of ["INSERT", "UPDATE"])
@@ -40,7 +37,6 @@ const makeSpace = Effect.gen(function* () {
   )
 })
 
-/** A Task change by hand, with no run behind it: the change that wakes the review. */
 const editByHand = (itemId: string, text: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -55,7 +51,6 @@ const reviewWakes = Effect.gen(function* () {
     SELECT COUNT(*) AS n FROM automation_event_queue WHERE task_id = ${REVIEW}`)[0]?.n
 })
 
-/** What the real store kept of one started chat run: its origin and its actor. */
 const storedRun = (runId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -69,7 +64,6 @@ const storedRun = (runId: string) =>
     }
   })
 
-/** Ends a started run with a made-up answer, then settles its job as finished. */
 const finish = (
   lease: Lease,
   run: Effect.Success<ReturnType<typeof startJob>>,
@@ -153,8 +147,6 @@ it("a Space review wakes, runs in its private chat and settles with no definitio
       }>`
         SELECT status, outcome, purpose FROM automation_runs WHERE id = ${review.payload.automationRunId}`
 
-      // A second change by hand: a new wake, a new attempt, the same private chat,
-      // and a prompt read from the Task as it is now.
       yield* editByHand(task.item_id, "Edited by hand again")
       const second = yield* claim("second", 10, LATER + 2 * 60 * 60_000)
       const again = second.find((lease) => lease.payload.automationId === REVIEW)
@@ -235,13 +227,11 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
       const listed = (yield* (yield* AutomationCatalog).diagnostics()).queue.find(
         (row) => row.task_id === REVIEW
       )
-      // Its lease runs out: the same row comes back, with the same attempt and hold start.
       const back = (yield* claim("back", 10, first.expiresAt + 1)).find(
         (lease) => lease.payload.automationId === REVIEW
       )
       if (back === undefined) throw new Error("The expired review claim did not come back")
       const reheld = yield* holdOf(back.id)
-      // It fails for good: the attempt ends failed and the review queues its own retry.
       yield* Effect.promise(async () =>
         queue.jobs.fail({
           ...back,
@@ -256,7 +246,6 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
         SELECT json_extract(context, '$.trigger_context_snapshot.event_type') AS event_type,
           next_attempt_at > ${new Date(first.expiresAt + 2).toISOString()} AS later
         FROM automation_event_queue WHERE task_id = ${REVIEW}`
-      // The retry runs, and its Space is deleted while it does: the attempt still settles.
       const retry = (yield* claim("retry", 10, first.expiresAt + 24 * 60 * 60_000)).find(
         (lease) => lease.payload.automationId === REVIEW
       )
@@ -321,9 +310,6 @@ it("a Space rename renames the review's generated chat, keeps a custom one, and 
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const spaces = yield* SpaceStore
-      // The old definition row a 179 server left, kept as migration 180 keeps it. Its
-      // scope and approval are made stale on purpose ('all', ask): no reader may take
-      // them. The guard comes after it, so any later write of it fails.
       yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
         VALUES ('space-1', 'Made-up', 'made-up', '{"enabled":true}', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`
       yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, description, prompt, context_mode,
@@ -357,7 +343,6 @@ it("a Space rename renames the review's generated chat, keeps a custom one, and 
       yield* editByHand(task.item_id, "Edited by hand")
       const custom = yield* chatName
 
-      // Permissions of the review's chat and of its running chat run, from the native store.
       const review = (yield* claim("first", 10)).find(
         (lease) => lease.payload.automationId === REVIEW
       )
@@ -409,31 +394,25 @@ it("a Space review holds while it may not run, wakes once when it may, and stops
       const spaces = yield* SpaceStore
       yield* guardDefinitions
       const task = yield* makeSpace
-      // The last Space cannot be archived.
       yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
         VALUES ('space-2', 'Other', 'other', '{"enabled":true}', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`
       yield* sql`DELETE FROM automation_event_queue`
-      // No route switches a Space's inference; the stored policy is set directly.
       const setInference = (enabled: boolean) =>
         sql.unsafe(`UPDATE spaces SET inference_policy = json_set(inference_policy, '$.enabled', json('${enabled}'))
           WHERE space_id = 'space-1'`)
 
-      // Off: a change by hand queues nothing for the review, and nothing is claimed.
       yield* setInference(false)
       yield* editByHand(task.item_id, "While off")
       const whileOff = yield* reviewWakes
-      // On again: one change wakes it, and a second change joins the same wake.
       yield* setInference(true)
       yield* editByHand(task.item_id, "On again")
       yield* editByHand(task.item_id, "On again, twice")
       const whileOn = yield* reviewWakes
-      // Off with a wake waiting: the wake stays, and no claim takes it.
       yield* setInference(false)
       const heldClaim = (yield* claim("held", 10)).filter(
         (lease) => lease.payload.automationId === REVIEW
       )
       const keptWhileHeld = yield* reviewWakes
-      // On again: that one wake is claimed, once.
       yield* setInference(true)
       const resumed = (yield* claim("resumed", 10)).filter(
         (lease) => lease.payload.automationId === REVIEW
@@ -443,9 +422,7 @@ it("a Space review holds while it may not run, wakes once when it may, and stops
       )
       const [running] = resumed
       if (running === undefined) throw new Error("The re-enabled review was not claimed")
-      // Archive: the running attempt is ended and its claim is refused.
       yield* spaces.archive("space-1")
-      // An attempt with no chat run yet is ended as superseded (automation-authority.ts).
       const [attempt] = yield* sql<{ readonly outcome: string }>`
         SELECT outcome FROM automation_runs WHERE id = ${running.payload.automationRunId}`
       const queue = yield* AutomationQueue

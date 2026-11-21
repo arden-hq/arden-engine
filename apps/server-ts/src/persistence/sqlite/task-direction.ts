@@ -11,10 +11,6 @@ import {
 import { decodeJson } from "./json.js"
 import { readTaskContract } from "./task-contract.js"
 
-/**
- * A Task's direction as stored now: the same row and contract reader the run's context
- * shows it from (space-job-context.ts). Undefined when the Task is gone.
- */
 export const readTaskDirection = Effect.fn("TaskDirection.read")(function* (
   sql: SqlClient.SqlClient,
   itemId: string
@@ -32,13 +28,6 @@ export const readTaskDirection = Effect.fn("TaskDirection.read")(function* (
   } satisfies TaskDirection
 })
 
-/**
- * Whether a started call's stored plan matches its run's Task now, read in the caller's
- * transaction. "current" also for a run with no Task. "needs_review" when the direction
- * changed, or when a Task run's call has no stored plan: such a call (from before plans
- * were stored, or from a turn shown none) is never run on today's Task. "no_call" when no
- * durable call has that id: the caller is not a durable tool call.
- */
 export const readCallPlan = Effect.fn("TaskDirection.readCallPlan")(function* (
   sql: SqlClient.SqlClient,
   call: { readonly runId: string; readonly toolCallId: string }
@@ -62,11 +51,6 @@ export const readCallPlan = Effect.fn("TaskDirection.readCallPlan")(function* (
     : ("needs_review" as const)
 })
 
-/**
- * A Task write a durable call asked for, checked in the write's own transaction: the
- * direction cannot change between this check and the write. Fails with
- * `TaskDirectionChanged` when the call's plan is stale.
- */
 export const assertCallPlan = Effect.fn("TaskDirection.assertCallPlan")(function* (
   sql: SqlClient.SqlClient,
   call: { readonly runId: string; readonly toolCallId: string }

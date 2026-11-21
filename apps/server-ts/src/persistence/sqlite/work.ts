@@ -537,7 +537,6 @@ export const makeWorkStore = ({
         { status: "cancelled" },
         "user"
       ).pipe(
-        // A stop names no tool call, so no call's plan is checked.
         Effect.catchTag("TaskDirectionChanged", (error) => Effect.die(error)),
         Effect.catchTag("WorkStoreError", (error) => {
           if (error.reason !== "conflict") return Effect.fail(error)

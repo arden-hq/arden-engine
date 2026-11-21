@@ -190,11 +190,6 @@ export const makeChatAdmission = ({
             )).automationLimits[valid.automation.automationId]?.maxTokensPerRun ?? undefined)
       const now = yield* DateTime.now
       const timestamp = DateTime.formatIso(now)
-      // The only writer that marks an arrival delivered. A stored receipt
-      // can exist beside a still-pending arrival row; a replay settles that
-      // row too. Only the arrival's own client id settles it, and only the
-      // row this chat and text name. `loadReceipt` alone decides whether a
-      // stored receipt answers this request.
       const settleDelivery = (target: DeliveryTarget) => {
         if (valid.deliveryId === undefined || valid.clientId !== `arrival:${valid.deliveryId}`)
           return Effect.void

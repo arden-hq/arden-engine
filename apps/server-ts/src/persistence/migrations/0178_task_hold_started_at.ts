@@ -1,10 +1,5 @@
 import type { Migration } from "./index.js"
 
-/**
- * When a worker took hold of a Task's queue row. A renewal moves `claimed_at`, so
- * that cannot say it. A row held across this migration keeps NULL: its start was
- * never stored.
- */
 export const taskHoldStartedAt: Migration = {
   version: 178,
   name: "task_hold_started_at",

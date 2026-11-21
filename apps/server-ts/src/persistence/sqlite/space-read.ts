@@ -385,9 +385,6 @@ export const makeSpaceReads = (
         summary: row.summary
       }))
 
-      // The review is there once it has its private chat. What it last reported
-      // is read from its last counted attempt: the result of one that ran, else
-      // its error.
       const workers = yield* reader<SpaceWorkerRow>`
         SELECT ${workerAutomationId} AS task_id,
                (SELECT CASE WHEN ended.status = 'completed' THEN ended.result ELSE ended.error END
@@ -537,9 +534,6 @@ export const makeSpaceReads = (
       const worker = workers[0]
       const workerLatestFailed = worker?.latest_status === "failed"
       const liveTasks = workItems.filter((item) => item.status === "open").length
-      // When the Space's review or one of its Task workers last ran to an end: the latest
-      // end time of any counted completed run. Each job's is read from its end-time index,
-      // latest first, so the cost stays per job, not per run in the history.
       const spaceRuns = yield* reader<{ readonly last_run_at: string | null }>`
         SELECT MAX((SELECT run.ended_at FROM automation_runs AS run
             WHERE run.task_id = job.id AND +run.status = 'completed'

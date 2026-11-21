@@ -104,27 +104,17 @@ export const jobHandler = (
   }
 }
 
-/**
- * What a claim reads from its owner: what a new attempt is written as, and what
- * the worker is told now. A Task authors none of it, so its side is fixed here.
- */
 export interface ClaimedWork {
   readonly job: JobClassification
   readonly name: string
   readonly model: string | null
   readonly chatKind: "own" | "yours"
-  /**
-   * The chat set on the owner now; for a Task or a review, its private chat.
-   * Null when it has none.
-   */
   readonly chatId: string | null
-  /** The handler set now. A reclaimed attempt runs it too, as before. */
   readonly handler: string | null
   readonly ref: string
   readonly contextMode: AutomationContextMode
   readonly cooldownMinutes: number | null
   readonly instructionRevisionId: number | null
-  /** An Automation's worker hold. A Task's or a review's is on its queue row. */
   readonly heldSince: string | null
 }
 
@@ -162,8 +152,6 @@ export const claimedWork = (owner: WorkOwner): ClaimedWork => {
     }
     case "automation": {
       const { authored } = owner
-      // Only a user's Automation can be set on a chat that is not its own. A
-      // run that goes on from such a chat works in a copy of it.
       const chatKind =
         isUserAutomationPurpose(owner.purpose) && authored.chatOrigin !== owner.key
           ? "yours"

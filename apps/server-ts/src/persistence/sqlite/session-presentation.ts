@@ -4,7 +4,6 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { JobPurpose } from "../job-classification.js"
 import { ownerJoin } from "./automation-rows.js"
 
-// A Space review's chat is named by its key (`space:<space>`), whether or not its Space is still there.
 export const readableConversationSql = (sql: SqlClient.SqlClient) =>
   sql`(session_type = 'chat' AND parent_session_id IS NULL AND parent_message_id IS NULL
     AND COALESCE(substr(origin_automation_id, 1, 6), '') != 'space:')`
@@ -36,8 +35,6 @@ export const sessionPresentations = Effect.fn("Sessions.presentation")(function*
   const rows = yield* sql<PresentationRow>`
     SELECT conversation.space_id AS conversation_space_id, s.session_id, s.session_type, s.name, s.parent_session_id, s.parent_message_id,
       parent.name AS parent_name,
-      -- A Task's or a review's chat stays its worker chat after its owner is
-      -- deleted: the key says so.
       COALESCE(task.purpose,
         CASE WHEN substr(s.origin_automation_id, 1, 5) = 'task:' THEN 'task_execution'
           WHEN substr(s.origin_automation_id, 1, 6) = 'space:' THEN 'space_review' END) AS purpose,

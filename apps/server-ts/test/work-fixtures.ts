@@ -7,8 +7,6 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { spaceJobId } from "../src/persistence/space-job-id.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 
-// Shared by the bounded-repair tests. Every row is made up and lives in a temp database.
-
 export const LATER = Date.now() + 60 * 60_000
 
 const LEASE_MS = 60_000
@@ -23,7 +21,6 @@ export const claim = (workerId: string, limit: number, now = LATER) =>
 
 export type Lease = Effect.Success<ReturnType<typeof claim>>[number]
 
-/** What a queue call did: its value, or the words it was refused with. */
 const attempted = <A>(call: () => Promise<A>) =>
   Effect.promise(async () =>
     call().then(
@@ -48,7 +45,6 @@ export const tryRenew = (lease: Lease, now: number) =>
     )
   })
 
-/** A Space with one worker-owned Task whose wake is queued. The review's own wake is removed. */
 export const makeTask = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
@@ -61,7 +57,6 @@ export const makeTask = Effect.gen(function* () {
   return task
 })
 
-/** A user's Automation with its own chat. No run is asked for. */
 export const makeAutomation = Effect.gen(function* () {
   const automation = yield* (yield* AutomationCatalog).create(
     {
@@ -77,12 +72,6 @@ export const makeAutomation = Effect.gen(function* () {
   return automation.task_id
 })
 
-/**
- * Stores the Automation under another key, as no store method would: the key a
- * Task's wakes use. A definition under a key wins over the Task the key names.
- * The definition is copied, not renamed: its deliveries, idle state and
- * revisions name the first key and stay with it.
- */
 export const storeUnderKey = (automationId: string, key: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -101,10 +90,6 @@ export const requestRun = (key: string) =>
     yield* (yield* AutomationQueue).requestRun(AutomationId.make(key))
   })
 
-/**
- * Rewrites what an attempt was started as. A trigger refuses this in a real
- * database, so the test removes it first: this is stored corruption, made up.
- */
 export type AttemptCorruption =
   | { readonly kind: "purpose"; readonly purpose: string | null }
   | { readonly kind: "origin"; readonly origin: Readonly<Record<string, string>> }

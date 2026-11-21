@@ -41,7 +41,6 @@ const personTurn = (sessionId: string, task: RunContext["task"] = null): RunCont
   task
 })
 
-// The call sites below are the tracked ones; this names the typed owner each one meant.
 const automation = (
   id: string,
   purpose: "user_automation" | "system" | "space_review" | "task_execution",

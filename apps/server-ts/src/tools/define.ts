@@ -121,23 +121,7 @@ export interface ServerToolDefinition<S extends StandardSchemaV1> extends Omit<
   ToolDefinition<S, ServerRunContext, ServerToolMetadataInput>,
   "approvalPrompt" | "approvalRequirement" | "execute"
 > {
-  /**
-   * One short sentence for a person: the public tool catalog shows it, and an
-   * approval card falls back to it. Every tool the catalog lists has one
-   * (tool-contract.ts). It is not the model's `description`, and it is not in
-   * `metadata`, which the loop copies into every call's events. The loop keeps the
-   * definition object as given (`createTool`) and projects only its name,
-   * description, parameters and metadata, so the field stays on the definition and
-   * reaches no model request, event or store.
-   */
   readonly summary?: string
-  /**
-   * How a broad-scope run (`all`, `space`) finds this tool. `"always_loaded"`: the
-   * model has it from the first turn. A group: the tool is deferred, and tool search
-   * lists and loads it with the others of its group (OpenAI advises fewer than 10 per
-   * group). None: deferred with no group. A run's own scope tools and hosted tools are
-   * never deferred (tool-catalog.ts). Like `summary`, it stays on the definition.
-   */
   readonly discovery?: ToolDiscovery
   readonly execute: (
     input: StandardSchemaV1.InferOutput<S>,
@@ -187,11 +171,6 @@ const SITES = new WeakMap<object, SiteOf>()
 
 export const siteOf = (definition: object): SiteOf | undefined => SITES.get(definition)
 
-/**
- * A tool's short text for a person: its definition's own `summary` field. Callers
- * hold the loop's definition type, which does not name the field, so it is read here.
- * An MCP or internal tool has none.
- */
 export const summaryOf = (definition: object): string | undefined =>
   "summary" in definition && typeof definition.summary === "string" ? definition.summary : undefined
 
@@ -209,7 +188,6 @@ const validDiscovery = (value: unknown): value is ToolDiscovery =>
     typeof value.group === "string" &&
     GROUP_NAME.test(value.group))
 
-/** A tool's discovery fact: its definition's own `discovery` field (see summaryOf). */
 export const discoveryOf = (definition: object): ToolDiscovery | undefined =>
   "discovery" in definition && validDiscovery(definition.discovery)
     ? definition.discovery
