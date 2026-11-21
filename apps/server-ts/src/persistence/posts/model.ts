@@ -1,5 +1,9 @@
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
-import { NewTaskInputSchema } from "@arden-hq/protocol/effect/spaces/work"
+import {
+  NewTaskInputSchema,
+  SpaceTaskCaptureInputSchema,
+  SpaceTaskSourceSchema
+} from "@arden-hq/protocol/effect/spaces/work"
 import { Schema } from "effect"
 
 const POST_TEXT_MAX = 1_500
@@ -17,7 +21,8 @@ const PostTextSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLeng
 export const POST_WITHDRAWAL_REASONS = [
   "destination_archived",
   "destination_deleted",
-  "undecodable"
+  "undecodable",
+  "undeliverable"
 ] as const
 
 export const PostDeliveryPayloadSchema = Schema.Struct({
@@ -37,3 +42,27 @@ export const PostDeliveryPayloadSchema = Schema.Struct({
   )
 })
 export type PostDeliveryPayload = typeof PostDeliveryPayloadSchema.Type
+
+export const postTaskParts = (payload: PostDeliveryPayload, task: PostTask) => ({
+  input: { text: task.title, body: task.brief },
+  taskSources: [
+    {
+      kind: "chat" as const,
+      session_id: payload.sessionId,
+      turn_id: payload.messageId,
+      revision: payload.messageId
+    },
+    ...payload.itemIds.map((itemId) => ({
+      kind: "connection_item" as const,
+      item_id: itemId,
+      revision: itemId
+    }))
+  ],
+  capture: { basis: "explicit" as const, reason: payload.text }
+})
+
+export const PostTaskPartsSchema = Schema.Struct({
+  input: NewTaskInputSchema,
+  taskSources: Schema.Array(SpaceTaskSourceSchema),
+  capture: SpaceTaskCaptureInputSchema
+})

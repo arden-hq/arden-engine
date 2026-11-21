@@ -563,3 +563,36 @@ it("a thread whose pending post's Space was archived takes the next post to Main
     })
   )
 })
+
+it("a post whose Task the Task store would refuse is refused before it is queued", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, post } = yield* setup
+      const refused = yield* post(1, {
+        itemIds: [" "],
+        task: { title: "Pay", brief: "Pay it." }
+      }).pipe(Effect.flip)
+      expect(refused).toMatchObject({ reason: "invalid" })
+      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
+    })
+  )
+})
+
+it("a post that keeps failing is set aside and stops holding its chat", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { post, drain, delivery, posts } = yield* setup
+      yield* post(1)
+      yield* post(2)
+      for (let attempt = 0; attempt < 10; attempt += 1)
+        yield* posts.defer({ deliveryId: postDeliveryId(1), attempt }, "failed")
+      expect(yield* delivery(1)).toEqual({
+        status: "discarded",
+        attempt_count: 10,
+        reason: "undeliverable"
+      })
+      expect(yield* drain).toBe(1)
+      expect(yield* delivery(2)).toMatchObject({ status: "delivered" })
+    })
+  )
+})

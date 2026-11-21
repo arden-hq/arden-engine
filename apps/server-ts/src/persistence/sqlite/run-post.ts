@@ -6,6 +6,8 @@ import { Clock, Effect, Option, Schema } from "effect"
 import { nextOutboxAttemptAt } from "../../runtime/outbox.js"
 import { iso } from "../../runtime/clock.js"
 import {
+  PostTaskPartsSchema,
+  postTaskParts,
   PostDeliveryPayloadSchema,
   type PostDeliveryPayload,
   POST_WITHDRAWAL_REASONS
@@ -39,6 +41,8 @@ const encodePayload = Schema.encodeEffect(Schema.fromJsonString(PostDeliveryPayl
 const decodePayload = Schema.decodeUnknownOption(Schema.fromJsonString(PostDeliveryPayloadSchema))
 
 export const postDeliveryId = (attemptId: number): string => sha256Hex(`post:${attemptId}`)
+
+const POST_ATTEMPTS = 10
 
 const postMessageId = (deliveryId: string): string => `post:${deliveryId}`
 
@@ -206,6 +210,14 @@ export const makePostStore = ({
             itemIds: [...input.itemIds],
             ...(input.task === undefined ? {} : { task: input.task })
           }
+          if (payload.task !== undefined)
+            yield* Schema.decodeUnknownEffect(PostTaskPartsSchema)(
+              postTaskParts(payload, payload.task)
+            ).pipe(
+              Effect.mapError(
+                (cause) => new PostStoreError({ reason: "invalid", message: "Invalid post", cause })
+              )
+            )
           yield* sql`INSERT INTO automation_deliveries (
               delivery_id, task_id, delivered_at, subject, body, payload, status, created_at,
               destinations
@@ -259,24 +271,13 @@ export const makePostStore = ({
     if (task === undefined) return
     if (yield* threadTaken(sql, { itemIds: payload.itemIds, exceptProposal: undefined })) return
     const scope = { kind: "space", spaceId } as const
+    const parts = postTaskParts(payload, task)
     yield* work.createInTransaction({
       scope,
-      input: { key: yield* work.freeKey(scope, task.title), text: task.title, body: task.brief },
+      input: { ...parts.input, key: yield* work.freeKey(scope, task.title) },
       actor: "worker",
-      taskSources: [
-        {
-          kind: "chat",
-          session_id: payload.sessionId,
-          turn_id: payload.messageId,
-          revision: payload.messageId
-        },
-        ...payload.itemIds.map((itemId) => ({
-          kind: "connection_item" as const,
-          item_id: itemId,
-          revision: itemId
-        }))
-      ],
-      capture: { basis: "explicit", reason: payload.text },
+      taskSources: parts.taskSources,
+      capture: parts.capture,
       causedBy: payload.runId,
       originMessageId: payload.messageId
     })
@@ -373,13 +374,21 @@ export const makePostStore = ({
     cause: string
   ) {
     const attempt = delivery.attempt + 1
-    const retryAt = nextOutboxAttemptAt(yield* Clock.currentTimeMillis, attempt)
+    const now = yield* Clock.currentTimeMillis
     yield* writer
       .run(
-        sql`UPDATE automation_deliveries SET
-          attempt_count = ${attempt}, next_attempt_at = ${retryAt}, last_error = ${cause}
-        WHERE delivery_id = ${delivery.deliveryId} AND status = 'pending'
-          AND attempt_count = ${delivery.attempt}`
+        attempt >= POST_ATTEMPTS
+          ? sql`UPDATE automation_deliveries SET status = 'discarded',
+              attempt_count = ${attempt}, last_error = ${cause},
+              payload = json_set(COALESCE(json(payload), '{}'), '$.withdrawal',
+                json_object('at', ${iso(now)}, 'reason', 'undeliverable'))
+            WHERE delivery_id = ${delivery.deliveryId} AND status = 'pending'
+              AND attempt_count = ${delivery.attempt}`
+          : sql`UPDATE automation_deliveries SET
+              attempt_count = ${attempt}, next_attempt_at = ${nextOutboxAttemptAt(now, attempt)},
+              last_error = ${cause}
+            WHERE delivery_id = ${delivery.deliveryId} AND status = 'pending'
+              AND attempt_count = ${delivery.attempt}`
       )
       .pipe(Effect.mapError(storage("Could not schedule the post retry")))
   })
