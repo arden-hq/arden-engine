@@ -220,6 +220,7 @@ const runNested = async (
   try {
     const result = await ctx.run.codeMode.call({
       approvalContinuation: "caller",
+      parentToolCallId: ctx.toolCallId,
       toolCallId,
       name,
       args,

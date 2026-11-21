@@ -54,9 +54,11 @@ import { answerFixInHistory } from "./loop-events.js"
 import { labelToolResults, seenToolResult } from "../context/tool-result-ids.js"
 import {
   presentedRuntimeState,
+  producingTaskDirection,
   runtimeUpdate,
   type RuntimeContext
 } from "../context/runtime-update.js"
+import { DIRECTION_REVIEW_HOST } from "../persistence/tools/mutation-receipt.js"
 import { currentIso } from "../runtime/clock.js"
 import type { ModelDefinition } from "../models/host.js"
 import { chatStepOutputLimit, outputLimitDelivery } from "../models/side-call.js"
@@ -448,7 +450,8 @@ const appendRuntimeContext = (
 
 const makeSystemContextMiddleware = (
   systemContext: NonNullable<LoopChatRunnerOptions["systemContext"]>,
-  input: ChatRunnerInput
+  input: ChatRunnerInput,
+  directionReviews: () => number
 ): ModelRequestMiddleware => {
   let cacheKey: string | null = null
   let cached: RuntimeContext | undefined
@@ -478,7 +481,15 @@ const makeSystemContextMiddleware = (
         ? [message.tool_call_id]
         : []
     )
-    const key = JSON.stringify([userIndex, user?.message_id, user?.content, completedCatalogCalls])
+    // A call refused because its Task's direction changed makes the next request read the
+    // context again, so the model is shown the direction as it is now.
+    const key = JSON.stringify([
+      userIndex,
+      user?.message_id,
+      user?.content,
+      completedCatalogCalls,
+      directionReviews()
+    ])
     if (cacheKey !== key) {
       cached = await systemContext({
         sessionId: input.sessionId,
@@ -522,6 +533,15 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
       window === undefined
         ? undefined
         : chatStepOutputLimit({ context: window, delivery: outputLimitDelivery(capabilities) })
+    /**
+     * This run's calls, its scripts' nested calls included, refused because their Task's
+     * direction changed. The context cache key: the next request shows the Task as it is now.
+     */
+    let directionReviews = 0
+    const counted = (result: ToolResult): ToolResult => {
+      if (result.host?.["not_run"] === DIRECTION_REVIEW_HOST.not_run) directionReviews += 1
+      return result
+    }
     const sourceToolset =
       typeof config.toolset === "function"
         ? await config.toolset({
@@ -529,7 +549,8 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
             runId: input.runId,
             approvalMode: input.approvalMode,
             automationId: input.automationId,
-            executeTool: input.tools.execute,
+            executeTool: (request, operation, options) =>
+              input.tools.execute(request, operation, options).then(counted),
             executeDetachedTool: input.tools.executeDetached,
             spawnAgent: input.tools.spawnAgent,
             cancelAgent: input.tools.cancelAgent,
@@ -563,17 +584,28 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
       request: ToolCallRequest,
       operation: (request: ToolCallRequest) => Promise<ToolResult> | ToolResult
     ): Promise<ToolResult> => {
+      // `messages` is the live history: read the producing turn before any await.
+      const shown =
+        request.messages === undefined
+          ? undefined
+          : producingTaskDirection(request.messages, request.toolCallId)
       request.phase?.("waiting")
-      return input.tools.execute(
-        await durableRequest(request),
+      const result = await input.tools.execute(
+        { ...(await durableRequest(request)), plan: { kind: "turn", shown } },
         (context) =>
-          operation(
-            context?.approval === undefined
-              ? request
-              : { ...request, approval: { ...context.approval } }
-          ),
+          operation({
+            ...request,
+            ...(context?.approval === undefined ? {} : { approval: { ...context.approval } }),
+            ...(context === undefined
+              ? {}
+              : {
+                  beforeExecute: async () =>
+                    (await request.beforeExecute?.()) ?? (await context.admit())
+                })
+          }),
         request.backgrounded === undefined ? {} : { backgrounded: request.backgrounded }
       )
+      return counted(result)
     }
     const toolset: Toolset = {
       ...sourceToolset,
@@ -635,7 +667,7 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
           ...(maxSteps === undefined ? [] : [makeStepLimitMiddleware(input, maxSteps)]),
           ...(config.systemContext === undefined
             ? []
-            : [makeSystemContextMiddleware(config.systemContext, input)]),
+            : [makeSystemContextMiddleware(config.systemContext, input, () => directionReviews)]),
           ...(localInstructions === undefined ? [] : [localInstructions.modelMiddleware]),
           ...(compact === undefined
             ? []

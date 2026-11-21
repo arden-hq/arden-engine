@@ -278,7 +278,9 @@ export const makeWorkflowNodeRunner = (
               args,
               changesState: true,
               effect: "arden_db",
-              source: "_agents"
+              source: "_agents",
+              // A launched agent keeps the plan of the script that launched it.
+              plan: { kind: "call", toolCallId: request.parentToolCallId }
             },
             (context) =>
               toolset.execute({
@@ -286,9 +288,8 @@ export const makeWorkflowNodeRunner = (
                 name: SPAWN_AGENT_TOOL,
                 args,
                 signal: request.signal,
-                ...(request.beforeExecute === undefined
-                  ? {}
-                  : { beforeExecute: request.beforeExecute }),
+                beforeExecute: async () =>
+                  (await request.beforeExecute?.()) ?? (await context?.admit()),
                 ...(context?.approval === undefined ? {} : { approval: { ...context.approval } })
               })
           )

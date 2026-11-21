@@ -1,4 +1,10 @@
+import type { ChatMessage } from "@arden-hq/loop"
+import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Option, Schema } from "effect"
+import {
+  TaskDirectionReceiptSchema,
+  type TaskDirectionReceipt
+} from "../persistence/work/task-direction.js"
 import {
   SpaceFactsSchema,
   spaceFacts,
@@ -19,6 +25,13 @@ export type RuntimeSection =
       readonly key: string
       readonly text: string
       readonly space: SpaceView
+    }
+  /** The run's Task as its owner has it now; its receipt rides in the runtime state. */
+  | {
+      readonly kind: "direction"
+      readonly key: string
+      readonly text: string
+      readonly receipt: TaskDirectionReceipt
     }
 
 /**
@@ -44,7 +57,8 @@ export interface RuntimeContext {
 const RuntimeStateSchema = Schema.Struct({
   sections: Schema.Record(Schema.String, Schema.String),
   turn: Schema.Record(Schema.String, Schema.String),
-  space: Schema.optionalKey(Schema.Struct({ key: Schema.String, facts: SpaceFactsSchema }))
+  space: Schema.optionalKey(Schema.Struct({ key: Schema.String, facts: SpaceFactsSchema })),
+  direction: Schema.optionalKey(TaskDirectionReceiptSchema)
 })
 export type RuntimeState = typeof RuntimeStateSchema.Type
 
@@ -103,12 +117,37 @@ export const presentedRuntimeState = (
 
 const decodeState = Schema.decodeUnknownOption(RuntimeStateSchema)
 
+/**
+ * The Task direction shown to the model turn that asked for `toolCallId`: the runtime
+ * record just before the assistant message holding that call. Undefined when that turn was
+ * shown none, or the call is not in `messages` (a nested call).
+ */
+export const producingTaskDirection = (
+  messages: ReadonlyArray<ChatMessage>,
+  toolCallId: string
+): TaskDirectionReceipt | undefined => {
+  const asked = messages.findIndex(
+    (message) =>
+      message.role === ROLE.assistant &&
+      (message.tool_calls ?? []).some((call) => call.id === toolCallId)
+  )
+  const record = messages
+    .slice(0, Math.max(asked, 0))
+    .findLast(
+      (message) => message.role === ROLE.developer && message.arden_context_source === "runtime"
+    )
+  if (asked < 0 || record === undefined || record.role !== ROLE.developer) return undefined
+  return Option.getOrUndefined(decodeState(record.arden_context_state))?.direction
+}
+
 const sectionChanges = (
   presented: RuntimeState,
   current: RuntimeContext
 ): ReadonlyArray<string> => {
   const present = new Set(current.sections.map((section) => section.key))
   const changed = current.sections.flatMap((section) => {
+    if (section.kind === "direction")
+      return presented.sections[section.key] === digest(section.text) ? [] : [section.text]
     if (section.kind === "space") {
       if (presented.space === undefined || presented.space.key !== section.key)
         return [section.text]
@@ -131,10 +170,11 @@ const sectionChanges = (
 
 const runtimeState = (context: RuntimeContext): RuntimeState => {
   const space = context.sections.find((section) => section.kind === "space")
+  const direction = context.sections.find((section) => section.kind === "direction")
   return {
     sections: Object.fromEntries(
       context.sections.flatMap((section) =>
-        section.kind === "text" && section.lifetime === "state"
+        (section.kind === "text" && section.lifetime === "state") || section.kind === "direction"
           ? [[section.key, digest(section.text)]]
           : []
       )
@@ -146,7 +186,8 @@ const runtimeState = (context: RuntimeContext): RuntimeState => {
           : []
       )
     ),
-    ...(space === undefined ? {} : { space: { key: space.key, facts: spaceFacts(space.space) } })
+    ...(space === undefined ? {} : { space: { key: space.key, facts: spaceFacts(space.space) } }),
+    ...(direction === undefined ? {} : { direction: direction.receipt })
   }
 }
 

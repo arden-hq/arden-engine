@@ -120,6 +120,7 @@ export const computerTools = Effect.gen(function* () {
                   name,
                   args,
                   signal,
+                  parentToolCallId: ctx.toolCallId,
                   toolCallId: `${ctx.toolCallId}${NESTED_CALL_MARKERS[COMPUTER_TOOL]}${index}`,
                   detached: false,
                   messages: ctx.messages,

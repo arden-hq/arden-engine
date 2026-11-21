@@ -36,10 +36,14 @@ export const deferredCallOf = (toolCallId: string): string | undefined =>
 export class DeferredToolCalls extends Context.Service<
   DeferredToolCalls,
   {
+    /**
+     * Publishes the call's card, unless the call's stored plan no longer matches its Task:
+     * then nothing is inserted or announced, and the answer is `needs_review`.
+     */
     readonly defer: (input: {
       readonly call: DeferredToolCall
       readonly prompt: ToolApprovalPrompt<ApprovalPresentation>
-    }) => Effect.Effect<void, ToolExecutionStoreError>
+    }) => Effect.Effect<"published" | "needs_review", ToolExecutionStoreError>
     readonly decide: (
       input: DeferredDecisionInput
     ) => Effect.Effect<DeferredDecision, ToolExecutionStoreError>

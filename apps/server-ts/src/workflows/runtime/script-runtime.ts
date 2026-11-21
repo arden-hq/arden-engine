@@ -66,6 +66,7 @@ const isScriptEnvelope = Schema.is(ScriptEnvelopeSchema)
 interface ScriptToolRequest {
   readonly onResolved: (toolCallId: string) => void
   readonly onSettled: (facts: NestedCallFacts) => void
+  readonly parentToolCallId: string
   readonly toolCallId: string
   readonly name: string
   readonly args: Readonly<Record<string, Schema.Json>>
@@ -520,6 +521,7 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
             onSettled: (facts) => {
               recorded = facts
             },
+            parentToolCallId: options.parentToolCallId,
             toolCallId,
             name,
             args,

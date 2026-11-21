@@ -24,6 +24,17 @@ export const executionBudgetExpired = (
     AND (budget.token_limit IS NULL OR budget.tokens_used < budget.token_limit)
 ))`
 
+/**
+ * The run names no budget row that exists: a broken reference, not a spent allowance.
+ * `executionBudgetExpired` counts it as expired too, so a run never acts on it.
+ */
+export const executionBudgetMissing = (
+  sql: SqlClient.SqlClient,
+  metadata: Statement.Fragment
+) => sql`NOT EXISTS (
+  SELECT 1 FROM execution_budgets AS budget
+  WHERE budget.budget_id = json_extract(${metadata}, '$.run_policy.budget_id'))`
+
 export const readBudgetRemaining = Effect.fn("ExecutionBudget.remaining")(function* (
   sql: SqlClient.SqlClient,
   budgetId: string

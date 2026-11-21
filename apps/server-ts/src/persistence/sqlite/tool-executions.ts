@@ -1,4 +1,6 @@
-import { assertRunTaskBinding } from "./run-context.js"
+import { readRunAuthority } from "./run-context.js"
+import { readCallPlan } from "./task-direction.js"
+import { TaskDirectionReceiptSchema, type ToolCallPlan } from "../work/task-direction.js"
 import { refreshChangeEvidence } from "./change-evidence.js"
 import type { ToolResult } from "@arden-hq/loop"
 import { DateTime, Effect } from "effect"
@@ -59,6 +61,7 @@ export const makeToolExecutions = ({
 }: Pick<PersistenceDeps, "writer" | "chatEvents" | "sessionEvents">): Pick<
   ToolExecutionStore["Service"],
   | "begin"
+  | "admitPlanned"
   | "complete"
   | "pause"
   | "uncertain"
@@ -68,9 +71,27 @@ export const makeToolExecutions = ({
   | "target"
 > => {
   const sql = writer.sql
+  /** The run's binding, in begin's transaction: undefined when it may act. */
+  const notAdmitted = Effect.fn("SqliteToolExecutionStore.notAdmitted")(function* (
+    identity: ToolExecutionIdentity
+  ) {
+    const run = yield* readRunAuthority(sql, identity.runId).pipe(
+      Effect.mapError((cause) => toolError("begin", "storage", cause.message, identity, cause))
+    )
+    if (run === undefined)
+      return yield* toolError("begin", "not_found", "Owning chat run was not found", identity)
+    if (run.budget_missing === 1)
+      return yield* toolError("begin", "corrupt", "This Run's token budget is missing", identity)
+    return run.authority === "active"
+      ? undefined
+      : ({ _tag: "NotAdmitted", authority: run.authority } as const)
+  })
   const begin = Effect.fn("SqliteToolExecutionStore.begin")(function* (
     input: ToolExecutionIdentity,
-    options: { readonly backgrounded?: ReadonlySet<string> } = {}
+    options: {
+      readonly backgrounded?: ReadonlySet<string>
+      readonly plan?: ToolCallPlan
+    } = {}
   ): Effect.fn.Return<ToolExecutionBeginResult, ToolExecutionStoreError> {
     const identity = yield* decodeIdentity(input, "begin")
     const argumentsJson = yield* encodeJson(JsonObjectSchema, identity.arguments).pipe(
@@ -78,6 +99,26 @@ export const makeToolExecutions = ({
         toolError("begin", "invalid", "Tool arguments must be JSON-safe", identity, cause)
       )
     )
+    const shownJson =
+      options.plan?.kind !== "turn" || options.plan.shown === undefined
+        ? null
+        : yield* encodeJson(TaskDirectionReceiptSchema, options.plan.shown).pipe(
+            Effect.mapError((cause) =>
+              toolError(
+                "begin",
+                "invalid",
+                "The call's planned direction is invalid",
+                identity,
+                cause
+              )
+            )
+          )
+    // A call another call made keeps that call's stored plan, read in this transaction.
+    const planned =
+      options.plan?.kind === "call"
+        ? sql`(SELECT planned_from_json FROM tool_calls
+            WHERE run_id = ${identity.runId} AND tool_call_id = ${options.plan.toolCallId})`
+        : sql`${shownJson}`
     return yield* writer
       .transactInteractive(
         Effect.gen(function* () {
@@ -144,11 +185,8 @@ export const makeToolExecutions = ({
           if (existing !== null) {
             const status = yield* validateRowIdentity(existing, identity, "begin")
             if (status === "ready") {
-              yield* assertRunTaskBinding(sql, identity.runId).pipe(
-                Effect.mapError((cause) =>
-                  toolError("begin", "conflict", cause.message, identity, cause)
-                )
-              )
+              const refused = yield* notAdmitted(identity)
+              if (refused !== undefined) return refused
               const approval = yield* resumeApprovedTool(sql, identity)
               return {
                 _tag: "Started",
@@ -184,11 +222,8 @@ export const makeToolExecutions = ({
             )
           }
 
-          yield* assertRunTaskBinding(sql, identity.runId).pipe(
-            Effect.mapError((cause) =>
-              toolError("begin", "conflict", cause.message, identity, cause)
-            )
-          )
+          const refused = yield* notAdmitted(identity)
+          if (refused !== undefined) return refused
 
           if (identity.changesState) {
             const unresolved = yield* sql<{
@@ -229,11 +264,11 @@ export const makeToolExecutions = ({
           yield* sql`
         INSERT INTO tool_calls (
           run_id, session_id, tool_call_id, tool_name, arguments_json,
-          changes_state, effect, status, result_json, started_at, ended_at
+          changes_state, effect, status, result_json, started_at, ended_at, planned_from_json
         ) VALUES (
           ${identity.runId}, ${identity.sessionId}, ${identity.toolCallId},
           ${identity.toolName}, ${argumentsJson}, ${Number(identity.changesState)},
-          ${identity.effect ?? null}, 'running', NULL, ${startedAt}, NULL
+          ${identity.effect ?? null}, 'running', NULL, ${startedAt}, NULL, ${planned}
         )
       `.pipe(
             Effect.mapError((cause) =>
@@ -244,6 +279,21 @@ export const makeToolExecutions = ({
         })
       )
       .pipe(Effect.mapError(preserveToolError("begin", identity)))
+  })
+
+  const admitPlanned = Effect.fn("SqliteToolExecutionStore.admitPlanned")(function* (
+    call: Pick<ToolExecutionIdentity, "runId" | "toolCallId">
+  ): Effect.fn.Return<"current" | "needs_review", ToolExecutionStoreError> {
+    const plan = yield* readCallPlan(sql, call).pipe(
+      Effect.mapError((cause) =>
+        cause._tag === "JsonColumnError"
+          ? toolError("admit", "corrupt", "The call's stored plan is unreadable", call, cause)
+          : toolError("admit", "storage", "Could not read the call's plan", call, cause)
+      )
+    )
+    if (plan === "no_call")
+      return yield* toolError("admit", "not_found", "The call was never started", call)
+    return plan
   })
 
   const complete = Effect.fn("SqliteToolExecutionStore.complete")(function* (
@@ -598,6 +648,7 @@ export const makeToolExecutions = ({
 
   return {
     begin,
+    admitPlanned,
     complete,
     pause,
     uncertain,

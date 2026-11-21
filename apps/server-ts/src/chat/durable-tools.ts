@@ -32,6 +32,7 @@ import type {
 import type { ChatMessageFailure } from "./message-errors.js"
 import type { HeldBackground } from "./held-background.js"
 import { RecordedToolPause } from "../execution/recorded-tool-pause.js"
+import { taskDirectionReview } from "../persistence/work/task-direction.js"
 
 export interface ToolHost {
   readonly lifecycle: Semaphore.Semaphore
@@ -69,6 +70,14 @@ interface Halt {
 const UNCERTAIN_MUTATION =
   "A state-changing tool outcome is uncertain and must be verified before another mutation"
 const STALLED_MUTATION = "An earlier change in this run was approved but never ran"
+const SETTLING = toolRefusal(
+  "This run's Task is finished, so this did not run. Say your closing reply.",
+  "Not run: the Task is finished"
+)
+const REVOKED = toolRefusal(
+  "This run may no longer act for its work, so this did not run.",
+  "Not run: the run was stopped"
+)
 
 const UNRECORDED_APPROVAL_RESULT = Object.freeze({
   content: "Tool approval could not be recorded, so the tool was not executed.",
@@ -194,7 +203,8 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     }
     const begun = yield* fenced(
       toolStore.begin(identity, {
-        backgrounded: new Set([...backgroundedMutations, ...host.heldBackground.held(run.runId)])
+        backgrounded: new Set([...backgroundedMutations, ...host.heldBackground.held(run.runId)]),
+        ...(request.plan === undefined ? {} : { plan: request.plan })
       })
     ).pipe(
       Effect.catchCause((cause) => {
@@ -224,6 +234,28 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
         })
       })
     )
+    if (begun._tag === "NotAdmitted") {
+      if (begun.authority === "settling") return failedToolResult(SETTLING)
+      // The attempt may not act again. It stops the way a cancelled run stops, so no tool
+      // failure holds its chat and a later attempt there can run. A detached call (an
+      // approved card) belongs to a run that already ended: only the call is refused.
+      // cancelAgent already treats an ended run (not_found) as stopped, and commits before
+      // it aborts: any other failure means the stop was not recorded, which is a durable
+      // failure, not a stop.
+      if (!options.detached)
+        yield* host.cancelAgent({ runId: run.runId }).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : halt(request, {
+                  reason: TOOL_PERSISTENCE_FAILED,
+                  detail: "The run lost its authority, but its stop could not be recorded",
+                  cause
+                })
+          )
+        )
+      return failedToolResult(REVOKED)
+    }
     if (begun._tag === "Recovered") {
       if (request.changesState && begun.outcome.status === "uncertain") {
         return yield* halt(request, { reason: TOOL_OUTCOME_UNCERTAIN, detail: UNCERTAIN_MUTATION })
@@ -248,11 +280,35 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     const complete = (result: ToolResult) =>
       toolStore.complete(identity, result).pipe(Effect.catchCause(() => uncertain))
 
+    // A state-changing call starts only if the plan stored with it still matches its Task's
+    // direction. A read never acts, so it is never refused for a changed Task.
+    const admit = (): Promise<ToolResult | undefined> =>
+      request.changesState
+        ? runPromise(
+            toolStore.admitPlanned(identity).pipe(
+              Effect.map((plan) =>
+                plan === "current" ? undefined : failedToolResult(taskDirectionReview())
+              ),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : halt(request, {
+                      reason: TOOL_PERSISTENCE_FAILED,
+                      detail: "The call's plan could not be checked against its Task",
+                      cause
+                    })
+              )
+            )
+          )
+        : Promise.resolve(undefined)
     const settled = yield* Effect.result(
       Effect.tryPromise({
         try: () =>
           Promise.resolve(
-            operation(begun.approval === undefined ? undefined : { approval: begun.approval })
+            operation({
+              ...(begun.approval === undefined ? {} : { approval: begun.approval }),
+              admit
+            })
           ),
         catch: (cause) => cause
       })

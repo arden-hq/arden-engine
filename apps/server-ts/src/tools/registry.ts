@@ -132,6 +132,7 @@ import { tellTools } from "./tell.js"
 import { toolParametersJsonSchema } from "./tool-json-schema.js"
 import { ROLE_TOOLS } from "../persistence/tools/tool-roles.js"
 import type { ApprovalAlternativeInput, ApprovalEditsInput } from "../persistence/tools/store.js"
+import { ToolExecutionStore } from "../persistence/tools/store.js"
 
 const builtinTools = Effect.all([
   internalStateTools,
@@ -327,6 +328,7 @@ export class ServerToolRegistry extends Context.Service<
       const automations = yield* AutomationCatalog
       const permissions = yield* PermissionStore
       const deferred = yield* DeferredToolCalls
+      const executions = yield* ToolExecutionStore
       const structured = yield* StructuredCompletion
       const work = yield* WorkStore
       const mcpServers = yield* McpStore
@@ -590,10 +592,7 @@ export class ServerToolRegistry extends Context.Service<
         const approvalGate = makeApprovalGate({
           review: approvalReview,
           policy: {
-            live: (current) =>
-              Effect.runPromise(
-                approvalPolicy.live({ runId: current.runId, authority: current.authority })
-              ),
+            live: (current) => Effect.runPromise(approvalPolicy.live(current)),
             defer: ({ run: current, toolCallId, name, args, changesState, prompt }) =>
               Effect.runPromise(
                 Effect.gen(function* () {
@@ -601,7 +600,7 @@ export class ServerToolRegistry extends Context.Service<
                   if (Option.isNone(decoded))
                     return yield* Effect.die(new Error(`${name} arguments are not JSON`))
                   const presentation = sanitizeApprovalPresentation(prompt.presentation)
-                  yield* deferred.defer({
+                  return yield* deferred.defer({
                     call: {
                       runId: current.runId,
                       sessionId: current.sessionId,
@@ -642,6 +641,7 @@ export class ServerToolRegistry extends Context.Service<
             },
             refusals: ({ run: current, name }) =>
               Effect.runPromise(policy.refusedCalls({ runId: current.runId, toolName: name })),
+            planned: (call) => Effect.runPromise(executions.admitPlanned(call)),
             reach: ({ run: current, name, live }) => {
               const tool = byName.get(name)
               return tool === undefined

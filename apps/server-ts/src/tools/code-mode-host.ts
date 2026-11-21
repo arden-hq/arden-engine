@@ -171,7 +171,9 @@ export const makeCodeModeHost = (options: {
             name: toolName,
             args,
             changesState: metadata.changes_state,
-            source: metadata.source
+            source: metadata.source,
+            // A nested call keeps the plan of the call it is part of.
+            plan: { kind: "call", toolCallId: request.parentToolCallId }
           },
           (context) =>
             Promise.resolve(
@@ -181,9 +183,9 @@ export const makeCodeModeHost = (options: {
                 args,
                 signal: request.signal,
                 messages: request.messages,
-                ...(request.beforeExecute === undefined
-                  ? {}
-                  : { beforeExecute: request.beforeExecute }),
+                // The outer call's own recheck first, then this call's stored plan.
+                beforeExecute: async () =>
+                  (await request.beforeExecute?.()) ?? (await context?.admit()),
                 ...(context?.approval === undefined ? {} : { approval: { ...context.approval } })
               })
             )

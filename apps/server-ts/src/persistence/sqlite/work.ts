@@ -6,6 +6,8 @@ import { readRunTaskContext, readTaskWorkerContext } from "./space-job-context.j
 import { makeWorkExecution } from "./work-execution.js"
 import { makeWorkEvents } from "./work-events.js"
 import { assertRunTaskAuthority } from "./run-task-authority.js"
+import { assertCallPlan } from "./task-direction.js"
+import { TaskDirectionChanged } from "../work/task-direction.js"
 import { verifyTaskCompletion } from "./work-completion.js"
 import { makeFinishCheck, readTaskIntent } from "./task-plan.js"
 import { readWorkState } from "./work-activity.js"
@@ -204,7 +206,7 @@ export const makeWorkStore = ({
     runId?: string,
     fromJob = false,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTask, WorkStoreError> {
+  ): Effect.fn.Return<SpaceTask, WorkStoreError | TaskDirectionChanged> {
     const validPatch = yield* decodeUpdateSpaceTaskPatchEffect(patch).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task update", cause))
     )
@@ -246,6 +248,7 @@ export const makeWorkStore = ({
           const attemptOf = runId
             ? yield* assertRunTaskAuthority(sql, runId, row.item_id)
             : undefined
+          if (runId && toolCallId) yield* assertCallPlan(sql, { runId, toolCallId })
           const ownAttempt = runId ? attemptOf !== undefined : actor === "worker"
           const { continuation_context: currentContext, ...publicRow } = row
           const current = yield* decodeWorkItem(publicRow)
@@ -501,7 +504,7 @@ export const makeWorkStore = ({
       )
       .pipe(
         Effect.mapError((cause) =>
-          cause instanceof WorkStoreError
+          cause instanceof WorkStoreError || cause instanceof TaskDirectionChanged
             ? cause
             : workError("storage", "Could not complete Space task update", cause)
         )
@@ -534,6 +537,8 @@ export const makeWorkStore = ({
         { status: "cancelled" },
         "user"
       ).pipe(
+        // A stop names no tool call, so no call's plan is checked.
+        Effect.catchTag("TaskDirectionChanged", (error) => Effect.die(error)),
         Effect.catchTag("WorkStoreError", (error) => {
           if (error.reason !== "conflict") return Effect.fail(error)
           return resolveTaskItem(sql, address).pipe(
@@ -564,8 +569,9 @@ export const makeWorkStore = ({
     address: TaskAddress,
     input: CreateSpaceTaskCommentInput,
     actor: "user" | "worker",
-    runId?: string
-  ): Effect.fn.Return<SpaceTaskComment, WorkStoreError> {
+    runId?: string,
+    toolCallId?: string
+  ): Effect.fn.Return<SpaceTaskComment, WorkStoreError | TaskDirectionChanged> {
     const valid = yield* decodeCreateSpaceTaskCommentInputEffect(input).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task comment", cause))
     )
@@ -580,6 +586,7 @@ export const makeWorkStore = ({
           const task = tasks[0]
           if (task === undefined) return yield* workError("not_found", "Space task not found")
           if (runId) yield* assertRunTaskAuthority(sql, runId, task.item_id)
+          if (runId && toolCallId) yield* assertCallPlan(sql, { runId, toolCallId })
           const rows = yield* sql<WorkCommentRow>`
         INSERT INTO space_task_comments (space_id, item_id, author, body, created_at, kind)
         VALUES (${task.space_id}, ${task.item_id}, ${actor}, ${valid.body}, ${now}, 'note')
@@ -593,15 +600,15 @@ export const makeWorkStore = ({
       )
       .pipe(
         Effect.mapError((cause) =>
-          cause instanceof WorkStoreError
+          cause instanceof WorkStoreError || cause instanceof TaskDirectionChanged
             ? cause
             : workError("storage", "Could not create Space task comment", cause)
         )
       )
   })
 
-  const comment: WorkStore["Service"]["comment"] = (address, input, runId) =>
-    commentFor(address, input, runId ? "worker" : "user", runId)
+  const comment: WorkStore["Service"]["comment"] = (address, input, runId, toolCallId) =>
+    commentFor(address, input, runId ? "worker" : "user", runId, toolCallId)
 
   const jobOrigin = Effect.fn("SqliteWorkStore.jobOrigin")(function* (
     originAutomationId: string
@@ -702,7 +709,7 @@ export const makeWorkStore = ({
     requestedSpaceId?: string,
     runId?: string,
     toolCallId?: string
-  ): Effect.fn.Return<SpaceTask, WorkStoreError> {
+  ): Effect.fn.Return<SpaceTask, WorkStoreError | TaskDirectionChanged> {
     const target = yield* jobTarget(originAutomationId, key, requestedSpaceId)
     return yield* updateFor(target, expectedUpdatedAt, patch, "worker", runId, true, toolCallId)
   })
@@ -712,10 +719,11 @@ export const makeWorkStore = ({
     key: string,
     input: CreateSpaceTaskCommentInput,
     requestedSpaceId?: string,
-    runId?: string
-  ): Effect.fn.Return<SpaceTaskComment, WorkStoreError> {
+    runId?: string,
+    toolCallId?: string
+  ): Effect.fn.Return<SpaceTaskComment, WorkStoreError | TaskDirectionChanged> {
     const target = yield* jobTarget(originAutomationId, key, requestedSpaceId)
-    return yield* commentFor(target, input, "worker", runId)
+    return yield* commentFor(target, input, "worker", runId, toolCallId)
   })
 
   const get: WorkStore["Service"]["get"] = (address) => readTask(sql, page, address)

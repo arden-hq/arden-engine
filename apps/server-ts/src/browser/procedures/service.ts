@@ -454,7 +454,15 @@ export class BrowserProcedures extends Context.Service<
         let output: ToolResult | undefined
         try {
           output = await ctx.run.executeTool(
-            { toolCallId, name: "code_mode", args, changesState: false, source: "_code" },
+            {
+              toolCallId,
+              name: "code_mode",
+              args,
+              changesState: false,
+              source: "_code",
+              // The procedure's script keeps the plan of the browser_procedure call.
+              plan: { kind: "call", toolCallId: ctx.toolCallId }
+            },
             async () => {
               const value = await executeCodeMode(args, { ...ctx, toolCallId }, codeMode, {
                 ...(input.lifecycle === undefined ? {} : { lifecycle: input.lifecycle })

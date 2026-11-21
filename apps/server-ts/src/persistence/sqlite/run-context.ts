@@ -11,7 +11,7 @@ import { WorkStoreError } from "../work/store.js"
 import { type BoundAttempt, boundAttemptJson, decodeBoundAttempt } from "./automation-rows.js"
 import { decodeJson } from "./json.js"
 import { runPolicyRevoked } from "./run-policy.js"
-import { executionBudgetExpired } from "./execution-budgets.js"
+import { executionBudgetExpired, executionBudgetMissing } from "./execution-budgets.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import { userChatSql } from "./chat-ownership.js"
@@ -56,17 +56,22 @@ export const runAuthorityState = (
   ELSE 'revoked'
 END)`
 
-export const assertRunTaskBinding = Effect.fn(function* (
+/**
+ * A run's authority and Task, read in the caller's transaction. Undefined when the run
+ * does not exist. Only a storage fault fails it: "settling" and "revoked" are answers.
+ */
+export const readRunAuthority = Effect.fn("RunContext.readRunAuthority")(function* (
   sql: SqlClient.SqlClient,
-  runId: string,
-  itemId?: string
+  runId: string
 ) {
   const rows = yield* sql<{
     readonly authority: RunAuthorityState
     readonly item_id: string | null
+    readonly budget_missing: number
   }>`
     SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`)} AS authority,
-      json_extract(metadata_json, '$.run_context.task.item_id') AS item_id
+      json_extract(metadata_json, '$.run_context.task.item_id') AS item_id,
+      ${executionBudgetMissing(sql, sql`metadata_json`)} AS budget_missing
     FROM chat_runs WHERE run_id = ${runId}
   `.pipe(
     Effect.mapError(
@@ -78,7 +83,15 @@ export const assertRunTaskBinding = Effect.fn(function* (
         })
     )
   )
-  const row = rows[0]
+  return rows[0]
+})
+
+export const assertRunTaskBinding = Effect.fn(function* (
+  sql: SqlClient.SqlClient,
+  runId: string,
+  itemId?: string
+) {
+  const row = yield* readRunAuthority(sql, runId)
   if (
     !row ||
     row.authority !== "active" ||

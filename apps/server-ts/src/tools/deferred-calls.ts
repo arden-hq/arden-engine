@@ -53,14 +53,18 @@ export class DeferredCalls extends Context.Service<
               toolCallId,
               name: call.toolName,
               args: call.arguments,
-              changesState: call.changesState
+              changesState: call.changesState,
+              // The follow-up keeps the plan its card's call was made from.
+              plan: { kind: "call", toolCallId: call.toolCallId }
             },
-            () =>
+            // The card's call checks its stored plan after the gate, like a call in a run.
+            (context) =>
               toolset.execute({
                 toolCallId,
                 name: call.toolName,
                 args: call.arguments,
-                approval
+                approval,
+                ...(context === undefined ? {} : { beforeExecute: context.admit })
               })
           )
         )

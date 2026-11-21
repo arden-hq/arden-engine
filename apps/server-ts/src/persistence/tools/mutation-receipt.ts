@@ -335,6 +335,13 @@ export const attachMutationReceipt = (
 })
 
 export const NOT_RUN_HOST = { not_run: "approval" } as const
+/** A call refused before its effect because its Task's direction changed after it was planned. */
+export const DIRECTION_REVIEW_HOST = { not_run: "task_direction" } as const
+
+/** Whether a result says its effect never started: its receipt is a known no-op. */
+const notRun = (result: Pick<ToolResult, "host">): boolean =>
+  result.host?.["not_run"] === NOT_RUN_HOST.not_run ||
+  result.host?.["not_run"] === DIRECTION_REVIEW_HOST.not_run
 
 export const ensureMutationReceipt = (
   identity: MutationOperationIdentity,
@@ -352,8 +359,7 @@ export const ensureMutationReceipt = (
   return attachMutationReceipt(result, {
     identity,
     outcome:
-      result.data?.["outcome"] === INVALID_ARGUMENTS_OUTCOME ||
-      result.host?.["not_run"] === NOT_RUN_HOST.not_run
+      result.data?.["outcome"] === INVALID_ARGUMENTS_OUTCOME || notRun(result)
         ? "no_op"
         : "unknown",
     resource: { kind: "none" }

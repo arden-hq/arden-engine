@@ -1,6 +1,8 @@
 import { cutText } from "@arden-hq/std/text"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext, type ToolResultOutput } from "@arden-hq/loop"
+import { taskDirectionReview } from "../persistence/work/task-direction.js"
+import type { TaskDirectionChanged } from "../persistence/work/task-direction.js"
 import {
   taskActivityWords,
   type SpaceTask,
@@ -215,16 +217,18 @@ const CommentParametersSchema = Schema.Struct({
   )
 })
 
-export const workFailure = (error: WorkStoreError): ToolExecutionError =>
-  toolFailure(error, error.reason === "conflict" ? "Task changed" : "Task update failed")
+export const workFailure = (error: WorkStoreError | TaskDirectionChanged): ToolExecutionError => {
+  if (error._tag === "TaskDirectionChanged") return taskDirectionReview()
+  return toolFailure(error, error.reason === "conflict" ? "Task changed" : "Task update failed")
+}
 
-const updateFailure = (error: WorkStoreError): ToolExecutionError =>
-  error.reason === "conflict"
+const updateFailure = (error: WorkStoreError | TaskDirectionChanged): ToolExecutionError =>
+  error._tag === "WorkStoreError" && error.reason === "conflict"
     ? new ToolExecutionError(
         `${error.message}. Read it again with task_get, check what changed, and retry with the updated_at shown there only if your change still applies.`,
         { preview: "Task changed", retryable: true }
       )
-    : toolFailure(error, "Task update failed")
+    : workFailure(error)
 
 const sessionFailure = (cause: SessionQueryFailure): ToolExecutionError =>
   toolFailure(
@@ -796,12 +800,14 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
                 input.key,
                 comment,
                 target.spaceId,
-                ctx.run.runId
+                ctx.run.runId,
+                ctx.toolCallId
               )
             : services.work.comment(
                 { kind: "key", scope: scopeOf(target), key: input.key },
                 comment,
-                ctx.run.runId
+                ctx.run.runId,
+                ctx.toolCallId
               )
           ).pipe(Effect.mapError(workFailure)),
           { signal: ctx.signal }
