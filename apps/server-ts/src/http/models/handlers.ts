@@ -5,8 +5,7 @@ import { ModelCatalog } from "../../models/catalog.js"
 import { ModelProviderService } from "../../models/provider.js"
 import type { ModelSettingsSnapshot } from "../../persistence/models/store.js"
 import { ArdenApi } from "../api.js"
-
-const internalError = () => new HttpApiError.InternalServerError({})
+import { failInternal } from "../errors.js"
 
 const catalogResponse = (catalog: CatalogListing) => {
   const models = catalog.providers.flatMap((provider) => provider.models)
@@ -70,7 +69,7 @@ export const ModelHandlers = HttpApiBuilder.group(
       .handle("catalog", () =>
         catalog
           .catalog({ refresh: "revalidate" })
-          .pipe(Effect.map(catalogResponse), Effect.mapError(internalError))
+          .pipe(Effect.map(catalogResponse), Effect.catch(failInternal("Models")))
       )
       .handle("transcribe", ({ payload }) => {
         const transcription = models.current()?.transcription
@@ -85,7 +84,7 @@ export const ModelHandlers = HttpApiBuilder.group(
         }).pipe(
           Effect.map((text) => ({ text })),
           Effect.tapError((cause) => Effect.logWarning("Transcription failed", { cause })),
-          Effect.mapError(internalError)
+          Effect.catch(failInternal("Models"))
         )
       })
   })

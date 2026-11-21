@@ -1,8 +1,8 @@
 import { Effect } from "effect"
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InboxStore } from "../../persistence/inbox/store.js"
 import { ArdenApi } from "../api.js"
-import { failStore } from "../errors.js"
+import { failInternal, failStore } from "../errors.js"
 import { inboxToWire } from "../wire/inbox.js"
 
 export const InboxHandlers = HttpApiBuilder.group(
@@ -13,10 +13,7 @@ export const InboxHandlers = HttpApiBuilder.group(
 
     return handlers
       .handle("view", () =>
-        store.view().pipe(
-          Effect.map(inboxToWire),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
-        )
+        store.view().pipe(Effect.map(inboxToWire), Effect.catch(failInternal("Inbox")))
       )
       .handle("markRead", ({ payload }) =>
         store.markRead(payload).pipe(Effect.map(inboxToWire), Effect.catch(failStore))

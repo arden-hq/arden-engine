@@ -4,7 +4,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import type { GoogleConnectionError } from "../../google/errors.js"
 import { GoogleConnections } from "../../google/service.js"
 import { ArdenApi } from "../api.js"
-import { StoreInvalid, storeErrorToHttp } from "../errors.js"
+import { failInternal, storeErrorToHttp, StoreInvalid } from "../errors.js"
 
 const mapError = (
   error: GoogleConnectionError
@@ -52,7 +52,7 @@ export const GoogleHandlers = HttpApiBuilder.group(
               }))
             }))
           })),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Google"))
         )
       )
       .handle("startOAuth", ({ params }) =>

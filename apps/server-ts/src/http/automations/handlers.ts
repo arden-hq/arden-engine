@@ -21,6 +21,7 @@ import { isInternalLifecycleEvent } from "../../persistence/sessions/internal-ev
 import { ArdenApi } from "../api.js"
 import {
   completionErrorToHttp,
+  failInternal,
   failStore,
   logStoreFailure,
   orNotFound,
@@ -98,7 +99,7 @@ export const AutomationHandlers = HttpApiBuilder.group(
         store.list().pipe(
           Effect.map((automations) => ({ automations })),
           Effect.tapError(logStoreFailure),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Automations"))
         )
       )
       .handle("create", ({ payload }) =>
@@ -110,7 +111,7 @@ export const AutomationHandlers = HttpApiBuilder.group(
       .handle("eventCatalog", () =>
         availableAutomationEvents(google, mcp).pipe(
           Effect.map((events) => ({ events })),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Automations"))
         )
       )
       .handle("get", ({ params }) =>

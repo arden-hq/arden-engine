@@ -7,7 +7,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
 import { LimitSettingsStore } from "../../persistence/settings/store.js"
 import { ArdenApi } from "../api.js"
-import { storeErrorToHttp } from "../errors.js"
+import { failInternal, storeErrorToHttp } from "../errors.js"
 
 export const LimitSettingsHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -16,10 +16,9 @@ export const LimitSettingsHandlers = HttpApiBuilder.group(
     const store = yield* LimitSettingsStore
     return handlers
       .handle("settings", () =>
-        store.settings().pipe(
-          Effect.map(limitSettingsResponse),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
-        )
+        store
+          .settings()
+          .pipe(Effect.map(limitSettingsResponse), Effect.catch(failInternal("Limit settings")))
       )
       .handle("updateSettings", ({ payload }) =>
         Effect.gen(function* () {

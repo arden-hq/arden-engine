@@ -108,7 +108,20 @@ const noDefaultFolders: Restriction = {
   message:
     "No folder of its own for a Space, chat or run: a folder Arden may use or change is a path rule (permission_rules, kind \"path\")."
 }
-const baseRestricted: Restriction[] = [noEnum, noForTestExport, noInlineErrorMessage]
+const noSilentInternalError = {
+  selector: [
+    "CallExpression[callee.property.name='mapError'] > ArrowFunctionExpression > NewExpression[callee.property.name='InternalServerError']",
+    "VariableDeclarator[id.name=/^(internalError|failure)$/] > ArrowFunctionExpression > NewExpression[callee.property.name='InternalServerError']"
+  ].join(", "),
+  message:
+    "A 500 logs its reason: Effect.catch(failInternal(\"What\")) from http/errors.ts, not a bare InternalServerError."
+}
+const noModuleMock = {
+  selector: "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/]",
+  message:
+    "No vi.mock: unit tests share one module cache in shuffled order (isolate: false), so a module mock depends on which file loaded the module first. Pass the dependency in (see ScanFileSystem in storage/inventory.ts)."
+}
+const baseRestricted: Restriction[] = [noEnum, noForTestExport, noInlineErrorMessage, noSilentInternalError, noModuleMock]
 const restricted: Restriction[] = [...baseRestricted, ...domainWords, noDefaultFolders]
 const restrictedSyntax = (...more: Restriction[]) => ({
   "arden/restricted-syntax": ["error", ...restricted, ...more] as const

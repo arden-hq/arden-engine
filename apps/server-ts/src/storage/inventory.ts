@@ -7,7 +7,12 @@ import { classifyStorageRootEntry, type StorageRootBucket } from "./catalog.js"
 import { isErrnoCode } from "../fs/private-store.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-const MAX_INVENTORY_ENTRIES = 100_000
+export interface ScanFileSystem {
+  readonly lstat: typeof lstat
+  readonly readdir: typeof readdir
+}
+
+const nodeFileSystem: ScanFileSystem = { lstat, readdir }
 
 /** A file or folder below the root can be removed while the scan runs (a temp file, a finished
  *  download). It is then no longer part of the storage, so the scan leaves it out. */
@@ -94,17 +99,17 @@ const emptyTallies = (): Record<RootBucket, CategoryTally> => ({
 
 export const scanInventoryUnsafe = async (
   root: string,
-  databaseName: string | null
+  databaseName: string | null,
+  fs: ScanFileSystem = nodeFileSystem
 ): Promise<Record<RootBucket, CategoryTally>> => {
-  const rootStatus = await lstat(root)
+  const rootStatus = await fs.lstat(root)
   if (!rootStatus.isDirectory() || rootStatus.isSymbolicLink()) {
     throw new Error("Arden storage root is not a directory")
   }
 
   const tallies = emptyTallies()
   const directories: Array<{ readonly path: string; readonly category: RootBucket }> = []
-  const rootEntries = await readdir(root, { withFileTypes: true })
-  let visited = 0
+  const rootEntries = await fs.readdir(root, { withFileTypes: true })
 
   for (const entry of rootEntries) {
     directories.push({
@@ -114,11 +119,7 @@ export const scanInventoryUnsafe = async (
   }
 
   for (let next = directories.pop(); next !== undefined; next = directories.pop()) {
-    visited += 1
-    if (visited > MAX_INVENTORY_ENTRIES) {
-      throw new Error("Arden storage inventory is too large")
-    }
-    const status = await ifThere(lstat(next.path))
+    const status = await ifThere(fs.lstat(next.path))
     if (status === null || status.isSymbolicLink()) continue
     if (status.isFile()) {
       const tally = tallies[next.category]
@@ -127,7 +128,7 @@ export const scanInventoryUnsafe = async (
       continue
     }
     if (!status.isDirectory()) continue
-    const entries = (await ifThere(readdir(next.path, { withFileTypes: true }))) ?? []
+    const entries = (await ifThere(fs.readdir(next.path, { withFileTypes: true }))) ?? []
     for (const entry of entries) {
       directories.push({ path: join(next.path, entry.name), category: next.category })
     }
@@ -138,9 +139,10 @@ export const scanInventoryUnsafe = async (
 
 const scanUnitMemberUnsafe = async (
   path: string,
-  name: string
+  name: string,
+  fs: ScanFileSystem
 ): Promise<StorageUnitMember | null> => {
-  const rootStatus = await ifThere(lstat(path))
+  const rootStatus = await ifThere(fs.lstat(path))
   if (rootStatus === null || rootStatus.isSymbolicLink()) return null
   const kind = unitKind(rootStatus)
   if (kind === null) return null
@@ -148,7 +150,6 @@ const scanUnitMemberUnsafe = async (
   let sizeBytes = rootStatus.isFile() ? requireFileSize(rootStatus) : 0
   let modifiedMilliseconds = rootStatus.mtimeMs
   const entries = rootStatus.isDirectory() ? [path] : []
-  let visited = 1
   const fingerprintEntries: Array<{
     readonly path: string
     readonly type: string
@@ -172,14 +173,10 @@ const scanUnitMemberUnsafe = async (
   record(path, rootStatus)
 
   for (let directory = entries.pop(); directory !== undefined; directory = entries.pop()) {
-    const children = (await ifThere(readdir(directory, { withFileTypes: true }))) ?? []
+    const children = (await ifThere(fs.readdir(directory, { withFileTypes: true }))) ?? []
     for (const child of children) {
-      visited += 1
-      if (visited > MAX_INVENTORY_ENTRIES) {
-        throw new Error("Arden storage inventory is too large")
-      }
       const childPath = join(directory, child.name)
-      const status = await ifThere(lstat(childPath))
+      const status = await ifThere(fs.lstat(childPath))
       if (status === null) continue
       record(childPath, status)
       if (status.isSymbolicLink()) continue
@@ -220,10 +217,13 @@ const storageUnit = (name: string, members: ReadonlyArray<StorageUnitMember>): S
   )
 })
 
-export const scanStorageUnitsUnsafe = async (root: string): Promise<ReadonlyArray<StorageUnit>> => {
+export const scanStorageUnitsUnsafe = async (
+  root: string,
+  fs: ScanFileSystem = nodeFileSystem
+): Promise<ReadonlyArray<StorageUnit>> => {
   let status: Stats
   try {
-    status = await lstat(root)
+    status = await fs.lstat(root)
   } catch (cause) {
     if (isErrnoCode(cause, "ENOENT")) return []
     throw cause
@@ -231,10 +231,7 @@ export const scanStorageUnitsUnsafe = async (root: string): Promise<ReadonlyArra
   if (!status.isDirectory() || status.isSymbolicLink()) {
     throw new Error("Arden storage root is not a directory")
   }
-  const entries = await readdir(root, { withFileTypes: true })
-  if (entries.length > MAX_INVENTORY_ENTRIES) {
-    throw new Error("Arden storage inventory is too large")
-  }
+  const entries = await fs.readdir(root, { withFileTypes: true })
   const names = new Set(entries.map((entry) => entry.name))
   const units: Array<StorageUnit> = []
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -249,7 +246,7 @@ export const scanStorageUnitsUnsafe = async (root: string): Promise<ReadonlyArra
     const members: Array<StorageUnitMember> = []
     let valid = true
     for (const memberName of memberNames) {
-      const member = await scanUnitMemberUnsafe(join(root, memberName), memberName)
+      const member = await scanUnitMemberUnsafe(join(root, memberName), memberName, fs)
       if (member === null) {
         valid = false
         break

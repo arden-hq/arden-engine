@@ -129,6 +129,7 @@ const routeCalls = (
     "/storage/backfills": ["/storage/backfills"],
     "/storage/files": ["/storage/files"],
     "/storage/retention": ["/storage/retention"],
+    "/storage/settings": ["/storage/settings"],
     "/storage": ["/storage"],
     "/context/experiments/:sessionId": [`/context/experiments/${ids.chat}`],
     "/settings/intelligence": ["/settings/intelligence"],

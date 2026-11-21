@@ -80,6 +80,13 @@ export const logStoreFailure = (error: StoreFailure): Effect.Effect<void> =>
       )
     : Effect.void
 
+export const failInternal =
+  (what: string) =>
+  (error: unknown): Effect.Effect<never, HttpApiError.InternalServerError> =>
+    Effect.logError(`${what} answered 500`, error).pipe(
+      Effect.andThen(Effect.fail(new HttpApiError.InternalServerError({})))
+    )
+
 export const failStore = <R extends StoreReason>(
   error: StoreFailure<R> & { readonly message: string }
 ): Effect.Effect<never, StoreReasonHttp[R]> =>

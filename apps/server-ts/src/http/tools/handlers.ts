@@ -1,8 +1,9 @@
 import type { ToolPolicy } from "@arden-hq/protocol/tools"
 import { Effect } from "effect"
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ServerToolRegistry } from "../../tools/registry.js"
 import { ArdenApi } from "../api.js"
+import { failInternal } from "../errors.js"
 
 const policyResponse = (policy: ToolPolicy) => ({
   action: policy.action,
@@ -35,7 +36,7 @@ export const ToolHandlers = HttpApiBuilder.group(
             display: tool.display
           }))
         })),
-        Effect.mapError(() => new HttpApiError.InternalServerError({}))
+        Effect.catch(failInternal("Tools"))
       )
     )
   })

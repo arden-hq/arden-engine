@@ -210,7 +210,7 @@ const mapStatus = (status: StorageStatusWire): StorageStatus => ({
   categories: status.categories.map(mapCategory)
 })
 
-const mapSettings = (settings: StorageSettingsWire): StorageSettings => ({
+export const mapSettings = (settings: StorageSettingsWire): StorageSettings => ({
   maxSpaceGiB: settings.max_space_gib,
   allowArchivedSessionDeletion: settings.allow_archived_session_deletion,
   allowInactiveSessionDeletion: settings.allow_inactive_session_deletion,

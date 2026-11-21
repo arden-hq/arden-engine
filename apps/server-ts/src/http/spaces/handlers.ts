@@ -15,6 +15,7 @@ import { ArdenApi } from "../api.js"
 import { ChatStop } from "../../chat/chat-stop.js"
 import {
   completionErrorToHttp,
+  failInternal,
   failStore,
   orNotFound,
   storeErrorToHttp,
@@ -91,7 +92,7 @@ export const SpaceHandlers = HttpApiBuilder.group(
       .handle("list", () =>
         store.list().pipe(
           Effect.map((spaces) => ({ spaces: spaces.map(publicSpace) })),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Spaces"))
         )
       )
       .handle("create", ({ payload }) =>
@@ -136,7 +137,7 @@ export const SpaceHandlers = HttpApiBuilder.group(
       .handle("archived", () =>
         store.listArchived().pipe(
           Effect.map((spaces) => ({ spaces: spaces.map(publicSpace) })),
-          Effect.mapError(() => new HttpApiError.InternalServerError({}))
+          Effect.catch(failInternal("Spaces"))
         )
       )
       .handle("conversation", ({ params }) =>

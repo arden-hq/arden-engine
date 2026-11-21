@@ -8,8 +8,7 @@ import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import type { EmbeddingControl } from "../../embedding/index-plan.js"
 import { WikiEmbeddingIndex } from "../../embedding/wiki-index.js"
 import { ArdenApi } from "../api.js"
-
-const internalError = () => new HttpApiError.InternalServerError({})
+import { failInternal } from "../errors.js"
 
 export const EmbeddingHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -26,17 +25,14 @@ export const EmbeddingHandlers = HttpApiBuilder.group(
                 ? new HttpApiError.UnprocessableEntity({})
                 : new HttpApiError.Conflict({})
             ),
-          WikiEmbeddingIndexError: (cause) =>
-            Effect.logWarning("Embedding control failed", cause).pipe(
-              Effect.andThen(Effect.fail(internalError()))
-            )
+          WikiEmbeddingIndexError: (cause) => failInternal("Embedding control")(cause)
         })
       )
     return handlers
       .handle("status", () =>
         embeddings
           .status()
-          .pipe(Effect.map(embeddingStatusResponse), Effect.mapError(internalError))
+          .pipe(Effect.map(embeddingStatusResponse), Effect.catch(failInternal("Embeddings")))
       )
       .handle("setModel", ({ payload }) =>
         decodeEmbeddingModelChoiceRequestEffect(payload).pipe(
