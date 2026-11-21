@@ -724,7 +724,7 @@ export const makeAutomationRowReads = ({
               default_triggers: spec.triggers,
               settable: systemSettable({
                 contextMode: row.context_mode,
-                runsModel: spec.runsModel
+                promptEdit: spec.promptEdit
               }),
               changed: changedSystemSettings(row, spec)
             }

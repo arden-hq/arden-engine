@@ -63,7 +63,7 @@ export const urgentEventsHandler: SystemAutomationHandler<"urgent_events"> = {
     contextMode: "fresh",
     chatSession: true,
     manualRun: false,
-    runsModel: true,
+    promptEdit: "owner",
     rearmOnSeed: false
   },
   run: (services) =>

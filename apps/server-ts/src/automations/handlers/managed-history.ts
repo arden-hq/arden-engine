@@ -40,7 +40,7 @@ export const managedHistoryHandler: SystemAutomationHandler<"managed_history_col
     contextMode: "fresh",
     chatSession: false,
     manualRun: true,
-    runsModel: false,
+    promptEdit: "fixed",
     rearmOnSeed: false
   },
   run: (services) => () => collectManagedHistory(services)

@@ -49,6 +49,8 @@ export const OWNER_FACING_HANDLERS = [
 export const systemHandlerTellsOwner = (handler: string | null | undefined): boolean =>
   OWNER_FACING_HANDLERS.some((facing) => facing === handler)
 
+export type SystemPromptEdit = "owner" | "fixed"
+
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId
   readonly name: string
@@ -61,7 +63,7 @@ export interface SystemAutomationSpec {
   readonly toolScope: AutomationToolScope
   readonly contextMode: "fresh" | "fork"
   readonly chatSession: boolean
-  readonly runsModel: boolean
+  readonly promptEdit: SystemPromptEdit
   readonly manualRun: boolean
   readonly rearmOnSeed: boolean
 }

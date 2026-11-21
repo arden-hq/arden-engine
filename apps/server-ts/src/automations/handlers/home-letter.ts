@@ -90,7 +90,7 @@ export const homeLetterHandler: SystemAutomationHandler<"home_letter"> = {
     contextMode: "fresh",
     chatSession: true,
     manualRun: true,
-    runsModel: true,
+    promptEdit: "owner",
     rearmOnSeed: false
   },
   tools: withHomeLetterTool,

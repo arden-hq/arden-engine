@@ -1,3 +1,4 @@
+import type { SystemPromptEdit } from "./model.js"
 import type {
   AutomationContextMode,
   SystemAutomationSetting,
@@ -18,7 +19,7 @@ export interface SystemAutomationRow {
 
 interface SystemSettableSpec {
   readonly contextMode: AutomationContextMode
-  readonly runsModel: boolean
+  readonly promptEdit: SystemPromptEdit
 }
 
 export const systemSettable = (
@@ -26,7 +27,7 @@ export const systemSettable = (
 ): ReadonlyArray<SystemAutomationSetting> => [
   "triggers",
   ...(spec.contextMode === "fork" ? [] : (["model"] as const)),
-  ...(spec.runsModel ? (["prompt"] as const) : []),
+  ...(spec.promptEdit === "owner" ? (["prompt"] as const) : []),
   "enabled"
 ]
 

@@ -172,6 +172,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
             }
 
             const enabled = spec.enabled && row.enabled === 1
+            const fixed = spec.promptEdit === "fixed" ? 1 : 0
             const userOwnsTriggers = row.triggers_source === "manual" && row.triggers !== triggers
             const current = { ...row, triggers_source: userOwnsTriggers ? "manual" : null }
             const nextRunAt = currentNextRunAt({
@@ -186,7 +187,9 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                 UPDATE scheduled_tasks
                 SET description = ${spec.description},
                     description_source = 'manual',
-                    prompt = CASE WHEN prompt_author IS NULL THEN ${spec.prompt} ELSE prompt END,
+                    prompt = CASE WHEN prompt_author IS NULL OR ${fixed} THEN ${spec.prompt}
+                      ELSE prompt END,
+                    prompt_author = CASE WHEN ${fixed} THEN NULL ELSE prompt_author END,
                     context_mode = ${spec.contextMode},
                     handler = ${spec.handler},
                     builtin = 1,
