@@ -5,6 +5,7 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { failureNeedsOwner } from "./run-attention.js"
 import type { EndingStatus, PlaceKind, Purpose } from "../runs/ending.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
+import { systemHandlerTellsOwner } from "../automations/model.js"
 
 export interface Notice {
   readonly key: string
@@ -14,9 +15,11 @@ export interface Notice {
   readonly title: string
   readonly text: string
   readonly chatSessionId: string | null
+  readonly sourceSessionId: string | null
   readonly automationId: string | null
   readonly itemId: string | null
   readonly unread: boolean
+  readonly alert: boolean
   readonly occurredAt: string
   readonly purpose: Purpose | null
 }
@@ -69,6 +72,7 @@ interface EndingRow {
   readonly place_unread: number | null
   readonly automation_id: string | null
   readonly automation_name: string | null
+  readonly automation_handler: string | null
   readonly item_id: string | null
   readonly task_name: string | null
   readonly listed: number
@@ -84,6 +88,8 @@ const endingRows = (sql: SqlClient.SqlClient, filter: Statement.Fragment) =>
       json_extract(chat.metadata_json, '$.run_context.origin.automation_id') AS automation_id,
       (SELECT name FROM scheduled_tasks WHERE task_id =
         json_extract(chat.metadata_json, '$.run_context.origin.automation_id')) AS automation_name,
+      (SELECT handler FROM scheduled_tasks WHERE task_id =
+        json_extract(chat.metadata_json, '$.run_context.origin.automation_id')) AS automation_handler,
       COALESCE(json_extract(chat.metadata_json, '$.run_context.task.item_id'),
         json_extract(chat.metadata_json, '$.run_context.origin.item_id')) AS item_id,
       (SELECT text FROM space_tasks WHERE item_id =
@@ -109,6 +115,9 @@ const noticeOfEnding = (row: EndingRow): Notice => {
     entityTold: row.entity_told === 1
   })
   const placed = row.place_kind === "chat" && row.place !== null
+  const alert = systemHandlerTellsOwner(row.automation_handler)
+  const automationResult = isUserAutomationPurpose(row.purpose)
+  const opensOwnRunChat = automationResult && !alert
   return {
     key: `ending:${row.run_id}`,
     record: "ending",
@@ -116,10 +125,12 @@ const noticeOfEnding = (row: EndingRow): Notice => {
     shown,
     title: row.automation_name ?? row.task_name ?? row.own_name ?? "",
     text: row.text,
-    chatSessionId: placed && !isUserAutomationPurpose(row.purpose) ? row.place : row.own_session,
+    chatSessionId: placed && !opensOwnRunChat ? row.place : row.own_session,
+    sourceSessionId: placed && !automationResult ? row.place : row.own_session,
     automationId: row.automation_id,
     itemId: row.item_id,
     unread: (placed ? row.place_unread : row.own_unread) === 1,
+    alert,
     occurredAt: row.occurred_at,
     purpose: row.purpose
   }
@@ -156,9 +167,11 @@ const noticeOfEntity = (row: EntityRow): Notice => ({
   title: (row.entity === "task" ? row.task_name : row.automation_name) ?? "",
   text: row.text,
   chatSessionId: row.place,
+  sourceSessionId: row.place,
   automationId: row.entity === "automation" ? row.entity_id : null,
   itemId: row.entity === "task" ? row.entity_id : null,
   unread: row.place_unread === null || row.place_unread === 1,
+  alert: false,
   occurredAt: row.occurred_at,
   purpose: null
 })
@@ -186,7 +199,7 @@ export const recentNotices = Effect.fn("Notices.recent")(function* (
 
 export const announceNotice = Effect.fn("Notices.announce")(function* (
   sql: SqlClient.SqlClient,
-  sessionEvents: SessionLifecycleEvents["Service"],
+  sessionEvents: Pick<SessionLifecycleEvents["Service"], "appendEventInTransaction">,
   key: string
 ) {
   const notice = yield* readNotice(sql, key)
@@ -198,6 +211,7 @@ export const announceNotice = Effect.fn("Notices.announce")(function* (
     status: notice.status,
     shown: notice.shown,
     unread: true,
+    alert: notice.alert,
     title: notice.title,
     text: notice.text,
     chat_session_id: notice.chatSessionId,

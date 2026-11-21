@@ -22,6 +22,8 @@ export type NoticeRecord =
       readonly shown: boolean
       /** The chat it was told in holds something the owner has not read. */
       readonly unread: boolean
+      /** An alert the owner asked Arden to raise: news at "Needs you", not only "Everything". */
+      readonly alert?: boolean
     }
   | {
       readonly kind: "entity"
@@ -74,20 +76,19 @@ export const notifyOwner = (input: {
     case "off":
       return false
     case "needs_you":
-      return tier === "needs_you"
+      return tier === "needs_you" || (input.record.kind === "ending" && input.record.alert === true)
     case "everything":
       return true
   }
 }
 
 /** The record a `record_told` event carries. */
-export const noticeOfEvent = (event: RecordToldEvent): NoticeRecord => ({
-  kind: event.record,
-  key: event.key,
-  status: event.status,
-  shown: event.shown,
-  unread: event.unread
-})
+export const noticeOfEvent = (event: RecordToldEvent): NoticeRecord => {
+  const told = { key: event.key, status: event.status, shown: event.shown, unread: event.unread }
+  return event.record === "ending"
+    ? { kind: "ending", ...told, ...(event.alert === true ? { alert: true } : {}) }
+    : { kind: "entity", ...told }
+}
 
 /**
  * The keys already notified, so a record notifies at most once however often it

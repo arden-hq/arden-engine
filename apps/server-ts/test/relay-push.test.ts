@@ -38,6 +38,7 @@ describe("relay push", () => {
       title: "Taxes",
       body: "Edit notes.md",
       sessionId: "chat-1",
+      collapseId: "call-1",
       askId: "call-1",
       runId: "run-1"
     } as const
@@ -69,6 +70,30 @@ describe("relay push", () => {
       ask_id: "call-1",
       run_id: "run-1"
     })
+  })
+
+  it("two alerts told in one chat open that chat, and neither replaces the other on the phone", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.notices = [
+      notice("alert-1", { chatSessionId: "urgent-chat", sourceSessionId: "urgent-chat::i1" }),
+      notice("alert-2", { chatSessionId: "urgent-chat", sourceSessionId: "urgent-chat::i2" })
+    ]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => [pushed.sessionId, pushed.collapseId])).toEqual([
+      ["urgent-chat", "urgent-chat::i1"],
+      ["urgent-chat", "urgent-chat::i2"]
+    ])
+  })
+
+  it("an ask's push collapses on the ask", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.asks = [question("q-1"), approval("run-1", "call-1")]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => pushed.collapseId)).toEqual(["q-1", "call-1"])
   })
 
   it("a restart neither repeats a push nor skips an ask that opened while Arden was down", async () => {
@@ -230,9 +255,11 @@ const notice = (id: string, fields: Partial<Notice>): Notice => ({
   title: "Morning brief",
   text: "Sent the summary",
   chatSessionId: `own-${id}`,
+  sourceSessionId: `own-${id}`,
   automationId: null,
   itemId: null,
   unread: true,
+  alert: false,
   occurredAt: NOW_ISO,
   purpose: "chat",
   ...fields
@@ -251,6 +278,7 @@ const makeWorld = (options: { readonly seeded: boolean }) => {
     refusing: new Set<string>(),
     sent: [] as Array<string>,
     bodies: [] as Array<string>,
+    onSend: (_notice: PushNotice): void => {},
     reconcile: async (): Promise<ReadonlyArray<string>> => {
       const loopback: Loopback = {
         request: async ({ path }): Promise<LoopbackResponse> => {
@@ -299,6 +327,7 @@ const makeWorld = (options: { readonly seeded: boolean }) => {
                           world.devices.length > 1 ? `${notice.key}>${dev}` : notice.key
                         )
                         if (notice.kind === "finished") world.bodies.push(notice.body)
+                        world.onSend(notice)
                         return true
                       }
                     }

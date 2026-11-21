@@ -1,3 +1,4 @@
+import { noticeOfEvent, notifyOwner } from "@arden-hq/protocol/notifications"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -12,7 +13,13 @@ import type { AutomationJobLeaseRef } from "../src/persistence/automations/store
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
-import { recentNotices } from "../src/persistence/sqlite/notices.js"
+import { announceNotice, recentNotices } from "../src/persistence/sqlite/notices.js"
+import type {
+  LifecycleFeedEvent,
+  SessionLifecycleEvents
+} from "../src/persistence/sessions/events.js"
+import { reconcileEndings } from "../src/persistence/sqlite/run-ending.js"
+import { SessionReadState } from "../src/persistence/sessions/read-state.js"
 import { claimAll, startJob } from "./fixtures/job-runs.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
@@ -82,7 +89,7 @@ it("the check of an event reads what is known about the owner when the job gives
   expect(withOwner?.passed).toEqual([])
 })
 
-it("each arrival wakes Urgent events with the owner's sentence, and every alert is one the owner is told", async () => {
+it("each arrival wakes Urgent events with the owner's sentence, and every alert is one the owner is told in its chat", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -90,6 +97,7 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
       const triggers = yield* AutomationTriggers
       const chat = yield* ChatWriteStore
       const queue = yield* AutomationQueue
+      const readState = yield* SessionReadState
       yield* catalog.seedSystemAutomations([urgentEventsHandler.spec])
       // One made-up mail goes the whole way: published, claimed, run, finished, settled.
       const alert = (id: string, title: string, reply: string) =>
@@ -119,7 +127,11 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
           expect(published.queued).toBe(1)
           const [lease] = yield* claimAll(`urgent-${id}`)
           if (lease === undefined) throw new Error("Urgent events was not claimed")
-          const { run, sessionId } = yield* startJob(lease, `alert-${id}`)
+          const { run, sessionId } = yield* startJob(
+            lease,
+            `alert-${id}`,
+            yield* queue.prepareRunSession(lease)
+          )
           yield* chat.finish({
             runId: run.runId,
             messages: [
@@ -149,9 +161,9 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
               })
             )
           )
-          return lease
+          return { lease, runSession: sessionId }
         })
-      const first = yield* alert(
+      const { lease: first, runSession: firstRun } = yield* alert(
         "item-1",
         "Interview on Tuesday",
         "A recruiter asks you to confirm Tuesday."
@@ -166,18 +178,76 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
       ])
       expect(first.payload.prefilter?.events[0]?.prompt).toContain("Interview on Tuesday")
       // A later alert is news too: it is not held back as a repeat of the first.
-      yield* alert("item-2", "Offer expires today", "An offer needs your answer today.")
+      const { lease: second, runSession: secondRun } = yield* alert(
+        "item-2",
+        "Offer expires today",
+        "An offer needs your answer today."
+      )
+      const urgentChat = second.payload.sessionId
+      if (urgentChat === null) throw new Error("Urgent events has no chat")
+      const told = yield* sql<{ readonly session_id: string; readonly weight: string }>`
+        SELECT json_extract(payload, '$.sessionId') AS session_id,
+          json_extract(payload, '$.update.weight') AS weight
+        FROM automation_deliveries WHERE json_extract(payload, '$.kind') = 'update'`
+      expect(told).toEqual([
+        { session_id: urgentChat, weight: "news" },
+        { session_id: urgentChat, weight: "news" }
+      ])
       const notices = yield* recentNotices(sql, { since: "2000-01-01T00:00:00.000Z", limit: 10 })
       expect(notices.map((notice) => notice.text).toSorted()).toEqual([
         "A recruiter asks you to confirm Tuesday.",
         "An offer needs your answer today."
       ])
       expect(notices).toMatchObject([
-        { status: "finished", shown: true, purpose: "user_automation", title: "Urgent events" },
-        { status: "finished", shown: true, purpose: "user_automation", title: "Urgent events" }
+        { ...toldIn(urgentChat), purpose: "user_automation", title: "Urgent events" },
+        { ...toldIn(urgentChat), purpose: "user_automation", title: "Urgent events" }
       ])
+      expect(new Set(notices.map((notice) => notice.key)).size).toBe(2)
+      expect(notices.map((notice) => notice.sourceSessionId).toSorted()).toEqual(
+        [firstRun, secondRun].toSorted()
+      )
+      expect(notices.map((notice) => notice.unread)).toEqual([false, false])
+      expect(notices.map((notice) => notice.alert)).toEqual([true, true])
+      const announced: Array<LifecycleFeedEvent> = []
+      const events: Pick<SessionLifecycleEvents["Service"], "appendEventInTransaction"> = {
+        appendEventInTransaction: (event) =>
+          Effect.sync(() => {
+            announced.push(event)
+            return { records: [], headSequence: announced.length }
+          })
+      }
+      for (const notice of notices) yield* announceNotice(sql, events, notice.key)
+      expect(announced).toMatchObject([
+        { type: "record_told", alert: true, chat_session_id: urgentChat },
+        { type: "record_told", alert: true, chat_session_id: urgentChat }
+      ])
+      const defaultLevel = announced.map((event) =>
+        event.type === "record_told"
+          ? notifyOwner({ record: noticeOfEvent(event), level: "needs_you", inFront: false })
+          : false
+      )
+      expect(defaultLevel).toEqual([true, true])
+
+      yield* reconcileEndings(sql)
+      expect(
+        yield* sql`SELECT 1 FROM automation_deliveries WHERE json_extract(payload, '$.kind') = 'update'`
+      ).toHaveLength(2)
+      expect(yield* recentNotices(sql, { since: "2000-01-01T00:00:00.000Z", limit: 10 })).toEqual(
+        notices
+      )
+
+      yield* readState.mark(urgentChat)
+      expect(yield* recentNotices(sql, { since: "2000-01-01T00:00:00.000Z", limit: 10 })).toEqual(
+        notices
+      )
     })
   )
+})
+
+const toldIn = (chatSessionId: string) => ({
+  status: "finished",
+  shown: true,
+  chatSessionId
 })
 
 it("a mail the owner sent is no new mail for any Automation", () => {
