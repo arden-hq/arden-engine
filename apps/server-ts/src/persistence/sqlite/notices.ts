@@ -5,6 +5,7 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { failureNeedsOwner } from "./run-attention.js"
 import type { EndingStatus, PlaceKind, Purpose } from "../runs/ending.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
+import { systemHandlerTellsOwner } from "../automations/model.js"
 
 export interface Notice {
   readonly key: string
@@ -13,10 +14,19 @@ export interface Notice {
   readonly shown: boolean
   readonly title: string
   readonly text: string
+  /** The chat the notice opens. */
   readonly chatSessionId: string | null
+  /**
+   * The chat the record comes from, as the owner is told of it: an Automation's result its own
+   * run's chat, any other record the chat it was told in. A newer notice from the same one
+   * replaces the older on a device.
+   */
+  readonly sourceSessionId: string | null
   readonly automationId: string | null
   readonly itemId: string | null
   readonly unread: boolean
+  /** The ending of a system Automation that tells the owner (Urgent events): its reply is an alert. */
+  readonly alert: boolean
   readonly occurredAt: string
   readonly purpose: Purpose | null
 }
@@ -69,6 +79,8 @@ interface EndingRow {
   readonly place_unread: number | null
   readonly automation_id: string | null
   readonly automation_name: string | null
+  readonly automation_purpose: string | null
+  readonly automation_handler: string | null
   readonly item_id: string | null
   readonly task_name: string | null
   readonly listed: number
@@ -84,6 +96,10 @@ const endingRows = (sql: SqlClient.SqlClient, filter: Statement.Fragment) =>
       json_extract(chat.metadata_json, '$.run_context.origin.automation_id') AS automation_id,
       (SELECT name FROM scheduled_tasks WHERE task_id =
         json_extract(chat.metadata_json, '$.run_context.origin.automation_id')) AS automation_name,
+      (SELECT purpose FROM scheduled_tasks WHERE task_id =
+        json_extract(chat.metadata_json, '$.run_context.origin.automation_id')) AS automation_purpose,
+      (SELECT handler FROM scheduled_tasks WHERE task_id =
+        json_extract(chat.metadata_json, '$.run_context.origin.automation_id')) AS automation_handler,
       COALESCE(json_extract(chat.metadata_json, '$.run_context.task.item_id'),
         json_extract(chat.metadata_json, '$.run_context.origin.item_id')) AS item_id,
       (SELECT text FROM space_tasks WHERE item_id =
@@ -109,6 +125,11 @@ const noticeOfEnding = (row: EndingRow): Notice => {
     entityTold: row.entity_told === 1
   })
   const placed = row.place_kind === "chat" && row.place !== null
+  // A user's Automation is answered in its own run chat. A system Automation that speaks to the
+  // owner also ends as a user Automation, but it runs in a System run Session no list shows, so
+  // its notice opens the chat it was told in. Built-in Automations cannot be deleted, so a missing
+  // purpose is a deleted user's Automation.
+  const inOwnChat = isUserAutomationPurpose(row.purpose) && row.automation_purpose !== "system"
   return {
     key: `ending:${row.run_id}`,
     record: "ending",
@@ -116,10 +137,12 @@ const noticeOfEnding = (row: EndingRow): Notice => {
     shown,
     title: row.automation_name ?? row.task_name ?? row.own_name ?? "",
     text: row.text,
-    chatSessionId: placed && !isUserAutomationPurpose(row.purpose) ? row.place : row.own_session,
+    chatSessionId: placed && !inOwnChat ? row.place : row.own_session,
+    sourceSessionId: placed && !isUserAutomationPurpose(row.purpose) ? row.place : row.own_session,
     automationId: row.automation_id,
     itemId: row.item_id,
     unread: (placed ? row.place_unread : row.own_unread) === 1,
+    alert: systemHandlerTellsOwner(row.automation_handler),
     occurredAt: row.occurred_at,
     purpose: row.purpose
   }
@@ -156,9 +179,11 @@ const noticeOfEntity = (row: EntityRow): Notice => ({
   title: (row.entity === "task" ? row.task_name : row.automation_name) ?? "",
   text: row.text,
   chatSessionId: row.place,
+  sourceSessionId: row.place,
   automationId: row.entity === "automation" ? row.entity_id : null,
   itemId: row.entity === "task" ? row.entity_id : null,
   unread: row.place_unread === null || row.place_unread === 1,
+  alert: false,
   occurredAt: row.occurred_at,
   purpose: null
 })
@@ -198,6 +223,7 @@ export const announceNotice = Effect.fn("Notices.announce")(function* (
     status: notice.status,
     shown: notice.shown,
     unread: true,
+    alert: notice.alert,
     title: notice.title,
     text: notice.text,
     chat_session_id: notice.chatSessionId,

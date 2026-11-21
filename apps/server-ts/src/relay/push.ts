@@ -15,7 +15,10 @@ export interface PushNotice {
   readonly kind: "approval" | "question" | "finished"
   readonly title: string
   readonly body: string
+  /** The chat a tap opens; the phone groups its notifications by it. */
   readonly sessionId: string
+  /** What a newer push replaces on the phone (APNs collapse id): the ask, or the record's source. */
+  readonly collapse: string
   readonly askId: string | undefined
   readonly runId?: string
   readonly attention?: boolean
@@ -122,8 +125,11 @@ export interface PushState {
   ) => Effect.Effect<ReadonlySet<string>, RelayStoreError>
 }
 
-const phoneTells = (notice: Notice): notice is Notice & { readonly chatSessionId: string } =>
+const phoneTells = (
+  notice: Notice
+): notice is Notice & { readonly chatSessionId: string; readonly sourceSessionId: string } =>
   notice.chatSessionId !== null &&
+  notice.sourceSessionId !== null &&
   (notice.status === "failed" ||
     (notice.record === "ending" &&
       notice.status === "finished" &&
@@ -141,6 +147,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           title: ask.place,
           body: ask.prompt,
           sessionId: ask.session_id,
+          collapse: ask.question_id,
           askId: ask.question_id
         }
       : {
@@ -149,6 +156,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           title: ask.place,
           body: ask.title,
           sessionId: ask.session_id,
+          collapse: ask.tool_id,
           askId: ask.tool_id,
           runId: ask.run_id
         }
@@ -173,6 +181,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           title: notice.title === "" ? "Arden" : notice.title,
           body: previewLine(notice.text) ?? "Finished",
           sessionId: notice.chatSessionId,
+          collapse: notice.sourceSessionId,
           askId: undefined,
           attention: tier === "needs_you"
         }

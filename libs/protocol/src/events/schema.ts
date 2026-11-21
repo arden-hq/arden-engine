@@ -64,6 +64,7 @@ export const RecordToldEventSchema = event("record_told", {
   status: RecordToldStatusSchema,
   shown: Schema.Boolean,
   unread: Schema.Boolean,
+  alert: Schema.optionalKey(Schema.Boolean),
   title: Schema.String,
   text: Schema.String,
   chat_session_id: optionalNullableString,

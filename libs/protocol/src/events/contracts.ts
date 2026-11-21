@@ -58,6 +58,11 @@ export interface RecordToldEvent extends CommonServerEventFields {
   readonly shown: boolean
   /** The chat holds something the owner has not read; read news that finished is not news. */
   readonly unread: boolean
+  /**
+   * A run's ending that is an alert the owner asked Arden to raise (a system Automation that tells
+   * the owner, such as Urgent events). Absent from an engine that does not say.
+   */
+  readonly alert?: boolean
   /** The Automation, Task or chat it is about, by name. */
   readonly title: string
   /** Its words. */
