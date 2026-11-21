@@ -165,6 +165,9 @@ const RUN_AUTHORITY_GUARD = `CREATE TRIGGER chat_runs_immutable_authority
         SELECT RAISE(ABORT, 'Run authority is immutable');
       END`
 
+const RUN_AUTHORITY_CHAT = `COALESCE(
+  json_extract(chat_runs.metadata_json, '$.run_policy.authority_session_id'), chat_runs.session_id)`
+
 const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
   database.exec("DROP TRIGGER chat_runs_immutable_context")
   database.exec("DROP TRIGGER chat_runs_immutable_authority")
@@ -173,7 +176,8 @@ const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
       `UPDATE chat_runs SET
         metadata_json = json_set(metadata_json, '$.run_policy.space', json_object(
           'space_id', main.space_id, 'generation', main.policy_generation,
-          'inference', json(main.inference_policy))),
+          'inference', json(main.inference_policy)),
+          '$.run_policy.authority_session_id', ${RUN_AUTHORITY_CHAT}),
         authority_json = CASE
           WHEN authority_json IS NULL THEN NULL
           WHEN json_extract(authority_json, '$.actor.kind') = 'task_worker' THEN json_set(
@@ -182,8 +186,7 @@ const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
           ELSE json_set(authority_json, '$.owns.space_id', main.space_id) END
       FROM (SELECT space_id, policy_generation, inference_policy FROM spaces WHERE space_id = ?) AS main
       WHERE json_type(chat_runs.metadata_json, '$.run_policy.space') = 'null'
-        AND json_extract(chat_runs.metadata_json, '$.run_policy.authority_session_id') IN
-          (SELECT session_id FROM sessions WHERE space_id = ?)`
+        AND ${RUN_AUTHORITY_CHAT} IN (SELECT session_id FROM sessions WHERE space_id = ?)`
     )
     .run(mainId, mainId)
   const unshared = database
@@ -210,7 +213,7 @@ const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
       authority_json = CASE WHEN authority_json IS NULL THEN NULL
         ELSE ${withoutSource("authority_json", "$.reach.resource_sessions")} END
     WHERE session_id = ?
-      OR json_extract(metadata_json, '$.run_policy.authority_session_id') = ?`
+      OR ${RUN_AUTHORITY_CHAT} = ?`
   )
   const dropShare = database.prepare(
     "UPDATE sessions SET metadata = json_remove(metadata, '$.fork_resources') WHERE session_id = ?"

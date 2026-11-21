@@ -12,6 +12,7 @@ import {
   narrowCapabilities,
   meetCapabilities,
   runApprovalMode,
+  runAuthorityChat,
   SessionResourceReachSchema,
   type SessionResourceReach,
   type RunCapability,
@@ -134,7 +135,10 @@ const sessionResourceReach = Effect.fn("RunPolicy.sessionResourceReach")(functio
       const sourceAuthority = yield* decodeJson(RunAuthoritySchema, recent[0].authority_json)
       if (sourceAuthority.actor.kind !== "person") return { sessions: [], sourcePolicy: undefined }
     }
-    const authoritySessionId = sourcePolicy?.authority_session_id ?? current.source_session_id
+    const authoritySessionId =
+      sourcePolicy === undefined
+        ? current.source_session_id
+        : runAuthorityChat(sourcePolicy, current.source_session_id)
     const authorities = yield* sql<{ readonly generation: number }>`
       SELECT COALESCE(json_extract(metadata, '$.policy_generation'), 0) AS generation
       FROM sessions WHERE session_id = ${authoritySessionId} AND archived_at IS NULL`

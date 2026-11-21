@@ -12,6 +12,7 @@ import {
   SessionResourceReachSchema,
   meetCapabilities,
   narrowCapabilities,
+  runAuthorityChat,
   type RunCapability,
   type SessionResourceReach,
   type RunPolicy,
@@ -237,14 +238,15 @@ const approvalSource = (
 ): ApprovalSource => {
   if (owner === null) {
     const current: ApprovalSource = { kind: "chat", session_id: sessionId }
-    return policy.authority_session_id === undefined || policy.authority_session_id === sessionId
+    const authority = runAuthorityChat(policy, sessionId)
+    return authority === sessionId
       ? current
-      : stricterSource(current, { kind: "chat", session_id: policy.authority_session_id })
+      : stricterSource(current, { kind: "chat", session_id: authority })
   }
   switch (owner.kind) {
     case "automation":
       return owner.purpose === "user_automation"
-        ? { kind: "chat", session_id: policy.authority_session_id ?? sessionId }
+        ? { kind: "chat", session_id: runAuthorityChat(policy, sessionId) }
         : { kind: "automation", automation_id: owner.key }
     case "space_review":
       return { kind: "space_thread", space_id: owner.spaceId }

@@ -324,3 +324,27 @@ it("M1 drops the resource share, and its runs' grants, of a moved branch whose s
   ])
   database.close()
 })
+
+it("M1 treats a run with no recorded authority chat as its own chat's run", () => {
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity)
+      VALUES ('loose', 'loose', '${AT}', '${AT}')`)
+    database
+      .prepare(
+        `INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at, ended_at,
+          assistant_message_id, metadata_json)
+        VALUES ('old', 'loose', 'completed', ?, ?, ?, 'a1', ?)`
+      )
+      .run(AT, AT, AT, JSON.stringify({ run_policy: { space: null } }))
+  })
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
+  expect(
+    database
+      .prepare(
+        `SELECT json_extract(metadata_json, '$.run_policy.authority_session_id') AS authority,
+          json_extract(metadata_json, '$.run_policy.space.space_id') = ? AS in_main FROM chat_runs`
+      )
+      .all(main)
+  ).toEqual([{ authority: "loose", in_main: 1 }])
+  database.close()
+})

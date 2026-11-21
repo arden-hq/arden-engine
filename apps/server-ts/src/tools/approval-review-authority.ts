@@ -2,7 +2,7 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Buffer } from "node:buffer"
 import { isUserAutomation, type Actor } from "../execution/authority.js"
 import { Effect, Predicate } from "effect"
-import { runPolicyOf } from "../execution/policy.js"
+import { runAuthorityChat, runPolicyOf } from "../execution/policy.js"
 import type {
   AutomationCatalog,
   AutomationDelegation,
@@ -83,7 +83,9 @@ export const approvalReviewAuthority =
       Effect.gen(function* () {
         const current = yield* runs.get(runId)
         const captured = current === null ? null : yield* runPolicyOf(current)
-        const root = yield* sessions.loadHistoryHeader(captured?.authority_session_id ?? sessionId)
+        const root = yield* sessions.loadHistoryHeader(
+          captured === null ? sessionId : runAuthorityChat(captured, sessionId)
+        )
         const origin = yield* executionOrigin(runs, runId)
         const ownerRequest =
           origin?.actor.kind === "person"
