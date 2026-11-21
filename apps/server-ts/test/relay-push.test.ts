@@ -38,7 +38,7 @@ describe("relay push", () => {
       title: "Taxes",
       body: "Edit notes.md",
       sessionId: "chat-1",
-      collapse: "call-1",
+      collapseId: "call-1",
       askId: "call-1",
       runId: "run-1"
     } as const
@@ -93,7 +93,7 @@ describe("relay push", () => {
         title: "Taxes",
         body: "The bank wrote back.",
         sessionId: "chat-1",
-        collapse: "post:1",
+        collapseId: "post:1",
         askId: undefined,
         news: "posted"
       }
@@ -118,7 +118,7 @@ describe("relay push", () => {
     ]
     world.onSend = (pushed) => sent.push(pushed)
     await world.reconcile()
-    expect(sent.map((pushed) => [pushed.sessionId, pushed.collapse])).toEqual([
+    expect(sent.map((pushed) => [pushed.sessionId, pushed.collapseId])).toEqual([
       ["space-chat", "post:1"],
       ["space-chat", "post:2"]
     ])
@@ -130,7 +130,7 @@ describe("relay push", () => {
     world.notices = [notice("done-1", { chatSessionId: "chat-1" })]
     world.onSend = (pushed) => sent.push(pushed)
     await world.reconcile()
-    expect(sent.map((pushed) => pushed.collapse)).toEqual(["chat-1"])
+    expect(sent.map((pushed) => pushed.collapseId)).toEqual(["chat-1"])
   })
 
   it("an ask's push collapses on the ask", async () => {
@@ -139,7 +139,7 @@ describe("relay push", () => {
     world.asks = [question("q-1"), approval("run-1", "call-1")]
     world.onSend = (pushed) => sent.push(pushed)
     await world.reconcile()
-    expect(sent.map((pushed) => pushed.collapse)).toEqual(["q-1", "call-1"])
+    expect(sent.map((pushed) => pushed.collapseId)).toEqual(["q-1", "call-1"])
   })
 
   it("a restart neither repeats a push nor skips an ask that opened while Arden was down", async () => {

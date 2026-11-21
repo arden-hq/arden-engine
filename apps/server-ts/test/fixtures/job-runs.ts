@@ -88,7 +88,6 @@ export const claimAll = (workerId: string) =>
 
 type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
-/** Starts the job's run in its Automation's chat, or in `sessionId` when the runner prepared one. */
 export const startJob = (lease: JobLease, id: string, sessionId = lease.payload.sessionId) =>
   Effect.gen(function* () {
     const automationId = lease.payload.automationId
