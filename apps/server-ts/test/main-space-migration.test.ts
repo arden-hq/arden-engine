@@ -32,13 +32,13 @@ const space = (database: DatabaseSync, id: string, name: string, archived = fals
     )
     .run(id, name, name.toLowerCase(), AT, AT, archived ? AT : null)
 
-it("M1 names the Main Space so it never takes an active Space's name", () => {
+it("M1 names the Main Space so it never takes another Space's name, archived or not", () => {
   const database = migratedTo(183, (database) => {
     space(database, "taken", "main")
     space(database, "old", "Main space", true)
   })
   expect(database.prepare("SELECT name, name_key FROM spaces WHERE kind = 'main'").all()).toEqual([
-    { name: "Main space", name_key: "main space" }
+    { name: "Main space 2", name_key: "main space 2" }
   ])
   database.close()
 })
@@ -206,6 +206,65 @@ it("M1 moves an Automation's copy of a moved chat with it, not a copy of the Aut
     { session_id: "copy-of-loose", in_main: 1 },
     { session_id: "daily", in_main: null },
     { session_id: "loose", in_main: 1 }
+  ])
+  database.close()
+})
+
+it("M1 moves every chat under a moved chat, and survives unreadable old metadata", () => {
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+        session_type, origin_automation_id, parent_session_id, parent_run_id, parent_tool_call_id,
+        metadata)
+      VALUES ('loose', 'loose', '${AT}', '${AT}', 'chat', NULL, NULL, NULL, NULL, NULL),
+        ('daily', 'daily', '${AT}', '${AT}', 'channel', 'daily', NULL, NULL, NULL, NULL),
+        ('copy', 'copy', '${AT}', '${AT}', 'chat', 'daily', 'daily', NULL, NULL,
+          '{"fork_origin":{"sourceSessionId":"loose"}}'),
+        ('copy-agent', 'copy-agent', '${AT}', '${AT}', 'agent', 'daily', 'copy', 'run', 'call', NULL),
+        ('daily-agent', 'daily-agent', '${AT}', '${AT}', 'agent', 'daily', 'daily', 'run', 'call-2', NULL),
+        ('broken', 'broken', '${AT}', '${AT}', 'chat', 'daily', 'daily', NULL, NULL, 'not json')`)
+  })
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
+  expect(
+    database
+      .prepare("SELECT session_id, space_id = ? AS in_main FROM sessions ORDER BY session_id")
+      .all(main)
+  ).toEqual([
+    { session_id: "broken", in_main: null },
+    { session_id: "copy", in_main: 1 },
+    { session_id: "copy-agent", in_main: 1 },
+    { session_id: "daily", in_main: null },
+    { session_id: "daily-agent", in_main: null },
+    { session_id: "loose", in_main: 1 }
+  ])
+  database.close()
+})
+
+it("M1 moves the Space of runs that can still continue, not of settled history", () => {
+  const policy = JSON.stringify({ run_policy: { authority_session_id: "loose", space: null } })
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity)
+      VALUES ('loose', 'loose', '${AT}', '${AT}')`)
+    const run = database.prepare(`INSERT INTO chat_runs (run_id, session_id, status, started_at,
+        updated_at, ended_at, assistant_message_id, metadata_json)
+      VALUES (?, 'loose', 'completed', ?, ?, ?, ?, ?)`)
+    run.run("old", "2026-11-01T00:00:00.000Z", AT, AT, "a1", policy)
+    run.run("asked", "2026-11-02T00:00:00.000Z", AT, AT, "a2", policy)
+    run.run("latest", "2026-11-03T00:00:00.000Z", AT, AT, "a3", policy)
+    database.exec(`INSERT INTO run_questions (question_id, run_id, tool_call_id, content, created_at)
+      VALUES ('q', 'asked', 'call', '{}', '${AT}')`)
+  })
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
+  expect(
+    database
+      .prepare(
+        `SELECT run_id, json_extract(metadata_json, '$.run_policy.space.space_id') = ? AS in_main
+        FROM chat_runs ORDER BY run_id`
+      )
+      .all(main)
+  ).toEqual([
+    { run_id: "asked", in_main: 1 },
+    { run_id: "latest", in_main: 1 },
+    { run_id: "old", in_main: null }
   ])
   database.close()
 })

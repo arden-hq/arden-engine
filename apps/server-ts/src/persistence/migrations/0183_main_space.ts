@@ -53,7 +53,7 @@ export const ENTITY_EVENTS_RUN_INDEX =
 const freeMainName = (database: DatabaseSync): string => {
   const taken = new Set(
     database
-      .prepare("SELECT name_key FROM spaces WHERE archived_at IS NULL")
+      .prepare("SELECT name_key FROM spaces")
       .all()
       .map((row) => String(row.name_key))
   )
@@ -82,9 +82,22 @@ const moveOwnerChats = (database: DatabaseSync, mainId: string): void => {
       `UPDATE sessions SET space_id = ?
       WHERE space_id IS NULL AND origin_automation_id IS NOT NULL AND session_type = 'chat'
         AND parent_session_id IS NOT NULL
-        AND COALESCE(json_extract(metadata, '$.fork_origin.sourceSessionId'),
-          json_extract(metadata, '$.fork_of.source_session_id'))
+        AND CASE WHEN json_valid(metadata) THEN COALESCE(
+          json_extract(metadata, '$.fork_origin.sourceSessionId'),
+          json_extract(metadata, '$.fork_of.source_session_id')) END
           IN (SELECT session_id FROM sessions WHERE space_id = ?)`
+    )
+    .run(mainId, mainId)
+  database
+    .prepare(
+      `WITH RECURSIVE moved(session_id) AS (
+        SELECT session_id FROM sessions WHERE space_id = ?
+        UNION
+        SELECT child.session_id FROM sessions AS child
+        JOIN moved ON child.parent_session_id = moved.session_id
+        WHERE child.space_id IS NULL)
+      UPDATE sessions SET space_id = ?
+      WHERE space_id IS NULL AND session_id IN (SELECT session_id FROM moved)`
     )
     .run(mainId, mainId)
   const moving = `space_id IS NULL
@@ -168,9 +181,22 @@ const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
             '$.memory', json_object('_tag', 'Space', 'space_id', main.space_id))
           ELSE json_set(authority_json, '$.owns.space_id', main.space_id) END
       FROM (SELECT space_id, policy_generation, inference_policy FROM spaces WHERE space_id = ?) AS main
-      WHERE json_type(chat_runs.metadata_json, '$.run_policy.space') = 'null'
-        AND json_extract(chat_runs.metadata_json, '$.run_policy.authority_session_id') IN
-          (SELECT session_id FROM sessions WHERE space_id = ?)`
+      WHERE chat_runs.run_id IN (
+        SELECT ranked.run_id FROM (
+          SELECT run.run_id, run.status, ROW_NUMBER() OVER (
+              PARTITION BY run.session_id
+              ORDER BY run.started_at DESC, run.run_id DESC) AS recency
+          FROM (SELECT run_id, session_id, status, started_at,
+              json_type(metadata_json, '$.run_policy.space') AS policy_space,
+              json_extract(metadata_json, '$.run_policy.authority_session_id') AS authority
+            FROM chat_runs) AS run
+          WHERE run.policy_space = 'null'
+            AND run.authority IN (SELECT session_id FROM sessions WHERE space_id = ?)) AS ranked
+        WHERE ranked.recency = 1
+          OR ranked.status IN ('pending', 'running', 'backgrounded')
+          OR EXISTS (SELECT 1 FROM run_questions AS question
+            WHERE question.run_id = ranked.run_id AND question.resolution IS NULL
+              AND question.closed_at IS NULL))`
     )
     .run(mainId, mainId)
   database.exec(RUN_CONTEXT_GUARD)
