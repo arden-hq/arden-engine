@@ -12,18 +12,3 @@ export const mainSpaceId = Effect.fn("MainSpace.id")(function* (sql: SqlClient.S
 
 export const mainSpaceIdSql = (sql: SqlClient.SqlClient): Statement.Fragment =>
   sql`(SELECT main.space_id FROM spaces AS main WHERE main.kind = 'main')`
-
-export const sameAuthoritySpace = Effect.fn("MainSpace.sameAuthority")(function* (
-  sql: SqlClient.SqlClient,
-  left: string | null,
-  right: string | null
-) {
-  if (left === right) return true
-  const main = yield* mainSpaceId(sql)
-  return (left ?? main) === (right ?? main)
-})
-
-export const authoritySpaceSql = (
-  sql: SqlClient.SqlClient,
-  spaceId: Statement.Fragment
-): Statement.Fragment => sql`COALESCE(${spaceId}, ${mainSpaceIdSql(sql)})`

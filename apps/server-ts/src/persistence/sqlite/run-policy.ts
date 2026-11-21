@@ -1,4 +1,3 @@
-import { authoritySpaceSql, sameAuthoritySpace } from "./main-space.js"
 import { Effect, Option, Schema } from "effect"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import {
@@ -47,8 +46,7 @@ export const runPolicyRevoked = (
   (json_extract(${metadata}, '$.run_policy.authority_session_id') IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM sessions AS authority_session
       WHERE authority_session.session_id = json_extract(${metadata}, '$.run_policy.authority_session_id')
-        AND ${authoritySpaceSql(sql, sql`authority_session.space_id`)}
-          IS ${authoritySpaceSql(sql, sql`json_extract(${metadata}, '$.run_policy.space.space_id')`)}
+        AND authority_session.space_id IS json_extract(${metadata}, '$.run_policy.space.space_id')
         AND authority_session.archived_at IS NULL
         AND (json_extract(${metadata}, '$.run_policy.authority_generation') IS NULL
           OR COALESCE(json_extract(authority_session.metadata, '$.policy_generation'), 0)
@@ -325,12 +323,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     const sourcePolicy = resourceAdmission.sourcePolicy
     if (sourcePolicy !== undefined) {
       capabilities = meetCapabilities(capabilities, sourcePolicy.capabilities)
-      const sameSpace = yield* sameAuthoritySpace(
-        sql,
-        sourcePolicy.space?.space_id ?? null,
-        space?.space_id ?? null
-      )
-      if (!sameSpace)
+      if ((sourcePolicy.space?.space_id ?? null) !== (space?.space_id ?? null))
         return yield* failure(
           sourcePolicy.space === null
             ? "The source chat does not authorize this Space"
@@ -368,9 +361,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
         return yield* failure("Continuation cannot change its Automation instructions")
       instructionRevisionId = previousRevision ?? instructionRevisionId
       authoritySessionId = previous.authority_session_id ?? authoritySessionId
-      if (
-        !(yield* sameAuthoritySpace(sql, previous.space?.space_id ?? null, space?.space_id ?? null))
-      )
+      if (previous.space?.space_id !== space?.space_id)
         return yield* failure("Continuation cannot change its Space authority")
       capabilities = [
         ...capabilities,

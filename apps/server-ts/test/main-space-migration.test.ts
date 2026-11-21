@@ -149,3 +149,38 @@ it("M1 keeps every Task key that was already unique and suffixes only the repeat
   ])
   database.close()
 })
+
+it("M1 moves a pre-upgrade run's captured Space and authority into Main with its chat", () => {
+  const policy = (session: string) =>
+    JSON.stringify({ run_policy: { authority_session_id: session, space: null } })
+  const authority = (kind: string) =>
+    JSON.stringify({ actor: { kind }, owns: { space_id: null }, memory: { _tag: "None" } })
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
+        session_type, origin_automation_id)
+      VALUES ('loose', 'loose', '${AT}', '${AT}', 'chat', NULL),
+        ('daily', 'daily', '${AT}', '${AT}', 'channel', 'daily')`)
+    const run = database.prepare(`INSERT INTO chat_runs (run_id, session_id, status, started_at,
+        updated_at, assistant_message_id, metadata_json, authority_json)
+      VALUES (?, ?, 'pending', '${AT}', '${AT}', ?, ?, ?)`)
+    run.run("person-run", "loose", "a1", policy("loose"), authority("person"))
+    run.run("automation-run", "daily", "a2", policy("daily"), authority("automation"))
+  })
+  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
+  expect(
+    database
+      .prepare(
+        `SELECT run_id, json_extract(metadata_json, '$.run_policy.space.space_id') AS policy_space,
+          json_extract(authority_json, '$.owns.space_id') AS owns_space
+        FROM chat_runs ORDER BY run_id`
+      )
+      .all()
+  ).toEqual([
+    { run_id: "automation-run", policy_space: null, owns_space: null },
+    { run_id: "person-run", policy_space: main, owns_space: main }
+  ])
+  expect(() =>
+    database.exec(`UPDATE chat_runs SET authority_json = '{}' WHERE run_id = 'person-run'`)
+  ).toThrow(/Run authority is immutable/)
+  database.close()
+})
