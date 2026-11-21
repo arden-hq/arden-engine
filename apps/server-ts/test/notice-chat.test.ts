@@ -13,9 +13,6 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 
 type Lease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
-// A user's Automation is answered in its own run chat, so its notice opens that chat. The
-// Urgent events case, a system Automation, is in urgent-events.test.ts.
-
 it("a user's Automation that runs in its own chat: the notice opens that chat", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -120,7 +117,6 @@ const sayHello = (sessionId: string) =>
     })
   })
 
-/** Starts the job's run in `sessionId`, finishes it with `reply` and settles the job. */
 const settleRun = (lease: Lease, sessionId: string, reply: string) =>
   Effect.gen(function* () {
     const chat = yield* ChatWriteStore

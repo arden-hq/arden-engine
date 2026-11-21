@@ -1,4 +1,3 @@
-import type { ServerEvent } from "@arden-hq/protocol"
 import { noticeOfEvent, notifyOwner } from "@arden-hq/protocol/notifications"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
@@ -15,7 +14,10 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { announceNotice, recentNotices } from "../src/persistence/sqlite/notices.js"
-import type { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
+import type {
+  LifecycleFeedEvent,
+  SessionLifecycleEvents
+} from "../src/persistence/sessions/events.js"
 import { reconcileEndings } from "../src/persistence/sqlite/run-ending.js"
 import { SessionReadState } from "../src/persistence/sessions/read-state.js"
 import { claimAll, startJob } from "./fixtures/job-runs.js"
@@ -125,7 +127,6 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
           expect(published.queued).toBe(1)
           const [lease] = yield* claimAll(`urgent-${id}`)
           if (lease === undefined) throw new Error("Urgent events was not claimed")
-          // As the handler does: each alert runs in a run Session under the Automation's chat.
           const { run, sessionId } = yield* startJob(
             lease,
             `alert-${id}`,
@@ -197,28 +198,24 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
         "A recruiter asks you to confirm Tuesday.",
         "An offer needs your answer today."
       ])
-      // Each notice opens the Urgent events chat the alert was told in, not the run Session no
-      // list shows.
       expect(notices).toMatchObject([
         { ...toldIn(urgentChat), purpose: "user_automation", title: "Urgent events" },
         { ...toldIn(urgentChat), purpose: "user_automation", title: "Urgent events" }
       ])
       expect(new Set(notices.map((notice) => notice.key)).size).toBe(2)
-      // Each still comes from its own run, so on the phone neither alert replaces the other.
       expect(notices.map((notice) => notice.sourceSessionId).toSorted()).toEqual(
         [firstRun, secondRun].toSorted()
       )
-      // The update is queued, not yet in the chat, so the chat holds nothing unread yet.
       expect(notices.map((notice) => notice.unread)).toEqual([false, false])
-      // Each is an alert the owner asked to be told, so the desktop shows it at its default level.
       expect(notices.map((notice) => notice.alert)).toEqual([true, true])
-      const announced: Array<ServerEvent> = []
-      const events = {
-        appendEventInTransaction: (event: ServerEvent) =>
+      const announced: Array<LifecycleFeedEvent> = []
+      const events: Pick<SessionLifecycleEvents["Service"], "appendEventInTransaction"> = {
+        appendEventInTransaction: (event) =>
           Effect.sync(() => {
             announced.push(event)
+            return { records: [], headSequence: announced.length }
           })
-      } as unknown as SessionLifecycleEvents["Service"]
+      }
       for (const notice of notices) yield* announceNotice(sql, events, notice.key)
       expect(announced).toMatchObject([
         { type: "record_told", alert: true, chat_session_id: urgentChat },
@@ -231,7 +228,6 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
       )
       expect(defaultLevel).toEqual([true, true])
 
-      // Settling again after a restart tells nothing twice and changes no notice.
       yield* reconcileEndings(sql)
       expect(
         yield* sql`SELECT 1 FROM automation_deliveries WHERE json_extract(payload, '$.kind') = 'update'`
@@ -240,7 +236,6 @@ it("each arrival wakes Urgent events with the owner's sentence, and every alert 
         notices
       )
 
-      // Reading the chat answers nothing and removes no notice.
       yield* readState.mark(urgentChat)
       expect(yield* recentNotices(sql, { since: "2000-01-01T00:00:00.000Z", limit: 10 })).toEqual(
         notices
