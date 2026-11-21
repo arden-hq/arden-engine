@@ -114,6 +114,7 @@ export const makeWorkCaptureSql = (options: {
     readonly reuseExisting?: boolean
     readonly fromChat?: string
     readonly originMessageId?: string
+    readonly causedBy?: string
   }) {
     const {
       scope,
@@ -125,7 +126,8 @@ export const makeWorkCaptureSql = (options: {
       settledInference = false,
       reuseExisting = false,
       fromChat,
-      originMessageId
+      originMessageId,
+      causedBy = runId
     } = options
     const validInput = yield* decodeCreateSpaceTaskInputEffect(input).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task input", cause))
@@ -213,9 +215,9 @@ export const makeWorkCaptureSql = (options: {
       yield* sources.add({ itemId: row.item_id, sources: taskSources, now })
       if (row.runs_in === "chat" || row.token_budget !== null)
         yield* ensureTaskBudget(sql, row.item_id, row.token_budget)
-      yield* taskEvent(row.space_id, row.item_id, "created", row.text, now, runId)
+      yield* taskEvent(row.space_id, row.item_id, "created", row.text, now, causedBy)
 
-      yield* spaceJobs.queueTaskWake(row.item_id, now, taskWaker(runId))
+      yield* spaceJobs.queueTaskWake(row.item_id, now, taskWaker(causedBy))
       if (runId === undefined && actor === "user")
         yield* spaceJobs.queueTaskChangedByHand(row.item_id, now)
 

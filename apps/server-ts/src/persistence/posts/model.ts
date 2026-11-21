@@ -22,6 +22,7 @@ export const POST_WITHDRAWAL_REASONS = [
 
 export const PostDeliveryPayloadSchema = Schema.Struct({
   kind: Schema.Literal("post"),
+  runId: Schema.NonEmptyString,
   sessionId: Schema.NonEmptyString,
   messageId: Schema.NonEmptyString,
   text: PostTextSchema,

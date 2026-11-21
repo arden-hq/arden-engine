@@ -58,6 +58,7 @@ const setup = Effect.gen(function* () {
     posts.post({
       automationId,
       attemptId,
+      runId: `run-${attemptId}`,
       spaceId: undefined,
       text: `Post ${attemptId}`,
       task: undefined,
@@ -239,6 +240,9 @@ it("a post waits while its chat has a turn open, with no failed attempt, and com
         WHERE run_id = ${started.runId}`
       expect(yield* drain).toBe(1)
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toHaveLength(1)
+      expect(
+        yield* sql`SELECT run_ref FROM space_task_events WHERE event_type = 'created'`
+      ).toEqual([{ run_ref: "run-1" }])
       const tasks = yield* sql`SELECT text, body, origin_message_id, owner FROM space_tasks`
       expect(tasks).toEqual([
         {
@@ -330,6 +334,14 @@ it("a Task update quotes the post that started it, only in that post's chat", as
             occurredAt: AT
           })
         })
+      yield* appendMessagesInTransaction(
+        sql,
+        other.sessionId,
+        [{ message_id: posted.messageId, role: ROLE.user, content: "Same id", created_at: AT }],
+        AT,
+        "post",
+        posted.messageId
+      )
       yield* tell(posted.sessionId, "in-post-chat")
       yield* tell(other.sessionId, "elsewhere")
       const pending = yield* work.pendingDeliveries()

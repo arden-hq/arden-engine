@@ -11,6 +11,7 @@ export class PostStoreError extends Schema.TaggedError<PostStoreError>()("PostSt
 export interface PostInput {
   readonly automationId: AutomationId
   readonly attemptId: number
+  readonly runId: string
   readonly spaceId: string | undefined
   readonly text: string
   readonly task: PostTask | undefined

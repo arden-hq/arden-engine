@@ -1,7 +1,12 @@
 import { cutText } from "@arden-hq/std/text"
 import { bodyAad, fromB64url, sealQueued, toB64url, utf8 } from "@arden-hq/relay-protocol"
 import { previewLine } from "@arden-hq/protocol/chat"
-import { notifyOwner, noticeTier, type NoticeRecord } from "@arden-hq/protocol/notifications"
+import {
+  notifyOwner,
+  noticeTier,
+  type NoticeRecord,
+  type NoticeTier
+} from "@arden-hq/protocol/notifications"
 import { Duration, Effect, Queue, Schedule, Schema } from "effect"
 import type { PairedDevice, RelayStoreError } from "../persistence/relay/store.js"
 import type { Notice } from "../persistence/sqlite/notices.js"
@@ -18,7 +23,21 @@ export interface PushNotice {
   readonly sessionId: string
   readonly askId: string | undefined
   readonly runId?: string
-  readonly attention?: boolean
+  readonly news?: PushNews
+}
+
+type PushNews = "finished" | "stopped" | "posted"
+
+const finishedAlert = (news: PushNews | undefined): string => {
+  switch (news) {
+    case "posted":
+      return "A new message"
+    case "stopped":
+      return "A run stopped"
+    case "finished":
+    case undefined:
+      return "A chat finished"
+  }
 }
 
 const category = (kind: PushNotice["kind"]): string | undefined => {
@@ -39,7 +58,7 @@ const fallbackAlert = (notice: PushNotice): string => {
     case "question":
       return "A question from Arden"
     case "finished":
-      return notice.attention === true ? "A run stopped" : "A chat finished"
+      return finishedAlert(notice.news)
   }
 }
 
@@ -130,6 +149,11 @@ const phoneTells = (notice: Notice): notice is Notice & { readonly chatSessionId
       notice.status === "finished" &&
       (notice.purpose === "chat" || isUserAutomationPurpose(notice.purpose))))
 
+const newsOf = (status: Notice["status"], tier: NoticeTier | undefined): PushNews => {
+  if (status === "posted") return "posted"
+  return tier === "needs_you" ? "stopped" : "finished"
+}
+
 const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now: number) {
   const since = iso(now - FINISHED_WINDOW_MS)
   const home = yield* read(state.loopback, "/mobile/home", Asks)
@@ -175,7 +199,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           body: previewLine(notice.text) ?? "Finished",
           sessionId: notice.chatSessionId,
           askId: undefined,
-          attention: tier === "needs_you"
+          news: newsOf(notice.status, tier)
         }
       ]
     })

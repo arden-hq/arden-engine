@@ -147,6 +147,7 @@ export const makePostStore = ({
             WHERE NOT ${liveMapping("event_threads")}`
           const payload: PostDeliveryPayload = {
             kind: "post",
+            runId: input.runId,
             sessionId: place.sessionId,
             messageId,
             text: input.text,
@@ -225,6 +226,7 @@ export const makePostStore = ({
         }))
       ],
       capture: { basis: "explicit", reason: payload.text },
+      causedBy: payload.runId,
       originMessageId: payload.messageId
     })
   })
