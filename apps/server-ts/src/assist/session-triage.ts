@@ -224,6 +224,7 @@ const movedTo = (target: SessionTriageTarget, rationale: string): SessionTriageD
 
 const mainChat = (session: SessionHeaderSnapshot): boolean =>
   session.header.spaceKind === "main" &&
+  !session.header.spaceConversation &&
   session.header.sessionType === "chat" &&
   session.header.parentSessionId === null &&
   !Object.hasOwn(session.metadata, "capture") &&

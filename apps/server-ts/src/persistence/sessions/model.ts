@@ -22,6 +22,7 @@ export const SessionHistoryHeaderSchema = Schema.Struct({
   parentMessageId: Schema.NullOr(Schema.NonEmptyString),
   spaceId: Schema.NullOr(Schema.NonEmptyString),
   spaceKind: Schema.NullOr(SpaceKindSchema),
+  spaceConversation: Schema.Boolean,
   chatModel: Schema.NullOr(Schema.NonEmptyString),
   activeMessageCount: Schema.Natural,
   lastInputTokens: Schema.NullOr(Schema.Natural),

@@ -87,6 +87,74 @@ interface OnboardingToolServices {
   readonly home?: string
 }
 
+export const makeOnboardingFinishTool = ({
+  sessions,
+  store
+}: Pick<OnboardingToolServices, "sessions" | "store">): ServerTool =>
+  defineServerTool({
+    name: "onboarding_finish",
+    summary: "Ends Getting started in this chat.",
+    discovery: { group: "onboarding" },
+    description: [
+      "End Getting started in this chat, after the user answered the last step or said they are done.",
+      "From then on this is an ordinary chat: the Getting started steps no longer apply here.",
+      "Only the onboarding chat may call this."
+    ].join(" "),
+    parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
+    metadata: {
+      effect: "run_record",
+      display_name: "Finish Getting Started",
+      kind: "tool",
+      action: "write",
+      approval_preview: "End Getting started in this chat.",
+      source: "_app",
+      changes_state: true,
+      target: "reported",
+      concurrency_group: null,
+      destructive: false
+    },
+    execute: async (_input, ctx, effects) => {
+      const session = await Effect.runPromise(sessions.loadHeaderSnapshot(ctx.run.sessionId), {
+        signal: ctx.signal
+      })
+      if (session === null || readSpecialChat(session.metadata)?.kind !== "onboarding") {
+        throw new ToolExecutionError("Getting started is not running in this chat.", {
+          preview: "Not available here",
+          retryable: false
+        })
+      }
+      await recordApplied(
+        effects,
+        Effect.runPromise(
+          store.finishOnboarding(ctx.run.sessionId).pipe(
+            Effect.mapError((error) =>
+              toolFailure(
+                {
+                  reason: error.reason,
+                  message: `Getting started did not end: ${error.message}`
+                },
+                "Not ended"
+              )
+            )
+          ),
+          { signal: ctx.signal }
+        )
+      )
+      return {
+        result: "Getting started ended.",
+        preview: "Getting started ended",
+        data: { finished: true },
+        host: appliedReceipt(ctx, {
+          kind: "target",
+          resourceRef: `onboarding:${session.header.sessionId}`,
+          domain: "session",
+          title: "Getting started ended",
+          href: chatHref({ publicRef: session.header.publicRef })
+        })
+      }
+    }
+  })
+
 const makeOnboardingTools = ({
   sessions,
   store,
@@ -303,69 +371,7 @@ const makeOnboardingTools = ({
     }
   }),
 
-  defineServerTool({
-    name: "onboarding_finish",
-    summary: "Ends Getting started in this chat.",
-    discovery: { group: "onboarding" },
-    description: [
-      "End Getting started in this chat, after the user answered the last step or said they are done.",
-      "From then on this is an ordinary chat: the Getting started steps no longer apply here.",
-      "Only the onboarding chat may call this."
-    ].join(" "),
-    parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
-    metadata: {
-      effect: "arden_db",
-      display_name: "Finish Getting Started",
-      kind: "tool",
-      action: "write",
-      approval_preview: "End Getting started in this chat.",
-      source: "_app",
-      changes_state: true,
-      target: "reported",
-      concurrency_group: null,
-      destructive: false
-    },
-    execute: async (_input, ctx, effects) => {
-      const session = await Effect.runPromise(sessions.loadHeaderSnapshot(ctx.run.sessionId), {
-        signal: ctx.signal
-      })
-      if (session === null || readSpecialChat(session.metadata)?.kind !== "onboarding") {
-        throw new ToolExecutionError(
-          "Getting started already ended in this chat, or this is not the Getting started chat. Carry on as usual.",
-          { preview: "Not available here", retryable: false }
-        )
-      }
-      await recordApplied(
-        effects,
-        Effect.runPromise(
-          store.finishOnboarding(ctx.run.sessionId).pipe(
-            Effect.mapError((error) =>
-              toolFailure(
-                {
-                  reason: error.reason,
-                  message: `Getting started did not end: ${error.message}`
-                },
-                "Not ended"
-              )
-            )
-          ),
-          { signal: ctx.signal }
-        )
-      )
-      return {
-        result: "Getting started is over. This is now an ordinary chat.",
-        preview: "Getting started ended",
-        data: { finished: true },
-        host: appliedReceipt(ctx, {
-          kind: "target",
-          resourceRef: `onboarding:${session.header.sessionId}`,
-          domain: "session",
-          title: "Getting started ended",
-          href: chatHref({ publicRef: session.header.publicRef })
-        })
-      }
-    }
-  }),
+  makeOnboardingFinishTool({ sessions, store }),
 
   defineServerTool({
     name: "show_tour",

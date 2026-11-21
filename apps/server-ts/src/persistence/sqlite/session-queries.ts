@@ -52,6 +52,7 @@ interface SessionRow {
   readonly parent_message_id: string | null
   readonly space_id: string | null
   readonly space_kind: string | null
+  readonly space_conversation: number
   readonly chat_model: string | null
   readonly context_generation: number
   readonly active_message_count: number
@@ -102,7 +103,9 @@ export const makeSessionQueries = ({
                session_type, origin_automation_id, parent_session_id, parent_run_id,
                parent_tool_call_id, parent_message_id, space_id, chat_model,
                context_generation, active_message_count,
-               (SELECT kind FROM spaces WHERE spaces.space_id = sessions.space_id) AS space_kind
+               (SELECT kind FROM spaces WHERE spaces.space_id = sessions.space_id) AS space_kind,
+               EXISTS (SELECT 1 FROM space_conversations AS bound
+                 WHERE bound.session_id = sessions.session_id) AS space_conversation
         FROM sessions
         WHERE archived_at IS NULL
         ORDER BY last_activity DESC, session_id DESC
@@ -113,7 +116,9 @@ export const makeSessionQueries = ({
                session_type, origin_automation_id, parent_session_id, parent_run_id,
                parent_tool_call_id, parent_message_id, space_id, chat_model,
                context_generation, active_message_count,
-               (SELECT kind FROM spaces WHERE spaces.space_id = sessions.space_id) AS space_kind
+               (SELECT kind FROM spaces WHERE spaces.space_id = sessions.space_id) AS space_kind,
+               EXISTS (SELECT 1 FROM space_conversations AS bound
+                 WHERE bound.session_id = sessions.session_id) AS space_conversation
         FROM sessions
         WHERE session_id = ${sessionId}
         LIMIT 1
@@ -181,6 +186,7 @@ export const makeSessionQueries = ({
       parentMessageId: row.parent_message_id,
       spaceId: row.space_id,
       spaceKind: row.space_kind,
+      spaceConversation: row.space_conversation === 1,
       chatModel: row.chat_model,
       activeMessageCount: row.active_message_count,
       lastInputTokens,

@@ -31,5 +31,9 @@ export const spaceLabel = (spaceName: string | undefined): string =>
   spaceName === undefined ? "no Space" : `Space ${quoted(spaceName)}`
 
 export const seesEveryChat = (
-  header: Pick<SessionHistoryHeader, "spaceId" | "spaceKind">
-): boolean => header.spaceId === null || header.spaceKind === "main"
+  header: Pick<SessionHistoryHeader, "spaceId" | "spaceKind">,
+  run: Pick<ServerRunContext, "authority">
+): boolean =>
+  header.spaceId === null ||
+  (header.spaceKind === "main" &&
+    boundary(run.authority, { kind: "chat_browse", scope: "all_spaces" }).kind === "allow")

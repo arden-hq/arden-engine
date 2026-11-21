@@ -192,7 +192,7 @@ const makeSessionSearchTool = ({
         (input.session_ref === undefined &&
           (await Effect.runPromise(
             queries.loadHistoryHeader(ctx.run.sessionId).pipe(
-              Effect.map((header) => header !== null && seesEveryChat(header)),
+              Effect.map((header) => header !== null && seesEveryChat(header, ctx.run)),
               Effect.orElseSucceed(() => false)
             ),
             { signal: ctx.signal }
@@ -205,7 +205,7 @@ const makeSessionSearchTool = ({
         transcript
           .search({
             requestingSessionId: ctx.run.sessionId,
-            ...(allSpaces ? { allSpaces } : {}),
+            ...(spansSpaces ? { allSpaces: true } : {}),
             query: input.query,
             limit: input.limit,
             offset: input.offset,

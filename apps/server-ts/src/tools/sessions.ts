@@ -37,6 +37,7 @@ import {
   spaceLabel,
   permittedBrowseScope
 } from "./session-browse-scope.js"
+import type { ServerRunContext } from "./run-context.js"
 import { eventRowText } from "../persistence/transcript/chat-events.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
@@ -241,11 +242,11 @@ const transcriptFailure = (error: TranscriptQueryFailure): ToolExecutionError =>
 
 const currentScope = async (
   queries: SessionQueries["Service"],
-  sessionId: string,
+  run: Pick<ServerRunContext, "sessionId" | "authority">,
   signal: AbortSignal
 ): Promise<SessionListQuery> => {
   const header = await Effect.runPromise(
-    queries.loadHistoryHeader(sessionId).pipe(Effect.mapError(queryFailure)),
+    queries.loadHistoryHeader(run.sessionId).pipe(Effect.mapError(queryFailure)),
     { signal }
   )
   if (header === null) {
@@ -256,7 +257,7 @@ const currentScope = async (
   }
   return {
     scope: "all",
-    ...(header.spaceId === null || seesEveryChat(header) ? {} : { spaceId: header.spaceId })
+    ...(header.spaceId === null || seesEveryChat(header, run) ? {} : { spaceId: header.spaceId })
   }
 }
 
@@ -468,7 +469,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       permissions: ["session"]
     },
     execute: async (input, ctx) => {
-      const own = await currentScope(services.queries, ctx.run.sessionId, ctx.signal)
+      const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const scope: SessionListQuery =
         permittedBrowseScope(input.scope, ctx.run) === "all_spaces" ? { scope: "all" } : own
       const page = await Effect.runPromise(
@@ -567,7 +568,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
             ? requested.content_chars
             : Math.min(requested.content_chars, MAX_CONTENT_CHARS)
       }
-      const own = await currentScope(services.queries, ctx.run.sessionId, ctx.signal)
+      const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const session = await resolveReadable(services, input.session_ref, ctx.signal)
       if (input.view === "actions") {
         const page = await Effect.runPromise(
@@ -700,7 +701,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       idempotent: false
     },
     execute: async (input, ctx, effects) => {
-      const scope = await currentScope(services.queries, ctx.run.sessionId, ctx.signal)
+      const scope = await currentScope(services.queries, ctx.run, ctx.signal)
       const created = await recordApplied(
         effects,
         Effect.runPromise(

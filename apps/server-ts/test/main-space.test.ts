@@ -9,6 +9,15 @@ import { seesEveryChat } from "../src/tools/session-browse-scope.js"
 import { makeSessionTriage, makeSessionTriageAction } from "../src/assist/session-triage.js"
 import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-transcript.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { serverRunContext } from "./kit.js"
+import { deriveAuthority, type RunAuthority } from "../src/execution/authority.js"
+import { decide } from "../src/execution/decide.js"
+import { defaultImpact } from "../src/execution/impact.js"
+import type { RunPolicy } from "../src/execution/policy.js"
+import { toolFacts } from "../src/tools/approval-decision.js"
+import { makeOnboardingFinishTool } from "../src/tools/onboarding.js"
+import { sessionSearchTools } from "../src/tools/session-search.js"
+import { StorageSessionStore } from "../src/persistence/storage/session-store.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
 
@@ -88,10 +97,14 @@ it("a chat made, moved or branched with no Space lands in Main and sees every Sp
         (yield* sessions.create({ spaceId: work.space_id })).sessionId
       )
       expect([inMain?.spaceKind, inWork?.spaceKind]).toEqual(["main", "ordinary"])
-      expect([inMain, inWork].map((header) => header !== null && seesEveryChat(header))).toEqual([
-        true,
+      expect(
+        [inMain, inWork].map(
+          (header) => header !== null && seesEveryChat(header, { authority: person("chat") })
+        )
+      ).toEqual([true, false])
+      expect(inMain !== null && seesEveryChat(inMain, { authority: taskWorker("chat") })).toBe(
         false
-      ])
+      )
 
       const listed = yield* sessions.list({ inbox: true, scope: "primary" })
       expect(listed.map((entry) => entry.sessionId).toSorted()).toEqual(
@@ -165,6 +178,150 @@ it("triage files a chat from Main into another Space and undo brings it back to 
       expect(yield* spaceOf(chat.sessionId)).toBe(work.space_id)
       yield* makeSessionTriageAction(dependencies)(chat.sessionId, "undo")
       expect(yield* spaceOf(chat.sessionId)).toBe(main.space_id)
+    })
+  )
+})
+
+const person = (sessionId: string) =>
+  deriveAuthority({
+    sessionId,
+    context: { origin: { kind: "chat", session_id: sessionId, turn_id: "t1" }, task: null },
+    policy: runPolicy,
+    originOwner: null,
+    chatOwner: null
+  })
+
+const taskWorker = (sessionId: string) =>
+  deriveAuthority({
+    sessionId,
+    context: {
+      origin: { kind: "task", item_id: "task-1", occurrence_id: "o1" },
+      task: { item_id: "task-1", generation: 1 }
+    },
+    policy: runPolicy,
+    originOwner: null,
+    chatOwner: null
+  })
+
+const runPolicy = {
+  budget_id: "budget",
+  budget_generation: 0,
+  execution: { mode: "inline", observe: false },
+  capabilities: ["all"],
+  auto_approve: false,
+  google_accounts: null,
+  space: null
+} satisfies RunPolicy
+
+it("a chat in Main searches every Space by default, but only for runs that may browse them", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const spaces = yield* SpaceStore
+      const sql = yield* SqlClient.SqlClient
+      const work = yield* spaces.create({ name: "Work" })
+      const there = yield* sessions.create({ name: "Zebra plans", spaceId: work.space_id })
+      yield* appendMessagesInTransaction(
+        sql,
+        there.sessionId,
+        [{ message_id: "zebra", role: ROLE.user, content: "zebra crossing", created_at: AT }],
+        AT,
+        "post",
+        "zebra"
+      )
+      const here = yield* sessions.create({ name: "Loose" })
+      const [search] = yield* sessionSearchTools
+      if (search === undefined) return yield* Effect.die("no search tool")
+      const searchAs = (authority: RunAuthority) =>
+        Effect.promise(() =>
+          Promise.resolve(
+            search.execute(
+              { query: "zebra", limit: 5, offset: 0 },
+              {
+                toolCallId: "call",
+                signal: new AbortController().signal,
+                run: serverRunContext({ sessionId: here.sessionId, runId: "run", authority }),
+                messages: []
+              }
+            )
+          )
+        )
+      expect(yield* searchAs(person(here.sessionId))).toMatchObject({ preview: "1 hit" })
+      expect(yield* searchAs(taskWorker(here.sessionId))).toMatchObject({ preview: "0 hits" })
+    })
+  )
+})
+
+it("triage and storage cleanup leave Main's own conversation alone; other Main chats can go", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const queries = yield* SessionQueries
+      const storage = yield* StorageSessionStore
+      const main = yield* mainSpace
+      const bound = yield* sessions.ensureSpaceConversation(main.space_id)
+      const other = yield* sessions.create({ name: "Other" })
+      expect([
+        (yield* queries.loadHistoryHeader(bound))?.spaceConversation,
+        (yield* queries.loadHistoryHeader(other.sessionId))?.spaceConversation
+      ]).toEqual([true, false])
+      const protections = new Map(
+        (yield* storage.candidates()).candidates.map((candidate) => [
+          candidate.sessionId,
+          candidate.protections
+        ])
+      )
+      expect(protections.get(bound)).toContain("space_owned")
+      expect(protections.get(other.sessionId)).not.toContain("space_owned")
+      const triage = makeSessionTriage({
+        completion: { runTool: () => Effect.die("triage must not run") },
+        sessions: queries,
+        spaces: yield* SpaceStore,
+        wiki: { ensureSpacePage: () => Effect.die("no Memory in this test") },
+        store: sessions
+      })
+      const sql = yield* SqlClient.SqlClient
+      yield* appendMessagesInTransaction(
+        sql,
+        bound,
+        [
+          { message_id: "ask", role: ROLE.user, content: "Hi", created_at: AT },
+          { message_id: "answer", role: ROLE.assistant, content: "Hello", created_at: AT }
+        ],
+        AT,
+        "post",
+        "ask"
+      )
+      expect(yield* triage(bound)).toMatchObject({ decision: "none" })
+    })
+  )
+})
+
+it("onboarding_finish runs in a Read only chat", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const tool = makeOnboardingFinishTool({
+        sessions: yield* SessionQueries,
+        store: yield* SessionStore
+      })
+      const facts = toolFacts(tool.definition)
+      const decision = decide(
+        person("chat"),
+        { state: "active", mode: "read_only", rule: undefined },
+        {
+          tool: facts,
+          impact: defaultImpact(facts),
+          available: true,
+          unattended_scope: false,
+          floor: undefined,
+          target: undefined,
+          requirement: false,
+          user_only: false,
+          reads_only: false,
+          approved: false
+        }
+      )
+      expect(decision.kind).toBe("allow")
     })
   )
 })
