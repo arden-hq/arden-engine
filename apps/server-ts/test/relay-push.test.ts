@@ -38,6 +38,7 @@ describe("relay push", () => {
       title: "Taxes",
       body: "Edit notes.md",
       sessionId: "chat-1",
+      collapse: "call-1",
       askId: "call-1",
       runId: "run-1"
     } as const
@@ -92,6 +93,7 @@ describe("relay push", () => {
         title: "Taxes",
         body: "The bank wrote back.",
         sessionId: "chat-1",
+        collapse: "post:1",
         askId: undefined,
         news: "posted"
       }
@@ -99,6 +101,45 @@ describe("relay push", () => {
     expect(JSON.parse(fromUtf8(sealed.payload))).toMatchObject({
       aps: { alert: { title: "Arden", body: "A new message" } }
     })
+  })
+
+  it("two posts in one chat open that chat, and neither replaces the other on the phone", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    const posted = {
+      record: "entity",
+      status: "posted",
+      purpose: null,
+      chatSessionId: "space-chat"
+    } as const
+    world.notices = [
+      notice("post-1", { ...posted, key: "post:1" }),
+      notice("post-2", { ...posted, key: "post:2" })
+    ]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => [pushed.sessionId, pushed.collapse])).toEqual([
+      ["space-chat", "post:1"],
+      ["space-chat", "post:2"]
+    ])
+  })
+
+  it("a finished chat's push collapses on its chat", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.notices = [notice("done-1", { chatSessionId: "chat-1" })]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => pushed.collapse)).toEqual(["chat-1"])
+  })
+
+  it("an ask's push collapses on the ask", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.asks = [question("q-1"), approval("run-1", "call-1")]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => pushed.collapse)).toEqual(["q-1", "call-1"])
   })
 
   it("a restart neither repeats a push nor skips an ask that opened while Arden was down", async () => {
@@ -284,6 +325,7 @@ const makeWorld = (options: { readonly seeded: boolean }) => {
     sent: [] as Array<string>,
     bodies: [] as Array<string>,
     news: [] as Array<PushNotice["news"]>,
+    onSend: (_notice: PushNotice): void => {},
     reconcile: async (): Promise<ReadonlyArray<string>> => {
       const loopback: Loopback = {
         request: async ({ path }): Promise<LoopbackResponse> => {
@@ -335,6 +377,7 @@ const makeWorld = (options: { readonly seeded: boolean }) => {
                           world.bodies.push(notice.body)
                           world.news.push(notice.news)
                         }
+                        world.onSend(notice)
                         return true
                       }
                     }

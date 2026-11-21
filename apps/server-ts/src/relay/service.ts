@@ -193,7 +193,7 @@ export const relayLayer = (
             const sealed = pushPayload({ identity: mac, device, notice })
             return live.push({
               device,
-              collapseId: collapseId(notice.askId ?? notice.sessionId),
+              collapseId: collapseId(notice.collapse),
               category: sealed.category,
               payload: sealed.payload
             })
