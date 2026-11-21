@@ -8,6 +8,7 @@ import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { JobClassification } from "../job-classification.js"
 import { WorkStoreError } from "../work/store.js"
+import { type BoundAttempt, boundAttemptJson, decodeBoundAttempt } from "./automation-rows.js"
 import { decodeJson } from "./json.js"
 import { runPolicyRevoked } from "./run-policy.js"
 import { executionBudgetExpired } from "./execution-budgets.js"
@@ -333,18 +334,19 @@ export const captureChildTask = Effect.fn("RunContext.captureChildTask")(functio
   })
 })
 
-export const captureScheduledContext = Effect.fn("RunContext.captureScheduled")(
+/**
+ * What a running scheduled attempt was started as: its purpose, origin and Task
+ * binding as one value. Undefined when the attempt is not running under the key.
+ */
+export const readScheduledIdentity = Effect.fn("RunContext.readScheduledIdentity")(
   function* (options: {
     readonly sql: SqlClient.SqlClient
     readonly automationId: string
     readonly attemptId: number
-  }): Effect.fn.Return<RunContext, WorkStoreError> {
-    const rows = yield* options.sql<{
-      readonly origin: string
-      readonly item_id: string | null
-      readonly task_generation: number | null
-    }>`
-    SELECT origin, item_id, task_generation FROM automation_runs
+  }): Effect.fn.Return<BoundAttempt | undefined, WorkStoreError> {
+    const rows = yield* options.sql<{ readonly task_id: string; readonly bound: string }>`
+    SELECT task_id, ${boundAttemptJson(options.sql, "automation_runs")} AS bound
+    FROM automation_runs
     WHERE id = ${options.attemptId} AND task_id = ${options.automationId} AND status = 'running'
   `.pipe(
       Effect.mapError(
@@ -357,25 +359,40 @@ export const captureScheduledContext = Effect.fn("RunContext.captureScheduled")(
       )
     )
     const row = rows[0]
-    if (!row)
+    if (row === undefined) return undefined
+    return yield* decodeBoundAttempt(row, "get").pipe(
+      Effect.mapError(
+        (cause) =>
+          new WorkStoreError({
+            reason: "storage",
+            message: "Scheduled attempt identity is corrupt",
+            cause
+          })
+      )
+    )
+  }
+)
+
+export const captureScheduledContext = Effect.fn("RunContext.captureScheduled")(
+  function* (options: {
+    readonly sql: SqlClient.SqlClient
+    readonly automationId: string
+    readonly attemptId: number
+  }): Effect.fn.Return<RunContext, WorkStoreError> {
+    const bound = yield* readScheduledIdentity(options)
+    if (bound === undefined)
       return yield* new WorkStoreError({
         reason: "invalid",
         message: "Scheduled attempt is no longer active"
       })
-    const origin = yield* decodeJson(RunOriginSchema, row.origin).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkStoreError({ reason: "storage", message: "Attempt origin is corrupt", cause })
-      )
-    )
-    const task = yield* captureRunTask({ sql: options.sql, itemId: row.item_id ?? undefined })
-    if (task !== null && task.generation !== row.task_generation) {
+    const task = yield* captureRunTask({ sql: options.sql, itemId: bound.itemId ?? undefined })
+    if (task !== null && task.generation !== bound.generation) {
       return yield* new WorkStoreError({
         reason: "conflict",
         message: "The admitted Task attempt no longer has authority"
       })
     }
-    return { origin, task }
+    return { origin: bound.origin, task }
   }
 )
 

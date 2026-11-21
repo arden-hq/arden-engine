@@ -45,9 +45,8 @@ export const workActivitySql = (sql: SqlClient.SqlClient, task: Statement.Fragme
       WHEN ${task}.owner = 'worker' AND ${task}.next_attempt_at IS NULL
         AND EXISTS (SELECT 1 FROM chat_runs AS r
           WHERE json_extract(r.metadata_json, '$.run_context.task.item_id') = +${task}.item_id)
-        AND NOT EXISTS (SELECT 1 FROM scheduled_tasks AS job
-          JOIN automation_event_queue AS pending ON pending.task_id = job.task_id
-          WHERE job.owner_task_id = ${task}.item_id)
+        AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS pending
+          WHERE pending.task_id = 'task:' || ${task}.item_id)
         AND NOT EXISTS (SELECT 1 FROM automation_deliveries AS answer
           WHERE answer.status = 'pending' AND json_extract(answer.payload, '$.kind') = 'answer'
             AND json_extract(answer.payload, '$.context.task.item_id') = ${task}.item_id) THEN 'stopped'

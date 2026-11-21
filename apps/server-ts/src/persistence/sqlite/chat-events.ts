@@ -27,6 +27,7 @@ import { runColumns, runDestinationSessionId } from "./run-destination.js"
 import { RUN_END_APPROVAL_FEEDBACK } from "./tool-receipts.js"
 import { currentSessionTurnId } from "./turns.js"
 import { sessionDescendants } from "./tree-walk.js"
+import { reviewNameSql, reviewSpaceIdSql } from "./automation-rows.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import {
   answeredApprovalStatusList,
@@ -36,6 +37,16 @@ import {
 
 const FIRST_LOOK = Duration.days(3)
 const LATE_SLACK = Duration.days(2)
+
+/**
+ * The job whose chat asks: an Automation's definition, or the Space a review's key
+ * names. A review's old definition row is not read.
+ */
+const askingOwnerJoin = (sql: SqlClient.SqlClient) => sql`
+    LEFT JOIN scheduled_tasks AS job ON job.task_id = asking.origin_automation_id
+      AND job.purpose != 'space_review'
+    LEFT JOIN spaces AS review_space
+      ON review_space.space_id = ${reviewSpaceIdSql(sql, sql`asking.origin_automation_id`)}`
 
 type InScope = (item: {
   readonly itemId: string | null
@@ -299,6 +310,7 @@ const arrivals = Effect.fn("SqliteChatEvents.arrivals")(function* (
       ON source_run.run_id = json_extract(m.message_json, '$.communication.arrival.source_run_id')
     LEFT JOIN sessions AS source ON source.session_id = source_run.session_id
     LEFT JOIN scheduled_tasks AS job ON job.task_id = source.origin_automation_id
+      AND job.purpose != 'space_review'
     LEFT JOIN space_tasks AS task
       ON task.item_id = COALESCE(json_extract(m.message_json, '$.communication.arrival.door.item_id'),
         json_extract(m.message_json, '$.update.door.item_id'))
@@ -373,14 +385,14 @@ const waiting = Effect.fn("SqliteChatEvents.waiting")(function* (
     readonly destination_session_id: string | null
   }>`SELECT question.question_id, question.content, question.created_at,
       task.item_id, task.space_id AS task_space_id, task.text AS task_text, task.stable_key,
-      job.name AS automation_name, asking.session_type AS asking_type,
+      COALESCE(job.name, ${reviewNameSql(sql, "review_space")}) AS automation_name, asking.session_type AS asking_type,
       asking.name AS asking_name, asking.public_ref AS asking_ref,
       ${runDestinationSessionId(sql, runColumns(sql, "run"))}
         AS destination_session_id
     FROM run_questions AS question
     JOIN chat_runs AS run ON run.run_id = question.run_id
     JOIN sessions AS asking ON asking.session_id = run.session_id
-    LEFT JOIN scheduled_tasks AS job ON job.task_id = asking.origin_automation_id
+    ${askingOwnerJoin(sql)}
     LEFT JOIN space_tasks AS task
       ON task.item_id = json_extract(run.metadata_json, '$.run_context.task.item_id')
     WHERE ${questionVisiblePredicate({
@@ -412,14 +424,14 @@ const waiting = Effect.fn("SqliteChatEvents.waiting")(function* (
   }>`SELECT approval.run_id, approval.tool_call_id, approval.tool_name, approval.preview,
       approval.requested_at, approval.payload_json,
       task.item_id, task.space_id AS task_space_id, task.text AS task_text, task.stable_key,
-      job.name AS automation_name, asking.session_type AS asking_type,
+      COALESCE(job.name, ${reviewNameSql(sql, "review_space")}) AS automation_name, asking.session_type AS asking_type,
       asking.name AS asking_name, asking.public_ref AS asking_ref,
       ${runDestinationSessionId(sql, runColumns(sql, "run"))}
         AS destination_session_id
     FROM tool_approvals AS approval
     JOIN chat_runs AS run ON run.run_id = approval.run_id
     JOIN sessions AS asking ON asking.session_id = approval.session_id
-    LEFT JOIN scheduled_tasks AS job ON job.task_id = asking.origin_automation_id
+    ${askingOwnerJoin(sql)}
     LEFT JOIN space_tasks AS task
       ON task.item_id = json_extract(run.metadata_json, '$.run_context.task.item_id')
     WHERE approval.kind = 'tool_approval' AND approval.status = 'pending'
@@ -605,7 +617,7 @@ const approvals = Effect.fn("SqliteChatEvents.approvals")(function* (
       approval.resolved_at, approval.resolution_json, approval.payload_json,
       tool.arguments_json, asking.session_id AS asking_session_id, asking.name AS asking_name,
       asking.session_type AS asking_type, asking.public_ref AS asking_ref,
-      job.name AS automation_name, task.item_id, task.space_id AS task_space_id,
+      COALESCE(job.name, ${reviewNameSql(sql, "review_space")}) AS automation_name, task.item_id, task.space_id AS task_space_id,
       task.text AS task_text, task.stable_key,
       ${runDestinationSessionId(sql, runColumns(sql, "run"))}
         AS destination_session_id
@@ -614,7 +626,7 @@ const approvals = Effect.fn("SqliteChatEvents.approvals")(function* (
     JOIN tool_calls AS tool
       ON tool.run_id = approval.run_id AND tool.tool_call_id = approval.tool_call_id
     JOIN sessions AS asking ON asking.session_id = approval.session_id
-    LEFT JOIN scheduled_tasks AS job ON job.task_id = asking.origin_automation_id
+    ${askingOwnerJoin(sql)}
     LEFT JOIN space_tasks AS task
       ON task.item_id = json_extract(run.metadata_json, '$.run_context.task.item_id')
     WHERE approval.kind = 'tool_approval' AND approval.status IN ${answeredApprovalStatusList}

@@ -1,4 +1,5 @@
-import { openRunSince } from "./automation-running.js"
+import { jobHeldSince, openRunSince } from "./automation-running.js"
+import { taskStandsSql } from "./task-wake.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { outcomeSql, shownRunStatus } from "./automation-run-outcome.js"
 import { QueueContextSchema, type QueueContext } from "./automation-queue-context.js"
@@ -8,18 +9,32 @@ import type {
   AutomationToolScope
 } from "@arden-hq/protocol/automations"
 import { AutomationSchema, AutomationToolScopeSchema } from "@arden-hq/protocol/effect/automations"
+import { RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import { Effect, Result, Schema } from "effect"
 import { freshRow } from "./automation-enqueue.js"
 import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { causingAutomation } from "./run-cause.js"
-import type { AutomationRules, SystemAutomationSpec } from "../automations/model.js"
+import {
+  AutomationId,
+  type AutomationRules,
+  type SystemAutomationSpec
+} from "../automations/model.js"
 import { changedSystemSettings, systemSettable } from "../automations/system-settings.js"
 import { AutomationStoreError, type AutomationQueueSource } from "../automations/store.js"
-import type { JobClassification } from "../job-classification.js"
+import { JobPurposeSchema, type JobClassification } from "../job-classification.js"
+import {
+  AutomationSubjectSchema,
+  SpaceId,
+  SpaceReviewSubjectSchema,
+  TaskItemId,
+  TaskSubjectSchema,
+  spaceJobId,
+  taskJobId
+} from "../space-job-id.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
 import type { PersistenceDeps } from "./deps.js"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlClient, Statement } from "effect/unstable/sql"
 import { inArdenWords } from "../restart-notice.js"
 import { oldConditions } from "../automations/event-words.js"
 
@@ -55,27 +70,422 @@ export type AutomationRow = JobClassification & {
   readonly instruction_revision_id: number | null
 }
 
-export type QueueRow = JobClassification & {
+/** One queue row as it was asked for. A claim does not change these. */
+export interface QueueEntry {
   readonly id: number
   readonly task_id: string
-  readonly name: string
   readonly source: AutomationQueueSource
   readonly context: string
   readonly created_at: string
+}
+
+/**
+ * The live claim on a queue row: who holds it now and until when. Every claim,
+ * renewal, release and retry rewrites it, so nothing here names the attempt.
+ */
+export interface QueueClaim {
   readonly claimed_at: string | null
+  /**
+   * When a worker took hold of a Task's or a Space review's row. A renewal and
+   * a reclaim keep it; a release, retry or deferral clears it. NULL for an
+   * Automation's row, whose definition keeps its own hold start.
+   */
+  readonly hold_started_at: string | null
   readonly lease_expires_at: string | null
   readonly attempt_count: number
   readonly next_attempt_at: string | null
-  readonly prompt: string
-  readonly model: string | null
-  readonly context_mode: AutomationContextMode
-  readonly run_chat_origin_automation_id: string | null
-  readonly thread_id: string | null
-  readonly handler: string | null
-  readonly enabled: number
-  readonly held_by_worker_since: string | null
-  readonly task_next_run_at: string | null
-  readonly task_last_run_at: string | null
+}
+
+export const queueColumns = (sql: SqlClient.SqlClient): Statement.Fragment => sql`
+  queue.id, queue.task_id, queue.source, queue.context, queue.created_at,
+  queue.claimed_at, queue.hold_started_at, queue.lease_expires_at, queue.attempt_count,
+  queue.next_attempt_at`
+
+const ContextModeSchema = Schema.Literals(["fresh", "continue", "fork"])
+
+/**
+ * What an attempt was started as. The claim writes it once and a trigger on
+ * `automation_runs` refuses any change, so it holds while the owner is edited
+ * or deleted. The chat the attempt is pinned to and its claim count are not
+ * here: they change while it runs.
+ */
+const BoundAttemptSchema = Schema.Struct({
+  purpose: JobPurposeSchema,
+  origin: Schema.fromJsonString(RunOriginSchema),
+  itemId: Schema.NullOr(TaskItemId),
+  generation: Schema.NullOr(Schema.Number),
+  handler: Schema.NullOr(Schema.String),
+  contextMode: ContextModeSchema
+})
+export type BoundAttempt = typeof BoundAttemptSchema.Type
+
+/**
+ * `attempt` names the `automation_runs` row in the query. The origin stays the
+ * stored text, so text that is not JSON fails the decode and not the query.
+ */
+export const boundAttemptJson = (sql: SqlClient.SqlClient, attempt: string): Statement.Fragment => {
+  const run = sql.literal(attempt)
+  return sql`json_object('purpose', ${run}.purpose, 'origin', ${run}.origin,
+    'itemId', ${run}.item_id,
+    'generation', ${run}.task_generation, 'handler', ${run}.handler,
+    'contextMode', ${run}.context_mode)`
+}
+
+/** What a person or the system wrote to set an Automation up. Only an Automation has it. */
+const AuthoredConfigSchema = Schema.Struct({
+  ref: Schema.String,
+  name: Schema.String,
+  prompt: Schema.String,
+  model: Schema.NullOr(Schema.String),
+  contextMode: ContextModeSchema,
+  chatId: Schema.NullOr(Schema.String),
+  /** The key the set chat was made for; null when the chat row is gone. */
+  chatOrigin: Schema.NullOr(Schema.String),
+  handler: Schema.NullOr(Schema.String),
+  triggers: Schema.String,
+  cooldownMinutes: Schema.NullOr(Schema.Number),
+  instructionRevisionId: Schema.NullOr(Schema.Number)
+})
+
+/** What a definition's runs may do without asking. */
+const DefinitionPolicySchema = Schema.Struct({
+  toolScope: AutomationToolScopeSchema,
+  autoApprove: Schema.Boolean
+})
+
+/** Where a definition's schedule and its worker hold stand now. */
+const DefinitionStateSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  heldSince: Schema.NullOr(Schema.String),
+  nextRunAt: Schema.NullOr(Schema.String),
+  lastRunAt: Schema.NullOr(Schema.String),
+  lastResult: Schema.NullOr(Schema.String)
+})
+
+const AutomationOwnerSchema = Schema.Struct({
+  ...AutomationSubjectSchema.fields,
+  key: AutomationId,
+  purpose: Schema.Literals(["user_automation", "system"]),
+  authored: AuthoredConfigSchema,
+  policy: DefinitionPolicySchema,
+  state: DefinitionStateSchema
+})
+
+/**
+ * What a Space review's runs use that its Space does not say
+ * (`space_review_settings`; the defaults when it has no row). A review has no
+ * prompt of its own, no handler, no triggers and no instruction revision: its
+ * prompt is built from the Space, and its chat is always its own.
+ */
+const ReviewSettingsSchema = Schema.Struct({
+  model: Schema.NullOr(Schema.String),
+  contextMode: ContextModeSchema,
+  cooldownMinutes: Schema.NullOr(Schema.Number)
+})
+
+/** A Space review is owned by its Space: the row in `spaces` that its key names. */
+const SpaceReviewOwnerSchema = Schema.Struct({
+  ...SpaceReviewSubjectSchema.fields,
+  key: AutomationId,
+  /** Named after its Space, as its private chat is. */
+  name: Schema.String,
+  settings: ReviewSettingsSchema,
+  /** Its private chat (`space_review_chats`); null until it is given one. */
+  chatId: Schema.NullOr(Schema.String),
+  /** Its Space has inference on, a page, and is not archived. */
+  mayRun: Schema.Boolean
+})
+
+/**
+ * A Task is its own owner: the row in `space_tasks`. It has no settings to
+ * author, so there is no prompt, model, handler or tool scope here.
+ */
+const TaskOwnerSchema = Schema.Struct({
+  ...TaskSubjectSchema.fields,
+  key: AutomationId,
+  spaceId: Schema.NullOr(SpaceId),
+  text: Schema.String,
+  /** The Task is open, the worker's, not held, and its Space is not archived. */
+  stands: Schema.Boolean,
+  /** Its private chat: the oldest live channel made for its key. */
+  chatId: Schema.NullOr(Schema.String)
+})
+
+const WorkOwnerSchema = Schema.Union([
+  AutomationOwnerSchema,
+  SpaceReviewOwnerSchema,
+  TaskOwnerSchema
+])
+export type WorkOwner = typeof WorkOwnerSchema.Type
+export type DefinitionOwner = Extract<WorkOwner, { readonly kind: "automation" }>
+
+/**
+ * Which stored row a key names. Only an Automation has a definition. A Task is
+ * the row in `space_tasks` and a Space review the row in `spaces` that the key
+ * names. Old definition rows of Tasks and reviews are kept for the ids that
+ * point at them, and name no owner. The key is `queue.task_id` unless given.
+ */
+export const ownerJoin = (
+  sql: SqlClient.SqlClient,
+  key: Statement.Fragment = sql`queue.task_id`
+): Statement.Fragment => sql`
+  LEFT JOIN scheduled_tasks AS task
+    ON task.task_id = ${key} AND task.purpose IN ('user_automation', 'system')
+  LEFT JOIN space_tasks AS item
+    ON task.task_id IS NULL AND substr(${key}, 1, 5) = 'task:'
+      AND item.item_id = substr(${key}, 6)
+  LEFT JOIN spaces AS review_space
+    ON task.task_id IS NULL AND review_space.space_id = ${reviewSpaceIdSql(sql, key)}`
+
+export const hasOwner = (sql: SqlClient.SqlClient): Statement.Fragment =>
+  sql`(task.task_id IS NOT NULL OR item.item_id IS NOT NULL OR review_space.space_id IS NOT NULL)`
+
+/** The Space a review's key (`space:<space>`, `spaceJobId`) names; NULL for any other key. */
+export const reviewSpaceIdSql = (
+  sql: SqlClient.SqlClient,
+  key: Statement.Fragment
+): Statement.Fragment => sql`CASE WHEN substr(${key}, 1, 6) = 'space:' THEN substr(${key}, 7) END`
+
+/** A review is named after its Space, as its private chat is (`syncSpaceReview`). */
+export const reviewNameSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment =>
+  sql`${sql.literal(space)}.name || ' worker'`
+
+/**
+ * When a job's runs act without asking. `own`: by the owner's own switch. `space`:
+ * as its Space says, which is the owner's default approval mode.
+ */
+type OwnerApproval =
+  | { readonly kind: "own"; readonly autoApprove: boolean }
+  | { readonly kind: "space" }
+
+/** What a job's runs may do, as its owner says now. */
+export interface OwnerPolicy {
+  readonly toolScope: AutomationToolScope
+  readonly approval: OwnerApproval
+}
+
+/**
+ * The one reading of a job's policy. An Automation has its own scope and switch on
+ * its definition. A Space review and a Task have the Space tools and no setting of
+ * their own: a review and a Task in a Space follow the Space; a Task outside any
+ * Space asks first. Nothing here is stored for a review or a Task.
+ */
+export const ownerPolicy = (owner: WorkOwner): OwnerPolicy => {
+  switch (owner.kind) {
+    case "automation":
+      return {
+        toolScope: owner.policy.toolScope,
+        approval: { kind: "own", autoApprove: owner.policy.autoApprove }
+      }
+    case "space_review":
+      return { toolScope: "space", approval: { kind: "space" } }
+    case "task":
+      return {
+        toolScope: "space",
+        approval: owner.spaceId === null ? { kind: "own", autoApprove: false } : { kind: "space" }
+      }
+  }
+}
+
+/** A Space's review may run: inference on, a page bound, and not archived. */
+export const reviewMayRunSql = (sql: SqlClient.SqlClient, space: string): Statement.Fragment => {
+  const row = sql.literal(space)
+  return sql`(json_extract(${row}.inference_policy, '$.enabled') = 1
+    AND ${row}.page_path IS NOT NULL AND ${row}.archived_at IS NULL)`
+}
+
+const jsonBool = (sql: SqlClient.SqlClient, value: Statement.Fragment): Statement.Fragment =>
+  sql`json(CASE WHEN ${value} THEN 'true' ELSE 'false' END)`
+
+/**
+ * The owner that `ownerJoin` found, as one tagged value; NULL when the key
+ * names no stored row. Each kind carries only the facts it has.
+ */
+export const ownerJson = (
+  sql: SqlClient.SqlClient,
+  key: Statement.Fragment = sql`queue.task_id`
+): Statement.Fragment => {
+  return sql`CASE
+  WHEN task.task_id IS NOT NULL THEN json_object(
+    'kind', 'automation', 'key', task.task_id, 'automationId', task.task_id,
+    'purpose', task.purpose,
+    'authored', json_object(
+      'ref', task.automation_ref, 'name', task.name, 'prompt', task.prompt, 'model', task.model,
+      'contextMode', task.context_mode, 'chatId', task.thread_id,
+      'chatOrigin', (SELECT set_chat.origin_automation_id FROM sessions AS set_chat
+        WHERE set_chat.session_id = task.thread_id),
+      'handler', task.handler, 'triggers', task.triggers,
+      'cooldownMinutes', task.cooldown_minutes,
+      'instructionRevisionId', task.instruction_revision_id),
+    'policy', json_object('toolScope', task.tool_scope,
+      'autoApprove', ${jsonBool(sql, sql`task.auto_approve = 1`)}),
+    'state', json_object('enabled', ${jsonBool(sql, sql`task.enabled = 1`)},
+      'heldSince', ${jobHeldSince(sql, "task")}, 'nextRunAt', task.next_run_at,
+      'lastRunAt', task.last_run_at, 'lastResult', task.last_result))
+  WHEN item.item_id IS NOT NULL THEN json_object(
+    'kind', 'task', 'key', ${key}, 'itemId', item.item_id, 'spaceId', item.space_id,
+    'text', item.text, 'stands', ${jsonBool(sql, taskStandsSql(sql, "item"))},
+    'chatId', (SELECT own.session_id FROM sessions AS own
+      WHERE own.origin_automation_id = ${key} AND own.session_type = 'channel'
+        AND own.archived_at IS NULL
+      ORDER BY own.started_at, own.session_id LIMIT 1))
+  WHEN review_space.space_id IS NOT NULL THEN json_object(
+    'kind', 'space_review', 'key', ${key}, 'spaceId', review_space.space_id,
+    'name', ${reviewNameSql(sql, "review_space")},
+    'settings', (SELECT json_object('model', set_review.model,
+        'contextMode', COALESCE(set_review.context_mode, 'fresh'),
+        'cooldownMinutes', set_review.cooldown_minutes)
+      FROM (SELECT 1) LEFT JOIN space_review_settings AS set_review
+        ON set_review.space_id = review_space.space_id),
+    'chatId', (SELECT review_chat.session_id FROM space_review_chats AS review_chat
+      WHERE review_chat.space_id = review_space.space_id),
+    'mayRun', ${jsonBool(sql, reviewMayRunSql(sql, "review_space"))})
+END`
+}
+
+const decodeOwnerJson = Schema.decodeUnknownEffect(Schema.fromJsonString(WorkOwnerSchema))
+
+/** The owner in a row read with `ownerJson`, or undefined when the key names none. */
+export const decodeOwner = (
+  row: { readonly task_id: string; readonly owner: string | null },
+  operation: StoreOperation
+): Effect.Effect<WorkOwner | undefined, AutomationStoreError> =>
+  row.owner === null
+    ? Effect.succeed(undefined)
+    : decodeOwnerJson(row.owner).pipe(
+        Effect.mapError((cause) =>
+          storeError(
+            operation,
+            "corrupt",
+            "Stored Automation job owner is corrupt",
+            row.task_id,
+            cause
+          )
+        )
+      )
+
+const decodeBoundJson = Schema.decodeUnknownEffect(Schema.fromJsonString(BoundAttemptSchema))
+
+/**
+ * The attempt identity in a row read with `boundAttemptJson`. Its purpose, its
+ * origin and its Task binding are one value: they must name the same work, and
+ * that work must be the one stored under the row's key.
+ */
+export const decodeBoundAttempt = (
+  row: { readonly task_id: string; readonly bound: string },
+  operation: StoreOperation
+): Effect.Effect<BoundAttempt, AutomationStoreError> =>
+  decodeBoundJson(row.bound).pipe(
+    Effect.mapError((cause) =>
+      storeError(
+        operation,
+        "corrupt",
+        "Stored Automation run identity is corrupt",
+        row.task_id,
+        cause
+      )
+    ),
+    Effect.filterOrFail(
+      (bound) => boundAgrees(bound, row.task_id),
+      () =>
+        storeError(operation, "corrupt", "Stored Automation run identity is corrupt", row.task_id)
+    )
+  )
+
+const boundAgrees = (bound: BoundAttempt, key: string): boolean => {
+  const { origin } = bound
+  switch (bound.purpose) {
+    case "task_execution":
+      return (
+        origin.kind === "task" &&
+        origin.item_id === bound.itemId &&
+        bound.generation !== null &&
+        key === taskJobId(origin.item_id)
+      )
+    case "space_review":
+      return (
+        origin.kind === "space" &&
+        bound.itemId === null &&
+        bound.generation === null &&
+        key === spaceJobId(origin.space_id)
+      )
+    case "user_automation":
+    case "system":
+      return (
+        origin.kind === "automation" &&
+        origin.automation_id === key &&
+        bound.itemId === null &&
+        bound.generation === null
+      )
+  }
+}
+
+/**
+ * What an attempt that already exists was started as. A reclaim and a renewal
+ * hand it out again from here, not from the owner as stored now, and refuse
+ * an owner under its key that is other work.
+ */
+export const decodeOwnedAttempt = Effect.fn("AutomationRows.decodeOwnedAttempt")(function* (
+  row: { readonly task_id: string; readonly bound: string },
+  owner: WorkOwner,
+  operation: "claim" | "renew"
+) {
+  const bound = yield* decodeBoundAttempt(row, operation)
+  if (classificationOf(owner).purpose !== bound.purpose) {
+    return yield* storeError(
+      operation,
+      "conflict",
+      "Automation job owner is not what its attempt was started as",
+      row.task_id
+    )
+  }
+  return bound
+})
+
+/** The owner of one key, for a reader that has no queue row. */
+export const readWorkOwner = Effect.fn("AutomationRows.readWorkOwner")(function* (
+  sql: SqlClient.SqlClient,
+  key: string
+) {
+  const rows = yield* sql<{ readonly owner: string | null }>`
+    SELECT ${ownerJson(sql)} AS owner
+    FROM (SELECT ${key} AS task_id) AS queue ${ownerJoin(sql)}`
+  const owner = rows[0]?.owner ?? null
+  return owner === null ? undefined : yield* decodeOwnerJson(owner)
+})
+
+export const isDefinition = (owner: WorkOwner | undefined): owner is DefinitionOwner =>
+  owner?.kind === "automation"
+
+/**
+ * An Automation is on while enabled. A Task is on while it stands, and a
+ * review while its Space lets it run.
+ */
+export const ownerIsOn = (owner: WorkOwner): boolean => {
+  switch (owner.kind) {
+    case "automation":
+      return owner.state.enabled
+    case "space_review":
+      return owner.mayRun
+    case "task":
+      return owner.stands
+  }
+}
+
+/** The classification the run origin and the event batch are written from. */
+export const classificationOf = (owner: WorkOwner): JobClassification => {
+  switch (owner.kind) {
+    case "automation":
+      return { purpose: owner.purpose, owner_space_id: null, owner_task_id: null }
+    case "space_review":
+      return { purpose: "space_review", owner_space_id: owner.spaceId, owner_task_id: null }
+    case "task":
+      return {
+        purpose: "task_execution",
+        owner_space_id: owner.spaceId,
+        owner_task_id: owner.itemId
+      }
+  }
 }
 
 export const strict = { onExcessProperty: "error" } as const
@@ -154,7 +564,7 @@ const scopeLabel = (scope: AutomationToolScope): string => {
 }
 
 export const decodeQueueContext = (
-  row: Pick<QueueRow, "context" | "task_id">,
+  row: Pick<QueueEntry, "context" | "task_id">,
   operation: StoreOperation
 ) =>
   decodeJson(QueueContextSchema, row.context).pipe(

@@ -21,7 +21,6 @@ import { RunAuthoritySchema } from "../../execution/authority.js"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
-import type { JobPurpose } from "../job-classification.js"
 import {
   createExecutionBudget,
   readBudgetRemaining,
@@ -31,6 +30,8 @@ import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
 import { readCopySource } from "./automation-copy.js"
 import { taskOpenSql } from "./task-status-sql.js"
 import { defaultModeSql } from "./default-approval-mode.js"
+import { ownerIsOn, ownerPolicy, readWorkOwner } from "./automation-rows.js"
+import { isUserAutomationPurpose } from "../job-classification.js"
 
 export const workerScopes = { code: "agent_code", research: "agent_research", work: "all" } as const
 
@@ -253,53 +254,63 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     }
     let capability: RunCapability = options.workerScope ?? "all"
     let approvalMode = options.approvalMode
-    let purpose: JobPurpose | undefined
+    let observe = false
     let authoritySessionId = options.sessionId
+    let budgetTask: BudgetTask = { kind: "home_chat", sessionId: options.sessionId }
     if (options.automationId !== undefined) {
-      const rows = yield* sql<{
-        readonly purpose: JobPurpose
-        readonly tool_scope: string
-        readonly auto_approve: number
-        readonly space_mode: string | null
+      budgetTask = { kind: "none" }
+      const owner = yield* readWorkOwner(sql, options.automationId)
+      // What the owner's row does not say: the chat the run reads from, the
+      // default approval setting, and whether this attempt is a run by hand
+      // that is already claimed.
+      const around = yield* sql<{
+        readonly default_mode: string
         readonly chat_mode: string | null
         readonly chat_id: string | null
+        readonly claimed_by_hand: number
       }>`
-        SELECT automation.purpose, automation.tool_scope, automation.auto_approve,
+        SELECT ${defaultModeSql(sql)} AS default_mode,
           json_extract(chat.metadata, '$.approval_mode') AS chat_mode, chat.session_id AS chat_id,
-          CASE WHEN automation.purpose != 'user_automation' AND automation.owner_space_id IS NOT NULL
-            THEN ${defaultModeSql(sql)} END AS space_mode
-        FROM scheduled_tasks AS automation
+          EXISTS (SELECT 1 FROM automation_event_queue AS queue
+            JOIN automation_runs AS attempt ON attempt.id = ${options.automationAttemptId ?? null}
+            WHERE queue.task_id = ${options.automationId} AND attempt.task_id = queue.task_id
+              AND queue.source = 'manual' AND queue.claimed_at IS NOT NULL AND attempt.status = 'running'
+              AND json_extract(queue.context, '$.automation_run_id') = attempt.id) AS claimed_by_hand
+        FROM (SELECT 1) AS one
         LEFT JOIN sessions AS run_chat ON run_chat.session_id = ${options.sessionId}
         LEFT JOIN sessions AS chat ON chat.session_id =
           COALESCE(
             json_extract(run_chat.metadata, '$.fork_origin.sourceSessionId'),
             json_extract(run_chat.metadata, '$.fork_of.source_session_id'),
             run_chat.session_id
-          )
-        WHERE automation.task_id = ${options.automationId}
-          AND (automation.enabled = 1 OR EXISTS (SELECT 1 FROM automation_event_queue AS queue
-            JOIN automation_runs AS attempt ON attempt.id = ${options.automationAttemptId ?? null}
-            WHERE queue.task_id = automation.task_id AND attempt.task_id = automation.task_id
-              AND queue.source = 'manual' AND queue.claimed_at IS NOT NULL AND attempt.status = 'running'
-              AND json_extract(queue.context, '$.automation_run_id') = attempt.id))`
-      const row = rows[0]
-      if (!row) return yield* failure("The Automation is disabled or unavailable")
-      purpose = row.purpose
-      if (purpose === "user_automation") {
-        if (row.chat_id === null) return yield* failure("The execution Chat is unavailable")
+          )`
+      const facts = around[0]
+      if (
+        owner === undefined ||
+        facts === undefined ||
+        !(ownerIsOn(owner) || facts.claimed_by_hand === 1)
+      )
+        return yield* failure("The Automation is disabled or unavailable")
+      // In a Space the default approval setting decides. Where it does not
+      // decode, the owner's own rule does.
+      const inSpaceMode = (ownRule: ApprovalMode): ApprovalMode =>
+        isApprovalMode(facts.default_mode) ? facts.default_mode : ownRule
+      if (owner.kind === "automation" && isUserAutomationPurpose(owner.purpose)) {
+        // A user's Automation works as its set chat does.
+        if (facts.chat_id === null) return yield* failure("The execution Chat is unavailable")
         capability = "all"
-        authoritySessionId = row.chat_id
+        authoritySessionId = facts.chat_id
         approvalMode = yield* Schema.decodeUnknownEffect(ApprovalModeSchema)(
-          row.chat_mode ?? DEFAULT_APPROVAL_MODE
+          facts.chat_mode ?? DEFAULT_APPROVAL_MODE
         )
       } else {
-        capability = yield* Schema.decodeUnknownEffect(RunCapabilitySchema)(row.tool_scope)
+        const job = ownerPolicy(owner)
+        capability = yield* Schema.decodeUnknownEffect(RunCapabilitySchema)(job.toolScope)
+        if (job.approval.kind === "space") approvalMode = inSpaceMode("allow")
+        else approvalMode = job.approval.autoApprove ? "allow" : "ask"
       }
-      if (purpose !== "user_automation" && isApprovalMode(row.space_mode)) {
-        approvalMode = row.space_mode
-      } else if (purpose !== "user_automation") {
-        approvalMode = row.auto_approve === 1 ? "allow" : "ask"
-      }
+      if (owner.kind === "space_review") observe = true
+      if (owner.kind === "task") budgetTask = { kind: "task", itemId: owner.itemId }
     } else {
       const copy = yield* readCopySource(sql, options.sessionId)
       if (copy !== undefined) {
@@ -330,7 +341,6 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
       }
       googleAccounts = intersectGoogleAccounts(googleAccounts, sourcePolicy.google_accounts)
     }
-    const observe = purpose === "space_review"
     const admittedRevision =
       options.automationAttemptId === undefined
         ? undefined
@@ -392,7 +402,15 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
           FROM chat_runs AS run LEFT JOIN execution_budgets AS budget
             ON budget.budget_id = json_extract(run.metadata_json, '$.run_policy.budget_id')
           WHERE run.run_id = ${options.sharesRunId}`)[0]
-    const budgetId = yield* runBudget(sql, { ...options, sharedBudgetId: shared?.budget_id })
+    if (options.taskItemId !== undefined) budgetTask = { kind: "task", itemId: options.taskItemId }
+    const budgetId = yield* runBudget(sql, {
+      runId: options.runId,
+      ...(options.automationTokenLimit === undefined
+        ? {}
+        : { automationTokenLimit: options.automationTokenLimit }),
+      budgetTask,
+      sharedBudgetId: shared?.budget_id
+    })
     const authority = yield* sql<{ readonly generation: number }>`
       SELECT COALESCE(json_extract(metadata, '$.policy_generation'), 0) AS generation
       FROM sessions WHERE session_id = ${authoritySessionId} AND archived_at IS NULL`
@@ -429,24 +447,40 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
   )
 })
 
+/**
+ * Whose Task budget a run may spend: a named Task's, or that of the Task
+ * running in the run's own chat. A scheduled Automation or Space review spends
+ * no Task's budget, whatever its key looks like.
+ */
+type BudgetTask =
+  | { readonly kind: "task"; readonly itemId: string }
+  | { readonly kind: "home_chat"; readonly sessionId: string }
+  | { readonly kind: "none" }
+
 const runBudget = Effect.fn("RunPolicy.budget")(function* (
   sql: SqlClient.SqlClient,
   options: {
     readonly runId: string
-    readonly sessionId: string
-    readonly automationId?: string
     readonly automationTokenLimit?: number
-    readonly taskItemId?: string | undefined
+    readonly budgetTask: BudgetTask
     readonly sharedBudgetId: string | null | undefined
   }
 ) {
-  const task = (yield* sql<{ readonly budget_id: string }>`
-    SELECT budget.budget_id
-    FROM space_tasks AS item JOIN execution_budgets AS budget ON budget.task_item_id = item.item_id
-    WHERE ${taskOpenSql("item")} AND item.owner = 'worker'
-      AND ${taskGrant(sql, options)}
-    LIMIT 1`)[0]
-  if (task !== undefined) return task.budget_id
+  const subject = options.budgetTask
+  if (subject.kind !== "none") {
+    const task = (yield* sql<{ readonly budget_id: string }>`
+      SELECT budget.budget_id
+      FROM space_tasks AS item JOIN execution_budgets AS budget ON budget.task_item_id = item.item_id
+      WHERE ${taskOpenSql("item")} AND item.owner = 'worker'
+        AND ${
+          subject.kind === "task"
+            ? sql`item.item_id = ${subject.itemId}`
+            : sql`item.home_session_id = ${subject.sessionId} AND item.runs_in = 'chat'
+                AND item.blocked = 0`
+        }
+      LIMIT 1`)[0]
+    if (task !== undefined) return task.budget_id
+  }
   if (options.sharedBudgetId != null) {
     yield* readBudgetRemaining(sql, options.sharedBudgetId)
     return options.sharedBudgetId
@@ -457,21 +491,6 @@ const runBudget = Effect.fn("RunPolicy.budget")(function* (
       WHERE budget_id = ${budgetId}`
   return budgetId
 })
-
-const taskGrant = (
-  sql: SqlClient.SqlClient,
-  options: {
-    readonly sessionId: string
-    readonly automationId?: string
-    readonly taskItemId?: string | undefined
-  }
-) => {
-  if (options.taskItemId !== undefined) return sql`item.item_id = ${options.taskItemId}`
-  if (options.automationId !== undefined)
-    return sql`${options.automationId} = 'task:' || item.item_id`
-  return sql`item.home_session_id = ${options.sessionId} AND item.runs_in = 'chat'
-    AND item.blocked = 0`
-}
 
 const intersectGoogleAccounts = (
   left: RunPolicy["google_accounts"],

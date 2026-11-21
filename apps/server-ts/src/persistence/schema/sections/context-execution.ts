@@ -166,6 +166,7 @@ export const contextExecutionSchemaSection = {
       ON tool_calls(session_id, status)
       WHERE status IN ('running', 'ready', 'paused', 'uncertain')`,
     "ALTER TABLE tool_calls ADD COLUMN effect TEXT CHECK(effect IS NULL OR effect IN ('none', 'run_record', 'arden_db', 'local_files', 'external'))",
+    "ALTER TABLE tool_calls ADD COLUMN planned_from_json TEXT CHECK(planned_from_json IS NULL OR (json_valid(planned_from_json) AND json_type(planned_from_json) = 'object'))",
     `CREATE TABLE tool_call_targets (
       run_id TEXT NOT NULL,
       tool_call_id TEXT NOT NULL,

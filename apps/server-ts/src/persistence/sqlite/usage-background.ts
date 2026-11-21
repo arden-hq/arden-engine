@@ -1,6 +1,7 @@
 import { countsAsRun } from "./automation-skip-record.js"
 import { outcomeSql } from "./automation-run-outcome.js"
 import { runAncestors } from "./tree-walk.js"
+import { reviewSpaceIdSql } from "./automation-rows.js"
 import type { UsageAutomationOutcome, UsageAutomationRow } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -89,7 +90,7 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
     LEFT JOIN spaces space ON space.space_id = task.space_id AND space.archived_at IS NULL`
   const attempts = yield* sql<AttemptRow>`${relevant}
     SELECT a.id, a.task_id, a.item_id,
-      coalesce(task.space_id, job.owner_space_id) AS space_id,
+      coalesce(task.space_id, job.owner_space_id, ${reviewSpaceIdSql(sql, sql`a.task_id`)}) AS space_id,
       CASE WHEN (task.space_id IS NULL OR space.space_id IS NOT NULL)
         THEN task.item_id END AS available_task,
       CASE WHEN job.purpose IN ('user_automation', 'system') THEN job.task_id END AS available_job,
@@ -105,9 +106,13 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
       coalesce(json_extract(a.origin, '$.automation_id'), json_extract(a.origin, '$.item_id'),
         json_extract(a.origin, '$.space_id')) AS entity
     FROM automation_runs a
+    -- Only an Automation owns its definition row. A Task is named by its own row, and a
+    -- Space review's key names its Space; a definition row kept under either is not read.
     LEFT JOIN scheduled_tasks job ON job.task_id = a.task_id
+      AND job.purpose IN ('user_automation', 'system')
     LEFT JOIN space_tasks task ON task.item_id = a.item_id
-    LEFT JOIN spaces space ON space.space_id = coalesce(task.space_id, job.owner_space_id) AND space.archived_at IS NULL
+    LEFT JOIN spaces space ON space.space_id = coalesce(task.space_id, job.owner_space_id,
+      ${reviewSpaceIdSql(sql, sql`a.task_id`)}) AND space.archived_at IS NULL
     LEFT JOIN chat_runs final ON final.run_id = a.chat_run_id
     LEFT JOIN sessions session ON session.session_id = a.chat_session_id
     -- Three ways an attempt belongs to the window, each found through its own

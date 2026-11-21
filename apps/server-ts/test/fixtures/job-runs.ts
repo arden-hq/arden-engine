@@ -1,6 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
-import { SqlClient } from "effect/unstable/sql"
 import { AutomationId } from "../../src/persistence/automations/model.js"
 import { AutomationQueue } from "../../src/persistence/automations/queue.js"
 import { ChatWriteStore, type TaskStepCause } from "../../src/persistence/chat/store.js"
@@ -91,11 +90,10 @@ type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
 export const startJob = (lease: JobLease, id: string) =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
     const automationId = lease.payload.automationId
-    const [job] = yield* sql<{ readonly thread_id: string }>`
-      SELECT thread_id FROM scheduled_tasks WHERE task_id = ${automationId}`
-    if (job === undefined) throw new Error(`${automationId} has no chat`)
+    // A Task has no stored job row, so the chat is the one the lease names.
+    const job = { thread_id: lease.payload.sessionId }
+    if (job.thread_id === null) throw new Error(`${automationId} has no chat`)
     const run = yield* startChat(job.thread_id, id, {
       automation: {
         automationId,

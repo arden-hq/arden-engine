@@ -1,4 +1,3 @@
-import { jobHeldSince } from "./automation-running.js"
 import { freshRow } from "./automation-enqueue.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
 import { systemHandlerTellsOwner } from "../automations/model.js"
@@ -39,9 +38,16 @@ import { makeAutomationEventDispatch } from "./automation-event-dispatch.js"
 import { raiseRunEnded } from "./automation-run-ended.js"
 import {
   type StoreOperation,
-  type QueueRow,
+  type QueueEntry,
+  type WorkOwner,
+  boundAttemptJson,
   storeError,
-  decodeQueueContext
+  decodeBoundAttempt,
+  decodeOwner,
+  decodeQueueContext,
+  isDefinition,
+  ownerJoin,
+  ownerJson
 } from "./automation-rows.js"
 import { iso } from "../../runtime/clock.js"
 import { activeRunStatusList } from "./status-sets.js"
@@ -84,28 +90,23 @@ export const makeFencedOccurrences = ({
     now: number
   ) {
     const parsed = parseLease(input)
+    // The fence is the claim and the attempt alone: an unexpired claim on this
+    // row, by this running attempt, at this claim count. Whether the owner is
+    // still stored is not part of it, so an attempt ends its own account after
+    // its owner is deleted.
     const rows = yield* sql<
-      QueueRow & {
-        readonly triggers: string
-        readonly task_last_result: string | null
-        readonly cooldown_minutes: number | null
-        readonly automation_run_status: string
-        readonly automation_chat_run_id: string | null
-        readonly automation_chat_session_id: string | null
+      Pick<QueueEntry, "task_id" | "source" | "context"> & {
+        readonly owner: string | null
+        readonly bound: string
+        readonly chat_run_id: string | null
+        readonly chat_session_id: string | null
       }
     >`
-      SELECT queue.id, queue.task_id, queue.source, queue.context, queue.created_at,
-             queue.claimed_at, queue.lease_expires_at, queue.attempt_count, queue.next_attempt_at,
-             task.prompt, task.model, task.context_mode, task.thread_id, task.handler, task.purpose, task.owner_space_id, task.owner_task_id,
-             task.enabled, ${jobHeldSince(sql, "task")} AS held_by_worker_since,
-             task.next_run_at AS task_next_run_at,
-             task.last_run_at AS task_last_run_at, task.last_result AS task_last_result, task.triggers,
-             task.cooldown_minutes,
-             run.status AS automation_run_status,
-             run.chat_run_id AS automation_chat_run_id,
-             run.chat_session_id AS automation_chat_session_id
+      SELECT queue.task_id, queue.source, queue.context,
+             ${ownerJson(sql)} AS owner, ${boundAttemptJson(sql, "run")} AS bound,
+             run.chat_run_id, run.chat_session_id
       FROM automation_event_queue AS queue
-      JOIN scheduled_tasks AS task ON task.task_id = queue.task_id
+      ${ownerJoin(sql)}
       JOIN automation_runs AS run ON run.id = ${parsed.runId}
       WHERE queue.id = ${parsed.queueId} AND queue.lease_expires_at > ${iso(now)}
         AND queue.claimed_at IS NOT NULL
@@ -121,7 +122,17 @@ export const makeFencedOccurrences = ({
     )
     const row = rows[0]
     if (row === undefined) throw new JobLeaseLostError(input.id)
-    return { parsed, row, context: yield* decodeQueueContext(row, operation) }
+    return {
+      parsed,
+      queue: { task_id: row.task_id, source: row.source },
+      // The chat the attempt is pinned to now. Admission sets it while it runs.
+      pinned: { chatRunId: row.chat_run_id, chatSessionId: row.chat_session_id },
+      // What the attempt was started as, which no edit of the owner can change.
+      bound: yield* decodeBoundAttempt(row, operation),
+      // The owner as stored now; undefined when it has been deleted.
+      owner: yield* decodeOwner(row, operation),
+      context: yield* decodeQueueContext(row, operation)
+    }
   })
 
   const settleFenced = Effect.fn("SqliteAutomationStore.settleFenced")(function* (
@@ -134,8 +145,8 @@ export const makeFencedOccurrences = ({
       ending.status === "ended" && ending.chatRunId !== null
         ? { runId: ending.chatRunId, sessionId: ending.chatSessionId }
         : {
-            runId: fenced.row.automation_chat_run_id,
-            sessionId: fenced.row.automation_chat_session_id
+            runId: fenced.pinned.chatRunId,
+            sessionId: fenced.pinned.chatSessionId
           }
     const settledRunId = settled.runId
     const settledSessionId = settled.sessionId
@@ -150,7 +161,7 @@ export const makeFencedOccurrences = ({
           operation,
           "conflict",
           "Automation completion requires a terminal Run from this occurrence and its exact Session",
-          fenced.row.task_id
+          fenced.queue.task_id
         )
     }
     const endedAt = iso(settledAt)
@@ -172,28 +183,39 @@ export const makeFencedOccurrences = ({
           }
     const { outcome } = run
     const ran = ranOutcome(outcome)
-    const triggers = yield* decodeJson(AutomationTriggersSchema, fenced.row.triggers).pipe(
-      Effect.mapError((cause) =>
-        storeError(
-          operation,
-          "corrupt",
-          "Stored Automation triggers are corrupt",
-          fenced.row.task_id,
-          cause
-        )
-      )
-    )
-    const internalSpaceJob = isSpaceWorkJob(fenced.row)
+    const { purpose } = fenced.bound
+    const taskItemId = purpose === "task_execution" ? fenced.bound.itemId : null
+    const internalSpaceJob = isSpaceWorkJob(fenced.bound)
+    // The on switch and the worker hold belong to an Automation's definition. A
+    // Task and a review have none, and a deleted owner has none left. Triggers
+    // and a schedule are an Automation's alone: a review is woken, never scheduled.
+    const definition = isDefinition(fenced.owner) ? fenced.owner : undefined
+    const automation = definition?.kind === "automation" ? definition : undefined
+    const triggers =
+      automation === undefined
+        ? []
+        : yield* decodeJson(AutomationTriggersSchema, automation.authored.triggers).pipe(
+            Effect.mapError((cause) =>
+              storeError(
+                operation,
+                "corrupt",
+                "Stored Automation triggers are corrupt",
+                fenced.queue.task_id,
+                cause
+              )
+            )
+          )
     const schedule =
-      internalSpaceJob && triggers.length === 0
+      automation === undefined || (internalSpaceJob && triggers.length === 0)
         ? null
-        : yield* scheduleEffect(rules, triggers, operation, fenced.row.task_id)
+        : yield* scheduleEffect(rules, triggers, operation, fenced.queue.task_id)
+    const wasEnabled = definition?.state.enabled === true
     let nextRunAt: string | null | undefined
     let enabled: number | undefined
     let spent = false
-    if (answersSchedule(fenced.context, fenced.row.source) && schedule !== null) {
+    if (answersSchedule(fenced.context, fenced.queue.source) && schedule !== null) {
       const oneShot = rules.oneShot(schedule)
-      if (fenced.row.enabled !== 1 || oneShot || schedule.times.length === 0) {
+      if (!wasEnabled || oneShot || schedule.times.length === 0) {
         nextRunAt = null
         if (oneShot) enabled = 0
         spent =
@@ -215,12 +237,12 @@ export const makeFencedOccurrences = ({
       enabled = followup.action === "stop" ? 0 : undefined
       nextRunAt = followup.action === "stop" ? null : followup.at
       if (followup.action !== "stop")
-        yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${fenced.row.task_id}
+        yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${fenced.queue.task_id}
           AND ${freshRow(sql)} AND source = 'scheduled'`
     }
     const done = jobDone({
-      purpose: fenced.row.purpose,
-      enabled: fenced.row.enabled === 1,
+      purpose,
+      enabled: wasEnabled,
       outcome,
       followup: followup?.action,
       spent
@@ -230,50 +252,63 @@ export const makeFencedOccurrences = ({
       yield* haltAutomation({
         sql,
         sessionEvents,
-        automationId: fenced.row.task_id,
+        automationId: fenced.queue.task_id,
         halt: "stop",
         settlingRunId: settledRunId ?? undefined
       })
     const counted = ending.status !== "skipped"
     const lastResult = ran ? run.result : run.error
-    yield* sql`
+    if (definition !== undefined) {
+      const { state } = definition
+      yield* sql`
         UPDATE scheduled_tasks
         SET job_held_since = NULL,
-            last_run_at = ${counted && ran ? endedAt : fenced.row.task_last_run_at},
-            last_result = ${counted ? lastResult : fenced.row.task_last_result},
-            next_run_at = ${nextRunAt === undefined ? fenced.row.task_next_run_at : nextRunAt}
-        WHERE task_id = ${fenced.row.task_id}
+            last_run_at = ${counted && ran ? endedAt : state.lastRunAt},
+            last_result = ${counted ? lastResult : state.lastResult},
+            next_run_at = ${nextRunAt === undefined ? state.nextRunAt : nextRunAt}
+        WHERE task_id = ${definition.key}
       `
-    if (counted && ran) {
-      yield* endStreak(sql, fenced.row.task_id)
-      yield* endAutoResumes(sql, fenced.row.task_id)
+      if (counted && ran) {
+        yield* endStreak(sql, definition.key)
+        yield* endAutoResumes(sql, definition.key)
+      }
     }
-    const userAutomation = isUserAutomationPurpose(fenced.row.purpose)
+    const userAutomation = isUserAutomationPurpose(purpose)
     const endingRecord = yield* recordEnding(sql, {
       kind: "occurrence",
-      purpose: fenced.row.purpose,
+      purpose,
       run
     })
     const told = toldOutcomeOf(endingRecord, run)
-    if (userAutomation && told !== undefined && settledRunId === null && outcome === "failed") {
+    // What follows a run for its definition (its event log, the Automations
+    // it wakes, the pause after giving up, a review's retry) has nowhere to go
+    // once the definition is deleted.
+    if (
+      definition !== undefined &&
+      userAutomation &&
+      told !== undefined &&
+      settledRunId === null &&
+      outcome === "failed"
+    ) {
       yield* recordAutomationEvent(sql, {
         sessionEvents,
-        automationId: fenced.row.task_id,
+        automationId: fenced.queue.task_id,
         attemptId: fenced.parsed.runId,
         event: "failed",
         text: told.text
       })
     }
     if (
+      definition !== undefined &&
       told !== undefined &&
-      (isUserAutomationPurpose(fenced.row.purpose) || fenced.row.purpose === "system")
+      (isUserAutomationPurpose(purpose) || purpose === "system")
     ) {
       yield* raiseRunEnded({
         sql,
         rules,
         dispatch: dispatchInTransaction,
-        automationId: fenced.row.task_id,
-        purpose: fenced.row.purpose,
+        automationId: fenced.queue.task_id,
+        purpose,
         attemptId: fenced.parsed.runId,
         outcome: told.outcome,
         text: told.text,
@@ -282,36 +317,39 @@ export const makeFencedOccurrences = ({
       })
     }
     const paused =
-      outcome === "failed" && (userAutomation || systemHandlerTellsOwner(fenced.row.handler))
+      definition !== undefined &&
+      outcome === "failed" &&
+      (userAutomation ||
+        (automation !== undefined && systemHandlerTellsOwner(automation.authored.handler)))
         ? yield* pauseOnGivingUp({
             sql,
             sessionEvents,
-            automationId: fenced.row.task_id,
+            automationId: fenced.queue.task_id,
             attemptId: fenced.parsed.runId,
             chatRunId: settledRunId
           })
         : false
     yield* sql`DELETE FROM automation_event_queue WHERE id = ${fenced.parsed.queueId}`
-    if (fenced.row.purpose === "space_review" && outcome === "failed")
-      yield* spaceJobs.retryReview(fenced.row.task_id, endedAt)
-    yield* consumeIdleInput({ sql, automationId: fenced.row.task_id, context: fenced.context })
-    if (internalSpaceJob && outcome === "failed") {
-      yield* spaceJobs.failTask(fenced.row.task_id, run.error, endedAt, settledRunId)
+    if (fenced.owner?.kind === "space_review" && outcome === "failed")
+      yield* spaceJobs.retryReview(fenced.queue.task_id, endedAt)
+    yield* consumeIdleInput({ sql, automationId: fenced.queue.task_id, context: fenced.context })
+    if (taskItemId !== null && outcome === "failed") {
+      yield* spaceJobs.failTask(taskItemId, run.error, endedAt, settledRunId)
     }
     if (internalSpaceJob && settledRunId !== null)
       yield* recordTaskReport({ sql, sessionEvents }, settledRunId)
-    if (internalSpaceJob && ran && settledRunId !== null) {
-      yield* spaceJobs.keepMoving(fenced.row.task_id, settledRunId, endedAt)
+    if (taskItemId !== null && ran && settledRunId !== null) {
+      yield* spaceJobs.keepMoving(taskItemId, settledRunId, endedAt)
     }
     if (
       schedule !== null &&
       !paused &&
-      (enabled ?? fenced.row.enabled) === 1 &&
+      (enabled === undefined ? wasEnabled : enabled === 1) &&
       (schedule.idle !== null || schedule.count !== null)
     ) {
       yield* rearmAutomation(
         {
-          automationId: fenced.row.task_id,
+          automationId: fenced.queue.task_id,
           idle: schedule.idle?.idle_minutes ?? null,
           count: schedule.count?.every_n ?? null,
           chatQuiet: null
@@ -323,12 +361,12 @@ export const makeFencedOccurrences = ({
       yield* deleteAutomationRow({
         sql,
         sessionEvents,
-        automationId: fenced.row.task_id,
+        automationId: fenced.queue.task_id,
         settlingRunId: settledRunId ?? undefined
       })
     yield* announceEnded(sessionEvents, {
-      automationId: fenced.row.task_id,
-      purpose: fenced.row.purpose,
+      automationId: fenced.queue.task_id,
+      purpose,
       run
     })
     if (settledRunId !== null) yield* announceNotice(sql, sessionEvents, `ending:${settledRunId}`)
@@ -378,6 +416,13 @@ export const makeAutomationJobSettlement = ({
 }: Pick<AutomationStoreDeps, "writer" | "sessionEvents" | "rules" | "diagnostics">) => {
   const sql = writer.sql
   const { loadFenced, settleFenced } = makeFencedOccurrences({ writer, sessionEvents, rules })
+  /** An Automation's hold is on its definition. A Task's or a review's went with its row's claim. */
+  const releaseDefinitionHold = (owner: WorkOwner | undefined) =>
+    isDefinition(owner)
+      ? sql`UPDATE scheduled_tasks SET job_held_since = NULL WHERE task_id = ${owner.key}`.pipe(
+          Effect.asVoid
+        )
+      : Effect.void
   const settle = Effect.fn("SqliteAutomationStore.settle")(function* (
     input: { readonly id: string; readonly token: string },
     settledAt: number,
@@ -420,18 +465,16 @@ export const makeAutomationJobSettlement = ({
           yield* sql`
           UPDATE automation_event_queue
           SET claimed_at = NULL,
+              hold_started_at = NULL,
               lease_expires_at = NULL,
               attempt_count = MAX(0, attempt_count - 1),
               last_error = NULL,
               next_attempt_at = ${nextAttemptAt}
           WHERE id = ${fenced.parsed.queueId}
         `
-          yield* sql`
-          UPDATE scheduled_tasks SET job_held_since = NULL
-          WHERE task_id = ${fenced.row.task_id}
-        `
+          yield* releaseDefinitionHold(fenced.owner)
           return {
-            automationTaskId: fenced.row.task_id,
+            automationTaskId: fenced.queue.task_id,
             automationRunId: fenced.parsed.runId,
             queueId: fenced.parsed.queueId,
             nextAttemptAt
@@ -483,17 +526,15 @@ export const makeAutomationJobSettlement = ({
           const fenced = yield* loadFenced(input, "fail", input.failedAt)
           yield* sql`
           UPDATE automation_event_queue
-          SET claimed_at = NULL, lease_expires_at = NULL, last_error = ${input.error},
+          SET claimed_at = NULL, hold_started_at = NULL, lease_expires_at = NULL,
+              last_error = ${input.error},
               next_attempt_at = ${iso(retryAt)}
           WHERE id = ${fenced.parsed.queueId}
         `
-          yield* sql`
-          UPDATE scheduled_tasks SET job_held_since = NULL
-          WHERE task_id = ${fenced.row.task_id}
-        `
+          yield* releaseDefinitionHold(fenced.owner)
           yield* sessionEvents.appendEventInTransaction({
             type: "automation_progress",
-            task_id: fenced.row.task_id,
+            task_id: fenced.queue.task_id,
             status: "retrying"
           })
         })
@@ -515,13 +556,11 @@ export const makeAutomationJobSettlement = ({
         Effect.gen(function* () {
           const fenced = yield* loadFenced(input, "release", input.releasedAt)
           yield* sql`
-        UPDATE automation_event_queue SET claimed_at = NULL, lease_expires_at = NULL
+        UPDATE automation_event_queue
+        SET claimed_at = NULL, hold_started_at = NULL, lease_expires_at = NULL
         WHERE id = ${fenced.parsed.queueId}
       `
-          yield* sql`
-        UPDATE scheduled_tasks SET job_held_since = NULL
-        WHERE task_id = ${fenced.row.task_id}
-      `
+          yield* releaseDefinitionHold(fenced.owner)
         })
       )
       .pipe(

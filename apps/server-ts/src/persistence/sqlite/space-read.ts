@@ -132,13 +132,12 @@ export const makeSpaceReads = (
       const spaces = yield* reader<OverviewSpaceRow>`
         SELECT d.space_id, d.name, d.instructions, d.instructions_source, d.page_path, d.page_id,
                d.inference_policy, d.mark, d.created_at, d.updated_at, d.archived_at,
-               ${openRunSince(reader, reader`worker.task_id`)} AS running_since, d.pinned_position,
+               ${openRunSince(reader, reader`'space:' || d.space_id`)} AS running_since, d.pinned_position,
                (SELECT m.search_text FROM session_messages AS m
                 WHERE m.session_id = latest.session_id AND m.role = ${ROLE.assistant}
                   AND TRIM(COALESCE(m.search_text, '')) <> ''
                 ORDER BY m.seq DESC LIMIT 1) AS last_text
         FROM spaces AS d
-        LEFT JOIN scheduled_tasks AS worker ON worker.purpose = 'space_review' AND worker.owner_space_id = d.space_id
         LEFT JOIN sessions AS latest ON latest.session_id = (
           SELECT s.session_id FROM sessions AS s
           WHERE s.space_id = d.space_id AND s.archived_at IS NULL
@@ -386,23 +385,29 @@ export const makeSpaceReads = (
         summary: row.summary
       }))
 
+      // The review is there once it has its private chat. What it last reported
+      // is read from its last counted attempt: the result of one that ran, else
+      // its error.
       const workers = yield* reader<SpaceWorkerRow>`
-        SELECT task.task_id, task.last_result,
-               ${openRunSince(reader, reader`task.task_id`)} AS running_since,
+        SELECT ${workerAutomationId} AS task_id,
+               (SELECT CASE WHEN ended.status = 'completed' THEN ended.result ELSE ended.error END
+                FROM automation_runs AS ended
+                WHERE ended.task_id = ${workerAutomationId} AND ended.status <> 'running'
+                  AND ${countsAsRun(reader, reader`ended`)}
+                ORDER BY ended.id DESC LIMIT 1) AS last_result,
+               ${openRunSince(reader, reader`${workerAutomationId}`)} AS running_since,
                latest.chat_run_id AS latest_chat_run_id,
                latest.status AS latest_status, latest.error AS latest_error
-        FROM scheduled_tasks AS task
+        FROM space_review_chats AS review
         LEFT JOIN automation_runs AS latest
           ON latest.id = (
             SELECT candidate.id
             FROM automation_runs AS candidate
-            WHERE candidate.task_id = task.task_id AND ${countsAsRun(reader, reader`candidate`)}
+            WHERE candidate.task_id = ${workerAutomationId} AND ${countsAsRun(reader, reader`candidate`)}
             ORDER BY candidate.id DESC
             LIMIT 1
           )
-        WHERE task.task_id = ${workerAutomationId}
-          AND task.owner_space_id = ${validSpaceId}
-          AND task.purpose = 'space_review'
+        WHERE review.space_id = ${validSpaceId}
         LIMIT 1
       `.pipe(
         Effect.mapError((cause) =>
@@ -532,10 +537,17 @@ export const makeSpaceReads = (
       const worker = workers[0]
       const workerLatestFailed = worker?.latest_status === "failed"
       const liveTasks = workItems.filter((item) => item.status === "open").length
+      // When the Space's review or one of its Task workers last ran to an end: the latest
+      // end time of any counted completed run. Each job's is read from its end-time index,
+      // latest first, so the cost stays per job, not per run in the history.
       const spaceRuns = yield* reader<{ readonly last_run_at: string | null }>`
-        SELECT MAX(last_run_at) AS last_run_at
-        FROM scheduled_tasks
-        WHERE owner_space_id = ${space.space_id} AND purpose IN ('space_review', 'task_execution')
+        SELECT MAX((SELECT run.ended_at FROM automation_runs AS run
+            WHERE run.task_id = job.id AND +run.status = 'completed'
+              AND run.ended_at IS NOT NULL AND ${countsAsRun(reader, reader`run`)}
+            ORDER BY run.ended_at DESC LIMIT 1)) AS last_run_at
+        FROM (SELECT ${workerAutomationId} AS id
+          UNION ALL SELECT 'task:' || item.item_id FROM space_tasks AS item
+            WHERE item.space_id = ${space.space_id}) AS job
       `
       const lastRunAt = spaceRuns[0]?.last_run_at ?? null
       const nowMs = DateTime.toEpochMillis(yield* DateTime.now)

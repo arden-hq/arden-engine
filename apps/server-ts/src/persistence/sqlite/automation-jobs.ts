@@ -1,13 +1,11 @@
 import { jobHeldSince } from "./automation-running.js"
 import { cutText } from "@arden-hq/std/text"
 import { triggerContextForClaim } from "./automation-occurrence.js"
-import { isUserAutomationPurpose } from "../job-classification.js"
 import { enqueue, holdForCooldown } from "./automation-enqueue.js"
 import { dropClosedAsks } from "./automation-ask-feed.js"
 import { parseLease } from "./automation-lease.js"
 import { resumeDueAutomations } from "./automation-resume.js"
 import { queueNextDueAt } from "./automation-next-due.js"
-import type { QueueContext } from "./automation-queue-context.js"
 import { reopenDeferredTasks } from "./work-lifecycle.js"
 import {
   JobLeaseLostError,
@@ -33,123 +31,50 @@ import {
   withEventText
 } from "./automation-event-batch.js"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect } from "effect"
 import { wakeChainDepth } from "../automations/chain-depth.js"
-import { AutomationId, SYSTEM_HANDLER_IDS } from "../automations/model.js"
 import { AutomationQueue } from "../automations/queue.js"
 import {
   AutomationStoreError,
-  type AutomationJobHandler,
-  type AutomationJobPayload,
   type ClaimedAutomationJobLease,
   type AutomationJobSettlement
 } from "../automations/store.js"
-import { namedPublicRef } from "../public-ref.js"
 import type { AutomationJobPrompt } from "../automations/job-prompt.js"
-import { isSpaceWorkJob, type JobPurpose } from "../job-classification.js"
+import {
+  claimedWork,
+  isJobHandlerId,
+  jobHandler,
+  readJobChatRun,
+  readJobHandler,
+  unknownHandlerMessage
+} from "./automation-claimed-work.js"
 import { encodeJson } from "./json.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
-import { nextId } from "./deps.js"
-import { insertSession } from "./session-insert.js"
+import { readSpaceReviewContext, readTaskWorkerContext } from "./space-job-context.js"
 import type { AutomationStoreDeps } from "./automation-rows.js"
 import { makeAutomationJobSettlement, makeFencedOccurrences } from "./automation-job-settlement.js"
 import {
-  type StoreOperation,
-  type QueueRow,
+  type QueueClaim,
+  type QueueEntry,
+  type WorkOwner,
+  boundAttemptJson,
   storeError,
+  decodeOwnedAttempt,
+  decodeOwner,
   decodeQueueContext,
-  encodeQueueContext
+  encodeQueueContext,
+  hasOwner,
+  ownerJoin,
+  ownerJson,
+  queueColumns,
+  reviewMayRunSql
 } from "./automation-rows.js"
+import { makeOwnerChats } from "./owner-chat.js"
+import { taskStandsSql } from "./task-wake.js"
 import { iso } from "../../runtime/clock.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { pendingDecisionCards } from "./pending-decision-cards.js"
 import { causingAutomation } from "./run-cause.js"
-
-const JobChatRunSchema = Schema.NullOr(
-  Schema.Struct({
-    runId: Schema.NonEmptyString,
-    sessionId: Schema.NonEmptyString,
-    authority: Schema.Literals(["active", "settling", "revoked"])
-  })
-)
-
-const readJobChatRun = Effect.fn("AutomationJob.readChatRun")(function* (
-  row:
-    | {
-        readonly chat_run_id: string | null
-        readonly chat_session_id: string | null
-        readonly authority: RunAuthorityState | null
-      }
-    | undefined,
-  operation: StoreOperation,
-  automationId: string
-): Effect.fn.Return<AutomationJobPayload["chatRun"], AutomationStoreError> {
-  if (!row)
-    return yield* storeError(
-      operation,
-      "corrupt",
-      "The Automation occurrence is missing",
-      automationId
-    )
-  return yield* Schema.decodeUnknownEffect(JobChatRunSchema)(
-    row.chat_run_id === null
-      ? null
-      : { runId: row.chat_run_id, sessionId: row.chat_session_id, authority: row.authority }
-  ).pipe(
-    Effect.mapError((cause) =>
-      storeError(
-        operation,
-        "corrupt",
-        "The Automation Run identity is incomplete",
-        automationId,
-        cause
-      )
-    )
-  )
-})
-
-const JobHandlerIdSchema = Schema.NullOr(Schema.Literals(SYSTEM_HANDLER_IDS))
-
-const isJobHandlerId = Schema.is(JobHandlerIdSchema)
-
-const unknownHandlerMessage = (handler: string | null) => `Unknown Automation handler: ${handler}`
-
-const readJobHandler = Effect.fn("AutomationJob.readHandler")(function* (
-  handler: string | null,
-  context: QueueContext,
-  operation: StoreOperation,
-  automationId: string
-): Effect.fn.Return<AutomationJobHandler, AutomationStoreError> {
-  if (!isJobHandlerId(handler))
-    return yield* storeError(operation, "corrupt", unknownHandlerMessage(handler), automationId)
-  return jobHandler(handler, context)
-})
-
-const jobHandler = (
-  id: typeof JobHandlerIdSchema.Type,
-  context: QueueContext
-): AutomationJobHandler => {
-  switch (id) {
-    case null:
-      return context.space_review_input === undefined
-        ? { handler: id }
-        : { handler: id, spaceReviewInput: context.space_review_input }
-    case "home_letter":
-      return context.home_letter_input === undefined
-        ? { handler: id }
-        : { handler: id, homeLetterInput: context.home_letter_input }
-    case "memory_capture":
-    case "daily_summary":
-    case "wiki_maintenance":
-      return context.handler_item === undefined
-        ? { handler: id }
-        : { handler: id, handlerItem: context.handler_item }
-    case "managed_history_collection":
-    case "chat_summaries":
-    case "urgent_events":
-      return { handler: id }
-  }
-}
 
 const nextLeaseStamp = (epochMs: number, previous: string | null): string => {
   const previousMs = previous === null ? Number.NEGATIVE_INFINITY : Date.parse(previous)
@@ -174,20 +99,44 @@ export const makeAutomationJobs = ({
     rules,
     diagnostics
   })
+
   const claimedPrompt = Effect.fn("SqliteAutomationStore.claimedPrompt")(function* (
-    job: {
-      readonly task_id: string
-      readonly purpose: JobPurpose
-      readonly prompt: string
-      readonly context_mode: AutomationContextMode
-    },
+    owner: WorkOwner,
+    contextMode: AutomationContextMode,
     triggerContext: string | undefined
   ) {
-    const context = isSpaceWorkJob(job) ? yield* spaceJobs.context(job.task_id) : undefined
-    if (context !== undefined)
-      return { kind: "space_job", context, triggerContext } satisfies AutomationJobPrompt
-    if (job.context_mode !== "fresh")
-      return { kind: "text", text: job.prompt, triggerContext } satisfies AutomationJobPrompt
+    switch (owner.kind) {
+      case "task":
+        return {
+          kind: "space_job",
+          context: {
+            kind: "task_execution",
+            task: yield* readTaskWorkerContext(sql, owner.itemId)
+          },
+          triggerContext
+        } satisfies AutomationJobPrompt
+      case "space_review":
+        return {
+          kind: "space_job",
+          context: {
+            kind: "space_review",
+            space: yield* readSpaceReviewContext(sql, owner.spaceId)
+          },
+          triggerContext
+        } satisfies AutomationJobPrompt
+      case "automation":
+        return yield* authoredPrompt(owner, contextMode, triggerContext)
+    }
+  })
+
+  const authoredPrompt = Effect.fn("SqliteAutomationStore.authoredPrompt")(function* (
+    owner: Extract<WorkOwner, { readonly kind: "automation" }>,
+    contextMode: AutomationContextMode,
+    triggerContext: string | undefined
+  ) {
+    const text = owner.authored.prompt
+    if (contextMode !== "fresh")
+      return { kind: "text", text, triggerContext } satisfies AutomationJobPrompt
     const cards = yield* sql<{
       readonly count: number
       readonly run_id: string
@@ -202,7 +151,7 @@ export const makeAutomationJobs = ({
       JOIN chat_runs AS run ON run.run_id = card.run_id
       JOIN tool_calls AS call ON call.run_id = card.run_id
         AND call.tool_call_id = card.tool_call_id
-      WHERE ${causingAutomation(sql, "run")} = ${job.task_id}
+      WHERE ${causingAutomation(sql, "run")} = ${owner.key}
       ORDER BY card.requested_at, card.run_id, card.tool_call_id
       LIMIT 32
     `
@@ -219,16 +168,19 @@ export const makeAutomationJobs = ({
             )}${cards[0] !== undefined && cards[0].count > cards.length ? "\nMore pending cards remain unresolved." : ""}`
     return {
       kind: "text",
-      text: `${job.prompt}${pendingContext}`,
+      text: `${text}${pendingContext}`,
       triggerContext
     } satisfies AutomationJobPrompt
   })
+
+  const { openChat, isLiveChat } = makeOwnerChats(sql, sessionEvents)
 
   const materializeDue = Effect.fn("SqliteAutomationStore.materializeDue")(function* (now: string) {
     const due = yield* sql<{ readonly task_id: string; readonly next_run_at: string }>`
       SELECT task_id, next_run_at
       FROM scheduled_tasks AS task
-      WHERE enabled = 1
+      -- Only an Automation has a schedule; an old Task or review row is none.
+      WHERE purpose IN ('user_automation', 'system') AND enabled = 1
         AND next_run_at IS NOT NULL
         AND next_run_at <= ${now}
         AND ${jobHeldSince(sql, "task")} IS NULL
@@ -268,63 +220,77 @@ export const makeAutomationJobs = ({
           const leases: Array<ClaimedAutomationJobLease> = []
           while (leases.length < input.limit) {
             const candidates = yield* sql<
-              QueueRow & {
-                readonly cooldown_minutes: number | null
-                readonly admitted_run_id: number | null
-              }
+              QueueEntry &
+                QueueClaim & {
+                  readonly owner: string | null
+                  readonly admitted_run_id: number | null
+                  readonly admitted_session_id: string | null
+                  readonly bound: string | null
+                }
             >`
-            SELECT queue.id, queue.task_id, queue.source, queue.context, queue.created_at,
-                   queue.claimed_at, queue.lease_expires_at, queue.attempt_count, queue.next_attempt_at,
-                   task.name, task.prompt, task.model, task.context_mode, task.thread_id, task.handler, task.purpose, task.owner_space_id, task.owner_task_id, task.enabled,
-                   run_chat.origin_automation_id AS run_chat_origin_automation_id,
-                   ${jobHeldSince(sql, "task")} AS held_by_worker_since, task.cooldown_minutes,
-                   task.next_run_at AS task_next_run_at,
-                   task.last_run_at AS task_last_run_at, admitted.id AS admitted_run_id
+            SELECT ${queueColumns(sql)}, ${ownerJson(sql)} AS owner,
+                   admitted.id AS admitted_run_id, admitted.chat_session_id AS admitted_session_id,
+                   CASE WHEN admitted.id IS NOT NULL THEN ${boundAttemptJson(sql, "admitted")} END
+                     AS bound
             FROM automation_event_queue AS queue
-            JOIN scheduled_tasks AS task ON task.task_id = queue.task_id
+            ${ownerJoin(sql)}
             LEFT JOIN sessions AS run_chat ON run_chat.session_id = task.thread_id
             LEFT JOIN automation_runs AS admitted
               ON admitted.id = json_extract(queue.context, '$.automation_run_id')
                 AND admitted.task_id = queue.task_id
-            WHERE (queue.next_attempt_at IS NULL OR queue.next_attempt_at <= ${nowText})
-              AND (task.purpose != 'task_execution' OR admitted.chat_run_id IS NOT NULL
+            WHERE ${hasOwner(sql)}
+              AND (queue.next_attempt_at IS NULL OR queue.next_attempt_at <= ${nowText})
+              AND (item.item_id IS NULL OR admitted.chat_run_id IS NOT NULL
                 OR json_extract(queue.context, '$.person_change_at') IS NOT NULL
-                OR NOT EXISTS (SELECT 1 FROM space_tasks AS owner
-                  WHERE owner.item_id = task.owner_task_id AND owner.next_attempt_at > ${nowText}))
+                OR item.next_attempt_at IS NULL OR item.next_attempt_at <= ${nowText})
               -- A Task moved to the background during its step in a chat goes on
               -- from where that step ends, not beside it.
-              AND (task.purpose != 'task_execution' OR admitted.chat_run_id IS NOT NULL
+              AND (item.item_id IS NULL OR admitted.chat_run_id IS NOT NULL
                 OR NOT EXISTS (SELECT 1 FROM chat_runs AS step
-                  WHERE json_extract(step.metadata_json, '$.run_context.task.item_id') = task.owner_task_id
+                  WHERE json_extract(step.metadata_json, '$.run_context.task.item_id') = item.item_id
                     AND json_extract(step.metadata_json, '$.run_context.origin.kind') = 'chat'
                     AND json_extract(step.metadata_json, '$.run_context.origin.session_id') =
-                      (SELECT home_session_id FROM space_tasks WHERE item_id = task.owner_task_id)
+                      item.home_session_id
                     AND step.status IN ${activeRunStatusList}))
               AND NOT ${heldBehindProducer(sql, "queue")}
-              AND (task.purpose != 'space_review' OR NOT EXISTS (
+              AND (review_space.space_id IS NULL OR NOT EXISTS (
                 SELECT 1 FROM automation_event_queue AS earlier
                 JOIN automation_runs AS waiting ON waiting.id = json_extract(earlier.context, '$.automation_run_id')
                   AND waiting.task_id = earlier.task_id AND waiting.status = 'running'
                 WHERE earlier.task_id = queue.task_id AND earlier.id != queue.id
                   AND (earlier.created_at < queue.created_at OR (earlier.created_at = queue.created_at AND earlier.id < queue.id))
               ))
-              AND (task.purpose != 'task_execution' OR NOT ${hasPendingTaskQuestion(sql, sql`task.owner_task_id`)}
+              AND (item.item_id IS NULL OR NOT ${hasPendingTaskQuestion(sql, sql`item.item_id`)}
                 OR admitted.chat_run_id IS NOT NULL
                 OR (json_extract(queue.context, '$.person_change_at') IS NOT NULL
-                  AND NOT ${hasPendingTaskApproval(sql, sql`task.owner_task_id`)}))
-              AND (
+                  AND NOT ${hasPendingTaskApproval(sql, sql`item.item_id`)}))
+              -- One owner works one row at a time. An Automation's definition
+              -- says so in job_held_since. A Task and a review say so with the
+              -- claimed row itself: no other wake of it starts, and that row
+              -- alone comes back when its lease runs out.
+              AND CASE WHEN task.task_id IS NOT NULL THEN
                 (queue.claimed_at IS NULL AND ${jobHeldSince(sql, "task")} IS NULL)
                 OR
                 (queue.claimed_at IS NOT NULL AND queue.lease_expires_at <= ${nowText}
                   AND ${jobHeldSince(sql, "task")} IS NOT NULL)
-              )
+              ELSE
+                (queue.claimed_at IS NULL AND NOT EXISTS (
+                  SELECT 1 FROM automation_event_queue AS working
+                  WHERE working.task_id = queue.task_id AND working.claimed_at IS NOT NULL))
+                OR
+                (queue.claimed_at IS NOT NULL AND queue.lease_expires_at <= ${nowText})
+              END
               -- An Automation that is off runs nothing new, a run you asked for by
-              -- hand included: it waits for the resume (automation-halt.ts).
-              AND (task.enabled = 1 OR admitted.chat_run_id IS NOT NULL)
+              -- hand included: it waits for the resume (automation-halt.ts). A
+              -- Task is on while it stands, and a review while its Space lets it run.
+              AND (CASE WHEN task.task_id IS NOT NULL THEN task.enabled = 1
+                  WHEN review_space.space_id IS NOT NULL THEN ${reviewMayRunSql(sql, "review_space")}
+                  ELSE ${taskStandsSql(sql, "item")} END
+                OR admitted.chat_run_id IS NOT NULL)
               -- A user's Automation waits for its own chat to be free. A run that
               -- reads one of your chats works in a copy of it, so nothing waits.
               AND (
-                task.purpose != 'user_automation'
+                task.purpose IS NOT 'user_automation'
                 OR admitted.chat_run_id IS NOT NULL
                 OR (run_chat.origin_automation_id IS NOT task.task_id AND task.context_mode = 'continue')
                 OR NOT EXISTS (
@@ -345,69 +311,116 @@ export const makeAutomationJobs = ({
               (yield* holdForCooldown(sql, candidate, input.now))
             )
               continue
-            if (candidate.thread_id === null && candidate.handler === null) {
+            const owner = yield* decodeOwner(candidate, "claim")
+            if (owner === undefined) {
               return yield* storeError(
                 "claim",
                 "corrupt",
-                "Automation has no Chat session",
+                "Automation job has no owner",
                 candidate.task_id
               )
             }
-            let sessionId = candidate.thread_id
-            if (sessionId !== null) {
-              const live = yield* sql<{ readonly session_id: string }>`
-              SELECT session_id FROM sessions
-              WHERE session_id = ${sessionId} AND archived_at IS NULL
-              LIMIT 1
-            `
-              if (live.length === 0) {
-                const spaceId = candidate.owner_space_id
-                const threadId = yield* nextId
-                sessionId = threadId
-                yield* insertSession({
-                  sql,
-                  session: {
-                    type: "channel",
-                    sessionId: threadId,
-                    publicRef: namedPublicRef(candidate.name, threadId),
-                    startedAt: nowText,
-                    name: candidate.name,
-                    metadata: "{}",
-                    spaceId,
-                    chatModel: candidate.model,
-                    originAutomationId: candidate.task_id
-                  },
-                  lifecycle: {
-                    kind: "announce",
-                    events: sessionEvents,
-                    complete: sql`
-                  UPDATE scheduled_tasks SET thread_id = ${threadId}
-                  WHERE task_id = ${candidate.task_id}
-                `
-                  }
-                })
-              }
+            // A new candidate has no attempt yet: the claim below writes it from the owner.
+            const bound =
+              candidate.bound === null
+                ? undefined
+                : yield* decodeOwnedAttempt(
+                    { task_id: candidate.task_id, bound: candidate.bound },
+                    owner,
+                    "claim"
+                  )
+            const work = claimedWork(owner)
+            let sessionId: string | null
+            switch (owner.kind) {
+              case "task":
+                // A Task's attempt keeps the private chat it was given. Only a new
+                // attempt may be given a new one.
+                sessionId =
+                  candidate.admitted_session_id ??
+                  owner.chatId ??
+                  (yield* openChat({
+                    owner,
+                    name: owner.text,
+                    spaceId: owner.spaceId,
+                    model: null,
+                    now: nowText
+                  }))
+                break
+              case "space_review":
+                // A review always works in its own private chat. One that has
+                // none, or whose chat was archived, is given a new one.
+                sessionId =
+                  work.chatId !== null && (yield* isLiveChat(work.chatId))
+                    ? work.chatId
+                    : yield* openChat({
+                        owner,
+                        name: work.name,
+                        spaceId: owner.spaceId,
+                        model: work.model,
+                        now: nowText
+                      })
+                break
+              case "automation":
+                if (work.chatId === null && work.handler === null) {
+                  return yield* storeError(
+                    "claim",
+                    "corrupt",
+                    "Automation has no Chat session",
+                    candidate.task_id
+                  )
+                }
+                sessionId =
+                  work.chatId === null || (yield* isLiveChat(work.chatId))
+                    ? work.chatId
+                    : yield* openChat({
+                        owner,
+                        name: work.name,
+                        spaceId: work.job.owner_space_id,
+                        model: work.model,
+                        now: nowText
+                      })
+                break
             }
             let context = yield* decodeQueueContext(candidate, "claim")
             if (context.automation_run_id === null) {
-              context = yield* batchAtClaim({ sql, row: candidate, context, now: nowText })
+              context = yield* batchAtClaim({
+                sql,
+                row: {
+                  id: candidate.id,
+                  task_id: candidate.task_id,
+                  purpose: work.job.purpose,
+                  handler: work.handler,
+                  source: candidate.source,
+                  attempt_count: candidate.attempt_count,
+                  cooldown_minutes: work.cooldownMinutes,
+                  created_at: candidate.created_at
+                },
+                context,
+                now: nowText
+              })
               if (candidate.source === "event" || candidate.source === "manual")
-                context = withEventText(context, input.now, candidate.cooldown_minutes)
+                context = withEventText(context, input.now, work.cooldownMinutes)
             }
             const stamp = nextLeaseStamp(input.now, candidate.claimed_at)
-            const startedAt = candidate.held_by_worker_since ?? nowText
+            const startedAt = work.heldSince ?? nowText
+            // A Task's or a review's hold starts with the claim of a free row.
+            // Taking back a row whose lease ran out keeps the start it has,
+            // unknown included.
+            const rowHoldStart = candidate.claimed_at === null ? nowText : candidate.hold_started_at
             yield* sql`
             UPDATE automation_event_queue
             SET claimed_at = ${stamp}, lease_expires_at = ${iso(Date.parse(stamp) + input.leaseDurationMs)}, attempt_count = attempt_count + 1,
+                hold_started_at = ${owner.kind === "automation" ? null : rowHoldStart},
                 last_error = NULL
             WHERE id = ${candidate.id}
               AND claimed_at IS ${candidate.claimed_at}
           `
-            yield* sql`
-            UPDATE scheduled_tasks
-            SET job_held_since = ${startedAt}
-            WHERE task_id = ${candidate.task_id}
-          `
+            if (owner.kind === "automation")
+              yield* sql`
+              UPDATE scheduled_tasks
+              SET job_held_since = ${startedAt}
+              WHERE task_id = ${owner.key}
+            `
             let automationRunId = context.automation_run_id
             if (automationRunId === null) {
               const trigger = triggerContextForClaim({
@@ -420,7 +433,7 @@ export const makeAutomationJobs = ({
                   ? null
                   : yield* encodeJson(AutomationTriggerContextSchema, trigger)
               const origin = scheduledRunOrigin({
-                job: candidate,
+                job: work.job,
                 automationId: candidate.task_id,
                 occurrenceId: queueOccurrenceId(candidate),
                 chainDepth: wakeChainDepth(trigger)
@@ -440,14 +453,13 @@ export const makeAutomationJobs = ({
                 purpose, handler, context_mode, trigger_json, input_json, claim_count,
                 instruction_revision_id
               )
-              SELECT task_id, automation_ref, NULL, ${sessionId},
+              VALUES (${candidate.task_id},
+                     ${work.ref}, NULL, ${sessionId},
                      ${startedAt}, NULL, 'running', NULL, NULL, ${JSON.stringify(origin)},
                      ${taskBinding?.item_id ?? null}, ${taskBinding?.generation ?? null},
-                     purpose, handler, ${runContextMode(candidate)}, ${triggerJson},
+                     ${work.job.purpose}, ${work.handler}, ${work.contextMode}, ${triggerJson},
                      ${JSON.stringify(context.home_letter_input ?? context.space_review_input) ?? null}, 1,
-                     instruction_revision_id
-              FROM scheduled_tasks
-              WHERE task_id = ${candidate.task_id}
+                     ${work.instructionRevisionId})
               RETURNING id
             `
               automationRunId = inserted[0]?.id ?? null
@@ -513,7 +525,7 @@ export const makeAutomationJobs = ({
                 candidate.task_id
               )
             }
-            const handler = candidate.handler
+            const handler = work.handler
             if (!isJobHandlerId(handler)) {
               const fenced = yield* loadFenced(
                 {
@@ -538,7 +550,11 @@ export const makeAutomationJobs = ({
               task_id: candidate.task_id,
               status: "starting..."
             })
-            const prompt = yield* claimedPrompt(candidate, context.trigger_context)
+            const prompt = yield* claimedPrompt(
+              owner,
+              runSnapshot.context_mode,
+              context.trigger_context
+            )
             const targetContext = context.trigger_context_snapshot
             const target =
               targetContext?.source === "event" &&
@@ -559,14 +575,14 @@ export const makeAutomationJobs = ({
               token: `${automationRunId}|${runSnapshot.claim_count}`,
               attempt: candidate.attempt_count + 1,
               payload: {
-                automationId: AutomationId.make(candidate.task_id),
-                purpose: candidate.purpose,
-                name: candidate.name,
+                automationId: owner.key,
+                purpose: bound?.purpose ?? work.job.purpose,
+                name: work.name,
                 automationRunId,
                 sessionId,
                 prompt,
-                model: candidate.model,
-                chatKind: chatKindOf(candidate),
+                model: work.model,
+                chatKind: work.chatKind,
                 contextMode: runSnapshot.context_mode,
                 chatRun: yield* readJobChatRun(runSnapshot, "claim", candidate.task_id),
                 occurrence: candidate.source,
@@ -596,13 +612,16 @@ export const makeAutomationJobs = ({
     return yield* writer
       .transact(
         Effect.gen(function* () {
+          // Only an Automation's definition holds its rows. An old definition
+          // row of a Task or a review holds nothing, so its rows are left alone.
           const released = yield* sql<{ readonly id: number }>`
         UPDATE automation_event_queue
-        SET claimed_at = NULL, lease_expires_at = NULL
+        SET claimed_at = NULL, hold_started_at = NULL, lease_expires_at = NULL
         WHERE claimed_at IS NOT NULL
           AND task_id IN (
             SELECT task.task_id FROM scheduled_tasks AS task
-            WHERE ${jobHeldSince(sql, "task")} IS NULL
+            WHERE task.purpose IN ('user_automation', 'system')
+              AND ${jobHeldSince(sql, "task")} IS NULL
           )
         RETURNING id
       `
@@ -610,6 +629,7 @@ export const makeAutomationJobs = ({
         UPDATE scheduled_tasks
         SET job_held_since = NULL
         WHERE ${jobHeldSince(sql, "scheduled_tasks")} IS NOT NULL
+          AND purpose IN ('user_automation', 'system')
           AND NOT EXISTS (
             SELECT 1 FROM automation_event_queue AS queue
             WHERE queue.task_id = scheduled_tasks.task_id
@@ -633,7 +653,7 @@ export const makeAutomationJobs = ({
       .transact(
         Effect.gen(function* () {
           const now = Math.max(input.now, yield* Clock.currentTimeMillis)
-          const rows = yield* sql<QueueRow>`
+          const renewed = yield* sql<{ readonly id: number }>`
       UPDATE automation_event_queue
       SET claimed_at = MAX(claimed_at, ${iso(now)}),
           lease_expires_at = MAX(lease_expires_at, ${iso(now + input.leaseDurationMs)})
@@ -645,38 +665,57 @@ export const makeAutomationJobs = ({
             AND status = 'running' AND task_id = automation_event_queue.task_id
         )
         AND json_extract(context, '$.automation_run_id') = ${parsed.runId}
-      RETURNING id, task_id, source, context, created_at, claimed_at, lease_expires_at, attempt_count,
-                next_attempt_at,
-                (SELECT prompt FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS prompt,
-                (SELECT name FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS name,
-                (SELECT model FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS model,
-                (SELECT context_mode FROM automation_runs WHERE id = ${parsed.runId}) AS context_mode,
-                (SELECT chat.origin_automation_id FROM scheduled_tasks AS task
-                 LEFT JOIN sessions AS chat ON chat.session_id = task.thread_id
-                 WHERE task.task_id = automation_event_queue.task_id) AS run_chat_origin_automation_id,
-                (SELECT thread_id FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS thread_id,
-                (SELECT handler FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS handler,
-                (SELECT purpose FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS purpose,
-                (SELECT owner_space_id FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS owner_space_id,
-                (SELECT owner_task_id FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS owner_task_id,
-                (SELECT enabled FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS enabled,
-                (SELECT ${jobHeldSince(sql, "task")} FROM scheduled_tasks AS task WHERE task.task_id = automation_event_queue.task_id) AS held_by_worker_since,
-                (SELECT next_run_at FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS task_next_run_at,
-                (SELECT last_run_at FROM scheduled_tasks WHERE task_id = automation_event_queue.task_id) AS task_last_run_at
+      RETURNING id
     `.pipe(
             Effect.mapError((cause) =>
               storeError("renew", "storage", "Could not renew Automation job", undefined, cause)
             )
           )
+          const rows =
+            renewed.length === 0
+              ? []
+              : yield* sql<
+                  QueueEntry &
+                    QueueClaim & {
+                      readonly owner: string | null
+                      readonly admitted_session_id: string | null
+                      readonly bound: string
+                    }
+                >`
+      SELECT ${queueColumns(sql)}, ${ownerJson(sql)} AS owner,
+             attempt.chat_session_id AS admitted_session_id,
+             ${boundAttemptJson(sql, "attempt")} AS bound
+      FROM automation_event_queue AS queue
+      ${ownerJoin(sql)}
+      JOIN automation_runs AS attempt ON attempt.id = ${parsed.runId}
+      WHERE queue.id = ${parsed.queueId}
+    `.pipe(
+                  Effect.mapError((cause) =>
+                    storeError(
+                      "renew",
+                      "storage",
+                      "Could not read renewed Automation job",
+                      undefined,
+                      cause
+                    )
+                  )
+                )
           const row = rows[0]
+          const owner = row === undefined ? undefined : yield* decodeOwner(row, "renew")
           if (
             row === undefined ||
+            owner === undefined ||
             row.claimed_at === null ||
-            row.lease_expires_at === null ||
-            (row.thread_id === null && row.handler === null)
+            row.lease_expires_at === null
           ) {
             throw new JobLeaseLostError(input.id)
           }
+          const bound = yield* decodeOwnedAttempt(row, owner, "renew")
+          const work = claimedWork(owner)
+          // A Task's attempt works in the chat it is pinned to. A definition's
+          // works in the chat set on it now.
+          const sessionId = owner.kind === "task" ? row.admitted_session_id : work.chatId
+          if (sessionId === null && work.handler === null) throw new JobLeaseLostError(input.id)
           const context = yield* decodeQueueContext(row, "renew")
           const run = yield* sql<{
             readonly chat_run_id: string | null
@@ -702,27 +741,27 @@ export const makeAutomationJobs = ({
             )
           )
           if (run[0] === undefined) throw new JobLeaseLostError(input.id)
-          const prompt = yield* claimedPrompt(row, context.trigger_context)
+          const prompt = yield* claimedPrompt(owner, run[0].context_mode, context.trigger_context)
           return {
             id: input.id,
             token: input.token,
             attempt: row.attempt_count,
             payload: {
-              automationId: AutomationId.make(row.task_id),
-              purpose: row.purpose,
-              name: row.name,
+              automationId: owner.key,
+              purpose: bound.purpose,
+              name: work.name,
               automationRunId: parsed.runId,
-              sessionId: row.thread_id,
+              sessionId,
               prompt,
-              model: row.model,
-              chatKind: chatKindOf(row),
+              model: work.model,
+              chatKind: work.chatKind,
               contextMode: run[0].context_mode,
               chatRun: yield* readJobChatRun(run[0], "renew", row.task_id),
               occurrence: row.source,
               ...(context.scheduled_for === null ? {} : { scheduledFor: context.scheduled_for }),
               triggeringChange: context.triggering_change ?? null,
               prefilter: jobPrefilter(context, Date.parse(row.claimed_at)),
-              ...(yield* readJobHandler(row.handler, context, "renew", row.task_id))
+              ...(yield* readJobHandler(work.handler, context, "renew", row.task_id))
             },
             leasedAt: Date.parse(row.claimed_at),
             expiresAt: Date.parse(row.lease_expires_at)
@@ -751,15 +790,3 @@ export const makeAutomationJobs = ({
 
   return jobs
 }
-
-const chatKindOf = (
-  row: Pick<QueueRow, "purpose" | "task_id" | "run_chat_origin_automation_id">
-): "own" | "yours" =>
-  isUserAutomationPurpose(row.purpose) && row.run_chat_origin_automation_id !== row.task_id
-    ? "yours"
-    : "own"
-
-const runContextMode = (
-  row: Pick<QueueRow, "purpose" | "task_id" | "run_chat_origin_automation_id" | "context_mode">
-): AutomationContextMode =>
-  chatKindOf(row) === "yours" && row.context_mode === "continue" ? "fork" : row.context_mode

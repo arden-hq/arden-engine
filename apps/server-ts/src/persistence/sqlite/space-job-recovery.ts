@@ -1,10 +1,8 @@
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SpaceJobSql } from "./space-jobs.js"
-import type { AutomationHalt } from "./automation-halt.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { activeRunStatusList } from "./status-sets.js"
-import { taskOpenSql } from "./task-status-sql.js"
 import { taskMayWakeSql } from "./task-wake.js"
 
 const CHUNK_SIZE = 50
@@ -18,10 +16,7 @@ export const makeSpaceJobRecovery = (options: {
   readonly sql: SqlClient.SqlClient
   readonly syncSpace: SpaceJobSql["syncSpace"]
   readonly syncTask: (itemId: string, now: string) => ReturnType<SpaceJobSql["syncSpace"]>
-  readonly halt: (
-    automationId: string,
-    reason: AutomationHalt
-  ) => ReturnType<SpaceJobSql["stopTask"]>
+  readonly stopWork: (automationId: string) => ReturnType<SpaceJobSql["stopTask"]>
   readonly queueTaskWake: SpaceJobSql["queueTaskWake"]
   readonly materializeDue: SpaceJobSql["materializeDue"]
 }): SpaceJobSql["reconcile"] =>
@@ -40,40 +35,41 @@ export const makeSpaceJobRecovery = (options: {
         return next === undefined ? { stage: "reviews", after: undefined } : { stage, after: next }
       }
       case "reviews": {
-        const rows = yield* sql<{ readonly task_id: string; readonly ended: number }>`
-        SELECT task_id, NOT EXISTS (SELECT 1 FROM spaces WHERE space_id = scheduled_tasks.owner_space_id
-          AND archived_at IS NULL) AS ended
-        FROM scheduled_tasks
-        WHERE purpose = 'space_review'
-          AND (enabled = 1
-            OR EXISTS (SELECT 1 FROM automation_event_queue AS queue
-              WHERE queue.task_id = scheduled_tasks.task_id)
-            OR task_id IN (${automationRecoveryAuthority(sql)}))
-          AND ${after === undefined ? sql`1` : sql`task_id > ${after}`}
-          AND NOT EXISTS (SELECT 1 FROM spaces WHERE space_id = scheduled_tasks.owner_space_id
-            AND archived_at IS NULL AND json_extract(inference_policy, '$.enabled') = 1
-            AND page_path IS NOT NULL)
-        ORDER BY task_id LIMIT ${CHUNK_SIZE}`
-        for (const row of rows) yield* options.halt(row.task_id, row.ended === 1 ? "stop" : "hold")
+        // A review whose Space is gone or archived ends the work under its key.
+        // One whose Space only does not let it run holds with no write: its
+        // claim reads the Space.
+        const rows = yield* sql<{ readonly task_id: string }>`
+        WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
+        SELECT keyed.task_id FROM (
+          SELECT queue.task_id FROM automation_event_queue AS queue
+          WHERE substr(queue.task_id, 1, 6) = 'space:'
+          UNION
+          SELECT authority.automation_id FROM authority
+          WHERE substr(authority.automation_id, 1, 6) = 'space:'
+        ) AS keyed
+        WHERE ${after === undefined ? sql`1` : sql`keyed.task_id > ${after}`}
+          AND NOT EXISTS (SELECT 1 FROM spaces WHERE space_id = substr(keyed.task_id, 7)
+            AND archived_at IS NULL)
+        ORDER BY keyed.task_id LIMIT ${CHUNK_SIZE}`
+        for (const row of rows) yield* options.stopWork(row.task_id)
         const next = rows.at(-1)?.task_id
         return next === undefined ? { stage: "tasks", after: undefined } : { stage, after: next }
       }
       case "tasks": {
-        const rows = yield* sql<{ readonly task_id: string; readonly item_id: string }>`
+        // A Task's standing is read when its wake is claimed, so only a Task
+        // with queued wakes or admitted work under its key needs a look.
+        const rows = yield* sql<{ readonly item_id: string }>`
         WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
-        SELECT job.task_id, job.owner_task_id AS item_id
-        FROM scheduled_tasks AS job
-        LEFT JOIN space_tasks AS item ON item.item_id = job.owner_task_id
-        LEFT JOIN authority ON authority.automation_id = job.task_id
-        WHERE job.purpose = 'task_execution'
-          AND ${after === undefined ? sql`1` : sql`job.task_id > ${after}`}
-          AND ((${taskOpenSql("item")})
-            OR job.enabled = 1
-            OR authority.automation_id IS NOT NULL
-            OR EXISTS (SELECT 1 FROM automation_event_queue AS queue WHERE queue.task_id = job.task_id))
-        ORDER BY job.task_id LIMIT ${CHUNK_SIZE}`
+        SELECT item.item_id
+        FROM space_tasks AS item
+        LEFT JOIN authority ON authority.automation_id = 'task:' || item.item_id
+        WHERE ${after === undefined ? sql`1` : sql`item.item_id > ${after}`}
+          AND (authority.automation_id IS NOT NULL
+            OR EXISTS (SELECT 1 FROM automation_event_queue AS queue
+              WHERE queue.task_id = 'task:' || item.item_id))
+        ORDER BY item.item_id LIMIT ${CHUNK_SIZE}`
         for (const row of rows) yield* options.syncTask(row.item_id, now)
-        const next = rows.at(-1)?.task_id
+        const next = rows.at(-1)?.item_id
         return next === undefined
           ? { stage: "unstarted", after: undefined }
           : { stage, after: next }
@@ -86,12 +82,10 @@ export const makeSpaceJobRecovery = (options: {
           AND (item.next_attempt_at IS NULL OR item.next_attempt_at <= ${now})
           AND NOT EXISTS (SELECT 1 FROM automation_runs AS attempt
             WHERE attempt.item_id = item.item_id AND ${countsAsRun(sql, sql`attempt`)})
-          AND NOT EXISTS (SELECT 1 FROM scheduled_tasks AS job
-            JOIN automation_runs AS attempt ON attempt.task_id = job.task_id
-            WHERE job.owner_task_id = item.item_id AND ${countsAsRun(sql, sql`attempt`)})
+          AND NOT EXISTS (SELECT 1 FROM automation_runs AS attempt
+            WHERE attempt.task_id = 'task:' || item.item_id AND ${countsAsRun(sql, sql`attempt`)})
           AND NOT EXISTS (SELECT 1 FROM automation_event_queue AS pending
-            JOIN scheduled_tasks AS job ON job.task_id = pending.task_id
-            WHERE job.owner_task_id = item.item_id)
+            WHERE pending.task_id = 'task:' || item.item_id)
         ORDER BY item.item_id LIMIT ${CHUNK_SIZE}`
         for (const row of rows)
           yield* options.queueTaskWake(row.item_id, now, { kind: "continuation" })

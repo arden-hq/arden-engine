@@ -238,6 +238,8 @@ export const tableTells = {
   permission_settings: { tell: "permission", id: "{row}.singleton_id" },
   capability_offers: { silent: "A connection card in its chat, told by that chat's stream." },
   space_review_checkpoints: { silent: internal },
+  space_review_settings: { silent: internal },
+  space_review_chats: { silent: internal },
   space_chat_links: { tell: "space", id: "{row}.space_id" },
   space_conversations: { tell: "space", id: "{row}.space_id" },
   chat_summaries: { silent: "Read into the model's prompts; no screen shows it live." },

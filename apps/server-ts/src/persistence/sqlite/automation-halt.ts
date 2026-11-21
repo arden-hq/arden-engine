@@ -28,7 +28,23 @@ export const haltAutomation = Effect.fn("AutomationHalt.halt")(function* (option
       : sql`NULL`
   yield* sql`UPDATE scheduled_tasks
     SET enabled = 0, next_run_at = NULL, paused_at = ${pausedAt}, auto_resume_at = NULL
-    WHERE task_id = ${automationId}`
+    WHERE task_id = ${automationId} AND purpose IN ('user_automation', 'system')`
+  yield* haltWork(options)
+})
+
+/**
+ * Stops the work under one key: its running runs and the wakes it drops. A Task
+ * and a Space review have no definition to switch off, so this is all their
+ * stop does; whether they may run again is read from their own row at a claim.
+ */
+export const haltWork = Effect.fn("AutomationHalt.haltWork")(function* (options: {
+  readonly sql: SqlClient.SqlClient
+  readonly sessionEvents: SessionLifecycleEvents["Service"]
+  readonly automationId: string
+  readonly halt: AutomationHalt
+  readonly settlingRunId?: string | undefined
+}) {
+  const { sql, automationId, halt } = options
   if (halt !== "hold")
     yield* revokeAutomationWork({
       sql,

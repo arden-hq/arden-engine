@@ -6,6 +6,7 @@ import { uploadIdsIn } from "../sessions/chat-uploads.js"
 import { SESSION_OWNED_TABLES } from "../sessions/ownership.js"
 import { deleteRunSidecarsBySessionInTransaction } from "./run-sidecar-mutations.js"
 import { haltAutomation } from "./automation-halt.js"
+import { taskJobId } from "../space-job-id.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 
 export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")(function* (
@@ -27,11 +28,15 @@ export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")
       ON CONFLICT(upload_id) DO NOTHING`
   }
   yield* deleteRunSidecarsBySessionInTransaction(sql, sessionId)
-  const endedJobs = yield* sql<{ readonly task_id: string }>`SELECT task_id FROM scheduled_tasks
-    WHERE purpose = 'task_execution' AND owner_task_id IN (SELECT item_id FROM space_tasks
-      WHERE home_session_id = ${sessionId} AND space_id IS NULL)`
-  for (const job of endedJobs)
-    yield* haltAutomation({ sql, sessionEvents, automationId: job.task_id, halt: "stop" })
+  const endedTasks = yield* sql<{ readonly item_id: string }>`SELECT item_id FROM space_tasks
+    WHERE home_session_id = ${sessionId} AND space_id IS NULL`
+  for (const task of endedTasks)
+    yield* haltAutomation({
+      sql,
+      sessionEvents,
+      automationId: taskJobId(task.item_id),
+      halt: "stop"
+    })
   yield* sql`DELETE FROM space_tasks WHERE home_session_id = ${sessionId} AND space_id IS NULL`
   yield* sql`UPDATE space_tasks SET home_session_id = NULL, runs_in = 'background'
     WHERE home_session_id = ${sessionId}`

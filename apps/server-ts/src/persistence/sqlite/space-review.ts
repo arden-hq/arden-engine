@@ -28,6 +28,7 @@ import { userChatSql } from "./chat-ownership.js"
 import { queuedEventType } from "./automation-listening.js"
 import { RUNS_ALONE } from "../automations/event-batch.js"
 import { keyMessageJson } from "./chat-key-message.js"
+import { reviewMayRunSql } from "./automation-rows.js"
 
 const REVIEWED_TASK_COLUMNS = REVIEWED_TASK_FIELDS.map((field) => `'${field}', ${field}`).join(", ")
 
@@ -170,8 +171,8 @@ export const makeSpaceReviewStore = ({
           if (offer.space_exists !== 1 || offer.archived_at !== null)
             return yield* failure("conflict", "The Space is archived or unavailable")
           const automationId = spaceJobId(spaceId)
-          const jobs = yield* sql<{ readonly task_id: string }>`SELECT task_id FROM scheduled_tasks
-            WHERE task_id = ${automationId} AND purpose = 'space_review' AND enabled = 1`
+          const jobs = yield* sql`SELECT 1 FROM spaces AS space
+            WHERE space.space_id = ${spaceId} AND ${reviewMayRunSql(sql, "space")}`
           if (jobs.length === 0)
             return yield* failure("conflict", "The Space review is off or unavailable")
           const requestId = proposalReviewRequestId(proposalId, expectedRevision)
@@ -241,9 +242,9 @@ export const makeSpaceReviewStore = ({
         readonly run_status: string | null
       }>`SELECT json_extract(queue.context, '$.trigger_context_snapshot.context.expected_revision') AS expected_revision,
         queue.claimed_at, run.status AS run_status
-      FROM automation_event_queue AS queue JOIN scheduled_tasks AS task ON task.task_id = queue.task_id
+      FROM automation_event_queue AS queue
       LEFT JOIN automation_runs AS run ON run.id = json_extract(queue.context, '$.automation_run_id')
-      WHERE queue.task_id = ${automationId} AND task.purpose = 'space_review'
+      WHERE queue.task_id = ${automationId}
         AND ${queuedEventType(sql, sql`queue.context`)} = ${RUNS_ALONE}
         AND json_extract(queue.context, '$.trigger_context_snapshot.context.proposal_id') = ${proposalId}
       ORDER BY queue.id DESC LIMIT 1`
@@ -301,11 +302,11 @@ export const makeSpaceReviewStore = ({
     const rows = yield* sql<{
       readonly context: string
       readonly space_id: string
-      readonly prompt: string
       readonly trigger_json: string | null
     }>`
-      SELECT queue.context, job.owner_space_id AS space_id, job.prompt, attempt.trigger_json FROM automation_event_queue AS queue
-      JOIN scheduled_tasks AS job ON job.task_id = queue.task_id AND job.purpose = 'space_review'
+      SELECT queue.context, review_space.space_id, attempt.trigger_json FROM automation_event_queue AS queue
+      JOIN spaces AS review_space ON substr(queue.task_id, 1, 6) = 'space:'
+        AND review_space.space_id = substr(queue.task_id, 7)
       JOIN automation_runs AS attempt ON attempt.id = ${parsed.runId} AND attempt.task_id = queue.task_id
       WHERE queue.id = ${parsed.queueId} AND queue.task_id = ${lease.payload.automationId}
         AND queue.claimed_at IS NOT NULL AND attempt.claim_count = ${parsed.claimAttempt}
@@ -449,9 +450,11 @@ export const makeSpaceReviewStore = ({
           Effect.gen(function* () {
             const runs = yield* sql<{
               readonly space_id: string
-            }>`SELECT job.owner_space_id AS space_id FROM chat_runs AS run
-        JOIN scheduled_tasks AS job ON job.task_id = json_extract(run.metadata_json, '$.automation.task_id')
-        WHERE run.run_id = ${runId} AND run.status IN ${modelTurnRunStatusList} AND job.purpose = 'space_review'`
+            }>`SELECT review_space.space_id FROM chat_runs AS run
+        JOIN spaces AS review_space
+          ON substr(json_extract(run.metadata_json, '$.automation.task_id'), 1, 6) = 'space:'
+            AND review_space.space_id = substr(json_extract(run.metadata_json, '$.automation.task_id'), 7)
+        WHERE run.run_id = ${runId} AND run.status IN ${modelTurnRunStatusList}`
             if (!runs[0])
               return yield* failure(
                 "conflict",

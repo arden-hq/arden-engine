@@ -1,11 +1,6 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { JobClassification } from "../job-classification.js"
-import type {
-  SpaceJobPromptContext,
-  SpaceReviewSnapshot,
-  TaskWorkerSnapshot
-} from "../automations/job-prompt.js"
+import type { SpaceReviewSnapshot, TaskWorkerSnapshot } from "../automations/job-prompt.js"
 import { readJobSpace, readJobTask, type TaskRow } from "./space-job-rows.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { stallStreakSql } from "./task-next-move.js"
@@ -193,29 +188,6 @@ export const readTaskWorkerContext = Effect.fn("SpaceJobSql.taskWorkerContext")(
         : { prompt: question.prompt, askedAt: question.created_at },
     contract
   } satisfies TaskWorkerSnapshot
-})
-
-export const readSpaceJobContext = Effect.fn("SpaceJobSql.context")(function* (
-  sql: SqlClient.SqlClient,
-  automationId: string
-) {
-  const rows = yield* sql<JobClassification>`
-    SELECT purpose, owner_space_id, owner_task_id FROM scheduled_tasks WHERE task_id = ${automationId} LIMIT 1
-  `
-  const job = rows[0]
-  if (job?.purpose === "space_review") {
-    return {
-      kind: "space_review",
-      space: yield* readSpaceReviewContext(sql, job.owner_space_id)
-    } satisfies SpaceJobPromptContext
-  }
-  if (job?.purpose === "task_execution") {
-    return {
-      kind: "task_execution",
-      task: yield* readTaskWorkerContext(sql, job.owner_task_id)
-    } satisfies SpaceJobPromptContext
-  }
-  return undefined
 })
 
 export const readRunTaskContext = Effect.fn("SpaceJobSql.runTaskContext")(function* (

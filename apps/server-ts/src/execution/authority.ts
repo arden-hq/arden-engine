@@ -119,19 +119,29 @@ export const RunAuthoritySchema = Schema.Struct({
 })
 export type RunAuthority = typeof RunAuthoritySchema.Type
 
-export interface AutomationFacts {
-  readonly automation_id: string
-  readonly purpose: JobPurpose
-  readonly handler: string | null
-  readonly owner_space_id: string | null
-}
+/**
+ * Who a run works for, as stored when the run is admitted. `key` is the id the
+ * queue and the run's chat know the owner by. Each kind has only its own facts:
+ * a handler belongs to an Automation, a Space to a review or a Task.
+ */
+export type ExecutionOwner =
+  | {
+      readonly kind: "automation"
+      readonly key: string
+      readonly purpose: "user_automation" | "system"
+      readonly handler: string | null
+    }
+  | { readonly kind: "space_review"; readonly key: string; readonly spaceId: string }
+  | { readonly kind: "task"; readonly key: string; readonly spaceId: string | null }
 
 export interface AdmissionFacts {
   readonly sessionId: string
   readonly context: RunContext
   readonly policy: RunPolicy
-  readonly originAutomation: AutomationFacts | null
-  readonly chatAutomation: AutomationFacts | null
+  /** The owner the run's origin names. */
+  readonly originOwner: ExecutionOwner | null
+  /** The owner the run's chat was made for. */
+  readonly chatOwner: ExecutionOwner | null
   readonly resourceSessions?: ReadonlyArray<SessionResourceReach>
 }
 
@@ -153,7 +163,7 @@ export const rootOf = (actor: Actor): RootKind => (actor.kind === "agent" ? acto
 
 export const deriveAuthority = (facts: AdmissionFacts): RunAuthority => {
   const actor = rootActor(facts)
-  const permissionOwner = facts.chatAutomation ?? facts.originAutomation
+  const permissionOwner = facts.chatOwner ?? facts.originOwner
   const resourceSessions = facts.resourceSessions ?? facts.policy.resource_sessions ?? []
   const follows = resourceSessions.reduce<ApprovalSource>(
     (held, resource) =>
@@ -172,7 +182,7 @@ export const deriveAuthority = (facts: AdmissionFacts): RunAuthority => {
       automation_id:
         actor.kind === "person" || actor.kind === "unrecorded"
           ? null
-          : (facts.originAutomation?.automation_id ?? facts.chatAutomation?.automation_id ?? null),
+          : (facts.originOwner?.key ?? facts.chatOwner?.key ?? null),
       chain_depth: originChainDepth(facts.context.origin),
       task_item_id: facts.context.task?.item_id ?? null
     },
@@ -198,8 +208,7 @@ const rootActor = (facts: AdmissionFacts): Actor => {
       return {
         kind: "automation",
         automation_id: origin.automation_id,
-        purpose: facts.originAutomation?.purpose ?? "user_automation",
-        handler: facts.originAutomation?.handler ?? null
+        ...automationActorFacts(facts.originOwner)
       }
     case "task":
       return {
@@ -214,10 +223,25 @@ const rootActor = (facts: AdmissionFacts): Actor => {
   }
 }
 
+/** What an origin that names an Automation says of its actor, by the owner stored for it. */
+const automationActorFacts = (
+  owner: ExecutionOwner | null
+): { readonly purpose: JobPurpose; readonly handler: string | null } => {
+  if (owner === null) return { purpose: "user_automation", handler: null }
+  switch (owner.kind) {
+    case "automation":
+      return { purpose: owner.purpose, handler: owner.handler }
+    case "space_review":
+      return { purpose: "space_review", handler: null }
+    case "task":
+      return { purpose: "task_execution", handler: null }
+  }
+}
+
 const approvalSource = (
   sessionId: string,
   policy: RunPolicy,
-  owner: AutomationFacts | null
+  owner: ExecutionOwner | null
 ): ApprovalSource => {
   if (owner === null) {
     const current: ApprovalSource = { kind: "chat", session_id: sessionId }
@@ -225,10 +249,20 @@ const approvalSource = (
       ? current
       : stricterSource(current, { kind: "chat", session_id: policy.authority_session_id })
   }
-  if (owner.purpose === "user_automation")
-    return { kind: "chat", session_id: policy.authority_session_id ?? sessionId }
-  if (owner.owner_space_id !== null) return { kind: "space_thread", space_id: owner.owner_space_id }
-  return { kind: "automation", automation_id: owner.automation_id }
+  switch (owner.kind) {
+    case "automation":
+      return owner.purpose === "user_automation"
+        ? { kind: "chat", session_id: policy.authority_session_id ?? sessionId }
+        : { kind: "automation", automation_id: owner.key }
+    case "space_review":
+      return { kind: "space_thread", space_id: owner.spaceId }
+    case "task":
+      // A Task in a Space follows that Space. One outside any Space has no
+      // setting of its own to follow, so it is named by its key.
+      return owner.spaceId === null
+        ? { kind: "automation", automation_id: owner.key }
+        : { kind: "space_thread", space_id: owner.spaceId }
+  }
 }
 
 const memoryOf = (actor: Actor, policy: RunPolicy): MemoryAuthority => {

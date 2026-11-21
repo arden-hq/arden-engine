@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { taskHasHold } from "./task-hold-state.js"
 import { taskConversationSql } from "./task-conversation.js"
+import { reviewMayRunSql } from "./automation-rows.js"
 
 export interface SpaceRow {
   readonly space_id: string
@@ -11,6 +12,8 @@ export interface SpaceRow {
   readonly page_path: string | null
   readonly inference_enabled: number
   readonly archived_at: string | null
+  /** Its review may run (`reviewMayRunSql`): 1 or 0. */
+  readonly review_may_run: number
 }
 
 export interface TaskRow {
@@ -46,8 +49,8 @@ export const readJobSpace = Effect.fn("SpaceJobSql.space")(function* (
   const rows = yield* sql<SpaceRow>`
     SELECT space_id, name, instructions, page_id, page_path,
            json_extract(inference_policy, '$.enabled') AS inference_enabled,
-           archived_at
-    FROM spaces
+           archived_at, ${reviewMayRunSql(sql, "space")} AS review_may_run
+    FROM spaces AS space
     WHERE space_id = ${spaceId}
     LIMIT 1
   `

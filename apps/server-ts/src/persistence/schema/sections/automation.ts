@@ -300,6 +300,8 @@ export const automationSchemaSection = {
       last_error TEXT,
       next_attempt_at TEXT
     )`,
+    `ALTER TABLE automation_event_queue ADD COLUMN hold_started_at TEXT
+      CHECK(hold_started_at IS NULL OR claimed_at IS NOT NULL)`,
     `CREATE INDEX idx_automation_event_queue_task_claimed_id
       ON automation_event_queue(task_id, claimed_at, id)`,
     `CREATE TABLE automation_count_state (

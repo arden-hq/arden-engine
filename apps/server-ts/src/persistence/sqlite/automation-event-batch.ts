@@ -29,6 +29,7 @@ import { eventBatchOf, queuedEventType } from "./automation-listening.js"
 import { triggerContextForClaim } from "./automation-occurrence.js"
 import type { QueueContext } from "./automation-queue-context.js"
 import { decodeJson } from "./json.js"
+import { claimedWork } from "./automation-claimed-work.js"
 import { decodeQueueContext, encodeQueueContext, storeError } from "./automation-rows.js"
 import { iso } from "../../runtime/clock.js"
 import type { AutomationStoreDeps } from "./automation-rows.js"
@@ -473,7 +474,7 @@ export const makeEventScreens = (
               "record_skips",
               "invalid",
               "Only a screened event wake records skips",
-              fenced.row.task_id
+              fenced.queue.task_id
             )
           const ran = screenedBatch(batch, new Set(input.screen.passed), eventKeyOf)
           const allSkipped = ran === undefined
@@ -502,12 +503,17 @@ export const makeEventScreens = (
               "record_skips",
               "invalid",
               "A screened event wake kept no event",
-              fenced.row.task_id
+              fenced.queue.task_id
             )
           const { run_only_if: _top, ...context } = fenced.context
           const triggerContext = renderEvents(
             screened,
-            textOptions(fenced.context, input.now, fenced.row.cooldown_minutes)
+            // The cooldown set on the owner now; a Task and a deleted owner have none.
+            textOptions(
+              fenced.context,
+              input.now,
+              fenced.owner === undefined ? null : claimedWork(fenced.owner).cooldownMinutes
+            )
           )
           const encoded = yield* encodeQueueContext(
             {
@@ -516,7 +522,7 @@ export const makeEventScreens = (
               trigger_context: triggerContext
             },
             "record_skips",
-            fenced.row.task_id
+            fenced.queue.task_id
           )
           yield* sql`UPDATE automation_event_queue SET context = ${encoded} WHERE id = ${fenced.parsed.queueId}`
           return allSkipped

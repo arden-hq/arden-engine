@@ -4,6 +4,9 @@ import { Clock, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { WorkStoreError } from "../work/store.js"
 import { iso } from "../../runtime/clock.js"
+import { ownerJoin } from "./automation-rows.js"
+import { attemptRunSessionIdSql } from "./owner-chat.js"
+import { readScheduledIdentity } from "./run-context.js"
 
 export const parseLease = (input: { readonly id: string; readonly token: string }) => {
   const queueId = Number(input.id)
@@ -36,11 +39,32 @@ export const assertAutomationLease = Effect.fn("AutomationLease.assert")(functio
     new WorkStoreError({ reason: "conflict", message: "The Automation lease is no longer current" })
   const parsed = yield* Effect.try({ try: () => parseLease(options.lease), catch: failure })
   if (parsed.runId !== options.attemptId) return yield* failure()
+  // What the attempt was started as is read before its lease, so a corrupt
+  // attempt is refused as corrupt whatever the lease says. An attempt that is
+  // not running is the lease check's to refuse.
+  yield* readScheduledIdentity({
+    sql,
+    automationId: options.automationId,
+    attemptId: options.attemptId
+  })
   const live = yield* sql`SELECT 1 FROM automation_event_queue AS queue
     JOIN automation_runs AS attempt ON attempt.id = ${options.attemptId} AND attempt.task_id = queue.task_id
-    JOIN scheduled_tasks AS automation ON automation.task_id = queue.task_id
+    ${ownerJoin(sql)}
+    -- An Automation's run may use its own chat or the chat it is set to. A Task
+    -- has no setting to follow: only the private chat its attempt was given. A
+    -- review works in its private trunk (space_review_chats) or in the one child
+    -- chat prepareRunSession made for this attempt under that trunk.
+    LEFT JOIN space_review_chats AS review_chat ON review_chat.space_id = review_space.space_id
     JOIN sessions AS session ON session.session_id = ${options.sessionId}
-      AND (session.origin_automation_id = queue.task_id OR session.session_id = automation.thread_id)
+      AND ((task.task_id IS NOT NULL
+          AND (session.origin_automation_id = queue.task_id OR session.session_id = task.thread_id))
+        OR (item.item_id IS NOT NULL AND attempt.item_id = item.item_id
+          AND session.session_id = attempt.chat_session_id
+          AND session.origin_automation_id = queue.task_id AND session.session_type = 'channel')
+        OR (review_chat.session_id IS NOT NULL AND session.origin_automation_id = queue.task_id
+          AND ((session.session_id = review_chat.session_id AND session.session_type = 'channel')
+            OR (session.session_type = 'chat' AND session.parent_session_id = review_chat.session_id
+              AND session.session_id = ${attemptRunSessionIdSql(sql, sql`review_chat.session_id`, sql`attempt.id`)}))))
     WHERE queue.id = ${parsed.queueId} AND queue.task_id = ${options.automationId} AND session.archived_at IS NULL
       AND queue.lease_expires_at > ${iso(yield* Clock.currentTimeMillis)} AND queue.claimed_at IS NOT NULL
       AND attempt.claim_count = ${parsed.claimAttempt}

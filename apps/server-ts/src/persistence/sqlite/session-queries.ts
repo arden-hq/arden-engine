@@ -35,6 +35,7 @@ import { ActiveContextError, loadActiveContext } from "./active-context.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { sessionForkOriginFromMetadata } from "../sessions/fork-origin.js"
 import { keyMessageJson } from "./chat-key-message.js"
+import { readWorkOwner } from "./automation-rows.js"
 
 interface SessionRow {
   readonly session_id: string
@@ -141,16 +142,28 @@ export const makeSessionQueries = ({
         corruption(row.session_id, "Session metadata.last_input_tokens is corrupt", cause)
       )
     )
-    const jobs =
+    // A Space review is named by its key and owned by its Space; its old definition
+    // row is not read. Any other job keeps the purpose its row stores.
+    const reviewOwner =
       row.origin_automation_id === null
-        ? []
-        : yield* sql<{
-            readonly purpose: JobPurpose
-          }>`SELECT purpose FROM scheduled_tasks WHERE task_id = ${row.origin_automation_id}`.pipe(
+        ? undefined
+        : yield* readWorkOwner(sql, row.origin_automation_id).pipe(
+            Effect.map((owner) => (owner?.kind === "space_review" ? owner : undefined)),
             Effect.mapError((cause) =>
               corruption(row.session_id, "Session job classification is unavailable", cause)
             )
           )
+    let jobs: ReadonlyArray<{ readonly purpose: JobPurpose }> = []
+    if (reviewOwner !== undefined) jobs = [{ purpose: "space_review" }]
+    else if (row.origin_automation_id !== null)
+      jobs = yield* sql<{
+        readonly purpose: JobPurpose
+      }>`SELECT purpose FROM scheduled_tasks
+        WHERE task_id = ${row.origin_automation_id} AND purpose != 'space_review'`.pipe(
+        Effect.mapError((cause) =>
+          corruption(row.session_id, "Session job classification is unavailable", cause)
+        )
+      )
     const forkOrigin = sessionForkOriginFromMetadata(metadata, row.started_at)
     const header = yield* Schema.decodeUnknownEffect(SessionHistoryHeaderSchema)({
       originJobPurpose: jobs[0]?.purpose ?? null,

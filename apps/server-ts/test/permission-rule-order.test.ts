@@ -35,8 +35,8 @@ const admitted = (facts: Partial<AdmissionFacts>) =>
     sessionId: "chat-1",
     context: { origin: { kind: "chat", session_id: "chat-1", turn_id: "t1" }, task: null },
     policy: policy(null),
-    originAutomation: null,
-    chatAutomation: null,
+    originOwner: null,
+    chatOwner: null,
     ...facts
   })
 
@@ -46,7 +46,7 @@ const automation = (purpose: "user_automation" | "system", spaceId: string | nul
       origin: { kind: "automation", automation_id: "auto", occurrence_id: "o1" },
       task: null
     },
-    originAutomation: { automation_id: "auto", purpose, handler: null, owner_space_id: null },
+    originOwner: { kind: "automation", key: "auto", purpose, handler: null },
     policy: policy(spaceId)
   })
 

@@ -1,8 +1,7 @@
 import { writtenByPersonSql } from "./person-written-sql.js"
-import { foldSpace } from "@arden-hq/std/text"
 import { outcomeSql } from "./automation-run-outcome.js"
 import { countsAsRun } from "./automation-skip-record.js"
-import type { SpaceJobPromptContext, SpaceReviewSnapshot } from "../automations/job-prompt.js"
+import type { SpaceReviewSnapshot } from "../automations/job-prompt.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
@@ -13,14 +12,14 @@ import { enqueue, type QueueWriter } from "./automation-enqueue.js"
 import type { JsonColumnError } from "./json.js"
 import { attemptWakeDepth, readRunCause, taskWakeDepth } from "./run-cause.js"
 
-import { spaceJobId, taskJobId } from "../space-job-id.js"
+import { spaceJobId, spaceOfJob, taskJobId } from "../space-job-id.js"
 import { hasPendingTaskApproval, hasPendingTaskQuestion } from "./task-question-state.js"
-import { haltAutomation, type AutomationHalt } from "./automation-halt.js"
-import { resumeAutomation } from "./automation-resume.js"
+import { haltWork } from "./automation-halt.js"
 import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
-import { readJobSpace, readJobTask, type SpaceRow } from "./space-job-rows.js"
-import { readSpaceJobContext, readSpaceReviewContext } from "./space-job-context.js"
+import { readJobSpace, readJobTask } from "./space-job-rows.js"
+import { recordReviewChat } from "./owner-chat.js"
+import { readSpaceReviewContext } from "./space-job-context.js"
 import { endExternalWaitAtCheck, failTaskItem, keepTaskMoving } from "./task-next-move.js"
 import {
   automationRecoveryAuthority,
@@ -34,7 +33,6 @@ import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
-import { renameOwnedJob } from "./job-labels.js"
 
 type EventWake = Extract<AutomationTriggerContext, { readonly source: "event" }>
 
@@ -101,33 +99,22 @@ export interface SpaceJobSql {
     fromPerson?: boolean
   ) => SpaceJobWrite<void>
   readonly stopTask: (itemId: string, settlingRunId?: string) => SpaceJobWrite<void>
-  readonly context: (
-    automationId: string
-  ) => Effect.Effect<SpaceJobPromptContext | undefined, SqlError>
   readonly spaceReviewContext: (
     spaceId: string
   ) => Effect.Effect<SpaceReviewSnapshot | undefined, SqlError>
-  readonly keepMoving: (automationId: string, chatRunId: string, now: string) => SpaceJobWrite<void>
+  readonly keepMoving: (itemId: string, chatRunId: string, now: string) => SpaceJobWrite<void>
   readonly failTask: (
-    automationId: string,
+    itemId: string,
     error: string | null,
     now: string,
     chatRunId: string | null
   ) => SpaceJobWrite<void>
 }
 
-const internalRef = (automationId: string): string => {
+export const internalRef = (automationId: string): string => {
   const digest = sha256Hex(automationId).slice(0, 12)
   return `internal-job~${digest}`
 }
-
-const jobEnabled = (space: SpaceRow): boolean =>
-  space.inference_enabled === 1 && space.page_path !== null && space.archived_at === null
-
-const line = (value: string | null): string => foldSpace(value ?? "") || "none"
-
-const appLink = (label: string, target: string): string =>
-  `[${line(label).replace(/[\\[\]]/g, "\\$&")}](${target})`
 
 export const makeSpaceJobSql = (
   sql: SqlClient.SqlClient,
@@ -155,21 +142,19 @@ export const makeSpaceJobSql = (
       }
     }
   })
-  const halt = Effect.fn("SpaceJobSql.halt")(function* (
+  /**
+   * A Task or a Space review has no stored job to switch off. Stopping one ends
+   * the work under its key: the wakes still waiting and the runs it was given.
+   */
+  const stopWork = Effect.fn("SpaceJobSql.stopWork")(function* (
     automationId: string,
-    reason: AutomationHalt,
     settlingRunId?: string
   ) {
-    const needsHalt =
-      reason === "hold"
-        ? sql`job.enabled = 1 OR job.next_run_at IS NOT NULL`
-        : sql`job.enabled = 1 OR job.next_run_at IS NOT NULL
-          OR EXISTS (SELECT 1 FROM automation_event_queue AS queue WHERE queue.task_id = job.task_id)
-          OR job.task_id IN (${automationRecoveryAuthority(sql)})`
-    const pending = yield* sql`SELECT 1 FROM scheduled_tasks AS job
-      WHERE job.task_id = ${automationId} AND (${needsHalt}) LIMIT 1`
+    const pending = yield* sql`SELECT 1
+      WHERE EXISTS (SELECT 1 FROM automation_event_queue AS queue WHERE queue.task_id = ${automationId})
+        OR ${automationId} IN (${automationRecoveryAuthority(sql)})`
     if (pending.length === 0) return
-    yield* haltAutomation({ sql, sessionEvents, automationId, halt: reason, settlingRunId })
+    yield* haltWork({ sql, sessionEvents, automationId, halt: "stop", settlingRunId })
   })
   const ensureSession = Effect.fn("SpaceJobSql.ensureSession")(function* (
     automationId: string,
@@ -207,131 +192,68 @@ export const makeSpaceJobSql = (
     return sessionId
   })
 
-  const upsertJob = Effect.fn("SpaceJobSql.upsertJob")(function* (input: {
-    readonly automationId: string
-    readonly spaceId: string | null
-    readonly name: string
-    readonly prompt: string
-    readonly enabled: boolean
-    readonly ownerTaskId?: string
-    readonly now: string
-  }) {
-    yield* renameOwnedJob(sql, input.automationId, input.name)
-    const sessionId = yield* ensureSession(input.automationId, input.spaceId, input.name, input.now)
-    const before = yield* sql<{ readonly enabled: number }>`
-      SELECT enabled FROM scheduled_tasks WHERE task_id = ${input.automationId}`
-    const autoApprove = input.spaceId === null ? 0 : 1
-    yield* sql`
-      INSERT INTO scheduled_tasks (
-        task_id, automation_ref, name, description, prompt, context_mode, triggers, trigger_last_id, enabled,
-        created_at, auto_approve, builtin, thread_id,
-        tool_scope, triggers_source, next_run_at, purpose, owner_space_id, owner_task_id
-      ) VALUES (
-        ${input.automationId}, ${internalRef(input.automationId)}, ${input.name},
-        'Internal Space execution', ${input.prompt}, 'fresh', '[]', 0, ${input.enabled ? 1 : 0},
-        ${input.now}, ${autoApprove}, 1, ${sessionId},
-        'space', 'space_runtime', NULL,
-        ${input.ownerTaskId === undefined ? "space_review" : "task_execution"}, ${input.spaceId}, ${input.ownerTaskId ?? null}
-      )
-      ON CONFLICT(task_id) DO UPDATE SET
-        name = excluded.name,
-        description = excluded.description,
-        prompt = excluded.prompt,
-        context_mode = excluded.context_mode,
-        triggers = excluded.triggers,
-        trigger_last_id = MAX(scheduled_tasks.trigger_last_id, excluded.trigger_last_id),
-        next_run_at = NULL,
-        thread_id = COALESCE(scheduled_tasks.thread_id, excluded.thread_id),
-        tool_scope = excluded.tool_scope,
-        triggers_source = excluded.triggers_source,
-        auto_approve = excluded.auto_approve,
-        owner_space_id = excluded.owner_space_id
-      WHERE scheduled_tasks.name IS NOT excluded.name
-        OR scheduled_tasks.description IS NOT excluded.description
-        OR scheduled_tasks.prompt IS NOT excluded.prompt
-        OR scheduled_tasks.context_mode IS NOT excluded.context_mode
-        OR scheduled_tasks.triggers IS NOT excluded.triggers
-        OR scheduled_tasks.trigger_last_id < excluded.trigger_last_id
-        OR scheduled_tasks.next_run_at IS NOT NULL
-        OR scheduled_tasks.thread_id IS NULL
-        OR scheduled_tasks.tool_scope IS NOT excluded.tool_scope
-        OR scheduled_tasks.triggers_source IS NOT excluded.triggers_source
-        OR scheduled_tasks.auto_approve IS NOT excluded.auto_approve
-        OR scheduled_tasks.owner_space_id IS NOT excluded.owner_space_id
-    `
-    if (!input.enabled && before[0]?.enabled !== 0) yield* halt(input.automationId, "hold")
-    if (input.enabled && before[0]?.enabled === 0)
-      yield* resumeAutomation({ sql, automationId: input.automationId, nextRunAt: null })
-    return {
-      automationId: input.automationId,
-      enabled: input.enabled,
-      purpose: input.ownerTaskId === undefined ? "space_review" : "task_execution"
-    } satisfies JobState
-  })
+  const stopTask = (itemId: string, settlingRunId?: string) =>
+    stopWork(taskJobId(itemId), settlingRunId)
 
+  /** Gives a live Task its private chat. Whether it may run is read from the Task at the claim. */
   const syncTask = Effect.fn("SpaceJobSql.syncTask")(function* (itemId: string, now: string) {
     const task = yield* readJobTask(sql, itemId)
     const id = taskJobId(itemId)
     if (task === null || !taskIsLive(task) || task.space_archived_at !== null) {
-      yield* halt(id, "stop")
+      yield* stopTask(itemId)
       return null
     }
-    return yield* upsertJob({
+    yield* sql`UPDATE sessions SET name = ${task.text}
+      WHERE origin_automation_id = ${id} AND session_type = 'channel' AND name IS NOT ${task.text}`
+    yield* ensureSession(id, task.space_id, task.text, now)
+    return {
       automationId: id,
-      ownerTaskId: itemId,
-      spaceId: task.space_id,
-      name: task.text,
-      prompt: `Continue ${appLink(task.text, `arden:task/${encodeURIComponent(task.item_id)}`)}.`,
       enabled: taskStands(task),
-      now
-    })
+      purpose: "task_execution"
+    } satisfies JobState
   })
 
+  /**
+   * A review is owned by its Space, so there is no definition to write. A Space
+   * that is gone or archived ends the review's work. One with inference off holds:
+   * its waiting wakes stay, and no claim takes them while the Space does not let
+   * the review run (`reviewMayRunSql`). Otherwise the review gets its private chat,
+   * named after the Space, when it has none.
+   */
   const syncSpaceReview = Effect.fn("SpaceJobSql.syncSpaceReview")(function* (
     spaceId: string,
     now: string
   ) {
+    const automationId = spaceJobId(spaceId)
     const current = yield* readJobSpace(sql, spaceId)
-    if (current === null || current.inference_enabled !== 1 || current.archived_at !== null) {
-      yield* halt(
-        spaceJobId(spaceId),
-        current === null || current.archived_at !== null ? "stop" : "hold"
-      )
+    if (current === null || current.archived_at !== null) {
+      yield* stopWork(automationId)
       return null
     }
-    return yield* upsertJob({
-      automationId: spaceJobId(spaceId),
-      spaceId,
-      name: `${current.name} worker`,
-      prompt: `Review ${appLink(current.name, `arden:space/${encodeURIComponent(current.space_id)}`)}.`,
-      enabled: jobEnabled(current),
-      now
-    })
+    if (current.inference_enabled !== 1) return null
+    // A Space rename renames the chat (`followSpaceName`); a sync only names a new one.
+    const name = `${current.name} worker`
+    const chats = yield* sql`SELECT 1 FROM space_review_chats WHERE space_id = ${spaceId}`
+    if (chats.length === 0)
+      yield* recordReviewChat(
+        sql,
+        spaceId,
+        yield* ensureSession(automationId, spaceId, name, now),
+        "keep"
+      )
+    return {
+      automationId,
+      enabled: current.review_may_run === 1,
+      purpose: "space_review"
+    } satisfies JobState
   })
 
   const syncSpace = Effect.fn("SpaceJobSql.syncSpace")(function* (spaceId: string, now: string) {
     const current = yield* readJobSpace(sql, spaceId)
-    const workable = current !== null && current.archived_at === null
-    const ended = current === null || current.archived_at !== null
-    if (workable) {
-      const waiting = yield* sql<{ readonly task_id: string }>`
-        SELECT task_id FROM scheduled_tasks
-        WHERE enabled = 0 AND purpose = 'task_execution'
-          AND owner_task_id IN (
-            SELECT candidate.item_id
-            FROM space_tasks AS candidate
-            WHERE candidate.space_id = ${spaceId}
-              AND ${taskStandsSql(sql, "candidate")}
-          )
-      `
-      for (const job of waiting)
-        yield* resumeAutomation({ sql, automationId: job.task_id, nextRunAt: null })
-    } else {
-      const jobs = yield* sql<{ readonly task_id: string }>`
-        SELECT task_id FROM scheduled_tasks
-        WHERE purpose = 'task_execution'
-          AND owner_task_id IN (SELECT item_id FROM space_tasks WHERE space_id = ${spaceId})`
-      for (const job of jobs) yield* halt(job.task_id, ended ? "stop" : "hold")
+    if (current === null || current.archived_at !== null) {
+      const tasks = yield* sql<{ readonly item_id: string }>`
+        SELECT item_id FROM space_tasks WHERE space_id = ${spaceId}`
+      for (const task of tasks) yield* stopTask(task.item_id)
     }
     return yield* syncSpaceReview(spaceId, now)
   })
@@ -375,7 +297,7 @@ export const makeSpaceJobSql = (
     cause: WakeCause
   ) {
     const space = yield* readJobSpace(sql, spaceId)
-    if (space === null || !jobEnabled(space)) return false
+    if (space === null || space.review_may_run !== 1) return false
     const state = yield* syncSpaceReview(spaceId, now)
     if (state === null) return false
     return yield* queue(state, cause, {
@@ -410,26 +332,25 @@ export const makeSpaceJobSql = (
     automationId: string,
     now: string
   ) {
+    const spaceId = spaceOfJob(automationId)
+    if (spaceId === undefined) return
     const attempts = yield* sql<{
       readonly failed: number
       readonly restart_cut: number
-      readonly space_id: string | null
       readonly chain_depth: number
     }>`
       SELECT ${outcomeSql(sql, sql`attempt`)} = 'failed' AS failed,
         ${attemptWakeDepth(sql, "attempt")} AS chain_depth,
-        COALESCE(${restartCutRunSql("chat")}, 0) AS restart_cut,
-        job.owner_space_id AS space_id
-      FROM automation_runs AS attempt JOIN scheduled_tasks AS job ON job.task_id = attempt.task_id
+        COALESCE(${restartCutRunSql("chat")}, 0) AS restart_cut
+      FROM automation_runs AS attempt
       LEFT JOIN chat_runs AS chat ON chat.run_id = attempt.chat_run_id
-      WHERE attempt.task_id = ${automationId} AND job.purpose = 'space_review'
+      WHERE attempt.task_id = ${automationId}
         AND attempt.status <> 'running' AND ${countsAsRun(sql, sql`attempt`)}
       ORDER BY attempt.id DESC LIMIT ${SPACE_REVIEW_LADDER_MS.length + 1}`
-    const spaceId = attempts[0]?.space_id
     const recent = attempts.filter((row) => row.restart_cut !== 1)
     const streak = recent.findIndex((row) => row.failed !== 1)
     const delay = ladderStepMs(SPACE_REVIEW_LADDER_MS, streak === -1 ? recent.length : streak)
-    if (spaceId == null || delay === undefined) return
+    if (attempts.length === 0 || delay === undefined) return
     const state = yield* syncSpace(spaceId, now)
     if (state === null || !state.enabled) return
     yield* queue(
@@ -610,7 +531,6 @@ export const makeSpaceJobSql = (
     fromPerson = false
   ) {
     const task = yield* readJobTask(sql, itemId)
-    if (task !== null && !taskStands(task)) yield* halt(taskJobId(itemId), "hold")
     if (
       task === null ||
       !taskMayWake(task) ||
@@ -635,13 +555,6 @@ export const makeSpaceJobSql = (
       },
       fromPerson ? { personChangeAt: now } : {}
     )
-  })
-
-  const stopTask = Effect.fn("SpaceJobSql.stopTask")(function* (
-    itemId: string,
-    settlingRunId?: string
-  ) {
-    yield* halt(taskJobId(itemId), "stop", settlingRunId)
   })
 
   const materializeDue = Effect.fn("SpaceJobSql.materializeDue")(function* (now: string) {
@@ -686,26 +599,17 @@ export const makeSpaceJobSql = (
     sql,
     syncSpace: syncSpaceReview,
     syncTask,
-    halt,
+    stopWork,
     queueTaskWake,
     materializeDue
   })
 
-  const jobTaskItem = Effect.fn("SpaceJobSql.jobTaskItem")(function* (automationId: string) {
-    const jobs = yield* sql<{
-      readonly owner_task_id: string
-    }>`SELECT owner_task_id FROM scheduled_tasks WHERE task_id = ${automationId} AND purpose = 'task_execution'`
-    return jobs[0]?.owner_task_id
-  })
-
   const failTask = Effect.fn("SpaceJobSql.failTask")(function* (
-    automationId: string,
+    itemId: string,
     error: string | null,
     now: string,
     chatRunId: string | null
   ) {
-    const itemId = yield* jobTaskItem(automationId)
-    if (itemId === undefined) return
     const codes =
       chatRunId === null
         ? []
@@ -721,12 +625,10 @@ export const makeSpaceJobSql = (
   })
 
   const keepMoving = Effect.fn("SpaceJobSql.keepMoving")(function* (
-    automationId: string,
+    itemId: string,
     chatRunId: string,
     now: string
   ) {
-    const itemId = yield* jobTaskItem(automationId)
-    if (itemId === undefined) return
     yield* keepTaskMoving(writer, { itemId, chatRunId, now })
   })
 
@@ -743,7 +645,6 @@ export const makeSpaceJobSql = (
     queueItemsRouted,
     queueTaskWake,
     stopTask,
-    context: (automationId) => readSpaceJobContext(sql, automationId),
     spaceReviewContext: (spaceId) => readSpaceReviewContext(sql, spaceId),
     keepMoving,
     failTask

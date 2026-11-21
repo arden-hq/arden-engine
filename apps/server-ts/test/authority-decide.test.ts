@@ -40,43 +40,28 @@ const admitted = (overrides: Partial<AdmissionFacts>): RunAuthority =>
     sessionId: "chat-1",
     context: { origin: { kind: "chat", session_id: "chat-1", turn_id: "t1" }, task: null },
     policy,
-    originAutomation: null,
-    chatAutomation: null,
+    originOwner: null,
+    chatOwner: null,
     ...overrides
   })
 
 const person = admitted({})
 const personInAutomationChat = admitted({
-  chatAutomation: {
-    automation_id: "auto-1",
-    purpose: "user_automation",
-    handler: null,
-    owner_space_id: null
-  }
+  chatOwner: { kind: "automation", key: "auto-1", purpose: "user_automation", handler: null }
 })
 const automation = admitted({
   context: {
     origin: { kind: "automation", automation_id: "auto-1", occurrence_id: "o1" },
     task: null
   },
-  originAutomation: {
-    automation_id: "auto-1",
-    purpose: "user_automation",
-    handler: null,
-    owner_space_id: null
-  }
+  originOwner: { kind: "automation", key: "auto-1", purpose: "user_automation", handler: null }
 })
 const automationInOwnChat = admitted({
   context: {
     origin: { kind: "automation", automation_id: "auto-1", occurrence_id: "o1" },
     task: null
   },
-  originAutomation: {
-    automation_id: "auto-1",
-    purpose: "user_automation",
-    handler: null,
-    owner_space_id: null
-  },
+  originOwner: { kind: "automation", key: "auto-1", purpose: "user_automation", handler: null },
   policy: { ...policy, space: null }
 })
 const taskWorker = admitted({
