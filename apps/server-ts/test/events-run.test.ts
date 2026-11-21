@@ -134,17 +134,16 @@ const setup = Effect.gen(function* () {
         cursor: itemIds.join(","),
         events: itemIds.map(mail)
       })
-      if (itemIds.length > 1) {
-        const fresh = sql`claimed_at IS NULL`
-        yield* sql`UPDATE automation_event_queue SET context = json_set(context, '$.event_batch',
-            json_object('omitted', 0, 'events', (SELECT json_group_array(json(json_set(json_remove(
-              json_extract(waiting.context, '$.trigger_context_snapshot'), '$.source'),
-              '$.run_only_if', json_extract(waiting.context, '$.run_only_if'))))
-              FROM automation_event_queue AS waiting WHERE ${fresh})))
-          WHERE id = (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
-        yield* sql`DELETE FROM automation_event_queue
-          WHERE ${fresh} AND id <> (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
-      }
+      const fresh = sql`claimed_at IS NULL AND source = 'event'
+        AND task_id = ${eventsHandler.spec.automationId}`
+      yield* sql`UPDATE automation_event_queue SET context = json_set(context, '$.event_batch',
+          json_object('omitted', 0, 'events', (SELECT json_group_array(json(json_set(json_remove(
+            json_extract(waiting.context, '$.trigger_context_snapshot'), '$.source'),
+            '$.run_only_if', json_extract(waiting.context, '$.run_only_if'))))
+            FROM automation_event_queue AS waiting WHERE ${fresh})))
+        WHERE id = (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
+      yield* sql`DELETE FROM automation_event_queue
+        WHERE ${fresh} AND id <> (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
       const lease = (yield* claimAll(`events-${itemIds.join("-")}`)).find(
         (claimed) => claimed.payload.automationId === eventsHandler.spec.automationId
       )
@@ -175,7 +174,7 @@ const setup = Effect.gen(function* () {
       SELECT json_extract(message_json, '$.role') AS role,
         json_extract(message_json, '$.content') AS content
       FROM session_messages WHERE session_id = ${sessionId} ORDER BY seq`
-  return { sql, queue, spaces, arrive, runEvents, settle, drain, postedIn }
+  return { sql, queue, spaces, triggers, arrive, runEvents, settle, drain, postedIn }
 })
 
 it("post_message posts in the named Space, and a retried job posts nothing twice", async () => {
@@ -371,6 +370,49 @@ it("Events keeps listening after runs that fail one after another", async () => 
           WHERE task_id = ${eventsHandler.spec.automationId}`
       ).toEqual([{ enabled: 1, paused_at: null }])
       expect(yield* sql`SELECT 1 FROM entity_events WHERE event = 'paused'`).toEqual([])
+    })
+  )
+})
+
+it("a task change that wakes Events gives no item id, so a post cites only the mail", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, triggers, arrive, runEvents, drain } = yield* setup
+      yield* (yield* AutomationCatalog).update(
+        eventsHandler.spec.automationId,
+        {
+          triggers: [
+            { type: "event", event_type: "email.received", run_only_if: "A mail." },
+            { type: "event", event_type: "task.changed", run_only_if: "A Task change." }
+          ]
+        },
+        "owner"
+      )
+      yield* triggers.publishSourceEvents({
+        eventType: "task.changed",
+        source: "made-up",
+        cursor: "42",
+        events: [
+          {
+            eventType: "task.changed",
+            eventKey: "42",
+            producedBy: null,
+            chainDepth: 0,
+            context: { task: { change: "changed" } }
+          }
+        ]
+      })
+      const lease = yield* arrive("mail-1")
+      expect(lease.payload.prefilter?.events).toHaveLength(2)
+      expect(lease.payload).toMatchObject({ handler: "events", itemIds: ["mail-1"] })
+      yield* runEvents(lease, [
+        yield* posting({ text: "Two things.", task: { title: "Check", brief: "Check both." } })
+      ])
+      yield* drain
+      expect(
+        yield* sql`SELECT json_extract(source, '$.item_id') AS item_id FROM space_task_sources
+          WHERE json_extract(source, '$.kind') = 'connection_item'`
+      ).toEqual([{ item_id: "mail-1" }])
     })
   )
 })

@@ -1,3 +1,4 @@
+import { ITEM_EVENTS } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { ChatMessage } from "../../chat/message.js"
 import type { AutomationQueue } from "../../persistence/automations/queue.js"
@@ -11,7 +12,6 @@ import {
   PostMessageInputSchema,
   withPostMessageTool
 } from "../post-message-tool.js"
-import { ITEM_EVENT_TYPES } from "../producers/connection-item.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler } from "../system-handler.js"
 
@@ -67,7 +67,7 @@ export const eventsHandler: SystemAutomationHandler<"events"> = {
       "Post in the right Space when a mail, a notification or a calendar change matters to you.",
     prompt: PROMPTS.events,
     handler: "events",
-    triggers: Object.values(ITEM_EVENT_TYPES).map((event_type) => ({
+    triggers: ITEM_EVENTS.map((event_type) => ({
       type: "event" as const,
       event_type,
       run_only_if: DEFAULT_RULE

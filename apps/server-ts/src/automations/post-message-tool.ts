@@ -3,7 +3,13 @@ import { Schema } from "effect"
 import { TOOL_DISPLAY_TITLE } from "../execution/tool-call-presentation.js"
 import { mergeToolsets } from "../execution/toolset-middleware.js"
 import type { HandlerToolName } from "../persistence/automations/queue.js"
-import { PostTaskSchema, PostTextSchema } from "../persistence/posts/model.js"
+import {
+  POST_TASK_BRIEF_MAX,
+  POST_TASK_TITLE_MAX,
+  POST_TEXT_MAX,
+  PostTaskSchema,
+  PostTextSchema
+} from "../persistence/posts/model.js"
 
 export const POST_MESSAGE_TOOL = "post_message" satisfies HandlerToolName
 
@@ -11,14 +17,16 @@ export const PostMessageInputSchema = Schema.Struct({
   space_id: Schema.NonEmptyString.annotate({
     description: "The exact Space id from space_list."
   }).pipe(Schema.optionalKey),
-  text: PostTextSchema.pipe(Schema.annotateEncoded({ description: "The message, in Markdown." })),
+  text: Schema.String.check(Schema.isMaxLength(POST_TEXT_MAX))
+    .annotate({ description: "The message, in Markdown." })
+    .pipe(Schema.decodeTo(PostTextSchema)),
   task: Schema.Struct({
-    title: PostTaskSchema.fields.title.pipe(
-      Schema.annotateEncoded({ description: "A short name for the work." })
-    ),
-    brief: PostTaskSchema.fields.brief.pipe(
-      Schema.annotateEncoded({ description: "What Arden should do, and what it needs for it." })
-    )
+    title: Schema.String.check(Schema.isMaxLength(POST_TASK_TITLE_MAX))
+      .annotate({ description: "A short name for the work." })
+      .pipe(Schema.decodeTo(PostTaskSchema.fields.title)),
+    brief: Schema.String.check(Schema.isMaxLength(POST_TASK_BRIEF_MAX))
+      .annotate({ description: "What Arden should do, and what it needs for it." })
+      .pipe(Schema.decodeTo(PostTaskSchema.fields.brief))
   })
     .annotate({ description: "Work Arden can do about it." })
     .pipe(Schema.optionalKey)

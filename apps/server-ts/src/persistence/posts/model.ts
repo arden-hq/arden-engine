@@ -6,9 +6,9 @@ import {
 } from "@arden-hq/protocol/effect/spaces/work"
 import { Schema } from "effect"
 
-const POST_TEXT_MAX = 1_500
-const POST_TASK_TITLE_MAX = 200
-const POST_TASK_BRIEF_MAX = 2_000
+export const POST_TEXT_MAX = 1_500
+export const POST_TASK_TITLE_MAX = 200
+export const POST_TASK_BRIEF_MAX = 2_000
 
 export const PostTaskSchema = Schema.Struct({
   title: NewTaskInputSchema.fields.text.check(Schema.isMaxLength(POST_TASK_TITLE_MAX)),

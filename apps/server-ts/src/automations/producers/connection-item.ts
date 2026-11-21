@@ -4,21 +4,21 @@ import type {
 } from "../../persistence/automations/model.js"
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
 import type { ConnectionSource } from "../../persistence/connections/store.js"
-import type { AutomationEventType } from "@arden-hq/protocol/automations"
+import type { ItemEventType } from "@arden-hq/protocol/automations"
 import { gmailThreadTarget, hasReadyGmail, SENT_BY_OWNER } from "../../connections/items/gmail.js"
 import { calendarEventTarget } from "../../google/calendar-client.js"
 import { githubItemUrl } from "../../persistence/connections/item-url.js"
 import type { AutomationEventProducer } from "../event-producer.js"
 
 /**
- * The event each stored item's source publishes. A new source adds its entry here; an Automation
- * that listens to every arrival (Events) then hears it with no change of its own.
+ * The event each stored item's source publishes. A new source adds its entry here and its event to
+ * `ITEM_EVENTS`; Events, which listens to every arrival, then hears it with no change of its own.
  */
 export const ITEM_EVENT_TYPES = {
   gmail: "email.received",
   github: "github.received",
   calendar: "calendar.changed"
-} as const satisfies Record<ConnectionSource, AutomationEventType>
+} as const satisfies Record<ConnectionSource, ItemEventType>
 
 export const connectionItemEvent = (
   row: ConnectionItemFeedRow
