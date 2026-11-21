@@ -1,10 +1,8 @@
-import { Effect, Option, Schema } from "effect"
+import { Effect } from "effect"
 import type { AutomationQueue, HandlerToolName } from "../automations/queue.js"
 import type { AutomationStoreDeps } from "./automation-rows.js"
 import { storeError } from "./automation-rows.js"
-import { PersistedToolResultSchema } from "./tool-result-storage.js"
-
-const decodeResult = Schema.decodeUnknownOption(Schema.fromJsonString(PersistedToolResultSchema))
+import { loadFullResult } from "./tool-result-storage.js"
 
 export const makeHandlerToolResults = ({
   writer
@@ -32,10 +30,20 @@ export const makeHandlerToolResults = ({
     )
     const row = rows[0]
     if (row === undefined) return undefined
-    const result = decodeResult(row.result_json)
-    if (Option.isNone(result))
-      return yield* storeError("observe_chat_run", "corrupt", "The run's stored result is corrupt")
-    return result.value.content
+    const result = yield* writer
+      .withToolResults(loadFullResult(row.result_json))
+      .pipe(
+        Effect.mapError((cause) =>
+          storeError(
+            "observe_chat_run",
+            cause.reason === "corrupt" ? "corrupt" : "storage",
+            cause.message,
+            undefined,
+            cause
+          )
+        )
+      )
+    return result.content
   })
   return { handlerToolResult }
 }

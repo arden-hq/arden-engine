@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest"
 
 import { ConversationArtifacts } from "../src/artifacts/conversation.js"
 import { ManagedOutputs } from "../src/artifacts/managed-output/managed-output.js"
+import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { makeToolResultObjects } from "../src/persistence/managed-output/tool-result-objects.js"
 import { ToolResultObjects } from "../src/persistence/managed-output/tool-result-objects.js"
@@ -642,5 +643,28 @@ describe("tool result storage", () => {
       expect(after.readers).toEqual(legacy.readers)
       expect(await filesUnder(path.join(rig.outputs, "objects"))).toHaveLength(1)
     })
+  })
+})
+
+it("a handler reads its whole result back from a slim row", async () => {
+  const body = { paragraphs: [[{ text: "Ünïcode 🙂 ".repeat(1_200), source_id: null }]] }
+  const content = JSON.stringify(body)
+  await withRig(async (rig) => {
+    const out = await Effect.runPromise(
+      Effect.gen(function* () {
+        const run = yield* startRun
+        const letter = { ...identityOf(run, "letter"), toolName: "publish_home_letter" }
+        yield* settle(letter, { content, preview: "Home letter ready", data: { body } })
+        return {
+          slim: JSON.parse(yield* storedRow("letter")).stored_result !== undefined,
+          read: yield* (yield* AutomationQueue).handlerToolResult({
+            runId: run.runId,
+            tool: "publish_home_letter"
+          })
+        }
+      }).pipe(Effect.provide(storage(rig, { slim: true })))
+    )
+    expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(16 * 1024)
+    expect(out).toEqual({ slim: true, read: content })
   })
 })
