@@ -8,7 +8,7 @@ export const makeSessionOnboarding = ({
 }: Pick<PersistenceDeps, "writer">): Pick<SessionStore["Service"], "finishOnboarding"> => ({
   finishOnboarding: Effect.fn("SqliteSessionStore.finishOnboarding")(function* (sessionId: string) {
     const updated = yield* writer
-      .run(
+      .transact(
         writer.sql<{ readonly session_id: string }>`
           UPDATE sessions SET metadata = json_remove(metadata, '$.onboarding')
           WHERE session_id = ${sessionId} AND json_type(metadata, '$.onboarding') IS NOT NULL

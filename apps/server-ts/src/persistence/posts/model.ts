@@ -26,7 +26,9 @@ export const PostDeliveryPayloadSchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,
   messageId: Schema.NonEmptyString,
   text: PostTextSchema,
-  replyToMessageId: Schema.optionalKey(Schema.NonEmptyString),
+  replyTo: Schema.optionalKey(
+    Schema.Struct({ messageId: Schema.NonEmptyString, deliveryId: Schema.NonEmptyString })
+  ),
   task: Schema.optionalKey(
     Schema.Struct({
       ...PostTaskSchema.fields,

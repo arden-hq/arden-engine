@@ -27,6 +27,7 @@ import { makeWorkEvents } from "./work-events.js"
 interface ThreadHit {
   readonly session_id: string
   readonly message_id: string
+  readonly delivery_id: string
 }
 
 interface DeliveryRow {
@@ -78,13 +79,11 @@ export const makePostStore = ({
           WHERE message.session_id = ${sql(mapped)}.session_id
             AND message.message_id = ${sql(mapped)}.message_id)
       OR EXISTS (SELECT 1 FROM automation_deliveries AS earlier
-          WHERE earlier.status = 'pending' AND json_extract(earlier.payload, '$.kind') = 'post'
-            AND json_extract(earlier.payload, '$.messageId') = ${sql(mapped)}.message_id
-            AND json_extract(earlier.payload, '$.sessionId') = ${sql(mapped)}.session_id)))`
+          WHERE earlier.delivery_id = ${sql(mapped)}.delivery_id AND earlier.status = 'pending')))`
 
   const threadHit = (threads: string) =>
     sql<ThreadHit>`
-      SELECT mapped.session_id, mapped.message_id
+      SELECT mapped.session_id, mapped.message_id, mapped.delivery_id
       FROM event_threads AS mapped
       JOIN json_each(${threads}) AS thread
         ON mapped.source = json_extract(thread.value, '$.source')
@@ -136,13 +135,16 @@ export const makePostStore = ({
           const place =
             hit === undefined ? yield* spaceChat(input.spaceId) : { sessionId: hit.session_id }
           yield* sql`
-            INSERT INTO event_threads (source, account, thread_key, session_id, message_id, updated_at)
+            INSERT INTO event_threads (source, account, thread_key, session_id, message_id,
+              delivery_id, updated_at)
             SELECT json_extract(thread.value, '$.source'), json_extract(thread.value, '$.account'),
-              json_extract(thread.value, '$.thread_key'), ${place.sessionId}, ${messageId}, ${now}
+              json_extract(thread.value, '$.thread_key'), ${place.sessionId}, ${messageId},
+              ${deliveryId}, ${now}
             FROM json_each(${threads}) AS thread
             WHERE true
             ON CONFLICT (source, account, thread_key) DO UPDATE SET
               session_id = excluded.session_id, message_id = excluded.message_id,
+              delivery_id = excluded.delivery_id,
               updated_at = excluded.updated_at
             WHERE NOT ${liveMapping("event_threads")}`
           const payload: PostDeliveryPayload = {
@@ -151,7 +153,9 @@ export const makePostStore = ({
             sessionId: place.sessionId,
             messageId,
             text: input.text,
-            ...(hit === undefined ? {} : { replyToMessageId: hit.message_id }),
+            ...(hit === undefined
+              ? {}
+              : { replyTo: { messageId: hit.message_id, deliveryId: hit.delivery_id } }),
             ...(input.task === undefined
               ? {}
               : { task: { ...input.task, itemIds: [...input.itemIds] } })
@@ -185,9 +189,8 @@ export const makePostStore = ({
         AND (delivery.next_attempt_at IS NULL OR delivery.next_attempt_at <= ${now})
         AND (chat.session_id IS NULL OR NOT ${chatHasActiveWork(sql, sql`chat`)})
         AND NOT EXISTS (SELECT 1 FROM automation_deliveries AS earlier
-          WHERE earlier.status = 'pending' AND json_extract(earlier.payload, '$.kind') = 'post'
-            AND json_extract(earlier.payload, '$.messageId') =
-              json_extract(delivery.payload, '$.replyToMessageId'))
+          WHERE earlier.delivery_id = json_extract(delivery.payload, '$.replyTo.deliveryId')
+            AND earlier.status = 'pending')
       ORDER BY delivery.created_at, delivery.delivery_id LIMIT 32`.pipe(
       Effect.mapError(storage("Could not read pending posts"))
     )
@@ -262,11 +265,11 @@ export const makePostStore = ({
     }
     if (chat.busy === 1) return false
     const quote =
-      payload.replyToMessageId === undefined
+      payload.replyTo === undefined
         ? undefined
         : yield* messageQuote(sql, {
             sessionId: payload.sessionId,
-            messageId: payload.replyToMessageId
+            messageId: payload.replyTo.messageId
           })
     const message: StoredMessageEnvelope = {
       message_id: payload.messageId,

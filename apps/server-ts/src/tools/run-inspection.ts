@@ -1,3 +1,4 @@
+import { seesEveryChat } from "./session-browse-scope.js"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
@@ -72,7 +73,7 @@ export const runInspectTool = (services: {
       if (
         requester === null ||
         owner === null ||
-        (requester.spaceId !== null && requester.spaceId !== owner.spaceId)
+        (!seesEveryChat(requester, ctx.run) && requester.spaceId !== owner.spaceId)
       )
         throw new ToolExecutionError("Run is not visible from this chat", { retryable: false })
       const reference =

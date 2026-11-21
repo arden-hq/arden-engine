@@ -66,7 +66,8 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
     const transcript = triageTranscript(session.messages)
     if (transcript.length === 0) return NO_TRIAGE
 
-    const candidates = (yield* dependencies.spaces.list())
+    const spaces = yield* dependencies.spaces.list()
+    const candidates = spaces
       .filter((space) => space.kind !== "main")
       .map((space): SessionTriageTarget => ({ space_id: space.space_id, title: space.name }))
     const output = yield* dependencies.completion.runTool({
@@ -83,7 +84,11 @@ export const makeSessionTriage = (dependencies: SessionTriageDependencies) =>
       },
       maxOutputTokens: 256
     })
-    const decision = yield* validatedTriageDecision(output, candidates)
+    const validated = yield* validatedTriageDecision(output, candidates)
+    const decision =
+      validated.decision === "create" && nameTaken(spaces, validated.new_title)
+        ? { ...NO_TRIAGE, rationale: validated.rationale }
+        : validated
     const checked = {
       decision,
       checked_at: DateTime.formatIso(yield* DateTime.now),
@@ -186,6 +191,8 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
       return { space_id: target.space_id, title: target.title, created: false }
     }
     case "create": {
+      if (nameTaken(yield* dependencies.spaces.list(), decision.new_title))
+        return yield* staleSuggestion(`A Space named ${decision.new_title} already exists`)
       const space = yield* createSpaceWithPage(dependencies, { name: decision.new_title })
       yield* Effect.gen(function* () {
         yield* requireMoved(yield* dependencies.store.moveToSpace(sessionId, space.space_id))
@@ -211,6 +218,11 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
       return yield* staleSuggestion()
   }
 })
+
+const nameTaken = (
+  spaces: ReadonlyArray<{ readonly name: string }>,
+  title: string | null
+): boolean => spaces.some((space) => space.name.toLowerCase() === title?.toLowerCase())
 
 const requireMoved = (moved: string | undefined) =>
   moved !== undefined

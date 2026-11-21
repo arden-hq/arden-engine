@@ -1,4 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { errorMessage } from "@arden-hq/std/errors"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -14,7 +15,11 @@ import { looseChats } from "../src/mobile/spaces.js"
 import { makeCaptureRouter } from "../src/routing/capture.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { SummaryStore } from "../src/persistence/summaries/store.js"
-import { installCapture } from "../src/persistence/sqlite/tells/capture.js"
+import { journalRecordsSql } from "@arden-hq/journal/effect"
+import { SESSION_LIFECYCLE_STREAM_ID } from "../src/persistence/sessions/events.js"
+import { RunQueries } from "../src/persistence/runs/queries.js"
+import { runInspectTool } from "../src/tools/run-inspection.js"
+import { runPolicyRevoked } from "../src/persistence/sqlite/run-policy.js"
 import { serverRunContext } from "./kit.js"
 import { deriveAuthority, type RunAuthority } from "../src/execution/authority.js"
 import { decide } from "../src/execution/decide.js"
@@ -366,21 +371,125 @@ it("an unmatched capture is kept in its own chat when Main is the only Space", a
   )
 })
 
-it("ending Getting started is a session change clients hear about", async () => {
+it("ending Getting started tells clients the chat changed", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sessions = yield* SessionStore
       const sql = yield* SqlClient.SqlClient
       const chat = yield* sessions.create({ origin: "onboarding" })
-      yield* installCapture(sql)
-      yield* sql`UPDATE sessions SET metadata = json_set(metadata, '$.unwatched', 1)
-        WHERE session_id = ${chat.sessionId}`
-      expect(yield* sql`SELECT kind FROM temp.told_touches`).toEqual([])
-      yield* sql`UPDATE sessions SET metadata = json_remove(metadata, '$.onboarding')
-        WHERE session_id = ${chat.sessionId}`
-      expect(yield* sql`SELECT kind, id FROM temp.told_touches`).toEqual([
-        { kind: "session", id: chat.sessionId }
-      ])
+      const told = sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM ${journalRecordsSql(sql)} AS record
+        WHERE record.stream_id = ${SESSION_LIFECYCLE_STREAM_ID}
+          AND record.event_type = 'entity_changed'
+          AND json_extract(record.data_json, '$.kind') = 'session'
+          AND json_extract(record.data_json, '$.id') = ${chat.sessionId}`
+      const before = (yield* told)[0]?.count ?? 0
+      expect(yield* sessions.finishOnboarding(chat.sessionId)).toBe(true)
+      expect((yield* told)[0]?.count).toBe(before + 1)
+    })
+  )
+})
+
+it("run_inspect from a Main chat reaches a chat on another Space", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const spaces = yield* SpaceStore
+      const queries = yield* SessionQueries
+      const work = yield* spaces.create({ name: "Work" })
+      const there = yield* sessions.create({ spaceId: work.space_id })
+      const here = yield* sessions.create({})
+      const ref = (yield* queries.loadHistoryHeader(there.sessionId))?.publicRef ?? ""
+      const tool = runInspectTool({ runs: yield* RunQueries, sessions: queries })
+      const refusal = yield* Effect.promise(async () => {
+        try {
+          await tool.execute(
+            { session_ref: ref },
+            {
+              toolCallId: "call",
+              signal: new AbortController().signal,
+              run: serverRunContext({
+                sessionId: here.sessionId,
+                runId: "run",
+                authority: person(here.sessionId)
+              }),
+              messages: []
+            }
+          )
+          return "ran"
+        } catch (error) {
+          return errorMessage(error)
+        }
+      })
+      expect(refusal).toBe("No retained run for this chat")
+    })
+  )
+})
+
+it("triage never proposes a new Space under a name a Space already has", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore
+      const queries = yield* SessionQueries
+      const spaces = yield* SpaceStore
+      const sql = yield* SqlClient.SqlClient
+      const chat = yield* sessions.create({ name: "Notes" })
+      yield* appendMessagesInTransaction(
+        sql,
+        chat.sessionId,
+        [
+          { message_id: "ask", role: ROLE.user, content: "Hi", created_at: AT },
+          { message_id: "answer", role: ROLE.assistant, content: "Hello", created_at: AT }
+        ],
+        AT,
+        "post",
+        "ask"
+      )
+      const decision = yield* makeSessionTriage({
+        completion: {
+          runTool: <S extends Schema.ConstraintDecoder<unknown>>(request: {
+            readonly result: { readonly schema: S }
+          }) =>
+            Schema.decodeUnknownEffect(request.result.schema)({
+              decision: "create",
+              target: null,
+              new_title: "main",
+              confident: true,
+              rationale: "General"
+            }).pipe(Effect.orDie)
+        },
+        sessions: queries,
+        spaces,
+        wiki: { ensureSpacePage: () => Effect.die("no Memory in this test") },
+        store: sessions
+      })(chat.sessionId)
+      expect(decision).toMatchObject({ decision: "none" })
+      expect((yield* spaces.list()).map((space) => space.name)).toEqual(["Main"])
+    })
+  )
+})
+
+it("moving a run's chat from no Space into Main keeps the run; into another Space revokes it", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const spaces = yield* SpaceStore
+      const main = yield* mainSpace
+      const work = yield* spaces.create({ name: "Work" })
+      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity)
+        VALUES ('chat', 'chat', ${AT}, ${AT})`
+      const metadata = JSON.stringify({
+        run_policy: { authority_session_id: "chat", space: null }
+      })
+      const revoked = (spaceId: string) =>
+        Effect.gen(function* () {
+          yield* sql`UPDATE sessions SET space_id = ${spaceId} WHERE session_id = 'chat'`
+          const rows = yield* sql<{ readonly revoked: number }>`
+            SELECT ${runPolicyRevoked(sql, sql`json(${metadata})`)} AS revoked`
+          return rows[0]?.revoked
+        })
+      expect(yield* revoked(main.space_id)).toBe(0)
+      expect(yield* revoked(work.space_id)).toBe(1)
     })
   )
 })
