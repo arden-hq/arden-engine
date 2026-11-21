@@ -332,11 +332,11 @@ export const ownerJson = (
   WHEN review_space.space_id IS NOT NULL THEN json_object(
     'kind', 'space_review', 'key', ${key}, 'spaceId', review_space.space_id,
     'name', ${reviewNameSql(sql, "review_space")},
-    'settings', (SELECT json_object('model', set_review.model,
+    'settings', json((SELECT json_object('model', set_review.model,
         'contextMode', COALESCE(set_review.context_mode, 'fresh'),
         'cooldownMinutes', set_review.cooldown_minutes)
       FROM (SELECT 1) LEFT JOIN space_review_settings AS set_review
-        ON set_review.space_id = review_space.space_id),
+        ON set_review.space_id = review_space.space_id)),
     'chatId', (SELECT review_chat.session_id FROM space_review_chats AS review_chat
       WHERE review_chat.space_id = review_space.space_id),
     'mayRun', ${jsonBool(sql, reviewMayRunSql(sql, "review_space"))})
