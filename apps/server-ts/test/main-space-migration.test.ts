@@ -129,3 +129,23 @@ it("M1 moves every owner chat into Main with its chat Tasks, their records and w
   ])
   database.close()
 })
+
+it("M1 keeps every Task key that was already unique and suffixes only the repeats", () => {
+  const database = migratedTo(183, (database) => {
+    database.exec(`INSERT INTO sessions (session_id, public_ref, started_at, last_activity)
+      VALUES ('a', 'a', '${AT}', '${AT}'), ('b', 'b', '${AT}', '${AT}'), ('c', 'c', '${AT}', '${AT}')`)
+    database.exec(`INSERT INTO space_tasks (item_id, space_id, home_session_id, stable_key, text,
+        status, owner, runs_in, created_at, updated_at)
+      VALUES ('first', NULL, 'a', 'reply', 'Reply', 'open', 'worker', 'chat', '${AT}', '${AT}'),
+        ('second', NULL, 'b', 'reply', 'Reply', 'open', 'worker', 'chat', '${AT}', '${AT}'),
+        ('third', NULL, 'c', 'reply-2', 'Reply', 'open', 'worker', 'chat', '${AT}', '${AT}')`)
+  })
+  expect(
+    database.prepare("SELECT item_id, stable_key FROM space_tasks ORDER BY item_id").all()
+  ).toEqual([
+    { item_id: "first", stable_key: "reply" },
+    { item_id: "second", stable_key: "reply-3" },
+    { item_id: "third", stable_key: "reply-2" }
+  ])
+  database.close()
+})

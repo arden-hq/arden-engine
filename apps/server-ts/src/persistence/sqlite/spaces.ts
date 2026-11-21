@@ -92,7 +92,13 @@ export const makeSpaceStore = ({
               storeError("create", "storage", "Could not find an existing Space", undefined, cause)
             )
           )
-          if (existing[0] !== undefined) return yield* decodeRow(existing[0], "create")
+          if (existing[0] !== undefined)
+            return yield* storeError(
+              "create",
+              "conflict",
+              "An active Space already has that name. Pick another.",
+              existing[0].space_id
+            )
 
           const spaceId = yield* nextId
           const recordVersions = yield* captureMutationVersions(sql, {

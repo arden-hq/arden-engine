@@ -191,9 +191,12 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
       return { space_id: target.space_id, title: target.title, created: false }
     }
     case "create": {
-      if (nameTaken(yield* dependencies.spaces.list(), decision.new_title))
-        return yield* staleSuggestion(`A Space named ${decision.new_title} already exists`)
-      const space = yield* createSpaceWithPage(dependencies, { name: decision.new_title })
+      const space = yield* createSpaceWithPage(dependencies, { name: decision.new_title }).pipe(
+        Effect.catchIf(
+          (error) => error._tag === "SpaceStoreError" && error.reason === "conflict",
+          () => Effect.fail(staleSuggestion(`A Space named ${decision.new_title} already exists`))
+        )
+      )
       yield* Effect.gen(function* () {
         yield* requireMoved(yield* dependencies.store.moveToSpace(sessionId, space.space_id))
         yield* dependencies.store.adoptSpaceConversation(space.space_id, sessionId)

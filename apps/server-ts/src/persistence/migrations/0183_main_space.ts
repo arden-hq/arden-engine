@@ -89,16 +89,25 @@ const moveOwnerChats = (database: DatabaseSync, mainId: string): void => {
       ORDER BY created_at, item_id`
     )
     .all(mainId)
-  const taken = new Set<string>()
-  const moveTask = database.prepare(
-    "UPDATE space_tasks SET space_id = ?, stable_key = ? WHERE item_id = ?"
-  )
+  const taken = new Set(tasks.map((task) => String(task.stable_key)))
+  const kept = new Set<string>()
+  const rekey = database.prepare("UPDATE space_tasks SET stable_key = ? WHERE item_id = ?")
   for (const task of tasks) {
-    const key = freeKey(String(task.stable_key), taken)
-    taken.add(key)
-    moveTask.run(mainId, key, String(task.item_id))
+    const key = String(task.stable_key)
+    if (!kept.has(key)) {
+      kept.add(key)
+      continue
+    }
+    const free = freeKey(key, taken)
+    taken.add(free)
+    rekey.run(free, String(task.item_id))
   }
   const moved = JSON.stringify(tasks.map((task) => String(task.item_id)))
+  database
+    .prepare(
+      "UPDATE space_tasks SET space_id = ? WHERE item_id IN (SELECT value FROM json_each(?))"
+    )
+    .run(mainId, moved)
   for (const table of ["space_task_events", "space_task_comments", "space_task_attachments"])
     database
       .prepare(
