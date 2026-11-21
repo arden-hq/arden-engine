@@ -208,7 +208,8 @@ export class ChatWriteError extends Schema.TaggedError<ChatWriteError>()("ChatWr
     "reorder_queued",
     "cancel_queued",
     "due_queue_heads",
-    "fail_queued"
+    "fail_queued",
+    "post"
   ] as const),
   reason: Schema.Literals(["invalid", "not_found", "corrupt", "storage", "terminal"] as const),
   message: Schema.String,

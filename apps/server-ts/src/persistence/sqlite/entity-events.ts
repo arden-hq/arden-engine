@@ -10,11 +10,14 @@ import { entityPlaces, type ChatPlace, type Place } from "./run-destination.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { failedRunStatusList, restartCutRunSql } from "./status-sets.js"
 
+const ENTITY_EVENTS = ["done", "paused", "failed", "posted"] as const
+export type EntityEventName = (typeof ENTITY_EVENTS)[number]
+
 interface EntityEvent {
   readonly key: string
   readonly entity: "task" | "automation"
   readonly entityId: string
-  readonly event: "done" | "paused" | "failed"
+  readonly event: EntityEventName
   readonly runId: string | null
   readonly text: string
   readonly places: ReadonlyArray<Place>
@@ -318,5 +321,35 @@ export const recordAutomationEvent = Effect.fn("EntityEvents.automation")(functi
         event: options.event,
         occurredAt: at
       })
+  )
+})
+
+export const recordAutomationPosted = Effect.fn("EntityEvents.automationPosted")(function* (
+  sql: SqlClient.SqlClient,
+  options: {
+    readonly sessionEvents: SessionLifecycleEvents["Service"]
+    readonly automationId: string
+    readonly key: string
+    readonly sessionId: string
+    readonly text: string
+    readonly occurredAt: string
+  }
+) {
+  yield* recordEntityEvent(
+    sql,
+    options.sessionEvents,
+    {
+      key: options.key,
+      entity: "automation",
+      entityId: options.automationId,
+      event: "posted",
+      runId: null,
+      text: options.text,
+      places: [{ sessionId: options.sessionId, kind: "own", row: undefined }],
+      occurredAt: options.occurredAt,
+      ownSession: options.sessionId,
+      shown: true
+    },
+    () => Effect.void
   )
 })

@@ -159,7 +159,7 @@ describe("relay push", () => {
     expect(await world.reconcile()).toEqual([])
   })
 
-  it("pushes each record the rule lets through once: finished chats and Automations that are unread, and failures; never the model-only, read, paused, Task-done or chatless", async () => {
+  it("pushes each record the rule lets through once: finished chats and Automations that are unread, failures and posts; never the model-only, read, paused, Task-done or chatless", async () => {
     const world = makeWorld({ seeded: true })
     world.notices = [
       notice("unread", {}),
@@ -176,11 +176,12 @@ describe("relay push", () => {
         purpose: null
       }),
       notice("task-done", { record: "entity", key: "task-done:4", status: "done", purpose: null }),
+      notice("posted", { record: "entity", key: "post:5", status: "posted", purpose: null }),
       notice("worker", { purpose: "task_execution" }),
       notice("nowhere", { status: "failed", chatSessionId: null })
     ]
-    expect(await world.reconcile()).toEqual(["ending:unread", "ending:failed"])
-    expect(world.bodies).toEqual(["Sent the summary", "Sent the summary"])
+    expect(await world.reconcile()).toEqual(["ending:unread", "ending:failed", "post:5"])
+    expect(world.bodies).toEqual(["Sent the summary", "Sent the summary", "Sent the summary"])
     expect(await world.reconcile()).toEqual([])
   })
 

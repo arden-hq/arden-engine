@@ -417,6 +417,7 @@ export const makeWorkCaptureSql = (options: {
     create,
     createFromChat,
     createInChat,
-    createInTransaction
+    createInTransaction,
+    freeKey
   }
 }

@@ -125,6 +125,7 @@ export interface PushState {
 const phoneTells = (notice: Notice): notice is Notice & { readonly chatSessionId: string } =>
   notice.chatSessionId !== null &&
   (notice.status === "failed" ||
+    notice.status === "posted" ||
     (notice.record === "ending" &&
       notice.status === "finished" &&
       (notice.purpose === "chat" || isUserAutomationPurpose(notice.purpose))))

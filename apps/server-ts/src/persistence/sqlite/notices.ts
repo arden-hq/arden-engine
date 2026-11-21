@@ -5,6 +5,7 @@ import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { failureNeedsOwner } from "./run-attention.js"
 import type { EndingStatus, PlaceKind, Purpose } from "../runs/ending.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
+import type { EntityEventName } from "./entity-events.js"
 
 export interface Notice {
   readonly key: string
@@ -129,7 +130,7 @@ interface EntityRow {
   readonly key: string
   readonly entity: "task" | "automation"
   readonly entity_id: string
-  readonly event: "done" | "paused" | "failed"
+  readonly event: EntityEventName
   readonly text: string
   readonly place: string | null
   readonly occurred_at: string
@@ -137,23 +138,30 @@ interface EntityRow {
   readonly place_unread: number | null
   readonly automation_name: string | null
   readonly task_name: string | null
+  readonly place_space_name: string | null
 }
 
 const entityRows = (sql: SqlClient.SqlClient, filter: Statement.Fragment) =>
   sql<EntityRow>`SELECT event.key, event.entity, event.entity_id, event.event, event.text,
       event.place, event.occurred_at, event.shown, placed.has_unread AS place_unread,
       (SELECT name FROM scheduled_tasks WHERE task_id = event.entity_id) AS automation_name,
-      (SELECT text FROM space_tasks WHERE item_id = event.entity_id) AS task_name
+      (SELECT text FROM space_tasks WHERE item_id = event.entity_id) AS task_name,
+      (SELECT name FROM spaces WHERE space_id = placed.space_id) AS place_space_name
     FROM entity_events AS event
     LEFT JOIN sessions AS placed ON placed.session_id = event.place
     WHERE ${filter}`
+
+const entityTitle = (row: EntityRow): string => {
+  if (row.event === "posted") return row.place_space_name ?? ""
+  return (row.entity === "task" ? row.task_name : row.automation_name) ?? ""
+}
 
 const noticeOfEntity = (row: EntityRow): Notice => ({
   key: row.key,
   record: "entity",
   status: row.event,
   shown: row.shown === 1,
-  title: (row.entity === "task" ? row.task_name : row.automation_name) ?? "",
+  title: entityTitle(row),
   text: row.text,
   chatSessionId: row.place,
   automationId: row.entity === "automation" ? row.entity_id : null,

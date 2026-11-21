@@ -1,24 +1,7 @@
 import { Effect, Schema } from "effect"
 import { ChatWriteError, ChatWriteConflictError, type ChatWriteFailure } from "../chat/store.js"
 
-export type ChatWriteOperation =
-  | "start"
-  | "drain"
-  | "checkpoint"
-  | "finish"
-  | "fail"
-  | "cancel"
-  | "spawn_agent"
-  | "fork_session"
-  | "list_resumable"
-  | "claim_resume"
-  | "interrupt_stranded"
-  | "enqueue"
-  | "list_queued"
-  | "reorder_queued"
-  | "cancel_queued"
-  | "due_queue_heads"
-  | "fail_queued"
+export type ChatWriteOperation = ChatWriteError["operation"]
 
 export const writeError = (
   operation: ChatWriteOperation,
