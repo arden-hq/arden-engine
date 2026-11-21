@@ -4,7 +4,7 @@ import { noticeTier } from "@arden-hq/protocol/notifications"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { urgentEventsHandler } from "../src/automations/handlers/urgent-events.js"
+import { eventsHandler } from "../src/automations/handlers/events.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { PostStore, type PostInput } from "../src/persistence/posts/store.js"
@@ -22,10 +22,10 @@ import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-tran
 import { messageQuote } from "../src/persistence/sqlite/message-quote.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
-const automationId = urgentEventsHandler.spec.automationId
+const automationId = eventsHandler.spec.automationId
 
 const setup = Effect.gen(function* () {
-  yield* (yield* AutomationCatalog).seedSystemAutomations([urgentEventsHandler.spec])
+  yield* (yield* AutomationCatalog).seedSystemAutomations([eventsHandler.spec])
   const sql = yield* SqlClient.SqlClient
   const spaces = yield* SpaceStore
   const listed = yield* spaces.list()

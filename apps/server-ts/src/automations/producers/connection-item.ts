@@ -12,7 +12,7 @@ import type { AutomationEventProducer } from "../event-producer.js"
 
 /**
  * The event each stored item's source publishes. A new source adds its entry here; an Automation
- * that listens to every arrival (Urgent events) then hears it with no change of its own.
+ * that listens to every arrival (Events) then hears it with no change of its own.
  */
 export const ITEM_EVENT_TYPES = {
   gmail: "email.received",

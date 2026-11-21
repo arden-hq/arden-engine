@@ -56,7 +56,7 @@ const sessions: ReadonlyArray<string> = [
     ["auto-once", "user_automation", "NULL", "thread-a"],
     ["auto-repeat", "user_automation", "NULL", "thread-a"],
     ["auto-system", "system", "NULL", "thread-a"],
-    ["auto-urgent", "system", "'urgent_events'", "thread-a"],
+    ["auto-urgent", "system", "'events'", "thread-a"],
     ["auto-archived", "user_automation", "NULL", "archived-thread"],
     ["auto-move", "user_automation", "NULL", "thread-a"]
   ].map(

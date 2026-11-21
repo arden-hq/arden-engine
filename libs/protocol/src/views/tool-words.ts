@@ -175,6 +175,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   },
   forward_message: { verb: "Forwarded a message", icon: "dot", many: "Forwarded messages" },
   report: { verb: "Reported back", icon: "dot" },
+  post_message: { verb: "Posted a message", icon: "dot" },
   run_inspect: { verb: "Checked a run", icon: "dot", many: "Checked runs" },
   run_no_change: { verb: "Reported no change", icon: "dot" },
   workflow_get: { verb: "Checked a workflow", icon: "list", many: "Checked workflows" },

@@ -20,13 +20,19 @@ const renderAutomationJobPrompt = (prompt: AutomationJobPrompt): string => {
   }
 }
 
-export const withTriggerContext = (
+export const withScreenedEvents = (
   job: ClaimedAutomationJobLease,
-  triggerContext: string
-): ClaimedAutomationJobLease => ({
-  ...job,
-  payload: { ...job.payload, prompt: { ...job.payload.prompt, triggerContext } }
-})
+  screened: { readonly triggerContext: string; readonly itemIds: ReadonlyArray<string> }
+): ClaimedAutomationJobLease => {
+  const payload = {
+    ...job.payload,
+    prompt: { ...job.payload.prompt, triggerContext: screened.triggerContext }
+  }
+  return {
+    ...job,
+    payload: payload.handler === "events" ? { ...payload, itemIds: screened.itemIds } : payload
+  }
+}
 
 export const renderAutomationJob = (job: ClaimedAutomationJobLease): AutomationJobLease => ({
   ...job,

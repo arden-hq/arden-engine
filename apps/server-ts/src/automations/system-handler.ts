@@ -18,6 +18,7 @@ import type { HomeStore } from "../persistence/home/store.js"
 import type { SessionStore } from "../persistence/sessions/store.js"
 import type { StoragePolicyStore } from "../persistence/storage/store.js"
 import type { SummaryStore } from "../persistence/summaries/store.js"
+import type { PostStore } from "../persistence/posts/store.js"
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
 import type { ReaderPositions } from "../persistence/reader-position.js"
 import type { Wiki } from "../wiki/service.js"
@@ -37,6 +38,7 @@ export interface SystemHandlerServices {
   readonly retentionPolicy: StoragePolicyStore["Service"]
   readonly sessions: SessionStore["Service"]
   readonly summaries: SummaryStore["Service"]
+  readonly posts: PostStore["Service"]
   readonly linkOfferChat: ReturnType<typeof makeChatOutcomeLinker>
   readonly transcripts: TranscriptQueries["Service"]
   readonly awaitRun: AwaitAutomationRun

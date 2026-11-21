@@ -68,7 +68,11 @@ interface ScreenedSkip {
 
 export type AutomationEventScreenOutcome =
   | { readonly kind: "skip"; readonly skip: StoredAutomationRunSkip }
-  | { readonly kind: "run"; readonly triggerContext: string }
+  | {
+      readonly kind: "run"
+      readonly triggerContext: string
+      readonly itemIds: ReadonlyArray<string>
+    }
 
 interface StoredPrefilterSkip extends AutomationRunSkip {
   readonly prompt: string
@@ -85,7 +89,8 @@ export type AutomationJobHandler =
   | { readonly handler: null; readonly spaceReviewInput?: SpaceReviewInput }
   | { readonly handler: "home_letter"; readonly homeLetterInput?: HomeLetterInput }
   | { readonly handler: HandlerItemOwnerId; readonly handlerItem?: HandlerItem }
-  | { readonly handler: "managed_history_collection" | "chat_summaries" | "urgent_events" }
+  | { readonly handler: "managed_history_collection" | "chat_summaries" }
+  | { readonly handler: "events"; readonly itemIds: ReadonlyArray<string> }
 
 export type AutomationJobPayload = AutomationJobPayloadFields<string> & AutomationJobHandler
 

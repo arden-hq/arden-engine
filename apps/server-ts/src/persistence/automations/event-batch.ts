@@ -19,6 +19,9 @@ export interface EventBatch {
   readonly paused_since?: string
 }
 
+export const eventItemIds = (batch: EventBatch | undefined): ReadonlyArray<string> =>
+  batch === undefined ? [] : [...batch.events, ...batch.overflow].map((event) => event.event_key)
+
 export const KEPT_EVENTS = 50
 
 export const RUNS_ALONE = "space.proposal_review_requested"

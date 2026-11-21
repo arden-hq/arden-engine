@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { urgentEventsHandler } from "../src/automations/handlers/urgent-events.js"
+import { eventsHandler } from "../src/automations/handlers/events.js"
 import { screenEventWake } from "../src/automations/prefilter.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
@@ -14,7 +14,7 @@ it("a screened event wake of an authored Automation records its skip under the c
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const queue = yield* AutomationQueue
-      yield* (yield* AutomationCatalog).seedSystemAutomations([urgentEventsHandler.spec])
+      yield* (yield* AutomationCatalog).seedSystemAutomations([eventsHandler.spec])
       yield* (yield* AutomationTriggers).publishSourceEvents({
         eventType: "email.received",
         source: "made-up",
@@ -38,7 +38,7 @@ it("a screened event wake of an authored Automation records its skip under the c
         ]
       })
       const [lease] = yield* claimAll("screen")
-      if (lease === undefined) throw new Error("Urgent events was not claimed")
+      if (lease === undefined) throw new Error("Events was not claimed")
       const decide = () =>
         Effect.succeed({
           by: "decision_model" as const,
@@ -61,7 +61,7 @@ it("a screened event wake of an authored Automation records its skip under the c
       const attempt = yield* sql<{ readonly status: string }>`
         SELECT status FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
       return {
-        owner: lease.payload.automationId === urgentEventsHandler.spec.automationId,
+        owner: lease.payload.automationId === eventsHandler.spec.automationId,
         skippedKeys: screen.skipped.length,
         kind: recorded.kind,
         events: queued?.events,

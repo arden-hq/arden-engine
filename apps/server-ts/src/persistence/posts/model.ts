@@ -10,13 +10,16 @@ const POST_TEXT_MAX = 1_500
 const POST_TASK_TITLE_MAX = 200
 const POST_TASK_BRIEF_MAX = 2_000
 
-const PostTaskSchema = Schema.Struct({
+export const PostTaskSchema = Schema.Struct({
   title: NewTaskInputSchema.fields.text.check(Schema.isMaxLength(POST_TASK_TITLE_MAX)),
   brief: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(POST_TASK_BRIEF_MAX))
 })
 export type PostTask = typeof PostTaskSchema.Type
 
-const PostTextSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(POST_TEXT_MAX))
+export const PostTextSchema = Schema.Trim.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(POST_TEXT_MAX)
+)
 
 export const POST_WITHDRAWAL_REASONS = [
   "destination_archived",

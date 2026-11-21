@@ -22,7 +22,7 @@ const UNREADY = {
   superseded: ["superseded", "Newer Home evidence replaced this input"]
 } as const
 
-const makeHomeLetterRunner = (services: {
+export const makeHomeLetterRunner = (services: {
   readonly chat: ChatMessage["Service"]
   readonly queue: AutomationQueue["Service"]
   readonly homeLetterInputs: HomeLetterInputs["Service"]
