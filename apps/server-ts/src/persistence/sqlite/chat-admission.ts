@@ -36,7 +36,7 @@ import { decodeJson, encodeJson } from "./json.js"
 import { bindHandlerItem } from "./automation-handler-item.js"
 import { assertAutomationLease } from "./automation-lease.js"
 import { readModelSelection, readRequestedModel, runInheritsChatModel } from "./models.js"
-import { liftOwedUpdate, readDeliveryForAdmission } from "./work-deliveries.js"
+import { arrivalIdentitySql, liftOwedUpdate, readDeliveryForAdmission } from "./work-deliveries.js"
 import {
   captureScheduledContext,
   continuedContext,
@@ -65,6 +65,10 @@ import { claimQueued } from "./chat-queue.js"
 import { insertChatKey } from "./chat-key-message.js"
 
 const transcriptChanged = { type: "transcript_changed" } satisfies ChatProjectionEvent
+
+type DeliveryTarget =
+  | { readonly kind: "session"; readonly sessionId: string }
+  | { readonly kind: "run"; readonly runId: string }
 
 export const makeChatAdmission = ({
   writer,
@@ -186,6 +190,20 @@ export const makeChatAdmission = ({
             )).automationLimits[valid.automation.automationId]?.maxTokensPerRun ?? undefined)
       const now = yield* DateTime.now
       const timestamp = DateTime.formatIso(now)
+      // The only writer that marks an arrival delivered. A stored receipt
+      // can exist beside a still-pending arrival row; a replay settles that
+      // row too. Only the arrival's own client id settles it, and only the
+      // row this chat and text name. `loadReceipt` alone decides whether a
+      // stored receipt answers this request.
+      const settleDelivery = (target: DeliveryTarget) => {
+        if (valid.deliveryId === undefined || valid.clientId !== `arrival:${valid.deliveryId}`)
+          return Effect.void
+        const chatOrRun = target.kind === "run" ? target.runId : target.sessionId
+        return sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${timestamp},
+          destinations = ${JSON.stringify([`chat:${chatOrRun}`])}
+          WHERE delivery_id = ${valid.deliveryId} AND status = 'pending'
+            AND ${arrivalIdentitySql(sql, valid.sessionId, valid.message["content"])}`
+      }
       const session = yield* loadLiveSession(sql, valid.sessionId)
       const preparing = yield* sql<{ readonly child_session_id: string }>`
             SELECT child_session_id FROM session_fork_requests
@@ -234,7 +252,10 @@ export const makeChatAdmission = ({
       if (receipt === null && valid.fromQueue === true && !claimed)
         return yield* conflict("The queued message is no longer at the head", "queue_changed")
       if (receipt !== null) {
-        if (receipt.run_id === null) return { _tag: "Stored" } satisfies ChatWriteReceiveResult
+        if (receipt.run_id === null) {
+          yield* settleDelivery({ kind: "session", sessionId: valid.sessionId })
+          return { _tag: "Stored" } satisfies ChatWriteReceiveResult
+        }
         const existingRun = yield* loadRun(sql, receipt.run_id, "start")
         if (existingRun.session_id !== valid.sessionId) {
           return yield* writeError(
@@ -247,6 +268,7 @@ export const makeChatAdmission = ({
             }
           )
         }
+        yield* settleDelivery({ kind: "run", runId: receipt.run_id })
         return {
           _tag: "Existing",
           runId: receipt.run_id,
@@ -377,11 +399,7 @@ export const makeChatAdmission = ({
           return yield* conflict("Arrival waits for the current Chat turn")
         }
         yield* insertChatKey(sql, { ...key, runId: activeRun.run_id, status: "queued" })
-        if (valid.deliveryId !== undefined) {
-          yield* sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${timestamp},
-            destinations = ${JSON.stringify([`chat:${activeRun.run_id}`])}
-            WHERE delivery_id = ${valid.deliveryId} AND status = 'pending'`
-        }
+        yield* settleDelivery({ kind: "run", runId: activeRun.run_id })
         if (delivery?.kind !== "update" && delivery?.questionId) {
           yield* appendQuestionChange({ sql, sessionEvents, questionId: delivery.questionId })
         }
@@ -431,11 +449,7 @@ export const makeChatAdmission = ({
           acceptedMessage.message_id
         )
         yield* insertChatKey(sql, { ...key, runId: null, status: "accepted" })
-        if (valid.deliveryId !== undefined) {
-          yield* sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${timestamp},
-                destinations = ${JSON.stringify([`chat:${valid.sessionId}`])}
-                WHERE delivery_id = ${valid.deliveryId} AND status = 'pending'`
-        }
+        yield* settleDelivery({ kind: "session", sessionId: valid.sessionId })
         yield* chatEvents.appendInTransaction({
           sessionId: valid.sessionId,
           events: [{ event: transcriptChanged }]
@@ -666,11 +680,7 @@ export const makeChatAdmission = ({
           WHERE id = ${valid.automation.attemptId} AND chat_run_id IS NULL`
       }
 
-      if (valid.deliveryId !== undefined) {
-        yield* sql`UPDATE automation_deliveries SET status = 'delivered', delivered_at = ${timestamp},
-          destinations = ${JSON.stringify([`chat:${runId}`])}
-          WHERE delivery_id = ${valid.deliveryId} AND status = 'pending'`
-      }
+      yield* settleDelivery({ kind: "run", runId })
 
       if (agent !== null || (delivery?.kind === "answer" && runContext.origin.kind !== "chat")) {
         yield* recordChildAttempt({
