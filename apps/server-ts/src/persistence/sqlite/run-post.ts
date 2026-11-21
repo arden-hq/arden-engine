@@ -17,6 +17,7 @@ import { appendMessagesInTransaction } from "./chat-transcript.js"
 import { threadTaken } from "./connection-item-evidence.js"
 import { recordAutomationPosted } from "./entity-events.js"
 import { mainSpaceId } from "./main-space.js"
+import { messageQuote } from "./message-quote.js"
 import { chatHasActiveWork } from "./session-archive.js"
 import { liftChat } from "./session-unread.js"
 import { ensureSpaceConversationInTransaction } from "./space-conversation.js"
@@ -198,20 +199,6 @@ export const makePostStore = ({
           json_object('at', ${at}, 'reason', ${reason}))
       WHERE delivery_id = ${deliveryId} AND status = 'pending'`
 
-  const quoteOf = Effect.fn("PostStore.quoteOf")(function* (
-    sessionId: string,
-    messageId: string | undefined
-  ) {
-    if (messageId === undefined) return undefined
-    const rows = yield* sql<{ readonly role: string; readonly content: unknown }>`
-      SELECT role, json_extract(message_json, '$.content') AS content FROM session_messages
-      WHERE session_id = ${sessionId} AND message_id = ${messageId}`
-    const row = rows[0]
-    if (row === undefined || typeof row.content !== "string") return undefined
-    if (row.role !== ROLE.assistant && row.role !== ROLE.user) return undefined
-    return { messageId, role: row.role, content: row.content }
-  })
-
   const createTask = Effect.fn("PostStore.createTask")(function* (
     payload: PostDeliveryPayload,
     spaceId: string
@@ -272,7 +259,13 @@ export const makePostStore = ({
       return false
     }
     if (chat.busy === 1) return false
-    const quote = yield* quoteOf(payload.sessionId, payload.replyToMessageId)
+    const quote =
+      payload.replyToMessageId === undefined
+        ? undefined
+        : yield* messageQuote(sql, {
+            sessionId: payload.sessionId,
+            messageId: payload.replyToMessageId
+          })
     const message: StoredMessageEnvelope = {
       message_id: payload.messageId,
       role: ROLE.assistant,

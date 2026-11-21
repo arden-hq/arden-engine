@@ -17,6 +17,8 @@ import { postDeliveryId } from "../src/persistence/sqlite/run-post.js"
 import { taskDoor } from "../src/persistence/sqlite/ending-arrival.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-transcript.js"
+import { messageQuote } from "../src/persistence/sqlite/message-quote.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
 const automationId = urgentEventsHandler.spec.automationId
@@ -346,6 +348,61 @@ it("a Task update quotes the post that started it, only in that post's chat", as
         ])
       )
       expect(pending).toHaveLength(2)
+    })
+  )
+})
+
+it("a quote keeps only the quoted message's text, never its image data", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql } = yield* setup
+      const sessions = yield* SessionStore
+      const chat = yield* sessions.create({ name: "Photo" })
+      yield* appendMessagesInTransaction(
+        sql,
+        chat.sessionId,
+        [
+          {
+            message_id: "photo",
+            role: ROLE.user,
+            content: [
+              { type: "text", text: "Pay this bill" },
+              { type: "image", media_type: "image/png", data: "A".repeat(200_000) }
+            ],
+            created_at: AT
+          },
+          {
+            message_id: "picture-only",
+            role: ROLE.user,
+            content: [{ type: "image", media_type: "image/png", data: "AAAA" }],
+            created_at: AT
+          }
+        ],
+        AT,
+        "post",
+        "photo"
+      )
+      expect(yield* messageQuote(sql, { sessionId: chat.sessionId, messageId: "photo" })).toEqual({
+        messageId: "photo",
+        role: ROLE.user,
+        content: "Pay this bill"
+      })
+      expect(
+        yield* messageQuote(sql, { sessionId: chat.sessionId, messageId: "picture-only" })
+      ).toBeUndefined()
+    })
+  )
+})
+
+it("a Task title on two lines is refused before the post is queued", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, post } = yield* setup
+      const refused = yield* post(1, { task: { title: "Pay\nthe bill", brief: "Pay it." } }).pipe(
+        Effect.flip
+      )
+      expect(refused).toMatchObject({ reason: "invalid" })
+      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
     })
   )
 })

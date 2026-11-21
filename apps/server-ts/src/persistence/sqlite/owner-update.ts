@@ -1,4 +1,4 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { messageQuote } from "./message-quote.js"
 import type { ChatUpdate, CommunicationDoor } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -122,19 +122,8 @@ const originQuote = Effect.fn("OwnerUpdate.originQuote")(function* (
   itemId: string,
   sessionId: string
 ) {
-  const rows = yield* sql<{
-    readonly message_id: string
-    readonly role: string
-    readonly content: unknown
-  }>`SELECT origin.message_id, origin.role,
-      json_extract(origin.message_json, '$.content') AS content
-    FROM space_tasks AS task
-    JOIN session_messages AS origin
-      ON origin.session_id = ${sessionId} AND origin.message_id = task.origin_message_id
-    WHERE task.item_id = ${itemId}`
-  const row = rows[0]
-  if (row === undefined || typeof row.content !== "string" || row.content.trim() === "")
-    return undefined
-  if (row.role !== ROLE.user && row.role !== ROLE.assistant) return undefined
-  return { messageId: row.message_id, role: row.role, content: row.content }
+  const origin = (yield* sql<{ readonly message_id: string | null }>`
+    SELECT origin_message_id AS message_id FROM space_tasks WHERE item_id = ${itemId}`)[0]
+  if (origin === undefined || origin.message_id === null) return undefined
+  return yield* messageQuote(sql, { sessionId, messageId: origin.message_id })
 })
