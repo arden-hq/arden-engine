@@ -42,6 +42,11 @@ export interface SpaceMemoryInput {
   readonly page: SpacePageInput | undefined
 }
 
+/** A Space with its one render: the recall prefix and the sent text both read it. */
+export interface PreparedSpaceMemory extends SpaceMemoryInput {
+  readonly rendered: ReturnType<typeof renderSpaceContext>
+}
+
 export interface SpacePageInput {
   readonly pageId: string
   readonly version: string
@@ -70,7 +75,7 @@ export const assembleMemoryContext = ({
   readonly reader: RunMemoryReader
   /** Undefined when Memory could not be read. */
   readonly sources: MemorySources | undefined
-  readonly space: SpaceMemoryInput | undefined
+  readonly space: PreparedSpaceMemory | undefined
   /** The Memory revision every source was read at. */
   readonly revision: string | null
   /** The text the recall searched with. */
@@ -113,14 +118,15 @@ const SPACE_ROOM = {
   pageBytes: MEMORY_BUDGET.space_page
 }
 
-/** How many characters of the Space page's content, from its start, the Space context sends. */
-export const spacePageSent = (view: SpaceView): number =>
-  renderSpaceContext(view, SPACE_ROOM).page?.sent ?? 0
+export const prepareSpaceMemory = (space: SpaceMemoryInput): PreparedSpaceMemory => ({
+  ...space,
+  rendered: renderSpaceContext(space.view, SPACE_ROOM)
+})
 
 const renderSpace = (
-  space: SpaceMemoryInput
+  space: PreparedSpaceMemory
 ): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
-  const rendered = renderSpaceContext(space.view, SPACE_ROOM)
+  const rendered = space.rendered
   const identity = {
     kind: "space" as const,
     space_id: space.view.space_id,
