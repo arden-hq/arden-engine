@@ -441,3 +441,31 @@ it("Main letter evidence names no item when the first one an offer cites expired
   )
   expect(cited).toBeNull()
 })
+
+it("M2 settles a Home offer dated ahead of the clock in one change, never before its last update", () => {
+  const AHEAD = "2999-01-01T00:00:00.000Z"
+  const database = migratedTo(185, (database) => {
+    database.exec(`INSERT INTO task_proposals (proposal_id, place, dedupe_key, stable_key, text,
+        owner, capture_json, sources_json, evidence_revision_key, candidate_hash, revision, seq,
+        status, created_at, updated_at)
+      VALUES ('ahead', 'home', 'home:ahead', 'ahead', 'Reply to Ann', 'worker',
+        '{"basis":"inferred","reason":"Asked."}', '[]', 'ahead', 'ahead', 0, 1, 'offered',
+        '${AHEAD}', '${AHEAD}')`)
+  })
+  expect(
+    database
+      .prepare(
+        `SELECT status, updated_at, settled_at, revision,
+          (SELECT COUNT(*) FROM task_proposal_revisions WHERE proposal_id = 'ahead') AS versions
+        FROM task_proposals WHERE proposal_id = 'ahead'`
+      )
+      .get()
+  ).toEqual({
+    status: "expired",
+    updated_at: AHEAD,
+    settled_at: AHEAD,
+    revision: 1,
+    versions: 2
+  })
+  database.close()
+})

@@ -9,6 +9,7 @@ import {
 } from "../connections/store.js"
 import { JsonObjectSchema } from "../json.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
+import { eventThreadLiveSql } from "./event-thread-live.js"
 
 interface ItemRow {
   readonly item_id: string
@@ -79,8 +80,9 @@ export const makeConnectionItemStore = ({
     )
 
   const threadOwned: ConnectionItemStore["Service"]["threadOwned"] = (input) =>
-    reader`SELECT 1 FROM event_threads WHERE source = ${input.source}
-      AND account = ${input.account} AND thread_key = ${input.threadKey}`.pipe(
+    reader`SELECT 1 FROM event_threads AS mapped WHERE mapped.source = ${input.source}
+      AND mapped.account = ${input.account} AND mapped.thread_key = ${input.threadKey}
+      AND ${eventThreadLiveSql(reader, "mapped")}`.pipe(
       Effect.map((rows) => rows.length > 0),
       Effect.mapError(failure("read", "Could not read the thread"))
     )

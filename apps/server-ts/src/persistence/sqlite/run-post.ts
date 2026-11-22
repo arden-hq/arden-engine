@@ -1,4 +1,3 @@
-import type { Statement } from "effect/unstable/sql"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { sha256Hex } from "@arden-hq/std/hash"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
@@ -24,6 +23,7 @@ import { recordAutomationPosted } from "./entity-events.js"
 import { mainSpaceId } from "./main-space.js"
 import { messageQuote } from "./message-quote.js"
 import { chatHasActiveWork } from "./session-archive.js"
+import { eventThreadLiveSql } from "./event-thread-live.js"
 import { decodeJson } from "./json.js"
 import { liftChat } from "./session-unread.js"
 import { ensureSpaceConversationInTransaction } from "./space-conversation.js"
@@ -76,19 +76,6 @@ export const makePostStore = ({
     } satisfies PostedMessage
   })
 
-  const pendingDelivery = (deliveryId: Statement.Fragment) => sql`EXISTS (
-    SELECT 1 FROM automation_deliveries AS earlier
-    WHERE earlier.delivery_id = ${deliveryId} AND earlier.status = 'pending')`
-
-  const rootLive = (mapped: string) => sql`(
-    EXISTS (SELECT 1 FROM sessions AS chat
-      WHERE chat.session_id = ${sql(mapped)}.session_id
-        AND chat.archived_at IS NULL AND chat.space_id IS NOT NULL)
-    AND (EXISTS (SELECT 1 FROM session_messages AS message
-          WHERE message.session_id = ${sql(mapped)}.session_id
-            AND message.message_id = ${sql(mapped)}.message_id)
-      OR ${pendingDelivery(sql`${sql(mapped)}.delivery_id`)}))`
-
   const threadHit = (threads: string) =>
     sql<ThreadHit>`
       SELECT mapped.session_id
@@ -97,7 +84,7 @@ export const makePostStore = ({
         ON mapped.source = json_extract(thread.value, '$.source')
        AND mapped.account = json_extract(thread.value, '$.account')
        AND mapped.thread_key = json_extract(thread.value, '$.thread_key')
-      WHERE ${rootLive("mapped")}
+      WHERE ${eventThreadLiveSql(sql, "mapped")}
       ORDER BY mapped.updated_at DESC
       LIMIT 1`
 
@@ -132,7 +119,7 @@ export const makePostStore = ({
     ON CONFLICT (source, account, thread_key) DO UPDATE SET
       session_id = excluded.session_id, message_id = excluded.message_id,
       delivery_id = excluded.delivery_id, updated_at = excluded.updated_at
-    WHERE NOT ${rootLive("event_threads")}`
+    WHERE NOT ${eventThreadLiveSql(sql, "event_threads")}`
 
   const rootOnThreads = (
     threads: string,
@@ -146,7 +133,7 @@ export const makePostStore = ({
     UPDATE event_threads AS mapped
     SET session_id = ${post.sessionId}, message_id = ${post.messageId},
       delivery_id = ${post.deliveryId}, updated_at = ${post.at}
-    WHERE ${threadMatch(threads, "mapped")} AND NOT ${rootLive("mapped")}`
+    WHERE ${threadMatch(threads, "mapped")} AND NOT ${eventThreadLiveSql(sql, "mapped")}`
 
   const parentOf = (
     threads: string,

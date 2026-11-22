@@ -8,6 +8,7 @@ import { eventsHandler } from "../src/automations/handlers/events.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { PostStore, type PostInput } from "../src/persistence/posts/store.js"
+import { ConnectionItemStore } from "../src/persistence/connections/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { loadActiveContext } from "../src/persistence/sqlite/active-context.js"
@@ -687,6 +688,32 @@ it("a post to a Space whose inference is off arrives without its Task", async ()
         content: "The bank wrote back."
       })
       expect(yield* sql`SELECT 1 FROM space_tasks`).toEqual([])
+    })
+  )
+})
+
+it("a thread counts as owned for its sent mail only while its post is live, like a thread hit", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { thread, post, drain, spaces } = yield* setup
+      const items = yield* ConnectionItemStore
+      const taxes = yield* spaces.create({ name: "Taxes" })
+      const owned = () =>
+        items.threadOwned({ source: "gmail", account: "me@example.com", threadKey: "t-1" })
+      const before = yield* owned()
+      yield* thread("item-1", "t-1")
+      yield* post(1, { itemIds: ["item-1"], spaceId: taxes.space_id })
+      const pending = yield* owned()
+      yield* drain
+      const delivered = yield* owned()
+      yield* spaces.archive(taxes.space_id)
+      const archived = yield* owned()
+      expect({ before, pending, delivered, archived }).toEqual({
+        before: false,
+        pending: true,
+        delivered: true,
+        archived: false
+      })
     })
   )
 })

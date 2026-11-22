@@ -95,11 +95,19 @@ const dropItemRoutes = (database: DatabaseSync): void => {
 const retireHomeOffers = (database: DatabaseSync): void => {
   const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()
   if (main === undefined) throw new Error("The Main Space is missing")
-  database.exec(`UPDATE task_proposals SET status = 'expired', revision = revision + 1,
-      updated_at = ${NOW}, settled_at = ${NOW}, put_off_until = NULL, waiting_since = NULL
-    WHERE place = 'home' AND status IN ('offered', 'held')`)
+  const open = "status IN ('offered', 'held')"
+  const settledAt = `max(${NOW}, updated_at)`
   database
-    .prepare("UPDATE task_proposals SET place = 'space', space_id = ? WHERE place = 'home'")
+    .prepare(
+      `UPDATE task_proposals SET place = 'space', space_id = ?,
+        status = CASE WHEN ${open} THEN 'expired' ELSE status END,
+        revision = CASE WHEN ${open} THEN revision + 1 ELSE revision END,
+        settled_at = CASE WHEN ${open} THEN ${settledAt} ELSE settled_at END,
+        put_off_until = CASE WHEN ${open} THEN NULL ELSE put_off_until END,
+        waiting_since = CASE WHEN ${open} THEN NULL ELSE waiting_since END,
+        updated_at = CASE WHEN ${open} THEN ${settledAt} ELSE updated_at END
+      WHERE place = 'home'`
+    )
     .run(String(main.space_id))
 }
 

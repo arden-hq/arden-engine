@@ -6,7 +6,6 @@ import type {
 } from "../spaces/work/contracts.js"
 import type { JsonRecord } from "../common/json.js"
 
-/** Where a suggestion waits: a Space's conversation or a chat. */
 export type TaskProposalPlace = "space" | "chat"
 
 export interface TaskProposalCapturePolicy extends JsonRecord {
@@ -48,11 +47,6 @@ export interface TaskProposalRetirement extends JsonRecord {
   readonly evidence: ReadonlyArray<TaskProposalRetirementEvidence>
 }
 
-/**
- * A Task Arden suggests and the person starts or skips (goal-task-merge §12):
- * a run's proposal on its Space. Start creates the Task from the stored words;
- * Skip is durable for its evidence and for a cited thread.
- */
 export interface TaskProposal extends JsonRecord {
   readonly proposal_id: string
   readonly place: TaskProposalPlace
@@ -91,7 +85,6 @@ export interface TaskProposalList extends JsonRecord {
   readonly proposals: ReadonlyArray<TaskProposal>
 }
 
-/** Which suggestions to list: one Space's or one chat's. */
 export type TaskProposalScope =
   | { readonly place: "space"; readonly spaceId: string }
   | { readonly place: "chat"; readonly sessionId: string }

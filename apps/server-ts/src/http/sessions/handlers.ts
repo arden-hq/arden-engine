@@ -212,7 +212,7 @@ export const SessionHandlers = HttpApiBuilder.group(
         )
         .pipe(Effect.mapError(artifactHttpError))
     const creation = makeSessionCreation({ store, models })
-    const startOnboarding = makeOnboardingStart({ store, send: chat.send })
+    const startOnboarding = yield* makeOnboardingStart({ store, send: chat.send })
     const kickoff = (sessionId: string) =>
       chat.send(onboardingKickoff(sessionId)).pipe(
         Effect.catchCause((cause) =>
@@ -562,8 +562,11 @@ export const SessionHandlers = HttpApiBuilder.group(
       .handle("startOnboarding", ({ params }) =>
         startOnboarding(params.sessionId).pipe(
           Effect.map((started) => ({ session_id: params.sessionId, started })),
-          Effect.catchTag("SessionStoreError", failStore),
-          Effect.catch(failInternal("Sessions"))
+          Effect.catchTags({
+            SessionStoreError: failStore,
+            ChatMessageError: failInternal("Sessions"),
+            ChatMessageConflictError: failInternal("Sessions")
+          })
         )
       )
       .handle("continueRun", ({ params }) =>

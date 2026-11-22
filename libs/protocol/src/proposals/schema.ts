@@ -118,7 +118,6 @@ export const TaskProposalListSchema: Schema.Codec<TaskProposalList> = withExtras
   proposals: Schema.Array(TaskProposalSchema)
 })
 
-/** `GET /proposals`: one Space's (`space_id`) or one chat's (`session_id`). */
 export const TaskProposalListQuerySchema = Schema.Struct({
   place: TaskProposalPlaceSchema,
   space_id: Schema.optionalKey(identity),

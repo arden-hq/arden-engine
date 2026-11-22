@@ -14,7 +14,6 @@
  * - `space_instructions`, `automation_description`, `recipe_draft`: the text
  *   a Generate button writes.
  * - `capture`: routing a handed screenshot to the chat it belongs in.
- * - `item_routing`: routing a finished chat to the Space it belongs on.
  * - `helper_review`: the Helper judging a tool call in Auto approval mode.
  * - `claim_check`: checking a research claim against its source.
  * - `compaction`: the handoff summary that replaces a chat's older context.

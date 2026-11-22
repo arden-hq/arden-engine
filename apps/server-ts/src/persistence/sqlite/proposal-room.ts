@@ -48,9 +48,6 @@ export const putOfferOff = (sql: SqlClient.SqlClient, proposalId: string, now: D
     put_off_until = ${DateTime.formatIso(DateTime.add(now, { hours: OFFER_LATER_HOURS }))}
     WHERE proposal_id = ${proposalId} AND status = 'offered'`.pipe(Effect.asVoid)
 
-/** Starts the expiry clock of every open offer that is in sight while the owner has Arden open,
- * then moves every offer that has waited `OFFER_EXPIRY_HOURS` since to `expired`. Returns the
- * offers that expired. */
 export const expireOverdueOffers = Effect.fn("Work.expireOverdueOffers")(function* (
   sql: SqlClient.SqlClient,
   now: DateTime.Utc
