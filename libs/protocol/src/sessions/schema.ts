@@ -78,7 +78,6 @@ const requiredListedSessionKeys = [
 
 export const SessionListQuerySchema = withExtras({
   space_id: Schema.optionalKey(Schema.NonEmptyString),
-  inbox: Schema.optionalKey(QueryBooleanSchema),
   scope: Schema.optionalKey(SessionListScopeSchema),
   live: Schema.optionalKey(QueryBooleanSchema),
   parent_session_ids: Schema.optionalKey(Schema.Trimmed.check(Schema.isMinLength(1))),
@@ -378,7 +377,6 @@ export const decodeSessionListQueryEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(SessionListQuerySchema)(value).pipe(
     Effect.map((query) => ({
       ...query,
-      inbox: query.inbox === true || query.inbox === "true",
       scope: query.scope ?? "all",
       live: query.live === true || query.live === "true",
       limit: query.limit ?? 100,

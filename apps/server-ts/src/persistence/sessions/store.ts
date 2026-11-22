@@ -38,7 +38,6 @@ export class SessionStoreError extends Schema.TaggedError<SessionStoreError>()(
 
 export interface SessionListQuery {
   readonly spaceId?: string
-  readonly inbox?: boolean
   readonly scope?: "primary" | "agent" | "all"
   readonly live?: boolean
   readonly parentSessionIds?: ReadonlyArray<string>

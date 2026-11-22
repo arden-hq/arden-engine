@@ -6,7 +6,6 @@ import type { RuntimeRunStatus } from "../chat/runtime.js"
 /** Semantic options accepted by `sessionRoutes.list`. */
 export interface SessionListOptions {
   readonly spaceId?: string
-  readonly inbox?: boolean
   readonly scope?: SessionListScope
   /** Only sessions whose latest run is still open. The set is bounded by
    *  concurrency rather than history, which is what makes hydrating all of them

@@ -119,7 +119,6 @@ const artifactHttpError = (error: ConversationArtifactError) => {
 
 const listOptions = (query: {
   readonly space_id?: string
-  readonly inbox?: boolean | "true" | "false"
   readonly scope?: SessionListScope
   readonly live?: boolean | "true" | "false"
   readonly parent_session_ids?: string
@@ -133,7 +132,6 @@ const listOptions = (query: {
 }): SessionListQuery => ({
   ...(query.session_ref === undefined ? {} : { sessionRef: query.session_ref }),
   ...(query.space_id === undefined ? {} : { spaceId: query.space_id }),
-  ...(query.inbox === undefined ? {} : { inbox: query.inbox === true || query.inbox === "true" }),
   ...(query.scope === undefined ? {} : { scope: query.scope }),
   ...(query.live === undefined ? {} : { live: query.live === true || query.live === "true" }),
   ...(query.parent_session_ids === undefined

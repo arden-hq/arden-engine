@@ -127,7 +127,10 @@ it("a chat made, moved or branched with no Space lands in Main and sees every Sp
         false
       )
 
-      const listed = yield* sessions.list({ inbox: true, scope: "primary" })
+      const listed = yield* sessions.list({
+        spaceId: (yield* mainSpace).space_id,
+        scope: "primary"
+      })
       expect(listed.map((entry) => entry.sessionId).toSorted()).toEqual(
         [loose.sessionId, capture.sessionId, filed.sessionId, kept?.sessionId].toSorted()
       )
@@ -354,7 +357,7 @@ it("the phone's loose list shows Main's chats but not Main's own conversation", 
       const main = yield* mainSpace
       const bound = yield* sessions.ensureSpaceConversation(main.space_id)
       const chat = yield* sessions.create({ name: "Loose" })
-      const listed = (yield* sessions.list({ inbox: true, scope: "primary" })).map(
+      const listed = (yield* sessions.list({ spaceId: main.space_id, scope: "primary" })).map(
         listedSessionToWire
       )
       expect(looseChats(listed).map((row) => row.session_id)).toEqual([chat.sessionId])

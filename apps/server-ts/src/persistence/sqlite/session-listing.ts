@@ -1,4 +1,3 @@
-import { mainSpaceIdSql } from "./main-space.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { latestSessionRunQuery } from "./session-latest-run.js"
 import { sessionOriginQuery } from "./session-origin.js"
@@ -35,7 +34,6 @@ import { pendingDecisionCards } from "./pending-decision-cards.js"
 
 const sessionListOptionsSchema = Schema.Struct({
   spaceId: Schema.optionalKey(Schema.NonEmptyString),
-  inbox: Schema.optionalKey(Schema.Boolean),
   scope: Schema.optionalKey(Schema.Literals(["primary", "agent", "all"] as const)),
   live: Schema.optionalKey(Schema.Boolean),
   parentSessionIds: Schema.optionalKey(
@@ -247,9 +245,8 @@ export const makeSessionListing = ({
     const limit = input.limit ?? 100
     const offset = input.offset ?? 0
     const sort = input.sort ?? "activity"
-    let spaceFilter = reader``
-    if (input.inbox === true) spaceFilter = reader`AND s.space_id = ${mainSpaceIdSql(reader)}`
-    else if (input.spaceId !== undefined) spaceFilter = reader`AND s.space_id = ${input.spaceId}`
+    const spaceFilter =
+      input.spaceId === undefined ? reader`` : reader`AND s.space_id = ${input.spaceId}`
     let agentFilter = reader``
     if (input.scope === "primary")
       agentFilter = reader`AND s.session_type = 'chat'
