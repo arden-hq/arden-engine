@@ -14,6 +14,7 @@ import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { runCommand } from "../src/relay/commands.js"
 import { relayLoopback } from "../src/relay/loopback.js"
 import { startServer, startServerWithLocalAccess } from "../src/server.js"
+import { memoryServerVault } from "./fixtures/memory-vault.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 
 const access = {
@@ -105,7 +106,7 @@ const command = (databasePath: string, cid: string) => {
   }
 }
 
-it("on a server started without local access, an iPhone's decision is held to the same checks", async () => {
+it("on a server started without local access but with a vault, so the relay may run, an iPhone's decision is held to the same checks", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-phone-asked-at-standalone-"))
   const databasePath = join(directory, "arden.db")
   const cards = ["old-deny", "stale", "unknown", "new-allow", "desk"] as const
@@ -125,8 +126,18 @@ it("on a server started without local access, an iPhone's decision is held to th
       })
     )
     await store.dispose()
-    const server = await startServer({ port: 0, databasePath, modelHost })
+    const server = await startServer({
+      port: 0,
+      databasePath,
+      modelHost,
+      credentialVault: memoryServerVault()
+    })
     try {
+      expect(await (await server.fetch("/relay")).json()).toMatchObject({
+        connection: "idle",
+        enabled: true,
+        devices: []
+      })
       const phone = relayLoopback(
         { _tag: "TcpAddress", hostname: "127.0.0.1", port: server.port },
         undefined
