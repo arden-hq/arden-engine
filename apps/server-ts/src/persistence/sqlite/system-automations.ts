@@ -9,8 +9,13 @@ import { AutomationStoreError } from "../automations/store.js"
 import { namedPublicRef } from "../public-ref.js"
 import { nextId } from "./deps.js"
 import type { PersistenceDeps } from "./deps.js"
-import { AutomationTriggersSchema, scheduleEffect, writtenTriggers } from "./automation-schedule.js"
-import { decodeJson, encodeJson } from "./json.js"
+import {
+  AutomationTriggersSchema,
+  listenerTriggers,
+  scheduleEffect,
+  writtenTriggers
+} from "./automation-schedule.js"
+import { encodeJson } from "./json.js"
 import { systemTakesTrigger } from "../automations/system-settings.js"
 import { insertSession } from "./session-insert.js"
 import { haltAutomation } from "./automation-halt.js"
@@ -72,11 +77,9 @@ const takenTriggers = Effect.fn("SqliteAutomationStore.takenTriggers")(function*
   spec: SystemAutomationSpec,
   row: StoredSystemAutomation
 ) {
-  const stored = yield* decodeJson(AutomationTriggersSchema, row.triggers).pipe(
-    Effect.mapError((cause) =>
-      seedError("Stored system Automation triggers are corrupt", spec.automationId, cause)
-    )
-  )
+  if (spec.triggerScope === "any") return row.triggers
+  const stored = yield* listenerTriggers({ task_id: spec.automationId, triggers: row.triggers })
+  if (stored === undefined) return row.triggers
   const taken = stored.filter((trigger) => systemTakesTrigger(spec, trigger))
   if (taken.length === 0) return undefined
   if (taken.length === stored.length) return row.triggers

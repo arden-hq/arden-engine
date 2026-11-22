@@ -254,3 +254,20 @@ it("a mail the owner sent is no new mail for any Automation", () => {
   expect(connectionItemEvent(mail)?.eventType).toBe("email.received")
   expect(connectionItemEvent({ ...mail, detail: { [SENT_BY_OWNER]: true } })).toBeUndefined()
 })
+
+it("an unreadable stored trigger list does not stop seeding, and stays as it was", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      const specs = [eventsHandler.spec, dailySummaryHandler.spec]
+      yield* catalog.seedSystemAutomations(specs)
+      const broken = '[{"type":"nonsense"}]'
+      yield* sql`UPDATE scheduled_tasks SET triggers = ${broken}, triggers_source = 'manual'`
+      yield* catalog.seedSystemAutomations(specs)
+      expect(yield* sql`SELECT DISTINCT triggers FROM scheduled_tasks`).toEqual([
+        { triggers: broken }
+      ])
+    })
+  )
+})
