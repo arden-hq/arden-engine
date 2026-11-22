@@ -88,19 +88,18 @@ export const claimAll = (workerId: string) =>
 
 type JobLease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
-export const startJob = (lease: JobLease, id: string) =>
+export const startJob = (lease: JobLease, id: string, sessionId = lease.payload.sessionId) =>
   Effect.gen(function* () {
     const automationId = lease.payload.automationId
-    const job = { thread_id: lease.payload.sessionId }
-    if (job.thread_id === null) throw new Error(`${automationId} has no chat`)
-    const run = yield* startChat(job.thread_id, id, {
+    if (sessionId === null) throw new Error(`${automationId} has no chat`)
+    const run = yield* startChat(sessionId, id, {
       automation: {
         automationId,
         attemptId: lease.payload.automationRunId,
         lease: { id: lease.id, token: lease.token }
       }
     })
-    return { run, sessionId: job.thread_id }
+    return { run, sessionId }
   })
 
 export const startJobs = (ids: Readonly<Record<string, string>>) =>

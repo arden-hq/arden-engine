@@ -21,6 +21,7 @@ export interface PushNotice {
   readonly title: string
   readonly body: string
   readonly sessionId: string
+  readonly collapseId: string
   readonly askId: string | undefined
   readonly runId?: string
   readonly news?: PushNews
@@ -166,6 +167,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           title: ask.place,
           body: ask.prompt,
           sessionId: ask.session_id,
+          collapseId: ask.question_id,
           askId: ask.question_id
         }
       : {
@@ -174,6 +176,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           title: ask.place,
           body: ask.title,
           sessionId: ask.session_id,
+          collapseId: ask.tool_id,
           askId: ask.tool_id,
           runId: ask.run_id
         }
@@ -198,6 +201,7 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           title: notice.title === "" ? "Arden" : notice.title,
           body: previewLine(notice.text) ?? "Finished",
           sessionId: notice.chatSessionId,
+          collapseId: notice.status === "posted" ? notice.key : notice.chatSessionId,
           askId: undefined,
           news: newsOf(notice.status, tier)
         }
