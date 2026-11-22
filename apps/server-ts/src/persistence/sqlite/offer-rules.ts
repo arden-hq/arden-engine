@@ -29,43 +29,29 @@ export const citedTurnFinished = (runStatuses: ReadonlyArray<string>): boolean =
 export const UNFINISHED_TURN =
   "That chat turn has not finished, or is not a turn of one of your chats; wait for its outcome and review again"
 
-/** What may anchor an offer in each place. In a Space: a chat turn, a mail item, or the worker's
- * own Task. At Home, where no Space reviews the evidence: this run's own chat turn or its own
- * Task (the Home admission checks which turn and which Task). A Memory page only supports an
- * offer anywhere: a page changes on any edit, so an offer built on one came back after a No. */
-const anchors = (place: OfferPlace, kind: SpaceTaskSource["kind"]): boolean => {
+/** What may anchor an offer: a chat turn, a mail item, or the worker's own Task. A Memory page
+ * only supports an offer: a page changes on any edit, so an offer built on one came back after
+ * a No. */
+const anchors = (kind: SpaceTaskSource["kind"]): boolean => {
   switch (kind) {
     case "chat":
     case "task":
-      return true
     case "connection_item":
-      return place === "space"
+      return true
     case "memory":
     case "space":
       return false
   }
 }
 
-export type OfferPlace = "space" | "home"
-
 export const OFFER_NEEDS_ANCHOR =
   "A Memory page is background, not a reason to offer a Task. Cite the chat turn or the mail item that asks for this outcome (a Task's worker may cite its own Task); if none does, offer nothing."
 
-export const HOME_OFFER_SOURCES =
-  "With no Space, an offer cites this run's own chat turn or its own Task, and a Memory page only supports it. If neither asks for this outcome, offer nothing."
-
-const refusals: Record<OfferPlace, string> = {
-  space: OFFER_NEEDS_ANCHOR,
-  home: HOME_OFFER_SOURCES
-}
-
-/** The refusal for an offer whose sources hold no anchor for its place; undefined when one
- * does. The Home admission refuses any other source it never accepts with the same words. */
+/** The refusal for an offer whose sources hold no anchor; undefined when one does. */
 export const offerAnchorRefusal = (
-  place: OfferPlace,
   sources: ReadonlyArray<{ readonly kind: SpaceTaskSource["kind"] }>
 ): string | undefined =>
-  sources.some((source) => anchors(place, source.kind)) ? undefined : refusals[place]
+  sources.some((source) => anchors(source.kind)) ? undefined : OFFER_NEEDS_ANCHOR
 
 /**
  * Whether the stored offer answers a new propose call unchanged. The store reads the offer with

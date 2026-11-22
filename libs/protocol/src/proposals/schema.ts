@@ -20,7 +20,7 @@ import type {
 
 const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
 
-export const TaskProposalPlaceSchema = Schema.Literals(["space", "chat", "home"] as const)
+export const TaskProposalPlaceSchema = Schema.Literals(["space", "chat"] as const)
 
 export const TaskProposalCapturePolicySchema = Schema.Struct({
   origin: Schema.Literals(["chat", "automation", "task", "space", "unrecorded"] as const),
@@ -118,7 +118,7 @@ export const TaskProposalListSchema: Schema.Codec<TaskProposalList> = withExtras
   proposals: Schema.Array(TaskProposalSchema)
 })
 
-/** `GET /proposals`: one Space's (`space_id`), one chat's (`session_id`), or Home's. */
+/** `GET /proposals`: one Space's (`space_id`) or one chat's (`session_id`). */
 export const TaskProposalListQuerySchema = Schema.Struct({
   place: TaskProposalPlaceSchema,
   space_id: Schema.optionalKey(identity),

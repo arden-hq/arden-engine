@@ -190,7 +190,6 @@ const routeCalls = (
     "/spaces/:spaceId/continuity/state": [`/spaces/${ids.space}/continuity/state`],
     "/proposals/:proposalId/history": [`/proposals/${MISSING}/history`],
     "/proposals": [
-      `/proposals${q({ place: "home" })}`,
       `/proposals${q({ place: "space", space_id: ids.space })}`,
       `/proposals${q({ place: "chat", session_id: ids.chat })}`
     ],

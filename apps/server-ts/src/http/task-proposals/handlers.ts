@@ -22,8 +22,6 @@ const scopeOf = (query: {
       return query.session_id === undefined
         ? undefined
         : { place: "chat", sessionId: query.session_id }
-    case "home":
-      return { place: "home" }
   }
 }
 

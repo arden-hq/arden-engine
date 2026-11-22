@@ -8,11 +8,12 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 const NOW = Date.now()
 const at = (hoursAgo: number) => new Date(NOW - hoursAgo * 3_600_000).toISOString()
 
-const homeOffer = (sql: SqlClient.SqlClient, id: string, hoursAgo: number) =>
-  sql`INSERT INTO task_proposals (proposal_id, place, dedupe_key, stable_key, text, owner,
+const mainOffer = (sql: SqlClient.SqlClient, id: string, hoursAgo: number) =>
+  sql`INSERT INTO task_proposals (proposal_id, place, space_id, dedupe_key, stable_key, text, owner,
       capture_json, sources_json, evidence_revision_key, candidate_hash, revision, seq,
       status, created_at, updated_at)
-    VALUES (${id}, 'home', ${`home:${id}`}, ${id}, 'Made-up offer', 'worker',
+    VALUES (${id}, 'space', (SELECT space_id FROM spaces WHERE kind = 'main'), ${`main:${id}`},
+      ${id}, 'Made-up offer', 'worker',
       '{"basis":"inferred","reason":"Made up."}', '[]', ${id}, ${id}, 0, 1,
       'offered', ${at(hoursAgo)}, ${at(hoursAgo)})`
 
@@ -26,7 +27,7 @@ it("an offer expires only after the owner was around to see it", async () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const proposals = yield* TaskProposalStore
-      yield* homeOffer(sql, "offer_a", OFFER_EXPIRY_HOURS + 300)
+      yield* mainOffer(sql, "offer_a", OFFER_EXPIRY_HOURS + 300)
       const away = [yield* proposals.expireOffers(), yield* status(sql)]
       yield* sql`INSERT INTO home_presence (client_id, sequence, last_seen_at, lease_until)
         VALUES ('c', 1, ${at(0)}, ${new Date(Date.now() + 30_000).toISOString()})`
