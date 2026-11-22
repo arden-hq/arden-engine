@@ -188,8 +188,7 @@ export const requestResponder = (input: {
     if (choice === undefined) return unanswered(data, runId, name)
     if (choice === "leave") return say(`${name} stays waiting.`)
     await input.client.answerApproval({
-      runId,
-      toolId: data.tool_id,
+      ...answering(data, runId),
       result: "",
       approved: choice !== "deny",
       grantStanding: choice === "always_allow"
@@ -227,8 +226,7 @@ export const requestResponder = (input: {
     try {
       if (data.type === "approval_needed") {
         await input.client.answerApproval({
-          runId,
-          toolId: data.tool_id,
+          ...answering(data, runId),
           result: DECLINED_NOTE,
           approved: false
         })
@@ -335,6 +333,15 @@ export const requestResponder = (input: {
     }
   }
 }
+
+const answering = (
+  card: Extract<HeadlessRunEvent["data"], { type: "approval_needed" }>,
+  runId: string
+) => ({
+  runId,
+  toolId: card.tool_id,
+  ...(card.asked_at === undefined ? {} : { askedAt: card.asked_at })
+})
 
 const plainError = (cause: unknown): string =>
   cause instanceof HeadlessHttpError ? plainHttpMessage(cause) : errorMessage(cause)
