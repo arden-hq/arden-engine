@@ -454,3 +454,43 @@ it("with no rule on its trigger, the run is told to post about every event", asy
     })
   )
 })
+
+it("a no-change verdict counts only while it still holds", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, queue, arrive } = yield* setup
+      const lease = yield* arrive("mail-1")
+      const sessionId = yield* queue.prepareRunSession(renderAutomationJob(lease))
+      const started = yield* startChat(sessionId, "verdict", {
+        automation: {
+          automationId: lease.payload.automationId,
+          attemptId: lease.payload.automationRunId,
+          lease: { id: lease.id, token: lease.token }
+        }
+      })
+      const report = (id: string, event: string, at: string) =>
+        sql`INSERT INTO tool_calls (run_id, session_id, tool_call_id, tool_name, arguments_json,
+            changes_state, status, result_json, started_at, ended_at, effect)
+          VALUES (${started.runId}, ${sessionId}, ${id}, 'report', ${JSON.stringify({ event })},
+            0, 'completed', '{"content":"Recorded.","preview":"Recorded"}', ${at}, ${at},
+            'run_record')`
+      yield* report("no-change", "no_change", "2026-11-20T00:00:01.000Z")
+      yield* sql`UPDATE chat_runs
+        SET metadata_json = json_set(metadata_json, '$.no_change_reason', 'A newsletter.')
+        WHERE run_id = ${started.runId}`
+      yield* (yield* ChatWriteStore).finish({
+        runId: started.runId,
+        messages: [
+          ...started.activeMessages,
+          { message_id: "verdict-answer", role: ROLE.assistant, content: "Done.", created_at: AT }
+        ]
+      })
+      const verdict = Effect.map(queue.observeChatRun(started.runId), (observed) =>
+        observed !== null && "noChange" in observed ? observed.noChange : undefined
+      )
+      expect(yield* verdict).toBe("A newsletter.")
+      yield* report("news", "news", "2026-11-20T00:00:02.000Z")
+      expect(yield* verdict).toBeNull()
+    })
+  )
+})
