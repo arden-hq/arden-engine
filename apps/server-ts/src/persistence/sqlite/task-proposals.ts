@@ -33,7 +33,6 @@ import type { Writer } from "./deps.js"
 import { decodeJson } from "./json.js"
 import { expireOverdueOffers, putOfferOff, restartOfferWait } from "./proposal-room.js"
 import { storedOfferStands } from "./offer-rules.js"
-import { homeTaskBody } from "./task-proposal-home.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
 import { assertInferenceAdmission, assertMainProposalAdmission } from "./work-inference.js"
@@ -309,6 +308,7 @@ export const makeTaskProposalStore = (options: {
               ? assertMainProposalAdmission(sql, {
                   spaceId,
                   runId: request.runId,
+                  snapshot: request.inferenceSnapshot,
                   sources,
                   proposalId
                 })
@@ -506,14 +506,13 @@ export const makeTaskProposalStore = (options: {
     })
   })
 
-  const authoredOutside = (row: ProposalRow, spaceId: string) =>
-    sql`SELECT 1 FROM spaces AS space WHERE space.space_id = ${spaceId} AND space.kind = 'main'
-      AND NOT EXISTS (SELECT 1 FROM sessions AS source
-        WHERE source.session_id = ${row.source_session_id} AND source.space_id = space.space_id)`.pipe(
+  const authoredWithoutSpace = (row: ProposalRow) =>
+    sql`SELECT 1 FROM chat_runs WHERE run_id = ${row.source_run_id}
+      AND json_extract(metadata_json, '$.run_policy.space.space_id') IS NULL`.pipe(
       Effect.map((rows) => rows.length > 0)
     )
 
-  const startFromHome = Effect.fn("TaskProposal.startFromHome")(function* (
+  const startWithoutSpace = Effect.fn("TaskProposal.startWithoutSpace")(function* (
     row: ProposalRow,
     spaceId: string
   ) {
@@ -525,47 +524,31 @@ export const makeTaskProposalStore = (options: {
         message: "That Space is archived"
       })
     }
-    const kept = yield* sql<{ readonly item_id: string }>`SELECT item.item_id
-      FROM json_each(${row.sources_json}) AS cited
-      JOIN connection_items AS item ON item.item_id = json_extract(cited.value, '$.item_id')
-      WHERE json_extract(cited.value, '$.kind') = 'connection_item' LIMIT 1`
-    const itemId = kept[0]?.item_id
-    const capture = yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json)
-    const input = { key: row.stable_key, text: row.text, body: row.body, owner: row.owner }
-    const task =
-      row.source_run_id !== null
-        ? yield* work.createInTransaction({
-            scope: { kind: "space", spaceId },
-            input,
-            actor: "user",
-            taskSources: yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json),
-            capture,
-            settledInference: true,
-            reuseExisting: true
-          })
-        : yield* work.createInTransaction({
-            scope: { kind: "space", spaceId },
-            input: {
-              ...input,
-              body:
-                row.body ??
-                homeTaskBody(
-                  capture.reason,
-                  row.signal_json === null
-                    ? ""
-                    : (yield* decodeJson(SignalSnapshotSchema, row.signal_json)).title
-                )
-            },
-            actor: "user",
-            taskSources:
-              itemId === undefined
-                ? []
-                : [{ kind: "connection_item", item_id: itemId, revision: itemId }],
-            capture: { basis: "explicit", reason: "You started it from an offer in Main." },
-            reuseExisting: true
-          })
-    return task
+    return yield* work.createInTransaction({
+      scope: { kind: "space", spaceId },
+      input: { key: row.stable_key, text: row.text, body: row.body, owner: row.owner },
+      actor: "user",
+      taskSources: yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json),
+      capture: yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json),
+      settledInference: true,
+      reuseExisting: true
+    })
   })
+
+  const memoryScope: TaskProposalStore["Service"]["memoryScope"] = Effect.fn(
+    "TaskProposal.memoryScope"
+  )(
+    function* (proposalId) {
+      const row = yield* read(proposalId)
+      if (row.space_id === null || (yield* authoredWithoutSpace(row))) return undefined
+      return row.space_id
+    },
+    Effect.mapError((cause) =>
+      cause instanceof TaskProposalStoreError
+        ? cause
+        : failure("storage", "Could not read Task proposal", cause)
+    )
+  )
 
   const resolve: TaskProposalStore["Service"]["resolve"] = Effect.fn("TaskProposal.resolve")(
     function* (proposalId, request, authority) {
@@ -650,8 +633,8 @@ export const makeTaskProposalStore = (options: {
           }
           if (row.space_id === null)
             return yield* failure("invalid", "A chat's suggestions cannot be started yet")
-          const task = (yield* authoredOutside(row, row.space_id))
-            ? yield* startFromHome(row, input.space_id ?? row.space_id)
+          const task = (yield* authoredWithoutSpace(row))
+            ? yield* startWithoutSpace(row, input.space_id ?? row.space_id)
             : yield* startOnSpace(row, row.space_id, input.space_id, authority)
           if (input.session_id !== undefined && (yield* isOrdinaryChat(sql, input.session_id)))
             yield* sql`UPDATE space_tasks SET home_session_id = ${input.session_id}
@@ -715,6 +698,7 @@ export const makeTaskProposalStore = (options: {
     expireOffers,
     revise,
     resolve,
+    memoryScope,
     retire,
     history: (input) =>
       writer

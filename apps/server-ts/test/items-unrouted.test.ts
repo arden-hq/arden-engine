@@ -6,6 +6,7 @@ import { ConnectionItemStore } from "../src/persistence/connections/store.js"
 import { DayActivity } from "../src/persistence/automations/day-activity.js"
 import { TaskProposalStore } from "../src/persistence/proposals/store.js"
 import { assertItemEvidence } from "../src/persistence/sqlite/connection-item-evidence.js"
+import { homeOfferJson } from "../src/persistence/sqlite/task-proposal-home.js"
 import { connectionItemTools } from "../src/tools/connection-items.js"
 import { GoogleConnections } from "../src/google/service.js"
 import { migratedTo } from "./fixtures/migrated-to.js"
@@ -98,7 +99,7 @@ const homeOffer = (
       status === "rejected" ? AT : null
     )
 
-it("M2 moves every Home offer to Main and keeps Main within its three open offers", () => {
+it("M2 files every Home offer under Main and leaves none of them open", () => {
   const database = migratedTo(185, (database) => {
     const main = String(
       database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
@@ -130,8 +131,8 @@ it("M2 moves every Home offer to Main and keeps Main within its three open offer
     { proposal_id: "skipped", place: "space", in_main: 1, status: "rejected", settled: 1 },
     { proposal_id: "oldest", place: "space", in_main: 1, status: "expired", settled: 1 },
     { proposal_id: "older", place: "space", in_main: 1, status: "expired", settled: 1 },
-    { proposal_id: "newer", place: "space", in_main: 1, status: "offered", settled: 0 },
-    { proposal_id: "newest", place: "space", in_main: 1, status: "offered", settled: 0 }
+    { proposal_id: "newer", place: "space", in_main: 1, status: "expired", settled: 1 },
+    { proposal_id: "newest", place: "space", in_main: 1, status: "expired", settled: 1 }
   ])
   expect(() =>
     database.exec(
@@ -171,7 +172,7 @@ const mainOffer = (
   offer: {
     readonly id: string
     readonly sources: string
-    readonly authoredIn: { readonly session: string; readonly run: string } | undefined
+    readonly authoredIn: { readonly session: string; readonly run: string }
   }
 ) =>
   Effect.gen(function* () {
@@ -183,9 +184,8 @@ const mainOffer = (
         capture_policy_json, revision, seq, status, created_at, updated_at)
       VALUES (${offer.id}, 'space', ${main}, ${offer.id}, ${offer.id}, 'Reply to Ann', 'worker',
         '{"basis":"inferred","reason":"Ann asked."}', ${offer.sources}, ${offer.id}, ${offer.id},
-        ${run?.run ?? null}, ${run?.session ?? null}, ${run === undefined ? null : "turn-1"},
-        ${run === undefined ? null : "call-1"},
-        ${run === undefined ? null : '{"origin":"automation","task_item_id":null,"task_generation":null}'},
+        ${run.run}, ${run.session}, 'turn-1', 'call-1',
+        '{"origin":"automation","task_item_id":null,"task_generation":null}',
         0, 1, 'offered', ${AT}, ${AT})`
   })
 
@@ -202,7 +202,9 @@ const chatWithTurn = (
     yield* sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at,
         ended_at, metadata_json, assistant_message_id)
       VALUES (${chat.run}, ${chat.session}, 'completed', ${AT}, ${AT}, ${AT},
-        json_object('turn_id', 'turn-1'), ${`assistant-${chat.run}`})`
+        json_object('turn_id', 'turn-1',
+          'run_policy', json_object('space', json_object('space_id', ${chat.spaceId}))),
+        ${`assistant-${chat.run}`})`
   })
 
 const start = (proposalId: string, spaceId?: string) =>
@@ -224,18 +226,13 @@ const start = (proposalId: string, spaceId?: string) =>
     return rows[0]?.space_id
   })
 
-it("a moved item offer and an Automation's Main offer start on Main or on the Space picked", async () => {
-  const placed = await withTempDatabase(
+it("a Main offer from a run with no Space starts on Main or on the Space picked, with no Memory scope", async () => {
+  const outcome = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      const proposals = yield* TaskProposalStore
       yield* sql`INSERT INTO spaces (space_id, name, name_key, created_at, updated_at)
         VALUES ('work', 'Work', 'work', ${AT}, ${AT})`
-      yield* seedItem(sql, "item-1")
-      yield* seedItem(sql, "item-2")
-      const item = (id: string) =>
-        JSON.stringify([{ kind: "connection_item", item_id: id, revision: id }])
-      yield* mainOffer(sql, { id: "moved-main", sources: item("item-1"), authoredIn: undefined })
-      yield* mainOffer(sql, { id: "moved-work", sources: item("item-2"), authoredIn: undefined })
       yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
       const turn = JSON.stringify([
         { kind: "chat", session_id: "automation", turn_id: "turn-1", revision: "turn-1" }
@@ -246,19 +243,13 @@ it("a moved item offer and an Automation's Main offer start on Main or on the Sp
       const main = yield* mainId(sql)
       const label = (spaceId: string | undefined) => (spaceId === main ? "main" : spaceId)
       return {
-        movedMain: label(yield* start("moved-main")),
-        movedWork: label(yield* start("moved-work", "work")),
-        automationMain: label(yield* start("automation-main")),
-        automationWork: label(yield* start("automation-work", "work"))
+        memoryScope: yield* proposals.memoryScope("automation-main"),
+        main: label(yield* start("automation-main")),
+        work: label(yield* start("automation-work", "work"))
       }
     })
   )
-  expect(placed).toEqual({
-    movedMain: "main",
-    movedWork: "work",
-    automationMain: "main",
-    automationWork: "work"
-  })
+  expect(outcome).toEqual({ memoryScope: undefined, main: "main", work: "work" })
 })
 
 it("a Main chat's offer citing a stored item starts, and item evidence needs only a stored item", async () => {
@@ -276,6 +267,7 @@ it("a Main chat's offer citing a stored item starts, and item evidence needs onl
         ]),
         authoredIn: { session: "main-chat", run: "main-run" }
       })
+      const scope = yield* (yield* TaskProposalStore).memoryScope("main-chat-offer")
       const started = yield* start("main-chat-offer")
       const evidence = (itemId: string) =>
         assertItemEvidence(sql, {
@@ -287,6 +279,7 @@ it("a Main chat's offer citing a stored item starts, and item evidence needs onl
         )
       yield* seedItem(sql, "item-2")
       return {
+        memoryInMain: scope === main,
         started: started === main,
         stored: yield* evidence("item-2"),
         unknown: yield* evidence("item-3")
@@ -294,6 +287,7 @@ it("a Main chat's offer citing a stored item starts, and item evidence needs onl
     })
   )
   expect(outcome).toEqual({
+    memoryInMain: true,
     started: true,
     stored: "accepted",
     unknown: "That item is not stored, so it cannot be evidence"
@@ -364,4 +358,28 @@ it("the connection item tools are a read of recent items and a read of one; item
     "connection_items_state",
     "connection_item_read"
   ])
+})
+
+it("Main letter evidence names the item an offer cites, whatever source comes first", async () => {
+  const cited = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* seedItem(sql, "item-1")
+      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
+      yield* mainOffer(sql, {
+        id: "offer",
+        sources: JSON.stringify([
+          { kind: "chat", session_id: "automation", turn_id: "turn-1", revision: "turn-1" },
+          { kind: "connection_item", item_id: "item-1", revision: "item-1" }
+        ]),
+        authoredIn: { session: "automation", run: "automation-run" }
+      })
+      yield* sql`UPDATE task_proposals SET signal_json = json_object('source', 'gmail',
+        'title', 'Invoice', 'from', 'Ann')`
+      const rows = yield* sql<{ readonly offer: string }>`SELECT ${homeOfferJson(sql)} AS offer
+        FROM task_proposals AS offer`
+      return JSON.parse(rows[0]?.offer ?? "{}").item.item_id
+    })
+  )
+  expect(cited).toBe("item-1")
 })

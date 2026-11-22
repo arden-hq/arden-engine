@@ -68,8 +68,6 @@ export const TASK_PROPOSALS_TABLE = `CREATE TABLE "task_proposals" (
       CHECK(status != 'rejected' OR settlement_decision = 'reject')
     )`
 
-const SPACE_OPEN_OFFER_CAP = 3
-
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 
 const columnsOf = (database: DatabaseSync, table: string): string =>
@@ -94,31 +92,15 @@ const dropItemRoutes = (database: DatabaseSync): void => {
     DELETE FROM permission_rules WHERE rule_id IN (SELECT rule_id FROM gone)`)
 }
 
-const moveHomeOffers = (database: DatabaseSync): void => {
+const retireHomeOffers = (database: DatabaseSync): void => {
   const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()
   if (main === undefined) throw new Error("The Main Space is missing")
-  const mainId = String(main.space_id)
-  const offered = database
-    .prepare(
-      "SELECT COUNT(*) AS count FROM task_proposals WHERE place = 'space' AND space_id = ? AND status = 'offered'"
-    )
-    .get(mainId)
-  const room = Math.max(0, SPACE_OPEN_OFFER_CAP - Number(offered?.count ?? 0))
-  database
-    .prepare(
-      `UPDATE task_proposals SET status = 'expired', revision = revision + 1,
-        updated_at = ${NOW}, settled_at = ${NOW}
-      WHERE place = 'home' AND status IN ('offered', 'held') AND proposal_id NOT IN (
-        SELECT proposal_id FROM task_proposals WHERE place = 'home' AND status IN ('offered', 'held')
-        ORDER BY seq DESC LIMIT ?)`
-    )
-    .run(room)
-  database.exec(`UPDATE task_proposals SET status = 'offered', revision = revision + 1,
-      updated_at = ${NOW}, put_off_until = NULL, waiting_since = NULL
-    WHERE place = 'home' AND status = 'held'`)
+  database.exec(`UPDATE task_proposals SET status = 'expired', revision = revision + 1,
+      updated_at = ${NOW}, settled_at = ${NOW}, put_off_until = NULL, waiting_since = NULL
+    WHERE place = 'home' AND status IN ('offered', 'held')`)
   database
     .prepare("UPDATE task_proposals SET place = 'space', space_id = ? WHERE place = 'home'")
-    .run(mainId)
+    .run(String(main.space_id))
 }
 
 const dropHomePlace = (database: DatabaseSync): void => {
@@ -141,7 +123,7 @@ const dropHomePlace = (database: DatabaseSync): void => {
 
 const up = (database: DatabaseSync): void => {
   dropItemRoutes(database)
-  moveHomeOffers(database)
+  retireHomeOffers(database)
   dropHomePlace(database)
 }
 

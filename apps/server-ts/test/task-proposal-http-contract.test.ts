@@ -55,6 +55,7 @@ it("encodes stale Memory conflicts and review status through the Task proposals 
       TaskProposalStore,
       TaskProposalStore.of({
         get: () => Effect.succeed(proposal),
+        memoryScope: () => Effect.succeed(proposal.space_id ?? undefined),
         resolve: () => Effect.die("stale Memory must be rejected by the HTTP handler"),
         requestProposalReview: () => Effect.succeed(review),
         proposalReviewStatus: () => Effect.succeed(review)

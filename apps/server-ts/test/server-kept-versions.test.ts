@@ -18,7 +18,7 @@ import {
 } from "../src/persistence/proposals/store.js"
 import { assertCurrentTaskRevision } from "../src/persistence/sqlite/work-history.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
-import { SpaceStore } from "../src/persistence/spaces/store.js"
+import { SpaceStore, type PersistedSpace } from "../src/persistence/spaces/store.js"
 import type { TaskInferenceReview } from "../src/persistence/work/inference.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import type { ServerTool } from "../src/tools/define.js"
@@ -58,6 +58,21 @@ const hashInputsOf = (tools: ReadonlyArray<ServerTool>): ReadonlyArray<string> =
     hashInputPaths(tool.definition.name, tool.entry(toolParametersJsonSchema).parameters)
   )
 
+const mainSpaceRow: PersistedSpace = {
+  inference: { enabled: true },
+  space_id: "main-space",
+  name: "Main",
+  instructions: null,
+  instructions_source: null,
+  page_id: null,
+  page_path: null,
+  mark: null,
+  kind: "main",
+  created_at: "2026-09-01T00:00:00Z",
+  updated_at: "2026-09-01T00:00:00Z",
+  archived_at: null
+}
+
 describe("task_propose after a review", () => {
   const SPACE = "space-1"
   const offered: TaskProposal = {
@@ -87,9 +102,10 @@ describe("task_propose after a review", () => {
     settled_at: null
   }
 
-  const fixture = () => {
+  const fixture = (runSpaceId: string | null = SPACE) => {
     const state = { snapshot: hash("a") }
     const proposed: Array<ProposeSpaceTaskInput> = []
+    const reviewedSpaces: Array<string> = []
     const review = (): TaskInferenceReview => ({
       snapshot: state.snapshot,
       tasks: [
@@ -101,11 +117,19 @@ describe("task_propose after a review", () => {
     })
     const tools = Effect.runSync(
       taskInferenceTools.pipe(
-        Effect.provideService(SpaceStore, partialService<SpaceStore["Service"]>("SpaceStore", {})),
+        Effect.provideService(
+          SpaceStore,
+          partialService<SpaceStore["Service"]>("SpaceStore", {
+            list: () => Effect.succeed([mainSpaceRow])
+          })
+        ),
         Effect.provideService(
           WorkStore,
           partialService<WorkStore["Service"]>("WorkStore", {
-            inferenceReview: () => Effect.succeed(review())
+            inferenceReview: (spaceId) => {
+              reviewedSpaces.push(spaceId)
+              return Effect.succeed(review())
+            }
           })
         ),
         Effect.provideService(
@@ -120,13 +144,13 @@ describe("task_propose after a review", () => {
         Effect.provideService(
           SessionQueries,
           partialService<SessionQueries["Service"]>("SessionQueries", {
-            loadHistoryHeader: () => Effect.succeed(sessionHeader({ spaceId: SPACE }))
+            loadHistoryHeader: () => Effect.succeed(sessionHeader({ spaceId: runSpaceId }))
           })
         ),
         Effect.provideService(Wiki, partialService<Wiki["Service"]>("Wiki", {}))
       )
     )
-    return { state, proposed, tools }
+    return { state, proposed, reviewedSpaces, tools }
   }
 
   const create = (sources: ReadonlyArray<Record<string, string>>) => ({
@@ -155,6 +179,18 @@ describe("task_propose after a review", () => {
     expect(proposed).toHaveLength(1)
     expect(proposed[0]?.inferenceSnapshot).toBe(state.snapshot)
     expect(proposed[0]?.sources).toEqual([{ ...chatTurn, revision: "turn-1" }])
+  })
+
+  it("reads Main's work for a run with no Space and proposes against that review", async () => {
+    const { state, proposed, reviewedSpaces, tools } = fixture(null)
+    const ctx = context()
+    const reviewed = await named(tools, "space_inference_review").execute({}, ctx)
+    expect(reviewed.content).toContain("Ship it")
+    await named(tools, "task_propose").execute(create([chatTurn]), ctx)
+    expect(reviewedSpaces).toEqual(["main-space"])
+    expect(proposed.map((input) => [input.spaceId, input.inferenceSnapshot])).toEqual([
+      [undefined, state.snapshot]
+    ])
   })
 
   it("is refused before any review in this run", async () => {

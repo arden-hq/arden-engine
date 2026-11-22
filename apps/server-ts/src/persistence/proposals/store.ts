@@ -90,6 +90,7 @@ export class TaskProposalStore extends Context.Service<
     readonly proposalReviewStatus: (input: {
       readonly proposalId: string
     }) => Result<TaskProposalReview | undefined>
+    readonly memoryScope: (proposalId: string) => Result<string | undefined>
     readonly resolve: (
       proposalId: string,
       input: ResolveTaskProposalInput,

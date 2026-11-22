@@ -8,6 +8,7 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
+import { SpaceStore } from "../persistence/spaces/store.js"
 import { Wiki } from "../wiki/service.js"
 import type { Snapshot } from "../wiki/snapshot.js"
 import {
@@ -25,6 +26,7 @@ interface Services {
   readonly work: WorkStore["Service"]
   readonly proposals: TaskProposalStore["Service"]
   readonly sessions: SessionQueries["Service"]
+  readonly spaces: SpaceStore["Service"]
   readonly wiki: Wiki["Service"]
 }
 
@@ -146,7 +148,20 @@ const runSpace = async (services: Services, sessionId: string, signal: AbortSign
   return header?.spaceId ?? undefined
 }
 
-const HOME_REVIEW = "home"
+const reviewedSpace = async (
+  services: Services,
+  spaceId: string | undefined,
+  signal: AbortSignal
+): Promise<string> => {
+  if (spaceId !== undefined) return spaceId
+  const spaces = await Effect.runPromise(
+    services.spaces.list().pipe(Effect.mapError((cause) => failure(cause))),
+    { signal }
+  )
+  const main = spaces.find((space) => space.kind === "main")
+  if (main === undefined) throw failure({ reason: "storage", message: "The Main Space is missing" })
+  return main.space_id
+}
 
 const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
@@ -169,22 +184,17 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     },
     execute: async (_input, ctx) => {
       const spaceId = await runSpace(services, ctx.run.sessionId, ctx.signal)
-      if (spaceId === undefined) {
-        ctx.run.observations.observe(observedKey.inferenceReview(spaceId), HOME_REVIEW)
-        return {
-          result:
-            "This run works in no Space, so a proposal goes to the Main Space. There are no Space Tasks to reuse.",
-          preview: "No Space: proposals go to Main",
-          data: { tasks: [], rejections: [] }
-        }
-      }
+      const target = await reviewedSpace(services, spaceId, ctx.signal)
       const { snapshot, ...review } = await Effect.runPromise(
-        services.work.inferenceReview(spaceId).pipe(Effect.mapError((cause) => failure(cause))),
+        services.work.inferenceReview(target).pipe(Effect.mapError((cause) => failure(cause))),
         { signal: ctx.signal }
       )
       ctx.run.observations.observe(observedKey.inferenceReview(spaceId), snapshot)
       return {
-        result: JSON.stringify(review),
+        result:
+          spaceId === undefined
+            ? `This run works in no Space, so a proposal goes to the Main Space. Its work: ${JSON.stringify(review)}`
+            : JSON.stringify(review),
         preview: `${review.tasks.length} Tasks, ${review.rejections.length} rejected inferences`,
         data: review
       }
@@ -264,14 +274,10 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
         }
       }
       if (input.decision.kind === "reuse") {
-        if (spaceId === undefined)
-          throw new ToolExecutionError(
-            "This run works in no Space, so there is no Task to reuse. Propose a distinct new Task, or nothing.",
-            { preview: "No Space Tasks to reuse", retryable: false }
-          )
         const decision = input.decision
+        const target = await reviewedSpace(services, spaceId, ctx.signal)
         const review = await Effect.runPromise(
-          services.work.inferenceReview(spaceId).pipe(Effect.mapError((cause) => failure(cause))),
+          services.work.inferenceReview(target).pipe(Effect.mapError((cause) => failure(cause))),
           { signal: ctx.signal }
         )
         if (review.snapshot !== reviewed)
@@ -433,6 +439,7 @@ export const taskInferenceTools = Effect.gen(function* () {
     work: yield* WorkStore,
     proposals: yield* TaskProposalStore,
     sessions: yield* SessionQueries,
+    spaces: yield* SpaceStore,
     wiki: yield* Wiki
   })
 })
