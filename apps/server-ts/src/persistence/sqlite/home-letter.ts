@@ -12,7 +12,8 @@ import { HOME_LETTER_AUTOMATION_ID } from "../automations/model.js"
 import { WorkStoreError } from "../work/store.js"
 import { HomeStore, type HomeLetterSnapshot } from "../home/store.js"
 import type { HomeAddressBook, HomeAddressNeeds, HomeLetterRules } from "../home/model.js"
-import { leaseIsCurrent } from "./automation-lease.js"
+import { jobMayPublish } from "./automation-lease.js"
+import { handlerToolContent } from "./automation-handler-tool.js"
 import { makeHomeEvidence } from "./home-evidence.js"
 import { decodeJson } from "./json.js"
 import { workError } from "./work-records.js"
@@ -309,7 +310,7 @@ export const makeHomeStore = ({
             return true
           }
           if (
-            !(yield* leaseIsCurrent(sql, {
+            !(yield* jobMayPublish(sql, {
               lease: input.lease,
               automationId: HOME_LETTER_AUTOMATION_ID,
               attemptId: input.attemptId
@@ -317,15 +318,11 @@ export const makeHomeStore = ({
           )
             return yield* workError(
               "conflict",
-              "The Home letter run's lease is no longer current, so nothing was published"
+              "The Home letter job is no longer current or its Automation is paused, so nothing was published"
             )
           const current = yield* collect(input.rules)
           if (!(yield* validSnapshot(input.snapshot, current, input.rules))) return false
-          const runs = yield* sql<{
-            readonly result: string | null
-          }>`SELECT COALESCE(json_extract(run.metadata_json, '$.terminal_result.text'), message.search_text) AS result
-          FROM chat_runs AS run LEFT JOIN session_messages AS message
-            ON message.session_id = run.session_id AND message.message_id = run.assistant_message_id
+          const runs = yield* sql`SELECT 1 FROM chat_runs AS run
           WHERE run.run_id = ${input.runId} AND run.status = 'completed'
           AND json_extract(run.metadata_json, '$.run_policy.execution.mode') = 'worker'
           AND json_extract(run.metadata_json, '$.run_context.origin.kind') = 'automation'
@@ -335,7 +332,15 @@ export const makeHomeStore = ({
               "invalid",
               "Home letter requires a completed Home Automation Worker Run"
             )
-          const result = yield* decodeJson(HomeLetterBodySchema, runs[0].result).pipe(
+          const receipt = yield* handlerToolContent(sql, {
+            runId: input.runId,
+            tool: "publish_home_letter"
+          }).pipe(
+            Effect.mapError((cause) =>
+              workError("invalid", "Could not read the Home Worker's letter", cause)
+            )
+          )
+          const result = yield* decodeJson(HomeLetterBodySchema, receipt).pipe(
             Effect.mapError((cause) =>
               workError("invalid", "Home Worker returned an invalid letter", cause)
             )

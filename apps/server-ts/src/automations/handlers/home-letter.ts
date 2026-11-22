@@ -11,7 +11,7 @@ import type { HomeStore } from "../../persistence/home/store.js"
 import { HOME_LETTER_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import { HOME_LETTER_PROMPT, HOME_LETTER_RULES, homeLetterInput } from "../home-letter-prompt.js"
 import { HOME_LETTER_TOOL, withHomeLetterTool } from "../home-letter-tool.js"
-import { handlerToolResult } from "../handler-tool-result.js"
+import { readHandlerRun } from "../handler-tool-result.js"
 import { runByRule } from "../job-run.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler } from "../system-handler.js"
@@ -55,16 +55,15 @@ export const makeHomeLetterRunner = (services: {
     })
     const runId = observed.runId
     const run = { chatRunId: runId, chatSessionId: sessionId }
-    if (observed.status !== "completed")
-      return jobResult.failed(observed.error, observed.result, run)
-    if (observed.blocked !== null) return jobResult.blocked(observed.blocked, observed.result, run)
-    const body = yield* handlerToolResult(services.queue, {
-      runId,
+    const read = yield* readHandlerRun(services.queue, {
+      observed,
+      run,
       tool: HOME_LETTER_TOOL,
-      schema: HomeLetterBodySchema
+      schema: HomeLetterBodySchema,
+      missing: "The run ended without writing a Home letter or reporting no change"
     })
-    if (body === undefined)
-      return jobResult.failed("The run wrote no Home letter", observed.result, run)
+    if (read.kind === "ended") return read.result
+    const body = read.value
     const published = yield* services.home.publishHomeLetter({
       lease: { id: job.id, token: job.token },
       attemptId: job.payload.automationRunId,

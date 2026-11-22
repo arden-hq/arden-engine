@@ -38,11 +38,13 @@ interface FakeCall {
   readonly isError?: boolean
 }
 
-const fakeModel = (
-  calls: ReadonlyArray<FakeCall>,
-  reply: string,
-  blocked: AutomationBlockedReport | null = null
-) =>
+interface FakeEnding {
+  readonly reply?: string
+  readonly blocked?: AutomationBlockedReport
+  readonly noChange?: string
+}
+
+const fakeModel = (calls: ReadonlyArray<FakeCall>, ending: FakeEnding = {}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const chat = yield* ChatWriteStore
@@ -72,7 +74,7 @@ const fakeModel = (
             {
               message_id: `${input.clientId}-answer`,
               role: ROLE.assistant,
-              content: reply,
+              content: ending.reply ?? "Done.",
               created_at: AT
             }
           ]
@@ -84,10 +86,11 @@ const fakeModel = (
     const awaitRun: AwaitAutomationRun = () =>
       Effect.succeed({
         status: "completed",
-        result: reply,
+        result: ending.reply ?? "Done.",
         error: null,
         errorCode: null,
-        blocked,
+        blocked: ending.blocked ?? null,
+        noChange: ending.noChange ?? null,
         wrote: false
       })
     return { chat: { startAutomation }, awaitRun, runs, prompts }
@@ -162,11 +165,10 @@ const setup = Effect.gen(function* () {
   const runEvents = (
     lease: ClaimedAutomationJobLease,
     calls: ReadonlyArray<FakeCall>,
-    reply = "Done.",
-    blocked: AutomationBlockedReport | null = null
+    ending: FakeEnding = {}
   ) =>
     Effect.gen(function* () {
-      const model = yield* fakeModel(calls, reply, blocked)
+      const model = yield* fakeModel(calls, ending)
       const result = yield* makeEventsRunner({ ...model, queue, posts })(renderAutomationJob(lease))
       return { result, runs: model.runs, prompts: model.prompts }
     })
@@ -223,27 +225,39 @@ it("post_message posts in the named Space, and a retried job posts nothing twice
   )
 })
 
-it("report followed by free text posts nothing and completes with no change", async () => {
+it("report no_change followed by free text posts nothing and completes with no change", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const { sql, arrive, runEvents } = yield* setup
-      const lease = yield* arrive("mail-1")
       const { result } = yield* runEvents(
-        lease,
-        [
-          {
-            tool: "report",
-            args: { event: "no_change" },
-            content: "Recorded."
-          },
-          { ...(yield* posting({ text: "Refused." })), isError: true }
-        ],
-        "Nothing here matches the rule."
+        yield* arrive("mail-1"),
+        [{ tool: "report", args: { event: "no_change" }, content: "Recorded." }],
+        { reply: "Nothing here matches the rule.", noChange: "A newsletter." }
       )
       expect(result).toMatchObject({
         status: "ended",
         outcome: "no_change",
-        result: "Nothing here matches the rule."
+        result: "A newsletter."
+      })
+      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
+    })
+  )
+})
+
+it("a refused post_message followed by free text ends failed, not with no change", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, arrive, runEvents } = yield* setup
+      const { result } = yield* runEvents(
+        yield* arrive("mail-1"),
+        [{ ...(yield* posting({ text: "Refused." })), isError: true }],
+        { reply: "I tried to tell you about a mail." }
+      )
+      expect(result).toMatchObject({
+        status: "ended",
+        outcome: "failed",
+        result: "I tried to tell you about a mail.",
+        error: "The run ended without posting a message or reporting no change"
       })
       expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
     })
@@ -335,22 +349,21 @@ const runHomeLetter = (calls: ReadonlyArray<FakeCall>, blocked: AutomationBlocke
     yield* queue.requestRun(HOME_LETTER_AUTOMATION_ID)
     const [lease] = yield* claimAll("letter")
     if (lease === undefined) return yield* Effect.die("the Home letter was not claimed")
-    const published: Array<unknown> = []
-    const model = yield* fakeModel(calls, "Letter written.", blocked)
+    const model = yield* fakeModel(calls, {
+      reply: "Letter written.",
+      ...(blocked === null ? {} : { blocked })
+    })
     const result = yield* makeHomeLetterRunner({
       ...model,
       queue,
       homeLetterInputs: yield* HomeLetterInputs,
       home: {
         ...home,
-        checkHomeLetter: () => Effect.succeed("ready"),
-        publishHomeLetter: (input) =>
-          Effect.sync(() => {
-            published.push(input.body)
-            return true
-          })
+        checkHomeLetter: () => Effect.succeed("ready")
       }
     })(renderAutomationJob(lease))
+    const published = (yield* (yield* SqlClient.SqlClient)<{ readonly body_json: string }>`
+      SELECT body_json FROM home_letters`).map((row) => JSON.parse(row.body_json))
     return { result, published }
   })
 
@@ -407,8 +420,10 @@ it("a run that reports it is blocked ends blocked with its reason, and posts not
       const { result } = yield* runEvents(
         yield* arrive("mail-1"),
         [{ tool: "report", args: { event: "blocked" }, content: "Recorded." }],
-        "I could not read the mail.",
-        { kind: "dependency", reason: "The mail could not be read." }
+        {
+          reply: "I could not read the mail.",
+          blocked: { kind: "dependency", reason: "The mail could not be read." }
+        }
       )
       expect(result).toMatchObject({
         status: "ended",

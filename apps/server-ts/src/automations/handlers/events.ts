@@ -5,7 +5,7 @@ import type { AutomationQueue } from "../../persistence/automations/queue.js"
 import { EVENTS_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import type { PostStore } from "../../persistence/posts/store.js"
 import { PROMPTS } from "../../prompts/catalog.js"
-import { handlerToolResult } from "../handler-tool-result.js"
+import { readHandlerRun } from "../handler-tool-result.js"
 import { runByRule } from "../job-run.js"
 import {
   POST_MESSAGE_TOOL,
@@ -39,15 +39,15 @@ export const makeEventsRunner = (services: {
       name: job.payload.name
     })
     const run = { chatRunId: observed.runId, chatSessionId: sessionId }
-    if (observed.status !== "completed")
-      return jobResult.failed(observed.error, observed.result, run)
-    if (observed.blocked !== null) return jobResult.blocked(observed.blocked, observed.result, run)
-    const post = yield* handlerToolResult(services.queue, {
-      runId: observed.runId,
+    const read = yield* readHandlerRun(services.queue, {
+      observed,
+      run,
       tool: POST_MESSAGE_TOOL,
-      schema: PostMessageInputSchema
+      schema: PostMessageInputSchema,
+      missing: "The run ended without posting a message or reporting no change"
     })
-    if (post === undefined) return jobResult.completed("no_change", observed.result, run)
+    if (read.kind === "ended") return read.result
+    const post = read.value
     yield* services.posts.post({
       automationId: job.payload.automationId,
       attemptId: job.payload.automationRunId,

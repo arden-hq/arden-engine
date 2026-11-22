@@ -48,6 +48,7 @@ export interface TerminalAutomationChatRun {
   readonly error: string | null
   readonly errorCode: ChatRunErrorCode | null
   readonly blocked: AutomationBlockedReport | null
+  readonly noChange: string | null
   readonly wrote: boolean
 }
 
