@@ -262,7 +262,6 @@ export const tableTells = {
   relay_push_notified: { silent: internal },
   data_backfills: { silent: "Settings › Storage reads backfill progress while it is open." },
   connection_items: { silent: pipeline },
-  connection_threads: { silent: pipeline },
   connection_cursors: { silent: pipeline },
   connection_item_threads: { silent: pipeline },
   event_threads: { silent: pipeline },

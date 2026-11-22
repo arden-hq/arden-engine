@@ -29,20 +29,14 @@ import {
 import { TaskProposalConflictError } from "../proposals/conflict.js"
 import { TASK_PROPOSAL_ID_PREFIX } from "../automations/space-review.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
-import { routeItem } from "./connection-item-route.js"
-import { nextId, type Writer } from "./deps.js"
+import type { Writer } from "./deps.js"
 import { decodeJson } from "./json.js"
-import {
-  expireOverdueOffers,
-  openHeldOnHome,
-  putOfferOff,
-  restartOfferWait
-} from "./proposal-room.js"
+import { expireOverdueOffers, putOfferOff, restartOfferWait } from "./proposal-room.js"
 import { storedOfferStands } from "./offer-rules.js"
-import { homeTaskBody, writeHomeSuggestion } from "./task-proposal-home.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
-import { assertHomeProposalAdmission, assertInferenceAdmission } from "./work-inference.js"
+import { assertInferenceAdmission, assertMainProposalAdmission } from "./work-inference.js"
+import { mainSpaceId } from "./main-space.js"
 import { sourceIdentity, sourceRevision, normalized, evidenceKey } from "./proposal-evidence.js"
 import { retireProposal } from "./proposal-retirement.js"
 import { pruneChatLinks } from "./space-chat-links.js"
@@ -50,11 +44,11 @@ import { projectRetirements } from "./proposal-retirement-view.js"
 import { isOrdinaryChat } from "./in-chat-task.js"
 import { makeProposalRevision, proposalHash } from "./proposal-revision.js"
 import { userChatSql } from "./chat-ownership.js"
-import { openProposalStatusList, refusedProposalStatusList } from "./status-sets.js"
+import { refusedProposalStatusList } from "./status-sets.js"
 
 export interface ProposalRow {
   readonly proposal_id: string
-  readonly place: "space" | "chat" | "home"
+  readonly place: "space" | "chat"
   readonly space_id: string | null
   readonly chat_session_id: string | null
   readonly dedupe_key: string
@@ -92,8 +86,6 @@ const SignalSnapshotSchema = Schema.Struct({
   title: Schema.String,
   from: Schema.NullOr(Schema.String)
 })
-
-const HOME_SETTLED_LISTED_DAYS = 1
 
 const failure = (
   reason: TaskProposalStoreError["reason"],
@@ -213,7 +205,7 @@ export const makeTaskProposalStore = (options: {
   const changed = (row: ProposalRow) =>
     row.space_id === null ? Effect.void : pruneChatLinks(sql, row.space_id)
 
-  const listed = (scope: TaskProposalScope, since: string) => {
+  const listed = (scope: TaskProposalScope) => {
     switch (scope.place) {
       case "space":
         return sql<ProposalRow>`SELECT * FROM task_proposals
@@ -223,19 +215,12 @@ export const makeTaskProposalStore = (options: {
         return sql<ProposalRow>`SELECT * FROM task_proposals
           WHERE place = 'chat' AND chat_session_id = ${scope.sessionId}
           ORDER BY updated_at DESC, proposal_id`
-      case "home":
-        return sql<ProposalRow>`SELECT * FROM task_proposals
-          WHERE place = 'home' AND (status IN ${openProposalStatusList} OR settled_at >= ${since})
-          ORDER BY status = 'offered' DESC, status = 'held' DESC, seq DESC`
     }
   }
 
   const list: TaskProposalStore["Service"]["list"] = Effect.fn("TaskProposal.list")(
     function* (scope) {
-      const since = DateTime.formatIso(
-        DateTime.subtract(yield* DateTime.now, { days: HOME_SETTLED_LISTED_DAYS })
-      )
-      const rows = yield* listed(scope, since)
+      const rows = yield* listed(scope)
       const retirements = yield* projectRetirements(sql, rows)
       return { proposals: yield* Effect.forEach(rows, (row) => project(row, retirements)) }
     },
@@ -282,8 +267,8 @@ export const makeTaskProposalStore = (options: {
       }
       const sources = yield* canonicalizeSources(decodedSources)
       const identities = normalized(sources, sourceIdentity)
-      const place = request.spaceId === undefined ? "home" : "space"
-      const dedupeKey = proposalHash([request.spaceId ?? place, input.key, identities])
+      const spaceId = request.spaceId ?? (yield* mainSpaceId(sql))
+      const dedupeKey = proposalHash([spaceId, input.key, identities])
       const proposalId = `${TASK_PROPOSAL_ID_PREFIX}${dedupeKey}`
       const evidenceRevisionKey = evidenceKey(sources)
       const owner = input.owner ?? "worker"
@@ -309,7 +294,7 @@ export const makeTaskProposalStore = (options: {
           >`SELECT *,
             json_extract(retirement_json, '$.evidence_revision_key') AS retired_evidence_key FROM task_proposals
           WHERE proposal_id = ${proposalId}
-            OR (place = ${place} AND space_id IS ${request.spaceId ?? null}
+            OR (place = 'space' AND space_id = ${spaceId}
               AND stable_key = ${input.key} AND status IN ${refusedProposalStatusList})
           ORDER BY status IN ${refusedProposalStatusList} DESC, settled_at DESC LIMIT 1`
           const existing = existingRows[0]
@@ -320,7 +305,13 @@ export const makeTaskProposalStore = (options: {
             return yield* project(existing)
           yield* (
             request.spaceId === undefined
-              ? assertHomeProposalAdmission(sql, { runId: request.runId, sources, proposalId })
+              ? assertMainProposalAdmission(sql, {
+                  spaceId,
+                  runId: request.runId,
+                  snapshot: request.inferenceSnapshot,
+                  sources,
+                  proposalId
+                })
               : assertInferenceAdmission(sql, {
                   spaceId: request.spaceId,
                   runId: request.runId,
@@ -367,7 +358,7 @@ export const makeTaskProposalStore = (options: {
           capture_policy_json, revision, seq, status, item_id, settlement_client_id,
           settlement_decision, settlement_task_json, created_at, updated_at, settled_at
         ) VALUES (
-          ${proposalId}, ${place}, ${request.spaceId ?? null}, ${dedupeKey}, ${input.key}, ${input.text},
+          ${proposalId}, 'space', ${spaceId}, ${dedupeKey}, ${input.key}, ${input.text},
           ${input.body ?? null}, ${owner}, ${JSON.stringify(taskCapture)},
           ${JSON.stringify(sources)}, ${signals[0]?.signal ?? null}, ${evidenceRevisionKey},
           ${candidateHash}, ${request.runId}, ${request.sessionId}, ${run.turn_id},
@@ -427,25 +418,19 @@ export const makeTaskProposalStore = (options: {
       )
   })
 
-  const suggestFromItem: TaskProposalStore["Service"]["suggestFromItem"] = Effect.fn(
-    "TaskProposal.suggestFromItem"
-  )(
-    function* (input) {
-      const now = DateTime.formatIso(yield* DateTime.now)
-      const proposalId = `offer_${yield* nextId}`
-      return yield* writer.transact(
-        Effect.gen(function* () {
-          const written = yield* writeHomeSuggestion(sql, { ...input, proposalId, now })
-          return written ? yield* read(proposalId).pipe(Effect.flatMap(project)) : undefined
+  const assertItemsStored = Effect.fn("TaskProposal.assertItemsStored")(function* (
+    sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>
+  ) {
+    for (const source of sources) {
+      if (source.kind !== "connection_item") continue
+      const stored = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
+      if (stored.length === 0)
+        return yield* new TaskProposalConflictError({
+          kind: "source_unavailable",
+          message: "That item expired"
         })
-      )
-    },
-    Effect.mapError((cause) =>
-      cause instanceof TaskProposalStoreError
-        ? cause
-        : failure("storage", "Could not record the Home suggestion", cause)
-    )
-  )
+    }
+  })
 
   const validateStoredSources = Effect.fn("TaskProposal.validateSources")(function* (
     spaceId: string,
@@ -466,15 +451,6 @@ export const makeTaskProposalStore = (options: {
           return yield* new TaskProposalConflictError({
             kind: "source_unavailable",
             message: "Task proposal evidence is no longer available"
-          })
-        }
-      } else if (source.kind === "connection_item") {
-        const owned = yield* sql`SELECT 1 FROM connection_items
-          WHERE item_id = ${source.item_id} AND owner_space_id = ${spaceId}`
-        if (owned.length === 0) {
-          return yield* new TaskProposalConflictError({
-            kind: "source_unavailable",
-            message: "That item moved off this Space or expired"
           })
         }
       } else if (
@@ -524,6 +500,7 @@ export const makeTaskProposalStore = (options: {
       })
     }
     const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json)
+    yield* assertItemsStored(sources)
     yield* validateStoredSources(spaceId, sources, authority)
     return yield* work.createInTransaction({
       scope: { kind: "space", spaceId },
@@ -536,70 +513,51 @@ export const makeTaskProposalStore = (options: {
     })
   })
 
-  const startFromHome = Effect.fn("TaskProposal.startFromHome")(function* (
+  const authoredWithoutSpace = (row: ProposalRow) =>
+    sql`SELECT 1 FROM chat_runs WHERE run_id = ${row.source_run_id}
+      AND json_extract(metadata_json, '$.run_policy.space.space_id') IS NULL`.pipe(
+      Effect.map((rows) => rows.length > 0)
+    )
+
+  const startWithoutSpace = Effect.fn("TaskProposal.startWithoutSpace")(function* (
     row: ProposalRow,
-    spaceId: string | undefined,
-    now: string
+    spaceId: string
   ) {
-    if (spaceId === undefined) return yield* failure("invalid", "Pick the Space to start it on")
-    const spaces = yield* sql<{ readonly name: string }>`SELECT name FROM spaces
-      WHERE space_id = ${spaceId} AND archived_at IS NULL`
-    const space = spaces[0]
-    if (space === undefined) {
+    const spaces =
+      yield* sql`SELECT 1 FROM spaces WHERE space_id = ${spaceId} AND archived_at IS NULL`
+    if (spaces.length === 0) {
       return yield* new TaskProposalConflictError({
         kind: "space_unavailable",
         message: "That Space is archived"
       })
     }
-    const kept = yield* sql<{ readonly item_id: string }>`SELECT item.item_id
-      FROM json_each(${row.sources_json}) AS cited
-      JOIN connection_items AS item ON item.item_id = json_extract(cited.value, '$.item_id')
-      WHERE json_extract(cited.value, '$.kind') = 'connection_item' LIMIT 1`
-    const itemId = kept[0]?.item_id
-    const capture = yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json)
-    const input = { key: row.stable_key, text: row.text, body: row.body, owner: row.owner }
-    const task =
-      row.source_run_id !== null
-        ? yield* work.createInTransaction({
-            scope: { kind: "space", spaceId },
-            input,
-            actor: "user",
-            taskSources: yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json),
-            capture,
-            settledInference: true,
-            reuseExisting: true
-          })
-        : yield* work.createInTransaction({
-            scope: { kind: "space", spaceId },
-            input: {
-              ...input,
-              body:
-                row.body ??
-                homeTaskBody(
-                  capture.reason,
-                  row.signal_json === null
-                    ? ""
-                    : (yield* decodeJson(SignalSnapshotSchema, row.signal_json)).title
-                )
-            },
-            actor: "user",
-            taskSources:
-              itemId === undefined
-                ? []
-                : [{ kind: "connection_item", item_id: itemId, revision: itemId }],
-            capture: { basis: "explicit", reason: "You started it from an offer on Home." },
-            reuseExisting: true
-          })
-    if (itemId !== undefined)
-      yield* routeItem(sql, {
-        itemId,
-        spaceId,
-        basis: "user",
-        reason: `You started it on ${space.name}.`,
-        now
-      })
-    return task
+    const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json)
+    yield* assertItemsStored(sources)
+    return yield* work.createInTransaction({
+      scope: { kind: "space", spaceId },
+      input: { key: row.stable_key, text: row.text, body: row.body, owner: row.owner },
+      actor: "user",
+      taskSources: sources,
+      capture: yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json),
+      settledInference: true,
+      reuseExisting: true
+    })
   })
+
+  const memoryScope: TaskProposalStore["Service"]["memoryScope"] = Effect.fn(
+    "TaskProposal.memoryScope"
+  )(
+    function* (proposalId) {
+      const row = yield* read(proposalId)
+      if (row.space_id === null || (yield* authoredWithoutSpace(row))) return undefined
+      return row.space_id
+    },
+    Effect.mapError((cause) =>
+      cause instanceof TaskProposalStoreError
+        ? cause
+        : failure("storage", "Could not read Task proposal", cause)
+    )
+  )
 
   const resolve: TaskProposalStore["Service"]["resolve"] = Effect.fn("TaskProposal.resolve")(
     function* (proposalId, request, authority) {
@@ -678,17 +636,15 @@ export const makeTaskProposalStore = (options: {
             status = 'rejected', settlement_client_id = ${input.client_id},
             settlement_decision = 'reject', updated_at = ${now}, settled_at = ${now}
             WHERE proposal_id = ${proposalId} AND status = 'offered'`
-            if (row.place === "home") yield* openHeldOnHome(sql, now)
             const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
             yield* changed(row)
             return { proposal, task: null }
           }
-          if (row.place === "chat")
+          if (row.space_id === null)
             return yield* failure("invalid", "A chat's suggestions cannot be started yet")
-          const task =
-            row.space_id === null
-              ? yield* startFromHome(row, input.space_id, now)
-              : yield* startOnSpace(row, row.space_id, input.space_id, authority)
+          const task = (yield* authoredWithoutSpace(row))
+            ? yield* startWithoutSpace(row, input.space_id ?? row.space_id)
+            : yield* startOnSpace(row, row.space_id, input.space_id, authority)
           if (input.session_id !== undefined && (yield* isOrdinaryChat(sql, input.session_id)))
             yield* sql`UPDATE space_tasks SET home_session_id = ${input.session_id}
               WHERE item_id = ${task.item_id} AND space_id IS NOT NULL`
@@ -698,7 +654,6 @@ export const makeTaskProposalStore = (options: {
           settlement_task_json = ${JSON.stringify(task)},
           updated_at = ${now}, settled_at = ${now}
           WHERE proposal_id = ${proposalId} AND status = 'offered'`
-          if (row.place === "home") yield* openHeldOnHome(sql, now)
           const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
           yield* changed(row)
           return { proposal, task }
@@ -751,8 +706,8 @@ export const makeTaskProposalStore = (options: {
     propose,
     expireOffers,
     revise,
-    suggestFromItem,
     resolve,
+    memoryScope,
     retire,
     history: (input) =>
       writer

@@ -63,9 +63,9 @@ it("a day's Tasks and items are read once each, inside the day", async () => {
       const activity = yield* DayActivity
       const item = (id: string, account: string, at: string) =>
         `INSERT INTO connection_items (item_id, source, account, external_id, thread_key, title,
-            sender, received_at, snippet, fetched_at, state)
+            sender, received_at, snippet, fetched_at)
           VALUES ('${id}', 'gmail', '${account}', '${id}', 'thread-${id}', 'Interview', 'A <a@x.test>',
-            '${at}', 'Tuesday works.', '${at}', 'pending')`
+            '${at}', 'Tuesday works.', '${at}')`
       const event = (id: number, type: string, at: string) =>
         `INSERT INTO space_task_events (space_id, item_id, operation_index, event_type, summary,
             created_at, state_version)

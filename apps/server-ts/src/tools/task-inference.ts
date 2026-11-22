@@ -8,6 +8,7 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { WorkStore } from "../persistence/work/store.js"
 import { TaskProposalStore } from "../persistence/proposals/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
+import { SpaceStore } from "../persistence/spaces/store.js"
 import { Wiki } from "../wiki/service.js"
 import type { Snapshot } from "../wiki/snapshot.js"
 import {
@@ -25,6 +26,7 @@ interface Services {
   readonly work: WorkStore["Service"]
   readonly proposals: TaskProposalStore["Service"]
   readonly sessions: SessionQueries["Service"]
+  readonly spaces: SpaceStore["Service"]
   readonly wiki: Wiki["Service"]
 }
 
@@ -55,7 +57,7 @@ const evidence = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("connection_item").annotate({
       description:
-        "Evidence from a mail or GitHub item. To create, one routed to this Space, listed under Routed connection items. To retire, any stored item, found with connection_items_state."
+        "Evidence from a mail or GitHub item: any stored item, found with connection_items_state."
     }),
     item_id: Schema.NonEmptyString.annotate({ description: "Exact item_id from that list." })
   }),
@@ -146,7 +148,20 @@ const runSpace = async (services: Services, sessionId: string, signal: AbortSign
   return header?.spaceId ?? undefined
 }
 
-const HOME_REVIEW = "home"
+const reviewedSpace = async (
+  services: Services,
+  spaceId: string | undefined,
+  signal: AbortSignal
+): Promise<string> => {
+  if (spaceId !== undefined) return spaceId
+  const spaces = await Effect.runPromise(
+    services.spaces.list().pipe(Effect.mapError((cause) => failure(cause))),
+    { signal }
+  )
+  const main = spaces.find((space) => space.kind === "main")
+  if (main === undefined) throw failure({ reason: "storage", message: "The Main Space is missing" })
+  return main.space_id
+}
 
 const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> => [
   defineServerTool({
@@ -169,22 +184,17 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     },
     execute: async (_input, ctx) => {
       const spaceId = await runSpace(services, ctx.run.sessionId, ctx.signal)
-      if (spaceId === undefined) {
-        ctx.run.observations.observe(observedKey.inferenceReview(spaceId), HOME_REVIEW)
-        return {
-          result:
-            "This run works in no Space, so a proposal goes to Home, where the user picks its Space. There are no Space Tasks to reuse.",
-          preview: "No Space: proposals go to Home",
-          data: { tasks: [], rejections: [] }
-        }
-      }
+      const target = await reviewedSpace(services, spaceId, ctx.signal)
       const { snapshot, ...review } = await Effect.runPromise(
-        services.work.inferenceReview(spaceId).pipe(Effect.mapError((cause) => failure(cause))),
+        services.work.inferenceReview(target).pipe(Effect.mapError((cause) => failure(cause))),
         { signal: ctx.signal }
       )
       ctx.run.observations.observe(observedKey.inferenceReview(spaceId), snapshot)
       return {
-        result: JSON.stringify(review),
+        result:
+          spaceId === undefined
+            ? `This run works in no Space, so a proposal goes to the Main Space. Its work: ${JSON.stringify(review)}`
+            : JSON.stringify(review),
         preview: `${review.tasks.length} Tasks, ${review.rejections.length} rejected inferences`,
         data: review
       }
@@ -194,14 +204,14 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
     name: "task_propose",
     summary: "Proposes a Task for you to start.",
     discovery: { group: "task_inference" },
-    description: `Propose one Task for the user to start, on this run's Space while it suggests tasks: from its Space review, a worker of one of its Tasks, or an Automation working in it. Background runs never start Tasks; the user's Start does. Read space_inference_review first. A Space review chooses revise with the exact proposal_id and expected_revision when an open proposal still names the same outcome but needs current wording or evidence; cite newly observed sources, and preserve the proposal identity. Revise does not start a Task. Choose retire with the exact proposal_id and expected_revision when a settled record shows an open proposal's outcome is done; retirement is not a user rejection. Retirement may cite any record Arden holds, on any Space or none: a finished Chat turn (find it with session_search_transcripts, scope all_spaces), an exact applied action (session_read with view actions, copy its chat_action source), a Memory page read in this Run, a live or done Task, or a stored mail or GitHub item (connection_items_state, connection_item_read). Retire only on a record showing the outcome is done; a mention, draft, plan, or run that ended with no clear result is not proof. Unsure: keep the proposal. Do not duplicate work already being performed in Chat or already completed there. Choose reuse with the canonical Task item_id whenever a live or done Task already owns the outcome; a cancelled Task owns nothing, and a Task that does not own the outcome is never a reuse target; it returns the exact Task deep link and performs no mutation. Choose create only for a distinct outcome anchored by a finished Chat turn in the current Space, a connection item routed to it, or the Task this worker works on; a Memory page may support it but never anchors it; an item whose thread is already an offer, a Task or a skipped offer is refused, and so is any new proposal while the Space has three open ones. Linked or foreign evidence may support existing work but cannot create work here. A run that works in no Space (an Automation, or a worker of a Task without one) proposes to Home instead, where the user picks the Space: it creates only, citing a turn of its own chat or its own Task; a Memory page it read may support it. ${
+    description: `Propose one Task for the user to start, on this run's Space while it suggests tasks: from its Space review, a worker of one of its Tasks, or an Automation working in it. Background runs never start Tasks; the user's Start does. Read space_inference_review first. A Space review chooses revise with the exact proposal_id and expected_revision when an open proposal still names the same outcome but needs current wording or evidence; cite newly observed sources, and preserve the proposal identity. Revise does not start a Task. Choose retire with the exact proposal_id and expected_revision when a settled record shows an open proposal's outcome is done; retirement is not a user rejection. Retirement may cite any record Arden holds, on any Space or none: a finished Chat turn (find it with session_search_transcripts, scope all_spaces), an exact applied action (session_read with view actions, copy its chat_action source), a Memory page read in this Run, a live or done Task, or a stored mail or GitHub item (connection_items_state, connection_item_read). Retire only on a record showing the outcome is done; a mention, draft, plan, or run that ended with no clear result is not proof. Unsure: keep the proposal. Do not duplicate work already being performed in Chat or already completed there. Choose reuse with the canonical Task item_id whenever a live or done Task already owns the outcome; a cancelled Task owns nothing, and a Task that does not own the outcome is never a reuse target; it returns the exact Task deep link and performs no mutation. Choose create only for a distinct outcome anchored by a finished Chat turn in the current Space, a stored item, or the Task this worker works on; a Memory page may support it but never anchors it; an item whose thread is already an offer, a Task or a skipped offer is refused, and so is any new proposal while the Space has three open ones. Linked or foreign evidence may support existing work but cannot create work here. A run that works in no Space (an Automation, or a worker of a Task without one) proposes to the Main Space instead: it creates only, citing a turn of its own chat, its own Task or a stored item; a Memory page it read may support it. ${
       TASK_SPACE_RULE
     } Never create a consolidation, cleanup, or replacement Task for overlap. The user's own chat starts Tasks with task_start instead. Cite observed evidence that fully defines the outcome. A reply that only answers, rejects or acknowledges prior conversation is not an outcome. Ambiguity or stale evidence should remain a suggestion. When nothing qualifies, do not call this tool. Admission rechecks ownership, that the Space is still as this Run's space_inference_review showed it, policy and rejected evidence; a refused call changes nothing.`,
     parameters: Schema.toStandardSchemaV1(
       Schema.Struct({
         sources: Schema.NonEmptyArray(evidence).annotate({
           description:
-            "Required for every decision. The evidence for it: observed Chat turns, Memory pages read in this Run, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat turn, connection item routed to this Space, or this worker's own Task; Memory pages only support it. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
+            "Required for every decision. The evidence for it: observed Chat turns, Memory pages read in this Run, connection items, or this worker's own Task. Proposing needs at least one current-Space Chat turn, stored item, or this worker's own Task; Memory pages only support it. Retiring also accepts exact chat_action sources from session_read with view actions, and its Chat turns, items and Tasks need not belong to this Space."
         }),
         decision: inferenceDecision
       })
@@ -264,14 +274,10 @@ const makeTaskInferenceTools = (services: Services): ReadonlyArray<ServerTool> =
         }
       }
       if (input.decision.kind === "reuse") {
-        if (spaceId === undefined)
-          throw new ToolExecutionError(
-            "This run works in no Space, so there is no Task to reuse. Propose a distinct new Task, or nothing.",
-            { preview: "No Space Tasks to reuse", retryable: false }
-          )
         const decision = input.decision
+        const target = await reviewedSpace(services, spaceId, ctx.signal)
         const review = await Effect.runPromise(
-          services.work.inferenceReview(spaceId).pipe(Effect.mapError((cause) => failure(cause))),
+          services.work.inferenceReview(target).pipe(Effect.mapError((cause) => failure(cause))),
           { signal: ctx.signal }
         )
         if (review.snapshot !== reviewed)
@@ -433,6 +439,7 @@ export const taskInferenceTools = Effect.gen(function* () {
     work: yield* WorkStore,
     proposals: yield* TaskProposalStore,
     sessions: yield* SessionQueries,
+    spaces: yield* SpaceStore,
     wiki: yield* Wiki
   })
 })

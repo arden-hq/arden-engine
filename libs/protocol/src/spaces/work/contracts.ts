@@ -50,7 +50,6 @@ export type SpaceTaskSource =
   | { readonly kind: "memory"; readonly page_ref: string; readonly revision: string }
   | { readonly kind: "task"; readonly item_id: string; readonly revision: string | null }
   | { readonly kind: "space"; readonly space_id: string; readonly revision: string | null }
-  /** A mail or GitHub item routed to the Space (I-23); `revision` is its item id. */
   | { readonly kind: "connection_item"; readonly item_id: string; readonly revision: string }
 
 export interface SpaceTask extends JsonRecord {

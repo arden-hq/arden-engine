@@ -25,10 +25,7 @@ const UNTIL = "2026-11-14T00:00:00.000Z"
 const ACTED = new Set(["finished", "needs_you"])
 // A review that ran a model and ended with one of these advanced the Space's checkpoint.
 const CHECKPOINTED = new Set(["finished", "no_change", "needs_you"])
-// The changes that always have a wake of their own: a chat turn, mail and Space settings. A Task
-// change wakes a review only when the owner made it by hand, with no run, which a stored input
-// does not say.
-const WOKEN_BY: ReadonlySet<ReviewChange> = new Set(["chat_turn", "mail", "space_settings"])
+const WOKEN_BY: ReadonlySet<ReviewChange> = new Set(["chat_turn", "space_settings"])
 
 const decodeTrigger = Schema.decodeUnknownSync(
   Schema.fromJsonString(AutomationTriggerContextSchema)
@@ -64,11 +61,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
       const counts = { rows: 0, start: 0, acted: 0, actedStarts: 0 }
       const byOutcome = new Map<string, { started: number; skipped: number }>()
       const actedSkipped = new Map<string, number>()
-      // Rows a chat, mail or settings wake still produces; rows only an owner's Task change could
-      // still produce; rows with no change that has a wake now.
       const wakes = { woken: 0, wokenStart: 0, taskOnly: 0, unwoken: 0, unwokenPagesOnly: 0 }
-      // Rows a Task change alone accounts for: a Task changed while the Space held something,
-      // with no chat turn and no mail.
       const taskAlone = { acted: 0, notActed: 0 }
       for (const row of rows) {
         const input = decodeStoredReviewInput(row.input_json)
@@ -93,8 +86,7 @@ it.skipIf(DATABASE === "" || !existsSync(DATABASE))(
           if (
             verdict.changes.has("task") &&
             !verdict.holds.has("nothing") &&
-            !verdict.changes.has("chat_turn") &&
-            !verdict.changes.has("mail")
+            !verdict.changes.has("chat_turn")
           ) {
             if (acted) taskAlone.acted += 1
             else taskAlone.notActed += 1

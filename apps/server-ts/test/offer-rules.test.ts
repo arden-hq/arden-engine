@@ -1,16 +1,15 @@
 import { expect, it } from "vitest"
 import {
-  HOME_OFFER_SOURCES,
   OFFER_NEEDS_ANCHOR,
   offerAnchorRefusal,
   storedOfferStands
 } from "../src/persistence/sqlite/offer-rules.js"
 
-it("an offer is anchored by a chat turn or Task; a mail item only in a Space; a Memory page never", () => {
-  expect(offerAnchorRefusal("space", [{ kind: "connection_item" }])).toBeUndefined()
-  expect(offerAnchorRefusal("home", [{ kind: "task" }])).toBeUndefined()
-  expect(offerAnchorRefusal("home", [{ kind: "connection_item" }])).toBe(HOME_OFFER_SOURCES)
-  expect(offerAnchorRefusal("space", [{ kind: "memory" }])).toBe(OFFER_NEEDS_ANCHOR)
+it("an offer is anchored by a chat turn, a Task or a mail item; a Memory page never", () => {
+  expect(offerAnchorRefusal([{ kind: "connection_item" }])).toBeUndefined()
+  expect(offerAnchorRefusal([{ kind: "task" }])).toBeUndefined()
+  expect(offerAnchorRefusal([{ kind: "chat" }])).toBeUndefined()
+  expect(offerAnchorRefusal([{ kind: "memory" }])).toBe(OFFER_NEEDS_ANCHOR)
 })
 
 it("a stored No stays when a cited page changed; a retired or open offer does not", () => {

@@ -99,7 +99,6 @@ import { OfferExpiryRuntime } from "../work/offer-expiry-runtime.js"
 import { connectionItemsRuntime } from "../connections/items/runtime.js"
 import { capabilityOfferRuntime } from "../mcp/offer-runtime.js"
 import { mcpChangeFeedRuntime } from "../mcp/change-feed.js"
-import { makeRouteStep } from "../connections/items/route-step.js"
 import { makeLocalOnlyMiddleware } from "./middleware/local-only.js"
 import { commandLineAccess } from "./middleware/command-line-access.js"
 import { RequestIdMiddleware } from "./middleware/request-id.js"
@@ -361,7 +360,7 @@ const composeServer = (
     BrowserProcedureRuntime,
     CommunicationDeliveryRuntime,
     AutomationTriggerProducersRuntime,
-    connectionItemsRuntime({ power: options.power, makeAfterFetch: makeRouteStep }),
+    connectionItemsRuntime({ power: options.power }),
     capabilityOfferRuntime,
     mcpChangeFeedRuntime
   ).pipe(Layer.provide(chat), Layer.provide(services))

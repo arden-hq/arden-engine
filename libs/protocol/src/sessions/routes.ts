@@ -11,7 +11,6 @@ const SessionListCursorSchema = Schema.Struct({
 })
 const SessionListOptionsSchema = Schema.Struct({
   spaceId: Schema.optionalKey(routeSegment()),
-  inbox: Schema.optionalKey(Schema.Boolean),
   scope: Schema.optionalKey(Schema.Literals(["primary", "agent", "all"] as const)),
   live: Schema.optionalKey(Schema.Boolean),
   parentSessionIds: Schema.optionalKey(Schema.Array(routeSegment())),
@@ -31,7 +30,6 @@ export const encodeSessionListPathEffect = (value: unknown) =>
   encodeRouteEffect(SessionListOptionsSchema, value, (options) =>
     appendSearch("/sessions", [
       ["space_id", options.spaceId],
-      ["inbox", options.inbox],
       ["scope", options.scope],
       ["live", options.live],
       ["parent_session_ids", options.parentSessionIds?.join(",")],
@@ -76,6 +74,8 @@ export const encodeSessionRestorePathEffect = (value: unknown) =>
   sessionPathEffect(value, "/restore")
 export const encodeSessionContinuePathEffect = (value: unknown) =>
   sessionPathEffect(value, "/continue")
+export const encodeSessionOnboardingPathEffect = (value: unknown) =>
+  sessionPathEffect(value, "/onboarding")
 const SessionEndRouteSchema = Schema.Struct({ sessionId: routeSegment(), stop: Schema.Boolean })
 const sessionEndPathEffect = (value: unknown, suffix: string) =>
   encodeRouteEffect(SessionEndRouteSchema, value, ({ sessionId, stop }) =>

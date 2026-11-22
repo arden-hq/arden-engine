@@ -22,8 +22,6 @@ const scopeOf = (query: {
       return query.session_id === undefined
         ? undefined
         : { place: "chat", sessionId: query.session_id }
-    case "home":
-      return { place: "home" }
   }
 }
 
@@ -74,12 +72,13 @@ export const TaskProposalHandlers = HttpApiBuilder.group(
               message: "This suggestion changed. Review the updated instructions before starting."
             })
           }
-          const spaceId = proposal?.space_id ?? null
           const memorySources =
             proposal?.status === "offered" && payload.decision === "accept"
               ? proposal.sources.filter((source) => source.kind === "memory")
               : []
-          if (memorySources.length === 0 || spaceId === null) {
+          const spaceId =
+            memorySources.length === 0 ? undefined : yield* proposals.memoryScope(params.proposalId)
+          if (spaceId === undefined) {
             return yield* proposals.resolve(params.proposalId, payload, { memory: [] })
           }
           const space = yield* spaces.get(spaceId).pipe(

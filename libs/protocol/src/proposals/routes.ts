@@ -3,8 +3,7 @@ import { appendSearch, encodeRouteEffect, encodeSegment, routeSegment } from "..
 
 const scope = Schema.Union([
   Schema.Struct({ place: Schema.Literal("space"), spaceId: routeSegment() }),
-  Schema.Struct({ place: Schema.Literal("chat"), sessionId: routeSegment() }),
-  Schema.Struct({ place: Schema.Literal("home") })
+  Schema.Struct({ place: Schema.Literal("chat"), sessionId: routeSegment() })
 ])
 
 export const encodeTaskProposalListPathEffect = (value: unknown) =>

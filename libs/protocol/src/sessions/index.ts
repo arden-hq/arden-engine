@@ -25,6 +25,7 @@ import {
   RenameSessionResponseSchema,
   RevertSessionResponseSchema,
   MoveSessionToSpaceResponseSchema,
+  StartOnboardingResponseSchema,
   SessionExportResponseSchema,
   SessionLifecycleResponseSchema,
   SessionEndConflictSchema,
@@ -52,6 +53,7 @@ import {
   encodeSessionArchivePathEffect,
   encodeSessionRestorePathEffect,
   encodeSessionContinuePathEffect,
+  encodeSessionOnboardingPathEffect,
   encodeSessionTriagePathEffect,
   encodeChatFindPathEffect,
   encodeChatSearchPathEffect
@@ -79,6 +81,7 @@ export const sessionDecoders = {
   ),
   revertResponse: decoderFor(RevertSessionResponseSchema, "Invalid revert-session response"),
   moved: decoderFor(MoveSessionToSpaceResponseSchema, "Invalid move-session response"),
+  onboardingResponse: decoderFor(StartOnboardingResponseSchema, "Invalid onboarding response"),
   exported: decoderFor(SessionExportResponseSchema, "Invalid session-export response"),
   triage: decoderFor(SessionTriageDecisionSchema, "Invalid session-triage response", strict),
   capture: decoderFor(HandCaptureResponseSchema, "Invalid capture response", strict),
@@ -169,6 +172,9 @@ export const sessionRoutes = {
   },
   restore(sessionId: string): string {
     return route(encodeSessionRestorePathEffect(sessionId), "Invalid session-restore route")
+  },
+  onboarding(sessionId: string): string {
+    return route(encodeSessionOnboardingPathEffect(sessionId), "Invalid onboarding route")
   },
   continueRun(sessionId: string): string {
     return route(encodeSessionContinuePathEffect(sessionId), "Invalid session-continue route")

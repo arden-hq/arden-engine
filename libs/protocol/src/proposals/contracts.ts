@@ -6,8 +6,7 @@ import type {
 } from "../spaces/work/contracts.js"
 import type { JsonRecord } from "../common/json.js"
 
-/** Where a suggestion waits: a Space's conversation, a chat, or Home. */
-export type TaskProposalPlace = "space" | "chat" | "home"
+export type TaskProposalPlace = "space" | "chat"
 
 export interface TaskProposalCapturePolicy extends JsonRecord {
   readonly origin: "chat" | "automation" | "task" | "space" | "unrecorded"
@@ -48,12 +47,6 @@ export interface TaskProposalRetirement extends JsonRecord {
   readonly evidence: ReadonlyArray<TaskProposalRetirementEvidence>
 }
 
-/**
- * A Task Arden suggests and the person starts or skips (goal-task-merge §12):
- * a run's proposal on its Space, or the item router's on Home. `held` waits
- * behind the five open on Home. Start creates the Task from the stored words;
- * Skip is durable for its evidence and for a cited thread.
- */
 export interface TaskProposal extends JsonRecord {
   readonly proposal_id: string
   readonly place: TaskProposalPlace
@@ -92,11 +85,9 @@ export interface TaskProposalList extends JsonRecord {
   readonly proposals: ReadonlyArray<TaskProposal>
 }
 
-/** Which suggestions to list: one Space's, one chat's, or Home's. */
 export type TaskProposalScope =
   | { readonly place: "space"; readonly spaceId: string }
   | { readonly place: "chat"; readonly sessionId: string }
-  | { readonly place: "home" }
 
 export interface ResolveTaskProposalInput {
   readonly expected_revision: number
@@ -105,8 +96,6 @@ export interface ResolveTaskProposalInput {
   readonly decision: "accept" | "reject" | "later"
   /** The chat it was accepted in, which then hears how the Task goes. */
   readonly session_id?: string
-  /** The Space Start puts the Task on: required on Home; a Space's own proposal
-   *  goes on that Space. */
   readonly space_id?: string
 }
 

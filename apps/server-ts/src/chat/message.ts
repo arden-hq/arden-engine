@@ -389,6 +389,7 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
               ...(input.modelRole === undefined ? {} : { modelRole: input.modelRole }),
               ...(input.announce === undefined ? {} : { announce: true }),
               ...(input.fromQueue === undefined ? {} : { fromQueue: true }),
+              ...(input.opensOnboarding === undefined ? {} : { opensOnboarding: true }),
               ...(input.continuesTask === undefined ? {} : { continuesTask: input.continuesTask }),
               ...(input.capture === undefined
                 ? {}

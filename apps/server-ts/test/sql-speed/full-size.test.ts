@@ -97,11 +97,7 @@ const OUTSIDE: ReadonlySet<string> = new Set([
 const SEARCH_CATCH_UP_MS = 180_000
 
 /** Every GET route with the calls that open it on the seeded data. */
-const routeCalls = (
-  ids: FullSizeIds,
-  since: string,
-  longAgo: string
-): Readonly<Record<string, ReadonlyArray<string>>> => {
+const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<string>>> => {
   const chats = [ids.chat, ids.fork, ids.agent, ids.channel, ids.thread]
   const q = (params: Record<string, string>) => `?${new URLSearchParams(params).toString()}`
   return {
@@ -190,7 +186,6 @@ const routeCalls = (
     "/spaces/:spaceId/continuity/state": [`/spaces/${ids.space}/continuity/state`],
     "/proposals/:proposalId/history": [`/proposals/${MISSING}/history`],
     "/proposals": [
-      `/proposals${q({ place: "home" })}`,
       `/proposals${q({ place: "space", space_id: ids.space })}`,
       `/proposals${q({ place: "chat", session_id: ids.chat })}`
     ],
@@ -198,8 +193,6 @@ const routeCalls = (
     "/spaces/:spaceId/focus-choices/:questionId": [`/spaces/${ids.space}/focus-choices/${MISSING}`],
     "/sessions/:sessionId/answer-blocks": [`/sessions/${ids.chat}/answer-blocks`],
     "/spaces/work/:itemId/history": [`/spaces/work/${ids.taskItem}/history`],
-    "/home/letter": ["/home/letter"],
-    "/home/evidence": [`/home/evidence${q({ since })}`, `/home/evidence${q({ since: longAgo })}`],
     "/spaces/work/:itemId/attempts": [`/spaces/work/${ids.taskItem}/attempts`],
     "/chat/questions": [
       "/chat/questions",
@@ -418,9 +411,7 @@ const measure = async (directory: string, scale: number): Promise<SizeResult> =>
   const ids = seedFullSizeDatabase(databasePath, { scale })
   const seedMs = Math.round(performance.now() - seedStarted)
 
-  const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
-  const longAgo = new Date(Date.now() - 150 * scale * 86_400_000).toISOString()
-  const table = routeCalls(ids, since, longAgo)
+  const table = routeCalls(ids)
   const routes = getRoutes()
   const uncovered = routes.filter((route) => table[route] === undefined)
   expect(uncovered, "Add each new GET route to routeCalls, with real ids").toEqual([])

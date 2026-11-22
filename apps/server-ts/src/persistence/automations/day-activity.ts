@@ -18,8 +18,6 @@ export interface DayItem {
   readonly sender: string | undefined
   readonly title: string
   readonly snippet: string
-  readonly spaceName: string | undefined
-  /** A mail the owner sent themselves, kept because its thread belongs to a Space. */
   readonly sentByOwner: boolean
 }
 

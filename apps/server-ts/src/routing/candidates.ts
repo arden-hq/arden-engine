@@ -83,10 +83,7 @@ export const renderOfferSpaces = (spaces: ReadonlyArray<OfferSpace>) => {
   return { text, ids }
 }
 
-export const makeRouterSpaces = (
-  dependencies: Pick<RouterCandidateDependencies, "spaces" | "work">,
-  include: (space: PersistedSpace) => boolean
-) => {
+const makeRouterSpaces = (dependencies: Pick<RouterCandidateDependencies, "spaces" | "work">) => {
   const routerSpace = Effect.fn("Router.space")(function* (space: PersistedSpace) {
     const detail = yield* dependencies.spaces.detail(space.space_id)
     const page = yield* dependencies.work.page({ spaceId: space.space_id, limit: 50 })
@@ -104,12 +101,15 @@ export const makeRouterSpaces = (
     } satisfies RouterSpace
   })
   return Effect.fn("Router.spaces")(function* () {
-    return yield* Effect.forEach((yield* dependencies.spaces.list()).filter(include), routerSpace)
+    return yield* Effect.forEach(
+      (yield* dependencies.spaces.list()).filter((space) => space.kind !== "main"),
+      routerSpace
+    )
   })
 }
 
 export const makeRouterCandidates = (dependencies: RouterCandidateDependencies) => {
-  const spacesOf = makeRouterSpaces(dependencies, (space) => space.kind !== "main")
+  const spacesOf = makeRouterSpaces(dependencies)
   return Effect.fn("Router.candidates")(function* () {
     const spaces = yield* dependencies.spaces.list()
     const spaceName = new Map(spaces.map((space) => [space.space_id, space.name]))

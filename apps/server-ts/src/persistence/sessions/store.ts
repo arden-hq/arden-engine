@@ -36,9 +36,10 @@ export class SessionStoreError extends Schema.TaggedError<SessionStoreError>()(
   }
 ) {}
 
+export const onboardingClientId = (sessionId: string): string => `onboarding:${sessionId}`
+
 export interface SessionListQuery {
   readonly spaceId?: string
-  readonly inbox?: boolean
   readonly scope?: "primary" | "agent" | "all"
   readonly live?: boolean
   readonly parentSessionIds?: ReadonlyArray<string>
@@ -220,6 +221,7 @@ export class SessionStore extends Context.Service<
       spaceId: string | undefined,
       toolCallId?: string
     ) => Effect.Effect<OwnChatMove | undefined, SessionStoreError>
+    readonly onboardingKickedOff: (sessionId: string) => Effect.Effect<boolean, SessionStoreError>
     readonly finishOnboarding: (sessionId: string) => Effect.Effect<boolean, SessionStoreError>
     readonly saveCaptureForward: (
       sessionId: string,

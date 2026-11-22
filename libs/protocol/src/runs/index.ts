@@ -2,18 +2,12 @@ import { RunProgressSchema } from "./progress.js"
 export type { RunProgress } from "./progress.js"
 export { RUN_PROGRESS_EVENT_TYPES } from "./progress.js"
 import {
-  HomeLetterResponseSchema,
   HomePresenceResponseSchema,
   encodeHomePresenceEffect,
   type HomePresenceInput
 } from "./home.js"
 export type { HomeLetter, HomeOffer } from "./home.js"
 import { decoderFor, runBoundary } from "../common/boundary.js"
-import {
-  HomeEvidencePageSchema,
-  encodeHomeEvidencePathEffect,
-  type HomeEvidenceQuery
-} from "./home.js"
 import { WorkerAttemptPageSchema, type WorkerAttemptPageOptions } from "./attempts.js"
 import type { RunEventPageOptions, SessionUsageOptions, UsageReportOptions } from "./contracts.js"
 import {
@@ -51,8 +45,6 @@ export type { RuleSavedIn } from "./questions.js"
 
 export const runDecoders = {
   homePresence: decoderFor(HomePresenceResponseSchema, "Invalid Home presence response"),
-  homeLetter: decoderFor(HomeLetterResponseSchema, "Invalid Home letter"),
-  homeEvidence: decoderFor(HomeEvidencePageSchema, "Invalid Home evidence"),
   attempts: decoderFor(WorkerAttemptPageSchema, "Invalid worker attempts"),
   question: decoderFor(RunQuestionSchema, "Invalid Run question"),
   questions: decoderFor(RunQuestionListSchema, "Invalid Run questions"),
@@ -66,15 +58,7 @@ export const runDecoders = {
 } as const
 
 export const runRoutes = {
-  homeLetter: "/home/letter",
   homePresence: "/home/presence",
-  homeEvidence(options: HomeEvidenceQuery): string {
-    return runBoundary(
-      encodeHomeEvidencePathEffect(options),
-      "Invalid Home evidence route",
-      "encode"
-    )
-  },
   taskAttempts(itemId: string, options: WorkerAttemptPageOptions = {}): string {
     return runBoundary(
       encodeTaskAttemptsPathEffect({ itemId, options }),

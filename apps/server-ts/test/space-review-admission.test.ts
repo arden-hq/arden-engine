@@ -8,7 +8,6 @@ import type { SpaceReviewReads } from "../src/persistence/automations/space-revi
 
 const EXPECTED: Record<ReviewChange, Record<ReviewHold, boolean>> = {
   chat_turn: { nothing: true, unfinished_tasks: true, open_offers: true },
-  mail: { nothing: true, unfinished_tasks: true, open_offers: true },
   space_settings: { nothing: true, unfinished_tasks: true, open_offers: true },
   memory_page: { nothing: false, unfinished_tasks: false, open_offers: false },
   task: { nothing: false, unfinished_tasks: true, open_offers: true }
@@ -35,9 +34,7 @@ const cell = (change: ReviewChange, hold: ReviewHold) => {
         : [],
     chats:
       change === "chat_turn" ? [{ sessionId: "s", sessionRef: "c", runId: "r", turnId: "t" }] : [],
-    removed: [],
-    items:
-      change === "mail" ? [{ itemId: "i", source: "g", sender: "S", title: "T", isNew: true }] : []
+    removed: []
   } as unknown as SpaceReviewReads
   const current = semantic(
     status,

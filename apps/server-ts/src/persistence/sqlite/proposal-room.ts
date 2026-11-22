@@ -7,8 +7,6 @@ import { workError } from "./work-records.js"
 
 const SPACE_OPEN_PROPOSAL_CAP = 3
 
-export const HOME_OPEN_PROPOSAL_CAP = 5
-
 export const assertOpenProposalRoom = Effect.fn("Work.assertOpenProposalRoom")(function* (
   sql: SqlClient.SqlClient,
   options: { readonly spaceId: string; readonly proposalId: string | undefined }
@@ -23,34 +21,11 @@ export const assertOpenProposalRoom = Effect.fn("Work.assertOpenProposalRoom")(f
     )
 })
 
-export const assertHomeProposalRoom = Effect.fn("Work.assertHomeProposalRoom")(function* (
-  sql: SqlClient.SqlClient,
-  proposalId: string
-) {
-  const open = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
-    FROM task_proposals WHERE place = 'home' AND status = 'offered'
-      AND proposal_id != ${proposalId}`
-  if ((open[0]?.count ?? 0) >= HOME_OPEN_PROPOSAL_CAP)
-    return yield* workError(
-      "conflict",
-      `Home already has ${HOME_OPEN_PROPOSAL_CAP} open suggestions; a new one waits until the person settles one. Finish without proposing it.`
-    )
-})
-
 /** Every write that (re)opens an offer sets this: its expiry clock starts over, unput off and not
  * yet waiting, until the owner is next around. */
 export const restartOfferWait = Statement.fragment([
   Statement.literal("put_off_until = NULL, waiting_since = NULL")
 ])
-
-export const openHeldOnHome = (sql: SqlClient.SqlClient, now: string) =>
-  sql`UPDATE task_proposals SET status = 'offered', revision = revision + 1, updated_at = ${now},
-    ${restartOfferWait}
-    WHERE proposal_id IN (SELECT proposal_id FROM task_proposals
-      WHERE place = 'home' AND status = 'held'
-      ORDER BY seq
-      LIMIT MAX(0, ${HOME_OPEN_PROPOSAL_CAP} - (SELECT COUNT(*) FROM task_proposals
-        WHERE place = 'home' AND status = 'offered')))`.pipe(Effect.asVoid)
 
 /** An open offer the owner can see at `at`: offered, and not put off past `at`. Its expiry clock
  * runs only then, and only then is it Home evidence. */
@@ -73,10 +48,6 @@ export const putOfferOff = (sql: SqlClient.SqlClient, proposalId: string, now: D
     put_off_until = ${DateTime.formatIso(DateTime.add(now, { hours: OFFER_LATER_HOURS }))}
     WHERE proposal_id = ${proposalId} AND status = 'offered'`.pipe(Effect.asVoid)
 
-/** Starts the expiry clock of every open offer that is in sight while the owner has Arden open,
- * then moves every offer that has waited `OFFER_EXPIRY_HOURS` since to `expired`, and lets held
- * Home offers take the room. A held offer's clock starts once it moves up and the owner is
- * around. Returns the offers that expired. */
 export const expireOverdueOffers = Effect.fn("Work.expireOverdueOffers")(function* (
   sql: SqlClient.SqlClient,
   now: DateTime.Utc
@@ -93,6 +64,5 @@ export const expireOverdueOffers = Effect.fn("Work.expireOverdueOffers")(functio
   yield* sql`UPDATE task_proposals SET status = 'expired', revision = revision + 1,
     updated_at = ${at}, settled_at = ${at}
     WHERE proposal_id IN ${sql.in(overdue.map((row) => row.proposal_id))}`
-  yield* openHeldOnHome(sql, at)
   return overdue
 })

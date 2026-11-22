@@ -24,6 +24,7 @@ import {
 import { makeSessionCreation } from "../../sessions/create.js"
 import { ChatMessage } from "../../chat/message.js"
 import { onboardingKickoff } from "../../chat/message-input.js"
+import { makeOnboardingStart } from "../../chat/onboarding-start.js"
 import {
   makeSessionTriage,
   makeSessionTriageAction,
@@ -119,7 +120,6 @@ const artifactHttpError = (error: ConversationArtifactError) => {
 
 const listOptions = (query: {
   readonly space_id?: string
-  readonly inbox?: boolean | "true" | "false"
   readonly scope?: SessionListScope
   readonly live?: boolean | "true" | "false"
   readonly parent_session_ids?: string
@@ -133,7 +133,6 @@ const listOptions = (query: {
 }): SessionListQuery => ({
   ...(query.session_ref === undefined ? {} : { sessionRef: query.session_ref }),
   ...(query.space_id === undefined ? {} : { spaceId: query.space_id }),
-  ...(query.inbox === undefined ? {} : { inbox: query.inbox === true || query.inbox === "true" }),
   ...(query.scope === undefined ? {} : { scope: query.scope }),
   ...(query.live === undefined ? {} : { live: query.live === true || query.live === "true" }),
   ...(query.parent_session_ids === undefined
@@ -213,6 +212,7 @@ export const SessionHandlers = HttpApiBuilder.group(
         )
         .pipe(Effect.mapError(artifactHttpError))
     const creation = makeSessionCreation({ store, models })
+    const startOnboarding = yield* makeOnboardingStart({ store, send: chat.send })
     const kickoff = (sessionId: string) =>
       chat.send(onboardingKickoff(sessionId)).pipe(
         Effect.catchCause((cause) =>
@@ -557,6 +557,20 @@ export const SessionHandlers = HttpApiBuilder.group(
             () => new HttpApiError.NotFound({})
           ),
           Effect.map(() => ({ status: "restored" as const, session_id: params.sessionId }))
+        )
+      )
+      .handle("startOnboarding", ({ params }) =>
+        startOnboarding(params.sessionId).pipe(
+          Effect.map((started) => ({ session_id: params.sessionId, started })),
+          Effect.catchTags({
+            SessionStoreError: failStore,
+            ChatMessageConflictError: (error) =>
+              Effect.fail(new StoreConflict({ detail: error.message })),
+            ChatMessageError: (error) =>
+              error.reason === "not_found"
+                ? Effect.fail(new HttpApiError.NotFound({}))
+                : failInternal("Sessions")(error)
+          })
         )
       )
       .handle("continueRun", ({ params }) =>

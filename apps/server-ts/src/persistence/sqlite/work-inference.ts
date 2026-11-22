@@ -11,15 +11,16 @@ import { decodeJson } from "./json.js"
 import { runMayActSql } from "./run-liveness.js"
 import { openProposalStatusList, refusedProposalStatusList } from "./status-sets.js"
 import { ownerTurnFingerprint, readChatSettled, userChatSql } from "./chat-ownership.js"
-import {
-  citedTurnFinished,
-  HOME_OFFER_SOURCES,
-  offerAnchorRefusal,
-  UNFINISHED_TURN
-} from "./offer-rules.js"
+import { citedTurnFinished, offerAnchorRefusal, UNFINISHED_TURN } from "./offer-rules.js"
 import { assertItemEvidence } from "./connection-item-evidence.js"
-import { assertHomeProposalRoom, assertOpenProposalRoom } from "./proposal-room.js"
+import { assertOpenProposalRoom } from "./proposal-room.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+
+const WORK_CHANGED =
+  "Space work changed since review; inspect the new Tasks and rejections before inferring again"
+
+const BARE_SPACE =
+  "A proposal needs Chat, Memory, stored item or its own Task evidence, not a bare Space reference"
 
 export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
   read: {
@@ -177,14 +178,10 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
     )
     if (!policy.enabled || !captured.enabled)
       return yield* workError("conflict", "Task inference is disabled for this Space")
-    const unanchored = offerAnchorRefusal("space", options.sources)
+    const unanchored = offerAnchorRefusal(options.sources)
     if (unanchored !== undefined) return yield* workError("invalid", unanchored)
     const review = yield* readInferenceReview({ sql, consistent: (read) => read }, options.spaceId)
-    if (review.snapshot !== options.snapshot)
-      return yield* workError(
-        "conflict",
-        "Space work changed since review; inspect the new Tasks and rejections before inferring again"
-      )
+    if (review.snapshot !== options.snapshot) return yield* workError("conflict", WORK_CHANGED)
     yield* assertCitedTurnsFinished(sql, options.sources)
     for (const source of options.sources) {
       if (source.revision === null)
@@ -207,15 +204,11 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
             "invalid",
             "A proposal cites only the Task whose worker is proposing it"
           )
-      } else if (source.kind !== "memory" && source.kind !== "connection_item") {
-        return yield* workError(
-          "invalid",
-          "A proposal needs Chat, Memory, routed item or its own Task evidence, not a bare Space reference"
-        )
+      } else if (source.kind === "space") {
+        return yield* workError("invalid", BARE_SPACE)
       }
     }
     yield* assertItemEvidence(sql, {
-      spaceId: options.spaceId,
       proposalId: options.proposalId,
       sources: options.sources
     })
@@ -233,10 +226,12 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
   )
 })
 
-export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(function* (
+export const assertMainProposalAdmission = Effect.fn("Work.admitMainProposal")(function* (
   sql: SqlClient.SqlClient,
   options: {
+    readonly spaceId: string
     readonly runId: string
+    readonly snapshot: string
     readonly sources: ReadonlyArray<SpaceTaskSource>
     readonly proposalId: string
   }
@@ -256,10 +251,12 @@ export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(f
     if (run === undefined)
       return yield* workError(
         "conflict",
-        "Only an Automation or a Task worker with no Space proposes to Home"
+        "Only an Automation or a Task worker with no Space proposes to the Main Space"
       )
-    const unanchored = offerAnchorRefusal("home", options.sources)
+    const unanchored = offerAnchorRefusal(options.sources)
     if (unanchored !== undefined) return yield* workError("invalid", unanchored)
+    const review = yield* readInferenceReview({ sql, consistent: (read) => read }, options.spaceId)
+    if (review.snapshot !== options.snapshot) return yield* workError("conflict", WORK_CHANGED)
     for (const source of options.sources) {
       if (source.kind === "chat") {
         const own = yield* sql`SELECT 1 FROM chat_runs WHERE session_id = ${run.session_id}
@@ -278,16 +275,17 @@ export const assertHomeProposalAdmission = Effect.fn("Work.admitHomeProposal")(f
             "invalid",
             "A proposal cites only the Task whose worker is proposing it"
           )
-      } else if (source.kind !== "memory") {
-        return yield* workError("invalid", HOME_OFFER_SOURCES)
+      } else if (source.kind === "space") {
+        return yield* workError("invalid", BARE_SPACE)
       }
     }
-    yield* assertHomeProposalRoom(sql, options.proposalId)
+    yield* assertItemEvidence(sql, { proposalId: options.proposalId, sources: options.sources })
+    yield* assertOpenProposalRoom(sql, { spaceId: options.spaceId, proposalId: options.proposalId })
   }).pipe(
     Effect.mapError((cause) =>
       cause instanceof WorkStoreError
         ? cause
-        : workError("invalid", "Could not admit the proposal to Home", cause)
+        : workError("invalid", "Could not admit the proposal to the Main Space", cause)
     )
   )
 })

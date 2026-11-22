@@ -13,6 +13,7 @@ import type {
   SessionEndConflict,
   RevertSessionResponse,
   MoveSessionToSpaceResponse,
+  StartOnboardingResponse,
   SessionExportResponse,
   ChatFindResponse,
   ChatSearchResponse
@@ -78,7 +79,6 @@ const requiredListedSessionKeys = [
 
 export const SessionListQuerySchema = withExtras({
   space_id: Schema.optionalKey(Schema.NonEmptyString),
-  inbox: Schema.optionalKey(QueryBooleanSchema),
   scope: Schema.optionalKey(SessionListScopeSchema),
   live: Schema.optionalKey(QueryBooleanSchema),
   parent_session_ids: Schema.optionalKey(Schema.Trimmed.check(Schema.isMinLength(1))),
@@ -270,6 +270,11 @@ export const MoveSessionToSpaceRequestSchema = Schema.Struct({
   space_id: Schema.NullOr(Schema.NonEmptyString)
 })
 
+export const StartOnboardingResponseSchema: Schema.Codec<StartOnboardingResponse> = withExtras({
+  session_id: Schema.NonEmptyString,
+  started: Schema.Boolean
+})
+
 export const MoveSessionToSpaceResponseSchema: Schema.Codec<MoveSessionToSpaceResponse> =
   withExtras({
     session_id: Schema.NonEmptyString,
@@ -378,7 +383,6 @@ export const decodeSessionListQueryEffect = (value: unknown) =>
   Schema.decodeUnknownEffect(SessionListQuerySchema)(value).pipe(
     Effect.map((query) => ({
       ...query,
-      inbox: query.inbox === true || query.inbox === "true",
       scope: query.scope ?? "all",
       live: query.live === true || query.live === "true",
       limit: query.limit ?? 100,

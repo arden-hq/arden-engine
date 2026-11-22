@@ -162,9 +162,15 @@ export const MobileHandlers = HttpApiBuilder.group(
         })
       })
       const rows = yield* Effect.forEach(overview.spaces, spaceRow)
+      const main = overview.spaces.find((space) => space.kind === "main")
       return {
         spaces: rows,
-        loose: looseChats(yield* list({ inbox: true, scope: "primary", limit: LOOSE_CHAT_LIMIT })),
+        loose:
+          main === undefined
+            ? []
+            : looseChats(
+                yield* list({ spaceId: main.key, scope: "primary", limit: LOOSE_CHAT_LIMIT })
+              ),
         cursor
       }
     })

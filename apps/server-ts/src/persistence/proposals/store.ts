@@ -79,8 +79,6 @@ export class TaskProposalStore extends Context.Service<
     readonly get: (proposalId: string) => Result<TaskProposal | undefined>
     readonly retire: (input: RetireTaskProposalInput) => Result<TaskProposal>
     readonly propose: (input: ProposeSpaceTaskInput) => Result<TaskProposal>
-    /** Moves every offer left unanswered past `OFFER_EXPIRY_HOURS` to `expired`, then lets held
-     * Home offers take the room. Returns how many expired. */
     readonly expireOffers: () => Result<number>
     readonly revise: (input: ReviseTaskProposalInput) => ProposalResult<TaskProposal>
     readonly requestProposalReview: (input: {
@@ -90,11 +88,7 @@ export class TaskProposalStore extends Context.Service<
     readonly proposalReviewStatus: (input: {
       readonly proposalId: string
     }) => Result<TaskProposalReview | undefined>
-    readonly suggestFromItem: (input: {
-      readonly itemId: string
-      readonly text: string
-      readonly why: string
-    }) => Result<TaskProposal | undefined>
+    readonly memoryScope: (proposalId: string) => Result<string | undefined>
     readonly resolve: (
       proposalId: string,
       input: ResolveTaskProposalInput,
