@@ -107,10 +107,6 @@ const bookAutoResume = Effect.fn("AutomationGiveUp.bookAutoResume")(function* (
 export const giveUpReason = (cause: GiveUpCause): string =>
   cause.kind === "lasting" ? cause.said : `it failed ${FAILURES_BEFORE_GIVING_UP} runs in a row`
 
-/**
- * Pauses a user Automation when `givesUp` holds for its failed run, and tells the owner through
- * `recordAutomationEvent`. Answers whether the Automation was paused.
- */
 export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: SessionLifecycleEvents["Service"]

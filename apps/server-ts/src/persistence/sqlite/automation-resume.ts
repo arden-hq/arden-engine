@@ -28,12 +28,6 @@ export const automationPositionNamespace = (automationId: string): string => aut
 const restartAutomationPositions = (sql: SqlClient.SqlClient, automationId: string) =>
   sql`DELETE FROM monitor_state WHERE namespace = ${automationPositionNamespace(automationId)}`
 
-/**
- * Resumes each user Automation whose provider pause has waited its time
- * (`bookAutoResume`): the try the owner would otherwise make by hand, and with the same next run
- * as theirs. One with a schedule runs at its next time; one that listens takes up its waiting
- * events. A run that is refused again pauses it again with the next, longer wait.
- */
 export const resumeDueAutomations = Effect.fn("AutomationResume.resumeDue")(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly rules: AutomationRules["Service"]

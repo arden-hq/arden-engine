@@ -10,10 +10,6 @@ import { calendarEventTarget } from "../../google/calendar-client.js"
 import { githubItemUrl } from "../../persistence/connections/item-url.js"
 import type { AutomationEventProducer } from "../event-producer.js"
 
-/**
- * The event each stored item's source publishes. A new source adds its entry here and its event to
- * `ITEM_EVENTS`; Events, which listens to every arrival, then hears it with no change of its own.
- */
 const ITEM_EVENT_TYPES = {
   gmail: "email.received",
   github: "github.received",
