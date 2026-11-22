@@ -355,9 +355,10 @@ export const ChatHandlers = HttpApiBuilder.group(
       )
       .handle("toolResult", ({ payload }) =>
         Effect.flatMap(LocalCaller, (caller) => {
-          if (caller === "phone" && payload.asked_at === undefined)
+          const commandId =
+            caller === "phone" || caller === "other" ? payload.command_id : undefined
+          if ((caller === "phone" || commandId !== undefined) && payload.asked_at === undefined)
             return Effect.fail(new StoreInvalid({ detail: PHONE_NEEDS_UPDATE }))
-          const commandId = caller === "phone" ? payload.command_id : undefined
           return refuseAppOnlyGrant(payload)
             .pipe(
               Effect.andThen(

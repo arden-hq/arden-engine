@@ -61,10 +61,7 @@ const APP_ONLY_CARDS = [
   "vault_card_frame"
 ] as const satisfies ReadonlyArray<Facts["card"][number]>
 
-/**
- * Whether only the Arden app on the Mac may grant this card: it needs Touch ID or a secret typed
- * into the app. Other clients may deny such a card but must not grant it.
- */
+/** Whether only the Arden app on the Mac may grant this card. Other clients may deny it. */
 export const grantedOnlyInTheApp = (display: ToolDisplay | undefined): boolean =>
   APP_ONLY_CARDS.some((card) => card === display?.card)
 

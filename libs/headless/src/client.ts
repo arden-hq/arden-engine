@@ -86,8 +86,8 @@ export interface WaitForRunOptions {
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
   readonly reconnectDelayMs?: number
-  /** Called for each event; `signal` ends with the wait (its own signal or its timeout), so work
-   *  the handler starts ends with it too. */
+  /** Called for each event, with a signal that aborts when the wait's own signal or its timeout
+   *  does. It does not abort when the wait returns. */
   readonly onEvent?: (event: HeadlessRunEvent, signal: AbortSignal) => void | PromiseLike<void>
 }
 

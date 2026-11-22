@@ -200,9 +200,9 @@ export const ToolResultRequestSchema = withExtras({
   edited_arguments: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   /** The card's alternative to the call as asked: `draft` saves instead of sending. */
   alternative: Schema.optionalKey(Schema.Literal("draft")),
-  /** When the card answered was asked; an answer naming an earlier asking is refused. */
+  /** When the card answered was asked; an answer naming any other asking is refused. */
   asked_at: Schema.optionalKey(Schema.NonEmptyString),
-  /** The relay's phone command behind the decision; ignored from callers other than the phone. */
+  /** The relay's phone command behind the decision; see `ToolResultInput.commandId`. */
   command_id: Schema.optionalKey(Schema.NonEmptyString)
 }).check(
   Schema.makeFilter((request) =>

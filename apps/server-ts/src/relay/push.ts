@@ -1,3 +1,4 @@
+import { sha256Hex } from "@arden-hq/std/hash"
 import { cutText } from "@arden-hq/std/text"
 import { bodyAad, fromB64url, sealQueued, toB64url, utf8 } from "@arden-hq/relay-protocol"
 import { previewLine } from "@arden-hq/protocol/chat"
@@ -152,12 +153,12 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           askId: ask.question_id
         }
       : {
-          key: `ask:approval:${ask.run_id}:${ask.tool_id}:${ask.asked_at}`,
+          key: `ask:approval:${sha256Hex(JSON.stringify([ask.run_id, ask.tool_id, ask.asked_at]))}`,
           kind: "approval",
           title: ask.place,
           body: ask.title,
           sessionId: ask.session_id,
-          collapseId: ask.tool_id,
+          collapseId: sha256Hex(JSON.stringify([ask.run_id, ask.tool_id])),
           askId: ask.tool_id,
           runId: ask.run_id,
           askedAt: ask.asked_at

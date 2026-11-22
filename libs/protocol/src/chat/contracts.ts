@@ -123,10 +123,11 @@ export interface ToolResultInput {
    *  message as a draft instead of sending it. Requires `approved`. */
   readonly alternative?: ToolApprovalAlternative
   /** When the card answered was asked (`RunApproval.at`). The same call can be asked again in
-   *  place, for example whether it completed; an answer naming an earlier asking is refused. */
+   *  place, for example whether it completed; an answer naming any other asking is refused. */
   readonly askedAt?: string
-  /** The relay's phone command that sends the decision. Read only from the phone capability;
-   *  ignored from any other caller. */
+  /** The relay's phone command that sends the decision. Read from the phone capability, and from
+   *  any caller of a server without local access; ignored from the app and the command line. A
+   *  decision that names one must name its asking and settles only with that running command. */
   readonly commandId?: string
 }
 
