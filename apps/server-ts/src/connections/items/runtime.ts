@@ -17,16 +17,14 @@ const FETCH_EVERY = "5 minutes"
 const FIRST_FETCH_AFTER = "1 minute"
 const AFTER_WAKE = "15 seconds"
 
-export const connectionItemsRuntime = <R>(options: {
+export const connectionItemsRuntime = (options: {
   readonly power: PowerHost | undefined
-  readonly makeAfterFetch: Effect.Effect<Effect.Effect<void>, never, R>
-}): Layer.Layer<never, never, R | ConnectionItemStore | GoogleConnections | McpConnections> =>
+}): Layer.Layer<never, never, ConnectionItemStore | GoogleConnections | McpConnections> =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const store = yield* ConnectionItemStore
       const google = yield* GoogleConnections
       const mcp = yield* McpConnections
-      const afterFetch = yield* options.makeAfterFetch
       const wakes = yield* Queue.dropping<"wake">(1)
       const unsubscribe = options.power?.onSleep((asleep) => {
         if (!asleep) Queue.offerUnsafe(wakes, "wake")
@@ -125,7 +123,6 @@ export const connectionItemsRuntime = <R>(options: {
         yield* calendar.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Calendar changes fetch failed", cause))
         )
-        yield* afterFetch
         yield* prune.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Old items could not be removed", cause))
         )

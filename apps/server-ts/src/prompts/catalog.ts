@@ -100,12 +100,6 @@ export const PROMPTS = Object.freeze({
     slots: [],
     values: {}
   }),
-  itemRouter: fixedPrompt({
-    id: "auxiliary.item-router",
-    sourcePath: "auxiliary/item-router.md",
-    slots: [],
-    values: {}
-  }),
   ruleCompiler: templatePrompt({
     id: "auxiliary.rule-compiler",
     sourcePath: "auxiliary/rule-compiler.md",

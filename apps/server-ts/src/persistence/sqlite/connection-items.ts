@@ -7,8 +7,7 @@ import {
   type ConnectionItem,
   type ConnectionItemAvailability,
   type ConnectionItemsReport,
-  type RouteBasis,
-  type RouteDecision
+  type RouteBasis
 } from "../connections/store.js"
 import { JsonObjectSchema } from "../json.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
@@ -151,59 +150,6 @@ export const makeConnectionItemStore = ({
       )
     },
     Effect.mapError(failure("fetch", "Could not save fetched items"))
-  )
-
-  const pending: ConnectionItemStore["Service"]["pending"] = (limit) =>
-    reader<ItemRow>`SELECT * FROM connection_items WHERE state = 'pending'
-      ORDER BY fetched_at, received_at, item_id LIMIT ${limit}`.pipe(
-      Effect.map((rows) => rows.map(project)),
-      Effect.mapError(failure("read", "Could not read pending items"))
-    )
-
-  const routeAll = Effect.fnUntraced(function* (
-    decisions: ReadonlyArray<RouteDecision>,
-    at: string
-  ) {
-    const spaces = new Set<string>()
-    for (const decision of decisions) {
-      const routed = yield* routeItem(sql, { ...decision, now: at })
-      if (routed.changed && routed.spaceId !== undefined) spaces.add(routed.spaceId)
-    }
-    for (const spaceId of spaces) yield* spaceJobs.queueItemsRouted(spaceId, at)
-  })
-
-  const route: ConnectionItemStore["Service"]["route"] = Effect.fn("ConnectionItems.route")(
-    function* (decisions) {
-      return yield* writer.transact(routeAll(decisions, yield* now))
-    },
-    Effect.mapError(failure("route", "Could not route items"))
-  )
-
-  const routeOwnedThreads: ConnectionItemStore["Service"]["routeOwnedThreads"] = Effect.fn(
-    "ConnectionItems.routeOwnedThreads"
-  )(
-    function* () {
-      const at = yield* now
-      return yield* writer.transact(
-        Effect.gen(function* () {
-          const owned = yield* sql<{ readonly item_id: string }>`SELECT item.item_id
-            FROM connection_items AS item JOIN connection_threads AS thread
-              ON thread.source = item.source AND thread.account = item.account
-                AND thread.thread_key = item.thread_key
-            WHERE item.state = 'pending' ORDER BY item.fetched_at, item.item_id`
-          return yield* routeAll(
-            owned.map((row) => ({
-              itemId: row.item_id,
-              spaceId: undefined,
-              basis: "thread" as const,
-              reason: "Its thread has an owner."
-            })),
-            at
-          )
-        })
-      )
-    },
-    Effect.mapError(failure("route", "Could not route items"))
   )
 
   const get: ConnectionItemStore["Service"]["get"] = (itemId) =>
@@ -366,9 +312,6 @@ export const makeConnectionItemStore = ({
     cursor,
     threadOwned,
     saveFetch,
-    pending,
-    routeOwnedThreads,
-    route,
     move,
     get,
     availability,

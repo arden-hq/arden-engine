@@ -1,8 +1,4 @@
-import { signalSourceLabel } from "@arden-hq/protocol/signals"
-import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import { threadTaken } from "./connection-item-evidence.js"
-import { HOME_OPEN_PROPOSAL_CAP, openHeldOnHome } from "./proposal-room.js"
 
 const citedItem = (sql: SqlClient.SqlClient) => sql`(SELECT item.item_id
   FROM connection_items AS item
@@ -26,56 +22,3 @@ export const homeTaskBody = (why: string, itemTitle: string): string =>
     `Why it was offered: ${JSON.stringify(why)}`,
     `Item: ${JSON.stringify(itemTitle)}`
   ].join("\n")
-
-export const writeHomeSuggestion = Effect.fn("TaskProposal.writeHomeSuggestion")(function* (
-  sql: SqlClient.SqlClient,
-  input: {
-    readonly proposalId: string
-    readonly itemId: string
-    readonly text: string
-    readonly why: string
-    readonly now: string
-  }
-) {
-  const items = yield* sql<{
-    readonly source: string
-    readonly account: string
-    readonly thread_key: string
-    readonly title: string
-    readonly sender: string | null
-  }>`SELECT source, account, thread_key, title, sender FROM connection_items
-    WHERE item_id = ${input.itemId} AND state = 'routed' AND owner_space_id IS NULL`
-  const item = items[0]
-  if (item === undefined) return false
-  if (yield* threadTaken(sql, { itemIds: [input.itemId], exceptProposal: undefined })) return false
-  yield* openHeldOnHome(sql, input.now)
-  const open = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
-    FROM task_proposals WHERE place = 'home' AND status = 'offered'`
-  const status = (open[0]?.count ?? 0) < HOME_OPEN_PROPOSAL_CAP ? "offered" : "held"
-  const why = input.why.trim().slice(0, 500)
-  const key = `home:${input.proposalId}`
-  const capture = {
-    basis: "inferred",
-    reason: why.length > 0 ? why : `It came in from ${signalSourceLabel(item.source)}.`
-  }
-  const sources = [{ kind: "connection_item", item_id: input.itemId, revision: input.itemId }]
-  const signal = {
-    source: item.source,
-    account: item.account,
-    thread_key: item.thread_key,
-    title: item.title,
-    from: item.sender
-  }
-  yield* sql`INSERT INTO task_proposals (proposal_id, place, dedupe_key, stable_key, text, owner,
-      capture_json, sources_json, signal_json, evidence_revision_key, candidate_hash, revision,
-      seq, status, created_at, updated_at)
-    VALUES (${input.proposalId}, 'home', ${key}, ${homeTaskKey(input.proposalId)},
-      ${input.text.trim().slice(0, 200)}, 'worker', ${JSON.stringify(capture)},
-      ${JSON.stringify(sources)}, ${JSON.stringify(signal)}, ${key}, ${key}, 0,
-      (SELECT COALESCE(MAX(seq), 0) + 1 FROM task_proposals), ${status}, ${input.now},
-      ${input.now})`
-  return true
-})
-
-const homeTaskKey = (proposalId: string): string =>
-  `offer-${proposalId.slice("offer_".length).toLowerCase()}`.slice(0, 80)

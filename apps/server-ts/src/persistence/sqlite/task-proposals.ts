@@ -30,7 +30,7 @@ import { TaskProposalConflictError } from "../proposals/conflict.js"
 import { TASK_PROPOSAL_ID_PREFIX } from "../automations/space-review.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { routeItem } from "./connection-item-route.js"
-import { nextId, type Writer } from "./deps.js"
+import type { Writer } from "./deps.js"
 import { decodeJson } from "./json.js"
 import {
   expireOverdueOffers,
@@ -39,7 +39,7 @@ import {
   restartOfferWait
 } from "./proposal-room.js"
 import { storedOfferStands } from "./offer-rules.js"
-import { homeTaskBody, writeHomeSuggestion } from "./task-proposal-home.js"
+import { homeTaskBody } from "./task-proposal-home.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
 import { makeWorkEvents } from "./work-events.js"
 import { assertHomeProposalAdmission, assertInferenceAdmission } from "./work-inference.js"
@@ -427,26 +427,6 @@ export const makeTaskProposalStore = (options: {
       )
   })
 
-  const suggestFromItem: TaskProposalStore["Service"]["suggestFromItem"] = Effect.fn(
-    "TaskProposal.suggestFromItem"
-  )(
-    function* (input) {
-      const now = DateTime.formatIso(yield* DateTime.now)
-      const proposalId = `offer_${yield* nextId}`
-      return yield* writer.transact(
-        Effect.gen(function* () {
-          const written = yield* writeHomeSuggestion(sql, { ...input, proposalId, now })
-          return written ? yield* read(proposalId).pipe(Effect.flatMap(project)) : undefined
-        })
-      )
-    },
-    Effect.mapError((cause) =>
-      cause instanceof TaskProposalStoreError
-        ? cause
-        : failure("storage", "Could not record the Home suggestion", cause)
-    )
-  )
-
   const validateStoredSources = Effect.fn("TaskProposal.validateSources")(function* (
     spaceId: string,
     sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>,
@@ -751,7 +731,6 @@ export const makeTaskProposalStore = (options: {
     propose,
     expireOffers,
     revise,
-    suggestFromItem,
     resolve,
     retire,
     history: (input) =>
