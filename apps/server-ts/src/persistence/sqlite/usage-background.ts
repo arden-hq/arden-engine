@@ -95,7 +95,7 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
         THEN task.item_id END AS available_task,
       CASE WHEN job.purpose IN ('user_automation', 'system') THEN job.task_id END AS available_job,
       space.space_id AS available_space,
-      a.chat_run_id, a.started_at, a.handler, ${outcomeSql(sql, sql`a`)} AS outcome,
+      a.chat_run_id, a.started_at, coalesce(job.handler, a.handler) AS handler, ${outcomeSql(sql, sql`a`)} AS outcome,
       coalesce(nullif(job.name, ''), nullif(task.text, ''),
         nullif(json_extract(final.metadata_json, '$.automation.name'), ''),
         nullif(session.name, ''), 'Background work') AS name,
@@ -164,25 +164,22 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
   const inWindow = (at: string) => at >= since && at < until
   type MutableOutcome = { -readonly [K in keyof UsageAutomationOutcome]: UsageAutomationOutcome[K] }
   interface Group {
-    attempt: UsageSource
+    readonly attempt: UsageSource
     readonly outcomes: Map<string, MutableOutcome>
   }
   const groups = new Map<string, Group>()
-  const groupOf = (attempt: UsageSource): Group => {
+  const outcomeFor = (attempt: UsageSource): MutableOutcome => {
     const groupKey = JSON.stringify([
       attempt.task_id,
       attempt.item_id,
       attempt.space_id,
       attempt.purpose
     ])
-    const found = groups.get(groupKey)
-    if (found !== undefined) return found
-    const group = { attempt, outcomes: new Map<string, MutableOutcome>() }
-    groups.set(groupKey, group)
-    return group
-  }
-  const outcomeFor = (attempt: UsageSource): MutableOutcome => {
-    const group = groupOf(attempt)
+    let group = groups.get(groupKey)
+    if (group === undefined) {
+      group = { attempt, outcomes: new Map() }
+      groups.set(groupKey, group)
+    }
     const key = attempt.outcome ?? "unrecorded"
     let outcome = group.outcomes.get(key)
     if (outcome === undefined) {
@@ -200,12 +197,11 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
     }
     return outcome
   }
-  for (const attempt of attempts.toSorted((a, b) => a.started_at.localeCompare(b.started_at))) {
+  for (const attempt of attempts) {
     if (!inWindow(attempt.started_at)) continue
     const owner = attempt.chat_run_id === null ? null : ownerOf(attempt.chat_run_id)
     if (owner !== null && owner.attemptId !== attempt.id) continue
     outcomeFor(attempt).checks++
-    groupOf(attempt).attempt = attempt
   }
   for (const run of runs) {
     if (!inWindow(run.started_at)) continue

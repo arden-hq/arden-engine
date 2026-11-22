@@ -67,3 +67,18 @@ it("an Automation's usage stays one row across a handler rename, under its curre
     [{ name: "Events", handler: "events", checks: 2 }]
   )
 })
+
+it("usage of a deleted Automation keeps the handler its runs recorded", async () => {
+  const rows = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO automation_runs (task_id, purpose, handler, started_at, ended_at, status)
+        VALUES ('builtin-gone', 'system', 'urgent_events', '2026-11-10T00:00:00.000Z',
+          '2026-11-10T00:01:00.000Z', 'completed')`
+      return yield* backgroundUsage(sql, "2000-01-01T00:00:00.000Z", "2200-01-01T00:00:00.000Z")
+    })
+  )
+  expect(rows.map((row) => ({ handler: row.handler, checks: row.checks }))).toEqual([
+    { handler: "urgent_events", checks: 1 }
+  ])
+})
