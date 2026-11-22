@@ -168,7 +168,7 @@ it("Events takes only item triggers: an owner's other trigger is refused, and an
   )
 })
 
-it("seeding resumes Events when Arden paused it, and leaves it off when the owner did", async () => {
+it("seeding resumes Events only from a booked retry; any other pause stays off", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -186,18 +186,50 @@ it("seeding resumes Events when Arden paused it, and leaves it off when the owne
               AND json_extract(pause.payload, '$.resumedAt') IS NOT NULL) AS resumed
         FROM scheduled_tasks AS task WHERE task.task_id = ${events}`
       const pauseAt = "2026-11-18T09:00:00.000Z"
-      yield* sql`UPDATE scheduled_tasks SET enabled = 0, paused_at = ${pauseAt}, failed_runs = 3
-        WHERE task_id = ${events}`
-      yield* sql`INSERT INTO automation_deliveries (delivery_id, task_id, delivered_at, subject,
-          body, payload, status, created_at, destinations)
-        VALUES (${"a".repeat(64)}, ${events}, ${pauseAt}, 'Paused', 'Paused after 3 failed runs',
-          ${JSON.stringify({ kind: "automation_paused", attemptId: 1, resumedAt: null })},
-          'delivered', ${pauseAt}, '[]')`
+      const pause = (retryAt: string | null, attemptId: number) =>
+        Effect.gen(function* () {
+          yield* sql`UPDATE scheduled_tasks SET enabled = 0, paused_at = ${pauseAt},
+              auto_resume_at = ${retryAt}, failed_runs = 3
+            WHERE task_id = ${events}`
+          yield* sql`INSERT INTO automation_deliveries (delivery_id, task_id, delivered_at, subject,
+              body, payload, status, created_at, destinations)
+            VALUES (${String(attemptId).repeat(64)}, ${events}, ${pauseAt}, 'Paused', 'Paused',
+              ${JSON.stringify({ kind: "automation_paused", attemptId, resumedAt: null })},
+              'delivered', ${pauseAt}, '[]')`
+        })
+      yield* pause("2026-11-18T10:00:00.000Z", 1)
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
       expect(yield* state).toEqual([{ enabled: 1, paused_at: null, failed_runs: 0, resumed: 1 }])
+      yield* pause(null, 2)
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      expect(yield* state).toEqual([{ enabled: 0, paused_at: pauseAt, failed_runs: 3, resumed: 1 }])
+      yield* pause("2026-11-18T10:00:00.000Z", 3)
       yield* catalog.update(events, { enabled: false }, "owner")
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
-      expect(yield* state).toMatchObject([{ enabled: 0, resumed: 1 }])
+      expect(yield* state).toMatchObject([{ enabled: 0 }])
+    })
+  )
+})
+
+it("an owner's trigger choice with no item trigger in it leaves Events off, not on the defaults", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      const events = eventsHandler.spec.automationId
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      yield* sql`UPDATE scheduled_tasks SET triggers_source = 'manual',
+          triggers = '[{"id":"t9","type":"time","at":"08:00","days":"daily"}]'
+        WHERE task_id = ${events}`
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      expect(
+        yield* sql`SELECT enabled, triggers, triggers_source FROM scheduled_tasks
+          WHERE task_id = ${events}`
+      ).toEqual([{ enabled: 0, triggers: "[]", triggers_source: "manual" }])
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      expect(
+        yield* sql`SELECT enabled, triggers FROM scheduled_tasks WHERE task_id = ${events}`
+      ).toEqual([{ enabled: 0, triggers: "[]" }])
     })
   )
 })

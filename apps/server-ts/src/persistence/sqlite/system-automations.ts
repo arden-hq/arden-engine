@@ -32,7 +32,7 @@ interface StoredSystemAutomation {
   readonly last_run_at: string | null
   readonly next_run_at: string | null
   readonly thread_id: string | null
-  readonly system_paused: number
+  readonly auto_resume_at: string | null
 }
 
 const seedError = (message: string, automationId: string | undefined, cause?: unknown) =>
@@ -73,21 +73,31 @@ const currentNextRunAt = (input: {
   return input.row.next_run_at !== null && !input.spec.rearmOnSeed ? input.row.next_run_at : next
 }
 
-const takenTriggers = Effect.fn("SqliteAutomationStore.takenTriggers")(function* (
+type OwnerTriggers =
+  | { readonly kind: "spec" }
+  | { readonly kind: "owner"; readonly triggers: string }
+  | { readonly kind: "none_taken" }
+
+const ownerTriggers = Effect.fn("SqliteAutomationStore.ownerTriggers")(function* (
   spec: SystemAutomationSpec,
   row: StoredSystemAutomation
-) {
-  if (spec.triggerScope === "any") return row.triggers
+): Effect.fn.Return<OwnerTriggers, AutomationStoreError> {
+  if (row.triggers_source !== "manual") return { kind: "spec" }
+  const kept = { kind: "owner", triggers: row.triggers } as const
+  if (spec.triggerScope === "any") return kept
   const stored = yield* listenerTriggers({ task_id: spec.automationId, triggers: row.triggers })
-  if (stored === undefined) return row.triggers
+  if (stored === undefined) return kept
   const taken = stored.filter((trigger) => systemTakesTrigger(spec, trigger))
-  if (taken.length === 0) return undefined
-  if (taken.length === stored.length) return row.triggers
-  return yield* encodeJson(AutomationTriggersSchema, taken).pipe(
-    Effect.mapError((cause) =>
-      seedError("Could not encode the system Automation triggers", spec.automationId, cause)
+  if (taken.length === 0) return { kind: "none_taken" }
+  if (taken.length === stored.length) return kept
+  return {
+    kind: "owner",
+    triggers: yield* encodeJson(AutomationTriggersSchema, taken).pipe(
+      Effect.mapError((cause) =>
+        seedError("Could not encode the system Automation triggers", spec.automationId, cause)
+      )
     )
-  )
+  }
 })
 
 export const specSchedule = Effect.fn("SqliteAutomationStore.specSchedule")(function* (
@@ -136,11 +146,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
           for (const [index, { spec, schedule, triggers, lastId }] of schedules.entries()) {
             const rows = yield* sql<StoredSystemAutomation>`
                 SELECT task_id, enabled, purpose, triggers, triggers_source,
-                       last_run_at, next_run_at, thread_id,
-                       EXISTS (SELECT 1 FROM automation_deliveries AS pause
-                         WHERE pause.task_id = scheduled_tasks.task_id
-                           AND json_extract(pause.payload, '$.kind') = 'automation_paused'
-                           AND json_extract(pause.payload, '$.resumedAt') IS NULL) AS system_paused
+                       last_run_at, next_run_at, thread_id, auto_resume_at
                 FROM scheduled_tasks
                 WHERE task_id = ${spec.automationId}
                 LIMIT 1
@@ -200,17 +206,18 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
               continue
             }
 
-            const resumes = spec.enabled && row.enabled === 0 && row.system_paused === 1
-            const enabled = spec.enabled && (row.enabled === 1 || resumes)
+            const owner = yield* ownerTriggers(spec, row)
+            const noneTaken = owner.kind === "none_taken"
+            const stored = owner.kind === "owner" ? owner.triggers : noneTaken ? "[]" : triggers
+            const userOwnsTriggers = stored !== triggers
+            const resumes =
+              !noneTaken && spec.enabled && row.enabled === 0 && row.auto_resume_at !== null
+            const enabled = !noneTaken && spec.enabled && (row.enabled === 1 || resumes)
             const fixed = spec.promptEdit === "fixed" ? 1 : 0
-            const owned =
-              row.triggers_source === "manual" ? yield* takenTriggers(spec, row) : undefined
-            const userOwnsTriggers = owned !== undefined && owned !== triggers
             const current = {
               ...row,
               triggers_source: userOwnsTriggers ? "manual" : null,
-              next_run_at:
-                row.triggers_source === "manual" && owned !== row.triggers ? null : row.next_run_at
+              next_run_at: userOwnsTriggers && stored !== row.triggers ? null : row.next_run_at
             }
             const nextRunAt = currentNextRunAt({
               rules,
@@ -234,7 +241,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                     tool_scope = ${spec.toolScope},
                     thread_id = ${session.id},
                     enabled = ${enabled ? 1 : 0},
-                    triggers = ${userOwnsTriggers ? owned : triggers},
+                    triggers = ${stored},
                     trigger_last_id = MAX(trigger_last_id, ${lastId}),
                     triggers_source = ${current.triggers_source},
                     next_run_at = ${nextRunAt}
@@ -247,7 +254,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
                 rules,
                 row: {
                   task_id: spec.automationId,
-                  triggers: userOwnsTriggers ? owned : triggers
+                  triggers: stored
                 },
                 now: timestamp
               })
