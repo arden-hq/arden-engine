@@ -65,7 +65,7 @@ export const assertAutomationLease = Effect.fn("AutomationLease.assert")(functio
   if (live.length === 0) return yield* failure()
 })
 
-export const leaseIsCurrent = Effect.fn("AutomationLease.current")(function* (
+export const jobMayPublish = Effect.fn("AutomationLease.mayPublish")(function* (
   sql: SqlClient.SqlClient,
   options: {
     readonly lease: JobLeaseRef
@@ -78,6 +78,7 @@ export const leaseIsCurrent = Effect.fn("AutomationLease.current")(function* (
   const live = yield* sql`SELECT 1 FROM automation_event_queue AS queue
     JOIN automation_runs AS attempt ON attempt.id = ${options.attemptId}
       AND attempt.task_id = queue.task_id
+    JOIN scheduled_tasks AS task ON task.task_id = queue.task_id AND task.enabled = 1
     WHERE queue.id = ${parsed.value.queueId} AND queue.task_id = ${options.automationId}
       AND queue.claimed_at IS NOT NULL
       AND queue.lease_expires_at > ${iso(yield* Clock.currentTimeMillis)}

@@ -645,3 +645,27 @@ it("a run whose lease is no longer current posts nothing", async () => {
     })
   )
 })
+
+it("a run whose Automation was paused after its chat ended posts nothing", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, posts, leaseOf } = yield* setup
+      const lease = yield* leaseOf(1)
+      yield* sql`UPDATE scheduled_tasks SET enabled = 0 WHERE task_id = ${automationId}`
+      const refused = yield* posts
+        .post({
+          automationId,
+          attemptId: 1,
+          lease,
+          runId: "run-1",
+          spaceId: undefined,
+          text: "After the pause",
+          task: undefined,
+          itemIds: []
+        })
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({ reason: "conflict" })
+      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
+    })
+  )
+})
