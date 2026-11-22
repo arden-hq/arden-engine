@@ -74,6 +74,8 @@ export const encodeSessionRestorePathEffect = (value: unknown) =>
   sessionPathEffect(value, "/restore")
 export const encodeSessionContinuePathEffect = (value: unknown) =>
   sessionPathEffect(value, "/continue")
+export const encodeSessionOnboardingPathEffect = (value: unknown) =>
+  sessionPathEffect(value, "/onboarding")
 const SessionEndRouteSchema = Schema.Struct({ sessionId: routeSegment(), stop: Schema.Boolean })
 const sessionEndPathEffect = (value: unknown, suffix: string) =>
   encodeRouteEffect(SessionEndRouteSchema, value, ({ sessionId, stop }) =>

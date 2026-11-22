@@ -557,6 +557,13 @@ export const SessionHandlers = HttpApiBuilder.group(
           Effect.map(() => ({ status: "restored" as const, session_id: params.sessionId }))
         )
       )
+      .handle("startOnboarding", ({ params }) =>
+        store.startOnboarding(params.sessionId).pipe(
+          Effect.tap((started) => (started ? kickoff(params.sessionId) : Effect.void)),
+          Effect.map((started) => ({ session_id: params.sessionId, started })),
+          Effect.catch(failStore)
+        )
+      )
       .handle("continueRun", ({ params }) =>
         store.continueRun(params.sessionId).pipe(
           Effect.catch(failStore),

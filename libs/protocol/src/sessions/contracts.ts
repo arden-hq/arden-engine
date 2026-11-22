@@ -234,6 +234,11 @@ export interface MoveSessionToSpaceRequest {
   readonly space_id: string | null
 }
 
+export interface StartOnboardingResponse extends JsonRecord {
+  readonly session_id: string
+  readonly started: boolean
+}
+
 export interface MoveSessionToSpaceResponse extends JsonRecord {
   readonly session_id: string
   readonly space_id: string | null

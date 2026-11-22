@@ -33,6 +33,7 @@ import {
   SessionListQuerySchema,
   SessionListResponseSchema,
   SessionTriageActionRequestSchema,
+  StartOnboardingResponseSchema,
   SessionTriageDecisionSchema,
   UpdateSessionModelRequestSchema,
   UpdateSessionModelResponseSchema
@@ -201,6 +202,11 @@ export class SessionsApi extends HttpApiGroup.make("sessions", { topLevel: true 
     params: { sessionId: Schema.NonEmptyString },
     success: SessionLifecycleResponseSchema,
     error: [HttpApiError.BadRequestNoContent, ...storeErrors]
+  }),
+  HttpApiEndpoint.post("startOnboarding", "/sessions/:sessionId/onboarding", {
+    params: { sessionId: Schema.NonEmptyString },
+    success: StartOnboardingResponseSchema,
+    error: storeErrors
   }),
   HttpApiEndpoint.post("continueRun", "/sessions/:sessionId/continue", {
     params: { sessionId: Schema.NonEmptyString },

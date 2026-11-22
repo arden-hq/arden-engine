@@ -13,6 +13,7 @@ import type {
   SessionEndConflict,
   RevertSessionResponse,
   MoveSessionToSpaceResponse,
+  StartOnboardingResponse,
   SessionExportResponse,
   ChatFindResponse,
   ChatSearchResponse
@@ -267,6 +268,11 @@ export const RevertSessionResponseSchema: Schema.Codec<RevertSessionResponse> = 
 
 export const MoveSessionToSpaceRequestSchema = Schema.Struct({
   space_id: Schema.NullOr(Schema.NonEmptyString)
+})
+
+export const StartOnboardingResponseSchema: Schema.Codec<StartOnboardingResponse> = withExtras({
+  session_id: Schema.NonEmptyString,
+  started: Schema.Boolean
 })
 
 export const MoveSessionToSpaceResponseSchema: Schema.Codec<MoveSessionToSpaceResponse> =

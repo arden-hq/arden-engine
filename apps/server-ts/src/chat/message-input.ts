@@ -1,3 +1,4 @@
+import { onboardingClientId } from "../persistence/sessions/store.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { HandlerItemRef } from "../persistence/automations/handler-item.js"
 import type { JobLeaseRef } from "@arden-hq/jobs"
@@ -109,7 +110,7 @@ export const onboardingKickoff = (sessionId: string): ChatSendInput => {
   const content = PROMPTS.onboardingKickoff
   return {
     sessionId,
-    clientId: `onboarding:${sessionId}`,
+    clientId: onboardingClientId(sessionId),
     message: content,
     sender: {
       kind: INTERACTION_KIND.instruction,

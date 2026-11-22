@@ -179,6 +179,7 @@ const tables: Readonly<Record<string, RouteTable>> = {
     search: () => sessionRoutes.search("deploy"),
     restore: () => sessionRoutes.restore(sessionId),
     continueRun: () => sessionRoutes.continueRun(sessionId),
+    onboarding: () => sessionRoutes.onboarding(sessionId),
     triage: () => sessionRoutes.triage(sessionId),
     archive: () => sessionRoutes.archive(sessionId, { stop: true }),
     permanentDelete: () => sessionRoutes.permanentDelete(sessionId, { stop: false })
