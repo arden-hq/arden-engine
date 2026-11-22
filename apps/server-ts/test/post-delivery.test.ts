@@ -669,3 +669,24 @@ it("a run whose Automation was paused after its chat ended posts nothing", async
     })
   )
 })
+
+it("a post to a Space whose inference is off arrives without its Task", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, spaces, post, drain, message } = yield* setup
+      const quiet = yield* spaces.create({ name: "Quiet" })
+      yield* sql`UPDATE spaces SET inference_policy = json_set(inference_policy, '$.enabled', json('false'))
+        WHERE space_id = ${quiet.space_id}`
+      const posted = yield* post(1, {
+        spaceId: quiet.space_id,
+        text: "The bank wrote back.",
+        task: { title: "Answer the bank", brief: "Answer the bank's letter." }
+      })
+      expect(yield* drain).toBe(1)
+      expect(yield* message(posted.sessionId, posted.messageId)).toMatchObject({
+        content: "The bank wrote back."
+      })
+      expect(yield* sql`SELECT 1 FROM space_tasks`).toEqual([])
+    })
+  )
+})
