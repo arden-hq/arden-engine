@@ -66,6 +66,8 @@ export const makeHomeLetterRunner = (services: {
     if (body === undefined)
       return jobResult.failed("The run wrote no Home letter", observed.result, run)
     const published = yield* services.home.publishHomeLetter({
+      lease: { id: job.id, token: job.token },
+      attemptId: job.payload.automationRunId,
       runId,
       snapshot: input.snapshot,
       body,

@@ -55,18 +55,39 @@ const setup = Effect.gen(function* () {
       if (yield* posts.deliver(pending)) delivered += 1
     return delivered
   })
-  const post = (attemptId: number, fields: Partial<PostInput> = {}) =>
-    posts.post({
-      automationId,
-      attemptId,
-      runId: `run-${attemptId}`,
-      spaceId: undefined,
-      text: `Post ${attemptId}`,
-      task: undefined,
-      itemIds: [],
-      ...fields
+  const leaseOf = (attemptId: number) =>
+    Effect.gen(function* () {
+      yield* sql`INSERT OR IGNORE INTO automation_runs (id, task_id, started_at, status, claim_count)
+        VALUES (${attemptId}, ${automationId}, ${AT}, 'running', 1)`
+      const queued = yield* sql<{ readonly id: number }>`
+        SELECT id FROM automation_event_queue
+        WHERE json_extract(context, '$.automation_run_id') = ${attemptId}`
+      const id =
+        queued[0]?.id ??
+        (yield* sql<{ readonly id: number }>`INSERT INTO automation_event_queue (task_id, source,
+            event_key, context, created_at, claimed_at, lease_expires_at, attempt_count)
+          VALUES (${automationId}, 'event', ${`mail-${attemptId}`},
+            ${JSON.stringify({ scheduled_for: null, automation_run_id: attemptId })}, ${AT}, ${AT},
+            '2999-01-01T00:00:00.000Z', 1)
+          RETURNING id`)[0]?.id
+      if (id === undefined) return yield* Effect.die("no queue row")
+      return { id: String(id), token: `${attemptId}|1` }
     })
-  return { sql, spaces, main, thread, message, delivery, posts, post, drain }
+  const post = (attemptId: number, fields: Partial<PostInput> = {}) =>
+    Effect.gen(function* () {
+      return yield* posts.post({
+        automationId,
+        attemptId,
+        lease: yield* leaseOf(attemptId),
+        runId: `run-${attemptId}`,
+        spaceId: undefined,
+        text: `Post ${attemptId}`,
+        task: undefined,
+        itemIds: [],
+        ...fields
+      })
+    })
+  return { sql, spaces, main, thread, message, delivery, posts, post, leaseOf, drain }
 })
 
 it("a post lands in its Space chat as an unread assistant message, with a notice and no run", async () => {
@@ -593,6 +614,34 @@ it("a post that keeps failing is set aside and stops holding its chat", async ()
       })
       expect(yield* drain).toBe(1)
       expect(yield* delivery(2)).toMatchObject({ status: "delivered" })
+    })
+  )
+})
+
+it("a run whose lease is no longer current posts nothing", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, post, posts, leaseOf } = yield* setup
+      yield* post(1)
+      const lease = yield* leaseOf(2)
+      yield* sql`UPDATE automation_event_queue SET lease_expires_at = ${AT}`
+      const refused = yield* posts
+        .post({
+          automationId,
+          attemptId: 2,
+          lease,
+          runId: "run-2",
+          spaceId: undefined,
+          text: "Late",
+          task: undefined,
+          itemIds: []
+        })
+        .pipe(Effect.flip)
+      expect(refused).toMatchObject({ reason: "conflict" })
+      expect(yield* post(1)).toMatchObject({ messageId: expect.stringMatching(/^post:/) })
+      expect(yield* sql`SELECT delivery_id FROM automation_deliveries`).toEqual([
+        { delivery_id: postDeliveryId(1) }
+      ])
     })
   )
 })

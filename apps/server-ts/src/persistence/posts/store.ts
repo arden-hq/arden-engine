@@ -1,9 +1,10 @@
+import type { JobLeaseRef } from "@arden-hq/jobs"
 import { Context, Effect, Schema } from "effect"
 import type { AutomationId } from "../automations/model.js"
 import type { PostTask } from "./model.js"
 
 export class PostStoreError extends Schema.TaggedError<PostStoreError>()("PostStoreError", {
-  reason: Schema.Literals(["invalid", "storage"] as const),
+  reason: Schema.Literals(["invalid", "conflict", "storage"] as const),
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
@@ -11,6 +12,7 @@ export class PostStoreError extends Schema.TaggedError<PostStoreError>()("PostSt
 export interface PostInput {
   readonly automationId: AutomationId
   readonly attemptId: number
+  readonly lease: JobLeaseRef
   readonly runId: string
   readonly spaceId: string | undefined
   readonly text: string

@@ -12,6 +12,7 @@ import { HOME_LETTER_AUTOMATION_ID } from "../automations/model.js"
 import { WorkStoreError } from "../work/store.js"
 import { HomeStore, type HomeLetterSnapshot } from "../home/store.js"
 import type { HomeAddressBook, HomeAddressNeeds, HomeLetterRules } from "../home/model.js"
+import { leaseIsCurrent } from "./automation-lease.js"
 import { makeHomeEvidence } from "./home-evidence.js"
 import { decodeJson } from "./json.js"
 import { workError } from "./work-records.js"
@@ -307,6 +308,17 @@ export const makeHomeStore = ({
               return yield* workError("conflict", "This Home Run already published another body")
             return true
           }
+          if (
+            !(yield* leaseIsCurrent(sql, {
+              lease: input.lease,
+              automationId: HOME_LETTER_AUTOMATION_ID,
+              attemptId: input.attemptId
+            }))
+          )
+            return yield* workError(
+              "conflict",
+              "The Home letter run's lease is no longer current, so nothing was published"
+            )
           const current = yield* collect(input.rules)
           if (!(yield* validSnapshot(input.snapshot, current, input.rules))) return false
           const runs = yield* sql<{

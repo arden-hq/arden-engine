@@ -51,6 +51,7 @@ export const makeEventsRunner = (services: {
     yield* services.posts.post({
       automationId: job.payload.automationId,
       attemptId: job.payload.automationRunId,
+      lease: { id: job.id, token: job.token },
       runId: observed.runId,
       spaceId: post.space_id,
       text: post.text,

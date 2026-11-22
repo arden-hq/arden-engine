@@ -18,6 +18,7 @@ import type { StoredMessageEnvelope } from "../transcript/model.js"
 import type { PersistenceDeps } from "./deps.js"
 import { appendMessagesInTransaction } from "./chat-transcript.js"
 import { threadTaken } from "./connection-item-evidence.js"
+import { leaseIsCurrent } from "./automation-lease.js"
 import { recordAutomationPosted } from "./entity-events.js"
 import { mainSpaceId } from "./main-space.js"
 import { messageQuote } from "./message-quote.js"
@@ -189,6 +190,17 @@ export const makePostStore = ({
         Effect.gen(function* () {
           const found = yield* existing(deliveryId)
           if (found !== undefined) return found
+          if (
+            !(yield* leaseIsCurrent(sql, {
+              lease: input.lease,
+              automationId: input.automationId,
+              attemptId: input.attemptId
+            }))
+          )
+            return yield* new PostStoreError({
+              reason: "conflict",
+              message: "The run's lease is no longer current, so nothing was posted"
+            })
           const now = iso(yield* Clock.currentTimeMillis)
           const threads = yield* threadsOf(input.itemIds)
           const hit = (yield* threadHit(threads))[0]

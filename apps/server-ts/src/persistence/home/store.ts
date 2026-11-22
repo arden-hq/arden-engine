@@ -1,3 +1,4 @@
+import type { JobLeaseRef } from "@arden-hq/jobs"
 import { Context, type Effect } from "effect"
 import type {
   HomePresenceInput,
@@ -31,6 +32,8 @@ export class HomeStore extends Context.Service<
       rules: HomeLetterRules
     ) => Effect.Effect<"ready" | "no_change" | "skipped_no_input" | "superseded", WorkStoreError>
     readonly publishHomeLetter: (input: {
+      readonly lease: JobLeaseRef
+      readonly attemptId: number
       readonly runId: string
       readonly snapshot: HomeLetterSnapshot
       readonly body: HomeLetterBody
