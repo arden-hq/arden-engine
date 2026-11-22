@@ -25,7 +25,7 @@ export const SYSTEM_HANDLER_IDS = [
   "managed_history_collection",
   "wiki_maintenance",
   "chat_summaries",
-  "urgent_events"
+  "events"
 ] as const
 export type SystemHandlerId = (typeof SYSTEM_HANDLER_IDS)[number]
 
@@ -34,20 +34,11 @@ export type AutomationId = typeof AutomationId.Type
 
 export const HOME_LETTER_AUTOMATION_ID = AutomationId.make(HOME_LETTER_AUTOMATION_REF)
 export const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summary")
-export const URGENT_EVENTS_AUTOMATION_ID = AutomationId.make("builtin-urgent-events")
+export const EVENTS_AUTOMATION_ID = AutomationId.make("builtin-urgent-events")
 
-/**
- * The system handlers whose run speaks to the owner. Such a handler is treated as a user
- * Automation where the owner is concerned: its final reply is delivered and notified, every
- * reply counts as news, and a run the provider refuses pauses it and is tried again. Every other
- * system run works unseen and files its result elsewhere.
- */
-export const OWNER_FACING_HANDLERS = [
-  "urgent_events"
-] as const satisfies ReadonlyArray<SystemHandlerId>
+export type SystemPromptEdit = "owner" | "fixed"
 
-export const systemHandlerTellsOwner = (handler: string | null | undefined): boolean =>
-  OWNER_FACING_HANDLERS.some((facing) => facing === handler)
+export type SystemTriggerScope = "any" | "item_events"
 
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId
@@ -61,7 +52,8 @@ export interface SystemAutomationSpec {
   readonly toolScope: AutomationToolScope
   readonly contextMode: "fresh" | "fork"
   readonly chatSession: boolean
-  readonly runsModel: boolean
+  readonly promptEdit: SystemPromptEdit
+  readonly triggerScope: SystemTriggerScope
   readonly manualRun: boolean
   readonly rearmOnSeed: boolean
 }

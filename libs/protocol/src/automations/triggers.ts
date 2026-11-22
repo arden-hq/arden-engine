@@ -445,6 +445,16 @@ export const AUTOMATION_EVENTS: {
 export const isAutomationEventType = (value: string): value is AutomationEventType =>
   Object.hasOwn(AUTOMATION_EVENTS, value)
 
+export const ITEM_EVENTS = [
+  "email.received",
+  "github.received",
+  "calendar.changed"
+] as const satisfies ReadonlyArray<AutomationEventType>
+export type ItemEventType = (typeof ITEM_EVENTS)[number]
+
+export const isItemEventType = (value: string): value is ItemEventType =>
+  ITEM_EVENTS.some((type) => type === value)
+
 /**
  * The activity triggers. Both read only your chats: a chat an Automation owns
  * (its own chat, a system chat, a run's copy or child) never counts.

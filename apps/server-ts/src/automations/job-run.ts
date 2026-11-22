@@ -12,6 +12,7 @@ import {
 } from "../persistence/automations/store.js"
 import {
   awaitEnded,
+  blockedOutcome,
   jobResult,
   startAutomationRun,
   type AutomationRunner,
@@ -195,5 +196,5 @@ const occurrenceOutcome = (
   if (options.handler) return "failed"
   if (observed.status !== "completed") return observed.status
   if (observed.blocked === null) return "finished"
-  return observed.blocked.kind === "needs_input" ? "needs_you" : "blocked"
+  return blockedOutcome(observed.blocked)
 }

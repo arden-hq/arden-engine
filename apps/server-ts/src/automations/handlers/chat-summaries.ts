@@ -90,7 +90,8 @@ export const chatSummariesHandler: SystemAutomationHandler<"chat_summaries"> = {
     contextMode: "fork",
     chatSession: false,
     manualRun: false,
-    runsModel: true,
+    promptEdit: "owner",
+    triggerScope: "any",
     rearmOnSeed: false
   },
   run: (services) =>

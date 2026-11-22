@@ -70,8 +70,9 @@ stored as an item first, so a Space, Home and every Automation see the same
 event. Its adapter in `apps/server-ts/src/connections/items/` returns
 `FetchedConnectionItem`s, and `runtime.ts` there saves them with the source's
 cursor (`store.saveFetch`). The source is one entry in `SIGNAL_SOURCES`
-(`libs/protocol/src/signals/index.ts`), its event in `ITEM_EVENT_TYPES` and a
-`case` above, and a `feed` producer,
+(`libs/protocol/src/signals/index.ts`), its event in `ITEM_EVENT_TYPES` and in
+`ITEM_EVENTS` (`libs/protocol/src/automations/triggers.ts`, the events whose key is
+a stored item's id), a `case` above, and a `feed` producer,
 like GitHub: `{ eventType: "github.received", source: { kind: "feed" }, failureMessage: "GitHub item trigger failed" }`.
 Fields the event offers beyond title, sender and snippet go in the item's
 `detail`: `connections/items/calendar.ts` stores a calendar change that way and

@@ -95,7 +95,7 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
         THEN task.item_id END AS available_task,
       CASE WHEN job.purpose IN ('user_automation', 'system') THEN job.task_id END AS available_job,
       space.space_id AS available_space,
-      a.chat_run_id, a.started_at, a.handler, ${outcomeSql(sql, sql`a`)} AS outcome,
+      a.chat_run_id, a.started_at, coalesce(job.handler, a.handler) AS handler, ${outcomeSql(sql, sql`a`)} AS outcome,
       coalesce(nullif(job.name, ''), nullif(task.text, ''),
         nullif(json_extract(final.metadata_json, '$.automation.name'), ''),
         nullif(session.name, ''), 'Background work') AS name,
@@ -173,8 +173,7 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
       attempt.task_id,
       attempt.item_id,
       attempt.space_id,
-      attempt.purpose,
-      attempt.handler
+      attempt.purpose
     ])
     let group = groups.get(groupKey)
     if (group === undefined) {

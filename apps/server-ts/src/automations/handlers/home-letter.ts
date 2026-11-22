@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { HomeLetterBodySchema } from "@arden-hq/protocol/effect/runs"
 import type { ChatMessage } from "../../chat/message.js"
 import type { AutomationQueue } from "../../persistence/automations/queue.js"
@@ -10,7 +10,8 @@ import type { HomeLetterInputs } from "../../persistence/automations/home-letter
 import type { HomeStore } from "../../persistence/home/store.js"
 import { HOME_LETTER_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import { HOME_LETTER_PROMPT, HOME_LETTER_RULES, homeLetterInput } from "../home-letter-prompt.js"
-import { withHomeLetterTool } from "../home-letter-tool.js"
+import { HOME_LETTER_TOOL, withHomeLetterTool } from "../home-letter-tool.js"
+import { readHandlerRun } from "../handler-tool-result.js"
 import { runByRule } from "../job-run.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler } from "../system-handler.js"
@@ -21,7 +22,7 @@ const UNREADY = {
   superseded: ["superseded", "Newer Home evidence replaced this input"]
 } as const
 
-const makeHomeLetterRunner = (services: {
+export const makeHomeLetterRunner = (services: {
   readonly chat: ChatMessage["Service"]
   readonly queue: AutomationQueue["Service"]
   readonly homeLetterInputs: HomeLetterInputs["Service"]
@@ -54,11 +55,18 @@ const makeHomeLetterRunner = (services: {
     })
     const runId = observed.runId
     const run = { chatRunId: runId, chatSessionId: sessionId }
-    if (observed.status !== "completed")
-      return jobResult.failed(observed.error, observed.result, run)
-    const decoded: unknown = JSON.parse(observed.result ?? "null")
-    const body = yield* Schema.decodeUnknownEffect(HomeLetterBodySchema)(decoded)
+    const read = yield* readHandlerRun(services.queue, {
+      observed,
+      run,
+      tool: HOME_LETTER_TOOL,
+      schema: HomeLetterBodySchema,
+      missing: "The run ended without writing a Home letter or reporting no change"
+    })
+    if (read.kind === "ended") return read.result
+    const body = read.value
     const published = yield* services.home.publishHomeLetter({
+      lease: { id: job.id, token: job.token },
+      attemptId: job.payload.automationRunId,
       runId,
       snapshot: input.snapshot,
       body,
@@ -90,7 +98,8 @@ export const homeLetterHandler: SystemAutomationHandler<"home_letter"> = {
     contextMode: "fresh",
     chatSession: true,
     manualRun: true,
-    runsModel: true,
+    promptEdit: "owner",
+    triggerScope: "any",
     rearmOnSeed: false
   },
   tools: withHomeLetterTool,

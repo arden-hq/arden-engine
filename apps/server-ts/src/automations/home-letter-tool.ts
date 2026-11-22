@@ -5,6 +5,7 @@ import { fromMarkdown } from "mdast-util-from-markdown"
 import { TOOL_DISPLAY_TITLE } from "../execution/tool-call-presentation.js"
 import { mergeToolsets } from "../execution/toolset-middleware.js"
 import { errorMessage } from "@arden-hq/std/errors"
+import type { HandlerToolName } from "../persistence/automations/queue.js"
 
 interface MarkdownNode {
   readonly type: string
@@ -14,7 +15,7 @@ interface MarkdownNode {
   readonly children?: ReadonlyArray<MarkdownNode> | undefined
 }
 
-const TOOL_NAME = "publish_home_letter"
+export const HOME_LETTER_TOOL = "publish_home_letter" satisfies HandlerToolName
 const MarkdownSchema = Schema.Struct({
   markdown: Schema.String.check(Schema.isMaxLength(5_000)).annotate({
     description:
@@ -23,7 +24,7 @@ const MarkdownSchema = Schema.Struct({
 })
 
 const tool = createTool({
-  name: TOOL_NAME,
+  name: HOME_LETTER_TOOL,
   description:
     "Publish the Home letter and end the run. Link only the smallest meaningful phrases, using exact evidence IDs as Markdown destinations, for example [release review](task:123). Plain text needs no link. Call this exactly once, including with empty markdown when no update is useful.",
   parameters: Schema.toStandardSchemaV1(MarkdownSchema),
@@ -64,7 +65,7 @@ const bindHomeToolset = createToolset([tool], {
 })
 
 export const withHomeLetterTool = (base: Toolset): Toolset =>
-  mergeToolsets(base, { toolset: bindHomeToolset(undefined), names: new Set([TOOL_NAME]) })
+  mergeToolsets(base, { toolset: bindHomeToolset(undefined), names: new Set([HOME_LETTER_TOOL]) })
 
 type Segment = HomeLetterBody["paragraphs"][number][number]
 

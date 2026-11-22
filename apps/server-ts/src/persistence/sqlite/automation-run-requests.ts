@@ -7,6 +7,7 @@ import { Clock, Effect, Schema } from "effect"
 import { ChatRunErrorCodeSchema } from "@arden-hq/protocol/effect/chat"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
 import { decodeJson } from "./json.js"
+import { quietRunOutcome } from "./run-outcomes.js"
 import {
   AutomationQueue,
   AUTOMATION_BLOCKED_KINDS,
@@ -47,6 +48,7 @@ interface ObservedChatRunRow {
   readonly result: string | null
   readonly blocked_kind: string | null
   readonly blocked_reason: string | null
+  readonly no_change: string | null
   readonly wrote: number
 }
 
@@ -365,6 +367,8 @@ export const makeAutomationRunRequests = ({
              COALESCE(json_extract(run.metadata_json, '$.terminal_result.text'), message.search_text) AS result,
              json_extract(sidecar.evidence_json, '$.automation_outcome.kind') AS blocked_kind,
              json_extract(sidecar.evidence_json, '$.automation_outcome.reason') AS blocked_reason,
+             CASE WHEN ${quietRunOutcome(sql, "run")}
+               THEN json_extract(run.metadata_json, '$.no_change_reason') END AS no_change,
              EXISTS (
                SELECT 1 FROM tool_calls
                WHERE tool_calls.run_id = run.run_id
@@ -409,6 +413,7 @@ export const makeAutomationRunRequests = ({
         error: null,
         errorCode: null,
         blocked,
+        noChange: row.no_change,
         wrote
       } satisfies ObservedAutomationChatRun
     }
@@ -418,6 +423,7 @@ export const makeAutomationRunRequests = ({
       error: row.error_message ?? row.stop_reason ?? row.error_code ?? `Chat run ${row.status}`,
       errorCode: Schema.is(ChatRunErrorCodeSchema)(row.error_code) ? row.error_code : null,
       blocked,
+      noChange: row.no_change,
       wrote
     } satisfies ObservedAutomationChatRun
   })

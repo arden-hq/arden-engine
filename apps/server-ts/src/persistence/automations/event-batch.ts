@@ -1,4 +1,5 @@
 import type { JsonValue } from "@arden-hq/protocol"
+import { isItemEventType } from "@arden-hq/protocol/automations"
 import { Predicate } from "effect"
 
 export interface BatchedEvent {
@@ -18,6 +19,13 @@ export interface EventBatch {
   readonly unchecked?: number
   readonly paused_since?: string
 }
+
+export const eventItemIds = (batch: EventBatch | undefined): ReadonlyArray<string> =>
+  batch === undefined
+    ? []
+    : [...batch.events, ...batch.overflow]
+        .filter((event) => isItemEventType(event.event_type))
+        .map((event) => event.event_key)
 
 export const KEPT_EVENTS = 50
 

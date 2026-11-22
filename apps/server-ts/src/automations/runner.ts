@@ -3,7 +3,10 @@ import type { ChatMessage } from "../chat/message.js"
 import { ChatMessageError, type ChatMessageFailure } from "../chat/message-errors.js"
 import type { HandlerItemRef } from "../persistence/automations/handler-item.js"
 import type { AutomationJobLease, AutomationJobResult } from "../persistence/automations/store.js"
-import type { TerminalAutomationChatRun } from "../persistence/automations/queue.js"
+import type {
+  AutomationBlockedReport,
+  TerminalAutomationChatRun
+} from "../persistence/automations/queue.js"
 import type { ChatReceipt } from "@arden-hq/protocol/chat"
 import { automationModelSelection } from "./model-selection.js"
 import { iso } from "../runtime/clock.js"
@@ -55,6 +58,9 @@ interface JobRunRef {
 
 export const NO_CHAT_RUN: JobRunRef = { chatRunId: null, chatSessionId: null }
 
+export const blockedOutcome = (blocked: AutomationBlockedReport): "needs_you" | "blocked" =>
+  blocked.kind === "needs_input" ? "needs_you" : "blocked"
+
 export const jobResult = {
   completed: (
     outcome: "finished" | "no_change" | "needs_you" | "blocked" | "superseded",
@@ -66,6 +72,17 @@ export const jobResult = {
     outcome: "failed",
     result,
     error,
+    ...run
+  }),
+  blocked: (
+    blocked: AutomationBlockedReport,
+    result: string | null,
+    run: JobRunRef
+  ): AutomationJobResult => ({
+    status: "ended",
+    outcome: blockedOutcome(blocked),
+    result,
+    error: blocked.reason,
     ...run
   }),
   withoutRun: (

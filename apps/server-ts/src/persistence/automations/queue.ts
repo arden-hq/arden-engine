@@ -20,6 +20,9 @@ export const AUTOMATION_BLOCKED_KINDS = [
 ] as const
 type AutomationBlockedKind = (typeof AUTOMATION_BLOCKED_KINDS)[number]
 
+export const HANDLER_TOOL_NAMES = ["publish_home_letter", "post_message"] as const
+export type HandlerToolName = (typeof HANDLER_TOOL_NAMES)[number]
+
 export interface AutomationBlockedReport {
   readonly kind: AutomationBlockedKind
   readonly reason: string
@@ -46,6 +49,7 @@ export interface TerminalAutomationChatRun {
   readonly error: string | null
   readonly errorCode: ChatRunErrorCode | null
   readonly blocked: AutomationBlockedReport | null
+  readonly noChange: string | null
   readonly wrote: boolean
 }
 
@@ -92,6 +96,10 @@ export class AutomationQueue extends Context.Service<
     readonly observeChatRun: (
       chatRunId: string
     ) => Effect.Effect<ObservedAutomationChatRun | null, AutomationStoreError>
+    readonly handlerToolResult: (input: {
+      readonly runId: string
+      readonly tool: HandlerToolName
+    }) => Effect.Effect<string | undefined, AutomationStoreError>
     readonly observeOccurrence: (
       attemptId: number
     ) => Effect.Effect<ObservedAutomationOccurrence | null, AutomationStoreError>

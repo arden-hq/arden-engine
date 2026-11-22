@@ -11,6 +11,7 @@ import { makeHandlerItemRunner } from "./handler-item-run.js"
 import { SessionStore } from "../persistence/sessions/store.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { SummaryStore } from "../persistence/summaries/store.js"
+import { PostStore } from "../persistence/posts/store.js"
 import { StructuredCompletion } from "../models/structured-completion.js"
 import { Decisions } from "../models/decisions/service.js"
 import { isStandingFactsPage } from "../memory/core-memory.js"
@@ -20,7 +21,7 @@ import { TaskProposalStore } from "../persistence/proposals/store.js"
 import { makeChatOutcomeLinker } from "../routing/chat-outcome.js"
 import { makeJobWorker } from "@arden-hq/jobs"
 import { makeAutomationJobRunner } from "./job-run.js"
-import { renderAutomationJob, withTriggerContext } from "./job-prompt.js"
+import { renderAutomationJob, withScreenedEvents } from "./job-prompt.js"
 import { Cause, Clock, Context, Deferred, Effect, Layer, Record, Scope, Stream } from "effect"
 import { IntelligenceSettingsStore, LimitSettingsStore } from "../persistence/settings/store.js"
 import { ModelProviderService } from "../models/provider.js"
@@ -100,6 +101,7 @@ export class AutomationRuntime extends Context.Service<
     | SpaceStore
     | WorkStore
     | TaskProposalStore
+    | PostStore
   > = Layer.effect(
     AutomationRuntime,
     Effect.gen(function* () {
@@ -126,15 +128,15 @@ export class AutomationRuntime extends Context.Service<
       const sessions = yield* SessionStore
       const transcripts = yield* TranscriptQueries
       const summaries = yield* SummaryStore
+      const posts = yield* PostStore
       const linkOfferChat = makeChatOutcomeLinker({
         spaces: yield* SpaceStore,
         proposals: yield* TaskProposalStore,
         completion: yield* StructuredCompletion
       })
       const decisions = yield* Decisions
-      // "Urgent events" asks what needs the owner today: its check reads their standing pages.
       const ownerProfile = (job: AutomationJobLeaseRef) =>
-        job.payload.handler !== "urgent_events"
+        job.payload.handler !== "events"
           ? Effect.succeed(undefined)
           : wiki.snapshot().pipe(
               Effect.map((snapshot) =>
@@ -179,6 +181,7 @@ export class AutomationRuntime extends Context.Service<
         retentionPolicy,
         sessions,
         summaries,
+        posts,
         linkOfferChat,
         transcripts,
         awaitRun: awaitChatRun,
@@ -266,7 +269,7 @@ export class AutomationRuntime extends Context.Service<
         })
         return outcome.kind === "skip"
           ? outcome
-          : { kind: "run" as const, job: withTriggerContext(job, outcome.triggerContext) }
+          : { kind: "run" as const, job: withScreenedEvents(job, outcome) }
       })
       const execute = (
         claimed: ClaimedAutomationJobLease

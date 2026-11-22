@@ -2,6 +2,7 @@ import type { Statement } from "effect/unstable/sql"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { sha256Hex } from "@arden-hq/std/hash"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
+import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 import { Clock, Effect, Option, Schema } from "effect"
 import { nextOutboxAttemptAt } from "../../runtime/outbox.js"
 import { iso } from "../../runtime/clock.js"
@@ -18,10 +19,12 @@ import type { StoredMessageEnvelope } from "../transcript/model.js"
 import type { PersistenceDeps } from "./deps.js"
 import { appendMessagesInTransaction } from "./chat-transcript.js"
 import { threadTaken } from "./connection-item-evidence.js"
+import { jobMayPublish } from "./automation-lease.js"
 import { recordAutomationPosted } from "./entity-events.js"
 import { mainSpaceId } from "./main-space.js"
 import { messageQuote } from "./message-quote.js"
 import { chatHasActiveWork } from "./session-archive.js"
+import { decodeJson } from "./json.js"
 import { liftChat } from "./session-unread.js"
 import { ensureSpaceConversationInTransaction } from "./space-conversation.js"
 import { makeWorkCaptureSql } from "./work-capture.js"
@@ -189,6 +192,18 @@ export const makePostStore = ({
         Effect.gen(function* () {
           const found = yield* existing(deliveryId)
           if (found !== undefined) return found
+          if (
+            !(yield* jobMayPublish(sql, {
+              lease: input.lease,
+              automationId: input.automationId,
+              attemptId: input.attemptId
+            }))
+          )
+            return yield* new PostStoreError({
+              reason: "conflict",
+              message:
+                "The run's job is no longer current or its Automation is paused, so nothing was posted"
+            })
           const now = iso(yield* Clock.currentTimeMillis)
           const threads = yield* threadsOf(input.itemIds)
           const hit = (yield* threadHit(threads))[0]
@@ -263,12 +278,21 @@ export const makePostStore = ({
           json_object('at', ${at}, 'reason', ${reason}))
       WHERE delivery_id = ${deliveryId} AND status = 'pending'`
 
+  const inferenceOn = Effect.fn("PostStore.inferenceOn")(function* (spaceId: string) {
+    const row = (yield* sql<{ readonly inference_policy: string }>`
+      SELECT inference_policy FROM spaces WHERE space_id = ${spaceId}`)[0]
+    if (row === undefined) return false
+    const policy = yield* Effect.option(decodeJson(TaskInferencePolicySchema, row.inference_policy))
+    return Option.isSome(policy) && policy.value.enabled
+  })
+
   const createTask = Effect.fn("PostStore.createTask")(function* (
     payload: PostDeliveryPayload,
     spaceId: string
   ) {
     const task = payload.task
     if (task === undefined) return
+    if (!(yield* inferenceOn(spaceId))) return
     if (yield* threadTaken(sql, { itemIds: payload.itemIds, exceptProposal: undefined })) return
     const scope = { kind: "space", spaceId } as const
     const parts = postTaskParts(payload, task)

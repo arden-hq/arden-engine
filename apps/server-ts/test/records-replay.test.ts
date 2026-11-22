@@ -64,7 +64,7 @@ const writerOf = (originKind: string | null, automationId: string | null): Write
     case "chat_summaries":
     case "home_letter":
     case "managed_history_collection":
-    case "urgent_events":
+    case "events":
       return "other system"
     case undefined:
       return "user automation"

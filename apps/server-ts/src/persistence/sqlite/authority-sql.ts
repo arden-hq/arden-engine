@@ -1,6 +1,5 @@
 import { Statement, type SqlClient } from "effect/unstable/sql"
 import type { Actor } from "../../execution/authority.js"
-import { OWNER_FACING_HANDLERS } from "../automations/model.js"
 
 const PERSON = "person" satisfies Actor["kind"]
 const AGENT = "agent" satisfies Actor["kind"]
@@ -38,15 +37,3 @@ export const userAutomationSql = (alias?: string): Statement.Fragment =>
   Statement.fragment([
     Statement.literal(`${alias === undefined ? "" : `${alias}.`}purpose = '${USER_AUTOMATION}'`)
   ])
-
-/** An Automation whose runs speak to the owner: the owner's own, or a system one that tells them
- *  something (`OWNER_FACING_HANDLERS`). These pause when they give up and are tried again. */
-export const ownerFacingAutomationSql = (alias?: string): Statement.Fragment => {
-  const column = alias === undefined ? "" : `${alias}.`
-  const handlers = OWNER_FACING_HANDLERS.map((handler) => `'${handler}'`).join(", ")
-  return Statement.fragment([
-    Statement.literal(
-      `(${column}purpose = '${USER_AUTOMATION}' OR ${column}handler IN (${handlers}))`
-    )
-  ])
-}

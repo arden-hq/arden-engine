@@ -47,7 +47,8 @@ import { iso } from "../../runtime/clock.js"
 import {
   lockedSystemChanges,
   lockedSystemMessage,
-  systemSettable
+  systemSettable,
+  systemTakesTrigger
 } from "../automations/system-settings.js"
 import {
   prepareInstructionRevision,
@@ -354,6 +355,16 @@ export const makeAutomationCatalogEdits = ({
           )
           if (spec !== null && !spec.triggers.some(hasRunOnlyIf))
             yield* refuseSystemRunOnlyIf(schedule.triggers, validAutomationId)
+          if (
+            spec !== null &&
+            !schedule.triggers.every((trigger) => systemTakesTrigger(spec, trigger))
+          )
+            return yield* storeError(
+              "update",
+              "invalid",
+              "This system Automation takes only triggers for new mail, GitHub items and calendar changes",
+              validAutomationId
+            )
           const triggersJson =
             valid.triggers === undefined
               ? row.triggers

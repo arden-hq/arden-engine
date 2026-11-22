@@ -14,7 +14,7 @@ const message = (id: string, isMeta: boolean) => ({
     : { role: ROLE.user })
 })
 
-const startChat = (
+export const startChat = (
   sessionId: string,
   id: string,
   options: {

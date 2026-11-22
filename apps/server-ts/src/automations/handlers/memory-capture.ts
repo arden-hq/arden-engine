@@ -71,7 +71,8 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     contextMode: "fresh",
     chatSession: true,
     manualRun: true,
-    runsModel: true,
+    promptEdit: "owner",
+    triggerScope: "any",
     rearmOnSeed: true
   },
   item: handlerItemText("memory", (data) => data.batch.markdown),

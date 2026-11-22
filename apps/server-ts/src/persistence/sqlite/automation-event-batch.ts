@@ -4,6 +4,7 @@ import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automa
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
+  eventItemIds,
   mergeEventBatches,
   RUNS_ALONE,
   runsAlone,
@@ -526,7 +527,7 @@ export const makeEventScreens = (
           yield* sql`UPDATE automation_event_queue SET context = ${encoded} WHERE id = ${fenced.parsed.queueId}`
           return allSkipped
             ? ({ kind: "skip", skip: first.skip } as const)
-            : ({ kind: "run", triggerContext } as const)
+            : ({ kind: "run", triggerContext, itemIds: eventItemIds(screened) } as const)
         })
       )
       .pipe(

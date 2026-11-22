@@ -171,9 +171,9 @@ export const PROMPTS = Object.freeze({
     slots: [],
     values: {}
   }),
-  urgentEvents: fixedPrompt({
-    id: "memory.urgent-events",
-    sourcePath: "memory/urgent-events.md",
+  events: fixedPrompt({
+    id: "memory.events",
+    sourcePath: "memory/events.md",
     slots: [],
     values: {}
   }),

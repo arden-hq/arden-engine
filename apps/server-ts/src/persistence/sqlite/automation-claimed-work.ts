@@ -8,6 +8,8 @@ import type {
 } from "../automations/store.js"
 import { isUserAutomationPurpose, type JobClassification } from "../job-classification.js"
 import type { QueueContext } from "./automation-queue-context.js"
+import { eventBatchOf } from "./automation-listening.js"
+import { eventItemIds } from "../automations/event-batch.js"
 import {
   type StoreOperation,
   type WorkOwner,
@@ -99,8 +101,9 @@ export const jobHandler = (
         : { handler: id, handlerItem: context.handler_item }
     case "managed_history_collection":
     case "chat_summaries":
-    case "urgent_events":
       return { handler: id }
+    case "events":
+      return { handler: id, itemIds: eventItemIds(eventBatchOf(context)) }
   }
 }
 

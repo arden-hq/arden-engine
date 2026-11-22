@@ -54,7 +54,7 @@ const RUN_STATUS_READERS = {
   "persistence/sqlite/automation-home-input.ts": 1,
   "persistence/sqlite/automation-job-settlement.ts": 1,
   "persistence/sqlite/automation-jobs.ts": 5,
-  "persistence/sqlite/automation-lease.ts": 1,
+  "persistence/sqlite/automation-lease.ts": 2,
   "persistence/sqlite/automation-rows.ts": 1,
   "persistence/sqlite/automation-run-outcome.ts": 2,
   "persistence/sqlite/automation-run-requests.ts": 1,

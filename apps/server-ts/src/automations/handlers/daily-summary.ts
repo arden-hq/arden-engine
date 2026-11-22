@@ -465,7 +465,8 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
     contextMode: "fresh",
     chatSession: true,
     manualRun: true,
-    runsModel: true,
+    promptEdit: "owner",
+    triggerScope: "any",
     rearmOnSeed: false
   },
   item: handlerItemText("daily", (data) => data.markdown),

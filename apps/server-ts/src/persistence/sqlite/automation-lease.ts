@@ -64,3 +64,25 @@ export const assertAutomationLease = Effect.fn("AutomationLease.assert")(functio
       AND json_extract(queue.context, '$.automation_run_id') = attempt.id AND attempt.status = 'running'`
   if (live.length === 0) return yield* failure()
 })
+
+export const jobMayPublish = Effect.fn("AutomationLease.mayPublish")(function* (
+  sql: SqlClient.SqlClient,
+  options: {
+    readonly lease: JobLeaseRef
+    readonly automationId: string
+    readonly attemptId: number
+  }
+) {
+  const parsed = yield* Effect.option(Effect.try(() => parseLease(options.lease)))
+  if (parsed._tag === "None" || parsed.value.runId !== options.attemptId) return false
+  const live = yield* sql`SELECT 1 FROM automation_event_queue AS queue
+    JOIN automation_runs AS attempt ON attempt.id = ${options.attemptId}
+      AND attempt.task_id = queue.task_id
+    JOIN scheduled_tasks AS task ON task.task_id = queue.task_id AND task.enabled = 1
+    WHERE queue.id = ${parsed.value.queueId} AND queue.task_id = ${options.automationId}
+      AND queue.claimed_at IS NOT NULL
+      AND queue.lease_expires_at > ${iso(yield* Clock.currentTimeMillis)}
+      AND attempt.claim_count = ${parsed.value.claimAttempt} AND attempt.status = 'running'
+      AND json_extract(queue.context, '$.automation_run_id') = attempt.id`
+  return live.length > 0
+})
