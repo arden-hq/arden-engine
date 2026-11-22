@@ -57,6 +57,8 @@ export const makeHomeLetterRunner = (services: {
     const run = { chatRunId: runId, chatSessionId: sessionId }
     if (observed.status !== "completed")
       return jobResult.failed(observed.error, observed.result, run)
+    if (observed.blocked !== null)
+      return jobResult.blocked(observed.blocked, observed.result, run)
     const body = yield* handlerToolResult(services.queue, {
       runId,
       tool: HOME_LETTER_TOOL,

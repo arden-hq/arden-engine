@@ -13,7 +13,10 @@ import type { AwaitAutomationRun } from "../src/automations/runner.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { HomeLetterInputs } from "../src/persistence/automations/home-letter-inputs.js"
 import { HOME_LETTER_AUTOMATION_ID } from "../src/persistence/automations/model.js"
-import { AutomationQueue } from "../src/persistence/automations/queue.js"
+import {
+  AutomationQueue,
+  type AutomationBlockedReport
+} from "../src/persistence/automations/queue.js"
 import type {
   AutomationJobResult,
   ClaimedAutomationJobLease
@@ -35,7 +38,11 @@ interface FakeCall {
   readonly isError?: boolean
 }
 
-const fakeModel = (calls: ReadonlyArray<FakeCall>, reply: string) =>
+const fakeModel = (
+  calls: ReadonlyArray<FakeCall>,
+  reply: string,
+  blocked: AutomationBlockedReport | null = null
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const chat = yield* ChatWriteStore
@@ -78,7 +85,7 @@ const fakeModel = (calls: ReadonlyArray<FakeCall>, reply: string) =>
         result: reply,
         error: null,
         errorCode: null,
-        blocked: null,
+        blocked,
         wrote: false
       })
     return { chat: { startAutomation }, awaitRun, runs }
@@ -153,10 +160,11 @@ const setup = Effect.gen(function* () {
   const runEvents = (
     lease: ClaimedAutomationJobLease,
     calls: ReadonlyArray<FakeCall>,
-    reply = "Done."
+    reply = "Done.",
+    blocked: AutomationBlockedReport | null = null
   ) =>
     Effect.gen(function* () {
-      const model = yield* fakeModel(calls, reply)
+      const model = yield* fakeModel(calls, reply, blocked)
       const result = yield* makeEventsRunner({ ...model, queue, posts })(renderAutomationJob(lease))
       return { result, runs: model.runs }
     })
@@ -317,39 +325,55 @@ it("Events gets the item ids of the screened batch only, so a skipped mail is ne
   )
 })
 
+const runHomeLetter = (calls: ReadonlyArray<FakeCall>, blocked: AutomationBlockedReport | null) =>
+  Effect.gen(function* () {
+    yield* (yield* AutomationCatalog).seedSystemAutomations([homeLetterHandler.spec])
+    const queue = yield* AutomationQueue
+    const home = yield* HomeStore
+    yield* queue.requestRun(HOME_LETTER_AUTOMATION_ID)
+    const [lease] = yield* claimAll("letter")
+    if (lease === undefined) return yield* Effect.die("the Home letter was not claimed")
+    const published: Array<unknown> = []
+    const model = yield* fakeModel(calls, "Letter written.", blocked)
+    const result = yield* makeHomeLetterRunner({
+      ...model,
+      queue,
+      homeLetterInputs: yield* HomeLetterInputs,
+      home: {
+        ...home,
+        checkHomeLetter: () => Effect.succeed("ready"),
+        publishHomeLetter: (input) =>
+          Effect.sync(() => {
+            published.push(input.body)
+            return true
+          })
+      }
+    })(renderAutomationJob(lease))
+    return { result, published }
+  })
+
 it("the Home letter still publishes through the shared tool call reader", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      yield* (yield* AutomationCatalog).seedSystemAutomations([homeLetterHandler.spec])
-      const queue = yield* AutomationQueue
-      const home = yield* HomeStore
-      yield* queue.requestRun(HOME_LETTER_AUTOMATION_ID)
-      const [lease] = yield* claimAll("letter")
-      if (lease === undefined) return yield* Effect.die("the Home letter was not claimed")
-      const body = { paragraphs: [[{ text: "Two Tasks wait for you.", source_id: null }]] }
-      const published: Array<unknown> = []
-      const model = yield* fakeModel(
-        [{ tool: "publish_home_letter", args: { markdown: "" }, content: JSON.stringify(body) }],
-        "Letter written."
-      )
-      const result = yield* makeHomeLetterRunner({
-        ...model,
-        queue,
-        homeLetterInputs: yield* HomeLetterInputs,
-        home: {
-          ...home,
-          checkHomeLetter: () => Effect.succeed("ready"),
-          publishHomeLetter: (input) =>
-            Effect.sync(() => {
-              published.push(input.body)
-              return true
-            })
-        }
-      })(renderAutomationJob(lease))
-      expect(result).toMatchObject({ status: "ended", outcome: "finished" })
-      expect(published).toEqual([body])
-    })
+  const body = { paragraphs: [[{ text: "Two Tasks wait for you.", source_id: null }]] }
+  const { result, published } = await withTempDatabase(
+    runHomeLetter(
+      [{ tool: "publish_home_letter", args: { markdown: "" }, content: JSON.stringify(body) }],
+      null
+    )
   )
+  expect(result).toMatchObject({ status: "ended", outcome: "finished" })
+  expect(published).toEqual([body])
+})
+
+it("a Home letter run that reports it is blocked ends blocked with its reason", async () => {
+  const { result, published } = await withTempDatabase(
+    runHomeLetter([], { kind: "needs_input", reason: "Which Space is the main one?" })
+  )
+  expect(result).toMatchObject({
+    status: "ended",
+    outcome: "needs_you",
+    error: "Which Space is the main one?"
+  })
+  expect(published).toEqual([])
 })
 
 it("Events keeps listening after runs that fail one after another", async () => {
@@ -413,6 +437,27 @@ it("a task change that wakes Events gives no item id, so a post cites only the m
         yield* sql`SELECT json_extract(source, '$.item_id') AS item_id FROM space_task_sources
           WHERE json_extract(source, '$.kind') = 'connection_item'`
       ).toEqual([{ item_id: "mail-1" }])
+    })
+  )
+})
+
+it("a run that reports it is blocked ends blocked with its reason, and posts nothing", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, arrive, runEvents } = yield* setup
+      const { result } = yield* runEvents(
+        yield* arrive("mail-1"),
+        [{ tool: "report", args: { event: "blocked" }, content: "Recorded." }],
+        "I could not read the mail.",
+        { kind: "dependency", reason: "The mail could not be read." }
+      )
+      expect(result).toMatchObject({
+        status: "ended",
+        outcome: "blocked",
+        result: "I could not read the mail.",
+        error: "The mail could not be read."
+      })
+      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
     })
   )
 })

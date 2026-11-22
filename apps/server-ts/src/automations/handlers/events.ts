@@ -41,6 +41,8 @@ export const makeEventsRunner = (services: {
     const run = { chatRunId: observed.runId, chatSessionId: sessionId }
     if (observed.status !== "completed")
       return jobResult.failed(observed.error, observed.result, run)
+    if (observed.blocked !== null)
+      return jobResult.blocked(observed.blocked, observed.result, run)
     const post = yield* handlerToolResult(services.queue, {
       runId: observed.runId,
       tool: POST_MESSAGE_TOOL,
