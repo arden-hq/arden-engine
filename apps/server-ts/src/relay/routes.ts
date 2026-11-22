@@ -90,11 +90,6 @@ const CommandArgs = {
     run_id: Id,
     tool_id: Id,
     approve: Schema.Boolean,
-    /**
-     * When the card the phone answers was asked (its ask's or its push's `asked_at`). Arden settles
-     * nothing without it; it stays optional here so an older iPhone app is told to update rather
-     * than that its command could not be read.
-     */
     asked_at: Schema.optionalKey(Id)
   }),
   stop: Schema.Struct({ session_id: Id }),

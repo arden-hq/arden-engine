@@ -33,7 +33,7 @@ describe("relay push", () => {
       push: undefined
     }
     const notice = {
-      key: "ask:approval:run-1:call-1",
+      key: "ask:approval:run-1:call-1:2026-11-21T09:00:00.000Z",
       kind: "approval",
       title: "Taxes",
       body: "Edit notes.md",
@@ -168,8 +168,23 @@ describe("relay push", () => {
     const world = makeWorld({ seeded: true })
     world.asks = [approval("run-1", "call-1"), approval("run-2", "call-1")]
     expect(await world.reconcile()).toEqual([
-      "ask:approval:run-1:call-1",
-      "ask:approval:run-2:call-1"
+      "ask:approval:run-1:call-1:2026-10-12T09:58:00.000Z",
+      "ask:approval:run-2:call-1:2026-10-12T09:58:00.000Z"
+    ])
+  })
+
+  it("a call asked again pushes again with its own stamp, and each asking pushes once", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.onSend = (pushed) => sent.push(pushed)
+    world.asks = [approval("run-1", "call-1")]
+    await world.reconcile()
+    world.asks = [approval("run-1", "call-1", "2026-10-12T09:59:30.000Z")]
+    await world.reconcile()
+    await world.reconcile()
+    expect(sent.map((pushed) => [pushed.collapseId, pushed.askId, pushed.askedAt])).toEqual([
+      ["call-1", "call-1", "2026-10-12T09:58:00.000Z"],
+      ["call-1", "call-1", "2026-10-12T09:59:30.000Z"]
     ])
   })
 
@@ -299,14 +314,14 @@ const question = (id: string) => ({
   prompt: id
 })
 
-const approval = (runId: string, toolId: string) => ({
+const approval = (runId: string, toolId: string, askedAt = "2026-10-12T09:58:00.000Z") => ({
   kind: "approval",
   tool_id: toolId,
   run_id: runId,
   session_id: `chat-${runId}`,
   place: "Lab",
   title: "Edit notes.md",
-  asked_at: "2026-10-12T09:58:00.000Z"
+  asked_at: askedAt
 })
 
 const notice = (id: string, fields: Partial<Notice>): Notice => ({

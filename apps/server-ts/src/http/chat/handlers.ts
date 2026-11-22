@@ -40,7 +40,7 @@ import { ToolHistoryQueries } from "../../persistence/tools/history-queries.js"
 import { grantedOnlyInTheApp } from "@arden-hq/protocol/tools"
 import { ArdenApi } from "../api.js"
 import { ServerConfig } from "../../config/service.js"
-import { LocalCaller, NativeConsent } from "../middleware/local-only.js"
+import { CallerIsTheApp, LocalCaller } from "../middleware/local-only.js"
 import { isRequestId } from "../middleware/request-id.js"
 import {
   CHAT_OPEN_TIMING_REQUEST_HEADER,
@@ -155,7 +155,7 @@ export const ChatHandlers = HttpApiBuilder.group(
       readonly tool_id: string
       readonly approved?: boolean | undefined
     }) {
-      if (payload.approved !== true || (yield* NativeConsent)) return
+      if (payload.approved !== true || (yield* CallerIsTheApp)) return
       const identity = { runId: payload.run_id, toolCallId: payload.tool_id }
       const toolName = yield* toolHistory.calledTool(identity)
       if (toolName === undefined)

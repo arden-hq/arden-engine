@@ -37,14 +37,8 @@ export const LocalCaller = Context.Reference<"desktop" | "cli" | "phone" | "othe
   { defaultValue: () => "other" }
 )
 
-/**
- * Whether this request comes from the Arden app itself, which alone grants what needs its own
- * consent (Touch ID, a typed secret). A caller's routes are `LocalCaller`'s; this is apart from them:
- * a configured server's owner reaches every route but has no app. Without local access nothing tells
- * callers apart, and every request counts as the app's.
- */
-export const NativeConsent = Context.Reference<boolean>("@arden-hq/server/http/NativeConsent", {
-  defaultValue: () => true
+export const CallerIsTheApp = Context.Reference<boolean>("@arden-hq/server/http/CallerIsTheApp", {
+  defaultValue: () => false
 })
 
 const matchesLocalCapability = (expected: string, provided: string | undefined): boolean => {
@@ -95,10 +89,7 @@ export const makeLocalOnlyMiddleware = (access?: LocalAccess) => {
     else if (phone) caller = "phone"
     const app = httpApp.pipe(
       Effect.provideService(LocalCaller, caller),
-      Effect.provideService(
-        NativeConsent,
-        access === undefined || (desktop && access.host === "app")
-      )
+      Effect.provideService(CallerIsTheApp, desktop && access.host === "app")
     )
     const origin = request.headers["origin"]
     if (origin === undefined) return authorized ? yield* app : yield* forbidden

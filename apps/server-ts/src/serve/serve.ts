@@ -109,8 +109,6 @@ export const startConfigured = async <Server extends StartedServer>(
             toolSearch: settings.toolSearch
           })
         }
-  // The access file carries the owner secret: every route, approvals included,
-  // except a grant only the Arden app gives (there is no app here).
   const owner = randomBytes(32).toString("base64url")
   const commandLine = randomBytes(32).toString("base64url")
   const server = await start({
