@@ -44,12 +44,16 @@ export interface SpaceMarkLook extends JsonRecord {
   readonly focus: number
 }
 
+export const SPACE_KINDS = ["ordinary", "main"] as const
+export type SpaceKind = (typeof SPACE_KINDS)[number]
+
 /** Who wrote a Space's standing instructions. Manual text is never overwritten. */
 export type SpaceInstructionsSource = "manual" | "generated"
 
 export interface Space extends JsonRecord {
   readonly inference: TaskInferencePolicy
   readonly space_id: string
+  readonly kind: SpaceKind
   readonly name: string
   readonly instructions: string | null
   readonly instructions_source: SpaceInstructionsSource | null
@@ -103,6 +107,7 @@ export interface SpaceUnseenEntry extends SpaceUnseen {
 export interface SpaceSummary extends JsonRecord {
   readonly updated_at: string
   readonly key: string
+  readonly kind: SpaceKind
   readonly title: string
   readonly page_path: string | null
   readonly live: boolean

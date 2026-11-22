@@ -48,7 +48,7 @@ import type { OriginalRequest } from "../persistence/todos/items.js"
 const OptionalSpaceIdSchema = Schema.optionalKey(
   Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
     description:
-      "Exact space_id from space_list. Omit to use this chat's Space, or this chat when it is in no Space. An Automation's own chat names the Space."
+      "Exact space_id from space_list. Omit to use this chat's Space. An Automation's own chat names the Space."
   })
 )
 
@@ -631,7 +631,7 @@ const makeTaskTools = (services: TaskToolServices): ReadonlyArray<ServerTool> =>
     name: "task_start",
     summary: "Starts a Task.",
     discovery: { group: "tasks" },
-    description: `Start one Task: on this chat's Space, in this chat when it is in no Space, or on a named Space. A key that names a live Task is refused (change that Task instead); a key that names an archived Task revives it. Only the user's own chats and their Automations start Tasks. ${TASK_SPACE_RULE}`,
+    description: `Start one Task: on this chat's Space or on a named Space. A key that names a live Task is refused (change that Task instead); a key that names an archived Task revives it. Only the user's own chats and their Automations start Tasks. ${TASK_SPACE_RULE}`,
     parameters: Schema.toStandardSchemaV1(StartParametersSchema),
     metadata: {
       effect: "arden_db",

@@ -2,6 +2,7 @@ import { Option, Schema } from "effect"
 import { PROMPTS } from "../prompts/catalog.js"
 import { cutText } from "@arden-hq/std/text"
 import { renderPromptSection } from "../prompts/format.js"
+import type { SpaceKind } from "@arden-hq/protocol/spaces"
 
 export interface SpecialChat {
   readonly kind: "capture" | "onboarding"
@@ -27,23 +28,31 @@ export const readSpecialChat = (
 
 const CAPTURE_SPACE_TEXT_MAX = 300
 
-export const renderCaptureSpaces = (
-  spaces: ReadonlyArray<{
+export const renderCaptureSpaces = ({
+  spaces,
+  chatInMain
+}: {
+  readonly spaces: ReadonlyArray<{
     readonly space_id: string
+    readonly kind: SpaceKind
     readonly name: string
     readonly instructions: string | null
   }>
-): string =>
+  readonly chatInMain: boolean
+}): string =>
   renderPromptSection(
     "Spaces to file it under",
-    spaces
-      .map((space) => {
-        const purpose = (space.instructions ?? "").replace(/\s+/gu, " ").trim()
-        return `- ${space.name} (space_id ${space.space_id}): ${
-          purpose.length === 0
-            ? "no description; judge by its name"
-            : cutText(purpose, CAPTURE_SPACE_TEXT_MAX)
-        }`
-      })
-      .join("\n")
+    [
+      chatInMain ? "This chat is in the Main Space." : "This chat is already on a Space.",
+      ...spaces
+        .filter((space) => space.kind !== "main")
+        .map((space) => {
+          const purpose = (space.instructions ?? "").replace(/\s+/gu, " ").trim()
+          return `- ${space.name} (space_id ${space.space_id}): ${
+            purpose.length === 0
+              ? "no description; judge by its name"
+              : cutText(purpose, CAPTURE_SPACE_TEXT_MAX)
+          }`
+        })
+    ].join("\n")
   )

@@ -187,7 +187,7 @@ export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
       ? (yield* sql<{ readonly policy: string; readonly context: string; readonly ended: number }>`
           SELECT json_extract(metadata_json, '$.run_policy') AS policy,
             json_extract(metadata_json, '$.run_context') AS context,
-            (${runPolicyRevoked(sql, sql`metadata_json`, false)}
+            (${runPolicyRevoked(sql, sql`metadata_json`, sql`session_id`, false)}
               OR ${executionBudgetExpired(sql, sql`metadata_json`)}) AS ended
           FROM chat_runs WHERE run_id = ${row.parent_run_id} AND session_id = ${sessionId}`)[0]
       : undefined

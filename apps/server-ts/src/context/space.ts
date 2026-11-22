@@ -19,6 +19,8 @@ const SPACE_THREADS = renderPromptSection(
   PROMPTS.spaceThreads
 )
 
+const SPACE_CONTEXT_CHATS = 50
+
 interface SpaceConversationContextSnapshot {
   readonly authority: string
   readonly view: SpaceView
@@ -31,7 +33,7 @@ interface SpaceConversationContextInput {
   readonly spaceId: string | undefined
   readonly sessionId: string
   readonly spaces: SpaceStore["Service"]
-  readonly summaries: Pick<SummaryStore["Service"], "spaceChats">
+  readonly summaries: Pick<SummaryStore["Service"], "chats">
   readonly memory: MemoryTurn | undefined
   readonly work: Pick<WorkStore["Service"], "questions">
 }
@@ -48,15 +50,15 @@ export const spaceConversationContextSnapshot = Effect.fn("Context.spaceConversa
     if (spaceId === undefined) return undefined
     const space = yield* spaces.get(spaceId)
     if (space === null) return undefined
-    const detail = yield* spaces.detail(spaceId)
+    const detail = yield* spaces.detail(spaceId, { recentChats: SPACE_CONTEXT_CHATS })
     const conversation = detail?.sessions.find(
       (session) => session.session_id === detail.conversation_session_id
     )
     const chats = (detail?.sessions ?? []).filter(
       (session) => session.session_id !== detail?.conversation_session_id
     )
-    const summarized = new Map(
-      (yield* summaries.spaceChats(spaceId)).map((summary) => [summary.sessionId, summary])
+    const summarized = yield* summaries.chats(
+      (detail?.sessions ?? []).map((session) => session.session_id)
     )
     const questions = yield* work.questions({ space_id: spaceId, state: "actionable" })
     const items = new Map((detail?.work.work_items ?? []).map((task) => [task.item_id, task]))

@@ -81,3 +81,8 @@ export const meetCapabilities = (
   right: RunPolicy["capabilities"]
 ): RunPolicy["capabilities"] =>
   right.reduce((held, capability) => narrowCapabilities(capability, held), left)
+
+export const runAuthorityChat = (
+  policy: Pick<RunPolicy, "authority_session_id">,
+  sessionId: string
+): string => policy.authority_session_id ?? sessionId

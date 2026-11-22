@@ -77,24 +77,9 @@ export const makeSummaryStore = ({ writer }: Pick<PersistenceDeps, "writer">) =>
   const chat = (sessionId: string) =>
     chats([sessionId]).pipe(Effect.map((found) => found.get(sessionId) ?? null))
 
-  const spaceChats = Effect.fn("SqliteSummaryStore.spaceChats")(
-    function* (spaceId: string) {
-      const rows = yield* sql<ChatSummaryRow>`
-        SELECT c.session_id, s.public_ref, s.name, s.space_id, s.last_activity, c.title, c.summary,
-               c.topics_json, c.through_sequence, c.run_id, c.updated_at
-        FROM chat_summaries AS c JOIN sessions AS s USING (session_id)
-        WHERE s.space_id = ${spaceId} AND s.archived_at IS NULL
-        ORDER BY s.last_activity DESC
-      `
-      return yield* Effect.forEach(rows, chatSummary)
-    },
-    Effect.mapError(failure("space_chats", "Could not read the Space's chat summaries"))
-  )
-
   return SummaryStore.of({
     setChat,
     chat,
-    chats,
-    spaceChats
+    chats
   })
 }

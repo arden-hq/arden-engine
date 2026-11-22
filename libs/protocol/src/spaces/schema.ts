@@ -3,7 +3,7 @@ import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../co
 import { APPROVAL_MODES } from "../permissions/modes.js"
 import { ChatRunningWorkSchema } from "../sessions/schema.js"
 import { SpaceSnapshotSchema, SpaceTaskStatusSchema } from "./work/schema.js"
-import { SPACE_MARK_COLOURS, SPACE_MARK_MEDIA } from "./contracts.js"
+import { SPACE_KINDS, SPACE_MARK_COLOURS, SPACE_MARK_MEDIA } from "./contracts.js"
 import type {
   SpaceConversationResponse,
   Space,
@@ -62,9 +62,12 @@ export const StoredSpaceMarkLookSchema = Schema.Union([SpaceMarkLookSchema, lega
 
 export const SpaceInstructionsSourceSchema = Schema.Literals(["manual", "generated"] as const)
 
+export const SpaceKindSchema = Schema.Literals(SPACE_KINDS)
+
 export const SpaceSchema: Schema.Codec<Space> = withExtras({
   inference: TaskInferencePolicySchema,
   space_id: Schema.NonEmptyString,
+  kind: SpaceKindSchema,
   name: Schema.String,
   instructions: Schema.NullOr(Schema.String),
   instructions_source: Schema.NullOr(SpaceInstructionsSourceSchema),
@@ -135,6 +138,7 @@ export const SpaceUnseenEntrySchema = withExtras({
 export const SpaceSummarySchema = withExtras({
   updated_at: IsoDateTimeStringSchema,
   key: Schema.NonEmptyString,
+  kind: SpaceKindSchema,
   title: Schema.String,
   page_path: Schema.NullOr(Schema.String),
   live: Schema.Boolean,

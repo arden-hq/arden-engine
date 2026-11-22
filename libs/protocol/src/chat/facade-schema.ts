@@ -71,7 +71,7 @@ export const RunsStatusSchema = withExtras({
   })
 )
 
-const ReplyContextInputSchema = Schema.Struct({
+export const ChatReplyContextSchema = Schema.Struct({
   messageId: chatIdentifier,
   role: Schema.Literals(["user", "assistant"] as const),
   content: chatMessage
@@ -95,8 +95,8 @@ export const ChatMessageInputSchema = Schema.Struct({
   ),
   replyTo: Schema.optionalKey(
     Schema.Union([
-      ReplyContextInputSchema,
-      Schema.NonEmptyArray(ReplyContextInputSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
+      ChatReplyContextSchema,
+      Schema.NonEmptyArray(ChatReplyContextSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
     ])
   ),
   sentFrom: Schema.optionalKey(ChatSentFromSchema),

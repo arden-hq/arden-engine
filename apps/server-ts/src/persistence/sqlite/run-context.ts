@@ -48,9 +48,10 @@ const taskBindingSettling = (
 export const runAuthorityState = (
   sql: SqlClient.SqlClient,
   metadata: Statement.Fragment,
-  runId: Statement.Fragment
+  runId: Statement.Fragment,
+  sessionId: Statement.Fragment
 ) => sql`(CASE
-  WHEN ${executionBudgetExpired(sql, metadata)} OR ${runPolicyRevoked(sql, metadata)} THEN 'revoked'
+  WHEN ${executionBudgetExpired(sql, metadata)} OR ${runPolicyRevoked(sql, metadata, sessionId)} THEN 'revoked'
   WHEN NOT ${taskBindingRevoked(sql, metadata)} THEN 'active'
   WHEN ${taskBindingSettling(sql, metadata, runId)} THEN 'settling'
   ELSE 'revoked'
@@ -65,7 +66,7 @@ export const readRunAuthority = Effect.fn("RunContext.readRunAuthority")(functio
     readonly item_id: string | null
     readonly budget_missing: number
   }>`
-    SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`)} AS authority,
+    SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`, sql`session_id`)} AS authority,
       json_extract(metadata_json, '$.run_context.task.item_id') AS item_id,
       ${executionBudgetMissing(sql, sql`metadata_json`)} AS budget_missing
     FROM chat_runs WHERE run_id = ${runId}
@@ -106,7 +107,7 @@ export const assertRunModelAuthority = Effect.fn(function* (
   runId: string
 ) {
   const rows = yield* sql<{ readonly authority: RunAuthorityState }>`
-    SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`)} AS authority
+    SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`, sql`session_id`)} AS authority
     FROM chat_runs WHERE run_id = ${runId}
   `.pipe(
     Effect.mapError(

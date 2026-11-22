@@ -131,7 +131,7 @@ export const makeSpaceReads = (
     return yield* Effect.gen(function* () {
       const spaces = yield* reader<OverviewSpaceRow>`
         SELECT d.space_id, d.name, d.instructions, d.instructions_source, d.page_path, d.page_id,
-               d.inference_policy, d.mark, d.created_at, d.updated_at, d.archived_at,
+               d.inference_policy, d.mark, d.kind, d.created_at, d.updated_at, d.archived_at,
                ${openRunSince(reader, reader`'space:' || d.space_id`)} AS running_since, d.pinned_position,
                (SELECT m.search_text FROM session_messages AS m
                 WHERE m.session_id = latest.session_id AND m.role = ${ROLE.assistant}
@@ -151,9 +151,7 @@ export const makeSpaceReads = (
           ORDER BY s.last_activity DESC, s.session_id DESC LIMIT 1
         )
         WHERE d.archived_at IS NULL
-        -- The Spaces the owner placed first, in their order; then the rest by
-        -- their latest chat, a Space with no chat yet by when it was made.
-        ORDER BY d.pinned_position IS NULL, d.pinned_position,
+        ORDER BY d.kind <> 'main', d.pinned_position IS NULL, d.pinned_position,
                  COALESCE(
                    (SELECT MAX(s.last_activity) FROM sessions AS s
                      WHERE s.space_id = d.space_id AND s.archived_at IS NULL
@@ -273,6 +271,7 @@ export const makeSpaceReads = (
           const space = yield* decodeRow(row, "overview")
           return {
             key: space.space_id,
+            kind: space.kind,
             title: space.name,
             page_path: space.page_path,
             live: row.running_since !== null,
@@ -330,7 +329,8 @@ export const makeSpaceReads = (
   })
 
   const detail = Effect.fn("SqliteSpaceStore.detail")(function* (
-    spaceId: string
+    spaceId: string,
+    options?: { readonly recentChats?: number }
   ): Effect.fn.Return<SpaceDetail | null, SpaceStoreError> {
     const validSpaceId = yield* Schema.decodeUnknownEffect(Schema.NonEmptyString)(spaceId).pipe(
       Effect.mapError((cause) =>
@@ -342,7 +342,7 @@ export const makeSpaceReads = (
     return yield* Effect.gen(function* () {
       const spaces = yield* reader<SpaceRow>`
         SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-               inference_policy, mark, created_at, updated_at, archived_at
+               inference_policy, mark, kind, created_at, updated_at, archived_at
         FROM spaces
         WHERE space_id = ${validSpaceId} AND archived_at IS NULL
         LIMIT 1
@@ -358,12 +358,13 @@ export const makeSpaceReads = (
       const conversation = yield* reader<{ readonly session_id: string }>`
         SELECT session_id FROM space_conversations WHERE space_id = ${validSpaceId}
       `
-      const sessionRows = yield* reader<SessionDetailRow>`
-        SELECT s.session_id, s.public_ref, s.name, s.last_activity,
+      const sessionColumns = reader`s.session_id, s.public_ref, s.name, s.last_activity,
           (SELECT m.search_text FROM session_messages AS m
             WHERE m.session_id = s.session_id AND m.role = ${ROLE.assistant}
             ORDER BY m.seq DESC LIMIT 1) AS last_text,
-          (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary
+          (SELECT summary FROM chat_summaries WHERE session_id = s.session_id) AS summary`
+      const recentRows = yield* reader<SessionDetailRow>`
+        SELECT ${sessionColumns}
         FROM sessions AS s
         WHERE s.space_id = ${validSpaceId}
           AND s.archived_at IS NULL
@@ -371,10 +372,33 @@ export const makeSpaceReads = (
           AND s.parent_session_id IS NULL
           AND s.parent_message_id IS NULL
         ORDER BY s.last_activity DESC, s.session_id DESC
+        LIMIT ${options?.recentChats ?? -1}
       `.pipe(
         Effect.mapError((cause) =>
           storeError("detail", "storage", "Could not load Space sessions", validSpaceId, cause)
         )
+      )
+      const conversationId = conversation[0]?.session_id
+      const conversationRows =
+        conversationId === undefined || recentRows.some((row) => row.session_id === conversationId)
+          ? []
+          : yield* reader<SessionDetailRow>`
+              SELECT ${sessionColumns} FROM sessions AS s
+              WHERE s.session_id = ${conversationId} AND s.archived_at IS NULL`.pipe(
+              Effect.mapError((cause) =>
+                storeError(
+                  "detail",
+                  "storage",
+                  "Could not load Space sessions",
+                  validSpaceId,
+                  cause
+                )
+              )
+            )
+      const sessionRows = [...recentRows, ...conversationRows].toSorted(
+        (left, right) =>
+          right.last_activity.localeCompare(left.last_activity) ||
+          right.session_id.localeCompare(left.session_id)
       )
       const sessions = sessionRows.map((row) => ({
         session_id: row.session_id,
@@ -605,10 +629,10 @@ export const makeSpaceLists = (
   const list = Effect.fn("SqliteSpaceStore.list")(function* () {
     const rows = yield* sql<SpaceRow>`
       SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-             inference_policy, mark, created_at, updated_at, archived_at
+             inference_policy, mark, kind, created_at, updated_at, archived_at
       FROM spaces
       WHERE archived_at IS NULL
-      ORDER BY updated_at DESC, created_at DESC, space_id DESC
+      ORDER BY kind <> 'main', updated_at DESC, created_at DESC, space_id DESC
     `.pipe(
       Effect.mapError((cause) =>
         storeError("list", "storage", "Could not list Spaces", undefined, cause)
@@ -620,7 +644,7 @@ export const makeSpaceLists = (
   const listArchived = Effect.fn("SqliteSpaceStore.listArchived")(function* () {
     const rows = yield* sql<SpaceRow>`
       SELECT space_id, name, instructions, instructions_source, page_path, page_id,
-             inference_policy, mark, created_at, updated_at, archived_at
+             inference_policy, mark, kind, created_at, updated_at, archived_at
       FROM spaces
       WHERE archived_at IS NOT NULL
       ORDER BY archived_at DESC, created_at DESC, space_id DESC

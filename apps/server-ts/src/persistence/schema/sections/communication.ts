@@ -1,4 +1,5 @@
 import type { OperationalSchemaSection } from "../section.js"
+import { ENTITY_EVENTS_RUN_INDEX, ENTITY_EVENTS_TABLE } from "../../migrations/0183_main_space.js"
 
 /** SQLite splices this column's text into the stored `automation_deliveries` DDL,
  *  so the schema and the communication conversion share one spelling. */
@@ -68,19 +69,7 @@ export const communicationSchemaSection = {
       decided INTEGER NOT NULL CHECK(decided IN (0, 1)),
       delivery_error TEXT
     )`,
-    `CREATE TABLE entity_events (
-      key TEXT PRIMARY KEY CHECK(length(key) BETWEEN 1 AND 256),
-      entity TEXT NOT NULL CHECK(entity IN ('task', 'automation')),
-      entity_id TEXT NOT NULL,
-      event TEXT NOT NULL CHECK(event IN ('done', 'paused', 'failed')),
-      run_id TEXT,
-      text TEXT NOT NULL,
-      place TEXT,
-      place_kind TEXT NOT NULL CHECK(place_kind IN ('own', 'chat', 'gone')),
-      occurred_at TEXT NOT NULL,
-      shown INTEGER NOT NULL CHECK(shown IN (0, 1)),
-      delivery_error TEXT
-    )`,
+    ENTITY_EVENTS_TABLE,
     `CREATE TABLE run_tells (
       run_id TEXT NOT NULL REFERENCES chat_runs(run_id) ON DELETE CASCADE,
       n INTEGER NOT NULL CHECK(n >= 1),
@@ -94,7 +83,7 @@ export const communicationSchemaSection = {
       PRIMARY KEY (run_id, n),
       UNIQUE (run_id, tool_call_id)
     )`,
-    `CREATE INDEX idx_entity_events_run ON entity_events(run_id) WHERE run_id IS NOT NULL`,
+    ENTITY_EVENTS_RUN_INDEX,
     `CREATE INDEX idx_run_endings_undecided ON run_endings(run_id) WHERE decided = 0`,
     `CREATE INDEX idx_automation_deliveries_answer
       ON automation_deliveries(destinations) WHERE json_extract(payload, '$.kind') = 'answer'`,

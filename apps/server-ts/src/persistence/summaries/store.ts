@@ -5,7 +5,7 @@ export class SummaryStoreError extends Schema.TaggedError<SummaryStoreError>()(
   "SummaryStoreError",
   {
     ...storeErrorFields({
-      operations: ["set_chat", "chat", "space_chats"],
+      operations: ["set_chat", "chat"],
       reasons: ["storage"]
     })
   }
@@ -40,8 +40,5 @@ export class SummaryStore extends Context.Service<
     readonly chats: (
       sessionIds: ReadonlyArray<string>
     ) => Effect.Effect<ReadonlyMap<string, ChatSummary>, SummaryStoreError>
-    readonly spaceChats: (
-      spaceId: string
-    ) => Effect.Effect<ReadonlyArray<ChatSummary>, SummaryStoreError>
   }
 >()("@arden-hq/server/persistence/summaries/SummaryStore") {}

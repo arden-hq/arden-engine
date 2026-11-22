@@ -209,7 +209,9 @@ const composePreparedTurnContext = Effect.fn("Context.composePreparedTurnContext
     captureSpaces:
       origin.source === "personal" && origin.special?.kind === "capture"
         ? services.spaces.list().pipe(
-            Effect.map(renderCaptureSpaces),
+            Effect.map((spaces) =>
+              renderCaptureSpaces({ spaces, chatInMain: origin.header?.spaceKind === "main" })
+            ),
             Effect.catchCause((cause) =>
               Effect.logWarning("Capture Space list failed", {
                 sessionId: input.sessionId,

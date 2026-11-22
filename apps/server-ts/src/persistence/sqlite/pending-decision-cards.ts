@@ -1,4 +1,4 @@
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlClient, Statement } from "effect/unstable/sql"
 import { runAsksVisiblePredicate } from "./question-events.js"
 import { runColumns, runDestinationSessionId } from "./run-destination.js"
 
@@ -11,20 +11,25 @@ const destination = (sql: SqlClient.SqlClient) =>
     COALESCE(json_extract(card_run.metadata_json, '$.run_context.belongs_to'),
       json_extract(card_run.metadata_json, '$.run_context.origin')) AS work_json`
 
-export const pendingDecisionCards = (sql: SqlClient.SqlClient) => sql`
+export const pendingDecisionCards = (
+  sql: SqlClient.SqlClient,
+  session: Statement.Fragment = sql`1 = 1`
+) => sql`
   SELECT source.run_id, source.session_id, source.tool_call_id, source.tool_name,
          source.action, source.scope, source.preview, source.diff, source.requested_at,
          source.kind, source.payload_json, source.expires_at, source.result_feedback,
          source.resolution_json, source.status, source.resolved_at, 'run' AS source,
          ${destination(sql)}
-  FROM tool_approvals AS source ${asking(sql)} WHERE source.status = 'pending'
+  FROM tool_approvals AS source ${asking(sql)}
+  WHERE source.status = 'pending' AND ${session}
   UNION ALL
   SELECT source.run_id, source.session_id, source.tool_call_id, source.tool_name,
          source.action, source.scope, source.preview, source.diff, source.requested_at,
          'tool_approval' AS kind, source.payload_json, NULL AS expires_at,
          NULL AS result_feedback, NULL AS resolution_json, source.status,
          source.resolved_at, 'deferred' AS source, ${destination(sql)}
-  FROM deferred_tool_calls AS source ${asking(sql)} WHERE source.status = 'pending'
+  FROM deferred_tool_calls AS source ${asking(sql)}
+  WHERE source.status = 'pending' AND ${session}
 `
 
 export const decisionRoutesSql = (sql: SqlClient.SqlClient) => sql`

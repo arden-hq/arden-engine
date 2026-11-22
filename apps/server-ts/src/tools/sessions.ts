@@ -31,7 +31,13 @@ import { passage, type SourcePassage } from "./source-passage.js"
 import { SummaryStore, type ChatSummary } from "../persistence/summaries/store.js"
 import { chatSummaryText } from "./chat-summary.js"
 import { unknownSession } from "./session-visibility.js"
-import { BrowseScopeSchema, spaceLabel, permittedBrowseScope } from "./session-browse-scope.js"
+import {
+  BrowseScopeSchema,
+  seesEveryChat,
+  spaceLabel,
+  permittedBrowseScope
+} from "./session-browse-scope.js"
+import type { ServerRunContext } from "./run-context.js"
 import { eventRowText } from "../persistence/transcript/chat-events.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
@@ -178,7 +184,7 @@ const CreateParametersSchema = Schema.Struct({
 const MoveParametersSchema = Schema.Struct({
   space_id: Schema.NullOr(Schema.NonEmptyString).annotate({
     description:
-      "Exact space_id from space_list. Pass null to move the current chat out of its Space."
+      "Exact space_id from space_list. Pass null to move the current chat to the Main Space."
   })
 })
 
@@ -234,13 +240,18 @@ const transcriptFailure = (error: TranscriptQueryFailure): ToolExecutionError =>
     error.reason === "corrupt" ? "Transcript data is corrupt" : "Transcript unavailable"
   )
 
+interface CurrentScope {
+  readonly spaceId: string | undefined
+  readonly browse: SessionListQuery
+}
+
 const currentScope = async (
   queries: SessionQueries["Service"],
-  sessionId: string,
+  run: Pick<ServerRunContext, "sessionId" | "authority">,
   signal: AbortSignal
-): Promise<SessionListQuery> => {
+): Promise<CurrentScope> => {
   const header = await Effect.runPromise(
-    queries.loadHistoryHeader(sessionId).pipe(Effect.mapError(queryFailure)),
+    queries.loadHistoryHeader(run.sessionId).pipe(Effect.mapError(queryFailure)),
     { signal }
   )
   if (header === null) {
@@ -250,8 +261,11 @@ const currentScope = async (
     })
   }
   return {
-    scope: "all",
-    ...(header.spaceId === null ? {} : { spaceId: header.spaceId })
+    spaceId: header.spaceId ?? undefined,
+    browse: {
+      scope: "all",
+      ...(header.spaceId === null || seesEveryChat(header, run) ? {} : { spaceId: header.spaceId })
+    }
   }
 }
 
@@ -463,9 +477,9 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       permissions: ["session"]
     },
     execute: async (input, ctx) => {
-      const own = await currentScope(services.queries, ctx.run.sessionId, ctx.signal)
+      const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const scope: SessionListQuery =
-        permittedBrowseScope(input.scope, ctx.run) === "all_spaces" ? { scope: "all" } : own
+        permittedBrowseScope(input.scope, ctx.run) === "all_spaces" ? { scope: "all" } : own.browse
       const page = await Effect.runPromise(
         services.store
           .list({
@@ -562,7 +576,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
             ? requested.content_chars
             : Math.min(requested.content_chars, MAX_CONTENT_CHARS)
       }
-      const own = await currentScope(services.queries, ctx.run.sessionId, ctx.signal)
+      const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const session = await resolveReadable(services, input.session_ref, ctx.signal)
       if (input.view === "actions") {
         const page = await Effect.runPromise(
@@ -673,7 +687,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
     summary: "Starts a new chat.",
     discovery: { group: "sessions" },
     description: [
-      "Create a new chat Session in the current Space, or in the personal Inbox outside a Space.",
+      "Create a new chat Session in the current Space, or in the Main Space when this chat has none.",
       "Use only when the user explicitly asks for a new chat.",
       "Search for a reusable chat first.",
       "Never create a chat because the topic changed or the response is long. Creation does not navigate.",
@@ -695,7 +709,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       idempotent: false
     },
     execute: async (input, ctx, effects) => {
-      const scope = await currentScope(services.queries, ctx.run.sessionId, ctx.signal)
+      const scope = await currentScope(services.queries, ctx.run, ctx.signal)
       const created = await recordApplied(
         effects,
         Effect.runPromise(
@@ -736,7 +750,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
     discovery: { group: "sessions" },
     description: [
       "Move the current chat into an existing Space at the user's explicit request.",
-      "Use space_list to resolve the exact space_id; pass null only when the user asks to remove the chat from its Space.",
+      "Use space_list to resolve the exact space_id; pass null only when the user asks to take the chat out of its Space, which moves it to the Main Space.",
       "This changes the current chat's location; it does not create, copy, merge, or navigate to another chat.",
       "The move lands now, or when your current reply ends if this chat is still running; the result says which. Call it once."
     ].join(" "),
@@ -771,23 +785,18 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
           retryable: false
         })
       }
-      const where = moved.spaceName === undefined ? "out of its Space" : `to ${moved.spaceName}`
       switch (moved.when) {
         case "now":
           return {
-            result: `Moved this chat ${where}.`,
-            preview:
-              moved.spaceName === undefined ? "Moved to Chats" : `Moved to ${moved.spaceName}`,
-            data: { space_id: input.space_id, when: moved.when }
+            result: `Moved this chat to ${moved.spaceName}.`,
+            preview: `Moved to ${moved.spaceName}`,
+            data: { space_id: moved.spaceId, when: moved.when }
           }
         case "run_end":
           return {
-            result: `This chat moves ${where} as soon as this reply ends; nothing more to do. Tell the user it is moving ${where} when you finish.`,
-            preview:
-              moved.spaceName === undefined
-                ? "Moving to Chats after this reply"
-                : `Moving to ${moved.spaceName} after this reply`,
-            data: { space_id: input.space_id, when: moved.when }
+            result: `This chat moves to ${moved.spaceName} as soon as this reply ends; nothing more to do. Tell the user it is moving to ${moved.spaceName} when you finish.`,
+            preview: `Moving to ${moved.spaceName} after this reply`,
+            data: { space_id: moved.spaceId, when: moved.when }
           }
       }
     }

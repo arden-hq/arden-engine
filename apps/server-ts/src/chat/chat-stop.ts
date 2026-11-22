@@ -7,7 +7,7 @@ import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { SessionStore, type SessionStoreError } from "../persistence/sessions/store.js"
 import type { MutationOperationIdentity } from "../persistence/tools/mutation-receipt.js"
 import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
-import { SpaceStore, type SpaceStoreError } from "../persistence/spaces/store.js"
+import { SpaceStore, SpaceStoreError, archiveRefusal } from "../persistence/spaces/store.js"
 import { TerminalSessions } from "../terminals/service.js"
 import { ScriptRunner } from "../workflows/script-runner.js"
 import { ChatMessageError, type ChatMessageFailure } from "./message-errors.js"
@@ -138,6 +138,15 @@ export class ChatStop extends Context.Service<
         readonly spaceId: string
         readonly stop: boolean
       }) {
+        const space = yield* spaces.get(input.spaceId)
+        const refusal = space === null ? undefined : archiveRefusal(space)
+        if (refusal !== undefined)
+          return yield* new SpaceStoreError({
+            operation: "archive",
+            reason: "conflict",
+            message: refusal,
+            spaceId: input.spaceId
+          })
         const first = yield* busyChats(input.spaceId)
         if (!input.stop && first.busy.length > 0)
           return { kind: "running", chats: first.busy } satisfies SpaceEndResult

@@ -1,3 +1,4 @@
+import { mainSpaceIdSql } from "./main-space.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { latestSessionRunQuery } from "./session-latest-run.js"
 import { sessionOriginQuery } from "./session-origin.js"
@@ -247,7 +248,7 @@ export const makeSessionListing = ({
     const offset = input.offset ?? 0
     const sort = input.sort ?? "activity"
     let spaceFilter = reader``
-    if (input.inbox === true) spaceFilter = reader`AND s.space_id IS NULL`
+    if (input.inbox === true) spaceFilter = reader`AND s.space_id = ${mainSpaceIdSql(reader)}`
     else if (input.spaceId !== undefined) spaceFilter = reader`AND s.space_id = ${input.spaceId}`
     let agentFilter = reader``
     if (input.scope === "primary")
@@ -286,6 +287,7 @@ export const makeSessionListing = ({
           ${orderTimestamp} < ${input.cursor.at}
           OR (${orderTimestamp} = ${input.cursor.at} AND s.session_id < ${input.cursor.sessionId})
         )`
+    const ownCards = reader`source.session_id = s.session_id`
     const rows = yield* reader<SessionListRow>`
       SELECT s.session_id, s.public_ref, s.started_at, s.last_activity,
              s.last_accessed_at, s.name,
@@ -305,17 +307,15 @@ export const makeSessionListing = ({
              latest_run.error_code AS run_error_code,
              latest_run.stop_reason AS run_stop_reason,
              (
-               SELECT COUNT(*) FROM (${pendingDecisionCards(reader)}) AS pending_approval
-             WHERE pending_approval.session_id = s.session_id
-               AND COALESCE(
+               SELECT COUNT(*) FROM (${pendingDecisionCards(reader, ownCards)}) AS pending_approval
+             WHERE COALESCE(
                  json_extract(pending_approval.payload_json, '$.approval_data._tag'),
                  ''
                ) != 'ConnectionRequired'
              ) AS pending_approvals_count,
              (
-               SELECT COUNT(*) FROM (${pendingDecisionCards(reader)}) AS pending_connection
-               WHERE pending_connection.session_id = s.session_id
-                 AND json_extract(
+               SELECT COUNT(*) FROM (${pendingDecisionCards(reader, ownCards)}) AS pending_connection
+               WHERE json_extract(
                    pending_connection.payload_json,
                    '$.approval_data._tag'
                  ) = 'ConnectionRequired'

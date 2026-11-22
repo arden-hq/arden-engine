@@ -23,8 +23,8 @@ export const runHoldsWorkSql = (sql: SqlClient.SqlClient, alias: string): Statem
 const runLivenessSql = (sql: SqlClient.SqlClient, alias: string): Statement.Fragment => {
   const run = runColumns(sql, alias)
   return sql`(CASE
-    WHEN ${runAuthorityState(sql, run.metadata, run.runId)} != 'active'
-      OR ${runPolicyRevoked(sql, run.metadata, false)} THEN ${REVOKED}
+    WHEN ${runAuthorityState(sql, run.metadata, run.runId, run.sessionId)} != 'active'
+      OR ${runPolicyRevoked(sql, run.metadata, run.sessionId, false)} THEN ${REVOKED}
     WHEN ${run.status} IN ${activeRunStatusList} THEN ${TURN}
     WHEN ${runOwnsLiveWork(sql, run.runId)} THEN ${BACKGROUND}
     ELSE ${ENDED}

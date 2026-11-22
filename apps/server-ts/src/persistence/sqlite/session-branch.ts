@@ -34,6 +34,8 @@ import {
 } from "./session-rows.js"
 import { openDeferredCallStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
+import { ownerChatSpace } from "./main-space.js"
+import { runAuthorityChatSql } from "./run-authority-chat.js"
 
 const BranchOptionsSchema = Schema.Struct({
   disposition: Schema.optionalKey(Schema.UndefinedOr(Schema.Literals(["retained", "disposable"]))),
@@ -209,9 +211,11 @@ export const makeSessionBranch = ({
             AND json_type(run.metadata_json, '$.run_policy') = 'object'
           ORDER BY run.started_at DESC, run.run_id DESC LIMIT 1
         )
-        LEFT JOIN sessions AS authority ON authority.session_id = COALESCE(
-          json_extract(latest_policy.metadata_json, '$.run_policy.authority_session_id'), source.session_id
-        )
+        LEFT JOIN sessions AS authority ON authority.session_id = ${runAuthorityChatSql(
+          sql,
+          sql`latest_policy.metadata_json`,
+          sql`COALESCE(latest_policy.session_id, source.session_id)`
+        )}
         WHERE source.session_id = ${validSessionId} AND source.archived_at IS NULL
         LIMIT 1
       `.pipe(
@@ -379,23 +383,34 @@ export const makeSessionBranch = ({
           )
           const name = valid.name ?? (source.name === null ? null : `${source.name} (branch)`)
 
+          if (valid.shareResources === true && source.space_id === null)
+            return yield* storeError(
+              "branch",
+              "invalid",
+              "This chat is in no Space, so a branch of it cannot share its resources. Branch it without sharing.",
+              validSessionId
+            )
+          const branchSpaceId = yield* ownerChatSpace(sql, source.space_id)
+          const branch = {
+            sessionId: branchId,
+            publicRef: friendlySessionRef(branchId),
+            startedAt: timestamp,
+            name,
+            metadata: metadataJson,
+            spaceId: branchSpaceId,
+            chatModel: null,
+            originAutomationId: null
+          }
           yield* insertSession({
             sql,
-            session: {
-              type: "chat",
-              sessionId: branchId,
-              publicRef: friendlySessionRef(branchId),
-              startedAt: timestamp,
-              name,
-              metadata: metadataJson,
-              spaceId: source.space_id,
-              chatModel: null,
-              originAutomationId: null,
-              parent:
-                valid.disposition === "disposable"
-                  ? { sessionId: validSessionId, messageId: null }
-                  : null
-            },
+            session:
+              valid.disposition === "disposable"
+                ? {
+                    ...branch,
+                    type: "chat",
+                    parent: { sessionId: validSessionId, messageId: null }
+                  }
+                : { ...branch, type: "chat", parent: null },
             lifecycle: { kind: "silent", reason: "branch" }
           }).pipe(
             Effect.mapError((cause) =>
@@ -503,7 +518,7 @@ export const makeSessionBranch = ({
             name: name ?? undefined,
             startedAt: timestamp,
             lastActivity: timestamp,
-            spaceId: source.space_id ?? undefined,
+            spaceId: branchSpaceId,
             forkOrigin
           }
         })

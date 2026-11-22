@@ -74,9 +74,14 @@ export const tableTells = {
     columns: [...sessionColumns, "metadata"],
     compare: [
       ...sessionColumns.map((column) => `{row}.${column}`),
-      ...[...sessionPermissionPaths, "$.triage", "$.fork", "$.thread", "$.capture"].map((path) =>
-        metadataPath(path)
-      )
+      ...[
+        ...sessionPermissionPaths,
+        "$.triage",
+        "$.fork",
+        "$.thread",
+        "$.capture",
+        "$.onboarding"
+      ].map((path) => metadataPath(path))
     ],
     nameChanged: "OLD.name IS NOT NEW.name",
     unlistedChanged: sessionPermissionPaths
@@ -260,6 +265,7 @@ export const tableTells = {
   connection_threads: { silent: pipeline },
   connection_cursors: { silent: pipeline },
   connection_item_threads: { silent: pipeline },
+  event_threads: { silent: pipeline },
   task_proposals: { tell: "proposal", id: "{row}.proposal_id", scope: "{row}.space_id" },
   space_task_mutation_links: { silent: history },
   task_proposal_mutation_links: { silent: history },

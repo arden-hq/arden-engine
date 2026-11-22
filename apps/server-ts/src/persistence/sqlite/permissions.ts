@@ -129,7 +129,7 @@ const runRuleHome = Effect.fn("SqlitePermissionStore.runRuleHome")(function* (
     readonly space_name: string | null
   }>`
     SELECT run.authority_json, space.name AS space_name,
-      ${runAuthorityState(sql, sql`run.metadata_json`, sql`run.run_id`)} AS authority
+      ${runAuthorityState(sql, sql`run.metadata_json`, sql`run.run_id`, sql`run.session_id`)} AS authority
     FROM chat_runs AS run
     LEFT JOIN spaces AS space ON space.space_id = json_extract(run.authority_json, '$.owns.space_id')
     WHERE run.run_id = ${runId}

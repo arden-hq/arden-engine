@@ -755,7 +755,7 @@ export const makeWorkDeliverySql = ({
     return yield* sql<{ readonly runId: string; readonly sessionId: string }>`
       SELECT run.run_id AS runId, run.session_id AS sessionId FROM chat_runs AS run
       WHERE run.status IN ${activeRunStatusList}
-        AND (${runAuthorityState(sql, sql`run.metadata_json`, sql`run.run_id`)} = 'revoked'
+        AND (${runAuthorityState(sql, sql`run.metadata_json`, sql`run.run_id`, sql`run.session_id`)} = 'revoked'
           -- Never two chats on one thread: the run that asked stops once the
           -- thread moves, and the target's runs since the move stop once it
           -- comes back (thread-location.ts).

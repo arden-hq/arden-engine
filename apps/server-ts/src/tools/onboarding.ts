@@ -13,6 +13,7 @@ import { GoogleConnections } from "../google/service.js"
 import { ApprovalPolicyStore } from "../persistence/permissions/approval-policy.js"
 import { RunQueries } from "../persistence/runs/queries.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
+import { SessionStore } from "../persistence/sessions/store.js"
 import { Wiki } from "../wiki/service.js"
 import {
   digestAgentKnowledge,
@@ -78,6 +79,7 @@ const MAX_CLIENT_FILE_BYTES = 64 * 1024
 
 interface OnboardingToolServices {
   readonly sessions: SessionQueries["Service"]
+  readonly store: SessionStore["Service"]
   readonly policy: ApprovalPolicyStore["Service"]
   readonly wiki: Wiki["Service"]
   readonly runs: RunQueries["Service"]
@@ -85,8 +87,78 @@ interface OnboardingToolServices {
   readonly home?: string
 }
 
+export const makeOnboardingFinishTool = ({
+  sessions,
+  store
+}: Pick<OnboardingToolServices, "sessions" | "store">): ServerTool =>
+  defineServerTool({
+    name: "onboarding_finish",
+    summary: "Ends Getting started in this chat.",
+    discovery: { group: "onboarding" },
+    description: [
+      "End Getting started in this chat, after the user answered the last step or said they are done.",
+      "After this, the Getting started steps no longer apply here.",
+      "Only the onboarding chat may call this."
+    ].join(" "),
+    parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
+    metadata: {
+      effect: "run_record",
+      display_name: "Finish Getting Started",
+      kind: "tool",
+      action: "write",
+      approval_preview: "End Getting started in this chat.",
+      source: "_app",
+      changes_state: true,
+      target: "reported",
+      concurrency_group: null,
+      destructive: false
+    },
+    execute: async (_input, ctx, effects) => {
+      const session = await Effect.runPromise(sessions.loadHeaderSnapshot(ctx.run.sessionId), {
+        signal: ctx.signal
+      })
+      if (session === null || readSpecialChat(session.metadata)?.kind !== "onboarding") {
+        throw new ToolExecutionError("Getting started is not running in this chat.", {
+          preview: "Not available here",
+          retryable: false
+        })
+      }
+      const finished = await Effect.runPromise(
+        store
+          .finishOnboarding(ctx.run.sessionId)
+          .pipe(
+            Effect.mapError((error) =>
+              toolFailure(
+                { reason: error.reason, message: `Getting started did not end: ${error.message}` },
+                "Not ended"
+              )
+            )
+          ),
+        { signal: ctx.signal }
+      )
+      if (!finished) {
+        effects.unchanged()
+        return { result: "Getting started already ended.", preview: "Already ended" }
+      }
+      effects.applied()
+      return {
+        result: "Getting started ended.",
+        preview: "Getting started ended",
+        data: { finished: true },
+        host: appliedReceipt(ctx, {
+          kind: "target",
+          resourceRef: `onboarding:${session.header.sessionId}`,
+          domain: "session",
+          title: "Getting started ended",
+          href: chatHref({ publicRef: session.header.publicRef })
+        })
+      }
+    }
+  })
+
 const makeOnboardingTools = ({
   sessions,
+  store,
   policy,
   wiki,
   runs,
@@ -300,6 +372,8 @@ const makeOnboardingTools = ({
     }
   }),
 
+  makeOnboardingFinishTool({ sessions, store }),
+
   defineServerTool({
     name: "show_tour",
     summary: "Shows you around Arden.",
@@ -478,6 +552,7 @@ const readClientFile = async (
 export const onboardingTools = Effect.gen(function* () {
   return makeOnboardingTools({
     sessions: yield* SessionQueries,
+    store: yield* SessionStore,
     policy: yield* ApprovalPolicyStore,
     wiki: yield* Wiki,
     runs: yield* RunQueries,

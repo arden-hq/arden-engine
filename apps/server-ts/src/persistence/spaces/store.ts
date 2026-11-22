@@ -6,6 +6,7 @@ import type {
   Space,
   SpaceArchiveResponse,
   SpaceDetail,
+  SpaceKind,
   SpacesOverview,
   UpdateSpaceInput
 } from "@arden-hq/protocol/spaces"
@@ -39,12 +40,8 @@ export const spaceChoices = (
     ? "There is no active Space."
     : `Pass space_id, one of: ${spaces.map((space) => `${space.name} (${space.space_id})`).join(", ")}.`
 
-export const KEEP_ONE_SPACE = "Keep at least one Space"
-
-export const isKeepOneSpace = (error: {
-  readonly reason: string
-  readonly message: string
-}): boolean => error.reason === "conflict" && error.message === KEEP_ONE_SPACE
+export const archiveRefusal = (space: { readonly kind: SpaceKind }): string | undefined =>
+  space.kind === "main" ? "The Main Space cannot be archived." : undefined
 
 export class SpaceStoreError extends Schema.TaggedError<SpaceStoreError>()("SpaceStoreError", {
   ...storeErrorFields({
@@ -103,7 +100,10 @@ export class SpaceStore extends Context.Service<
       spaceId: string,
       page: FreeSpacePage | null
     ) => Effect.Effect<PersistedSpace | null, SpaceStoreError>
-    readonly detail: (spaceId: string) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
+    readonly detail: (
+      spaceId: string,
+      options?: { readonly recentChats?: number }
+    ) => Effect.Effect<SpaceDetail | null, SpaceStoreError>
     readonly recordLetterSubject: (
       sessionId: string,
       messageId: string,

@@ -10,6 +10,7 @@ import { makeSessionLifecycle } from "./session-lifecycle.js"
 import { makeSessionListing } from "./session-listing.js"
 import { makeSessionCaptureRecords } from "./session-capture.js"
 import { makeSessionTriageRecords } from "./session-triage.js"
+import { makeSessionOnboarding } from "./session-onboarding.js"
 
 export const makeSessionStore = (
   deps: Pick<PersistenceDeps, "writer" | "chatEvents" | "sessionEvents" | "reader">
@@ -24,5 +25,6 @@ export const makeSessionStore = (
     ...makeSessionContinue(deps),
     ...makeSessionContext(deps),
     ...makeSessionTriageRecords(deps),
-    ...makeSessionCaptureRecords(deps)
+    ...makeSessionCaptureRecords(deps),
+    ...makeSessionOnboarding(deps)
   })

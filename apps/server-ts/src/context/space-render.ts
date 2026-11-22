@@ -124,7 +124,7 @@ export const renderSpaceContext = (
   )
   place(
     fitList({
-      title: `Other chats in this Space (${view.chats.length}):`,
+      title: "Other recent chats in this Space:",
       lines: view.chats.map(chatLine),
       more: (count) => `+${count} more chats — use session_list`,
       budget: remaining

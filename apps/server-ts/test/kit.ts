@@ -167,6 +167,8 @@ export const sessionHeader = (
     parentToolCallId: null,
     parentMessageId: null,
     spaceId: null,
+    spaceKind: null,
+    spaceConversation: false,
     chatModel: null,
     activeMessageCount: 0,
     lastInputTokens: null,

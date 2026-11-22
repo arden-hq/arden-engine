@@ -71,6 +71,36 @@ describe("relay push", () => {
     })
   })
 
+  it("a post's phone alert says a message came, not that a run stopped", async () => {
+    const identity = await loadMacIdentity(memoryVault())
+    const phoneEd = generateEd25519()
+    const device: PairedDevice = {
+      dev: deviceId(phoneEd.publicKey),
+      name: "Test iPhone",
+      edPub: toB64url(phoneEd.publicKey),
+      xPub: toB64url(generateX25519().publicKey),
+      addedAt: "",
+      lastSeenAt: undefined,
+      push: undefined
+    }
+    const sealed = pushPayload({
+      identity,
+      device,
+      notice: {
+        key: "post:1",
+        kind: "finished",
+        title: "Taxes",
+        body: "The bank wrote back.",
+        sessionId: "chat-1",
+        askId: undefined,
+        news: "posted"
+      }
+    })
+    expect(JSON.parse(fromUtf8(sealed.payload))).toMatchObject({
+      aps: { alert: { title: "Arden", body: "A new message" } }
+    })
+  })
+
   it("a restart neither repeats a push nor skips an ask that opened while Arden was down", async () => {
     const world = makeWorld({ seeded: true })
     world.asks = [question("q-1")]
@@ -159,7 +189,7 @@ describe("relay push", () => {
     expect(await world.reconcile()).toEqual([])
   })
 
-  it("pushes each record the rule lets through once: finished chats and Automations that are unread, and failures; never the model-only, read, paused, Task-done or chatless", async () => {
+  it("pushes each record the rule lets through once: finished chats and Automations that are unread, failures and posts; never the model-only, read, paused, Task-done or chatless", async () => {
     const world = makeWorld({ seeded: true })
     world.notices = [
       notice("unread", {}),
@@ -176,11 +206,13 @@ describe("relay push", () => {
         purpose: null
       }),
       notice("task-done", { record: "entity", key: "task-done:4", status: "done", purpose: null }),
+      notice("posted", { record: "entity", key: "post:5", status: "posted", purpose: null }),
       notice("worker", { purpose: "task_execution" }),
       notice("nowhere", { status: "failed", chatSessionId: null })
     ]
-    expect(await world.reconcile()).toEqual(["ending:unread", "ending:failed"])
-    expect(world.bodies).toEqual(["Sent the summary", "Sent the summary"])
+    expect(await world.reconcile()).toEqual(["ending:unread", "ending:failed", "post:5"])
+    expect(world.bodies).toEqual(["Sent the summary", "Sent the summary", "Sent the summary"])
+    expect(world.news).toEqual(["finished", "stopped", "posted"])
     expect(await world.reconcile()).toEqual([])
   })
 
@@ -251,6 +283,7 @@ const makeWorld = (options: { readonly seeded: boolean }) => {
     refusing: new Set<string>(),
     sent: [] as Array<string>,
     bodies: [] as Array<string>,
+    news: [] as Array<PushNotice["news"]>,
     reconcile: async (): Promise<ReadonlyArray<string>> => {
       const loopback: Loopback = {
         request: async ({ path }): Promise<LoopbackResponse> => {
@@ -298,7 +331,10 @@ const makeWorld = (options: { readonly seeded: boolean }) => {
                         world.sent.push(
                           world.devices.length > 1 ? `${notice.key}>${dev}` : notice.key
                         )
-                        if (notice.kind === "finished") world.bodies.push(notice.body)
+                        if (notice.kind === "finished") {
+                          world.bodies.push(notice.body)
+                          world.news.push(notice.news)
+                        }
                         return true
                       }
                     }

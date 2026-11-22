@@ -18,6 +18,8 @@ import type { PersistenceDeps } from "./deps.js"
 import { storeError, sessionIdSchema, sessionNameSchema } from "./session-rows.js"
 import { moveConversationInTransaction } from "./session-space-move.js"
 import { sessionOriginQuery } from "./session-origin.js"
+import { mainSpaceId } from "./main-space.js"
+import { SpaceId } from "../space-job-id.js"
 
 const SessionCreateRowSchema = Schema.Struct({
   session_id: Schema.NonEmptyString,
@@ -76,6 +78,21 @@ const createRow = Effect.fn("SqliteSessionStore.createRow")(function* (
     : row
 })
 
+const chatSpace = Effect.fn("SqliteSessionStore.chatSpace")(function* (
+  sql: SqlClient.SqlClient,
+  requested: string | undefined
+) {
+  if (requested === undefined) return yield* mainSpaceId(sql)
+  const spaces = yield* sql<{ readonly space_id: string }>`SELECT space_id
+    FROM spaces
+    WHERE space_id = ${requested} AND archived_at IS NULL
+    LIMIT 1`
+  const space = spaces[0]
+  if (space === undefined)
+    return yield* storeError("create", "not_found", "Space not found", undefined)
+  return SpaceId.make(space.space_id)
+})
+
 export const createSessionInTransaction = Effect.fn("SqliteSessionStore.createInTransaction")(
   function* (options: {
     readonly sql: SqlClient.SqlClient
@@ -86,20 +103,13 @@ export const createSessionInTransaction = Effect.fn("SqliteSessionStore.createIn
   }) {
     const { sql, sessionEvents, sessionId, timestamp, session } = options
     const name = session.name?.trim() || null
-    const spaceId = session.spaceId ?? null
-    if (spaceId !== null) {
-      const spaces = yield* sql<{ readonly space_id: string }>`SELECT space_id
-      FROM spaces
-      WHERE space_id = ${spaceId} AND archived_at IS NULL
-      LIMIT 1`.pipe(
-        Effect.mapError((cause) =>
-          storeError("create", "storage", "Could not validate the Space", undefined, cause)
-        )
+    const spaceId = yield* chatSpace(sql, session.spaceId).pipe(
+      Effect.mapError((cause) =>
+        cause instanceof SessionStoreError
+          ? cause
+          : storeError("create", "storage", "Could not validate the Space", undefined, cause)
       )
-      if (spaces.length === 0) {
-        return yield* storeError("create", "not_found", "Space not found", undefined)
-      }
-    }
+    )
 
     const row = yield* insertSession({
       sql,
@@ -333,7 +343,7 @@ export const makeSessionLifecycle = ({
   const moveToSpace = Effect.fn("SqliteSessionStore.moveToSpace")(function* (
     sessionId: string,
     spaceId: string | undefined
-  ): Effect.fn.Return<boolean, SessionStoreError> {
+  ): Effect.fn.Return<string | undefined, SessionStoreError> {
     const validSessionId = yield* Schema.decodeUnknownEffect(sessionIdSchema)(sessionId).pipe(
       Effect.mapError((cause) =>
         storeError("move", "invalid", "Session id must not be empty", sessionId, cause)
@@ -357,7 +367,7 @@ export const makeSessionLifecycle = ({
         })
       )
       .pipe(Effect.mapError(moveFailure(validSessionId)))
-    return moved.kind !== "missing"
+    return moved.kind === "missing" ? undefined : moved.spaceId
   })
 
   const moveFromRun = Effect.fn("SqliteSessionStore.moveFromRun")(function* (
@@ -389,9 +399,9 @@ export const makeSessionLifecycle = ({
       case "missing":
         return undefined
       case "moved":
-        return { when: "now", spaceName: moved.spaceName }
+        return { when: "now", spaceId: moved.spaceId, spaceName: moved.spaceName }
       case "on_run_end":
-        return { when: "run_end", spaceName: moved.spaceName }
+        return { when: "run_end", spaceId: moved.spaceId, spaceName: moved.spaceName }
     }
   })
 

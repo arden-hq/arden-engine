@@ -12,6 +12,7 @@ import {
   narrowCapabilities,
   meetCapabilities,
   runApprovalMode,
+  runAuthorityChat,
   SessionResourceReachSchema,
   type SessionResourceReach,
   type RunCapability,
@@ -21,6 +22,7 @@ import { RunAuthoritySchema } from "../../execution/authority.js"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 import { WorkStoreError } from "../work/store.js"
 import { decodeJson } from "./json.js"
+import { runAuthorityChatSql } from "./run-authority-chat.js"
 import {
   createExecutionBudget,
   readBudgetRemaining,
@@ -41,11 +43,12 @@ const failure = (message: string, cause?: unknown) =>
 export const runPolicyRevoked = (
   sql: SqlClient.SqlClient,
   metadata: Statement.Fragment,
+  sessionId: Statement.Fragment,
   workerOnly = true
 ) => sql`(
-  (json_extract(${metadata}, '$.run_policy.authority_session_id') IS NOT NULL
+  (json_type(${metadata}, '$.run_policy') = 'object'
     AND NOT EXISTS (SELECT 1 FROM sessions AS authority_session
-      WHERE authority_session.session_id = json_extract(${metadata}, '$.run_policy.authority_session_id')
+      WHERE authority_session.session_id = ${runAuthorityChatSql(sql, metadata, sessionId)}
         AND authority_session.space_id IS json_extract(${metadata}, '$.run_policy.space.space_id')
         AND authority_session.archived_at IS NULL
         AND (json_extract(${metadata}, '$.run_policy.authority_generation') IS NULL
@@ -114,7 +117,7 @@ const sessionResourceReach = Effect.fn("RunPolicy.sessionResourceReach")(functio
       readonly revoked: number
     }>`
       SELECT json_extract(metadata_json, '$.run_policy') AS policy, authority_json,
-        ${runPolicyRevoked(sql, sql`metadata_json`, false)} AS revoked FROM chat_runs
+        ${runPolicyRevoked(sql, sql`metadata_json`, sql`session_id`, false)} AS revoked FROM chat_runs
       WHERE session_id = ${current.source_session_id} AND authority_json IS NOT NULL
       ORDER BY started_at DESC, run_id DESC LIMIT 1`
     if (recent[0]?.revoked !== undefined && recent[0].revoked !== 0)
@@ -134,7 +137,10 @@ const sessionResourceReach = Effect.fn("RunPolicy.sessionResourceReach")(functio
       const sourceAuthority = yield* decodeJson(RunAuthoritySchema, recent[0].authority_json)
       if (sourceAuthority.actor.kind !== "person") return { sessions: [], sourcePolicy: undefined }
     }
-    const authoritySessionId = sourcePolicy?.authority_session_id ?? current.source_session_id
+    const authoritySessionId =
+      sourcePolicy === undefined
+        ? current.source_session_id
+        : runAuthorityChat(sourcePolicy, current.source_session_id)
     const authorities = yield* sql<{ readonly generation: number }>`
       SELECT COALESCE(json_extract(metadata, '$.policy_generation'), 0) AS generation
       FROM sessions WHERE session_id = ${authoritySessionId} AND archived_at IS NULL`
@@ -200,7 +206,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     if (options.parentRunId !== undefined) {
       const rows = yield* sql<{ readonly policy: string | null; readonly revoked: number }>`
         SELECT json_extract(metadata_json, '$.run_policy') AS policy,
-          ${runPolicyRevoked(sql, sql`metadata_json`, false)} AS revoked
+          ${runPolicyRevoked(sql, sql`metadata_json`, sql`session_id`, false)} AS revoked
         FROM chat_runs WHERE run_id = ${options.parentRunId}
       `
       const row = rows[0]
@@ -323,11 +329,13 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
     const sourcePolicy = resourceAdmission.sourcePolicy
     if (sourcePolicy !== undefined) {
       capabilities = meetCapabilities(capabilities, sourcePolicy.capabilities)
-      if (sourcePolicy.space === null && space !== null)
-        return yield* failure("The source chat does not authorize this Space")
-      if (sourcePolicy.space !== null) {
-        if (space === null || space.space_id !== sourcePolicy.space.space_id)
-          return yield* failure("The source chat's Space authority is unavailable in this Chat")
+      if ((sourcePolicy.space?.space_id ?? null) !== (space?.space_id ?? null))
+        return yield* failure(
+          sourcePolicy.space === null
+            ? "The source chat does not authorize this Space"
+            : "The source chat's Space authority is unavailable in this Chat"
+        )
+      if (sourcePolicy.space !== null && space !== null) {
         space = {
           ...space,
           inference: { enabled: space.inference.enabled && sourcePolicy.space.inference.enabled }
@@ -358,7 +366,7 @@ export const captureRunPolicy = Effect.fn("RunPolicy.capture")(function* (
       )
         return yield* failure("Continuation cannot change its Automation instructions")
       instructionRevisionId = previousRevision ?? instructionRevisionId
-      authoritySessionId = previous.authority_session_id ?? authoritySessionId
+      authoritySessionId = runAuthorityChat(previous, authoritySessionId)
       if (previous.space?.space_id !== space?.space_id)
         return yield* failure("Continuation cannot change its Space authority")
       capabilities = [

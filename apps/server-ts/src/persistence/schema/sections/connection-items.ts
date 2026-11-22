@@ -1,4 +1,5 @@
 import type { OperationalSchemaSection } from "../section.js"
+import { EVENT_THREADS_TABLE } from "../../migrations/0183_main_space.js"
 
 export const connectionItemsSchemaSection = {
   name: "connection-items",
@@ -7,7 +8,8 @@ export const connectionItemsSchemaSection = {
     "connection_items",
     "connection_threads",
     "connection_cursors",
-    "connection_item_threads"
+    "connection_item_threads",
+    "event_threads"
   ],
   indexes: [
     "idx_connection_items_thread",
@@ -69,6 +71,7 @@ export const connectionItemsSchemaSection = {
     )`,
     `CREATE INDEX idx_connection_item_threads_thread
       ON connection_item_threads(source, account, thread_key)`,
-    "CREATE INDEX idx_connection_threads_owner_space_id ON connection_threads(owner_space_id)"
+    "CREATE INDEX idx_connection_threads_owner_space_id ON connection_threads(owner_space_id)",
+    EVENT_THREADS_TABLE
   ]
 } as const satisfies OperationalSchemaSection

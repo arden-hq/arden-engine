@@ -114,6 +114,7 @@ export const makeWorkCaptureSql = (options: {
     readonly reuseExisting?: boolean
     readonly fromChat?: string
     readonly originMessageId?: string
+    readonly causedBy?: string
   }) {
     const {
       scope,
@@ -125,7 +126,8 @@ export const makeWorkCaptureSql = (options: {
       settledInference = false,
       reuseExisting = false,
       fromChat,
-      originMessageId
+      originMessageId,
+      causedBy = runId
     } = options
     const validInput = yield* decodeCreateSpaceTaskInputEffect(input).pipe(
       Effect.mapError((cause) => workError("invalid", "Invalid Space task input", cause))
@@ -213,9 +215,9 @@ export const makeWorkCaptureSql = (options: {
       yield* sources.add({ itemId: row.item_id, sources: taskSources, now })
       if (row.runs_in === "chat" || row.token_budget !== null)
         yield* ensureTaskBudget(sql, row.item_id, row.token_budget)
-      yield* taskEvent(row.space_id, row.item_id, "created", row.text, now, runId)
+      yield* taskEvent(row.space_id, row.item_id, "created", row.text, now, causedBy)
 
-      yield* spaceJobs.queueTaskWake(row.item_id, now, taskWaker(runId))
+      yield* spaceJobs.queueTaskWake(row.item_id, now, taskWaker(causedBy))
       if (runId === undefined && actor === "user")
         yield* spaceJobs.queueTaskChangedByHand(row.item_id, now)
 
@@ -300,8 +302,40 @@ export const makeWorkCaptureSql = (options: {
       )
   })
 
-  const create: WorkStore["Service"]["create"] = (scope, input) =>
-    createFor(scope, input, "user", [], { basis: "explicit", reason: "Created by you." })
+  const create: WorkStore["Service"]["create"] = Effect.fn("Work.create")(function* (scope, input) {
+    const capture = { basis: "explicit", reason: "Created by you." } as const
+    if (scope.kind !== "chat") return yield* createFor(scope, input, "user", [], capture)
+    return yield* writer
+      .transact(
+        Effect.gen(function* () {
+          const chats = yield* sql<{ readonly space_id: string | null }>`
+            SELECT space_id FROM sessions
+            WHERE session_id = ${scope.sessionId} AND archived_at IS NULL
+              AND session_type = 'chat'`
+          const chat = chats[0]
+          if (chat === undefined) return yield* workError("not_found", "Chat not found")
+          if (chat.space_id !== null && !(yield* isOrdinaryChat(sql, scope.sessionId)))
+            return yield* workError("invalid", "This chat cannot hold a Task.")
+          const target: TaskScope =
+            chat.space_id === null ? scope : { kind: "space", spaceId: chat.space_id }
+          return yield* createInTransaction({
+            scope: target,
+            input: { ...input, key: input.key ?? (yield* freeKey(target, input.text)) },
+            actor: "user",
+            taskSources: [],
+            capture,
+            fromChat: scope.sessionId
+          })
+        })
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          cause instanceof WorkStoreError
+            ? cause
+            : workError("storage", "Could not complete Space task creation", cause)
+        )
+      )
+  })
 
   const createFromChat: WorkStore["Service"]["createFromChat"] = Effect.fn("Work.createFromChat")(
     function* (options) {
@@ -417,6 +451,7 @@ export const makeWorkCaptureSql = (options: {
     create,
     createFromChat,
     createInChat,
-    createInTransaction
+    createInTransaction,
+    freeKey
   }
 }

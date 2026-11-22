@@ -28,6 +28,7 @@ const lifecycleError = (error: SpaceStoreError | WikiError) =>
 const publicSpace = (space: PersistedSpace): Space => ({
   inference: space.inference,
   space_id: space.space_id,
+  kind: space.kind,
   name: space.name,
   instructions: space.instructions,
   instructions_source: space.instructions_source,

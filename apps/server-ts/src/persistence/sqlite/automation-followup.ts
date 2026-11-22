@@ -48,7 +48,7 @@ export const makeAutomationFollowup = ({
             AND ${userAutomationSql("task")} AND task.enabled = 1
             AND queue.claimed_at IS NOT NULL AND queue.lease_expires_at > ${DateTime.formatIso(now)}
             AND NOT ${executionBudgetExpired(sql, sql`run.metadata_json`)}
-            AND NOT ${runPolicyRevoked(sql, sql`run.metadata_json`)}
+            AND NOT ${runPolicyRevoked(sql, sql`run.metadata_json`, sql`run.session_id`)}
         ) RETURNING task_id,
           (SELECT automation_ref FROM scheduled_tasks WHERE task_id = automation_runs.task_id) AS automation_ref,
           (SELECT name FROM scheduled_tasks WHERE task_id = automation_runs.task_id) AS name`
@@ -90,7 +90,7 @@ export const readAutomationFollowup = Effect.fn("AutomationFollowup.read")(funct
       AND json_extract(owner.metadata_json, '$.run_context.origin') = json(attempt.origin)
       AND json_extract(attempt.followup_json, '$.generation') = task.followup_generation
       AND NOT ${executionBudgetExpired(sql, sql`owner.metadata_json`)}
-      AND NOT ${runPolicyRevoked(sql, sql`owner.metadata_json`)}
+      AND NOT ${runPolicyRevoked(sql, sql`owner.metadata_json`, sql`owner.session_id`)}
   `
   return rows[0]
 })

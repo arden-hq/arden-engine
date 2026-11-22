@@ -1,3 +1,4 @@
+import { messageQuote } from "./message-quote.js"
 import type { ChatUpdate, CommunicationDoor } from "@arden-hq/protocol/chat"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -90,11 +91,16 @@ const enqueueUpdate = Effect.fn("OwnerUpdate.enqueue")(function* (options: {
     line,
     door
   }
+  const taskItem = door.kind === "task" || door.kind === "artifact" ? door.item_id : undefined
   const stableKey =
-    door.kind === "task" || door.kind === "artifact"
-      ? ((yield* sql<{ readonly stable_key: string | null }>`SELECT stable_key FROM space_tasks
-          WHERE item_id = ${door.item_id}`)[0]?.stable_key ?? null)
-      : null
+    taskItem === undefined
+      ? null
+      : ((yield* sql<{ readonly stable_key: string | null }>`SELECT stable_key FROM space_tasks
+          WHERE item_id = ${taskItem}`)[0]?.stable_key ?? null)
+  const replyTo =
+    taskItem !== undefined
+      ? yield* originQuote(sql, taskItem, options.destination.session_id)
+      : undefined
   yield* enqueueRunDelivery({
     sql,
     eventId: options.occurrenceKey,
@@ -105,8 +111,23 @@ const enqueueUpdate = Effect.fn("OwnerUpdate.enqueue")(function* (options: {
       sessionId: options.destination.session_id,
       source: options.source,
       update,
+      ...(replyTo === undefined ? {} : { replyTo }),
       occurredAt: options.occurredAt
     },
     now: options.occurredAt
   })
+})
+
+const originQuote = Effect.fn("OwnerUpdate.originQuote")(function* (
+  sql: SqlClient.SqlClient,
+  itemId: string,
+  sessionId: string
+) {
+  const origin = (yield* sql<{ readonly message_id: string | null }>`
+    SELECT task.origin_message_id AS message_id FROM space_tasks AS task
+    WHERE task.item_id = ${itemId} AND EXISTS (SELECT 1 FROM space_task_sources AS source
+      WHERE source.item_id = task.item_id AND json_extract(source.source, '$.kind') = 'chat'
+        AND json_extract(source.source, '$.session_id') = ${sessionId})`)[0]
+  if (origin === undefined || origin.message_id === null) return undefined
+  return yield* messageQuote(sql, { sessionId, messageId: origin.message_id })
 })

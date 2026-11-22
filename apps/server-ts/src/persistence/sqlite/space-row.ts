@@ -16,6 +16,7 @@ export interface SpaceRow {
   readonly page_id: string | null
   readonly inference_policy: string
   readonly mark: string | null
+  readonly kind: string
   readonly created_at: string
   readonly updated_at: string
   readonly archived_at: string | null
@@ -59,6 +60,7 @@ export const decodeRow = Effect.fn("SqliteSpaceStore.decodeRow")(function* (
       )
     ),
     space_id: row.space_id,
+    kind: row.kind,
     name: row.name,
     instructions: row.instructions,
     instructions_source: row.instructions_source,

@@ -466,7 +466,7 @@ export const makeAutomationRunRequests = ({
       SELECT
         (SELECT run_id FROM own ORDER BY started_at DESC, run_id DESC LIMIT 1) AS final_run_id,
         (SELECT chat_session_id FROM attempt) AS session_id,
-        (SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`)} FROM own
+        (SELECT ${runAuthorityState(sql, sql`metadata_json`, sql`run_id`, sql`session_id`)} FROM own
           ORDER BY started_at DESC, run_id DESC LIMIT 1) AS authority,
         (SELECT COUNT(*) FROM members WHERE status IN ${activeRunStatusList}
           AND NOT ${parkedOnQuota(sql, sql`status`, sql`metadata_json`)}) AS working,

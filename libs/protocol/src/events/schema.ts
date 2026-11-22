@@ -55,7 +55,8 @@ const RecordToldStatusSchema = Schema.Literals([
   "silent",
   "waiting",
   "done",
-  "paused"
+  "paused",
+  "posted"
 ] as const)
 
 export const RecordToldEventSchema = event("record_told", {

@@ -42,6 +42,7 @@ export type RecordToldStatus =
   | "waiting"
   | "done"
   | "paused"
+  | "posted"
 
 /**
  * A run ending or an entity change was recorded and the owner can see it: as a

@@ -43,6 +43,9 @@ export const toSendInput = (delivery: RunDelivery): ChatSendInput => {
       : {}),
     ...(delivery.payload.kind === "connection" ? { connection: delivery.payload.connection } : {}),
     ...(delivery.payload.kind === "update" ? { update: delivery.payload.update } : {}),
+    ...(delivery.payload.kind === "update" && delivery.payload.replyTo !== undefined
+      ? { replyTo: delivery.payload.replyTo }
+      : {}),
     ...(delivery.images === undefined || delivery.images.length === 0
       ? {}
       : { images: delivery.images })

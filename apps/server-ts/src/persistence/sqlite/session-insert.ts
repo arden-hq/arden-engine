@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
 import type { UnitOfWork } from "../unit-of-work.js"
+import type { SpaceId } from "../space-job-id.js"
 
 interface SessionInsertBase {
   readonly sessionId: string
@@ -14,9 +15,16 @@ interface SessionInsertBase {
   readonly originAutomationId: string | null
 }
 
-interface ChatSessionInsert extends SessionInsertBase {
+interface OwnerChatInsert extends SessionInsertBase {
   readonly type: "chat"
-  readonly parent: { readonly sessionId: string; readonly messageId: string | null } | null
+  readonly spaceId: SpaceId
+  readonly originAutomationId: null
+  readonly parent: null
+}
+
+interface ChildChatInsert extends SessionInsertBase {
+  readonly type: "chat"
+  readonly parent: { readonly sessionId: string; readonly messageId: string | null }
 }
 
 interface ChannelSessionInsert extends SessionInsertBase {
@@ -32,7 +40,7 @@ interface AgentSessionInsert extends SessionInsertBase {
   }
 }
 
-type SessionInsert = ChatSessionInsert | ChannelSessionInsert | AgentSessionInsert
+type SessionInsert = OwnerChatInsert | ChildChatInsert | ChannelSessionInsert | AgentSessionInsert
 
 interface AnnouncedSession<A, E, R> {
   readonly kind: "announce"

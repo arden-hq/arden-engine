@@ -105,7 +105,7 @@ const makeBrowserTools = ({
       summary: "Lists the pages open in Arden’s browser.",
       discovery: { group: "web_browser" },
       description: [
-        "List browser tabs in the shared Space or Home browser, including refs, profiles, URLs, and selection state.",
+        "List browser tabs in this chat's shared browser, including refs, profiles, URLs, and selection state.",
         "Start here when a tab_ref, profile_ref, or current origin is unknown; use browser_snapshot to inspect page content."
       ].join(" "),
       parameters: Schema.toStandardSchemaV1(EmptyParametersSchema),
@@ -179,7 +179,7 @@ const makeBrowserTools = ({
       summary: "Closes a page in Arden’s browser.",
       discovery: { group: "web_browser" },
       description: [
-        "Close one exact browser tab in the shared Space or Home browser.",
+        "Close one exact browser tab in this chat's shared browser.",
         "Closing a tab this run opened needs no approval; any other tab asks the user first.",
         "Use browser_tabs first when the target ref is unclear."
       ].join(" "),

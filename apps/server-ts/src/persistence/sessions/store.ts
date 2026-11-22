@@ -27,7 +27,8 @@ export class SessionStoreError extends Schema.TaggedError<SessionStoreError>()(
         "clear",
         "revert",
         "triage",
-        "capture"
+        "capture",
+        "onboarding"
       ],
       reasons: ["invalid", "not_found", "conflict", "storage"]
     }),
@@ -133,7 +134,8 @@ export interface CreatedSession {
 
 export interface OwnChatMove {
   readonly when: "now" | "run_end"
-  readonly spaceName: string | undefined
+  readonly spaceId: string
+  readonly spaceName: string
 }
 
 export interface BranchOptions {
@@ -212,12 +214,13 @@ export class SessionStore extends Context.Service<
     readonly moveToSpace: (
       sessionId: string,
       spaceId: string | undefined
-    ) => Effect.Effect<boolean, SessionStoreError>
+    ) => Effect.Effect<string | undefined, SessionStoreError>
     readonly moveFromRun: (
       runId: string,
       spaceId: string | undefined,
       toolCallId?: string
     ) => Effect.Effect<OwnChatMove | undefined, SessionStoreError>
+    readonly finishOnboarding: (sessionId: string) => Effect.Effect<boolean, SessionStoreError>
     readonly saveCaptureForward: (
       sessionId: string,
       forwarded: CaptureForward

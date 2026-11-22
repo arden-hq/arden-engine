@@ -109,7 +109,7 @@ export const makeRouterSpaces = (
 }
 
 export const makeRouterCandidates = (dependencies: RouterCandidateDependencies) => {
-  const spacesOf = makeRouterSpaces(dependencies, () => true)
+  const spacesOf = makeRouterSpaces(dependencies, (space) => space.kind !== "main")
   return Effect.fn("Router.candidates")(function* () {
     const spaces = yield* dependencies.spaces.list()
     const spaceName = new Map(spaces.map((space) => [space.space_id, space.name]))

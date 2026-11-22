@@ -48,9 +48,9 @@ describe("desk to space conversion", () => {
         migrations
       ))
         step.run(database)
-      expect(database.prepare("SELECT space_id, name FROM spaces").all()).toEqual([
-        { space_id: "d1", name: "My desk" }
-      ])
+      expect(
+        database.prepare("SELECT space_id, name FROM spaces WHERE kind = 'ordinary'").all()
+      ).toEqual([{ space_id: "d1", name: "My desk" }])
       expect(database.prepare("SELECT space_id, metadata FROM sessions").all()).toEqual([
         { space_id: "d1", metadata: '{"origin":{"kind":"space","space_id":"d1"}}' }
       ])

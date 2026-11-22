@@ -6,6 +6,57 @@ import type { Writer } from "./deps.js"
 import { nextId } from "./deps.js"
 import { friendlySessionRef } from "../public-ref.js"
 import { insertSession } from "./session-insert.js"
+import { SpaceId } from "../space-job-id.js"
+
+export const ensureSpaceConversationInTransaction = Effect.fn(
+  "SpaceConversation.ensureInTransaction"
+)(function* (options: {
+  readonly sql: SqlClient.SqlClient
+  readonly sessionEvents: SessionLifecycleEvents["Service"]
+  readonly spaceId: string
+}) {
+  const { sql, sessionEvents } = options
+  const spaces = yield* sql<{ readonly space_id: string; readonly name: string }>`
+    SELECT space_id, name FROM spaces WHERE space_id = ${options.spaceId} AND archived_at IS NULL
+  `
+  const space = spaces[0]
+  if (space === undefined) {
+    return yield* new SessionStoreError({
+      operation: "create",
+      reason: "not_found",
+      message: "Space not found"
+    })
+  }
+  const spaceId = SpaceId.make(space.space_id)
+  const existing = yield* sql<{ readonly session_id: string }>`
+    SELECT session_id FROM space_conversations WHERE space_id = ${spaceId}
+  `
+  if (existing[0] !== undefined) return existing[0].session_id
+  const sessionId = yield* nextId
+  const timestamp = DateTime.formatIso(yield* DateTime.now)
+  yield* insertSession({
+    sql,
+    session: {
+      type: "chat",
+      sessionId,
+      publicRef: friendlySessionRef(sessionId),
+      startedAt: timestamp,
+      name: space.name,
+      metadata: "{}",
+      spaceId,
+      chatModel: null,
+      originAutomationId: null,
+      parent: null
+    },
+    lifecycle: {
+      kind: "announce",
+      events: sessionEvents,
+      complete: sql`INSERT INTO space_conversations (space_id, session_id)
+        VALUES (${spaceId}, ${sessionId})`
+    }
+  })
+  return sessionId
+})
 
 export const makeEnsureSpaceConversation = ({
   writer,
@@ -16,49 +67,8 @@ export const makeEnsureSpaceConversation = ({
 }): SessionStore["Service"]["ensureSpaceConversation"] =>
   Effect.fn("SpaceConversation.ensure")(
     function* (spaceId: string) {
-      const sql = writer.sql
       return yield* writer.transact(
-        Effect.gen(function* () {
-          const spaces = yield* sql<{ readonly name: string }>`
-        SELECT name FROM spaces WHERE space_id = ${spaceId} AND archived_at IS NULL
-      `
-          const space = spaces[0]
-          if (space === undefined) {
-            return yield* new SessionStoreError({
-              operation: "create",
-              reason: "not_found",
-              message: "Space not found"
-            })
-          }
-          const existing = yield* sql<{ readonly session_id: string }>`
-        SELECT session_id FROM space_conversations WHERE space_id = ${spaceId}
-      `
-          if (existing[0] !== undefined) return existing[0].session_id
-          const sessionId = yield* nextId
-          const timestamp = DateTime.formatIso(yield* DateTime.now)
-          yield* insertSession({
-            sql,
-            session: {
-              type: "chat",
-              sessionId,
-              publicRef: friendlySessionRef(sessionId),
-              startedAt: timestamp,
-              name: space.name,
-              metadata: "{}",
-              spaceId,
-              chatModel: null,
-              originAutomationId: null,
-              parent: null
-            },
-            lifecycle: {
-              kind: "announce",
-              events: sessionEvents,
-              complete: sql`INSERT INTO space_conversations (space_id, session_id)
-            VALUES (${spaceId}, ${sessionId})`
-            }
-          })
-          return sessionId
-        })
+        ensureSpaceConversationInTransaction({ sql: writer.sql, sessionEvents, spaceId })
       )
     },
     Effect.mapError((cause) =>

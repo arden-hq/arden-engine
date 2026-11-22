@@ -402,11 +402,11 @@ export const SessionHandlers = HttpApiBuilder.group(
       .handle("move", ({ params, payload }) =>
         store.moveToSpace(params.sessionId, payload.space_id ?? undefined).pipe(
           Effect.catch(failStore),
-          Effect.filterOrFail(
-            (found) => found,
-            () => new HttpApiError.NotFound({})
-          ),
-          Effect.map(() => ({ session_id: params.sessionId, space_id: payload.space_id }))
+          Effect.flatMap((spaceId) =>
+            spaceId === undefined
+              ? Effect.fail(new HttpApiError.NotFound({}))
+              : Effect.succeed({ session_id: params.sessionId, space_id: spaceId })
+          )
         )
       )
       .handle("exportSession", ({ params, query }) =>

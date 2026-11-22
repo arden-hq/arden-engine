@@ -91,10 +91,9 @@ it("denies one exact visible approval and admits its reason once", async () => {
       const work = yield* WorkStore
       const session = yield* sessions.create({ name: "Approval reply" })
       const other = yield* sessions.create({ name: "Other chat" })
-      const task = yield* work.create(
-        { kind: "chat", sessionId: session.sessionId },
-        { key: "reply-task", text: "Protect the original files", runs_in: "chat" }
-      )
+      const task = yield* work.createInChat(session.sessionId, {
+        request: "Protect the original files"
+      })
       const run = yield* chat.start({
         continuesTask: { itemId: task.item_id },
         sessionId: session.sessionId,

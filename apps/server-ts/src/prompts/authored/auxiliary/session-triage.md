@@ -1,4 +1,4 @@
-File a Chat that is in no Space into the user's existing workspace.
+Move a Chat from the Main Space into one of the user's other Spaces.
 You receive the recent exchange and the user's existing Spaces, which are ongoing areas the user already keeps.
 
 ## Decisions
