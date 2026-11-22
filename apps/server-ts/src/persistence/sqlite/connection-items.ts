@@ -1,20 +1,14 @@
 import { SIGNAL_SOURCE_IDS } from "@arden-hq/protocol/signals"
 import { DateTime, Effect, Option, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
 import {
   ConnectionItemStore,
   ConnectionItemStoreError,
   type ConnectionItem,
   type ConnectionItemAvailability,
-  type ConnectionItemsReport,
-  type RouteBasis
+  type ConnectionItemsReport
 } from "../connections/store.js"
 import { JsonObjectSchema } from "../json.js"
-import { makeSpaceJobSql } from "./space-jobs.js"
-import { openHeldOnHome } from "./proposal-room.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
-import { routeItem } from "./connection-item-route.js"
-import { openProposalStatusList } from "./status-sets.js"
 
 interface ItemRow {
   readonly item_id: string
@@ -28,11 +22,6 @@ interface ItemRow {
   readonly snippet: string
   readonly fetched_at: string
   readonly detail: string | null
-  readonly state: "pending" | "routed"
-  readonly owner_space_id: string | null
-  readonly route_basis: RouteBasis | null
-  readonly route_reason: string | null
-  readonly routed_at: string | null
 }
 
 const decodeDetail = Schema.decodeUnknownOption(Schema.fromJsonString(JsonObjectSchema))
@@ -40,11 +29,6 @@ const decodeDetail = Schema.decodeUnknownOption(Schema.fromJsonString(JsonObject
 /** The stored detail document, or undefined when the item has none. */
 export const itemDetailOf = (detail: string | null): ConnectionItem["detail"] =>
   detail === null ? undefined : Option.getOrUndefined(decodeDetail(detail))
-
-const citesAny = (sql: SqlClient.SqlClient, itemIds: string) =>
-  sql`EXISTS (SELECT 1 FROM json_each(task_proposals.sources_json) AS cited
-    WHERE json_extract(cited.value, '$.kind') = 'connection_item'
-      AND json_extract(cited.value, '$.item_id') IN (SELECT value FROM json_each(${itemIds})))`
 
 const failure =
   (operation: ConnectionItemStoreError["operation"], message: string) =>
@@ -64,29 +48,14 @@ const project = (row: ItemRow): ConnectionItem => ({
   receivedAt: row.received_at,
   snippet: row.snippet,
   detail: itemDetailOf(row.detail),
-  fetchedAt: row.fetched_at,
-  route:
-    row.state === "pending" || row.route_basis === null || row.routed_at === null
-      ? { kind: "pending" }
-      : {
-          kind: "routed",
-          spaceId: row.owner_space_id ?? undefined,
-          basis: row.route_basis,
-          reason: row.route_reason ?? "",
-          routedAt: row.routed_at
-        }
+  fetchedAt: row.fetched_at
 })
 
 export const makeConnectionItemStore = ({
   writer,
-  reader,
-  sessionEvents
-}: Pick<
-  PersistenceDeps,
-  "writer" | "reader" | "sessionEvents"
->): ConnectionItemStore["Service"] => {
+  reader
+}: Pick<PersistenceDeps, "writer" | "reader">): ConnectionItemStore["Service"] => {
   const sql = writer.sql
-  const spaceJobs = makeSpaceJobSql(sql, sessionEvents)
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso))
 
   const cursor: ConnectionItemStore["Service"]["cursor"] = (source, account) =>
@@ -110,7 +79,7 @@ export const makeConnectionItemStore = ({
     )
 
   const threadOwned: ConnectionItemStore["Service"]["threadOwned"] = (input) =>
-    reader`SELECT 1 FROM connection_threads WHERE source = ${input.source}
+    reader`SELECT 1 FROM event_threads WHERE source = ${input.source}
       AND account = ${input.account} AND thread_key = ${input.threadKey}`.pipe(
       Effect.map((rows) => rows.length > 0),
       Effect.mapError(failure("read", "Could not read the thread"))
@@ -181,74 +150,12 @@ export const makeConnectionItemStore = ({
       Effect.mapError(failure("read", "Could not read recent items"))
     )
 
-  const move: ConnectionItemStore["Service"]["move"] = Effect.fn("ConnectionItems.move")(
-    function* (input) {
-      const at = yield* now
-      return yield* writer.transact(
-        Effect.gen(function* () {
-          const notFound = new ConnectionItemStoreError({
-            operation: "move",
-            reason: "not_found",
-            message: "That item is not stored"
-          })
-          const thread = yield* sql<{ readonly item_id: string }>`SELECT item.item_id
-            FROM connection_items AS item JOIN connection_items AS moved
-              ON moved.source = item.source AND moved.account = item.account
-                AND moved.thread_key = item.thread_key
-            WHERE moved.item_id = ${input.itemId}
-            ORDER BY item.item_id = ${input.itemId} DESC, item.item_id`
-          if (thread.length === 0) return yield* notFound
-          let spaceId: string | undefined
-          for (const item of thread) {
-            const routed = yield* routeItem(sql, {
-              itemId: item.item_id,
-              spaceId: input.spaceId,
-              basis: "user",
-              reason: input.reason,
-              now: at
-            })
-            spaceId = routed.spaceId
-          }
-          const movedIds = JSON.stringify(thread.map((item) => item.item_id))
-          yield* sql`UPDATE task_proposals SET status = 'rejected',
-              settlement_client_id = 'item_move', settlement_decision = 'reject',
-              updated_at = ${at}, settled_at = ${at}
-            WHERE place = 'space' AND space_id IS NOT ${spaceId ?? null} AND status = 'offered'
-              AND ${citesAny(sql, movedIds)}`
-          if (spaceId !== undefined) {
-            yield* sql`UPDATE task_proposals SET status = 'rejected', revision = revision + 1,
-              settlement_client_id = 'item_move', settlement_decision = 'reject',
-              updated_at = ${at}, settled_at = ${at}
-              WHERE place = 'home' AND status IN ${openProposalStatusList} AND ${citesAny(sql, movedIds)}`
-            yield* openHeldOnHome(sql, at)
-            yield* spaceJobs.queueItemsRouted(spaceId, at)
-          }
-          const rows =
-            yield* sql<ItemRow>`SELECT * FROM connection_items WHERE item_id = ${input.itemId}`
-          const row = rows[0]
-          if (row === undefined) return yield* notFound
-          return project(row)
-        })
-      )
-    },
-    Effect.mapError(failure("move", "Could not move the item"))
-  )
-
   const report: ConnectionItemStore["Service"]["report"] = Effect.fn("ConnectionItems.report")(
     function* (since) {
       const counts = yield* reader<{
         readonly source: string
         readonly fetched: number
-        readonly routed_to_space: number
-        readonly routed_home: number
-        readonly moved_by_user: number
-        readonly pending: number
-      }>`SELECT source,
-          SUM(fetched_at >= ${since}) AS fetched,
-          SUM(routed_at >= ${since} AND owner_space_id IS NOT NULL) AS routed_to_space,
-          SUM(routed_at >= ${since} AND owner_space_id IS NULL) AS routed_home,
-          SUM(routed_at >= ${since} AND route_basis = 'user') AS moved_by_user,
-          SUM(state = 'pending') AS pending
+      }>`SELECT source, SUM(fetched_at >= ${since}) AS fetched
         FROM connection_items GROUP BY source`
       const offers = yield* reader<{
         readonly offered: number | null
@@ -258,42 +165,20 @@ export const makeConnectionItemStore = ({
           SUM(proposal.status = 'accepted') AS started,
           SUM(proposal.status = 'rejected' AND proposal.settlement_client_id IS NOT 'item_move') AS skipped
         FROM task_proposals AS proposal
-        WHERE proposal.place = 'space' AND proposal.created_at >= ${since}
+        WHERE proposal.created_at >= ${since}
           AND EXISTS (SELECT 1 FROM json_each(proposal.sources_json) AS cited
             WHERE json_extract(cited.value, '$.kind') = 'connection_item')`
-      const home = yield* reader<{
-        readonly offered: number | null
-        readonly held: number | null
-        readonly started: number | null
-        readonly skipped: number | null
-      }>`SELECT SUM(status = 'offered') AS offered, SUM(status = 'held') AS held,
-          SUM(status = 'accepted') AS started,
-          SUM(status = 'rejected' AND settlement_client_id IS NOT 'item_move') AS skipped
-        FROM task_proposals WHERE place = 'home' AND created_at >= ${since}`
-      const bySource = new Map(counts.map((row) => [row.source, row]))
+      const fetched = new Map(counts.map((row) => [row.source, row.fetched]))
       return {
         since,
-        sources: [...new Set([...SIGNAL_SOURCE_IDS, ...bySource.keys()])].map((source) => {
-          const row = bySource.get(source)
-          return {
-            source,
-            fetched: row?.fetched ?? 0,
-            routed_to_space: row?.routed_to_space ?? 0,
-            routed_home: row?.routed_home ?? 0,
-            moved_by_user: row?.moved_by_user ?? 0,
-            pending: row?.pending ?? 0
-          }
-        }),
-        space_offers: {
+        sources: [...new Set([...SIGNAL_SOURCE_IDS, ...fetched.keys()])].map((source) => ({
+          source,
+          fetched: fetched.get(source) ?? 0
+        })),
+        offers: {
           offered: offers[0]?.offered ?? 0,
           started: offers[0]?.started ?? 0,
           skipped: offers[0]?.skipped ?? 0
-        },
-        home_offers: {
-          offered: home[0]?.offered ?? 0,
-          held: home[0]?.held ?? 0,
-          started: home[0]?.started ?? 0,
-          skipped: home[0]?.skipped ?? 0
         }
       } satisfies ConnectionItemsReport
     },
@@ -312,7 +197,6 @@ export const makeConnectionItemStore = ({
     cursor,
     threadOwned,
     saveFetch,
-    move,
     get,
     availability,
     recent,

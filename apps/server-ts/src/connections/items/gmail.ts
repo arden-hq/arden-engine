@@ -186,8 +186,6 @@ const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (
   )
   const from = headers.get("from") ?? ""
   const subject = headers.get("subject") ?? ""
-  // A mail the owner sent is kept only in a thread a Space owns, where it tells the Space they
-  // replied; it never arrives, so it is marked and no Automation hears it as a new mail.
   const sent = (message.labelIds ?? []).includes(SENT_LABEL)
   const kept =
     (!sent && keepMail({ labelIds: message.labelIds ?? [], subject })) ||

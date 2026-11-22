@@ -29,7 +29,6 @@ import {
 import { TaskProposalConflictError } from "../proposals/conflict.js"
 import { TASK_PROPOSAL_ID_PREFIX } from "../automations/space-review.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
-import { routeItem } from "./connection-item-route.js"
 import type { Writer } from "./deps.js"
 import { decodeJson } from "./json.js"
 import {
@@ -449,12 +448,11 @@ export const makeTaskProposalStore = (options: {
           })
         }
       } else if (source.kind === "connection_item") {
-        const owned = yield* sql`SELECT 1 FROM connection_items
-          WHERE item_id = ${source.item_id} AND owner_space_id = ${spaceId}`
-        if (owned.length === 0) {
+        const stored = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
+        if (stored.length === 0) {
           return yield* new TaskProposalConflictError({
             kind: "source_unavailable",
-            message: "That item moved off this Space or expired"
+            message: "That item expired"
           })
         }
       } else if (
@@ -518,14 +516,12 @@ export const makeTaskProposalStore = (options: {
 
   const startFromHome = Effect.fn("TaskProposal.startFromHome")(function* (
     row: ProposalRow,
-    spaceId: string | undefined,
-    now: string
+    spaceId: string | undefined
   ) {
     if (spaceId === undefined) return yield* failure("invalid", "Pick the Space to start it on")
-    const spaces = yield* sql<{ readonly name: string }>`SELECT name FROM spaces
-      WHERE space_id = ${spaceId} AND archived_at IS NULL`
-    const space = spaces[0]
-    if (space === undefined) {
+    const spaces =
+      yield* sql`SELECT 1 FROM spaces WHERE space_id = ${spaceId} AND archived_at IS NULL`
+    if (spaces.length === 0) {
       return yield* new TaskProposalConflictError({
         kind: "space_unavailable",
         message: "That Space is archived"
@@ -570,14 +566,6 @@ export const makeTaskProposalStore = (options: {
             capture: { basis: "explicit", reason: "You started it from an offer on Home." },
             reuseExisting: true
           })
-    if (itemId !== undefined)
-      yield* routeItem(sql, {
-        itemId,
-        spaceId,
-        basis: "user",
-        reason: `You started it on ${space.name}.`,
-        now
-      })
     return task
   })
 
@@ -667,7 +655,7 @@ export const makeTaskProposalStore = (options: {
             return yield* failure("invalid", "A chat's suggestions cannot be started yet")
           const task =
             row.space_id === null
-              ? yield* startFromHome(row, input.space_id, now)
+              ? yield* startFromHome(row, input.space_id)
               : yield* startOnSpace(row, row.space_id, input.space_id, authority)
           if (input.session_id !== undefined && (yield* isOrdinaryChat(sql, input.session_id)))
             yield* sql`UPDATE space_tasks SET home_session_id = ${input.session_id}

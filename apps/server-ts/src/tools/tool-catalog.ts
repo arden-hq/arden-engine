@@ -69,7 +69,6 @@ const INPUT_SOURCES: Readonly<Record<string, ReadonlyArray<ToolInputSource>>> = 
   forward_message: inputs(["session_ref", "session_list"]),
   session_archive: inputs(["session_refs", "session_list"]),
   session_move: inputs(["space_id", "space_list"]),
-  item_move: inputs(["item_id", "connection_items_state"], ["space_id", "space_list"]),
   connection_item_read: inputs(["item_id", "connection_items_state"]),
   automation_list_runs: inputs(["automation_ref", "automation_list"]),
   automation_update: inputs(["automation_ref", "automation_list"]),

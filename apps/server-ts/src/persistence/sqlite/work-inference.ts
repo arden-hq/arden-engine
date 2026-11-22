@@ -210,12 +210,11 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
       } else if (source.kind !== "memory" && source.kind !== "connection_item") {
         return yield* workError(
           "invalid",
-          "A proposal needs Chat, Memory, routed item or its own Task evidence, not a bare Space reference"
+          "A proposal needs Chat, Memory, stored item or its own Task evidence, not a bare Space reference"
         )
       }
     }
     yield* assertItemEvidence(sql, {
-      spaceId: options.spaceId,
       proposalId: options.proposalId,
       sources: options.sources
     })

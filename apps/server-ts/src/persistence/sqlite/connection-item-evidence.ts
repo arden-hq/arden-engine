@@ -6,7 +6,6 @@ import { workError } from "./work-records.js"
 export const assertItemEvidence = Effect.fn("Work.assertItemEvidence")(function* (
   sql: SqlClient.SqlClient,
   options: {
-    readonly spaceId: string
     readonly proposalId: string | undefined
     readonly sources: ReadonlyArray<SpaceTaskSource>
   }
@@ -21,13 +20,9 @@ export const assertItemEvidence = Effect.fn("Work.assertItemEvidence")(function*
         "invalid",
         "Cite a connection item with revision equal to its item_id"
       )
-    const owned = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}
-      AND state = 'routed' AND owner_space_id = ${options.spaceId}`
-    if (owned.length === 0)
-      return yield* workError(
-        "invalid",
-        "That item is not routed to this Space, so it cannot be evidence here"
-      )
+    const stored = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
+    if (stored.length === 0)
+      return yield* workError("invalid", "That item is not stored, so it cannot be evidence")
   }
   const taken = yield* threadTaken(sql, {
     itemIds: items.map((source) => source.item_id),
