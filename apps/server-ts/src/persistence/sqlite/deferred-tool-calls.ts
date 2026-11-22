@@ -118,8 +118,8 @@ export const makeDeferredToolCalls = ({
         toolError("pause", "corrupt", "Deferred call arguments are invalid", identity, cause)
       )
     )
-    const draft = yield* pendingDecisionDraft(card, "pause", "deferred")
     const at = DateTime.formatIso(yield* DateTime.now)
+    const draft = yield* pendingDecisionDraft(card, "pause", at, "deferred")
     return yield* writer
       .transact(
         Effect.gen(function* () {
