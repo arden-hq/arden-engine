@@ -93,6 +93,8 @@ const NO_APP: AppLauncher = {
 
 const URL_ARGS = ["--url", "http://arden.test"] as const
 
+const ASKED_AT = "2026-11-21T22:11:50.941Z"
+
 const APP_ONLY = "Only the Arden app can allow this."
 const UNCHECKED =
   "Arden could not check whether this can be allowed from here, so it cannot be allowed here. If this keeps happening, update Arden."
@@ -540,6 +542,41 @@ describe("progress and asks at a terminal", () => {
     ])
     expect(connections).toEqual([
       { runId: "run-1", toolId: "tool-2", connectionId: "connection-1", approved: false }
+    ])
+  })
+
+  it("answers a card with the asking it names, and a card that names none without one", async () => {
+    const approvals: Array<unknown> = []
+    const card = approvalNeeded("tool-1")
+    const client: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
+        await emit(options, approvalNeeded("tool-2"))
+        return completedRun()
+      },
+      answerApproval: async (input) => {
+        approvals.push(input)
+      }
+    }
+    const io = testIo({ client })
+    const asking = askingWith(["1", "2"])
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...io.dependencies,
+        askInTerminal: asking.askInTerminal
+      })
+    ).toBe(0)
+    expect(approvals).toEqual([
+      {
+        runId: "run-1",
+        toolId: "tool-1",
+        result: "",
+        approved: true,
+        grantStanding: false,
+        askedAt: ASKED_AT
+      },
+      { runId: "run-1", toolId: "tool-2", result: "", approved: false, grantStanding: false }
     ])
   })
 
@@ -1021,6 +1058,26 @@ describe("approvals with no one at the terminal", () => {
     expect(jsonLines(io.stdout())[0]).toMatchObject({
       declined: [{ kind: "approval", tool_id: "tool-1", name: "write_file" }]
     })
+  })
+
+  it("--no-wait-approval declines the asking the card names", async () => {
+    const answers: Array<unknown> = []
+    const card = approvalNeeded("tool-1")
+    const client: CliClient = {
+      ...approvalClient(answers),
+      wait: async (_run, options) => {
+        await emit(options, { ...card, data: { ...card.data, asked_at: ASKED_AT } })
+        return completedRun()
+      }
+    }
+    const io = testIo({ client })
+
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS, "--no-wait-approval"], io.dependencies)
+    ).toBe(0)
+    expect(answers).toEqual([
+      expect.objectContaining({ toolId: "tool-1", approved: false, askedAt: ASKED_AT })
+    ])
   })
 
   it("by default leaves the request to Arden and answers nothing", async () => {
