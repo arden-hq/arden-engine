@@ -91,7 +91,6 @@ export interface SpaceJobSql {
     throughSequence: number,
     spaceIds: ReadonlyArray<string>
   ) => SpaceJobWrite<ReadonlyArray<string>>
-  readonly queueItemsRouted: (spaceId: string, now: string) => SpaceJobWrite<void>
   readonly queueTaskWake: (
     itemId: string,
     now: string,
@@ -485,32 +484,6 @@ export const makeSpaceJobSql = (
     )
   })
 
-  const queueItemsRouted = Effect.fn("SpaceJobSql.queueItemsRouted")(function* (
-    spaceId: string,
-    now: string
-  ) {
-    const spaces = yield* sql<{ readonly space_id: string }>`
-      SELECT space_id FROM spaces WHERE space_id = ${spaceId} AND archived_at IS NULL
-        AND json_extract(inference_policy, '$.enabled') = 1`
-    if (spaces.length === 0) return
-    const state = yield* syncSpace(spaceId, now)
-    if (!state?.enabled) return
-    yield* queue(
-      state,
-      NO_RUN,
-      {
-        queued_at: now,
-        event_type: "item.routed",
-        event_key: spaceId,
-        context: { space_id: spaceId }
-      },
-      {
-        triggerContext:
-          "New items from the user's connections were routed to this Space. They are listed under Routed connection items; the trigger itself is not evidence."
-      }
-    )
-  })
-
   const queueTaskWake = Effect.fn("SpaceJobSql.queueTaskWake")(function* (
     itemId: string,
     now: string,
@@ -629,7 +602,6 @@ export const makeSpaceJobSql = (
     queueInferenceChat,
     linkChat,
     unlinkedSpaces,
-    queueItemsRouted,
     queueTaskWake,
     stopTask,
     spaceReviewContext: (spaceId) => readSpaceReviewContext(sql, spaceId),

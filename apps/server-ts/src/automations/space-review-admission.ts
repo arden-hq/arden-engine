@@ -8,14 +8,13 @@ import { UNFINISHED_TASK_STATUSES } from "../persistence/sqlite/task-status-sql.
 /**
  * What changed since the Space's last review, each read from one owner:
  * - `chat_turn`: an owner chat turn the review has not seen (`reads.chats`).
- * - `mail`: a routed mail or GitHub item new since the last review.
  * - `memory_page`: a page the review reads for this Space changed, or a source left it.
  *   It never starts a review; a page-only verdict is `nothing_to_act_on`.
  * - `task`: a Task of the Space was added, removed or changed in any field.
  * - `space_settings`: the Space instructions or inference policy changed, or there is no
  *   earlier review to compare with.
  */
-export type ReviewChange = "chat_turn" | "mail" | "memory_page" | "task" | "space_settings"
+export type ReviewChange = "chat_turn" | "memory_page" | "task" | "space_settings"
 
 /**
  * What the Space holds that a review can act on:
@@ -34,7 +33,6 @@ export type ReviewHold = "nothing" | "unfinished_tasks" | "open_offers"
  */
 const STARTS: Record<ReviewChange, Record<ReviewHold, boolean>> = {
   chat_turn: { nothing: true, unfinished_tasks: true, open_offers: true },
-  mail: { nothing: true, unfinished_tasks: true, open_offers: true },
   space_settings: { nothing: true, unfinished_tasks: true, open_offers: true },
   memory_page: { nothing: false, unfinished_tasks: false, open_offers: false },
   task: { nothing: false, unfinished_tasks: true, open_offers: true }
@@ -66,7 +64,6 @@ export const spaceReviewAdmission = (
   const before = reviewed === undefined ? undefined : rows(reviewed.semantic)
   const changes = new Set<ReviewChange>()
   if (current.reads.chats.length > 0) changes.add("chat_turn")
-  if (current.reads.items.some((item) => item.isNew)) changes.add("mail")
   if (current.reads.pages.length > 0 || current.reads.removed.length > 0) changes.add("memory_page")
   if (before === undefined || before.settings !== now.settings) changes.add("space_settings")
   if (before !== undefined && !sameTasks(before.tasks, now.tasks)) changes.add("task")

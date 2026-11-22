@@ -376,8 +376,7 @@ describe("wiki_read_change by page link", () => {
       }
     ],
     chats: [],
-    removed: [],
-    items: []
+    removed: []
   }
   const tools = Effect.runSync(
     wikiChangeTools.pipe(

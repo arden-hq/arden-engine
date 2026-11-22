@@ -12,8 +12,7 @@ import {
   canonicalProposalId,
   REVIEWED_TASK_FIELDS,
   SpaceReviewDispositionSchema,
-  SpaceReviewInputSchema,
-  type SpaceReviewItem
+  SpaceReviewInputSchema
 } from "../automations/space-review.js"
 import { parseLease } from "./automation-lease.js"
 import { QueueContextSchema } from "./automation-queue-context.js"
@@ -31,9 +30,6 @@ import { keyMessageJson } from "./chat-key-message.js"
 import { reviewMayRunSql } from "./automation-rows.js"
 
 const REVIEWED_TASK_COLUMNS = REVIEWED_TASK_FIELDS.map((field) => `'${field}', ${field}`).join(", ")
-
-const ITEM_REVIEW_DAYS = 14
-const ITEM_REVIEW_LIMIT = 20
 
 const failure = (reason: AutomationStoreError["reason"], message: string, cause?: unknown) =>
   new AutomationStoreError({
@@ -328,10 +324,9 @@ export const makeSpaceReviewStore = ({
           const spaces = yield* sql<{
             readonly page_id: string | null
             readonly page_path: string | null
-            readonly inference: number | null
             readonly semantic: string
           }>`
-        SELECT page_id, page_path, json_extract(inference_policy, '$.enabled') AS inference, json_object('name', name, 'instructions', instructions,
+        SELECT page_id, page_path, json_object('name', name, 'instructions', instructions,
           'inference_policy', json(inference_policy), 'policy_generation', policy_generation,
           'page_id', page_id, 'page_path', page_path) AS semantic FROM spaces
         WHERE space_id = ${current.space_id} AND archived_at IS NULL`
@@ -371,21 +366,6 @@ export const makeSpaceReviewStore = ({
           AND json_extract(run.metadata_json, '$.automation') IS NULL
           AND json_extract(run.metadata_json, '$.turn_id') IS NOT NULL
         ORDER BY session.session_id, run.started_at, run.run_id`
-          const routedSince = iso((yield* Clock.currentTimeMillis) - ITEM_REVIEW_DAYS * 86_400_000)
-          const items =
-            space.inference === 1
-              ? yield* sql<SpaceReviewItem>`SELECT item.item_id AS "itemId", item.source,
-                  item.sender, item.title, item.snippet, item.received_at AS "receivedAt",
-                  item.route_reason AS reason
-                FROM connection_items AS item
-                WHERE item.owner_space_id = ${current.space_id} AND item.state = 'routed'
-                  AND item.routed_at >= ${routedSince}
-                  AND NOT EXISTS (SELECT 1 FROM task_proposals AS proposal,
-                    json_each(proposal.sources_json) AS cited
-                    WHERE json_extract(cited.value, '$.kind') = 'connection_item'
-                      AND json_extract(cited.value, '$.item_id') = item.item_id)
-                ORDER BY item.routed_at DESC, item.item_id LIMIT ${ITEM_REVIEW_LIMIT}`
-              : []
           const offers = yield* sql<{ readonly text: string }>`SELECT text FROM task_proposals
             WHERE space_id = ${current.space_id} AND status = 'offered' ORDER BY created_at, proposal_id`
           const previous = yield* sql<{
@@ -408,7 +388,6 @@ export const makeSpaceReviewStore = ({
               sources: sources.map((source) => source.source)
             }),
             chats,
-            items,
             openProposals: offers.map((offer) => offer.text),
             space: yield* readSpaceReviewContext(sql, current.space_id),
             ...(reviewed === undefined ? {} : { reviewed }),

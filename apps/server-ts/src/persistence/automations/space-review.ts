@@ -113,19 +113,7 @@ const SpaceReviewReadsSchema = Schema.Struct({
   memory: Schema.Struct({ base: Schema.NullOr(Schema.String), head: Schema.NullOr(Schema.String) }),
   pages: ReadPagesSchema,
   chats: Schema.Array(ChatTurnSchema),
-  removed: Schema.Array(Schema.String),
-  items: Schema.Array(
-    Schema.Struct({
-      itemId: Schema.String,
-      source: Schema.String,
-      sender: Schema.NullOr(Schema.String),
-      title: Schema.String,
-      snippet: Schema.String,
-      receivedAt: Schema.String,
-      reason: Schema.String,
-      isNew: Schema.Boolean
-    })
-  )
+  removed: Schema.Array(Schema.String)
 })
 export type SpaceReviewReads = typeof SpaceReviewReadsSchema.Type
 
@@ -146,21 +134,10 @@ export const SpaceReviewInputSchema = Schema.Struct({
   chats: Schema.Array(ChatTurnSchema),
   semantic: Schema.String,
   unresolved: Schema.Array(Schema.String),
-  items: Schema.optionalKey(Schema.Array(Schema.Struct({ itemId: Schema.String }))),
   reads: Schema.optionalKey(SpaceReviewReadsSchema),
   prompt: Schema.String
 })
 export type SpaceReviewInput = typeof SpaceReviewInputSchema.Type
-
-export interface SpaceReviewItem {
-  readonly itemId: string
-  readonly source: string
-  readonly sender: string | null
-  readonly title: string
-  readonly snippet: string
-  readonly receivedAt: string
-  readonly reason: string
-}
 
 export interface SpaceReviewEvidence {
   readonly spaceId: string
@@ -169,7 +146,6 @@ export interface SpaceReviewEvidence {
   readonly memorySources: ReadonlyArray<string>
   readonly semantic: string
   readonly chats: SpaceReviewInput["chats"]
-  readonly items: ReadonlyArray<SpaceReviewItem>
   readonly openProposals: ReadonlyArray<string>
   readonly space: SpaceReviewSnapshot | undefined
   readonly reviewed?: SpaceReviewInput
