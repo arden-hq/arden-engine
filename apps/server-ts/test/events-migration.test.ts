@@ -3,7 +3,7 @@ import { migratedTo } from "./fixtures/migrated-to.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
 
-it("184 moves the Urgent events handler id to events on the Automation and its past runs", () => {
+it("184 moves the Urgent events job to the events handler, and its past runs keep theirs", () => {
   const database = migratedTo(184, (database) => {
     database.exec(`INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers,
         created_at, purpose, handler)
@@ -17,7 +17,7 @@ it("184 moves the Urgent events handler id to events on the Automation and its p
     { handler: "events" }
   ])
   expect(database.prepare("SELECT handler FROM automation_runs ORDER BY id").all()).toEqual([
-    { handler: "events" },
+    { handler: "urgent_events" },
     { handler: "daily_summary" }
   ])
   database.close()
