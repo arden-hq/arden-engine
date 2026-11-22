@@ -54,6 +54,17 @@ export type ToolDisplay = JsonRecord & {
   readonly [Fact in keyof Facts]?: Facts[Fact][number]
 }
 
+const APP_ONLY_CARDS = [
+  "site_secret",
+  "vault_key_ask",
+  "vault_card_pay",
+  "vault_card_frame"
+] as const satisfies ReadonlyArray<Facts["card"][number]>
+
+/** Whether only the Arden app on the Mac may grant this card. Other clients may deny it. */
+export const grantedOnlyInTheApp = (display: ToolDisplay | undefined): boolean =>
+  APP_ONLY_CARDS.some((card) => card === display?.card)
+
 const exact = <const Values extends ReadonlyArray<string>>(values: Values) =>
   Schema.optionalKey(Schema.Literals(values))
 

@@ -152,7 +152,13 @@ export class PhoneSession {
         state: outcome.state,
         result: outcome.result
       })
-      this.#ack(message.cid, outcome)
+      const kept = await this.#commands.find(message.cid)
+      this.#ack(
+        message.cid,
+        kept === undefined || kept.state === "running"
+          ? outcome
+          : { state: kept.state, result: kept.result }
+      )
     } finally {
       this.#running.delete(message.cid)
     }

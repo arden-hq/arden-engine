@@ -29,6 +29,13 @@ export const failureMessage = (input: {
     body.message.trim() !== ""
   )
     return body.message
+  if (
+    Predicate.isObject(body) &&
+    "detail" in body &&
+    typeof body.detail === "string" &&
+    body.detail.trim() !== ""
+  )
+    return body.detail
   switch (input.response.status) {
     case 503:
       return input.path === "/chat/message"
@@ -110,7 +117,9 @@ export const runCommand = async (
           run_id: command.args.run_id,
           tool_id: command.args.tool_id,
           result: "",
-          approved: command.args.approve
+          approved: command.args.approve,
+          command_id: cid,
+          ...(command.args.asked_at === undefined ? {} : { asked_at: command.args.asked_at })
         })
       )
     case "stop": {

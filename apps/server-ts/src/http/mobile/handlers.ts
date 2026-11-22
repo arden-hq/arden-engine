@@ -1,10 +1,9 @@
 import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
 import type { MobileAsk } from "@arden-hq/protocol/mobile"
-import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
 import { chatName } from "@arden-hq/protocol/views"
-import { DateTime, Effect } from "effect"
+import { Array as Arr, DateTime, Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { addressedHomeLetter } from "../../automations/home-letter-links.js"
 import { ChatHistory } from "../../chat/history.js"
@@ -19,9 +18,14 @@ import { HomeStore } from "../../persistence/home/store.js"
 import { InboxStore } from "../../persistence/inbox/store.js"
 import { RunQueries } from "../../persistence/runs/queries.js"
 import { SessionLifecycleEvents } from "../../persistence/sessions/events.js"
-import { SessionStore, type SessionListQuery } from "../../persistence/sessions/store.js"
+import {
+  SESSION_IDS_PER_LIST,
+  SessionStore,
+  type SessionListQuery
+} from "../../persistence/sessions/store.js"
 import type { JsonObject } from "../../persistence/json.js"
 import { WorkStore } from "../../persistence/work/store.js"
+import { ServerToolRegistry } from "../../tools/registry.js"
 import { ArdenApi } from "../api.js"
 import { listedSessionToWire } from "../wire/sessions.js"
 
@@ -44,9 +48,15 @@ export const MobileHandlers = HttpApiBuilder.group(
     const work = yield* WorkStore
     const history = yield* ChatHistory
     const bus = yield* SessionLifecycleEvents
+    const tools = yield* ServerToolRegistry
 
     const list = (query: SessionListQuery) =>
       sessions.list(query).pipe(Effect.map((rows) => rows.map(listedSessionToWire)))
+
+    const chatsById = (ids: ReadonlyArray<string>) =>
+      Effect.forEach(Arr.chunksOf(ids, SESSION_IDS_PER_LIST), (group) =>
+        list({ sessionIds: group, scope: "all", limit: group.length })
+      ).pipe(Effect.map((groups) => groups.flat()))
 
     const busHead = Effect.scoped(bus.open()).pipe(Effect.map((opened) => opened.initialSequence))
 
@@ -70,13 +80,7 @@ export const MobileHandlers = HttpApiBuilder.group(
           )
         )
       ]
-      const alive = new Set(
-        sessionIds.length === 0
-          ? []
-          : (yield* list({ sessionIds, scope: "all", limit: sessionIds.length })).map(
-              (row) => row.session_id
-            )
-      )
+      const alive = new Set((yield* chatsById(sessionIds)).map((row) => row.session_id))
       return new Map(
         pairs.flatMap(([itemId, task]): [string, PhoneHome][] => {
           if (task.space_id !== null)
@@ -91,20 +95,11 @@ export const MobileHandlers = HttpApiBuilder.group(
     })
 
     const loadAsks = Effect.fn("MobileHandlers.loadAsks")(function* () {
-      const items = (yield* inbox.view()).groups.flatMap((group) => group.items)
-      const questions = items.flatMap((item): RunQuestion[] =>
-        item.source === "question" ? [item.question] : []
-      )
-      const approvals = items.flatMap((item): RunApproval[] =>
-        item.source === "approval" ? [item.approval] : []
-      )
+      const { questions, approvals } = yield* inbox.openAsks()
       const sessionIds = [
         ...new Set([...questions, ...approvals].map((ask) => ask.destination_session_id))
       ]
-      const asking =
-        sessionIds.length === 0
-          ? []
-          : yield* list({ sessionIds, scope: "all", limit: sessionIds.length })
+      const asking = yield* chatsById(sessionIds)
       const places = new Map(
         asking.map((session): [string, AskPlace] => [
           session.session_id,
@@ -119,7 +114,15 @@ export const MobileHandlers = HttpApiBuilder.group(
       const spaceNames = new Map(
         (yield* spaces.list()).map((space) => [space.space_id, space.name])
       )
-      return mobileAsks({ questions, approvals, places, spaceNames })
+      const catalog = yield* tools.catalog()
+      const displays = new Map(catalog.tools.map((tool) => [tool.name, tool.display]))
+      return mobileAsks({
+        questions,
+        approvals,
+        places,
+        spaceNames,
+        displayOf: (name) => displays.get(name) ?? catalog.unlisted[name]
+      })
     })
 
     const homeView = Effect.fn("MobileHandlers.home")(function* () {
@@ -195,10 +198,7 @@ export const MobileHandlers = HttpApiBuilder.group(
       const taskHomes = yield* taskPlaces(keys.taskIds)
       const named = [...new Set([...keys.sessionIds, ...sessionIds.values()])]
       const names = new Map(
-        (named.length === 0
-          ? []
-          : yield* list({ sessionIds: named, scope: "all", limit: named.length })
-        ).map((row): [string, string] => [row.session_id, chatName(row)])
+        (yield* chatsById(named)).map((row): [string, string] => [row.session_id, chatName(row)])
       )
       const savedBlocks = new Map<string, Map<number, JsonObject>>()
       for (const saved of yield* answerBlocks.list(sessionId)) {

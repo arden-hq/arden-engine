@@ -233,14 +233,13 @@ const start = async (input: unknown): Promise<void> => {
     }
     const cliCapability = randomBytes(32).toString("base64url")
     const localAccess = {
+      host: "app" as const,
       capability: message.capability,
       rendererOrigin: message.options.rendererOrigin,
-      cliCapability
+      cliCapability,
+      phoneCapability: randomBytes(32).toString("base64url")
     }
     const startupSignal = new AbortController().signal
-    // Opening the database and reading chats need no model credential, so the
-    // server starts while the host fetches it. Model calls wait for it inside
-    // the provider; a signed-out host swaps to local-only once that is known.
     const initial = requestCredential(false, startupSignal).catch(() => null)
     const reportedPhases = new Set<StartupPhase>()
     const reportPhase = (phase: StartupPhase): void => {

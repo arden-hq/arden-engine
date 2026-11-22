@@ -8,10 +8,15 @@ import {
   openQueued,
   toB64url
 } from "@arden-hq/relay-protocol"
-import { Clock, Effect, Queue } from "effect"
+import { Clock, Effect, Layer, ManagedRuntime, Queue } from "effect"
 import { TestClock } from "effect/testing"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import type { PairedDevice } from "../src/persistence/relay/store.js"
+import { RelayStore, type PairedDevice } from "../src/persistence/relay/store.js"
+import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
+import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 import type { Notice } from "../src/persistence/sqlite/notices.js"
 import { loadMacIdentity } from "../src/relay/identity.js"
 import { memoryVault } from "./fixtures/memory-vault.js"
@@ -40,7 +45,8 @@ describe("relay push", () => {
       sessionId: "chat-1",
       collapseId: "call-1",
       askId: "call-1",
-      runId: "run-1"
+      runId: "run-1",
+      askedAt: "2026-11-21T09:00:00.000Z"
     } as const
     const sealed = pushPayload({ identity, device, notice })
     expect(sealed.category).toBe("arden.approval")
@@ -68,7 +74,8 @@ describe("relay push", () => {
       body: "Edit notes.md",
       session_id: "chat-1",
       ask_id: "call-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      asked_at: "2026-11-21T09:00:00.000Z"
     })
   })
 
@@ -103,6 +110,17 @@ describe("relay push", () => {
     })
   })
 
+  it("an approval push carries the time its card was asked", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.asks = [approval("run-1", "call-1")]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => [pushed.askId, pushed.askedAt])).toEqual([
+      ["call-1", "2026-10-12T09:58:00.000Z"]
+    ])
+  })
+
   it("two posts in one chat open that chat, and neither replaces the other on the phone", async () => {
     const world = makeWorld({ seeded: true })
     const sent: Array<PushNotice> = []
@@ -133,13 +151,25 @@ describe("relay push", () => {
     expect(sent.map((pushed) => pushed.collapseId)).toEqual(["chat-1"])
   })
 
-  it("an ask's push collapses on the ask", async () => {
+  it("a question collapses on the question, and an approval on its call in its run", async () => {
     const world = makeWorld({ seeded: true })
     const sent: Array<PushNotice> = []
-    world.asks = [question("q-1"), approval("run-1", "call-1")]
+    world.asks = [question("q-1"), approval("run-1", "call-1"), approval("run-2", "call-1")]
     world.onSend = (pushed) => sent.push(pushed)
     await world.reconcile()
-    expect(sent.map((pushed) => pushed.collapseId)).toEqual(["q-1", "call-1"])
+    world.asks = [approval("run-1", "call-1", "2026-10-12T09:59:30.000Z")]
+    await world.reconcile()
+    const [asked, otherRun, askedAgain] = sent.slice(1).map((pushed) => pushed.collapseId)
+    expect(sent[0]?.collapseId).toBe("q-1")
+    expect(askedAgain).toBe(asked)
+    expect(otherRun).not.toBe(asked)
+    for (const pushed of sent) expect(pushed.collapseId).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+    expect(new Set(sent.map((pushed) => pushed.key)).size).toBe(4)
+    expect(sent.slice(1).map((pushed) => [pushed.runId, pushed.askId, pushed.askedAt])).toEqual([
+      ["run-1", "call-1", "2026-10-12T09:58:00.000Z"],
+      ["run-2", "call-1", "2026-10-12T09:58:00.000Z"],
+      ["run-1", "call-1", "2026-10-12T09:59:30.000Z"]
+    ])
   })
 
   it("a restart neither repeats a push nor skips an ask that opened while Arden was down", async () => {
@@ -154,10 +184,69 @@ describe("relay push", () => {
   it("keys an approval by its run, so the same tool call id in another run is another ask", async () => {
     const world = makeWorld({ seeded: true })
     world.asks = [approval("run-1", "call-1"), approval("run-2", "call-1")]
-    expect(await world.reconcile()).toEqual([
-      "ask:approval:run-1:call-1",
-      "ask:approval:run-2:call-1"
-    ])
+    expect(new Set(await world.reconcile()).size).toBe(2)
+  })
+
+  it("with call ids of any length, each asking pushes once to each phone, and a call asked again pushes again", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "arden-relay-push-keys-"))
+    const store = ManagedRuntime.make(
+      sqlitePersistenceLayer({ dataDir: null, filename: join(directory, "arden.db") }).pipe(
+        Layer.provide(PersistenceWriteQueue.layer)
+      )
+    )
+    try {
+      const longCall = `call_${"x".repeat(400)}`
+      const otherCall = `call_${"y".repeat(400)}`
+      const phones = ["a".repeat(22), "b".repeat(22)]
+      let asks: ReadonlyArray<ReturnType<typeof approval>> = []
+      const sent: Array<string> = []
+      const loopback: Loopback = {
+        request: async () => ({ status: 200, body: { asks } }),
+        events: async function* () {}
+      }
+      const reconcile = () =>
+        store.runPromise(
+          Effect.gen(function* () {
+            const relay = yield* RelayStore
+            yield* deliverPushes(
+              {
+                state: { loopback, notices: () => Effect.succeed([]), notified: relay.notified },
+                seeded: relay.pushesSeeded,
+                seed: relay.seedNotified,
+                claim: relay.claimNotified,
+                release: relay.releaseNotified,
+                present: () => Effect.succeed(false),
+                route: () =>
+                  Effect.succeed({
+                    devices: phones,
+                    send: (notice: PushNotice, dev: string) => {
+                      sent.push(`${notice.askId?.slice(0, 6)} ${notice.askedAt} ${dev.slice(0, 1)}`)
+                      return true
+                    }
+                  })
+              },
+              NOW
+            )
+          })
+        )
+      await reconcile()
+      asks = [approval("run-1", longCall), approval("run-1", otherCall)]
+      await reconcile()
+      await reconcile()
+      asks = [approval("run-1", longCall, "2026-10-12T09:59:30.000Z"), approval("run-1", otherCall)]
+      await reconcile()
+      expect(sent).toEqual([
+        "call_x 2026-10-12T09:58:00.000Z a",
+        "call_x 2026-10-12T09:58:00.000Z b",
+        "call_y 2026-10-12T09:58:00.000Z a",
+        "call_y 2026-10-12T09:58:00.000Z b",
+        "call_x 2026-10-12T09:59:30.000Z a",
+        "call_x 2026-10-12T09:59:30.000Z b"
+      ])
+    } finally {
+      await store.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it("a push that throws is released and tried again; the notices after it are still sent", async () => {
@@ -286,13 +375,14 @@ const question = (id: string) => ({
   prompt: id
 })
 
-const approval = (runId: string, toolId: string) => ({
+const approval = (runId: string, toolId: string, askedAt = "2026-10-12T09:58:00.000Z") => ({
   kind: "approval",
   tool_id: toolId,
   run_id: runId,
   session_id: `chat-${runId}`,
   place: "Lab",
-  title: "Edit notes.md"
+  title: "Edit notes.md",
+  asked_at: askedAt
 })
 
 const notice = (id: string, fields: Partial<Notice>): Notice => ({

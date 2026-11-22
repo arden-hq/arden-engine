@@ -17,9 +17,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { startServer, type ServerHandle, type ServerOptions } from "../src/index.js"
-import type { McpOAuthVault } from "../src/mcp/vault.js"
 import type { ModelHost } from "../src/models/host.js"
 import { brokeredProviderRoute } from "../src/providers/registry.js"
+import { memoryServerVault } from "./fixtures/memory-vault.js"
 
 const headers = { "content-type": "application/json" }
 const GEMMA = "gemma-4"
@@ -130,27 +130,6 @@ const codexProvider = () => {
     }
   }
   return { provider, requests }
-}
-
-/** The Electron vault, in memory. */
-const memoryVault = () => {
-  const documents = new Map<string, unknown>()
-  const unused = async (): Promise<never> => {
-    throw new Error("not used")
-  }
-  const vault: McpOAuthVault = {
-    readDocument: async (target) => documents.get(target.documentKey) ?? null,
-    writeDocument: async (target, value) => void documents.set(target.documentKey, value),
-    clearDocument: async (target) => void documents.delete(target.documentKey),
-    read: unused,
-    write: unused,
-    clear: unused,
-    resolveClient: unused,
-    readTransportSecrets: unused,
-    writeTransportSecrets: unused,
-    clearTransportSecrets: unused
-  }
-  return { vault, documents }
 }
 
 const cleanups: Array<() => Promise<void>> = []
@@ -389,8 +368,8 @@ describe("the model server beside the signed-in account", () => {
     const first = await fakeLlama(GEMMA)
     const second = await fakeLlama(QWEN)
     cleanups.push(first.close, second.close)
-    const { vault, documents } = memoryVault()
-    const running = await started({ credentialVault: vault })
+    const documents = new Map<string, unknown>()
+    const running = await started({ credentialVault: memoryServerVault(documents) })
     const keyed = (baseUrl: string, model: string, apiKey: string): ChatEndpointDraft => ({
       service: "custom",
       baseUrl,

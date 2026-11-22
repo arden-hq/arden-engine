@@ -16,6 +16,7 @@ import {
 import { spaceDecoders, spaceRoutes, type SpaceListResponse } from "@arden-hq/protocol/spaces"
 import { healthDecoders, healthRoutes, type HealthStatus } from "@arden-hq/protocol/health"
 import { modelDecoders, modelRoutes, type ModelCatalog } from "@arden-hq/protocol/models"
+import { toolDecoders, toolRoutes, type ToolCatalogResponse } from "@arden-hq/protocol/tools"
 import { ProtocolError } from "@arden-hq/protocol"
 import {
   isTerminalRunStatus,
@@ -85,7 +86,9 @@ export interface WaitForRunOptions {
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
   readonly reconnectDelayMs?: number
-  readonly onEvent?: (event: HeadlessRunEvent) => void | PromiseLike<void>
+  /** Called for each event, with a signal that aborts when the wait's own signal or its timeout
+   *  does. It does not abort when the wait returns. */
+  readonly onEvent?: (event: HeadlessRunEvent, signal: AbortSignal) => void | PromiseLike<void>
 }
 
 /** Which Runs `listRuns` returns; every Run when empty. */
@@ -409,6 +412,16 @@ export class HeadlessClient {
     return modelDecoders.catalog(await this.#requestJson(modelRoutes.catalog, { method: "GET" }))
   }
 
+  /** The server's tools and the display facts each declares, such as the card it asks on. */
+  async toolCatalog(options: { readonly signal?: AbortSignal } = {}): Promise<ToolCatalogResponse> {
+    return toolDecoders.catalog(
+      await this.#requestJson(toolRoutes.catalog, {
+        method: "GET",
+        ...(options.signal === undefined ? {} : { signal: options.signal })
+      })
+    )
+  }
+
   async listSpaces(): Promise<SpaceListResponse> {
     return spaceDecoders.list(await this.#requestJson(spaceRoutes.collection, { method: "GET" }))
   }
@@ -475,7 +488,7 @@ export class HeadlessClient {
             throwIfAborted(signal)
             if (options.onEvent !== undefined) {
               try {
-                await options.onEvent(event)
+                await options.onEvent(event, signal)
               } catch (cause) {
                 throw new HeadlessEventHandlerError(cause)
               }

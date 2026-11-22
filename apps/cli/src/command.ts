@@ -27,6 +27,7 @@ export type CliClient = Pick<
   | "listSpaces"
   | "listSessions"
   | "submit"
+  | "toolCatalog"
   | "wait"
   | "waitForRun"
 >

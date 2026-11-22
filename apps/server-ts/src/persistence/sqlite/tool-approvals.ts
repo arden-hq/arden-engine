@@ -156,11 +156,13 @@ export const approvalPayload = (input: PendingToolApprovalInput): JsonObject => 
 
 const approvalNeededDraft = (
   input: PendingToolApprovalInput,
-  sourceKind: "run" | "deferred"
+  sourceKind: "run" | "deferred",
+  askedAt: string
 ): EventDraft => ({
   event: {
     type: "approval_needed",
     tool_id: input.toolCallId,
+    asked_at: askedAt,
     name: input.toolName,
     content_preview: input.preview,
     ...(input.diff === undefined ? {} : { diff: input.diff }),
@@ -185,6 +187,7 @@ export const pendingDecisionDraft = Effect.fn("SqliteToolExecutionStore.pendingD
   function* (
     input: PendingToolApprovalInput,
     operation: "pause" | "uncertain" | "recover",
+    askedAt: string,
     sourceKind: "run" | "deferred" = "run"
   ): Effect.fn.Return<EventDraft, ToolExecutionStoreError> {
     if (isConnectionRequiredData(input.data)) {
@@ -213,7 +216,7 @@ export const pendingDecisionDraft = Effect.fn("SqliteToolExecutionStore.pendingD
         runId: input.runId
       }
     }
-    return approvalNeededDraft(input, sourceKind)
+    return approvalNeededDraft(input, sourceKind, askedAt)
   }
 )
 
@@ -229,7 +232,6 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
   requestedAt: string,
   operation: "pause" | "uncertain" | "recover"
 ): Effect.fn.Return<EventDraft | null, ToolExecutionStoreError, UnitOfWork> {
-  const decisionDraft = yield* pendingDecisionDraft(input, operation)
   const announced = (draft: EventDraft) =>
     Effect.gen(function* () {
       yield* journalAskChange(sql, sessionEvents, {
@@ -271,14 +273,17 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
       existing.session_id === input.sessionId &&
       existing.tool_name === input.toolName
     ) {
-      yield* sql`
+      const reopened = yield* sql<{ readonly requested_at: string }>`
         UPDATE tool_approvals
         SET action = ${input.action}, scope = ${input.scope}, preview = ${input.preview},
-            diff = ${input.diff ?? null}, status = 'pending', requested_at = ${requestedAt},
+            diff = ${input.diff ?? null}, status = 'pending',
+            requested_at = CASE WHEN ${requestedAt} > requested_at THEN ${requestedAt}
+              ELSE strftime('%Y-%m-%dT%H:%M:%fZ', requested_at, '+0.001 seconds') END,
             resolved_at = NULL, expires_at = NULL, result_feedback = NULL,
             kind = ${input.kind}, payload_json = ${payloadJson}, resolution_json = NULL
         WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}
           AND kind = 'tool_approval' AND status = 'approved'
+        RETURNING requested_at
       `.pipe(
         Effect.mapError((cause) =>
           toolError(
@@ -290,7 +295,15 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
           )
         )
       )
-      return yield* announced(decisionDraft)
+      const asking = reopened[0]
+      if (asking === undefined)
+        return yield* toolError(
+          operation,
+          "storage",
+          "Could not record the next tool decision",
+          approvalIdentity(input)
+        )
+      return yield* announced(yield* pendingDecisionDraft(input, operation, asking.requested_at))
     }
     const storedPayload = yield* decodeJson(JsonObjectSchema, existing.payload_json).pipe(
       Effect.mapError((cause) =>
@@ -350,7 +363,7 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
       )
     )
   )
-  return yield* announced(decisionDraft)
+  return yield* announced(yield* pendingDecisionDraft(input, operation, requestedAt))
 })
 
 export const approvalInput = (

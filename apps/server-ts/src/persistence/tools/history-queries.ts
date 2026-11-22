@@ -48,6 +48,10 @@ export class ToolHistoryQueries extends Context.Service<
     readonly ledgerToolCall: (
       input: LedgerToolCallInput
     ) => Effect.Effect<LedgerToolCall | undefined, ToolExecutionStoreError>
+    readonly calledTool: (input: {
+      readonly runId: string
+      readonly toolCallId: string
+    }) => Effect.Effect<string | undefined, ToolExecutionStoreError>
     readonly pendingApprovals: (
       sessionId: string
     ) => Effect.Effect<ReadonlyArray<RuntimeApprovalSnapshot>, ToolExecutionStoreError>

@@ -9,13 +9,13 @@ import type { SqlClient } from "effect/unstable/sql"
 import type { PendingConnectionDecision } from "../../connections/recovery.js"
 import { JsonObjectSchema } from "../json.js"
 import { grantFolderField } from "../permissions/grant-folder.js"
-import {
+import type {
   ToolHistoryQueries,
-  type AgentAssignment,
-  type LedgerToolCall,
-  type LedgerToolCallInput,
-  type ToolExecutionHistoryInput,
-  type ToolExecutionResultMetadata
+  AgentAssignment,
+  LedgerToolCall,
+  LedgerToolCallInput,
+  ToolExecutionHistoryInput,
+  ToolExecutionResultMetadata
 } from "../tools/history-queries.js"
 import { ToolExecutionStore, ToolExecutionStoreError } from "../tools/store.js"
 import { decodeJson } from "./json.js"
@@ -67,7 +67,7 @@ export const makeToolHistory = ({
   reader,
   writer
 }: Pick<PersistenceDeps, "reader" | "writer">): {
-  readonly history: ToolHistoryQueries["Service"]
+  readonly history: Omit<ToolHistoryQueries["Service"], "calledTool">
 } & Pick<
   ToolExecutionStore["Service"],
   "priorResults" | "pendingConnection" | "allPendingConnections"
@@ -808,7 +808,7 @@ export const makeToolHistory = ({
   )
 
   return {
-    history: ToolHistoryQueries.of({
+    history: {
       agentAssignment,
       historyResultMetadata,
       ledgerToolCall,
@@ -816,7 +816,7 @@ export const makeToolHistory = ({
       pendingDescendantApprovals,
       pendingConnections,
       pendingDescendantConnections
-    }),
+    },
     priorResults,
     pendingConnection,
     allPendingConnections

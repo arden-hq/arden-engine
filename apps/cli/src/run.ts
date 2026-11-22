@@ -563,9 +563,9 @@ export const runCommand = async (
     const waiting = {
       signal: waitController.signal,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      onEvent: async (event: HeadlessRunEvent) => {
+      onEvent: async (event: HeadlessRunEvent, signal: AbortSignal) => {
         writeProgress(identity(), event)
-        await respond.onEvent(event)
+        await respond.onEvent(event, signal)
       }
     }
     const detail = await followAnswers(respond, await client.wait(accepted, waiting), (runId) =>
@@ -624,9 +624,9 @@ export const waitCommand = async (
       client.waitForRun(runId, {
         signal: controller.signal,
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-        onEvent: async (event) => {
+        onEvent: async (event, signal) => {
           writeProgress(identity, event)
-          await respond.onEvent(event)
+          await respond.onEvent(event, signal)
         }
       })
     const detail = await followAnswers(respond, await follow(options.runId), follow)

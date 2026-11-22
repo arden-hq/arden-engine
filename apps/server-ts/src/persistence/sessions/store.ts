@@ -38,6 +38,8 @@ export class SessionStoreError extends Schema.TaggedError<SessionStoreError>()(
 
 export const onboardingClientId = (sessionId: string): string => `onboarding:${sessionId}`
 
+export const SESSION_IDS_PER_LIST = 100
+
 export interface SessionListQuery {
   readonly spaceId?: string
   readonly scope?: "primary" | "agent" | "all"

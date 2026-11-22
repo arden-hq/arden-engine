@@ -98,7 +98,8 @@ const denyApprovalReplyInTransaction = Effect.fn("Chat.denyApprovalReplyInTransa
           grantList: undefined,
           attachFolderToSpace: false,
           edits: null,
-          alternative: null
+          alternative: null,
+          askedAt: undefined
         },
         timestamp: options.now,
         approvedFolders: new Map()

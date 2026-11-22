@@ -86,7 +86,12 @@ const CommandArgs = {
       Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(6))
     )
   }),
-  decide: Schema.Struct({ run_id: Id, tool_id: Id, approve: Schema.Boolean }),
+  decide: Schema.Struct({
+    run_id: Id,
+    tool_id: Id,
+    approve: Schema.Boolean,
+    asked_at: Schema.optionalKey(Id)
+  }),
   stop: Schema.Struct({ session_id: Id }),
   capture: Schema.Struct({
     text: Words,

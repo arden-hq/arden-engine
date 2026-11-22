@@ -119,7 +119,9 @@ export const ToolResultInputSchema = Schema.Struct({
   grantList: Schema.optionalKey(Schema.Literals(["space", "global"])),
   attachFolderToSpace: Schema.optionalKey(Schema.Boolean),
   editedArguments: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
-  alternative: Schema.optionalKey(Schema.Literal("draft"))
+  alternative: Schema.optionalKey(Schema.Literal("draft")),
+  askedAt: Schema.optionalKey(Schema.NonEmptyString),
+  commandId: Schema.optionalKey(Schema.NonEmptyString)
 }).check(
   Schema.makeFilter((input) =>
     input.grantList !== undefined && input.grantStanding !== true
@@ -415,7 +417,9 @@ export const encodeToolResultRequestEffect = (value: unknown) =>
           ? {}
           : { attach_folder_to_space: input.attachFolderToSpace }),
         ...(input.editedArguments === undefined ? {} : { edited_arguments: input.editedArguments }),
-        ...(input.alternative === undefined ? {} : { alternative: input.alternative })
+        ...(input.alternative === undefined ? {} : { alternative: input.alternative }),
+        ...(input.askedAt === undefined ? {} : { asked_at: input.askedAt }),
+        ...(input.commandId === undefined ? {} : { command_id: input.commandId })
       })
     )
   )

@@ -21,6 +21,7 @@ import type {
   SessionStoreError,
   StoredSession
 } from "../sessions/store.js"
+import { SESSION_IDS_PER_LIST } from "../sessions/store.js"
 import type { PersistenceDeps } from "./deps.js"
 import { storeError } from "./session-rows.js"
 import { decodeJsonWith } from "./json.js"
@@ -50,7 +51,9 @@ const sessionListOptionsSchema = Schema.Struct({
   ),
   sessionRef: Schema.optionalKey(Schema.NonEmptyString),
   includeArchived: Schema.optionalKey(Schema.Boolean),
-  sessionIds: Schema.optionalKey(Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(100)))
+  sessionIds: Schema.optionalKey(
+    Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(SESSION_IDS_PER_LIST))
+  )
 }).check(
   Schema.makeFilter((options) =>
     options.cursor === undefined || options.offset === undefined

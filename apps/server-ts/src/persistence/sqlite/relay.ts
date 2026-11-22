@@ -1,5 +1,6 @@
 import type { CommandKind } from "@arden-hq/relay-protocol"
 import { Clock, DateTime, Effect, Schema } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
 import {
   DEFAULT_RELAY_SETTINGS,
   RelaySettingsPatchSchema,
@@ -64,6 +65,22 @@ const PUSH_SEEDED_KEY = "seeded:records"
 const decodeResult = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 const now = Effect.map(DateTime.now, DateTime.formatIso)
+
+export const recordCommandResult = (
+  sql: SqlClient.SqlClient,
+  input: {
+    readonly cid: string
+    readonly kind?: CommandKind
+    readonly state: Exclude<RelayCommandState, "running">
+    readonly result: Schema.Json | undefined
+  }
+) =>
+  sql<{ readonly cid: string }>`UPDATE relay_commands
+    SET state = ${input.state},
+      result_json = ${input.result === undefined ? null : JSON.stringify(input.result)}
+    WHERE cid = ${input.cid} AND state = 'running'
+      AND ${input.kind === undefined ? sql`1 = 1` : sql`kind = ${input.kind}`}
+    RETURNING cid`
 
 export const makeRelayStore = Effect.fn("SqliteRelayStore.make")(function* ({
   writer,
@@ -199,10 +216,7 @@ export const makeRelayStore = Effect.fn("SqliteRelayStore.make")(function* ({
       readonly state: Exclude<RelayCommandState, "running">
       readonly result: Schema.Json | undefined
     }) {
-      const result = input.result === undefined ? null : JSON.stringify(input.result)
-      yield* writer.run(sql`
-        UPDATE relay_commands SET state = ${input.state}, result_json = ${result}
-        WHERE cid = ${input.cid}`)
+      yield* writer.run(recordCommandResult(sql, input))
     },
     Effect.mapError(failure("commands", "Could not record the phone command's result"))
   )

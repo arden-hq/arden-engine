@@ -50,6 +50,8 @@ const DecisionRouteSchema = Schema.Struct({
 export interface ApprovalNeededEvent extends NullableSessionServerEventFields {
   readonly type: "approval_needed"
   readonly tool_id: string
+  /** The asking's `requested_at`; `POST /tools/result` takes it as `asked_at`. Older events lack it. */
+  readonly asked_at?: string
   readonly name: string
   readonly path?: string | null
   readonly diff?: string | null
@@ -115,6 +117,7 @@ export type ApprovalEvent =
 
 export const ApprovalNeededEventSchema = sessionEvent("approval_needed", optionalNullableString, {
   tool_id: Schema.String,
+  asked_at: Schema.optionalKey(Schema.String),
   name: Schema.String,
   path: optionalNullableString,
   diff: optionalNullableString,

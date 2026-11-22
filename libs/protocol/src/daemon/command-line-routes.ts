@@ -18,6 +18,7 @@ export const COMMAND_LINE_ROUTES: ReadonlyArray<CommandLineRoute> = [
   { method: "GET", path: "/health", rule: "open" },
   { method: "GET", path: "/spaces", rule: "open" },
   { method: "GET", path: "/models", rule: "open" },
+  { method: "GET", path: "/tools", rule: "open" },
   { method: "GET", path: "/sessions", rule: "open" },
   { method: "POST", path: "/sessions", rule: "plain_new_chat" },
   { method: "POST", path: "/sessions/:id/branch", rule: "own_chat_in_path" },
