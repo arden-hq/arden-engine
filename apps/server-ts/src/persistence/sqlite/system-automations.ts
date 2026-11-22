@@ -100,6 +100,17 @@ const ownerTriggers = Effect.fn("SqliteAutomationStore.ownerTriggers")(function*
   }
 })
 
+const storedTriggers = (owner: OwnerTriggers, specTriggers: string): string => {
+  switch (owner.kind) {
+    case "spec":
+      return specTriggers
+    case "owner":
+      return owner.triggers
+    case "none_taken":
+      return "[]"
+  }
+}
+
 export const specSchedule = Effect.fn("SqliteAutomationStore.specSchedule")(function* (
   rules: AutomationRules["Service"],
   spec: SystemAutomationSpec,
@@ -208,7 +219,7 @@ export const seedSystemAutomations = Effect.fn("SqliteAutomationStore.seedSystem
 
             const owner = yield* ownerTriggers(spec, row)
             const noneTaken = owner.kind === "none_taken"
-            const stored = owner.kind === "owner" ? owner.triggers : noneTaken ? "[]" : triggers
+            const stored = storedTriggers(owner, triggers)
             const userOwnsTriggers = stored !== triggers
             const resumes =
               !noneTaken && spec.enabled && row.enabled === 0 && row.auto_resume_at !== null
