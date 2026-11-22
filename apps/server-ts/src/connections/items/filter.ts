@@ -1,15 +1,5 @@
 import { clipLine } from "@arden-hq/std/text"
 
-const CATEGORIES = ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES", "CATEGORY_FORUMS"]
-const SECURITY_SUBJECT =
-  /\b(security|sign-?in|password|2-step|two-factor|secrets?|tokens?|leaked|exposed|suspicious|unauthori[sz]ed|compromised)\b/i
-
-export const keepMail = (mail: {
-  readonly labelIds: ReadonlyArray<string>
-  readonly subject: string
-}): boolean =>
-  SECURITY_SUBJECT.test(mail.subject) || !mail.labelIds.some((label) => CATEGORIES.includes(label))
-
 const ENTITIES: Readonly<Record<string, string>> = {
   "&amp;": "&",
   "&lt;": "<",

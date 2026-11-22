@@ -8,7 +8,7 @@ import type {
   ConnectionItemStore,
   FetchedConnectionItem
 } from "../../persistence/connections/store.js"
-import { keepMail, redactText } from "./filter.js"
+import { redactText } from "./filter.js"
 import { FetchError } from "./fetch-error.js"
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -188,7 +188,7 @@ const toItem = Effect.fn("ConnectionItems.gmailItem")(function* (
   const subject = headers.get("subject") ?? ""
   const sent = (message.labelIds ?? []).includes(SENT_LABEL)
   const kept =
-    (!sent && keepMail({ labelIds: message.labelIds ?? [], subject })) ||
+    !sent ||
     (yield* input.store
       .threadOwned({ source: "gmail", account: input.account.id, threadKey: message.threadId })
       .pipe(
