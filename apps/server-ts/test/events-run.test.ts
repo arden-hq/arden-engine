@@ -494,3 +494,26 @@ it("a no-change verdict counts only while it still holds", async () => {
     })
   )
 })
+
+it("a job with no item to check ends without starting a run", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { arrive, runEvents } = yield* setup
+      const lease = yield* arrive("mail-1")
+      const empty = {
+        ...lease,
+        payload: { ...lease.payload, handler: "events" as const, itemIds: [] }
+      }
+      const { result, runs } = yield* runEvents(empty, [])
+      expect(result).toEqual({
+        status: "ended",
+        outcome: "no_input",
+        result: "Nothing arrived to check",
+        error: null,
+        chatRunId: null,
+        chatSessionId: null
+      })
+      expect(runs).toEqual([])
+    })
+  )
+})

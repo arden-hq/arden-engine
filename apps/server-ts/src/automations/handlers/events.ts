@@ -25,6 +25,8 @@ export const makeEventsRunner = (services: {
   readonly awaitRun: AwaitAutomationRun
 }): AutomationRunner =>
   Effect.fn("EventsRunner")(function* (job) {
+    const itemIds = job.payload.handler === "events" ? job.payload.itemIds : []
+    if (itemIds.length === 0) return jobResult.withoutRun("no_input", "Nothing arrived to check")
     const sessionId =
       job.payload.chatRun?.sessionId ?? (yield* services.queue.prepareRunSession(job))
     const rules = [
@@ -56,7 +58,7 @@ export const makeEventsRunner = (services: {
       spaceId: post.space_id,
       text: post.text,
       task: post.task,
-      itemIds: job.payload.handler === "events" ? job.payload.itemIds : []
+      itemIds
     })
     return jobResult.completed("finished", post.text, run)
   })
