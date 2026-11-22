@@ -47,6 +47,7 @@ const fakeModel = (
     const sql = yield* SqlClient.SqlClient
     const chat = yield* ChatWriteStore
     const runs: Array<string> = []
+    const prompts: Array<string> = []
     const startAutomation: ChatMessage["Service"]["startAutomation"] = (input) =>
       Effect.gen(function* () {
         const started = yield* startChat(input.sessionId, input.clientId, {
@@ -77,6 +78,7 @@ const fakeModel = (
           ]
         })
         runs.push(runId)
+        prompts.push(input.prompt)
         return { runId, sessionId: input.sessionId, status: "running" as const }
       }).pipe(Effect.orDie)
     const awaitRun: AwaitAutomationRun = () =>
@@ -88,7 +90,7 @@ const fakeModel = (
         blocked,
         wrote: false
       })
-    return { chat: { startAutomation }, awaitRun, runs }
+    return { chat: { startAutomation }, awaitRun, runs, prompts }
   })
 
 const eventsTools = (eventsHandler.tools ?? ((base) => base))(
@@ -144,9 +146,9 @@ const setup = Effect.gen(function* () {
       const fresh = sql`claimed_at IS NULL AND source = 'event'
         AND task_id = ${eventsHandler.spec.automationId}`
       yield* sql`UPDATE automation_event_queue SET context = json_set(context, '$.event_batch',
-          json_object('omitted', 0, 'events', (SELECT json_group_array(json(json_set(json_remove(
+          json_object('omitted', 0, 'events', (SELECT json_group_array(json(json_patch(json_remove(
             json_extract(waiting.context, '$.trigger_context_snapshot'), '$.source'),
-            '$.run_only_if', json_extract(waiting.context, '$.run_only_if'))))
+            json_object('run_only_if', json_extract(waiting.context, '$.run_only_if')))))
             FROM automation_event_queue AS waiting WHERE ${fresh})))
         WHERE id = (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
       yield* sql`DELETE FROM automation_event_queue
@@ -166,7 +168,7 @@ const setup = Effect.gen(function* () {
     Effect.gen(function* () {
       const model = yield* fakeModel(calls, reply, blocked)
       const result = yield* makeEventsRunner({ ...model, queue, posts })(renderAutomationJob(lease))
-      return { result, runs: model.runs }
+      return { result, runs: model.runs, prompts: model.prompts }
     })
   const settle = (lease: ClaimedAutomationJobLease, result: AutomationJobResult) =>
     Effect.promise(async () =>
@@ -415,6 +417,25 @@ it("a run that reports it is blocked ends blocked with its reason, and posts not
         error: "The mail could not be read."
       })
       expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
+    })
+  )
+})
+
+it("with no rule on its trigger, the run is told to post about every event", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { arrive, runEvents } = yield* setup
+      yield* (yield* AutomationCatalog).update(
+        eventsHandler.spec.automationId,
+        { triggers: [{ type: "event", event_type: "email.received" }] },
+        "owner"
+      )
+      const { prompts } = yield* runEvents(yield* arrive("mail-1"), [
+        yield* posting({ text: "A mail came." })
+      ])
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain("If no rule is given, post about every event.")
+      expect(prompts[0]).not.toContain("## The user's rule")
     })
   )
 })
