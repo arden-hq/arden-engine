@@ -153,10 +153,10 @@ const setup = Effect.gen(function* () {
       const fresh = sql`claimed_at IS NULL AND source = 'event'
         AND task_id = ${eventsHandler.spec.automationId}`
       yield* sql`UPDATE automation_event_queue SET context = json_set(context, '$.event_batch',
-          json_object('omitted', 0, 'events', (SELECT json_group_array(json(json_patch(json_remove(
+          json_object('omitted', 0, 'events', json((SELECT json_group_array(json(json_patch(json_remove(
             json_extract(waiting.context, '$.trigger_context_snapshot'), '$.source'),
             json_object('run_only_if', json_extract(waiting.context, '$.run_only_if')))))
-            FROM automation_event_queue AS waiting WHERE ${fresh})))
+            FROM automation_event_queue AS waiting WHERE ${fresh}))))
         WHERE id = (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
       yield* sql`DELETE FROM automation_event_queue
         WHERE ${fresh} AND id <> (SELECT MIN(id) FROM automation_event_queue WHERE ${fresh})`
