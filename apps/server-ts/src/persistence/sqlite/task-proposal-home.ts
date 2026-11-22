@@ -1,10 +1,11 @@
 import type { SqlClient } from "effect/unstable/sql"
 
 const citedItem = (sql: SqlClient.SqlClient) => sql`(SELECT item.item_id
-  FROM json_each(offer.sources_json) AS cited
-  JOIN connection_items AS item ON item.item_id = json_extract(cited.value, '$.item_id')
-  WHERE json_extract(cited.value, '$.kind') = 'connection_item'
-  ORDER BY cited.key LIMIT 1)`
+  FROM (SELECT json_extract(cited.value, '$.item_id') AS item_id
+    FROM json_each(offer.sources_json) AS cited
+    WHERE json_extract(cited.value, '$.kind') = 'connection_item'
+    ORDER BY cited.key LIMIT 1) AS first
+  JOIN connection_items AS item ON item.item_id = first.item_id)`
 
 export const homeOfferJson = (sql: SqlClient.SqlClient) => sql`json_object(
   'offer_id', offer.proposal_id, 'text', offer.text,

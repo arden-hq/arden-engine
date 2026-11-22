@@ -221,7 +221,9 @@ export class SessionStore extends Context.Service<
       spaceId: string | undefined,
       toolCallId?: string
     ) => Effect.Effect<OwnChatMove | undefined, SessionStoreError>
-    readonly startOnboarding: (sessionId: string) => Effect.Effect<boolean, SessionStoreError>
+    readonly markOnboarding: (
+      sessionId: string
+    ) => Effect.Effect<"marked" | "kicked_off", SessionStoreError>
     readonly finishOnboarding: (sessionId: string) => Effect.Effect<boolean, SessionStoreError>
     readonly saveCaptureForward: (
       sessionId: string,

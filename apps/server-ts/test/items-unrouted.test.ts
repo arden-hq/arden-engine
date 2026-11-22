@@ -383,3 +383,61 @@ it("Main letter evidence names the item an offer cites, whatever source comes fi
   )
   expect(cited).toBe("item-1")
 })
+
+it("Start refuses an offer whose cited item expired, on both start paths", async () => {
+  const refused = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const main = yield* mainId(sql)
+      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
+      yield* chatWithTurn(sql, { session: "main-chat", run: "main-run", spaceId: main })
+      const sources = (session: string) =>
+        JSON.stringify([
+          { kind: "chat", session_id: session, turn_id: "turn-1", revision: "turn-1" },
+          { kind: "connection_item", item_id: "gone", revision: "gone" }
+        ])
+      yield* mainOffer(sql, {
+        id: "no-space",
+        sources: sources("automation"),
+        authoredIn: { session: "automation", run: "automation-run" }
+      })
+      yield* mainOffer(sql, {
+        id: "in-main",
+        sources: sources("main-chat"),
+        authoredIn: { session: "main-chat", run: "main-run" }
+      })
+      const kind = (proposalId: string) =>
+        start(proposalId).pipe(
+          Effect.flip,
+          Effect.map((error) => ("kind" in error ? error.kind : error.reason))
+        )
+      return { noSpace: yield* kind("no-space"), inMain: yield* kind("in-main") }
+    })
+  )
+  expect(refused).toEqual({ noSpace: "source_unavailable", inMain: "source_unavailable" })
+})
+
+it("Main letter evidence names no item when the first one an offer cites expired", async () => {
+  const cited = await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* seedItem(sql, "item-2")
+      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
+      yield* mainOffer(sql, {
+        id: "offer",
+        sources: JSON.stringify([
+          { kind: "connection_item", item_id: "item-1", revision: "item-1" },
+          { kind: "connection_item", item_id: "item-2", revision: "item-2" }
+        ]),
+        authoredIn: { session: "automation", run: "automation-run" }
+      })
+      yield* sql`UPDATE task_proposals SET signal_json = json_object('source', 'gmail',
+        'title', 'Invoice', 'from', 'Ann')`
+      const rows = yield* sql<{ readonly item_id: string | null }>`SELECT
+        json_extract(${homeOfferJson(sql)}, '$.item.item_id') AS item_id
+        FROM task_proposals AS offer`
+      return rows[0]?.item_id
+    })
+  )
+  expect(cited).toBeNull()
+})

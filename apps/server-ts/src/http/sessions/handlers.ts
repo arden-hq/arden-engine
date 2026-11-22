@@ -24,6 +24,7 @@ import {
 import { makeSessionCreation } from "../../sessions/create.js"
 import { ChatMessage } from "../../chat/message.js"
 import { onboardingKickoff } from "../../chat/message-input.js"
+import { makeOnboardingStart } from "../../chat/onboarding-start.js"
 import {
   makeSessionTriage,
   makeSessionTriageAction,
@@ -211,6 +212,7 @@ export const SessionHandlers = HttpApiBuilder.group(
         )
         .pipe(Effect.mapError(artifactHttpError))
     const creation = makeSessionCreation({ store, models })
+    const startOnboarding = makeOnboardingStart({ store, send: chat.send })
     const kickoff = (sessionId: string) =>
       chat.send(onboardingKickoff(sessionId)).pipe(
         Effect.catchCause((cause) =>
@@ -558,10 +560,10 @@ export const SessionHandlers = HttpApiBuilder.group(
         )
       )
       .handle("startOnboarding", ({ params }) =>
-        store.startOnboarding(params.sessionId).pipe(
-          Effect.tap((started) => (started ? kickoff(params.sessionId) : Effect.void)),
+        startOnboarding(params.sessionId).pipe(
           Effect.map((started) => ({ session_id: params.sessionId, started })),
-          Effect.catch(failStore)
+          Effect.catchTag("SessionStoreError", failStore),
+          Effect.catch(failInternal("Sessions"))
         )
       )
       .handle("continueRun", ({ params }) =>

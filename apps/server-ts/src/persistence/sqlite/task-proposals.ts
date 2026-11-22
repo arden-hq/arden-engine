@@ -418,6 +418,20 @@ export const makeTaskProposalStore = (options: {
       )
   })
 
+  const assertItemsStored = Effect.fn("TaskProposal.assertItemsStored")(function* (
+    sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>
+  ) {
+    for (const source of sources) {
+      if (source.kind !== "connection_item") continue
+      const stored = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
+      if (stored.length === 0)
+        return yield* new TaskProposalConflictError({
+          kind: "source_unavailable",
+          message: "That item expired"
+        })
+    }
+  })
+
   const validateStoredSources = Effect.fn("TaskProposal.validateSources")(function* (
     spaceId: string,
     sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>,
@@ -437,14 +451,6 @@ export const makeTaskProposalStore = (options: {
           return yield* new TaskProposalConflictError({
             kind: "source_unavailable",
             message: "Task proposal evidence is no longer available"
-          })
-        }
-      } else if (source.kind === "connection_item") {
-        const stored = yield* sql`SELECT 1 FROM connection_items WHERE item_id = ${source.item_id}`
-        if (stored.length === 0) {
-          return yield* new TaskProposalConflictError({
-            kind: "source_unavailable",
-            message: "That item expired"
           })
         }
       } else if (
@@ -494,6 +500,7 @@ export const makeTaskProposalStore = (options: {
       })
     }
     const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json)
+    yield* assertItemsStored(sources)
     yield* validateStoredSources(spaceId, sources, authority)
     return yield* work.createInTransaction({
       scope: { kind: "space", spaceId },
@@ -524,11 +531,13 @@ export const makeTaskProposalStore = (options: {
         message: "That Space is archived"
       })
     }
+    const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json)
+    yield* assertItemsStored(sources)
     return yield* work.createInTransaction({
       scope: { kind: "space", spaceId },
       input: { key: row.stable_key, text: row.text, body: row.body, owner: row.owner },
       actor: "user",
-      taskSources: yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json),
+      taskSources: sources,
       capture: yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json),
       settledInference: true,
       reuseExisting: true
