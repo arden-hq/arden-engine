@@ -15,8 +15,10 @@ export const migratedTo = (version: number, seed: (database: DatabaseSync) => vo
   seed(database)
   for (const step of pendingMigrationSteps(
     { kind: "pending", from: version - 1, bridge: undefined },
-    migrations
+    migrations.filter((migration) => migration.version <= version)
   ))
     step.run(database)
+  const reached = database.prepare("PRAGMA user_version").get()?.["user_version"]
+  if (reached !== version) throw new Error(`Migrated to ${String(reached)}, not ${version}`)
   return database
 }
