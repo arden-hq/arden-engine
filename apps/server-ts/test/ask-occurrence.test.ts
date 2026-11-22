@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
+import { ChatEventStore } from "../src/persistence/events/store.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
 import { RelayStore } from "../src/persistence/relay/store.js"
@@ -167,6 +168,111 @@ it.each([
       })
     } finally {
       await server?.stop().catch(() => undefined)
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+)
+
+it.each([
+  ["the clock moves", false],
+  ["the clock stands still", true]
+] as const)(
+  "every approval_needed names its asking with the stored requested_at, in the run's chat and the parent's copy (%s)",
+  async (_clock, frozen) => {
+    const directory = await mkdtemp(join(tmpdir(), "arden-asking-stamp-"))
+    const databasePath = join(directory, "arden.db")
+    try {
+      const layer = sqlitePersistenceLayer({ dataDir: null, filename: databasePath }).pipe(
+        Layer.provide(PersistenceWriteQueue.layer),
+        Layer.provideMerge(frozen ? TestClock.layer() : Layer.empty)
+      )
+      const askings = (sessionId: string, runId: string) =>
+        Effect.gen(function* () {
+          const page = yield* (yield* ChatEventStore).readPage({
+            sessionId,
+            afterSequence: 0,
+            throughSequence: 1000,
+            limit: 1000
+          })
+          return page.records.flatMap(({ event }) =>
+            event.type === "approval_needed" && event.run_id === runId ? [event.asked_at] : []
+          )
+        })
+      const { parentId, childId, runId, call, first } = await Effect.runPromise(
+        Effect.gen(function* () {
+          const chat = yield* ChatWriteStore
+          const tools = yield* ToolExecutionStore
+          const parent = yield* (yield* SessionStore).create({ name: "notes" })
+          const run = yield* chat.start({
+            sessionId: parent.sessionId,
+            clientId: "start",
+            requestHash: "start",
+            assistantMessageId: "answer",
+            message: {
+              message_id: "start",
+              client_id: "start",
+              role: ROLE.user,
+              content: "Delegate",
+              created_at: new Date().toISOString()
+            }
+          })
+          const spawn = {
+            runId: run.runId,
+            sessionId: parent.sessionId,
+            toolCallId: "spawn",
+            toolName: "spawn_agent",
+            changesState: true,
+            arguments: { task: "Write", mode: "research" }
+          }
+          yield* tools.begin(spawn)
+          const { child } = yield* chat.spawnAgent({
+            parent: spawn,
+            task: "Write",
+            mode: "research"
+          })
+          const call = {
+            runId: child.runId,
+            sessionId: child.sessionId,
+            toolCallId: "write",
+            toolName: "file_write",
+            changesState: true,
+            arguments: { path: "notes.md", content: "Findings" }
+          }
+          yield* tools.begin(call)
+          yield* tools.pause(call, { reason: "approval", preview: "Create notes.md" })
+          return {
+            parentId: parent.sessionId,
+            childId: child.sessionId,
+            runId: child.runId,
+            call,
+            first: {
+              child: yield* askings(child.sessionId, child.runId),
+              parent: yield* askings(parent.sessionId, child.runId)
+            }
+          }
+        }).pipe(Effect.provide(layer))
+      )
+      const asked = cardOf(databasePath, runId)
+      expect(first).toEqual({ child: [asked.requested_at], parent: [asked.requested_at] })
+
+      const again = await Effect.runPromise(
+        Effect.gen(function* () {
+          const tools = yield* ToolExecutionStore
+          yield* tools.resolve({ runId, toolCallId: "write", approved: true })
+          yield* tools.begin(call)
+          yield* tools.uncertain(call)
+          yield* tools.requireOutcomeDecision({ runId, sessionId: childId })
+          return {
+            child: yield* askings(childId, runId),
+            parent: yield* askings(parentId, runId)
+          }
+        }).pipe(Effect.provide(layer))
+      )
+      const askedAgain = cardOf(databasePath, runId)
+      expect(askedAgain.requested_at > asked.requested_at).toBe(true)
+      expect(again.child).toEqual([asked.requested_at, askedAgain.requested_at])
+      expect(again.parent).toEqual([asked.requested_at, askedAgain.requested_at])
+    } finally {
       await rm(directory, { recursive: true, force: true })
     }
   }
