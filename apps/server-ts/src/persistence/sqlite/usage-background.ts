@@ -164,23 +164,25 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
   const inWindow = (at: string) => at >= since && at < until
   type MutableOutcome = { -readonly [K in keyof UsageAutomationOutcome]: UsageAutomationOutcome[K] }
   interface Group {
-    readonly attempt: UsageSource
+    attempt: UsageSource
     readonly outcomes: Map<string, MutableOutcome>
   }
   const groups = new Map<string, Group>()
-  const outcomeFor = (attempt: UsageSource): MutableOutcome => {
+  const groupOf = (attempt: UsageSource): Group => {
     const groupKey = JSON.stringify([
       attempt.task_id,
       attempt.item_id,
       attempt.space_id,
-      attempt.purpose,
-      attempt.handler
+      attempt.purpose
     ])
-    let group = groups.get(groupKey)
-    if (group === undefined) {
-      group = { attempt, outcomes: new Map() }
-      groups.set(groupKey, group)
-    }
+    const found = groups.get(groupKey)
+    if (found !== undefined) return found
+    const group = { attempt, outcomes: new Map<string, MutableOutcome>() }
+    groups.set(groupKey, group)
+    return group
+  }
+  const outcomeFor = (attempt: UsageSource): MutableOutcome => {
+    const group = groupOf(attempt)
     const key = attempt.outcome ?? "unrecorded"
     let outcome = group.outcomes.get(key)
     if (outcome === undefined) {
@@ -198,11 +200,12 @@ export const backgroundUsage = Effect.fn("Usage.background")(function* (
     }
     return outcome
   }
-  for (const attempt of attempts) {
+  for (const attempt of attempts.toSorted((a, b) => a.started_at.localeCompare(b.started_at))) {
     if (!inWindow(attempt.started_at)) continue
     const owner = attempt.chat_run_id === null ? null : ownerOf(attempt.chat_run_id)
     if (owner !== null && owner.attemptId !== attempt.id) continue
     outcomeFor(attempt).checks++
+    groupOf(attempt).attempt = attempt
   }
   for (const run of runs) {
     if (!inWindow(run.started_at)) continue
