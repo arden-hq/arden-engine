@@ -4,7 +4,11 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import type { ToolFacts } from "../src/execution/decide.js"
 import type { OfferHolders } from "../src/persistence/permissions/offer.js"
-import { wordsRuleText, type PermissionRule } from "../src/persistence/permissions/rules.js"
+import {
+  wordsRuleText,
+  type PermissionRule,
+  type RuleDecision
+} from "../src/persistence/permissions/rules.js"
 import type { PermissionStore } from "../src/persistence/permissions/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import {
@@ -382,7 +386,7 @@ describe("an offer from the person's words in any mode", () => {
       connectorTitles: () => Promise.resolve(new Map()),
       compileWords: (text) =>
         Promise.resolve({
-          decision: "never" as const,
+          decision: COMPILED_DECISION[text] ?? ("never" as const),
           rules: text.includes("Documents")
             ? [
                 {
@@ -395,6 +399,10 @@ describe("an offer from the person's words in any mode", () => {
           dropped: []
         })
     })
+  const COMPILED_DECISION: Readonly<Record<string, RuleDecision>> = {
+    "pushing to GitHub": "allow",
+    "sending an email": "ask"
+  }
   const words = { kind: "words", text: "uploading my CV to job sites", decision: "allow" } as const
 
   it.each(["allow", "read_only", "safe"] as const)("offers in %s mode", async (mode) => {
@@ -422,6 +430,22 @@ describe("an offer from the person's words in any mode", () => {
     const question = asked[0]
     expect(question?.permissionOffer?.change).toMatchObject({ kind: "words", text: said })
     expect(question?.content.prompt).toContain(`“${said}”`)
+  })
+
+  it.each([
+    ["pushing to GitHub", "Always allow “pushing to GitHub”?"],
+    ["sending an email", "Always ask before “sending an email”?"],
+    ["drafting messages in X", "Always deny “drafting messages in X”?"]
+  ] as const)("names the compiled decision on the card for %s", async (text, prompt) => {
+    asked.length = 0
+    await offersIn("safe").offer({
+      run: serverRunContext(),
+      toolCallId: "ask",
+      request: { kind: "words", text, decision: "allow" },
+      tools: [],
+      source: { kind: "message" }
+    })
+    expect(asked[0]?.content.prompt).toBe(prompt)
   })
 
   it("compiles words into the hard rules the card shows and the tap saves", async () => {

@@ -479,7 +479,7 @@ const offerPrompt = (
     case "path":
       return `${STANDING_DECISION_WORD[change.decision]} ${PATH_DOING[change.access]} ${collapseHome(change.path)}?`
     case "words":
-      return `Save the rule ${quoted(change.text)}?`
+      return `${STANDING_DECISION_WORD[change.decision]} ${quoted(change.text)}?`
     case "rule": {
       if (held === undefined) return ""
       const rule = `${quoted(label)} ${held.list.kind === "space" ? "in this Space" : "everywhere"}`

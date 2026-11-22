@@ -164,7 +164,7 @@ export const PermissionOfferParametersSchema = Schema.Struct({
         Schema.isMaxLength(WORDS_OFFER_MAX)
       ).annotate({
         description:
-          'The action the rule is about, as a short phrase: "uploading my CV to job sites", "sending an email". The decision goes in `decision`, never in the words: no "always", "never", "you can", "without asking". Nothing the person did not say: no caveats, no "this does not cover…". For what no tool, connector or command names; the Auto reviewer reads it, in Auto only.'
+          'The action the rule is about, as a short phrase: "uploading my CV to job sites", "sending an email", "pushing to GitHub". Name the action only, as general as their words allow: no when, why, project or task ("after each slice", "for this branch", "on one GPU"). The decision goes in `decision`, never in the words: no "always", "never", "you can", "without asking". No caveats, no "this does not cover…". For what no tool, connector or command names; the Auto reviewer reads it, in Auto only.'
       }),
       decision: Schema.Literals(["allow", "ask", "never"])
     })
