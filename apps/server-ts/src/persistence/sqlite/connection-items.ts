@@ -96,11 +96,11 @@ export const makeConnectionItemStore = ({
           let inserted = 0
           for (const [index, item] of input.items.entries()) {
             const rows = yield* sql`INSERT INTO connection_items (item_id, source, account,
-              external_id, thread_key, title, sender, received_at, snippet, detail, fetched_at, state)
+              external_id, thread_key, title, sender, received_at, snippet, detail, fetched_at)
               VALUES (${`item_${ids[index]}`}, ${input.source}, ${input.account}, ${item.externalId},
                 ${item.threadKey}, ${item.title}, ${item.sender ?? null}, ${item.receivedAt},
                 ${item.snippet}, ${item.detail === undefined ? null : JSON.stringify(item.detail)},
-                ${at}, 'pending')
+                ${at})
               ON CONFLICT(source, account, external_id) DO NOTHING RETURNING item_id`
             for (const row of rows)
               yield* sql`INSERT INTO connection_item_threads (item_id, source, account, thread_key)
