@@ -184,10 +184,9 @@ const itemSender = (item: DayItem): string => {
 const itemExcerpts = (items: ReadonlyArray<DayItem>): Excerpts =>
   cut(
     items.map((item) => {
-      const where = item.spaceName === undefined ? "" : ` (Space ${item.spaceName})`
       return {
         ref: `item ${item.itemId}`,
-        text: `${item.source} at ${item.receivedAt}${itemSender(item)}${where}: ${item.title}. ${item.snippet}`
+        text: `${item.source} at ${item.receivedAt}${itemSender(item)}: ${item.title}. ${item.snippet}`
       }
     }),
     ITEM_SHARE

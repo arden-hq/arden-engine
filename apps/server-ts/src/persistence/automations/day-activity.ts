@@ -18,7 +18,6 @@ export interface DayItem {
   readonly sender: string | undefined
   readonly title: string
   readonly snippet: string
-  readonly spaceName: string | undefined
   readonly sentByOwner: boolean
 }
 
