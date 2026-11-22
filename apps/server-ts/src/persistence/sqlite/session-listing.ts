@@ -287,6 +287,7 @@ export const makeSessionListing = ({
           ${orderTimestamp} < ${input.cursor.at}
           OR (${orderTimestamp} = ${input.cursor.at} AND s.session_id < ${input.cursor.sessionId})
         )`
+    const ownCards = reader`source.session_id = s.session_id`
     const rows = yield* reader<SessionListRow>`
       SELECT s.session_id, s.public_ref, s.started_at, s.last_activity,
              s.last_accessed_at, s.name,
@@ -306,17 +307,15 @@ export const makeSessionListing = ({
              latest_run.error_code AS run_error_code,
              latest_run.stop_reason AS run_stop_reason,
              (
-               SELECT COUNT(*) FROM (${pendingDecisionCards(reader)}) AS pending_approval
-             WHERE pending_approval.session_id = s.session_id
-               AND COALESCE(
+               SELECT COUNT(*) FROM (${pendingDecisionCards(reader, ownCards)}) AS pending_approval
+             WHERE COALESCE(
                  json_extract(pending_approval.payload_json, '$.approval_data._tag'),
                  ''
                ) != 'ConnectionRequired'
              ) AS pending_approvals_count,
              (
-               SELECT COUNT(*) FROM (${pendingDecisionCards(reader)}) AS pending_connection
-               WHERE pending_connection.session_id = s.session_id
-                 AND json_extract(
+               SELECT COUNT(*) FROM (${pendingDecisionCards(reader, ownCards)}) AS pending_connection
+               WHERE json_extract(
                    pending_connection.payload_json,
                    '$.approval_data._tag'
                  ) = 'ConnectionRequired'
