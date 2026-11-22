@@ -204,8 +204,8 @@ const moveRunAuthority = (database: DatabaseSync, mainId: string): void => {
     .all(mainId)
   const withoutSource = (column: string, path: string) => `CASE
     WHEN json_type(${column}, '${path}') = 'array' THEN json_set(${column}, '${path}',
-      (SELECT json_group_array(json(grant.value)) FROM json_each(${column}, '${path}') AS grant
-        WHERE json_extract(grant.value, '$.session_id') IS NOT ?))
+      json((SELECT json_group_array(json(grant.value)) FROM json_each(${column}, '${path}') AS grant
+        WHERE json_extract(grant.value, '$.session_id') IS NOT ?)))
     ELSE ${column} END`
   const dropGrants = database.prepare(
     `UPDATE chat_runs SET
