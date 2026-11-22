@@ -45,8 +45,10 @@ import {
 } from "./tool-approval-folders.js"
 import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
 import { announceRunAskChange } from "./ask-changes.js"
+import { recordCommandResult } from "./relay.js"
 import { noApprovalForRun } from "./approval-policy.js"
 import { detachedWorkflowCalls, requireLiveWorkflowOwner } from "./detached-workflow-calls.js"
+import { readRunAuthority } from "./run-context.js"
 
 const ResolveToolApprovalInputSchema = Schema.Struct({
   runId: Schema.NonEmptyString,
@@ -55,7 +57,9 @@ const ResolveToolApprovalInputSchema = Schema.Struct({
   feedback: Schema.optionalKey(Schema.String),
   grantStanding: Schema.optionalKey(Schema.Boolean),
   grantList: Schema.optionalKey(Schema.Literals(["space", "global"])),
-  attachFolderToSpace: Schema.optionalKey(Schema.Boolean)
+  attachFolderToSpace: Schema.optionalKey(Schema.Boolean),
+  askedAt: Schema.optionalKey(Schema.NonEmptyString),
+  commandId: Schema.optionalKey(Schema.NonEmptyString)
 })
 
 const decodeResolveInput = Effect.fn("SqliteToolExecutionStore.decodeResolveInput")(function* (
@@ -68,6 +72,8 @@ const decodeResolveInput = Effect.fn("SqliteToolExecutionStore.decodeResolveInpu
     readonly attachFolderToSpace: boolean
     readonly edits: ApprovalEditsInput | null
     readonly alternative: ApprovalAlternativeInput | null
+    readonly askedAt: string | undefined
+    readonly commandId?: string
   },
   ToolExecutionStoreError
 > {
@@ -140,7 +146,9 @@ const decodeResolveInput = Effect.fn("SqliteToolExecutionStore.decodeResolveInpu
     grantList: decoded.grantList,
     attachFolderToSpace: decoded.attachFolderToSpace === true,
     edits: edits ?? null,
-    alternative: alternative ?? null
+    alternative: alternative ?? null,
+    askedAt: decoded.askedAt,
+    ...(decoded.commandId === undefined ? {} : { commandId: decoded.commandId })
   }
 })
 
@@ -197,10 +205,49 @@ export const makeToolApprovalResolve = ({
       decision
     )
     return yield* writer
-      .transact(resolveInTransaction({ decision, timestamp, approvedFolders }))
+      .transact(
+        resolveInTransaction({ decision, timestamp, approvedFolders }).pipe(
+          Effect.tap(() => keepCommandResult(writer.sql, decision))
+        )
+      )
       .pipe(Effect.mapError(preserveToolError("resolve", decision)))
   })
 }
+
+export const keepCommandResult = (
+  sql: SqlClient.SqlClient,
+  decision: { readonly runId: string; readonly toolCallId: string; readonly commandId?: string }
+) =>
+  decision.commandId === undefined
+    ? Effect.void
+    : recordCommandResult(sql, {
+        cid: decision.commandId,
+        kind: "decide",
+        state: "done",
+        result: { status: "ok" }
+      }).pipe(
+        Effect.mapError((cause) =>
+          toolError(
+            "resolve",
+            "storage",
+            "Could not keep the phone command's result",
+            decision,
+            cause
+          )
+        ),
+        Effect.flatMap((kept) =>
+          kept.length === 1
+            ? Effect.void
+            : Effect.fail(
+                toolError(
+                  "resolve",
+                  "conflict",
+                  "The phone already gave up on this answer; the card still waits",
+                  decision
+                )
+              )
+        )
+      )
 
 export const makeToolApprovalResolveInTransaction = ({
   sql,
@@ -224,6 +271,14 @@ export const makeToolApprovalResolveInTransaction = ({
         "resolve",
         "not_found",
         "Pending tool approval was not found",
+        decision
+      )
+    }
+    if (decision.askedAt !== undefined && decision.askedAt !== approval.requested_at) {
+      return yield* toolError(
+        "resolve",
+        "conflict",
+        "This card was asked again; answer it as it is now",
         decision
       )
     }
@@ -282,6 +337,20 @@ export const makeToolApprovalResolveInTransaction = ({
       )
     }
     if (approval.kind === "tool_approval") yield* requireLiveWorkflowOwner(sql, decision, "resolve")
+    if (approval.kind === "tool_approval" && decision.approved) {
+      const run = yield* readRunAuthority(sql, decision.runId).pipe(
+        Effect.mapError((cause) =>
+          toolError("resolve", "storage", "Could not read the run's authority", decision, cause)
+        )
+      )
+      if (run !== undefined && run.authority !== "active")
+        return yield* toolError(
+          "resolve",
+          "conflict",
+          "This card's Task no longer lets its run act; it can only be denied",
+          decision
+        )
+    }
     if (
       approval.kind === "tool_approval" &&
       decision.approved &&

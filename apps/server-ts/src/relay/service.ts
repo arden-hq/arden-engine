@@ -1,6 +1,4 @@
-import { decodeSseFrameStream } from "@arden-hq/protocol"
 import { sleep } from "@arden-hq/std/sleep"
-import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import type { RelayPairOffer, RelaySettingsPatch, RelayStatus } from "@arden-hq/protocol/relay"
 import { Clock, Context, DateTime, Effect, Layer, Queue, Schedule, Schema, Stream } from "effect"
 import { HttpServer } from "effect/unstable/http"
@@ -13,7 +11,8 @@ import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
 import { RelayConnector } from "./connector.js"
 import { PUSH_RETRY, deliverPushes, pushPayload, runPushes, type PushRoute } from "./push.js"
 import { loadMacIdentity, type MacIdentity } from "./identity.js"
-import type { CommandLog, DeviceRegistry, Loopback, RelayLog } from "./ports.js"
+import { relayLoopback } from "./loopback.js"
+import type { CommandLog, DeviceRegistry, RelayLog } from "./ports.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { currentMillis, iso } from "../runtime/clock.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
@@ -75,7 +74,7 @@ export const relayLayer = (
       const lifecycle = yield* ServerLifecycle
       const phoneRelayUrl = process.env["ARDEN_RELAY_PHONE_URL"]
       const server = yield* HttpServer.HttpServer
-      const loopback = makeLoopback(server.address, options.localAccess)
+      const loopback = relayLoopback(server.address, options.localAccess)
       const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect)
       const log: RelayLog = (level, message, fields = {}) => {
         Effect.runFork(
@@ -365,48 +364,5 @@ const connected = async (
     if (instance?.state === "connected") return instance
     if (currentMillis() > deadline) return undefined
     await sleep(50)
-  }
-}
-
-const parseBody = (text: string): Schema.Json => {
-  if (text === "") return null
-  try {
-    const value: Schema.Json = JSON.parse(text)
-    return value
-  } catch {
-    return null
-  }
-}
-
-const makeLoopback = (address: HttpServer.Address, access: LocalAccess | undefined): Loopback => {
-  const base =
-    address._tag === "TcpAddress" ? `http://127.0.0.1:${address.port}` : "http://127.0.0.1"
-  const auth: Record<string, string> =
-    access === undefined ? {} : { [LOCAL_CAPABILITY_HEADER]: access.capability }
-  return {
-    request: async ({ method, path, body, signal }) => {
-      const response = await fetch(`${base}${path}`, {
-        method,
-        headers: body === undefined ? auth : { ...auth, "content-type": "application/json" },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        ...(signal === undefined ? {} : { signal })
-      })
-      return { status: response.status, body: parseBody(await response.text()) }
-    },
-    events: async function* ({ path, lastEventId, signal }) {
-      const response = await fetch(`${base}${path}`, {
-        headers: {
-          ...auth,
-          accept: "text/event-stream",
-          ...(lastEventId === undefined ? {} : { "last-event-id": lastEventId })
-        },
-        signal
-      })
-      if (!response.ok || response.body === null)
-        throw new Error(`The event stream answered ${response.status}`)
-      for await (const frame of decodeSseFrameStream(response.body)) {
-        yield frame.id === undefined ? { data: frame.data } : { id: frame.id, data: frame.data }
-      }
-    }
   }
 }

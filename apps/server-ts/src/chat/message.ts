@@ -634,7 +634,11 @@ export class ChatMessage extends Context.Service<ChatMessage, ChatMessageShape>(
                         ? {}
                         : { attachFolderToSpace: input.attachFolderToSpace }),
                       ...(input.edits === undefined ? {} : { edits: input.edits }),
-                      ...(input.alternative === undefined ? {} : { alternative: input.alternative })
+                      ...(input.alternative === undefined
+                        ? {}
+                        : { alternative: input.alternative }),
+                      ...(input.askedAt === undefined ? {} : { askedAt: input.askedAt }),
+                      ...(input.commandId === undefined ? {} : { commandId: input.commandId })
                     })
                     .pipe(Effect.mapError(mapToolStoreError))
                   if (resolution.ready && chatRunner.current() !== undefined) {

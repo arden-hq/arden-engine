@@ -36,9 +36,11 @@ import {
   type ChatWriteFailure
 } from "../../persistence/chat/store.js"
 import { ToolExecutionStore, ToolExecutionStoreError } from "../../persistence/tools/store.js"
+import { ToolHistoryQueries } from "../../persistence/tools/history-queries.js"
+import { grantedOnlyInTheApp } from "@arden-hq/protocol/tools"
 import { ArdenApi } from "../api.js"
 import { ServerConfig } from "../../config/service.js"
-import { LocalCaller } from "../middleware/local-only.js"
+import { LocalCaller, NativeConsent } from "../middleware/local-only.js"
 import { isRequestId } from "../middleware/request-id.js"
 import {
   CHAT_OPEN_TIMING_REQUEST_HEADER,
@@ -74,6 +76,8 @@ const historyError = (
   }
   return new HttpApiError.InternalServerError({})
 }
+
+const PHONE_NEEDS_UPDATE = "Update Arden on your iPhone to approve or deny from it."
 
 const messageError = (error: ChatMessageFailure) => {
   if (error instanceof ChatMessageConflictError) return new StoreConflict({})
@@ -144,6 +148,32 @@ export const ChatHandlers = HttpApiBuilder.group(
     const tools = yield* ToolExecutionStore
     const toolRegistry = yield* ServerToolRegistry
     const deferred = yield* DeferredCalls
+    const toolHistory = yield* ToolHistoryQueries
+
+    const refuseAppOnlyGrant = Effect.fn("ChatHandlers.refuseAppOnlyGrant")(function* (payload: {
+      readonly run_id: string
+      readonly tool_id: string
+      readonly approved?: boolean | undefined
+    }) {
+      if (payload.approved !== true || (yield* NativeConsent)) return
+      const identity = { runId: payload.run_id, toolCallId: payload.tool_id }
+      const toolName = yield* toolHistory.calledTool(identity)
+      if (toolName === undefined)
+        return yield* new ToolExecutionStoreError({
+          operation: "resolve",
+          reason: "not_found",
+          message: "Nothing waits for this answer.",
+          ...identity
+        })
+      const { tools: catalog } = yield* toolRegistry.catalog()
+      if (!grantedOnlyInTheApp(catalog.find((tool) => tool.name === toolName)?.display)) return
+      return yield* new ToolExecutionStoreError({
+        operation: "resolve",
+        reason: "conflict",
+        message: "Grant this in Arden on your Mac.",
+        ...identity
+      })
+    })
     const writes = yield* ChatWriteStore
     const sessionStore = yield* SessionStore
     const creation = makeSessionCreation({ store: sessionStore, models: yield* ModelStore })
@@ -324,68 +354,85 @@ export const ChatHandlers = HttpApiBuilder.group(
         })
       )
       .handle("toolResult", ({ payload }) =>
-        deferred
-          .decide({
-            runId: payload.run_id,
-            toolCallId: payload.tool_id,
-            result: payload.result,
-            ...(payload.approved === undefined ? {} : { approved: payload.approved }),
-            ...(payload.grant_standing === undefined
-              ? {}
-              : { grantStanding: payload.grant_standing }),
-            ...(payload.grant_list === undefined ? {} : { grantList: payload.grant_list }),
-            ...(payload.attach_folder_to_space === undefined
-              ? {}
-              : { attachFolderToSpace: payload.attach_folder_to_space }),
-            ...(payload.edited_arguments === undefined
-              ? {}
-              : { editedArguments: payload.edited_arguments }),
-            ...(payload.alternative === undefined ? {} : { alternative: payload.alternative })
-          })
-          .pipe(
-            Effect.mapError(mapToolStoreError),
-            Effect.flatMap((decided) =>
-              decided === "decided"
-                ? Effect.succeed({ status: "ok" } as const)
-                : message.resolveTool({
-                    runId: payload.run_id,
-                    toolId: payload.tool_id,
-                    result: payload.result,
-                    ...(payload.approved === undefined ? {} : { approved: payload.approved }),
-                    ...(payload.grant_standing === undefined
-                      ? {}
-                      : { grantStanding: payload.grant_standing }),
-                    ...(payload.grant_list === undefined ? {} : { grantList: payload.grant_list }),
-                    ...(payload.attach_folder_to_space === undefined
-                      ? {}
-                      : { attachFolderToSpace: payload.attach_folder_to_space }),
-                    ...(payload.edited_arguments === undefined
-                      ? {}
-                      : {
-                          edits: {
-                            patch: payload.edited_arguments,
-                            apply: toolRegistry.applyApprovalEdits
-                          }
-                        }),
-                    ...(payload.alternative === undefined
-                      ? {}
-                      : {
-                          alternative: {
-                            kind: payload.alternative,
-                            offeredBy: toolRegistry.offersApprovalDraft
-                          }
-                        })
-                  })
-            ),
-            Effect.tapError((error) =>
-              Effect.logError("Tool approval resolution failed", {
-                runId: payload.run_id,
-                toolId: payload.tool_id,
-                error
-              })
-            ),
-            Effect.mapError(messageError)
-          )
+        Effect.flatMap(LocalCaller, (caller) => {
+          if (caller === "phone" && payload.asked_at === undefined)
+            return Effect.fail(new StoreInvalid({ detail: PHONE_NEEDS_UPDATE }))
+          const commandId = caller === "phone" ? payload.command_id : undefined
+          return refuseAppOnlyGrant(payload)
+            .pipe(
+              Effect.andThen(
+                deferred.decide({
+                  runId: payload.run_id,
+                  toolCallId: payload.tool_id,
+                  result: payload.result,
+                  ...(payload.approved === undefined ? {} : { approved: payload.approved }),
+                  ...(payload.grant_standing === undefined
+                    ? {}
+                    : { grantStanding: payload.grant_standing }),
+                  ...(payload.grant_list === undefined ? {} : { grantList: payload.grant_list }),
+                  ...(payload.attach_folder_to_space === undefined
+                    ? {}
+                    : { attachFolderToSpace: payload.attach_folder_to_space }),
+                  ...(payload.edited_arguments === undefined
+                    ? {}
+                    : { editedArguments: payload.edited_arguments }),
+                  ...(payload.alternative === undefined
+                    ? {}
+                    : { alternative: payload.alternative }),
+                  ...(payload.asked_at === undefined ? {} : { askedAt: payload.asked_at }),
+                  ...(commandId === undefined ? {} : { commandId })
+                })
+              )
+            )
+            .pipe(
+              Effect.mapError(mapToolStoreError),
+              Effect.flatMap((decided) =>
+                decided === "decided"
+                  ? Effect.succeed({ status: "ok" } as const)
+                  : message.resolveTool({
+                      runId: payload.run_id,
+                      toolId: payload.tool_id,
+                      result: payload.result,
+                      ...(payload.approved === undefined ? {} : { approved: payload.approved }),
+                      ...(payload.grant_standing === undefined
+                        ? {}
+                        : { grantStanding: payload.grant_standing }),
+                      ...(payload.grant_list === undefined
+                        ? {}
+                        : { grantList: payload.grant_list }),
+                      ...(payload.attach_folder_to_space === undefined
+                        ? {}
+                        : { attachFolderToSpace: payload.attach_folder_to_space }),
+                      ...(payload.edited_arguments === undefined
+                        ? {}
+                        : {
+                            edits: {
+                              patch: payload.edited_arguments,
+                              apply: toolRegistry.applyApprovalEdits
+                            }
+                          }),
+                      ...(payload.alternative === undefined
+                        ? {}
+                        : {
+                            alternative: {
+                              kind: payload.alternative,
+                              offeredBy: toolRegistry.offersApprovalDraft
+                            }
+                          }),
+                      ...(payload.asked_at === undefined ? {} : { askedAt: payload.asked_at }),
+                      ...(commandId === undefined ? {} : { commandId })
+                    })
+              ),
+              Effect.tapError((error) =>
+                Effect.logError("Tool approval resolution failed", {
+                  runId: payload.run_id,
+                  toolId: payload.tool_id,
+                  error
+                })
+              ),
+              Effect.mapError(messageError)
+            )
+        })
       )
       .handle(
         "connectionResult",

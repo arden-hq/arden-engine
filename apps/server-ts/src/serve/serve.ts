@@ -109,19 +109,19 @@ export const startConfigured = async <Server extends StartedServer>(
             toolSearch: settings.toolSearch
           })
         }
-  // Whoever starts a configured server owns it and its data folder, so the
-  // access file carries the owner secret: every route, approvals included.
-  // The narrower command-line secret the app hands out is made and not used.
+  // The access file carries the owner secret: every route, approvals included,
+  // except a grant only the Arden app gives (there is no app here).
   const owner = randomBytes(32).toString("base64url")
   const commandLine = randomBytes(32).toString("base64url")
   const server = await start({
     ...options,
     ...models,
-    // No page loads from a configured server, so the renderer origin is unused.
     localAccess: {
+      host: "configured",
       capability: owner,
       rendererOrigin: "http://127.0.0.1",
-      cliCapability: commandLine
+      cliCapability: commandLine,
+      phoneCapability: randomBytes(32).toString("base64url")
     }
   })
   const accessFile = cliAccessPath(options.databasePath)

@@ -199,7 +199,11 @@ export const ToolResultRequestSchema = withExtras({
   /** The card's editable fields as the person left them; a field absent was cleared. */
   edited_arguments: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
   /** The card's alternative to the call as asked: `draft` saves instead of sending. */
-  alternative: Schema.optionalKey(Schema.Literal("draft"))
+  alternative: Schema.optionalKey(Schema.Literal("draft")),
+  /** When the card answered was asked; an answer naming an earlier asking is refused. */
+  asked_at: Schema.optionalKey(Schema.NonEmptyString),
+  /** The relay's phone command behind the decision; ignored from callers other than the phone. */
+  command_id: Schema.optionalKey(Schema.NonEmptyString)
 }).check(
   Schema.makeFilter((request) =>
     request.edited_arguments !== undefined && request.approved !== true

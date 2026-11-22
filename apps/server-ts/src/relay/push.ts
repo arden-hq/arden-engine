@@ -14,6 +14,7 @@ import { iso } from "../runtime/clock.js"
 import type { MacIdentity } from "./identity.js"
 import type { Loopback } from "./ports.js"
 import { isUserAutomationPurpose } from "../persistence/job-classification.js"
+import { HomeAsks } from "./home-asks.js"
 
 export interface PushNotice {
   readonly key: string
@@ -24,6 +25,7 @@ export interface PushNotice {
   readonly collapseId: string
   readonly askId: string | undefined
   readonly runId?: string
+  readonly askedAt?: string
   readonly news?: PushNews
 }
 
@@ -79,7 +81,8 @@ export const pushPayload = (input: {
         body: cutText(notice.body, 600),
         session_id: notice.sessionId,
         ask_id: notice.askId ?? null,
-        run_id: notice.runId ?? null
+        run_id: notice.runId ?? null,
+        ...(notice.askedAt === undefined ? {} : { asked_at: notice.askedAt })
       })
     ),
     aad: bodyAad({ sender: input.identity.macId, receiver: input.device.dev })
@@ -106,28 +109,6 @@ class PushReadError extends Schema.TaggedError<PushReadError>()("PushReadError",
 const FINISHED_WINDOW_MS = 60 * 60_000
 
 const RECENT = 50
-
-const Asks = Schema.Struct({
-  asks: Schema.Array(
-    Schema.Union([
-      Schema.Struct({
-        kind: Schema.Literal("question"),
-        question_id: Schema.String,
-        session_id: Schema.String,
-        place: Schema.String,
-        prompt: Schema.String
-      }),
-      Schema.Struct({
-        kind: Schema.Literal("approval"),
-        tool_id: Schema.String,
-        run_id: Schema.String,
-        session_id: Schema.String,
-        place: Schema.String,
-        title: Schema.String
-      })
-    ])
-  )
-})
 
 const loose = { onExcessProperty: "ignore" } as const
 
@@ -157,7 +138,7 @@ const newsOf = (status: Notice["status"], tier: NoticeTier | undefined): PushNew
 
 const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now: number) {
   const since = iso(now - FINISHED_WINDOW_MS)
-  const home = yield* read(state.loopback, "/mobile/home", Asks)
+  const home = yield* read(state.loopback, "/mobile/home", HomeAsks)
   const recorded = yield* state.notices({ since, limit: RECENT })
   const asks = home.asks.map((ask): PushNotice =>
     ask.kind === "question"
@@ -178,7 +159,8 @@ const unnotified = Effect.fn("Push.unnotified")(function* (state: PushState, now
           sessionId: ask.session_id,
           collapseId: ask.tool_id,
           askId: ask.tool_id,
-          runId: ask.run_id
+          runId: ask.run_id,
+          askedAt: ask.asked_at
         }
   )
   const candidates = [

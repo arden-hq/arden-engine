@@ -11,7 +11,9 @@ import type { RunQuestion } from "@arden-hq/protocol/runs"
 
 import {
   approvalNeeded,
+  catalogEntry,
   cancelling,
+  emit,
   completedRun,
   defaultClient,
   jsonLines,
@@ -90,6 +92,10 @@ const NO_APP: AppLauncher = {
 }
 
 const URL_ARGS = ["--url", "http://arden.test"] as const
+
+const APP_ONLY = "Only the Arden app can allow this."
+const UNCHECKED =
+  "Arden could not check whether this can be allowed from here, so it cannot be allowed here. If this keeps happening, update Arden."
 const CAPABILITY = "c".repeat(43)
 const accessFile = (pid = 4242): string =>
   JSON.stringify({ version: 1, serverUrl: "http://127.0.0.1:51234/", capability: CAPABILITY, pid })
@@ -109,7 +115,7 @@ describe("arden run", () => {
         return defaultClient().submit(input)
       },
       wait: async (run, options) => {
-        await options?.onEvent?.(runEvent("RUN_STARTED"))
+        await emit(options, runEvent("RUN_STARTED"))
         return { ...completedRun(), run_id: run.runId, session_id: run.sessionId }
       }
     }
@@ -431,8 +437,8 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await options?.onEvent?.(runEvent("RUN_STARTED"))
-        await options?.onEvent?.({
+        await emit(options, runEvent("RUN_STARTED"))
+        await emit(options, {
           event: "TOOL_CALL_START",
           data: {
             type: "TOOL_CALL_START",
@@ -442,11 +448,11 @@ describe("progress and asks at a terminal", () => {
             display_title: "Search inbox"
           }
         })
-        await options?.onEvent?.({
+        await emit(options, {
           event: "TOOL_CALL_END",
           data: { type: "TOOL_CALL_END", tool_call_id: "call-1" }
         })
-        await options?.onEvent?.({
+        await emit(options, {
           event: "TOOL_CALL_START",
           data: {
             type: "TOOL_CALL_START",
@@ -455,19 +461,19 @@ describe("progress and asks at a terminal", () => {
             display_name: "Command"
           }
         })
-        await options?.onEvent?.({
+        await emit(options, {
           event: "TOOL_CALL_ARGS",
           data: { type: "TOOL_CALL_ARGS", tool_call_id: "call-2", delta: '{"command":' }
         })
-        await options?.onEvent?.({
+        await emit(options, {
           event: "TOOL_CALL_ARGS",
           data: { type: "TOOL_CALL_ARGS", tool_call_id: "call-2", delta: '"ls -la"}' }
         })
-        await options?.onEvent?.({
+        await emit(options, {
           event: "TOOL_CALL_END",
           data: { type: "TOOL_CALL_END", tool_call_id: "call-2" }
         })
-        await options?.onEvent?.(runEvent("RUN_FINISHED"))
+        await emit(options, runEvent("RUN_FINISHED"))
         return completedRun()
       }
     }
@@ -482,14 +488,14 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await options?.onEvent?.({
+        await emit(options, {
           ...approvalNeeded("tool-1"),
           data: {
             ...approvalNeeded("tool-1").data,
             rule_places: [{ kind: "everywhere" }]
           }
         })
-        await options?.onEvent?.({
+        await emit(options, {
           event: "connection_needed",
           data: {
             type: "connection_needed",
@@ -537,6 +543,259 @@ describe("progress and asks at a terminal", () => {
     ])
   })
 
+  it("offers no grant of a card only the Arden app grants; it can deny it or leave it waiting", async () => {
+    const approvals: Array<unknown> = []
+    const pay = (toolId: string): HeadlessRunEvent => ({
+      event: "approval_needed",
+      data: { ...approvalNeeded(toolId).data, name: "vault_pay" }
+    })
+    const client: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async () => ({
+        tools: [catalogEntry("vault_pay", { card: "vault_card_pay" })],
+        unlisted: {}
+      }),
+      wait: async (_run, options) => {
+        await emit(options, pay("pay-1"))
+        await emit(options, pay("pay-2"))
+        await emit(options, pay("pay-1"))
+        return completedRun()
+      },
+      answerApproval: async (input) => {
+        approvals.push(input)
+      }
+    }
+    const io = testIo({ client })
+    const asking = askingWith(["1", "2"])
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...io.dependencies,
+        askInTerminal: asking.askInTerminal
+      })
+    ).toBe(0)
+    const card = `Arden asks to run vault_pay. ${APP_ONLY}\n  1) Deny\n  2) Leave it waiting\nChoose 1-2: `
+    expect(asking.prompts).toEqual([card, card])
+    expect(approvals).toEqual([
+      { runId: "run-1", toolId: "pay-1", result: "", approved: false, grantStanding: false }
+    ])
+    expect(io.stderr()).toBe("arden: Deny: vault_pay\narden: vault_pay stays waiting.\n")
+  })
+
+  it("a catalog that could not be read leaves the card unknown, and is read again at the next card", async () => {
+    const prompts: Array<string> = []
+    let reads = 0
+    const pay = (toolId: string): HeadlessRunEvent => ({
+      event: "approval_needed",
+      data: { ...approvalNeeded(toolId).data, name: "vault_pay" }
+    })
+    const client: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async () => {
+        reads += 1
+        if (reads === 1) throw new Error("the server was busy")
+        return { tools: [catalogEntry("vault_pay", { card: "vault_card_pay" })], unlisted: {} }
+      },
+      wait: async (_run, options) => {
+        await emit(options, pay("pay-1"))
+        await emit(options, pay("pay-2"))
+        await emit(options, pay("pay-3"))
+        return completedRun()
+      }
+    }
+    const io = testIo({ client })
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...io.dependencies,
+        askInTerminal: async (prompt) => {
+          prompts.push(prompt.split("\n")[0] ?? "")
+          return undefined
+        }
+      })
+    ).toBe(0)
+    expect(prompts).toEqual([
+      `Arden asks to run vault_pay. ${UNCHECKED}`,
+      `Arden asks to run vault_pay. ${APP_ONLY}`,
+      `Arden asks to run vault_pay. ${APP_ONLY}`
+    ])
+    expect(reads).toBe(2)
+  })
+
+  it("a tool the catalog did not list is looked up again at its next card", async () => {
+    const prompts: Array<string> = []
+    let reads = 0
+    const later = (toolId: string): HeadlessRunEvent => ({
+      event: "approval_needed",
+      data: { ...approvalNeeded(toolId).data, name: "mcp_search" }
+    })
+    const client: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async () => {
+        reads += 1
+        return {
+          tools: reads === 1 ? [] : [catalogEntry("mcp_search", {})],
+          unlisted: {}
+        }
+      },
+      wait: async (_run, options) => {
+        await emit(options, later("search-1"))
+        await emit(options, later("search-2"))
+        return completedRun()
+      }
+    }
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...testIo({ client }).dependencies,
+        askInTerminal: async (prompt) => {
+          prompts.push(prompt)
+          return undefined
+        }
+      })
+    ).toBe(0)
+    expect(prompts.map((prompt) => prompt.split("\n").at(-2))).toEqual([
+      "  2) Leave it waiting",
+      "  2) Deny"
+    ])
+    expect(reads).toBe(2)
+  })
+
+  it.each([
+    ["a prompt sent to the running Arden app", ["Prompt"], true],
+    ["arden run against a server named by --url", ["run", "Prompt", ...URL_ARGS], false],
+    ["arden wait against a server named by --url", ["wait", "run-1", ...URL_ARGS], false],
+    ["arden exec on a server of its own", ["exec", "--config", "s.json", "Prompt"], false]
+  ] as const)("%s says the same about a card it may not allow", async (_entry, argv, app) => {
+    const pay: HeadlessRunEvent = {
+      event: "approval_needed",
+      data: { ...approvalNeeded("pay-1").data, name: "vault_pay" }
+    }
+    const client: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async () => ({
+        tools: [catalogEntry("vault_pay", { card: "vault_card_pay" })],
+        unlisted: {}
+      }),
+      wait: async (_run, options) => {
+        await emit(options, pay)
+        return completedRun()
+      },
+      waitForRun: async (_runId, options) => {
+        await emit(options, pay)
+        return completedRun()
+      }
+    }
+    const events: Array<string> = []
+    const io = testIo({
+      client,
+      ...(app ? { files: { "/home/test/.arden/cli-access.json": accessFile() } } : {})
+    })
+    const asking = askingWith(["2"])
+    expect(
+      await runCli([...argv], {
+        ...io.dependencies,
+        ...started(events),
+        askInTerminal: asking.askInTerminal
+      })
+    ).toBe(0)
+    expect(asking.prompts).toEqual([
+      `Arden asks to run vault_pay. ${APP_ONLY}\n  1) Deny\n  2) Leave it waiting\nChoose 1-2: `
+    ])
+    expect(io.stderr()).toBe("arden: vault_pay stays waiting.\n")
+  })
+
+  it("a server that will not show its catalog, or a tool it does not list, gets no grant from here", async () => {
+    const approvals: Array<unknown> = []
+    const listedNowhere: HeadlessRunEvent = {
+      event: "approval_needed",
+      data: { ...approvalNeeded("tool-2").data, name: "unlisted_tool" }
+    }
+    const refusing: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async () => {
+        throw new HeadlessHttpError(403, "GET", "/tools", "")
+      },
+      wait: async (_run, options) => {
+        await emit(options, approvalNeeded("tool-1"))
+        return completedRun()
+      },
+      answerApproval: async (input) => {
+        approvals.push(input)
+      }
+    }
+    const asking = askingWith(["1"])
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...testIo({ client: refusing }).dependencies,
+        askInTerminal: asking.askInTerminal
+      })
+    ).toBe(0)
+    expect(asking.prompts).toEqual([
+      `Arden asks to run write_file. ${UNCHECKED}\n  1) Deny\n  2) Leave it waiting\nChoose 1-2: `
+    ])
+    expect(approvals).toEqual([
+      { runId: "run-1", toolId: "tool-1", result: "", approved: false, grantStanding: false }
+    ])
+
+    const missing: CliClient = {
+      ...defaultClient(),
+      wait: async (_run, options) => {
+        await emit(options, listedNowhere)
+        return completedRun()
+      }
+    }
+    const leaving = askingWith(["2"])
+    const io = testIo({ client: missing })
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], {
+        ...io.dependencies,
+        askInTerminal: leaving.askInTerminal
+      })
+    ).toBe(0)
+    expect(leaving.prompts[0]?.endsWith("1) Deny\n  2) Leave it waiting\nChoose 1-2: ")).toBe(true)
+    expect(io.stderr()).toBe("arden: unlisted_tool stays waiting.\n")
+  })
+
+  it("with no one to ask, no catalog is read; a stalled read ends with the wait", async () => {
+    let reads = 0
+    const unattended: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async () => {
+        reads += 1
+        return { tools: [], unlisted: {} }
+      },
+      wait: async (_run, options) => {
+        await emit(options, approvalNeeded("tool-1"))
+        return completedRun()
+      }
+    }
+    expect(
+      await runCli(["run", "Prompt", ...URL_ARGS], testIo({ client: unattended }).dependencies)
+    ).toBe(0)
+    expect(reads).toBe(0)
+
+    const stalled: CliClient = {
+      ...defaultClient(),
+      toolCatalog: async (options) =>
+        new Promise((_, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true
+          })
+        }),
+      wait: async (_run, options) => {
+        await emit(options, approvalNeeded("tool-1"))
+        return completedRun()
+      }
+    }
+    const io = testIo({ client: stalled })
+    const running = runCli(["run", "Prompt", ...URL_ARGS], {
+      ...io.dependencies,
+      askInTerminal: async () => "1"
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    io.sigint()
+    expect(await running).not.toBe(0)
+    expect(io.stderr()).toBe("arden: Interrupted by SIGINT\n")
+  })
+
   it("names the tool as progress does, and declines on its own server when the terminal ends", async () => {
     const commandStart: HeadlessRunEvent = {
       event: "TOOL_CALL_START",
@@ -551,8 +810,8 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await options?.onEvent?.(commandStart)
-        await options?.onEvent?.(approvalNeeded("tool-1"))
+        await emit(options, commandStart)
+        await emit(options, approvalNeeded("tool-1"))
         return completedRun()
       },
       answerApproval: async (input) => {
@@ -594,7 +853,7 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await options?.onEvent?.(approvalNeeded("tool-1"))
+        await emit(options, approvalNeeded("tool-1"))
         return completedRun()
       }
     }
@@ -611,7 +870,7 @@ describe("progress and asks at a terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await options?.onEvent?.(QUESTION_EVENT)
+        await emit(options, QUESTION_EVENT)
         return completedRun("Asked")
       },
       answerQuestion: async (questionId, input) => {
@@ -736,9 +995,9 @@ describe("approvals with no one at the terminal", () => {
   const approvalClient = (answers: Array<unknown>): CliClient => ({
     ...defaultClient(),
     wait: async (_run, options) => {
-      await options?.onEvent?.(approvalNeeded("tool-1"))
-      await options?.onEvent?.(approvalNeeded("tool-1"))
-      await options?.onEvent?.(approvalNeeded("tool-9", "run-other"))
+      await emit(options, approvalNeeded("tool-1"))
+      await emit(options, approvalNeeded("tool-1"))
+      await emit(options, approvalNeeded("tool-9", "run-other"))
       return completedRun()
     },
     answerApproval: async (input) => {
@@ -804,7 +1063,7 @@ describe("approvals with no one at the terminal", () => {
     const client: CliClient = {
       ...defaultClient(),
       wait: async (_run, options) => {
-        await options?.onEvent?.(approvalNeeded("tool-1"))
+        await emit(options, approvalNeeded("tool-1"))
         return completedRun()
       },
       answerApproval: async (input) => {

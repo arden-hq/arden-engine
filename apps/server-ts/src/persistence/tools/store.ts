@@ -56,6 +56,8 @@ export interface ResolveToolApprovalInput {
   readonly attachFolderToSpace?: boolean
   readonly edits?: ApprovalEditsInput
   readonly alternative?: ApprovalAlternativeInput
+  readonly askedAt?: string
+  readonly commandId?: string
 }
 
 export interface ApprovalAlternativeInput {

@@ -1,6 +1,33 @@
 import type { HeadlessRunEvent } from "@arden-hq/headless"
+import type { ToolCatalogEntry, ToolDisplay } from "@arden-hq/protocol/tools"
 
 import type { CliClient } from "../src/index.js"
+
+type WaitOptions = Parameters<CliClient["wait"]>[1]
+
+export const emit = async (options: WaitOptions, event: HeadlessRunEvent): Promise<void> => {
+  await options?.onEvent?.(event, options.signal ?? new AbortController().signal)
+}
+
+export const catalogEntry = (name: string, display: ToolDisplay): ToolCatalogEntry => ({
+  name,
+  displayName: name,
+  description: "",
+  kind: "tool",
+  source: null,
+  effectivePolicy: {
+    action: "read",
+    scope: "external",
+    requiresApproval: true,
+    permissions: [],
+    concurrencyGroup: null,
+    destructive: null,
+    openWorld: null,
+    idempotent: null
+  },
+  defaultApproval: "ask",
+  display
+})
 
 type CancelInput = Parameters<CliClient["cancel"]>[0]
 type CancelResponse = Awaited<ReturnType<CliClient["cancel"]>>
@@ -130,6 +157,7 @@ export const defaultClient = (): CliClient => ({
   deleteSession: async () => undefined,
   answerApproval: async () => undefined,
   answerConnection: async () => undefined,
+  toolCatalog: async () => ({ tools: [catalogEntry("write_file", {})], unlisted: {} }),
   answerQuestion: async () => {
     throw new Error("answerQuestion is not stubbed")
   },

@@ -25,7 +25,7 @@ import { noApprovalForRun } from "./approval-policy.js"
 import { loadPendingDecisionRoutes } from "./decision-route-journal.js"
 import { COMMAND_TOOL } from "../permissions/command-policy.js"
 import { approvalPermissionContext } from "./permissions.js"
-import { saveCardRule } from "./tool-approval-resolve.js"
+import { keepCommandResult, saveCardRule } from "./tool-approval-resolve.js"
 import { followUpRecordableStatusList } from "./status-sets.js"
 import { readCallPlan } from "./task-direction.js"
 
@@ -160,7 +160,13 @@ export const makeDeferredToolCalls = ({
   const decideInTransaction = makeDeferredDecisionInTransaction({ sql, sessionEvents })
   const decide: DeferredToolCalls["Service"]["decide"] = (input) =>
     writer
-      .transact(decideInTransaction(input))
+      .transact(
+        decideInTransaction(input).pipe(
+          Effect.tap((decision) =>
+            decision.kind === "not_deferred" ? Effect.void : keepCommandResult(sql, input)
+          )
+        )
+      )
       .pipe(
         Effect.mapError((cause) =>
           cause._tag === "ToolExecutionStoreError"
@@ -281,12 +287,20 @@ export const makeDeferredDecisionInTransaction = ({
   Effect.fn("DeferredToolCalls.decideInTransaction")(function* (input: DeferredDecisionInput) {
     const identity = { runId: input.runId, toolCallId: input.toolCallId }
     const at = DateTime.formatIso(yield* DateTime.now)
-    const rows = yield* sql<DeferredRow>`SELECT run_id, session_id, tool_call_id, tool_name,
-  arguments_json, changes_state, payload_json, status
+    const rows = yield* sql<DeferredRow & { readonly requested_at: string }>`SELECT run_id,
+  session_id, tool_call_id, tool_name, arguments_json, changes_state, payload_json, status,
+  requested_at
 FROM deferred_tool_calls
 WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}`
     const row = rows[0]
     if (row === undefined) return { kind: "not_deferred" } satisfies DeferredDecision
+    if (input.askedAt !== undefined && input.askedAt !== row.requested_at)
+      return yield* toolError(
+        "resolve",
+        "conflict",
+        "This card was asked again; answer it as it is now",
+        identity
+      )
     if (input.approved === undefined)
       return yield* toolError(
         "resolve",

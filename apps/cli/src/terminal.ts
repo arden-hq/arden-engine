@@ -1,5 +1,6 @@
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
+import { grantedOnlyInTheApp, type ToolCatalogResponse } from "@arden-hq/protocol/tools"
 import { runDecoders, type RunQuestion } from "@arden-hq/protocol/runs"
 import { errorMessage } from "@arden-hq/std/errors"
 import { sleep } from "@arden-hq/std/sleep"
@@ -61,12 +62,37 @@ const keyArgument = (args: string): string | undefined => {
 const DECLINED_NOTE =
   "No one was at the command line to answer this, so it was declined. Carry on without it."
 
-type ApprovalChoice = "allow_once" | "always_allow" | "deny"
+type ApprovalChoice = "allow_once" | "always_allow" | "deny" | "leave"
 
-const APPROVAL_LABELS: Record<ApprovalChoice, string> = {
-  allow_once: DECISION_WORD.allowOnce,
-  always_allow: DECISION_WORD.alwaysAllow,
-  deny: DECISION_WORD.deny
+const approvalLabel = (choice: ApprovalChoice): string => {
+  switch (choice) {
+    case "allow_once":
+      return DECISION_WORD.allowOnce
+    case "always_allow":
+      return DECISION_WORD.alwaysAllow
+    case "deny":
+      return DECISION_WORD.deny
+    case "leave":
+      return "Leave it waiting"
+  }
+}
+
+type CardKind = "app_only" | "ordinary" | "unknown"
+
+const cardNote = (card: CardKind): string | undefined => {
+  switch (card) {
+    case "ordinary":
+      return undefined
+    case "app_only":
+      return "Only the Arden app can allow this."
+    case "unknown":
+      return "Arden could not check whether this can be allowed from here, so it cannot be allowed here. If this keeps happening, update Arden."
+  }
+}
+
+const approvalChoices = (card: CardKind, standing: boolean): Array<ApprovalChoice> => {
+  if (card !== "ordinary") return ["deny", "leave"]
+  return standing ? ["allow_once", "always_allow", "deny"] : ["allow_once", "deny"]
 }
 
 type ConnectionChoice = "connected" | "skip"
@@ -81,7 +107,7 @@ const NEXT_RUN_ATTEMPTS = 40
 const NEXT_RUN_POLL_MS = 250
 
 export interface RunResponder {
-  readonly onEvent: (event: HeadlessRunEvent) => Promise<void>
+  readonly onEvent: (event: HeadlessRunEvent, signal?: AbortSignal) => Promise<void>
   readonly afterRun: () => Promise<string | undefined>
 }
 
@@ -119,14 +145,31 @@ export const requestResponder = (input: {
     }
   }
 
+  let catalog: ToolCatalogResponse | undefined
+  const displayIn = (read: ToolCatalogResponse | undefined, tool: string) =>
+    read?.tools.find((listed) => listed.name === tool)?.display ?? read?.unlisted[tool]
+  const cardOf = async (tool: string, signal: AbortSignal | undefined): Promise<CardKind> => {
+    if (displayIn(catalog, tool) === undefined)
+      catalog =
+        (await input.client
+          .toolCatalog(signal === undefined ? {} : { signal })
+          .catch((cause: unknown) => {
+            if (signal?.aborted === true) throw cause
+            return undefined
+          })) ?? catalog
+    const display = displayIn(catalog, tool)
+    if (display === undefined) return "unknown"
+    return grantedOnlyInTheApp(display) ? "app_only" : "ordinary"
+  }
+
   const answerApproval = async (
     data: Extract<HeadlessRunEvent["data"], { type: "approval_needed" }>,
-    runId: string
+    runId: string,
+    signal: AbortSignal | undefined
   ): Promise<void> => {
-    const offered: Array<ApprovalChoice> =
-      (data.rule_places ?? []).length > 0
-        ? ["allow_once", "always_allow", "deny"]
-        : ["allow_once", "deny"]
+    const card = ask === undefined ? "unknown" : await cardOf(data.name, signal)
+    const offered = approvalChoices(card, (data.rule_places ?? []).length > 0)
+    const note = cardNote(card)
     const presentation = data.presentation
     const shown = [
       ...(presentation?.fields ?? []).map((field) => `${field.label}: ${field.value}`),
@@ -137,11 +180,13 @@ export const requestResponder = (input: {
       .filter((line): line is string => typeof line === "string" && line.length > 0)
       .map((line) => `  ${clip(line)}`)
     const name = toolName(data.tool_id, data.name)
+    const title = presentation?.title ?? `Arden asks to run ${name}.`
     const choice = await choose(
-      [presentation?.title ?? `Arden asks to run ${name}.`, ...shown].join("\n"),
-      offered.map((value) => [value, APPROVAL_LABELS[value]] as const)
+      [note === undefined ? title : `${title} ${note}`, ...shown].join("\n"),
+      offered.map((value) => [value, approvalLabel(value)] as const)
     )
     if (choice === undefined) return unanswered(data, runId, name)
+    if (choice === "leave") return say(`${name} stays waiting.`)
     await input.client.answerApproval({
       runId,
       toolId: data.tool_id,
@@ -149,7 +194,7 @@ export const requestResponder = (input: {
       approved: choice !== "deny",
       grantStanding: choice === "always_allow"
     })
-    say(`${APPROVAL_LABELS[choice]}: ${name}`)
+    say(`${approvalLabel(choice)}: ${name}`)
   }
 
   const answerConnection = async (
@@ -267,7 +312,7 @@ export const requestResponder = (input: {
       }
       return undefined
     },
-    onEvent: async (event) => {
+    onEvent: async (event, signal) => {
       const data = event.data
       if (data.type === "TOOL_CALL_START")
         toolNames.set(data.tool_call_id, data.display_name ?? data.tool_call_name)
@@ -285,7 +330,7 @@ export const requestResponder = (input: {
       if (handled.has(data.tool_id)) return
       handled.add(data.tool_id)
       if (input.handling === "decline") return decline(data, runId)
-      if (data.type === "approval_needed") return answerApproval(data, runId)
+      if (data.type === "approval_needed") return answerApproval(data, runId, signal)
       return answerConnection(data, runId)
     }
   }

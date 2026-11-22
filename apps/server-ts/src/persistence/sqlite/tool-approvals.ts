@@ -274,7 +274,9 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
       yield* sql`
         UPDATE tool_approvals
         SET action = ${input.action}, scope = ${input.scope}, preview = ${input.preview},
-            diff = ${input.diff ?? null}, status = 'pending', requested_at = ${requestedAt},
+            diff = ${input.diff ?? null}, status = 'pending',
+            requested_at = CASE WHEN ${requestedAt} > requested_at THEN ${requestedAt}
+              ELSE strftime('%Y-%m-%dT%H:%M:%fZ', requested_at, '+0.001 seconds') END,
             resolved_at = NULL, expires_at = NULL, result_feedback = NULL,
             kind = ${input.kind}, payload_json = ${payloadJson}, resolution_json = NULL
         WHERE run_id = ${input.runId} AND tool_call_id = ${input.toolCallId}

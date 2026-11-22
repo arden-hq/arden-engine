@@ -18,9 +18,11 @@ export interface OpenServer {
 const decodeLocalAccess = Schema.decodeUnknownEffect(
   Schema.UndefinedOr(
     Schema.Struct({
+      host: Schema.Literals(["app", "configured"]),
       capability: Schema.String.check(Schema.isMinLength(32)),
       rendererOrigin: Schema.String.check(Schema.isMinLength(1)),
-      cliCapability: Schema.String.check(Schema.isMinLength(32))
+      cliCapability: Schema.String.check(Schema.isMinLength(32)),
+      phoneCapability: Schema.String.check(Schema.isMinLength(32))
     })
   )
 )

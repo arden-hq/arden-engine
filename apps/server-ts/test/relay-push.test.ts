@@ -40,7 +40,8 @@ describe("relay push", () => {
       sessionId: "chat-1",
       collapseId: "call-1",
       askId: "call-1",
-      runId: "run-1"
+      runId: "run-1",
+      askedAt: "2026-11-21T09:00:00.000Z"
     } as const
     const sealed = pushPayload({ identity, device, notice })
     expect(sealed.category).toBe("arden.approval")
@@ -68,7 +69,8 @@ describe("relay push", () => {
       body: "Edit notes.md",
       session_id: "chat-1",
       ask_id: "call-1",
-      run_id: "run-1"
+      run_id: "run-1",
+      asked_at: "2026-11-21T09:00:00.000Z"
     })
   })
 
@@ -101,6 +103,17 @@ describe("relay push", () => {
     expect(JSON.parse(fromUtf8(sealed.payload))).toMatchObject({
       aps: { alert: { title: "Arden", body: "A new message" } }
     })
+  })
+
+  it("an approval push carries the time its card was asked", async () => {
+    const world = makeWorld({ seeded: true })
+    const sent: Array<PushNotice> = []
+    world.asks = [approval("run-1", "call-1")]
+    world.onSend = (pushed) => sent.push(pushed)
+    await world.reconcile()
+    expect(sent.map((pushed) => [pushed.askId, pushed.askedAt])).toEqual([
+      ["call-1", "2026-10-12T09:58:00.000Z"]
+    ])
   })
 
   it("two posts in one chat open that chat, and neither replaces the other on the phone", async () => {
@@ -292,7 +305,8 @@ const approval = (runId: string, toolId: string) => ({
   run_id: runId,
   session_id: `chat-${runId}`,
   place: "Lab",
-  title: "Edit notes.md"
+  title: "Edit notes.md",
+  asked_at: "2026-10-12T09:58:00.000Z"
 })
 
 const notice = (id: string, fields: Partial<Notice>): Notice => ({

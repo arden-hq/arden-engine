@@ -1,6 +1,7 @@
 import { previewLine } from "@arden-hq/protocol/chat"
 import type { MobileAsk, MobileChange } from "@arden-hq/protocol/mobile"
 import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
+import { grantedOnlyInTheApp, type ToolDisplay } from "@arden-hq/protocol/tools"
 import { namedTool } from "@arden-hq/protocol/views"
 
 export interface AskPlace {
@@ -14,13 +15,18 @@ export function mobileAsks({
   questions,
   approvals,
   places,
-  spaceNames
+  spaceNames,
+  displayOf
 }: {
   readonly questions: ReadonlyArray<RunQuestion>
   readonly approvals: ReadonlyArray<RunApproval>
   readonly places: ReadonlyMap<string, AskPlace>
   readonly spaceNames: ReadonlyMap<string, string>
+  readonly displayOf: (toolName: string) => ToolDisplay | undefined
 }): MobileAsk[] {
+  const answeredOnThePhone = (approval: RunApproval): boolean =>
+    approval.kind !== "integration_connection" &&
+    !grantedOnlyInTheApp(displayOf(approval.tool_name))
   const where = (sessionId: string) => {
     const place = places.get(sessionId)
     const spaceId = place?.spaceId
@@ -67,9 +73,6 @@ export function mobileAsks({
       }))
   ]
 }
-
-const answeredOnThePhone = (approval: RunApproval): boolean =>
-  approval.kind !== "integration_connection"
 
 function approvalTitle(approval: RunApproval): string {
   return (

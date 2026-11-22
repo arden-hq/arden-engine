@@ -1,7 +1,12 @@
 import { projectedDecoderFor } from "../common/boundary.js"
 import { ToolCatalogResponseSchema, toToolCatalogResponse } from "./schema.js"
 
-export { LEGACY_TOOL_DISPLAY, TOOL_DISPLAY_FACTS, type ToolDisplay } from "./display.js"
+export {
+  grantedOnlyInTheApp,
+  LEGACY_TOOL_DISPLAY,
+  TOOL_DISPLAY_FACTS,
+  type ToolDisplay
+} from "./display.js"
 
 export type {
   ToolAction,

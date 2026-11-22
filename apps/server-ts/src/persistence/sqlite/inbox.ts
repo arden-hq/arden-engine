@@ -19,9 +19,10 @@ import {
   type InboxIncidentEntry,
   type InboxQuestionEntry,
   type InboxReadScope,
-  type InboxState
+  type InboxState,
+  type OpenAsks
 } from "../inbox/store.js"
-import type { RunQuestion } from "@arden-hq/protocol/runs"
+import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
 import { makeRunQuestionReader, type QuestionRow } from "./run-question-read.js"
 import { MAX_SCRIPT_RESULT_ATTEMPTS } from "../scripts/results.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -96,7 +97,7 @@ interface Snapshot {
   readonly spaces: ReadonlyArray<SpaceRow>
   readonly tasks: ReadonlyArray<TaskRow>
   readonly comments: ReadonlyArray<CommentRow>
-  readonly approvals: ReadonlyArray<ApprovalRow>
+  readonly approvals: ReadonlyArray<RunApproval>
   readonly failures: ReadonlyArray<FailureRow>
   readonly pauses: ReadonlyArray<PauseRow>
   readonly spacePauses: ReadonlyArray<SpacePauseRow>
@@ -108,6 +109,7 @@ interface Snapshot {
 }
 
 type StoreOperation = "view" | "mark_read" | "dismiss"
+type OpenAsksOperation = StoreOperation | "open_asks"
 
 interface Projection {
   readonly view: InboxState
@@ -115,7 +117,7 @@ interface Projection {
 }
 
 const storeError = (
-  operation: StoreOperation,
+  operation: OpenAsksOperation,
   reason: "invalid" | "not_found" | "storage",
   message: string,
   cause?: unknown
@@ -174,6 +176,16 @@ const byRecency = <T extends { readonly at: string; readonly key: string }>(
       : difference
   })
 
+const newestFirst = <T>(
+  items: ReadonlyArray<T>,
+  at: (item: T) => string,
+  key: (item: T) => string
+): Array<T> =>
+  byRecency(items.map((item) => ({ item, at: at(item), key: key(item) }))).map(({ item }) => item)
+
+const approvalKey = (approval: RunApproval): string =>
+  `approval:${approval.run_id}:${approval.tool_call_id}`
+
 const group = (
   key: string,
   kind: InboxEntryGroup["kind"],
@@ -202,20 +214,18 @@ const capGroups = (groups: ReadonlyArray<InboxEntryGroup>): Array<InboxEntryGrou
 }
 
 const query = <A>(
-  operation: StoreOperation,
+  operation: OpenAsksOperation,
   statement: Effect.Effect<ReadonlyArray<A>, unknown>
 ): Effect.Effect<ReadonlyArray<A>, InboxStoreError> =>
   statement.pipe(
     Effect.mapError((cause) => storeError(operation, "storage", "Could not read Inbox data", cause))
   )
 
-const makeSnapshotLoader = (sql: SqlClient.SqlClient) => {
+const makeOpenAsksLoader = (sql: SqlClient.SqlClient) => {
   const questionReader = makeRunQuestionReader(sql)
-  return Effect.fn("SqliteInbox.loadSnapshot")(function* (
-    operation: StoreOperation,
-    now: string,
-    cutoff: string
-  ): Effect.fn.Return<Snapshot, InboxStoreError> {
+  return Effect.fn("SqliteInbox.loadOpenAsks")(function* (
+    operation: OpenAsksOperation
+  ): Effect.fn.Return<OpenAsks, InboxStoreError> {
     const questionRows = yield* query(
       operation,
       sql<QuestionRow>`SELECT * FROM (${questionReader.openSelect}) WHERE status = 'open'`
@@ -225,6 +235,44 @@ const makeSnapshotLoader = (sql: SqlClient.SqlClient) => {
         storeError(operation, "storage", "Could not read Inbox questions", cause)
       )
     )
+    const approvalRows = yield* query(
+      operation,
+      sql<ApprovalRow>`
+      SELECT run_id, session_id, destination_session_id, work_json, tool_call_id, tool_name, action,
+             scope, preview, diff, requested_at, kind, payload_json, source
+      FROM (${pendingDecisionCards(sql)})
+    `
+    )
+    const approvals = yield* Effect.forEach(approvalRows, (row) =>
+      decodeRunApproval(row).pipe(
+        Effect.mapError((cause) =>
+          storeError(operation, "storage", "Stored Inbox approval payload is corrupt", cause)
+        ),
+        Effect.map((approval): RunApproval => ({
+          ...approval,
+          description: spokenDescription(approval.description)
+        }))
+      )
+    )
+    return {
+      questions: newestFirst(
+        questions,
+        (question) => question.created_at,
+        (question) => question.question_id
+      ),
+      approvals: newestFirst(approvals, (approval) => approval.at, approvalKey)
+    }
+  })
+}
+
+const makeSnapshotLoader = (sql: SqlClient.SqlClient) => {
+  const loadOpenAsks = makeOpenAsksLoader(sql)
+  return Effect.fn("SqliteInbox.loadSnapshot")(function* (
+    operation: StoreOperation,
+    now: string,
+    cutoff: string
+  ): Effect.fn.Return<Snapshot, InboxStoreError> {
+    const { questions, approvals } = yield* loadOpenAsks(operation)
     const spaces = yield* query(
       operation,
       sql<SpaceRow>`
@@ -280,15 +328,6 @@ const makeSnapshotLoader = (sql: SqlClient.SqlClient) => {
         WHERE recency = 1
       `
           )
-
-    const approvals = yield* query(
-      operation,
-      sql<ApprovalRow>`
-      SELECT run_id, session_id, destination_session_id, work_json, tool_call_id, tool_name, action,
-             scope, preview, diff, requested_at, kind, payload_json, source
-      FROM (${pendingDecisionCards(sql)})
-    `
-    )
 
     const failures = yield* query(operation, failureRows(sql, cutoff))
 
@@ -379,6 +418,7 @@ export const makeInboxStore = ({
 }: Pick<PersistenceDeps, "writer" | "reader">): InboxStore["Service"] => {
   const sql = writer.sql
   const readSnapshot = makeSnapshotLoader(reader)
+  const readOpenAsks = makeOpenAsksLoader(reader)
   const loadSnapshot = makeSnapshotLoader(sql)
 
   const makeProjection = Effect.fn("SqliteInbox.makeProjection")(function* (
@@ -442,26 +482,19 @@ export const makeInboxStore = ({
         return timeValue(rightAt) - timeValue(leftAt)
       })
 
-    const approvalItems = yield* Effect.forEach(snapshot.approvals, (row) =>
-      decodeRunApproval(row).pipe(
-        Effect.mapError((cause) =>
-          storeError(operation, "storage", "Stored Inbox approval payload is corrupt", cause)
-        ),
-        Effect.map((approval): InboxApprovalEntry => {
-          const key = `approval:${row.run_id}:${row.tool_call_id}`
-          return {
-            source: "approval",
-            key,
-            groupKey: "approvals",
-            at: approval.at,
-            counted: true,
-            unread: unread(row.requested_at, marks.get(key)),
-            readAt: marks.get(key),
-            approval: { ...approval, description: spokenDescription(approval.description) }
-          }
-        })
-      )
-    )
+    const approvalItems = snapshot.approvals.map((approval): InboxApprovalEntry => {
+      const key = approvalKey(approval)
+      return {
+        source: "approval",
+        key,
+        groupKey: "approvals",
+        at: approval.at,
+        counted: true,
+        unread: unread(approval.at, marks.get(key)),
+        readAt: marks.get(key),
+        approval
+      }
+    })
     const sortedApprovals = byRecency(approvalItems)
 
     const failureItems = automationFailureEntries({
@@ -729,5 +762,7 @@ export const makeInboxStore = ({
       )
   })
 
-  return InboxStore.of({ view, markRead, dismiss })
+  const openAsks = () => readOpenAsks("open_asks")
+
+  return InboxStore.of({ view, openAsks, markRead, dismiss })
 }

@@ -25,15 +25,27 @@ const isLoopbackHostHeader = (value: string | undefined): boolean => {
 const PREFLIGHT_MAX_AGE_SECONDS = 7_200
 
 export interface LocalAccess {
+  readonly host: "app" | "configured"
   readonly capability: string
   readonly rendererOrigin: string
   readonly cliCapability: string
+  readonly phoneCapability: string
 }
 
-export const LocalCaller = Context.Reference<"desktop" | "cli" | "other">(
+export const LocalCaller = Context.Reference<"desktop" | "cli" | "phone" | "other">(
   "@arden-hq/server/http/LocalCaller",
   { defaultValue: () => "other" }
 )
+
+/**
+ * Whether this request comes from the Arden app itself, which alone grants what needs its own
+ * consent (Touch ID, a typed secret). A caller's routes are `LocalCaller`'s; this is apart from them:
+ * a configured server's owner reaches every route but has no app. Without local access nothing tells
+ * callers apart, and every request counts as the app's.
+ */
+export const NativeConsent = Context.Reference<boolean>("@arden-hq/server/http/NativeConsent", {
+  defaultValue: () => true
+})
 
 const matchesLocalCapability = (expected: string, provided: string | undefined): boolean => {
   if (provided === undefined) return false
@@ -75,11 +87,19 @@ export const makeLocalOnlyMiddleware = (access?: LocalAccess) => {
     const provided = request.headers[LOCAL_CAPABILITY_HEADER]
     const desktop = access !== undefined && matchesLocalCapability(access.capability, provided)
     const cli = access !== undefined && matchesLocalCapability(access.cliCapability, provided)
-    const authorized = access === undefined || desktop || cli
+    const phone = access !== undefined && matchesLocalCapability(access.phoneCapability, provided)
+    const authorized = access === undefined || desktop || cli || phone
     let caller: typeof LocalCaller.Service = "other"
     if (desktop) caller = "desktop"
     else if (cli) caller = "cli"
-    const app = Effect.provideService(httpApp, LocalCaller, caller)
+    else if (phone) caller = "phone"
+    const app = httpApp.pipe(
+      Effect.provideService(LocalCaller, caller),
+      Effect.provideService(
+        NativeConsent,
+        access === undefined || (desktop && access.host === "app")
+      )
+    )
     const origin = request.headers["origin"]
     if (origin === undefined) return authorized ? yield* app : yield* forbidden
     if (renderer === undefined || origin !== renderer.origin) return yield* forbidden

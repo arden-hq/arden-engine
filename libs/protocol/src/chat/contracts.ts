@@ -122,6 +122,12 @@ export interface ToolResultInput {
   /** The person chose the tool's alternative on the card: `draft` saves the
    *  message as a draft instead of sending it. Requires `approved`. */
   readonly alternative?: ToolApprovalAlternative
+  /** When the card answered was asked (`RunApproval.at`). The same call can be asked again in
+   *  place, for example whether it completed; an answer naming an earlier asking is refused. */
+  readonly askedAt?: string
+  /** The relay's phone command that sends the decision. Read only from the phone capability;
+   *  ignored from any other caller. */
+  readonly commandId?: string
 }
 
 /** The rules list a card's "Always allow" saves to (see `ToolResultInput`). */

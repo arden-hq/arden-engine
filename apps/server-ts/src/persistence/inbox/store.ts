@@ -4,7 +4,7 @@ import { Context, Effect, Schema } from "effect"
 
 export class InboxStoreError extends Schema.TaggedError<InboxStoreError>()("InboxStoreError", {
   ...storeErrorFields({
-    operations: ["view", "mark_read", "dismiss"],
+    operations: ["view", "open_asks", "mark_read", "dismiss"],
     reasons: ["invalid", "not_found", "storage"]
   })
 }) {}
@@ -108,10 +108,16 @@ export type InboxDismissScope =
   | { readonly scope: "group"; readonly groupKey: string }
   | { readonly scope: "items"; readonly keys: ReadonlyArray<string> }
 
+export interface OpenAsks {
+  readonly questions: ReadonlyArray<RunQuestion>
+  readonly approvals: ReadonlyArray<RunApproval>
+}
+
 export class InboxStore extends Context.Service<
   InboxStore,
   {
     readonly view: () => Effect.Effect<InboxState, InboxStoreError>
+    readonly openAsks: () => Effect.Effect<OpenAsks, InboxStoreError>
     readonly markRead: (scope: InboxReadScope) => Effect.Effect<InboxState, InboxStoreError>
     readonly dismiss: (scope: InboxDismissScope) => Effect.Effect<InboxState, InboxStoreError>
   }
