@@ -20,7 +20,8 @@ export const AUTOMATION_BLOCKED_KINDS = [
 ] as const
 type AutomationBlockedKind = (typeof AUTOMATION_BLOCKED_KINDS)[number]
 
-export type HandlerToolName = "publish_home_letter" | "post_message"
+export const HANDLER_TOOL_NAMES = ["publish_home_letter", "post_message"] as const
+export type HandlerToolName = (typeof HANDLER_TOOL_NAMES)[number]
 
 export interface AutomationBlockedReport {
   readonly kind: AutomationBlockedKind

@@ -67,6 +67,10 @@ const fakeModel = (calls: ReadonlyArray<FakeCall>, ending: FakeEnding = {}) =>
               ${JSON.stringify(call.args)}, 0, 'completed',
               ${JSON.stringify({ content: call.content, preview: "Done", is_error: call.isError ?? false })},
               ${AT}, ${AT})`
+        if (ending.noChange !== undefined)
+          yield* sql`UPDATE chat_runs
+            SET metadata_json = json_set(metadata_json, '$.no_change_reason', ${ending.noChange})
+            WHERE run_id = ${runId}`
         yield* chat.finish({
           runId,
           messages: [
@@ -514,6 +518,28 @@ it("a job with no item to check ends without starting a run", async () => {
         chatSessionId: null
       })
       expect(runs).toEqual([])
+    })
+  )
+})
+
+it("a run that reported no change and then posted settles as finished", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, arrive, runEvents, settle } = yield* setup
+      const lease = yield* arrive("mail-1")
+      const { result } = yield* runEvents(
+        lease,
+        [
+          { tool: "report", args: { event: "no_change" }, content: "Recorded." },
+          yield* posting({ text: "On second look, the bank needs a form." })
+        ],
+        { noChange: "Looked routine." }
+      )
+      expect(result).toMatchObject({ status: "ended", outcome: "finished" })
+      yield* settle(lease, result)
+      expect(
+        yield* sql`SELECT outcome FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
+      ).toEqual([{ outcome: "finished" }])
     })
   )
 })

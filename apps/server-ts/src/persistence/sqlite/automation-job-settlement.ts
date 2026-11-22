@@ -1,4 +1,5 @@
 import { freshRow } from "./automation-enqueue.js"
+import { HANDLER_TOOL_NAMES } from "../automations/queue.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
 import { readAutomationFollowup } from "./automation-followup.js"
 import { haltAutomation } from "./automation-halt.js"
@@ -360,7 +361,10 @@ export const makeFencedOccurrences = ({
     ending: AutomationJobResult
   ) {
     const admitted = yield* sql<{ readonly count: number; readonly quiet: number }>`
-            SELECT COUNT(*) AS count, COALESCE(MIN(chat.status = 'completed' AND ${quietRunOutcome(sql, "chat")}), 0) AS quiet
+            SELECT COUNT(*) AS count, COALESCE(MIN(chat.status = 'completed' AND ${quietRunOutcome(sql, "chat")}
+              AND NOT EXISTS (SELECT 1 FROM tool_calls AS made WHERE made.run_id = chat.run_id
+                AND made.tool_name IN ${sql.in(HANDLER_TOOL_NAMES)} AND made.status = 'completed'
+                AND COALESCE(json_extract(made.result_json, '$.is_error'), 0) = 0)), 0) AS quiet
             FROM chat_runs AS chat JOIN automation_runs AS attempt ON attempt.id = ${attemptId}
             WHERE json_extract(chat.metadata_json, '$.run_context.origin') = json(attempt.origin)`
     const ranModel = (admitted[0]?.count ?? 0) > 0
