@@ -1,4 +1,5 @@
-import type { SystemPromptEdit } from "./model.js"
+import { isItemEventType, type AutomationTrigger } from "@arden-hq/protocol/automations"
+import type { SystemPromptEdit, SystemTriggerScope } from "./model.js"
 import type {
   AutomationContextMode,
   SystemAutomationSetting,
@@ -75,3 +76,15 @@ export const lockedSystemMessage = (
   spec: SystemSettableSpec
 ): string =>
   `A system Automation cannot change ${locked.join(", ")}. It accepts only ${systemSettable(spec).join(", ")}.`
+
+export const systemTakesTrigger = (
+  spec: { readonly triggerScope: SystemTriggerScope },
+  trigger: AutomationTrigger
+): boolean => {
+  switch (spec.triggerScope) {
+    case "any":
+      return true
+    case "item_events":
+      return trigger.type === "event" && isItemEventType(trigger.event_type)
+  }
+}

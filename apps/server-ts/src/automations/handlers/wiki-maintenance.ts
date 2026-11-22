@@ -63,6 +63,7 @@ export const wikiMaintenanceHandler: SystemAutomationHandler<"wiki_maintenance">
     chatSession: true,
     manualRun: true,
     promptEdit: "owner",
+    triggerScope: "any",
     rearmOnSeed: false
   },
   item: handlerItemText("wiki", (data) => data.markdown),

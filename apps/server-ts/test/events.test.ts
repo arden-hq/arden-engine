@@ -128,62 +128,76 @@ it("seeding over Urgent events names the row and its chat Events, keeps the rule
   )
 })
 
-it("seeding resumes an Events row that paused itself, with its own schedule, and leaves one turned off", async () => {
+it("Events takes only item triggers: an owner's other trigger is refused, and an old one is dropped at seeding", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const catalog = yield* AutomationCatalog
       const events = eventsHandler.spec.automationId
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
-      yield* catalog.update(
-        events,
-        {
-          triggers: [
-            { type: "time", at: "08:00", days: "daily" },
-            { type: "event", event_type: "email.received", run_only_if: SENTENCE }
-          ]
-        },
-        "owner"
+      const mail = {
+        type: "event" as const,
+        event_type: "email.received" as const,
+        run_only_if: SENTENCE
+      }
+      const refused = yield* catalog
+        .update(
+          events,
+          {
+            triggers: [mail, { type: "event", event_type: "task.changed", run_only_if: SENTENCE }]
+          },
+          "owner"
+        )
+        .pipe(Effect.flip)
+      expect(refused.message).toBe(
+        "This system Automation takes only triggers for new mail, GitHub items and calendar changes"
       )
-      const pause = (autoResumeAt: string | null) =>
-        sql`UPDATE scheduled_tasks SET enabled = 0, next_run_at = NULL,
-            paused_at = '2026-11-18T09:00:00.000Z', auto_resume_at = ${autoResumeAt},
-            auto_resumes = 1, failed_runs = 2
-          WHERE task_id = ${events}`
+      yield* catalog.update(events, { triggers: [mail] }, "owner")
+      yield* sql`UPDATE scheduled_tasks SET triggers = json_insert(triggers, '$[#]',
+          json_object('id', 't99', 'type', 'time', 'at', '08:00', 'days', 'daily')),
+          next_run_at = '2026-11-23T08:00:00.000Z'
+        WHERE task_id = ${events}`
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
+      const seeded = yield* catalog.get(events)
+      expect(seeded?.triggers).toMatchObject([mail])
+      expect(seeded?.triggers).toHaveLength(1)
+      expect(
+        yield* sql`SELECT triggers_source, next_run_at FROM scheduled_tasks WHERE task_id = ${events}`
+      ).toEqual([{ triggers_source: "manual", next_run_at: null }])
+    })
+  )
+})
+
+it("seeding resumes Events when Arden paused it, and leaves it off when the owner did", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const catalog = yield* AutomationCatalog
+      const events = eventsHandler.spec.automationId
+      yield* catalog.seedSystemAutomations([eventsHandler.spec])
       const state = sql<{
         readonly enabled: number
-        readonly armed: number
         readonly paused_at: string | null
-        readonly auto_resume_at: string | null
-        readonly auto_resumes: number
         readonly failed_runs: number
-      }>`SELECT enabled, next_run_at IS NOT NULL AS armed, paused_at, auto_resume_at,
-          auto_resumes, failed_runs
-        FROM scheduled_tasks WHERE task_id = ${events}`
-      yield* pause("2026-11-18T10:00:00.000Z")
+        readonly resumed: number
+      }>`SELECT task.enabled, task.paused_at, task.failed_runs,
+          (SELECT COUNT(*) FROM automation_deliveries AS pause
+            WHERE pause.task_id = task.task_id
+              AND json_extract(pause.payload, '$.resumedAt') IS NOT NULL) AS resumed
+        FROM scheduled_tasks AS task WHERE task.task_id = ${events}`
+      const pauseAt = "2026-11-18T09:00:00.000Z"
+      yield* sql`UPDATE scheduled_tasks SET enabled = 0, paused_at = ${pauseAt}, failed_runs = 3
+        WHERE task_id = ${events}`
+      yield* sql`INSERT INTO automation_deliveries (delivery_id, task_id, delivered_at, subject,
+          body, payload, status, created_at, destinations)
+        VALUES (${"a".repeat(64)}, ${events}, ${pauseAt}, 'Paused', 'Paused after 3 failed runs',
+          ${JSON.stringify({ kind: "automation_paused", attemptId: 1, resumedAt: null })},
+          'delivered', ${pauseAt}, '[]')`
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
-      expect(yield* state).toEqual([
-        {
-          enabled: 1,
-          armed: 1,
-          paused_at: null,
-          auto_resume_at: null,
-          auto_resumes: 0,
-          failed_runs: 0
-        }
-      ])
-      yield* pause(null)
+      expect(yield* state).toEqual([{ enabled: 1, paused_at: null, failed_runs: 0, resumed: 1 }])
+      yield* catalog.update(events, { enabled: false }, "owner")
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
-      expect(yield* state).toEqual([
-        {
-          enabled: 0,
-          armed: 0,
-          paused_at: "2026-11-18T09:00:00.000Z",
-          auto_resume_at: null,
-          auto_resumes: 1,
-          failed_runs: 2
-        }
-      ])
+      expect(yield* state).toMatchObject([{ enabled: 0, resumed: 1 }])
     })
   )
 })

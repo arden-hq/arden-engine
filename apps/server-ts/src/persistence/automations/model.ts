@@ -38,6 +38,8 @@ export const EVENTS_AUTOMATION_ID = AutomationId.make("builtin-urgent-events")
 
 export type SystemPromptEdit = "owner" | "fixed"
 
+export type SystemTriggerScope = "any" | "item_events"
+
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId
   readonly name: string
@@ -51,6 +53,7 @@ export interface SystemAutomationSpec {
   readonly contextMode: "fresh" | "fork"
   readonly chatSession: boolean
   readonly promptEdit: SystemPromptEdit
+  readonly triggerScope: SystemTriggerScope
   readonly manualRun: boolean
   readonly rearmOnSeed: boolean
 }
