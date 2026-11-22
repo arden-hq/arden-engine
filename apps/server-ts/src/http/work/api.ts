@@ -21,9 +21,6 @@ import {
   WorkOkResponseSchema
 } from "@arden-hq/protocol/effect/spaces/work"
 import {
-  HomeEvidencePageSchema,
-  HomeEvidenceQuerySchema,
-  HomeLetterResponseSchema,
   HomePresenceInputSchema,
   HomePresenceResponseSchema,
   ResolveRunQuestionInputSchema,
@@ -44,18 +41,9 @@ export class WorkApi extends HttpApiGroup.make("work", { topLevel: true }).add(
     success: RecordedHistoryPageSchema,
     error: storeErrors
   }),
-  HttpApiEndpoint.get("homeLetter", "/home/letter", {
-    success: HomeLetterResponseSchema,
-    error: [HttpApiError.InternalServerErrorNoContent]
-  }),
   HttpApiEndpoint.post("homePresence", "/home/presence", {
     payload: HomePresenceInputSchema,
     success: HomePresenceResponseSchema,
-    error: storeErrors
-  }),
-  HttpApiEndpoint.get("homeEvidence", "/home/evidence", {
-    query: HomeEvidenceQuerySchema,
-    success: HomeEvidencePageSchema,
     error: storeErrors
   }),
   HttpApiEndpoint.post("moveToChat", "/spaces/work/:itemId/chat", {

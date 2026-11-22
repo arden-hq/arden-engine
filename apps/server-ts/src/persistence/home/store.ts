@@ -1,12 +1,6 @@
 import type { JobLeaseRef } from "@arden-hq/jobs"
 import { Context, type Effect } from "effect"
-import type {
-  HomePresenceInput,
-  HomeLetterBody,
-  HomeLetterResponse,
-  HomeEvidenceQuery,
-  HomeEvidencePage
-} from "@arden-hq/protocol/runs"
+import type { HomePresenceInput, HomeLetterBody, HomeLetterResponse } from "@arden-hq/protocol/runs"
 import type { WorkStoreError } from "../work/store.js"
 import type {
   HomeAddressBook,
@@ -39,8 +33,5 @@ export class HomeStore extends Context.Service<
       readonly body: HomeLetterBody
       readonly rules: HomeLetterRules
     }) => Effect.Effect<boolean, WorkStoreError>
-    readonly homeEvidence: (
-      options: HomeEvidenceQuery
-    ) => Effect.Effect<HomeEvidencePage, WorkStoreError>
   }
 >()("@arden-hq/server/persistence/HomeStore") {}

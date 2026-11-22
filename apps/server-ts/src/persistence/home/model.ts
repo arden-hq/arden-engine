@@ -1,6 +1,10 @@
 import { Schema } from "effect"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
-import { HomeEvidenceSchema, HomeLetterResponseSchema } from "@arden-hq/protocol/effect/runs"
+import {
+  HOME_HEADLINES,
+  HomeEvidenceSchema,
+  HomeLetterResponseSchema
+} from "@arden-hq/protocol/effect/runs"
 import type { HomeEvidence } from "@arden-hq/protocol/runs"
 
 const HomeLetterSnapshotSchema = Schema.Struct({
@@ -15,6 +19,20 @@ const HomeLetterSnapshotSchema = Schema.Struct({
   entries: Schema.Array(HomeEvidenceSchema).check(Schema.isMaxLength(200))
 })
 export type HomeLetterSnapshot = typeof HomeLetterSnapshotSchema.Type
+
+export const HomeEvidenceQuerySchema = Schema.Struct({
+  since: IsoDateTimeStringSchema,
+  cursor: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048)))
+})
+export type HomeEvidenceQuery = typeof HomeEvidenceQuerySchema.Type
+
+export const HomeEvidencePageSchema = Schema.Struct({
+  window: Schema.Struct({ since: IsoDateTimeStringSchema, through: IsoDateTimeStringSchema }),
+  headline: Schema.Literals(HOME_HEADLINES),
+  entries: Schema.Array(HomeEvidenceSchema),
+  next_cursor: Schema.NullOr(Schema.NonEmptyString)
+})
+export type HomeEvidencePage = typeof HomeEvidencePageSchema.Type
 
 export const HomeLetterInputSchema = Schema.Struct({
   snapshot: HomeLetterSnapshotSchema,

@@ -183,7 +183,6 @@ export const makeHomeStore = ({
   })
 
   return HomeStore.of({
-    homeEvidence: viewEvidence,
     homePresence: Effect.fn("WorkStore.homePresence")(function* (input) {
       const valid = yield* Schema.decodeUnknownEffect(HomePresenceInputSchema)(input).pipe(
         Effect.mapError((cause) => workError("invalid", "Invalid Home presence", cause))

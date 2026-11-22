@@ -159,7 +159,6 @@ const tables: Readonly<Record<string, RouteTable>> = {
     device: () => relayRoutes.device("abcdefghijklmnopqrstuv")
   }),
   runRoutes: table(runRoutes, {
-    homeEvidence: () => runRoutes.homeEvidence({ since: "2026-01-01T00:00:00.000Z" }),
     taskAttempts: () => runRoutes.taskAttempts(itemId),
     questions: () => runRoutes.questions(),
     answerQuestion: () => runRoutes.answerQuestion("question-1"),

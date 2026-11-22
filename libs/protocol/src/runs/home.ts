@@ -79,31 +79,10 @@ export const HomeEvidenceSchema = Schema.Union([
   Schema.Struct({ ...source, kind: Schema.Literal("offer"), offer: HomeOfferSchema })
 ])
 
-export const HomeEvidenceQuerySchema = Schema.Struct({
-  since: at,
-  cursor: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048)))
-})
 /** The Home headline, a persisted code value: the owner never sees it, and stored
  *  letter snapshots carry it, so renaming it is a data migration. */
 export const HOME_HEADLINES = ["Nothing needs you", "Since your last visit"] as const
-
-export const HomeEvidencePageSchema = Schema.Struct({
-  window: Schema.Struct({ since: at, through: at }),
-  headline: Schema.Literals(HOME_HEADLINES),
-  entries: Schema.Array(HomeEvidenceSchema),
-  next_cursor: Schema.NullOr(identity)
-})
 export type HomeEvidence = typeof HomeEvidenceSchema.Type
-export type HomeEvidenceQuery = typeof HomeEvidenceQuerySchema.Type
-export type HomeEvidencePage = typeof HomeEvidencePageSchema.Type
-export const encodeHomeEvidencePathEffect = (value: unknown) =>
-  Schema.decodeUnknownEffect(HomeEvidenceQuerySchema)(value, { onExcessProperty: "error" }).pipe(
-    Effect.map((query) => {
-      const params = new URLSearchParams({ since: query.since })
-      if (query.cursor) params.set("cursor", query.cursor)
-      return `/home/evidence?${params}`
-    })
-  )
 
 export const HomePresenceInputSchema = Schema.Struct({
   client_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),

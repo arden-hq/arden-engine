@@ -1,12 +1,13 @@
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { SqlClient, SqlError, Statement } from "effect/unstable/sql"
-import {
-  HOME_HEADLINES,
-  HomeEvidencePageSchema,
-  HomeEvidenceQuerySchema
-} from "@arden-hq/protocol/effect/runs"
+import { HOME_HEADLINES } from "@arden-hq/protocol/effect/runs"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
-import type { HomeStore } from "../home/store.js"
+import {
+  HomeEvidencePageSchema,
+  HomeEvidenceQuerySchema,
+  type HomeEvidencePage,
+  type HomeEvidenceQuery
+} from "../home/model.js"
 import { WorkStoreError } from "../work/store.js"
 import { makeRunQuestionReader } from "./run-question-read.js"
 import { quietRunOutcome } from "./run-outcomes.js"
@@ -34,7 +35,7 @@ export const makeHomeEvidence = ({
 }: {
   readonly sql: SqlClient.SqlClient
   readonly consistent: <A, E>(read: Effect.Effect<A, E>) => Effect.Effect<A, E | SqlError.SqlError>
-}): HomeStore["Service"]["homeEvidence"] => {
+}): ((options: HomeEvidenceQuery) => Effect.Effect<HomeEvidencePage, WorkStoreError>) => {
   const questions = makeRunQuestionReader(sql)
   return Effect.fn("HomeStore.homeEvidence")(function* (options) {
     const query = yield* Schema.decodeUnknownEffect(HomeEvidenceQuerySchema)(options).pipe(

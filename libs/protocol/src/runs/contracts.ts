@@ -6,7 +6,7 @@ import type { JsonRecord, JsonValue } from "../common/json.js"
 import type { RuntimeRunStatus } from "../chat/runtime.js"
 import type { AutomationRunOutcome } from "../automations/outcome.js"
 import type { ModelCallKind } from "./usage.js"
-export type { HomeEvidence, HomeEvidenceQuery, HomeEvidencePage } from "./home.js"
+export type { HomeEvidence } from "./home.js"
 
 export type { RunApprovalWork, RunOrigin, RunTaskBinding, RunContext } from "./context.js"
 export type { WorkerAttempt, WorkerAttemptPage, WorkerAttemptPageOptions } from "./attempts.js"

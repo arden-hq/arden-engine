@@ -5,7 +5,6 @@ import {
 } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
-import { addressedHomeLetter } from "../../automations/home-letter-links.js"
 import { ChatMessage, type ChatMessageShape } from "../../chat/message.js"
 import { WorkStore, type TaskAddress } from "../../persistence/work/store.js"
 import { ArdenApi } from "../api.js"
@@ -56,16 +55,9 @@ export const WorkHandlers = HttpApiBuilder.group(
       .handle("history", ({ params, query }) =>
         store.history({ id: params.itemId, ...query }).pipe(Effect.catch(failStore))
       )
-      .handle("homeLetter", () =>
-        addressedHomeLetter(home).pipe(
-          Effect.tapCause((cause) => Effect.logError("Home letter failed", cause)),
-          Effect.catch(failInternal("Work"))
-        )
-      )
       .handle("homePresence", ({ payload }) =>
         home.homePresence(payload).pipe(Effect.as({ ok: true as const }), Effect.catch(failStore))
       )
-      .handle("homeEvidence", ({ query }) => home.homeEvidence(query).pipe(Effect.catch(failStore)))
       .handle("moveToChat", ({ params, payload }) =>
         store
           .moveToChat({ itemId: params.itemId, sessionId: payload.session_id })
