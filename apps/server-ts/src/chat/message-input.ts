@@ -52,6 +52,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly continuesTask?: TaskStepCause
   readonly capture?: ChatCaptureInput["via"]
   readonly fromQueue?: true
+  readonly opensOnboarding?: true
 }
 
 interface ChatHandoffSource {

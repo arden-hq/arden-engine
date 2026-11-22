@@ -57,6 +57,7 @@ export interface ChatWriteStartInput {
   readonly continuesTask?: TaskStepCause
   readonly capture?: ChatCaptureInput
   readonly fromQueue?: true
+  readonly opensOnboarding?: true
 }
 
 export interface ChatCaptureInput {

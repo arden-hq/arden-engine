@@ -125,7 +125,7 @@ it("M2 files every Home offer under Main and leaves none of them open", () => {
       `SELECT proposal_id, place, space_id = ? AS in_main, status, settled_at IS NOT NULL AS settled
       FROM task_proposals ORDER BY seq`
     )
-    .all(main)
+    .all(String(main))
   expect(rows).toEqual([
     { proposal_id: "own", place: "space", in_main: 1, status: "offered", settled: 0 },
     { proposal_id: "skipped", place: "space", in_main: 1, status: "rejected", settled: 1 },

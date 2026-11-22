@@ -564,8 +564,12 @@ export const SessionHandlers = HttpApiBuilder.group(
           Effect.map((started) => ({ session_id: params.sessionId, started })),
           Effect.catchTags({
             SessionStoreError: failStore,
-            ChatMessageError: failInternal("Sessions"),
-            ChatMessageConflictError: failInternal("Sessions")
+            ChatMessageConflictError: (error) =>
+              Effect.fail(new StoreConflict({ detail: error.message })),
+            ChatMessageError: (error) =>
+              error.reason === "not_found"
+                ? Effect.fail(new HttpApiError.NotFound({}))
+                : failInternal("Sessions")(error)
           })
         )
       )

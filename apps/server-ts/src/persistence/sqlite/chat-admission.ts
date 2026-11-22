@@ -47,6 +47,7 @@ import {
 import { bindInChatTask } from "./in-chat-task.js"
 import { taskStepDepth } from "./run-cause.js"
 import { holdsUnattendedInput, readLastEndedRun } from "./chat-hold.js"
+import { markOnboarding, onboardingRefusal } from "./session-onboarding.js"
 import { captureRunPolicy, workerScopes } from "./run-policy.js"
 import { appendQuestionChange } from "./question-events.js"
 import { settleTypedReply } from "./typed-reply.js"
@@ -274,6 +275,18 @@ export const makeChatAdmission = ({
       if (runtime === null) {
         return yield* conflict("The saved request expired before it could be replayed")
       }
+      if (valid.opensOnboarding === true) {
+        const refusal = yield* onboardingRefusal(sql, valid.sessionId).pipe(
+          Effect.mapError((cause) =>
+            writeError("start", "storage", "Could not check Getting started", {
+              sessionId: valid.sessionId,
+              cause
+            })
+          )
+        )
+        if (refusal !== undefined) return yield* conflict(refusal)
+        yield* markOnboarding(sql, valid.sessionId, timestamp)
+      }
 
       const arrivalConflict = (cause: { readonly message: string }) => conflict(cause.message)
       const delivery =
@@ -425,6 +438,7 @@ export const makeChatAdmission = ({
       const held =
         model !== undefined &&
         valid.message.role === ROLE.interaction &&
+        valid.opensOnboarding !== true &&
         valid.automation === undefined &&
         valid.continuesTask === undefined &&
         delivery?.kind !== "answer" &&

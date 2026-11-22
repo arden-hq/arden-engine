@@ -45,6 +45,7 @@ export const chatAdmissionInputSchema = Schema.Struct({
     })
   ),
   fromQueue: Schema.optionalKey(Schema.Literal(true)),
+  opensOnboarding: Schema.optionalKey(Schema.Literal(true)),
   capture: Schema.optionalKey(
     Schema.Struct({
       via: Schema.Literals(["screenshot", "quick", "phone"] as const),

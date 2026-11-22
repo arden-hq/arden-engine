@@ -231,17 +231,14 @@ it("replays the offer rules over the real history: counts only", async (context)
       accepted: accepted.length,
       admitted: accepted.filter(
         ({ sources, at }) =>
-          offerAnchorRefusal("space", sources) === undefined && finishedRule(database, sources, at)
+          offerAnchorRefusal(sources) === undefined && finishedRule(database, sources, at)
       ).length,
-      pageOnly: accepted.filter(({ sources }) => offerAnchorRefusal("space", sources) !== undefined)
-        .length
+      pageOnly: accepted.filter(({ sources }) => offerAnchorRefusal(sources) !== undefined).length
     }
 
-    // Every rejected Space offer, asked again after each Memory page it cites changed. Home
-    // offers from mail carry no computed evidence key, and cite no page.
     const rejected = database
       .prepare(`SELECT sources_json, evidence_revision_key, candidate_hash FROM task_proposals
-          WHERE status = 'rejected' AND place = 'space'`)
+          WHERE status = 'rejected' AND place = 'space' AND source_run_id IS NOT NULL`)
       .all()
       .map((row) => {
         const sources = decodeSources(JSON.parse(text(row, "sources_json")))
@@ -260,7 +257,7 @@ it("replays the offer rules over the real history: counts only", async (context)
           citesPage: sources.some((source) => source.kind === "memory"),
           oldRuleReopens: stored.evidence_revision_key !== call.evidenceKey,
           newRuleReopens: !storedOfferStands(stored, call),
-          pageOnly: offerAnchorRefusal("space", sources) !== undefined
+          pageOnly: offerAnchorRefusal(sources) !== undefined
         }
       })
     // Offers that really came back after a No: a stored revision rejected, the next one offered.
