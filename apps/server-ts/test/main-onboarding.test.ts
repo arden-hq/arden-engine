@@ -23,11 +23,7 @@ const AT = "2026-11-22T00:00:00.000Z"
 
 const markOf = (sessionId: string) =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ readonly mark: string | null }>`
-      SELECT json_type(metadata, '$.onboarding.at') AS mark FROM sessions
-      WHERE session_id = ${sessionId}`
-    return rows[0]?.mark ?? undefined
+    return yield* (yield* SessionStore).onboardingKickedOff(sessionId)
   })
 
 const mainSpace = Effect.gen(function* () {
@@ -111,9 +107,9 @@ it("the kickoff admission checks the chat and writes the mark in one step", asyn
   expect(outcome).toEqual({
     admitted: "Started",
     replayed: "Existing",
-    freshMark: "text",
+    freshMark: true,
     busy: expect.stringContaining("busy"),
-    busyMark: undefined,
+    busyMark: false,
     archived: "not_found",
     moved: expect.stringContaining("Main"),
     missing: "not_found"

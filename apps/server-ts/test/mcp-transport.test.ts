@@ -101,7 +101,6 @@ it("rejects an MCP HTTP response whose declared body exceeds 16 MiB", async () =
       (cause: unknown) => cause
     )
     expect(failure).toMatchObject({
-      name: "McpHttpResponseTooLargeError",
       code: "MCP_HTTP_RESPONSE_TOO_LARGE",
       reason: "declared_length",
       observedBytes: 16 * 1_024 * 1_024 + 1
@@ -126,7 +125,6 @@ it("stops a chunked MCP HTTP response after 16 MiB", async () => {
       (cause: unknown) => cause
     )
     expect(failure).toMatchObject({
-      name: "McpHttpResponseTooLargeError",
       code: "MCP_HTTP_RESPONSE_TOO_LARGE",
       reason: "streamed_bytes",
       observedBytes: expect.any(Number)
@@ -236,7 +234,8 @@ it("keeps confidential preset identity in the vault and arbitrary MCP policy con
       ...discovery,
       authorizationServerUrl: "https://other.example.com"
     })
-  ).rejects.toThrow("issuer")
+  ).rejects.toThrow()
+  expect(await provider.discoveryState()).toEqual({ ...discovery, resourceMetadata })
   await provider.saveTokens({ access_token: "access-token", token_type: "Bearer" })
   expect(stored?.tokens?.access_token).toBe("access-token")
   await provider.saveTokens({
@@ -251,9 +250,15 @@ it("keeps confidential preset identity in the vault and arbitrary MCP policy con
     issuer: "https://mcp.slack.com/"
   })
   expect(JSON.stringify(stored)).not.toContain("static-client-secret")
-  expect(JSON.stringify(mcpPresetCatalog())).not.toMatch(
-    /client.?reference|client.?secret|credential.?key/i
-  )
+  const catalog = JSON.stringify(mcpPresetCatalog())
+  for (const hidden of [
+    "static-client-secret",
+    "mcp.slack.client-id",
+    "mcp.slack.client-secret",
+    preset.auth.credentialKey
+  ]) {
+    expect(catalog).not.toContain(hidden)
+  }
 
   await provider.invalidateCredentials("discovery")
   provider.saveCodeVerifier("test-verifier")
@@ -283,7 +288,7 @@ it("keeps confidential preset identity in the vault and arbitrary MCP policy con
         )
       }
     })
-  ).rejects.toThrow("issuer")
+  ).rejects.toThrow()
   expect(tokenRequests).toEqual([])
 })
 

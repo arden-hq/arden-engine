@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { Cause, Effect, Exit } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
+import { NEWER_DATA_OPERATION, StorageStartupError } from "../src/persistence/service.js"
 import {
   prepareReleaseStorage,
   recordDataVersion
@@ -49,7 +50,8 @@ describe("the data version guard", () => {
     const exit = await open(current)
     expect(Exit.isFailure(exit)).toBe(true)
     const failure = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
-    expect(failure).toMatchObject({ operation: "open_newer_data" })
+    expect(failure).toBeInstanceOf(StorageStartupError)
+    expect(failure).toMatchObject({ operation: NEWER_DATA_OPERATION })
     expect(Reflect.get(Object(failure), "message")).toContain(recorded)
   })
 
@@ -61,7 +63,7 @@ describe("the data version guard", () => {
     })
     const older = await open("1.0.1")
     expect(Exit.isFailure(older) ? Cause.squash(older.cause) : undefined).toMatchObject({
-      operation: "open_newer_data"
+      operation: NEWER_DATA_OPERATION
     })
   })
 })

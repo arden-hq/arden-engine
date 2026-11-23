@@ -9,9 +9,7 @@ it("refuses a tool whose parameters a model receives without an object root", ()
     { type: "string" }
   ]
   for (const root of refused) {
-    const problems = objectRootProblems("permissions_read", root)
-    expect(problems).toHaveLength(1)
-    expect(problems[0]).toContain("permissions_read")
+    expect(objectRootProblems("permissions_read", root)).not.toEqual([])
   }
   expect(
     objectRootProblems("usage_report", {

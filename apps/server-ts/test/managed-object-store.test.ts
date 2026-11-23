@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
@@ -48,16 +48,16 @@ describe("managed object store", () => {
         format: "text",
         source: { kind: "tool", name: "x", call_id: "y" }
       })
-      const guessed = `arden:managed-output/${hash("second")}/${descriptor.sha256}/text`
+      const guessed = descriptor.ref.replace(descriptor.owner_session_hash, hash("second"))
+      expect(guessed).not.toBe(descriptor.ref)
       await expect(store.read({ sessionId: "second", ref: guessed })).rejects.toThrow()
-      const object = path.join(
-        root,
-        "managed-outputs",
-        "objects",
-        descriptor.sha256.slice(0, 2),
-        descriptor.sha256
-      )
-      await writeFile(object, "sane bytes")
+      const entries = await readdir(path.join(root, "managed-outputs"), {
+        recursive: true,
+        withFileTypes: true
+      })
+      const object = entries.find((entry) => entry.isFile() && entry.name === descriptor.sha256)
+      if (!object) throw new Error("object file not found")
+      await writeFile(path.join(object.parentPath, object.name), "sane bytes")
       await expect(store.read({ sessionId: "first", ref: descriptor.ref })).rejects.toThrow()
       await expect(store.attach({ descriptor, sessionId: "second" })).rejects.toThrow()
     } finally {

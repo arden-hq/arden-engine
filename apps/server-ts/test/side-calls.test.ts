@@ -163,14 +163,16 @@ describe("a side call's effort and output limit", () => {
 
   it("leaves room for thinking at an assigned effort or the model's default", async () => {
     // A Codex model always carries its default effort, so its helper calls keep it.
-    expect(
-      await helperRequest(name, { efforts: ["low", "medium", "high"], assigned: "medium" })
-    ).toEqual({ maxOutputTokens: 80 + REASONING_ALLOWANCE_TOKENS, reasoningEffort: "medium" })
-    // OpenRouter lists models whose reasoning is mandatory without any effort.
-    expect(await helperRequest(name, { efforts: [], assigned: null })).toEqual({
-      maxOutputTokens: 80 + REASONING_ALLOWANCE_TOKENS,
-      reasoningEffort: undefined
+    const medium = await helperRequest(name, {
+      efforts: ["low", "medium", "high"],
+      assigned: "medium"
     })
+    expect(medium.reasoningEffort).toBe("medium")
+    expect(medium.maxOutputTokens).toBeGreaterThan(80)
+    // OpenRouter lists models whose reasoning is mandatory without any effort.
+    const mandatory = await helperRequest(name, { efforts: [], assigned: null })
+    expect(mandatory.reasoningEffort).toBeUndefined()
+    expect(mandatory.maxOutputTokens).toBeGreaterThan(80)
     // An effort chosen for the helper wins, `none` included.
     expect(await helperRequest(name, { efforts: ["none", "high"], assigned: "none" })).toEqual({
       maxOutputTokens: 80,

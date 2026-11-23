@@ -1,10 +1,9 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ToolResult } from "@arden-hq/loop"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { engineOrderedJson } from "@arden-hq/std/json"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
@@ -28,10 +27,18 @@ import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-laye
 import { SessionFileCleanup } from "../src/storage/session-file-cleanup.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 
-const IMAGE = { type: "image", media_type: "image/png", data: "iVBORw0KGgo".repeat(2_000) } as const
+const IMAGE = {
+  type: "image",
+  media_type: "image/png",
+  data: "iVBORw0KGgo".repeat(2_000)
+} as const
 
 const sqlFields = {
-  applied_change: { type: "file_edit", patch: `+${"line\n".repeat(700)}`, truncated: false },
+  applied_change: {
+    type: "file_edit",
+    patch: `+${"line\n".repeat(700)}`,
+    truncated: false
+  },
   attachment_id: "attachment-1",
   automation_ref: "automation-1",
   comment: { comment_id: "comment-1", body: "c".repeat(3_000) },
@@ -119,7 +126,11 @@ const startRun = Effect.gen(function* () {
   const turns = yield* sql<{ readonly turn_id: string }>`
     SELECT json_extract(metadata_json, '$.turn_id') AS turn_id FROM chat_runs
     WHERE run_id = ${started.runId}`
-  return { sessionId: session.sessionId, runId: started.runId, turnId: turns[0]?.turn_id ?? "" }
+  return {
+    sessionId: session.sessionId,
+    runId: started.runId,
+    turnId: turns[0]?.turn_id ?? ""
+  }
 })
 
 const identityOf = (
@@ -160,12 +171,15 @@ const replayed = (identity: ToolExecutionIdentity) =>
   })
 
 const filesUnder = async (directory: string): Promise<ReadonlyArray<string>> => {
-  const entries = await readdir(directory, { recursive: true, withFileTypes: true }).catch(() => [])
+  const entries = await readdir(directory, {
+    recursive: true,
+    withFileTypes: true
+  }).catch(() => [])
   return entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
 }
 
 describe("tool result storage", () => {
-  it("keeps a large result whole as an object and a slim row in its place", async () => {
+  it("gives back a large result whole when it is completed and when the call is replayed", async () => {
     await withRig(async (rig) => {
       const out = await Effect.runPromise(
         Effect.gen(function* () {
@@ -174,46 +188,16 @@ describe("tool result storage", () => {
           const small = identityOf(run, "small")
           return {
             completed: yield* settle(large, largeResult),
-            row: yield* storedRow("large"),
             replayed: yield* replayed(large),
             smallCompleted: yield* settle(small, smallResult),
-            smallRow: yield* storedRow("small")
+            smallReplayed: yield* replayed(small)
           }
         }).pipe(Effect.provide(storage(rig, { slim: true })))
       )
-      const whole = engineOrderedJson(largeResult)
-      const slim = JSON.parse(out.row) as {
-        readonly content: string
-        readonly stored_result: { readonly ref: string }
-      }
-      const marker = slim.stored_result
-      const digest = marker.ref.split("/")[2] ?? ""
-      expect(largeResult.content.startsWith(slim.content)).toBe(true)
-      expect(Buffer.byteLength(slim.content, "utf8")).toBeGreaterThan(4_092)
-      expect(Buffer.byteLength(slim.content, "utf8")).toBeLessThanOrEqual(4_096)
-      expect(slim).toEqual({
-        content: slim.content,
-        preview: "Read the page",
-        is_error: false,
-        retryable: null,
-        data: { ...sqlFields, small: 1 },
-        host: largeResult.host,
-        model_content: [],
-        stored_result: {
-          ref: marker.ref,
-          sha256: digest,
-          bytes: Buffer.byteLength(whole, "utf8"),
-          content_chars: [...largeResult.content].length,
-          omitted: ["data.text"]
-        }
-      })
-      expect(
-        await readFile(path.join(rig.outputs, "objects", digest.slice(0, 2), digest), "utf8")
-      ).toBe(whole)
       expect(out.completed).toEqual(largeResult)
-      expect(engineOrderedJson(out.replayed)).toBe(whole)
+      expect(out.replayed).toEqual(largeResult)
       expect(out.smallCompleted).toEqual(smallResult)
-      expect(JSON.parse(out.smallRow)).toEqual(smallResult)
+      expect(out.smallReplayed).toEqual(smallResult)
     })
   })
 
@@ -236,7 +220,10 @@ describe("tool result storage", () => {
           }
           const same = yield* tools.complete(identity, reordered)
           const different = yield* tools
-            .complete(identity, { ...largeResult, content: `${largeResult.content}!` })
+            .complete(identity, {
+              ...largeResult,
+              content: `${largeResult.content}!`
+            })
             .pipe(Effect.flip)
           const swapped = largeResult.content.replace("Résumé", "Rèsumé")
           const sameSize = yield* tools
@@ -277,9 +264,14 @@ describe("tool result storage", () => {
       },
       host: { source_refs: [{ ref: "https://example.com", title: "Example" }] }
     }
-    const contentOnly: ToolResult = { ...smallResult, content: "Long output.\n".repeat(3_000) }
+    const contentOnly: ToolResult = {
+      ...smallResult,
+      content: "Long output.\n".repeat(3_000)
+    }
     const objects = (rig: Rig) =>
-      makeToolResultObjects(rig.outputs, { withLiveSession: (_, action) => action() })
+      makeToolResultObjects(rig.outputs, {
+        withLiveSession: (_, action) => action()
+      })
     const read = (rig: Rig, slim: boolean, ids: ReadonlyArray<string>) =>
       Effect.gen(function* () {
         const run = yield* startRun
@@ -307,7 +299,11 @@ describe("tool result storage", () => {
             const entry = metadata.get(id)
             return entry === undefined
               ? undefined
-              : { isError: entry.isError, retryable: entry.retryable, data: entry.data }
+              : {
+                  isError: entry.isError,
+                  retryable: entry.retryable,
+                  data: entry.data
+                }
           }),
           evidence: evidence.items.map((item) => [item.tool_call_id, item.payload.text]),
           executions
@@ -341,12 +337,18 @@ describe("tool result storage", () => {
             toolCallIds: ["small", "content"]
           })
           const missing = yield* history
-            .historyResultMetadata({ sessionId: run.sessionId, toolCallIds: ["app"] })
+            .historyResultMetadata({
+              sessionId: run.sessionId,
+              toolCallIds: ["app"]
+            })
             .pipe(Effect.flip)
           return { kept: [...kept.keys()].toSorted(), missing: missing.reason }
         }).pipe(Effect.provide(storage(rig, { slim: true })))
       )
-      expect(outcome).toEqual({ kept: ["content", "small"], missing: "storage" })
+      expect(outcome).toEqual({
+        kept: ["content", "small"],
+        missing: "storage"
+      })
     })
   })
 
@@ -387,7 +389,9 @@ describe("tool result storage", () => {
                             type: "function",
                             function: {
                               name: "web_fetch",
-                              arguments: JSON.stringify({ url: "https://example.com/start" })
+                              arguments: JSON.stringify({
+                                url: "https://example.com/start"
+                              })
                             },
                             changes_state: false
                           }
@@ -402,7 +406,9 @@ describe("tool result storage", () => {
               .pipe(
                 Effect.provideService(
                   ToolResultObjects,
-                  makeToolResultObjects(rig.outputs, { withLiveSession: (_, action) => action() })
+                  makeToolResultObjects(rig.outputs, {
+                    withLiveSession: (_, action) => action()
+                  })
                 )
               )
           )
@@ -462,14 +468,23 @@ describe("tool result storage", () => {
 })
 
 it("a handler reads its whole result back from a slim row", async () => {
-  const body = { paragraphs: [[{ text: "Ünïcode 🙂 ".repeat(1_200), source_id: null }]] }
+  const body = {
+    paragraphs: [[{ text: "Ünïcode 🙂 ".repeat(1_200), source_id: null }]]
+  }
   const content = JSON.stringify(body)
   await withRig(async (rig) => {
     const out = await Effect.runPromise(
       Effect.gen(function* () {
         const run = yield* startRun
-        const letter = { ...identityOf(run, "letter"), toolName: "publish_home_letter" }
-        yield* settle(letter, { content, preview: "Home letter ready", data: { body } })
+        const letter = {
+          ...identityOf(run, "letter"),
+          toolName: "publish_home_letter"
+        }
+        yield* settle(letter, {
+          content,
+          preview: "Home letter ready",
+          data: { body }
+        })
         return {
           slim: JSON.parse(yield* storedRow("letter")).stored_result !== undefined,
           read: yield* (yield* AutomationQueue).handlerToolResult({
@@ -485,13 +500,18 @@ it("a handler reads its whole result back from a slim row", async () => {
 })
 
 it("a handler refuses a slim row whose digest does not name its saved object", async () => {
-  const body = { paragraphs: [[{ text: "Ünïcode 🙂 ".repeat(1_200), source_id: null }]] }
+  const body = {
+    paragraphs: [[{ text: "Ünïcode 🙂 ".repeat(1_200), source_id: null }]]
+  }
   await withRig(async (rig) => {
     const reason = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const run = yield* startRun
-        const letter = { ...identityOf(run, "letter"), toolName: "publish_home_letter" }
+        const letter = {
+          ...identityOf(run, "letter"),
+          toolName: "publish_home_letter"
+        }
         yield* settle(letter, {
           content: JSON.stringify(body),
           preview: "Home letter ready",

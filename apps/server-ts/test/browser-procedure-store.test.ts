@@ -56,80 +56,110 @@ const learningTables = Effect.fn(function* (sql: SqlClient.SqlClient, runId: str
   yield* sql`UPDATE browser_procedure_settings SET since='2026-10-28T00:00:00.000Z'`
 })
 
-it("admits safe read-only evidence, keeps an unchecked page's step without its page, and rejects the entire trace on sensitive capture", async () => {
-  const result = await Effect.runPromise(
+const safe = JSON.stringify({
+  content: "Dashboard shows 8 open items",
+  data: {
+    tab: { url: "https://example.com/dashboard", profile_ref: "default" },
+    procedure_learning: { eligible: true }
+  }
+})
+
+const withLearnedRun = <A>(
+  use: (context: {
+    readonly sql: SqlClient.SqlClient
+    readonly store: BrowserProcedureStore["Service"]
+  }) => Effect.Effect<A, unknown, never>
+) =>
+  Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const writer = makeWriter({ sql, reader: sql, queue: yield* PersistenceWriteQueue })
       yield* learningTables(sql, "read")
-      const safe = JSON.stringify({
-        content: "Dashboard shows 8 open items",
-        data: {
-          tab: { url: "https://example.com/dashboard", profile_ref: "default" },
-          procedure_learning: { eligible: true }
-        }
-      })
       yield* sql`INSERT INTO tool_calls VALUES ('read','inspect','browser_snapshot','{"tab_ref":"tab-1"}',${safe},0,'completed','2026-10-28T00:01:01.000Z','none')`
       yield* sql`INSERT INTO browser_procedure_candidates VALUES ('read')`
       const store = makeBrowserProcedureStore({ writer })
       yield* store.enqueue()
-      yield* store.recordOutcome("read", "skipped", "  ")
-      const blank = yield* sql<{
-        readonly outcome: string
-        readonly outcome_reason: string
-      }>`SELECT outcome, outcome_reason FROM browser_procedure_jobs WHERE run_id = 'read'`
-      yield* store.recordOutcome("read", "saved", "The reviewer accepted the draft.")
-      const recorded = yield* sql<{
-        readonly outcome: string
-        readonly outcome_reason: string
-      }>`SELECT outcome, outcome_reason FROM browser_procedure_jobs WHERE run_id = 'read'`
-      const catalog = yield* store.list()
-      const learned = yield* store.evidence("read")
-      yield* sql`INSERT INTO tool_calls VALUES ('read','refused','browser_act','{"value":"never-captured"}','{"is_error":true,"host":{"mutation_receipt":{"outcome":"no_op"}}}',1,'completed','2026-10-28T00:01:00.000Z','external')`
-      const repaired = yield* store.evidence("read")
-      yield* sql`DELETE FROM tool_calls WHERE tool_call_id='refused'`
-      yield* sql`UPDATE tool_calls SET result_json=${JSON.stringify({ content: "sensitive-value", data: { procedure_learning: { eligible: false } } })}`
-      const sensitive = yield* store.evidence("read")
-      yield* sql`UPDATE tool_calls SET result_json=${JSON.stringify({ content: 'Tab: tab-1\nPage:\n--- PAGE CONTENT (untrusted) nonce=n origin=https://example.com/done ---\n- heading "Unchecked page"\n--- END PAGE CONTENT nonce=n ---', data: { tab: { url: "https://example.com/done", profile_ref: "default" }, procedure_learning: { eligible: false, withheld: true } } })}`
-      const withheld = yield* store.evidence("read")
-      yield* sql`UPDATE tool_calls SET result_json=${JSON.stringify({ content: "unclassified-value", data: {} })}`
-      const unclassified = yield* store.evidence("read")
-      yield* sql`UPDATE tool_calls SET result_json=${safe}`
-      yield* sql`INSERT INTO tool_calls VALUES ('read','secret','browser_act','{"tab_ref":"tab-1","secret":"login"}',${safe},1,'completed','2026-10-28T00:01:02.000Z','external')`
-      const secret = yield* store.evidence("read")
-      return {
-        outcomes: [blank[0], recorded[0]],
-        jobs: catalog.jobs.map((job) => job.status),
-        scope: learned === undefined ? undefined : procedureEvidenceScope(learned),
-        count: learned?.calls.length,
-        repaired: repaired?.calls.map((call) => call.id),
-        request: learned === undefined ? undefined : "request" in learned,
-        sensitive,
-        withheld: withheld?.calls.map((call) => [call.id, JSON.stringify(call.result)]),
-        unclassified,
-        secret
-      }
+      return yield* use({ sql, store })
     }).pipe(
       Effect.provide(
         Layer.mergeAll(SqliteClient.layer({ filename: ":memory:" }), PersistenceWriteQueue.layer)
       )
     )
   )
+
+it("admits safe read-only evidence scoped to its origin and profile", async () => {
+  const result = await withLearnedRun(({ store }) =>
+    Effect.gen(function* () {
+      yield* store.recordOutcome("read", "skipped", "  ")
+      yield* store.recordOutcome("read", "saved", "The reviewer accepted the draft.")
+      const catalog = yield* store.list()
+      const learned = yield* store.evidence("read")
+      return {
+        jobs: catalog.jobs.map((job) => job.status),
+        scope: learned === undefined ? undefined : procedureEvidenceScope(learned),
+        calls: learned?.calls.length,
+        request: learned === undefined ? undefined : "request" in learned
+      }
+    })
+  )
   expect(result).toEqual({
-    outcomes: [
-      { outcome: "skipped", outcome_reason: expect.stringMatching(/\S/) },
-      { outcome: "saved", outcome_reason: "The reviewer accepted the draft." }
-    ],
     jobs: ["pending"],
     scope: { origin: "https://example.com", profile: "default" },
-    count: 1,
-    repaired: ["inspect"],
-    request: false,
-    sensitive: undefined,
-    withheld: [["inspect", expect.not.stringContaining("Unchecked page")]],
-    unclassified: undefined,
-    secret: undefined
+    calls: 1,
+    request: false
   })
+})
+
+it("drops a refused action from the evidence and keeps the safe step", async () => {
+  const calls = await withLearnedRun(({ sql, store }) =>
+    Effect.gen(function* () {
+      yield* sql`INSERT INTO tool_calls VALUES ('read','refused','browser_act','{"value":"never-captured"}','{"is_error":true,"host":{"mutation_receipt":{"outcome":"no_op"}}}',1,'completed','2026-10-28T00:01:00.000Z','external')`
+      return (yield* store.evidence("read"))?.calls.map((call) => call.id)
+    })
+  )
+  expect(calls).toEqual(["inspect"])
+})
+
+it("keeps an unchecked page's step without its page", async () => {
+  const withheld = await withLearnedRun(({ sql, store }) =>
+    Effect.gen(function* () {
+      yield* sql`UPDATE tool_calls SET result_json=${JSON.stringify({ content: 'Tab: tab-1\nPage:\n--- PAGE CONTENT (untrusted) nonce=n origin=https://example.com/done ---\n- heading "Unchecked page"\n--- END PAGE CONTENT nonce=n ---', data: { tab: { url: "https://example.com/done", profile_ref: "default" }, procedure_learning: { eligible: false, withheld: true } } })}`
+      return (yield* store.evidence("read"))?.calls.map((call) => [
+        call.id,
+        JSON.stringify(call.result)
+      ])
+    })
+  )
+  expect(withheld).toEqual([["inspect", expect.not.stringContaining("Unchecked page")]])
+})
+
+it.each([
+  [
+    "sensitive capture",
+    JSON.stringify({
+      content: "sensitive-value",
+      data: { procedure_learning: { eligible: false } }
+    })
+  ],
+  ["unclassified capture", JSON.stringify({ content: "unclassified-value", data: {} })]
+])("rejects the entire trace on %s", async (_name, result) => {
+  const evidence = await withLearnedRun(({ sql, store }) =>
+    Effect.gen(function* () {
+      yield* sql`UPDATE tool_calls SET result_json=${result}`
+      return yield* store.evidence("read")
+    })
+  )
+  expect(evidence).toBeUndefined()
+})
+
+it("rejects the entire trace when a step carries a secret", async () => {
+  const evidence = await withLearnedRun(({ sql, store }) =>
+    Effect.gen(function* () {
+      yield* sql`INSERT INTO tool_calls VALUES ('read','secret','browser_act','{"tab_ref":"tab-1","secret":"login"}',${safe},1,'completed','2026-10-28T00:01:02.000Z','external')`
+      return yield* store.evidence("read")
+    })
+  )
+  expect(evidence).toBeUndefined()
 })
 
 it("never sends or saves a typed value, a form field value or page body text while learning", async () => {
@@ -288,9 +318,12 @@ it("never sends or saves a typed value, a form field value or page body text whi
         Effect.provideService(SessionQueries, partialService("SessionQueries", {}))
       )
       yield* procedures.learn("apply", new AbortController().signal)
-      const saved = yield* sql<{ readonly row: string }>`
-        SELECT specification_json || evidence_json AS row FROM browser_procedure_revisions`
-      return { seen: seen.join("\n"), saved: saved.map((r) => r.row).join("\n") }
+      const catalog = yield* store.list()
+      const saved = yield* Effect.forEach(catalog.procedures, (listed) => store.get(listed.id))
+      return {
+        seen: seen.join("\n"),
+        saved: saved.map((procedure) => JSON.stringify(procedure)).join("\n")
+      }
     }).pipe(
       Effect.provide(
         Layer.mergeAll(SqliteClient.layer({ filename: ":memory:" }), PersistenceWriteQueue.layer)

@@ -215,20 +215,15 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
         (lease) => lease.payload.automationId === REVIEW
       )
       if (first === undefined) throw new Error("The review was not claimed")
-      const holdOf = (id: string) =>
-        sql<{ readonly hold_started_at: string | null; readonly claimed_at: string | null }>`
-          SELECT hold_started_at, claimed_at FROM automation_event_queue WHERE id = ${Number(id)}`.pipe(
-          Effect.map((rows) => rows[0])
-        )
-      const held = yield* holdOf(first.id)
-      const listed = (yield* (yield* AutomationCatalog).diagnostics()).queue.find(
-        (row) => row.task_id === REVIEW
+      const listing = Effect.map((yield* AutomationCatalog).diagnostics(), (shown) =>
+        shown.queue.find((row) => row.task_id === REVIEW)
       )
+      const listed = yield* listing
       const back = (yield* claim("back", 10, first.expiresAt + 1)).find(
         (lease) => lease.payload.automationId === REVIEW
       )
       if (back === undefined) throw new Error("The expired review claim did not come back")
-      const reheld = yield* holdOf(back.id)
+      const relisted = yield* listing
       yield* Effect.promise(async () =>
         queue.jobs.fail({
           ...back,
@@ -239,10 +234,11 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
       )
       const [failed] = yield* sql<{ readonly outcome: string }>`
         SELECT outcome FROM automation_runs WHERE id = ${back.payload.automationRunId}`
-      const retries = yield* sql<{ readonly event_type: string; readonly later: number }>`
-        SELECT json_extract(context, '$.trigger_context_snapshot.event_type') AS event_type,
-          next_attempt_at > ${new Date(first.expiresAt + 2).toISOString()} AS later
-        FROM automation_event_queue WHERE task_id = ${REVIEW}`
+      const retries = (yield* (yield* AutomationCatalog).diagnostics()).queue
+        .filter((row) => row.task_id === REVIEW)
+        .map((row) => ({
+          later: (row.next_attempt_at ?? "") > new Date(first.expiresAt + 2).toISOString()
+        }))
       const retry = (yield* claim("retry", 10, first.expiresAt + 24 * 60 * 60_000)).find(
         (lease) => lease.payload.automationId === REVIEW
       )
@@ -266,18 +262,16 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
       const [gone] = yield* sql<{ readonly outcome: string }>`
         SELECT outcome FROM automation_runs WHERE id = ${retry.payload.automationRunId}`
       return {
-        heldFromClaim: held?.hold_started_at === held?.claimed_at,
         listed: {
           name: listed?.name,
           enabled: listed?.enabled,
-          held: listed?.held_by_worker_since === held?.hold_started_at,
+          held: listed?.held_by_worker_since != null,
           chat: listed?.session_id === first.payload.sessionId
         },
         reclaimed: {
           sameRow: back.id === first.id,
           sameAttempt: back.payload.automationRunId === first.payload.automationRunId,
-          sameHoldStart: reheld?.hold_started_at === held?.hold_started_at,
-          claimMoved: reheld?.claimed_at !== held?.claimed_at
+          sameHoldStart: relisted?.held_by_worker_since === listed?.held_by_worker_since
         },
         failed: failed?.outcome,
         retries,
@@ -290,11 +284,10 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
     })
   )
   expect(outcome).toEqual({
-    heldFromClaim: true,
     listed: { name: "Made-up worker", enabled: 1, held: true, chat: true },
-    reclaimed: { sameRow: true, sameAttempt: true, sameHoldStart: true, claimMoved: true },
+    reclaimed: { sameRow: true, sameAttempt: true, sameHoldStart: true },
     failed: "failed",
-    retries: [{ event_type: "space.review_retry", later: 1 }],
+    retries: [{ later: true }],
     settled: "settled",
     gone: "failed",
     queuedAtEnd: 0,

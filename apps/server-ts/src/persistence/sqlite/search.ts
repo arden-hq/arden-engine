@@ -194,7 +194,7 @@ export const catchUpTranscriptSearch = Effect.fn("SqliteSearch.catchUp")(functio
 
 /** One step of background index upkeep, in one transaction: a batch of
  * changes, or else the next chunk of a refill. False when there is nothing to do. */
-export const transcriptSearchStep = Effect.fn("SqliteSearch.step")(function* (
+const transcriptSearchStep = Effect.fn("SqliteSearch.step")(function* (
   sql: SqlClient.SqlClient,
   options: { readonly rebuildBatchSize?: number } = {}
 ) {

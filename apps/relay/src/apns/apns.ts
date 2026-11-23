@@ -101,7 +101,7 @@ const signProviderToken = async ({
   return `${input}.${toB64url(new Uint8Array(signature))}`
 }
 
-export const buildApnsRequest = (request: PushRequest, jwt: string): ApnsHttpRequest => ({
+const buildApnsRequest = (request: PushRequest, jwt: string): ApnsHttpRequest => ({
   url: `${hosts[request.env]}/3/device/${request.token}`,
   headers: {
     authorization: `bearer ${jwt}`,
@@ -116,7 +116,7 @@ export const buildApnsRequest = (request: PushRequest, jwt: string): ApnsHttpReq
 })
 
 /** 400/403/410 are Apple refusing this push (410 Unregistered: drop the token); the rest may pass on retry. */
-export const mapApnsResponse = (response: ApnsHttpResponse): PushResult => {
+const mapApnsResponse = (response: ApnsHttpResponse): PushResult => {
   if (response.status === 200) return { status: "accepted" }
   const reason = appleReason(response.body) ?? `HTTP ${response.status}`
   switch (response.status) {

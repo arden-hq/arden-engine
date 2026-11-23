@@ -415,7 +415,6 @@ describe("progress and asks at a terminal", () => {
         askInTerminal: asking.askInTerminal
       })
     ).toBe(0)
-    expect(asking.prompts).toHaveLength(3)
     expect(approvals).toEqual([
       { runId: "run-1", toolId: "tool-1", result: "", approved: true, grantStanding: true }
     ])

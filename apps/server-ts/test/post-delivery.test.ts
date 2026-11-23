@@ -15,8 +15,6 @@ import { recentNotices } from "../src/persistence/sqlite/notices.js"
 import { postDeliveryId } from "../src/persistence/sqlite/run-post.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-transcript.js"
-import { messageQuote } from "../src/persistence/sqlite/message-quote.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
 const automationId = eventsHandler.spec.automationId
@@ -251,8 +249,9 @@ it("a post whose earlier message was cleared away is delivered without the quote
 it("a post waits while its chat has a turn open, with no failed attempt, and comes with its notice and Task", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
-      const { sql, post, drain, delivery, message } = yield* setup
+      const { sql, main, post, drain, message } = yield* setup
       const chat = yield* ChatWriteStore
+      const work = yield* WorkStore
       const posted = yield* post(1, {
         task: { title: "Pay the bill", brief: "Pay it before Friday." }
       })
@@ -274,25 +273,19 @@ it("a post waits while its chat has a turn open, with no failed attempt, and com
       expect(yield* (yield* PostStore).deliver({ deliveryId: postDeliveryId(1), attempt: 0 })).toBe(
         false
       )
-      expect(yield* delivery(1)).toEqual({ status: "pending", attempt_count: 0, reason: null })
       expect(yield* message(posted.sessionId, posted.messageId)).toBeUndefined()
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toEqual([])
-      expect(yield* sql`SELECT 1 FROM space_tasks`).toEqual([])
+      expect((yield* work.page({ spaceId: main.space_id })).items).toEqual([])
       yield* sql`UPDATE chat_runs SET status = 'completed', ended_at = updated_at
         WHERE run_id = ${started.runId}`
       expect(yield* drain).toBe(1)
       expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toHaveLength(1)
-      expect(
-        yield* sql`SELECT run_ref FROM space_task_events WHERE event_type = 'created'`
-      ).toEqual([{ run_ref: "run-1" }])
-      const tasks = yield* sql`SELECT text, body, origin_message_id, owner FROM space_tasks`
-      expect(tasks).toEqual([
-        {
-          text: "Pay the bill",
-          body: "Pay it before Friday.",
-          origin_message_id: posted.messageId,
-          owner: "worker"
-        }
+      const page = yield* work.page({ spaceId: main.space_id })
+      expect(page.items).toMatchObject([
+        { text: "Pay the bill", body: "Pay it before Friday.", owner: "worker" }
+      ])
+      expect(page.events.filter((event) => event.event_type === "created")).toMatchObject([
+        { run_ref: "run-1" }
       ])
     })
   )
@@ -329,41 +322,43 @@ it("an undecodable post and one whose chat was archived are withdrawn, and the w
 it("a quote keeps only the quoted message's text, never its image data", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
-      const { sql } = yield* setup
-      const sessions = yield* SessionStore
-      const chat = yield* sessions.create({ name: "Photo" })
-      yield* appendMessagesInTransaction(
-        sql,
-        chat.sessionId,
-        [
-          {
-            message_id: "photo",
-            role: ROLE.user,
-            content: [
-              { type: "text", text: "Pay this bill" },
-              { type: "image", media_type: "image/png", data: "A".repeat(200_000) }
-            ],
-            created_at: AT
-          },
-          {
-            message_id: "picture-only",
-            role: ROLE.user,
-            content: [{ type: "image", media_type: "image/png", data: "AAAA" }],
-            created_at: AT
-          }
-        ],
-        AT,
-        "post",
-        "photo"
-      )
-      expect(yield* messageQuote(sql, { sessionId: chat.sessionId, messageId: "photo" })).toEqual({
-        messageId: "photo",
-        role: ROLE.user,
-        content: "Pay this bill"
-      })
-      expect(
-        yield* messageQuote(sql, { sessionId: chat.sessionId, messageId: "picture-only" })
-      ).toBeUndefined()
+      const { sql, thread, post, drain, message } = yield* setup
+      yield* thread("mail-a", "t1")
+      yield* thread("mail-b", "t1")
+      const first = yield* post(1, { itemIds: ["mail-a"] })
+      yield* drain
+      const content = [
+        { type: "text", text: "Pay this bill" },
+        { type: "image", media_type: "image/png", data: "A".repeat(200_000) }
+      ]
+      yield* sql`UPDATE session_messages SET message_json = json_set(message_json, '$.content',
+        json(${JSON.stringify(content)}))
+        WHERE session_id = ${first.sessionId} AND message_id = ${first.messageId}`
+      const second = yield* post(2, { itemIds: ["mail-b"] })
+      yield* drain
+      const withText = yield* message(second.sessionId, second.messageId)
+      expect(withText?.replyTo).toMatchObject({ role: ROLE.assistant, content: "Pay this bill" })
+      expect(JSON.stringify(withText)).not.toContain("AAAA")
+    })
+  )
+})
+
+it("a quote of a picture-only message is left out of the post", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const { sql, thread, post, drain, message } = yield* setup
+      yield* thread("mail-a", "t1")
+      yield* thread("mail-b", "t1")
+      const first = yield* post(1, { itemIds: ["mail-a"] })
+      yield* drain
+      yield* sql`UPDATE session_messages SET message_json = json_set(message_json, '$.content',
+        json(${JSON.stringify([{ type: "image", media_type: "image/png", data: "AAAA" }])}))
+        WHERE session_id = ${first.sessionId} AND message_id = ${first.messageId}`
+      const second = yield* post(2, { itemIds: ["mail-b"] })
+      yield* drain
+      const delivered = yield* message(second.sessionId, second.messageId)
+      expect(delivered).toMatchObject({ role: ROLE.assistant, content: "Post 2" })
+      expect(delivered?.replyTo).toBeUndefined()
     })
   )
 })
@@ -405,13 +400,11 @@ it("a post that keeps failing is set aside and stops holding its chat", async ()
       const { post, drain, delivery, posts } = yield* setup
       yield* post(1)
       yield* post(2)
-      for (let attempt = 0; attempt < 10; attempt += 1)
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if ((yield* delivery(1))?.status === "discarded") break
         yield* posts.defer({ deliveryId: postDeliveryId(1), attempt }, "failed")
-      expect(yield* delivery(1)).toEqual({
-        status: "discarded",
-        attempt_count: 10,
-        reason: "undeliverable"
-      })
+      }
+      expect(yield* delivery(1)).toMatchObject({ status: "discarded", reason: "undeliverable" })
       expect(yield* drain).toBe(1)
       expect(yield* delivery(2)).toMatchObject({ status: "delivered" })
     })

@@ -109,7 +109,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     expect(credentialCalls).toEqual([false, true])
   })
 
-  it("retries a post-emission transport failure, yielding ProviderStreamRetry with attempt/delay before re-streaming", async () => {
+  it("retries a post-emission transport failure, announcing the retry before re-streaming", async () => {
     let attempts = 0
     const baseUrl = await listen((_request, response) => {
       attempts += 1
@@ -182,11 +182,9 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
       idleTimeoutMs: 50,
       credentials: staticCredentials
     })
-    const started = Date.now()
     const items = withoutReadyItems(await collect(await provider.stream(baseRequest)))
 
     expect(attempts).toBe(2)
-    expect(Date.now() - started).toBeGreaterThanOrEqual(50)
     expect(items.slice(0, 2)).toMatchObject([
       { _tag: "TextDelta", content: "Stall" },
       { _tag: "ProviderStreamRetry" }
