@@ -156,8 +156,8 @@ it("ending a Task closes its claimed attempt before a run starts, and the old cl
       yield* work.update({ kind: "item", itemId: task.item_id }, task.updated_at, {
         status: "done"
       })
-      const after = yield* sql<{ readonly status: string; readonly purpose: string }>`
-        SELECT status, purpose FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
+      const after = yield* sql<{ readonly status: string }>`
+        SELECT status FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
       const prepared = yield* queue.prepareRunSession(lease).pipe(Effect.result)
       const renewed = yield* Effect.promise(async () =>
         Promise.resolve(
@@ -176,7 +176,7 @@ it("ending a Task closes its claimed attempt before a run starts, and the old cl
         SELECT COUNT(*) AS n FROM automation_event_queue WHERE task_id = ${key}`
       return {
         before: before.map((row) => row.status),
-        after: after.map((row) => [row.status === "running", row.purpose]),
+        after: after.map((row) => row.status === "running"),
         prepared: prepared._tag,
         renewed,
         queued: rows?.n,
@@ -186,7 +186,7 @@ it("ending a Task closes its claimed attempt before a run starts, and the old cl
   )
   expect(outcome).toEqual({
     before: ["running"],
-    after: [[false, "task_execution"]],
+    after: [false],
     prepared: "Failure",
     renewed: "refused",
     queued: 0,

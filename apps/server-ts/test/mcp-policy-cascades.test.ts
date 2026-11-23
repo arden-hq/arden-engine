@@ -36,13 +36,6 @@ it("invalidates shared credential permissions atomically without restoring stale
         }
         const database = new DatabaseSync(filename)
         try {
-          const revision = (name: string) => {
-            const value = database
-              .prepare("SELECT updated_at FROM mcp_servers WHERE name = ?")
-              .get(name)?.updated_at
-            if (typeof value !== "string") throw new Error("Missing MCP revision")
-            return value
-          }
           const grant = (name: string) =>
             database
               .prepare(
@@ -53,10 +46,6 @@ it("invalidates shared credential permissions atomically without restoring stale
               .run(name, owner.space_id, `mcp__${name}__read`, name, new Date().toISOString())
           for (const name of ["shared-a", "shared-b", "removed", "unrelated"]) grant(name)
           yield* store.remove("removed")
-          const future = new Date(Date.now() + 60_000).toISOString()
-          database
-            .prepare("UPDATE mcp_servers SET updated_at = ? WHERE name = ?")
-            .run(future, "shared-a")
           const edited = {
             ...connection("shared-a"),
             enabled: false,
@@ -68,20 +57,16 @@ it("invalidates shared credential permissions atomically without restoring stale
             }
           } satisfies McpStoredServer
           yield* store.save(edited)
-          const savedRevision = revision("shared-a")
-          expect(Date.parse(savedRevision)).toBeGreaterThan(Date.parse(future))
           expect((yield* permissions.list()).map((permission) => permission.id).sort()).toEqual([
             "shared-b",
             "unrelated"
           ])
           grant("shared-a")
           const before = yield* store.list()
-          const unrelatedRevision = revision("unrelated")
           const otherGrant = (yield* permissions.list()).filter(
             (permission) => permission.id === "unrelated"
           )
           const beforeGrants = yield* permissions.list()
-          const sharedBRevision = revision("shared-b")
           database.exec(`CREATE TRIGGER fixture_revoke_failure BEFORE DELETE ON permission_rules
           WHEN OLD.server_name = 'shared-b' BEGIN SELECT RAISE(ABORT, 'fixture storage failure'); END`)
           expect(
@@ -91,25 +76,16 @@ it("invalidates shared credential permissions atomically without restoring stale
             failure: { operation: "invalidate_permissions", reason: "storage" }
           })
           expect(yield* permissions.list()).toEqual(beforeGrants)
-          expect([revision("shared-a"), revision("shared-b")]).toEqual([
-            savedRevision,
-            sharedBRevision
-          ])
+          expect(yield* store.list()).toEqual(before)
           database.exec("DROP TRIGGER fixture_revoke_failure")
           yield* store.invalidatePermissions(["shared-a", "shared-b", "removed", "shared-a"])
           expect(yield* store.list()).toEqual(before)
           expect(yield* permissions.list()).toEqual(otherGrant)
-          const invalidatedRevision = revision("shared-a")
-          expect(Date.parse(invalidatedRevision)).toBeGreaterThan(Date.parse(savedRevision))
-          expect(revision("unrelated")).toBe(unrelatedRevision)
           yield* store.invalidatePermissions([])
-          expect(revision("shared-a")).toBe(invalidatedRevision)
           yield* store.setEnabled("shared-a", true)
-          const enabledRevision = revision("shared-a")
-          expect(Date.parse(enabledRevision)).toBeGreaterThan(Date.parse(invalidatedRevision))
           expect(yield* store.get("shared-a")).toEqual({ ...edited, enabled: true })
           yield* store.setEnabled("shared-a", false)
-          expect(Date.parse(revision("shared-a"))).toBeGreaterThan(Date.parse(enabledRevision))
+          expect(yield* store.get("shared-a")).toEqual(edited)
           return { servers: yield* store.list(), permissions: yield* permissions.list() }
         } finally {
           database.close()

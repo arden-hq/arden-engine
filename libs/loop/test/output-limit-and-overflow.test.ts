@@ -146,10 +146,7 @@ describe("a request the provider refuses as too long", () => {
     const agent = makeAgent(
       {
         model: "test-model",
-        modelRequestMiddlewares: [shorten],
-        mintMessageId: (kind, position) => {
-          return `${kind}-${position.turn}-${position.fragment}-${position.index}`
-        }
+        modelRequestMiddlewares: [shorten]
       },
       { provider: model.shape, toolset: emptyToolset }
     )

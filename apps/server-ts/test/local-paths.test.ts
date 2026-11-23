@@ -9,13 +9,13 @@ import type { SpaceStore } from "../src/persistence/spaces/store.js"
 import type { SessionQueries } from "../src/persistence/sessions/queries.js"
 import {
   displayLocalPath,
-  insideLocalFolder,
   policyPathOptions,
   resolveLocalPath,
   sandboxRule,
   sessionPathPolicy
 } from "../src/storage/local-paths.js"
 import { NO_PATH_RULES, localRunAuthority } from "./fixtures/local-policy.js"
+import { runCommandUntil } from "../src/tools/shell-run.js"
 import { partialService } from "./kit.js"
 
 describe("Sandboxed file reads", () => {
@@ -223,28 +223,53 @@ describe("a never path rule", () => {
     await rm(base, { recursive: true, force: true })
   })
 
-  it("hides a never-read folder from a sandboxed command and write-protects a never-change one", () => {
-    const policy = {
-      cwd: "/Users/me/src/demo",
-      readRoots: ["/Users/me/src/demo"],
-      writeRoot: "/Users/me/src/demo",
-      stateRoot: "/nonexistent/arden-state",
-      sandbox: "approved_local" as const,
-      pathRules: {
-        own: undefined,
-        rules: [
-          ...never("/Users/me/Documents", "read").rules,
-          ...never("/Users/me/taxes", "change").rules
-        ]
+  it.skipIf(process.platform !== "darwin")(
+    "hides a never-read folder from a sandboxed command and write-protects a never-change one",
+    async () => {
+      const base = await realpath(await mkdtemp(path.join("/private/tmp", "arden-never-run-")))
+      const workspace = path.join(base, "workspace")
+      const hidden = path.join(base, "documents")
+      const protectedFolder = path.join(base, "taxes")
+      await Promise.all([mkdir(workspace), mkdir(hidden), mkdir(protectedFolder)])
+      await Promise.all([
+        writeFile(path.join(hidden, "a.txt"), "secret"),
+        writeFile(path.join(protectedFolder, "a.txt"), "figures")
+      ])
+      const policy = {
+        cwd: workspace,
+        readRoots: [base],
+        writeRoot: base,
+        stateRoot: path.join(base, "arden-state"),
+        sandbox: "approved_local" as const,
+        pathRules: {
+          own: undefined,
+          rules: [...never(hidden, "read").rules, ...never(protectedFolder, "change").rules]
+        }
+      }
+      const run = (command: string) =>
+        runCommandUntil(command, workspace, AbortSignal.timeout(10_000), policy, {
+          yieldMs: 60_000,
+          environment: { PATH: "/usr/bin:/bin" },
+          loginPath: undefined,
+          homeDirectory: base
+        })
+      try {
+        await expect(run(`/bin/cat ${path.join(protectedFolder, "a.txt")}`)).resolves.toMatchObject(
+          {
+            state: "exited",
+            output: "figures"
+          }
+        )
+        await expect(run(`/bin/cat ${path.join(hidden, "a.txt")}`)).rejects.toThrow()
+        await expect(run(`echo x > ${path.join(protectedFolder, "b.txt")}`)).rejects.toThrow()
+        await expect(run(`echo x > ${path.join(workspace, "b.txt")}`)).resolves.toMatchObject({
+          state: "exited"
+        })
+      } finally {
+        await rm(base, { recursive: true, force: true })
       }
     }
-    const rule = sandboxRule(policy, "/Users/me", "darwin")
-    expect(rule?.hidden).toContain("/Users/me/Documents")
-    expect(rule?.hidden).not.toContain("/Users/me/taxes")
-    expect(rule?.writeProtected).toEqual(
-      expect.arrayContaining(["/Users/me/Documents", "/Users/me/taxes"])
-    )
-  })
+  )
 
   it("hides the profile of the desktop that started the engine, whichever it is, from a sandboxed command", () => {
     const before = process.env.ARDEN_DESKTOP_PROFILE
@@ -272,37 +297,5 @@ describe("a never path rule", () => {
       if (before === undefined) delete process.env.ARDEN_DESKTOP_PROFILE
       else process.env.ARDEN_DESKTOP_PROFILE = before
     }
-  })
-})
-
-const insidePolicy = {
-  cwd: "/Users/me/src/ntrp",
-  localRoots: ["/Users/me/src/ntrp", "/Users/me/docs"],
-  readRoots: null,
-  writeRoot: null,
-  stateRoot: "/nonexistent/arden-state",
-  sandbox: null,
-  pathRules: NO_PATH_RULES,
-  usableRoots: []
-} as const
-
-describe("insideLocalFolder", () => {
-  it("accepts the folder itself and paths under any Local folder", () => {
-    expect(insideLocalFolder(insidePolicy, "/Users/me/src/ntrp")).toBe(true)
-    expect(insideLocalFolder(insidePolicy, "/Users/me/src/ntrp/apps/a.ts")).toBe(true)
-    expect(insideLocalFolder(insidePolicy, "/Users/me/docs/notes.md")).toBe(true)
-  })
-  it("rejects siblings, parents, and prefix look-alikes", () => {
-    expect(insideLocalFolder(insidePolicy, "/Users/me/src/ntrp-old/a.ts")).toBe(false)
-    expect(insideLocalFolder(insidePolicy, "/Users/me/src")).toBe(false)
-    expect(insideLocalFolder(insidePolicy, "/etc/hosts")).toBe(false)
-  })
-  it("counts a sandbox write root as inside", () => {
-    expect(
-      insideLocalFolder(
-        { ...insidePolicy, localRoots: [], writeRoot: "/tmp/agent" },
-        "/tmp/agent/x"
-      )
-    ).toBe(true)
   })
 })

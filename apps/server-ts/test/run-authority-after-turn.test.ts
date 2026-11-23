@@ -81,87 +81,130 @@ const seedScript = (sql: SqlClient.SqlClient, runId: string) =>
     VALUES (${`wf-${runId}`}, 'chat~1', ${runId}, 'call-script', 'profile', 'running', 1, 1,
       ${AT}, ${AT})`
 
-it("one rule decides whether a Run may still act: its turn, or work it started, until revoked", async () => {
+type Scenario = {
+  readonly name: string
+  readonly seed: (sql: SqlClient.SqlClient) => Effect.Effect<void, unknown>
+  readonly expected: { readonly liveness: string; readonly taskChange: string }
+}
+
+const scenarios: ReadonlyArray<Scenario> = [
+  {
+    name: "a Run parked for approval still has its turn",
+    seed: (sql) => seedRun(sql, { id: "run", status: "pending" }).pipe(Effect.asVoid),
+    expected: { liveness: "turn", taskChange: "allowed" }
+  },
+  {
+    name: "a script started by a completed turn keeps the Run in the background",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* seedRun(sql, { id: "run", status: "completed" })
+        yield* seedScript(sql, "run")
+      }),
+    expected: { liveness: "background", taskChange: "allowed" }
+  },
+  {
+    name: "a script of a Run interrupted by a restart keeps the Run in the background",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* seedRun(sql, { id: "run", status: "interrupted" })
+        yield* seedScript(sql, "run")
+      }),
+    expected: { liveness: "background", taskChange: "allowed" }
+  },
+  {
+    name: "a card awaiting an answer keeps the Run in the background",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* seedRun(sql, { id: "run", status: "completed" })
+        yield* seedPendingCard(sql, "run")
+      }),
+    expected: { liveness: "background", taskChange: "allowed" }
+  },
+  {
+    name: "a completed Run with nothing left has ended",
+    seed: (sql) => seedRun(sql, { id: "run", status: "completed" }).pipe(Effect.asVoid),
+    expected: { liveness: "ended", taskChange: "refused" }
+  },
+  {
+    name: "a spent budget revokes the Run",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO execution_budgets (budget_id, token_limit, tokens_used)
+          VALUES ('budget-spent', 10, 10)`
+        yield* seedRun(sql, {
+          id: "run",
+          status: "completed",
+          metadata: { run_policy: { budget_id: "budget-spent" } }
+        })
+        yield* seedScript(sql, "run")
+      }),
+    expected: { liveness: "revoked", taskChange: "refused" }
+  },
+  {
+    name: "a closed Task revokes the Run",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner,
+            created_at, updated_at)
+          VALUES ('task-1', NULL, 'reply', 'Reply', 'done', 'worker', ${AT}, ${AT})`
+        yield* seedRun(sql, {
+          id: "run",
+          status: "completed",
+          metadata: { run_context: { task: { item_id: "task-1", generation: 0 } } }
+        })
+        yield* seedScript(sql, "run")
+      }),
+    expected: { liveness: "revoked", taskChange: "refused" }
+  },
+  {
+    name: "an archived Space revokes the Run",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at,
+            updated_at, archived_at)
+          VALUES ('space-1', 'Space', 'space', '{"enabled":false}', ${AT}, ${AT}, ${ENDED})`
+        yield* seedRun(sql, {
+          id: "run",
+          status: "completed",
+          metadata: { run_policy: { space: { space_id: "space-1", generation: 0 } } }
+        })
+        yield* seedScript(sql, "run")
+      }),
+    expected: { liveness: "revoked", taskChange: "refused" }
+  },
+  {
+    name: "Stop revokes a Run that still runs a script",
+    seed: (sql) =>
+      Effect.gen(function* () {
+        yield* seedRun(sql, { id: "run", status: "completed" })
+        yield* seedScript(sql, "run")
+        yield* inUnitOfWork(
+          fenceRunCancellation({
+            sql,
+            sessionEvents: yield* SessionLifecycleEvents,
+            runId: "run",
+            now: ENDED
+          })
+        )
+      }),
+    expected: { liveness: "revoked", taskChange: "refused" }
+  }
+]
+
+it.each(scenarios)("$name", async ({ seed, expected }) => {
   const state = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* seedChat(sql)
-      yield* seedRun(sql, { id: "parked-for-approval", status: "pending" })
-      yield* seedRun(sql, { id: "script-after-turn", status: "completed" })
-      yield* seedScript(sql, "script-after-turn")
-      yield* seedRun(sql, { id: "script-after-restart", status: "interrupted" })
-      yield* seedScript(sql, "script-after-restart")
-      yield* seedRun(sql, { id: "card-awaiting-answer", status: "completed" })
-      yield* seedPendingCard(sql, "card-awaiting-answer")
-      yield* seedRun(sql, { id: "nothing-left", status: "completed" })
-      yield* sql`INSERT INTO execution_budgets (budget_id, token_limit, tokens_used)
-        VALUES ('budget-spent', 10, 10)`
-      yield* seedRun(sql, {
-        id: "budget-spent",
-        status: "completed",
-        metadata: { run_policy: { budget_id: "budget-spent" } }
-      })
-      yield* seedScript(sql, "budget-spent")
-      yield* sql`INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner,
-          created_at, updated_at)
-        VALUES ('task-1', NULL, 'reply', 'Reply', 'done', 'worker', ${AT}, ${AT})`
-      yield* seedRun(sql, {
-        id: "task-closed",
-        status: "completed",
-        metadata: { run_context: { task: { item_id: "task-1", generation: 0 } } }
-      })
-      yield* seedScript(sql, "task-closed")
-      yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at,
-          updated_at, archived_at)
-        VALUES ('space-1', 'Space', 'space', '{"enabled":false}', ${AT}, ${AT}, ${ENDED})`
-      yield* seedRun(sql, {
-        id: "space-archived",
-        status: "completed",
-        metadata: { run_policy: { space: { space_id: "space-1", generation: 0 } } }
-      })
-      yield* seedScript(sql, "space-archived")
-      yield* seedRun(sql, { id: "stopped-with-script", status: "completed" })
-      yield* seedScript(sql, "stopped-with-script")
-      yield* inUnitOfWork(
-        fenceRunCancellation({
-          sql,
-          sessionEvents: yield* SessionLifecycleEvents,
-          runId: "stopped-with-script",
-          now: ENDED
-        })
+      yield* seed(sql)
+      const taskChange = yield* assertRunTaskAuthority(sql, "run").pipe(
+        Effect.as("allowed"),
+        Effect.catch(() => Effect.succeed("refused"))
       )
-      const runIds = [
-        "parked-for-approval",
-        "script-after-turn",
-        "script-after-restart",
-        "card-awaiting-answer",
-        "nothing-left",
-        "budget-spent",
-        "task-closed",
-        "space-archived",
-        "stopped-with-script"
-      ] as const
-      const read = Effect.fn(function* (runId: string) {
-        const taskChange = yield* assertRunTaskAuthority(sql, runId).pipe(
-          Effect.as("allowed"),
-          Effect.catch(() => Effect.succeed("refused"))
-        )
-        return [runId, { liveness: yield* readRunLiveness(sql, runId), taskChange }] as const
-      })
-      return Object.fromEntries(yield* Effect.forEach(runIds, read))
+      return { liveness: yield* readRunLiveness(sql, "run"), taskChange }
     })
   )
-  expect(state).toEqual({
-    "parked-for-approval": { liveness: "turn", taskChange: "allowed" },
-    "script-after-turn": { liveness: "background", taskChange: "allowed" },
-    "script-after-restart": { liveness: "background", taskChange: "allowed" },
-    "card-awaiting-answer": { liveness: "background", taskChange: "allowed" },
-    "nothing-left": { liveness: "ended", taskChange: "refused" },
-    "budget-spent": { liveness: "revoked", taskChange: "refused" },
-    "task-closed": { liveness: "revoked", taskChange: "refused" },
-    "space-archived": { liveness: "revoked", taskChange: "refused" },
-    "stopped-with-script": { liveness: "revoked", taskChange: "refused" }
-  })
+  expect(state).toEqual(expected)
 })
 
 it("Stop on a Run whose turn ended stops its script, closes its approved card and ends its grants", async () => {

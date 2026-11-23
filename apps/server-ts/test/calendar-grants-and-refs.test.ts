@@ -1,4 +1,5 @@
 import { googleAccountHasGrant, type GoogleAccount } from "@arden-hq/protocol/google"
+import { ToolExecutionError } from "@arden-hq/loop"
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 
@@ -132,7 +133,7 @@ describe("calendar write access", () => {
           calendarId: "team@group",
           signal: new AbortController().signal
         })
-      ).rejects.toThrow()
+      ).rejects.toBeInstanceOf(ToolExecutionError)
     }
   )
 })

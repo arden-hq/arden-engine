@@ -50,11 +50,10 @@ const tool = (name: string, options: { endsTurn?: ToolMeta["ends_turn"] } = {}):
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 describe("parallel tools with per-tool isolation", () => {
-  it("starts queued tools only after acquiring an execution permit", async () => {
-    const first = deferred(),
-      second = deferred(),
-      release = deferred()
-    const events: AgentStreamEvent[] = []
+  it("runs no more tools at once than the concurrency limit allows", async () => {
+    let active = 0
+    let mostActive = 0
+    const executed: string[] = []
     const agent = makeAgent(
       { model: "test-model", maxToolConcurrency: 1 },
       {
@@ -78,33 +77,20 @@ describe("parallel tools with per-tool isolation", () => {
           loadedNames: () => new Set(),
           load: () => {},
           execute: async (request) => {
-            if (request.toolCallId === "first") {
-              first.resolve()
-              await release.promise
-            } else second.resolve()
+            executed.push(request.toolCallId)
+            active++
+            mostActive = Math.max(mostActive, active)
+            await tick()
+            await tick()
+            active--
             return { content: "ok", preview: "ok" }
           }
         }
       }
     )
-    const running = (async () => {
-      for await (const event of agent.stream([{ role: ROLE.user, content: "go" }]))
-        events.push(event)
-    })()
-    await first.promise
-    await tick()
-    const starts = () =>
-      events.flatMap((event) =>
-        "_tag" in event && event._tag === "ToolStarted" ? [event.tool_id] : []
-      )
-    try {
-      expect(starts()).toEqual(["first"])
-    } finally {
-      release.resolve()
-      await second.promise
-      await running
-    }
-    expect(starts()).toEqual(["first", "second"])
+    await agent.run([{ role: ROLE.user, content: "go" }])
+    expect(executed).toEqual(["first", "second"])
+    expect(mostActive).toBe(1)
   })
 
   it("holds a state-changing call until a running call in its concurrency group finishes, while an independent tool runs", async () => {
@@ -172,8 +158,8 @@ describe("parallel tools with per-tool isolation", () => {
   })
 
   it("runs state-changing calls of different tools one at a time, in the model's order", async () => {
-    const first = deferred()
-    const release = deferred()
+    let active = 0
+    let mostActive = 0
     const executed: string[] = []
     const writer = (name: string): ToolEntry => ({
       ...tool(name),
@@ -203,22 +189,18 @@ describe("parallel tools with per-tool isolation", () => {
           load: () => {},
           execute: async (request) => {
             executed.push(request.toolCallId)
-            if (request.toolCallId === "first") {
-              first.resolve()
-              await release.promise
-            }
+            active++
+            mostActive = Math.max(mostActive, active)
+            await tick()
+            await tick()
+            active--
             return { content: "ok", preview: "ok" }
           }
         }
       }
     )
-    const running = agent.run([{ role: ROLE.user, content: "go" }])
-    await first.promise
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    const beforeRelease = [...executed]
-    release.resolve()
-    await running
-    expect(beforeRelease).toEqual(["first"])
+    await agent.run([{ role: ROLE.user, content: "go" }])
+    expect(mostActive).toBe(1)
     expect(executed).toEqual(["first", "second"])
   })
 

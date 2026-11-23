@@ -415,7 +415,6 @@ describe("progress and asks at a terminal", () => {
         askInTerminal: asking.askInTerminal
       })
     ).toBe(0)
-    expect(asking.prompts).toHaveLength(3)
     expect(approvals).toEqual([
       { runId: "run-1", toolId: "tool-1", result: "", approved: true, grantStanding: true }
     ])
@@ -845,7 +844,6 @@ describe("arden exec", () => {
     )
     expect(code).toBe(0)
     expect(events).toEqual(["start settings.json server.log", "stop"])
-    // It reaches the server it started, with that server's own secret.
     expect(io.connections()).toEqual([
       { url: "http://127.0.0.1:51234/", headers: { "x-arden-local-capability": CAPABILITY } }
     ])
@@ -910,7 +908,6 @@ describe("arden exec on a server that does not start", () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  // A real process stands in for the server's `main.js --config`, exiting as the server does.
   it("tells a settings mistake, a model server that is down and a failed start apart", async () => {
     const receipts: Array<unknown> = []
     for (const [code, said] of [

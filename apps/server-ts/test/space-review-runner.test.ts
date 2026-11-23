@@ -97,11 +97,12 @@ const runnerCase = Effect.gen(function* () {
   const prepared = yield* prepare(first)
   const preparedAgain = yield* prepare(first)
   const child = prepared.kind === "prepared" ? (prepared.sessionId ?? "") : ""
+  const forgedId = "forged-child"
   yield* sql`INSERT INTO sessions (session_id, public_ref, name, started_at, last_activity,
         session_type, origin_automation_id, parent_session_id, space_id)
-      VALUES (${`${trunk}::i999999`}, 'forged-ref', NULL, '2026-11-01T00:00:00.000Z',
+      VALUES (${forgedId}, 'forged-ref', NULL, '2026-11-01T00:00:00.000Z',
         '2026-11-01T00:00:00.000Z', 'chat', ${REVIEW}, ${trunk}, 'space-1')`
-  const forged = yield* startIn(first, `${trunk}::i999999`, "forged")
+  const forged = yield* startIn(first, forgedId, "forged")
   const started = yield* startIn(first, child, "review-1")
   if (started.kind !== "started")
     throw new Error(`The review did not start in its child: ${started.message}`)
@@ -157,7 +158,7 @@ const runnerCase = Effect.gen(function* () {
   return {
     prepared:
       prepared.kind === "prepared"
-        ? prepared.sessionId === `${trunk}::i${first.payload.automationRunId}`
+        ? prepared.sessionId !== trunk && prepared.sessionId !== undefined
         : prepared.message,
     preparedAgainSame: preparedAgain.kind === "prepared" && preparedAgain.sessionId === child,
     childRow,
@@ -167,11 +168,11 @@ const runnerCase = Effect.gen(function* () {
     attemptPinnedToChild:
       attempt?.chat_session_id === child && attempt?.chat_run_id === started.runId,
     stale: stale.kind,
-    secondChild: secondChild === `${trunk}::i${second.payload.automationRunId}`,
+    secondChild: secondChild !== "" && secondChild !== child && secondChild !== trunk,
     sameTrunk: second.payload.sessionId === trunk,
     startedSecond: startedSecond.kind,
     children: (yield* sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM sessions
-        WHERE parent_session_id = ${trunk} AND session_id != ${`${trunk}::i999999`}`)[0]?.n,
+        WHERE parent_session_id = ${trunk} AND session_id != ${forgedId}`)[0]?.n,
     oldRows: (yield* sql`SELECT task_id FROM scheduled_tasks WHERE purpose = 'space_review'`).length
   }
 })

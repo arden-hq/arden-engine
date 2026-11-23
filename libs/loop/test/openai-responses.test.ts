@@ -345,14 +345,12 @@ describe("OpenAI Responses provider", () => {
       })
     const transport = makeTransport([unauthorized, unauthorized])
 
-    const authCalls: Array<boolean> = []
     const provider = makeOpenAiResponsesProvider({
       fetch: transport.fetchImpl,
       auth: {
-        headers: async ({ forceRefresh }) => {
-          authCalls.push(forceRefresh ?? false)
-          return { authorization: `Bearer token-${authCalls.length}` }
-        }
+        headers: async ({ forceRefresh }) => ({
+          authorization: forceRefresh === true ? "Bearer refreshed" : "Bearer stale"
+        })
       }
     })
 
@@ -360,9 +358,11 @@ describe("OpenAI Responses provider", () => {
       code: "provider_auth"
     })
     expect(transport.requests).toHaveLength(2)
-    expect(authCalls).toEqual([false, true])
+    expect(transport.requests[0]?.headers).toMatchObject({
+      authorization: "Bearer stale"
+    })
     expect(transport.requests[1]?.headers).toMatchObject({
-      authorization: "Bearer token-2"
+      authorization: "Bearer refreshed"
     })
   })
 

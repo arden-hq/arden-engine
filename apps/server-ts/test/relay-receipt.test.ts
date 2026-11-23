@@ -235,16 +235,12 @@ it("a phone decision whose answer is lost after it took effect is acknowledged d
         { t: "cmd_ack", cid: "decide-1", state: "done", result: { status: "ok" } },
         { t: "cmd_ack", cid: "decide-1", state: "done", result: { status: "ok" } }
       ])
-      const kept = receiptOf(databasePath, "decide-1") as {
-        readonly kind: string
-        readonly state: string
-        readonly result_json: string
-      }
-      expect({ kind: kept.kind, state: kept.state, result: JSON.parse(kept.result_json) }).toEqual({
-        kind: "decide",
-        state: "done",
-        result: { status: "ok" }
-      })
+      const kept = await store.runPromise(
+        Effect.gen(function* () {
+          return yield* (yield* RelayStore).command("decide-1")
+        })
+      )
+      expect(kept).toMatchObject({ kind: "decide", state: "done", result: { status: "ok" } })
     } finally {
       await store.dispose()
     }

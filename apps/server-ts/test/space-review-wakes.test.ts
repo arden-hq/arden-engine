@@ -25,7 +25,7 @@ it("only a Task change made by hand wakes the Space review; no run's change does
         [`task:${task.item_id}`]: "worker"
       })
       yield* sql`DELETE FROM automation_event_queue`
-      const queued = (text: string, runId?: string) =>
+      const queued = (text: string, runId?: string, actor?: "user" | "worker") =>
         Effect.gen(function* () {
           const [row] = yield* sql<{ readonly updated_at: string }>`
             SELECT updated_at FROM space_tasks WHERE item_id = ${task.item_id}`
@@ -34,7 +34,8 @@ it("only a Task change made by hand wakes the Space review; no run's change does
             row?.updated_at ?? "",
             { text },
             runId,
-            runId === undefined ? undefined : `${runId}-call`
+            runId === undefined ? undefined : `${runId}-call`,
+            actor
           )
           const [count] = yield* sql<{ readonly n: number }>`
             SELECT COUNT(*) AS n FROM automation_event_queue WHERE task_id = ${spaceJobId("space-1")}`
@@ -42,9 +43,15 @@ it("only a Task change made by hand wakes the Space review; no run's change does
         })
       return {
         review: yield* queued("By the review", jobs.get(spaceJobId("space-1"))),
+        reviewActingAsOwner: yield* queued(
+          "By the review as the owner",
+          jobs.get(spaceJobId("space-1")),
+          "user"
+        ),
+        workerWithoutRun: yield* queued("By a worker", undefined, "worker"),
         byHand: yield* queued("By the owner's hand")
       }
     })
   )
-  expect(outcome).toEqual({ review: 0, byHand: 1 })
+  expect(outcome).toEqual({ review: 0, reviewActingAsOwner: 0, workerWithoutRun: 0, byHand: 1 })
 })

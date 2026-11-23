@@ -3,7 +3,9 @@ import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { revokeAutomationWork } from "../src/persistence/sqlite/automation-authority.js"
-import { runCancellationRequested } from "../src/persistence/sqlite/run-cancellation.js"
+import { hasOpenRunAsks } from "../src/persistence/sqlite/run-asks.js"
+import { readRunLiveness } from "../src/persistence/sqlite/run-liveness.js"
+import { runMayAct } from "../src/persistence/runs/liveness.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 
@@ -33,7 +35,8 @@ it("an Automation that stops ends the runs that work for it and their asks, neve
         VALUES ('woken-question', 'woken-worker', 'ask', '{}', ${AT}),
           ('watch-question', 'watch-run', 'ask', '{}', ${AT})`
       yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, session_type)
-        VALUES ('session-woken-worker', 'chat~woken', ${AT}, ${AT}, 'chat'),
+        VALUES ('session-person-turn', 'chat~person', ${AT}, ${AT}, 'chat'),
+          ('session-woken-worker', 'chat~woken', ${AT}, ${AT}, 'chat'),
           ('session-watch-run', 'chat~watch', ${AT}, ${AT}, 'chat')`
       yield* sql`INSERT INTO tool_calls (run_id, session_id, tool_call_id, tool_name,
           arguments_json, changes_state, status, result_json, started_at, ended_at)
@@ -50,28 +53,19 @@ it("an Automation that stops ends the runs that work for it and their asks, neve
           automationId: WATCH
         })
       )
-      return {
-        runs: yield* sql`SELECT run_id, ${runCancellationRequested(sql, sql`metadata_json`)} AS stopped
-          FROM chat_runs ORDER BY run_id`,
-        questions: yield* sql`SELECT question_id, closed_at IS NOT NULL AS closed
-          FROM run_questions ORDER BY question_id`,
-        cards: yield* sql`SELECT run_id, status FROM deferred_tool_calls ORDER BY run_id`
+      const runIds = ["person-turn", "watch-run", "woken-worker"]
+      const mayAct: Record<string, boolean> = {}
+      const asksOpen: Record<string, boolean> = {}
+      for (const runId of runIds) {
+        const liveness = yield* readRunLiveness(sql, runId)
+        mayAct[runId] = liveness !== undefined && runMayAct(liveness)
+        asksOpen[runId] = yield* hasOpenRunAsks(sql, runId)
       }
+      return { mayAct, asksOpen }
     })
   )
   expect(state).toEqual({
-    runs: [
-      { run_id: "person-turn", stopped: 0 },
-      { run_id: "watch-run", stopped: 1 },
-      { run_id: "woken-worker", stopped: 0 }
-    ],
-    questions: [
-      { question_id: "watch-question", closed: 1 },
-      { question_id: "woken-question", closed: 0 }
-    ],
-    cards: [
-      { run_id: "watch-run", status: "rejected" },
-      { run_id: "woken-worker", status: "pending" }
-    ]
+    mayAct: { "person-turn": true, "watch-run": false, "woken-worker": true },
+    asksOpen: { "person-turn": false, "watch-run": false, "woken-worker": true }
   })
 })

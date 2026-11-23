@@ -1,7 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { AutomationEvent } from "@arden-hq/protocol"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -11,12 +10,30 @@ import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
+import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-layer.js"
 import { triggerFeedRecord } from "../src/automations/trigger-feed.js"
-import type { InternalLifecycleEvent } from "../src/persistence/sessions/internal-events.js"
+import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { SessionReadState } from "../src/persistence/sessions/read-state.js"
+
+const readJournal = <E, R>(layer: Layer.Layer<SessionLifecycleEvents | AutomationTriggers, E, R>) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* SessionLifecycleEvents
+        const { head } = yield* (yield* AutomationTriggers).triggerCursor()
+        const opened = yield* events.open(0)
+        if (head === 0) return []
+        const deliveries = yield* opened.stream.pipe(
+          Stream.takeUntil((delivery) => delivery.kind === "record" && delivery.sequence >= head),
+          Stream.runCollect
+        )
+        return deliveries.flatMap((delivery) => (delivery.kind === "record" ? [delivery] : []))
+      })
+    ).pipe(Effect.provide(layer))
+  )
 
 const snapshotKind = (
   session: Pick<SessionListItem, "session_id" | "session_type" | "origin_automation_id">
@@ -200,13 +217,9 @@ it("only your own message in your own chat is personal input", async () => {
         expect(assignment._tag).toBe("Started")
       }).pipe(Effect.provide(layer))
     )
-    const read = database()
-    const committed = read
-      .prepare(
-        "SELECT json_extract(data_json, '$.chat_session_id') AS session_id FROM journal_records WHERE event_type = 'chat_input_committed'"
-      )
-      .all()
-    read.close()
+    const committed = (await readJournal(layer)).flatMap(({ event }) =>
+      event.type === "chat_input_committed" ? [{ session_id: event.chat_session_id }] : []
+    )
     expect(committed).toEqual([{ session_id: yours }])
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -296,17 +309,7 @@ it("a completed run in your chat counts once, however often the chat changes aft
         })
       }).pipe(Effect.provide(layer))
     )
-    const database = new DatabaseSync(filename)
-    const events = database
-      .prepare(
-        "SELECT sequence, data_json FROM journal_records WHERE stream_id = 'automation:events' ORDER BY sequence"
-      )
-      .all()
-      .map((row) => ({
-        sequence: Number(row["sequence"]),
-        event: JSON.parse(String(row["data_json"])) as AutomationEvent | InternalLifecycleEvent
-      }))
-    database.close()
+    const events = (await readJournal(layer)).map(({ sequence, event }) => ({ sequence, event }))
     expect(events.flatMap(({ event }) => (event.type === "run_settled" ? [event] : []))).toEqual([
       {
         type: "run_settled",

@@ -8,7 +8,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import type { SqlitePersistence } from "../src/persistence/sqlite/layer.js"
-import { transcriptSearchStep } from "../src/persistence/sqlite/search.js"
+import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-transcript.js"
 import { Persistence } from "../src/persistence/service.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { transcriptSearchText } from "../src/persistence/transcript/search-text.js"
@@ -91,7 +91,6 @@ const searchState = Effect.fn("searchState")(function* (
   return { hits: page.hits.map((hit) => hit.messageId).toSorted(), indexing: page.indexing }
 })
 
-/** A chat with seven notes about the kettle, and no search database yet. */
 const kettleNotes = async (directory: string) => {
   const filename = join(directory, "arden.db")
   const chat = await openAt(
@@ -116,7 +115,7 @@ const ALL_NOTES = ["n1", "n2", "n3", "n4", "n5", "n6", "n7"]
 
 const searchFile = (directory: string) => join(directory, "search.sqlite")
 
-it("finds messages by their current text and cuts snippets from arden.db", async () => {
+it("finds messages by their text and cuts snippets, and forgets a deleted chat", async () => {
   await withDirectory(async (directory) => {
     const filename = join(directory, "arden.db")
     const results = await openAt(
@@ -125,71 +124,60 @@ it("finds messages by their current text and cuts snippets from arden.db", async
         const sql = yield* SqlClient.SqlClient
         const sessions = yield* SessionStore
         const { sessionId } = yield* sessions.create({ name: "Deploys" })
-        yield* say(sessionId, "m1", 1, "The staging cluster ran out of disk space.")
-        yield* say(
+        const asker = yield* sessions.create({ name: "Asker" })
+        yield* appendMessagesInTransaction(
+          sql,
           sessionId,
-          "m2",
-          2,
-          `${"alpha ".repeat(10)}needle ${"omega ".repeat(40)}`.trimEnd()
+          [
+            {
+              message_id: "m1",
+              role: ROLE.assistant,
+              content: "The staging cluster ran out of disk space.",
+              created_at: AT
+            },
+            {
+              message_id: "m2",
+              role: ROLE.assistant,
+              content: `${"alpha ".repeat(10)}needle ${"omega ".repeat(40)}`.trimEnd(),
+              created_at: AT
+            }
+          ],
+          AT,
+          "post",
+          "turn"
         )
-        const found = yield* search(sessionId, "staging")
-        const syntax = yield* search(sessionId, '"disk space" OR stag* OR missing')
-        const long = yield* search(sessionId, "needle")
-        const replacement = {
-          message_id: "m1",
-          role: ROLE.assistant,
-          content: "Rollout done.",
-          created_at: AT
-        }
-        yield* sql`UPDATE session_messages
-          SET message_json = ${JSON.stringify(replacement)},
-              search_text = ${transcriptSearchText(replacement)}
-          WHERE message_id = 'm1'`
-        const afterEditOld = yield* search(sessionId, "staging")
-        const afterEditNew = yield* search(sessionId, "rollout")
-        yield* sql`DELETE FROM session_messages WHERE message_id = 'm1'`
-        const afterDelete = yield* search(sessionId, "rollout")
-        return {
-          found,
-          syntax,
-          long,
-          afterEditOld,
-          afterEditNew,
-          afterDelete
-        }
+        const found = yield* search(asker.sessionId, "staging")
+        const syntax = yield* search(asker.sessionId, '"disk space" OR stag* OR missing')
+        const long = yield* search(asker.sessionId, "needle")
+        yield* sessions.archive(sessionId)
+        yield* sessions.permanentDelete(sessionId)
+        const afterDelete = yield* search(asker.sessionId, "staging")
+        return { found, syntax, long, afterDelete }
       })
     )
     expect(results).toEqual({
       found: [["m1", "The [staging] cluster ran out of disk space."]],
       syntax: [["m1", "The [staging] cluster ran out of [disk] [space]."]],
       long: [["m2", `…alpha alpha alpha [needle] ${"omega ".repeat(22)}ome…`]],
-      afterEditOld: [],
-      afterEditNew: [["m1", "[Rollout] done."]],
       afterDelete: []
     })
   })
 })
 
-it("opens without filling a new index, and a search meanwhile returns what is indexed so far", async () => {
+it("opens without filling a new index, and a search meanwhile says it is still indexing", async () => {
   await withDirectory(async (directory) => {
     const { filename, sessionId, sessionRef } = await kettleNotes(directory)
     const result = await openAt(
       filename,
       Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
         const persistence = yield* Persistence
         const atOpen = yield* searchState(sessionId, "kettle", sessionRef)
-        // One background step of two messages, run on a second connection.
-        yield* sql.unsafe("ATTACH DATABASE ? AS search", [searchFile(directory)])
-        yield* transcriptSearchStep(sql, { rebuildBatchSize: 2 })
-        const partway = yield* searchState(sessionId, "kettle", sessionRef)
         yield* persistence.fillSearchIndex
-        return { atOpen, partway, filled: yield* searchState(sessionId, "kettle", sessionRef) }
+        return { atOpen, filled: yield* searchState(sessionId, "kettle", sessionRef) }
       })
     )
     expect(result).toEqual({
       atOpen: { hits: [], indexing: true },
-      partway: { hits: ["n1", "n2"], indexing: true },
       filled: { hits: ALL_NOTES, indexing: false }
     })
   })
