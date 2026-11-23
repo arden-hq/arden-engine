@@ -47,7 +47,6 @@ it("the hourly trim shrinks agent logs past the cutoff, archived too, and leaves
           VALUES (${`r-${id}`}, ${id}, ${`tc-${id}`}, 'web_search', '{}', 0, 'completed', '{}',
             ${at}, ${at})`
       }
-      // An archived chat has no row in the chat list; the trim must still shrink it.
       yield* sql`UPDATE sessions SET archived_at = ${start} WHERE session_id = 'shelved'`
       yield* persistence.retentionTick
       const messages = yield* sql<{ readonly session_id: string }>`

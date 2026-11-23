@@ -23,11 +23,6 @@ const tokens = (prompt: number) => ({
   total: prompt + 2
 })
 
-/**
- * A reported cost goes everywhere usage is kept: each response's sample, the
- * Run's accounted usage, the daily rollup and every report read from them. A
- * total with a call that reported no cost is unknown, never a partial sum.
- */
 it("keeps the cost providers report beside usage, and leaves a total unknown when one call reported none", async () => {
   const storage = recoveredSqlitePersistenceLayer({ dataDir: null, filename: ":memory:" }).pipe(
     Layer.provide(PersistenceWriteQueue.layer)
@@ -81,7 +76,6 @@ it("keeps the cost providers report beside usage, and leaves a total unknown whe
       ])
       expect(first.top_sessions.map((row) => row.cost)).toEqual([0.0005])
 
-      // A second Run on the same day and model whose provider reported no cost.
       const unpriced = yield* startRun("unpriced")
       yield* chat.recordModelUsage({ runId: unpriced.runId, sampleId: "c", usage: tokens(30) })
       yield* usage.recordModelCall({
@@ -132,7 +126,6 @@ const noTools: Toolset = {
   execute: () => ({ content: "", preview: "" })
 }
 
-/** A provider whose every answer reports `cost`, or none when undefined. */
 const answering = (cost: number | undefined): ModelProvider => ({
   protocolVersion: MODEL_PROVIDER_PROTOCOL,
   stream: (request) => [

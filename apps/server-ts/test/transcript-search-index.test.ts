@@ -91,7 +91,6 @@ const searchState = Effect.fn("searchState")(function* (
   return { hits: page.hits.map((hit) => hit.messageId).toSorted(), indexing: page.indexing }
 })
 
-/** A chat with seven notes about the kettle, and no search database yet. */
 const kettleNotes = async (directory: string) => {
   const filename = join(directory, "arden.db")
   const chat = await openAt(
@@ -179,7 +178,6 @@ it("opens without filling a new index, and a search meanwhile returns what is in
         const sql = yield* SqlClient.SqlClient
         const persistence = yield* Persistence
         const atOpen = yield* searchState(sessionId, "kettle", sessionRef)
-        // One background step of two messages, run on a second connection.
         yield* sql.unsafe("ATTACH DATABASE ? AS search", [searchFile(directory)])
         yield* transcriptSearchStep(sql, { rebuildBatchSize: 2 })
         const partway = yield* searchState(sessionId, "kettle", sessionRef)

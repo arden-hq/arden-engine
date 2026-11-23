@@ -30,7 +30,6 @@ import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 
 const IMAGE = { type: "image", media_type: "image/png", data: "iVBORw0KGgo".repeat(2_000) } as const
 
-/** Every data field SQL reads in place, each but the plain ones over the 2 KB a slim row keeps. */
 const sqlFields = {
   applied_change: { type: "file_edit", patch: `+${"line\n".repeat(700)}`, truncated: false },
   attachment_id: "attachment-1",
@@ -88,7 +87,6 @@ const withRig = async (body: (rig: Rig) => Promise<void>): Promise<void> => {
   }
 }
 
-/** Storage as the server opens it; `slim: false` is a build from before slim rows. */
 const storage = (rig: Rig, { slim }: { readonly slim: boolean }) =>
   Layer.merge(
     recoveredSqlitePersistenceLayer({
@@ -329,7 +327,6 @@ describe("tool result storage", () => {
       )
     })
     expect(slim).toEqual(whole)
-    // Without the objects, rows that left nothing out still read: they never open one.
     await withRig(async (rig) => {
       const outcome = await Effect.runPromise(
         Effect.gen(function* () {

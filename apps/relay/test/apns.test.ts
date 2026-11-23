@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, setSystemTime } from "bun:test"
 import { fromB64url, fromUtf8, utf8 } from "@arden-hq/relay-protocol"
-import { buildApnsRequest, createApnsPusher, mapApnsResponse } from "../src/apns/apns.js"
+import { createApnsPusher } from "../src/apns/apns.js"
 import type { ApnsHttpResponse, ApnsTransport } from "../src/apns/apns.js"
 
 type ApnsHttpRequest = Parameters<ApnsTransport>[0]
@@ -124,11 +124,23 @@ describe("APNs pusher", () => {
     ])
   })
 
-  it("builds the request by environment and priority", () => {
-    expect(buildApnsRequest(request, "jwt")).toEqual({
-      url: `https://api.sandbox.push.apple.com/3/device/${request.token}`,
-      headers: {
-        authorization: "bearer jwt",
+  it("sends Apple the request for its environment and priority", async () => {
+    const key = await throwawayKey()
+    const { sent, transport } = recordingTransport([
+      { status: 200, body: "" },
+      { status: 200, body: "" }
+    ])
+    const pusher = createApnsPusher({
+      credentials: { keyPem: key.pem, keyId: "K", teamId: "T" },
+      transport
+    })
+    await pusher.push(request)
+    await pusher.push({ ...request, env: "production", priority: "normal" })
+    const { authorization, ...headers } = sent[0]?.headers ?? {}
+    expect(authorization?.startsWith("bearer ")).toBe(true)
+    expect([sent[0]?.url, headers, sent[0]?.body]).toEqual([
+      `https://api.sandbox.push.apple.com/3/device/${request.token}`,
+      {
         "apns-topic": "com.arden.ios",
         "apns-push-type": "alert",
         "apns-priority": "10",
@@ -136,26 +148,31 @@ describe("APNs pusher", () => {
         "apns-expiration": "0",
         "content-type": "application/json"
       },
-      body: request.body
-    })
-    const production = buildApnsRequest({ ...request, env: "production", priority: "normal" }, "j")
-    expect([production.url, production.headers["apns-priority"]]).toEqual([
+      request.body
+    ])
+    expect([sent[1]?.url, sent[1]?.headers["apns-priority"]]).toEqual([
       `https://api.push.apple.com/3/device/${request.token}`,
       "5"
     ])
   })
 
-  it("maps Apple's answers: 200 accepted, 400/403/410 rejected with the reason, the rest unavailable", () => {
-    expect(
-      [
-        { status: 200, body: "" },
-        { status: 400, body: '{"reason":"BadDeviceToken"}' },
-        { status: 403, body: '{"reason":"InvalidProviderToken"}' },
-        { status: 410, body: '{"reason":"Unregistered","timestamp":1}' },
-        { status: 429, body: '{"reason":"TooManyRequests"}' },
-        { status: 503, body: "<html>" }
-      ].map(mapApnsResponse)
-    ).toEqual([
+  it("maps Apple's answers: 200 accepted, 400/403/410 rejected with the reason, the rest unavailable", async () => {
+    const key = await throwawayKey()
+    const responses = [
+      { status: 200, body: "" },
+      { status: 400, body: '{"reason":"BadDeviceToken"}' },
+      { status: 403, body: '{"reason":"InvalidProviderToken"}' },
+      { status: 410, body: '{"reason":"Unregistered","timestamp":1}' },
+      { status: 429, body: '{"reason":"TooManyRequests"}' },
+      { status: 503, body: "<html>" }
+    ]
+    const pusher = createApnsPusher({
+      credentials: { keyPem: key.pem, keyId: "K", teamId: "T" },
+      transport: recordingTransport([...responses]).transport
+    })
+    const results = []
+    for (const _ of responses) results.push(await pusher.push(request))
+    expect(results).toEqual([
       { status: "accepted" },
       { status: "rejected", reason: "BadDeviceToken" },
       { status: "rejected", reason: "InvalidProviderToken" },

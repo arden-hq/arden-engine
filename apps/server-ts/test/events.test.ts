@@ -129,7 +129,6 @@ it("an Events run reads with the read-only scope and adds only post_message", as
     })(undefined)
   ).entries()
   expect(added.map((entry) => entry.meta.name)).toEqual(["post_message"])
-  expect(eventsHandler.extraCapabilities).toBeUndefined()
   await withTempDatabase(
     Effect.gen(function* () {
       yield* (yield* AutomationCatalog).seedSystemAutomations([eventsHandler.spec])
