@@ -57,10 +57,6 @@ const refuseNetwork = (): Promise<never> =>
  *   locked"). Every connection to the copy opens inside `holdingReplayCopy`.
  * - The engine's own stores write. `runOnReplayCopy` adds a read-only connection
  *   for queries no store answers.
- * - A replay that must write outside the stores (temporary tables, a backfill
- *   run ahead of its turn, a turn appended to see what is listed) runs through
- *   `rollBackOnReplayCopy`: one transaction that is always rolled back, so the
- *   copy is left exactly as the stores left it for the next replay.
  */
 
 /** Runs `body` while this process alone holds the copy, across vitest workers. */
@@ -155,66 +151,3 @@ export const runOnReplayCopy = async <A, E>(
   })
 }
 
-/**
- * Runs `body` on a writable connection to the copy, inside one transaction that
- * is always rolled back, and returns what it computed. Call `runOnReplayCopy`
- * first, so the copy is migrated; nothing here migrates it.
- */
-export const rollBackOnReplayCopy = async <A, E>(
-  copy: ReplayFolder,
-  body: (sql: SqlClient.SqlClient) => Effect.Effect<A, E, SqlClient.SqlClient>
-): Promise<A> => {
-  const { database } = assertReplayFolder(copy.folder)
-  return holdingReplayCopy(copy, async () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        return yield* rolledBack(sql, body(sql))
-      }).pipe(Effect.provide(SqliteClient.layer({ filename: database })))
-    )
-  )
-}
-
-const ROLLBACK = "rollback"
-
-/** Runs `body` in a transaction, or a savepoint inside one, that is always rolled
- * back, and returns what it computed. */
-export const rolledBack = Effect.fn("rolledBack")(function* <A, E, R>(
-  sql: SqlClient.SqlClient,
-  body: Effect.Effect<A, E, R>
-) {
-  const kept: { value?: A } = {}
-  yield* sql
-    .withTransaction(
-      body.pipe(
-        Effect.flatMap((value) => {
-          kept.value = value
-          return Effect.fail(ROLLBACK)
-        })
-      )
-    )
-    .pipe(Effect.catch((failure) => (failure === ROLLBACK ? Effect.void : Effect.fail(failure))))
-  if (!("value" in kept)) throw new Error("The rolled back body returned nothing")
-  return kept.value
-})
-
-/** Runs `body` over the copy's Memory history while this process alone holds the copy. */
-export const onCopyMemory = <A, E>(
-  copy: ReplayFolder,
-  body: (repository: ManagedFileRepositoryShape) => Effect.Effect<A, E>
-): Promise<A> =>
-  holdingReplayCopy(copy, () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        return yield* body(yield* ManagedFileRepository)
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          managedFileRepositoryNodeLayer({
-            workingRoot: join(copy.wiki, "pages"),
-            historyRoot: join(copy.wiki, ".wiki-history")
-          })
-        )
-      )
-    )
-  )

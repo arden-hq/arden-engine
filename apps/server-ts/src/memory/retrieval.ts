@@ -267,7 +267,7 @@ const renderRecall = (
 export const recallQuery = (query: string): string => query.slice(0, QUERY_LIMIT)
 
 /** The terms the word search reads from a query; none when it reads nothing of it. */
-export const wordSearchTerms = (query: string): ReadonlySet<string> => {
+const wordSearchTerms = (query: string): ReadonlySet<string> => {
   const text = normalized(recallQuery(query))
   return text.length < MIN_QUERY_LENGTH ? new Set() : searchTerms(text)
 }

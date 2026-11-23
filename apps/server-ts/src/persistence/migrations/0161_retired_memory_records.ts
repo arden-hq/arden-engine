@@ -59,7 +59,7 @@ const withoutResident = (pages: unknown): unknown =>
     ? pages.filter((page) => !isObject(page) || page["basis"] !== "resident")
     : pages
 
-export const todayReviewInput = (input: unknown): unknown => {
+const todayReviewInput = (input: unknown): unknown => {
   if (!isObject(input)) return input
   const reads = input["reads"]
   return {

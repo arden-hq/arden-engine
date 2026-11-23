@@ -646,7 +646,7 @@ const recoverEachChatRun = Effect.fn("SqlitePersistence.recoverEachChatRun")(fun
  * `idx_tool_calls_session_unresolved`, so SQLite reads that short list of
  * unsettled calls. Without it, every boot reads every tool call ever made.
  */
-export const ENDED_RUNS_WITH_RUNNING_CALLS_SQL = `SELECT run.run_id FROM chat_runs AS run
+const ENDED_RUNS_WITH_RUNNING_CALLS_SQL = `SELECT run.run_id FROM chat_runs AS run
   WHERE run.run_id IN (
       SELECT call.run_id FROM tool_calls AS call
       WHERE call.status IN ${statusSqlList(UNRESOLVED_TOOL_STATUSES)} AND call.status = 'running')
