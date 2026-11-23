@@ -33,7 +33,10 @@ function fixture({
     clear: async (target) => {
       documents.delete(target.credentialKey)
     },
-    resolveClient: async () => ({ clientId: "Iv-test-app", clientSecret: "test-client-secret" }),
+    resolveClient: async () => ({
+      clientId: "Iv-test-app",
+      clientSecret: "test-client-secret"
+    }),
     readTransportSecrets: async () => null,
     writeTransportSecrets: async () => undefined,
     clearTransportSecrets: async () => undefined
@@ -144,7 +147,9 @@ it("exchanges a PKCE-bound GitHub grant, refreshes it and retains access setting
     },
     oauth: setup.oauth
   })
-  expect(await reread.state()).toEqual({ connection: { readOnly: false, source: "app" } })
+  expect(await reread.state()).toEqual({
+    connection: { readOnly: false, source: "app" }
+  })
   await setup.github.forget()
   expect(await setup.github.state()).toEqual({ connection: null })
   expect(setup.documents.size).toBe(0)
@@ -218,7 +223,7 @@ it("removal wins over an in-flight refresh and cannot leave the rotated token be
       refresh_token: REFRESH
     })
   )
-  await token
+  await expect(token).resolves.toBe(REFRESHED)
   await clearing
   expect(await setup.oauth.hasGrant()).toBe(false)
   expect(setup.documents.size).toBe(0)

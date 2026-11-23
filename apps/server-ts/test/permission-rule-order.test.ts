@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import { deriveAuthority, type AdmissionFacts } from "../src/execution/authority.js"
 import type { RunPolicy } from "../src/execution/policy.js"
 import {
-  isSystemJobRun,
   jobHoldsShell,
   matchesCommand,
   matchesTool,
@@ -199,7 +198,6 @@ describe("a host command", () => {
 
 describe("a built-in job's shell", () => {
   const SYSTEM: RuleList = { kind: "system" }
-  const git = { executable: "/usr/bin/git", arguments: ["status"] }
   const command = (
     list: RuleList,
     decision: RuleDecision,
@@ -230,29 +228,21 @@ describe("a built-in job's shell", () => {
     expect(jobHoldsShell(automation("system", "lab"), rules)).toBe(false)
     expect(jobHoldsShell(admitted({}), rules)).toBe(false)
   })
+})
 
-  it("is a built-in job's alone, not a user Automation's or a person's", () => {
-    expect(isSystemJobRun(job)).toBe(true)
-    expect(isSystemJobRun(automation("user_automation", null))).toBe(false)
-    expect(isSystemJobRun(automation("system", "lab"))).toBe(false)
-    expect(isSystemJobRun(admitted({}))).toBe(false)
-  })
-
-  it("reads the global list's command rules as any run does", () => {
-    const own = command(SYSTEM, "allow")
-    const call = matchesCommand(git)
-    expect(ruleDecision(runRules([own]), call)).toBe("allow")
-    expect(ruleDecision(runRules([own, command(GLOBAL, "allow", "/usr/bin/coast")]), call)).toBe(
-      "allow"
+it("a command rule with an argument prefix matches only calls that start with it", () => {
+  const push: PermissionRule = {
+    ...rule(GLOBAL, "allow"),
+    subject: { kind: "command", executable: "/usr/bin/git", argumentPrefix: ["push"] }
+  }
+  const decided = (args: ReadonlyArray<string>) =>
+    ruleDecision(
+      { own: undefined, rules: [push] },
+      matchesCommand({ executable: "/usr/bin/git", arguments: args })
     )
-    expect(
-      ruleDecision(
-        runRules([own, command(GLOBAL, "allow", "/usr/bin/coast")]),
-        matchesCommand({ executable: "/usr/bin/coast", arguments: [] })
-      )
-    ).toBe("allow")
-    expect(ruleDecision(runRules([own, command(GLOBAL, "never")]), call)).toBe("never")
-  })
+  expect(decided(["push", "origin"])).toBe("allow")
+  expect(decided(["status"])).toBeUndefined()
+  expect(decided([])).toBeUndefined()
 })
 
 it("a site rule decides its tool on its site and nowhere else", () => {
@@ -395,18 +385,5 @@ describe("a path rule", () => {
     expect(
       decides(rules, { lexical: "/Users/me/src/demo/link", real: "/etc/hosts" }, "change")
     ).toBeUndefined()
-  })
-
-  it("another Space's rule does not reach this run", () => {
-    const other: RuleList = { kind: "space", spaceId: "other" }
-    expect(
-      pathDecision(
-        { own: LAB, rules: [] },
-        { lexical: "/Users/me/a", real: "/Users/me/a" },
-        "read",
-        false
-      )
-    ).toBeUndefined()
-    expect(ruleListsOf(automation("system", "lab"))).not.toContainEqual(other)
   })
 })

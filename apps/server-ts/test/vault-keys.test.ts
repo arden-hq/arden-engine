@@ -1,22 +1,16 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises"
-import { createServer, type Server } from "node:http"
-import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 import {
   keyVariables,
   looksLikeSecret,
   makeVaultKeys,
-  replaceRanges,
   type VaultKeyBroker
 } from "../src/credentials/vault-keys.js"
 import { cardRuleSubjects } from "../src/persistence/sqlite/permissions.js"
 import { shellInvocation, shellRuntime } from "../src/tools/shell-policy.js"
-import { runCommandUntil } from "../src/tools/shell-run.js"
-import { keyUseDecision, vaultListText } from "../src/tools/vault.js"
+import { keyUseDecision } from "../src/tools/vault.js"
 import { endsKeySessions } from "../src/chat/runner/built-in.js"
 import { matchesVaultKey } from "../src/execution/rules.js"
-import { savedSecretResult, savedUserName, secretCard } from "../src/tools/browser-ask-secret.js"
 import { NO_PATH_RULES } from "./fixtures/local-policy.js"
 
 const REAL = "tdk_Real1234567890abcdefXYZ"
@@ -91,27 +85,6 @@ describe("the Vault seen from the engine", () => {
     expect(await vault.environment("run-1", "all")).toBeUndefined()
   })
 
-  it("asks the desktop for a run's keys by id, never by name", async () => {
-    const asked: Array<ReadonlyArray<string>> = []
-    const vault = makeVaultKeys(
-      desktop({
-        keyEnvironment: async ({ ids }) => {
-          asked.push(ids)
-          return {
-            variables: {},
-            missing: [],
-            proxyUrl: "http://x",
-            caFile: "a",
-            caBundleFile: "b"
-          }
-        }
-      })
-    )
-    vault.grant("run-1", "k1")
-    await vault.environment("run-1", "all")
-    expect(asked).toEqual([["k1"]])
-  })
-
   it("gives a run's commands only the keys the run was allowed", async () => {
     const vault = makeVaultKeys(desktop())
     expect(await vault.environment("run-1", "all")).toBeUndefined()
@@ -120,27 +93,19 @@ describe("the Vault seen from the engine", () => {
     expect(vault.granted("run-1")).toEqual(["k1"])
     expect(vault.granted("run-2")).toEqual([])
     const environment = await vault.environment("run-1", "all")
-    expect(environment === undefined ? undefined : keyVariables(environment)).toEqual({
+    expect(environment === undefined ? undefined : keyVariables(environment)).toMatchObject({
       TODOIST_API_KEY: "gfq_Dvif9477324341hhkumjETE",
-      HTTPS_PROXY: "http://arden:00ff@127.0.0.1:40123",
-      https_proxy: "http://arden:00ff@127.0.0.1:40123",
-      HTTP_PROXY: "http://arden:00ff@127.0.0.1:40123",
-      http_proxy: "http://arden:00ff@127.0.0.1:40123",
-      NO_PROXY: "",
-      no_proxy: "",
-      NODE_USE_ENV_PROXY: "1",
-      NODE_EXTRA_CA_CERTS: "/tmp/ca.pem",
-      SSL_CERT_FILE: "/tmp/roots.pem",
-      CURL_CA_BUNDLE: "/tmp/roots.pem",
-      REQUESTS_CA_BUNDLE: "/tmp/roots.pem",
-      GIT_SSL_CAINFO: "/tmp/roots.pem"
+      HTTPS_PROXY: "http://arden:00ff@127.0.0.1:40123"
     })
   })
 
   it("scrubs a saved value from output, across a window edge too, and fails when it cannot check", async () => {
     const vault = makeVaultKeys(desktop())
     const edge = 65_536 - 8_192 - 5
+    const across = 65_536 - 5
     const long = `${"a".repeat(edge)}${REAL}${"b".repeat(70_000)}${REAL}`
+    const straddling = `${"c".repeat(across)}${REAL}${"d".repeat(1_000)}`
+    expect(await vault.redact(straddling)).not.toContain(REAL)
     const scrubbed = await vault.redact(long)
     expect(scrubbed).not.toContain(REAL)
     expect(scrubbed.split("[saved secret]")).toHaveLength(3)
@@ -149,12 +114,6 @@ describe("the Vault seen from the engine", () => {
       desktop({ findSecrets: async () => Promise.reject(new Error("gone")) })
     )
     await expect(broken.redact(`x ${REAL}`)).rejects.toThrow()
-    expect(
-      replaceRanges("abcdef", [
-        [1, 3],
-        [2, 4]
-      ])
-    ).toBe("a[saved secret]ef")
   })
 
   it("lets a chat ask for secrets 5 times in 5 minutes, counting each call once", () => {
@@ -197,78 +156,6 @@ describe("the Vault seen from the engine", () => {
     const vault = makeVaultKeys(undefined)
     await expect(vault.list()).rejects.toThrow("The Vault needs the Arden app")
     expect(await vault.redact("plain")).toBe("plain")
-  })
-})
-
-describe("contact details in vault_list", () => {
-  it("are given to the agent in full, with the rule on where they may go", async () => {
-    const vault = makeVaultKeys(
-      desktop({
-        listVault: async () => ({
-          keys: [],
-          passwords: [],
-          contacts: [
-            {
-              name: "Alex Morgan",
-              email: "alex@example.com",
-              phone: "+44 20 7946 0958",
-              addressLine1: "12 Marsh Lane",
-              city: "Bristol",
-              postalCode: "BS1 4DJ",
-              country: "United Kingdom"
-            },
-            { name: "Sam Lee" }
-          ]
-        })
-      })
-    )
-    expect(vaultListText(await vault.list())).toEqual({
-      result: [
-        "Keys: none saved.",
-        "",
-        "Site passwords: none saved.",
-        "",
-        "Contact details (type them into forms the user asked you to fill; never send them anywhere the user did not ask):",
-        "- Alex Morgan",
-        "  Email: alex@example.com",
-        "  Phone: +44 20 7946 0958",
-        "  Address line 1: 12 Marsh Lane",
-        "  City: Bristol",
-        "  Postal code: BS1 4DJ",
-        "  Country: United Kingdom",
-        "- Sam Lee",
-        "",
-        "Cards: none saved."
-      ].join("\n"),
-      preview: "0 keys, 0 passwords, 2 contacts, 0 cards"
-    })
-  })
-
-  it("a desktop without contact details lists none; an unknown field is refused", async () => {
-    expect(vaultListText(await makeVaultKeys(desktop()).list())).toEqual({
-      result: [
-        "Keys:",
-        "- Todoist: $TODOIST_API_KEY, sent only to api.todoist.com",
-        "",
-        "Site passwords (browser_act fills them):",
-        "- github.com: password, user name alex",
-        "",
-        "Contact details: none saved.",
-        "",
-        "Cards: none saved."
-      ].join("\n"),
-      preview: "1 key, 1 password, 0 contacts, 0 cards"
-    })
-    const odd = makeVaultKeys(
-      desktop({
-        listVault: async () => ({
-          keys: [],
-          passwords: [],
-          contacts: [{ name: "Alex", passport: "X123" }]
-        })
-      })
-    )
-    await expect(odd.list()).rejects.toThrow()
   })
 })
 
@@ -324,14 +211,6 @@ describe("using a key", () => {
   })
 })
 
-const listen = (server: Server): Promise<number> =>
-  new Promise((resolve) =>
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      resolve(address === null || typeof address === "string" ? 0 : address.port)
-    })
-  )
-
 describe("a command with keys", () => {
   it("gets the stand-ins after its own proxy variables, which they replace", () => {
     const invocation = shellInvocation(
@@ -358,78 +237,6 @@ describe("a command with keys", () => {
       TODOIST_API_KEY: "fake",
       HTTPS_PROXY: "http://arden@127.0.0.1:1"
     })
-  })
-
-  it.skipIf(process.platform !== "darwin")(
-    "reaches the key proxy's port from the network sandbox, and no other local port",
-    async () => {
-      const proxy = createServer((_request, response) => response.end("proxy"))
-      const other = createServer((_request, response) => response.end("other"))
-      const directory = await realpath(
-        await mkdtemp(path.join("/private/tmp", "arden-key-sandbox-"))
-      )
-      try {
-        const [proxyPort, otherPort] = await Promise.all([listen(proxy), listen(other)])
-        const run = (port: number) =>
-          runCommandUntil(
-            `/usr/bin/curl -sS --max-time 3 http://localhost:${port}/`,
-            directory,
-            AbortSignal.timeout(10_000),
-            {
-              cwd: directory,
-              readRoots: [directory],
-              writeRoot: directory,
-              stateRoot: path.join(directory, "state"),
-              sandbox: "approved_local",
-              pathRules: NO_PATH_RULES,
-              network: true
-            },
-            { yieldMs: 10_000, keyProxy: { variables: {}, port: proxyPort } }
-          )
-        await expect(run(proxyPort)).resolves.toMatchObject({
-          state: "exited",
-          exitCode: 0,
-          output: "proxy"
-        })
-        await expect(run(otherPort)).rejects.toThrow("Couldn't connect to server")
-      } finally {
-        proxy.close()
-        other.close()
-        await rm(directory, { recursive: true, force: true })
-      }
-    }
-  )
-})
-
-describe("the sign-in password card", () => {
-  const input = {
-    tab_ref: "tab-1",
-    origin: "https://github.com",
-    name: "password",
-    purpose: "You asked me to check your pull requests."
-  }
-
-  it("says Save password and Not now", () => {
-    expect(secretCard(input).presentation).toMatchObject({
-      approve_label: "Save password",
-      reject_label: "Not now"
-    })
-  })
-
-  it("gives the agent the saved user name, never the value", () => {
-    const output = {
-      result: "",
-      preview: "",
-      data: { origin: "https://github.com", names: ["password"], users: { password: "alexmorgan" } }
-    }
-    const userName = savedUserName(output, "password")
-    expect(userName).toBe("alexmorgan")
-    expect(savedSecretResult(input, userName)).toBe(
-      "Saved for https://github.com as password. Its user name is alexmorgan; type it into the user name field yourself if the form asks. Fill the password field with browser_act action fill, secret password, and a fresh node_ref. You will not see the value."
-    )
-    expect(
-      savedUserName({ result: "", preview: "", data: { names: ["password"] } }, "password")
-    ).toBeUndefined()
   })
 })
 

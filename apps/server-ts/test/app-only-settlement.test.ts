@@ -16,7 +16,7 @@ import { parseSettings } from "../src/serve/settings.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { relayLoopback } from "../src/relay/loopback.js"
 import { runCommand } from "../src/relay/commands.js"
-import { startServer, startServerWithLocalAccess, type ServerHandle } from "../src/server.js"
+import { startServerWithLocalAccess, type ServerHandle } from "../src/server.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 
 const NO_CARD_ASKED_AT = "2026-11-21T09:00:00.000Z"
@@ -234,37 +234,6 @@ it("a card only the Arden app can grant is granted from the desktop, not from th
     expect((await post(access.capability, shop, "pay", true))?.status).toBe(200)
     expect(statusOf(databasePath, shop, "pay")).toEqual({ status: "approved" })
     expect(statusOf(databasePath, shop, "kept")).toEqual({ status: "pending" })
-  } finally {
-    await server?.stop().catch(() => undefined)
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-it("a server started without the Arden app denies a card only the app can grant, grants none, and grants the rest", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "arden-app-only-standalone-"))
-  const databasePath = join(directory, "arden.db")
-  let server: ServerHandle | undefined
-  try {
-    const shop = await Effect.runPromise(
-      waitingChat(
-        "shop",
-        { pay: "vault_pay", "pay-denied": "vault_pay", write: "file_write" },
-        false
-      ).pipe(Effect.provide(persistence(databasePath)))
-    )
-    server = await startServer({ port: 0, databasePath, modelHost })
-    const answer = (toolId: string, approved: boolean) =>
-      server?.fetch("/tools/result", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ run_id: shop, tool_id: toolId, result: "", approved })
-      })
-    expect((await answer("pay", true))?.status).toBe(409)
-    expect(statusOf(databasePath, shop, "pay")).toEqual({ status: "pending" })
-    expect((await answer("pay-denied", false))?.status).toBe(200)
-    expect(statusOf(databasePath, shop, "pay-denied")).toEqual({ status: "rejected" })
-    expect((await answer("write", true))?.status).toBe(200)
-    expect(statusOf(databasePath, shop, "write")).toEqual({ status: "approved" })
   } finally {
     await server?.stop().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })

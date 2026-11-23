@@ -26,7 +26,10 @@ const offerTo = async (...files: ReadonlyArray<string>) =>
           get: () => Effect.succeed(spaceRow as never)
         })
       },
-      { run: serverRunContext({ sessionId: "chat" }), signal: new AbortController().signal },
+      {
+        run: serverRunContext({ sessionId: "chat" }),
+        signal: new AbortController().signal
+      },
       files
     )
   )?.folder
@@ -93,16 +96,14 @@ describe("the folder an approval card offers to keep", () => {
     [".ssh", "config"],
     ["Library", "LaunchAgents", "x.plist"],
     [".config", "gh", "hosts.yml"],
-    ["Library", "notes.md"]
-  ])("is never a secret or startup folder, or one holding one (~/%s/…)", async (...file) => {
-    await expect(offerTo(at("home", ...file))).resolves.toBeUndefined()
-  })
-
-  it.each([
+    ["Library", "notes.md"],
     [".config", "nvim", "init.lua"],
     [".local", "bin", "tool"],
     ["Library", "Preferences", "app.plist"]
-  ])("is never inside home's hidden folders or Library (~/%s/…)", async (...file) => {
-    await expect(offerTo(at("home", ...file))).resolves.toBeUndefined()
-  })
+  ])(
+    "is never a secret, startup or hidden folder, or one holding one (~/%s/…)",
+    async (...file) => {
+      await expect(offerTo(at("home", ...file))).resolves.toBeUndefined()
+    }
+  )
 })

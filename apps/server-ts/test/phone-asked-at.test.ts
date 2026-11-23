@@ -13,8 +13,7 @@ import { ToolExecutionStore } from "../src/persistence/tools/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { runCommand } from "../src/relay/commands.js"
 import { relayLoopback } from "../src/relay/loopback.js"
-import { startServer, startServerWithLocalAccess } from "../src/server.js"
-import { memoryServerVault } from "./fixtures/memory-vault.js"
+import { startServerWithLocalAccess } from "../src/server.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 
 const access = {
@@ -80,7 +79,15 @@ const waitingChat = (name: string, cards: ReadonlyArray<string>, commandLine: bo
     return run.runId
   })
 
-const PHONE_CARDS = ["old-allow", "old-deny", "new-allow", "new-deny", "desk"] as const
+const PHONE_CARDS = [
+  "old-allow",
+  "old-deny",
+  "new-allow",
+  "new-deny",
+  "stale",
+  "unknown",
+  "desk"
+] as const
 
 const card = (databasePath: string, runId: string, toolCallId: string) => {
   const database = new DatabaseSync(databasePath, { readOnly: true })
@@ -106,93 +113,6 @@ const command = (databasePath: string, cid: string) => {
   }
 }
 
-it("on a server started without local access but with a vault, so the relay may run, an iPhone's decision is held to the same checks", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "arden-phone-asked-at-standalone-"))
-  const databasePath = join(directory, "arden.db")
-  const cards = ["old-deny", "stale", "unknown", "new-allow", "desk"] as const
-  try {
-    const store = ManagedRuntime.make(
-      sqlitePersistenceLayer({ dataDir: null, filename: databasePath }).pipe(
-        Layer.provide(PersistenceWriteQueue.layer)
-      )
-    )
-    const runId = await store.runPromise(
-      Effect.gen(function* () {
-        const runId = yield* waitingChat("phone", cards, false)
-        const relay = yield* RelayStore
-        for (const toolId of ["old-deny", "stale", "new-allow"])
-          yield* relay.beginCommand({ cid: `cid-${toolId}`, kind: "decide" })
-        return runId
-      })
-    )
-    await store.dispose()
-    const server = await startServer({
-      port: 0,
-      databasePath,
-      modelHost,
-      credentialVault: memoryServerVault()
-    })
-    try {
-      expect(await (await server.fetch("/relay")).json()).toMatchObject({
-        connection: "idle",
-        enabled: true,
-        devices: []
-      })
-      const phone = relayLoopback(
-        { _tag: "TcpAddress", hostname: "127.0.0.1", port: server.port },
-        undefined
-      )
-      const fromPhone = (toolId: string, approve: boolean, askedAt?: string) =>
-        runCommand(phone, `cid-${toolId}`, {
-          kind: "decide",
-          args: {
-            run_id: runId,
-            tool_id: toolId,
-            approve,
-            ...(askedAt === undefined ? {} : { asked_at: askedAt })
-          }
-        })
-      const askedAt = (toolId: string) => card(databasePath, runId, toolId).requested_at
-
-      expect(await fromPhone("old-deny", false)).toEqual({
-        state: "rejected",
-        result: { message: "Update Arden on your iPhone to approve or deny from it." }
-      })
-      expect((await fromPhone("stale", false, "2026-01-01T00:00:00.000Z")).state).toBe("rejected")
-      expect((await fromPhone("unknown", true, askedAt("unknown"))).state).toBe("rejected")
-      for (const toolId of ["old-deny", "stale", "unknown"]) {
-        expect(card(databasePath, runId, toolId).status).toBe("pending")
-        if (toolId !== "unknown")
-          expect(command(databasePath, `cid-${toolId}`)).toEqual({
-            state: "running",
-            result_json: null
-          })
-      }
-      expect(command(databasePath, "cid-unknown")).toBeUndefined()
-
-      expect((await fromPhone("new-allow", true, askedAt("new-allow"))).state).toBe("done")
-      expect(card(databasePath, runId, "new-allow").status).toBe("approved")
-      const kept = { state: "done", result_json: JSON.stringify({ status: "ok" }) }
-      expect(command(databasePath, "cid-new-allow")).toEqual(kept)
-      await fromPhone("new-allow", true, askedAt("new-allow"))
-      expect(card(databasePath, runId, "new-allow").status).toBe("approved")
-      expect(command(databasePath, "cid-new-allow")).toEqual(kept)
-
-      const desk = await server.fetch("/tools/result", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ run_id: runId, tool_id: "desk", result: "", approved: true })
-      })
-      expect(desk.status).toBe(200)
-      expect(card(databasePath, runId, "desk").status).toBe("approved")
-    } finally {
-      await server.stop()
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
 it("an iPhone answers a card only by naming when it was asked; other callers and features are unchanged", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-phone-asked-at-"))
   const databasePath = join(directory, "arden.db")
@@ -207,7 +127,7 @@ it("an iPhone answers a card only by naming when it was asked; other callers and
         const phoneRun = yield* waitingChat("phone", PHONE_CARDS, false)
         const cliRun = yield* waitingChat("terminal", ["cli"], true)
         const relay = yield* RelayStore
-        for (const toolId of PHONE_CARDS)
+        for (const toolId of PHONE_CARDS.filter((id) => id !== "unknown"))
           yield* relay.beginCommand({ cid: `cid-${toolId}`, kind: "decide" })
         return { phoneRun, cliRun }
       })
@@ -234,13 +154,9 @@ it("an iPhone answers a card only by naming when it was asked; other callers and
             ...(askedAt === undefined ? {} : { asked_at: askedAt })
           }
         })
-      const update = {
-        state: "rejected",
-        result: { message: "Update Arden on your iPhone to approve or deny from it." }
-      }
 
-      expect(await fromPhone("old-allow", true)).toEqual(update)
-      expect(await fromPhone("old-deny", false)).toEqual(update)
+      expect((await fromPhone("old-allow", true)).state).toBe("rejected")
+      expect((await fromPhone("old-deny", false)).state).toBe("rejected")
       expect(card(databasePath, phoneRun, "old-allow").status).toBe("pending")
       expect(card(databasePath, phoneRun, "old-deny").status).toBe("pending")
 
@@ -250,6 +166,21 @@ it("an iPhone answers a card only by naming when it was asked; other callers and
       expect((await fromPhone("new-deny", false, denyAt)).state).toBe("done")
       expect(card(databasePath, phoneRun, "new-allow").status).toBe("approved")
       expect(card(databasePath, phoneRun, "new-deny").status).toBe("rejected")
+
+      expect((await fromPhone("stale", false, "2026-01-01T00:00:00.000Z")).state).toBe("rejected")
+      expect(
+        (await fromPhone("unknown", true, card(databasePath, phoneRun, "unknown").requested_at))
+          .state
+      ).toBe("rejected")
+      expect(card(databasePath, phoneRun, "stale").status).toBe("pending")
+      expect(card(databasePath, phoneRun, "unknown").status).toBe("pending")
+      expect(command(databasePath, "cid-stale")).toEqual({ state: "running", result_json: null })
+
+      const kept = command(databasePath, "cid-new-allow")
+      expect(kept?.state).toBe("done")
+      await fromPhone("new-allow", true, allowAt)
+      expect(card(databasePath, phoneRun, "new-allow").status).toBe("approved")
+      expect(command(databasePath, "cid-new-allow")).toEqual(kept)
 
       const home = await phone.request({ method: "GET", path: "/mobile/home" })
       expect(home.status).toBe(200)

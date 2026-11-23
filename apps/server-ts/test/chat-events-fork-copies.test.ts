@@ -13,11 +13,6 @@ import {
 } from "../src/persistence/sqlite/chat-events.js"
 import { initializeSchema } from "./fixtures/initialize-schema.js"
 
-// A fork copies its parent's messages and keeps their ids. The Space's main chat reads
-// arrivals from every chat in its Space, so each copy used to count as one more arrival
-// with the same key, and saving the keys broke the (session_id, event_key) primary key.
-// That failed every message sent to the main chat ("Could not record chat events").
-
 const HOME = "home-chat"
 const SPACE = "space-1"
 const NOW = "2026-11-05T12:00:00.000Z"
@@ -90,38 +85,20 @@ const setUp = (sql: SqlClient.SqlClient) =>
 
 const now = DateTime.makeUnsafe(NOW)
 
-it("does not tell the main chat about its own arrival through fork copies", () =>
-  run((sql) =>
-    Effect.gen(function* () {
-      yield* setUp(sql)
-      const look = yield* findChatEvents(sql, { sessionId: HOME, now })
-      expect(look?.batch).toBeUndefined()
-    })
-  ))
-
-it("tells the main chat once about an arrival that came to a fork", () =>
+it("tells the main chat once about an arrival that came to a fork, and records it despite fork copies", () =>
   run((sql) =>
     Effect.gen(function* () {
       yield* setUp(sql)
       yield* addMessage(sql, `${HOME}::f1`, 2, arrival("b"))
       const look = yield* findChatEvents(sql, { sessionId: HOME, now })
       expect(look?.batch?.keys).toEqual(["arrival:b"])
-    })
-  ))
-
-it("records chat events for a main chat that has forks", () =>
-  run((sql) =>
-    Effect.gen(function* () {
-      yield* setUp(sql)
-      yield* addMessage(sql, `${HOME}::f1`, 2, arrival("b"))
       yield* takeChatEventsBeforeQueued(sql, {
         run: { session_id: HOME, automation_context_mode: null },
         queued: 1,
         now,
         operation: "drain"
       })
-      const saved = yield* sql<{ readonly event_key: string }>`
-        SELECT event_key FROM chat_event_deliveries WHERE session_id = ${HOME}`
-      expect(saved.map((row) => row.event_key)).toEqual(["arrival:b"])
+      const again = yield* findChatEvents(sql, { sessionId: HOME, now })
+      expect(again?.batch).toBeUndefined()
     })
   ))

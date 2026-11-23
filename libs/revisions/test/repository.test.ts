@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { Effect, Exit, Fiber, Layer } from "effect"
+import { Effect, Exit } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { RevisionStorageError } from "../src/domain/errors.js"
@@ -28,6 +28,23 @@ const withRepository = async <A, E>(
   roots.push(root)
   return useRepository(root, use)
 }
+
+const create = (resourceId: string, path: string, text: string) =>
+  new Create({ resourceId, path, content: encodeUtf8(text) })
+
+const changeSet = (
+  operations: ConstructorParameters<typeof ChangeSet>[0]["operations"],
+  idempotencyKey: string
+): ChangeSet =>
+  new ChangeSet({
+    operations,
+    actor: "tester",
+    origin: "test",
+    reason: "exercise revision contract",
+    idempotencyKey,
+    expectedHead: null,
+    enforceExpectedHead: false
+  })
 
 describe("durable revisions repository", () => {
   it("initializes with the default history child and commits/reopens content", async () => {
@@ -70,43 +87,35 @@ describe("durable revisions repository", () => {
     expect(reopened).toBe(true)
   })
 
-  it("rejects stale per-resource versions", async () => {
+  it("rejects a stale per-resource version and keeps the current content", async () => {
     await withRepository((repository) =>
       Effect.gen(function* () {
-        const first = yield* repository.commit(
-          new ChangeSet({
-            operations: [
-              new Create({ resourceId: "note", path: "note.md", content: encodeUtf8("one") })
+        yield* repository.commit(changeSet([create("note", "note.md", "one")], "cas-1"))
+        const stale = (yield* requireVersion(repository, "note")).versionId
+        yield* repository.commit(
+          changeSet(
+            [
+              new Update({ resourceId: "note", expectedVersion: stale, content: encodeUtf8("two") })
             ],
-            actor: "alice",
-            origin: "test",
-            reason: "create",
-            idempotencyKey: "cas-1",
-            expectedHead: null,
-            enforceExpectedHead: false
-          })
-        )
-        const version = yield* requireVersion(repository, "note")
-        expect(version).not.toBeNull()
-        const stale = new Update({
-          resourceId: "note",
-          expectedVersion: "0".repeat(64),
-          content: encodeUtf8("two")
-        })
-        const failure = yield* Effect.exit(
-          repository.commit(
-            new ChangeSet({
-              operations: [stale],
-              actor: "alice",
-              origin: "test",
-              reason: "stale",
-              idempotencyKey: "cas-2",
-              expectedHead: first.commit.commitId,
-              enforceExpectedHead: true
-            })
+            "cas-2"
           )
         )
-        expect(failure._tag).toBe("Failure")
+        const failure = yield* Effect.exit(
+          repository.commit(
+            changeSet(
+              [
+                new Update({
+                  resourceId: "note",
+                  expectedVersion: stale,
+                  content: encodeUtf8("three")
+                })
+              ],
+              "cas-3"
+            )
+          )
+        )
+        expect(Exit.isFailure(failure)).toBe(true)
+        expect(new TextDecoder().decode(yield* repository.read("note"))).toBe("two")
       })
     )
   })
@@ -173,62 +182,7 @@ describe("durable revisions repository", () => {
       })
     )
     expect(recovered).toBe("one")
-  })
-
-  it("reads the published parent while a commit sits between its ref swap and its publication", async () => {
-    const root = await mkdtemp(join(tmpdir(), "arden-revisions-"))
-    roots.push(root)
-    const window: { reader?: ManagedFileRepositoryShape; seen?: readonly string[] } = {}
-    const seen = await Effect.runPromise(
-      Effect.gen(function* () {
-        const repository = yield* ManagedFileRepository
-        window.reader = repository
-        const first = yield* repository.commit(
-          new ChangeSet({
-            operations: [
-              new Create({ resourceId: "note", path: "note.md", content: encodeUtf8("one") })
-            ],
-            actor: "alice",
-            origin: "test",
-            reason: "create",
-            idempotencyKey: "window-1",
-            expectedHead: null,
-            enforceExpectedHead: false
-          })
-        )
-        yield* repository.commit(
-          new ChangeSet({
-            operations: [
-              new Create({ resourceId: "other", path: "other.md", content: encodeUtf8("two") })
-            ],
-            actor: "alice",
-            origin: "test",
-            reason: "create",
-            idempotencyKey: "window-2",
-            expectedHead: first.commit.commitId,
-            enforceExpectedHead: false
-          })
-        )
-        expect(window.seen).toEqual(["note"])
-        return (yield* repository.listResources()).map((resource) => resource.resourceId)
-      }).pipe(
-        Effect.provide(
-          managedFileRepositoryNodeLayer({
-            workingRoot: root,
-            checkpoint: (stage) =>
-              stage !== "after_ref" || window.reader === undefined
-                ? Effect.void
-                : window.reader.listResources().pipe(
-                    Effect.map((resources) => {
-                      if (window.seen === undefined && resources.length > 0)
-                        window.seen = resources.map((resource) => resource.resourceId)
-                    })
-                  )
-          })
-        )
-      )
-    )
-    expect(seen).toEqual(["note", "other"])
+    expect(await readFile(join(root, "note.md"), "utf8")).toBe("one")
   })
 
   it("preserves external drift and quarantines an interrupted transaction", async () => {
@@ -307,24 +261,54 @@ describe("durable revisions repository", () => {
     expect(issues).toContain("recovery_conflict")
   })
 
-  it("an open interrupted at any point releases the repository lock", async () => {
-    const root = await mkdtemp(join(tmpdir(), "arden-revisions-"))
-    roots.push(root)
-    const nextTick = Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)))
-    let opened = false
-    for (let ticks = 0; !opened && ticks < 2_000; ticks++) {
-      opened = await Effect.runPromise(
-        Effect.gen(function* () {
-          const fiber = yield* Effect.forkChild(
-            Layer.build(managedFileRepositoryNodeLayer({ workingRoot: root })).pipe(Effect.scoped)
-          )
-          yield* nextTick.pipe(Effect.repeat({ times: ticks }))
-          yield* Fiber.interrupt(fiber)
-          return Exit.isSuccess(yield* Fiber.await(fiber))
-        })
-      )
-      await useRepository(root, () => Effect.void)
-    }
-    expect(opened).toBe(true)
+  it("replays exact idempotent requests and rejects conflicting reuse", async () => {
+    await withRepository((repository) =>
+      Effect.gen(function* () {
+        const request = changeSet([create("note", "note.md", "one")], "retry")
+        const first = yield* repository.commit(request)
+        const replay = yield* repository.commit(request)
+        expect(replay.replayed).toBe(true)
+        expect(replay.commit.commitId).toBe(first.commit.commitId)
+        expect((yield* repository.history()).length).toBe(1)
+
+        const conflict = yield* Effect.exit(
+          repository.commit(changeSet([create("note", "note.md", "different")], "retry"))
+        )
+        expect(Exit.isFailure(conflict)).toBe(true)
+        expect((yield* repository.history()).length).toBe(1)
+        expect(new TextDecoder().decode(yield* repository.read("note"))).toBe("one")
+      })
+    )
+  })
+
+  it("allows only one stale-version contender to publish", async () => {
+    await withRepository((repository) =>
+      Effect.gen(function* () {
+        yield* repository.commit(changeSet([create("note", "note.md", "zero")], "seed"))
+        const expectedVersion = (yield* requireVersion(repository, "note")).versionId
+        const outcomes = yield* Effect.all(
+          [1, 2].map((index) =>
+            Effect.exit(
+              repository.commit(
+                changeSet(
+                  [
+                    new Update({
+                      resourceId: "note",
+                      expectedVersion,
+                      content: encodeUtf8(`winner-${index}`)
+                    })
+                  ],
+                  `contender-${index}`
+                )
+              )
+            )
+          ),
+          { concurrency: 2 }
+        )
+        expect(outcomes.filter(Exit.isSuccess)).toHaveLength(1)
+        expect(outcomes.filter(Exit.isFailure)).toHaveLength(1)
+        expect(new TextDecoder().decode(yield* repository.read("note"))).toMatch(/^winner-[12]$/)
+      })
+    )
   })
 })

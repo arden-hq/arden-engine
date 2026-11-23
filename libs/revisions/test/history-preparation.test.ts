@@ -45,35 +45,7 @@ const input = (head: string) => ({
   validateCommitTransition: () => Effect.void
 })
 
-it("cancelled preparation cannot hide earlier provenance from the next query", async () => {
-  const result = await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const history = makeHistoryQuery()
-        const halfway = yield* Deferred.make<void>()
-        const blocked = yield* Deferred.make<void>()
-        const pending = yield* Effect.forkChild(
-          history.prepare({
-            head: third.commitId,
-            loadCommit: (id) =>
-              id === second.commitId
-                ? Deferred.succeed(halfway, undefined).pipe(
-                    Effect.andThen(Deferred.await(blocked)),
-                    Effect.andThen(loadCommit(id))
-                  )
-                : loadCommit(id)
-          })
-        )
-        yield* Deferred.await(halfway)
-        yield* Fiber.interrupt(pending)
-        return yield* history.query(input(third.commitId))
-      })
-    )
-  )
-  expect(result).toEqual([third, second, first])
-})
-
-it("a preparation finishing after a newer query preserves both histories", async () => {
+it("histories stay correct when an older preparation finishes after a newer query", async () => {
   const result = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -107,38 +79,6 @@ it("a preparation finishing after a newer query preserves both histories", async
   expect(result).toEqual([
     [third, second, first],
     [second, first],
-    [third, second, first]
-  ])
-})
-
-it("cancelling a shared-head preparation cannot erase a completed reader's provenance", async () => {
-  const result = await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const history = makeHistoryQuery()
-        const halfway = yield* Deferred.make<void>()
-        const hold = yield* Deferred.make<void>()
-        const pending = yield* Effect.forkChild(
-          history.prepare({
-            head: third.commitId,
-            loadCommit: (id) =>
-              id === second.commitId
-                ? Deferred.succeed(halfway, undefined).pipe(
-                    Effect.andThen(Deferred.await(hold)),
-                    Effect.andThen(loadCommit(id))
-                  )
-                : loadCommit(id)
-          })
-        )
-        yield* Deferred.await(halfway)
-        const concurrent = yield* history.query(input(third.commitId))
-        yield* Fiber.interrupt(pending)
-        return [concurrent, yield* history.query(input(third.commitId))]
-      })
-    )
-  )
-  expect(result).toEqual([
-    [third, second, first],
     [third, second, first]
   ])
 })

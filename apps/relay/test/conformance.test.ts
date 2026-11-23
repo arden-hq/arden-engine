@@ -344,6 +344,8 @@ describe("Bun relay (WebSocket + bun:sqlite)", () => {
   it("revokes a phone: its socket closes at once and its key stops working", async () => {
     const { macClient, phone, phoneClient } = await paired()
     await phoneClient.next("ready")
+    phoneClient.send({ t: "remove_device", dev: phone.id, sig_mac: b64(new Uint8Array(64)) })
+    expect((await phoneClient.next("error")).header.code).toBe("forbidden")
     macClient.send({
       t: "remove_device",
       dev: phone.id,
@@ -473,13 +475,6 @@ describe("Bun relay (WebSocket + bun:sqlite)", () => {
     await macClient.next("pair_request")
     phoneClient.close()
     expect((await macClient.next("pair_gone")).header).toEqual({ t: "pair_gone", dev: phone.id })
-  })
-
-  it("keeps phones from Mac-only frames", async () => {
-    const { phone, phoneClient } = await paired()
-    await phoneClient.next("ready")
-    phoneClient.send({ t: "remove_device", dev: phone.id, sig_mac: b64(new Uint8Array(64)) })
-    expect((await phoneClient.next("error")).header.code).toBe("forbidden")
   })
 
   it("pushes only from the Mac, only to its registered phones, under the size cap", async () => {

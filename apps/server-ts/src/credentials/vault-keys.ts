@@ -221,10 +221,7 @@ export const makeVaultKeys = (
 }
 
 /** The text with each range (merged where they overlap) replaced by SECRET_MARK. */
-export const replaceRanges = (
-  text: string,
-  ranges: ReadonlyArray<readonly [number, number]>
-): string => {
+const replaceRanges = (text: string, ranges: ReadonlyArray<readonly [number, number]>): string => {
   const sorted = [...ranges].sort((left, right) => left[0] - right[0])
   const merged: Array<[number, number]> = []
   for (const [from, to] of sorted) {

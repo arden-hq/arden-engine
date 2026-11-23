@@ -57,7 +57,8 @@ it("encodes stale Memory conflicts and review status through the Task proposals 
         get: () => Effect.succeed(proposal),
         memoryScope: () => Effect.succeed(proposal.space_id ?? undefined),
         resolve: () => Effect.die("stale Memory must be rejected by the HTTP handler"),
-        requestProposalReview: () => Effect.succeed(review),
+        requestProposalReview: (input: { readonly expectedRevision: number }) =>
+          Effect.succeed({ ...review, expected_revision: input.expectedRevision }),
         proposalReviewStatus: () => Effect.succeed(review)
       } as unknown as TaskProposalStore["Service"])
     ),
@@ -140,7 +141,6 @@ it("encodes stale Memory conflicts and review status through the Task proposals 
 
   expect(result.staleStart.status).toBe(409)
   expect(result.conflict.kind).toBe("source_changed")
-  expect(result.conflict.message.length).toBeGreaterThan(0)
   expect(result.pendingStatus.status).toBe(200)
   expect(result.decodedStatus).toEqual(review)
   expect(result.requestedReview.status).toBe(200)

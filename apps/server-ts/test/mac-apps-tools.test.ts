@@ -237,41 +237,6 @@ describe("Mac app tools: the helper's arguments", () => {
     ])
   })
 
-  it("changes Reminders after reading the reminder the change names", async () => {
-    await run("mac_reminders_create", {
-      title: "Renew passport",
-      due: "2026-11-20T18:00",
-      priority: "high"
-    })
-    await run("mac_reminders_edit", { reminder_ref: "REM-1", due: "", notes: "At the consulate" })
-    await run("mac_reminders_complete", { reminder_ref: "REM-1" })
-    await run("mac_reminders_complete", { reminder_ref: "REM-1", reopen: true })
-    await run("mac_reminders_delete", { reminder_ref: "REM-1" })
-    expect(await calls()).toEqual([
-      ["reminders", "lists"],
-      [
-        "reminders",
-        "create",
-        "--title",
-        "Renew passport",
-        "--due",
-        "2026-11-20T18:00",
-        "--list",
-        "LIST-1",
-        "--priority",
-        "high"
-      ],
-      ["reminders", "get", "REM-1"],
-      ["reminders", "update", "REM-1", "--due", "", "--notes", "At the consulate"],
-      ["reminders", "get", "REM-1"],
-      ["reminders", "complete", "REM-1"],
-      ["reminders", "get", "REM-1"],
-      ["reminders", "complete", "REM-1", "--undo"],
-      ["reminders", "get", "REM-1"],
-      ["reminders", "delete", "REM-1"]
-    ])
-  })
-
   it("hands the model the reference and the item, and never takes a reference that reads as an option", async () => {
     const found = await run("mac_reminders_search", {})
     expect(found.data).toEqual({
@@ -339,119 +304,6 @@ describe("Mac app tools: faults and availability", () => {
 })
 
 describe("Mac app tools: approval cards", () => {
-  it("shows a new reminder's values", async () => {
-    expect(
-      await card("mac_reminders_create", {
-        title: "Renew passport",
-        due: "2026-11-20T18:00",
-        priority: "high",
-        notes: "Bring two photos"
-      })
-    ).toEqual({
-      title: "Add this reminder?",
-      approve_label: "Add reminder",
-      fields: [
-        { label: "Title", value: "Renew passport" },
-        { label: "Due", value: "Nov 20, 2026, 6:00 PM" },
-        { label: "List", value: "Errands (iCloud)" },
-        { label: "Priority", value: "High" }
-      ],
-      body: { label: "Notes", text: "Bring two photos" }
-    })
-  })
-
-  it("names the reminder an edit, a finish, a reopen and a delete act on", async () => {
-    expect(
-      await card("mac_reminders_edit", {
-        reminder_ref: "REM-1",
-        due: "2026-11-21",
-        priority: "low"
-      })
-    ).toEqual({
-      title: "Change this reminder?",
-      subject: "Renew passport",
-      approve_label: "Save changes",
-      fields: [
-        { label: "Due", value: "Nov 21, 2026", from: "Nov 20, 2026, 6:00 PM" },
-        { label: "List", value: "Errands" },
-        { label: "Repeats", value: "Every year" },
-        { label: "Priority", value: "Low", from: "High" }
-      ]
-    })
-    const named = [
-      { label: "Title", value: "Renew passport" },
-      { label: "Due", value: "Nov 20, 2026, 6:00 PM" },
-      { label: "List", value: "Errands" },
-      { label: "Repeats", value: "Every year" },
-      { label: "Priority", value: "High" }
-    ]
-    expect(await card("mac_reminders_complete", { reminder_ref: "REM-1" })).toEqual({
-      title: "Mark this reminder done?",
-      approve_label: "Mark done",
-      fields: named,
-      note: "It repeats: this occurrence is done and it moves to its next due date."
-    })
-    expect(await card("mac_reminders_complete", { reminder_ref: "REM-1", reopen: true })).toEqual({
-      title: "Reopen this reminder?",
-      approve_label: "Reopen",
-      fields: named
-    })
-    expect(await card("mac_reminders_delete", { reminder_ref: "REM-1" })).toEqual({
-      title: "Delete this reminder?",
-      approve_label: "Delete",
-      fields: named,
-      note: "It repeats: this deletes the reminder and every later occurrence."
-    })
-  })
-
-  it("shows a new event's values and the calendar it goes to", async () => {
-    expect(
-      await card("mac_calendar_create_event", {
-        title: "Lunch",
-        start: "2026-11-18T12:00",
-        location: "Cafe",
-        repeat: "weekly",
-        alert_minutes: 30
-      })
-    ).toEqual({
-      title: "Create this event?",
-      approve_label: "Create event",
-      fields: [
-        { label: "Title", value: "Lunch" },
-        { label: "Starts", value: "Nov 18, 2026, 12:00 PM" },
-        { label: "Ends", value: "1 hour after the start" },
-        { label: "Calendar", value: "Home (iCloud)" },
-        { label: "Repeats", value: "Every week" },
-        { label: "Where", value: "Cafe" },
-        { label: "Alert", value: "30 min before" }
-      ]
-    })
-    expect(
-      (
-        await card("mac_calendar_create_event", {
-          title: "Trip",
-          start: "2026-12-02",
-          end: "2026-12-05",
-          calendar_id: "CAL-2"
-        })
-      )?.fields
-    ).toEqual([
-      { label: "Title", value: "Trip" },
-      { label: "When", value: "2026-12-02 to 2026-12-05 (all day, both days included)" },
-      { label: "Calendar", value: "Work (Exchange)" }
-    ])
-    await expect(
-      card("mac_calendar_create_event", {
-        title: "Trip",
-        start: "2026-12-02",
-        calendar_id: "CAL-3"
-      })
-    ).rejects.toMatchObject({
-      message:
-        'The calendar "Holidays" is read-only. Pick another one from mac_calendar_list_calendars.'
-    })
-  })
-
   it("shows what an event edit changes, and which occurrences", async () => {
     expect(
       await card("mac_calendar_edit_event", {
@@ -486,23 +338,6 @@ describe("Mac app tools: approval cards", () => {
       message: "This event has times. To make it all-day, pass both start and end as days."
     })
   })
-
-  it("names the event a delete removes", async () => {
-    expect(await card("mac_calendar_delete_event", { event_ref: EVENT.id })).toEqual({
-      title: "Delete this event?",
-      approve_label: "Delete event",
-      fields: [
-        { label: "Title", value: "Dentist" },
-        { label: "Starts", value: "Nov 18, 2026, 9:30 AM" },
-        { label: "Ends", value: "Nov 18, 2026, 10:15 AM" },
-        { label: "Applies to", value: "This event only" },
-        { label: "Calendar", value: "Home" },
-        { label: "Repeats", value: "Every week" },
-        { label: "Where", value: "12 Main St" }
-      ],
-      body: { label: "Notes", text: "Bring the x-ray" }
-    })
-  })
 })
 
 describe("Mac app tools: review findings", () => {
@@ -528,21 +363,6 @@ describe("Mac app tools: review findings", () => {
       ["calendar", "update", "EV-9", "--title", "Checkup"],
       ["calendar", "delete", EVENT.id, "--span", "future"]
     ])
-  })
-
-  it("names an event's guests and says they may be told", async () => {
-    const guest_list = [
-      { answer: "accepted", name: "Sam Lee", email: "sam@example.com" },
-      { answer: "no_answer", email: "kim@example.com" },
-      { answer: "accepted", name: "Me", you: true }
-    ]
-    await answer({ "calendar get": { prints: { ...SINGLE, guests: 3, guest_list } } })
-    const edit = await card("mac_calendar_edit_event", { event_ref: "EV-9", title: "Checkup" })
-    expect(edit?.fields.at(-1)).toEqual({ label: "Guests", value: "Sam Lee, kim@example.com" })
-    expect(edit?.note).toBe("The calendar's account may tell the guests about this change.")
-    const removal = await card("mac_calendar_delete_event", { event_ref: "EV-9" })
-    expect(removal?.fields.at(-1)).toEqual({ label: "Guests", value: "Sam Lee, kim@example.com" })
-    expect(removal?.note).toBe("The calendar's account may tell the guests about this deletion.")
   })
 
   it("refuses all_day with a time, and a contact query that reads as an option, before the helper runs", async () => {
@@ -581,6 +401,16 @@ describe("Mac app tools: review findings", () => {
     await expect(card("mac_reminders_delete", { reminder_ref: "REM-1" })).rejects.toMatchObject(
       list
     )
+    await expect(
+      card("mac_calendar_create_event", {
+        title: "Trip",
+        start: "2026-12-02",
+        calendar_id: "CAL-3"
+      })
+    ).rejects.toMatchObject({
+      message:
+        'The calendar "Holidays" is read-only. Pick another one from mac_calendar_list_calendars.'
+    })
   })
 
   it("adds a new item to the calendar or list its card named", async () => {

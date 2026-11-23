@@ -130,6 +130,7 @@ it("a Task run's contract lines, state record and plan receipt are the run's own
   expect(outcome.contract).not.toContain("CHAT_RULE")
   expect(outcome.state).toContain("BOUND_NEXT")
   expect(outcome.state).not.toContain("CHAT_NEXT")
+  expect(outcome.receipt?.item_id).toBe("task-bound")
   expect(outcome.receipt).toEqual(outcome.expected)
   expect(outcome.chatTask).toContain("Chat goal")
 })

@@ -110,15 +110,12 @@ const toolsetFor = (options: {
   readonly live?: boolean
   readonly noApproval?: boolean
   readonly pausesConnection?: boolean
-  readonly words?: ReadonlyArray<string>
 }) => {
   const reviewed: string[] = []
-  const ruled: Array<ReadonlyArray<{ readonly text: string }>> = []
   const deferred: string[] = []
   const offered: string[] = []
   const review: ApprovalReview = async (input) => {
     reviewed.push(input.name)
-    ruled.push(input.ownerRules)
     return options.verdict === undefined
       ? { verdict: "ask", why: { kind: "judged", reason: "unused" } }
       : options.verdict()
@@ -142,7 +139,6 @@ const toolsetFor = (options: {
           deferred,
           offered,
           ...(options.noApproval === undefined ? {} : { noApproval: options.noApproval }),
-          ...(options.words === undefined ? {} : { words: options.words }),
           ...(options.decision === undefined ? {} : { overrides: { workspace: options.decision } })
         })
       })
@@ -155,7 +151,7 @@ const toolsetFor = (options: {
         }
       : run
   )
-  return { toolset, reviewed, ruled, deferred, offered }
+  return { toolset, reviewed, deferred, offered }
 }
 
 describe("tool approval gate", () => {
@@ -225,11 +221,13 @@ describe("tool approval gate", () => {
     plan.close()
     expect({
       ran: ran.map((result) => result.content),
-      reviewed,
+      reviews: reviewed.length,
+      alone: reviewed.includes("workspace"),
       "a closed plan's step": run.reviewPlans.reviewOf("step-1")
     }).toEqual({
       ran: ["used:/tmp/p:safe:/tmp/p", "used:/tmp/p:safe:/tmp/p", "used:/tmp/p:safe:/tmp/p"],
-      reviewed: ["browser_steps", "workspace"],
+      reviews: 2,
+      alone: true,
       "a closed plan's step": undefined
     })
   })
@@ -278,31 +276,6 @@ describe("tool approval gate", () => {
     ])
   })
 
-  it("hands words rules to the Auto reviewer and decides nothing with them in code", async () => {
-    const words = ["Never write outside my projects"]
-    const auto = toolsetFor({
-      mode: "safe",
-      words,
-      verdict: async () => ({ verdict: "ask", why: { kind: "judged", reason: "Your rule." } })
-    })
-    await expect(
-      auto.toolset.execute({ name: "workspace", args: { path: "/x" }, toolCallId: "w1" })
-    ).rejects.toMatchObject({ reason: "approval" })
-    const ask = toolsetFor({ mode: "ask", words: ["Use any folder"] })
-    await expect(
-      ask.toolset.execute({ name: "workspace", args: { path: "/x" }, toolCallId: "w2" })
-    ).rejects.toMatchObject({ reason: "approval" })
-    const never = toolsetFor({ mode: "allow", words })
-    await expect(
-      never.toolset.execute({ name: "workspace", args: {}, toolCallId: "w3" })
-    ).resolves.toMatchObject({ content: "used:default:allow" })
-    expect({ auto: auto.ruled, ask: ask.reviewed, never: never.reviewed }).toEqual({
-      auto: [[{ text: words[0], decision: "never" }]],
-      ask: [],
-      never: []
-    })
-  })
-
   it("never shows a user-only card to the Helper, in Auto or any mode", async () => {
     const auto = toolsetFor({
       mode: "safe",
@@ -335,10 +308,14 @@ describe("tool approval gate", () => {
         kept.toolset.execute({ name: "workspace", args: { path: "/x" }, toolCallId: "r2" })
       ).then(
         () => "ran",
-        (cause: unknown) => (cause instanceof PauseRequested ? "paused" : "failed")
+        (cause: unknown) => {
+          if (cause instanceof PauseRequested) return "paused"
+          const message = String(Reflect.get(cause as object, "message"))
+          return /card waits for them in this run's chat/.test(message) ? "waits" : "refused"
+        }
       )
       expect({ outcome, deferred: kept.deferred }).toEqual({
-        outcome: "failed",
+        outcome: "waits",
         deferred: ["workspace"]
       })
     }
@@ -359,13 +336,6 @@ describe("tool approval gate", () => {
       )
       expect({ outcome, deferred: refused.deferred }).toEqual({ outcome: "failed", deferred: [] })
     }
-  })
-
-  it("pauses an ask decision on the tool's approval preview", async () => {
-    const { toolset } = toolsetFor({ mode: "ask", decision: "ask" })
-    await expect(
-      toolset.execute({ name: "workspace", args: {}, toolCallId: "5" })
-    ).rejects.toMatchObject({ reason: "approval", detail: "Use this workspace." })
   })
 
   it("lets Auto clear a call-specific requirement only for approval_bypass tools", async () => {

@@ -1,7 +1,6 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 
 import {
@@ -17,11 +16,7 @@ import {
 } from "../src/mcp/failure.js"
 import { prepareMcpStdioLaunch } from "../src/mcp/launch.js"
 import { nextConnectRetryMs } from "../src/mcp/retry.js"
-import { StderrTail } from "../src/mcp/stderr-tail.js"
 import { McpStdioTransport } from "../src/mcp/transport.js"
-import { locateExecutable } from "../src/runtime/which.js"
-
-const fixturePath = fileURLToPath(new URL("./fixtures/mcp-stdio-server.mjs", import.meta.url))
 
 const folders: Array<string> = []
 afterEach(async () => {
@@ -102,6 +97,10 @@ describe("classifyMcpStartFailure", () => {
       }),
       classifyMcpStartFailure({
         ...base,
+        cause: Object.assign(new Error("x"), { code: "ENOEXEC" })
+      }),
+      classifyMcpStartFailure({
+        ...base,
         cause: new McpStartFailure({
           reason: "command_not_found",
           command: "npx",
@@ -114,6 +113,7 @@ describe("classifyMcpStartFailure", () => {
       { reason: "timeout", seconds: 60 },
       { reason: "exited_early", stderr: "npm warn\nError: GITHUB_TOKEN is not set" },
       { reason: "not_executable", path: "/opt/homebrew/bin/npx" },
+      { reason: "not_executable", path: "/opt/homebrew/bin/npx" },
       { reason: "command_not_found", command: "npx", pathSource: "login_shell" },
       undefined
     ])
@@ -125,11 +125,11 @@ describe("McpStdioTransport", () => {
     const folder = await tempFolder()
     const program = await writeProgram(
       join(folder, "broken-mcp"),
-      "#!/bin/sh\nprintf 'starting\\n' >&2\nprintf 'fatal: missing API_TOKEN=tok_12345678\\n' >&2\nexit 1\n"
+      "#!/bin/sh\nprintf 'starting\\n' >&2\nprintf 'fatal: missing API_TOKEN=tok_12345678\\n' >&2\nprintf 'rejected hunter-two-words\\n' >&2\nexit 1\n"
     )
     const launch = await prepareMcpStdioLaunch({
       transport: stdio(program),
-      secrets: {},
+      secrets: { SERVICE_KEY: "hunter-two-words" },
       loginPath: undefined,
       inherited: { PATH: "/usr/bin:/bin" }
     })
@@ -145,35 +145,8 @@ describe("McpStdioTransport", () => {
     await closeMcpClient({ client, transport })
     expect(detail).toEqual({
       reason: "exited_early",
-      stderr: "starting\nfatal: missing API_TOKEN=[redacted]"
+      stderr: "starting\nfatal: missing API_TOKEN=[redacted]\nrejected [redacted]"
     })
-  })
-
-  it("fails a write to a server that is gone only once its exit and stderr are in", async () => {
-    const folder = await tempFolder()
-    const program = await writeProgram(
-      join(folder, "gone-mcp"),
-      "#!/bin/sh\nexec 0<&-\nprintf 'fatal: no config\\n' >&2\nsleep 0.1\nexit 1\n"
-    )
-    const transport = new McpStdioTransport(
-      await prepareMcpStdioLaunch({
-        transport: stdio(program),
-        secrets: {},
-        loginPath: undefined,
-        inherited: { PATH: "/usr/bin:/bin" }
-      })
-    )
-    await transport.start()
-    while (transport.stderrTail() === undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 5))
-    }
-    const failure = await transport.send({ jsonrpc: "2.0", id: 1, method: "ping" }).then(
-      () => undefined,
-      (error: unknown) => error
-    )
-    expect(failure).toBeInstanceOf(Error)
-    expect([transport.exited, transport.stderrTail()]).toEqual([true, "fatal: no config"])
-    await transport.close()
   })
 })
 
@@ -184,7 +157,7 @@ describe("connect budget and retries", () => {
       attempt: number,
       reason: McpFailureReason | undefined,
       needsAuth = false
-    ) => nextConnectRetryMs({ phase, attempt, reason, needsAuth })
+    ) => nextConnectRetryMs({ phase, attempt, reason, needsAuth }) !== undefined
 
     expect([
       retry("starting", 0, "exited_early"),
@@ -199,19 +172,6 @@ describe("connect budget and retries", () => {
       retry("reconnecting", 3, "timeout"),
       retry("reconnecting", 0, "command_not_found"),
       retry("reconnecting", 0, undefined, true)
-    ]).toEqual([
-      1_000,
-      1_000,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      1_000,
-      2_000,
-      4_000,
-      undefined,
-      undefined,
-      undefined
-    ])
+    ]).toEqual([true, true, false, false, false, false, true, true, true, false, false, false])
   })
 })

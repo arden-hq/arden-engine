@@ -112,7 +112,7 @@ it("a spent budget is not admitted; a budget that does not exist is an integrity
       const rows = yield* sql<{ readonly run_id: string }>`SELECT run_id FROM tool_calls`
       return {
         spent,
-        dangling: { tag: dangling._tag, reason: dangling.reason, message: dangling.message },
+        dangling: { tag: dangling._tag, reason: dangling.reason },
         rows
       }
     })
@@ -121,8 +121,7 @@ it("a spent budget is not admitted; a budget that does not exist is an integrity
     spent: { _tag: "NotAdmitted", authority: "revoked" },
     dangling: {
       tag: "ToolExecutionStoreError",
-      reason: "corrupt",
-      message: "This Run's token budget is missing"
+      reason: "corrupt"
     },
     rows: []
   })

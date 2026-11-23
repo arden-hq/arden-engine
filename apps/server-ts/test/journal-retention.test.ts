@@ -24,51 +24,79 @@ it("lifecycle rule deletes only old status rows the trigger listener has read", 
       const sql = yield* SqlClient.SqlClient
       const writer = makeWriter({ sql, reader: sql, queue: yield* PersistenceWriteQueue })
       const base = (yield* readHeadSequence(sql, SESSION_LIFECYCLE_STREAM_ID)) ?? 0
-      // 1..4100 old progress rows (several delete chunks), then the mixed rows.
       const bulk = Array.from({ length: 4_100 }, () => event("automation_progress"))
       const mixed = [
-        event("automation_finished"), // 4101: deleted
-        event("automation_queued"), // 4102: deleted
-        event("question_changed"), // 4103: another type, kept
-        event("session_activity"), // 4104: another type, kept
-        event("automation_progress"), // 4105: recent, kept
-        event("automation_progress"), // 4106: above the cursor, kept
-        event("automation_finished") // 4107: above the cursor and head, kept
+        event("automation_finished"),
+        event("automation_queued"),
+        event("question_changed"),
+        event("session_activity"),
+        event("automation_progress"),
+        event("automation_progress"),
+        event("automation_finished")
       ]
       yield* sql.withTransaction(
         appendInTransaction(sql, SESSION_LIFECYCLE_STREAM_ID, [...bulk, ...mixed])
       )
       yield* sql`UPDATE journal_records SET created_at = ${ago(10)}
         WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID} AND sequence > ${base}`
-      yield* sql`UPDATE journal_records SET created_at = ${ago(1)}
-        WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID} AND sequence = ${base + 4_105}`
-      yield* sql`DELETE FROM automation_trigger_cursor`
-      yield* sql`INSERT INTO automation_trigger_cursor (stream_id, after_sequence)
-        VALUES (${SESSION_LIFECYCLE_STREAM_ID}, ${base + 4_105})`
+      const setCursor = (offset: number) =>
+        sql`DELETE FROM automation_trigger_cursor`.pipe(
+          Effect.andThen(
+            sql`INSERT INTO automation_trigger_cursor (stream_id, after_sequence)
+              VALUES (${SESSION_LIFECYCLE_STREAM_ID}, ${base + offset})`
+          )
+        )
+      const trim = () =>
+        trimJournals({
+          writer,
+          policy: {
+            retention: () => Effect.succeed({ agentTraceDays: null, wikiHistoryDays: null })
+          }
+        })
+      const kept = () =>
+        sql<{ readonly sequence: number }>`
+          SELECT sequence FROM journal_records
+          WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID} AND sequence > ${base}
+          ORDER BY sequence`.pipe(
+          Effect.map((rows) =>
+            rows.filter((row) => row.sequence - base > 4_100).map((row) => row.sequence - base)
+          )
+        )
       const floorBefore = yield* sql`SELECT retained_from_sequence AS floor FROM journal_streams
         WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID}`
-      const result = yield* trimJournals({
-        writer,
-        policy: {
-          retention: () => Effect.succeed({ agentTraceDays: null, wikiHistoryDays: null })
-        }
-      })
-      const kept = yield* sql<{ readonly sequence: number }>`
-        SELECT sequence FROM journal_records
-        WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID} AND sequence > ${base} ORDER BY sequence`
+      yield* setCursor(4_105)
+      const readOnly = yield* trim()
+      const keptReadOnly = yield* kept()
       const floorAfter = yield* sql`SELECT retained_from_sequence AS floor FROM journal_streams
         WHERE stream_id = ${SESSION_LIFECYCLE_STREAM_ID}`
+      yield* setCursor(4_107)
+      const headStays = yield* trim()
+      const keptHead = yield* kept()
+      yield* sql.withTransaction(
+        appendInTransaction(sql, SESSION_LIFECYCLE_STREAM_ID, [event("automation_progress")])
+      )
+      yield* setCursor(4_108)
+      const recentStays = yield* trim()
+      const keptRecent = yield* kept()
       return {
-        result,
-        kept: kept.map((row) => row.sequence - base),
-        floorMoved: JSON.stringify(floorBefore) !== JSON.stringify(floorAfter)
+        readOnly,
+        keptReadOnly,
+        floorMoved: JSON.stringify(floorBefore) !== JSON.stringify(floorAfter),
+        headStays,
+        keptHead,
+        recentStays,
+        keptRecent
       }
     }).pipe(Effect.provide(PersistenceWriteQueue.layer))
   )
   expect(outcome).toEqual({
-    result: { lifecycle: 4_102, sessions: 0 },
-    kept: [4_103, 4_104, 4_105, 4_106, 4_107],
-    floorMoved: false
+    readOnly: { lifecycle: 4_103, sessions: 0 },
+    keptReadOnly: [4_103, 4_104, 4_106, 4_107],
+    floorMoved: false,
+    headStays: { lifecycle: 1, sessions: 0 },
+    keptHead: [4_103, 4_104, 4_107],
+    recentStays: { lifecycle: 0, sessions: 0 },
+    keptRecent: [4_103, 4_104, 4_107, 4_108]
   })
 })
 

@@ -24,4 +24,16 @@ it("a stored No stays when a cited page changed; a retired or open offer does no
     expect(storedOfferStands(stored(status), changed)).toBe(true)
   for (const status of ["retired", "offered"] as const)
     expect(storedOfferStands(stored(status), changed)).toBe(false)
+  expect(
+    storedOfferStands(
+      { ...stored("retired"), retired_evidence_key: "evidence-b" },
+      { evidenceKey: "evidence-b", candidateHash: "candidate-b" }
+    )
+  ).toBe(true)
+  expect(
+    storedOfferStands(stored("retired"), {
+      evidenceKey: "evidence-a",
+      candidateHash: "candidate-b"
+    })
+  ).toBe(true)
 })

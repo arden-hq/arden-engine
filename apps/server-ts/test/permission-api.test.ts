@@ -176,24 +176,11 @@ it("a Space's rules are on that Space's page alone", async () => {
     expect(
       permissionDecoders.rules(await (await server.fetch(permissionRoutes.rules)).json()).rules
     ).toEqual([])
-    const rule = saved[0]
-    if (rule === undefined) throw new Error("expected the Space rule")
     expect(
       permissionDecoders
-        .rules(
-          await (await send("PATCH", permissionRoutes.rule(rule.id), { decision: "ask" })).json()
-        )
-        .rules.map(({ decision }) => decision)
-    ).toEqual(["ask"])
-    expect(
-      permissionDecoders.rules(await (await send("DELETE", permissionRoutes.rule(rule.id))).json())
-        .rules
-    ).toEqual([])
-    expect(
-      permissionDecoders.rules(
-        await (await server.fetch(permissionRoutes.spaceRules(space.space_id))).json()
-      ).rules
-    ).toEqual([])
+        .rules(await (await server.fetch(permissionRoutes.spaceRules(space.space_id))).json())
+        .rules.map(({ list, decision, subject }) => ({ list, decision, subject }))
+    ).toEqual([{ list, decision: "allow", subject: words }])
     const missing = await send("POST", permissionRoutes.rules, {
       list: { kind: "space", space_id: "no-such-space" },
       decision: "allow",

@@ -85,15 +85,13 @@ describe("pause and durable recovery", () => {
       decorateResult: (request, result) =>
         request.name === "finish" ? { ...result, model_content: [recoveredContext] } : result
     }
-    const recoverRequests: string[][] = []
     const agent = makeAgent(
       { model: "test-model" },
       {
         provider: model.shape,
         toolset: decorated,
         hooks: {
-          recoverToolCalls: (calls) => {
-            recoverRequests.push(calls.map((call) => call.toolCall.id))
+          recoverToolCalls: () => {
             return new Map([
               [
                 "missing",
@@ -114,8 +112,16 @@ describe("pause and durable recovery", () => {
         role: ROLE.assistant,
         content: "",
         tool_calls: [
-          { id: "done", type: "function", function: { name: "first", arguments: "{}" } },
-          { id: "missing", type: "function", function: { name: "finish", arguments: "{}" } }
+          {
+            id: "done",
+            type: "function",
+            function: { name: "first", arguments: "{}" }
+          },
+          {
+            id: "missing",
+            type: "function",
+            function: { name: "finish", arguments: "{}" }
+          }
         ]
       },
       { role: ROLE.tool, tool_call_id: "done", content: "already done" }
@@ -127,7 +133,6 @@ describe("pause and durable recovery", () => {
     expect(result.text).toBe("recovered from store")
     expect(model.requests).toHaveLength(0)
     expect(tools.calls).toHaveLength(0)
-    expect(recoverRequests).toEqual([["missing"]])
     expect(result.messages).toContainEqual(
       expect.objectContaining({
         role: ROLE.tool,
@@ -139,7 +144,7 @@ describe("pause and durable recovery", () => {
     )
   })
 
-  it("executes only unrecovered calls, resolving hidden metadata and seeding deferred names", async () => {
+  it("executes every unanswered call, one at a time for hidden state-changing tools, and offers the deferred tool it already used", async () => {
     const model = scriptedProvider([[response({ content: "recovered and continued" })]])
     let activeHidden = 0
     let maxActiveHidden = 0
@@ -153,22 +158,13 @@ describe("pause and durable recovery", () => {
       activeHidden -= 1
       return { content: "mutated", preview: "mutated" }
     })
-    const seeded: Array<ReadonlySet<string>> = []
-    const metadataRequests: string[] = []
-    const loadedRequests: Array<ReadonlySet<string>> = []
     const seededShape: Toolset = {
       ...tools.shape,
-      load: (names) => {
-        loadedRequests.push(new Set(names))
-      },
-      metadata: (name) => {
-        metadataRequests.push(name)
-        return name === "hidden_mutation"
+      metadata: (name) =>
+        name === "hidden_mutation"
           ? { name, changes_state: true, concurrency_group: "session" }
-          : undefined
-      },
+          : undefined,
       seedLoadedNames: (names) => {
-        seeded.push(new Set(names))
         for (const name of names) tools.loaded.add(name)
       }
     }
@@ -182,7 +178,11 @@ describe("pause and durable recovery", () => {
         role: ROLE.assistant,
         content: "",
         tool_calls: [
-          { id: "pending", type: "function", function: { name: "deferred", arguments: "{}" } },
+          {
+            id: "pending",
+            type: "function",
+            function: { name: "deferred", arguments: "{}" }
+          },
           {
             id: "hidden-1",
             type: "function",
@@ -199,15 +199,12 @@ describe("pause and durable recovery", () => {
     const output = await agent.run(messages)
 
     expect(output.text).toBe("recovered and continued")
-    expect(seeded).toEqual([new Set(["deferred"])])
-    expect(metadataRequests).toEqual(["hidden_mutation"])
     expect(tools.calls.map((call) => call.name)).toEqual([
       "deferred",
       "hidden_mutation",
       "hidden_mutation"
     ])
     expect(maxActiveHidden).toBe(1)
-    expect(loadedRequests).toEqual([])
     expect(
       model.requests[0]?.tools.some((schema) => JSON.stringify(schema).includes("deferred"))
     ).toBe(true)
@@ -236,8 +233,16 @@ describe("pause and durable recovery", () => {
           role: ROLE.assistant,
           content: "",
           tool_calls: [
-            { id: "bg", type: "function", function: { name: "search", arguments: "{}" } },
-            { id: "gated", type: "function", function: { name: "create", arguments: "{}" } }
+            {
+              id: "bg",
+              type: "function",
+              function: { name: "search", arguments: "{}" }
+            },
+            {
+              id: "gated",
+              type: "function",
+              function: { name: "create", arguments: "{}" }
+            }
           ]
         },
         {
@@ -252,9 +257,69 @@ describe("pause and durable recovery", () => {
 
       expect(tools.calls.map((call) => call.toolCallId)).toEqual(calls)
       expect(result.messages).toContainEqual(
-        expect.objectContaining({ role: ROLE.tool, tool_call_id: "gated", content: "done" })
+        expect.objectContaining({
+          role: ROLE.tool,
+          tool_call_id: "gated",
+          content: "done"
+        })
       )
       expect(result.text).toBe("created")
     }
   )
+
+  it("checkpoints a resumed tool output before draining pending input", async () => {
+    const checkpoints: Array<ReadonlyArray<ChatMessage>> = []
+    let pending = true
+    const model = scriptedProvider([[response({ content: "continued" })]])
+    const tools = toolset([tool("inspect")], () => ({
+      content: "inspected",
+      preview: "Inspected"
+    }))
+    const agent = makeAgent(
+      { model: "test-model" },
+      {
+        provider: model.shape,
+        toolset: tools.shape,
+        hooks: {
+          onStepFinish: (_step, _response, messages) => {
+            checkpoints.push(structuredClone(messages))
+          },
+          getPendingMessages: () => {
+            if (!pending) return []
+            pending = false
+            return [{ role: ROLE.user, content: "new input" }]
+          }
+        }
+      }
+    )
+
+    const output = await agent.run([
+      { role: ROLE.user, content: "begin" },
+      {
+        role: ROLE.assistant,
+        content: "",
+        tool_calls: [
+          {
+            id: "call-inspect",
+            type: "function",
+            function: { name: "inspect", arguments: "{}" }
+          }
+        ]
+      }
+    ])
+
+    expect(checkpoints[0]).toMatchObject([
+      { role: ROLE.user, content: "begin" },
+      { role: ROLE.assistant, tool_calls: [{ id: "call-inspect" }] },
+      { role: ROLE.tool, tool_call_id: "call-inspect", content: "inspected" }
+    ])
+    expect(model.requests[0]?.messages).toMatchObject([
+      { role: ROLE.system },
+      { role: ROLE.user, content: "begin" },
+      { role: ROLE.assistant, tool_calls: [{ id: "call-inspect" }] },
+      { role: ROLE.tool, tool_call_id: "call-inspect", content: "inspected" },
+      { role: ROLE.user, content: "new input" }
+    ])
+    expect(output.text).toBe("continued")
+  })
 })

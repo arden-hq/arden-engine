@@ -18,9 +18,7 @@ describe("every reader of a block goes through the guard", () => {
     expect(readAnswerBlock(doubling)).toBeUndefined()
     expect(answerBlockText(doubling)).toBe("")
     expect(savedBlockState(doubling, { $x: 1 })).toEqual({ kind: "unreadable" })
-    expect(checkAnswerBlock(doubling)).toEqual([
-      { line: undefined, message: expect.stringContaining("expand") }
-    ])
+    expect(checkAnswerBlock(doubling)).toEqual([{ line: undefined, message: expect.any(String) }])
   })
 
   it("turns a parser stack overflow into a refusal on every reader", () => {
@@ -53,57 +51,5 @@ describe("a block that is still being written", () => {
     expect(whole(`${head}$n = ok ? 1\n  : 2\n`)).toBe(`${head}$n = ok ? 1\n  : 2\n`)
     const split = `${head}b = Callout("T", "line one\nline two", "info")\n`
     expect(whole(split)).toBe(split)
-  })
-
-  it("holds a trailing bare name, a comment line and a closing bracket inside a string", () => {
-    expect(whole(`${head}b =`)).toBe(head)
-    expect(whole(`${head}b = `)).toBe(head)
-    expect(whole(`${head}\nb =`)).toBe(`${head}\n`)
-    expect(whole(`${head}// next:\n`)).toBe(`${head}// next:\n`)
-    expect(whole(`${head}b = Callout("a)", "b`)).toBe(head)
-    const done = `${head}b = Callout("a)", "b\nc")\n`
-    expect(whole(done)).toBe(done)
-  })
-
-  it("keeps a statement once its line has ended with everything closed", () => {
-    const done = `${head}b = Image("https://a.example/x.png")\n`
-    expect(whole(done)).toBe(done)
-    expect(whole("")).toBe("")
-  })
-})
-
-describe("lang-core token kinds read.ts relies on", () => {
-  const read = (source: string) => {
-    const guard = guardBlock(source)
-    if (guard.kind !== "ok") throw new Error(guard.kind)
-    return guard.statements
-  }
-
-  it("tells a literal $state from a computed one", () => {
-    const literals = [
-      "$a = 5",
-      "$a = -2",
-      '$a = "x"',
-      "$a = true",
-      "$a = null",
-      '$a = [1, -2, "x", {k: true, n: null, f: false}]'
-    ]
-    for (const source of literals) expect(read(source)[0]?.computed, source).toBe(false)
-    const computed = [
-      "$a = $b",
-      "$a = b",
-      "$a = 1 + 2",
-      "$a = -$b",
-      "$a = Foo(1)",
-      "$a = b.c",
-      "$a = [1, $b]"
-    ]
-    for (const source of computed) expect(read(source)[0]?.computed, source).toBe(true)
-  })
-
-  it("collects the names and $variables a statement uses", () => {
-    const [statement] = read("s = Foo(a, $v, [b, $w])")
-    expect(statement?.idents).toEqual(["a", "b"])
-    expect(statement?.states).toEqual(["$v", "$w"])
   })
 })

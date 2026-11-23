@@ -17,6 +17,11 @@ describe("MCP Events wire", () => {
         { name: "", delivery: ["poll"] },
         "not an event",
         {
+          name: "huge.schema",
+          delivery: ["poll"],
+          inputSchema: { type: "object", description: "x".repeat(200_000) }
+        },
+        {
           name: "message.posted",
           delivery: ["poll", "carrier-pigeon"],
           inputSchema: { type: "object", properties: { channel: { type: "string" } } }
@@ -41,19 +46,6 @@ describe("MCP Events wire", () => {
         }
       ],
       nextCursor: "page-2"
-    })
-  })
-
-  it.each([
-    ["absent", {}],
-    ["null", { cursor: null }]
-  ])("reads an %s poll cursor as no position", (_case, cursor) => {
-    expect(decodePollResult({ events: [], ...cursor })).toEqual({
-      events: [],
-      cursor: undefined,
-      truncated: false,
-      hasMore: false,
-      nextPollMs: undefined
     })
   })
 

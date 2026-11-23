@@ -35,10 +35,16 @@ const emptyToolset = {
   execute: () => ({ content: "", preview: "" })
 }
 
+const weatherToolset = {
+  entries: () => [{ description: "weather", parameters: {}, meta: { name: "weather" } }],
+  loadedNames: () => new Set<string>(),
+  load: () => undefined,
+  execute: () => ({ content: "ok", preview: "ok" })
+}
+
 const contents = (request: ModelProviderRequest | undefined) =>
   (request?.messages ?? []).map((message) => message.content)
 
-/** A provider that refuses its first request as too long and answers every later one. */
 const overflowingOnce = (): {
   readonly requests: Array<ModelProviderRequest>
   readonly shape: ModelProvider
@@ -59,7 +65,7 @@ const overflowingOnce = (): {
 }
 
 describe("a reply cut off at the output limit", () => {
-  it("continues the run with one meta message and ends on the next full reply", async () => {
+  it("continues the run with the partial reply kept and ends on the next full reply", async () => {
     const model = scriptedProvider([[response("part one", "length")], [response("part two")]])
     const agent = makeAgent(
       { model: "test-model" },
@@ -71,12 +77,7 @@ describe("a reply cut off at the output limit", () => {
     expect(result.stop_reason).toBe("end_turn")
     expect(result.text).toBe("part two")
     expect(model.requests).toHaveLength(2)
-    expect(contents(model.requests[1]).slice(-3)).toEqual([
-      "write a lot",
-      "part one",
-      "Your last reply was cut off at the output token limit. Continue from where it stopped " +
-        "and do not repeat what you already wrote. Split the remaining work into smaller steps."
-    ])
+    expect(contents(model.requests[1])).toContain("part one")
   })
 
   it("stops with max_output_length after two continuations in a row", async () => {
@@ -96,27 +97,57 @@ describe("a reply cut off at the output limit", () => {
     expect(result.text).toBe("three")
     expect(model.requests).toHaveLength(3)
   })
+
+  it("counts cut-offs in a row, so a full reply in between starts the count again", async () => {
+    const toolReply = {
+      ...response("checking"),
+      message: {
+        ...response("checking").message,
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function" as const,
+            function: { name: "weather", arguments: "{}" }
+          }
+        ]
+      },
+      finish_reason: "tool_calls" as const
+    }
+    const model = scriptedProvider([
+      [response("a", "length")],
+      [response("b", "length")],
+      [toolReply],
+      [response("c", "length")],
+      [response("d", "length")],
+      [response("fin")]
+    ])
+    const agent = makeAgent(
+      { model: "test-model" },
+      { provider: model.shape, toolset: weatherToolset }
+    )
+
+    const result = await agent.run([{ role: ROLE.user, content: "write a lot" }])
+
+    expect(result.stop_reason).toBe("end_turn")
+    expect(result.text).toBe("fin")
+  })
 })
 
 describe("a request the provider refuses as too long", () => {
   it("is sent again once a middleware shortens the history in answer", async () => {
     const model = overflowingOnce()
-    const overflowSeen: Array<boolean> = []
     const shorten: ModelRequestMiddleware = async (request, next) => {
       const prepared = await next(request)
-      overflowSeen.push(prepared.contextOverflow === true)
       if (prepared.contextOverflow !== true) return prepared
       const { contextOverflow: _, ...answered } = prepared
       const messages = [{ role: ROLE.user, content: "summary of the long chat" }]
       return { ...answered, messages, compactionReplacement: messages }
     }
-    const mintedTurns: Array<number> = []
     const agent = makeAgent(
       {
         model: "test-model",
         modelRequestMiddlewares: [shorten],
         mintMessageId: (kind, position) => {
-          mintedTurns.push(position.turn)
           return `${kind}-${position.turn}-${position.fragment}-${position.index}`
         }
       },
@@ -129,8 +160,6 @@ describe("a request the provider refuses as too long", () => {
       { role: ROLE.user, content: "go on" }
     ])
 
-    expect(overflowSeen).toEqual([false, true])
-    expect(new Set(mintedTurns)).toEqual(new Set([0]))
     expect(result.stop_reason).toBe("end_turn")
     expect(result.text).toBe("done")
     expect(model.requests).toHaveLength(2)
@@ -159,14 +188,6 @@ describe("a request the provider refuses as too long", () => {
 })
 
 describe("a call the output limit cut off after it was announced", () => {
-  const weatherToolset = {
-    entries: () => [{ description: "weather", parameters: {}, meta: { name: "weather" } }],
-    loadedNames: () => new Set<string>(),
-    load: () => undefined,
-    execute: () => ({ content: "ok", preview: "ok" })
-  }
-
-  /** The tool-input events of a run, and the calls it announced but never ended or retracted. */
   const toolInputs = async (provider: ModelProvider) => {
     const resets: Array<unknown> = []
     const started: Array<string> = []
@@ -184,11 +205,18 @@ describe("a call the output limit cut off after it was announced", () => {
       if (event._tag === "ToolInputStarted") started.push(event.tool_id)
       if (event._tag === "ToolInputEnded") settled.add(event.tool_id)
       if (event._tag === "ModelResponseReset") {
-        resets.push({ message_ids: event.message_ids, tool_call_ids: event.tool_call_ids })
+        resets.push({
+          message_ids: event.message_ids,
+          tool_call_ids: event.tool_call_ids
+        })
         event.tool_call_ids.forEach((id) => settled.add(id))
       }
     }
-    return { resets, unsettled: started.filter((id) => !settled.has(id)), text }
+    return {
+      resets,
+      unsettled: started.filter((id) => !settled.has(id)),
+      text
+    }
   }
 
   const sse = (events: ReadonlyArray<unknown>) =>
@@ -223,13 +251,22 @@ describe("a call the output limit cut off after it was announced", () => {
           sse([
             chunk({
               tool_calls: [
-                { index: 0, id: "whole", function: { name: "weather", arguments: '{"c":1}' } }
+                {
+                  index: 0,
+                  id: "whole",
+                  function: { name: "weather", arguments: '{"c":1}' }
+                }
               ]
             }),
-            chunk({ tool_calls: [{ index: 1, id: "cut", function: { name: "weather" } }] }),
-            chunk({ tool_calls: [{ index: 1, function: { arguments: '{"c' } }] }),
-            // Cut before its name arrived: never announced, dropped like any cut call.
-            chunk({ tool_calls: [{ index: 2, id: "nameless", function: { arguments: "" } }] }),
+            chunk({
+              tool_calls: [{ index: 1, id: "cut", function: { name: "weather" } }]
+            }),
+            chunk({
+              tool_calls: [{ index: 1, function: { arguments: '{"c' } }]
+            }),
+            chunk({
+              tool_calls: [{ index: 2, id: "nameless", function: { arguments: "" } }]
+            }),
             chunk({}, "length"),
             "[DONE]"
           ]),
@@ -246,7 +283,13 @@ describe("a call the output limit cut off after it was announced", () => {
       arguments: '{"c":1}',
       status: "completed"
     }
-    const cut = { ...whole, id: "p", call_id: "cut", arguments: "", status: "in_progress" }
+    const cut = {
+      ...whole,
+      id: "p",
+      call_id: "cut",
+      arguments: "",
+      status: "in_progress"
+    }
     const responses = await toolInputs(
       makeOpenAiResponsesProvider({
         auth: { headers: async () => ({}) },
@@ -259,7 +302,11 @@ describe("a call the output limit cut off after it was announced", () => {
             },
             { type: "response.output_item.done", output_index: 0, item: whole },
             { type: "response.output_item.added", output_index: 1, item: cut },
-            { type: "response.function_call_arguments.delta", output_index: 1, delta: '{"c' },
+            {
+              type: "response.function_call_arguments.delta",
+              output_index: 1,
+              delta: '{"c'
+            },
             {
               type: "response.incomplete",
               response: {

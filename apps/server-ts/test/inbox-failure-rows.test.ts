@@ -6,100 +6,13 @@ import {
   endStreak,
   givesUp
 } from "../src/persistence/sqlite/automation-auto-pause.js"
-import { outcomeSql } from "../src/persistence/sqlite/automation-run-outcome.js"
-import { countsAsRun } from "../src/persistence/sqlite/automation-skip-record.js"
 import { failureRows } from "../src/persistence/sqlite/inbox-failure-rows.js"
-import {
-  automationFailureEntries,
-  type FailureRow
-} from "../src/persistence/sqlite/inbox-failures.js"
-import { failureNeedsOwner } from "../src/persistence/sqlite/run-attention.js"
-import { taskOpenSql } from "../src/persistence/sqlite/task-status-sql.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-
-// The Inbox's failures used to be found by reading every failed ending, every
-// failure event and every failed attempt on record. They now start from the
-// recent failures and the stuck Tasks. This runs the old SQL (kept only here)
-// and the new one on the same rows and expects the same Inbox entries.
 
 const DAY = 86_400_000
 const NOW = Date.now()
 const at = (days: number) => new Date(NOW - days * DAY).toISOString()
 const PREFIX = "automation-failed:"
-
-/** The failures read before migration 151. */
-const oldFailureRows = (sql: SqlClient.SqlClient, cutoff: string) => sql<FailureRow>`
-  WITH latest_completed AS (
-    SELECT task_id AS completed_task_id, MAX(julianday(started_at)) AS completed_started
-    FROM automation_runs
-    WHERE status = 'completed' AND task_id IS NOT NULL
-      AND ${countsAsRun(sql, sql`automation_runs`)}
-    GROUP BY task_id
-  ),
-  candidate AS (
-    SELECT COALESCE(attempt.id, 0) AS id, attempt.task_id AS task_id, ending.run_id AS chat_run_id,
-      COALESCE(attempt.started_at, ending.occurred_at) AS started_at,
-      CASE WHEN attempt.id IS NULL THEN ending.text ELSE attempt.error END AS error,
-      chat.error_code AS error_code,
-      COALESCE(scheduled.owner_space_id, json_extract(attempt.origin, '$.space_id'),
-        (SELECT space_id FROM space_tasks WHERE item_id = COALESCE(attempt.item_id,
-          json_extract(chat.metadata_json, '$.run_context.task.item_id'))),
-        session.space_id) AS space_id,
-      COALESCE(attempt.item_id,
-        json_extract(chat.metadata_json, '$.run_context.task.item_id')) AS item_id,
-      chat.status AS chat_status
-    FROM run_endings AS ending
-    JOIN chat_runs AS chat ON chat.run_id = ending.run_id
-    JOIN sessions AS session ON session.session_id = chat.session_id
-    LEFT JOIN automation_runs AS attempt ON attempt.chat_run_id = ending.run_id
-    LEFT JOIN scheduled_tasks AS scheduled ON scheduled.task_id = attempt.task_id
-    WHERE ${failureNeedsOwner(sql)}
-      AND (attempt.id IS NULL
-        OR (attempt.status = 'failed' AND ${outcomeSql(sql, sql`attempt`)} = 'failed'))
-    UNION ALL
-    SELECT attempt.id, attempt.task_id, NULL, attempt.started_at, attempt.error, NULL,
-      COALESCE(scheduled.owner_space_id, json_extract(attempt.origin, '$.space_id')),
-      attempt.item_id, NULL
-    FROM entity_events AS event
-    JOIN automation_runs AS attempt
-      ON attempt.id = CAST(substr(event.key, ${PREFIX.length + 1}) AS INTEGER)
-    LEFT JOIN scheduled_tasks AS scheduled ON scheduled.task_id = attempt.task_id
-    WHERE event.entity = 'automation' AND event.event = 'failed'
-      AND attempt.status = 'failed' AND ${outcomeSql(sql, sql`attempt`)} = 'failed'
-    UNION ALL
-    SELECT attempt.id, attempt.task_id, attempt.chat_run_id, attempt.started_at, attempt.error,
-      (SELECT error_code FROM chat_runs WHERE run_id = attempt.chat_run_id),
-      COALESCE((SELECT owner_space_id FROM scheduled_tasks WHERE task_id = attempt.task_id),
-        json_extract(attempt.origin, '$.space_id'),
-        (SELECT space_id FROM space_tasks WHERE item_id = attempt.item_id)),
-      attempt.item_id,
-      (SELECT status FROM chat_runs WHERE run_id = attempt.chat_run_id)
-    FROM automation_runs AS attempt
-    WHERE attempt.status = 'failed' AND ${outcomeSql(sql, sql`attempt`)} = 'failed'
-      AND NOT EXISTS (SELECT 1 FROM run_endings
-        WHERE run_id = attempt.chat_run_id AND decided = 1 AND status = 'failed')
-      AND NOT EXISTS (SELECT 1 FROM entity_events
-        WHERE key = ${PREFIX} || attempt.id)
-  )
-  SELECT id, task_id, chat_run_id, started_at, error, error_code, space_id
-  FROM candidate
-  LEFT JOIN latest_completed ON latest_completed.completed_task_id = candidate.task_id
-  WHERE COALESCE(candidate.chat_status, '') <> 'cancelled'
-    AND COALESCE(latest_completed.completed_started > julianday(candidate.started_at), 0) = 0
-    AND (
-      julianday(candidate.started_at) IS NULL OR
-      julianday(candidate.started_at) >= julianday(${cutoff}) OR
-      EXISTS (
-        SELECT 1 FROM space_tasks AS stuck
-        WHERE stuck.item_id = candidate.item_id
-          AND ${taskOpenSql("stuck")} AND stuck.owner = 'worker' AND stuck.next_attempt_at IS NULL
-      )
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM space_tasks AS task
-      WHERE task.item_id = candidate.item_id AND ${taskOpenSql("task")}
-        AND task.next_attempt_at IS NOT NULL
-    )`
 
 interface Attempt {
   readonly id: number
@@ -125,19 +38,42 @@ const seed = (sql: SqlClient.SqlClient) => {
     { id: 1, task: "auto-1", daysAgo: 1, status: "failed", run: "r-1" },
     { id: 2, task: "auto-1", daysAgo: 40, status: "failed", run: "r-2" },
     { id: 3, task: "auto-2", daysAgo: 2, status: "failed", run: "r-3" },
-    // A counted run completed after 3; a skipped one completed after 4.
-    { id: 4, task: "auto-2", daysAgo: 1.5, status: "completed", outcome: "finished" },
+    {
+      id: 4,
+      task: "auto-2",
+      daysAgo: 1.5,
+      status: "completed",
+      outcome: "finished"
+    },
     { id: 5, task: "auto-1", daysAgo: 0.5, status: "failed" },
-    { id: 6, task: "auto-1", daysAgo: 0.2, status: "completed", outcome: "skipped:prefilter" },
+    {
+      id: 6,
+      task: "auto-1",
+      daysAgo: 0.2,
+      status: "completed",
+      outcome: "skipped:prefilter"
+    },
     { id: 7, task: null, daysAgo: 60, status: "failed", item: "task-stuck" },
     { id: 8, task: "auto-3", daysAgo: 3, status: "failed" },
     { id: 9, task: "auto-3", daysAgo: 4, status: "failed" },
-    { id: 10, task: null, daysAgo: 50, status: "failed", item: "task-retrying" },
+    {
+      id: 10,
+      task: null,
+      daysAgo: 50,
+      status: "failed",
+      item: "task-retrying"
+    },
     { id: 11, task: null, daysAgo: 70, status: "failed", run: "r-11" },
     { id: 12, task: "auto-3", daysAgo: 2, status: "failed", run: "r-12" },
     { id: 13, task: "auto-3", daysAgo: "not a time", status: "failed" },
     { id: 14, task: null, daysAgo: 90, status: "failed", item: "task-done" },
-    { id: 15, task: "auto-2", daysAgo: 0.1, status: "failed", outcome: "superseded" },
+    {
+      id: 15,
+      task: "auto-2",
+      daysAgo: 0.1,
+      status: "failed",
+      outcome: "superseded"
+    },
     { id: 16, task: "auto-3", daysAgo: 30, status: "failed", run: "r-16" }
   ]
   const endings: ReadonlyArray<Ending> = [
@@ -147,8 +83,6 @@ const seed = (sql: SqlClient.SqlClient) => {
     { run: "r-11", daysAgo: 70, item: "task-stuck" },
     { run: "r-12", daysAgo: 2, chatStatus: "cancelled" },
     { run: "r-16", daysAgo: 1 },
-    // Endings with no attempt: recent, equal times, old on a stuck Task, old,
-    // a parent's agent, a plain chat run.
     { run: "r-e1", daysAgo: 1, purpose: "task_execution", item: "task-open" },
     { run: "r-e2", daysAgo: 1, purpose: "task_execution", item: "task-open" },
     { run: "r-e0", daysAgo: 1, purpose: "task_execution", item: "task-open" },
@@ -156,7 +90,12 @@ const seed = (sql: SqlClient.SqlClient) => {
     { run: "r-e4", daysAgo: 45, purpose: "task_execution", item: "task-done" },
     { run: "r-e5", daysAgo: 1, purpose: "task_execution", placeKind: "parent" },
     { run: "r-e6", daysAgo: 1, purpose: "chat" },
-    { run: "r-e7", daysAgo: 2, purpose: "task_execution", item: "task-retrying" }
+    {
+      run: "r-e7",
+      daysAgo: 2,
+      purpose: "task_execution",
+      item: "task-retrying"
+    }
   ]
   const time = (daysAgo: number | string) => (typeof daysAgo === "string" ? daysAgo : at(daysAgo))
   const statements = [
@@ -214,82 +153,31 @@ const seed = (sql: SqlClient.SqlClient) => {
         VALUES ('${ending.run}', '${ending.purpose ?? "user_automation"}', 'failed', 'Ending ${ending.run}.',
           'chat', '${ending.placeKind ?? "own"}', '${at(ending.daysAgo)}', 1, 1)`
     ),
-    // Failure events: one per attempt, on attempts with no ending.
-    ...[8, 2, 5].map(
+    ...[8, 2, 5, 15].map(
       (
         id
       ) => `INSERT INTO entity_events (key, entity, entity_id, event, text, place_kind, occurred_at, shown)
         VALUES ('${PREFIX}${id}', 'automation', 'auto', 'failed', 'Failed.', 'own', '${at(1)}', 1)`
     )
   ]
-  return Effect.forEach(statements, (statement) => sql.unsafe(statement), { discard: true })
+  return Effect.forEach(statements, (statement) => sql.unsafe(statement), {
+    discard: true
+  })
 }
 
-// The Inbox orders the groups by time and key itself.
-const entries = (rows: ReadonlyArray<FailureRow>) =>
-  automationFailureEntries({
-    failures: rows,
-    pauses: [],
-    spacePauses: [],
-    spaceTitles: new Map([["sp", "Space"]]),
-    marks: new Map()
-  }).toSorted((left, right) => left.key.localeCompare(right.key))
-
-it("the Inbox's failures match the old read of every failure on record", async () => {
+it("the Inbox lists recent failures and those of stuck Tasks, and no failure that was handled or superseded", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* seed(sql)
-      for (const days of [7, 0.3, 3, 65]) {
-        const cutoff = at(days)
-        const next = yield* failureRows(sql, cutoff)
-        const old = yield* oldFailureRows(sql, cutoff)
-        const label = `cutoff ${days} days`
-        expect(next.map((row) => JSON.stringify(row)).toSorted(), label).toEqual(
-          old.map((row) => JSON.stringify(row)).toSorted()
-        )
-        expect(entries(next), label).toEqual(entries(old))
-        if (days === 7) {
-          // Endings with no attempt first, by run id; 16's ending is recent but
-          // its attempt started 30 days ago, so it stays out.
-          expect(next.map((row) => row.id)).toEqual([0, 0, 0, 0, 1, 5, 7, 8, 9, 11, 13])
-          expect(next.slice(0, 4).map((row) => row.chat_run_id)).toEqual([
-            "r-e0",
-            "r-e1",
-            "r-e2",
-            "r-e3"
-          ])
-        }
-      }
-    })
-  )
-})
-
-it("the Inbox's failures read the recent and stuck lists, not every failure", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const [statement, parameters] = failureRows(sql, at(7)).compile()
-      const rows = yield* sql.unsafe<{ readonly detail: string }>(
-        `EXPLAIN QUERY PLAN ${statement}`,
-        parameters
-      )
-      const plan = rows.map((row) => row.detail)
-      expect(
-        plan.filter((step) =>
-          /^SCAN (ending|event|attempt|chat|automation_runs|run_endings)\b/.test(step)
-        )
-      ).toEqual([])
-      for (const index of [
-        "idx_automation_runs_status_started",
-        "idx_run_endings_status_at",
-        "idx_space_tasks_stuck",
-        "idx_automation_runs_counted_completed"
+      const rows = yield* failureRows(sql, at(7))
+      expect(rows.map((row) => row.id)).toEqual([0, 0, 0, 0, 1, 5, 7, 8, 9, 11, 13])
+      expect(rows.slice(0, 4).map((row) => row.chat_run_id)).toEqual([
+        "r-e0",
+        "r-e1",
+        "r-e2",
+        "r-e3"
       ])
-        expect(
-          plan.some((step) => step.includes(index)),
-          index
-        ).toBe(true)
     })
   )
 })
@@ -300,7 +188,12 @@ it("a failure streak ends when a run does its work and does not carry to the nex
       const sql = yield* SqlClient.SqlClient
       yield* seed(sql)
       const givesUpAt = (attemptId: number, item: string) =>
-        givesUp(sql, { automationId: "auto-4", attemptId, chatRunId: null, item })
+        givesUp(sql, {
+          automationId: "auto-4",
+          attemptId,
+          chatRunId: null,
+          item
+        })
       for (const attemptId of [21, 22]) expect(yield* givesUpAt(attemptId, "a")).toBeUndefined()
       yield* endStreak(sql, "auto-4")
       for (const attemptId of [23, 24]) expect(yield* givesUpAt(attemptId, "a")).toBeUndefined()

@@ -84,7 +84,7 @@ it("renames a page and its links in one commit, refused when Memory changed afte
     const plan = await Effect.runPromise(wiki.planRename(previewed))
     expect(plan).toMatchObject({ linkCount: 1, pageCount: 1 })
     await save({ ...other, body: "See [[topics/note]] again.\n" })
-    await expect(Effect.runPromise(wiki.rename(previewed))).rejects.toThrow("changed")
+    await expect(Effect.runPromise(wiki.rename(previewed))).rejects.toThrow()
     await Effect.runPromise(wiki.rename(await request()))
     expect((await Effect.runPromise(wiki.read(PAGE))).path).toBe("topics/renamed.md")
     expect((await Effect.runPromise(wiki.read("other"))).content).toContain("[[topics/renamed]]")

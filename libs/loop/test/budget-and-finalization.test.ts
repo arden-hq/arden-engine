@@ -111,4 +111,40 @@ describe("budgets, limits, and forced finalization", () => {
     expect(result.stop_reason).toBe("no_progress")
     expect(model.requests).toHaveLength(2)
   })
+
+  it.each([
+    {
+      label: "retryable errors",
+      steps: [[{ id: "r", name: "flaky" }], [{ id: "r2", name: "flaky" }]]
+    },
+    {
+      label: "a batch mixing a permanent error with a success",
+      steps: [
+        [
+          { id: "m1", name: "broken" },
+          { id: "m2", name: "fine" }
+        ],
+        [
+          { id: "m3", name: "broken" },
+          { id: "m4", name: "fine" }
+        ]
+      ]
+    }
+  ])("does not count $label as no progress", async ({ steps }) => {
+    const model = scriptedProvider([
+      ...steps.map((toolCalls) => [response({ finishReason: "tool_calls", toolCalls })]),
+      [response({ content: "recovered" })]
+    ])
+    const tools = toolset([tool("flaky"), tool("broken"), tool("fine")], (request) => {
+      if (request.name === "fine") return { content: "ok", preview: "ok" }
+      throw new ToolExecutionError("failed", { retryable: request.name === "flaky" })
+    })
+    const agent = makeAgent(
+      { model: "test-model", maxNoProgressSteps: 2 },
+      { provider: model.shape, toolset: tools.shape }
+    )
+    const result = await agent.run([{ role: ROLE.user, content: "go" }])
+    expect(result.stop_reason).toBe("end_turn")
+    expect(result.text).toBe("recovered")
+  })
 })

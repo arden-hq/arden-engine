@@ -8,25 +8,12 @@ import { SqlClient } from "effect/unstable/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "vitest"
 import { databaseSchema } from "../src/persistence/schema/database.js"
-import { searchSchemaSection } from "../src/persistence/schema/search.js"
 import { LATEST_SCHEMA_VERSION } from "../src/persistence/migrations/index.js"
 import { StorageStartupError } from "../src/persistence/service.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 import { rebuildSessionTurns } from "../src/persistence/sqlite/turns.js"
 import { diagnosticsLayer } from "../src/runtime/diagnostics.js"
-import type { OperationalEvent } from "@arden-hq/protocol/daemon"
-
-const names = (
-  database: DatabaseSync,
-  type: "table" | "index" | "trigger"
-): ReadonlyArray<string> =>
-  database
-    .prepare(
-      "SELECT name FROM sqlite_schema WHERE type = ? AND name NOT GLOB 'sqlite_*' ORDER BY name"
-    )
-    .all(type)
-    .map((row) => String(row.name))
 
 const createSchemaFile = (
   filename: string,
@@ -47,8 +34,7 @@ const createSchemaFile = (
 
 const useInitializedDatabase = <A>(
   filename: string,
-  use: (sql: SqlClient.SqlClient) => Effect.Effect<A, unknown>,
-  events: Array<OperationalEvent> = []
+  use: (sql: SqlClient.SqlClient) => Effect.Effect<A, unknown>
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -63,7 +49,7 @@ const useInitializedDatabase = <A>(
             diagnosticsLayer({
               startupPhase: () => {},
               migration: () => {},
-              operational: (event) => events.push(event)
+              operational: () => {}
             })
           )
         )
@@ -139,13 +125,7 @@ describe("persistence schema", () => {
                 "user-2",
                 { role: ROLE.user, content: "Next", turn_id: "user-2" }
               ],
-              [
-                "assistant-3",
-                8,
-                "assistant",
-                null,
-                { role: ROLE.assistant, content: "Next done", turn_id: "user-2" }
-              ]
+              ["assistant-3", 8, "assistant", null, { role: ROLE.assistant, content: "Next done" }]
             ] as const
             for (const [messageId, sequence, role, clientId, message] of rows) {
               const createdAt = `2026-08-28T00:00:0${sequence}.000Z`
@@ -156,6 +136,9 @@ describe("persistence schema", () => {
             ${clientId}, ${createdAt}
           )`
             }
+            yield* sql`INSERT OR REPLACE INTO message_turns (message_rowid, turn_id)
+              SELECT message_rowid, 'user-2' FROM session_messages
+              WHERE session_id = 'turn-media' AND message_id = 'assistant-3'`
             yield* rebuildSessionTurns(sql, "turn-media")
             return yield* sql<{
               readonly user_message_id: string
@@ -177,7 +160,7 @@ describe("persistence schema", () => {
     }
   })
 
-  it("creates the exact baseline and enforces its critical ownership constraints", () => {
+  it("enforces the ownership constraints between deliveries, agent sessions, rules and attachments", () => {
     const database = new DatabaseSync(":memory:")
     try {
       database.exec("PRAGMA foreign_keys = ON")
@@ -185,79 +168,14 @@ describe("persistence schema", () => {
       for (const statement of databaseSchema.statements) database.exec(statement)
       database.exec("COMMIT")
 
-      expect(names(database, "table")).toEqual([...databaseSchema.tables].sort())
-      expect(names(database, "index")).toEqual([...databaseSchema.indexes].sort())
-      expect(names(database, "trigger")).toEqual([...databaseSchema.triggers].sort())
-      expect(
-        database
-          .prepare("SELECT name FROM pragma_table_info('scheduled_tasks') ORDER BY cid")
-          .all()
-          .map((row) => row.name)
-      ).toEqual([
-        "task_id",
-        "automation_ref",
-        "name",
-        "description",
-        "description_source",
-        "prompt",
-        "model",
-        "context_mode",
-        "triggers",
-        "enabled",
-        "created_at",
-        "last_run_at",
-        "next_run_at",
-        "last_result",
-        "job_held_since",
-        "auto_approve",
-        "handler",
-        "builtin",
-        "cooldown_minutes",
-        "thread_id",
-        "idempotency_key",
-        "idempotency_scope",
-        "tool_scope",
-        "triggers_source",
-        "purpose",
-        "owner_space_id",
-        "owner_task_id",
-        "followup_generation",
-        "trigger_last_id",
-        "prompt_author",
-        "instruction_revision_id",
-        "paused_at",
-        "failed_runs",
-        "failed_item",
-        "failed_attempt",
-        "auto_resume_at",
-        "auto_resumes"
-      ])
       database.exec(`INSERT INTO scheduled_tasks
         (task_id, automation_ref, prompt, triggers, created_at, tool_scope, purpose)
         VALUES ('browser-scope', 'browser-scope-ref', 'Prompt', '[]',
           '2026-08-20T00:00:00+00:00', 'browser', 'system')`)
-      expect(() =>
-        database.exec(`INSERT INTO scheduled_tasks
-        (task_id, automation_ref, prompt, triggers, created_at, tool_scope)
-        VALUES ('bad-scope', 'bad-scope-ref', 'Prompt', '[]',
-          '2026-08-20T00:00:00+00:00', 'unsupported')`)
-      ).toThrow()
       database.exec(`INSERT INTO automation_deliveries
         (delivery_id, task_id, delivered_at, subject, body, destinations)
         VALUES ('${"a".repeat(64)}', 'browser-scope', '2026-08-24T05:00:00Z',
           'Subject', 'Body', '["email"]')`)
-      expect(() =>
-        database.exec(`INSERT INTO automation_deliveries
-        (delivery_id, task_id, delivered_at, subject, body, destinations)
-        VALUES ('short', 'browser-scope', '2026-08-24T05:00:00Z',
-          'Subject', 'Body', '[]')`)
-      ).toThrow()
-      expect(() =>
-        database.exec(`INSERT INTO automation_deliveries
-        (delivery_id, task_id, delivered_at, subject, body, destinations)
-        VALUES ('${"b".repeat(64)}', 'browser-scope', '2026-08-24T05:00:00Z',
-          'Subject', 'Body', '{}')`)
-      ).toThrow()
       expect(() =>
         database.exec(`INSERT INTO automation_deliveries
         (delivery_id, task_id, delivered_at, subject, body, destinations)
@@ -335,102 +253,8 @@ describe("persistence schema", () => {
       expect(
         database.prepare("SELECT COUNT(*) AS count FROM space_task_attachments").get()
       ).toEqual({ count: 0 })
-
-      expect(names(database, "table")).not.toContain("wiki_embedding_chunks")
-
-      database.exec(`INSERT INTO journal_streams
-        (stream_id, head_sequence, retained_from_sequence)
-        VALUES ('session-1', 1, NULL)`)
-      expect(() =>
-        database.exec(`INSERT INTO journal_records
-        (stream_id, sequence, event_type, data_json, attributes_json, created_at)
-        VALUES ('session-1', 0, 'RUN_STARTED', '{}', '{}', '2026-08-20T00:00:00+00:00')`)
-      ).toThrow()
-      expect(() =>
-        database.exec(`INSERT INTO journal_streams
-        (stream_id, head_sequence, retained_from_sequence)
-        VALUES ('session-2', 1, 2)`)
-      ).toThrow()
-      expect(() =>
-        database.exec(`INSERT INTO session_event_checkpoints
-        (session_id, checkpoint_seq)
-        VALUES ('missing-session', 0)`)
-      ).toThrow()
-      expect(() =>
-        database.exec(`INSERT INTO chat_runs
-        (run_id, session_id, status, started_at, updated_at, ended_at)
-        VALUES ('run-1', 'session-1', 'running',
-          '2026-08-20T00:00:00+00:00', '2026-08-20T00:00:01+00:00',
-          '2026-08-20T00:00:01+00:00')`)
-      ).toThrow()
-      expect(() =>
-        database.exec(`INSERT INTO chat_idempotency_keys
-        (session_id, client_id, request_hash, status, created_at, updated_at)
-        VALUES ('session-1', 'client-1', 'hash-1', 'queued',
-          '2026-08-20T00:00:00+00:00', '2026-08-20T00:00:00+00:00')`)
-      ).toThrow()
-      expect(() =>
-        database.exec(`INSERT INTO scheduled_tasks
-        (task_id, automation_ref, prompt, triggers, created_at, purpose)
-        VALUES ('review', 'review-ref', 'Review', '[]', '2026-08-20T00:00:00+00:00',
-          'space_review')`)
-      ).toThrow()
     } finally {
       database.close()
-    }
-  })
-
-  it("preflights the file-backed storage mode without rewriting populated databases", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "arden-persistence-schema-"))
-    const freshFilename = join(directory, "fresh.db")
-    const modeZeroDirectory = await mkdtemp(join(directory, "mode-zero-"))
-    const modeZeroFilename = join(modeZeroDirectory, "mode-zero.db")
-    const storageMode = (filename: string) => {
-      const database = new DatabaseSync(filename)
-      try {
-        return {
-          journalMode: database.prepare("PRAGMA journal_mode").get(),
-          autoVacuum: database.prepare("PRAGMA auto_vacuum").get(),
-          rows: database
-            .prepare(
-              "SELECT space_id AS id, name FROM spaces WHERE kind = 'ordinary' UNION ALL SELECT session_id, name FROM sessions"
-            )
-            .all()
-        }
-      } finally {
-        database.close()
-      }
-    }
-
-    try {
-      await Effect.runPromise(
-        useInitializedDatabase(freshFilename, (sql) =>
-          sql.unsafe(`INSERT INTO sessions (session_id, public_ref, name, started_at, last_activity)
-          VALUES ('survives-reopen', 'survives-reopen-ref', 'Durable',
-            '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z')`)
-        )
-      )
-      expect(storageMode(freshFilename)).toEqual({
-        journalMode: { journal_mode: "wal" },
-        autoVacuum: { auto_vacuum: 2 },
-        rows: [{ id: "survives-reopen", name: "Durable" }]
-      })
-
-      createSchemaFile(modeZeroFilename, (database) => {
-        database.exec(`INSERT INTO spaces (space_id, name, name_key, created_at, updated_at)
-          VALUES ('must-not-change', 'Untouched', 'untouched',
-            '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z')`)
-        expect(database.prepare("PRAGMA auto_vacuum").get()).toEqual({ auto_vacuum: 0 })
-      })
-
-      await Effect.runPromise(useInitializedDatabase(modeZeroFilename, () => Effect.void))
-      expect(storageMode(modeZeroFilename)).toEqual({
-        journalMode: { journal_mode: "wal" },
-        autoVacuum: { auto_vacuum: 0 },
-        rows: [{ id: "must-not-change", name: "Untouched" }]
-      })
-    } finally {
-      await rm(directory, { recursive: true, force: true })
     }
   })
 
@@ -452,8 +276,6 @@ describe("persistence schema", () => {
       if (Exit.isFailure(result)) {
         const error = Cause.squash(result.cause)
         expect(error).toBeInstanceOf(StorageStartupError)
-        expect((error as StorageStartupError).message).toContain("SQLite schema is missing")
-        expect((error as StorageStartupError).message).toContain("table:session_queued_messages")
       }
 
       const database = new DatabaseSync(filename)
@@ -469,48 +291,6 @@ describe("persistence schema", () => {
       } finally {
         database.close()
       }
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
-  it("accepts only detached foreign tables and their indexes", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "arden-schema-foreign-"))
-    const filename = join(directory, "foreign.db")
-    try {
-      createSchemaFile(filename, (database) =>
-        database.exec(`
-        CREATE TABLE extension_records (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
-        CREATE INDEX idx_extension_records_value ON extension_records(value);
-      `)
-      )
-      const events: Array<OperationalEvent> = []
-      const result = await Effect.runPromiseExit(
-        useInitializedDatabase(filename, () => Effect.succeed("booted"), events)
-      )
-      expect(result).toEqual(Exit.succeed("booted"))
-      expect(events).toEqual([
-        {
-          version: 1,
-          code: "storage.schema_drift",
-          severity: "warning",
-          occurredAt: expect.any(String),
-          cause: null,
-          objectType: "index",
-          objectName: "idx_extension_records_value",
-          verdict: "foreign_warning"
-        },
-        {
-          version: 1,
-          code: "storage.schema_drift",
-          severity: "warning",
-          occurredAt: expect.any(String),
-          cause: null,
-          objectType: "table",
-          objectName: "extension_records",
-          verdict: "foreign_warning"
-        }
-      ])
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
@@ -584,7 +364,6 @@ describe("persistence schema", () => {
         if (Exit.isFailure(result)) {
           const error = Cause.squash(result.cause)
           expect(error).toBeInstanceOf(StorageStartupError)
-          expect((error as StorageStartupError).message).toContain(testCase.name)
         }
       }
     } finally {

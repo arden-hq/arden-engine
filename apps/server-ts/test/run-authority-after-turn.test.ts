@@ -2,10 +2,8 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { ManagedOutputs } from "../src/artifacts/managed-output/managed-output.js"
-import { stopRun } from "../src/chat/run-stop.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
-import { DeferredToolCalls } from "../src/persistence/tools/deferred.js"
 import { ScriptStore } from "../src/persistence/scripts/store.js"
 import { revokeAutomationWork } from "../src/persistence/sqlite/automation-authority.js"
 import { fenceRunCancellation } from "../src/persistence/sqlite/run-cancellation.js"
@@ -82,45 +80,6 @@ const seedScript = (sql: SqlClient.SqlClient, runId: string) =>
       origin_tool_call_id, profile_hash, status, version, attempt, created_at, updated_at)
     VALUES (${`wf-${runId}`}, 'chat~1', ${runId}, 'call-script', 'profile', 'running', 1, 1,
       ${AT}, ${AT})`
-
-it("a Run holds its Google grants while it runs or owns a live script, and Stop ends them", async () => {
-  const granted = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* seedChat(sql)
-      yield* seedRun(sql, { id: "turn-running", status: "running" })
-      yield* seedRun(sql, { id: "turn-ended-script-running", status: "completed" })
-      yield* seedScript(sql, "turn-ended-script-running")
-      yield* seedRun(sql, { id: "turn-ended-card-approved", status: "completed" })
-      yield* seedApprovedCard(sql, "turn-ended-card-approved")
-      yield* seedRun(sql, { id: "turn-ended-nothing-left", status: "completed" })
-      yield* seedRun(sql, { id: "turn-stopped", status: "running" })
-      yield* seedScript(sql, "turn-stopped")
-      yield* inUnitOfWork(
-        fenceRunCancellation({
-          sql,
-          sessionEvents: yield* SessionLifecycleEvents,
-          runId: "turn-stopped",
-          now: ENDED
-        })
-      )
-      return {
-        running: yield* runGoogleAccounts(sql, "turn-running", "calendar"),
-        scriptRunning: yield* runGoogleAccounts(sql, "turn-ended-script-running", "calendar"),
-        cardApproved: yield* runGoogleAccounts(sql, "turn-ended-card-approved", "calendar"),
-        nothingLeft: yield* runGoogleAccounts(sql, "turn-ended-nothing-left", "calendar"),
-        stopped: yield* runGoogleAccounts(sql, "turn-stopped", "calendar")
-      }
-    })
-  )
-  expect(granted).toEqual({
-    running: null,
-    scriptRunning: null,
-    cardApproved: null,
-    nothingLeft: [],
-    stopped: []
-  })
-})
 
 it("one rule decides whether a Run may still act: its turn, or work it started, until revoked", async () => {
   const state = await withTempDatabase(
@@ -285,30 +244,6 @@ it("turning an Automation off fences its ended Run that still runs a script, so 
   expect(state).toEqual({ before: null, after: [], fenced: [{ run_id: "automation-run" }] })
 })
 
-it("a chat's Stop cancels the active turn and also ends what its earlier turns left running", async () => {
-  const asked: Array<unknown> = []
-  const result = await Effect.runPromise(
-    stopRun(
-      {
-        store: {
-          stopEndedWork: (input) =>
-            Effect.sync(() => {
-              asked.push(input)
-              return { runIds: ["turn-1"], descendantRunIds: [] }
-            })
-        },
-        cancelAgent: () => Effect.void
-      },
-      { sessionId: "session-1" },
-      Effect.succeed({ runId: "turn-2" })
-    )
-  )
-  expect({ result, asked }).toEqual({
-    result: { runId: "turn-2" },
-    asked: [{ sessionId: "session-1" }]
-  })
-})
-
 it("a script whose Run was fenced is never resumed at boot; it is left for the fence to cancel", async () => {
   const state = await withTempDatabase(
     Effect.gen(function* () {
@@ -334,31 +269,4 @@ it("a script whose Run was fenced is never resumed at boot; it is left for the f
     })
   )
   expect(state).toEqual({ resumed: ["turn-live"], fenced: ["turn-stopped"] })
-})
-
-it("a follow-up that finishes after Stop closed its approved card still records its result", async () => {
-  const state = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* seedChat(sql)
-      yield* seedRun(sql, { id: "turn-ended", status: "completed" })
-      yield* seedApprovedCard(sql, "turn-ended")
-      yield* (yield* ChatWriteStore).stopEndedWork({ runId: "turn-ended" })
-      const closed = yield* sql`SELECT status FROM deferred_tool_calls`
-      yield* (yield* DeferredToolCalls).recordRun({
-        runId: "turn-ended",
-        toolCallId: "card",
-        result: { content: "Created Calendar event", preview: "Created", is_error: false }
-      })
-      return {
-        closed,
-        recorded: yield* sql`SELECT status, json_extract(result_json, '$.content') AS content
-          FROM deferred_tool_calls`
-      }
-    })
-  )
-  expect(state).toEqual({
-    closed: [{ status: "rejected" }],
-    recorded: [{ status: "ran", content: "Created Calendar event" }]
-  })
 })

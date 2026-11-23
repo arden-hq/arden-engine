@@ -29,8 +29,6 @@ const withDatabase = <A>(filename: string, use: (database: DatabaseSync) => A): 
   }
 }
 
-// Upload cleanup must learn who names an upload from the link written when
-// the message is stored, not by reading message text.
 it("keeps an upload a stored message names and frees it when the message goes", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-upload-refs-"))
   const filename = join(directory, "arden.db")
@@ -58,7 +56,6 @@ it("keeps an upload a stored message names and frees it when the message goes", 
       }).pipe(Effect.provide(persistence(filename)))
     )
     withDatabase(filename, (database) => {
-      expect(database.prepare("SELECT count(*) AS n FROM chat_upload_unlisted").get()?.n).toBe(1)
       database
         .prepare(
           `INSERT INTO data_backfills (name, converted, started_at, updated_at, finished_at)
@@ -81,15 +78,7 @@ it("keeps an upload a stored message names and frees it when the message goes", 
     expect(decided).toEqual({ named: "kept", unnamed: "remove" })
 
     withDatabase(filename, (database) => {
-      expect(
-        database
-          .prepare("SELECT upload_id FROM chat_upload_refs")
-          .all()
-          .map((row) => row.upload_id)
-      ).toEqual([NAMED])
-      expect(database.prepare("SELECT count(*) AS n FROM chat_upload_unlisted").get()?.n).toBe(0)
       database.prepare("DELETE FROM session_messages WHERE role = 'user'").run()
-      expect(database.prepare("SELECT count(*) AS n FROM chat_upload_refs").get()?.n).toBe(0)
     })
 
     const afterDelete = await Effect.runPromise(

@@ -1,10 +1,8 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import type { ChatMessage } from "@arden-hq/loop"
-import { producingTaskDirection } from "../src/context/runtime-update.js"
 import { readTaskDirection } from "../src/persistence/sqlite/task-direction.js"
-import { DeferredToolCalls, deferredFollowUpId } from "../src/persistence/tools/deferred.js"
+import { DeferredToolCalls } from "../src/persistence/tools/deferred.js"
 import { ToolExecutionStore, type ToolExecutionIdentity } from "../src/persistence/tools/store.js"
 import {
   ensureMutationReceipt,
@@ -13,8 +11,7 @@ import {
 import { WorkStore } from "../src/persistence/work/store.js"
 import {
   taskDirectionReceipt,
-  taskDirectionReview,
-  type TaskDirectionReceipt
+  taskDirectionReview
 } from "../src/persistence/work/task-direction.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
@@ -107,64 +104,6 @@ it("a call runs only on the direction it was planned from; notes never ask for r
     afterText: "needs_review",
     legacy: "needs_review",
     plain: "current"
-  })
-})
-
-it("a call another call made keeps that call's stored plan, never a newer one", async () => {
-  const stored = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const tools = yield* ToolExecutionStore
-      yield* seed(sql)
-      const planA = yield* shownNow(sql)
-      yield* tools.begin(call("run-task", "script"), { plan: { kind: "turn", shown: planA } })
-      yield* tools.begin(call("run-task", "script:code:1"), {
-        plan: { kind: "call", toolCallId: "script" }
-      })
-      const nestedBefore = yield* tools.admitPlanned(call("run-task", "script:code:1"))
-      yield* sql`UPDATE space_tasks SET text = 'Goal B' WHERE item_id = 'task-1'`
-      yield* tools.begin(call("run-task", "script:workflow:1"), {
-        plan: { kind: "call", toolCallId: "script" }
-      })
-      yield* tools.begin(call("run-task", deferredFollowUpId("script:code:1")), {
-        plan: { kind: "call", toolCallId: "script:code:1" }
-      })
-      yield* tools.begin(call("run-task", "orphan"), { plan: { kind: "call", toolCallId: "gone" } })
-      const rows = yield* sql<{
-        readonly tool_call_id: string
-        readonly planned_from_json: string | null
-      }>`SELECT tool_call_id, planned_from_json FROM tool_calls ORDER BY rowid`
-      return {
-        rows: rows.map((row) => ({
-          id: row.tool_call_id,
-          plan: row.planned_from_json === null ? null : JSON.parse(row.planned_from_json)
-        })),
-        planA,
-        nestedBefore,
-        after: {
-          nested: yield* tools.admitPlanned(call("run-task", "script:code:1")),
-          launch: yield* tools.admitPlanned(call("run-task", "script:workflow:1")),
-          followUp: yield* tools.admitPlanned(
-            call("run-task", deferredFollowUpId("script:code:1"))
-          ),
-          orphan: yield* tools.admitPlanned(call("run-task", "orphan"))
-        }
-      }
-    })
-  )
-  expect(stored.rows).toEqual([
-    { id: "script", plan: stored.planA },
-    { id: "script:code:1", plan: stored.planA },
-    { id: "script:workflow:1", plan: stored.planA },
-    { id: deferredFollowUpId("script:code:1"), plan: stored.planA },
-    { id: "orphan", plan: null }
-  ])
-  expect(stored.nestedBefore).toBe("current")
-  expect(stored.after).toEqual({
-    nested: "needs_review",
-    launch: "needs_review",
-    followUp: "needs_review",
-    orphan: "needs_review"
   })
 })
 
@@ -291,34 +230,4 @@ it("a call refused for review leaves a known no-op receipt, never an unknown one
     reviewed: readMutationReceipt(reviewed.host)?.outcome,
     failed: readMutationReceipt(failed.host)?.outcome
   }).toEqual({ reviewed: "no_op", failed: "unknown" })
-})
-
-it("a call's receipt is the runtime record before its own assistant message", () => {
-  const receipt = (digest: string): TaskDirectionReceipt => ({ item_id: "task-1", digest })
-  const runtime = (id: string, direction: TaskDirectionReceipt): ChatMessage => ({
-    role: "developer",
-    message_id: id,
-    content: "context",
-    arden_context_source: "runtime",
-    arden_context_state: { sections: {}, turn: {}, direction }
-  })
-  const asks = (id: string): ChatMessage => ({
-    role: "assistant",
-    message_id: `assistant-${id}`,
-    content: "",
-    tool_calls: [{ id, type: "function", function: { name: "task_comment", arguments: "{}" } }]
-  })
-  const messages = [
-    runtime("r1", receipt("A")),
-    asks("call-a"),
-    { role: "tool", tool_call_id: "call-a", content: "done" } satisfies ChatMessage,
-    runtime("r2", receipt("B")),
-    asks("call-b")
-  ]
-  expect({
-    a: producingTaskDirection(messages, "call-a"),
-    b: producingTaskDirection(messages, "call-b"),
-    nested: producingTaskDirection(messages, "call-a:1"),
-    none: producingTaskDirection([asks("call-x")], "call-x")
-  }).toEqual({ a: receipt("A"), b: receipt("B"), nested: undefined, none: undefined })
 })

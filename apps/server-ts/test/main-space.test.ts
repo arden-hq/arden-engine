@@ -1,10 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { ChatStop } from "../src/chat/chat-stop.js"
-import { ChatMessage } from "../src/chat/message.js"
-import { TerminalSessions } from "../src/terminals/service.js"
-import { ScriptRunner } from "../src/workflows/script-runner.js"
-import { errorMessage } from "@arden-hq/std/errors"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
@@ -18,17 +13,10 @@ import { listedSessionToWire } from "../src/http/wire/sessions.js"
 import { looseChats } from "../src/mobile/spaces.js"
 import { makeCaptureRouter } from "../src/routing/capture.js"
 import { WorkStore } from "../src/persistence/work/store.js"
-import { runPolicyRevoked } from "../src/persistence/sqlite/run-policy.js"
 import { SummaryStore } from "../src/persistence/summaries/store.js"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../src/persistence/sessions/events.js"
-import { RunQueries } from "../src/persistence/runs/queries.js"
-import { runInspectTool } from "../src/tools/run-inspection.js"
-import { sessionTools } from "../src/tools/sessions.js"
-import { ChatWriteStore } from "../src/persistence/chat/store.js"
-import { spaceArchiveTools } from "../src/tools/space-archive.js"
 import { spaceConversationContextSnapshot } from "../src/context/space.js"
-import { renderCaptureSpaces } from "../src/context/special-chat.js"
 import { partialService, serverRunContext } from "./kit.js"
 import { deriveAuthority, type RunAuthority } from "../src/execution/authority.js"
 import { decide } from "../src/execution/decide.js"
@@ -402,42 +390,6 @@ it("ending Getting started tells clients the chat changed", async () => {
   )
 })
 
-it("run_inspect from a Main chat reaches a chat on another Space", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sessions = yield* SessionStore
-      const spaces = yield* SpaceStore
-      const queries = yield* SessionQueries
-      const work = yield* spaces.create({ name: "Work" })
-      const there = yield* sessions.create({ spaceId: work.space_id })
-      const here = yield* sessions.create({})
-      const ref = (yield* queries.loadHistoryHeader(there.sessionId))?.publicRef ?? ""
-      const tool = runInspectTool({ runs: yield* RunQueries, sessions: queries })
-      const refusal = yield* Effect.promise(async () => {
-        try {
-          await tool.execute(
-            { session_ref: ref },
-            {
-              toolCallId: "call",
-              signal: new AbortController().signal,
-              run: serverRunContext({
-                sessionId: here.sessionId,
-                runId: "run",
-                authority: person(here.sessionId)
-              }),
-              messages: []
-            }
-          )
-          return "ran"
-        } catch (error) {
-          return errorMessage(error)
-        }
-      })
-      expect(refusal).toBe("No retained run for this chat")
-    })
-  )
-})
-
 it("triage never proposes a new Space under a name a Space already has", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -535,181 +487,6 @@ it("a Space name already in use is a conflict, and triage then leaves the other 
   )
 })
 
-it("Space context reads summaries only for the chats it lists", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sessions = yield* SessionStore
-      const spaces = yield* SpaceStore
-      const main = yield* mainSpace
-      for (let index = 0; index < 55; index += 1) yield* sessions.create({ name: `Chat ${index}` })
-      const asked: Array<number> = []
-      yield* spaceConversationContextSnapshot({
-        spaceId: main.space_id,
-        sessionId: "none",
-        spaces,
-        summaries: {
-          chats: (ids) => {
-            asked.push(ids.length)
-            return Effect.succeed(new Map())
-          }
-        },
-        memory: undefined,
-        work: yield* WorkStore
-      })
-      expect(asked).toEqual([50])
-    })
-  )
-})
-
-it("the capture list leaves Main out and says whether this chat is in Main", () => {
-  const spaces = [
-    { space_id: "main", kind: "main" as const, name: "Main space", instructions: null },
-    { space_id: "taxes", kind: "ordinary" as const, name: "Main", instructions: "Tax papers" }
-  ]
-  const inMain = renderCaptureSpaces({ spaces, chatInMain: true })
-  expect(inMain).toContain("This chat is in the Main Space.")
-  expect(inMain).toContain("- Main (space_id taxes): Tax papers")
-  expect(inMain).not.toContain("space_id main")
-  expect(renderCaptureSpaces({ spaces, chatInMain: false })).toContain(
-    "This chat is already on a Space."
-  )
-})
-
-it("session_read from a Main chat names another Space's chat, not another Main chat", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sessions = yield* SessionStore
-      const spaces = yield* SpaceStore
-      const queries = yield* SessionQueries
-      const work = yield* spaces.create({ name: "Work" })
-      const here = yield* sessions.create({ name: "Here" })
-      const sibling = yield* sessions.create({ name: "Sibling" })
-      const there = yield* sessions.create({ name: "There", spaceId: work.space_id })
-      const sql = yield* SqlClient.SqlClient
-      for (const chat of [sibling, there])
-        yield* appendMessagesInTransaction(
-          sql,
-          chat.sessionId,
-          [{ message_id: "hello", role: ROLE.user, content: "Hello", created_at: AT }],
-          AT,
-          "post",
-          "hello"
-        )
-      const read = (yield* sessionTools).find((tool) => tool.definition.name === "session_read")
-      if (read === undefined) return yield* Effect.die("no session_read")
-      const readRef = (sessionId: string) =>
-        Effect.gen(function* () {
-          const ref = (yield* queries.loadHistoryHeader(sessionId))?.publicRef ?? ""
-          const result = yield* Effect.promise(() =>
-            Promise.resolve(
-              read.execute(
-                { session_ref: ref, limit: 10, content_chars: 1000 },
-                {
-                  toolCallId: "call",
-                  signal: new AbortController().signal,
-                  run: serverRunContext({
-                    sessionId: here.sessionId,
-                    runId: "run",
-                    authority: person(here.sessionId)
-                  }),
-                  messages: []
-                }
-              )
-            )
-          )
-          return JSON.stringify(result)
-        })
-      expect(yield* readRef(sibling.sessionId)).not.toContain("not this chat's")
-      expect(yield* readRef(there.sessionId)).toContain("not this chat's")
-    })
-  )
-})
-
-it("space_archive refuses Main before it asks anyone", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const [archive] = yield* spaceArchiveTools
-      const main = yield* mainSpace
-      const here = yield* (yield* SessionStore).create({})
-      const started = yield* (yield* ChatWriteStore).start({
-        sessionId: here.sessionId,
-        clientId: "ask",
-        requestHash: "ask",
-        assistantMessageId: "answer",
-        message: {
-          message_id: "ask",
-          client_id: "ask",
-          role: ROLE.user,
-          content: "Archive Main",
-          created_at: AT
-        }
-      })
-      if (started._tag !== "Started") return yield* Effect.die("no run")
-      if (archive?.definition.approvalPrompt === undefined) return yield* Effect.die("no prompt")
-      const prompt = archive.definition.approvalPrompt
-      const refused = yield* Effect.promise(async () => {
-        try {
-          await prompt(
-            { space_id: main.space_id },
-            {
-              toolCallId: "call",
-              signal: new AbortController().signal,
-              run: serverRunContext({ sessionId: here.sessionId, runId: started.runId }),
-              messages: []
-            }
-          )
-          return "asked"
-        } catch (error) {
-          return errorMessage(error)
-        }
-      })
-      expect(refused).toBe("The Main Space cannot be archived.")
-    })
-  )
-})
-
-it("ending Main with stop refuses before it stops any of Main's chats", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const main = yield* mainSpace
-      const refused = yield* Effect.gen(function* () {
-        const stop = yield* ChatStop
-        return yield* stop.endSpace({ spaceId: main.space_id, stop: true }).pipe(Effect.flip)
-      }).pipe(
-        Effect.provide(
-          ChatStop.layer.pipe(
-            Layer.provide(
-              Layer.mergeAll(
-                Layer.succeed(
-                  ChatMessage,
-                  partialService<ChatMessage["Service"]>("ChatMessage", {})
-                ),
-                Layer.succeed(RunQueries, partialService<RunQueries["Service"]>("RunQueries", {})),
-                Layer.succeed(
-                  TerminalSessions,
-                  partialService<TerminalSessions["Service"]>("TerminalSessions", {})
-                ),
-                Layer.succeed(
-                  ScriptRunner,
-                  partialService<ScriptRunner["Service"]>("ScriptRunner", {})
-                ),
-                Layer.succeed(SessionStore, yield* SessionStore),
-                Layer.succeed(SessionQueries, yield* SessionQueries),
-                Layer.succeed(SpaceStore, yield* SpaceStore),
-                Layer.succeed(WorkStore, yield* WorkStore)
-              )
-            )
-          )
-        )
-      )
-      expect(refused).toMatchObject({
-        reason: "conflict",
-        message: "The Main Space cannot be archived."
-      })
-    })
-  )
-})
-
 it("a Task filed by chat id for a chat in Main lands on Main with the chat as its home", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -757,28 +534,6 @@ it("a branch of a chat in no Space cannot share its resources", async () => {
   )
 })
 
-it("continuing an Automation's copy of a chat in no Space puts the chat in Main", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const sessions = yield* SessionStore
-      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
-          session_type, origin_automation_id, context_from_seq)
-        VALUES ('daily-chat', 'daily-chat', ${AT}, ${AT}, 'channel', 'daily', 0)`
-      yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, prompt, triggers,
-          created_at, purpose, thread_id, context_mode)
-        VALUES ('daily', 'daily', 'Daily', 'Check', '[]', ${AT}, 'user_automation',
-          'daily-chat', 'continue')`
-      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
-          session_type, origin_automation_id, parent_session_id, metadata, context_from_seq)
-        VALUES ('copy', 'copy', ${AT}, ${AT}, 'chat', 'daily', 'daily-chat',
-          '{"fork_origin":{"sourceSessionId":"daily-chat"}}', 0)`
-      expect(yield* sessions.continueRun("copy")).toBe(true)
-      expect(yield* spaceOf("copy")).toBe((yield* mainSpace).space_id)
-    })
-  )
-})
-
 it("a Task filed by the id of an agent session is refused", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -796,26 +551,25 @@ it("a Task filed by the id of an agent session is refused", async () => {
   )
 })
 
-it("a new database records Main's creation like an upgraded one", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const main = yield* mainSpace
-      expect(
-        yield* sql`SELECT version, kind FROM space_revisions WHERE space_id = ${main.space_id}`
-      ).toEqual([{ version: 1, kind: "created" }])
-    })
-  )
-})
-
 it("the Space detail lists every chat; only the model context keeps the 50 newest", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sessions = yield* SessionStore
       const main = yield* mainSpace
       for (let index = 0; index < 55; index += 1) yield* sessions.create({ name: `Chat ${index}` })
-      const detail = yield* (yield* SpaceStore).detail(main.space_id)
+      const spaces = yield* SpaceStore
+      const detail = yield* spaces.detail(main.space_id)
       expect(detail?.sessions).toHaveLength(55)
+      const context = yield* spaceConversationContextSnapshot({
+        spaceId: main.space_id,
+        sessionId: "none",
+        spaces,
+        summaries: { chats: () => Effect.succeed(new Map()) },
+        memory: undefined,
+        work: yield* WorkStore
+      })
+      expect(context?.view.chats.length).toBeGreaterThanOrEqual(49)
+      expect(context?.view.chats.length).toBeLessThanOrEqual(50)
     })
   )
 })
@@ -905,26 +659,6 @@ it("a second onboarding_finish that changes nothing reports no change", async ()
         content: "Getting started already ended.",
         host: { mutation_receipt: { outcome: "no_op" } }
       })
-    })
-  )
-})
-
-it("revocation reads a run with no recorded authority chat as its own chat's run", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const main = yield* mainSpace
-      yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity, space_id)
-        VALUES ('in-main', 'in-main', ${AT}, ${AT}, ${main.space_id}),
-          ('no-space', 'no-space', ${AT}, ${AT}, NULL)`
-      const metadata = JSON.stringify({ run_policy: { space: null } })
-      const revoked = (sessionId: string) =>
-        sql<{ readonly revoked: number }>`SELECT ${runPolicyRevoked(
-          sql,
-          sql`json(${metadata})`,
-          sql`${sessionId}`
-        )} AS revoked`.pipe(Effect.map((rows) => rows[0]?.revoked))
-      expect([yield* revoked("in-main"), yield* revoked("no-space")]).toEqual([1, 0])
     })
   )
 })

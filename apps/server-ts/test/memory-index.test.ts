@@ -30,7 +30,7 @@ it("lists each active page once, folded or counted as cut, within every size", (
     ...folder("topics", 12),
     page("old.md", "redirect")
   ]
-  for (let maxBytes = 0; maxBytes <= 4_000; maxBytes += 250) {
+  for (let maxBytes = 0; maxBytes <= 4_000; maxBytes += 1) {
     const index = memoryIndex(pages, { root: "", maxBytes })
     const listed = index.lines.map((line) => line.path)
     const counted =
@@ -40,4 +40,18 @@ it("lists each active page once, folded or counted as cut, within every size", (
     expect(listed).not.toContain("old.md")
     expect(index.bytes).toBeLessThanOrEqual(maxBytes)
   }
+})
+
+it("lists only the pages under its root", () => {
+  const pages = [
+    page("README.md"),
+    ...Array.from({ length: 5 }, (_, index) => page(`daily/page-${index}.md`)),
+    ...Array.from({ length: 3 }, (_, index) => page(`topics/page-${index}.md`))
+  ]
+  const index = memoryIndex(pages, { root: "topics", maxBytes: 100_000 })
+  expect(index.lines.map((line) => line.path)).toEqual([
+    "topics/page-0.md",
+    "topics/page-1.md",
+    "topics/page-2.md"
+  ])
 })

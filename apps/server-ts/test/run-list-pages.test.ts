@@ -45,12 +45,14 @@ it("lists Runs a page at a time, by chat, and only those still going", async () 
       const ofOne = yield* queries.list({ sessionId: "one", activeOnly: false, limit: 10 })
       const going = yield* queries.list({ activeOnly: true, limit: 10 })
       yield* sql`UPDATE chat_runs SET status = 'completed', ended_at = updated_at WHERE run_id = 'r4'`
+      const exact = yield* queries.list({ activeOnly: false, limit: 5 })
       const quiet = yield* queries.list({ sessionId: "one", activeOnly: true, limit: 10 })
       return {
         pages,
         ofOne: ids(ofOne),
         going: ids(going),
         anyActiveWhileGoing: ofOne.anyActive,
+        exactFit: { runs: ids(exact).length, more: exact.more },
         quiet: { runs: ids(quiet), anyActive: quiet.anyActive }
       }
     })
@@ -60,6 +62,7 @@ it("lists Runs a page at a time, by chat, and only those still going", async () 
     ofOne: ["r1", "r3", "r5"],
     going: ["r4"],
     anyActiveWhileGoing: true,
+    exactFit: { runs: 5, more: false },
     quiet: { runs: [], anyActive: false }
   })
 })

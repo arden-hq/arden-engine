@@ -120,23 +120,6 @@ const askedAt = (databasePath: string, runId: string, toolCallId: string): strin
   }
 }
 
-const askingsOf = (databasePath: string): Array<[unknown, unknown]> => {
-  const database = new DatabaseSync(databasePath, { readOnly: true })
-  try {
-    return database
-      .prepare(
-        "SELECT data_json FROM journal_records WHERE event_type = 'approval_needed' ORDER BY sequence"
-      )
-      .all()
-      .map((row) => {
-        const event: unknown = JSON.parse(String(row.data_json))
-        return [Reflect.get(Object(event), "tool_id"), Reflect.get(Object(event), "asked_at")]
-      })
-  } finally {
-    database.close()
-  }
-}
-
 const cardStatus = (
   databasePath: string,
   runId: string,
@@ -208,20 +191,6 @@ const commandLog = (store: ManagedRuntime.ManagedRuntime<RelayStore, unknown>): 
     )
 })
 
-it("every card and deferred card a chat is asked names its asking with the stored requested_at", async () => {
-  await inDirectory(async (databasePath) => {
-    const store = storeAt(databasePath)
-    const runId = await store.runPromise(waitingChat("phone", false))
-    await store.dispose()
-    expect(askingsOf(databasePath)).toEqual(
-      ["write", "second", "kept", "later", "later-kept"].map((toolId) => [
-        toolId,
-        askedAt(databasePath, runId, toolId)
-      ])
-    )
-  })
-})
-
 it("a phone decision whose answer is lost after it took effect is acknowledged done, also when sent again", async () => {
   await inDirectory(async (databasePath) => {
     const store = storeAt(databasePath)
@@ -266,10 +235,15 @@ it("a phone decision whose answer is lost after it took effect is acknowledged d
         { t: "cmd_ack", cid: "decide-1", state: "done", result: { status: "ok" } },
         { t: "cmd_ack", cid: "decide-1", state: "done", result: { status: "ok" } }
       ])
-      expect(receiptOf(databasePath, "decide-1")).toEqual({
+      const kept = receiptOf(databasePath, "decide-1") as {
+        readonly kind: string
+        readonly state: string
+        readonly result_json: string
+      }
+      expect({ kind: kept.kind, state: kept.state, result: JSON.parse(kept.result_json) }).toEqual({
         kind: "decide",
         state: "done",
-        result_json: '{"status":"ok"}'
+        result: { status: "ok" }
       })
     } finally {
       await store.dispose()

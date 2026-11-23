@@ -34,6 +34,31 @@ describe("card rules", () => {
     ).toEqual(["Visa", "Mastercard", "Mastercard", "American Express", "Card"])
   })
 
+  test("the brand ranges end where the networks say", () => {
+    expect(
+      ["2220", "2221", "2720", "2721", "50", "51", "55", "56"].map((prefix) => cardBrand(prefix))
+    ).toEqual([
+      "Card",
+      "Mastercard",
+      "Mastercard",
+      "Card",
+      "Card",
+      "Mastercard",
+      "Mastercard",
+      "Card"
+    ])
+  })
+
+  test("a card number is 12 to 19 digits", () => {
+    const issue = (number: string) => {
+      const read = readCard({ number, expiry: "08/28", securityCode: "123", nameOnCard: "A" }, NOW)
+      return read.kind === "ok" ? "ok" : read.issues.number
+    }
+    expect(
+      ["40000000006", "400000000002", "4000000000000000006", "40000000000000000002"].map(issue)
+    ).toEqual(["not_number", "ok", "ok", "not_number"])
+  })
+
   test("a new card: every field checked at once, spaces in the number allowed", () => {
     expect(
       readCard(
@@ -101,6 +126,11 @@ describe("card rules", () => {
       undefined
     ])
     expect(readCardChange({ expiry: "11/26", nameOnCard: "A" }, NOW).kind).toBe("ok")
+    expect(readCardChange({ expiry: "12/56", nameOnCard: "A" }, NOW).kind).toBe("ok")
+    expect(readCardChange({ expiry: "01/57", nameOnCard: "A" }, NOW)).toEqual({
+      kind: "refused",
+      issues: { expiry: "not_expiry" }
+    })
     expect(readCardChange({ expiry: "10/26", nameOnCard: "A" }, NOW)).toEqual({
       kind: "refused",
       issues: { expiry: "expired" }

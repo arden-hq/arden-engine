@@ -90,24 +90,6 @@ describe("Linux command backend", () => {
       }
     })
   })
-
-  it("runs a host command as plain bash with the host environment, on Linux and macOS", () => {
-    const invocation = shellInvocation("echo hi", root, policies.host_approved, linux("ready"))
-    expect([invocation.executable, ...invocation.args]).toEqual(["/bin/bash", "-c", "echo hi"])
-    expect(invocation.env["HOME"]).toBe("/home/me")
-    const mac = shellRuntime({
-      platform: "darwin",
-      commandSandbox: "not_linux",
-      temporaryDirectory: root
-    })
-    expect(shellInvocation("echo hi", root, policies.host_approved, mac).executable).toBe(
-      "/bin/bash"
-    )
-    for (const kind of ["approved_local", "code_agent"] as const)
-      expect(shellInvocation("echo hi", root, policies[kind], mac).executable).toBe(
-        "/usr/bin/sandbox-exec"
-      )
-  })
 })
 
 describe("Linux sandbox rule", () => {

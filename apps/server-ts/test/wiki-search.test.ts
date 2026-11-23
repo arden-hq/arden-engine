@@ -30,8 +30,8 @@ it("finds a page by its words, by meaning alone, and nothing when no word matche
   const paths = (query: string, semantic: Parameters<typeof searchPages>[3] = []) =>
     searchPages(pages, query, 8, semantic).map((match) => match.record.resource.path)
   expect(paths("PPO CartPole diagnostic refresh")).toEqual(["rl.md"])
-  expect(
-    paths("when did the job end", [{ pageId: "id:dex.md", score: 0.8, chunkText: "last day" }])
-  ).toContain("dex.md")
+  expect(paths("zzzz qqqq", [{ pageId: "id:dex.md", score: 0.8, chunkText: "last day" }])).toEqual([
+    "dex.md"
+  ])
   expect(paths("zzzz qqqq")).toEqual([])
 })

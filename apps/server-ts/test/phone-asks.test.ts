@@ -39,7 +39,10 @@ const displays: Readonly<Record<string, ToolDisplay>> = {
 it("the phone is offered no card only the Arden app can answer", () => {
   const asks = mobileAsks({
     questions: [],
-    approvals: Object.keys(displays).map((name) => approval(name, name)),
+    approvals: [
+      ...Object.keys(displays).map((name) => approval(name, name)),
+      { ...approval("connect", "exec_command"), kind: "integration_connection" }
+    ],
     places: new Map([
       ["chat-1", { name: "My chat", spaceId: undefined, home: false, onboarding: false }]
     ]),
@@ -70,10 +73,10 @@ const engine = (answer: { readonly status: number; readonly body: unknown }) => 
   return { loopback, requests }
 }
 
-const decide = (loopback: Loopback, cid: string) =>
+const decide = (loopback: Loopback, cid: string, approve = true) =>
   runCommand(loopback, cid, {
     kind: "decide",
-    args: { run_id: "run-1", tool_id: "call-1", approve: true }
+    args: { run_id: "run-1", tool_id: "call-1", approve }
   })
 
 it("a phone decision goes to the engine as it came, and its answer is the result", async () => {
@@ -90,8 +93,8 @@ it("a phone decision goes to the engine as it came, and its answer is the result
     }
   ])
   const otherwise = engine({ status: 409, body: null })
-  expect(await decide(otherwise.loopback, "cid-2")).toEqual({
-    state: "rejected",
-    result: { message: "That was already handled." }
-  })
+  expect((await decide(otherwise.loopback, "cid-2")).state).toBe("rejected")
+  const denied = engine({ status: 200, body: { status: "ok" } })
+  await decide(denied.loopback, "cid-3", false)
+  expect(denied.requests[0]?.body).toMatchObject({ approved: false })
 })

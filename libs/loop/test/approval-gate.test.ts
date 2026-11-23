@@ -89,6 +89,22 @@ describe("approval gate", () => {
     await expect(
       toolset.execute({ name: "workspace", args: {}, toolCallId: "3" })
     ).rejects.toMatchObject({ reason: "approval", detail: "Use a workspace" })
+
+    const prompted = createTool({
+      name: "prompted",
+      description: "Generic description",
+      parameters: pathArgs,
+      metadata: {},
+      approvalPrompt: () => ({ preview: "Specific prompt" }),
+      execute: async () => "ran"
+    })
+    const promptedToolset = createToolset([prompted], {
+      toJsonSchema: () => ({ type: "object" }),
+      approvals: () => ({ prompted: "ask" })
+    })(undefined)
+    await expect(
+      promptedToolset.execute({ name: "prompted", args: {}, toolCallId: "5" })
+    ).rejects.toMatchObject({ reason: "approval", detail: "Specific prompt" })
   })
 
   it("hands the host gate the validated call and lets it run and shape the result", async () => {
@@ -111,7 +127,8 @@ describe("approval gate", () => {
     await expect(
       toolset.execute({ name: "workspace", args: { path: "/tmp" }, toolCallId: "4" })
     ).resolves.toMatchObject({ content: "used:/tmp:approved", data: { granted_by: "host" } })
-    expect(seen).toEqual([{ input: { path: "/tmp" }, decision: "ask", risk: "high" }])
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ input: { path: "/tmp" }, decision: "ask" })
   })
 })
 

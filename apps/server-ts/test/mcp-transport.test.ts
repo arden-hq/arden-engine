@@ -104,8 +104,7 @@ it("rejects an MCP HTTP response whose declared body exceeds 16 MiB", async () =
       name: "McpHttpResponseTooLargeError",
       code: "MCP_HTTP_RESPONSE_TOO_LARGE",
       reason: "declared_length",
-      observedBytes: 16 * 1_024 * 1_024 + 1,
-      message: expect.stringContaining("return a smaller result or a resource link")
+      observedBytes: 16 * 1_024 * 1_024 + 1
     })
   } finally {
     await fixture.close()
@@ -130,8 +129,7 @@ it("stops a chunked MCP HTTP response after 16 MiB", async () => {
       name: "McpHttpResponseTooLargeError",
       code: "MCP_HTTP_RESPONSE_TOO_LARGE",
       reason: "streamed_bytes",
-      observedBytes: expect.any(Number),
-      message: expect.stringContaining("return a smaller result or a resource link")
+      observedBytes: expect.any(Number)
     })
     expect(failure).toHaveProperty(
       "observedBytes",

@@ -201,7 +201,8 @@ describe("the reviewer's trusted authority", () => {
   })
 
   it("keeps only the nearest four briefs of a deep delegation chain", () => {
-    const briefs = ["b1", "b2", "b3", "b4", "b5"].map((text) => ({ from: "agent", text }))
+    const texts = ["Brief one.", "Brief two.", "Brief three.", "Brief four.", "Brief five."]
+    const briefs = texts.map((text) => ({ from: "agent", text }))
     const rendered = renderAuthority({
       ownerRequest: undefined,
       delegationRequests: [],
@@ -211,12 +212,6 @@ describe("the reviewer's trusted authority", () => {
       briefs,
       task: undefined
     })
-    expect(["b1", "b2", "b3", "b4", "b5"].map((text) => rendered.includes(`\n${text}`))).toEqual([
-      false,
-      true,
-      true,
-      true,
-      true
-    ])
+    expect(texts.map((text) => rendered.includes(text))).toEqual([false, true, true, true, true])
   })
 })

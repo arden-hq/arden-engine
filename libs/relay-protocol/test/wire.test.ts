@@ -20,6 +20,15 @@ const dev = "AbcdefghijklmnopqrstuV"
 const key = "A".repeat(43)
 const sig = "B".repeat(86)
 
+const overlongHeaderFrame = (() => {
+  const text = JSON.stringify({
+    t: "x",
+    pad: "a".repeat(8193 - utf8(JSON.stringify({ t: "x", pad: "" })).length)
+  })
+  const header = utf8(text)
+  return new Uint8Array([1, header.length >> 8, header.length & 0xff, ...header])
+})()
+
 describe("relay frame codec", () => {
   it("decodes what it encodes: any header with a string t, any body", () => {
     const header = fc
@@ -70,18 +79,37 @@ describe("relay frame codec", () => {
       decodeFrame(good.slice(0, 4)),
       decodeFrame(new Uint8Array(MAX_FRAME_BYTES + 1)),
       decodeFrame(new Uint8Array([1, 0, 2, 0x5b, 0x5d])),
-      decodeFrame(new Uint8Array([1, 0, 2, 0x7b, 0x7d]))
+      decodeFrame(new Uint8Array([1, 0, 2, 0x7b, 0x7d])),
+      decodeFrame(new Uint8Array([1, 0, 4, 0x6e, 0x75, 0x6c, 0x6c])),
+      decodeFrame(overlongHeaderFrame)
     ]).toEqual([
       { ok: false, reason: "bad_version" },
       { ok: false, reason: "truncated" },
       { ok: false, reason: "too_large" },
       { ok: false, reason: "bad_header" },
+      { ok: false, reason: "bad_header" },
+      { ok: false, reason: "bad_header" },
       { ok: false, reason: "bad_header" }
     ])
   })
 
-  it("refuses to encode a frame over the limit", () => {
-    expect(() => encodeFrame({ t: "msg" }, new Uint8Array(MAX_FRAME_BYTES))).toThrow()
+  it("encodes a frame of exactly the limit and refuses one byte more", () => {
+    const overhead = encodeFrame({ t: "msg" }).length
+    expect(encodeFrame({ t: "msg" }, new Uint8Array(MAX_FRAME_BYTES - overhead)).length).toBe(
+      MAX_FRAME_BYTES
+    )
+    expect(() =>
+      encodeFrame({ t: "msg" }, new Uint8Array(MAX_FRAME_BYTES - overhead + 1))
+    ).toThrow()
+  })
+
+  it("encodes a header of exactly 8 KiB and refuses one byte more", () => {
+    const header = (bytes: number) => ({
+      t: "x",
+      pad: "a".repeat(bytes - utf8(JSON.stringify({ t: "x", pad: "" })).length)
+    })
+    expect(encodeFrame(header(8192)).length).toBe(3 + 8192)
+    expect(() => encodeFrame(header(8193))).toThrow()
   })
 })
 
@@ -198,6 +226,16 @@ describe("app messages", () => {
       }),
       { numRuns: 20 }
     )
+  })
+
+  it("sends a message of exactly the threshold as one plaintext", () => {
+    const base = { t: "res", rid: "r", status: 200, body: "" } as const
+    const body = "x".repeat(PART_THRESHOLD - utf8(JSON.stringify(base)).length)
+    const message = { ...base, body }
+    expect(encodeAppMessage(message, { newId: () => "m1" }).length).toBe(1)
+    expect(
+      encodeAppMessage({ ...message, body: `${body}x` }, { newId: () => "m1" }).length
+    ).toBeGreaterThan(1)
   })
 
   it("throws on a part out of order", () => {

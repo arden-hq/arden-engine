@@ -110,7 +110,7 @@ const SETTLED_CANDIDATE_SQL = `r.status NOT IN ${statusSqlList(ACTIVE_RUN_STATUS
  * check has not judged, and reaches each run by its id. Before, it walked
  * every completed run, after every run and every 30 seconds.
  */
-export const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_jobs(id, run_id, status, created_at, updated_at)
+const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_procedure_jobs(id, run_id, status, created_at, updated_at)
   SELECT r.run_id, r.run_id, 'pending', ?, ? FROM browser_procedure_candidates c
   CROSS JOIN chat_runs r ON r.run_id = c.run_id
   WHERE r.status = 'completed' AND r.ended_at >= (SELECT since FROM browser_procedure_settings WHERE singleton = 1)
@@ -125,7 +125,7 @@ export const BROWSER_PROCEDURE_ENQUEUE_SQL = `INSERT OR IGNORE INTO browser_proc
 
 /** Drops every judged run from the list: a settled run has its job by now or
  * will never get one, so the list holds only runs still going. */
-export const BROWSER_PROCEDURE_SETTLE_SQL = `DELETE FROM browser_procedure_candidates
+const BROWSER_PROCEDURE_SETTLE_SQL = `DELETE FROM browser_procedure_candidates
   WHERE run_id IN (SELECT c.run_id FROM browser_procedure_candidates c
     CROSS JOIN chat_runs r ON r.run_id = c.run_id WHERE ${SETTLED_CANDIDATE_SQL})`
 

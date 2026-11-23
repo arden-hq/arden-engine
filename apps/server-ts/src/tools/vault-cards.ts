@@ -120,7 +120,7 @@ const amountText = (input: Pick<PayInput, "amount" | "currency">): string => {
 }
 
 /** "Pay $84.20 at booking.com?" with the card, the shop and the agent's reason. */
-export const payCard = (input: PayInput, card: Card): ServerApprovalPrompt => {
+const payCard = (input: PayInput, card: Card): ServerApprovalPrompt => {
   const amount = amountText(input)
   const title = cardTitle(card)
   return {
@@ -146,10 +146,7 @@ export const payCard = (input: PayInput, card: Card): ServerApprovalPrompt => {
 }
 
 /** "Give your card to pay.example.com?": a payment frame Arden does not know. */
-export const frameCard = (
-  input: typeof FrameParametersSchema.Type,
-  card: Card
-): ServerApprovalPrompt => ({
+const frameCard = (input: typeof FrameParametersSchema.Type, card: Card): ServerApprovalPrompt => ({
   preview: `Give your card to ${host(input.frame)}`,
   presentation: {
     title: `Give your card to ${host(input.frame)}?`,
@@ -195,7 +192,7 @@ const refuseSecretShaped = (reason: string): void => {
 const READ_ONLY = "This run is read-only, so it may not pay."
 
 /** What the agent is told once the owner paid with Touch ID: the one way to finish. */
-export const paymentAllowed = (card: Card, input: Pick<PayInput, "shop" | "tab_ref">): string =>
+const paymentAllowed = (card: Card, input: Pick<PayInput, "shop" | "tab_ref">): string =>
   [
     `The user approved the payment with Touch ID. For the next ${APPROVAL_MINUTES} minutes, while ${input.tab_ref} stays on ${input.shop}, Arden types the ${cardTitle(card)} card for you with vault_checkout.`,
     "Fill every other field of the checkout first (name, address, postcode, email, and any field inside the payment frame that is not the card, such as a postcode there), and choose expiry lists with select. Then take one browser_snapshot.",

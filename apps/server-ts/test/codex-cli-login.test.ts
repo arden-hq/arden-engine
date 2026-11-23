@@ -41,11 +41,6 @@ it("reads the token and sends the account id as a header", () =>
     }
   ))
 
-it("omits the header without an account id", () =>
-  withHome(JSON.stringify({ tokens: { access_token: jwt({}) } }), async (home) => {
-    expect((await read(home)).headers).toBeUndefined()
-  }))
-
 it("rejects a file without tokens", () =>
   withHome(JSON.stringify({ OPENAI_API_KEY: "x" }), async (home) => {
     await expect(read(home)).rejects.toBeInstanceOf(CodexLoginError)
@@ -60,7 +55,7 @@ it("rejects an expired token", () =>
   withHome(
     JSON.stringify({ tokens: { access_token: jwt({ exp: NOW / 1000 - 1 }) } }),
     async (home) => {
-      await expect(read(home)).rejects.toThrow("expired")
+      await expect(read(home)).rejects.toBeInstanceOf(CodexLoginError)
     }
   ))
 

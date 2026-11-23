@@ -61,7 +61,7 @@ const REFUSAL: Record<Extract<SiteSecretRequestDecision, { kind: "refuse" }>["re
   read_only: "Not asked: this run may not start a sign-in."
 }
 
-export const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
+const secretCard = (input: AskSecretInput): ServerApprovalPrompt => {
   const site = new URL(input.origin).host
   return {
     preview: `Sign in to ${site}`,
@@ -102,7 +102,7 @@ const savedNames = (output: BrowserOutput): ReadonlyArray<string> => {
 }
 
 /** The user name saved with a secret: not secret, so the agent may type it into the form. */
-export const savedUserName = (output: BrowserOutput, name: string): string | undefined => {
+const savedUserName = (output: BrowserOutput, name: string): string | undefined => {
   const users = output.data?.["users"]
   if (typeof users !== "object" || users === null || Array.isArray(users)) return undefined
   const user: unknown = Object.entries(users).find(([key]) => key === name)?.[1]
@@ -231,7 +231,7 @@ const makeBrowserAskSecretTool = (
 }
 
 /** What the agent reads once a password is saved: the user name (not secret), never the value. */
-export const savedSecretResult = (
+const savedSecretResult = (
   input: Pick<AskSecretInput, "origin" | "name">,
   userName: string | undefined
 ): string =>

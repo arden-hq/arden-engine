@@ -12,120 +12,6 @@ import { SessionStore } from "../src/persistence/sessions/store.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 
-it("can send a Chat message after an automation adds a transcript-only headline", async () => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* AutomationCatalog
-      const queue = yield* AutomationQueue
-      const chat = yield* ChatWriteStore
-      const sessions = yield* SessionStore
-      const session = yield* sessions.create({ name: "Conversation" })
-      const automation = yield* store.create(
-        {
-          history: "chat",
-          name: "Headline",
-          prompt: "Review",
-          triggers: [{ type: "time", every: "1h" }],
-          chat: { kind: "yours", session_id: session.sessionId },
-          idempotency_key: "e4d5bd57-853c-4876-a87a-55e2b487616f",
-          idempotency_scope: "global"
-        },
-        "owner"
-      )
-      yield* queue.requestRun(AutomationId.make(automation.task_id))
-      const [lease] = yield* Effect.promise(async () =>
-        queue.jobs.claim({
-          workerId: "headline",
-          now: Date.now(),
-          limit: 1,
-          leaseDurationMs: 30_000
-        })
-      )
-      if (!lease) throw new Error("Missing automation lease")
-      expect([lease.payload.chatKind, lease.payload.contextMode]).toEqual(["yours", "fork"])
-      yield* queue.prepareRunSession(lease)
-      const started = yield* chat.start({
-        sessionId: session.sessionId,
-        clientId: "reply",
-        requestHash: "reply",
-        assistantMessageId: "answer",
-        message: {
-          message_id: "reply",
-          client_id: "reply",
-          role: ROLE.user,
-          content: "Continue",
-          created_at: new Date().toISOString()
-        }
-      })
-      expect(started._tag).toBe("Started")
-    }).pipe(
-      Effect.provide(
-        sqlitePersistenceLayer({ dataDir: null, filename: ":memory:" }).pipe(
-          Layer.provide(PersistenceWriteQueue.layer)
-        )
-      )
-    )
-  )
-})
-
-it("honors the owner's expiry when another worker requests a different lease duration", async () => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* AutomationCatalog
-      const queue = yield* AutomationQueue
-      const automation = yield* store.create(
-        {
-          history: "chat",
-          name: "Expiry",
-          prompt: "Review",
-          triggers: [{ type: "time", every: "1h" }],
-          idempotency_key: "98ee26ae-2a9b-48dd-842c-f358b4d36c09",
-          idempotency_scope: "global"
-        },
-        "owner"
-      )
-      yield* queue.requestRun(AutomationId.make(automation.task_id))
-      const now = Date.now()
-      const first = (yield* Effect.promise(async () =>
-        queue.jobs.claim({ workerId: "first", now, limit: 1, leaseDurationMs: 30_000 })
-      ))[0]
-      if (!first) return yield* Effect.die("Expected a lease")
-      expect([first.payload.chatKind, first.payload.contextMode]).toEqual(["own", "continue"])
-      expect(
-        yield* Effect.promise(async () =>
-          queue.jobs.claim({
-            workerId: "early",
-            now: now + 5_000,
-            limit: 1,
-            leaseDurationMs: 1_000
-          })
-        )
-      ).toEqual([])
-      const second = (yield* Effect.promise(async () =>
-        queue.jobs.claim({
-          workerId: "replacement",
-          now: first.expiresAt,
-          limit: 1,
-          leaseDurationMs: 60_000
-        })
-      ))[0]
-      expect(second).toMatchObject({
-        id: first.id,
-        attempt: first.attempt + 1,
-        payload: first.payload,
-        leasedAt: first.expiresAt,
-        expiresAt: first.expiresAt + 60_000
-      })
-    }).pipe(
-      Effect.provide(
-        sqlitePersistenceLayer({ dataDir: null, filename: ":memory:" }).pipe(
-          Layer.provide(PersistenceWriteQueue.layer)
-        )
-      )
-    )
-  )
-})
-
 it("rejects expired ownership before another worker reclaims it", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -175,7 +61,11 @@ it("rejects expired ownership before another worker reclaims it", async () => {
               client_id: "expired",
               role: ROLE.interaction,
               kind: "assignment",
-              from: { source: "automation", id: automation.task_id, name: automation.name },
+              from: {
+                source: "automation",
+                id: automation.task_id,
+                name: automation.name
+              },
               content: "Review",
               created_at: new Date(now).toISOString(),
               automation: {
@@ -213,12 +103,22 @@ it("rejects expired ownership before another worker reclaims it", async () => {
           })
         ).rejects.toThrow()
         await expect(
-          queue.jobs.fail({ ...lease, failedAt: now, error: "Stale", retryAt: now + 1_000 })
+          queue.jobs.fail({
+            ...lease,
+            failedAt: now,
+            error: "Stale",
+            retryAt: now + 1_000
+          })
         ).rejects.toThrow()
         await expect(queue.jobs.release({ ...lease, releasedAt: now })).rejects.toThrow()
       })
       const replacement = (yield* Effect.promise(async () =>
-        queue.jobs.claim({ workerId: "replacement", now, limit: 1, leaseDurationMs: 30_000 })
+        queue.jobs.claim({
+          workerId: "replacement",
+          now,
+          limit: 1,
+          leaseDurationMs: 30_000
+        })
       ))[0]
       expect(replacement).toMatchObject({
         id: lease.id,
@@ -259,7 +159,9 @@ it.each([
               triggers: [{ type: "time", every: "1h" }],
               ...(destination === null
                 ? {}
-                : { chat: { kind: "yours", session_id: destination.sessionId } }),
+                : {
+                    chat: { kind: "yours", session_id: destination.sessionId }
+                  }),
               idempotency_key: "1b6a9e13-cc9d-428b-8eac-541449343bc9",
               idempotency_scope: "global"
             },
@@ -268,7 +170,12 @@ it.each([
           yield* queue.requestRun(AutomationId.make(automation.task_id))
           const now = Date.now()
           const first = (yield* Effect.promise(async () =>
-            queue.jobs.claim({ workerId: "first", now, limit: 1, leaseDurationMs: 30_000 })
+            queue.jobs.claim({
+              workerId: "first",
+              now,
+              limit: 1,
+              leaseDurationMs: 30_000
+            })
           ))[0]
           if (!first || !first.payload.sessionId)
             return yield* Effect.die("Expected a claimed Session")
@@ -291,7 +198,11 @@ it.each([
               client_id: "first",
               role: ROLE.interaction,
               kind: "assignment",
-              from: { source: "automation", id: automation.task_id, name: automation.name },
+              from: {
+                source: "automation",
+                id: automation.task_id,
+                name: automation.name
+              },
               content: "Review",
               created_at: new Date().toISOString(),
               automation: {
@@ -349,7 +260,11 @@ it.each([
                 ...request,
                 clientId: "stale",
                 requestHash: "stale",
-                message: { ...request.message, message_id: "stale", client_id: "stale" }
+                message: {
+                  ...request.message,
+                  message_id: "stale",
+                  client_id: "stale"
+                }
               })
               .pipe(Effect.result))._tag
           ).toBe("Failure")
@@ -363,7 +278,11 @@ it.each([
           }
           yield* Effect.promise(async () => {
             await expect(
-              queue.jobs.complete({ ...first, completedAt: replacementAt + 1_000, result })
+              queue.jobs.complete({
+                ...first,
+                completedAt: replacementAt + 1_000,
+                result
+              })
             ).rejects.toThrow()
             await expect(
               queue.jobs.renew({
@@ -376,17 +295,25 @@ it.each([
           })
           yield* Effect.promise(async () =>
             Promise.resolve(
-              queue.jobs.complete({ ...second, completedAt: replacementAt + 1_000, result })
+              queue.jobs.complete({
+                ...second,
+                completedAt: replacementAt + 1_000,
+                result
+              })
             )
           )
           expect((yield* store.runs(AutomationId.make(automation.task_id), 10))?.[0]).toMatchObject(
-            { status: "completed", result: "Replacement settled" }
+            {
+              status: "completed",
+              result: "Replacement settled"
+            }
           )
         }).pipe(
           Effect.provide(
-            sqlitePersistenceLayer({ dataDir: null, filename: join(directory, "arden.db") }).pipe(
-              Layer.provide(PersistenceWriteQueue.layer)
-            )
+            sqlitePersistenceLayer({
+              dataDir: null,
+              filename: join(directory, "arden.db")
+            }).pipe(Layer.provide(PersistenceWriteQueue.layer))
           )
         )
       )

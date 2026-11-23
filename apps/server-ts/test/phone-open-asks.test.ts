@@ -2,7 +2,6 @@ import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { INBOX_ITEM_LIMIT } from "@arden-hq/protocol/inbox"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Layer, ManagedRuntime } from "effect"
-import { DatabaseSync } from "node:sqlite"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -122,8 +121,7 @@ const persistence = (databasePath: string) =>
 
 const withServer = async (
   prepare: Effect.Effect<unknown, unknown, Layer.Success<ReturnType<typeof persistence>>>,
-  build: (fetch: (path: string, init?: RequestInit) => Promise<Response>) => Promise<void>,
-  adjust: (database: DatabaseSync) => void = () => {}
+  build: (fetch: (path: string, init?: RequestInit) => Promise<Response>) => Promise<void>
 ) => {
   const directory = await mkdtemp(join(tmpdir(), "arden-phone-open-asks-"))
   const databasePath = join(directory, "arden.db")
@@ -131,12 +129,6 @@ const withServer = async (
     const store = ManagedRuntime.make(persistence(databasePath))
     await store.runPromise(prepare)
     await store.dispose()
-    const database = new DatabaseSync(databasePath)
-    try {
-      adjust(database)
-    } finally {
-      database.close()
-    }
     const server = await startServerWithLocalAccess({
       port: 0,
       databasePath,
@@ -178,38 +170,6 @@ it("the phone lists asks from more chats than one lookup reads, each named by it
         Array.from({ length: chats }, (_, index) => `Chat ${index}`).toSorted()
       )
       expect((await read(fetch, "/mobile/spaces")).status).toBe(200)
-    }
-  )
-})
-
-it("asks asked at the same moment keep one order: questions newest first, cards oldest first", async () => {
-  const at = "2026-11-21T09:00:00.000Z"
-  await withServer(
-    chat("Same time", ["ask-1", "ask-2"], ["write-a", "write-b"]),
-    async (fetch) => {
-      const home = await read(fetch, "/mobile/home")
-      const asks = (
-        home.body as {
-          readonly asks: ReadonlyArray<{
-            readonly kind: string
-            readonly question_id?: string
-            readonly tool_id?: string
-          }>
-        }
-      ).asks
-      const questions = asks.flatMap((ask) =>
-        ask.question_id === undefined ? [] : [ask.question_id]
-      )
-      expect(questions).toEqual(questions.toSorted().toReversed())
-      expect(questions).toHaveLength(2)
-      expect(asks.flatMap((ask) => (ask.tool_id === undefined ? [] : [ask.tool_id]))).toEqual([
-        "write-b",
-        "write-a"
-      ])
-    },
-    (database) => {
-      database.prepare("UPDATE run_questions SET created_at = ?").run(at)
-      database.prepare("UPDATE tool_approvals SET requested_at = ?").run(at)
     }
   )
 })

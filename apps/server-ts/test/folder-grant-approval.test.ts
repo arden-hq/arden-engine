@@ -40,7 +40,6 @@ afterAll(async () => {
   await rm(base, { recursive: true, force: true })
 })
 
-type Place = "space" | "chat"
 type Choice = "once" | "add_folder"
 
 const inDatabase = async <A, E>(
@@ -70,13 +69,12 @@ const inDatabase = async <A, E>(
   )
 }
 
-const startRun = (place: Place) =>
+const startRun = () =>
   Effect.gen(function* () {
-    const spaces = yield* SpaceStore
-    const space = place === "space" ? yield* spaces.create({ name: "Margin" }) : null
+    const space = yield* (yield* SpaceStore).create({ name: "Margin" })
     const { sessionId } = yield* (yield* SessionStore).create({
       name: "Edit",
-      ...(space === null ? {} : { spaceId: space.space_id })
+      spaceId: space.space_id
     })
     const run = yield* (yield* ChatWriteStore).start({
       sessionId,
@@ -91,16 +89,15 @@ const startRun = (place: Place) =>
         created_at: new Date().toISOString()
       }
     })
-    return { sessionId, runId: run.runId, spaceId: space?.space_id }
+    return { sessionId, runId: run.runId, spaceId: space.space_id }
   })
 
 const answerCard = (
-  place: Place,
   choice: Choice,
   started: {
     readonly sessionId: string
     readonly runId: string
-    readonly spaceId: string | undefined
+    readonly spaceId: string
   },
   toolCallId: string
 ) =>
@@ -110,25 +107,23 @@ const answerCard = (
       runId: started.runId,
       toolCallId,
       approved: true,
-      ...(choice === "add_folder" && place === "space" ? { attachFolderToSpace: true } : {}),
-      ...(choice === "add_folder" && place === "chat" ? { grantStanding: true } : {})
+      ...(choice === "add_folder" ? { attachFolderToSpace: true } : {})
     })
     const folders = (yield* (yield* PermissionRules).list()).flatMap((rule) =>
       rule.subject.kind === "path" &&
       rule.subject.access === "change" &&
       rule.decision === "allow" &&
-      (started.spaceId === undefined
-        ? rule.list.kind === "global"
-        : rule.list.kind === "space" && rule.list.spaceId === started.spaceId)
+      rule.list.kind === "space" &&
+      rule.list.spaceId === started.spaceId
         ? [rule.subject.path]
         : []
     )
     return { pending, folders }
   })
 
-const uploadIn = (place: Place, choice: Choice) =>
+const uploadIn = (choice: Choice) =>
   Effect.gen(function* () {
-    const started = yield* startRun(place)
+    const started = yield* startRun()
     const tools = yield* ToolExecutionStore
     const call = {
       runId: started.runId,
@@ -152,42 +147,24 @@ const uploadIn = (place: Place, choice: Choice) =>
         origin: "https://drive.google.com",
         expected_revision: 1,
         files: [{ key: join(videos, "demo.mp4"), name: "demo.mp4", size: 11 }],
-        ...(started.spaceId === undefined
-          ? {
-              chat_folder_grant: {
-                _tag: "ChatFolderGrant",
-                session_id: started.sessionId,
-                local_folder: videos
-              }
-            }
-          : {
-              space_folder_grant: {
-                _tag: "SpaceFolderGrant",
-                space_id: started.spaceId,
-                local_folder: videos
-              }
-            })
+        space_folder_grant: {
+          _tag: "SpaceFolderGrant",
+          space_id: started.spaceId,
+          local_folder: videos
+        }
       }
     })
-    return yield* answerCard(place, choice, started, "upload")
+    return yield* answerCard(choice, started, "upload")
   })
 
-type FileTool = "file_edit" | "file_write"
+const changes = () => ({
+  first: { path: join(margin, "src", "index.ts"), old_text: "1", new_text: "2" },
+  second: { path: join(margin, "docs", "notes.md"), old_text: "draft", new_text: "done" }
+})
 
-const changes = (tool: FileTool) =>
-  tool === "file_edit"
-    ? {
-        first: { path: join(margin, "src", "index.ts"), old_text: "1", new_text: "2" },
-        second: { path: join(margin, "docs", "notes.md"), old_text: "draft", new_text: "done" }
-      }
-    : {
-        first: { path: join(margin, "src", "new.ts"), content: "export const b = 2\n" },
-        second: { path: join(margin, "docs", "notes.md"), content: "done\n" }
-      }
-
-const changeIn = (place: Place, tool: FileTool) =>
+const changeIn = () =>
   Effect.gen(function* () {
-    const started = yield* startRun(place)
+    const started = yield* startRun()
     const services = {
       spaces: yield* SpaceStore,
       sessions: yield* SessionQueries,
@@ -196,10 +173,10 @@ const changeIn = (place: Place, tool: FileTool) =>
       dataDir: join(base, "arden-state")
     }
     const edit = present(
-      fileWriteTools(services).find((candidate) => candidate.definition.name === tool),
-      tool
+      fileWriteTools(services).find((candidate) => candidate.definition.name === "file_edit"),
+      "file_edit"
     )
-    const { first: firstInput, second: secondInput } = changes(tool)
+    const { first: firstInput, second: secondInput } = changes()
     const ctx = (toolCallId: string) => ({
       run: serverRunContext({
         runId: started.runId,
@@ -219,13 +196,13 @@ const changeIn = (place: Place, tool: FileTool) =>
       runId: started.runId,
       sessionId: started.sessionId,
       toolCallId: "change-1",
-      toolName: tool,
+      toolName: "file_edit",
       changesState: true,
       arguments: firstInput
     }
     yield* tools.begin(call)
     yield* tools.pause(call, { reason: "approval", data: asked.data })
-    const answered = yield* answerCard(place, "add_folder", started, "change-1")
+    const answered = yield* answerCard("add_folder", started, "change-1")
     const next = yield* Effect.promise(async () =>
       edit.definition.approvalRequirement?.(secondInput, ctx("change-2"))
     )
@@ -246,66 +223,35 @@ const changeIn = (place: Place, tool: FileTool) =>
   })
 
 describe("folder grant on an approval card", () => {
-  it.each(["space"] as const)(
-    "a browser upload offers the %s grant, and adds the folder only when the user picks it",
-    async (place) => {
-      const added = await inDatabase(`upload-${place}-add`, uploadIn(place, "add_folder"))
-      expect(added.pending).toMatchObject({
-        ...(place === "space"
-          ? { can_attach_folder_to_space: true }
-          : { can_attach_folder_to_chat: true }),
-        grant_folder: expect.stringMatching(/\/videos$/)
-      })
-      expect(added.folders).toEqual([videos])
-      const once = await inDatabase(`upload-${place}-once`, uploadIn(place, "once"))
-      expect(once.folders ?? []).toEqual([])
-    }
-  )
-
-  it("a browser upload in a loose chat offers no folder to keep", async () => {
-    const once = await inDatabase("upload-chat-once", uploadIn("chat", "once"))
-    expect(once.pending).not.toHaveProperty("can_attach_folder_to_chat")
-    expect(once.pending).not.toHaveProperty("grant_folder")
+  it("a browser upload offers the space grant, and adds the folder only when the user picks it", async () => {
+    const added = await inDatabase("upload-add", uploadIn("add_folder"))
+    expect(added.pending).toMatchObject({
+      can_attach_folder_to_space: true,
+      grant_folder: expect.stringMatching(/\/videos$/)
+    })
+    expect(added.folders).toEqual([videos])
+    const once = await inDatabase("upload-once", uploadIn("once"))
     expect(once.folders).toEqual([])
   })
 
-  it.each([
-    ["file_edit", "space"],
-    ["file_write", "space"]
-  ] as const)(
-    "%s outside the folders offers its project to the %s, and the next change there runs without asking",
-    async (tool, place) => {
-      const result = await inDatabase(`${tool}-${place}`, changeIn(place, tool))
-      expect(result.asked).toMatchObject(
-        place === "space"
-          ? {
-              path: changes(tool).first.path,
-              space_folder_grant: {
-                _tag: "SpaceFolderGrant",
-                space_id: result.started.spaceId,
-                local_folder: margin
-              }
-            }
-          : {
-              path: changes(tool).first.path,
-              chat_folder_grant: {
-                _tag: "ChatFolderGrant",
-                session_id: result.started.sessionId,
-                local_folder: margin
-              }
-            }
-      )
-      expect(result.pending).toMatchObject({
-        ...(place === "space"
-          ? { can_attach_folder_to_space: true }
-          : { can_attach_folder_to_chat: true }),
-        grant_folder: expect.stringMatching(/\/margin$/)
-      })
-      expect(result.folders).toEqual([margin])
-      expect({ nextAsks: result.nextAsks, secondInside: result.secondInside }).toEqual({
-        nextAsks: false,
-        secondInside: true
-      })
-    }
-  )
+  it("file_edit outside the folders offers its project to the space, and the next change there runs without asking", async () => {
+    const result = await inDatabase("file-edit", changeIn())
+    expect(result.asked).toMatchObject({
+      path: changes().first.path,
+      space_folder_grant: {
+        _tag: "SpaceFolderGrant",
+        space_id: result.started.spaceId,
+        local_folder: margin
+      }
+    })
+    expect(result.pending).toMatchObject({
+      can_attach_folder_to_space: true,
+      grant_folder: expect.stringMatching(/\/margin$/)
+    })
+    expect(result.folders).toEqual([margin])
+    expect({ nextAsks: result.nextAsks, secondInside: result.secondInside }).toEqual({
+      nextAsks: false,
+      secondInside: true
+    })
+  })
 })

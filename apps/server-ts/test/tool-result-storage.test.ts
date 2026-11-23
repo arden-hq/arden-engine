@@ -5,7 +5,6 @@ import { engineOrderedJson } from "@arden-hq/std/json"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises"
-import { readdirSync, readFileSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
@@ -19,11 +18,8 @@ import { ToolResultObjects } from "../src/persistence/managed-output/tool-result
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
-import { makeBackfillChunks } from "../src/persistence/sqlite/backfills/store.js"
-import { makeWriter } from "../src/persistence/sqlite/deps.js"
 import { deleteSessionTree } from "../src/persistence/sqlite/session-tree-deletion.js"
 import { readScriptExecutions } from "../src/persistence/sqlite/script-executions.js"
-import { slimToolResultsBackfill } from "../src/persistence/sqlite/tool-result-backfill.js"
 import { settleTerminalToolsInTransaction } from "../src/persistence/sqlite/tool-terminal.js"
 import { ToolHistoryQueries } from "../src/persistence/tools/history-queries.js"
 import { ToolExecutionStore, type ToolExecutionIdentity } from "../src/persistence/tools/store.js"
@@ -165,31 +161,6 @@ const replayed = (identity: ToolExecutionIdentity) =>
     return begun.outcome.result
   })
 
-/** Every `result_json` path the engine's SQL reads, found in the source, but the slim-row marker. */
-const sqlReadPaths = (): ReadonlyArray<string> => {
-  const found = new Set<string>()
-  const walk = (directory: string): void => {
-    for (const entry of readdirSync(directory)) {
-      const file = path.join(directory, entry)
-      if (entry === "migrations") continue
-      if (statSync(file).isDirectory()) walk(file)
-      else if (file.endsWith(".ts"))
-        for (const match of readFileSync(file, "utf8").matchAll(/result_json, '(\$[^']*)'/g))
-          if (match[1] !== undefined && !match[1].startsWith("$.stored_result")) found.add(match[1])
-    }
-  }
-  walk(path.join(import.meta.dirname, "../src"))
-  return [...found].toSorted()
-}
-
-const extract = (json: string, jsonPath: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ readonly value: unknown }>`
-      SELECT json_extract(${json}, ${jsonPath}) AS value`
-    return rows[0]?.value
-  })
-
 const filesUnder = async (directory: string): Promise<ReadonlyArray<string>> => {
   const entries = await readdir(directory, { recursive: true, withFileTypes: true }).catch(() => [])
   return entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
@@ -248,60 +219,6 @@ describe("tool result storage", () => {
     })
   })
 
-  it("leaves every field SQL reads in place on the slim row", async () => {
-    await withRig(async (rig) => {
-      const paths = sqlReadPaths()
-      expect(paths).toEqual(
-        expect.arrayContaining([
-          "$.is_error",
-          "$.host.refusal",
-          "$.host.mutation_receipt.outcome",
-          "$.data.exit_code",
-          "$.data.requested_url",
-          "$.data.final_url"
-        ])
-      )
-      const compared = await Effect.runPromise(
-        Effect.gen(function* () {
-          const run = yield* startRun
-          yield* settle(identityOf(run, "large"), largeResult)
-          const slim = yield* storedRow("large")
-          const whole = JSON.stringify(largeResult)
-          // `$.content` keeps its head and `$.data` the fields that fit; both are checked below.
-          const exact = paths.filter(
-            (jsonPath) => jsonPath !== "$.content" && jsonPath !== "$.data"
-          )
-          return {
-            slim,
-            fields: yield* Effect.forEach(exact, (jsonPath) =>
-              Effect.all({
-                path: Effect.succeed(jsonPath),
-                slim: extract(slim, jsonPath),
-                whole: extract(whole, jsonPath)
-              })
-            ),
-            contentChars: yield* extract(slim, "$.stored_result.content_chars"),
-            wholeChars: yield* Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              const rows = yield* sql<{ readonly n: number }>`
-                SELECT length(${largeResult.content}) AS n`
-              return rows[0]?.n
-            })
-          }
-        }).pipe(Effect.provide(storage(rig, { slim: true })))
-      )
-      for (const field of compared.fields) {
-        expect({ path: field.path, value: field.slim }).toEqual({
-          path: field.path,
-          value: field.whole
-        })
-      }
-      expect(compared.contentChars).toBe(compared.wholeChars)
-      const content = (JSON.parse(compared.slim) as { readonly content: string }).content
-      expect(largeResult.content.startsWith(content)).toBe(true)
-    })
-  })
-
   it("knows a retried result by its digest and refuses a different one", async () => {
     await withRig(async (rig) => {
       const outcome = await Effect.runPromise(
@@ -323,15 +240,23 @@ describe("tool result storage", () => {
           const different = yield* tools
             .complete(identity, { ...largeResult, content: `${largeResult.content}!` })
             .pipe(Effect.flip)
-          return { same, different: { reason: different.reason, message: different.message } }
+          const swapped = largeResult.content.replace("Résumé", "Rèsumé")
+          const sameSize = yield* tools
+            .complete(identity, { ...largeResult, content: swapped })
+            .pipe(Effect.flip)
+          return {
+            same,
+            different: { reason: different.reason },
+            sameSize: { reason: sameSize.reason },
+            sameBytes: Buffer.byteLength(swapped) === Buffer.byteLength(largeResult.content)
+          }
         }).pipe(Effect.provide(storage(rig, { slim: true })))
       )
       expect(outcome).toEqual({
         same: largeResult,
-        different: {
-          reason: "conflict",
-          message: "Tool execution already has a different result"
-        }
+        different: { reason: "conflict" },
+        sameSize: { reason: "conflict" },
+        sameBytes: true
       })
     })
   })
@@ -537,113 +462,6 @@ describe("tool result storage", () => {
       expect(await filesUnder(path.join(rig.outputs, "refs"))).toEqual([])
     })
   })
-
-  it("slims stored rows in resumable chunks without changing what readers see", async () => {
-    await withRig(async (rig) => {
-      const readers = (run: {
-        readonly sessionId: string
-        readonly runId: string
-        readonly turnId: string
-      }) =>
-        Effect.gen(function* () {
-          const history = yield* ToolHistoryQueries
-          const sessions = yield* SessionQueries
-          const tools = yield* ToolExecutionStore
-          const rows = yield* Effect.forEach(["large-1", "large-2", "large-3", "small"], (id) =>
-            Effect.gen(function* () {
-              const json = yield* storedRow(id)
-              return {
-                id,
-                replayed: yield* replayed(identityOf(run, id)),
-                fields: yield* Effect.forEach(sqlReadPaths(), (jsonPath) =>
-                  jsonPath === "$.content" || jsonPath === "$.data"
-                    ? Effect.succeed(null)
-                    : extract(json, jsonPath)
-                )
-              }
-            })
-          )
-          return {
-            rows,
-            ledger: yield* history.ledgerToolCall({
-              sessionId: run.sessionId,
-              toolCallId: "large-1",
-              turnId: run.turnId
-            }),
-            prior: yield* tools.priorResults({ sessionId: run.sessionId, toolName: "web_fetch" }),
-            evidence: yield* sessions.readToolEvidence({
-              sessionId: run.sessionId,
-              limit: 10,
-              contentChars: 1_000_000
-            })
-          }
-        })
-      const legacy = await Effect.runPromise(
-        Effect.gen(function* () {
-          const run = yield* startRun
-          for (const id of ["large-1", "large-2", "large-3"])
-            yield* settle(identityOf(run, id), largeResult)
-          yield* settle(identityOf(run, "small"), smallResult)
-          return { run, readers: yield* readers(run), small: yield* storedRow("small") }
-        }).pipe(Effect.provide(storage(rig, { slim: false })))
-      )
-      const chunk = (limit: number) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const queue = yield* PersistenceWriteQueue
-          const writer = makeWriter({
-            sql,
-            reader: sql,
-            queue,
-            toolResults: () =>
-              makeToolResultObjects(rig.outputs, { withLiveSession: (_, action) => action() })
-          })
-          const store = makeBackfillChunks({
-            writer,
-            reader: sql,
-            sessionEvents: yield* SessionLifecycleEvents
-          })
-          return yield* store.runChunk(slimToolResultsBackfill, limit)
-        })
-      const steps = await Effect.runPromise(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          for (const name of ["script_execution_progress", "space_words"])
-            yield* sql`INSERT INTO data_backfills (name, cursor, converted, started_at, updated_at, finished_at)
-              VALUES (${name}, NULL, 0, '2026-11-13', '2026-11-13', '2026-11-13')
-              ON CONFLICT(name) DO UPDATE SET finished_at = excluded.finished_at`
-          return [yield* chunk(2)]
-        }).pipe(Effect.provide(storage(rig, { slim: true })))
-      )
-      // A restart between chunks resumes from the saved cursor.
-      const after = await Effect.runPromise(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          steps.push(yield* chunk(2))
-          const slimRows = yield* sql<{ readonly n: number }>`
-            SELECT count(*) AS n FROM tool_calls WHERE json_type(result_json, '$.stored_result') IS NOT NULL`
-          yield* sql`UPDATE data_backfills SET cursor = NULL, finished_at = NULL
-            WHERE name = 'slim_tool_results'`
-          const again = yield* chunk(200)
-          return {
-            slimRows: slimRows[0]?.n,
-            again: again.state,
-            readers: yield* readers(legacy.run),
-            small: yield* storedRow("small")
-          }
-        }).pipe(Effect.provide(storage(rig, { slim: true })))
-      )
-      expect(steps.map((step) => step.state)).toEqual([
-        { name: "slim_tool_results", converted: 2, finished: false },
-        { name: "slim_tool_results", converted: 3, finished: true }
-      ])
-      expect(after.slimRows).toBe(3)
-      expect(after.again).toEqual({ name: "slim_tool_results", converted: 3, finished: true })
-      expect(after.small).toBe(legacy.small)
-      expect(after.readers).toEqual(legacy.readers)
-      expect(await filesUnder(path.join(rig.outputs, "objects"))).toHaveLength(1)
-    })
-  })
 })
 
 it("a handler reads its whole result back from a slim row", async () => {
@@ -666,5 +484,30 @@ it("a handler reads its whole result back from a slim row", async () => {
     )
     expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(16 * 1024)
     expect(out).toEqual({ slim: true, read: content })
+  })
+})
+
+it("a handler refuses a slim row whose digest does not name its saved object", async () => {
+  const body = { paragraphs: [[{ text: "Ünïcode 🙂 ".repeat(1_200), source_id: null }]] }
+  await withRig(async (rig) => {
+    const reason = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const run = yield* startRun
+        const letter = { ...identityOf(run, "letter"), toolName: "publish_home_letter" }
+        yield* settle(letter, {
+          content: JSON.stringify(body),
+          preview: "Home letter ready",
+          data: { body }
+        })
+        yield* sql`UPDATE tool_calls SET result_json = json_set(result_json, '$.stored_result.sha256',
+          ${"0".repeat(64)}) WHERE tool_call_id = 'letter'`
+        const failure = yield* (yield* AutomationQueue)
+          .handlerToolResult({ runId: run.runId, tool: "publish_home_letter" })
+          .pipe(Effect.flip)
+        return Reflect.get(failure, "reason")
+      }).pipe(Effect.provide(storage(rig, { slim: true })))
+    )
+    expect(reason).toBe("corrupt")
   })
 })

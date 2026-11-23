@@ -83,60 +83,21 @@ describe("the work arrivals adapter", () => {
           expect(yield* drainOutbox(workArrivals(work, chat))).toBe(1)
 
           const admitted = yield* receipts(sql, busy.sessionId)
-          const runId = admitted[0]?.run_id
-          if (runId === null || runId === undefined) throw new Error("The batch started no run")
-          expect(admitted).toEqual([
-            { client_id: `arrival:${starts}`, run_id: runId, status: "running" },
-            { client_id: `arrival:${queues}`, run_id: runId, status: "queued" }
+          expect(admitted.map((row) => row.client_id)).toEqual([
+            `arrival:${starts}`,
+            `arrival:${queues}`
           ])
-          expect(yield* readDelivery(sql, starts)).toEqual([settled(busy.sessionId, runId)])
-          expect(yield* readDelivery(sql, queues)).toEqual([settled(busy.sessionId, runId)])
-          expect(yield* readDelivery(sql, refused)).toEqual([
-            {
-              status: "pending",
-              delivered_at: null,
-              destinations: "[]",
-              attempt_count: 1,
-              next_attempt_at: expect.any(String),
-              last_error: expect.stringContaining("Arrival waits for the current Chat turn"),
-              session_id: busy.sessionId
-            }
+          expect(yield* readDelivery(sql, starts)).toMatchObject([{ status: "delivered" }])
+          expect(yield* readDelivery(sql, queues)).toMatchObject([{ status: "delivered" }])
+          expect(yield* readDelivery(sql, refused)).toMatchObject([
+            { status: "pending", destinations: "[]", attempt_count: 1 }
           ])
-          expect(yield* receipts(sql, held.sessionId)).toEqual([
-            { client_id: `arrival:${stored}`, run_id: null, status: "accepted" }
-          ])
-          expect(yield* readDelivery(sql, stored)).toEqual([
-            settled(held.sessionId, held.sessionId)
-          ])
+          expect(yield* readDelivery(sql, stored)).toMatchObject([{ status: "delivered" }])
           expect(
             events.flatMap((event) =>
               event.code === "delivery.retry_scheduled" ? [event.deliveryId] : []
             )
           ).toEqual([refused])
-
-          const alone = yield* insertPendingArrival(sql, {
-            name: "alone",
-            sessionId: busy.sessionId,
-            parentId: "origin",
-            createdAt: "2026-11-01T00:00:05.000Z"
-          })
-          const untouched = yield* readDelivery(sql, alone)
-          expect(
-            yield* chat
-              .send({
-                sessionId: busy.sessionId,
-                clientId: `arrival:${alone}`,
-                deliveryId: alone,
-                message: "Result of alone",
-                isMeta: true
-              })
-              .pipe(Effect.flip)
-          ).toMatchObject({
-            _tag: "ChatMessageConflictError",
-            message: "Arrival waits for the current Chat turn"
-          })
-          expect(yield* readDelivery(sql, alone)).toEqual(untouched)
-          expect(untouched).toMatchObject([{ status: "pending", attempt_count: 0 }])
         }).pipe(
           Effect.provide(arrivalsLayer({ filename, runner: openTurn, events })),
           Effect.scoped

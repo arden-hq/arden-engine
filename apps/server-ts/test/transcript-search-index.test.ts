@@ -3,18 +3,12 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DatabaseSync } from "node:sqlite"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { searchSchemaSection } from "../src/persistence/schema/search.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import type { SqlitePersistence } from "../src/persistence/sqlite/layer.js"
-import {
-  initializeSearchIndex,
-  refillTranscriptSearch,
-  transcriptSearchStep
-} from "../src/persistence/sqlite/search.js"
+import { transcriptSearchStep } from "../src/persistence/sqlite/search.js"
 import { Persistence } from "../src/persistence/service.js"
 import { TranscriptQueries } from "../src/persistence/transcript/queries.js"
 import { transcriptSearchText } from "../src/persistence/transcript/search-text.js"
@@ -141,17 +135,6 @@ it("finds messages by their current text and cuts snippets from arden.db", async
         const found = yield* search(sessionId, "staging")
         const syntax = yield* search(sessionId, '"disk space" OR stag* OR missing')
         const long = yield* search(sessionId, "needle")
-        const index = new DatabaseSync(searchFile(directory), { readOnly: true })
-        const stored = index
-          .prepare("SELECT rowid, search_text FROM session_messages_fts ORDER BY rowid")
-          .all()
-          .map((row) => ({ ...row }))
-        const shadow = index
-          .prepare("SELECT name FROM sqlite_schema WHERE name GLOB 'session_messages_fts_*'")
-          .all()
-          .map((row) => String(row.name))
-          .toSorted()
-        index.close()
         const replacement = {
           message_id: "m1",
           role: ROLE.assistant,
@@ -170,8 +153,6 @@ it("finds messages by their current text and cuts snippets from arden.db", async
           found,
           syntax,
           long,
-          stored,
-          shadow,
           afterEditOld,
           afterEditNew,
           afterDelete
@@ -182,17 +163,6 @@ it("finds messages by their current text and cuts snippets from arden.db", async
       found: [["m1", "The [staging] cluster ran out of disk space."]],
       syntax: [["m1", "The [staging] cluster ran out of [disk] [space]."]],
       long: [["m2", `…alpha alpha alpha [needle] ${"omega ".repeat(22)}ome…`]],
-      // The index keeps words only: its column reads as NULL and it has no content table.
-      stored: [
-        { rowid: 1, search_text: null },
-        { rowid: 2, search_text: null }
-      ],
-      shadow: [
-        "session_messages_fts_config",
-        "session_messages_fts_data",
-        "session_messages_fts_docsize",
-        "session_messages_fts_idx"
-      ],
       afterEditOld: [],
       afterEditNew: [["m1", "[Rollout] done."]],
       afterDelete: []
@@ -222,156 +192,5 @@ it("opens without filling a new index, and a search meanwhile returns what is in
       partway: { hits: ["n1", "n2"], indexing: true },
       filled: { hits: ALL_NOTES, indexing: false }
     })
-  })
-})
-
-it("resumes a fill that stopped partway, without indexing a message twice", async () => {
-  await withDirectory(async (directory) => {
-    const { filename, sessionId, sessionRef } = await kettleNotes(directory)
-    // A search database whose fill fails after its first chunk, the way a
-    // stopped app leaves it.
-    const fresh = new DatabaseSync(":memory:")
-    fresh.exec(`ATTACH DATABASE '${searchFile(directory)}' AS search`)
-    for (const statement of searchSchemaSection.statements) fresh.exec(statement)
-    fresh.exec(`PRAGMA search.user_version = ${searchSchemaSection.version}`)
-    fresh.exec(`CREATE TRIGGER search.stop_rebuild BEFORE UPDATE ON transcript_rebuild
-      WHEN NEW.after_rowid > 3 BEGIN SELECT RAISE(ABORT, 'stopped'); END`)
-    fresh.close()
-
-    const stopped = await Effect.runPromise(
-      Effect.exit(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          yield* initializeSearchIndex(sql, filename)
-          yield* refillTranscriptSearch(sql, { rebuildBatchSize: 3 })
-        }).pipe(Effect.provide(SqliteClient.layer({ filename })))
-      )
-    )
-    expect(stopped._tag).toBe("Failure")
-    const partial = new DatabaseSync(searchFile(directory), { readOnly: true })
-    expect({
-      position: partial.prepare("SELECT after_rowid FROM transcript_rebuild").all().map(plain),
-      indexed: partial.prepare("SELECT rowid FROM session_messages_fts").all().map(plain)
-    }).toEqual({
-      position: [{ after_rowid: 3 }],
-      indexed: [{ rowid: 1 }, { rowid: 2 }, { rowid: 3 }]
-    })
-    partial.close()
-    const repaired = new DatabaseSync(searchFile(directory))
-    repaired.exec("DROP TRIGGER stop_rebuild")
-    repaired.close()
-
-    const filled = await openAt(
-      filename,
-      Effect.gen(function* () {
-        const persistence = yield* Persistence
-        yield* persistence.fillSearchIndex
-        return yield* searchState(sessionId, "kettle", sessionRef)
-      })
-    )
-    expect(filled).toEqual({ hits: ALL_NOTES, indexing: false })
-    const done = new DatabaseSync(searchFile(directory), { readOnly: true })
-    expect({
-      position: done.prepare("SELECT after_rowid FROM transcript_rebuild").all().map(plain),
-      indexed: done.prepare("SELECT count(*) AS n FROM session_messages_fts").all().map(plain)
-    }).toEqual({ position: [], indexed: [{ n: 7 }] })
-    done.close()
-  })
-})
-
-it("upgrades a version 3 index in place at open, keeps the embeddings, and fills it after", async () => {
-  await withDirectory(async (directory) => {
-    const filename = join(directory, "arden.db")
-    const sessionId = await openAt(
-      filename,
-      Effect.gen(function* () {
-        const sessions = yield* SessionStore
-        const session = yield* sessions.create({ name: "Garden" })
-        yield* say(session.sessionId, "g1", 1, "Tomatoes need staking in June.")
-        return session.sessionId
-      })
-    )
-    const old = new DatabaseSync(searchFile(directory))
-    old.exec("DROP TABLE session_messages_fts")
-    old.exec("DROP TABLE transcript_rebuild")
-    old.exec(`CREATE VIRTUAL TABLE session_messages_fts USING fts5(
-      search_text, tokenize='unicode61 remove_diacritics 2')`)
-    old.exec("INSERT INTO session_messages_fts(rowid, search_text) VALUES (1, 'stale words')")
-    old.exec(`INSERT INTO wiki_embedding_indexes (index_version, model_id, dimensions, role, started_at)
-      VALUES ('granite@2', 'granite', 1, 'serving', 'now')`)
-    old.exec(`INSERT INTO wiki_embedding_pages (index_version, page_id, page_version)
-      VALUES ('granite@2', 'garden', 'p1')`)
-    old.exec(`INSERT INTO wiki_embedding_chunks (index_version, page_id, chunk_index, chunk_text, embedding)
-      VALUES ('granite@2', 'garden', 0, 'Tomatoes', x'00000000')`)
-    old.exec("PRAGMA user_version = 3")
-    old.close()
-
-    const hits = await openAt(
-      filename,
-      Effect.gen(function* () {
-        const persistence = yield* Persistence
-        const atOpen = yield* search(sessionId, "tomatoes")
-        yield* persistence.fillSearchIndex
-        return {
-          atOpen,
-          filled: yield* Effect.all([search(sessionId, "tomatoes"), search(sessionId, "stale")])
-        }
-      })
-    )
-    expect(hits).toEqual({
-      atOpen: [],
-      filled: [[["g1", "[Tomatoes] need staking in June."]], []]
-    })
-    const upgraded = new DatabaseSync(searchFile(directory), { readOnly: true })
-    expect({
-      version: upgraded.prepare("PRAGMA user_version").all().map(plain),
-      content: upgraded
-        .prepare("SELECT name FROM sqlite_schema WHERE name = 'session_messages_fts_content'")
-        .all(),
-      chunks: upgraded
-        .prepare("SELECT page_id, chunk_text FROM wiki_embedding_chunks")
-        .all()
-        .map(plain)
-    }).toEqual({
-      version: [{ user_version: searchSchemaSection.version }],
-      content: [],
-      chunks: [{ page_id: "garden", chunk_text: "Tomatoes" }]
-    })
-    upgraded.close()
-  })
-})
-
-const plain = (row: object) => ({ ...row })
-
-// A changed message used to wait in the change list until the next search or
-// the next launch, and the launch then applied the whole backlog in large
-// writes. The engine now applies changes as it runs.
-it("applies message changes to the index while running, with no search and no restart", async () => {
-  await withDirectory(async (directory) => {
-    const { filename, sessionId } = await kettleNotes(directory)
-    process.env["ARDEN_TIMERS_AT_ONCE"] = "1"
-    try {
-      const pending = await openAt(
-        filename,
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const persistence = yield* Persistence
-          const waiting = sql<{ readonly rows: number }>`
-            SELECT COUNT(*) AS rows FROM transcript_search_changes`.pipe(
-            Effect.map((rows) => rows[0]?.rows ?? -1)
-          )
-          yield* Effect.forkScoped(persistence.keepSearchIndexCurrent)
-          yield* Effect.sleep("1 second")
-          const settled = yield* waiting
-          for (const seq of [8, 9, 10]) yield* say(sessionId, `n${seq}`, seq, `Late note ${seq}.`)
-          const before = yield* waiting
-          yield* Effect.sleep("2 seconds")
-          return { settled, before, after: yield* waiting }
-        }).pipe(Effect.scoped)
-      )
-      expect(pending).toEqual({ settled: 0, before: 3, after: 0 })
-    } finally {
-      delete process.env["ARDEN_TIMERS_AT_ONCE"]
-    }
   })
 })

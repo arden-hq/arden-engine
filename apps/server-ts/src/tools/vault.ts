@@ -167,7 +167,7 @@ const usable = (key: {
  * What `vault_list` tells the agent: keys and passwords without values, contact details in full,
  * cards by their safe fields.
  */
-export const vaultListText = (list: VaultList): { result: string; preview: string } => {
+const vaultListText = (list: VaultList): { result: string; preview: string } => {
   const keys = list.keys.map(
     (key) => `- ${key.name}: $${key.variable}, sent only to ${key.addresses.join(", ")}`
   )

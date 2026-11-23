@@ -42,6 +42,12 @@ it("saves a block's declared values only for a standing assistant message of tha
             JSON.stringify({ content: ANSWER, superseded: true }),
             AT
           )
+        database
+          .prepare(
+            `INSERT INTO session_messages (session_id, message_id, seq, role, message_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .run("chat", "typed", 2, "user", JSON.stringify({ content: ANSWER }), AT)
         database.close()
         const save = (sessionId: string, blockIndex: number, messageId = "answer") =>
           blocks
@@ -60,6 +66,7 @@ it("saves a block's declared values only for a standing assistant message of tha
         expect(yield* save("other", 0)).toBe("not_found")
         expect(yield* save("chat", 1)).toBe("not_found")
         expect(yield* save("chat", 0, "replaced")).toBe("not_found")
+        expect(yield* save("chat", 0, "typed")).toBe("not_found")
         expect(yield* blocks.list("chat")).toEqual([
           { messageId: "answer", blockIndex: 0, state: { $runs: 30 } }
         ])

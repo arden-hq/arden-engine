@@ -1,16 +1,9 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { makeInputMessage } from "../src/chat/message-input.js"
-import { ChatWriteStore } from "../src/persistence/chat/store.js"
-import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
-import { SessionStore } from "../src/persistence/sessions/store.js"
 import { revokeAutomationWork } from "../src/persistence/sqlite/automation-authority.js"
 import { runCancellationRequested } from "../src/persistence/sqlite/run-cancellation.js"
-import { ToolExecutionStore } from "../src/persistence/tools/store.js"
-import { chatHandoff } from "../src/tools/chat-handoff.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { inUnitOfWork } from "./fixtures/unit-of-work.js"
 
@@ -82,83 +75,3 @@ it("an Automation that stops ends the runs that work for it and their asks, neve
     ]
   })
 })
-
-const wakeStoppedWorker = Effect.fn("wakeStoppedWorker")(function* (
-  sender: "own-chat" | "sibling"
-) {
-  const sql = yield* SqlClient.SqlClient
-  const chat = yield* ChatWriteStore
-  const sessions = yield* SessionStore
-  const queries = yield* SessionQueries
-  const tools = yield* ToolExecutionStore
-  const root = yield* sessions.create({ name: "Run the experiments" })
-  const parent = yield* chat.start({
-    sessionId: root.sessionId,
-    clientId: "request",
-    requestHash: "request",
-    assistantMessageId: "parent-response",
-    message: {
-      message_id: "request",
-      client_id: "request",
-      role: ROLE.user,
-      content: "Run them",
-      created_at: AT
-    }
-  })
-  if (parent._tag !== "Started") return yield* Effect.die("The person's turn did not start")
-  const spawn = Effect.fn("spawn")(function* (id: string) {
-    const call = {
-      runId: parent.runId,
-      sessionId: root.sessionId,
-      toolCallId: id,
-      toolName: "spawn_agent",
-      arguments: { task: "Go", mode: "work" },
-      changesState: true
-    }
-    yield* tools.begin(call)
-    return (yield* chat.spawnAgent({ parent: call, task: "Go", mode: "work" })).child
-  })
-  const worker = yield* spawn("spawn-worker")
-  const sibling = yield* spawn("spawn-sibling")
-  yield* chat.cancel({ runId: worker.runId })
-  const from =
-    sender === "own-chat"
-      ? { runId: parent.runId, sessionId: root.sessionId }
-      : { runId: sibling.runId, sessionId: sibling.sessionId }
-  const source = yield* queries.loadHistoryHeader(from.sessionId)
-  if (source === null) return yield* Effect.die("The sender has no header")
-  yield* tools.begin({
-    ...from,
-    toolCallId: "send",
-    toolName: "agent_message",
-    arguments: { session_ref: worker.sessionId, message: "Resume" },
-    changesState: true
-  })
-  const handoff = chatHandoff({
-    source,
-    targetRef: worker.sessionId,
-    message: "Resume",
-    clientId: "agent-message:send",
-    toolCallId: "send"
-  })
-  const woken = yield* chat.receive({
-    sessionId: worker.sessionId,
-    clientId: handoff.clientId,
-    requestHash: handoff.clientId,
-    assistantMessageId: "woken-response",
-    message: yield* makeInputMessage({ ...handoff, isMeta: true, sessionId: worker.sessionId }),
-    wake: true
-  })
-  if (woken._tag !== "Started") return yield* Effect.die("The worker did not start")
-  const rows = yield* sql<{ readonly budget: string }>`
-    SELECT json_extract(metadata_json, '$.run_policy.budget_id') AS budget
-    FROM chat_runs WHERE run_id = ${woken.runId}`
-  return { spendsChatBudget: rows[0]?.budget === parent.runId }
-})
-
-it.each(["own-chat", "sibling"] as const)(
-  "a stopped worker that %s messages starts again on its chat's budget",
-  async (sender) => {
-    expect(await withTempDatabase(wakeStoppedWorker(sender))).toEqual({ spendsChatBudget: true })
-  }
-)

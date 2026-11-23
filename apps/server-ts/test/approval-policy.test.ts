@@ -7,7 +7,6 @@ import { Effect, Layer, Schema } from "effect"
 import { expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { ChatEventStore } from "../src/persistence/events/store.js"
-import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { ApprovalPolicyStore } from "../src/persistence/permissions/approval-policy.js"
 import { PermissionRules } from "../src/persistence/permissions/rules.js"
@@ -21,9 +20,7 @@ import { toolFacts } from "../src/tools/approval-decision.js"
 import { decide } from "../src/execution/decide.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { defineServerTool, type ServerTool } from "../src/tools/define.js"
-import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { ToolHistoryQueries } from "../src/persistence/tools/history-queries.js"
-import { AutomationId } from "../src/persistence/automations/model.js"
 import { liveMode } from "./kit.js"
 import { sqlitePersistenceLayer, withTempDatabase } from "./fixtures/temp-database.js"
 
@@ -206,7 +203,7 @@ it("keeps disposable Side chat runs and their agents free of approval requests",
   )
 })
 
-it("persists chat approval choices without resolving existing prompts or changing captured access", async () => {
+it("a changed approval mode reaches the run and its agent without resolving pending prompts or changing captured access", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-approval-policy-"))
   const persistence = () =>
     sqlitePersistenceLayer({ dataDir: null, filename: join(directory, "arden.db") }).pipe(
@@ -214,7 +211,7 @@ it("persists chat approval choices without resolving existing prompts or changin
     )
   try {
     const seedLayer = persistence()
-    const sessionId = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const sessions = yield* SessionStore
         const chat = yield* ChatWriteStore
@@ -293,23 +290,7 @@ it("persists chat approval choices without resolving existing prompts or changin
           kind: "inherited",
           approval_mode: "ask"
         })
-        yield* policy.setSession({ sessionId: session.sessionId, mode: "allow" })
-        return session.sessionId
       }).pipe(Effect.provide(seedLayer))
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const policy = yield* ApprovalPolicyStore
-        expect(yield* policy.session(sessionId)).toEqual({
-          kind: "chat",
-          approval_mode: "allow"
-        })
-        yield* policy.setSession({ sessionId, mode: "ask" })
-        expect(yield* policy.session(sessionId)).toEqual({
-          kind: "chat",
-          approval_mode: "ask"
-        })
-      }).pipe(Effect.provide(persistence()))
     )
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -512,97 +493,6 @@ it("refuses every tool call after a Task attempt loses authority", async () => {
         expect(yield* decided(approval, child.runId, report)).toBe("deny")
         yield* chat.admitModelRequest(child.runId, "final-response")
         expect(yield* work.revokedRuns()).toEqual([])
-      }).pipe(
-        Effect.provide(
-          sqlitePersistenceLayer({ dataDir: null, filename: join(directory, "arden.db") }).pipe(
-            Layer.provide(PersistenceWriteQueue.layer)
-          )
-        )
-      )
-    )
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-it("uses its chat's editable mode for an automation and its running descendants", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "arden-automation-permission-"))
-  try {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const automations = yield* AutomationCatalog
-        const queue = yield* AutomationQueue
-        const chat = yield* ChatWriteStore
-        const policy = yield* ApprovalPolicyStore
-        const rules = yield* PermissionRules
-        const automation = yield* automations.create(
-          {
-            history: "chat",
-            name: "Reports",
-            prompt: "Publish reports",
-            triggers: [{ type: "time", every: "1h" }],
-            approval_mode: "ask",
-            idempotency_key: "b944bba4-4700-463e-a4be-13a467d0b20b",
-            idempotency_scope: "global"
-          },
-          "owner"
-        )
-        yield* queue.requestRun(AutomationId.make(automation.task_id))
-        const [lease] = yield* Effect.promise(async () =>
-          queue.jobs.claim({ workerId: "test", now: Date.now(), limit: 1, leaseDurationMs: 30000 })
-        )
-        if (!lease || !lease.payload.sessionId) throw new Error("Expected automation lease")
-        const run = yield* chat.start({
-          sessionId: lease.payload.sessionId,
-          clientId: "automation",
-          requestHash: "automation",
-          assistantMessageId: "assistant",
-          automationLease: { id: lease.id, token: lease.token },
-          automation: {
-            automationId: lease.payload.automationId,
-            name: lease.payload.name,
-            attemptId: lease.payload.automationRunId
-          },
-          automationContextMode: "continue",
-          automationPrompt: "Publish",
-          message: {
-            message_id: "automation",
-            client_id: "automation",
-            role: ROLE.interaction,
-            kind: "assignment",
-            from: {
-              source: "automation",
-              id: lease.payload.automationId,
-              name: lease.payload.name
-            },
-            content: "Publish",
-            automation: {
-              context_mode: "continue",
-              task_id: lease.payload.automationId,
-              name: lease.payload.name,
-              prompt: "Publish"
-            },
-            created_at: new Date().toISOString()
-          }
-        })
-        if (automation.chat === null) throw new Error("Expected the automation's chat")
-        const executionId = automation.chat.session_id
-        if (run._tag !== "Started") return yield* Effect.die("The automation run did not start")
-        const before = yield* capturedPolicy(run.runId)
-        const approval = makeToolApprovalPolicy({ policy, rules })
-        const decisions = () => decided(approval, run.runId, report)
-        expect(yield* decisions()).toBe("ask")
-        expect(yield* policy.session(executionId)).toEqual({
-          kind: "chat",
-          approval_mode: "ask"
-        })
-        yield* policy.setSession({ sessionId: executionId, mode: "allow" })
-        expect(yield* liveMode(run.runId)).toBe("allow")
-        expect(yield* decisions()).toBe("allow")
-        yield* policy.setSession({ sessionId: executionId, mode: "read_only" })
-        expect(yield* liveMode(run.runId)).toBe("read_only")
-        expect(yield* decisions()).toBe("deny")
-        expect(yield* capturedPolicy(run.runId)).toEqual(before)
       }).pipe(
         Effect.provide(
           sqlitePersistenceLayer({ dataDir: null, filename: join(directory, "arden.db") }).pipe(

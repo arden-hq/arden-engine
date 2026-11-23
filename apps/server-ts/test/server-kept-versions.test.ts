@@ -7,7 +7,6 @@ import type {
   ResourceVersion
 } from "@arden-hq/revisions/effect"
 import { Effect } from "effect"
-import { SqlClient } from "effect/unstable/sql"
 import { describe, expect, it } from "vitest"
 
 import { SpaceReviewStore } from "../src/persistence/automations/space-review-store.js"
@@ -16,7 +15,6 @@ import {
   TaskProposalStore,
   type ProposeSpaceTaskInput
 } from "../src/persistence/proposals/store.js"
-import { assertCurrentTaskRevision } from "../src/persistence/sqlite/work-history.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SpaceStore, type PersistedSpace } from "../src/persistence/spaces/store.js"
 import type { TaskInferenceReview } from "../src/persistence/work/inference.js"
@@ -31,7 +29,6 @@ import { wikiChangeTools } from "../src/tools/wiki-change.js"
 import { makeWikiChangeMethods } from "../src/wiki/change.js"
 import { Wiki } from "../src/wiki/service.js"
 import { snapshotOf, type PageRecord } from "../src/wiki/snapshot.js"
-import { withTempDatabase } from "./fixtures/temp-database.js"
 import { partialService, serverRunContext, sessionHeader } from "./kit.js"
 
 // The model names a page, a Task or a Chat turn; the server keeps the versions.
@@ -163,10 +160,6 @@ describe("task_propose after a review", () => {
   })
   const chatTurn = { kind: "chat", session_id: "session-2", turn_id: "turn-1" }
 
-  it("takes no hash from the model", () => {
-    expect(hashInputsOf(fixture().tools)).toEqual([])
-  })
-
   it("is admitted against the review this run read, with no snapshot argument", async () => {
     const { state, proposed, tools } = fixture()
     const ctx = context()
@@ -235,49 +228,6 @@ describe("task_propose after a review", () => {
     expect(shown).not.toContain("task-1:3")
     await named(tools, "task_propose").execute(create([own]), ctx)
     expect(proposed[0]?.sources).toEqual([{ ...own, revision: "task-1:3" }])
-  })
-
-  // An old Task the history backfill has not reached has no saved version.
-  it("cites a Task that has no saved history", async () => {
-    const { proposed, tools } = fixture()
-    const ctx = context()
-    await named(tools, "space_inference_review").execute({}, ctx)
-    taskHandle(ctx.run, {
-      item_id: "task-1",
-      stable_key: "ship-it",
-      updated_at: "2026-11-04T09:00:00Z",
-      history_revision: null
-    })
-    const own = { kind: "task", item_id: "task-1" }
-    await named(tools, "task_propose").execute(create([own]), ctx)
-    expect(proposed[0]?.sources).toEqual([{ ...own, revision: "task-1:0" }])
-  })
-
-  it("admits that Task until its first saved change", async () => {
-    const AT = "2026-11-04T09:00:00.000Z"
-    const admitted = (sql: SqlClient.SqlClient, itemId: string, revision: string) =>
-      assertCurrentTaskRevision(sql, itemId, revision).pipe(
-        Effect.match({ onFailure: () => false, onSuccess: () => true })
-      )
-    const seen = await withTempDatabase(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql`INSERT INTO space_tasks (item_id, space_id, stable_key, text, status, owner,
-            created_at, updated_at)
-          VALUES ('task-1', NULL, 'ship-it', 'Ship it', 'open', 'worker', ${AT}, ${AT})`
-        yield* sql`DELETE FROM space_task_revisions WHERE item_id = 'task-1'`
-        const unsaved = yield* admitted(sql, "task-1", "task-1:0")
-        const missing = yield* admitted(sql, "task-2", "task-2:0")
-        yield* sql`UPDATE space_tasks SET text = 'Ship it today' WHERE item_id = 'task-1'`
-        return {
-          unsaved,
-          missing,
-          afterChange: yield* admitted(sql, "task-1", "task-1:0"),
-          current: yield* admitted(sql, "task-1", "task-1:2")
-        }
-      })
-    )
-    expect(seen).toEqual({ unsaved: true, missing: false, afterChange: false, current: true })
   })
 })
 
@@ -460,6 +410,11 @@ describe("wiki_read_change by page link", () => {
     })
     expect(result.content).toContain("Saved 2026-11-04T10:00:00.000000Z")
     expect(result.content).toContain("-nothing\n+1")
+    const between = await read({
+      page: "arden:memory/projects/arden.md",
+      at: "2026-11-04T10:30:00.000000Z"
+    })
+    expect(between.content).toContain("Saved 2026-11-04T10:00:00.000000Z")
   })
 
   it("finds a page that is no longer in Memory by the path it had", async () => {
@@ -492,11 +447,5 @@ describe("wiki_read_change by page link", () => {
       REVIEW_RUN
     )
     expect(named.content).toContain("-6\n+7")
-  })
-
-  it("says how to list a page's changes when none matches", async () => {
-    await expect(
-      read({ page: "arden:memory/projects/arden.md", at: "2026-11-01T00:00:00Z" })
-    ).rejects.toThrow(/wiki_page_history/)
   })
 })

@@ -52,7 +52,7 @@ const saved = (database: DatabaseSync) => ({
 
 // The Storage page reads chat sizes from numbers that triggers keep. After
 // every kind of change they must equal a fresh count of the rows.
-it("saved chat sizes equal a recount after inserts, edits, moves and deletes", () => {
+it("saved chat sizes equal a recount after inserts, edits, moves of messages and runs, and deletes", () => {
   const database = new DatabaseSync(":memory:")
   try {
     for (const statement of databaseSchema.statements) database.exec(statement)
@@ -76,10 +76,15 @@ it("saved chat sizes equal a recount after inserts, edits, moves and deletes", (
            error_message = 'it broke' WHERE run_id = 'r2'`,
       `UPDATE sessions SET name = 'Renamed chat', metadata = '{"k":"v"}' WHERE session_id = 'a'`,
       `UPDATE sessions SET archived_at = '2026-09-02' WHERE session_id = 'b'`,
+      `UPDATE session_messages SET session_id = 'b' WHERE message_id = 'm1'`,
+      `UPDATE chat_runs SET session_id = 'b' WHERE run_id = 'r1'`,
       `DELETE FROM session_messages WHERE message_id = 'm2'`,
+      `DELETE FROM session_messages WHERE message_id = 'm1'`,
       `DELETE FROM chat_runs WHERE run_id = 'r2'`,
       `DELETE FROM session_messages WHERE session_id = 'c'`,
-      `DELETE FROM sessions WHERE session_id = 'c'`
+      `DELETE FROM sessions WHERE session_id = 'c'`,
+      `DELETE FROM chat_runs WHERE run_id = 'r1'`,
+      `DELETE FROM sessions WHERE session_id = 'b'`
     ]
     for (const step of steps) {
       database.exec(step)

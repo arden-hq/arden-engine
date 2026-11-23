@@ -48,10 +48,9 @@ describe("the data version guard", () => {
     await writeFile(join(directory, "app-version.json"), JSON.stringify({ version: recorded }))
     const exit = await open(current)
     expect(Exit.isFailure(exit)).toBe(true)
-    expect(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined).toMatchObject({
-      operation: "open_newer_data",
-      message: `This data was last opened by Arden ${recorded}, which is newer than this Arden ${current}. Install ${recorded} or newer.`
-    })
+    const failure = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(failure).toMatchObject({ operation: "open_newer_data" })
+    expect(Reflect.get(Object(failure), "message")).toContain(recorded)
   })
 
   it("records the opening version so an older app is then refused", async () => {

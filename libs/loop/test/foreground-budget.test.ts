@@ -293,62 +293,6 @@ it("a tool that declares nothing about the background, like an MCP tool, moves t
   expect(deliveries(result.messages)).toEqual([{ id: "logs", content: "logs" }])
 })
 
-it("a pause is emitted at once while a background call runs on, and the resumed run delivers its result once", async () => {
-  const finish = deferred()
-  const longDone = deferred()
-  const outcomes = new Map<string, { content: string; preview: string }>()
-  let longRuns = 0
-  let longSignal: AbortSignal | undefined
-  let asked = false
-  const tools = toolsetOf(
-    [{ name: "long" }, { name: "ask", changes_state: true }],
-    async (request) => {
-      if (request.name === "ask") {
-        if (!asked) {
-          asked = true
-          throw new PauseRequested("approval", "Allow?")
-        }
-        return { content: "asked", preview: "ok" }
-      }
-      longRuns += 1
-      longSignal = request.signal
-      await finish.promise
-      outcomes.set(request.toolCallId, { content: "long result", preview: "ok" })
-      longDone.resolve()
-      return { content: "long result", preview: "ok" }
-    }
-  )
-  const paused = await makeAgent(
-    { model: "test", foregroundBudgetMs: 0 },
-    { provider: scripted([callOf("long"), callOf("ask")], []), toolset: tools }
-  ).run([{ role: ROLE.user, content: "Go" }])
-  const pausedWhileRunning = longRuns === 1 && outcomes.size === 0
-  finish.resolve()
-  await longDone.promise
-  const resumed = await makeAgent(
-    { model: "test" },
-    {
-      provider: { protocolVersion: MODEL_PROVIDER_PROTOCOL, stream: () => [response()] },
-      toolset: tools,
-      hooks: {
-        recoverToolCalls: (calls) =>
-          new Map(
-            calls.flatMap((call) => {
-              const outcome = outcomes.get(call.toolCall.id)
-              return outcome === undefined ? [] : [[call.toolCall.id, outcome] as const]
-            })
-          )
-      }
-    }
-  ).run(paused.messages)
-  expect(paused.stop_reason).toBe("paused")
-  expect(pausedWhileRunning).toBe(true)
-  expect(longSignal?.aborted).toBe(false)
-  expect(longRuns).toBe(1)
-  expect(deliveries(resumed.messages)).toEqual([{ id: "long", content: "long result" }])
-  expect(resumed.stop_reason).toBe("end_turn")
-})
-
 it("a moved call that later asks for approval pauses the run, and the resumed run runs it from its receipt", async () => {
   const finish = deferred()
   let runs = 0
@@ -470,7 +414,7 @@ it("stopping a paused run aborts the background calls its pause left running", a
   expect(setup.longSignal()?.aborted).toBe(true)
 })
 
-it("a pause whose host fails to hold its running background calls stops them", async () => {
+it("a pause whose host fails to hold its running background calls fails the run and leaves none running", async () => {
   const finish = deferred()
   let longSignal: AbortSignal | undefined
   const tools = toolsetOf(

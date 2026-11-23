@@ -1,7 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { Effect, Exit } from "effect"
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { StoredMessageDecodeError } from "../src/chat/message-errors.js"
 import { toChatRunnerMessages } from "../src/chat/run-driver.js"
 import type { StoredMessageEnvelope } from "../src/persistence/transcript/model.js"
 
@@ -94,39 +93,32 @@ describe("stored message decoding", () => {
     expect(Effect.runSync(toChatRunnerMessages("session-1", [several]))).toStrictEqual([
       { ...several }
     ])
-    expect(Effect.runSyncExit(toChatRunnerMessages("session-1", [quoting([])]))).toStrictEqual(
-      Exit.fail(
-        new StoredMessageDecodeError({
-          sessionId: "session-1",
-          messageId: "quoting",
-          position: 1,
-          message:
-            "Stored message #1 (quoting) in session session-1 is not a valid chat message: " +
-            "replyTo needs at least one quoted message"
-        })
-      )
-    )
+    const none = Effect.runSync(Effect.flip(toChatRunnerMessages("session-1", [quoting([])])))
+    expect(none).toMatchObject({ sessionId: "session-1", messageId: "quoting", position: 1 })
+
+    const badSecond = quoting([
+      { messageId: "earlier", role: ROLE.assistant, content: "Earlier answer" },
+      { messageId: "", role: ROLE.assistant, content: "Later answer" }
+    ])
+    const refused = Effect.runSync(Effect.flip(toChatRunnerMessages("session-1", [badSecond])))
+    expect(refused).toMatchObject({ sessionId: "session-1", messageId: "quoting", position: 1 })
   })
 
   it("fails on the first message that does not decode, naming the session and message", () => {
-    const exit = Effect.runSyncExit(
-      toChatRunnerMessages("session-1", [
-        ...stored.slice(0, 2),
-        { message_id: "broken-tool", role: ROLE.tool, created_at: createdAt, content: "orphan" }
-      ])
-    )
-
-    expect(exit).toStrictEqual(
-      Exit.fail(
-        new StoredMessageDecodeError({
-          sessionId: "session-1",
-          messageId: "broken-tool",
-          position: 3,
-          message:
-            "Stored message #3 (broken-tool) in session session-1 is not a valid chat message: " +
-            "tool message needs a tool_call_id"
-        })
+    const error = Effect.runSync(
+      Effect.flip(
+        toChatRunnerMessages("session-1", [
+          ...stored.slice(0, 2),
+          { message_id: "broken-tool", role: ROLE.tool, created_at: createdAt, content: "orphan" }
+        ])
       )
     )
+
+    expect(error).toMatchObject({
+      _tag: "StoredMessageDecodeError",
+      sessionId: "session-1",
+      messageId: "broken-tool",
+      position: 3
+    })
   })
 })

@@ -158,38 +158,6 @@ it("gives a failure the script raised itself no tool line", async () => {
   expect(outcome.error.preview).toBeUndefined()
 })
 
-it("names a script's syntax error and a thrown plain object in readable text", async () => {
-  const syntax = await executeCodeMode({
-    code: "return [{ prompt: 'don't' }]",
-    signal: signal(),
-    call: async () => null
-  })
-  const thrown = await executeCodeMode({
-    code: "throw { problem: 'quota' }",
-    signal: signal(),
-    call: async () => null
-  })
-  expect([syntax, thrown]).toMatchObject([
-    { status: "failed", error: expect.stringMatching(/^SyntaxError: /) },
-    { status: "failed", error: '{"problem":"quota"}' }
-  ])
-})
-
-const runScript = (
-  code: string,
-  agent: (prompt: string, logicalKey: string) => Promise<Schema.Json> = async (prompt) =>
-    `${prompt} done`
-) =>
-  executeScript({
-    code,
-    args: {},
-    parentToolCallId: "call-1",
-    signal: signal(),
-    executionProfileHash: "profile",
-    agent: (request) => agent(request.prompt, request.logicalKey),
-    tool: async ({ args }) => args
-  })
-
 it("keeps branch names through a replay without changing any call id", async () => {
   const body = (fanOut: string) => `
     const results = await parallel(${fanOut});

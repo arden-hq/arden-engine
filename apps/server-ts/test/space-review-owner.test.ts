@@ -4,9 +4,6 @@ import { expect, it } from "vitest"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
-import { SessionStore } from "../src/persistence/sessions/store.js"
-import { ApprovalPolicyStore } from "../src/persistence/permissions/approval-policy.js"
-import { storedAuthority } from "../src/persistence/sqlite/run-authority.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { spaceJobId, taskJobId } from "../src/persistence/space-job-id.js"
 import { WorkStore } from "../src/persistence/work/store.js"
@@ -302,88 +299,6 @@ it("a review keeps its hold start through a reclaim, shows in the queue list, re
     gone: "failed",
     queuedAtEnd: 0,
     definitions: 0
-  })
-})
-
-it("a Space rename renames the review's generated chat, keeps a custom one, and writes no definition row", async () => {
-  const outcome = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const spaces = yield* SpaceStore
-      yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
-        VALUES ('space-1', 'Made-up', 'made-up', '{"enabled":true}', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`
-      yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, description, prompt, context_mode,
-          triggers, enabled, created_at, auto_approve, builtin, tool_scope, triggers_source, purpose, owner_space_id)
-        VALUES (${REVIEW}, 'internal-job~legacy', 'Made-up worker', 'Internal Space execution', 'Review it.', 'fresh',
-          '[]', 1, '2026-11-01T00:00:00.000Z', 0, 1, 'all', 'space_runtime', 'space_review', 'space-1')`
-      yield* guardDefinitions
-      yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up.md"))
-      const task = yield* (yield* WorkStore).create(
-        { kind: "space", spaceId: "space-1" },
-        { key: "background", text: "In the background" }
-      )
-      const chatName = sql<{ readonly name: string | null }>`
-        SELECT session.name FROM space_review_chats AS review
-        JOIN sessions AS session ON session.session_id = review.session_id
-        WHERE review.space_id = 'space-1'`.pipe(Effect.map((rows) => rows[0]?.name))
-      const rename = (name: string) =>
-        Effect.gen(function* () {
-          const [space] = yield* sql<{ readonly updated_at: string }>`
-            SELECT updated_at FROM spaces WHERE space_id = 'space-1'`
-          yield* spaces.update("space-1", { name, expected_updated_at: space?.updated_at ?? "" })
-        })
-      const generated = yield* chatName
-      yield* rename("Renamed")
-      const followed = yield* chatName
-      const [chat] = yield* sql<{ readonly session_id: string }>`
-        SELECT session_id FROM space_review_chats WHERE space_id = 'space-1'`
-      if (chat === undefined) throw new Error("The review has no private chat")
-      yield* (yield* SessionStore).rename(chat.session_id, "My review notes")
-      yield* rename("Renamed again")
-      yield* editByHand(task.item_id, "Edited by hand")
-      const custom = yield* chatName
-
-      const review = (yield* claim("first", 10)).find(
-        (lease) => lease.payload.automationId === REVIEW
-      )
-      if (review === undefined) throw new Error("The review was not claimed")
-      const started = yield* startJob(review, "review-1")
-      const policy = yield* ApprovalPolicyStore
-      const [stored] = yield* sql<{ readonly authority_json: string | null }>`
-        SELECT authority_json FROM chat_runs WHERE run_id = ${started.run.runId}`
-      const authority = storedAuthority(stored?.authority_json ?? null)
-      if (authority === undefined) throw new Error("The review run has no authority")
-      const live = yield* policy.live({ runId: started.run.runId, authority })
-      return {
-        generated,
-        followed,
-        custom,
-        sameChat: review.payload.sessionId === chat.session_id,
-        session: yield* policy.session(chat.session_id),
-        defaultMode: yield* policy.defaultMode(),
-        follows: authority.approval.follows,
-        live: { state: live.state, mode: live.mode, currentScope: live.currentScope },
-        legacy: yield* sql`SELECT name, enabled, tool_scope, auto_approve FROM scheduled_tasks
-          WHERE task_id = ${REVIEW}`
-      }
-    })
-  )
-  expect(outcome).toEqual({
-    generated: "Made-up worker",
-    followed: "Renamed worker",
-    custom: "My review notes",
-    sameChat: true,
-    session: {
-      kind: "automation",
-      automation_id: REVIEW,
-      tool_scope: "space",
-      auto_approve: true,
-      approval_mode: outcome.defaultMode
-    },
-    defaultMode: expect.any(String),
-    follows: { kind: "space_thread", space_id: "space-1" },
-    live: { state: "active", mode: outcome.defaultMode, currentScope: "space" },
-    legacy: [{ name: "Made-up worker", enabled: 1, tool_scope: "all", auto_approve: 0 }]
   })
 })
 

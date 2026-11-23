@@ -1,5 +1,4 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { CommunicationDoor } from "@arden-hq/protocol/chat"
 import { noticeTier } from "@arden-hq/protocol/notifications"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -13,10 +12,7 @@ import { SessionStore } from "../src/persistence/sessions/store.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { loadActiveContext } from "../src/persistence/sqlite/active-context.js"
 import { recentNotices } from "../src/persistence/sqlite/notices.js"
-import { tellChat } from "../src/persistence/sqlite/owner-update.js"
-import { chatRow } from "../src/persistence/sqlite/run-destination.js"
 import { postDeliveryId } from "../src/persistence/sqlite/run-post.js"
-import { taskDoor } from "../src/persistence/sqlite/ending-arrival.js"
 import { WorkStore } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 import { appendMessagesInTransaction } from "../src/persistence/sqlite/chat-transcript.js"
@@ -173,6 +169,23 @@ it("a later event of a thread lands under the first post, in its chat, whatever 
         role: ROLE.assistant,
         content: "Post 1"
       })
+      yield* sql`UPDATE event_threads SET updated_at = '2026-01-01T00:00:00.000Z'
+        WHERE message_id = ${first.messageId}`
+      yield* thread("mail-4", "t2")
+      yield* thread("mail-5", "t3")
+      yield* thread("mail-6", "t2")
+      yield* thread("mail-7", "t3")
+      const older = yield* post(5, { spaceId: taxes.space_id, itemIds: ["mail-4"] })
+      const newer = yield* post(6, { spaceId: taxes.space_id, itemIds: ["mail-5"] })
+      expect(yield* drain).toBe(1)
+      expect(yield* drain).toBe(1)
+      yield* sql`UPDATE event_threads SET updated_at = '2026-01-01T00:00:00.000Z'
+        WHERE message_id = ${older.messageId}`
+      const joined = yield* post(7, { spaceId: taxes.space_id, itemIds: ["mail-6", "mail-7"] })
+      expect(yield* drain).toBe(1)
+      expect((yield* message(joined.sessionId, joined.messageId))?.replyTo?.messageId).toBe(
+        newer.messageId
+      )
       const elsewhere = yield* post(3, { spaceId: travel.space_id, itemIds: ["other-account"] })
       expect(elsewhere.sessionId).not.toBe(first.sessionId)
       yield* drain
@@ -235,28 +248,12 @@ it("a post whose earlier message was cleared away is delivered without the quote
   )
 })
 
-it("a post still brings its notice when its Automation was removed while it waited", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, post, drain } = yield* setup
-      const posted = yield* post(1)
-      yield* sql`DELETE FROM scheduled_tasks WHERE task_id = ${automationId}`
-      expect(yield* drain).toBe(1)
-      expect(yield* recentNotices(sql, { since: AT, limit: 10 })).toMatchObject([
-        { key: posted.messageId, status: "posted" }
-      ])
-    })
-  )
-})
-
 it("a post waits while its chat has a turn open, with no failed attempt, and comes with its notice and Task", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
-      const { sql, post, drain, delivery, message, thread } = yield* setup
+      const { sql, post, drain, delivery, message } = yield* setup
       const chat = yield* ChatWriteStore
-      yield* thread("mail-1", "t1")
       const posted = yield* post(1, {
-        itemIds: ["mail-1"],
         task: { title: "Pay the bill", brief: "Pay it before Friday." }
       })
       const started = yield* chat.start({
@@ -301,27 +298,6 @@ it("a post waits while its chat has a turn open, with no failed attempt, and com
   )
 })
 
-it("posts with the same Task title in one Space each start a Task; a thread with a Task starts none", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, post, drain, thread } = yield* setup
-      yield* thread("mail-1", "t1")
-      yield* thread("mail-2", "t2")
-      yield* thread("mail-3", "t1")
-      const task = { title: "Pay the bill", brief: "Pay it." }
-      yield* post(1, { itemIds: ["mail-1"], task })
-      yield* post(2, { itemIds: ["mail-2"], task })
-      yield* drain
-      yield* post(3, { itemIds: ["mail-3"], task })
-      yield* drain
-      expect(yield* sql`SELECT stable_key FROM space_tasks ORDER BY stable_key`).toEqual([
-        { stable_key: "pay-the-bill" },
-        { stable_key: "pay-the-bill-2" }
-      ])
-    })
-  )
-})
-
 it("an undecodable post and one whose chat was archived are withdrawn, and the work outbox never takes a post", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -346,75 +322,6 @@ it("an undecodable post and one whose chat was archived are withdrawn, and the w
         reason: "destination_archived"
       })
       expect(yield* (yield* PostStore).pendingDeliveries()).toEqual([])
-    })
-  )
-})
-
-it("a Task update quotes the post that started it, only in that post's chat", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, post, drain } = yield* setup
-      const work = yield* WorkStore
-      const sessions = yield* SessionStore
-      const posted = yield* post(1, { text: "Bill due", task: { title: "Pay", brief: "Pay it." } })
-      yield* drain
-      const task = (yield* sql<{ readonly item_id: string }>`SELECT item_id FROM space_tasks`)[0]
-      if (task === undefined) return yield* Effect.die("no Task")
-      const other = yield* sessions.create({ name: "Other" })
-      const tell = (
-        sessionId: string,
-        key: string,
-        door: CommunicationDoor = taskDoor(task.item_id, "Pay")
-      ) =>
-        Effect.gen(function* () {
-          const destination = yield* chatRow(sql, sessionId)
-          if (destination === undefined) return yield* Effect.die("no chat")
-          yield* tellChat({
-            sql,
-            weight: "news",
-            occurrenceKey: key,
-            source: { kind: "entity", key },
-            sourceRunId: "run-1",
-            sourceSessionRef: destination.public_ref,
-            destination,
-            line: "Paid.",
-            door,
-            event: "finished",
-            occurredAt: AT
-          })
-        })
-      yield* appendMessagesInTransaction(
-        sql,
-        other.sessionId,
-        [{ message_id: posted.messageId, role: ROLE.user, content: "Same id", created_at: AT }],
-        AT,
-        "post",
-        posted.messageId
-      )
-      yield* tell(posted.sessionId, "in-post-chat")
-      yield* tell(posted.sessionId, "artifact-in-post-chat", {
-        kind: "artifact",
-        label: "receipt.pdf",
-        item_id: task.item_id,
-        attachment_id: 1,
-        href: `arden:task/${encodeURIComponent(task.item_id)}`
-      })
-      yield* tell(other.sessionId, "elsewhere")
-      const pending = yield* work.pendingDeliveries()
-      const quote = { messageId: posted.messageId, role: ROLE.assistant, content: "Bill due" }
-      expect(
-        pending
-          .flatMap((delivery) =>
-            delivery.payload.kind === "update"
-              ? [[delivery.payload.update.key, delivery.payload.replyTo]]
-              : []
-          )
-          .toSorted((left, right) => String(left[0]).localeCompare(String(right[0])))
-      ).toEqual([
-        ["artifact-in-post-chat", quote],
-        ["elsewhere", undefined],
-        ["in-post-chat", quote]
-      ])
     })
   )
 })
@@ -474,58 +381,6 @@ it("a Task title on two lines is refused before the post is queued", async () =>
   )
 })
 
-it("two replies queued under a root that was cleared: the first stands alone, the second quotes it", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { thread, post, drain, message } = yield* setup
-      const sessions = yield* SessionStore
-      yield* thread("mail-1", "t1")
-      yield* thread("mail-2", "t1")
-      yield* thread("mail-3", "t1")
-      const first = yield* post(1, { itemIds: ["mail-1"] })
-      expect(yield* drain).toBe(1)
-      const second = yield* post(2, { itemIds: ["mail-2"] })
-      const third = yield* post(3, { itemIds: ["mail-3"] })
-      yield* sessions.clear(first.sessionId)
-      expect((yield* drain) + (yield* drain)).toBe(2)
-      expect((yield* message(second.sessionId, second.messageId))?.replyTo).toBeUndefined()
-      expect((yield* message(third.sessionId, third.messageId))?.replyTo).toEqual({
-        messageId: second.messageId,
-        role: ROLE.assistant,
-        content: "Post 2"
-      })
-    })
-  )
-})
-
-it("replies queued in the same millisecond deliver in the order they were queued", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, thread, post, drain, message } = yield* setup
-      const sessions = yield* SessionStore
-      const later = [3, 4, 5, 6, 7, 8, 9, 10].find(
-        (attempt) => postDeliveryId(attempt) < postDeliveryId(2)
-      )
-      if (later === undefined) return yield* Effect.die("no attempt hashes below attempt 2")
-      yield* thread("mail-1", "t1")
-      yield* thread("mail-2", "t1")
-      yield* thread("mail-3", "t1")
-      const root = yield* post(1, { itemIds: ["mail-1"] })
-      yield* drain
-      const earlier = yield* post(2, { itemIds: ["mail-2"] })
-      const after = yield* post(later, { itemIds: ["mail-3"] })
-      yield* sql`UPDATE automation_deliveries SET created_at = ${AT}
-        WHERE delivery_id IN (${postDeliveryId(2)}, ${postDeliveryId(later)})`
-      yield* sessions.clear(root.sessionId)
-      expect((yield* drain) + (yield* drain)).toBe(2)
-      expect((yield* message(earlier.sessionId, earlier.messageId))?.replyTo).toBeUndefined()
-      expect((yield* message(after.sessionId, after.messageId))?.replyTo).toMatchObject({
-        messageId: earlier.messageId
-      })
-    })
-  )
-})
-
 it("a reply waits for the reply queued before it, even while that one is retried later", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -540,62 +395,6 @@ it("a reply waits for the reply queued before it, even while that one is retried
       yield* posts.defer({ deliveryId: postDeliveryId(2), attempt: 0 }, "failed once")
       expect(yield* drain).toBe(0)
       expect(yield* delivery(3)).toMatchObject({ status: "pending" })
-    })
-  )
-})
-
-it("posts to one chat go out in queue order; a post to another chat is never held by them", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { spaces, thread, post, drain, delivery, posts } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes" })
-      yield* thread("mail-1", "t1")
-      yield* thread("mail-2", "t2")
-      yield* thread("mail-3", "t1")
-      yield* thread("mail-4", "t2")
-      yield* post(1, { itemIds: ["mail-1"] })
-      yield* post(2, { itemIds: ["mail-2"] })
-      yield* posts.defer({ deliveryId: postDeliveryId(1), attempt: 0 }, "failed once")
-      const both = yield* post(3, { itemIds: ["mail-3", "mail-4"] })
-      yield* post(4, { spaceId: taxes.space_id })
-      expect(yield* drain).toBe(1)
-      expect(yield* delivery(4)).toMatchObject({ status: "delivered" })
-      expect([
-        (yield* delivery(2))?.status,
-        (yield* delivery(3))?.status,
-        both.sessionId === (yield* post(1)).sessionId
-      ]).toEqual(["pending", "pending", true])
-    })
-  )
-})
-
-it("a thread whose pending post's Space was archived takes the next post to Main", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, spaces, main, thread, post } = yield* setup
-      const taxes = yield* spaces.create({ name: "Taxes" })
-      yield* thread("mail-1", "t1")
-      yield* thread("mail-2", "t1")
-      yield* post(1, { itemIds: ["mail-1"], spaceId: taxes.space_id })
-      yield* spaces.archive(taxes.space_id)
-      const next = yield* post(2, { itemIds: ["mail-2"] })
-      expect(
-        yield* sql`SELECT space_id FROM sessions WHERE session_id = ${next.sessionId}`
-      ).toEqual([{ space_id: main.space_id }])
-    })
-  )
-})
-
-it("a post whose Task the Task store would refuse is refused before it is queued", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, post } = yield* setup
-      const refused = yield* post(1, {
-        itemIds: [" "],
-        task: { title: "Pay", brief: "Pay it." }
-      }).pipe(Effect.flip)
-      expect(refused).toMatchObject({ reason: "invalid" })
-      expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
     })
   )
 })

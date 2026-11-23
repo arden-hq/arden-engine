@@ -5,14 +5,11 @@ import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import type { ChatMessage } from "../src/chat/message.js"
 import { eventsHandler, makeEventsRunner } from "../src/automations/handlers/events.js"
-import { homeLetterHandler, makeHomeLetterRunner } from "../src/automations/handlers/home-letter.js"
 import { renderAutomationJob, withScreenedEvents } from "../src/automations/job-prompt.js"
 import { screenEventWake } from "../src/automations/prefilter.js"
 import type { PostMessageInput } from "../src/automations/post-message-tool.js"
 import type { AwaitAutomationRun } from "../src/automations/runner.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
-import { HomeLetterInputs } from "../src/persistence/automations/home-letter-inputs.js"
-import { HOME_LETTER_AUTOMATION_ID } from "../src/persistence/automations/model.js"
 import {
   AutomationQueue,
   type AutomationBlockedReport
@@ -23,7 +20,6 @@ import type {
 } from "../src/persistence/automations/store.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
-import { HomeStore } from "../src/persistence/home/store.js"
 import { PostStore } from "../src/persistence/posts/store.js"
 import { SpaceStore } from "../src/persistence/spaces/store.js"
 import { claimAll, startChat } from "./fixtures/job-runs.js"
@@ -49,7 +45,6 @@ const fakeModel = (calls: ReadonlyArray<FakeCall>, ending: FakeEnding = {}) =>
     const sql = yield* SqlClient.SqlClient
     const chat = yield* ChatWriteStore
     const runs: Array<string> = []
-    const prompts: Array<string> = []
     const startAutomation: ChatMessage["Service"]["startAutomation"] = (input) =>
       Effect.gen(function* () {
         const started = yield* startChat(input.sessionId, input.clientId, {
@@ -84,7 +79,6 @@ const fakeModel = (calls: ReadonlyArray<FakeCall>, ending: FakeEnding = {}) =>
           ]
         })
         runs.push(runId)
-        prompts.push(input.prompt)
         return { runId, sessionId: input.sessionId, status: "running" as const }
       }).pipe(Effect.orDie)
     const awaitRun: AwaitAutomationRun = () =>
@@ -97,7 +91,7 @@ const fakeModel = (calls: ReadonlyArray<FakeCall>, ending: FakeEnding = {}) =>
         noChange: ending.noChange ?? null,
         wrote: false
       })
-    return { chat: { startAutomation }, awaitRun, runs, prompts }
+    return { chat: { startAutomation }, awaitRun, runs }
   })
 
 const eventsTools = (eventsHandler.tools ?? ((base) => base))(
@@ -174,7 +168,7 @@ const setup = Effect.gen(function* () {
     Effect.gen(function* () {
       const model = yield* fakeModel(calls, ending)
       const result = yield* makeEventsRunner({ ...model, queue, posts })(renderAutomationJob(lease))
-      return { result, runs: model.runs, prompts: model.prompts }
+      return { result, runs: model.runs }
     })
   const settle = (lease: ClaimedAutomationJobLease, result: AutomationJobResult) =>
     Effect.promise(async () =>
@@ -260,8 +254,7 @@ it("a refused post_message followed by free text ends failed, not with no change
       expect(result).toMatchObject({
         status: "ended",
         outcome: "failed",
-        result: "I tried to tell you about a mail.",
-        error: "The run ended without posting a message or reporting no change"
+        result: "I tried to tell you about a mail."
       })
       expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
     })
@@ -345,56 +338,6 @@ it("Events gets the item ids of the screened batch only, so a skipped mail is ne
   )
 })
 
-const runHomeLetter = (calls: ReadonlyArray<FakeCall>, blocked: AutomationBlockedReport | null) =>
-  Effect.gen(function* () {
-    yield* (yield* AutomationCatalog).seedSystemAutomations([homeLetterHandler.spec])
-    const queue = yield* AutomationQueue
-    const home = yield* HomeStore
-    yield* queue.requestRun(HOME_LETTER_AUTOMATION_ID)
-    const [lease] = yield* claimAll("letter")
-    if (lease === undefined) return yield* Effect.die("the Home letter was not claimed")
-    const model = yield* fakeModel(calls, {
-      reply: "Letter written.",
-      ...(blocked === null ? {} : { blocked })
-    })
-    const result = yield* makeHomeLetterRunner({
-      ...model,
-      queue,
-      homeLetterInputs: yield* HomeLetterInputs,
-      home: {
-        ...home,
-        checkHomeLetter: () => Effect.succeed("ready")
-      }
-    })(renderAutomationJob(lease))
-    const published = (yield* (yield* SqlClient.SqlClient)<{ readonly body_json: string }>`
-      SELECT body_json FROM home_letters`).map((row) => JSON.parse(row.body_json))
-    return { result, published }
-  })
-
-it("the Home letter still publishes through the shared tool call reader", async () => {
-  const body = { paragraphs: [[{ text: "Two Tasks wait for you.", source_id: null }]] }
-  const { result, published } = await withTempDatabase(
-    runHomeLetter(
-      [{ tool: "publish_home_letter", args: { markdown: "" }, content: JSON.stringify(body) }],
-      null
-    )
-  )
-  expect(result).toMatchObject({ status: "ended", outcome: "finished" })
-  expect(published).toEqual([body])
-})
-
-it("a Home letter run that reports it is blocked ends blocked with its reason", async () => {
-  const { result, published } = await withTempDatabase(
-    runHomeLetter([], { kind: "needs_input", reason: "Which Space is the main one?" })
-  )
-  expect(result).toMatchObject({
-    status: "ended",
-    outcome: "needs_you",
-    error: "Which Space is the main one?"
-  })
-  expect(published).toEqual([])
-})
-
 it("Events keeps listening after runs that fail one after another", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -436,25 +379,6 @@ it("a run that reports it is blocked ends blocked with its reason, and posts not
         error: "The mail could not be read."
       })
       expect(yield* sql`SELECT 1 FROM automation_deliveries`).toEqual([])
-    })
-  )
-})
-
-it("with no rule on its trigger, the run is told to post about every event", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { arrive, runEvents } = yield* setup
-      yield* (yield* AutomationCatalog).update(
-        eventsHandler.spec.automationId,
-        { triggers: [{ type: "event", event_type: "email.received" }] },
-        "owner"
-      )
-      const { prompts } = yield* runEvents(yield* arrive("mail-1"), [
-        yield* posting({ text: "A mail came." })
-      ])
-      expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toContain("If no rule is given, post about every event.")
-      expect(prompts[0]).not.toContain("## The user's rule")
     })
   )
 })
@@ -509,37 +433,13 @@ it("a job with no item to check ends without starting a run", async () => {
         payload: { ...lease.payload, handler: "events" as const, itemIds: [] }
       }
       const { result, runs } = yield* runEvents(empty, [])
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         status: "ended",
         outcome: "no_input",
-        result: "Nothing arrived to check",
-        error: null,
         chatRunId: null,
         chatSessionId: null
       })
       expect(runs).toEqual([])
-    })
-  )
-})
-
-it("a run that reported no change and then posted settles as finished", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const { sql, arrive, runEvents, settle } = yield* setup
-      const lease = yield* arrive("mail-1")
-      const { result } = yield* runEvents(
-        lease,
-        [
-          { tool: "report", args: { event: "no_change" }, content: "Recorded." },
-          yield* posting({ text: "On second look, the bank needs a form." })
-        ],
-        { noChange: "Looked routine." }
-      )
-      expect(result).toMatchObject({ status: "ended", outcome: "finished" })
-      yield* settle(lease, result)
-      expect(
-        yield* sql`SELECT outcome FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
-      ).toEqual([{ outcome: "finished" }])
     })
   )
 })

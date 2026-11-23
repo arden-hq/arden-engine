@@ -84,7 +84,7 @@ export const startsDrain = ({
 }): boolean => free > plan.reservePages && (trigger === "requested" || free >= plan.startPages)
 
 /** Whether a pass that has run `batches` batches for `elapsedMillis` starts another. */
-export const passContinues = ({
+const passContinues = ({
   batches,
   elapsedMillis,
   plan
@@ -113,7 +113,7 @@ export interface NextStep {
 
 const idle: DrainState = { kind: "idle" }
 
-export const afterPass = (state: DrainState, pass: PassResult): NextStep => {
+const afterPass = (state: DrainState, pass: PassResult): NextStep => {
   if (pass.end === "done") return { state: idle, delay: IDLE_INTERVAL, checkpoint: "truncate" }
   if (pass.end === "yielded" && pass.released === 0) {
     const stalls = state.kind === "draining" ? state.stalls + 1 : 1

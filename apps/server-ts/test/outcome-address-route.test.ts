@@ -5,6 +5,7 @@ import { expect, it } from "vitest"
 import type { EndedAutomationRun } from "../src/persistence/sqlite/automation-run-outcome.js"
 import { reconcileEndings, recordEnding } from "../src/persistence/sqlite/run-ending.js"
 import { recordTell } from "../src/persistence/sqlite/run-tell.js"
+import { TELL_LIMIT } from "../src/persistence/work/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
 
 const T = "2026-11-20T08:00:00.000Z"
@@ -154,115 +155,181 @@ const occurrence = (runId: string, id: number): EndedAutomationRun => ({
   skip: null
 })
 
-it("records where each run's ending and tells go, and replays stored endings", async () => {
-  const capture = await withTempDatabase(
+const inDatabase = <A>(use: (sql: SqlClient.SqlClient) => Effect.Effect<A, unknown, never>) =>
+  withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* seed(sql)
-      const endings: Record<string, unknown> = {}
-      for (const [run] of runs.filter(([run]) => !run.startsWith("r-occ")))
-        endings[run] = yield* recordEnding(sql, completed(run, `Result of ${run}.`))
-      endings["r-missing"] = yield* recordEnding(sql, completed("r-missing", "Lost."))
-      endings["r-occ-urgent"] = yield* recordEnding(sql, {
+      return yield* use(sql)
+    }).pipe(Effect.provide(TestClock.layer()))
+  )
+
+const deliveriesTo = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{
+    readonly payload: string
+  }>`SELECT payload FROM automation_deliveries ORDER BY delivery_id`.pipe(
+    Effect.map((rows) =>
+      rows
+        .map((row) => JSON.parse(row.payload) as Record<string, unknown>)
+        .filter(
+          (payload) =>
+            payload["sessionId"] === sessionId || payload["destinationSessionId"] === sessionId
+        )
+    )
+  )
+
+const resultsFor = (payloads: ReadonlyArray<Record<string, unknown>>) =>
+  payloads
+    .filter((payload) => payload["kind"] === "result")
+    .map((payload) => payload["runIds"])
+    .toSorted()
+
+it("a worker's result goes to the chat that started it, once, however often endings are replayed", async () => {
+  const delivered = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      for (const run of ["r-agent-work", "r-agent-research", "r-agent-code"]) {
+        yield* recordEnding(sql, completed(run, `Result of ${run}.`))
+        yield* recordEnding(sql, completed(run, `Result of ${run}.`))
+      }
+      yield* reconcileEndings(sql)
+      yield* reconcileEndings(sql)
+      return resultsFor(yield* deliveriesTo(sql, "owner-chat"))
+    })
+  )
+  expect(delivered).toEqual([["r-agent-code"], ["r-agent-research"], ["r-agent-work"]])
+})
+
+it("a chat's own run, and a run whose chat has other business, deliver nothing", async () => {
+  const delivered = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      yield* recordEnding(sql, completed("r-own", "Result of r-own."))
+      yield* recordEnding(sql, completed("r-sender", "Result of r-sender."))
+      yield* recordEnding(sql, completed("r-agent-script", "Result of r-agent-script."))
+      yield* reconcileEndings(sql)
+      return [
+        ...(yield* deliveriesTo(sql, "owner-chat")),
+        ...(yield* deliveriesTo(sql, "other-chat"))
+      ]
+    })
+  )
+  expect(delivered).toEqual([])
+})
+
+it("an Automation's result goes to the chat it is bound to now", async () => {
+  const delivered = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      yield* recordEnding(sql, completed("r-move", "Result of r-move."))
+      yield* sql`UPDATE scheduled_tasks SET thread_id = 'thread-b' WHERE task_id = 'auto-move'`
+      yield* reconcileEndings(sql)
+      yield* reconcileEndings(sql)
+      return {
+        moved: (yield* deliveriesTo(sql, "thread-b")).length,
+        old: (yield* deliveriesTo(sql, "thread-a")).length
+      }
+    })
+  )
+  expect(delivered).toEqual({ moved: 1, old: 0 })
+})
+
+it("a run with a corrupt context still ends: a worker tells its parent, a chat run says nothing", async () => {
+  const outcome = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      const worker = yield* recordEnding(sql, completed("r-agent-damaged", "Lost."))
+      const plain = yield* recordEnding(sql, completed("r-plain-damaged", "Lost."))
+      return {
+        worker: worker?.status,
+        plain: plain?.status,
+        parent: resultsFor(yield* deliveriesTo(sql, "owner-chat")),
+        own: yield* deliveriesTo(sql, "other-chat")
+      }
+    })
+  )
+  expect(outcome).toEqual({
+    worker: "finished",
+    plain: "finished",
+    parent: [["r-agent-damaged"]],
+    own: []
+  })
+})
+
+it("an occurrence's ending takes the Automation's own purpose unless it asks for more than system", async () => {
+  const purposes = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      const userAutomationAsSystem = yield* recordEnding(sql, {
         kind: "occurrence",
         purpose: "system",
-        run: occurrence("r-occ-urgent", 11)
+        run: occurrence("r-auto-once", 11)
       })
-      endings["r-occ-override"] = yield* recordEnding(sql, {
+      const systemAsUserAutomation = yield* recordEnding(sql, {
         kind: "occurrence",
         purpose: "user_automation",
         run: occurrence("r-occ-override", 12)
       })
-      endings["r-agent-work again"] = yield* recordEnding(
-        sql,
-        completed("r-agent-work", "Result of r-agent-work.")
-      )
-      const tells: Record<string, unknown> = {}
-      for (const run of [
-        "r-own",
-        "r-sender",
-        "r-auto-once",
-        "r-system",
-        "r-task",
-        "r-agent-work",
-        "r-agent-script",
-        "r-agent-damaged",
-        "r-plain-damaged",
-        "r-archived",
-        "r-missing"
-      ])
-        tells[run] = yield* recordTell(sql, {
-          runId: run,
-          toolCallId: "tell-1",
-          text: `Note from ${run}.`
-        })
-      tells["r-agent-work again"] = yield* recordTell(sql, {
-        runId: "r-agent-work",
-        toolCallId: "tell-1",
-        text: "Note from r-agent-work."
+      const systemAsSystem = yield* recordEnding(sql, {
+        kind: "occurrence",
+        purpose: "system",
+        run: occurrence("r-occ-urgent", 13)
       })
-      yield* sql`UPDATE scheduled_tasks SET thread_id = 'thread-b' WHERE task_id = 'auto-move'`
-      yield* reconcileEndings(sql)
-      yield* reconcileEndings(sql)
-      const rows = {
-        endings: yield* sql`SELECT * FROM run_endings ORDER BY run_id`,
-        tells: yield* sql`SELECT * FROM run_tells ORDER BY run_id, n`,
-        deliveries: (yield* sql<{
-          readonly delivery_id: string
-          readonly subject: string
-          readonly body: string
-          readonly payload: string
-          readonly status: string
-          readonly created_at: string
-          readonly communication_sequence: number | null
-        }>`SELECT delivery_id, subject, body, payload, status, created_at, communication_sequence
-          FROM automation_deliveries ORDER BY delivery_id`).map((row) => ({
-          ...row,
-          payload: JSON.parse(row.payload)
-        }))
-      }
-      return { endings, tells, rows }
-    }).pipe(Effect.provide(TestClock.layer()))
+      return [
+        userAutomationAsSystem?.purpose,
+        systemAsUserAutomation?.purpose,
+        systemAsSystem?.purpose
+      ]
+    })
   )
-  const ending = (run: string) =>
-    (capture.rows.endings as ReadonlyArray<Record<string, unknown>>).find(
-      (row) => row["run_id"] === run
-    )
-  const deliveriesTo = (sessionId: string) =>
-    capture.rows.deliveries.filter(
-      (row) => row.payload.sessionId === sessionId || row.payload.destinationSessionId === sessionId
-    )
-  const kinds = (sessionId: string) =>
-    deliveriesTo(sessionId)
-      .map(
-        (row) =>
-          `${row.payload.kind}:${JSON.stringify(row.payload.runIds ?? row.payload.sourceRunId ?? row.payload.source)}`
-      )
-      .toSorted()
-  expect(kinds("owner-chat")).toEqual([
-    'result:["r-agent-code"]',
-    'result:["r-agent-damaged"]',
-    'result:["r-agent-damaged"]',
-    'result:["r-agent-research"]',
-    'result:["r-agent-work"]',
-    'result:["r-agent-work"]'
-  ])
-  expect(ending("r-agent-script")?.["place_kind"]).toBe("sender")
-  expect(ending("r-agent-damaged")).toMatchObject({ place_kind: "parent", detail: "damaged" })
-  expect(ending("r-plain-damaged")).toMatchObject({
-    place_kind: "own",
-    delivery_error: "The run's context is corrupt"
+  expect(purposes).toEqual(["user_automation", "user_automation", "system"])
+})
+
+it("an ending the chat already shows as an event is not shown a second time", async () => {
+  const shown = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      yield* sql`INSERT INTO entity_events (key, entity, entity_id, event, run_id, text, place,
+          place_kind, occurred_at, shown)
+        VALUES ('twin:1', 'task', 'task-1', 'done', 'r-move', 'Done.', 'thread-a', 'chat',
+          ${ENDED}, 1)`
+      const plain = yield* recordEnding(sql, completed("r-auto-once", "Result of r-auto-once."))
+      const twinned = yield* recordEnding(sql, completed("r-move", "Result of r-move."))
+      return [plain?.shown, twinned?.shown]
+    })
+  )
+  expect(shown).toEqual([true, false])
+})
+
+it("a run tells its chat, once per call, up to a limit; a chat's own run has no one to tell", async () => {
+  const outcome = await inDatabase((sql) =>
+    Effect.gen(function* () {
+      const tell = (run: string, call: string) =>
+        recordTell(sql, { runId: run, toolCallId: call, text: `Note ${call}.` })
+      const first = yield* tell("r-agent-work", "call-1")
+      const again = yield* tell("r-agent-work", "call-1")
+      const own = yield* tell("r-own", "call-1")
+      const sender = yield* tell("r-sender", "call-1")
+      const automation = yield* tell("r-auto-once", "call-1")
+      const told = [first.kind]
+      for (let call = 2; call <= TELL_LIMIT + 1; call += 1)
+        told.push((yield* tell("r-agent-work", `call-${call}`)).kind)
+      return {
+        first,
+        again,
+        own: own.kind,
+        sender: sender.kind,
+        automation,
+        told,
+        toParent: (yield* deliveriesTo(sql, "owner-chat")).filter(
+          (payload) => payload["progress"] === true
+        ).length,
+        toAutomationChat: (yield* deliveriesTo(sql, "thread-a")).length
+      }
+    })
+  )
+  expect(outcome).toMatchObject({
+    first: { kind: "told", chatId: "owner-chat" },
+    again: { kind: "again", chatId: "owner-chat" },
+    own: "refused",
+    sender: "refused",
+    automation: { kind: "told", chatId: "thread-a" },
+    told: [...Array.from({ length: TELL_LIMIT }, () => "told"), "refused"],
+    toParent: TELL_LIMIT,
+    toAutomationChat: 1
   })
-  expect(ending("r-unrecorded")?.["place_kind"]).toBe("own")
-  expect(capture.endings["r-missing"]).toBeUndefined()
-  expect(ending("r-occ-urgent")?.["purpose"]).toBe("system")
-  expect(ending("r-occ-override")?.["purpose"]).toBe("user_automation")
-  expect(ending("r-system")?.["purpose"]).toBe("system")
-  expect(ending("r-move")?.["place"]).toBe("thread-a")
-  expect(deliveriesTo("thread-b").length).toBe(1)
-  expect(
-    deliveriesTo("thread-a").some((row) => JSON.stringify(row.payload).includes("r-move"))
-  ).toBe(false)
-  expect(ending("r-task")?.["shown"]).toBe(0)
-  expect(capture.tells["r-agent-work again"]).toMatchObject({ kind: "again", n: 1 })
 })

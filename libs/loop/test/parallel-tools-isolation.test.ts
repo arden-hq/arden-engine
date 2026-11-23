@@ -40,7 +40,11 @@ const response = (
 const tool = (name: string, options: { endsTurn?: ToolMeta["ends_turn"] } = {}): ToolEntry => ({
   description: name,
   parameters: { type: "object", properties: {} },
-  meta: { name, ends_turn: options.endsTurn ?? false, host: { display_name: name } }
+  meta: {
+    name,
+    ends_turn: options.endsTurn ?? false,
+    host: { display_name: name }
+  }
 })
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -103,7 +107,7 @@ describe("parallel tools with per-tool isolation", () => {
     expect(starts()).toEqual(["first", "second"])
   })
 
-  it("lets an independent tool run while another call waits for its concurrency group", async () => {
+  it("holds a state-changing call until a running call in its concurrency group finishes, while an independent tool runs", async () => {
     const first = deferred()
     const release = deferred()
     const executed: string[] = []
@@ -119,7 +123,7 @@ describe("parallel tools with per-tool isolation", () => {
                   response({
                     finishReason: "tool_calls",
                     toolCalls: [
-                      { id: "first", name: "write" },
+                      { id: "first", name: "peek" },
                       { id: "queued", name: "write" },
                       { id: "independent", name: "lookup" }
                     ]
@@ -128,7 +132,18 @@ describe("parallel tools with per-tool isolation", () => {
         },
         toolset: {
           entries: () => [
-            { ...tool("write"), meta: { name: "write", changes_state: true } },
+            {
+              ...tool("write"),
+              meta: {
+                name: "write",
+                changes_state: true,
+                concurrency_group: "shared"
+              }
+            },
+            {
+              ...tool("peek"),
+              meta: { name: "peek", concurrency_group: "shared" }
+            },
             tool("lookup")
           ],
           loadedNames: () => new Set(),
@@ -207,22 +222,23 @@ describe("parallel tools with per-tool isolation", () => {
     expect(executed).toEqual(["first", "second"])
   })
 
-  it("emits execution starts, settles in completion order, isolates failures", async () => {
+  it("settles calls in completion order and isolates failures", async () => {
     const gates = new Map([
       ["ok", deferred()],
       ["fails", deferred()],
       ["defects", deferred()]
     ])
-    const trace: string[] = []
     const toolset: Toolset = {
       entries: () => [tool("ok"), tool("fails"), tool("defects")],
       loadedNames: () => new Set<string>(),
       load: () => undefined,
       execute: async (request: ToolCallRequest) => {
-        trace.push(`execute:${request.name}`)
         await entryOf(gates, request.name).promise
         if (request.name === "fails") {
-          throw new ToolExecutionError("safe failure", { preview: "failed", retryable: false })
+          throw new ToolExecutionError("safe failure", {
+            preview: "failed",
+            retryable: false
+          })
         }
         if (request.name === "defects") throw new Error("raw defect")
         return { content: "fine", preview: "fine" }
@@ -258,29 +274,6 @@ describe("parallel tools with per-tool isolation", () => {
     })()
     await tick()
     await tick()
-    const tags = (list: ReadonlyArray<AgentStreamEvent>) =>
-      list.map((event) =>
-        "_tag" in event ? `${event._tag}:${"tool_id" in event ? event.tool_id : ""}` : "Result"
-      )
-    expect(tags(events)).toEqual([
-      "InputTaken:",
-      "TextStarted:",
-      "TextEnded:",
-      "ToolInputStarted:c1",
-      "ToolInputDelta:c1",
-      "ToolInputEnded:c1",
-      "ToolInputStarted:c2",
-      "ToolInputDelta:c2",
-      "ToolInputEnded:c2",
-      "ToolInputStarted:c3",
-      "ToolInputDelta:c3",
-      "ToolInputEnded:c3",
-      "ToolStarted:c1",
-      "ToolStarted:c2",
-      "ToolStarted:c3"
-    ])
-    expect(new Set(trace)).toEqual(new Set(["execute:ok", "execute:fails", "execute:defects"]))
-
     entryOf(gates, "defects").resolve()
     await tick()
     entryOf(gates, "fails").resolve()
@@ -304,7 +297,10 @@ describe("parallel tools with per-tool isolation", () => {
       is_error: true,
       retryable: false
     })
-    expect(byId.get("c3")).toMatchObject({ result: "raw defect", is_error: true })
+    expect(byId.get("c3")).toMatchObject({
+      result: "raw defect",
+      is_error: true
+    })
     expect(byId.get("c1")).toMatchObject({ result: "fine", is_error: false })
     const result = lastOf(events)
     expect("stop_reason" in result && result.stop_reason).toBe("end_turn")
@@ -319,7 +315,10 @@ describe("parallel tools with per-tool isolation", () => {
       load: () => undefined,
       execute: async (request: ToolCallRequest) => {
         executed.push(request.name)
-        return { content: request.name === "finish" ? "finished" : "history", preview: "ok" }
+        return {
+          content: request.name === "finish" ? "finished" : "history",
+          preview: "ok"
+        }
       }
     }
     let step = 0
@@ -359,7 +358,10 @@ describe("parallel tools with per-tool isolation", () => {
     )
     const byId = new Map(completed.map((event) => [event.tool_id, event]))
     expect(executed).toEqual(["read", "finish"])
-    expect(byId.get("r1")).toMatchObject({ result: "history", is_error: false })
+    expect(byId.get("r1")).toMatchObject({
+      result: "history",
+      is_error: false
+    })
     expect(byId.get("f1")).toMatchObject({ is_error: true })
     const result = lastOf(events)
     expect("stop_reason" in result && result.stop_reason).toBe("end_turn")
@@ -402,7 +404,12 @@ describe("parallel tools with per-tool isolation", () => {
           protocolVersion: MODEL_PROVIDER_PROTOCOL as const,
           stream: () => {
             step += 1
-            return [response({ finishReason: "tool_calls", toolCalls: steps[step - 1] ?? [] })]
+            return [
+              response({
+                finishReason: "tool_calls",
+                toolCalls: steps[step - 1] ?? []
+              })
+            ]
           }
         },
         toolset

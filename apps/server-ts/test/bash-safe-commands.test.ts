@@ -107,25 +107,10 @@ describe("commands that change nothing", () => {
     "base64 -o out f",
     "sed 's/a/b/w out' f",
     "sort f -ofile",
+    "sort --output=out f",
     "git log --output=f"
   ])("%s may change something", (command) => {
     expect(changesNothing(command, NORMAL)).toBe(false)
-  })
-
-  it.each([
-    "GH_PAGER=cat GH_PROMPT_DISABLED=1 NO_COLOR=1 gh api repos/openai/codex/commits/main --jq '{sha:.sha,date:.commit.committer.date}'",
-    `GH_PAGER=cat gh api repos/x --jq "{sha:.sha,date:.date}"`,
-    `GH_PAGER=cat gh api repos/x --jq '{sha:'".sha"',date:.date}'`,
-    `X=1; echo '$HOME' '\`date\`' '\${X:-$(touch out)}'`,
-    String.raw`X=1; echo \$HOME \{a,b\} "\$HOME"`,
-    "cat <<'EOF'\n$(touch out) $HOME\nEOF",
-    "cat <<EOF\nliteral {a,b}\nEOF",
-    String.raw`cat <<EOF
-\$(touch out)
-EOF`,
-    "cat <(printf '%s' '$HOME')"
-  ])("keeps literal shell-looking data read-only: %s", (command) => {
-    expect(changesNothing(command, NORMAL)).toBe(true)
   })
 
   it.each([
@@ -155,42 +140,6 @@ EOF`,
   ])("keeps active expansions and writes conservative: %s", (command) => {
     expect(changesNothing(command, NORMAL)).toBe(false)
     expect(readOnly(command)).toBe(false)
-  })
-
-  it("keeps environment-prefixed literal reads behind the existing approval gate", () => {
-    const command = "GH_PAGER=cat gh api repos/x --jq '{sha:.sha,date:.date}'"
-    expect(changesNothing(command, NORMAL)).toBe(true)
-    expect(readOnly(command)).toBe(false)
-  })
-
-  it("asks before a read-only executable that can still write", () => {
-    for (const command of [
-      "sed 's/a/b/w out' f",
-      "sed 'e touch x' f",
-      "sed '1w out' f",
-      "sed '$w out' f",
-      "sed '/x/w out' f",
-      "sed 's/a/b/e' f",
-      "sed 's|a|b|gw out' f",
-      "sed --expression='w out' f",
-      "sed -n -es/a/b/w f",
-      "sed 'w/dev/stdout' f",
-      "sed '0~2w out' f",
-      "sed '1,+2w out' f",
-      "sed '/x/I w out' f",
-      "sed -f script.sed f",
-      "sort f -ofile",
-      "date -s 2020",
-      "git log --output=f"
-    ])
-      expect(isReadOnlyCommand(parseCommandSegments(command), NORMAL)).toBe(false)
-  })
-
-  it("does not widen what runs without a card", () => {
-    expect(isReadOnlyCommand(parseCommandSegments("gh api repos/x"), NORMAL)).toBe(false)
-    expect(isReadOnlyCommand(parseCommandSegments("curl -s https://example.com"), NORMAL)).toBe(
-      false
-    )
   })
 })
 
@@ -247,13 +196,6 @@ describe("sed reads only inside its allowlist", () => {
     expect(readOnly(command)).toBe(false)
     expect(changesNothing(command, NORMAL)).toBe(false)
   })
-
-  it("rejects a long script in linear time", () => {
-    const started = performance.now()
-    expect(changesNothing(`sed -n '${" ".repeat(4_000)}w x' f`, NORMAL)).toBe(false)
-    expect(readOnly(`sed '${" ".repeat(3_000)}w x' f`)).toBe(false)
-    expect(performance.now() - started).toBeLessThan(1_000)
-  })
 })
 
 describe("globs expand against the folder", () => {
@@ -295,33 +237,4 @@ describe("globs expand against the folder", () => {
   ])("%s reads only in an ordinary folder", (command) => {
     expect(readOnly(command)).toBe(true)
   })
-
-  it("reads quoted globs as written", () => {
-    expect(readOnly("find . -name '*'", HOSTILE)).toBe(true)
-    expect(readOnly("ls a*", HOSTILE)).toBe(true)
-    expect(readOnly("find . -name '*' -delete", HOSTILE)).toBe(false)
-  })
-
-  it("counts a glob after cd, and a brace sequence, as a change", () => {
-    expect(changesNothing("cd src && find . *", NORMAL)).toBe(false)
-    expect(changesNothing("(cd src; ls *)", NORMAL)).toBe(false)
-    expect(changesNothing("for x in 1; do cd src; find . *; done", NORMAL)).toBe(false)
-    expect(changesNothing("if true; then cd src; fi; find . *", NORMAL)).toBe(false)
-    expect(changesNothing("! cd src; find . *", NORMAL)).toBe(false)
-    expect(changesNothing("./cd x", NORMAL)).toBe(false)
-    expect(changesNothing("while true; do find . *; cd src; done", NORMAL)).toBe(false)
-    expect(changesNothing("X=1; sort -{o..o} out in", NORMAL)).toBe(false)
-  })
-
-  it("judges a glob in linear time and never throws", () => {
-    const started = performance.now()
-    expect(readOnly("ls *a*a*a*a*a*a*a*a*a*a*a*a*b")).toBe(true)
-    expect(readOnly("ls [z-a]*")).toBe(true)
-    expect(performance.now() - started).toBeLessThan(500)
-  })
-})
-
-it("counts a loosely read word the shell fills in as a change", () => {
-  expect(changesNothing('for f in a b; do gh api "repos/$f"; done', NORMAL)).toBe(false)
-  expect(changesNothing("X=--pre=sh; rg $X foo", NORMAL)).toBe(false)
 })

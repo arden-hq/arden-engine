@@ -7,7 +7,7 @@ import { renderSpacePageList } from "../src/memory/index-render.js"
 import type { MemorySources } from "../src/memory/retrieval.js"
 import type { MemoryTurn } from "../src/memory/service.js"
 import type { PersistedSpace, SpaceStore } from "../src/persistence/spaces/store.js"
-import { partialService, present } from "./kit.js"
+import { partialService } from "./kit.js"
 
 const SOURCES: MemorySources = {
   standing: () => ({
@@ -45,16 +45,12 @@ const GARDEN: PersistedSpace = {
   archived_at: null
 }
 
-const run = async (
-  sources: MemoryTurn["sources"] | undefined,
-  reader: RunMemoryReader,
-  spacePage?: string
-) => {
+const run = async (sources: MemoryTurn["sources"] | undefined, reader: RunMemoryReader) => {
   const records: Array<RunMemoryContext> = []
   const memory: MemoryTurn | undefined = sources && {
     revision: "rev-1",
     readContent: (pageId) =>
-      Effect.succeed({ pageId, path: "spaces/garden.md", version: "v1", content: spacePage ?? "" }),
+      Effect.succeed({ pageId, path: "spaces/garden.md", version: "v1", content: "" }),
     spaceList: (space) => (maxBytes) => renderSpacePageList([], space, maxBytes),
     sources
   }
@@ -77,7 +73,7 @@ const run = async (
         sessionId: "chat-1",
         runId: "run-1",
         reader,
-        spaceId: spacePage === undefined ? undefined : GARDEN.space_id,
+        spaceId: undefined,
         query: "garden?",
         memory,
         measure: (_part, effect) => effect
@@ -89,36 +85,12 @@ const run = async (
 
 it("an owner is sent and recorded core and recall; a worker gets no recall", async () => {
   const owner = await run(() => Effect.succeed(SOURCES), "owner")
+  expect(owner.records).toHaveLength(1)
   expect(owner.records[0]?.sources.map((source) => source.kind)).toEqual(["core", "recalled"])
   const worker = await run(() => Effect.succeed({ ...SOURCES, recall: undefined }), "worker")
   expect(worker.prefetched.memoryContext.recall).toEqual([])
+  expect(worker.records).toHaveLength(1)
   expect(worker.records[0]).toMatchObject({ reader: "worker", query: null })
-})
-
-it("recall is told the part of a cut Space page that the sent Space text holds", async () => {
-  const page = Array.from({ length: 200 }, (_, line) => `${line} ${"é".repeat(40)}\n`).join("")
-  const asked: Array<Parameters<MemoryTurn["sources"]>[0]["recall"]> = []
-  const { prefetched, records } = await run(
-    (input) => Effect.sync(() => void asked.push(input.recall)).pipe(Effect.as(SOURCES)),
-    "owner",
-    page
-  )
-  const sent = present(asked[0]?.sent, "the sent part of the Space page")
-  const section = present(prefetched.memoryContext.space[0], "the Space section")
-  expect(sent.pageId).toBe("garden-space")
-  expect(sent.chars).toBeGreaterThan(0)
-  expect(sent.chars).toBeLessThan(page.length)
-  expect(section.text).toContain(`${page.slice(0, sent.chars)}(The page continues`)
-  const recorded = records[0]?.sources.find((source) => source.kind === "space")
-  expect(recorded).toMatchObject({
-    page_id: "garden-space",
-    version: "v1",
-    outcome: "cut",
-    reason: "space_page_allowance",
-    bytes: Buffer.byteLength(section.text)
-  })
-  expect(recorded?.bytes).toBeGreaterThan(section.text.length)
-  expect(prefetched.space?.view.page?.content).toBe(page)
 })
 
 it("sends and records no sources when the turn has no Memory or Memory fails", async () => {
@@ -127,6 +99,7 @@ it("sends and records no sources when the turn has no Memory or Memory fails", a
   for (const sources of [undefined, failing]) {
     const { prefetched, records } = await run(sources, "owner")
     expect(prefetched.memoryContext.core).toEqual([])
+    expect(records).toHaveLength(1)
     expect(records[0]?.sources).toEqual([])
   }
 })

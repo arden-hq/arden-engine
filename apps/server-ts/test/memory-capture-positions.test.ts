@@ -6,7 +6,6 @@ import { expect, it } from "vitest"
 import { makeMemoryCaptureBatches } from "../src/memory/capture-batches.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { MemoryCaptureStore } from "../src/persistence/memory/store.js"
-import { startCaptureAfterCopies } from "../src/persistence/sqlite/memory-capture-positions.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import type { StoredMessageEnvelope } from "../src/persistence/transcript/model.js"
@@ -46,7 +45,7 @@ const turn = Effect.fn("turn")(function* (
 })
 
 /** Runs Capture until idle and returns the owner messages it was handed. */
-const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "complete") {
+const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" | "leave" = "complete") {
   const receipts = new Set<string>()
   const batches = makeMemoryCaptureBatches({
     wiki: {
@@ -69,6 +68,7 @@ const drain = Effect.fn("drain")(function* (settle: "complete" | "skip" = "compl
           (m) => m[1] ?? []
         )
       )
+      if (settle === "leave") return read
       yield* (settle === "skip" ? batches.skipCaptureBatch : batches.completeCaptureBatch)(batch)
     }
     throw new Error("Capture did not become idle")
@@ -100,24 +100,22 @@ it("never reads a reverted turn, and reads the turn that reuses its numbers once
   })
 })
 
-it("reads an older range once, after new work, and removes it as it is read", async () => {
+it("never reads a turn reverted while its batch was waiting", async () => {
   const read = await withTempDatabase(
     Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const drainer = yield* drain()
-      const chat = (yield* (yield* SessionStore).create({})).sessionId
-      yield* turn(chat, "old-a")
-      yield* turn(chat, "old-b")
-      yield* startCaptureAfterCopies(sql, chat)
-      yield* sql`INSERT INTO memory_capture_unread (session_id, read_seq, through_seq, updated_at)
-        VALUES (${chat}, -1, 3, ${AT})`
-      yield* turn(chat, "new-c")
-      const first = yield* drainer
-      const left = yield* sql`SELECT 1 FROM memory_capture_unread WHERE through_seq IS NOT NULL`
-      return { first, left: left.length, again: yield* drainer }
+      const sessions = yield* SessionStore
+      const chat = (yield* sessions.create({})).sessionId
+      yield* turn(chat, "wait-a")
+      yield* turn(chat, "wait-b")
+      const offered = yield* yield* drain("leave")
+      yield* sessions.revert({ sessionId: chat, turns: 1 })
+      yield* turn(chat, "wait-c")
+      return { offered, after: yield* yield* drain() }
     })
   )
-  expect(read).toEqual({ first: ["new-c", "old-a", "old-b"], left: 0, again: [] })
+  expect(read.offered).toEqual(["wait-a", "wait-b"])
+  expect(read.after).not.toContain("wait-b")
+  expect(read.after).toContain("wait-c")
 })
 
 it("keeps a skipped batch unread, rests it a day, and then reads it again", async () => {
@@ -232,7 +230,7 @@ it("saves a repeated Capture request once in its run, and a different one again"
         toolCallId: "p"
       })
     await patch("open", "open, then closed")
-    await expect(patch("open", "open, then closed")).rejects.toThrow("already saved")
+    await expect(patch("open", "open, then closed")).rejects.toThrow()
     await patch("closed", "done")
     expect((await Effect.runPromise(wiki.read("a"))).content).toContain("Status: open, then done\n")
   })

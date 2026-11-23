@@ -10,14 +10,16 @@ import { objectRootProblems } from "../src/tools/tool-contract.js"
  * root was `Schema.Struct({})`'s JSON Schema.
  */
 it("refuses a tool whose parameters a model receives without an object root", () => {
-  expect(
-    objectRootProblems("permissions_read", {
-      anyOf: [{ type: "object" }, { type: "array" }],
-      properties: { _display_title: { type: "string" } }
-    })
-  ).toEqual([
-    'permissions_read parameters must be type "object" at the root; an empty input is EmptyParametersSchema'
-  ])
+  const refused = [
+    { anyOf: [{ type: "object" }, { type: "array" }], properties: {} },
+    { type: "array", items: { type: "string" } },
+    { type: "string" }
+  ]
+  for (const root of refused) {
+    const problems = objectRootProblems("permissions_read", root)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain("permissions_read")
+  }
   expect(
     objectRootProblems("usage_report", {
       type: "object",
