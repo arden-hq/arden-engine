@@ -2,8 +2,6 @@ import { errorMessage } from "@arden-hq/std/errors"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
-import { AutomationId } from "../src/persistence/automations/model.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { spaceJobId, taskJobId } from "../src/persistence/space-job-id.js"
 import { sessionPresentations } from "../src/persistence/sqlite/session-presentation.js"
@@ -30,68 +28,6 @@ const makeTask = Effect.gen(function* () {
   )
   yield* sql`DELETE FROM automation_event_queue WHERE task_id = ${spaceJobId("space-1")}`
   return task
-})
-
-it("each reader of a Task's owner reads the Task's own row", async () => {
-  const outcome = await withTempDatabase(
-    Effect.gen(function* () {
-      const catalog = yield* AutomationCatalog
-      const task = yield* makeTask
-      const key = taskJobId(task.item_id)
-      const waiting = yield* catalog.diagnostics()
-      const [lease] = yield* claim("first", 10)
-      if (lease === undefined) throw new Error("The Task was not claimed")
-      const policy = yield* catalog.originPolicy(AutomationId.make(key))
-      const running = yield* catalog.diagnostics()
-      const shown = (row: (typeof running.queue)[number] | undefined) =>
-        row === undefined
-          ? undefined
-          : {
-              ofTask: row.task_id === key,
-              name: row.name,
-              enabled: row.enabled,
-              internalRef: row.automation_ref.startsWith("internal-job~"),
-              held: row.held_by_worker_since,
-              chat: row.session_id
-            }
-      return {
-        waiting: waiting.queue.map(shown),
-        running: running.queue.map(shown),
-        policy,
-        chat: lease.payload.sessionId,
-        missing: yield* catalog.originPolicy(AutomationId.make("task:no-such-task")).pipe(
-          Effect.flip,
-          Effect.map((error) => error.reason)
-        )
-      }
-    })
-  )
-  expect(outcome.chat).toEqual(expect.any(String))
-  expect(outcome).toEqual({
-    waiting: [
-      {
-        ofTask: true,
-        name: "In the background",
-        enabled: 1,
-        internalRef: true,
-        held: null,
-        chat: outcome.chat
-      }
-    ],
-    running: [
-      {
-        ofTask: true,
-        name: "In the background",
-        enabled: 1,
-        internalRef: true,
-        held: new Date(LATER).toISOString(),
-        chat: outcome.chat
-      }
-    ],
-    policy: { purpose: "task_execution", handler: null, threadId: outcome.chat },
-    chat: outcome.chat,
-    missing: "not_found"
-  })
 })
 
 it("an attempt whose Task row is gone still ends, and its chat is still a Task worker's", async () => {

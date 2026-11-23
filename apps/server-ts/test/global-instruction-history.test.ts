@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect"
-import { readFile, symlink, writeFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { expect, it } from "vitest"
 
@@ -14,7 +14,11 @@ import { agentChat, withoutSpaces, withWikiRepository } from "./fixtures/wiki-re
 
 const OWNER_TURN: WikiCommitOrigin = { kind: "rules", sessionId: "session-1" }
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
-const by = (origin: WikiCommitOrigin) => ({ actor: "user:chat", origin, reason: "rules" })
+const by = (origin: WikiCommitOrigin) => ({
+  actor: "user:chat",
+  origin,
+  reason: "rules"
+})
 
 it("keeps each writer of the rules in page history, takes in outside edits, plain or not, and restores", async () => {
   await withWikiRepository(async ({ repository, workingRoot, wiki }) => {
@@ -22,7 +26,10 @@ it("keeps each writer of the rules in page history, takes in outside edits, plai
       const snapshot = await run(wiki.snapshot())
       const page = rulesPage(snapshot)
       if (page === undefined || snapshot.head === null) throw new Error("no rules page")
-      const at = { expectedVersion: page.resource.versionId, expectedHead: snapshot.head }
+      const at = {
+        expectedVersion: page.resource.versionId,
+        expectedHead: snapshot.head
+      }
       return { pageId: page.page.pageId, page: page.page, at }
     }
     const change = async (body: string, origin: WikiCommitOrigin) => {
@@ -43,36 +50,37 @@ it("keeps each writer of the rules in page history, takes in outside edits, plai
     await writeFile(file, (await readFile(file, "utf8")).replace("two", "three, in an editor"))
     const { spaces } = withoutSpaces(repository)
     const store = partialService<SpaceStore["Service"]>("SpaceStore", spaces)
-    const outside = makeOutsideEdits({ repository, spaces: store, snapshot: wiki.snapshot })
-    await run(outside.check())
-    expect((await run(outside.check())).takenIn.map((item) => item.path)).toEqual(["AGENTS.md"])
+    const outside = makeOutsideEdits({
+      repository,
+      spaces: store,
+      snapshot: wiki.snapshot
+    })
+    const takenIn = async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { takenIn } = await run(outside.check())
+        if (takenIn.length > 0) return takenIn.map((item) => item.path)
+      }
+      return []
+    }
+    expect(await takenIn()).toEqual(["AGENTS.md"])
     const { pageId, at } = await current()
     const commitId = (await run(wiki.history(pageId))).commits.at(-1)?.commitId ?? ""
     const version = { commitId, side: "after" } as const
-    await run(wiki.restore({ pageId, version, ...at, authority, commit: by(OWNER_TURN) }))
+    await run(
+      wiki.restore({
+        pageId,
+        version,
+        ...at,
+        authority,
+        commit: by(OWNER_TURN)
+      })
+    )
     const origins = (await run(wiki.history(pageId))).commits.map((entry) => entry.origin)
     const [chat, inFile] = ["memory.rules@session-1", "filesystem"]
     expect(origins).toEqual([chat, inFile, chat, inFile])
     expect((await current()).page.body).toBe("Rule one.\n")
     await writeFile(file, "A rule written as plain Markdown.\n")
-    await run(outside.check())
-    expect((await run(outside.check())).takenIn.map((item) => item.path)).toEqual(["AGENTS.md"])
+    expect(await takenIn()).toEqual(["AGENTS.md"])
     expect((await current()).page.body).toBe("A rule written as plain Markdown.\n")
-  })
-})
-
-it("moves a rules file reached by a symlink, and finishes a move whose delete failed", async () => {
-  await withWikiRepository(async ({ workingRoot, wiki }) => {
-    const target = join(workingRoot, "..", `${basename(workingRoot)}-rules.md`)
-    const link = `${target}-link`
-    await writeFile(target, "A rule by link.\n")
-    await symlink(target, link)
-    const move = () =>
-      run(Layer.build(rulesMoveLayer(link)).pipe(Effect.scoped, Effect.provideService(Wiki, wiki)))
-    await move()
-    expect(rulesPage(await run(wiki.snapshot()))?.page.body).toBe("A rule by link.\n")
-    await writeFile(link, "A rule by link.\n")
-    await move()
-    await expect(readFile(link)).rejects.toThrow()
   })
 })

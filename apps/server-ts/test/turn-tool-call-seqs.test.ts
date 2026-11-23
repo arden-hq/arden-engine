@@ -55,7 +55,7 @@ it("says where each of a turn's tool calls sits, so a reader can tell which came
         runId: started.runId,
         messages: [
           ...started.activeMessages,
-          calls("first-work", "web_search", "web_fetch"),
+          calls("first-work", "web_search", "web_fetch", "web_search"),
           says("first-reply", "First findings."),
           calls("second-work", "web_search"),
           says("answer", "Done.")
@@ -80,6 +80,6 @@ it("says where each of a turn's tool calls sits, so a reader can tell which came
   expect(first < reply && reply < second).toBe(true)
   expect(read.counts).toEqual([
     { name: "web_fetch", display_name: null, count: 1, rejected: 0, seqs: [first] },
-    { name: "web_search", display_name: null, count: 2, rejected: 0, seqs: [first, second] }
+    { name: "web_search", display_name: null, count: 3, rejected: 0, seqs: [first, first, second] }
   ])
 })

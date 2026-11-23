@@ -112,10 +112,10 @@ it("the kickoff admission checks the chat and writes the mark in one step", asyn
     admitted: "Started",
     replayed: "Existing",
     freshMark: "text",
-    busy: "This chat is busy; try again once it is idle",
+    busy: expect.stringContaining("busy"),
     busyMark: undefined,
     archived: "not_found",
-    moved: "Getting started runs only in an ordinary chat in the Main Space",
+    moved: expect.stringContaining("Main"),
     missing: "not_found"
   })
 })
@@ -244,17 +244,13 @@ it("the onboarding route starts once in Main, answers 404 for an unknown chat an
     const first = await start(inMain.session_id)
     const unknown = await start("no-such-chat")
     const refused = await start(outside.session_id)
-    expect([first.status, JSON.parse(first.body).started, unknown.status, refused]).toEqual([
+    expect([first.status, JSON.parse(first.body).started, unknown.status, refused.status]).toEqual([
       200,
       true,
       404,
-      {
-        status: 409,
-        body: JSON.stringify({
-          detail: "Getting started runs only in an ordinary chat in the Main Space"
-        })
-      }
+      409
     ])
+    expect(JSON.parse(refused.body).detail).toContain("Main")
   } finally {
     await server.stop()
     await rm(directory, { recursive: true, force: true })

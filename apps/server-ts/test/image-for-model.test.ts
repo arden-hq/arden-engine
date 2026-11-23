@@ -6,31 +6,51 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import { ConversationArtifacts } from "../src/artifacts/conversation.js"
-import { OPENAI_IMAGE_INPUT } from "../src/lib/prompt-image.js"
+import { OPENAI_IMAGE_INPUT, patchCount } from "../src/lib/prompt-image.js"
 import { encodePng, pngSize } from "../src/lib/png.js"
 import { preserveBrowserScreenshot } from "../src/tools/browser-screenshot.js"
 import { imageForModel } from "../src/tools/read-binary.js"
 
-/** A 3000x40 PNG: over OpenAI's 2048 px longest side. */
-const wide = encodePng({ width: 3000, height: 40, pixels: new Uint8Array(3000 * 40 * 4).fill(200) })
+const wide = encodePng({
+  width: 3000,
+  height: 40,
+  pixels: new Uint8Array(3000 * 40 * 4).fill(200)
+})
+
+const square = encodePng({
+  width: 2000,
+  height: 2000,
+  pixels: new Uint8Array(2000 * 2000 * 4).fill(200)
+})
+const withinPatches = (size: { width: number; height: number } | undefined) =>
+  size !== undefined &&
+  size.width === size.height &&
+  size.width < 2000 &&
+  patchCount(size, OPENAI_IMAGE_INPUT.patchSize) <= OPENAI_IMAGE_INPUT.fitPatches
 
 describe("an image read for the model", () => {
   it("is shrunk to the limits a route states, and sent at its stored size where it states none", async () => {
-    const read = (limits: typeof OPENAI_IMAGE_INPUT | undefined) =>
+    const read = (limits: typeof OPENAI_IMAGE_INPUT | undefined, bytes = wide) =>
       imageForModel({
         file: "/nonexistent/wide.png",
-        bytes: wide,
+        bytes,
         format: "png",
         limits,
         signal: new AbortController().signal
       }).then(
-        (image) => image && { mediaType: image.mediaType, source: image.source, size: image.size }
+        (image) =>
+          image && {
+            mediaType: image.mediaType,
+            source: image.source,
+            size: image.size
+          }
       )
     expect(await read(OPENAI_IMAGE_INPUT)).toEqual({
       mediaType: "image/png",
       source: { width: 3000, height: 40 },
       size: { width: 2048, height: 27 }
     })
+    expect(withinPatches((await read(OPENAI_IMAGE_INPUT, square))?.size)).toBe(true)
     expect(await read(undefined)).toEqual({
       mediaType: "image/png",
       source: { width: 3000, height: 40 },
@@ -48,20 +68,28 @@ describe("a browser screenshot for the model", () => {
           return yield* ConversationArtifacts
         }).pipe(Effect.provide(ConversationArtifacts.layer(join(directory, "conversations"))))
       )
-      const shot = (imageInput: ImageInput | undefined) =>
+      let calls = 0
+      const shot = (imageInput: ImageInput | undefined, bytes = wide) =>
         preserveBrowserScreenshot({
           output: {
             result: "Captured the tab.",
             preview: "Screenshot",
-            data: { url: "https://example.com/", captured_at: "2026-11-16T00:00:00.000Z" },
+            data: {
+              url: "https://example.com/",
+              captured_at: "2026-11-16T00:00:00.000Z"
+            },
             modelContent: [
-              { type: "image", media_type: "image/png", data: wide.toString("base64") }
+              {
+                type: "image",
+                media_type: "image/png",
+                data: bytes.toString("base64")
+              }
             ]
           },
           artifacts,
           sessionId: "s1",
           runId: "r1",
-          toolCallId: "c1",
+          toolCallId: `c${(calls += 1)}`,
           signal: new AbortController().signal,
           imageInput
         }).then((output) =>
@@ -70,6 +98,8 @@ describe("a browser screenshot for the model", () => {
           )
         )
       expect(await shot({ limits: OPENAI_IMAGE_INPUT })).toEqual([{ width: 2048, height: 27 }])
+      const [squareSize] = (await shot({ limits: OPENAI_IMAGE_INPUT }, square)) ?? []
+      expect(withinPatches(squareSize)).toBe(true)
       expect(await shot({ limits: undefined })).toEqual([{ width: 3000, height: 40 }])
     } finally {
       await rm(directory, { recursive: true, force: true })

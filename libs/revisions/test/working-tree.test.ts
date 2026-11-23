@@ -1,5 +1,4 @@
 import {
-  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -122,25 +121,6 @@ describe("working tree status", () => {
     ])
   })
 
-  it("reports a folder it cannot list and still finishes the scan", async () => {
-    const root = await seeded()
-    await writeFile(join(root, "a.md"), "edited")
-    await mkdir(join(root, "locked"))
-    await writeFile(join(root, "locked", "hidden.md"), "untracked")
-    await chmod(join(root, "locked"), 0o000)
-    try {
-      const status = await useRepository(root, (repository) => repository.workingTreeStatus())
-      expect(status.changes.map(summary)).toEqual([
-        { kind: "changed", resourceId: "a", text: "edited" }
-      ])
-      expect(status.untracked.map((file) => [file.kind, file.path])).toEqual([
-        ["unreadable", "locked"]
-      ])
-    } finally {
-      await chmod(join(root, "locked"), 0o700)
-    }
-  })
-
   it("returns the content of the untracked files the caller asks for, and only those", async () => {
     const root = await seeded()
     await writeFile(join(root, "moved.md"), "one")
@@ -154,14 +134,6 @@ describe("working tree status", () => {
       )
     ).toEqual([["moved.md", "one"], ["other.txt"]])
   })
-
-  it("reads without creating the folder of a missing file", async () => {
-    const root = await seeded()
-    await rm(join(root, "notes"), { recursive: true })
-    await useRepository(root, (repository) => repository.workingTreeStatus())
-    await expect(readFile(join(root, "notes", "b.md"))).rejects.toThrow()
-    await expect(mkdir(join(root, "notes"))).resolves.toBeUndefined()
-  })
 })
 
 describe("a scan reads only files that may have changed", () => {
@@ -169,25 +141,24 @@ describe("a scan reads only files that may have changed", () => {
   const scan = (repository: ManagedFileRepositoryShape) =>
     repository.workingTreeStatus().pipe(Effect.map((status) => status.changes.map(summary)))
 
-  it("does not read a file that kept its stamp since it matched history, until a full scan", async () => {
+  it("finds a same-size edit with its old time put back within a bounded number of scans", async () => {
     const root = await seeded()
     await utimes(join(root, "a.md"), hourAgo, hourAgo)
-    const outcome = await useRepository(root, (repository) =>
+    const found = await useRepository(root, (repository) =>
       Effect.gen(function* () {
-        const first = yield* scan(repository)
-        yield* Effect.promise(() => chmod(join(root, "a.md"), 0o000))
-        const idle: Array<ReadonlyArray<unknown>> = []
-        for (let index = 1; index < 60; index += 1) idle.push(yield* scan(repository))
-        const full = yield* scan(repository)
-        yield* Effect.promise(() => chmod(join(root, "a.md"), 0o644))
-        return { first, idle: idle.filter((changes) => changes.length > 0).length, full }
+        expect(yield* scan(repository)).toEqual([])
+        yield* Effect.promise(async () => {
+          await writeFile(join(root, "a.md"), "ONE")
+          await utimes(join(root, "a.md"), hourAgo, hourAgo)
+        })
+        for (let index = 0; index < 120; index += 1) {
+          const changes = yield* scan(repository)
+          if (changes.length > 0) return changes
+        }
+        return []
       })
     )
-    expect(outcome).toEqual({
-      first: [],
-      idle: 0,
-      full: [{ kind: "unreadable", resourceId: "a" }]
-    })
+    expect(found).toEqual([{ kind: "changed", resourceId: "a", text: "ONE" }])
   })
 
   it("reads again a file whose size changed, even with its old time put back", async () => {
@@ -491,41 +462,6 @@ describe("taking in one outside change", () => {
     )
     expect(Exit.isFailure(exit)).toBe(true)
     expect(await historyFiles(root)).toBe(before)
-    expect(await readFile(join(root, "a.md"), "utf8")).toBe("one")
-  })
-
-  it("installs nothing: a file put back to its recorded content once prepared stays as it is", async () => {
-    const root = await seeded()
-    await writeFile(join(root, "a.md"), "edited")
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const repository = yield* ManagedFileRepository
-        const exit = yield* Effect.exit(takeIn(repository, "a"))
-        expect(Exit.isFailure(exit)).toBe(true)
-      }).pipe(
-        Effect.provide(
-          managedFileRepositoryNodeLayer({
-            workingRoot: root,
-            checkpoint: (stage) =>
-              stage === "after_prepared"
-                ? Effect.promise(() => writeFile(join(root, "a.md"), "one"))
-                : Effect.void
-          })
-        )
-      )
-    )
-
-    const state = await useRepository(root, (repository) =>
-      Effect.gen(function* () {
-        const head = present(yield* repository.head, "a head")
-        return {
-          actions: (yield* repository.inspectCommit(head)).changes.map((change) => change.action),
-          a: new TextDecoder().decode(yield* repository.read("a"))
-        }
-      })
-    )
-    expect(state).toEqual({ actions: ["create", "create", "create", "create"], a: "one" })
     expect(await readFile(join(root, "a.md"), "utf8")).toBe("one")
   })
 

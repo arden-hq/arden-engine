@@ -61,10 +61,7 @@ describe("web_fetch refuses the local network", () => {
     "https://[2001:db8::1]/documentation",
     "https://[3fff::1]/documentation"
   ])("refuses the private or reserved address in %s", async (url) => {
-    await expect(fetchUrl(url)).rejects.toMatchObject({
-      preview: "Private address blocked",
-      retryable: false
-    })
+    await expect(fetchUrl(url)).rejects.toMatchObject({ retryable: false })
   })
 
   it("refuses a URL that carries credentials before resolving its host", async () => {

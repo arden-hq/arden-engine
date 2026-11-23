@@ -162,7 +162,7 @@ export const readDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
       json_extract(payload, '$.sessionId') AS session_id
     FROM automation_deliveries WHERE delivery_id = ${deliveryId}`
 
-export const strandedAt = "2026-11-01T00:00:05.000Z"
+const strandedAt = "2026-11-01T00:00:05.000Z"
 
 export const strandDelivery = (sql: SqlClient.SqlClient, deliveryId: string) =>
   sql`UPDATE automation_deliveries SET status = 'pending', delivered_at = NULL,

@@ -136,4 +136,25 @@ describe("format-v2 golden vectors", () => {
     expect(Effect.runSync(decodeCanonicalJsonl(encodeCommitRecord(commit)))).toEqual(commit)
     expect(Effect.runSync(parseTreeRecord(tree))).toEqual(tree)
   })
+
+  it("orders tree entries by code point, an astral name after a high BMP one", () => {
+    const version = (path: string, resourceId: string) =>
+      resourceVersion({
+        resource_id: resourceId,
+        path,
+        blob_id: "a".repeat(64),
+        state: "active",
+        version_id: "b".repeat(64)
+      })
+    const high = "\uFF5E.md"
+    const astral = "\u{1F600}.md"
+    for (const paths of [
+      [astral, high],
+      [high, astral]
+    ]) {
+      const trees = buildTreeObjects(paths.map((path, index) => version(path, `r${index}`)))
+      const root = present(trees.objects.get(trees.rootId), "root tree")
+      expect(root.entries.map((entry) => entry.name)).toEqual([high, astral])
+    }
+  })
 })

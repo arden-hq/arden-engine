@@ -1,7 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { DatabaseSync } from "node:sqlite"
 
-export interface ColumnPosition {
+interface ColumnPosition {
   readonly table: string
   readonly chat: string
   readonly column: string
@@ -12,18 +12,18 @@ interface MetadataPosition {
   readonly path: string
 }
 
-export const THROUGH_POSITIONS: ReadonlyArray<ColumnPosition> = [
+const THROUGH_POSITIONS: ReadonlyArray<ColumnPosition> = [
   { table: "chat_summaries", chat: "session_id", column: "through_sequence" },
   { table: "chat_runs", chat: "session_id", column: "last_seq" },
   { table: "memory_capture_unread", chat: "session_id", column: "read_seq" },
   { table: "memory_capture_unread", chat: "session_id", column: "through_seq" }
 ]
 
-export const FROM_POSITIONS: ReadonlyArray<ColumnPosition> = [
+const FROM_POSITIONS: ReadonlyArray<ColumnPosition> = [
   { table: "sessions", chat: "session_id", column: "context_from_seq" }
 ]
 
-export const ROW_POSITIONS: ReadonlyArray<ColumnPosition> = [
+const ROW_POSITIONS: ReadonlyArray<ColumnPosition> = [
   { table: "sessions", chat: "session_id", column: "context_head_seq" },
   { table: "chat_compactions", chat: "session_id", column: "boundary_seq" }
 ]

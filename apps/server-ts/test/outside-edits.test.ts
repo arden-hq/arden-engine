@@ -101,3 +101,15 @@ it("archives none when more pages are missing at once than one check archives", 
   )
   expect(added).toBe(0)
 })
+
+it("archives the missing pages when exactly as many are missing as one check archives", async () => {
+  const ids = Array.from({ length: MAX_MISSING_ARCHIVED }, (_, index) => `edge-${index}`)
+  const taken = await withMemory(ids, ({ root, settle }) =>
+    Effect.gen(function* () {
+      yield* Effect.promise(() => rm(join(root, "notes"), { recursive: true }))
+      const checked = yield* settle()
+      return checked.takenIn.map((item) => item.action)
+    })
+  )
+  expect(taken).toEqual(ids.map(() => "archive"))
+})

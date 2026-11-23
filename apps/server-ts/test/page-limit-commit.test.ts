@@ -50,15 +50,17 @@ it("refuses a write that grows a page past its size limit, but not one that leav
           })
         return {
           shorter: yield* write("Me", 9_200),
-          longer: yield* write("Me", 9_201)
+          longer: yield* write("Me", 9_201),
+          same: yield* write("Me too", 9_200)
         }
       }).pipe(
         Effect.scoped,
         Effect.provide(managedFileRepositoryNodeLayer({ workingRoot: root }))
-      ) as Effect.Effect<Record<"shorter" | "longer", string>>
+      ) as Effect.Effect<Record<"shorter" | "longer" | "same", string>>
     )
     expect(outcome.shorter).toBe("saved")
-    expect(outcome.longer).toMatch(/limit is 9000/u)
+    expect(outcome.longer).not.toBe("saved")
+    expect(outcome.same).toBe("saved")
   } finally {
     await rm(root, { recursive: true, force: true })
   }

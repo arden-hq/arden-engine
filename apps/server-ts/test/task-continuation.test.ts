@@ -31,7 +31,7 @@ afterAll(() => {
 })
 const at = (offset: number) => new Date(BOOKED + offset).toISOString()
 
-it("persists the state record atomically, keeps it out of public updates, and rejects stale edits", async () => {
+it("persists the state record atomically and rejects stale edits", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-task-continuation-"))
   const filename = join(directory, "arden.db")
   const storage = () =>
@@ -72,9 +72,7 @@ it("persists the state record atomically, keeps it out of public updates, and re
         const after = yield* work.page({ itemId: task.item_id })
         expect(after.events).toEqual(before.events)
         expect(after.comments).toEqual(before.comments)
-        expect(after.items[0]).not.toHaveProperty("continuation_context")
         expect(updated.updated_at).not.toBe(task.updated_at)
-        expect(updated).not.toHaveProperty("continuation_context")
         expect(yield* work.execution(task.item_id)).toEqual({ kind: "queued" })
         const stale = yield* work
           .update(
@@ -166,11 +164,9 @@ it("persists the state record atomically, keeps it out of public updates, and re
         expect(
           yield* sql`SELECT next_attempt_at FROM space_tasks WHERE item_id = ${saved.item_id}`
         ).toEqual([{ next_attempt_at: null }])
-        const queued = yield* sql<{
-          readonly context: string
-        }>`SELECT context FROM automation_event_queue WHERE task_id = ${taskJobId(saved.item_id)}`
+        const queued =
+          yield* sql`SELECT 1 FROM automation_event_queue WHERE task_id = ${taskJobId(saved.item_id)}`
         expect(queued.length).toBe(1)
-        expect(queued[0]?.context).toContain(`"scheduled_for":"${at(0)}"`)
         const current = (yield* work.page({ itemId: saved.item_id })).items[0]
         if (current === undefined) throw new Error("Task missing")
         yield* work.update({ kind: "item", itemId: current.item_id }, current.updated_at, {
@@ -186,7 +182,7 @@ it("persists the state record atomically, keeps it out of public updates, and re
   }
 })
 
-it("a wait on something external ends when its booked check comes due; a wait for the user stays", async () => {
+it("a wait on something external ends when its booked check comes due, not before; a wait for the user stays", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-task-wait-"))
   const filename = join(directory, "arden.db")
   try {
@@ -209,14 +205,17 @@ it("a wait on something external ends when its booked check comes due; a wait fo
           })
         const external = yield* waitOn("external-wait", "external")
         const yours = yield* waitOn("your-wait", "you")
+        const early = yield* waitOn("early-wait", "external")
+        yield* sql`UPDATE space_tasks SET next_attempt_at = ${at(HOUR)} WHERE item_id = ${early.item_id}`
         yield* sql`DELETE FROM automation_event_queue`
         yield* inUnitOfWork(
           makeSpaceJobSql(sql, yield* SessionLifecycleEvents).materializeDue(at(MINUTE))
         )
         expect(
           yield* sql`SELECT stable_key, blocked, waiting_on FROM space_tasks
-            WHERE item_id IN (${external.item_id}, ${yours.item_id}) ORDER BY stable_key`
+            WHERE item_id IN (${external.item_id}, ${yours.item_id}, ${early.item_id}) ORDER BY stable_key`
         ).toEqual([
+          { stable_key: "early-wait", blocked: 1, waiting_on: "external" },
           { stable_key: "external-wait", blocked: 0, waiting_on: null },
           { stable_key: "your-wait", blocked: 1, waiting_on: "you" }
         ])

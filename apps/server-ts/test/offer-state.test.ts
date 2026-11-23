@@ -17,9 +17,21 @@ const mainOffer = (sql: SqlClient.SqlClient, id: string, hoursAgo: number) =>
       '{"basis":"inferred","reason":"Made up."}', '[]', ${id}, ${id}, 0, 1,
       'offered', ${at(hoursAgo)}, ${at(hoursAgo)})`
 
-const status = (sql: SqlClient.SqlClient) =>
-  sql<{ readonly status: string }>`SELECT status FROM task_proposals`.pipe(
-    Effect.map((rows) => rows[0]?.status)
+const states = (sql: SqlClient.SqlClient) =>
+  sql<{
+    readonly proposal_id: string
+    readonly status: string
+    readonly revision: number
+    readonly waiting_since: string | null
+  }>`SELECT proposal_id, status, revision, waiting_since FROM task_proposals ORDER BY proposal_id`.pipe(
+    Effect.map((rows) =>
+      Object.fromEntries(
+        rows.map((row) => [
+          row.proposal_id,
+          { status: row.status, revision: row.revision, clockStarted: row.waiting_since !== null }
+        ])
+      )
+    )
   )
 
 it("an offer expires only after the owner was around to see it", async () => {
@@ -28,16 +40,26 @@ it("an offer expires only after the owner was around to see it", async () => {
       const sql = yield* SqlClient.SqlClient
       const proposals = yield* TaskProposalStore
       yield* mainOffer(sql, "offer_a", OFFER_EXPIRY_HOURS + 300)
-      const away = [yield* proposals.expireOffers(), yield* status(sql)]
+      const away = [yield* proposals.expireOffers(), yield* states(sql)]
       yield* sql`INSERT INTO home_presence (client_id, sequence, last_seen_at, lease_until)
         VALUES ('c', 1, ${at(0)}, ${new Date(Date.now() + 30_000).toISOString()})`
-      yield* sql`UPDATE task_proposals SET waiting_since = ${at(OFFER_EXPIRY_HOURS + 1)}`
-      const overdue = [yield* proposals.expireOffers(), yield* status(sql)]
+      yield* mainOffer(sql, "offer_b", 1)
+      yield* sql`UPDATE task_proposals SET waiting_since = ${at(OFFER_EXPIRY_HOURS + 1)}
+        WHERE proposal_id = 'offer_a'`
+      yield* sql`UPDATE task_proposals SET waiting_since = ${at(1)} WHERE proposal_id = 'offer_b'`
+      const overdue = [yield* proposals.expireOffers(), yield* states(sql)]
       return { away, overdue }
     })
   )
-  expect(outcome).toEqual({
-    away: [0, "offered"],
-    overdue: [1, "expired"]
-  })
+  expect(outcome.away).toEqual([
+    0,
+    { offer_a: { status: "offered", revision: 0, clockStarted: false } }
+  ])
+  expect(outcome.overdue).toEqual([
+    1,
+    {
+      offer_a: { status: "expired", revision: 1, clockStarted: true },
+      offer_b: { status: "offered", revision: 0, clockStarted: true }
+    }
+  ])
 })

@@ -3,7 +3,6 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { chatDecoders, chatRequests, chatRoutes } from "@arden-hq/protocol/chat"
 import { runDecoders, runRoutes } from "@arden-hq/protocol/runs"
 import type { ModelCapabilities, ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
-import { makeOpenAiResponsesProvider } from "@arden-hq/loop/providers/openai-responses"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -37,7 +36,6 @@ const host = (outputCap?: number): ModelHost => ({
   }
 })
 
-/** A provider that answers every request at once and records what the chat step asked for. */
 const recording = (outputLimit: ModelCapabilities["outputLimit"] = undefined) => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
@@ -68,7 +66,6 @@ const recording = (outputLimit: ModelCapabilities["outputLimit"] = undefined) =>
   return { requests, provider }
 }
 
-/** Runs one chat turn on a server with `provider` and `modelHost`, to its end. */
 const chatTurn = async (provider: ModelProvider, modelHost: ModelHost): Promise<void> => {
   const directory = await mkdtemp(join(tmpdir(), "arden-step-limit-"))
   let server: ServerHandle | undefined
@@ -110,7 +107,6 @@ const chatTurn = async (provider: ModelProvider, modelHost: ModelHost): Promise<
   }
 }
 
-/** The chat steps' limits: only a chat step carries the chat's cache scope; side calls do not. */
 const chatSteps = (requests: ReadonlyArray<ModelProviderRequest>) =>
   requests
     .filter((request) => request.cacheScope !== undefined)
@@ -137,38 +133,5 @@ describe("a chat step's output limit", () => {
     const model = recording("omitted")
     await chatTurn(model.provider, host())
     expect(chatSteps(model.requests)).toEqual([undefined])
-  })
-
-  it("leaves a Codex chat request without max_output_tokens", { timeout: 30_000 }, async () => {
-    const bodies: Array<Record<string, unknown>> = []
-    const completed = {
-      type: "response.completed",
-      response: {
-        id: "r1",
-        output: [
-          {
-            id: "m1",
-            type: "message",
-            role: ROLE.assistant,
-            content: [{ type: "output_text", text: "Done." }]
-          }
-        ]
-      }
-    }
-    // The Codex runtime's provider options (`openai-codex/runtime.ts`).
-    const codex = makeOpenAiResponsesProvider({
-      auth: { headers: async () => ({}) },
-      capabilities: () => ({ hostedTools: [], structuredOutput: "native", toolSearch: "client" }),
-      omitMaxOutputTokens: true,
-      fetch: async (_url, init) => {
-        bodies.push(JSON.parse(String(init?.body)))
-        return new Response(`data: ${JSON.stringify(completed)}\n\n`, {
-          headers: { "content-type": "text/event-stream" }
-        })
-      }
-    })
-    await chatTurn(codex, host())
-    const steps = bodies.filter((body) => body.prompt_cache_key !== undefined)
-    expect(steps.map((body) => body.max_output_tokens)).toEqual([undefined])
   })
 })

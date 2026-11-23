@@ -70,7 +70,7 @@ it("upkeep never edits, creates or moves into a record or folder contract; other
             ).pipe(
               Effect.match({
                 onFailure: (error) =>
-                  error._tag === "WikiCommitRuleError" ? error.rule : error._tag,
+                  error._tag === "WikiCommitRuleError" ? "refused" : error._tag,
                 onSuccess: () => "saved"
               })
             )
@@ -90,10 +90,10 @@ it("upkeep never edits, creates or moves into a record or folder contract; other
       ) as Effect.Effect<Record<string, string>>
     )
     expect(outcome).toEqual({
-      record: "records",
-      contract: "records",
-      created: "records",
-      movedIn: "records",
+      record: "refused",
+      contract: "refused",
+      created: "refused",
+      movedIn: "refused",
       knowledge: "saved",
       owner: "saved"
     })

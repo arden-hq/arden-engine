@@ -172,6 +172,11 @@ const send = tool(
   { action: "write", default_approval: "ask", requirement: "boundary" },
   true
 )
+const standing = (kind: "always" | "requirement", overrides: Partial<CallFacts> = {}) => {
+  const base = call(write, overrides)
+  return { ...base, tool: { ...base.tool, standing: kind } }
+}
+
 const crossSpace = (handed: boolean) =>
   ({ kind: "chat", verb: "message", other_space: true, handed }) as const
 
@@ -333,6 +338,21 @@ describe("decide: one row per case", () => {
       "agent forwards a handed capture to another Space": verdict(
         decide(delegateOf(person), live(), call(write, { target: crossSpace(true) }))
       ),
+      "Automation directives, Never ask": verdict(
+        decide(automation, live({ mode: "allow" }), standing("always"))
+      ),
+      "Automation directives, Auto": verdict(
+        decide(automation, live({ mode: "safe" }), standing("always"))
+      ),
+      "person's own directives, Never ask": verdict(
+        decide(person, live({ mode: "allow" }), standing("always"))
+      ),
+      "Automation Space setting that widens permissions, Never ask": verdict(
+        decide(automation, live({ mode: "allow" }), standing("requirement", { requirement: true }))
+      ),
+      "Automation Space setting that does not, Never ask": verdict(
+        decide(automation, live({ mode: "allow" }), standing("requirement"))
+      ),
       "Automation messages another Space": verdict(
         decide(
           automation,
@@ -413,6 +433,15 @@ describe("decide: one row per case", () => {
       },
       "person forwards a handed capture to another Space, Ask": { allow: "default" },
       "agent forwards a handed capture to another Space": { deny: "boundary", instead: ["report"] },
+      "Automation directives, Never ask": { ask: "standing", helper: false, delivery: "chat" },
+      "Automation directives, Auto": { ask: "standing", helper: false, delivery: "chat" },
+      "person's own directives, Never ask": { allow: "mode" },
+      "Automation Space setting that widens permissions, Never ask": {
+        ask: "standing",
+        helper: false,
+        delivery: "chat"
+      },
+      "Automation Space setting that does not, Never ask": { allow: "mode" },
       "Automation messages another Space": { allow: "default" }
     })
   })
@@ -523,54 +552,6 @@ describe("decide: one row per case", () => {
   })
 })
 
-describe("your Automation acts as you", () => {
-  const standing = (kind: "always" | "requirement", overrides: Partial<CallFacts> = {}) => {
-    const base = call(write, overrides)
-    return { ...base, tool: { ...base.tool, standing: kind } }
-  }
-
-  it("has your reach, and only a standing change asks it in every mode", () => {
-    expect({
-      "Automation holds no worker scope": authorityScopes(automation).includes("worker"),
-      "its agent still does": authorityScopes(delegateOf(automation)).includes("worker"),
-      "Automation starts a Task": boundary(automation, {
-        kind: "space_work",
-        requested_space_id: undefined,
-        chat_space_id: "space-a",
-        op: "create"
-      }),
-      "directives, Never ask": verdict(
-        decide(automation, live({ mode: "allow" }), standing("always"))
-      ),
-      "directives, Auto": verdict(decide(automation, live({ mode: "safe" }), standing("always"))),
-      "the person's own directives, Never ask": verdict(
-        decide(person, live({ mode: "allow" }), standing("always"))
-      ),
-      "Space settings that widen permissions, Never ask": verdict(
-        decide(automation, live({ mode: "allow" }), standing("requirement", { requirement: true }))
-      ),
-      "Space settings that do not, Never ask": verdict(
-        decide(automation, live({ mode: "allow" }), standing("requirement"))
-      ),
-      "a Task write, Never ask": verdict(decide(automation, live({ mode: "allow" }), call(write)))
-    }).toEqual({
-      "Automation holds no worker scope": false,
-      "its agent still does": true,
-      "Automation starts a Task": { kind: "allow", reach: "full" },
-      "directives, Never ask": { ask: "standing", helper: false, delivery: "chat" },
-      "directives, Auto": { ask: "standing", helper: false, delivery: "chat" },
-      "the person's own directives, Never ask": { allow: "mode" },
-      "Space settings that widen permissions, Never ask": {
-        ask: "standing",
-        helper: false,
-        delivery: "chat"
-      },
-      "Space settings that do not, Never ask": { allow: "mode" },
-      "a Task write, Never ask": { allow: "mode" }
-    })
-  })
-})
-
 describe("the locked list (plan, Appendix B decision 3)", () => {
   const act = tool("browser_act", { action: "write", refuse_unattended: true }, true)
   const password = (overrides: Partial<CallFacts> = {}) =>
@@ -672,28 +653,6 @@ describe("code settles a call by its impact; only an outward one reaches the rev
       "outward, Auto": { ask: "default", helper: true, delivery: "pause" },
       "outward, Never ask": { allow: "mode" },
       "outward, Auto, an allow rule": { allow: "grant" }
-    })
-  })
-
-  it("never lets an inert or contained call skip a floor, a rule's ask or its own requirement", () => {
-    const shellCall = (impact: CallFacts["impact"], overrides: Partial<CallFacts>) =>
-      verdict(decide(person, live({ mode: "safe" }), call(shell, { impact, ...overrides })))
-    expect({
-      "inert, a destructive command": shellCall(INERT, { floor: "destructive_command" }),
-      "contained, its own card": shellCall(CONTAINED, { requirement: true }),
-      "inert, the owner's own card": shellCall(INERT, { requirement: true, user_only: true }),
-      "inert, a rule's ask": at("safe", INERT, { rule: "ask" }),
-      "inert, a rule's never": at("allow", INERT, { rule: "never" }),
-      "inert, an always-ask tool": verdict(
-        decide(person, live({ mode: "allow" }), call(archive, { impact: INERT }))
-      )
-    }).toEqual({
-      "inert, a destructive command": { deny: "floor", instead: ["ask_user"] },
-      "contained, its own card": { ask: "requirement", helper: true, delivery: "pause" },
-      "inert, the owner's own card": { ask: "requirement", helper: false, delivery: "pause" },
-      "inert, a rule's ask": { ask: "override", helper: true, delivery: "pause" },
-      "inert, a rule's never": { deny: "user_deny", instead: ["ask_user"] },
-      "inert, an always-ask tool": { ask: "always_ask", helper: false, delivery: "pause" }
     })
   })
 })

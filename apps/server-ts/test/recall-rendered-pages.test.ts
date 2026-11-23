@@ -58,6 +58,28 @@ it("recall fits its room in bytes, cuts a long page, and records each block's by
   )
 })
 
+it("recall stays within its room when an earlier block is short and a later page is long", () => {
+  const room = 7_000
+  const pages = [
+    page("projects/garden.md", "Garden", "The garden seeds are ordered. ".repeat(80)),
+    page("projects/kitchen.md", "Kitchen", "The kitchen plan, café, crème brûlée.\n".repeat(2_000))
+  ]
+  const recall = prepareMemorySources({
+    pages,
+    recall: recallCandidates({
+      pages,
+      query: "garden seeds ordered kitchen",
+      today: "2026-11-14",
+      sent: new Map()
+    }),
+    lastChanged: new Map()
+  })
+    .render(new Map())
+    .recall?.(room)
+  expect(recall?.sources).toHaveLength(2)
+  expect(bytes(recall?.text ?? "")).toBeLessThanOrEqual(room)
+})
+
 it("recall of a page the run holds in part offers only the text past what it holds", () => {
   const head = "Seeds are ordered for the garden.\n".repeat(10)
   const space = page(

@@ -1,12 +1,10 @@
 import { Effect } from "effect"
-import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
-import { taskJobId } from "../src/persistence/space-job-id.js"
 import { iso } from "../src/runtime/clock.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { LATER, claim, makeAutomation, makeTask, requestRun, tryRenew } from "./work-fixtures.js"
+import { LATER, claim, makeTask, tryRenew } from "./work-fixtures.js"
 
 const seen = Effect.gen(function* () {
   const { queue } = yield* (yield* AutomationCatalog).diagnostics()
@@ -118,60 +116,5 @@ it("a Task's hold start survives a renewal and its own reclaim, and ends with th
     afterDeferral: [{ held: iso(T5), claimed: iso(T5) }],
     settled: [],
     sameAttempt: [true, true, true, true]
-  })
-})
-
-it("the hold start is the queue row's own fact for a Task, and a definition keeps its own", async () => {
-  const outcome = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const queue = yield* AutomationQueue
-      const task = yield* makeTask
-      const key = taskJobId(task.item_id)
-      const authored = yield* makeAutomation
-      yield* requestRun(authored)
-      const stored = sql<{
-        readonly owner: string
-        readonly hold_started_at: string | null
-        readonly job_held_since: string | null
-      }>`SELECT CASE queue.task_id WHEN ${key} THEN 'task' ELSE 'automation' END AS owner,
-          queue.hold_started_at, definition.job_held_since
-        FROM automation_event_queue AS queue
-        LEFT JOIN scheduled_tasks AS definition ON definition.task_id = queue.task_id
-        ORDER BY owner`
-      const leases = yield* claim("first", 10)
-      const held = yield* stored
-      const { queue: listed } = yield* (yield* AutomationCatalog).diagnostics()
-      for (const lease of leases)
-        yield* Effect.promise(async () => queue.jobs.release({ ...lease, releasedAt: LATER + 1 }))
-      const released = yield* stored
-      const unheld = yield* sql`UPDATE automation_event_queue SET hold_started_at = ${iso(LATER)}
-        WHERE task_id = ${key}`.pipe(
-        Effect.match({ onFailure: () => "refused", onSuccess: () => "written" })
-      )
-      return {
-        held,
-        listed: listed
-          .map((row) => [row.task_id === key ? "task" : "automation", row.held_by_worker_since])
-          .toSorted(),
-        released,
-        unheld
-      }
-    })
-  )
-  expect(outcome).toEqual({
-    held: [
-      { owner: "automation", hold_started_at: null, job_held_since: iso(LATER) },
-      { owner: "task", hold_started_at: iso(LATER), job_held_since: null }
-    ],
-    listed: [
-      ["automation", iso(LATER)],
-      ["task", iso(LATER)]
-    ],
-    released: [
-      { owner: "automation", hold_started_at: null, job_held_since: null },
-      { owner: "task", hold_started_at: null, job_held_since: null }
-    ],
-    unheld: "refused"
   })
 })

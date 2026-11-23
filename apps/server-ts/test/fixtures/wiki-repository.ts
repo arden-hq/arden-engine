@@ -200,7 +200,7 @@ export const wikiToolsOver = (
     )
   )
 
-export const namedTool = (tools: ReadonlyArray<ServerTool>, name: string): ServerTool => {
+const namedTool = (tools: ReadonlyArray<ServerTool>, name: string): ServerTool => {
   const tool = tools.find((candidate) => candidate.definition.name === name)
   if (tool === undefined) throw new Error(`Missing tool ${name}`)
   return tool

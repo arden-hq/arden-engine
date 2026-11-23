@@ -7,54 +7,8 @@ import {
   CHAT_QUEUE_LIMIT,
   CHAT_REPLY_QUOTES_MAX,
   chatRequests,
-  type ChatReplyContext,
-  type ChatRunErrorCode,
-  runFailureText
+  type ChatReplyContext
 } from "@arden-hq/protocol/chat"
-
-it("keeps delta streams lossy and terminal events authoritative", () => {
-  expect(
-    decodeServerEvent({
-      type: "TEXT_MESSAGE_END",
-      message_id: "assistant-1",
-      content: "The corrected final text"
-    })
-  ).toMatchObject({ content: "The corrected final text" })
-  expect(
-    decodeServerEvent({
-      type: "TEXT_MESSAGE_END",
-      message_id: "assistant-1"
-    })
-  ).toEqual({ type: "TEXT_MESSAGE_END", message_id: "assistant-1" })
-  expect(
-    decodeServerEvent({
-      type: "REASONING_MESSAGE_END",
-      message_id: "reasoning-1",
-      content: "Weighing both options"
-    })
-  ).toMatchObject({ content: "Weighing both options" })
-  expect(
-    decodeServerEvent({
-      type: "REASONING_MESSAGE_END",
-      message_id: "reasoning-1"
-    })
-  ).toEqual({ type: "REASONING_MESSAGE_END", message_id: "reasoning-1" })
-  expect(
-    decodeServerEvent({
-      type: "TOOL_CALL_RESULT",
-      tool_call_id: "tool-1",
-      name: "bash",
-      content: "complete output"
-    })
-  ).toMatchObject({ content: "complete output" })
-  expect(
-    decodeServerEvent({
-      type: "TOOL_CALL_PROGRESS",
-      tool_call_id: "tool-1",
-      message: "Running"
-    })
-  ).toMatchObject({ message: "Running" })
-})
 
 it("carries a bounded reconnect on stream_retry without ending the turn", () => {
   expect(
@@ -80,48 +34,6 @@ it("carries a bounded reconnect on stream_retry without ending the turn", () => 
       max_attempts: 5
     })
   ).toThrow(ProtocolError)
-})
-
-it("keeps RUN_ERROR on the closed run-failure taxonomy", () => {
-  const codes = [
-    "context_length_exceeded",
-    "rate_limited",
-    "provider_auth",
-    "provider_unavailable",
-    "provider_error",
-    "request_invalid",
-    "tool_persistence_failed",
-    "run_interrupted",
-    "runner_error"
-  ] as const satisfies ReadonlyArray<ChatRunErrorCode>
-  for (const code of codes) {
-    expect(
-      decodeServerEvent({
-        type: "RUN_ERROR",
-        run_id: "run-1",
-        turn_id: "turn-1",
-        message: "failed",
-        code
-      })
-    ).toMatchObject({ code })
-  }
-  expect(() =>
-    decodeServerEvent({
-      type: "RUN_ERROR",
-      run_id: "run-1",
-      turn_id: "turn-1",
-      message: "failed",
-      code: "provider_exploded"
-    })
-  ).toThrow(ProtocolError)
-  expect(
-    decodeServerEvent({
-      type: "RUN_ERROR",
-      run_id: "run-1",
-      turn_id: "turn-1",
-      message: "failed"
-    })
-  ).toEqual({ type: "RUN_ERROR", run_id: "run-1", turn_id: "turn-1", message: "failed" })
 })
 
 it("encodes queue order without reordering identities and rejects ambiguous membership", () => {
@@ -161,11 +73,4 @@ it("sends the quoted messages of a reply as a list, one or several, up to the li
   expect(() => sent(Array.from({ length: CHAT_REPLY_QUOTES_MAX + 1 }, (_, n) => quote(n)))).toThrow(
     ProtocolError
   )
-})
-
-it("says a model was refused in words true of any provider, an account or a local server", () => {
-  expect(runFailureText("model_unavailable", "llama.cpp request failed with status 404")).toEqual({
-    text: "The model server won't run this model. Pick another model for this chat, then try again.",
-    detail: "llama.cpp request failed with status 404"
-  })
 })

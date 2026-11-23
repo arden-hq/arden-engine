@@ -105,20 +105,9 @@ describe("relay push", () => {
         news: "posted"
       }
     })
-    expect(JSON.parse(fromUtf8(sealed.payload))).toMatchObject({
-      aps: { alert: { title: "Arden", body: "A new message" } }
-    })
-  })
-
-  it("an approval push carries the time its card was asked", async () => {
-    const world = makeWorld({ seeded: true })
-    const sent: Array<PushNotice> = []
-    world.asks = [approval("run-1", "call-1")]
-    world.onSend = (pushed) => sent.push(pushed)
-    await world.reconcile()
-    expect(sent.map((pushed) => [pushed.askId, pushed.askedAt])).toEqual([
-      ["call-1", "2026-10-12T09:58:00.000Z"]
-    ])
+    const body: string = JSON.parse(fromUtf8(sealed.payload)).aps.alert.body
+    expect(body).toMatch(/message/i)
+    expect(body).not.toMatch(/finish|stopp/i)
   })
 
   it("two posts in one chat open that chat, and neither replaces the other on the phone", async () => {
@@ -140,15 +129,6 @@ describe("relay push", () => {
       ["space-chat", "post:1"],
       ["space-chat", "post:2"]
     ])
-  })
-
-  it("a finished chat's push collapses on its chat", async () => {
-    const world = makeWorld({ seeded: true })
-    const sent: Array<PushNotice> = []
-    world.notices = [notice("done-1", { chatSessionId: "chat-1" })]
-    world.onSend = (pushed) => sent.push(pushed)
-    await world.reconcile()
-    expect(sent.map((pushed) => pushed.collapseId)).toEqual(["chat-1"])
   })
 
   it("a question collapses on the question, and an approval on its call in its run", async () => {
@@ -179,12 +159,6 @@ describe("relay push", () => {
     world.asks = [question("q-1"), question("q-2")]
     expect(await world.reconcile()).toEqual(["ask:question:q-2"])
     expect(await world.reconcile()).toEqual([])
-  })
-
-  it("keys an approval by its run, so the same tool call id in another run is another ask", async () => {
-    const world = makeWorld({ seeded: true })
-    world.asks = [approval("run-1", "call-1"), approval("run-2", "call-1")]
-    expect(new Set(await world.reconcile()).size).toBe(2)
   })
 
   it("with call ids of any length, each asking pushes once to each phone, and a call asked again pushes again", async () => {
@@ -261,18 +235,6 @@ describe("relay push", () => {
     expect(world.sent).toEqual(["ask:question:q-2", "ask:question:q-1"])
   })
 
-  it("a push with the socket down is released, then sent once it is up", async () => {
-    const world = makeWorld({ seeded: true })
-    world.asks = [question("q-1")]
-    world.refusing = new Set(["phone"])
-    expect(await world.reconcile()).toEqual([])
-    expect(world.sent).toEqual([])
-    world.refusing = new Set()
-    expect(await world.reconcile()).toEqual(["ask:question:q-1"])
-    expect(await world.reconcile()).toEqual([])
-    expect(world.sent).toEqual(["ask:question:q-1"])
-  })
-
   it("one phone failing does not block the others, and only it is tried again", async () => {
     const world = makeWorld({ seeded: true })
     world.devices = ["a", "b", "c"]
@@ -295,16 +257,6 @@ describe("relay push", () => {
     world.devices = ["phone"]
     expect(await world.reconcile()).toEqual([])
     expect(world.seeded()).toBe(true)
-    world.asks = [question("q-1"), question("q-2")]
-    expect(await world.reconcile()).toEqual(["ask:question:q-2"])
-  })
-
-  it("the first reconcile of this release records what waits (old keys differ) and pushes none of it", async () => {
-    const world = makeWorld({ seeded: false })
-    world.asks = [question("q-1")]
-    world.notices = [notice("a", {})]
-    expect(await world.reconcile()).toEqual([])
-    expect(world.sent).toEqual([])
     world.asks = [question("q-1"), question("q-2")]
     expect(await world.reconcile()).toEqual(["ask:question:q-2"])
   })

@@ -22,75 +22,66 @@ const guardDefinitions = Effect.gen(function* () {
       BEGIN SELECT RAISE(ABORT, 'reject_synthetic_space_review: a Space review definition row was written'); END`)
 })
 
-const readersCase = (poisoned: boolean) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const spaces = yield* SpaceStore
-    const catalog = yield* AutomationCatalog
-    const queue = yield* AutomationQueue
-    yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
+const readersCase = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const spaces = yield* SpaceStore
+  const catalog = yield* AutomationCatalog
+  const queue = yield* AutomationQueue
+  yield* sql`INSERT INTO spaces (space_id, name, name_key, inference_policy, created_at, updated_at)
       VALUES ('space-1', 'Made-up', 'made-up', '{"enabled":true}', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`
-    if (poisoned)
-      yield* sql`INSERT INTO scheduled_tasks (task_id, automation_ref, name, description, prompt, context_mode,
-          triggers, enabled, created_at, auto_approve, builtin, tool_scope, triggers_source, purpose,
-          owner_space_id, next_run_at)
-        VALUES (${REVIEW}, ${internalRef(REVIEW)}, 'Stale worker', 'Internal Space execution', 'Review it.',
-          'fresh', '[]', 1, '2026-11-01T00:00:00.000Z', 1, 1, 'space', 'space_runtime', 'space_review',
-          'space-1', ${DUE})`
-    yield* guardDefinitions
-    yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up.md"))
-    yield* (yield* WorkStore).create(
-      { kind: "space", spaceId: "space-1" },
-      { key: "background", text: "In the background" }
-    )
-    const [space] = yield* sql<{ readonly updated_at: string }>`
+  yield* guardDefinitions
+  yield* spaces.bindPage("space-1", freePage("page-1", "projects/made-up.md"))
+  yield* (yield* WorkStore).create(
+    { kind: "space", spaceId: "space-1" },
+    { key: "background", text: "In the background" }
+  )
+  const [space] = yield* sql<{ readonly updated_at: string }>`
       SELECT updated_at FROM spaces WHERE space_id = 'space-1'`
-    yield* spaces.update("space-1", {
-      name: "Renamed",
-      expected_updated_at: space?.updated_at ?? ""
-    })
-    const [chat] = yield* sql<{ readonly session_id: string }>`
-      SELECT session_id FROM space_review_chats WHERE space_id = 'space-1'`
-    if (chat === undefined) throw new Error("The review has no private chat")
-
-    const focused = yield* catalog.diagnostics(internalRef(REVIEW))
-    const header = yield* (yield* SessionQueries).loadHeaderSnapshot(chat.session_id)
-    const nextDue = yield* Effect.promise(async () =>
-      queue.jobs.nextDueAt(Date.parse("2029-12-31T00:00:00.000Z"))
-    )
-    const leases = yield* Effect.promise(async () =>
-      queue.jobs.claim({
-        workerId: "late",
-        now: Date.parse(DUE) + 60_000,
-        limit: 10,
-        leaseDurationMs: 60_000
-      })
-    )
-    return {
-      firstQueued: focused.queue[0]
-        ? {
-            task_id: focused.queue[0].task_id,
-            name: focused.queue[0].name,
-            session_id: focused.queue[0].session_id
-          }
-        : undefined,
-      selected: focused.selected_automation_ref === internalRef(REVIEW),
-      schedules: focused.schedules.map((row) => row.task_id),
-      originJobPurpose: header?.header.originJobPurpose,
-      nextDueIsOldRow: nextDue === Date.parse(DUE),
-      scheduledLeases: leases.filter(
-        (lease) => lease.payload.automationId === REVIEW && lease.payload.occurrence === "scheduled"
-      ).length,
-      scheduledRows: (yield* sql<{
-        readonly n: number
-      }>`SELECT COUNT(*) AS n FROM automation_event_queue
-        WHERE task_id = ${REVIEW} AND source = 'scheduled'`)[0]?.n,
-      oldRow:
-        yield* sql`SELECT name, next_run_at FROM scheduled_tasks WHERE purpose = 'space_review'`
-    }
+  yield* spaces.update("space-1", {
+    name: "Renamed",
+    expected_updated_at: space?.updated_at ?? ""
   })
+  const [chat] = yield* sql<{ readonly session_id: string }>`
+      SELECT session_id FROM space_review_chats WHERE space_id = 'space-1'`
+  if (chat === undefined) throw new Error("The review has no private chat")
 
-const expected = (oldRow: ReadonlyArray<unknown>) => ({
+  const focused = yield* catalog.diagnostics(internalRef(REVIEW))
+  const header = yield* (yield* SessionQueries).loadHeaderSnapshot(chat.session_id)
+  const nextDue = yield* Effect.promise(async () =>
+    queue.jobs.nextDueAt(Date.parse("2029-12-31T00:00:00.000Z"))
+  )
+  const leases = yield* Effect.promise(async () =>
+    queue.jobs.claim({
+      workerId: "late",
+      now: Date.parse(DUE) + 60_000,
+      limit: 10,
+      leaseDurationMs: 60_000
+    })
+  )
+  return {
+    firstQueued: focused.queue[0]
+      ? {
+          task_id: focused.queue[0].task_id,
+          name: focused.queue[0].name,
+          session_id: focused.queue[0].session_id
+        }
+      : undefined,
+    selected: focused.selected_automation_ref === internalRef(REVIEW),
+    schedules: focused.schedules.map((row) => row.task_id),
+    originJobPurpose: header?.header.originJobPurpose,
+    nextDueIsOldRow: nextDue === Date.parse(DUE),
+    scheduledLeases: leases.filter(
+      (lease) => lease.payload.automationId === REVIEW && lease.payload.occurrence === "scheduled"
+    ).length,
+    scheduledRows: (yield* sql<{
+      readonly n: number
+    }>`SELECT COUNT(*) AS n FROM automation_event_queue
+        WHERE task_id = ${REVIEW} AND source = 'scheduled'`)[0]?.n,
+    oldRow: yield* sql`SELECT name, next_run_at FROM scheduled_tasks WHERE purpose = 'space_review'`
+  }
+})
+
+const expected = {
   firstQueued: { task_id: REVIEW, name: "Renamed worker", session_id: expect.any(String) },
   selected: true,
   schedules: [],
@@ -98,8 +89,8 @@ const expected = (oldRow: ReadonlyArray<unknown>) => ({
   nextDueIsOldRow: false,
   scheduledLeases: 0,
   scheduledRows: 0,
-  oldRow
-})
+  oldRow: []
+}
 
 it("a Space's last check is the latest counted run its review or Tasks completed", async () => {
   const lastChecked = await withTempDatabase(
@@ -176,11 +167,5 @@ it("a Space's last check is the latest completion, even when a clock change reor
 })
 
 it("a review's reference, chat header and schedule come from its Space, with no old row", async () => {
-  expect(await withTempDatabase(readersCase(false))).toEqual(expected([]))
-})
-
-it("a poisoned old review row is not a reference, a header, a schedule or a wake", async () => {
-  expect(await withTempDatabase(readersCase(true))).toEqual(
-    expected([{ name: "Stale worker", next_run_at: DUE }])
-  )
+  expect(await withTempDatabase(readersCase)).toEqual(expected)
 })

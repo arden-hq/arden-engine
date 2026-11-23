@@ -86,6 +86,7 @@ it("moves a script through attempts, settles once and queues one result per sett
         const settledAgain = yield* store.settle({ ref: "wf-1", attempt: 2, settlement: failed })
         const oldVersion = yield* reason(store.retry({ ref: "wf-1", expectedVersion: 1 }))
         const retried = yield* store.retry({ ref: "wf-1", expectedVersion: settled?.version ?? 0 })
+        const manual = yield* store.nextAttempt({ ref: "wf-1", attempt: 3, auto: false })
         const running = yield* store.running()
         const cancelled = yield* store.cancel("wf-1")
         const cancelledAgain = yield* store.cancel("wf-1")
@@ -104,6 +105,7 @@ it("moves a script through attempts, settles once and queues one result per sett
           settledAgain,
           oldVersion,
           retried: [retried.status, retried.attempt, retried.autoRetries, retried.error],
+          manual: [manual.attempt, manual.autoRetries],
           running: running.map((record) => record.ref),
           cancelled: [cancelled.status, cancelled.attempt],
           cancelledAgain: cancelledAgain.version === cancelled.version,
@@ -145,12 +147,13 @@ it("moves a script through attempts, settles once and queues one result per sett
       settledAgain: undefined,
       oldVersion: "conflict",
       retried: ["running", 3, 0, null],
+      manual: [4, 0],
       running: ["wf-1"],
-      cancelled: ["cancelled", 3],
+      cancelled: ["cancelled", 4],
       cancelledAgain: true,
       results: [
         ["An agent failed", 2, "failed"],
-        ["The script was cancelled", 3, "cancelled"]
+        ["The script was cancelled", 4, "cancelled"]
       ]
     })
   } finally {

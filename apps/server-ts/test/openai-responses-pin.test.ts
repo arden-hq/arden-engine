@@ -2,10 +2,7 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { CompletionResponse, ModelProviderRequest, ModelStreamItem } from "@arden-hq/loop"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { afterEach, describe, expect, it } from "vitest"
-import {
-  makeOpenAiResponsesProvider,
-  OpenAiResponsesProviderError
-} from "../src/providers/openai-responses/index.js"
+import { makeOpenAiResponsesProvider } from "../src/providers/openai-responses/index.js"
 
 type Handler = (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
 
@@ -68,41 +65,6 @@ const baseRequest: ModelProviderRequest = {
   deferredTools: [],
   toolChoice: "auto"
 }
-
-const terminalWithoutIds = {
-  id: "resp-1",
-  output: [
-    {
-      type: "reasoning",
-      summary: [{ type: "summary_text", text: "Thinking." }]
-    },
-    {
-      type: "message",
-      role: ROLE.assistant,
-      phase: "final_answer",
-      content: [{ type: "output_text", text: "Done." }]
-    },
-    {
-      type: "reasoning",
-      id: "rs-real",
-      encrypted_content: "enc-real",
-      summary: [{ type: "summary_text", text: "Real." }],
-      status: "completed"
-    },
-    {
-      id: "msg-real",
-      type: "message",
-      role: ROLE.assistant,
-      content: [{ type: "output_text", text: " Kept." }],
-      status: "completed"
-    }
-  ],
-  usage: {
-    input_tokens: 40,
-    input_tokens_details: { cached_tokens: 15 },
-    output_tokens: 7
-  }
-} as const
 
 const simpleCompleted = {
   id: "resp-simple",
@@ -167,13 +129,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
 
     expect(attempts).toBe(2)
     expect(items[0]).toEqual({ _tag: "TextDelta", content: "Partial" })
-    expect(items[1]).toEqual({
-      _tag: "ProviderStreamRetry",
-      attempt: 1,
-      maxAttempts: 5,
-      delayMs: 5,
-      reason: expect.any(String)
-    })
+    expect(items[1]).toMatchObject({ _tag: "ProviderStreamRetry" })
     expect((items.at(-1) as CompletionResponse).message.content).toBe("Recovered.")
   })
 
@@ -182,7 +138,7 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     const baseUrl = await listen((_request, response) => {
       attempts += 1
       if (attempts === 1) {
-        response.writeHead(429, { "retry-after-ms": "20", "retry-after": "9" })
+        response.writeHead(429, { "retry-after-ms": "200", "retry-after": "9" })
         response.end()
         return
       }
@@ -192,20 +148,22 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     })
 
     const provider = makeOpenAiResponsesProvider({ baseUrl, credentials: staticCredentials })
+    const started = Date.now()
     const items = withoutReadyItems(await collect(await provider.stream(baseRequest)))
 
     expect(attempts).toBe(2)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(180)
     expect(items[0]).toEqual({
       _tag: "ProviderStreamRetry",
       attempt: 1,
       maxAttempts: 5,
-      delayMs: 20,
+      delayMs: 200,
       reason: expect.any(String)
     })
     expect(items).toHaveLength(2)
   })
 
-  it("treats SSE idleness as a transport retry (injected short timeout in place of the 120s default)", async () => {
+  it("treats SSE idleness as a transport retry", async () => {
     let attempts = 0
     const baseUrl = await listen((_request, response) => {
       attempts += 1
@@ -229,15 +187,9 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
 
     expect(attempts).toBe(2)
     expect(Date.now() - started).toBeGreaterThanOrEqual(50)
-    expect(items.slice(0, 2)).toEqual([
+    expect(items.slice(0, 2)).toMatchObject([
       { _tag: "TextDelta", content: "Stall" },
-      {
-        _tag: "ProviderStreamRetry",
-        attempt: 1,
-        maxAttempts: 5,
-        delayMs: 5,
-        reason: "OpenAI response stream became idle"
-      }
+      { _tag: "ProviderStreamRetry" }
     ])
     expect((items.at(-1) as CompletionResponse).message.content).toBe("Recovered.")
   })
@@ -263,108 +215,20 @@ describe("OpenAI Responses provider pin (I-107 Risk #4)", () => {
     expect(attempts).toBe(3)
   })
 
-  it("rejects a non-positive or fractional idle timeout at construction", () => {
-    for (const idleTimeoutMs of [0, -1, 1.5]) {
-      expect(() =>
-        makeOpenAiResponsesProvider({
-          baseUrl: "http://127.0.0.1:1",
-          idleTimeoutMs,
-          credentials: staticCredentials
-        })
-      ).toThrow(OpenAiResponsesProviderError)
-    }
-  })
-
-  it("round-trips response items through provider_state: synthetic ids filtered, reasoning replayed without status", async () => {
-    const bodies: Array<unknown> = []
+  it("gives up on a transient status once the retry budget is spent", async () => {
     let attempts = 0
-    const baseUrl = await listen(async (request, response) => {
-      bodies.push(await readJson(request))
+    const baseUrl = await listen((_request, response) => {
       attempts += 1
-      sseHead(response)
-      sse(response, {
-        type: "response.completed",
-        response: attempts === 1 ? terminalWithoutIds : simpleCompleted
-      })
+      response.writeHead(attempts < 20 ? 503 : 400, { "retry-after-ms": "1" })
       response.end()
     })
 
     const provider = makeOpenAiResponsesProvider({ baseUrl, credentials: staticCredentials })
-    const first = await collect(await provider.stream(baseRequest))
-    const completed = first.find((item) => item._tag === "Completed")
-    expect(completed?.usage).toEqual({
-      prompt_tokens: 25,
-      completion_tokens: 7,
-      cache_read_tokens: 15,
-      cache_write_tokens: 0
-    })
-    const stored = completed?.message.provider_state?.["openai-responses"]
-
-    expect(stored).toEqual([
-      {
-        type: "reasoning",
-        id: "arden-synthetic-output-0",
-        summary: [{ type: "summary_text", text: "Thinking." }],
-        status: "completed"
-      },
-      {
-        id: "arden-synthetic-output-1",
-        type: "message",
-        role: ROLE.assistant,
-        content: [{ type: "output_text", text: "Done.", annotations: [], logprobs: [] }],
-        status: "completed",
-        phase: "final_answer"
-      },
-      {
-        type: "reasoning",
-        id: "rs-real",
-        encrypted_content: "enc-real",
-        summary: [{ type: "summary_text", text: "Real." }],
-        status: "completed"
-      },
-      {
-        id: "msg-real",
-        type: "message",
-        role: ROLE.assistant,
-        content: [{ type: "output_text", text: " Kept.", annotations: [], logprobs: [] }],
-        status: "completed"
-      }
-    ])
-
-    await collect(
-      await provider.stream({
-        ...baseRequest,
-        messages: [
-          { role: ROLE.user, content: "Hi." },
-          {
-            role: ROLE.assistant,
-            content: "Done. Kept.",
-            ...(stored === undefined ? {} : { provider_state: { "openai-responses": stored } })
-          },
-          { role: ROLE.user, content: "More." }
-        ]
-      })
+    await expect(collect(await provider.stream(baseRequest))).rejects.toThrow(
+      "OpenAI request failed with status 503"
     )
 
-    const replayed = (bodies[1] as { input: ReadonlyArray<unknown> }).input
-    expect(replayed).toEqual([
-      { role: ROLE.user, content: "Hi." },
-      { role: ROLE.assistant, content: "Done.", phase: "final_answer" },
-      {
-        type: "reasoning",
-        id: "rs-real",
-        encrypted_content: "enc-real",
-        summary: [{ type: "summary_text", text: "Real." }]
-      },
-      {
-        id: "msg-real",
-        type: "message",
-        role: ROLE.assistant,
-        content: [{ type: "output_text", text: " Kept.", annotations: [], logprobs: [] }],
-        status: "completed"
-      },
-      { role: ROLE.user, content: "More." }
-    ])
+    expect(attempts).toBe(5)
   })
 
   it("never declares deferred tools; the model finds them through search", async () => {

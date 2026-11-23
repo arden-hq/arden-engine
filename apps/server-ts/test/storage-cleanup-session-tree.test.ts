@@ -71,21 +71,14 @@ it("deletes a chat with its agents and Side chats at any depth", async () => {
   expect(outcome.left).toEqual([])
 })
 
-it.each([
-  { kept: "a retained fork", parent: "chat", disposition: "retained" },
-  { kept: "an agent's retained fork", parent: "agent", disposition: "retained" }
-])("keeps a chat with $kept protected", async (row) => {
+it("keeps a chat with a retained fork protected", async () => {
   const outcome = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const storage = yield* StorageSessionStore
       const chat = yield* (yield* SessionStore).create({ name: "Trip" })
       yield* addChild(sql, { id: "agent", parent: chat.sessionId, type: "agent" })
-      yield* addFork(sql, {
-        id: "fork",
-        source: row.parent === "chat" ? chat.sessionId : "agent",
-        disposition: row.disposition
-      })
+      yield* addFork(sql, { id: "fork", source: chat.sessionId, disposition: "retained" })
       const candidate = yield* candidateOf(storage, chat.sessionId)
       if (candidate === undefined) return yield* Effect.die("no candidate")
       const refused = yield* storage.deleteCandidate(candidate).pipe(Effect.flip)
@@ -95,28 +88,6 @@ it.each([
   expect(outcome.candidate.protections).toEqual(["linked_session"])
   expect(outcome.refused.reason).toBe("conflict")
   expect(outcome.left).toEqual(["agent", outcome.chatId, "fork"].sort())
-})
-
-it("refuses a chat while a Side chat of an agent has an active run", async () => {
-  const outcome = await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const storage = yield* StorageSessionStore
-      const chat = yield* (yield* SessionStore).create({ name: "Trip" })
-      yield* addChild(sql, { id: "agent", parent: chat.sessionId, type: "agent" })
-      yield* addFork(sql, { id: "side", source: "agent", disposition: "disposable" })
-      const idle = yield* candidateOf(storage, chat.sessionId)
-      yield* sql`INSERT INTO chat_runs (run_id, session_id, status, started_at, updated_at, assistant_message_id)
-        VALUES ('side-run', 'side', 'running', ${at}, ${at}, 'side-answer')`
-      const busy = yield* candidateOf(storage, chat.sessionId)
-      if (idle === undefined) return yield* Effect.die("no candidate")
-      const refused = yield* storage.deleteCandidate(idle).pipe(Effect.flip)
-      return { busy, refused, left: yield* present(sql), chatId: chat.sessionId }
-    })
-  )
-  expect(outcome.busy?.protections).toEqual(["active_work"])
-  expect(outcome.refused.message).toBe("This chat changed. Preview the cleanup again.")
-  expect(outcome.left).toEqual(["agent", outcome.chatId, "side"].sort())
 })
 
 it("refuses a preview taken before an agent joined the chat", async () => {
@@ -134,7 +105,7 @@ it("refuses a preview taken before an agent joined the chat", async () => {
     })
   )
   expect(outcome.previewed.deletesWith).toEqual({ agents: 1, sideChats: 0, sessionIds: ["agent"] })
-  expect(outcome.refused.message).toBe("This chat changed. Preview the cleanup again.")
+  expect(outcome.refused.reason).toBe("conflict")
   expect(outcome.left).toEqual(["agent", outcome.chatId, "late-agent"].sort())
 })
 

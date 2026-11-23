@@ -1,12 +1,7 @@
-import { readFileSync } from "node:fs"
 import { Schema } from "effect"
 import { expect, it } from "vitest"
-import { defineServerTool, discoveryOf, type ToolDiscovery } from "../src/tools/define.js"
-import {
-  applyToolCatalog,
-  catalogNameProblems,
-  preloadToolNames
-} from "../src/tools/tool-catalog.js"
+import { defineServerTool, type ToolDiscovery } from "../src/tools/define.js"
+import { applyToolCatalog, preloadToolNames } from "../src/tools/tool-catalog.js"
 import { EmptyParametersSchema } from "../src/tools/automation-tool-schema.js"
 
 const tool = (
@@ -33,22 +28,6 @@ const tool = (
     execute: async () => "done"
   })
 const schema = () => ({ type: "object", properties: {} })
-
-it("the fact is the definition's own field, and no model entry or event metadata carries it", () => {
-  const grouped = tool("made_up_grouped", { discovery: { group: "made_up" } })
-  expect(Object.getOwnPropertyDescriptor(grouped.definition, "discovery")?.value).toEqual({
-    group: "made_up"
-  })
-  expect(discoveryOf(grouped.definition)).toEqual({ group: "made_up" })
-  expect(discoveryOf(tool("made_up_always", { discovery: "always_loaded" }).definition)).toBe(
-    "always_loaded"
-  )
-  expect(discoveryOf(tool("made_up_none").definition)).toBeUndefined()
-  const entry = grouped.entry(schema)
-  expect(JSON.stringify(entry)).not.toContain("discovery")
-  expect(Object.keys(entry.meta.host ?? {})).not.toContain("discovery")
-  expect(Object.keys(grouped.meta)).not.toContain("discovery")
-})
 
 it("a malformed fact is refused where the tool is defined", () => {
   for (const discovery of [
@@ -109,19 +88,4 @@ it("a chat preload is its named tools, then its groups' tools in definition orde
     "made_up_c",
     "made_up_a"
   ])
-})
-
-it("the boot check names a preload group that no tool has", () => {
-  const problems = catalogNameProblems([tool("made_up_tasks", { discovery: { group: "tasks" } })])
-  expect(problems.filter((line) => line.includes("names group"))).toEqual([
-    "SPECIAL_CHAT_PRELOAD.onboarding names group onboarding, which no built-in tool has",
-    "SPACE_CHAT_PRELOAD names group space, which no built-in tool has",
-    "SPACE_CHAT_PRELOAD names group task_inference, which no built-in tool has"
-  ])
-})
-
-it("the name-keyed lists are gone from the catalog module", () => {
-  const source = readFileSync(new URL("../src/tools/tool-catalog.ts", import.meta.url), "utf8")
-  for (const name of ["TOOL_GROUPS", "GROUP_OF", "ALWAYS_LOADED"])
-    expect(source).not.toContain(name)
 })

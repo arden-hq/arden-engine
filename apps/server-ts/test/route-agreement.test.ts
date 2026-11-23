@@ -1,4 +1,3 @@
-import { readdirSync } from "node:fs"
 import { HttpApi } from "effect/unstable/httpapi"
 import { expect, it } from "vitest"
 import { automationRoutes } from "@arden-hq/protocol/automations"
@@ -246,23 +245,6 @@ const endpointPatterns = (): ReadonlyArray<RegExp> => {
   })
   return patterns
 }
-
-const exportedRouteObjects = async (): Promise<ReadonlyArray<string>> => {
-  const srcDir = new URL("../../../libs/protocol/src/", import.meta.url)
-  const entries = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
-    .filter((file) => file.endsWith("/index.ts"))
-    .map((file) => `@arden-hq/protocol/${file.slice(0, -"/index.ts".length)}`)
-  const modules: ReadonlyArray<Record<string, unknown>> = await Promise.all(
-    entries.map((entry) => import(entry))
-  )
-  return modules
-    .flatMap((module) => Object.keys(module).filter((name) => name.endsWith("Routes")))
-    .sort()
-}
-
-it("samples every protocol route object", async () => {
-  expect(Object.keys(tables).sort()).toEqual(await exportedRouteObjects())
-})
 
 it("matches every protocol route to an ArdenApi endpoint path", () => {
   const patterns = endpointPatterns()

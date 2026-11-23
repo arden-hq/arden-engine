@@ -13,7 +13,7 @@ import { modelsFor } from "./models.js"
 import { SettingsError, type Settings } from "./settings.js"
 
 /** The start options a settings file stands for; the rest is applied after start. */
-export const serverOptionsFor = (
+const serverOptionsFor = (
   settings: Settings
 ): { readonly databasePath: string } & Pick<
   HostedServerOptions,

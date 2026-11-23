@@ -30,7 +30,7 @@ it("truncates only matching records below the boundary without advancing the rep
   withSql("journal-truncate-", (sql) =>
     Effect.gen(function* () {
       yield* sql`INSERT INTO journal_streams(stream_id, head_sequence, retained_from_sequence)
-      VALUES ('lifecycle', 4, 1)`
+      VALUES ('lifecycle', 4, 1), ('bystander', 4, 1)`
       for (const record of [
         { sequence: 1, eventType: "session_created", data: { session: { session_id: "agent" } } },
         {
@@ -43,6 +43,11 @@ it("truncates only matching records below the boundary without advancing the rep
       ]) {
         yield* sql`INSERT INTO journal_records(stream_id,sequence,event_type,data_json,attributes_json,created_at)
         VALUES ('lifecycle', ${record.sequence}, ${record.eventType}, ${JSON.stringify(record.data)},
+          '{}', '2026-09-19T00:00:00Z')`
+      }
+      for (const sequence of [1, 2, 3]) {
+        yield* sql`INSERT INTO journal_records(stream_id,sequence,event_type,data_json,attributes_json,created_at)
+        VALUES ('bystander', ${sequence}, 'session_created', ${JSON.stringify({ session: { session_id: "agent" } })},
           '{}', '2026-09-19T00:00:00Z')`
       }
       yield* sql.withTransaction(
@@ -60,5 +65,8 @@ it("truncates only matching records below the boundary without advancing the rep
         yield* sql`SELECT head_sequence, retained_from_sequence FROM journal_streams
       WHERE stream_id = 'lifecycle'`
       ).toEqual([{ head_sequence: 4, retained_from_sequence: 1 }])
+      expect(
+        yield* sql`SELECT sequence FROM journal_records WHERE stream_id = 'bystander' ORDER BY sequence`
+      ).toEqual([{ sequence: 1 }, { sequence: 2 }, { sequence: 3 }])
     })
   ))

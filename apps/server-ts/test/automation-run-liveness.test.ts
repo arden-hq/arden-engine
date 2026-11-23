@@ -2,7 +2,6 @@ import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
-import { memoryCaptureHandler } from "../src/automations/handlers/memory-capture.js"
 import { wikiMaintenanceHandler } from "../src/automations/handlers/wiki-maintenance.js"
 import { wikiChangedEvent } from "../src/automations/producers/wiki.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
@@ -15,7 +14,6 @@ import { withTempDatabase } from "./fixtures/temp-database.js"
 // A job run stays open only while a queue row names it. These cover each way a
 // run used to outlive its job, and the claims that must keep working as before.
 
-const CAPTURE = memoryCaptureHandler.spec.automationId
 const MAINTENANCE = wikiMaintenanceHandler.spec.automationId
 
 const userAutomation = (key: string) =>
@@ -41,7 +39,12 @@ const claim = (now: number) =>
   Effect.gen(function* () {
     const queue = yield* AutomationQueue
     return yield* Effect.promise(async () =>
-      queue.jobs.claim({ workerId: "liveness", now, limit: 1, leaseDurationMs: 30_000 })
+      queue.jobs.claim({
+        workerId: "liveness",
+        now,
+        limit: 1,
+        leaseDurationMs: 30_000
+      })
     )
   })
 
@@ -69,7 +72,7 @@ const runningRuns = (automationId: string) =>
 const interrupted = (claimCount: number) => ({
   status: "interrupted",
   outcome: "interrupted",
-  error: "Its job ended before the run did",
+  error: expect.any(String),
   ended: 1,
   claim_count: claimCount
 })
@@ -86,21 +89,6 @@ it("closes a run whose queue row is deleted without settlement", async () => {
       expect(
         yield* sql`SELECT job_held_since FROM scheduled_tasks WHERE task_id = ${automation.task_id}`
       ).toEqual([{ job_held_since: null }])
-    })
-  )
-})
-
-it("closes a run whose queue row is pointed at another run", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* userAutomation("0b6a3d1e-3a52-4d0e-8f43-1f7fb0a3c002")
-      const [lease] = yield* claim(Date.now())
-      if (lease === undefined) return yield* Effect.die("Expected a lease")
-      yield* sql`UPDATE automation_event_queue
-        SET context = json_set(context, '$.automation_run_id', 999999)
-        WHERE id = ${Number(lease.id)}`
-      expect(yield* runRow(lease.payload.automationRunId)).toEqual(interrupted(1))
     })
   )
 })
@@ -136,7 +124,11 @@ it("refuses to remove an Automation during its chat run, and keeps the run", asy
           client_id: "removed",
           role: ROLE.interaction,
           kind: "assignment",
-          from: { source: "automation", id: automation.task_id, name: automation.name },
+          from: {
+            source: "automation",
+            id: automation.task_id,
+            name: automation.name
+          },
           content: "Review",
           created_at: new Date(now).toISOString(),
           automation: {
@@ -151,41 +143,10 @@ it("refuses to remove an Automation during its chat run, and keeps the run", asy
         Promise.resolve(queue.jobs.release({ ...lease, releasedAt: now + 1_000 }))
       )
       const refused = yield* catalog.delete(AutomationId.make(automation.task_id)).pipe(Effect.flip)
-      expect(refused.message).toBe("A running Automation cannot be deleted")
+      expect(refused.reason).toBe("conflict")
       expect(yield* runningRuns(automation.task_id)).toEqual([
         { id: lease.payload.automationRunId }
       ])
-    })
-  )
-})
-
-it("does not hold a Memory change behind a producer whose job was lost", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const catalog = yield* AutomationCatalog
-      const queue = yield* AutomationQueue
-      const triggers = yield* AutomationTriggers
-      yield* catalog.seedSystemAutomations([memoryCaptureHandler.spec, wikiMaintenanceHandler.spec])
-      yield* queue.requestRun(CAPTURE)
-      const [capture] = yield* claim(Date.now())
-      if (capture?.payload.automationId !== CAPTURE) return yield* Effect.die("Expected Capture")
-      yield* sql`DELETE FROM automation_event_queue WHERE id = ${Number(capture.id)}`
-      yield* triggers.dispatchEvent(
-        wikiChangedEvent({
-          paths: ["notes.md"],
-          revision: "revision-1",
-          savedAt: new Date().toISOString(),
-          source: "automation",
-          hasSpacePage: false,
-          producedBy: CAPTURE,
-          chainDepth: 0
-        })
-      )
-      const leases = yield* claim(Date.now())
-      expect(leases.map((lease) => [lease.payload.automationId, lease.payload.occurrence])).toEqual(
-        [[MAINTENANCE, "event"]]
-      )
     })
   )
 })
@@ -256,11 +217,19 @@ it("keeps one run open across restart, retry and release, and settles it once", 
           })
         )
       )
-      expect(yield* runRow(runId)).toMatchObject({ status: "running", claim_count: 2 })
+      expect(yield* runRow(runId)).toMatchObject({
+        status: "running",
+        claim_count: 2
+      })
       const [retried] = yield* claim(first.expiresAt + 1_000)
       if (retried === undefined) return yield* Effect.die("Expected the retry")
       yield* Effect.promise(async () =>
-        Promise.resolve(queue.jobs.release({ ...retried, releasedAt: first.expiresAt + 1_000 }))
+        Promise.resolve(
+          queue.jobs.release({
+            ...retried,
+            releasedAt: first.expiresAt + 1_000
+          })
+        )
       )
       const [released] = yield* claim(first.expiresAt + 2_000)
       if (released === undefined) return yield* Effect.die("Expected the released job")

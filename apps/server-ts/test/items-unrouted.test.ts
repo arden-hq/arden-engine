@@ -1,4 +1,3 @@
-import type { DatabaseSync } from "node:sqlite"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
@@ -7,153 +6,14 @@ import { DayActivity } from "../src/persistence/automations/day-activity.js"
 import { TaskProposalStore } from "../src/persistence/proposals/store.js"
 import { assertItemEvidence } from "../src/persistence/sqlite/connection-item-evidence.js"
 import { homeOfferJson } from "../src/persistence/sqlite/task-proposal-home.js"
-import { connectionItemTools } from "../src/tools/connection-items.js"
-import { GoogleConnections } from "../src/google/service.js"
-import { migratedTo } from "./fixtures/migrated-to.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
-import { partialService } from "./kit.js"
 
 const AT = "2026-11-20T00:00:00.000Z"
 
-const routedItem = (database: DatabaseSync, id: string, state: "pending" | "routed") =>
-  database
-    .prepare(
-      `INSERT INTO connection_items (item_id, source, account, external_id, thread_key, title,
-        sender, received_at, snippet, fetched_at, state, owner_space_id, route_basis, route_reason,
-        routed_at, detail)
-      VALUES (?, 'gmail', 'me', ?, ?, 'Invoice', 'Ann', ?, 'Pay it', ?, ?, NULL, ?, ?, ?, NULL)`
-    )
-    .run(
-      id,
-      `external-${id}`,
-      `thread-${id}`,
-      AT,
-      AT,
-      state,
-      state === "routed" ? "home" : null,
-      state === "routed" ? "No Space fits." : null,
-      state === "routed" ? AT : null
-    )
-
-it("M2 keeps every item without its route and drops the thread owners and item_move rules", () => {
-  const database = migratedTo(185, (database) => {
-    routedItem(database, "item-a", "routed")
-    routedItem(database, "item-b", "pending")
-    database.exec(`INSERT INTO connection_threads (source, account, thread_key, owner_space_id,
-        basis, updated_at) VALUES ('gmail', 'me', 'thread-item-a', NULL, 'user', '${AT}')`)
-    database.exec(`INSERT INTO permission_rules (rule_id, list_kind, subject_kind, tool_name,
-        decision, source_kind, created_at)
-      VALUES ('rule-move', 'global', 'tool', 'item_move', 'allow', 'settings', '${AT}'),
-        ('rule-read', 'global', 'tool', 'connection_item_read', 'allow', 'settings', '${AT}')`)
-  })
-  expect(database.prepare("SELECT * FROM connection_items ORDER BY item_id").all()).toEqual(
-    ["item-a", "item-b"].map((id) => ({
-      item_id: id,
-      source: "gmail",
-      account: "me",
-      external_id: `external-${id}`,
-      thread_key: `thread-${id}`,
-      title: "Invoice",
-      sender: "Ann",
-      received_at: AT,
-      snippet: "Pay it",
-      fetched_at: AT,
-      detail: null
-    }))
-  )
-  expect(
-    database.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'connection_threads%'").all()
-  ).toEqual([])
-  expect(database.prepare("SELECT rule_id FROM permission_rules").all()).toEqual([
-    { rule_id: "rule-read" }
-  ])
-  database.close()
-})
-
-const homeOffer = (
-  database: DatabaseSync,
-  id: string,
-  seq: number,
-  status: "offered" | "held" | "rejected"
-) =>
-  database
-    .prepare(
-      `INSERT INTO task_proposals (proposal_id, place, dedupe_key, stable_key, text, owner,
-        capture_json, sources_json, evidence_revision_key, candidate_hash, revision, seq, status,
-        settlement_client_id, settlement_decision, created_at, updated_at, settled_at)
-      VALUES (?, 'home', ?, ?, 'Reply to Ann', 'worker', '{"basis":"inferred","reason":"Asked."}',
-        '[]', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      id,
-      `home:${id}`,
-      id,
-      id,
-      id,
-      seq,
-      status,
-      status === "rejected" ? "app" : null,
-      status === "rejected" ? "reject" : null,
-      AT,
-      AT,
-      status === "rejected" ? AT : null
-    )
-
-it("M2 files every Home offer under Main and leaves none of them open", () => {
-  const database = migratedTo(185, (database) => {
-    const main = String(
-      database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
-    )
-    database
-      .prepare(
-        `INSERT INTO task_proposals (proposal_id, place, space_id, dedupe_key, stable_key, text,
-          owner, capture_json, sources_json, evidence_revision_key, candidate_hash, revision, seq,
-          status, created_at, updated_at)
-        VALUES ('own', 'space', ?, 'own', 'own', 'Own offer', 'worker',
-          '{"basis":"inferred","reason":"Asked."}', '[]', 'own', 'own', 0, 1, 'offered', ?, ?)`
-      )
-      .run(main, AT, AT)
-    homeOffer(database, "skipped", 2, "rejected")
-    homeOffer(database, "oldest", 3, "offered")
-    homeOffer(database, "older", 4, "held")
-    homeOffer(database, "newer", 5, "offered")
-    homeOffer(database, "newest", 6, "held")
-  })
-  const main = database.prepare("SELECT space_id FROM spaces WHERE kind = 'main'").get()?.space_id
-  const rows = database
-    .prepare(
-      `SELECT proposal_id, place, space_id = ? AS in_main, status, settled_at IS NOT NULL AS settled
-      FROM task_proposals ORDER BY seq`
-    )
-    .all(String(main))
-  expect(rows).toEqual([
-    { proposal_id: "own", place: "space", in_main: 1, status: "offered", settled: 0 },
-    { proposal_id: "skipped", place: "space", in_main: 1, status: "rejected", settled: 1 },
-    { proposal_id: "oldest", place: "space", in_main: 1, status: "expired", settled: 1 },
-    { proposal_id: "older", place: "space", in_main: 1, status: "expired", settled: 1 },
-    { proposal_id: "newer", place: "space", in_main: 1, status: "expired", settled: 1 },
-    { proposal_id: "newest", place: "space", in_main: 1, status: "expired", settled: 1 }
-  ])
-  expect(() =>
-    database.exec(
-      "UPDATE task_proposals SET place = 'home', space_id = NULL WHERE proposal_id = 'own'"
-    )
-  ).toThrow(/CHECK constraint failed/u)
-  expect(
-    database
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE tbl_name = 'task_proposals' AND type = 'trigger' ORDER BY name"
-      )
-      .all()
-  ).toEqual([
-    { name: "task_proposal_revisions_insert" },
-    { name: "task_proposal_revisions_update" }
-  ])
-  database.close()
-})
-
 const mainId = (sql: SqlClient.SqlClient) =>
-  sql<{ readonly space_id: string }>`SELECT space_id FROM spaces WHERE kind = 'main'`.pipe(
+  sql<{
+    readonly space_id: string
+  }>`SELECT space_id FROM spaces WHERE kind = 'main'`.pipe(
     Effect.map((rows) => rows[0]?.space_id ?? "")
   )
 
@@ -191,7 +51,11 @@ const mainOffer = (
 
 const chatWithTurn = (
   sql: SqlClient.SqlClient,
-  chat: { readonly session: string; readonly run: string; readonly spaceId: string | null }
+  chat: {
+    readonly session: string
+    readonly run: string
+    readonly spaceId: string | null
+  }
 ) =>
   Effect.gen(function* () {
     yield* sql`INSERT INTO sessions (session_id, public_ref, started_at, last_activity,
@@ -221,7 +85,9 @@ const start = (proposalId: string, spaceId?: string) =>
       },
       { memory: [] }
     )
-    const rows = yield* sql<{ readonly space_id: string }>`SELECT space_id FROM space_tasks
+    const rows = yield* sql<{
+      readonly space_id: string
+    }>`SELECT space_id FROM space_tasks
       WHERE item_id = ${task?.item_id ?? ""}`
     return rows[0]?.space_id
   })
@@ -233,13 +99,30 @@ it("a Main offer from a run with no Space starts on Main or on the Space picked,
       const proposals = yield* TaskProposalStore
       yield* sql`INSERT INTO spaces (space_id, name, name_key, created_at, updated_at)
         VALUES ('work', 'Work', 'work', ${AT}, ${AT})`
-      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
+      yield* chatWithTurn(sql, {
+        session: "automation",
+        run: "automation-run",
+        spaceId: null
+      })
       const turn = JSON.stringify([
-        { kind: "chat", session_id: "automation", turn_id: "turn-1", revision: "turn-1" }
+        {
+          kind: "chat",
+          session_id: "automation",
+          turn_id: "turn-1",
+          revision: "turn-1"
+        }
       ])
       const authoredIn = { session: "automation", run: "automation-run" }
-      yield* mainOffer(sql, { id: "automation-main", sources: turn, authoredIn })
-      yield* mainOffer(sql, { id: "automation-work", sources: turn, authoredIn })
+      yield* mainOffer(sql, {
+        id: "automation-main",
+        sources: turn,
+        authoredIn
+      })
+      yield* mainOffer(sql, {
+        id: "automation-work",
+        sources: turn,
+        authoredIn
+      })
       const main = yield* mainId(sql)
       const label = (spaceId: string | undefined) => (spaceId === main ? "main" : spaceId)
       return {
@@ -249,7 +132,11 @@ it("a Main offer from a run with no Space starts on Main or on the Space picked,
       }
     })
   )
-  expect(outcome).toEqual({ memoryScope: undefined, main: "main", work: "work" })
+  expect(outcome).toEqual({
+    memoryScope: undefined,
+    main: "main",
+    work: "work"
+  })
 })
 
 it("a Main chat's offer citing a stored item starts, and item evidence needs only a stored item", async () => {
@@ -258,11 +145,20 @@ it("a Main chat's offer citing a stored item starts, and item evidence needs onl
       const sql = yield* SqlClient.SqlClient
       const main = yield* mainId(sql)
       yield* seedItem(sql, "item-1")
-      yield* chatWithTurn(sql, { session: "main-chat", run: "main-run", spaceId: main })
+      yield* chatWithTurn(sql, {
+        session: "main-chat",
+        run: "main-run",
+        spaceId: main
+      })
       yield* mainOffer(sql, {
         id: "main-chat-offer",
         sources: JSON.stringify([
-          { kind: "chat", session_id: "main-chat", turn_id: "turn-1", revision: "turn-1" },
+          {
+            kind: "chat",
+            session_id: "main-chat",
+            turn_id: "turn-1",
+            revision: "turn-1"
+          },
           { kind: "connection_item", item_id: "item-1", revision: "item-1" }
         ]),
         authoredIn: { session: "main-chat", run: "main-run" }
@@ -323,7 +219,10 @@ it("a fetch stores items with no routing step, and the Daily note lists them wit
         start: "2026-11-19T12:00:00.000Z",
         end: "2026-11-20T12:00:00.000Z"
       })
-      return { saved, items: read.items.map(({ itemId: _itemId, ...item }) => item) }
+      return {
+        saved,
+        items: read.items.map(({ itemId: _itemId, ...item }) => item)
+      }
     })
   )
   expect(outcome).toEqual({
@@ -341,42 +240,34 @@ it("a fetch stores items with no routing step, and the Daily note lists them wit
   })
 })
 
-it("the connection item tools are a read of recent items and a read of one; item_move is gone", async () => {
-  const tools = await Effect.runPromise(
-    connectionItemTools.pipe(
-      Effect.provideService(
-        ConnectionItemStore,
-        partialService<ConnectionItemStore["Service"]>("ConnectionItemStore", {})
-      ),
-      Effect.provideService(
-        GoogleConnections,
-        partialService<GoogleConnections["Service"]>("GoogleConnections", {})
-      )
-    )
-  )
-  expect(tools.map((tool) => tool.definition.name)).toEqual([
-    "connection_items_state",
-    "connection_item_read"
-  ])
-})
-
 it("Main letter evidence names the item an offer cites, whatever source comes first", async () => {
   const cited = await withTempDatabase(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* seedItem(sql, "item-1")
-      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
+      yield* chatWithTurn(sql, {
+        session: "automation",
+        run: "automation-run",
+        spaceId: null
+      })
       yield* mainOffer(sql, {
         id: "offer",
         sources: JSON.stringify([
-          { kind: "chat", session_id: "automation", turn_id: "turn-1", revision: "turn-1" },
+          {
+            kind: "chat",
+            session_id: "automation",
+            turn_id: "turn-1",
+            revision: "turn-1"
+          },
           { kind: "connection_item", item_id: "item-1", revision: "item-1" }
         ]),
         authoredIn: { session: "automation", run: "automation-run" }
       })
       yield* sql`UPDATE task_proposals SET signal_json = json_object('source', 'gmail',
         'title', 'Invoice', 'from', 'Ann')`
-      const rows = yield* sql<{ readonly offer: string }>`SELECT ${homeOfferJson(sql)} AS offer
+      const rows = yield* sql<{
+        readonly offer: string
+      }>`SELECT ${homeOfferJson(sql)} AS offer
         FROM task_proposals AS offer`
       return JSON.parse(rows[0]?.offer ?? "{}").item.item_id
     })
@@ -389,11 +280,24 @@ it("Start refuses an offer whose cited item expired, on both start paths", async
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const main = yield* mainId(sql)
-      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
-      yield* chatWithTurn(sql, { session: "main-chat", run: "main-run", spaceId: main })
+      yield* chatWithTurn(sql, {
+        session: "automation",
+        run: "automation-run",
+        spaceId: null
+      })
+      yield* chatWithTurn(sql, {
+        session: "main-chat",
+        run: "main-run",
+        spaceId: main
+      })
       const sources = (session: string) =>
         JSON.stringify([
-          { kind: "chat", session_id: session, turn_id: "turn-1", revision: "turn-1" },
+          {
+            kind: "chat",
+            session_id: session,
+            turn_id: "turn-1",
+            revision: "turn-1"
+          },
           { kind: "connection_item", item_id: "gone", revision: "gone" }
         ])
       yield* mainOffer(sql, {
@@ -411,10 +315,16 @@ it("Start refuses an offer whose cited item expired, on both start paths", async
           Effect.flip,
           Effect.map((error) => ("kind" in error ? error.kind : error.reason))
         )
-      return { noSpace: yield* kind("no-space"), inMain: yield* kind("in-main") }
+      return {
+        noSpace: yield* kind("no-space"),
+        inMain: yield* kind("in-main")
+      }
     })
   )
-  expect(refused).toEqual({ noSpace: "source_unavailable", inMain: "source_unavailable" })
+  expect(refused).toEqual({
+    noSpace: "source_unavailable",
+    inMain: "source_unavailable"
+  })
 })
 
 it("Main letter evidence names no item when the first one an offer cites expired", async () => {
@@ -422,7 +332,11 @@ it("Main letter evidence names no item when the first one an offer cites expired
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* seedItem(sql, "item-2")
-      yield* chatWithTurn(sql, { session: "automation", run: "automation-run", spaceId: null })
+      yield* chatWithTurn(sql, {
+        session: "automation",
+        run: "automation-run",
+        spaceId: null
+      })
       yield* mainOffer(sql, {
         id: "offer",
         sources: JSON.stringify([
@@ -440,32 +354,4 @@ it("Main letter evidence names no item when the first one an offer cites expired
     })
   )
   expect(cited).toBeNull()
-})
-
-it("M2 settles a Home offer dated ahead of the clock in one change, never before its last update", () => {
-  const AHEAD = "2999-01-01T00:00:00.000Z"
-  const database = migratedTo(185, (database) => {
-    database.exec(`INSERT INTO task_proposals (proposal_id, place, dedupe_key, stable_key, text,
-        owner, capture_json, sources_json, evidence_revision_key, candidate_hash, revision, seq,
-        status, created_at, updated_at)
-      VALUES ('ahead', 'home', 'home:ahead', 'ahead', 'Reply to Ann', 'worker',
-        '{"basis":"inferred","reason":"Asked."}', '[]', 'ahead', 'ahead', 0, 1, 'offered',
-        '${AHEAD}', '${AHEAD}')`)
-  })
-  expect(
-    database
-      .prepare(
-        `SELECT status, updated_at, settled_at, revision,
-          (SELECT COUNT(*) FROM task_proposal_revisions WHERE proposal_id = 'ahead') AS versions
-        FROM task_proposals WHERE proposal_id = 'ahead'`
-      )
-      .get()
-  ).toEqual({
-    status: "expired",
-    updated_at: AHEAD,
-    settled_at: AHEAD,
-    revision: 1,
-    versions: 2
-  })
-  database.close()
 })

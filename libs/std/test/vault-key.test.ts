@@ -21,6 +21,7 @@ describe("key rules", () => {
       "KEY_1PASSWORD_API_KEY",
       "STRIPE_KEY"
     ])
+    expect(variableOf("!!!")).toBe("VAULT_API_KEY")
   })
 
   test("Send only to reads hosts, ports and addresses, and refuses the rest", () => {
@@ -31,6 +32,18 @@ describe("key rules", () => {
       addresses: ["api.todoist.com", "todoist.com", "localhost:11434"]
     })
     expect(readAddresses("  ")).toEqual({ kind: "empty" })
+    expect(readAddresses("api.todoist.com. localhost.:8080")).toEqual({
+      kind: "ok",
+      addresses: ["api.todoist.com", "localhost:8080"]
+    })
+    expect(readAddresses("example.com:65535")).toEqual({
+      kind: "ok",
+      addresses: ["example.com:65535"]
+    })
+    expect(readAddresses("example.com:65536")).toEqual({
+      kind: "refused",
+      entry: "example.com:65536"
+    })
     expect(readAddresses("ftp://files.example.com")).toEqual({
       kind: "refused",
       entry: "ftp://files.example.com"
@@ -55,6 +68,8 @@ describe("key rules", () => {
     expect(addressCovers("example.com:8080", at("example.com", 8080, false))).toBe(false)
     expect(addressCovers("localhost:11434", at("localhost", 11434, false))).toBe(true)
     expect(addressCovers("localhost:11434", at("localhost", 11435, false))).toBe(false)
+    expect(addressCovers("localhost", at("localhost", 80, false))).toBe(true)
+    expect(addressCovers("localhost", at("localhost", 8080, false))).toBe(false)
     expect(addressCovers("[::1]:8080", at("[::1]", 8080, false))).toBe(true)
   })
 })
@@ -75,5 +90,7 @@ describe("the add-a-key card's limit", () => {
     expect(fitsCard(["a.com", "b.com", "c.com", "d.com"])).toBe(false)
     expect(fitsCard([`${"a".repeat(40)}.${"b".repeat(40)}.com`])).toBe(false)
     expect(fitsCard([])).toBe(false)
+    expect(fitsCard(["a".repeat(80)])).toBe(true)
+    expect(fitsCard(["a".repeat(81)])).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber, Option } from "effect"
 import { expect, it } from "vitest"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 
@@ -96,13 +96,14 @@ it("lets a cancelled caller leave while its accepted write and publication still
           )
           .pipe(Effect.forkChild)
         yield* Deferred.await(started)
-        yield* Fiber.interrupt(caller)
+        yield* Fiber.interrupt(caller).pipe(Effect.forkChild)
+        const left = yield* Fiber.await(caller).pipe(Effect.timeoutOption("1 second"))
         const atCancellation = [...committed]
         yield* Deferred.succeed(release, undefined)
         yield* writes.flush
-        return { atCancellation, committed }
+        return { left: Option.isSome(left), atCancellation, committed }
       }).pipe(Effect.provide(PersistenceWriteQueue.layer))
     )
   )
-  expect(result).toEqual({ atCancellation: [], committed: ["commit", "publication"] })
+  expect(result).toEqual({ left: true, atCancellation: [], committed: ["commit", "publication"] })
 })

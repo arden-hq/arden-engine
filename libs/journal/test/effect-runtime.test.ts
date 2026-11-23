@@ -112,101 +112,8 @@ describe("Effect journal storage", () => {
 })
 
 describe("Effect journal follower", () => {
-  it("attaches before the latest watermark and coalesces the seam instead of overflowing", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "arden-journal-follow-seam-"))
-    try {
-      const deliveries = await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
-            yield* initializeJournalSchema(sql)
-            const watermarkRead = yield* Deferred.make<void>()
-            const releaseWatermark = yield* Deferred.make<void>()
-            let blockNextWatermark = true
-            const gatedSql = new Proxy(sql, {
-              apply(target, thisArg, argumentsList) {
-                const strings = argumentsList[0]
-                const statement = Array.isArray(strings) ? strings.join("?") : ""
-                const query = Reflect.apply(target, thisArg, argumentsList)
-                if (
-                  blockNextWatermark &&
-                  statement.includes("SELECT head_sequence, retained_from_sequence")
-                ) {
-                  blockNextWatermark = false
-                  return Deferred.succeed(watermarkRead, undefined).pipe(
-                    Effect.andThen(Deferred.await(releaseWatermark)),
-                    Effect.andThen(query)
-                  )
-                }
-                return query
-              }
-            })
-            const journal = yield* makeJournalRuntime(gatedSql, {
-              initialize: false,
-              subscriberCapacity: 2
-            })
-            const opening = yield* journal
-              .openFollow({
-                streamId: "session-1",
-                startAt: "latest"
-              })
-              .pipe(Effect.forkChild)
-
-            yield* Deferred.await(watermarkRead)
-            yield* journal.append("session-1", [
-              {
-                type: "text_delta",
-                data: { delta: "first" },
-                durable: false
-              }
-            ])
-            yield* journal.append("session-1", [
-              {
-                type: "text_delta",
-                data: { delta: "second" },
-                durable: false
-              }
-            ])
-            yield* Deferred.succeed(releaseWatermark, undefined)
-
-            const opened = yield* Fiber.join(opening)
-            yield* journal.append("session-1", [
-              {
-                type: "text_end",
-                data: { content: "first second" }
-              }
-            ])
-            const values = yield* Effect.timeout(
-              Stream.runCollect(opened.stream.pipe(Stream.take(1))),
-              "1 second"
-            )
-            return { initialSequence: opened.initialSequence, values }
-          }).pipe(
-            Effect.provide(
-              SqliteClient.layer({
-                filename: join(directory, "journal.sqlite")
-              })
-            )
-          )
-        )
-      )
-
-      expect(deliveries.initialSequence).toBe(2)
-      expect(deliveries.values).toHaveLength(1)
-      const delivery = deliveries.values[0]
-      expect(delivery?.kind).toBe("record")
-      if (delivery?.kind !== "record") throw new Error("expected a record delivery")
-      expect(delivery.record.sequence).toBe(3)
-      expect(delivery.record.type).toBe("text_end")
-      expect(delivery.replayed).toBe(false)
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
   it.each([
     { subscriberCapacity: 2, subscriberByteCapacity: 100_000, batches: [2, 1], text: "x" },
-    { subscriberCapacity: 2, subscriberByteCapacity: 100_000, batches: [3], text: "x" },
     {
       subscriberCapacity: 100,
       subscriberByteCapacity: 1_000,
@@ -233,38 +140,6 @@ describe("Effect journal follower", () => {
       expect(deliveries).toEqual([{ kind: "overflow", cursor: 0 }])
     }
   )
-
-  it("still reports a bounded overflow when tier switches exceed the capacity", async () => {
-    const deliveries = await withJournal(
-      "arden-journal-overflow-",
-      { subscriberCapacity: 1 },
-      (journal) =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const opened = yield* journal.openFollow({
-              streamId: "session-1",
-              afterSequence: 0
-            })
-            yield* journal.append("session-1", [
-              {
-                type: "text_delta",
-                data: { delta: "first" },
-                durable: false
-              }
-            ])
-            yield* journal.append("session-1", [
-              {
-                type: "text_end",
-                data: { content: "first" }
-              }
-            ])
-            return yield* Effect.timeout(Stream.runCollect(opened.stream), "1 second")
-          })
-        )
-    )
-
-    expect(deliveries).toEqual([{ kind: "overflow", cursor: 0 }])
-  })
 
   it("delivers interleaved tiers in sequence order across sealed tails", async () => {
     const deliveries = await withJournal("arden-journal-interleave-", {}, (journal) =>

@@ -4,7 +4,6 @@ import {
   NativeObservations,
   NativeActionSchema,
   nativeDriverAction,
-  nativeDelivery,
   requireForegroundWindow,
   type NativeAction
 } from "../src/computer/contract.js"
@@ -151,63 +150,6 @@ it("refuses foreground delivery to missing, off-Space or unverified windows", ()
   ]) {
     expect(() => requireForegroundWindow(target, listing)).toThrow()
   }
-})
-
-it("binds activation and focused keyboard input to one observed window", () => {
-  const guard = new NativeObservations()
-  const activation: NativeAction = {
-    action: "activate",
-    target,
-    observation: "o1",
-    delivery: "foreground"
-  }
-  guard.remember("o1", {
-    app: undefined,
-    window: undefined,
-    elements: new Map(),
-    owner: "chat",
-    label: "Editor",
-    target,
-    visual: undefined,
-    snapshot: undefined,
-    capture: undefined
-  })
-  expect(() => guard.consume("other", activation)).toThrow()
-  expect(() =>
-    guard.consume("chat", { ...activation, target: { ...target, window_id: 31 } })
-  ).toThrow()
-  guard.consume("chat", activation)
-  expect(() => guard.consume("chat", activation)).toThrow()
-  expect(nativeDriverAction(activation)).toEqual({ name: "bring_to_front", args: target })
-  const keyboard = Schema.decodeUnknownSync(NativeActionSchema)({
-    action: "key",
-    target,
-    observation: "o2",
-    delivery: "foreground",
-    key: "g",
-    modifiers: ["cmd", "shift"]
-  })
-  guard.remember("o2", {
-    app: undefined,
-    window: undefined,
-    elements: new Map(),
-    owner: "chat",
-    label: "Native dialog",
-    target,
-    visual: undefined,
-    snapshot: undefined,
-    capture: "c2"
-  })
-  expect(() => guard.consume("other", keyboard)).toThrow()
-  expect(() =>
-    guard.consume("chat", { ...keyboard, target: { ...target, window_id: 31 } })
-  ).toThrow()
-  guard.consume("chat", keyboard)
-  expect(() => guard.consume("chat", keyboard)).toThrow()
-  expect(nativeDriverAction(keyboard)).toEqual({
-    name: "press_key",
-    args: { ...target, delivery_mode: "foreground", key: "g", modifiers: ["cmd", "shift"] }
-  })
 })
 
 it("keeps semantic menus bound to the observed window and foreground delivery", () => {

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { mergeTriggerInputs, type AutomationTrigger } from "../src/automations/index.js"
 
-const CONDITION = { kind: "compare", field: "item.sender", op: "contains", value: "acme" } as const
+const CONDITION = {
+  kind: "compare",
+  field: "item.sender",
+  op: "contains",
+  value: "acme"
+} as const
 const STORED = {
   lastId: 4,
   triggers: [
@@ -39,7 +44,12 @@ describe("a trigger list written over the stored one", () => {
     {
       name: "null clears a kept field and names it, and a new trigger takes an id never given",
       sent: [
-        { id: "t3", type: "event", event_type: "email.received", condition: null },
+        {
+          id: "t3",
+          type: "event",
+          event_type: "email.received",
+          condition: null
+        },
         { type: "idle", idle_minutes: 10 }
       ],
       result: {
@@ -103,5 +113,39 @@ describe("a trigger list written over the stored one", () => {
     }
   ] as const)("$name", ({ sent, result }) => {
     expect(mergeTriggerInputs(STORED, sent)).toEqual(result)
+  })
+
+  it("a trigger moved to another app event keeps nothing of the old one", () => {
+    const stored = {
+      lastId: 2,
+      triggers: [
+        {
+          id: "t2",
+          type: "event",
+          event_type: "mcp.event",
+          mcp_event: { server: "gmail", event: "message" },
+          condition: CONDITION
+        }
+      ] satisfies ReadonlyArray<AutomationTrigger>
+    }
+    const moved = {
+      id: "t2",
+      type: "event",
+      event_type: "mcp.event",
+      mcp_event: { server: "gmail", event: "label" }
+    } as const
+    expect(mergeTriggerInputs(stored, [moved])).toEqual({
+      kind: "ok",
+      lastId: 2,
+      dropped: [{ id: "t2", field: "condition", value: CONDITION }],
+      triggers: [
+        {
+          id: "t2",
+          type: "event",
+          event_type: "mcp.event",
+          mcp_event: { server: "gmail", event: "label" }
+        }
+      ]
+    })
   })
 })

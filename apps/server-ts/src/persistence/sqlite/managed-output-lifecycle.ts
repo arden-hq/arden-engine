@@ -13,7 +13,7 @@ const UPLOAD_REMOVAL_TRIES = 5
  * a lookup in `chat_upload_refs`, written when the message is stored. Queued
  * messages are few and short-lived, so their text is searched.
  */
-export const UPLOAD_NAMED_SQL = `SELECT 1 AS named FROM chat_upload_refs WHERE upload_id = ?
+const UPLOAD_NAMED_SQL = `SELECT 1 AS named FROM chat_upload_refs WHERE upload_id = ?
   UNION ALL
   SELECT 1 AS named FROM session_queued_messages WHERE instr(message, ?) > 0
   LIMIT 1`

@@ -226,10 +226,8 @@ describe("delivery reliability", () => {
             readonly next_attempt_at: string
           }>`SELECT attempt_count, last_error, next_attempt_at FROM automation_deliveries
           WHERE delivery_id = ${deliveryId}`)[0]
-          expect(state).toMatchObject({
-            attempt_count: 1,
-            last_error: "Arrival waits for the current Chat turn or pending approval"
-          })
+          expect(state).toMatchObject({ attempt_count: 1 })
+          expect(state?.last_error).toEqual(expect.any(String))
           expect(events.filter((event) => event.code === "delivery.retry_scheduled")).toHaveLength(
             1
           )

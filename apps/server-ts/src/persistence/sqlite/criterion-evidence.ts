@@ -17,14 +17,14 @@ const TASK_RUNS_SQL = `SELECT run.run_id FROM chat_runs AS run
       WHERE run.session_id = (SELECT home_session_id FROM space_tasks
         WHERE item_id = ? AND runs_in = 'chat')`
 
-export const EVIDENCE_TOOL_CALL_SQL = `SELECT call.run_id, call.tool_name, call.status, call.effect,
+const EVIDENCE_TOOL_CALL_SQL = `SELECT call.run_id, call.tool_name, call.status, call.effect,
     json_extract(call.result_json, '$.is_error') AS is_error,
     json_extract(call.result_json, '$.data.exit_code') AS exit_code
   FROM tool_calls AS call
   WHERE call.run_id IN (${TASK_RUNS_SQL}) AND call.tool_call_id = ? AND call.started_at > ?
   ORDER BY call.started_at DESC LIMIT 1`
 
-export const EVIDENCE_URL_SQL = `SELECT call.tool_call_id
+const EVIDENCE_URL_SQL = `SELECT call.tool_call_id
   FROM tool_calls AS call
   WHERE call.run_id IN (${TASK_RUNS_SQL})
     AND call.tool_name = 'web_fetch' AND call.status = 'completed'

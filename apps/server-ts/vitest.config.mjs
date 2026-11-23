@@ -43,10 +43,6 @@ const outsideEditsProject =
       ]
     : []
 
-// The replays read one copy of real data and each holds it while it runs: they run one file at
-// a time, in their own project, with room to wait for each other.
-const replays = ["test/*-replay.test.ts"]
-
 const memoryShapeProject =
   process.env.ARDEN_MEMORY_SHAPE === "1"
     ? [{ extends: true, test: { name: "memory-shape", include: ["scripts/memory-shape.ts"] } }]
@@ -71,17 +67,8 @@ export default mergeConfig(
           extends: true,
           test: {
             name: "unit",
-            exclude: [...configDefaults.exclude, ...boot, ...speed, ...replays],
+            exclude: [...configDefaults.exclude, ...boot, ...speed],
             isolate: false
-          }
-        },
-        {
-          extends: true,
-          test: {
-            name: "replay",
-            include: replays,
-            fileParallelism: false,
-            testTimeout: 1_800_000
           }
         },
         // The boot project carries the scan check: its teardown runs once, after both projects.

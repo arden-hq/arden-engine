@@ -50,6 +50,30 @@ describe("contact rules", () => {
     })
   })
 
+  test("each field takes up to its own limit and refuses one character more", () => {
+    const limits = {
+      name: 128,
+      email: 254,
+      phone: 32,
+      addressLine1: 128,
+      addressLine2: 128,
+      city: 128,
+      postalCode: 32,
+      region: 128,
+      country: 64
+    } as const
+    const fill = (field: keyof typeof limits, length: number) =>
+      field === "email" ? `${"a".repeat(length - 12)}@example.com` : "1".repeat(length)
+    for (const [field, limit] of Object.entries(limits) as [keyof typeof limits, number][]) {
+      expect(readContact({ name: "A", [field]: fill(field, limit) }).kind, field).toBe("ok")
+      expect(readContact({ name: "A", [field]: fill(field, limit + 1) }), field).toEqual({
+        kind: "refused",
+        field,
+        issue: "too_long"
+      })
+    }
+  })
+
   test("the address reads on one line and ends with the country", () => {
     expect(
       addressLine({

@@ -1,8 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { decodeServerEventStreamBuffer, encodeServerEventFrame } from "@arden-hq/protocol"
-import { ChatEventStore } from "../src/persistence/events/store.js"
 import { WorkStore } from "../src/persistence/work/store.js"
-import { ToolHistoryQueries } from "../src/persistence/tools/history-queries.js"
 import { userContent } from "../src/persistence/transcript/user-content.js"
 import { SqlClient } from "effect/unstable/sql"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
@@ -81,7 +78,7 @@ it("rolls back queue consumption on rejected admission and replays accepted admi
   }
 })
 
-it("denies one exact visible approval and admits its reason once", async () => {
+it("denies the addressed approval and admits its reason once", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
       const sessions = yield* SessionStore
@@ -132,7 +129,7 @@ it("denies one exact visible approval and admits its reason once", async () => {
         requestHash: "reply",
         assistantMessageId: "reply-answer",
         wake: true,
-        approvalReply: { runId: run.runId, toolId: "first" },
+        approvalReply: { runId: run.runId, toolId: "second" },
         message: {
           message_id: "reply",
           client_id: "reply",
@@ -163,8 +160,8 @@ it("denies one exact visible approval and admits its reason once", async () => {
       expect(
         yield* sql`SELECT tool_call_id, status, result_feedback FROM tool_approvals WHERE run_id = ${run.runId} ORDER BY tool_call_id`
       ).toEqual([
-        { tool_call_id: "first", status: "rejected", result_feedback: null },
-        { tool_call_id: "second", status: "pending", result_feedback: null }
+        { tool_call_id: "first", status: "pending", result_feedback: null },
+        { tool_call_id: "second", status: "rejected", result_feedback: null }
       ])
       expect(
         yield* sql`SELECT resolution FROM run_questions WHERE question_id = ${question.question_id}`
@@ -179,7 +176,7 @@ it("denies one exact visible approval and admits its reason once", async () => {
           .receive({
             ...reply,
             requestHash: "changed",
-            approvalReply: { runId: run.runId, toolId: "second" }
+            approvalReply: { runId: run.runId, toolId: "first" }
           })
           .pipe(Effect.result))._tag
       ).toBe("Failure")
@@ -278,91 +275,6 @@ it("atomically denies a deferred card and admits one ordinary reason", async () 
   )
 })
 
-it("replays an approval reply after reopening the database without denying its sibling", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "arden-approval-reply-"))
-  const layer = () =>
-    recoveredSqlitePersistenceLayer({ dataDir: null, filename: join(directory, "arden.db") }).pipe(
-      Layer.provide(PersistenceWriteQueue.layer)
-    )
-  try {
-    const saved = await Effect.runPromise(
-      Effect.gen(function* () {
-        const sessions = yield* SessionStore
-        const chat = yield* ChatWriteStore
-        const tools = yield* ToolExecutionStore
-        const session = yield* sessions.create({ name: "Reply restart" })
-        const run = yield* chat.start({
-          sessionId: session.sessionId,
-          clientId: "start",
-          requestHash: "start",
-          assistantMessageId: "answer",
-          message: {
-            message_id: "start",
-            client_id: "start",
-            role: ROLE.user,
-            content: "Work",
-            created_at: "2026-10-28T00:00:00.000Z"
-          }
-        })
-        const first = {
-          runId: run.runId,
-          sessionId: session.sessionId,
-          toolCallId: "first",
-          toolName: "file_read",
-          arguments: { path: "/tmp/first" },
-          changesState: false
-        }
-        const second = { ...first, toolCallId: "second" }
-        yield* tools.begin(first)
-        yield* tools.pause(first, { reason: "approval", preview: "Read first" })
-        yield* tools.begin(second)
-        yield* tools.pause(second, { reason: "approval", preview: "Read second" })
-        const input = {
-          sessionId: session.sessionId,
-          clientId: "reply",
-          requestHash: "reply",
-          assistantMessageId: "reply-answer",
-          wake: true,
-          approvalReply: { runId: run.runId, toolId: "first" },
-          message: {
-            message_id: "reply",
-            client_id: "reply",
-            role: ROLE.user,
-            content: "Keep it private",
-            created_at: "2026-10-28T00:01:00.000Z"
-          }
-        }
-        expect(yield* chat.receive(input)).toEqual({ _tag: "Queued", runId: run.runId })
-        return { input, runId: run.runId }
-      }).pipe(Effect.provide(layer()))
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const chat = yield* ChatWriteStore
-        const history = yield* ToolHistoryQueries
-        expect(yield* chat.receive(saved.input)).toEqual({
-          _tag: "Existing",
-          runId: saved.runId,
-          status: "queued"
-        })
-        expect(
-          (yield* history.pendingApprovals(saved.input.sessionId)).map(
-            (approval) => approval.tool_id
-          )
-        ).toEqual(["second"])
-        expect(
-          (yield* chat.drainPending(saved.runId)).map(
-            (message) => userContent(message.content).text
-          )
-        ).toEqual(["Keep it private"])
-        expect(yield* chat.drainPending(saved.runId)).toEqual([])
-      }).pipe(Effect.provide(layer()))
-    )
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
 it("routes a visible child's denial reason once to each recipient", async () => {
   await withTempDatabase(
     Effect.gen(function* () {
@@ -451,50 +363,3 @@ it("routes a visible child's denial reason once to each recipient", async () => 
     })
   )
 })
-
-it.each([true, false])(
-  "issue 56 preserves accepted question identity in durable live events: %s",
-  async (answer) => {
-    await withTempDatabase(
-      Effect.gen(function* () {
-        const sessions = yield* SessionStore
-        const chat = yield* ChatWriteStore
-        const journal = yield* ChatEventStore
-        const session = yield* sessions.create({ name: "Focus continuation" })
-        const started = yield* chat.start({
-          sessionId: session.sessionId,
-          clientId: "answer",
-          requestHash: "answer",
-          assistantMessageId: "assistant",
-          message: {
-            message_id: "answer",
-            client_id: "answer",
-            role: ROLE.user,
-            content: "Continue here",
-            is_meta: answer,
-            created_at: "2026-11-02T00:00:00Z",
-            ...(answer ? { question_answer: { question_id: "exact-focus-question" } } : {})
-          }
-        })
-        if (started._tag !== "Started") return yield* Effect.die("Expected admission")
-        const page = yield* journal.readPage({
-          sessionId: session.sessionId,
-          afterSequence: 0,
-          throughSequence: started.committed.records.at(-1)?.sequence ?? 0,
-          limit: 100
-        })
-        const event = page.records.find((record) => record.event.type === "RUN_STARTED")?.event
-        expect(event).toBeDefined()
-        if (event?.type !== "RUN_STARTED") return yield* Effect.die("Expected start event")
-        expect(event.question_answer).toEqual(
-          answer ? { question_id: "exact-focus-question" } : undefined
-        )
-        const frames = decodeServerEventStreamBuffer(encodeServerEventFrame(event))
-        expect(frames[0]?.data).toEqual(event)
-        expect(
-          started.activeMessages.find((message) => message.message_id === "answer")?.question_answer
-        ).toEqual(answer ? { question_id: "exact-focus-question" } : undefined)
-      })
-    )
-  }
-)

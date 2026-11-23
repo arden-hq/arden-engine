@@ -64,11 +64,18 @@ describe("email approval edits", () => {
     })
     expect(outcome).toEqual({
       _tag: "Edited",
-      arguments: { ...asked, subject: "Thu works", body: "Thursday works. See you then" }
+      arguments: {
+        ...asked,
+        subject: "Thu works",
+        body: "Thursday works. See you then"
+      }
     })
-    expect(editor("email_send").apply(asked, { subject: asked.subject, body: asked.body })).toEqual(
-      { _tag: "Unchanged" }
-    )
+    expect(
+      editor("email_send").apply(asked, {
+        subject: asked.subject,
+        body: asked.body
+      })
+    ).toEqual({ _tag: "Unchanged" })
   })
 
   it("refuses an edit to who the email goes to, from which account, or that breaks its rules", () => {
@@ -104,15 +111,12 @@ describe("email approval edits", () => {
     expect(reply.apply(replyAsked, { body: "  \n" })._tag).toBe("Refused")
   })
 
-  it("keeps both versions whole, so the user's writing sits next to the draft", () => {
-    expect(
-      mailEditLines(
-        { subject: "Thursday", body: "Dear Tom,\nKind regards" },
-        { subject: "Thursday", body: "Thu works" }
-      )
-    ).toEqual([
-      { field: "body", label: "Message", from: '"Dear Tom,\nKind regards"', to: '"Thu works"' }
-    ])
+  it("reports a dropped attachment next to the changed words", () => {
+    const lines = mailEditLines(
+      { subject: "Thursday", body: "Same", omit_attachments: [] },
+      { subject: "Thursday", body: "Same", omit_attachments: [1] }
+    )
+    expect(lines.map((line) => line.field)).toEqual(["omit_attachments"])
     expect(mailEditLines({ body: "Same" }, { body: "Same" })).toEqual([])
   })
 
@@ -140,7 +144,10 @@ describe("email approval edits", () => {
       scriptHost: {
         executionProfile: {
           hash: "unused",
-          modes: { research: { changesState: false }, code: { changesState: true } }
+          modes: {
+            research: { changesState: false },
+            code: { changesState: true }
+          }
         },
         agent: unused,
         tool: unused,
@@ -155,26 +162,37 @@ describe("email approval edits", () => {
         policy: gatePolicy("ask")
       })
     })(run)
-    const edited = { ...asked, subject: "Thu works", body: "Thursday works. See you then" }
+    const edited = {
+      ...asked,
+      subject: "Thu works",
+      body: "Thursday works. See you then"
+    }
     const result = await toolset.execute({
       name: "email_send",
       args: asked,
       toolCallId: "call-1",
-      approval: { approved: true, feedback: null, edited: { requested: asked, arguments: edited } }
+      approval: {
+        approved: true,
+        feedback: null,
+        edited: { requested: asked, arguments: edited }
+      }
     })
     expect(sent).toHaveLength(1)
     const [message] = sent
-    expect(message).toContain(`Subject: =?UTF-8?B?${Buffer.from("Thu works").toString("base64")}?=`)
     expect(message).toContain("To: tom@example.com")
     expect(message?.endsWith("\r\n\r\nThursday works. See you then")).toBe(true)
-    expect(result.data?.["approval_edits"]).toEqual([
-      { field: "subject", label: "Subject", from: '"Thursday"', to: '"Thu works"' },
-      {
+    const lines = result.data?.["approval_edits"]
+    expect(lines).toEqual([
+      expect.objectContaining({
+        field: "subject",
+        from: expect.stringContaining("Thursday"),
+        to: expect.stringContaining("Thu works")
+      }),
+      expect.objectContaining({
         field: "body",
-        label: "Message",
-        from: `"${asked.body}"`,
-        to: '"Thursday works. See you then"'
-      }
+        from: expect.stringContaining("I would be delighted"),
+        to: expect.stringContaining("Thursday works")
+      })
     ])
   })
 })

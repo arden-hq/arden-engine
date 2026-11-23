@@ -70,7 +70,7 @@ it("a card whose Task was closed cannot be allowed; it can still be denied", asy
         })
       )
       return {
-        allowed: { reason: allowed.reason, message: allowed.message },
+        allowed: allowed.reason,
         afterAllow: yield* status(sql, closed.runId, "write"),
         denied: yield* tools
           .resolve({ runId: closed.runId, toolCallId: "other", approved: false })
@@ -84,10 +84,7 @@ it("a card whose Task was closed cannot be allowed; it can still be denied", asy
     })
   )
   expect(outcome).toEqual({
-    allowed: {
-      reason: "conflict",
-      message: "This card's Task no longer lets its run act; it can only be denied"
-    },
+    allowed: "conflict",
     afterAllow: "pending",
     denied: "settled",
     afterDeny: "rejected",

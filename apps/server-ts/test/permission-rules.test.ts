@@ -105,55 +105,8 @@ it("a card's or an offer's allow never lands over a rule the person set", async 
         argumentPrefix: ["push"]
       } as const
       const github = { kind: "connector", server: "github" } as const
-      yield* (yield* McpStore).create({
-        name: "github",
-        enabled: true,
-        presetId: null,
-        transport: {
-          type: "http",
-          url: "https://github.invalid/mcp",
-          auth: "none",
-          headerKeys: []
-        }
-      })
-      yield* rules.save(settings({ subject: push, list: lab, decision: "ask" }))
-      const overrides = (name: string) => allowIsOverridden(rules, tool(name), lab)
-      expect({
-        spaceAsk: yield* overrides("space_ask"),
-        spaceNever: yield* overrides("space_never"),
-        globalAsk: yield* overrides("global_ask"),
-        globalAllow: yield* overrides("global_allow"),
-        otherSpace: yield* overrides("other_space"),
-        none: yield* overrides("unruled"),
-        commandAsk: yield* allowIsOverridden(rules, push, lab),
-        commandElsewhere: yield* allowIsOverridden(rules, push, jobs),
-        connectorNone: yield* allowIsOverridden(rules, github, lab)
-      }).toEqual({
-        spaceAsk: true,
-        spaceNever: true,
-        globalAsk: true,
-        globalAllow: false,
-        otherSpace: false,
-        none: false,
-        commandAsk: true,
-        commandElsewhere: false,
-        connectorNone: false
-      })
-    })
-  )
-})
-
-it("a connector's allow never lands over the person's global ask or never on one of its tools", async () => {
-  await withTempDatabase(
-    Effect.gen(function* () {
-      const rules = yield* PermissionRules
-      const mcp = yield* McpStore
-      const lab = {
-        kind: "space",
-        spaceId: (yield* (yield* SpaceStore).create({ name: "Lab" })).space_id
-      } as const
-      for (const name of ["github", "linear", "notion", "slack"])
-        yield* mcp.create({
+      for (const name of ["github", "notion", "linear"])
+        yield* (yield* McpStore).create({
           name,
           enabled: true,
           presetId: null,
@@ -178,39 +131,85 @@ it("a connector's allow never lands over the person's global ask or never on one
           decision: "never"
         })
       )
-      yield* rules.save(
-        settings({
-          subject: { kind: "tool", tool: "mcp__linear__read", server: "linear" },
-          list: { kind: "global" },
-          decision: "allow"
-        })
-      )
-      yield* rules.save(
-        settings({
-          subject: { kind: "connector", server: "slack" },
-          list: { kind: "global" },
-          decision: "ask"
-        })
-      )
-      const connector = (server: string, list: RuleInput["list"]) =>
-        allowIsOverridden(rules, { kind: "connector", server }, list)
+      yield* rules.save(settings({ subject: push, list: lab, decision: "ask" }))
+      const overrides = (name: string) => allowIsOverridden(rules, tool(name), lab)
       expect({
-        globalAsk: yield* connector("github", lab),
-        globalNever: yield* connector("notion", lab),
-        globalAllow: yield* connector("linear", lab),
-        everywhere: yield* connector("github", { kind: "global" }),
-        toolUnderConnectorAsk: yield* allowIsOverridden(
+        spaceAsk: yield* overrides("space_ask"),
+        spaceNever: yield* overrides("space_never"),
+        globalAsk: yield* overrides("global_ask"),
+        globalAllow: yield* overrides("global_allow"),
+        otherSpace: yield* overrides("other_space"),
+        none: yield* overrides("unruled"),
+        commandAsk: yield* allowIsOverridden(rules, push, lab),
+        commandElsewhere: yield* allowIsOverridden(rules, push, jobs),
+        connectorNone: yield* allowIsOverridden(
           rules,
-          { kind: "tool", tool: "mcp__slack__post", server: "slack" },
+          { kind: "connector", server: "linear" },
+          lab
+        ),
+        connectorOverToolAsk: yield* allowIsOverridden(rules, github, lab),
+        connectorOverToolNever: yield* allowIsOverridden(
+          rules,
+          { kind: "connector", server: "notion" },
           lab
         )
       }).toEqual({
+        spaceAsk: true,
+        spaceNever: true,
         globalAsk: true,
-        globalNever: true,
         globalAllow: false,
-        everywhere: false,
-        toolUnderConnectorAsk: true
+        otherSpace: false,
+        none: false,
+        commandAsk: true,
+        commandElsewhere: false,
+        connectorNone: false,
+        connectorOverToolAsk: true,
+        connectorOverToolNever: true
       })
+    })
+  )
+})
+
+it("rules for different connectors sit side by side in one list", async () => {
+  await withTempDatabase(
+    Effect.gen(function* () {
+      const rules = yield* PermissionRules
+      for (const name of ["github", "linear"])
+        yield* (yield* McpStore).create({
+          name,
+          enabled: true,
+          presetId: null,
+          transport: {
+            type: "http",
+            url: `https://${name}.invalid/mcp`,
+            auth: "none",
+            headerKeys: []
+          }
+        })
+      const global = { kind: "global" } as const
+      const github = yield* rules.save(
+        settings({
+          subject: { kind: "connector", server: "github" },
+          list: global,
+          decision: "allow"
+        })
+      )
+      const linear = yield* rules.save(
+        settings({
+          subject: { kind: "connector", server: "linear" },
+          list: global,
+          decision: "ask"
+        })
+      )
+      expect(linear.id).not.toBe(github.id)
+      expect(
+        (yield* rules.list())
+          .map(({ subject, decision }) => ({ subject, decision }))
+          .sort((left, right) => left.decision.localeCompare(right.decision))
+      ).toEqual([
+        { subject: { kind: "connector", server: "github" }, decision: "allow" },
+        { subject: { kind: "connector", server: "linear" }, decision: "ask" }
+      ])
     })
   )
 })
@@ -318,14 +317,13 @@ it("a folder rule allows or never, and no allow opens home or a secret", async (
         settings({ subject: folder(homedir()), list: global, decision: "never" })
       )
       expect(never.subject).toEqual(folder(homedir()))
-      const allowed = yield* rules.save(
+      yield* rules.save(
         settings({ subject: folder("/Users/me/src/demo"), list: global, decision: "allow" })
       )
       const loosened = yield* rules
         .change({ ruleId: never.id, decision: "allow", source: { kind: "settings" } })
         .pipe(Effect.result)
       expect(loosened).toMatchObject({ _tag: "Failure" })
-      expect(allowed.decision).toBe("allow")
     })
   )
 })

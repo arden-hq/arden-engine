@@ -196,7 +196,7 @@ type DayPreparation =
   | { readonly kind: "settled"; readonly note?: string }
   | { readonly kind: "write"; readonly markdown: string }
 
-export const makeDailySummaryRunner = (
+const makeDailySummaryRunner = (
   services: ItemLoopServices & {
     readonly wiki: Pick<Wiki["Service"], "snapshot" | "pageTimes" | "createDirectory">
     readonly sessions: Pick<SessionStore["Service"], "list">

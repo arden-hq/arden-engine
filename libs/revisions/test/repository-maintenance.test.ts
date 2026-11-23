@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -38,46 +38,46 @@ const openRepository = async (
   )
 
 describe("repository maintenance facade", () => {
-  it.each(["note.md", `${Array.from({ length: 64 }, () => "d").join("/")}/note.md`])(
-    "reports live state and collects unreachable objects for %s",
-    async (path) => {
-      const root = await mkdtemp(join(tmpdir(), "arden-revisions-maintenance-"))
-      roots.push(root)
-      const repository = await openRepository(root)
-      await Effect.runPromise(
-        repository.commit(
-          new ChangeSet({
-            operations: [new Create({ resourceId: "note", path, content: encodeUtf8("live\n") })],
-            actor: "tester",
-            origin: "maintenance-test",
-            reason: "seed",
-            idempotencyKey: "seed",
-            expectedHead: null,
-            enforceExpectedHead: false
-          })
-        )
-      )
-
-      const integrity = await Effect.runPromise(repository.integrityReport)
-      const storage = await Effect.runPromise(repository.storageReport)
-      expect(integrity.issues).toEqual([])
-      expect(integrity.ok).toBe(true)
-      expect(integrity.resources).toBe(1)
-      expect(storage.resourceCount).toBe(1)
-      expect(storage.commitCount).toBe(1)
-
-      const orphan = encodeUtf8("unreachable\n")
-      const orphanId = sha256Hex(orphan)
-      await writeFile(join(root, ".managed-history", "objects", "blobs", orphanId), orphan)
-      const collected = await Effect.runPromise(
-        repository.collect({
-          gracePeriodMs: 0,
-          nowMillis: Date.now() + 10_000
+  it("reports live state and collects unreachable objects", async () => {
+    const path = "note.md"
+    const root = await mkdtemp(join(tmpdir(), "arden-revisions-maintenance-"))
+    roots.push(root)
+    const repository = await openRepository(root)
+    await Effect.runPromise(
+      repository.commit(
+        new ChangeSet({
+          operations: [new Create({ resourceId: "note", path, content: encodeUtf8("live\n") })],
+          actor: "tester",
+          origin: "maintenance-test",
+          reason: "seed",
+          idempotencyKey: "seed",
+          expectedHead: null,
+          enforceExpectedHead: false
         })
       )
-      expect(collected.removed).toBe(1)
-      expect(collected.bytesRemoved).toBe(orphan.length)
-      expect((await Effect.runPromise(repository.integrityReport)).ok).toBe(true)
-    }
-  )
+    )
+
+    const integrity = await Effect.runPromise(repository.integrityReport)
+    const storage = await Effect.runPromise(repository.storageReport)
+    expect(integrity.issues).toEqual([])
+    expect(integrity.ok).toBe(true)
+    expect(integrity.resources).toBe(1)
+    expect(storage.resourceCount).toBe(1)
+    expect(storage.commitCount).toBe(1)
+
+    const orphan = encodeUtf8("unreachable\n")
+    const orphanId = sha256Hex(orphan)
+    const orphanPath = join(root, ".managed-history", "objects", "blobs", orphanId)
+    await writeFile(orphanPath, orphan)
+    const collected = await Effect.runPromise(
+      repository.collect({
+        gracePeriodMs: 0,
+        nowMillis: Date.now() + 10_000
+      })
+    )
+    expect(collected.removed).toBe(1)
+    expect(collected.bytesRemoved).toBe(orphan.length)
+    expect((await Effect.runPromise(repository.integrityReport)).ok).toBe(true)
+    await expect(access(orphanPath)).rejects.toThrow()
+  })
 })

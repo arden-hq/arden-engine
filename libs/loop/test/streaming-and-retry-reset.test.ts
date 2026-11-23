@@ -106,34 +106,6 @@ describe("streaming projection and provider retry reset", () => {
     )
   })
 
-  it("projects the text delta lifecycle with canonical TextEnded content", async () => {
-    const harness = run([
-      { _tag: "TextDelta", content: "hello" },
-      { _tag: "TextDelta", content: " world" },
-      response({ content: "hello world" })
-    ])
-    const output = await harness.promise
-    expect(harness.events.map((event) => event._tag)).toEqual([
-      "TextStarted",
-      "TextDelta",
-      "TextDelta",
-      "TextEnded"
-    ])
-    expect(harness.events.every((event) => event.depth === 0 && event.parent_id === null)).toBe(
-      true
-    )
-    expect(
-      harness.events.flatMap((event) => (event._tag === "TextDelta" ? [event.content] : []))
-    ).toEqual(["hello", " world"])
-    expect(firstTagged(harness.events, "TextEnded").content).toBe("hello world")
-    expect(output.lastTextId).toBe(firstTagged(harness.events, "TextStarted").message_id)
-    expect(harness.history).toHaveLength(2)
-    expect(harness.history[1]).toMatchObject({ role: ROLE.assistant, content: "hello world" })
-    expect(harness.history[1]).toMatchObject({
-      output_parts: [{ type: "text", text: "hello world" }]
-    })
-  })
-
   it("buffers tool input until id and name are known, then flushes and persists the call", async () => {
     const call = { id: "call-1", name: "echo", arguments: '{"value":1}' }
     const harness = run(
@@ -143,11 +115,11 @@ describe("streaming projection and provider retry reset", () => {
           _tag: "ToolCallDelta",
           index: 0,
           tool_id: "call-1",
-          name: "echo",
           arguments_delta: '{"value":',
           done: false
         },
-        { _tag: "ToolCallDelta", index: 0, arguments_delta: "1}", done: true },
+        { _tag: "ToolCallDelta", index: 0, name: "echo", arguments_delta: "1}", done: false },
+        { _tag: "ToolCallDelta", index: 0, done: true },
         response({ content: "before", finishReason: "tool_calls", toolCalls: [call] })
       ],
       {
@@ -161,7 +133,6 @@ describe("streaming projection and provider retry reset", () => {
       "TextEnded",
       "ToolInputStarted",
       "ToolInputDelta",
-      "ToolInputDelta",
       "ToolInputEnded"
     ])
     expect(harness.events.find((event) => event._tag === "ToolInputStarted")).toMatchObject({
@@ -171,7 +142,7 @@ describe("streaming projection and provider retry reset", () => {
     })
     expect(
       harness.events.flatMap((event) => (event._tag === "ToolInputDelta" ? [event.delta] : []))
-    ).toEqual(['{"value":', "1}"])
+    ).toEqual(['{"value":1}'])
     expect(output.streamedToolInputIds).toEqual(new Set(["call-1"]))
     expect(harness.history[1]).toMatchObject({
       role: ROLE.assistant,

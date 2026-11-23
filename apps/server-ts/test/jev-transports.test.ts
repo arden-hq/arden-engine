@@ -1,6 +1,5 @@
 import { Effect, Layer, Redacted } from "effect"
 import { expect, it } from "vitest"
-import { DatabaseSync } from "node:sqlite"
 import type { DecisionEndpoint } from "../src/models/decisions/endpoint.js"
 import { systemOneFormatBackend } from "../src/models/decisions/systemone-format.js"
 import { Decisions } from "../src/models/decisions/service.js"
@@ -9,7 +8,6 @@ import { StructuredCompletion } from "../src/models/structured-completion.js"
 import { UsageStore } from "../src/persistence/usage/store.js"
 import { decisionVisionProbe, readsProbeImages } from "../src/models/decisions/vision-probe.js"
 import type { DecisionInput } from "../src/models/decisions/questions.js"
-import { openrouterDecisionTransport } from "../src/persistence/migrations/0107_openrouter_decision_transport.js"
 import { partialService } from "./kit.js"
 
 const request = (): DecisionInput => ({
@@ -18,7 +16,10 @@ const request = (): DecisionInput => ({
   images: decisionVisionProbe().images,
   questions: {
     target: { kind: "box", image: 1, instructions: "The red rectangle" },
-    present: { kind: "predicate", instructions: "There is a red rectangle in the second image" }
+    present: {
+      kind: "predicate",
+      instructions: "There is a red rectangle in the second image"
+    }
   },
   usage: { kind: "chat_triage", owner: { type: "none" } }
 })
@@ -134,7 +135,9 @@ it.each([
 ])("rejects malformed provider box %j", async (box) => {
   const backend = systemOneFormatBackend(
     endpoint("systemone", async () =>
-      Response.json({ answers: { ...reply.answers, target: { ...reply.answers.target, box } } })
+      Response.json({
+        answers: { ...reply.answers, target: { ...reply.answers.target, box } }
+      })
     )
   )
   expect(await Effect.runPromise(Effect.flip(backend.classify(request())))).toMatchObject({
@@ -158,46 +161,32 @@ it("refuses missing image references before transmitting and does not treat a bl
         ready: {
           kind: "predicate",
           value: true,
-          distribution: { kind: "calibrated", probabilities: { true: 1, false: 0 }, confidence: 1 }
+          distribution: {
+            kind: "calibrated",
+            probabilities: { true: 1, false: 0 },
+            confidence: 1
+          }
         }
       }
     })
   ).toBe(false)
 })
 
-it("converts saved OpenRouter transports once, preserving the model, auth and unrelated settings", () => {
-  const db = new DatabaseSync(":memory:")
-  try {
-    db.exec("CREATE TABLE monitor_state (namespace TEXT PRIMARY KEY, state TEXT NOT NULL)")
-    const original = {
-      decision: {
-        format: "systemone",
-        baseUrl: "https://openrouter.ai/api/v1",
-        model: "typesafe/jev-1.13",
-        input: "text+image",
-        auth: { kind: "bearer" }
-      },
-      search: null,
-      decisionSource: "endpoint"
-    }
-    db.prepare("INSERT INTO monitor_state VALUES (?, ?)").run(
-      "model_endpoint_settings",
-      JSON.stringify(original)
-    )
-    openrouterDecisionTransport.up(db)
-    openrouterDecisionTransport.up(db)
-    expect(db.prepare("SELECT state FROM monitor_state").get()).toEqual({
-      state: JSON.stringify({
-        ...original,
-        decision: {
-          ...original.decision,
-          format: "openrouter-decisions",
-          baseUrl: "https://openrouter.ai/api",
-          input: "text"
-        }
-      })
+it("counts a model as seeing the probe images only when it places both rectangles correctly", () => {
+  const distribution = {
+    kind: "calibrated",
+    probabilities: { left: 0.5, right: 0.5 },
+    confidence: 1
+  } as const
+  const answered = (first: "left" | "right", second: "left" | "right") =>
+    readsProbeImages({
+      backend: "test",
+      answers: {
+        first: { kind: "choice", value: first, distribution },
+        second: { kind: "choice", value: second, distribution }
+      }
     })
-  } finally {
-    db.close()
-  }
+  expect(answered("left", "right")).toBe(true)
+  expect(answered("left", "left")).toBe(false)
+  expect(answered("right", "right")).toBe(false)
 })

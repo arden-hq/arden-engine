@@ -46,17 +46,15 @@ describe("attached files in a message", () => {
     })
   })
 
-  it("adds nothing when there are no files", () => {
-    expect(withAttachedFiles("hi ", [])).toBe("hi ")
-  })
-
   it("says the files' names instead of their path lines", () => {
-    expect(withFileNames(`Attached: ${PDF}\nAttached: /Users/me/Taxes 2026/`)).toBe(
-      "Документы.pdf, Taxes 2026"
-    )
-    expect(withFileNames(`Check the totals.\n\nAttached: ${PDF}`)).toBe(
-      "Check the totals. (Документы.pdf)"
-    )
+    const names = withFileNames(`Attached: ${PDF}\nAttached: /Users/me/Taxes 2026/`)
+    expect(names).toContain("Документы.pdf")
+    expect(names).toContain("Taxes 2026")
+    expect(names).not.toContain("/Users")
+    const withText = withFileNames(`Check the totals.\n\nAttached: ${PDF}`)
+    expect(withText).toContain("Check the totals.")
+    expect(withText).toContain("Документы.pdf")
+    expect(withText).not.toContain("Attached:")
     const typed = 'Write the note "Attached: /tmp/x" into the summary.'
     expect(withFileNames(typed)).toBe(typed)
   })

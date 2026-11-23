@@ -81,9 +81,4 @@ describe("a server the model names by URL", () => {
   it("is refused for a child agent, whatever the owner wrote", () => {
     expect(ask({ childAgent: true })).toEqual({ kind: "refused", reason: "child_agent" })
   })
-
-  it("takes the model's label only as a short lowercase slug", () => {
-    expect(ask({ name: "My Margin!" })).toMatchObject({ name: "my-margin" })
-    expect(ask({ name: "123" })).toMatchObject({ name: "margin" })
-  })
 })

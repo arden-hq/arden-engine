@@ -16,11 +16,28 @@ const collect = async (source: AsyncIterable<Uint8Array>) => {
 describe("decodeSseFrameStream", () => {
   it("frames events across chunks and line ends and keeps ids", async () => {
     const frames = await collect(
-      chunks('id: 41\r\ndata: {"a":', "1}\r\n\r\nid: 45\ndata: one\ndata: two\n\n")
+      chunks(
+        'id: 41\r\ndata: {"a":',
+        "1}\r\n\r\nid: 45\r\ndata: one\r\ndata: two\r\n\r\n",
+        "id: 46\r\ndata: three\r\n\r\nid: 47\r\ndata: four\r\n\r\nid: 48\r\ndata: five\r\n\r\n"
+      )
     )
     expect(frames.map((frame) => [frame.id, frame.data])).toEqual([
       ["41", '{"a":1}'],
-      ["45", "one\ntwo"]
+      ["45", "one\ntwo"],
+      ["46", "three"],
+      ["47", "four"],
+      ["48", "five"]
+    ])
+  })
+
+  it("frames events that end in bare newlines and joins their data lines", async () => {
+    const frames = await collect(
+      chunks("id: 45\ndata: one\ndata: two\n\n", "id: 46\ndata: three\n\n")
+    )
+    expect(frames.map((frame) => [frame.id, frame.data])).toEqual([
+      ["45", "one\ntwo"],
+      ["46", "three"]
     ])
   })
 

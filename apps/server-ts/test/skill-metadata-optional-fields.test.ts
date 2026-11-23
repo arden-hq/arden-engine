@@ -28,6 +28,10 @@ it("loads a Skill whose optional fields are not Arden's shape, keeping what it c
     description: "b",
     version: "1.2.0"
   })
+  expect(await parse("name: a", "description: b", "version: 1.2.3.4")).toEqual({
+    name: "a",
+    description: "b"
+  })
   expect(await parse("name: a", "description: b", "version: latest")).toEqual({
     name: "a",
     description: "b"
@@ -35,7 +39,19 @@ it("loads a Skill whose optional fields are not Arden's shape, keeping what it c
 })
 
 it("names the field when a Skill cannot load", async () => {
-  await expect(parse("name: a")).rejects.toMatchObject({
-    message: "Skill metadata `description` is missing or invalid"
-  })
+  await expect(parse("name: a")).rejects.toThrow(/description/)
+})
+
+it("reads a SKILL.md saved with Windows line endings", async () => {
+  const source = [
+    "---",
+    "name: 03_task1",
+    'description: "Use when: scheduling."',
+    "---",
+    "",
+    "# Body"
+  ].join("\r\n")
+  const metadata = await Effect.runPromise(parseSkillMetadata(source, "03_task1", "list"))
+  expect(metadata.name).toBe("03_task1")
+  expect(metadata.description).toBe("Use when: scheduling.")
 })

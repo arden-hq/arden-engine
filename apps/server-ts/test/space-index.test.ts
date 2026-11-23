@@ -42,7 +42,9 @@ it("a Space keeps its page while free, rebinds a renamed one, and makes a fresh 
   const pages = [
     page("areas/garden.md"),
     page("areas/moved.md", { pageId: "renamed" }),
-    page("areas/gone.md", { state: "archived" })
+    page("areas/gone.md", { state: "archived" }),
+    page("notes/inner/x.md"),
+    page("notes/inner.md")
   ]
   const other = (path: string) => [spaceBinding({ ...row(path), space_id: "b" })]
   expect(planSpacePage(pages, row("areas/garden.md"), []).kind).toBe("keep")
@@ -51,7 +53,8 @@ it("a Space keeps its page while free, rebinds a renamed one, and makes a fresh 
     [null, []],
     ["areas/gone.md", []],
     ["areas/garden.md", other("areas/garden.md")],
-    ["areas/garden.md", other("areas/garden/x.md")]
+    ["areas/garden.md", other("areas/garden/x.md")],
+    ["notes/inner/x.md", other("notes/inner.md")]
   ] as const)
     expect(planSpacePage(pages, row(path), held).kind).toBe("create")
 })

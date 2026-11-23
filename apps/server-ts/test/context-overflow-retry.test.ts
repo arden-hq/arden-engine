@@ -63,7 +63,6 @@ const startRun = async (server: ServerHandle): Promise<string> => {
 const runStatus = async (server: ServerHandle, runId: string) =>
   runDecoders.detail(await (await server.fetch(runRoutes.detail(runId))).json()).status
 
-/** A provider that refuses its first request as too long and answers every later one. */
 const overflowingOnce = () => {
   const requests: Array<ModelProviderRequest> = []
   const provider: ModelProvider = {
@@ -112,7 +111,14 @@ it(
             return input.overflow
               ? {
                   kind: "replacement",
-                  messages: input.messages.filter((message) => message.role !== ROLE.system)
+                  messages: [
+                    ...input.messages,
+                    ...input.messages.slice(0, 1).map((first) => ({
+                      ...first,
+                      message_id: "summary-1",
+                      content: "compacted history"
+                    }))
+                  ]
                 }
               : { kind: "unchanged" }
           }
@@ -124,6 +130,9 @@ it(
         .toBe("completed")
       expect(overflowAsked).toEqual([false, true])
       expect(model.requests).toHaveLength(2)
+      const sent = model.requests.map((request) => JSON.stringify(request.messages))
+      expect(sent[0]).not.toContain("compacted history")
+      expect(sent[1]).toContain("compacted history")
     } finally {
       await server?.stop().catch(() => undefined)
       await rm(directory, { recursive: true, force: true })

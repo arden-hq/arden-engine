@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { CLI_ACCESS_FILE } from "@arden-hq/protocol/daemon"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { cliAccessPath, publishCliAccess, withdrawCliAccess } from "../src/runtime/cli-access.js"
@@ -26,7 +27,9 @@ const tempDatabase = async (): Promise<string> => {
 
 describe("CLI access file", () => {
   it("is written beside the database, readable by its owner only", async () => {
-    const path = cliAccessPath(await tempDatabase())
+    const database = await tempDatabase()
+    const path = cliAccessPath(database)
+    expect(path).toBe(join(dirname(database), CLI_ACCESS_FILE))
     await publishCliAccess(path, access("a".repeat(43)))
 
     expect((await stat(path)).mode & 0o777).toBe(0o600)

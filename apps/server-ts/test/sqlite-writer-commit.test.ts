@@ -18,6 +18,7 @@ it.each(["begin", "commit"] as const)(
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          yield* sql`SELECT 1`
           const attempted = yield* Deferred.make<void>()
           let bodies = 0
           if (phase === "begin") blocker.exec("BEGIN IMMEDIATE")
@@ -36,7 +37,7 @@ it.each(["begin", "commit"] as const)(
             )
           }).pipe(Effect.forkChild)
           yield* Deferred.await(attempted)
-          yield* Effect.yieldNow
+          yield* Effect.sleep("40 millis")
           blocker.exec("COMMIT")
           yield* Fiber.join(write)
           const rows = yield* sql<{ readonly v: string }>`SELECT v FROM t`

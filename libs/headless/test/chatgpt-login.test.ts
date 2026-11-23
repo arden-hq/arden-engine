@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer, type Server } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -96,6 +96,7 @@ describe("startChatGptLogin", () => {
     expect(form.get("grant_type")).toBe("authorization_code")
     expect(form.get("code")).toBe("code-1")
     expect(form.get("redirect_uri")).toBe(redirect)
+    expect(authorize.searchParams.get("code_challenge_method")).toBe("S256")
     expect(
       createHash("sha256")
         .update(form.get("code_verifier") ?? "")
@@ -140,7 +141,7 @@ describe("chatGptCredentials", () => {
     expect(JSON.parse(requests[0]?.body ?? "")).toEqual({
       grant_type: "refresh_token",
       refresh_token: "old-refresh",
-      client_id: "app_EMoamEEZ73f0CkXaXp7hrann"
+      client_id: expect.any(String)
     })
     expect(await store.read()).toEqual({
       access: "new-access",
@@ -193,5 +194,8 @@ describe("chatGptCredentials", () => {
     await writeFile(join(folder, CHATGPT_LOGIN_FILE), "{")
     await expect(store.read()).rejects.toEqual(new ChatGptLoginError("unreadable_store"))
     expect(await readFile(join(folder, CHATGPT_LOGIN_FILE), "utf8")).toBe("{")
+    await rm(join(folder, CHATGPT_LOGIN_FILE))
+    await mkdir(join(folder, CHATGPT_LOGIN_FILE))
+    await expect(store.read()).rejects.toEqual(new ChatGptLoginError("unreadable_store"))
   })
 })

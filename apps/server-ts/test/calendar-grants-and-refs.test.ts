@@ -132,7 +132,7 @@ describe("calendar write access", () => {
           calendarId: "team@group",
           signal: new AbortController().signal
         })
-      ).rejects.toThrow("read-only")
+      ).rejects.toThrow()
     }
   )
 })

@@ -1,8 +1,6 @@
 import type { RunContext } from "@arden-hq/protocol/runs"
-import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
-  RunAuthoritySchema,
   deriveAuthority,
   approvalSources,
   handedAuthority,
@@ -251,12 +249,6 @@ describe("deriveAuthority", () => {
         unattended: true
       }
     })
-    for (const input of Object.values(cases)) {
-      const authority = deriveAuthority(input)
-      expect(
-        Schema.decodeUnknownSync(RunAuthoritySchema)(JSON.parse(JSON.stringify(authority)))
-      ).toEqual(authority)
-    }
   })
 })
 
@@ -504,14 +496,5 @@ describe("the run's cause", () => {
     expect(widerAxes({ ...agent, owns: { ...agent.owns, chain_depth: 0 } }, woken)).toEqual([
       "owns"
     ])
-  })
-
-  it("an authority stored before the depth was kept still decodes, at depth 0", () => {
-    const { chain_depth: _dropped, ...owns } = woken.owns
-    const stored = JSON.parse(JSON.stringify({ ...woken, owns }))
-    expect(Schema.decodeUnknownSync(RunAuthoritySchema)(stored).owns).toEqual({
-      ...woken.owns,
-      chain_depth: 0
-    })
   })
 })

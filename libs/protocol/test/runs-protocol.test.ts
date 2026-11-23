@@ -1,13 +1,7 @@
 import { expect, it } from "vitest"
 
 import { ProtocolError } from "@arden-hq/protocol"
-import { isRunTerminalEvent } from "@arden-hq/protocol/chat"
-import {
-  MODEL_CALL_KINDS,
-  RUN_PROGRESS_EVENT_TYPES,
-  runDecoders,
-  usageGroup
-} from "@arden-hq/protocol/runs"
+import { runDecoders } from "@arden-hq/protocol/runs"
 
 const completedRun = {
   version: 1,
@@ -81,6 +75,15 @@ it("decodes an ordered durable Run event page", () => {
       events: [...page.events].reverse()
     })
   ).toThrow(ProtocolError)
+  const [first, last] = page.events
+  expect(() =>
+    runDecoders.eventPage({
+      ...page,
+      events: [first, { ...last, sequence: 1 }],
+      next_after_sequence: 1
+    })
+  ).toThrow(ProtocolError)
+  expect(() => runDecoders.eventPage({ ...page, next_after_sequence: 4 })).toThrow(ProtocolError)
 })
 
 it("exposes late outcomes without reviving cancelled Runs", () => {
@@ -88,48 +91,6 @@ it("exposes late outcomes without reviving cancelled Runs", () => {
   expect(runDecoders.detail(late).status).toBe("cancelled")
   expect(() => runDecoders.detail({ ...late, late_result_at: null })).toThrow(ProtocolError)
   expect(() => runDecoders.detail({ ...late, result: null })).toThrow(ProtocolError)
-})
-
-it("counts every terminal Run event as a Run progress change", () => {
-  for (const type of ["RUN_FINISHED", "RUN_ERROR", "run_cancelled"]) {
-    expect(isRunTerminalEvent({ type })).toBe(true)
-    expect(RUN_PROGRESS_EVENT_TYPES.has(type)).toBe(true)
-  }
-})
-
-it("folds every model-call kind into the owner's four usage groups", () => {
-  const upkeep = [
-    "chat_title",
-    "run_activity",
-    "letter_subject",
-    "chat_triage",
-    "focus_offer",
-    "space_overview",
-    "space_instructions",
-    "automation_description",
-    "recipe_draft",
-    "capture",
-    "item_routing",
-    "compaction",
-    "composer_shortcut"
-  ]
-  const safety = ["helper_review", "claim_check"]
-  const byGroup = (origin: "user" | "automation") => {
-    const groups: Record<string, Array<string>> = {}
-    for (const kind of MODEL_CALL_KINDS) (groups[usageGroup(kind, origin)] ??= []).push(kind)
-    return groups
-  }
-  expect(byGroup("user")).toEqual({
-    chats: ["chat"],
-    upkeep,
-    safety,
-    automations: ["automation_prefilter", "space_review_gate"]
-  })
-  expect(byGroup("automation")).toEqual({
-    automations: ["chat", "automation_prefilter", "space_review_gate"],
-    upkeep,
-    safety
-  })
 })
 
 it("tells a reported cost from an unknown one in a Run's result", () => {

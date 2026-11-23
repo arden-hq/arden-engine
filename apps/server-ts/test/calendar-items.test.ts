@@ -39,8 +39,9 @@ describe("calendar changes as items", () => {
 
   it("stores one item per change, and the item publishes calendar.changed", async () => {
     const cursor = (await fetch([moved], undefined)).cursor
-    const [item] = (await fetch([moved], cursor)).items
-    expect(item).toMatchObject({
+    const { items } = await fetch([moved], cursor)
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
       source: "calendar",
       account: "acct-1",
       externalId: "event-1:2026-01-05T00:00:00Z",
@@ -49,18 +50,19 @@ describe("calendar changes as items", () => {
       sender: "lead@example.com",
       detail: { change: "changed", event_id: "event-1", start: "2999-01-02T10:00:00Z" }
     })
-    if (item === undefined) return
-    const event = connectionItemEvent({
-      itemId: "item_1",
-      source: item.source,
-      threadKey: item.threadKey,
-      title: item.title,
-      sender: item.sender,
-      receivedAt: item.receivedAt,
-      snippet: item.snippet,
-      detail: item.detail
-    })
-    expect(event).toMatchObject({
+    const events = items.map((item) =>
+      connectionItemEvent({
+        itemId: "item_1",
+        source: item.source,
+        threadKey: item.threadKey,
+        title: item.title,
+        sender: item.sender,
+        receivedAt: item.receivedAt,
+        snippet: item.snippet,
+        detail: item.detail
+      })
+    )
+    expect(events[0]).toMatchObject({
       eventType: "calendar.changed",
       eventKey: "item_1",
       context: { event: { change: "changed", summary: "Planning" } }

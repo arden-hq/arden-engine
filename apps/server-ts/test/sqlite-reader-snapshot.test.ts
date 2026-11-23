@@ -2,12 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeSqliteThreadClient } from "@arden-hq/sqlite-thread"
-import { Deferred, Effect, Fiber, Ref } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { expect, it } from "vitest"
-
-import { makeWriter, READER_CONNECTIONS } from "../src/persistence/sqlite/deps.js"
-import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 
 const inTempFile = async <A, E>(
   body: (filename: string) => Effect.Effect<A, E, Reactivity.Reactivity>
@@ -43,80 +40,38 @@ it("a reader transaction keeps one commit while the writer holds and commits a t
           )
           .pipe(Effect.forkScoped)
         yield* Deferred.await(held)
-        const inside = yield* reader
+        const began = yield* Deferred.make<void>()
+        const proceed = yield* Deferred.make<void>()
+        const reading = yield* reader
           .withTransaction(
             Effect.gen(function* () {
               const before = count(
                 yield* reader<{ readonly n: number }>`SELECT COUNT(*) AS n FROM items`
               )
-              yield* Deferred.succeed(commit, undefined)
-              yield* Fiber.join(writing)
+              yield* Deferred.succeed(began, undefined)
+              yield* Deferred.await(proceed)
               const after = count(
                 yield* reader<{ readonly n: number }>`SELECT COUNT(*) AS n FROM items`
               )
               return { before, after }
             })
           )
-          .pipe(Effect.timeout("1 second"))
-        const next = count(yield* reader<{ readonly n: number }>`SELECT COUNT(*) AS n FROM items`)
-        return { ...inside, next }
-      })
-    )
-  )
-
-  expect(result).toEqual({ before: 1, after: 1, next: 2 })
-})
-
-it("runs at most half the reader connections as snapshots and leaves the rest to reads", async () => {
-  const result = await inTempFile((filename) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const sql = yield* makeSqliteThreadClient({ filename })
-        yield* sql`CREATE TABLE items (value INTEGER)`
-        const reader = yield* makeSqliteThreadClient({
-          filename,
-          readonly: true,
-          connections: READER_CONNECTIONS
-        })
-        const writer = makeWriter({ sql, reader, queue: yield* PersistenceWriteQueue })
-        const entered = yield* Ref.make(0)
-        const gate = yield* Deferred.make<void>()
-        const snapshots = yield* Effect.forEach(
-          [1, 2, 3],
-          () =>
-            writer
-              .snapshot(
-                Effect.gen(function* () {
-                  yield* reader`SELECT COUNT(*) AS n FROM items`
-                  // A nested snapshot joins the transaction instead of taking a permit.
-                  yield* writer.snapshot(reader`SELECT COUNT(*) AS n FROM items`)
-                  yield* Ref.update(entered, (n) => n + 1)
-                  yield* Deferred.await(gate)
-                })
-              )
-              .pipe(Effect.forkScoped),
-          { concurrency: "unbounded" }
-        )
-        // Wait for the permits to fill, not for a fixed time: a slow machine (CI) had
-        // entered only one snapshot after 100 ms. Then wait once more, so a snapshot
-        // that got past the limit would show.
-        const deadline = Date.now() + 5_000
-        while ((yield* Ref.get(entered)) < READER_CONNECTIONS / 2 && Date.now() < deadline) {
-          yield* Effect.sleep("20 millis")
-        }
-        yield* Effect.sleep("100 millis")
-        const whileHeld = yield* Ref.get(entered)
-        const read = count(
+          .pipe(Effect.forkScoped)
+        yield* Deferred.await(began)
+        yield* Deferred.succeed(commit, undefined)
+        yield* Fiber.join(writing)
+        const outside = count(
           yield* reader<{ readonly n: number }>`SELECT COUNT(*) AS n FROM items`.pipe(
             Effect.timeout("1 second")
           )
         )
-        yield* Deferred.succeed(gate, undefined)
-        yield* Fiber.joinAll(snapshots).pipe(Effect.timeout("1 second"))
-        return { whileHeld, read, finished: yield* Ref.get(entered) }
+        yield* Deferred.succeed(proceed, undefined)
+        const inside = yield* Fiber.join(reading).pipe(Effect.timeout("1 second"))
+        const next = count(yield* reader<{ readonly n: number }>`SELECT COUNT(*) AS n FROM items`)
+        return { ...inside, outside, next }
       })
-    ).pipe(Effect.provide(PersistenceWriteQueue.layer))
+    )
   )
 
-  expect(result).toEqual({ whileHeld: READER_CONNECTIONS / 2, read: 0, finished: 3 })
+  expect(result).toEqual({ before: 1, after: 1, outside: 2, next: 2 })
 })

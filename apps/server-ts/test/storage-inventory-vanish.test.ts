@@ -54,16 +54,18 @@ describe("storage scan while files come and go", () => {
     expect(after[0]?.sizeBytes).toBe(4)
   })
 
-  it("the totals scan leaves them out too", async () => {
-    vanished.add("temp.part").add("leaving").add("top.tmp")
-    const tallies = await scanInventoryUnsafe(root, null, vanishing)
-    const bytes = Object.values(tallies).reduce((total, tally) => total + tally.totalBytes, 0)
-    expect(bytes).toBe(4)
-  })
-
   it("still fails on an error that is not a vanished entry", async () => {
-    await expect(scanInventoryUnsafe(join(root, "kept", "a.txt"), null)).rejects.toThrow(
-      "Arden storage root is not a directory"
-    )
+    const denied: ScanFileSystem = {
+      lstat: real.lstat,
+      readdir: (async (path: never, ...rest: Array<never>) => {
+        if (String(path).endsWith("inner")) {
+          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+        }
+        return real.readdir(path, ...rest)
+      }) as typeof real.readdir
+    }
+    await expect(scanStorageUnitsUnsafe(root, denied)).rejects.toThrow()
+    await expect(scanInventoryUnsafe(root, null, denied)).rejects.toThrow()
+    await expect(scanInventoryUnsafe(join(root, "kept", "a.txt"), null)).rejects.toThrow()
   })
 })

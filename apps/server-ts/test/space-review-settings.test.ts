@@ -18,6 +18,7 @@ it("a Space review owner carries only the review settings a run consumes", async
       const defaults = yield* readWorkOwner(sql, spaceJobId("space-1"))
       yield* sql`INSERT INTO space_review_settings (space_id, model, cooldown_minutes)
         VALUES ('space-1', 'review-model', 7)`
+      yield* sql`UPDATE space_review_settings SET context_mode = 'continue' WHERE space_id = 'space-1'`
       const stored = yield* sql<{ readonly task_id: string }>`SELECT task_id FROM scheduled_tasks`
       const owner = yield* readWorkOwner(sql, spaceJobId("space-1"))
       yield* sql`UPDATE space_review_settings SET cooldown_minutes = 0 WHERE space_id = 'space-1'`
@@ -33,7 +34,7 @@ it("a Space review owner carries only the review settings a run consumes", async
     kind: "space_review",
     spaceId: "space-1",
     name: "Made-up worker",
-    settings: { model: "review-model", cooldownMinutes: 7, contextMode: "fresh" },
+    settings: { model: "review-model", cooldownMinutes: 7, contextMode: "continue" },
     mayRun: true
   })
   expect(outcome.zero).toMatchObject({ settings: { cooldownMinutes: 0 } })

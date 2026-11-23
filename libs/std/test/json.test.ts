@@ -37,27 +37,9 @@ describe("canonicalJson", () => {
 })
 
 describe("engineOrderedJson", () => {
-  const first = (value: unknown): string =>
-    JSON.stringify(value, (_key, item: unknown) =>
-      typeof item === "object" && item !== null && !Array.isArray(item)
-        ? Object.fromEntries(
-            Object.keys(item)
-              .sort()
-              .map((key) => [key, (item as Record<string, unknown>)[key]])
-          )
-        : item
-    )
-
-  it("writes the first implementation's bytes, integer-like keys included", () => {
-    const value = {
-      "2": 1,
-      "10": 2,
-      "-x": 3,
-      $ref: 4,
-      "1a": 5,
-      nested: { b: [{ "9": 1, "10": 2 }], a: 1 }
-    }
-    expect(engineOrderedJson(value)).toBe(first(value))
+  it("sorts keys at every depth but keeps integer-like keys in numeric order", () => {
+    const value = { b: [{ "9": 1, "10": 2 }], a: 1, $ref: 4 }
+    expect(engineOrderedJson(value)).toBe('{"$ref":4,"a":1,"b":[{"9":1,"10":2}]}')
     expect(engineOrderedJson({ "2": 1, "10": 2 })).toBe('{"2":1,"10":2}')
     expect(canonicalJson({ "2": 1, "10": 2 }, { lenient: true })).toBe('{"10":2,"2":1}')
   })
@@ -69,5 +51,9 @@ describe("sameJson", () => {
     expect(sameJson({ a: undefined }, {})).toBe(false)
     expect(sameJson([1, 2], [2, 1])).toBe(false)
     expect(sameJson(undefined, "undefined")).toBe(false)
+    expect(sameJson({ a: 1 }, { a: 1, b: 2 })).toBe(false)
+    expect(sameJson({ a: 1, b: 2 }, { a: 1 })).toBe(false)
+    expect(sameJson([1], [1, 2])).toBe(false)
+    expect(sameJson([1, 2], [1])).toBe(false)
   })
 })

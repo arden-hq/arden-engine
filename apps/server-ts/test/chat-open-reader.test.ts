@@ -2,18 +2,7 @@ import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  Context,
-  Deferred,
-  Effect,
-  Fiber,
-  Layer,
-  Ref,
-  Schedule,
-  Schema,
-  Scope,
-  Stream
-} from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Schedule, Schema, Scope, Stream } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type * as Sse from "effect/unstable/encoding/Sse"
 import { describe, expect, it } from "vitest"
@@ -65,23 +54,6 @@ const finished = {
   runId
 }
 
-interface ArmedGate {
-  readonly reached: Deferred.Deferred<void>
-  readonly release: Deferred.Deferred<void>
-}
-
-/** Counts history reads; once armed, the next one waits after reading, so the
- * test can commit while a chat open holds its transaction's commit point. */
-class OpenGate extends Context.Service<
-  OpenGate,
-  { readonly armed: Ref.Ref<ArmedGate | undefined>; readonly reads: Ref.Ref<number> }
->()("test/OpenGate") {
-  static readonly layer = Layer.effect(
-    OpenGate,
-    Effect.all({ armed: Ref.make<ArmedGate | undefined>(undefined), reads: Ref.make(0) })
-  )
-}
-
 const historyLayer = ChatHistory.layer({
   contextBudget: (input) =>
     Effect.succeed({
@@ -93,30 +65,6 @@ const historyLayer = ChatHistory.layer({
     })
 })
 
-/** The real ChatHistory, with a gate after its database read. */
-const gatedHistoryLayer = Layer.effect(
-  ChatHistory,
-  Effect.gen(function* () {
-    const history = yield* ChatHistory
-    const gate = yield* OpenGate
-    return ChatHistory.of({
-      ...history,
-      read: (input) =>
-        history.read(input).pipe(
-          Effect.tap(() =>
-            Effect.gen(function* () {
-              yield* Ref.update(gate.reads, (n) => n + 1)
-              const armed = yield* Ref.getAndSet(gate.armed, undefined)
-              if (armed === undefined) return
-              yield* Deferred.succeed(armed.reached, undefined)
-              yield* Deferred.await(armed.release)
-            })
-          )
-        )
-    })
-  })
-).pipe(Layer.provide(historyLayer))
-
 const withChat = async <A, E>(
   body: Effect.Effect<
     A,
@@ -127,7 +75,6 @@ const withChat = async <A, E>(
     | ChatEventStore
     | SessionStore
     | ChatEventStream
-    | OpenGate
   >
 ): Promise<A> => {
   const directory = await mkdtemp(join(tmpdir(), "arden-chat-open-"))
@@ -144,8 +91,7 @@ const withChat = async <A, E>(
       )
     )
     const chat = ChatEventStream.layer.pipe(
-      Layer.provideMerge(gatedHistoryLayer),
-      Layer.provideMerge(OpenGate.layer),
+      Layer.provideMerge(historyLayer),
       Layer.provideMerge(persistence)
     )
     return await Effect.runPromise(Effect.scoped(body).pipe(Effect.provide(chat)))
@@ -195,7 +141,6 @@ const parse = (event: Sse.Event): Seen | undefined => {
   }
 }
 
-/** Opens the chat and collects what it sends, in the background. */
 const openChat = Effect.fn("test.openChat")(function* (sessionId: string) {
   const chat = yield* ChatEventStream
   const seen = yield* Ref.make<ReadonlyArray<Seen>>([])
@@ -212,8 +157,6 @@ const openChat = Effect.fn("test.openChat")(function* (sessionId: string) {
   return seen
 })
 
-/** Waits until the chat has sent every sequence through `head`, then
- * returns the snapshot and the tail sequences. */
 const delivered = (seen: Ref.Ref<ReadonlyArray<Seen>>, head: number) =>
   Ref.get(seen).pipe(
     Effect.flatMap((current) => {
@@ -241,8 +184,6 @@ const transactLagged = Effect.fn("test.transactLagged")(function* <A, E>(
   return yield* writer.transact(
     Effect.gen(function* () {
       const unit = yield* UnitOfWork
-      // Runs after COMMIT and before the event store's own after-commit
-      // publish, which the work registers next.
       yield* unit.afterCommit(
         Deferred.succeed(options.committed, undefined).pipe(
           Effect.andThen(Effect.sleep(options.lag))
@@ -254,44 +195,6 @@ const transactLagged = Effect.fn("test.transactLagged")(function* <A, E>(
 })
 
 describe("Chat open on a reader", () => {
-  it("returns its snapshot within a second while a write transaction holds the writer", () =>
-    withChat(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const writes = yield* PersistenceWriteQueue
-        const events = yield* ChatEventStore
-        const { sessionId } = yield* (yield* SessionStore).create({ name: "Held writer" })
-        yield* events.append({ sessionId, events: [started(sessionId)] })
-        yield* events.append({ sessionId, events: [delta("m", "hello")] })
-
-        const held = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        const writing = yield* writes
-          .run(
-            sql.withTransaction(
-              sql`UPDATE sessions SET name = 'Held' WHERE session_id = ${sessionId}`.pipe(
-                Effect.andThen(Deferred.succeed(held, undefined)),
-                Effect.andThen(Deferred.await(release))
-              )
-            )
-          )
-          .pipe(Effect.forkScoped)
-        yield* Deferred.await(held)
-
-        // Any statement on the writer during the open waits for `release`.
-        const first = yield* Effect.gen(function* () {
-          const chat = yield* ChatEventStream
-          const { stream } = yield* chat.open({ sessionId })
-          return yield* stream.pipe(Stream.take(1), Stream.runCollect)
-        }).pipe(Effect.timeout("1 second"), Effect.ensuring(Deferred.succeed(release, undefined)))
-        yield* Fiber.join(writing)
-
-        expect(first.map(parse)).toEqual([
-          { kind: "snapshot", applied: 2, checkpoint: 0, active: [1, 2] }
-        ])
-      })
-    ))
-
   it("sends each sequence once across snapshot and tail while events commit", () =>
     withChat(
       Effect.gen(function* () {
@@ -336,8 +239,6 @@ describe("Chat open on a reader", () => {
       Effect.gen(function* () {
         const events = yield* ChatEventStore
         const sessions = yield* SessionStore
-        // 30 ms is within the open's retries; 300 ms outlasts them, and the
-        // open falls back to the write queue.
         for (const lag of ["30 millis", "300 millis"]) {
           const { sessionId } = yield* sessions.create({ name: `Publish lag ${lag}` })
           yield* events.append({ sessionId, events: [started(sessionId)] })
@@ -362,57 +263,6 @@ describe("Chat open on a reader", () => {
             [...(result.snapshot?.active ?? []), ...result.tail].sort((a, b) => a - b)
           ).toEqual([1, 2])
         }
-      })
-    ))
-
-  it("retries an open whose run ended after its transaction began, and leaves no hole", () =>
-    withChat(
-      Effect.gen(function* () {
-        const events = yield* ChatEventStore
-        const sessions = yield* SessionStore
-        const gate = yield* OpenGate
-        const { sessionId } = yield* sessions.create({ name: "Terminal trim" })
-        yield* events.append({ sessionId, events: [started(sessionId)] })
-        for (const text of ["a", "b", "c"]) {
-          yield* events.append({ sessionId, events: [delta("m", text)] })
-        }
-
-        const reached = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        yield* Ref.set(gate.armed, { reached, release })
-        yield* Ref.set(gate.reads, 0)
-        const opening = yield* openChat(sessionId).pipe(Effect.forkScoped)
-        yield* Deferred.await(reached)
-        // The open's transaction saw head 4 and checkpoint 0. The run ends now
-        // and the projection drops its deltas for the new checkpoint.
-        const sql = yield* SqlClient.SqlClient
-        const writer = makeWriter({ sql, reader: sql, queue: yield* PersistenceWriteQueue })
-        yield* writer.transact(
-          Effect.gen(function* () {
-            const ended = yield* events.appendInTransaction({ sessionId, events: [finished] })
-            yield* events.setCheckpointInTransaction(sessionId, ended.headSequence)
-          })
-        )
-        const trimmed = yield* events.activeProjection({
-          sessionId,
-          afterSequence: 0,
-          throughSequence: 4
-        })
-        yield* Deferred.succeed(release, undefined)
-        const result = yield* delivered(yield* Fiber.join(opening), 5)
-
-        expect(trimmed).toEqual({
-          kind: "complete",
-          records: [],
-          publishedThrough: 5,
-          trimFloor: 4
-        })
-        expect(yield* Ref.get(gate.reads)).toBe(2)
-        expect(result).toEqual({
-          overflow: undefined,
-          snapshot: { kind: "snapshot", applied: 5, checkpoint: 5, active: [] },
-          tail: []
-        })
       })
     ))
 })

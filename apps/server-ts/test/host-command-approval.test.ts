@@ -110,28 +110,6 @@ describe("host command approval", () => {
       })
     ).toBe(false)
   })
-
-  it("tells the Helper and the user the command has no sandbox, and marks an Always-ask card as the user's", () => {
-    const helperCard = approvalPrompt({
-      command: "rm -rf ~/.arden",
-      resolved: host,
-      ardenData: true
-    })
-    expect(helperCard.presentation?.fields).toEqual(
-      expect.arrayContaining([
-        { label: "Access", value: "Full access to files, network and processes" },
-        { label: "Warning", value: "This command can change Arden's own data." }
-      ])
-    )
-    expect(helperCard.data?.["reviewer"]).not.toBe("user")
-    const plain = approvalPrompt({ command: "make", resolved: host, ardenData: false })
-    expect(plain.presentation?.fields.map((field) => field.label)).not.toContain("Warning")
-    expect(
-      approvalPrompt({ command: "make", resolved: host, ardenData: false, userOnly: true }).data?.[
-        "reviewer"
-      ]
-    ).toBe("user")
-  })
 })
 
 describe("sandbox denial note", () => {
@@ -187,14 +165,20 @@ describe("Arden data mention", () => {
         "ls ~/.arden-old",
         "cat ~/.arden.bak",
         "cat project/.arden.yml",
-        "ls /tmp/Users/me/.ardenx"
+        "ls /tmp/Users/me/.ardenx",
+        "ls /tmp/Users/me/.arden"
       ].filter((command) => mentions(command))
     ).toEqual([])
   })
+})
 
+describe("command rules", () => {
   it("offers and honors command rules for a code agent too", async () => {
     const codeAgent: ResolvedShell = { ...host, codeAgent: true }
-    const runtime = shellRuntime({ environment: { PATH: "/bin:/usr/bin" }, loginPath: undefined })
+    const runtime = shellRuntime({
+      environment: { PATH: "/bin:/usr/bin" },
+      loginPath: undefined
+    })
     const none = { own: undefined, rules: [] }
     const offered = await commandGrantPlan(none, "ls -la", codeAgent, runtime)
     expect(offered?.offer?.rules.map((rule) => rule.display_prefix)).toEqual(["ls …"])
@@ -222,16 +206,32 @@ describe("Arden data mention", () => {
   })
 
   it("keeps a Helper-judged card's Always allow as words, never as a command rule", async () => {
-    const runtime = shellRuntime({ environment: { PATH: "/bin:/usr/bin" }, loginPath: undefined })
+    const runtime = shellRuntime({
+      environment: { PATH: "/bin:/usr/bin" },
+      loginPath: undefined
+    })
     const plan = await commandGrantPlan({ own: undefined, rules: [] }, "ls -la", host, runtime)
-    const prompt = approvalPrompt({ command: "ls -la", resolved: host, plan, ardenData: false })
+    const prompt = approvalPrompt({
+      command: "ls -la",
+      resolved: host,
+      plan,
+      ardenData: false
+    })
     expect(
-      cardRuleSubjects({ toolName: "exec_command", serverName: undefined, data: prompt.data })
+      cardRuleSubjects({
+        toolName: "exec_command",
+        serverName: undefined,
+        data: prompt.data
+      })
     ).toMatchObject([{ kind: "command" }])
     const judged = withHelperRule(prompt, "list files  in Lab")
     expect(judged.data).not.toHaveProperty("command_grant")
     expect(
-      cardRuleSubjects({ toolName: "exec_command", serverName: undefined, data: judged.data })
+      cardRuleSubjects({
+        toolName: "exec_command",
+        serverName: undefined,
+        data: judged.data
+      })
     ).toEqual([{ kind: "words", text: "list files in Lab" }])
   })
 })

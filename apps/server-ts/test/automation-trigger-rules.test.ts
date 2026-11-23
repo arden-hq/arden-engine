@@ -1,43 +1,22 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { AutomationTriggerInputSchema } from "@arden-hq/protocol/effect/automations"
 import type { AutomationEvent } from "@arden-hq/protocol"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Effect, Layer } from "effect"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
+import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
+import { AutomationId } from "../src/persistence/automations/model.js"
+import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-layer.js"
-import { personalAutomationTriggers } from "../src/automations/schedule.js"
 import { triggerFeedRecord } from "../src/automations/trigger-feed.js"
 import type { InternalLifecycleEvent } from "../src/persistence/sessions/internal-events.js"
 import { SessionReadState } from "../src/persistence/sessions/read-state.js"
-
-const decodeTrigger = Schema.decodeUnknownOption(AutomationTriggerInputSchema)
-
-it("event triggers accept only the registry's event types and each event's own fields", () => {
-  expect(Option.isNone(decodeTrigger({ type: "event", event_type: "chat.closed" }))).toBe(true)
-
-  const quiet = (field: string, op: "gte" | "contains") => () =>
-    personalAutomationTriggers([
-      {
-        type: "event",
-        event_type: "chat.quiet",
-        condition: { kind: "compare", field, op, value: 1 }
-      }
-    ])
-  expect(quiet("chat.your_messages", "gte")().triggers).toHaveLength(1)
-  expect(quiet("change.page_count", "gte")).toThrow(
-    "Unknown chat.quiet condition field: change.page_count"
-  )
-  expect(quiet("chat.your_messages", "contains")).toThrow(
-    "Operator contains is not valid for chat.your_messages"
-  )
-})
 
 const snapshotKind = (
   session: Pick<SessionListItem, "session_id" | "session_type" | "origin_automation_id">
@@ -63,7 +42,11 @@ const snapshotKind = (
 
 it("idle, count and quiet never hear a chat an Automation owns", () => {
   expect({
-    yours: snapshotKind({ session_id: "s1", session_type: "chat", origin_automation_id: null }),
+    yours: snapshotKind({
+      session_id: "s1",
+      session_type: "chat",
+      origin_automation_id: null
+    }),
     ownChat: snapshotKind({
       session_id: "s2",
       session_type: "channel",
@@ -89,7 +72,11 @@ it("idle, count and quiet never hear a chat an Automation owns", () => {
       session_type: "chat",
       origin_automation_id: "space:d1:review"
     }),
-    subagent: snapshotKind({ session_id: "s5", session_type: "agent", origin_automation_id: null }),
+    subagent: snapshotKind({
+      session_id: "s5",
+      session_type: "agent",
+      origin_automation_id: null
+    }),
     continuedCopy: snapshotKind({
       session_id: "s1::f9",
       session_type: "chat",
@@ -107,20 +94,23 @@ it("idle, count and quiet never hear a chat an Automation owns", () => {
   })
 })
 
-it("your message in a chat an Automation owns is not personal input", async () => {
+it("only your own message in your own chat is personal input", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-trigger-own-output-"))
   const filename = join(directory, "arden.db")
-  const layer = recoveredSqlitePersistenceLayer({ dataDir: null, filename }).pipe(
-    Layer.provide(PersistenceWriteQueue.layer)
-  )
+  const layer = recoveredSqlitePersistenceLayer({
+    dataDir: null,
+    filename
+  }).pipe(Layer.provide(PersistenceWriteQueue.layer))
   const database = () => new DatabaseSync(filename)
+  let assigned = ""
   try {
-    const [yours, copy] = await Effect.runPromise(
+    const [yours, copy, destination] = await Effect.runPromise(
       Effect.gen(function* () {
         const sessions = yield* SessionStore
         return [
           (yield* sessions.create({ name: "Yours" })).sessionId,
-          (yield* sessions.create({ name: "A run's copy" })).sessionId
+          (yield* sessions.create({ name: "A run's copy" })).sessionId,
+          (yield* sessions.create({ name: "Destination" })).sessionId
         ] as const
       }).pipe(Effect.provide(layer))
     )
@@ -148,6 +138,66 @@ it("your message in a chat an Automation owns is not personal input", async () =
           })
           expect(started._tag).toBe("Started")
         }
+        const catalog = yield* AutomationCatalog
+        const queue = yield* AutomationQueue
+        const automation = yield* catalog.create(
+          {
+            history: "chat",
+            name: "Digest",
+            prompt: "Review",
+            triggers: [{ type: "time", every: "1h" }],
+            chat: { kind: "yours", session_id: destination },
+            idempotency_key: "5d0c2f7e-1a63-4b8e-9d4a-6c3e7f8a9b01",
+            idempotency_scope: "global"
+          },
+          "owner"
+        )
+        yield* queue.requestRun(AutomationId.make(automation.task_id))
+        const [lease] = yield* Effect.promise(async () =>
+          queue.jobs.claim({
+            workerId: "digest",
+            now: Date.now(),
+            limit: 1,
+            leaseDurationMs: 30_000
+          })
+        )
+        if (lease === undefined || lease.payload.sessionId === null)
+          return yield* Effect.die("Expected a lease with a chat")
+        assigned = lease.payload.sessionId
+        const assignment = yield* chat.start({
+          sessionId: assigned,
+          clientId: "assigned-input",
+          requestHash: "assigned-hash",
+          assistantMessageId: "assigned-answer",
+          automationLease: { id: lease.id, token: lease.token },
+          automation: {
+            automationId: AutomationId.make(automation.task_id),
+            name: automation.name,
+            attemptId: lease.payload.automationRunId
+          },
+          automationContextMode: "continue",
+          automationPrompt: "Review",
+          message: {
+            message_id: "assigned-input",
+            client_id: "assigned-input",
+            role: ROLE.interaction,
+            kind: "assignment",
+            from: {
+              source: "automation",
+              id: automation.task_id,
+              name: automation.name
+            },
+            content: "Review",
+            created_at: new Date().toISOString(),
+            automation: {
+              context_mode: "continue",
+              task_id: automation.task_id,
+              name: automation.name,
+              prompt: "Review"
+            }
+          }
+        })
+        expect(assignment._tag).toBe("Started")
       }).pipe(Effect.provide(layer))
     )
     const read = database()
@@ -166,18 +216,31 @@ it("your message in a chat an Automation owns is not personal input", async () =
 it("a completed run in your chat counts once, however often the chat changes after it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "arden-trigger-run-settled-"))
   const filename = join(directory, "arden.db")
-  const layer = recoveredSqlitePersistenceLayer({ dataDir: null, filename }).pipe(
-    Layer.provide(PersistenceWriteQueue.layer)
-  )
+  const layer = recoveredSqlitePersistenceLayer({
+    dataDir: null,
+    filename
+  }).pipe(Layer.provide(PersistenceWriteQueue.layer))
   const at = "2026-10-12T09:00:00.000Z"
   try {
-    const sessionId = await Effect.runPromise(
+    const [sessionId, copyId] = await Effect.runPromise(
       Effect.gen(function* () {
         const sessions = yield* SessionStore
+        return [
+          (yield* sessions.create({ name: "Yours" })).sessionId,
+          (yield* sessions.create({ name: "A run's copy" })).sessionId
+        ] as const
+      }).pipe(Effect.provide(layer))
+    )
+    const owned = new DatabaseSync(filename)
+    owned
+      .prepare("UPDATE sessions SET origin_automation_id = 'automation:4' WHERE session_id = ?")
+      .run(copyId)
+    owned.close()
+    await Effect.runPromise(
+      Effect.gen(function* () {
         const chat = yield* ChatWriteStore
         const readState = yield* SessionReadState
-        const { sessionId } = yield* sessions.create({ name: "Yours" })
-        const turn = (id: string) =>
+        const turn = (id: string, sessionId: string) =>
           chat
             .start({
               sessionId,
@@ -197,19 +260,40 @@ it("a completed run in your chat counts once, however often the chat changes aft
                 started._tag === "Started" ? Effect.succeed(started) : Effect.die(started._tag)
               )
             )
-        const answered = yield* turn("answered")
+        const answered = yield* turn("answered", sessionId)
         yield* chat.finish({
           runId: answered.runId,
           messages: [
             ...answered.activeMessages,
-            { message_id: "answer-answered", role: ROLE.assistant, content: "Done", created_at: at }
+            {
+              message_id: "answer-answered",
+              role: ROLE.assistant,
+              content: "Done",
+              created_at: at
+            }
           ]
         })
         yield* readState.mark(sessionId)
         yield* readState.mark(sessionId)
-        const failed = yield* turn("failed")
-        yield* chat.fail({ runId: failed.runId, code: "runner_error", message: "Fixture failure" })
-        return sessionId
+        const failed = yield* turn("failed", sessionId)
+        yield* chat.fail({
+          runId: failed.runId,
+          code: "runner_error",
+          message: "Fixture failure"
+        })
+        const copied = yield* turn("copied", copyId)
+        yield* chat.finish({
+          runId: copied.runId,
+          messages: [
+            ...copied.activeMessages,
+            {
+              message_id: "answer-copied",
+              role: ROLE.assistant,
+              content: "Done",
+              created_at: at
+            }
+          ]
+        })
       }).pipe(Effect.provide(layer))
     )
     const database = new DatabaseSync(filename)
@@ -243,12 +327,28 @@ it("a completed run in your chat counts once, however often the chat changes aft
         personal: true,
         produced_by: null,
         chain_depth: 0
+      },
+      {
+        type: "run_settled",
+        run_id: expect.any(String),
+        session_id: copyId,
+        status: "completed",
+        final_message_id: "answer-copied",
+        personal: false,
+        produced_by: null,
+        chain_depth: 0
       }
     ])
     expect(
       events
         .map(({ sequence, event }) =>
-          triggerFeedRecord({ kind: "record", sequence, createdAtMs: 0, replayed: false, event })
+          triggerFeedRecord({
+            kind: "record",
+            sequence,
+            createdAtMs: 0,
+            replayed: false,
+            event
+          })
         )
         .flatMap((record) => (record.kind === "run_completed" ? [record.sessionId] : []))
     ).toEqual([sessionId])

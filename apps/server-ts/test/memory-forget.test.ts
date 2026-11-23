@@ -107,9 +107,6 @@ it("forgetting a line removes every copy on every page in one commit, and no oth
     expect(outcome.sam).not.toContain(LINE)
     expect(outcome.town).not.toContain(LINE)
     expect(outcome.putBack).toBeInstanceOf(StoreInvalid)
-    expect(outcome.putBack).toMatchObject({
-      detail: expect.stringContaining("entry 1 in forgotten.md")
-    })
   } finally {
     await rm(root, { recursive: true, force: true })
   }

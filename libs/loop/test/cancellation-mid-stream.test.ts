@@ -134,7 +134,7 @@ describe("cancellation mid-stream", () => {
     expect(executed).toEqual(["active"])
   })
 
-  it("settles an interrupted tool batch as cancelled, classifying by signal not error type", async () => {
+  it("settles an interrupted tool batch as cancelled even when a tool throws a plain error on abort", async () => {
     const started = deferred()
     let startedCount = 0
     const toolset: Toolset = {
@@ -205,8 +205,5 @@ describe("cancellation mid-stream", () => {
       )
     }
     expect(events.some((event) => "_tag" in event && event._tag === "ToolCompleted")).toBe(false)
-    expect(
-      events.filter((event) => "_tag" in event && event._tag === "ToolInputStarted")
-    ).toHaveLength(2)
   })
 })

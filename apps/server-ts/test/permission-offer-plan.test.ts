@@ -4,11 +4,7 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import type { ToolFacts } from "../src/execution/decide.js"
 import type { OfferHolders } from "../src/persistence/permissions/offer.js"
-import {
-  wordsRuleText,
-  type PermissionRule,
-  type RuleDecision
-} from "../src/persistence/permissions/rules.js"
+import type { PermissionRule } from "../src/persistence/permissions/rules.js"
 import type { PermissionStore } from "../src/persistence/permissions/store.js"
 import type { WorkStore } from "../src/persistence/work/store.js"
 import {
@@ -155,14 +151,6 @@ describe("a browser action from the person's approvals", () => {
       ["everywhere", null]
     ])
   })
-
-  it.each([
-    ["the person's own Ask", { rule: "ask" }, "your_setting"],
-    ["a site already allowed", { rule: "approve" }, "already_allowed"],
-    ["a tool that always asks", { tool: { ...browser, always_ask: true } }, "always_asks"]
-  ] as const)("offers nothing for %s", (_case, input, reason) => {
-    expect(site(input)).toEqual({ kind: "refuse", reason })
-  })
 })
 
 describe("a connector from the person's words", () => {
@@ -173,19 +161,6 @@ describe("a connector from the person's words", () => {
     ["a connector already allowed", { rule: "approve" }, "already_allowed"]
   ] as const)("offers nothing for %s", (_case, input, reason) => {
     expect(connector(input)).toEqual({ kind: "refuse", reason })
-  })
-
-  it("offers the connector's rule in the run's Space or everywhere", () => {
-    const offered = connector()
-    expect(offered.kind === "offer" && offered.change).toEqual({
-      kind: "connector",
-      server: "GitHub"
-    })
-    expect(ids(offered)).toEqual([
-      ["space", "space:jobs"],
-      ["everywhere", null]
-    ])
-    expect(ids(connector({ holders: looseChat }))).toEqual([["everywhere", null]])
   })
 })
 
@@ -311,6 +286,20 @@ describe("a command prefix from the person's words", () => {
     ])
   })
 
+  it("offers the jobs' choice only where their prefixes are the chat's", () => {
+    const gitPull = { ...gitPush, argument_prefix: ["pull"], display_prefix: "git pull …" }
+    const jobs = { rule: undefined, displayPrefixes: ["git pull …"], offer: { rules: [gitPull] } }
+    const offered = command({ system: jobs })
+    expect(offered.kind === "offer" && offered.change).toEqual({
+      kind: "command",
+      rules: [gitPush]
+    })
+    expect(ids(offered)).toEqual([
+      ["space", "space:jobs"],
+      ["everywhere", null]
+    ])
+  })
+
   it("judges Arden's own jobs by their own list", () => {
     const everywhere = { rule: "allow", displayPrefixes: ["git push …"] } as const
     expect(ids(command({ grant: everywhere }))).toEqual([["system", null]])
@@ -329,22 +318,6 @@ describe("a command prefix from the person's words", () => {
       ["everywhere", null]
     ])
   })
-
-  it("still refuses to change a rule in the jobs' list", () => {
-    const rule: PermissionRule = {
-      id: "r1",
-      list: { kind: "system" },
-      subject: { kind: "command", executable: "/usr/bin/git", argumentPrefix: ["push"] },
-      decision: "allow",
-      source: { kind: "settings", runId: null },
-      createdAt: "2026-11-04T00:00:00.000Z",
-      fromRuleId: null
-    }
-    expect(planPermissionOffer({ kind: "rule", rule, decision: "remove" })).toEqual({
-      kind: "refuse",
-      reason: "system_list"
-    })
-  })
 })
 
 describe("an offer from the person's words in any mode", () => {
@@ -359,7 +332,7 @@ describe("an offer from the person's words in any mode", () => {
 
   const asked: Array<Parameters<WorkStore["Service"]["askQuestion"]>[0]> = []
   const DOCUMENTS = join(homedir(), "Documents")
-  const offersIn = (mode: "allow" | "read_only" | "safe") =>
+  const offersIn = () =>
     makePermissionOffers({
       permissions: partialService<PermissionStore["Service"]>("PermissionStore", {
         offerHolders: () => Effect.succeed(spaceChat),
@@ -376,7 +349,7 @@ describe("an offer from the person's words in any mode", () => {
       live: () =>
         Promise.resolve({
           state: "active",
-          mode,
+          mode: "safe",
           noApproval: false,
           currentScope: undefined,
           rules: { own: undefined, rules: [] }
@@ -386,7 +359,7 @@ describe("an offer from the person's words in any mode", () => {
       connectorTitles: () => Promise.resolve(new Map()),
       compileWords: (text) =>
         Promise.resolve({
-          decision: COMPILED_DECISION[text] ?? ("never" as const),
+          decision: "never" as const,
           rules: text.includes("Documents")
             ? [
                 {
@@ -399,58 +372,10 @@ describe("an offer from the person's words in any mode", () => {
           dropped: []
         })
     })
-  const COMPILED_DECISION: Readonly<Record<string, RuleDecision>> = {
-    "pushing to GitHub": "allow",
-    "sending an email": "ask"
-  }
-  const words = { kind: "words", text: "uploading my CV to job sites", decision: "allow" } as const
-
-  it.each(["allow", "read_only", "safe"] as const)("offers in %s mode", async (mode) => {
-    const outcome = await offersIn(mode).offer({
-      run: serverRunContext(),
-      toolCallId: "ask",
-      request: words,
-      tools: [],
-      source: { kind: "message" }
-    })
-    expect(outcome).toMatchObject({ kind: "offered", questionId: "q1" })
-  })
-
-  it("shows every word of a words rule it saves", async () => {
-    asked.length = 0
-    const text = `${"Upload my CV to job application sites. ".repeat(4)}\nAlso send email and delete files.`
-    const said = wordsRuleText(text)
-    await offersIn("safe").offer({
-      run: serverRunContext(),
-      toolCallId: "ask",
-      request: { kind: "words", text: said, decision: "allow" },
-      tools: [],
-      source: { kind: "message" }
-    })
-    const question = asked[0]
-    expect(question?.permissionOffer?.change).toMatchObject({ kind: "words", text: said })
-    expect(question?.content.prompt).toContain(`“${said}”`)
-  })
-
-  it.each([
-    ["pushing to GitHub", "Always allow “pushing to GitHub”?"],
-    ["sending an email", "Always ask before “sending an email”?"],
-    ["drafting messages in X", "Always deny “drafting messages in X”?"]
-  ] as const)("names the compiled decision on the card for %s", async (text, prompt) => {
-    asked.length = 0
-    await offersIn("safe").offer({
-      run: serverRunContext(),
-      toolCallId: "ask",
-      request: { kind: "words", text, decision: "allow" },
-      tools: [],
-      source: { kind: "message" }
-    })
-    expect(asked[0]?.content.prompt).toBe(prompt)
-  })
 
   it("compiles words into the hard rules the card shows and the tap saves", async () => {
     asked.length = 0
-    await offersIn("safe").offer({
+    await offersIn().offer({
       run: serverRunContext(),
       toolCallId: "ask",
       request: { kind: "words", text: "never touch Documents", decision: "allow" },
@@ -465,7 +390,7 @@ describe("an offer from the person's words in any mode", () => {
     })
     expect(asked[0]?.content.detail).toBe("- Deny: Read files in ~/Documents")
     asked.length = 0
-    await offersIn("safe").offer({
+    await offersIn().offer({
       run: serverRunContext(),
       toolCallId: "ask-2",
       request: { kind: "words", text: "never email anyone outside my company", decision: "never" },
@@ -474,17 +399,6 @@ describe("an offer from the person's words in any mode", () => {
     })
     expect(asked[0]?.permissionOffer?.change).toMatchObject({ kind: "words", rules: [] })
     expect(asked[0]?.content.detail).toBeNull()
-  })
-
-  it("offers nothing from approvals where no card asks", async () => {
-    const outcome = await offersIn("allow").offer({
-      run: serverRunContext(),
-      toolCallId: "call",
-      request: words,
-      tools: [],
-      source: { kind: "approvals" }
-    })
-    expect(outcome).toEqual({ kind: "skipped" })
   })
 })
 

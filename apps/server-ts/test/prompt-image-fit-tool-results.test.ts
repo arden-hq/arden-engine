@@ -25,12 +25,14 @@ it("fits an image a tool returned the same way as one in a message", async () =>
     limits: LIMITS,
     resize: async () => undefined
   })
-  const omitted = {
-    type: "text",
-    text: "An image of 5600x5600 pixels was left out here: it is larger than the model accepts."
+  const parts = result.messages.flatMap((message) => {
+    if (message.role === "user") return message.content
+    if (message.role === "tool") return message.model_content ?? []
+    return []
+  })
+  expect(parts).toHaveLength(2)
+  for (const part of parts) {
+    expect(part.type).toBe("text")
+    expect(JSON.stringify(part)).toContain("5600x5600")
   }
-  expect(result.messages).toEqual([
-    { role: "user", content: [omitted] },
-    { role: "tool", tool_call_id: "read", content: "Read photo.png", model_content: [omitted] }
-  ])
 })

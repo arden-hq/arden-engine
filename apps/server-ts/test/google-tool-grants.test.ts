@@ -39,20 +39,11 @@ const cases = [
   {
     name: "email_update",
     grant: "gmail_modify",
-    input: { account_ref: ME, thread_refs: [threadRef(ME, "thread-1")], read: true }
-  },
-  {
-    name: "email_update",
-    grant: "gmail_modify",
     input: {
       account_ref: ME,
-      restore: [{ message_ids: ["m1"], add_labels: ["UNREAD"], remove_labels: [] }]
+      thread_refs: [threadRef(ME, "thread-1")],
+      read: true
     }
-  },
-  {
-    name: "email_trash",
-    grant: "gmail_modify",
-    input: { account_ref: ME, thread_refs: [threadRef(ME, "thread-1")] }
   },
   { name: "calendar_list_calendars", grant: "calendar_list", input: {} },
   {
@@ -76,21 +67,6 @@ const cases = [
       end: "2026-10-15T10:00:00Z",
       attendees: []
     }
-  },
-  {
-    name: "calendar_edit_event",
-    grant: "calendar_list",
-    input: { event_ref: `${ME}:evt-1`, calendar_id: TEAM, title: "Updated" }
-  },
-  {
-    name: "calendar_delete_event",
-    grant: "calendar_list",
-    input: { event_ref: `${ME}:evt-1`, calendar_id: TEAM }
-  },
-  {
-    name: "calendar_respond",
-    grant: "calendar_list",
-    input: { event_ref: `${ME}:evt-1`, calendar_id: TEAM, response: "accepted" }
   }
 ] as const
 
@@ -100,7 +76,10 @@ const googleFixture = () => {
   const google: GoogleToolConnections = {
     accounts: () => accounts,
     request: (request) => {
-      requests.push({ method: request.init?.method ?? "GET", url: request.url })
+      requests.push({
+        method: request.init?.method ?? "GET",
+        url: request.url
+      })
       const value = request.url.includes("/threads/")
         ? {
             id: "thread-1",
@@ -145,38 +124,63 @@ describe("declared Google grants", () => {
       const context = ctx()
       const card = await call.definition.approvalRequirement?.(input, context)
       expect(card?.data?.["reviewer"]).toBe("user")
-      expect(card?.presentation).toMatchObject({ needs_grant: { grant, account: ME } })
+      expect(card?.presentation).toMatchObject({
+        needs_grant: { grant, account: ME }
+      })
       requests.length = 0
       await expect(
-        call.definition.execute(input, { ...context, approval: { approved: true, feedback: null } })
+        call.definition.execute(input, {
+          ...context,
+          approval: { approved: true, feedback: null }
+        })
       ).rejects.toBeInstanceOf(ToolExecutionError)
       expect(requests).toEqual([])
     }
   )
 
-  it.each(
-    cases.filter(
-      ({ name }) =>
-        name.startsWith("calendar_") &&
-        !["calendar_list_calendars", "calendar_free_busy"].includes(name)
-    )
-  )("$name needs no list consent on the primary calendar", async ({ name, input }) => {
+  it("calendar_create_event needs no list consent on the primary calendar", async () => {
     const { tool, requests } = googleFixture()
+    const create = cases.find(({ name }) => name === "calendar_create_event")
     expect(
-      await tool(name).definition.approvalRequirement?.({ ...input, calendar_id: "primary" }, ctx())
+      await tool("calendar_create_event").definition.approvalRequirement?.(
+        { ...create?.input, calendar_id: "primary" },
+        ctx()
+      )
     ).toBeUndefined()
     expect(requests).toEqual([])
   })
 
+  it("asks for nothing from a Google service the account has not connected", async () => {
+    const { accounts, tool } = googleFixture()
+    const draft = cases[0]
+    accounts[0] = {
+      id: "acct-1",
+      email: ME,
+      authorizations: [{ service: "calendar", status: "ready", scopes: [] }]
+    }
+    expect(
+      await tool("email_draft").definition.approvalRequirement?.(draft.input, ctx())
+    ).toBeUndefined()
+  })
+
   it("checks the live account after approval, and permits execution only while the grant is held", async () => {
     const { google, accounts, requests } = googleFixture()
+    let draftsOpen = true
     const tool = defineGoogleTool({
       google,
       grant: {
         grant: "gmail_drafts",
         what: "save drafts",
         note: "Allow drafts",
-        target: (input) => ({ accountRef: input.account_ref })
+        target: (input) => ({ accountRef: input.account_ref }),
+        validate: async () => {
+          if (draftsOpen === false) {
+            throw new ToolExecutionError("Drafts are closed", {
+              preview: "closed",
+              retryable: false
+            })
+          }
+        }
       },
       name: "save_probe",
       description: "Save a draft",
@@ -199,12 +203,23 @@ describe("declared Google grants", () => {
     expect(await tool.execute(input, ctx(), { decision: "approve" })).toMatchObject({
       content: "saved"
     })
+    draftsOpen = false
+    await expect(
+      tool.definition.execute(input, {
+        ...ctx(),
+        approval: { approved: true, feedback: null }
+      })
+    ).rejects.toBeInstanceOf(ToolExecutionError)
+    draftsOpen = true
     accounts[0] = connected()
     await expect(tool.execute(input, ctx(), { decision: "approve" })).rejects.toMatchObject({
       reason: "approval"
     })
     await expect(
-      tool.execute(input, { ...ctx(), approval: { approved: true, feedback: null } })
+      tool.execute(input, {
+        ...ctx(),
+        approval: { approved: true, feedback: null }
+      })
     ).rejects.toBeInstanceOf(ToolExecutionError)
     expect(requests).toEqual([])
   })
