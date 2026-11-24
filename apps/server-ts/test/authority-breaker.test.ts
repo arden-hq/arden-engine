@@ -9,7 +9,7 @@ import { ToolExecutionStore } from "../src/persistence/tools/store.js"
 import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { sqlitePersistenceLayer } from "./fixtures/temp-database.js"
 
-it("counts a run's rule refusals per tool and its reviews' endings from durable rows", async () => {
+it("counts a run's rule refusals per tool and its reviews' endings, newest first, from durable rows", async () => {
   const counts = await Effect.runPromise(
     Effect.gen(function* () {
       const sessions = yield* SessionStore
@@ -85,7 +85,12 @@ it("counts a run's rule refusals per tool and its reviews' endings from durable 
         rationale: "Routine",
         abbreviated: false
       }
-      const review = (toolCallId: string, decision: "allow" | "ask") =>
+      const outcomes = {
+        allow: { decision: "allow", decided_by: "outcome", assessment },
+        refuse: { decision: "ask", decided_by: "outcome", assessment },
+        ask: { decision: "ask", decided_by: "timed_out" }
+      } as const
+      const review = (toolCallId: string, decision: keyof typeof outcomes) =>
         policy.recordReview({
           runId: run.runId,
           toolCallId,
@@ -93,17 +98,18 @@ it("counts a run's rule refusals per tool and its reviews' endings from durable 
           toolName: "file_write",
           rung: "requirement",
           modelId: "helper",
-          outcome:
-            decision === "allow"
-              ? { decision, decided_by: "outcome", assessment }
-              : { decision, decided_by: "timed_out" }
+          outcome: outcomes[decision]
         })
       yield* card("h1", "Review didn't answer in time.")
       yield* review("h1", "ask")
       const waiting = yield* policy.reviewEndings(run.runId)
       yield* review("allowed", "allow")
       const ended = yield* policy.reviewEndings(run.runId)
-      return { refusals, waiting, ended }
+      yield* card("later", undefined)
+      yield* review("later", "refuse")
+      yield* tools.resolve({ runId: run.runId, toolCallId: "later", approved: false })
+      const newestFirst = yield* policy.reviewEndings(run.runId)
+      return { refusals, waiting, ended, newestFirst }
     }).pipe(
       Effect.provide(
         sqlitePersistenceLayer({ dataDir: null, filename: ":memory:" }).pipe(
@@ -112,5 +118,10 @@ it("counts a run's rule refusals per tool and its reviews' endings from durable 
       )
     )
   )
-  expect(counts).toEqual({ refusals: 2, waiting: [], ended: ["passed"] })
+  expect(counts).toEqual({
+    refusals: 2,
+    waiting: [],
+    ended: ["passed"],
+    newestFirst: ["denied", "passed"]
+  })
 })
