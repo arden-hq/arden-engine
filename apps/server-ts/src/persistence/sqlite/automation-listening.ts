@@ -10,6 +10,7 @@ import { runOnlyIfSentences } from "../automations/event-words.js"
 import type { EventBatch } from "../automations/event-batch.js"
 import type { QueueContext } from "./automation-queue-context.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
+import { batchedEventOf, producerAutomationId } from "../automations/event-cause.js"
 
 export const listensForEvents = (
   sql: SqlClient.SqlClient,
@@ -30,7 +31,7 @@ export const eventBatchOf = (
     return { ...context.event_batch, overflow: context.event_batch.overflow ?? [] }
   const snapshot = context.trigger_context_snapshot
   if (snapshot?.source !== "event") return undefined
-  const { source: _source, ...event } = snapshot
+  const event = batchedEventOf(snapshot)
   return {
     events: [
       context.run_only_if === undefined ? event : { ...event, run_only_if: context.run_only_if }
@@ -68,8 +69,8 @@ export const eventFromSnapshot = (context: QueueContext): AutomationTriggerEvent
   return {
     eventType: snapshot.event_type,
     eventKey: snapshot.event_key,
-    producedBy: snapshot.produced_by,
-    chainDepth: snapshot.chain_depth ?? 0,
+    producedBy: producerAutomationId(snapshot.produced_by),
+    chainDepth: snapshot.chain_depth,
     context: snapshot.context
   }
 }

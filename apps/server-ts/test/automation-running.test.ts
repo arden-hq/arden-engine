@@ -7,6 +7,7 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { automationsOfChat } from "../src/persistence/sqlite/automation-removal.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { changes, newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 it("an Automation whose job failed and waits for a retry is running, and stays", async () => {
   await withTempDatabase(
@@ -15,14 +16,13 @@ it("an Automation whose job failed and waits for a retry is running, and stays",
       const catalog = yield* AutomationCatalog
       const queue = yield* AutomationQueue
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           history: "chat",
           name: "Retrying",
           prompt: "Review",
-          triggers: [{ type: "time", every: "1h" }],
-          idempotency_key: "7c1e5b3a-2d4f-4a6b-8c9d-0e1f2a3b4c01",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1h")],
+          idempotency_key: "7c1e5b3a-2d4f-4a6b-8c9d-0e1f2a3b4c01"
+        }),
         "owner"
       )
       const id = AutomationId.make(automation.task_id)
@@ -49,7 +49,10 @@ it("an Automation whose job failed and waits for a retry is running, and stays",
       )
       const [run] = yield* sql<{ readonly started_at: string }>`
         SELECT started_at FROM automation_runs WHERE id = ${lease.payload.automationRunId}`
-      expect((yield* catalog.get(id))?.running_since).toBe(run?.started_at)
+      expect((yield* catalog.get(id))?.activity).toEqual({
+        kind: "running",
+        since: run?.started_at
+      })
       const refused = yield* catalog.delete(id).pipe(Effect.flip)
       expect(refused.reason).toBe("conflict")
     })
@@ -65,15 +68,14 @@ it("an Automation waiting for a retry keeps its chat, and its chat cannot be del
       const sessions = yield* SessionStore
       const chat = yield* sessions.create({ name: "Conversation" })
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           history: "chat",
           name: "Retrying",
           prompt: "Review",
-          triggers: [{ type: "time", every: "1h" }],
+          triggers: [everyTrigger("1h")],
           chat: { kind: "yours", session_id: chat.sessionId },
-          idempotency_key: "7c1e5b3a-2d4f-4a6b-8c9d-0e1f2a3b4c02",
-          idempotency_scope: "global"
-        },
+          idempotency_key: "7c1e5b3a-2d4f-4a6b-8c9d-0e1f2a3b4c02"
+        }),
         "owner"
       )
       const id = AutomationId.make(automation.task_id)
@@ -102,7 +104,7 @@ it("an Automation waiting for a retry keeps its chat, and its chat cannot be del
         { task_id: automation.task_id, name: "Retrying", running: 1 }
       ])
       const refused = yield* catalog
-        .update(id, { chat: { kind: "own" } }, "owner")
+        .update(id, changes({ kind: "chat", chat: { kind: "own" } }), "owner")
         .pipe(Effect.flip)
       expect(refused.reason).toBe("conflict")
       const archived = yield* sessions.archive(chat.sessionId).pipe(Effect.flip)

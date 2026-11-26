@@ -129,7 +129,7 @@ export const AutomationHandlers = HttpApiBuilder.group(
         )
       )
       .handle("runs", ({ params, query }) =>
-        store.runs(AutomationId.make(params.taskId), query.limit ?? 20).pipe(
+        store.runs(AutomationId.make(params.taskId), query.limit).pipe(
           Effect.catch(failStore),
           Effect.flatMap(orNotFound),
           Effect.map((runs) => ({ runs }))

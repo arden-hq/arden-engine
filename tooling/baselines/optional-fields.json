@@ -1,6 +1,4 @@
 {
-  "libs/protocol/src/automations/contracts.ts": 25,
-  "libs/protocol/src/automations/schema.ts": 22,
   "libs/protocol/src/chat/activity.ts": 4,
   "libs/protocol/src/chat/approval-presentation.ts": 31,
   "libs/protocol/src/chat/change-evidence.ts": 3,

@@ -36,7 +36,17 @@ export const managedHistoryHandler: SystemAutomationHandler<"managed_history_col
     description: "Collect expired unreachable managed-history objects.",
     prompt: "Collect expired unreachable managed-history objects.",
     handler: "managed_history_collection",
-    triggers: [{ type: "time", every: "7d" }],
+    triggers: [
+      {
+        type: "time",
+        schedule: {
+          kind: "interval",
+          every: "7d",
+          days: { kind: "every_day" },
+          window: { kind: "all_day" }
+        }
+      }
+    ],
     enabled: true,
     cooldownMinutes: null,
     toolScope: "read_only",

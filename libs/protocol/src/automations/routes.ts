@@ -5,13 +5,14 @@ import { NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
 import type { Effect } from "effect/Effect"
 
 const AutomationIdSchema = routeSegment()
-const AutomationEventRouteOptionsSchema = Schema.Struct({
-  afterSeq: Schema.optionalKey(NonNegativeIntSchema)
-})
+const AutomationEventRouteOptionsSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("live") }),
+  Schema.Struct({ kind: Schema.Literal("after"), afterSeq: NonNegativeIntSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
 const AutomationRunsRouteSchema = Schema.Struct({
   taskId: AutomationIdSchema,
   options: Schema.Struct({
-    limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(200)))
+    limit: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(200))
   })
 })
 
@@ -24,7 +25,10 @@ export const encodeAutomationEventsPathEffect = (
   value: unknown
 ): Effect<string, Schema.SchemaError, never> =>
   encodeRouteEffect(AutomationEventRouteOptionsSchema, value, (options) =>
-    appendSearch("/automations/events", [["after_seq", options.afterSeq]])
+    AutomationEventRouteOptionsSchema.match(options, {
+      live: () => "/automations/events",
+      after: ({ afterSeq }) => appendSearch("/automations/events", [["after_seq", afterSeq]])
+    })
   )
 
 export const encodeAutomationItemPathEffect = (

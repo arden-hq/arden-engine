@@ -88,8 +88,8 @@ export const homeLetterHandler: SystemAutomationHandler<"home_letter"> = {
     prompt: HOME_LETTER_PROMPT,
     handler: "home_letter",
     triggers: [
-      { type: "time", at: "08:00", days: "daily" },
-      { type: "time", at: "18:00", days: "daily" },
+      { type: "time", schedule: { kind: "daily", at: "08:00", days: "daily" } },
+      { type: "time", schedule: { kind: "daily", at: "18:00", days: "daily" } },
       { type: "idle", idle_minutes: 45 }
     ],
     enabled: true,

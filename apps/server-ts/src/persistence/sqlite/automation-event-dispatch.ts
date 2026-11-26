@@ -21,6 +21,7 @@ import { touchCause } from "./effect-targets.js"
 import type { UnitOfWork } from "../unit-of-work.js"
 import { readerPosition } from "./reader-position.js"
 import { iso } from "../../runtime/clock.js"
+import { eventCauseOf } from "../automations/event-cause.js"
 
 const storeError = (
   operation: "dispatch_event",
@@ -112,7 +113,7 @@ export const makeAutomationEventDispatch = ({
         scheduled_for: null,
         automation_run_id: null,
         trigger_context: renderEvent(snapshot, nowMs),
-        trigger_context_snapshot: { source: "event", ...snapshot },
+        trigger_context_snapshot: eventCauseOf(snapshot),
         ...(triggeringChange === null ? {} : { triggering_change: triggeringChange }),
         ...(runOnlyIf === undefined ? {} : { run_only_if: runOnlyIf })
       }

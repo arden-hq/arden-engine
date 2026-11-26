@@ -33,15 +33,13 @@ import { userChatSql } from "./chat-ownership.js"
 import { delegatedLinkSql, sessionAncestors } from "./tree-walk.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { keyMessageJson } from "./chat-key-message.js"
+import { wakeCause } from "../automations/event-cause.js"
 
 type EventWake = Extract<AutomationTriggerContext, { readonly source: "event" }>
 
 type WakeCause = Pick<EventWake, "produced_by" | "chain_depth">
 
-const woken = (producedBy: string | null, chainDepth: number): WakeCause =>
-  chainDepth === 0
-    ? { produced_by: producedBy }
-    : { produced_by: producedBy, chain_depth: chainDepth }
+const woken: (producedBy: string | null, chainDepth: number) => WakeCause = wakeCause
 
 const NO_RUN = woken(null, 0)
 

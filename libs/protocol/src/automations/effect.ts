@@ -1,4 +1,7 @@
 export * from "./occurrence.js"
 export * from "./outcome.js"
+export * from "./projection-schema.js"
 export * from "./routes.js"
+export * from "./run-schema.js"
 export * from "./schema.js"
+export * from "./trigger-schema.js"

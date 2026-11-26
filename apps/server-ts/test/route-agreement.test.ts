@@ -62,10 +62,10 @@ const workflowTarget = { workflowRef: "workflow-1", sessionId }
 
 const tables: Readonly<Record<string, RouteTable>> = {
   automationRoutes: table(automationRoutes, {
-    events: () => automationRoutes.events(),
+    events: () => automationRoutes.events({ kind: "live" }),
     item: () => automationRoutes.item("task-1"),
     description: () => automationRoutes.description("task-1"),
-    runs: () => automationRoutes.runs("task-1"),
+    runs: () => automationRoutes.runs("task-1", { limit: 20 }),
     toggle: () => automationRoutes.toggle("task-1"),
     run: () => automationRoutes.run("task-1"),
     runWithEvent: () => automationRoutes.runWithEvent("task-1", 7),

@@ -1,9 +1,9 @@
 import { clipLine } from "@arden-hq/std/text"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
-import type { AutomationTriggerInput } from "@arden-hq/protocol/automations"
 import type { McpServer } from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
+import type { ToolTrigger } from "./automation-tool-trigger-schema.js"
 
 const LISTED_EVENTS = 40
 
@@ -25,7 +25,7 @@ const availableWords = (servers: ReadonlyArray<McpServer>): string => {
 }
 
 const appEventProblem = (
-  triggers: ReadonlyArray<AutomationTriggerInput>,
+  triggers: ReadonlyArray<ToolTrigger>,
   servers: ReadonlyArray<McpServer>,
   options: { readonly creating: boolean }
 ): string | undefined => {
@@ -57,7 +57,7 @@ const appEventProblem = (
 }
 
 export const assertAppEvents = async (
-  triggers: ReadonlyArray<AutomationTriggerInput> | undefined,
+  triggers: ReadonlyArray<ToolTrigger> | undefined,
   apps: () => Effect.Effect<ReadonlyArray<McpServer>>,
   options: { readonly creating: boolean }
 ): Promise<void> => {

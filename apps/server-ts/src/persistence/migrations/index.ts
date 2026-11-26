@@ -191,6 +191,9 @@ import { spaceJobKeys } from "./0190_space_job_keys.js"
 import { workflowErrorStates } from "./0191_workflow_error_states.js"
 import { computerStepStates } from "./0192_computer_step_states.js"
 import { limitSettingsStates } from "./0193_limit_settings_states.js"
+import { skipRunWithEvent } from "./0194_skip_run_with_event.js"
+import { triggerContextStates } from "./0195_trigger_context_states.js"
+import { triggerStates } from "./0196_trigger_states.js"
 
 /**
  * How a migration keeps every reference whole. A whole-database check reads
@@ -413,7 +416,10 @@ export const migrations: ReadonlyArray<Migration> = [
   spaceJobKeys,
   workflowErrorStates,
   computerStepStates,
-  limitSettingsStates
+  limitSettingsStates,
+  skipRunWithEvent,
+  triggerContextStates,
+  triggerStates
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

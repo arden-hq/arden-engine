@@ -6,6 +6,7 @@ import { AutomationId } from "../src/persistence/automations/model.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { spaceJobId } from "../src/persistence/space-job-id.js"
 import { WorkStore } from "../src/persistence/work/store.js"
+import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 export const LATER = Date.now() + 60 * 60_000
 
@@ -59,14 +60,13 @@ export const makeTask = Effect.gen(function* () {
 
 export const makeAutomation = Effect.gen(function* () {
   const automation = yield* (yield* AutomationCatalog).create(
-    {
+    newAutomation({
       history: "chat",
       name: "Authored",
       prompt: "Review",
-      triggers: [{ type: "time", every: "1h" }],
-      idempotency_key: "88888888-8888-4888-8888-888888888888",
-      idempotency_scope: "global"
-    },
+      triggers: [everyTrigger("1h")],
+      idempotency_key: "88888888-8888-4888-8888-888888888888"
+    }),
     "owner"
   )
   return automation.task_id

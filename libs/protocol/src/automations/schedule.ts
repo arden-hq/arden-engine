@@ -1,20 +1,17 @@
 import { parseCalendarDay } from "@arden-hq/std/time"
 import { DateTime, Option, Schema } from "effect"
-import type {
-  AutomationTriggerInput,
-  TimeAutomationTrigger,
-  TimeAutomationTriggerInput
-} from "./contracts.js"
+import {
+  TRIGGER_STATE,
+  TRIGGER_TYPE,
+  type AutomationTriggerSpec,
+  type IntervalWindow,
+  type TimeTriggerSchedule,
+  type TriggerDays
+} from "./trigger-contracts.js"
 import { parseIntervalMinutes } from "./interval.js"
-import { AutomationTriggerInputSchema } from "./schema.js"
+import { AutomationTriggerSchema } from "./trigger-schema.js"
 
-const decodeTriggerInputs = Schema.decodeUnknownOption(Schema.Array(AutomationTriggerInputSchema))
-
-/** A call's `triggers` argument as trigger inputs, when it is a valid list of them. */
-export const automationTriggerInputs = (
-  value: unknown
-): ReadonlyArray<AutomationTriggerInput> | undefined =>
-  Option.getOrUndefined(decodeTriggerInputs(value))
+const decodeStoredTriggers = Schema.decodeUnknownOption(Schema.Array(AutomationTriggerSchema))
 
 /** A 24-hour wall-clock time; the zone is the one the schedule is evaluated in. */
 export interface WallTime {
@@ -102,73 +99,125 @@ const dayTokens = (text: string): ReadonlyArray<DayToken> | undefined => {
 const weekdays = (tokens: ReadonlyArray<DayToken>): Weekdays =>
   new Set(tokens.flatMap((token) => DAY_TOKENS[token]))
 
-const trimmed = (value: string | undefined): string | undefined => value?.trim()
+type DecodedTime = { readonly stored: TimeTriggerSchedule; readonly schedule: TimeSchedule }
+
+const decodedDays = (
+  days: TriggerDays
+): { readonly stored: TriggerDays; readonly weekdays: Weekdays } | undefined => {
+  switch (days.kind) {
+    case TRIGGER_STATE.every_day:
+      return { stored: days, weekdays: EVERY_DAY }
+    case TRIGGER_STATE.days: {
+      const tokens = dayTokens(days.days.trim())
+      return tokens === undefined
+        ? undefined
+        : { stored: { kind: "days", days: tokens.join(",") }, weekdays: weekdays(tokens) }
+    }
+  }
+}
+
+type DecodedWindow = {
+  readonly stored: IntervalWindow
+  readonly start: number
+  readonly end: number
+}
+
+const decodedWindow = (window: IntervalWindow): DecodedWindow | undefined => {
+  switch (window.kind) {
+    case TRIGGER_STATE.all_day:
+      return { stored: window, start: 0, end: MINUTES_PER_DAY }
+    case TRIGGER_STATE.from: {
+      const from = wallTime(window.start.trim())
+      return from === undefined
+        ? undefined
+        : {
+            stored: { kind: "from", start: formatWallTime(from) },
+            start: minuteOfDay(from),
+            end: MINUTES_PER_DAY
+          }
+    }
+    case TRIGGER_STATE.until: {
+      const to = wallTime(window.end.trim())
+      return to === undefined
+        ? undefined
+        : { stored: { kind: "until", end: formatWallTime(to) }, start: 0, end: minuteOfDay(to) }
+    }
+    case TRIGGER_STATE.between: {
+      const from = wallTime(window.start.trim())
+      const to = wallTime(window.end.trim())
+      return from === undefined || to === undefined || minuteOfDay(from) >= minuteOfDay(to)
+        ? undefined
+        : {
+            stored: { kind: "between", start: formatWallTime(from), end: formatWallTime(to) },
+            start: minuteOfDay(from),
+            end: minuteOfDay(to)
+          }
+    }
+  }
+}
+
+const decodeInterval = (
+  schedule: Extract<TimeTriggerSchedule, { readonly kind: "interval" }>
+): DecodedTime | undefined => {
+  const every = schedule.every.trim()
+  const minutes = parseIntervalMinutes(every)
+  const days = decodedDays(schedule.days)
+  const window = decodedWindow(schedule.window)
+  if (minutes === undefined || days === undefined || window === undefined) return undefined
+  return {
+    stored: {
+      kind: "interval",
+      every: every.toLowerCase(),
+      days: days.stored,
+      window: window.stored
+    },
+    schedule: {
+      kind: "interval",
+      minutes,
+      window: { start: window.start, end: window.end },
+      days: days.weekdays
+    }
+  }
+}
 
 /**
- * One time trigger as its schedule and the normalized JSON the store keeps;
- * `undefined` for any invalid field or combination.
+ * One time trigger's schedule as the schedule it fires on and the normalized
+ * form the store keeps; `undefined` for any invalid field.
  */
-export const decodeTimeTrigger = (
-  trigger: TimeAutomationTriggerInput
-): { readonly stored: TimeAutomationTrigger; readonly schedule: TimeSchedule } | undefined => {
-  const at = trimmed(trigger.at)
-  const on = trimmed(trigger.on)
-  const every = trimmed(trigger.every)
-  const start = trimmed(trigger.start)
-  const end = trimmed(trigger.end)
-  const dayText = trimmed(trigger.days)
-  const days = dayText === undefined ? undefined : dayTokens(dayText)
-  if (dayText !== undefined && days === undefined) return undefined
-  const storedDays = days === undefined ? {} : { days: days.join(",") }
-  if (every !== undefined) {
-    if (at !== undefined || on !== undefined) return undefined
-    const minutes = parseIntervalMinutes(every)
-    const from = start === undefined ? undefined : wallTime(start)
-    const to = end === undefined ? undefined : wallTime(end)
-    if (
-      minutes === undefined ||
-      (start !== undefined && from === undefined) ||
-      (end !== undefined && to === undefined) ||
-      (from !== undefined && to !== undefined && minuteOfDay(from) >= minuteOfDay(to))
-    ) {
-      return undefined
+export const decodeTimeTrigger = (schedule: TimeTriggerSchedule): DecodedTime | undefined => {
+  switch (schedule.kind) {
+    case TRIGGER_STATE.interval:
+      return decodeInterval(schedule)
+    case TRIGGER_STATE.next: {
+      const time = wallTime(schedule.at.trim())
+      return time === undefined
+        ? undefined
+        : {
+            stored: { kind: "next", at: formatWallTime(time) },
+            schedule: { kind: "next", at: time }
+          }
     }
-    return {
-      stored: {
-        type: "time",
-        ...storedDays,
-        every: every.toLowerCase(),
-        ...(from === undefined ? {} : { start: formatWallTime(from) }),
-        ...(to === undefined ? {} : { end: formatWallTime(to) })
-      },
-      schedule: {
-        kind: "interval",
-        minutes,
-        window: {
-          start: from === undefined ? 0 : minuteOfDay(from),
-          end: to === undefined ? MINUTES_PER_DAY : minuteOfDay(to)
-        },
-        days: days === undefined ? EVERY_DAY : weekdays(days)
-      }
+    case TRIGGER_STATE.once: {
+      const time = wallTime(schedule.at.trim())
+      const on = schedule.on.trim()
+      const date = parseCalendarDay(on)
+      return time === undefined || date === undefined
+        ? undefined
+        : {
+            stored: { kind: "once", at: formatWallTime(time), on },
+            schedule: { kind: "once", on: date, at: time }
+          }
     }
-  }
-  if (at === undefined || start !== undefined || end !== undefined) return undefined
-  const time = wallTime(at)
-  if (time === undefined) return undefined
-  if (on !== undefined) {
-    const date = parseCalendarDay(on)
-    if (days !== undefined || date === undefined) return undefined
-    return {
-      stored: { type: "time", at: formatWallTime(time), on },
-      schedule: { kind: "once", on: date, at: time }
+    case TRIGGER_STATE.daily: {
+      const time = wallTime(schedule.at.trim())
+      const tokens = dayTokens(schedule.days.trim())
+      return time === undefined || tokens === undefined
+        ? undefined
+        : {
+            stored: { kind: "daily", at: formatWallTime(time), days: tokens.join(",") },
+            schedule: { kind: "daily", at: time, days: weekdays(tokens) }
+          }
     }
-  }
-  return {
-    stored: { type: "time", at: formatWallTime(time), ...storedDays },
-    schedule:
-      days === undefined
-        ? { kind: "next", at: time }
-        : { kind: "daily", at: time, days: weekdays(days) }
   }
 }
 
@@ -193,14 +242,14 @@ export const nextScheduleRunAt = (
  * first, a time trigger is invalid, or no time trigger would ever fire.
  */
 export const firstRunAt = (
-  triggers: ReadonlyArray<AutomationTriggerInput>,
+  triggers: ReadonlyArray<AutomationTriggerSpec>,
   clock: ScheduleClock
 ): number | undefined => {
   if (triggers.length === 0) return undefined
   const times: Array<TimeSchedule> = []
   for (const trigger of triggers) {
-    if (trigger.type !== "time") return undefined
-    const decoded = decodeTimeTrigger(trigger)
+    if (trigger.type !== TRIGGER_TYPE.time) return undefined
+    const decoded = decodeTimeTrigger(trigger.schedule)
     if (decoded === undefined) return undefined
     times.push(decoded.schedule)
   }
@@ -217,15 +266,15 @@ export const nextAutomationRunAt = (
   { afterMs, zone }: ScheduleClock
 ): number | null => {
   switch (time.kind) {
-    case "once": {
+    case TRIGGER_STATE.once: {
       const fire = atWall(zone, time.on, time.at)
       return fire > afterMs ? fire : null
     }
-    case "next":
+    case TRIGGER_STATE.next:
       return nextDailyRunAt(time.at, EVERY_DAY, afterMs, zone)
-    case "daily":
+    case TRIGGER_STATE.daily:
       return nextDailyRunAt(time.at, time.days, afterMs, zone)
-    case "interval": {
+    case TRIGGER_STATE.interval: {
       let fire = afterMs + time.minutes * 60_000
       const due = wallParts(fire, zone)
       if (minuteOfDay(due) < time.window.start)
@@ -306,8 +355,8 @@ const allowedDate = (date: CalendarDate, days: Weekdays): CalendarDate => {
  * (`once`, `next`). Triggers that do not decode count as a one-off.
  */
 export const automationRepeats = (triggers: unknown): boolean =>
-  (automationTriggerInputs(triggers) ?? []).some((trigger) => {
-    if (trigger.type !== "time") return true
-    const kind = decodeTimeTrigger(trigger)?.schedule.kind
-    return kind === "daily" || kind === "interval"
+  Option.getOrElse(decodeStoredTriggers(triggers), () => []).some((trigger) => {
+    if (trigger.type !== TRIGGER_TYPE.time) return true
+    const kind = decodeTimeTrigger(trigger.schedule)?.schedule.kind
+    return kind === TRIGGER_STATE.daily || kind === TRIGGER_STATE.interval
   })

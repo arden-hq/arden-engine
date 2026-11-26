@@ -457,7 +457,7 @@ export const dailySummaryHandler: SystemAutomationHandler<"daily_summary"> = {
       "Retain a short daily note from recorded Chats, Tasks, items and available reports.",
     prompt: PROMPTS.dailySummary,
     handler: "daily_summary",
-    triggers: [{ type: "time", at: "00:15", days: "daily" }],
+    triggers: [{ type: "time", schedule: { kind: "daily", at: "00:15", days: "daily" } }],
     enabled: true,
     cooldownMinutes: null,
     toolScope: "reports",

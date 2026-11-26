@@ -140,12 +140,7 @@ export function makeSourceReferences({
           if (!automations) return unavailable("unsupported")
           const automation = await Effect.runPromise(automations.get(AutomationId.make(input.ref)))
           if (!automation) return unavailable("not_found")
-          const link = linkTo(
-            automation.automation_ref === undefined
-              ? null
-              : automationResource({ ...automation, automation_ref: automation.automation_ref })
-                  .href
-          )
+          const link = linkTo(automationResource(automation).href)
           return { ...identity, status: "resolved", title: automation.name, date: undated, link }
         }
         if (provider === "arden" && kind === "run") {

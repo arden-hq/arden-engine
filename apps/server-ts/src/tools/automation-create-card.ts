@@ -9,7 +9,14 @@ import { personalAutomationTriggers } from "../automations/schedule.js"
 import { InvalidAutomationScheduleError } from "../persistence/automations/model.js"
 import { type ApprovalEditLine, type ServerApprovalEdits } from "./approval-edits.js"
 import type { CreateParametersSchema } from "./automation-tool-schema.js"
-import { triggerInputWords } from "./automation-tool-text.js"
+import { cardTriggerWords } from "./automation-tool-text.js"
+import {
+  cardTriggers,
+  CONVERSION,
+  newTriggerInput,
+  toolTriggerSpecs
+} from "./automation-tool-triggers.js"
+import { freshTriggerIds } from "@arden-hq/protocol/automations"
 import { APPROVAL_MODE_LABEL } from "./onboarding.js"
 import { toolFailure } from "./tool-failure.js"
 import type { ServerApprovalPrompt } from "./define.js"
@@ -55,9 +62,17 @@ export const createConflict = (input: CreateInput): string | undefined => {
   return undefined
 }
 
+const createWords = (triggers: CreateInput["triggers"]): string =>
+  cardTriggerWords(
+    [],
+    cardTriggers(triggers, newTriggerInput, () => undefined)
+  )
+
 const triggersProblem = (triggers: CreateInput["triggers"]): string | undefined => {
+  const specs = toolTriggerSpecs(triggers)
+  if (specs.kind === CONVERSION.refused) return specs.message
   try {
-    personalAutomationTriggers(triggers)
+    personalAutomationTriggers(freshTriggerIds(specs.triggers).triggers)
     return undefined
   } catch (error) {
     if (error instanceof InvalidAutomationScheduleError) return error.message
@@ -111,8 +126,8 @@ const describeCreateEdits = (
       ? {
           field: "triggers",
           label: "When",
-          from: triggerInputWords(requested.triggers),
-          to: triggerInputWords(edited.triggers)
+          from: createWords(requested.triggers),
+          to: createWords(edited.triggers)
         }
       : undefined,
     differs("chat") || differs("chat_ref")
@@ -173,7 +188,7 @@ export const createCardOf =
           ...(input.description === undefined
             ? []
             : [{ label: "About", value: input.description }]),
-          { label: "When", value: triggerInputWords(input.triggers) },
+          { label: "When", value: createWords(input.triggers) },
           { label: "Reports to", value: createDestinationLabel(input.chat, input.chat_ref) },
           { label: "History", value: input.history === "chat" ? "Reads the chat" : "Starts fresh" },
           ...(input.reads === undefined ? [] : [{ label: "Reads", value: input.reads }]),

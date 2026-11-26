@@ -11,6 +11,7 @@ import { PersistenceWriteQueue } from "../src/persistence/write-queue.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
 import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
+import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 it("rejects expired ownership before another worker reclaims it", async () => {
   await Effect.runPromise(
@@ -19,14 +20,13 @@ it("rejects expired ownership before another worker reclaims it", async () => {
       const queue = yield* AutomationQueue
       const chat = yield* ChatWriteStore
       const automation = yield* store.create(
-        {
+        newAutomation({
           history: "chat",
           name: "Expired",
           prompt: "Review",
-          triggers: [{ type: "time", every: "1h" }],
-          idempotency_key: "18574a67-e61f-44ba-9cbe-53fa0b2787ae",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1h")],
+          idempotency_key: "18574a67-e61f-44ba-9cbe-53fa0b2787ae"
+        }),
         "owner"
       )
       yield* queue.requestRun(AutomationId.make(automation.task_id))
@@ -152,19 +152,18 @@ it.each([
           const destination =
             target === "existing" ? yield* sessions.create({ name: "Existing Chat" }) : null
           const automation = yield* store.create(
-            {
+            newAutomation({
               history: "chat",
               name: "Lease",
               prompt: "Review",
-              triggers: [{ type: "time", every: "1h" }],
+              triggers: [everyTrigger("1h")],
               ...(destination === null
                 ? {}
                 : {
                     chat: { kind: "yours", session_id: destination.sessionId }
                   }),
-              idempotency_key: "1b6a9e13-cc9d-428b-8eac-541449343bc9",
-              idempotency_scope: "global"
-            },
+              idempotency_key: "1b6a9e13-cc9d-428b-8eac-541449343bc9"
+            }),
             "owner"
           )
           yield* queue.requestRun(AutomationId.make(automation.task_id))
@@ -305,7 +304,7 @@ it.each([
           expect((yield* store.runs(AutomationId.make(automation.task_id), 10))?.[0]).toMatchObject(
             {
               status: "completed",
-              result: "Replacement settled"
+              output: { kind: "result", result: "Replacement settled" }
             }
           )
         }).pipe(

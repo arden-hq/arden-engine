@@ -17,6 +17,7 @@ import { recoveredSqlitePersistenceLayer } from "../src/runtime/persistence-laye
 import { triggerFeedRecord } from "../src/automations/trigger-feed.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { SessionReadState } from "../src/persistence/sessions/read-state.js"
+import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 const readJournal = <E, R>(layer: Layer.Layer<SessionLifecycleEvents | AutomationTriggers, E, R>) =>
   Effect.runPromise(
@@ -158,15 +159,14 @@ it("only your own message in your own chat is personal input", async () => {
         const catalog = yield* AutomationCatalog
         const queue = yield* AutomationQueue
         const automation = yield* catalog.create(
-          {
+          newAutomation({
             history: "chat",
             name: "Digest",
             prompt: "Review",
-            triggers: [{ type: "time", every: "1h" }],
+            triggers: [everyTrigger("1h")],
             chat: { kind: "yours", session_id: destination },
-            idempotency_key: "5d0c2f7e-1a63-4b8e-9d4a-6c3e7f8a9b01",
-            idempotency_scope: "global"
-          },
+            idempotency_key: "5d0c2f7e-1a63-4b8e-9d4a-6c3e7f8a9b01"
+          }),
           "owner"
         )
         yield* queue.requestRun(AutomationId.make(automation.task_id))

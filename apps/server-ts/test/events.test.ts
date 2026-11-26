@@ -11,6 +11,7 @@ import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { RunQueries } from "../src/persistence/runs/queries.js"
 import { claimAll, startJob } from "./fixtures/job-runs.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { changes, newTriggers, sentenceTrigger } from "./fixtures/automation-input.js"
 
 const SENTENCE = "It is from my bank."
 
@@ -22,19 +23,25 @@ it("Events keeps a Run only if sentence the owner rewrote and resets it; no othe
       const events = eventsHandler.spec.automationId
       const rewritten = yield* catalog.update(
         events,
-        { triggers: [{ type: "event", event_type: "email.received", run_only_if: SENTENCE }] },
+        changes({
+          kind: "triggers",
+          triggers: newTriggers(sentenceTrigger("email.received", SENTENCE))
+        }),
         "owner"
       )
       expect(rewritten?.triggers).toMatchObject([
-        { event_type: "email.received", run_only_if: SENTENCE }
+        { event_type: "email.received", run_only_if: { kind: "sentence", sentence: SENTENCE } }
       ])
-      expect(rewritten?.system?.changed).toContain("triggers")
+      expect(rewritten?.kind === "system" ? rewritten.settings.changed : []).toContain("triggers")
       const reset = yield* catalog.resetSystemSetting(events, "triggers")
       expect(reset?.triggers).toMatchObject(eventsHandler.spec.triggers)
       yield* catalog
         .update(
           dailySummaryHandler.spec.automationId,
-          { triggers: [{ type: "event", event_type: "email.received", run_only_if: SENTENCE }] },
+          changes({
+            kind: "triggers",
+            triggers: newTriggers(sentenceTrigger("email.received", SENTENCE))
+          }),
           "owner"
         )
         .pipe(Effect.flip)
@@ -49,23 +56,25 @@ it("Events takes only item triggers: an owner's other trigger is refused, and an
       const catalog = yield* AutomationCatalog
       const events = eventsHandler.spec.automationId
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
-      const mail = {
-        type: "event" as const,
-        event_type: "email.received" as const,
-        run_only_if: SENTENCE
-      }
+      const mail = sentenceTrigger("email.received", SENTENCE)
       yield* catalog
         .update(
           events,
-          {
-            triggers: [mail, { type: "event", event_type: "task.changed", run_only_if: SENTENCE }]
-          },
+          changes({
+            kind: "triggers",
+            triggers: newTriggers(mail, sentenceTrigger("task.changed", SENTENCE))
+          }),
           "owner"
         )
         .pipe(Effect.flip)
-      yield* catalog.update(events, { triggers: [mail] }, "owner")
+      yield* catalog.update(
+        events,
+        changes({ kind: "triggers", triggers: newTriggers(mail) }),
+        "owner"
+      )
       yield* sql`UPDATE scheduled_tasks SET triggers = json_insert(triggers, '$[#]',
-          json_object('id', 't99', 'type', 'time', 'at', '08:00', 'days', 'daily')),
+          json_object('id', 't99', 'type', 'time', 'schedule',
+            json_object('kind', 'daily', 'at', '08:00', 'days', 'daily'))),
           next_run_at = '2026-11-23T08:00:00.000Z'
         WHERE task_id = ${events}`
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
@@ -115,7 +124,7 @@ it("seeding resumes Events only from a booked retry; any other pause stays off",
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
       expect(yield* state).toEqual([{ enabled: 0, paused_at: pauseAt, failed_runs: 3, resumed: 1 }])
       yield* pause("2026-11-18T10:00:00.000Z", 3)
-      yield* catalog.update(events, { enabled: false }, "owner")
+      yield* catalog.update(events, changes({ kind: "enabled", enabled: false }), "owner")
       yield* catalog.seedSystemAutomations([eventsHandler.spec])
       expect(yield* state).toMatchObject([{ enabled: 0 }])
     })

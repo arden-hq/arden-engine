@@ -8,9 +8,11 @@ import {
   chainMayWake,
   wakeChainDepth
 } from "../src/persistence/automations/chain-depth.js"
+import { eventProducer } from "../src/persistence/automations/event-cause.js"
 import type { AutomationTriggerEvent } from "../src/persistence/automations/model.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { newAutomation, eventTrigger } from "./fixtures/automation-input.js"
 
 const AT = "2026-10-12T09:00:00.000Z"
 
@@ -20,8 +22,8 @@ const wokenBy = (event: AutomationTriggerEvent) =>
     queued_at: AT,
     event_type: event.eventType,
     event_key: event.eventKey,
-    produced_by: event.producedBy,
-    ...(event.chainDepth === 0 ? {} : { chain_depth: event.chainDepth }),
+    produced_by: eventProducer(event.producedBy),
+    chain_depth: event.chainDepth,
     context: event.context
   }) as const
 
@@ -93,14 +95,13 @@ describe("dispatch", () => {
         const ids: Record<string, string> = {}
         for (const [index, name] of ["a", "b"].entries()) {
           const created = yield* catalog.create(
-            {
+            newAutomation({
               name,
               prompt: "React to a Task change",
               history: "fresh",
-              triggers: [{ type: "event", event_type: "task.changed" }],
-              idempotency_key: `6a3d1f0e-9b7c-4d2a-8e5f-1c2b3a4d5e6${index}`,
-              idempotency_scope: "global"
-            },
+              triggers: [eventTrigger("task.changed")],
+              idempotency_key: `6a3d1f0e-9b7c-4d2a-8e5f-1c2b3a4d5e6${index}`
+            }),
             "owner"
           )
           ids[name] = created.task_id

@@ -1,5 +1,4 @@
 import {
-  freshTriggerIds,
   mergeTriggerInputs,
   type AutomationTrigger,
   type AutomationTriggerInput,
@@ -9,12 +8,14 @@ import {
 import { AutomationTriggerSchema } from "@arden-hq/protocol/effect/automations"
 import { Effect, Schema } from "effect"
 import {
+  EVENT_TRIGGER_REFUSAL,
   InvalidAutomationScheduleError,
   type AutomationRules,
   type PersonalAutomationTriggers
 } from "../automations/model.js"
 import { AutomationStoreError } from "../automations/store.js"
 import { decodeJson } from "./json.js"
+import { hasRunOnlyIf } from "../automations/system-settings.js"
 
 export const AutomationTriggersSchema = Schema.Array(AutomationTriggerSchema)
 
@@ -53,12 +54,11 @@ export const scheduleEffect = (
   })
 
 export const writtenTriggers = (
-  stored: StoredTriggers | "new",
+  stored: StoredTriggers,
   sent: ReadonlyArray<AutomationTriggerInput>,
   operation: AutomationStoreError["operation"],
   automationId?: string
-): Effect.Effect<StoredTriggers<AutomationTriggerInput>, AutomationStoreError> => {
-  if (stored === "new") return Effect.succeed(freshTriggerIds(sent))
+): Effect.Effect<StoredTriggers, AutomationStoreError> => {
   const merged = mergeTriggerInputs(stored, sent)
   if (merged.kind === "ok") return Effect.succeed(merged)
   return Effect.fail(
@@ -76,7 +76,8 @@ const MERGE_REFUSAL: Readonly<Record<Exclude<TriggerMerge["kind"], "ok">, (id: s
     unknown_id: (id) => `This Automation has no trigger ${id}; send a new trigger without an id`,
     deleted_id: (id) =>
       `Trigger ${id} was deleted since these triggers were read; read the Automation again and send its current triggers`,
-    duplicate_id: (id) => `Trigger ${id} is sent twice`
+    duplicate_id: (id) => `Trigger ${id} is sent twice`,
+    missing_app_event: () => EVENT_TRIGGER_REFUSAL.missingAppEvent
   }
 
 export const sameTriggers = (
@@ -85,3 +86,18 @@ export const sameTriggers = (
 ): boolean => JSON.stringify(left.map(withoutId)) === JSON.stringify(right.map(withoutId))
 
 const withoutId = ({ id: _id, ...trigger }: AutomationTrigger) => trigger
+
+export const refuseSystemRunOnlyIf = (
+  triggers: ReadonlyArray<AutomationTrigger>,
+  automationId: string
+): Effect.Effect<void, AutomationStoreError> =>
+  triggers.some(hasRunOnlyIf)
+    ? Effect.fail(
+        new AutomationStoreError({
+          operation: "update",
+          reason: "invalid",
+          message: "This system Automation's triggers take no run_only_if sentence",
+          automationId
+        })
+      )
+    : Effect.void

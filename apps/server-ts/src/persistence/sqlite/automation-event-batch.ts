@@ -29,6 +29,7 @@ import { isUserAutomationPurpose } from "../job-classification.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 import type { Statement } from "effect/unstable/sql/Statement"
 import { decodeQueueContext } from "./automation-queue-context.js"
+import { batchedEventOf, eventCauseOf } from "../automations/event-cause.js"
 
 export const batchAtClaim = Effect.fn("AutomationEventBatch.batchAtClaim")(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -193,7 +194,10 @@ const absorbMemoryChanges = Effect.fn("AutomationEventBatch.absorbMemoryChanges"
       cause.source === "coalesced" ? cause.causes : [cause]
     )
     const [first, ...more] = merged.events
-    const [head, ...tail] = [...ownCauses, ...[first, ...more, ...merged.overflow].map(eventCause)]
+    const [head, ...tail] = [
+      ...ownCauses,
+      ...[first, ...more, ...merged.overflow].map(eventCauseOf)
+    ]
     if (head === undefined) return options.context
     return {
       ...options.context,
@@ -214,7 +218,7 @@ export const heldBehindProducer = (sql: SqlClient.SqlClient, queue: string): Sta
   const alias = sql.literal(queue)
   return sql`(${alias}.source = 'event'
     AND ${queuedEventType(sql, sql`${alias}.context`)} = 'wiki.changed'
-    AND ${openRunSince(sql, sql`json_extract(${alias}.context, '$.trigger_context_snapshot.produced_by')`)} IS NOT NULL)`
+    AND ${openRunSince(sql, sql`json_extract(${alias}.context, '$.trigger_context_snapshot.produced_by.automation_id')`)} IS NOT NULL)`
 }
 
 const foldFacts = (sql: SqlClient.SqlClient, now: string) =>
@@ -349,7 +353,7 @@ const absorbWaitingEvents = Effect.fn("AutomationEventBatch.absorbWaitingEvents"
     if (merged === undefined) return options.context
     const { run_only_if: _perEvent, ...rest } = options.context
     const [first, ...more] = merged.events
-    const causes = [first, ...more, ...merged.overflow].map(eventCause)
+    const causes = [first, ...more, ...merged.overflow].map(eventCauseOf)
     const queuedAt = claimedManual
       ? row.created_at
       : manualRows.map(({ createdAt }) => createdAt).toSorted()[0]
@@ -384,9 +388,6 @@ const contextDepth = (context: QueueContext): number => {
   const batch = eventBatchOf(context)
   return batch === undefined ? 0 : batchChainDepth(batch)
 }
-
-const eventCause = ({ run_only_if: _sentences, ...event }: BatchedEvent) =>
-  ({ source: "event", ...event }) as const
 
 interface RunAttemptRow {
   readonly task_id: string
@@ -424,11 +425,9 @@ export const makeRunEvents = ({
       if (attempt.trigger_json === null) return { run, startedAt: attempt.started_at, events: [] }
       const trigger = yield* decodeJson(AutomationTriggerContextSchema, attempt.trigger_json)
       const causes = trigger.source === "coalesced" ? trigger.causes : ([trigger] as const)
-      const events = causes.flatMap((cause): ReadonlyArray<BatchedEvent> => {
-        if (cause.source !== "event") return []
-        const { source: _source, ...event } = cause
-        return [event]
-      })
+      const events = causes.flatMap((cause): ReadonlyArray<BatchedEvent> =>
+        cause.source === "event" ? [batchedEventOf(cause)] : []
+      )
       if (attempt.occurrence === null) return { run, startedAt: attempt.started_at, events }
       const prefix = `${attempt.occurrence}#`
       const skipped = yield* reader<{ readonly occurrence: string }>`

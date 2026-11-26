@@ -14,6 +14,7 @@ import { decodeJson, encodeJson } from "./json.js"
 import type { Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 import { reviewSpaceIdSql } from "./automation-owner.js"
+import { producerAutomationId } from "../automations/event-cause.js"
 
 export interface QueueWriter {
   readonly sql: SqlClient.SqlClient
@@ -280,8 +281,8 @@ const queuedCause = (entry: QueueEntry) => {
   return snapshot?.source === "event"
     ? {
         eventType: snapshot.event_type,
-        producedBy: snapshot.produced_by,
-        chainDepth: snapshot.chain_depth ?? 0
+        producedBy: producerAutomationId(snapshot.produced_by),
+        chainDepth: snapshot.chain_depth
       }
     : { eventType: entry.source, producedBy: null, chainDepth: 0 }
 }

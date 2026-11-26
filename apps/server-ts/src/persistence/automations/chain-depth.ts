@@ -9,7 +9,7 @@ export const wakeChainDepth = (wokenBy: AutomationTriggerContext | undefined): n
     case "coalesced":
       return Math.max(0, ...wokenBy.causes.map(wakeChainDepth))
     case "event":
-      return wokenBy.chain_depth ?? 0
+      return wokenBy.chain_depth
     case "scheduled":
     case "manual":
     case "home":
