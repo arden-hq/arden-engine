@@ -127,7 +127,7 @@ describe("Always allow on a built-in tool's card", () => {
           const tools = yield* ToolExecutionStore
           const history = yield* ToolHistoryQueries
           const rules = yield* PermissionRules
-          const space = yield* spaces.create({ name: "Home" })
+          const space = yield* spaces.create({ name: "Home", instructions: { kind: "unwritten" } })
           const { sessionId } = yield* sessions.create({ name: "Request", spaceId: space.space_id })
           const { runId } = yield* chat.start({
             sessionId,

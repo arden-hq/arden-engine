@@ -443,7 +443,10 @@ it("refuses every tool call after a Task attempt loses authority", async () => {
         const work = yield* WorkStore
         const policy = yield* ApprovalPolicyStore
         const rules = yield* PermissionRules
-        const space = yield* spaces.create({ name: "Revoked toolset" })
+        const space = yield* spaces.create({
+          name: "Revoked toolset",
+          instructions: { kind: "unwritten" }
+        })
         const session = yield* sessions.create({ name: "Task source", spaceId: space.space_id })
         const parent = yield* chat.start({
           sessionId: session.sessionId,

@@ -52,7 +52,7 @@ it("persists the state record atomically and rejects stale edits", async () => {
         const spaces = yield* SpaceStore
         const work = yield* WorkStore
         const sql = yield* SqlClient.SqlClient
-        const space = yield* spaces.create({ name: "Travel" })
+        const space = yield* spaces.create({ name: "Travel", instructions: { kind: "unwritten" } })
         const task = yield* work.create(
           { kind: "space", spaceId: space.space_id },
           {
@@ -191,7 +191,7 @@ it("a wait on something external ends when its booked check comes due, not befor
         const spaces = yield* SpaceStore
         const work = yield* WorkStore
         const sql = yield* SqlClient.SqlClient
-        const space = yield* spaces.create({ name: "Lab" })
+        const space = yield* spaces.create({ name: "Lab", instructions: { kind: "unwritten" } })
         const scope = { kind: "space", spaceId: space.space_id } as const
         const waitOn = (key: string, waitingOn: "you" | "external") =>
           Effect.gen(function* () {

@@ -59,7 +59,10 @@ const inRun = async (
             headerKeys: []
           }
         })
-        const space = yield* spaces.create({ name: "Permission owner" })
+        const space = yield* spaces.create({
+          name: "Permission owner",
+          instructions: { kind: "unwritten" }
+        })
         const userAutomation = newAutomation({
           history: "chat",
           name: "Permission owner",

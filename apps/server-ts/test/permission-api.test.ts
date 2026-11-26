@@ -158,7 +158,10 @@ it("a Space's rules are on that Space's page alone", async () => {
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     })
   try {
-    const created = await send("POST", "/spaces", { name: "Lab" })
+    const created = await send("POST", "/spaces", {
+      name: "Lab",
+      instructions: { kind: "unwritten" }
+    })
     expect(created.status).toBe(200)
     const space = Schema.decodeUnknownSync(Schema.Struct({ space_id: Schema.String }))(
       await created.json()

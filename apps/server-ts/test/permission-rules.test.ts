@@ -44,7 +44,10 @@ it("a second rule for the same subject in the same list replaces the first, and 
   await withTempDatabase(
     Effect.gen(function* () {
       const rules = yield* PermissionRules
-      const created = yield* (yield* SpaceStore).create({ name: "Lab" })
+      const created = yield* (yield* SpaceStore).create({
+        name: "Lab",
+        instructions: { kind: "unwritten" }
+      })
       const space = { kind: "space", spaceId: created.space_id } as const
       const first = yield* rules.save(
         settings({ subject: browser, list: { kind: "global" }, decision: "allow" })
@@ -84,11 +87,13 @@ it("a card's or an offer's allow never lands over a rule the person set", async 
       const spaces = yield* SpaceStore
       const lab = {
         kind: "space",
-        spaceId: (yield* spaces.create({ name: "Lab" })).space_id
+        spaceId: (yield* spaces.create({ name: "Lab", instructions: { kind: "unwritten" } }))
+          .space_id
       } as const
       const jobs = {
         kind: "space",
-        spaceId: (yield* spaces.create({ name: "Jobs" })).space_id
+        spaceId: (yield* spaces.create({ name: "Jobs", instructions: { kind: "unwritten" } }))
+          .space_id
       } as const
       const tool = (name: string) => ({ kind: "tool", tool: name, server: null }) as const
       yield* rules.save(settings({ subject: tool("space_ask"), list: lab, decision: "ask" }))

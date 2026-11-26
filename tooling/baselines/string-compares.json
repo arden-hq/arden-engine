@@ -788,7 +788,6 @@
   "libs/protocol/src/sessions/focus-choices/schema.ts": 2,
   "libs/protocol/src/sessions/schema.ts": 1,
   "libs/protocol/src/spaces/continuity/schema.ts": 2,
-  "libs/protocol/src/spaces/schema.ts": 4,
   "libs/protocol/src/spaces/work/schema.ts": 7,
   "libs/protocol/src/spaces/work/words.ts": 9,
   "libs/protocol/src/transport/sse-effect.ts": 2,

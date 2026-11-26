@@ -49,7 +49,7 @@ it("a new database has one Main Space; it lists first and cannot be archived", a
   await withTempDatabase(
     Effect.gen(function* () {
       const spaces = yield* SpaceStore
-      const work = yield* spaces.create({ name: "Work" })
+      const work = yield* spaces.create({ name: "Work", instructions: { kind: "unwritten" } })
       const listed = yield* spaces.list()
       expect(listed.map((space) => [space.name, space.kind])).toEqual([
         ["Main", "main"],
@@ -80,7 +80,7 @@ it("a chat made, moved or branched with no Space lands in Main and sees every Sp
       const spaces = yield* SpaceStore
       const sql = yield* SqlClient.SqlClient
       const main = yield* mainSpace
-      const work = yield* spaces.create({ name: "Work" })
+      const work = yield* spaces.create({ name: "Work", instructions: { kind: "unwritten" } })
 
       const loose = yield* sessions.create({ name: "Loose" })
       const capture = yield* sessions.create({ origin: "capture" })
@@ -150,7 +150,7 @@ it("triage files a chat from Main into another Space and undo brings it back to 
       const spaces = yield* SpaceStore
       const sql = yield* SqlClient.SqlClient
       const main = yield* mainSpace
-      const work = yield* spaces.create({ name: "Work" })
+      const work = yield* spaces.create({ name: "Work", instructions: { kind: "unwritten" } })
       const chat = yield* sessions.create({ name: "Invoices" })
       yield* appendMessagesInTransaction(
         sql,
@@ -231,7 +231,7 @@ it("a chat in Main searches every Space by default, but only for runs that may b
       const sessions = yield* SessionStore
       const spaces = yield* SpaceStore
       const sql = yield* SqlClient.SqlClient
-      const work = yield* spaces.create({ name: "Work" })
+      const work = yield* spaces.create({ name: "Work", instructions: { kind: "unwritten" } })
       const there = yield* sessions.create({ name: "Zebra plans", spaceId: work.space_id })
       yield* appendMessagesInTransaction(
         sql,
@@ -473,8 +473,15 @@ it("a Space name already in use is a conflict, and triage then leaves the other 
       expect(yield* makeSessionTriage(dependencies)(chat.sessionId)).toMatchObject({
         decision: "create"
       })
-      const projects = yield* spaces.create({ name: "Projects" })
-      expect(yield* spaces.create({ name: "projects" }).pipe(Effect.flip)).toMatchObject({
+      const projects = yield* spaces.create({
+        name: "Projects",
+        instructions: { kind: "unwritten" }
+      })
+      expect(
+        yield* spaces
+          .create({ name: "projects", instructions: { kind: "unwritten" } })
+          .pipe(Effect.flip)
+      ).toMatchObject({
         reason: "conflict"
       })
       const accepted = yield* makeSessionTriageAction(dependencies)(chat.sessionId, "accept").pipe(

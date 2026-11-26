@@ -71,7 +71,10 @@ const inDatabase = async <A, E>(
 
 const startRun = () =>
   Effect.gen(function* () {
-    const space = yield* (yield* SpaceStore).create({ name: "Margin" })
+    const space = yield* (yield* SpaceStore).create({
+      name: "Margin",
+      instructions: { kind: "unwritten" }
+    })
     const { sessionId } = yield* (yield* SessionStore).create({
       name: "Edit",
       spaceId: space.space_id

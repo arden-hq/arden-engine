@@ -75,7 +75,10 @@ const EVERYWHERE: OfferChoice = {
 
 const chatOnSpace = (said: { readonly text: string; readonly meta?: boolean }) =>
   Effect.gen(function* () {
-    const space = yield* (yield* SpaceStore).create({ name: "Hiring" })
+    const space = yield* (yield* SpaceStore).create({
+      name: "Hiring",
+      instructions: { kind: "unwritten" }
+    })
     const session = yield* (yield* SessionStore).create({
       name: "Paraform talent density index review",
       spaceId: space.space_id

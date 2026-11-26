@@ -1,6 +1,5 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
-import type { SpaceDetail } from "@arden-hq/protocol/spaces"
 import { taskActivityWords } from "@arden-hq/protocol/spaces/work"
 import { Effect, Schema } from "effect"
 
@@ -9,7 +8,8 @@ import {
   SpaceStore,
   SpaceStoreError,
   spaceChoices,
-  type PersistedSpace
+  type PersistedSpace,
+  type SpaceDetailRecord
 } from "../persistence/spaces/store.js"
 import { SessionQueries, type SessionQueryFailure } from "../persistence/sessions/queries.js"
 import { WorkStore } from "../persistence/work/store.js"
@@ -268,7 +268,7 @@ const updateSpacePage = async (
   } as const
 }
 
-const boardRows = (detail: SpaceDetail) => {
+const boardRows = (detail: SpaceDetailRecord) => {
   const comments = new Map<string, Array<(typeof detail.work.comments)[number]>>()
   for (const comment of detail.work.comments) {
     const current = comments.get(comment.item_id) ?? []
@@ -294,7 +294,7 @@ const boardRows = (detail: SpaceDetail) => {
   return { entries, liveCount: live.length, settledShown: settled.length }
 }
 
-const taskStateWords = (task: SpaceDetail["work"]["work_items"][number]): string[] => {
+const taskStateWords = (task: SpaceDetailRecord["work"]["work_items"][number]): string[] => {
   if (task.status !== "open") return []
   const next = task.next_attempt_at === null ? [] : [`next check ${task.next_attempt_at}`]
   const words = taskActivityWords(task)

@@ -38,8 +38,8 @@ const readersCase = Effect.gen(function* () {
   const [space] = yield* sql<{ readonly updated_at: string }>`
       SELECT updated_at FROM spaces WHERE space_id = 'space-1'`
   yield* spaces.update("space-1", {
-    name: "Renamed",
-    expected_updated_at: space?.updated_at ?? ""
+    expected: { kind: "at", updated_at: space?.updated_at ?? "" },
+    changes: [{ kind: "name", name: "Renamed" }]
   })
   const [chat] = yield* sql<{ readonly session_id: string }>`
       SELECT session_id FROM space_review_chats WHERE space_id = 'space-1'`
