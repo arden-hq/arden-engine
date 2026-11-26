@@ -2,13 +2,16 @@ import { RunContextSchema } from "../runs/stored-context.js"
 import { AnswerWithdrawalReasonSchema } from "@arden-hq/protocol/effect/runs"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import {
+  ChatForwardedSourceSchema,
   ChatReplyContextSchema,
   ChatUpdateSchema,
   ConnectionArrivalSchema
 } from "@arden-hq/protocol/effect/chat"
 import { Schema } from "effect"
-import type { Interaction } from "@arden-hq/protocol/chat"
-import type { ChatImageInput, HistoryMessage } from "@arden-hq/protocol/chat"
+import type { StoredInteraction } from "../transcript/interaction.js"
+import type { ChatImageInput } from "@arden-hq/protocol/chat"
+
+export type ChatForwardedSource = typeof ChatForwardedSourceSchema.Type
 
 const deliveryFields = {
   progress: Schema.optionalKey(Schema.Boolean),
@@ -90,7 +93,7 @@ export interface RunDelivery {
   readonly subject: string
   readonly body: string
   readonly payload: RunDeliveryPayload
-  readonly interaction?: Interaction
-  readonly forwardedFrom?: HistoryMessage["forwarded_from"]
+  readonly interaction?: StoredInteraction
+  readonly forwardedFrom?: ChatForwardedSource
   readonly images?: ReadonlyArray<ChatImageInput>
 }

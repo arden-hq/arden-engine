@@ -4,14 +4,15 @@ import {
   INTERACTION_SOURCE,
   type InteractionOutcome
 } from "@arden-hq/std/message-vocabulary"
-import type { ChatUpdate, Interaction } from "@arden-hq/protocol/chat"
+import type { ChatUpdate } from "@arden-hq/protocol/chat"
+import type { StoredInteraction } from "../transcript/interaction.js"
 import type { RunDeliveryPayload } from "./model.js"
 import { doorRef } from "../transcript/chat-events.js"
 
 export const updateInteraction = (
   payload: Extract<RunDeliveryPayload, { readonly kind: "update" }>,
   body: string
-): Interaction => ({
+): StoredInteraction => ({
   kind: INTERACTION_KIND.completion,
   from: {
     source: INTERACTION_SOURCE.agent,

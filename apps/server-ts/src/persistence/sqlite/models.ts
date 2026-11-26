@@ -5,6 +5,7 @@ import type {
   ModelRole,
   ModelSettingsPatch
 } from "@arden-hq/protocol/models"
+import { CONTEXT_LIMIT } from "@arden-hq/protocol/chat"
 import { Effect, Result, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ModelCatalogError, type ModelCatalog } from "../../models/catalog.js"
@@ -360,6 +361,7 @@ export const makeModelStore = ({
         )
       )
     return {
+      kind: CONTEXT_LIMIT.resolved,
       model: selected.id,
       hard_limit: selected.context.hardLimit,
       compaction_trigger: Math.floor(selected.context.hardLimit * controls.compactionThreshold),

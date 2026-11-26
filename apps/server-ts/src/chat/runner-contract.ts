@@ -1,9 +1,5 @@
-import type {
-  ChatApprovalMode,
-  ChatImageInput,
-  ChatReceipt,
-  InteractionSender
-} from "@arden-hq/protocol/chat"
+import type { ChatApprovalMode, ChatImageInput, ChatReceipt } from "@arden-hq/protocol/chat"
+import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
 import type {
   AgentStreamEvent,
@@ -78,7 +74,7 @@ export interface ChatRunnerSendMessageRequest {
   readonly message: string
   /** A handed capture's screenshot, moved into the chat it belongs to (`forward_message`). */
   readonly images?: ReadonlyArray<ChatImageInput>
-  readonly sender?: InteractionSender
+  readonly sender?: StoredInteractionSender
   /** A plain user message no client drew as it was sent; its chat's viewers reload. */
   readonly announce?: true
   /** The chat this message is handed over from: it reads there as Arden's handoff. */

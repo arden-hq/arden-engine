@@ -1,8 +1,7 @@
 {
   "libs/protocol/src/chat/approval-presentation.ts": 31,
-  "libs/protocol/src/chat/contracts.ts": 28,
+  "libs/protocol/src/chat/contracts.ts": 27,
   "libs/protocol/src/chat/facade-schema.ts": 26,
-  "libs/protocol/src/chat/history.ts": 31,
-  "libs/protocol/src/chat/schema.ts": 23,
+  "libs/protocol/src/chat/schema.ts": 13,
   "libs/protocol/src/common/schema.ts": 8
 }

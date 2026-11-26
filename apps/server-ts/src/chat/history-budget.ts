@@ -1,7 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
+  CONTEXT_LIMIT,
+  CONTEXT_MODEL,
   PAGE_BOUNDS,
   pageBounds,
+  type ContextBudgetSnapshot,
   type HistoryResponse,
   type TurnWorkResponse
 } from "@arden-hq/protocol/chat"
@@ -27,12 +30,12 @@ export const boundActiveWorkTail = (
   const costByCarrier = new Map<string, number>()
   for (const carrier of carriers) {
     costByCarrier.set(carrier.message_id, bytes(carrier) + 1)
-    for (const call of carrier.tool_calls ?? []) {
+    for (const call of carrier.role === ROLE.assistant ? carrier.tool_calls : []) {
       if (call.execution !== "provider") ownerByCall.set(call.id, carrier.message_id)
     }
   }
   for (const message of work.messages) {
-    if (message.role !== ROLE.tool || message.tool_call_id === undefined) continue
+    if (message.role !== ROLE.tool) continue
     const owner = ownerByCall.get(message.tool_call_id)
     if (owner !== undefined)
       costByCarrier.set(owner, (costByCarrier.get(owner) ?? 0) + bytes(message) + 1)
@@ -59,8 +62,7 @@ export const boundActiveWorkTail = (
     ...work,
     messages: work.messages.filter((message) => {
       if (message.role !== ROLE.tool) return !removed.has(message.message_id)
-      const owner =
-        message.tool_call_id === undefined ? undefined : ownerByCall.get(message.tool_call_id)
+      const owner = ownerByCall.get(message.tool_call_id)
       return owner !== undefined && !removed.has(owner)
     }),
     page: pageAt(start)
@@ -100,3 +102,17 @@ export const boundConversationWindow = <H extends HistoryRows>(history: H, capac
     }
   }
 }
+
+export const unresolvedBudget = (input: {
+  readonly model: string | null
+  readonly inputTokens: number
+  readonly messageCount: number
+}): ContextBudgetSnapshot => ({
+  kind: CONTEXT_LIMIT.unresolved,
+  model:
+    input.model === null
+      ? { kind: CONTEXT_MODEL.unselected }
+      : { kind: CONTEXT_MODEL.selected, model_id: input.model },
+  input_tokens: input.inputTokens,
+  message_count: input.messageCount
+})

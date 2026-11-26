@@ -338,9 +338,20 @@ export interface ToolCallResponse extends JsonRecord {
   readonly tool_call_id: string
   readonly name: string
   readonly arguments: string
-  readonly result: string | null
-  readonly is_error?: boolean
+  readonly result: ToolCallReturn
+  readonly is_error: boolean
 }
+
+export const TOOL_CALL_RETURN = { pending: "pending", returned: "returned" } as const
+
+export type ToolCallReturn =
+  | { readonly kind: typeof TOOL_CALL_RETURN.pending }
+  | { readonly kind: typeof TOOL_CALL_RETURN.returned; readonly text: string }
+
+export const callResult = (text: string | undefined): ToolCallReturn =>
+  text === undefined
+    ? { kind: TOOL_CALL_RETURN.pending }
+    : { kind: TOOL_CALL_RETURN.returned, text }
 
 export interface ReadAddress {
   readonly sessionId: string
@@ -374,6 +385,10 @@ export type {
   InteractionReference,
   InteractionSender,
   InteractionSource,
+  ActorName,
+  InteractionPreview,
+  SenderAddress,
+  SenderCause,
   PageBounds,
   ToolCountName,
   TurnEnding,

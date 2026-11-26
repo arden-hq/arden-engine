@@ -36,6 +36,7 @@ const resumeHistory = {
     bounds: { kind: "empty" }
   },
   context_budget: {
+    kind: "resolved",
     model: "test",
     hard_limit: 100,
     compaction_trigger: 80,

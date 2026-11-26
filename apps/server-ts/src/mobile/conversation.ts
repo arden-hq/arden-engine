@@ -1,4 +1,19 @@
-import { PAGE_BOUNDS, RUNTIME_RUN } from "@arden-hq/protocol/chat"
+import {
+  ACTOR_NAME,
+  AGENT_RESULT_ROW,
+  AUTOMATION_ROW,
+  COMMUNICATION_ROW,
+  FORWARDED_FROM,
+  FROM_CHAT,
+  QUESTION_ANSWER_ROW,
+  SENT_FROM,
+  UPDATE_ROW,
+  INTERACTION_PREVIEW,
+  PAGE_BOUNDS,
+  RUNTIME_RUN,
+  TOOL_CALL_STATUS,
+  TOOL_DATA
+} from "@arden-hq/protocol/chat"
 import {
   INTERACTION_KIND,
   INTERACTION_OUTCOME,
@@ -16,6 +31,7 @@ import {
   type HistoryMessage,
   type HistoryResponse,
   type HistoryToolCall,
+  type InteractionPreview,
   type InteractionSender
 } from "@arden-hq/protocol/chat"
 import {
@@ -63,7 +79,7 @@ export function conversationPage({
   const sentTo = new Map<string, Set<string>>()
   for (const message of history.messages) {
     items.push(...messageItems(message, lookups))
-    for (const call of message.role === ROLE.assistant ? (message.tool_calls ?? []) : []) {
+    for (const call of message.role === ROLE.assistant ? message.tool_calls : []) {
       const sent = sentItem(call, lookups)
       if (sent === undefined) continue
       const seen = sentTo.get(message.turn_id) ?? new Set<string>()
@@ -101,10 +117,11 @@ export function conversationLookupKeys(history: HistoryResponse): {
   for (const message of history.messages) {
     if (internalWorkMessage(message)) continue
     linkRefs(message.content)
-    if (message.from_chat !== undefined) sessionIds.add(message.from_chat.session_id)
+    const handoff = handoffOf(message)
+    if (handoff !== undefined) sessionIds.add(handoff.session_id)
     if (message.role === ROLE.interaction && message.from.source === INTERACTION_SOURCE.agent)
       refs.add(message.from.id)
-    for (const call of message.role === ROLE.assistant ? (message.tool_calls ?? []) : []) {
+    for (const call of message.role === ROLE.assistant ? message.tool_calls : []) {
       const send = sendOf(call)
       if (send !== undefined) refs.add(send.ref)
     }
@@ -116,7 +133,7 @@ function messageItems(
   message: HistoryMessage,
   lookups: ConversationLookups
 ): MobileConversationItem[] {
-  const at = message.created_at ?? ""
+  const at = message.created_at
   if (message.role === ROLE.assistant) {
     if (message.content.trim() === "") return []
     return [
@@ -131,30 +148,32 @@ function messageItems(
     ]
   }
   if (internalWorkMessage(message)) return []
-  if (message.forwarded_from !== undefined) return [userItem(message)]
+  if (isForwarded(message)) return [userItem(message)]
   if (message.role === ROLE.user)
-    return message.question_answer === undefined ? [userItem(message)] : []
+    return message.question_answer.kind === QUESTION_ANSWER_ROW.none ? [userItem(message)] : []
   if (message.role !== ROLE.interaction) return []
-  if (message.automation !== undefined) {
+  const automation = message.automation
+  if (automation.kind === AUTOMATION_ROW.automation) {
     return [
       {
         kind: "sender",
         id: message.message_id,
-        sender: { kind: "automation", name: message.automation.name },
-        preview: previewMarkup(message.automation.prompt) ?? "",
-        body: message.automation.prompt,
+        sender: { kind: "automation", name: automation.name },
+        preview: previewMarkup(automation.prompt) ?? "",
+        body: automation.prompt,
         failed: false,
         at
       }
     ]
   }
-  if (message.from_chat !== undefined) {
+  const handoff = handoffOf(message)
+  if (handoff !== undefined) {
     return [
       {
         kind: "handoff",
         id: message.message_id,
-        from_session_id: message.from_chat.session_id,
-        from_title: titleOf(lookups.names.get(message.from_chat.session_id)),
+        from_session_id: handoff.session_id,
+        from_title: titleOf(lookups.names.get(handoff.session_id)),
         markdown: phoneLinks(message.content, lookups),
         at
       }
@@ -167,7 +186,7 @@ function messageItems(
       kind: "sender",
       id: message.message_id,
       sender: senderOf(message, lookups),
-      preview: previewMarkup(message.preview?.trim() || body) ?? "",
+      preview: previewMarkup(previewText(message.preview) || body) ?? "",
       body: phoneLinks(body, lookups),
       failed: failed(message),
       at
@@ -178,16 +197,13 @@ function messageItems(
 function userItem(message: HistoryMessage): MobileConversationItem {
   const sent = splitAttachedFiles(message.content)
   // The phone shows one quoted line: the first of the messages this one quotes.
-  const quoted = message.reply_to?.[0]
+  const quoted = message.reply_to[0]
   return {
     kind: "user",
     id: message.message_id,
-    client:
-      message.client_id === undefined
-        ? { kind: "untracked" }
-        : { kind: "tracked", client_id: message.client_id },
+    client: message.client,
     text: sent.text,
-    photos: message.role === ROLE.user ? (message.images?.length ?? 0) : 0,
+    photos: message.role === ROLE.user ? message.images.length : 0,
     files: sent.files.map((file) => file.name),
     reply_to:
       quoted === undefined
@@ -197,21 +213,23 @@ function userItem(message: HistoryMessage): MobileConversationItem {
             role: quoted.role,
             text: previewLine(withFileNames(quoted.content)) ?? quoted.content
           },
-    sent_from:
-      message.sent_from === undefined
-        ? { kind: "typed" }
-        : { kind: "surface", surface: message.sent_from }
+    sent_from: message.role === ROLE.user ? message.sent_from : { kind: SENT_FROM.typed }
   }
 }
 
 type SenderRow = Extract<MobileConversationItem, { readonly kind: "sender" }>["sender"]
 
 const senderOf = (sender: InteractionSender, lookups: ConversationLookups): SenderRow => {
-  const name = sender.from.name?.trim() || sender.from.id
+  const name =
+    (sender.from.name.kind === ACTOR_NAME.named ? sender.from.name.text.trim() : "") ||
+    sender.from.id
   if (isCommandArrival(sender)) return { kind: "command", name }
   if (sender.from.source === INTERACTION_SOURCE.workflow) return { kind: "workflow" }
   return { kind: "agent", name, chat: chatLink(lookups.sessionIds.get(sender.from.id)) }
 }
+
+const previewText = (preview: InteractionPreview): string =>
+  preview.kind === INTERACTION_PREVIEW.previewed ? preview.text.trim() : ""
 
 const chatLink = (sessionId: string | undefined): MobileChatLink =>
   sessionId === undefined
@@ -229,29 +247,42 @@ const failed = (sender: InteractionSender): boolean =>
 function internalWorkMessage(message: HistoryMessage): boolean {
   return isInternalWorkMessage({
     role: message.role,
-    forwarded: message.forwarded_from !== undefined,
+    forwarded: isForwarded(message),
     carriesWork:
-      message.communication !== undefined ||
-      message.update !== undefined ||
-      message.agent_result !== undefined,
+      message.role === ROLE.interaction &&
+      (message.communication.kind !== COMMUNICATION_ROW.none ||
+        message.update.kind !== UPDATE_ROW.none ||
+        message.agent_result.kind !== AGENT_RESULT_ROW.none),
     sender:
       message.role === ROLE.interaction
         ? {
             kind: "attributed",
             sender: message,
             origin:
-              message.from_chat === undefined
-                ? { kind: "direct" }
-                : { kind: "from_chat", sessionRef: message.from_chat.session_ref }
+              message.from_chat.kind === FROM_CHAT.handedOver
+                ? { kind: "from_chat", sessionRef: message.from_chat.session_ref }
+                : { kind: "direct" }
           }
         : { kind: "unattributed" }
   })
 }
 
+const isForwarded = (message: HistoryMessage): boolean =>
+  (message.role === ROLE.user || message.role === ROLE.interaction) &&
+  message.forwarded_from.kind === FORWARDED_FROM.forwarded
+
+const handoffOf = (
+  message: HistoryMessage
+): { readonly session_id: string; readonly session_ref: string } | undefined =>
+  message.role === ROLE.interaction && message.from_chat.kind === FROM_CHAT.handedOver
+    ? message.from_chat
+    : undefined
+
 function sendOf(call: HistoryToolCall): { ref: string; title: string } | undefined {
-  if (call.name !== "session_send_message" || call.is_error === true) return undefined
-  const data = call.data
-  if (typeof data !== "object" || data === null) return undefined
+  if (call.name !== "session_send_message") return undefined
+  if (call.status.kind === TOOL_CALL_STATUS.settled && call.status.is_error) return undefined
+  if (call.data.kind !== TOOL_DATA.attached) return undefined
+  const data = call.data.value
   const ref = "session_ref" in data ? data.session_ref : undefined
   if (typeof ref !== "string" || ref === "") return undefined
   const sources = "source_refs" in data && Array.isArray(data.source_refs) ? data.source_refs : []

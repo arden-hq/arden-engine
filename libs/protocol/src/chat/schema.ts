@@ -8,34 +8,21 @@ import type {
 } from "./events/stream.js"
 import type { JsonRecord } from "../common/json.js"
 import type { Agrees, Assert } from "../common/type-agreement.js"
-import { ACTIVE_WORK, type HistoryMessage } from "./history.js"
+import { ACTIVE_WORK } from "./history.js"
 import { HistoryPageSchema, TurnShellSchema } from "./history-page-schema.js"
 import type { HistoryResponse } from "./history.js"
 import type { TurnDetailsResponse, TurnWorkResponse } from "./history.js"
-import { CHAT_REPLY_QUOTES_MAX } from "./contracts.js"
+import { TOOL_CALL_RETURN } from "./contracts.js"
 import type { ChatReceiptStatus, ToolCallResponse } from "./contracts.js"
 import {
   event,
   isChatEventFrame,
   optionalBoolean,
-  optionalInt,
   optionalNullableString,
-  optionalNumber,
   optionalString,
-  optionalUnknown,
   withExtras,
   NonNegativeIntSchema
 } from "../common/schema.js"
-import { ChatUpdateSchema, CommunicationEnvelopeSchema } from "./communication-schema.js"
-import { GmailSendReceiptSchema } from "./gmail-receipt.js"
-import {
-  QuestionAnswerSchema,
-  chatIdentifier,
-  chatMessage,
-  ImageDataSchema,
-  ImageMediaTypeSchema,
-  ServedImageDataSchema
-} from "./schema-fields.js"
 
 export * from "./events/run.js"
 export * from "./events/text.js"
@@ -47,13 +34,22 @@ export * from "./interaction.js"
 export * from "./runtime-schema.js"
 export * from "./history-query-schema.js"
 export * from "./history-page-schema.js"
+export * from "./history-tool-call.js"
+export * from "./history-message-schema.js"
+import {
+  ChatCaptureViaSchema,
+  ChatImageSchema,
+  ChatSentFromSchema,
+  ContextBudgetSnapshotSchema,
+  HistoryMessageSchema,
+  ReplyContextsSchema
+} from "./history-message-schema.js"
 import {
   ActiveRunSnapshotSchema,
   RuntimeApprovalSnapshotSchema,
   RuntimeConnectionSnapshotSchema
 } from "./runtime-schema.js"
 import { RUNTIME_RUN } from "./runtime.js"
-import { AgentResultSchema, interactionSenderFields } from "./interaction.js"
 import {
   runLifecycleEventSchemas,
   textStreamEventSchemas,
@@ -119,63 +115,6 @@ const isKnownProjectionEventCandidate = (value: unknown): boolean =>
 export type ChatProjectionEventAgrees = Assert<
   Agrees<(typeof chatProjectionEventSchemas)[number]["Type"], ChatProjectionEvent>
 >
-
-export const ContextBlockSchema = withExtras({
-  type: Schema.optionalKey(Schema.Literal("context")),
-  content_type: Schema.String,
-  content: optionalNullableString,
-  metadata: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.String)))
-})
-
-/** The chat a handed-over message came from (`HistoryMessage.from_chat`). */
-export const ChatHandoffSourceSchema = Schema.Struct({
-  session_id: Schema.NonEmptyString,
-  session_ref: Schema.NonEmptyString
-})
-
-export const ChatForwardedSourceSchema = Schema.Struct({
-  ...ChatHandoffSourceSchema.fields,
-  message_id: Schema.NonEmptyString
-})
-
-/** `ChatSentFrom`: the UI surface that wrote a confirmed message's words, or the command line. */
-export const ChatSentFromSchema = Schema.Literals(["visualization", "answer", "cli"] as const)
-
-/** `ConnectionArrival`: a connection card answered, as the transcript row records it. */
-export const ConnectionArrivalSchema = Schema.Struct({
-  tool_call_id: Schema.NonEmptyString,
-  server: Schema.NonEmptyString,
-  outcome: Schema.Literals(["connected", "declined"] as const),
-  offered_at: Schema.NonEmptyString,
-  at: Schema.NonEmptyString
-})
-
-/** `ChatCaptureVia`: a message sent as a capture, from the quick-capture window or iPhone. */
-export const ChatCaptureViaSchema = Schema.Literals(["quick", "phone"] as const)
-
-const ReplyContextSchema = Schema.Struct({
-  message_id: chatIdentifier,
-  role: Schema.Literals(["user", "assistant"] as const),
-  content: chatMessage
-})
-
-/** A request quotes one message, or a list of them; history always lists them. */
-const ReplyContextsSchema = Schema.Union([
-  ReplyContextSchema,
-  Schema.NonEmptyArray(ReplyContextSchema).check(Schema.isMaxLength(CHAT_REPLY_QUOTES_MAX))
-])
-
-export const ChatImageSchema = Schema.Struct({
-  type: Schema.Literal("image"),
-  media_type: ImageMediaTypeSchema,
-  data: ImageDataSchema
-})
-
-const HistoryImageSchema = Schema.Struct({
-  type: Schema.Literal("image"),
-  media_type: ImageMediaTypeSchema,
-  data: ServedImageDataSchema
-})
 
 export const ChatRequestSchema = withExtras({
   approval_reply: Schema.optionalKey(
@@ -313,8 +252,11 @@ export const ToolCallResponseSchema: Schema.Codec<ToolCallResponse> = withExtras
   tool_call_id: Schema.NonEmptyString,
   name: Schema.NonEmptyString,
   arguments: Schema.String,
-  result: Schema.NullOr(Schema.String),
-  is_error: optionalBoolean
+  result: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(TOOL_CALL_RETURN.pending) }),
+    Schema.Struct({ kind: Schema.Literal(TOOL_CALL_RETURN.returned), text: Schema.String })
+  ]),
+  is_error: Schema.Boolean
 })
 
 export const ToolResultValueQuerySchema = Schema.Struct({
@@ -337,144 +279,6 @@ export type ToolResultValueResponse = typeof ToolResultValueResponseSchema.Type
 export const MarkSessionReadResponseSchema = withExtras({
   session_id: Schema.NonEmptyString,
   has_unread: Schema.Boolean
-})
-
-const historyToolCallSchema = withExtras({
-  id: Schema.String,
-  name: Schema.String,
-  arguments: Schema.String,
-  execution: Schema.optionalKey(Schema.Literals(["runtime", "provider"] as const)),
-  started_at: optionalNumber,
-  parent_id: optionalNullableString,
-  display_name: optionalString,
-  display_title: optionalString,
-  result: optionalString,
-  kind: optionalString,
-  icon: optionalNullableString,
-  noun: optionalNullableString,
-  source: optionalNullableString,
-  presentation: Schema.optionalKey(Schema.Literals(["work", "conversation", "status"] as const)),
-  is_error: optionalBoolean,
-  retryable: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-  gmail_send_receipt: Schema.optionalKey(GmailSendReceiptSchema),
-  /** The result's structured data for a conversation-surface call, so the
-   *  conversation stream can render a proposal or a navigation card without
-   *  the work trail's tool row; on a provider call, the places it read
-   *  (`source_refs`), since it has no tool row. */
-  data: optionalUnknown,
-  /** Wall-clock run time of the call from the tool execution ledger, so a
-   *  reopened chat shows the same duration the live row did. */
-  duration_ms: optionalNumber
-})
-
-const historyAssistantOutputPartSchema = Schema.Union([
-  withExtras({
-    type: Schema.Literal("reasoning"),
-    text: Schema.NonEmptyString,
-    source_index: NonNegativeIntSchema
-  }),
-  withExtras({
-    type: Schema.Literal("text"),
-    text: Schema.NonEmptyString,
-    phase: Schema.optionalKey(Schema.Literals(["commentary", "final_answer"] as const)),
-    source_index: NonNegativeIntSchema
-  }),
-  withExtras({
-    type: Schema.Literal("tool_call"),
-    tool_call_id: Schema.NonEmptyString,
-    execution: Schema.Literals(["runtime", "provider"] as const),
-    source_index: NonNegativeIntSchema
-  })
-])
-
-const historyMessageFields = {
-  communication: Schema.optionalKey(CommunicationEnvelopeSchema),
-  update: Schema.optionalKey(ChatUpdateSchema),
-  agent_result: Schema.optionalKey(AgentResultSchema),
-  content: Schema.String,
-  context: Schema.optionalKey(Schema.Array(ContextBlockSchema)),
-  reasoning_content: optionalString,
-  tool_calls: Schema.optionalKey(Schema.Array(historyToolCallSchema)),
-  output_parts: Schema.optionalKey(Schema.Array(historyAssistantOutputPartSchema)),
-  tool_call_id: optionalString,
-  data: optionalUnknown,
-  /** Set on a compact-view row: long arguments and output were cut to a
-   *  prefix; the tool-call route has the rest. */
-  compact: optionalBoolean,
-  message_id: Schema.String,
-  client_id: optionalString,
-  seq: optionalInt,
-  created_at: optionalString,
-  /** A steer's stamp: when the running turn took it in, as opposed to when it
-   *  was sent. Absent on rows that started their turn and on older rows. */
-  applied_at: optionalString,
-  reply_to: Schema.optionalKey(Schema.Array(ReplyContextSchema)),
-  /** On the hidden row that carries a Run question's answer to the run: which
-   *  question. A mid-run answer is where the question's card sits. */
-  question_answer: Schema.optionalKey(QuestionAnswerSchema),
-  /** On the hidden row that tells the agent a connection card was answered. */
-  connection: Schema.optionalKey(ConnectionArrivalSchema),
-  /** On a message Arden handed over from another chat: that chat. */
-  from_chat: Schema.optionalKey(ChatHandoffSourceSchema),
-  forwarded_from: Schema.optionalKey(ChatForwardedSourceSchema),
-  /** On a message whose words a UI surface wrote and the person confirmed. */
-  sent_from: Schema.optionalKey(ChatSentFromSchema),
-  turn_id: Schema.NonEmptyString,
-  automation: Schema.optionalKey(
-    Schema.Struct({
-      task_id: Schema.NonEmptyString,
-      name: Schema.NonEmptyString,
-      prompt: Schema.NonEmptyString,
-      context_mode: Schema.Literals(["fresh", "continue", "fork"] as const)
-    })
-  )
-} as const
-
-const noImages = Schema.makeFilter((message: Readonly<Record<string, unknown>>) =>
-  "images" in message
-    ? { path: ["images"], issue: "images are valid only on user messages" }
-    : undefined
-)
-
-/**
- * One struct per role, so the wire shape and the hand-written `HistoryMessage`
- * union agree by construction: images exist only on user rows, tool outcome
- * fields only on tool rows.
- */
-export const HistoryMessageSchema: Schema.Codec<HistoryMessage> = Schema.Union([
-  withExtras({
-    ...historyMessageFields,
-    role: Schema.Literal("user"),
-    images: Schema.optionalKey(Schema.Array(HistoryImageSchema))
-  }),
-  withExtras({
-    ...historyMessageFields,
-    ...interactionSenderFields[0],
-    role: Schema.Literal("interaction")
-  }).check(noImages),
-  withExtras({
-    ...historyMessageFields,
-    ...interactionSenderFields[1],
-    role: Schema.Literal("interaction")
-  }).check(noImages),
-  withExtras({
-    ...historyMessageFields,
-    role: Schema.Literal("assistant")
-  }).check(noImages),
-  withExtras({
-    ...historyMessageFields,
-    role: Schema.Literal("tool"),
-    is_error: optionalBoolean,
-    retryable: Schema.optionalKey(Schema.NullOr(Schema.Boolean))
-  }).check(noImages)
-])
-
-export const ContextBudgetSnapshotSchema = withExtras({
-  model: Schema.NullOr(Schema.String),
-  hard_limit: Schema.NullOr(Schema.Int),
-  compaction_trigger: Schema.NullOr(Schema.Int),
-  input_tokens: Schema.Int,
-  message_count: Schema.Int
 })
 
 export const TurnWorkResponseSchema: Schema.Codec<TurnWorkResponse> = withExtras({

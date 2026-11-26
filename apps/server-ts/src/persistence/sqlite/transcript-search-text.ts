@@ -1,17 +1,16 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import {
-  AgentResultSchema,
   ChatForwardedSourceSchema,
   ChatHandoffSourceSchema,
   ChatUpdateSchema,
-  CommunicationEnvelopeSchema,
-  InteractionSenderSchema
+  CommunicationEnvelopeSchema
 } from "@arden-hq/protocol/effect/chat"
 import { Effect, Option, Predicate, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { TranscriptDataCorruptionError } from "../transcript/queries.js"
 import { isAgentInstruction, isInternalWorkMessage } from "@arden-hq/protocol/views"
 import { StoredMessageEnvelopeSchema } from "../transcript/model.js"
+import { StoredAgentResultSchema, wireSenderOf } from "../transcript/interaction.js"
 import { type FindSnippet } from "./find-snippet.js"
 import { agentResultPresentation } from "./agent-result-presentation.js"
 import { decodeJson } from "./json.js"
@@ -132,9 +131,7 @@ export const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInte
   ) {
     const envelope = yield* decodeJson(StoredMessageEnvelopeSchema, row.message_json)
     if (envelope.role !== ROLE.interaction) return false
-    const sender = Option.getOrUndefined(
-      Schema.decodeUnknownOption(InteractionSenderSchema)(envelope)
-    )
+    const sender = wireSenderOf(envelope)
     const fromChat = Option.getOrUndefined(
       Schema.decodeUnknownOption(ChatHandoffSourceSchema)(envelope.from_chat)
     )
@@ -154,7 +151,7 @@ export const isInternalSearchMessage = Effect.fn("SqliteTranscriptQueries.isInte
             Schema.decodeUnknownOption(CommunicationEnvelopeSchema)(envelope.communication)
           ) ||
           Option.isSome(Schema.decodeUnknownOption(ChatUpdateSchema)(envelope.update)) ||
-          Option.isSome(Schema.decodeUnknownOption(AgentResultSchema)(envelope.agent_result)),
+          Option.isSome(Schema.decodeUnknownOption(StoredAgentResultSchema)(envelope.agent_result)),
         sender:
           sender === undefined
             ? { kind: "unattributed" }

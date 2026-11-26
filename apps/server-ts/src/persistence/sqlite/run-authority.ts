@@ -1,6 +1,6 @@
 import { RunContextSchema, type RunContext } from "../runs/stored-context.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
-import type { InteractionSender } from "@arden-hq/protocol/chat"
+import type { StoredInteractionSender } from "../transcript/interaction.js"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -152,7 +152,7 @@ export const delegateAuthority = Effect.fn("RunAuthority.delegate")(function* (
 
 export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
   sql: SqlClient.SqlClient,
-  sender: InteractionSender | undefined,
+  sender: StoredInteractionSender | undefined,
   sessionId: string
 ) {
   if (

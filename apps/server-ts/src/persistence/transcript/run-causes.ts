@@ -1,14 +1,17 @@
 import {
   AUTOMATION_PROMPT,
   RUN_CAUSE,
-  type AgentResult,
   type AutomationPrompt,
   type ChatUpdate,
-  type InteractionSender,
   type RunCause
 } from "@arden-hq/protocol/chat"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import { startedBy } from "./interaction.js"
+import {
+  startedBy,
+  wireAgentResult,
+  type StoredAgentResult,
+  type StoredInteractionSender
+} from "./interaction.js"
 
 interface CauseAutomation {
   readonly automationId: string
@@ -37,8 +40,8 @@ export const delegatedCauses = (
 
 export const runCauses = (input: {
   readonly questionAnswer: { readonly question_id: string } | undefined
-  readonly agentResult: AgentResult | undefined
-  readonly sender: InteractionSender | undefined
+  readonly agentResult: StoredAgentResult | undefined
+  readonly sender: StoredInteractionSender | undefined
   readonly content: unknown
   readonly update: ChatUpdate | undefined
   readonly automation:
@@ -50,7 +53,7 @@ export const runCauses = (input: {
     : [{ kind: RUN_CAUSE.questionAnswer, question_id: input.questionAnswer.question_id }]),
   ...(input.agentResult === undefined
     ? []
-    : [{ kind: RUN_CAUSE.agentResult, agent_result: input.agentResult }]),
+    : [{ kind: RUN_CAUSE.agentResult, agent_result: wireAgentResult(input.agentResult) }]),
   ...startedBy(input.sender, input.content),
   ...(input.update === undefined ? [] : [{ kind: RUN_CAUSE.update, update: input.update }]),
   ...(input.automation === undefined

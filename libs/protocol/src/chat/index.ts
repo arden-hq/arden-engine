@@ -81,6 +81,11 @@ import { GmailSendReceiptSchema } from "./gmail-receipt.js"
 export * from "./contracts.js"
 export {
   ACTIVE_WORK,
+  ACTOR_NAME,
+  INTERACTION_PREVIEW,
+  INTERACTION_REFERENCE,
+  SENDER_ADDRESS,
+  SENDER_CAUSE,
   INTERACTION_KINDS,
   INTERACTION_OUTCOMES,
   INTERACTION_SOURCES,
@@ -89,6 +94,26 @@ export {
   TOOL_COUNT_NAME,
   TURN_ENDING
 } from "./history.js"
+export {
+  AGENT_RESULT_ROW,
+  AUTOMATION_ROW,
+  COMMUNICATION_ROW,
+  CONNECTION_ROW,
+  CONTEXT_TEXT,
+  FORWARDED_FROM,
+  FROM_CHAT,
+  CONTEXT_BLOCK,
+  MESSAGE_CLIENT,
+  OUTPUT_PART,
+  QUESTION_ANSWER_ROW,
+  REASONING_ROW,
+  SENT_FROM,
+  STEER_STAMP,
+  TEXT_PHASE,
+  UPDATE_ROW
+} from "./history-message.js"
+export type * from "./history-message.js"
+export { CONTEXT_LIMIT, CONTEXT_MODEL } from "./history.js"
 export type { ToolResultValueResponse } from "./schema.js"
 export * from "./runtime.js"
 export {
@@ -160,6 +185,16 @@ export {
   type ToolSource,
   type ToolTitle
 } from "./tool-face.js"
+export {
+  TOOL_CALL_RESULT,
+  TOOL_CALL_STARTED,
+  TOOL_CALL_STATUS,
+  TOOL_DURATION,
+  type ToolCallResult,
+  type ToolCallStarted,
+  type ToolCallStatus,
+  type ToolDuration
+} from "./history-tool-call.js"
 export {
   APPROVAL_PRESENTATION_LIMITS,
   sanitizeApprovalPresentation

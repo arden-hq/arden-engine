@@ -19,9 +19,15 @@ import {
 } from "@arden-hq/protocol/chat"
 import { PROVIDER_COST } from "@arden-hq/protocol"
 import { ChatProjectionEventSchema } from "@arden-hq/protocol/effect/chat"
-import { type Effect, Schema } from "effect"
-import { isJsonObject, type JsonObject } from "../json.js"
+import { type Effect, Option, Schema } from "effect"
+import { isJsonObject, JsonObjectSchema, type JsonObject } from "../json.js"
 import { storedToolEventUpgrades } from "./stored-tool-event.js"
+import {
+  StoredAgentResultSchema,
+  StoredInteractionSenderSchema,
+  wireAgentResult,
+  wireSender
+} from "../transcript/interaction.js"
 
 type StoredEventUpgrade = (event: JsonObject, sessionId: string) => JsonObject
 
@@ -141,8 +147,26 @@ const todoUpdated: StoredEventUpgrade = (event) => {
   }
 }
 
-const runStarted: StoredEventUpgrade = (event) => {
-  if (Array.isArray(event["causes"])) return event
+const asJson = Schema.decodeUnknownSync(JsonObjectSchema)
+
+const storedCause = (cause: JsonObject): JsonObject => {
+  if (cause["kind"] === RUN_CAUSE.agentResult) {
+    const result = Schema.decodeUnknownOption(StoredAgentResultSchema)(cause["agent_result"])
+    return Option.isSome(result)
+      ? { ...cause, agent_result: asJson(wireAgentResult(result.value)) }
+      : cause
+  }
+  if (cause["kind"] !== RUN_CAUSE.interaction) return cause
+  const interaction = cause["interaction"]
+  const sender = Schema.decodeUnknownOption(StoredInteractionSenderSchema)(interaction)
+  if (Option.isNone(sender) || !isJsonObject(interaction)) return cause
+  return {
+    ...cause,
+    interaction: asJson({ ...wireSender(sender.value), content: interaction["content"] ?? "" })
+  }
+}
+
+const legacyRunStarted: StoredEventUpgrade = (event) => {
   const question = event["question_answer"]
   const result = event["agent_result"]
   const interaction = event["interaction"]
@@ -189,6 +213,17 @@ const runStarted: StoredEventUpgrade = (event) => {
         : [])
     ]
   }
+}
+
+const runStarted: StoredEventUpgrade = (event, sessionId) => {
+  const upgraded = Array.isArray(event["causes"]) ? event : legacyRunStarted(event, sessionId)
+  const causes = upgraded["causes"]
+  return Array.isArray(causes)
+    ? {
+        ...upgraded,
+        causes: causes.map((cause) => (isJsonObject(cause) ? storedCause(cause) : cause))
+      }
+    : upgraded
 }
 
 const sessionUpdated: StoredEventUpgrade = (event) => {

@@ -1,4 +1,4 @@
-import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
+import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import type { JsonRecord } from "../common/json.js"
 export {
   INTERACTION_KINDS,
@@ -13,8 +13,10 @@ import type {
   InteractionOutcome,
   InteractionSource
 } from "@arden-hq/std/message-vocabulary"
-import type { ChatUpdate, CommunicationEnvelope } from "./communication.js"
 import type { SessionRuntimeSnapshot } from "./runtime.js"
+export type { HistoryToolCall } from "./history-tool-call.js"
+import type { HistoryMessage } from "./history-message.js"
+export type * from "./history-message.js"
 
 export type HistoryImageMediaType = "image/png" | "image/jpeg"
 
@@ -47,10 +49,16 @@ export interface HistoryImage extends JsonRecord {
   readonly data: string
 }
 
+export const ACTOR_NAME = { unnamed: "unnamed", named: "named" } as const
+
+export type ActorName =
+  | { readonly kind: typeof ACTOR_NAME.unnamed }
+  | { readonly kind: typeof ACTOR_NAME.named; readonly text: string }
+
 export interface InteractionActor extends JsonRecord {
   readonly source: InteractionSource
   readonly id: string
-  readonly name?: string
+  readonly name: ActorName
 }
 
 export interface InteractionRecipient extends JsonRecord {
@@ -58,20 +66,41 @@ export interface InteractionRecipient extends JsonRecord {
   readonly id: string
 }
 
-/** What produced the interaction: the run, tool call, message or workflow. */
+export const INTERACTION_REFERENCE = {
+  message: "message",
+  run: "run",
+  toolCall: "tool_call",
+  workflow: "workflow"
+} as const
+
 export interface InteractionReference extends JsonRecord {
   readonly type: "message" | "run" | "tool_call" | "workflow"
   readonly id: string
 }
 
-/** `interrupted`: the sender stopped because Arden restarted — routine, not
- *  a failure. */
+export const SENDER_ADDRESS = { unaddressed: "unaddressed", addressed: "addressed" } as const
+
+export type SenderAddress =
+  | { readonly kind: typeof SENDER_ADDRESS.unaddressed }
+  | { readonly kind: typeof SENDER_ADDRESS.addressed; readonly recipient: InteractionRecipient }
+
+export const INTERACTION_PREVIEW = { unpreviewed: "unpreviewed", previewed: "previewed" } as const
+
+export type InteractionPreview =
+  | { readonly kind: typeof INTERACTION_PREVIEW.unpreviewed }
+  | { readonly kind: typeof INTERACTION_PREVIEW.previewed; readonly text: string }
+
+export const SENDER_CAUSE = { untraced: "untraced", traced: "traced" } as const
+
+export type SenderCause =
+  | { readonly kind: typeof SENDER_CAUSE.untraced }
+  | { readonly kind: typeof SENDER_CAUSE.traced; readonly reference: InteractionReference }
 
 export type InteractionSender = {
   readonly from: InteractionActor
-  readonly to?: InteractionRecipient
-  readonly preview?: string
-  readonly caused_by?: InteractionReference
+  readonly to: SenderAddress
+  readonly preview: InteractionPreview
+  readonly caused_by: SenderCause
 } & (
   | { readonly kind: Exclude<InteractionKind, "completion"> }
   | { readonly kind: typeof INTERACTION_KIND.completion; readonly outcome: InteractionOutcome }
@@ -79,20 +108,11 @@ export type InteractionSender = {
 
 export type Interaction = InteractionSender & { readonly content: string }
 
-/** An agent's report retained for the parent's model input and inspection. */
 export interface AgentResult extends JsonRecord {
   readonly session_id: string
   readonly name: string
   readonly content: string
-  /** Legacy preview retained with the complete report. */
-  readonly preview?: string
-}
-
-export interface HistoryContextBlock extends JsonRecord {
-  readonly type?: "context"
-  readonly content_type: string
-  readonly content?: string | null
-  readonly metadata?: Readonly<Record<string, string>> | null
+  readonly preview: InteractionPreview
 }
 
 /** A Gmail provider receipt. Its presence proves Gmail accepted one send. */
@@ -104,134 +124,6 @@ export interface GmailSendReceipt extends JsonRecord {
   /** Local observation time after Gmail accepted the send; not Gmail's send time. */
   readonly confirmed_at: string
 }
-
-export interface HistoryToolCall extends JsonRecord {
-  readonly id: string
-  readonly name: string
-  readonly arguments: string
-  readonly execution?: "runtime" | "provider"
-  readonly started_at?: number
-  readonly parent_id?: string | null
-  readonly display_name?: string
-  readonly display_title?: string
-  readonly result?: string
-  readonly kind?: string
-  readonly icon?: string | null
-  readonly noun?: string | null
-  readonly source?: string | null
-  /** "conversation": the result is content the user always sees, so the call
-   *  rides in the conversation stream as well as the work projection. */
-  readonly presentation?: "work" | "conversation" | "status"
-  readonly is_error?: boolean
-  readonly retryable?: boolean | null
-  /** Present only after Gmail accepted a send and returned provider evidence. */
-  readonly gmail_send_receipt?: GmailSendReceipt
-  /** Structured result data, served for conversation-surface calls and, as
-   *  `source_refs`, for provider calls (they have no tool row). */
-  readonly data?: unknown
-  /** Wall-clock run time from the tool execution ledger. */
-  readonly duration_ms?: number
-}
-
-export type HistoryAssistantOutputPart =
-  | {
-      readonly type: "reasoning"
-      readonly text: string
-      /** Zero-based position in the durable assistant output_parts array. */
-      readonly source_index: number
-    }
-  | {
-      readonly type: "text"
-      readonly text: string
-      readonly phase?: AssistantTextPhase
-      /** Zero-based position in the durable assistant output_parts array. */
-      readonly source_index: number
-    }
-  | {
-      readonly type: "tool_call"
-      readonly tool_call_id: string
-      readonly execution: "runtime" | "provider"
-      /** Zero-based position in the durable assistant output_parts array. */
-      readonly source_index: number
-    }
-
-/** The chat a handed-over message came from: its id, and the public ref links take. */
-interface ChatHandoffSource extends JsonRecord {
-  readonly session_id: string
-  readonly session_ref: string
-}
-
-interface HistoryMessageBase extends JsonRecord {
-  /** Static arrival or scheduled letter carried by this meta transcript row. */
-  readonly communication?: CommunicationEnvelope
-  /** On the meta row that brought a background update to Arden as its turn's input. */
-  readonly update?: ChatUpdate
-  readonly agent_result?: AgentResult
-  readonly content: string
-  /** Context blocks are retained in server history even when UI projections omit them. */
-  readonly context?: ReadonlyArray<HistoryContextBlock>
-  readonly reasoning_content?: string
-  readonly tool_calls?: ReadonlyArray<HistoryToolCall>
-  readonly output_parts?: ReadonlyArray<HistoryAssistantOutputPart>
-  readonly tool_call_id?: string
-  readonly data?: unknown
-  /** Set on a compact-view row: long arguments and output were cut to a prefix. */
-  readonly compact?: boolean
-  readonly message_id: string
-  /** Caller-owned retry identity when the message originated from a client send. */
-  readonly client_id?: string
-  readonly seq?: number
-  readonly created_at?: string
-  /** A steer's stamp: when the running turn took it in; absent on rows that started their turn. */
-  readonly applied_at?: string
-  /** The messages this one quotes, in the order they were quoted. */
-  readonly reply_to?: ReadonlyArray<{
-    readonly message_id: string
-    readonly role: typeof ROLE.user | typeof ROLE.assistant
-    readonly content: string
-  }>
-  /** The Run question whose answer this hidden row carries to the run. */
-  readonly question_answer?: { readonly question_id: string }
-  /** On a hidden-context row that tells the agent a connection card was answered. */
-  readonly connection?: ConnectionArrival
-  /** A message Arden handed over from another chat (`session_send_message`): it
-   *  reads as Arden's handoff from that chat, never as the user's own message. */
-  readonly from_chat?: ChatHandoffSource
-  /** Original user message copied here; the interaction, if any, names its carrier. */
-  readonly forwarded_from?: ChatHandoffSource & { readonly message_id: string }
-  /** A message whose words a UI surface wrote and the person confirmed. */
-  readonly sent_from?: ChatSentFrom
-  /** Durable physical turn membership assigned by the server write path. */
-  readonly turn_id: string
-  readonly automation?: {
-    readonly task_id: string
-    readonly name: string
-    readonly prompt: string
-    readonly context_mode: "fresh" | "continue" | "fork"
-  }
-}
-
-export type HistoryMessage = HistoryMessageBase &
-  (
-    | {
-        readonly role: typeof ROLE.user
-        readonly images?: ReadonlyArray<HistoryImage>
-      }
-    | ({
-        readonly role: typeof ROLE.interaction
-        readonly images?: never
-      } & InteractionSender)
-    | {
-        readonly role: typeof ROLE.assistant
-        readonly images?: never
-      }
-    | {
-        readonly role: typeof ROLE.tool
-        readonly images?: never
-        readonly is_error?: boolean
-        readonly retryable?: boolean | null
-      }
-  )
 
 export interface TurnShell extends JsonRecord {
   readonly turn_id: string
@@ -290,13 +182,26 @@ export type ActiveWork =
   | { readonly kind: typeof ACTIVE_WORK.idle }
   | { readonly kind: typeof ACTIVE_WORK.running; readonly work: TurnWorkResponse }
 
-export interface ContextBudgetSnapshot extends JsonRecord {
-  readonly model: string | null
-  readonly hard_limit: number | null
-  readonly compaction_trigger: number | null
+export const CONTEXT_LIMIT = { unresolved: "unresolved", resolved: "resolved" } as const
+
+export const CONTEXT_MODEL = { unselected: "unselected", selected: "selected" } as const
+
+type ContextModel =
+  | { readonly kind: typeof CONTEXT_MODEL.unselected }
+  | { readonly kind: typeof CONTEXT_MODEL.selected; readonly model_id: string }
+
+export type ContextBudgetSnapshot = {
   readonly input_tokens: number
   readonly message_count: number
-}
+} & (
+  | { readonly kind: typeof CONTEXT_LIMIT.unresolved; readonly model: ContextModel }
+  | {
+      readonly kind: typeof CONTEXT_LIMIT.resolved
+      readonly model: string
+      readonly hard_limit: number
+      readonly compaction_trigger: number
+    }
+)
 
 export interface HistoryResponse extends JsonRecord {
   readonly messages: ReadonlyArray<HistoryMessage>

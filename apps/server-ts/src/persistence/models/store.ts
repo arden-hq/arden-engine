@@ -6,13 +6,12 @@ import type {
   ModelSettings,
   ModelSettingsPatch
 } from "@arden-hq/protocol/models"
-import type { HistoryResponse } from "@arden-hq/protocol/chat"
+import type { CONTEXT_LIMIT, HistoryResponse } from "@arden-hq/protocol/chat"
 
-export type ModelContextBudget = HistoryResponse["context_budget"] & {
-  readonly model: string
-  readonly hard_limit: number
-  readonly compaction_trigger: number
-}
+export type ModelContextBudget = Extract<
+  HistoryResponse["context_budget"],
+  { readonly kind: typeof CONTEXT_LIMIT.resolved }
+>
 import { Context, Effect, Schema } from "effect"
 
 export type ModelStoreOperation =

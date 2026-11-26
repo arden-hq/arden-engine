@@ -1,5 +1,5 @@
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
-import type { InteractionSender } from "../chat/history.js"
+import { INTERACTION_REFERENCE, SENDER_CAUSE, type InteractionSender } from "../chat/history.js"
 
 export interface WorkMessageFacts {
   readonly role: string
@@ -61,7 +61,7 @@ export function isAgentInstruction(
     sender?.from.source === INTERACTION_SOURCE.agent &&
     (sender.kind === INTERACTION_KIND.assignment ||
       (sender.kind === INTERACTION_KIND.message &&
-        sender.caused_by?.type === "tool_call" &&
+        causedByToolCall(sender) &&
         parentSessionRef !== undefined &&
         sender.from.id === parentSessionRef))
   )
@@ -74,5 +74,12 @@ export function isCommandArrival(sender: InteractionSender): boolean {
 /** A tool-mediated sender message, used to group activity within its turn. */
 export function isCorrespondence(sender: InteractionSender | undefined): boolean {
   if (sender === undefined || !isSenderArrival(sender)) return false
-  return sender.kind === INTERACTION_KIND.message && sender.caused_by?.type === "tool_call"
+  return sender.kind === INTERACTION_KIND.message && causedByToolCall(sender)
+}
+
+export function causedByToolCall(sender: InteractionSender): boolean {
+  return (
+    sender.caused_by.kind === SENDER_CAUSE.traced &&
+    sender.caused_by.reference.type === INTERACTION_REFERENCE.toolCall
+  )
 }

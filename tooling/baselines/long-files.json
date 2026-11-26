@@ -5,7 +5,6 @@
   "apps/server-ts/src/browser/procedures/service.ts": 16,
   "apps/server-ts/src/chat/durable-tools.ts": 27,
   "apps/server-ts/src/chat/events.ts": 80,
-  "apps/server-ts/src/chat/history-projection.ts": 235,
   "apps/server-ts/src/chat/loop-runner.ts": 254,
   "apps/server-ts/src/chat/message.ts": 293,
   "apps/server-ts/src/chat/run-driver.ts": 188,
@@ -88,7 +87,6 @@
   "libs/loop/src/providers/openai-responses/websocket.ts": 3,
   "libs/loop/src/tools/dispatch.ts": 145,
   "libs/loop/src/tools/tool.ts": 80,
-  "libs/protocol/src/chat/schema.ts": 79,
   "libs/revisions/src/repository/service.ts": 199,
   "libs/revisions/src/storage/maintenance.ts": 129,
   "libs/revisions/src/storage/service.ts": 308

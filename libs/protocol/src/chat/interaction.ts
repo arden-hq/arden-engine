@@ -1,18 +1,27 @@
 import { Schema } from "effect"
-import { optionalString } from "../common/schema.js"
 
 import {
+  ACTOR_NAME,
   INTERACTION_KINDS,
   INTERACTION_OUTCOMES,
+  INTERACTION_PREVIEW,
   INTERACTION_SOURCES,
+  SENDER_ADDRESS,
+  SENDER_CAUSE,
   type Interaction,
   type InteractionSender
 } from "./history.js"
 
+const tagged = <const Tag extends string>(kind: Tag) =>
+  Schema.Struct({ kind: Schema.Literal(kind) })
+
 export const InteractionActorSchema = Schema.Struct({
   source: Schema.Literals(INTERACTION_SOURCES),
   id: Schema.NonEmptyString,
-  name: optionalString
+  name: Schema.Union([
+    tagged(ACTOR_NAME.unnamed),
+    Schema.Struct({ kind: Schema.Literal(ACTOR_NAME.named), text: Schema.String })
+  ])
 })
 
 export const InteractionRecipientSchema = Schema.Struct({
@@ -25,11 +34,28 @@ export const InteractionReferenceSchema = Schema.Struct({
   id: Schema.NonEmptyString
 })
 
+export const InteractionPreviewSchema = Schema.Union([
+  tagged(INTERACTION_PREVIEW.unpreviewed),
+  Schema.Struct({ kind: Schema.Literal(INTERACTION_PREVIEW.previewed), text: Schema.String })
+])
+
 const senderFields = {
   from: InteractionActorSchema,
-  to: Schema.optionalKey(InteractionRecipientSchema),
-  preview: optionalString,
-  caused_by: Schema.optionalKey(InteractionReferenceSchema)
+  to: Schema.Union([
+    tagged(SENDER_ADDRESS.unaddressed),
+    Schema.Struct({
+      kind: Schema.Literal(SENDER_ADDRESS.addressed),
+      recipient: InteractionRecipientSchema
+    })
+  ]),
+  preview: InteractionPreviewSchema,
+  caused_by: Schema.Union([
+    tagged(SENDER_CAUSE.untraced),
+    Schema.Struct({
+      kind: Schema.Literal(SENDER_CAUSE.traced),
+      reference: InteractionReferenceSchema
+    })
+  ])
 }
 
 const kinds = INTERACTION_KINDS.filter(
@@ -59,6 +85,5 @@ export const AgentResultSchema = Schema.Struct({
   session_id: Schema.NonEmptyString,
   name: Schema.NonEmptyString,
   content: Schema.String,
-  /** One readable line from the report, for a row that only glances at it. */
-  preview: optionalString
+  preview: InteractionPreviewSchema
 })

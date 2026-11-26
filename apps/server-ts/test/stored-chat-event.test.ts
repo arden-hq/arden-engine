@@ -265,4 +265,46 @@ describe("stored tool events", () => {
     expect(decoded.content.detail).toEqual({ kind: "none" })
     expect(decoded.resolution).toEqual({ kind: "unresolved" })
   })
+
+  it("reads an old run cause's sender and agent result as tagged states", async () => {
+    const event = await decode({
+      type: "RUN_STARTED",
+      run_id: "run-1",
+      session_id: "session-1",
+      turn_id: "turn-1",
+      interaction: {
+        kind: "message",
+        from: { source: "agent", id: "c-2", name: "Researcher" },
+        caused_by: { type: "tool_call", id: "call-1" },
+        content: "done"
+      },
+      agent_result: { session_id: "c-2", name: "Researcher", content: "report" }
+    })
+    expect(event).toEqual(
+      expect.objectContaining({
+        causes: [
+          {
+            kind: "agent_result",
+            agent_result: {
+              session_id: "c-2",
+              name: "Researcher",
+              content: "report",
+              preview: { kind: "unpreviewed" }
+            }
+          },
+          {
+            kind: "interaction",
+            interaction: {
+              kind: "message",
+              from: { source: "agent", id: "c-2", name: { kind: "named", text: "Researcher" } },
+              to: { kind: "unaddressed" },
+              preview: { kind: "unpreviewed" },
+              caused_by: { kind: "traced", reference: { type: "tool_call", id: "call-1" } },
+              content: "done"
+            }
+          }
+        ]
+      })
+    )
+  })
 })

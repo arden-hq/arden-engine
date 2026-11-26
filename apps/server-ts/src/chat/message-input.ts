@@ -8,10 +8,10 @@ import type {
   ChatMessageInput,
   ChatReceipt,
   ChatUpdate,
-  ConnectionArrival,
-  HistoryMessage,
-  InteractionSender
+  ConnectionArrival
 } from "@arden-hq/protocol/chat"
+import type { ChatForwardedSource } from "../persistence/deliveries/model.js"
+import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
 import type { ModelRole } from "@arden-hq/protocol/models"
 import { DateTime, Effect, Schema } from "effect"
 import { ChatUpdateSchema } from "@arden-hq/protocol/effect/chat"
@@ -37,7 +37,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly wake?: boolean
   readonly deliveryId?: string
   readonly clientId: string
-  readonly sender?: InteractionSender
+  readonly sender?: StoredInteractionSender
   readonly workflowDelivery?: {
     readonly workflowRef: string
     readonly attempt: number
@@ -49,7 +49,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly modelId?: string
   readonly announce?: true
   readonly fromChat?: ChatHandoffSource
-  readonly forwardedFrom?: HistoryMessage["forwarded_from"]
+  readonly forwardedFrom?: ChatForwardedSource
   readonly continuesTask?: TaskStepCause
   readonly capture?: ChatCaptureInput["via"]
   readonly fromQueue?: true
