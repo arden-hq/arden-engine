@@ -170,7 +170,7 @@ export const MobileHandlers = HttpApiBuilder.group(
         return mobileSpace({
           space,
           chats: yield* list({ spaceId: space.key, scope: "primary", limit: SPACE_CHAT_LIMIT }),
-          live: live.filter((session) => session.space_id === space.key),
+          live: live.filter((session) => spaceIdOf(session.space) === space.key),
           asks: asks.filter(
             (ask: MobileAsk) =>
               ask.space.kind === MOBILE_FILING.space && ask.space.space_id === space.key

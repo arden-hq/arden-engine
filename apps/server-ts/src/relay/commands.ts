@@ -15,7 +15,14 @@ import {
   STANDING_GRANT,
   TOOL_DECISION
 } from "@arden-hq/protocol/chat"
+import { sessionRoutes, type CreateSessionRequest } from "@arden-hq/protocol/sessions"
 import { Predicate, type Schema } from "effect"
+import {
+  sessionChatModel,
+  sessionName,
+  sessionOrigin,
+  sessionSpace
+} from "../sessions/session-states.js"
 import type { Loopback, LoopbackResponse } from "./ports.js"
 import type { Command } from "./routes.js"
 
@@ -192,7 +199,12 @@ export const runCommand = async (
         : refusal(call)
     }
     case COMMAND_KIND.capture: {
-      const created = await post("/sessions", { space_id: command.args.space_id ?? null })
+      const created = await post(sessionRoutes.collection, {
+        name: sessionName(undefined),
+        space: sessionSpace(command.args.space_id),
+        chat_model: sessionChatModel(undefined),
+        origin: sessionOrigin(undefined)
+      } satisfies CreateSessionRequest)
       const body = created.response.body
       const sessionId =
         ok(created.response) && Predicate.isObject(body) && "session_id" in body
