@@ -31,11 +31,7 @@ import { resumeAutomation } from "./automation-resume.js"
 import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
 import { nextId } from "./deps.js"
 import { insertOwnChat, ownChat } from "./automation-own-chat.js"
-import {
-  makeAutomationRowReads,
-  type AutomationRow,
-  type AutomationStoreDeps
-} from "./automation-rows.js"
+import { type AutomationRow, type AutomationStoreDeps } from "./automation-rows.js"
 import {
   dropMeasuredRows,
   makeTriggerArming,
@@ -54,6 +50,7 @@ import {
   prepareInstructionRevision,
   type AutomationWriteSource
 } from "./automation-instruction-provenance.js"
+import { makeAutomationRowReads } from "./automation-row-reads.js"
 
 const updatedNextRunAt = (input: {
   readonly rules: AutomationRules["Service"]

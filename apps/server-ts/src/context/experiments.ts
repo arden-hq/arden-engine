@@ -8,6 +8,25 @@ import {
 } from "@arden-hq/protocol/context"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
 
+export interface ContextExperiments {
+  readonly begin: (sessionId: string, runId: string, personal: boolean) => ContextSelection
+  readonly start: (
+    runId: string,
+    part: ContextStage["part"]
+  ) => (outcome: ContextStage["outcome"]) => void
+  readonly measure: <A, E, R>(
+    runId: string,
+    part: "space" | "memory" | "threads" | "answers" | "skills" | "cliTools",
+    enabled: boolean,
+    operation: Effect.Effect<A, E, R>,
+    skipped: A
+  ) => Effect.Effect<A, E, R>
+  readonly finish: (runId: string) => void
+  readonly set: (sessionId: string, selection: ContextSelection) => void
+  readonly phase: (runId: string, timing: ModelPhaseTiming) => void
+  readonly report: (sessionId: string) => ContextExperimentReport
+}
+
 /**
  * `base` is what a run takes into its prompt when its chat has no selection of
  * its own: everything, unless the server was started with Memory off.
@@ -15,7 +34,7 @@ import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
 export const makeContextExperiments = (
   clock: () => number = () => performance.now(),
   base: ContextSelection = fullContext
-) => {
+): ContextExperiments => {
   const selections = new Map<string, ContextSelection>()
   const runSelections = new Map<string, ContextSelection>()
   const runs = new Map<string, { sessionId: string; active: boolean; report: ContextRun }>()

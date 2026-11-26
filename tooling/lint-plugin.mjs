@@ -158,6 +158,26 @@ const testRoot = (node) => {
   if (target.type === "CallExpression") return testRoot(target.callee)
   return false
 }
+const platformGates = new Set(["skipIf", "runIf"])
+const isProcessPlatform = (wrapped) => {
+  const node = unwrap(wrapped)
+  return node.type === "MemberExpression" && !node.computed && objectName(node.object) === "process" && node.property.name === "platform"
+}
+const isPlatformCheck = (wrapped) => {
+  const node = unwrap(wrapped)
+  if (node.type !== "BinaryExpression" || (node.operator !== "===" && node.operator !== "!==")) return false
+  return (isProcessPlatform(node.left) && isStringLiteral(node.right)) || (isProcessPlatform(node.right) && isStringLiteral(node.left))
+}
+const isPlatformGate = (node) => {
+  const call = node.parent
+  return (
+    platformGates.has(memberName(node)) &&
+    call?.type === "CallExpression" &&
+    call.callee === node &&
+    call.arguments.length === 1 &&
+    isPlatformCheck(call.arguments[0])
+  )
+}
 const longFileLines = 500
 const optionalSchemas = new Set(["optional", "optionalKey", "optionalWith", "NullOr", "UndefinedOr"])
 
@@ -343,11 +363,11 @@ export const baselinedRules = [
     files: testFiles,
     ignores: [],
     baseline: "tooling/baselines/test-escapes.json",
-    message: "No skipped, focused or retried tests: fix the cause, or delete the test and say why in the commit",
+    message: "No skipped, focused or retried tests: fix the cause, or delete the test and say why in the commit. Only a test of a platform-only feature may gate on `process.platform === \"<os>\"` (skipIf or runIf)",
     description: "No test escape hatches.",
     collect: (_context, found) => ({
       MemberExpression: (node) => {
-        if (testEscapes.has(memberName(node)) && testRoot(node.object)) found.push({ node })
+        if (testEscapes.has(memberName(node)) && testRoot(node.object) && !isPlatformGate(node)) found.push({ node })
       },
       CallExpression: (node) => {
         if (!testRoot(node.callee)) return

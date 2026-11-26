@@ -123,6 +123,19 @@ export const decodePageRef = (
   }
 }
 
+export type EventTimes = {
+  readonly start:
+    | { dateTime: null; timeZone: null; date: string }
+    | { dateTime?: never; timeZone?: never; date: string }
+    | { date: null; timeZone?: string; dateTime: string }
+    | { date?: never; timeZone?: string; dateTime: string }
+  readonly end:
+    | { dateTime: null; timeZone: null; date: string }
+    | { dateTime?: never; timeZone?: never; date: string }
+    | { date: null; timeZone?: string; dateTime: string }
+    | { date?: never; timeZone?: string; dateTime: string }
+}
+
 /**
  * The start and end of a write. A patch also clears the other form's fields
  * (`date` against `dateTime`), so an event can change between all-day and timed.
@@ -135,7 +148,7 @@ export const eventTimes = (
     readonly timezone: string | undefined
   },
   patch: boolean
-) => {
+): EventTimes => {
   if (input.allDay) {
     const days = allDayTimes(input.start, input.end)
     const clear = patch ? { dateTime: null, timeZone: null } : {}
@@ -199,12 +212,20 @@ export const timeFields = (input: {
   ]
 }
 
+export interface CurrentEvent {
+  readonly account: string
+  readonly item: CalendarEvent
+  readonly target: CalendarEvent
+  readonly targetId: string
+  readonly rawTarget: unknown
+}
+
 export const currentEvent = async (
   google: GoogleToolConnections,
   ref: { readonly account: string; readonly calendarId: string; readonly id: string },
   scope: EventScope,
   signal: AbortSignal
-) => {
+): Promise<CurrentEvent> => {
   const fetchOne = (id: string) =>
     googleCall({
       google,

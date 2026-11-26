@@ -267,7 +267,21 @@ const mapVersion = (version: ResourceVersion | null): WikiResourceVersion | null
         versionId: version.versionId
       }
 
-export const mapHistory = (commit: Commit) => ({
+export const mapHistory = (
+  commit: Commit
+): {
+  commitId: string
+  parentId: string | null
+  actor: string
+  origin: string
+  reason: string
+  timestamp: string
+  changes: {
+    action: string
+    before: WikiResourceVersion | null
+    after: WikiResourceVersion | null
+  }[]
+} => ({
   commitId: commit.commitId,
   parentId: commit.parentId,
   actor: commit.actor,

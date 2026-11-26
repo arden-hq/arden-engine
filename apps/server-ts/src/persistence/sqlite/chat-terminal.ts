@@ -34,12 +34,12 @@ import { decodeJson, encodeJson } from "./json.js"
 import { JsonObjectSchema } from "../json.js"
 import { settleTerminalToolsInTransaction } from "./tool-terminal.js"
 import { supersedeMessagesInTransaction } from "./superseded-messages.js"
-import { conversationMessagePredicate } from "./transcript.js"
 import { nextId, type PersistenceDeps } from "./deps.js"
 import { appendRunSettledInTransaction } from "./run-settled.js"
 import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
 import { messageTurnIdSql } from "./message-turns.js"
 import { turnTouchesRecencySql } from "./session-unread.js"
+import { conversationMessagePredicate } from "./transcript-predicates.js"
 
 const finishUsageSchema = Schema.Struct({
   prompt: Schema.optionalKey(Schema.Natural),

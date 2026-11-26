@@ -16,11 +16,11 @@ import { addressOfRun, chatRow, type Place, type RunAddress } from "./run-destin
 import { changedRunOutcome, newsRunOutcome, quietRunOutcome } from "./run-outcomes.js"
 import { readTaskState } from "../work/task-state.js"
 import { activeRunStatusList } from "./status-sets.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
 import type { EndingRecord, EndingStatus, PlaceKind, Purpose } from "../runs/ending.js"
 import { parentCompletion } from "../runs/parent-completion.js"
 import type { ChatRunRecord } from "../runs/model.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 export type ToldOutcome = "finished" | "needs_you" | "blocked" | "failed"
 

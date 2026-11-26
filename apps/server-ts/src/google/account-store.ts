@@ -1,6 +1,5 @@
-import type { GoogleAccount } from "@arden-hq/protocol/google"
+import type { GoogleAccount, GoogleServiceId } from "@arden-hq/protocol/google"
 import { GoogleServiceIdSchema } from "@arden-hq/protocol/effect/google"
-import type { GoogleServiceId } from "@arden-hq/protocol/google"
 import { Schema } from "effect"
 
 import {
@@ -76,9 +75,16 @@ export const validEmail = (value: string): boolean =>
 
 export const accountId = (subject: string): string => `g_${sha256Base64Url(subject).slice(0, 32)}`
 
-export type GoogleAccountStore = ReturnType<typeof makeGoogleAccountStore>
+export interface GoogleAccountStore {
+  readonly serial: <A>(operation: () => Promise<A>) => Promise<A>
+  readonly read: () => Promise<StoredState>
+  readonly write: (state: StoredState) => Promise<void>
+  readonly markNeedsAuth: (accountIdValue: string, service: GoogleServiceId) => Promise<void>
+  readonly snapshot: () => readonly GoogleAccount[]
+  readonly mirrored: () => boolean
+}
 
-export const makeGoogleAccountStore = (vault: CredentialVault | undefined) => {
+export const makeGoogleAccountStore = (vault: CredentialVault | undefined): GoogleAccountStore => {
   let snapshot: ReadonlyArray<GoogleAccount> = []
   let mirrored = false
   let tail: Promise<void> = Promise.resolve()

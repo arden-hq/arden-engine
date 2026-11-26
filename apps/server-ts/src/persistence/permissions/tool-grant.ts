@@ -14,7 +14,13 @@ const ToolGrantApprovalDataSchema = Schema.Struct({
   [TOOL_GRANT]: Schema.Struct({ subject: RuleSubjectSchema })
 })
 
-export const toolGrantData = (subject: RuleSubject) => ({ [TOOL_GRANT]: { subject } })
+export interface ToolGrantData {
+  readonly tool_grant: { readonly subject: RuleSubject }
+}
+
+export const toolGrantData = (subject: RuleSubject): ToolGrantData => ({
+  [TOOL_GRANT]: { subject }
+})
 
 /** The subject the gate kept for this tool's card; a subject for any other tool is ignored. */
 export const toolGrantSubject = (toolName: string, data: unknown): RuleSubject | undefined => {

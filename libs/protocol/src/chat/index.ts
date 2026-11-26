@@ -34,21 +34,15 @@ import {
 } from "./schema.js"
 import {
   CancelResponseSchema,
-  mapCancelResponse,
   ChatAcknowledgementSchema,
-  mapChatAcknowledgement,
   ChatReceiptResponseSchema,
   ConnectionResumeResponseSchema,
-  mapChatReceipt,
   encodeToolCallPathEffect,
   encodeToolResultValuePathEffect,
   QueuedCancelResponseSchema,
-  mapQueuedCancelResponse,
   QueuedChatMessageSchema,
   QueuedChatMessagesSchema,
-  mapReadResponse,
   RunsStatusSchema,
-  mapRunsStatus,
   encodeCancelRequestEffect,
   encodeChatMessageRequestEffect,
   encodeConnectionResultRequestEffect,
@@ -63,6 +57,14 @@ import {
   encodeReadPathEffect,
   encodeToolResultRequestEffect
 } from "./facade-schema.js"
+import {
+  mapCancelResponse,
+  mapChatAcknowledgement,
+  mapChatReceipt,
+  mapQueuedCancelResponse,
+  mapReadResponse,
+  mapRunsStatus
+} from "./facade-mappers.js"
 import {
   PersistedChildAgentMetadataSchema,
   ToolResultCostSchema,

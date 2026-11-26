@@ -29,7 +29,6 @@ import type { ServerRunContext } from "./run-context.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { skipsCards } from "../execution/decide.js"
 import {
-  displayLocalPath,
   type LocalPathPolicy,
   type LocalPathServices,
   policyPathOptions,
@@ -40,6 +39,7 @@ import {
 } from "../storage/local-paths.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { toolFault, toolRefusal } from "./tool-failure.js"
+import { displayLocalPath } from "../storage/local-directory.js"
 
 export const ShellAccessSchema = Schema.Literals(["sandbox", "network", "host"] as const)
 export type ShellAccess = typeof ShellAccessSchema.Type

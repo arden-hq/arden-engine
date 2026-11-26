@@ -6,7 +6,7 @@ import { TELL_LIMIT, TELL_TEXT_LIMIT, type TellOutcome } from "../work/store.js"
 import { doorOf, purposeOf, tellShown, workerNames } from "./run-ending.js"
 import { addressOfRun } from "./run-destination.js"
 import { tellChat, updateWeight } from "./owner-update.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 const NOWHERE = "No one can hear this run right now, so there is nowhere to tell. Carry on."
 const OWN_CHAT = "This run's reply goes to this same chat. Write it there instead."

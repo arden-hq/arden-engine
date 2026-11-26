@@ -1,5 +1,5 @@
 import { GoogleAccountGrantsSchema } from "@arden-hq/protocol/effect/google"
-import { Schema } from "effect"
+import { Schema, type Effect } from "effect"
 import type { ApprovalMode } from "@arden-hq/protocol/permissions"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
@@ -64,7 +64,8 @@ export type RunPolicy = typeof RunPolicySchema.Type
 
 export const runPolicyOf = (
   record: { readonly metadata: Readonly<Record<string, unknown>> } | null
-) => Schema.decodeUnknownEffect(RunPolicySchema)(record?.metadata["run_policy"])
+): Effect.Effect<RunPolicy, Schema.SchemaError> =>
+  Schema.decodeUnknownEffect(RunPolicySchema)(record?.metadata["run_policy"])
 
 export const narrowCapabilities = (
   requested: RunCapability,

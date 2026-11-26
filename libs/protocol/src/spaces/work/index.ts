@@ -12,8 +12,6 @@ import type {
   AcknowledgeTaskResultInput
 } from "./contracts.js"
 import {
-  encodeMoveTaskToChatEffect,
-  encodeAcknowledgeTaskResultEffect,
   WorkOkResponseSchema,
   SpaceWorkPageSchema,
   SpaceTaskAttachmentSchema,
@@ -21,13 +19,17 @@ import {
   SpaceTaskSchema,
   StopSpaceTaskResponseSchema,
   encodeCreateSpaceTaskAttachmentRequestEffect,
+  encodeUpdateSpaceTaskRequestEffect
+} from "./schema.js"
+import {
+  encodeMoveTaskToChatEffect,
+  encodeAcknowledgeTaskResultEffect,
   encodeCreateSpaceTaskCommentRequestEffect,
   encodeNewTaskRequestEffect,
   encodeCreateLooseTaskRequestEffect,
   encodeCreateChatTaskRequestEffect,
-  encodeStopSpaceTaskRequestEffect,
-  encodeUpdateSpaceTaskRequestEffect
-} from "./schema.js"
+  encodeStopSpaceTaskRequestEffect
+} from "./codecs.js"
 import {
   encodeChatTaskPathEffect,
   encodeTaskChatPathEffect,

@@ -261,7 +261,22 @@ const guestParts = (current: MacEventRecord, what: string) => {
 const optionalField = (label: string, value: string | undefined): ReadonlyArray<Field> =>
   value === undefined || value === "" ? [] : [{ label, value }]
 
-export const makeMacCalendarCards = (apps: MacApps) => {
+export interface MacCalendarCards {
+  readonly createCard: (
+    input: typeof EventCreateSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly editCard: (
+    input: typeof EventEditSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+  readonly deleteCard: (
+    input: typeof EventDeleteSchema.Type,
+    signal: AbortSignal
+  ) => Promise<ServerApprovalPrompt>
+}
+
+export const makeMacCalendarCards = (apps: MacApps): MacCalendarCards => {
   const { words } = apps
   const createCard = async (
     input: typeof EventCreateSchema.Type,

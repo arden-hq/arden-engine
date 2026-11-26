@@ -1,15 +1,10 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { makeTurnInputs } from "./transcript-turn-inputs.js"
 import { makeResolveReference } from "./transcript-reference.js"
-import { disposableForkSql } from "../schema/fork-disposition.js"
 import { makeOwnerMessagesAfter, makeOwnerWordsIn } from "./transcript-owner-messages.js"
-import {
-  agentResultPresentation,
-  agentResultMessagePredicate
-} from "./agent-result-presentation.js"
+import { agentResultPresentation } from "./agent-result-presentation.js"
 import { TRANSCRIPT_RESULT_PREVIEW_CHARS } from "../transcript/model.js"
 import { Effect, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
 import { makeTranscriptSearches } from "./transcript-search.js"
 import { makeToolResultInSession, type TranscriptRow } from "./transcript-tool-result.js"
 import { makeToolCallCounts } from "./transcript-tool-calls.js"
@@ -31,6 +26,12 @@ import {
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
 import { messageTurnIdSql } from "./message-turns.js"
+import {
+  conversationCallPredicate,
+  workCarrierMessagePredicate,
+  toolWorkCarrierMessagePredicate,
+  conversationMessagePredicate
+} from "./transcript-predicates.js"
 
 interface CountRow {
   readonly count: number
@@ -72,110 +73,6 @@ const corruption = (
     message,
     ...(cause === undefined ? {} : { cause })
   })
-
-const conversationCallPredicate = (sql: SqlClient.SqlClient) =>
-  sql`
-    (
-      COALESCE(json_extract(call.value, '$.presentation'), '') = 'conversation'
-    )
-  `
-
-export const communicationToldSql = (sql: SqlClient.SqlClient) =>
-  sql`(json_extract(m.message_json, '$.communication') IS NOT NULL
-    AND json_extract(m.message_json, '$.communication.arrival.event') IS NOT 'needs_you')`
-
-const communicationDrawnSql = (sql: SqlClient.SqlClient) =>
-  sql`(${communicationToldSql(sql)}
-    AND COALESCE(json_extract(m.message_json, '$.communication.shown'), 1) <> 0)`
-
-/** True for a message the chat `m` got itself, false for one a fork or branch copied from
- * its parent. A copy keeps the parent's message id. */
-export const ownMessagePredicate = (sql: SqlClient.SqlClient) => sql`
-  json_type(m.message_json, '$.forked_from') IS NOT 'text'
-  AND NOT EXISTS (
-    SELECT 1 FROM session_fork_requests AS fork
-    JOIN sessions AS child ON child.session_id = fork.child_session_id
-    JOIN session_messages AS boundary ON boundary.session_id = child.session_id
-      AND boundary.message_id = json_extract(child.metadata, '$.fork_origin.sourceMessageId')
-    WHERE fork.child_session_id = m.session_id
-      AND ${sql.literal(disposableForkSql("fork"))}
-      AND m.seq <= boundary.seq
-  )`
-
-export const conversationMessagePredicate = (sql: SqlClient.SqlClient) =>
-  sql`
-    ${ownMessagePredicate(sql)} AND
-    (
-      m.role = ${ROLE.user}
-      OR
-      (
-        m.role = ${ROLE.interaction}
-        AND (
-          json_extract(m.message_json, '$.from.source') IN ('automation', 'agent', 'workflow')
-          OR ${agentResultMessagePredicate(sql)}
-          OR ${communicationDrawnSql(sql)}
-        )
-      )
-      OR
-      (
-        m.role = ${ROLE.assistant}
-        AND m.search_text IS NOT NULL
-        AND json_extract(m.message_json, '$.compaction') IS NULL
-      )
-      OR
-      (
-        -- A call whose result is conversation content (a card, a proposal, a
-        -- navigation request) keeps its carrier in the conversation stream
-        -- even when it says nothing else.
-        m.role = ${ROLE.assistant}
-        AND json_extract(m.message_json, '$.compaction') IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM json_each(m.message_json, '$.tool_calls') AS call
-          WHERE ${conversationCallPredicate(sql)}
-        )
-      )
-    )
-  `
-
-const toolWorkCarrierMessagePredicate = (sql: SqlClient.SqlClient) =>
-  sql`
-    ${ownMessagePredicate(sql)} AND
-    (
-      m.role = ${ROLE.assistant}
-      AND (
-        COALESCE(json_array_length(m.message_json, '$.provider_tool_calls'), 0) > 0
-        OR EXISTS (
-          SELECT 1
-          FROM json_each(m.message_json, '$.tool_calls') AS call
-          WHERE NOT ${conversationCallPredicate(sql)}
-        )
-      )
-    )
-  `
-
-const workCarrierMessagePredicate = (sql: SqlClient.SqlClient) =>
-  sql`
-    ${ownMessagePredicate(sql)} AND
-    (
-      m.role = ${ROLE.assistant}
-      AND json_extract(m.message_json, '$.superseded') IS NULL
-      AND (
-        length(trim(COALESCE(json_extract(m.message_json, '$.reasoning_content'), ''))) > 0
-        OR COALESCE(json_array_length(m.message_json, '$.provider_tool_calls'), 0) > 0
-        OR EXISTS (
-          SELECT 1
-          FROM json_each(m.message_json, '$.tool_calls') AS call
-          WHERE NOT ${conversationCallPredicate(sql)}
-        )
-        OR EXISTS (
-          SELECT 1
-          FROM json_each(m.message_json, '$.output_parts') AS part
-          WHERE json_extract(part.value, '$.type') = 'reasoning'
-        )
-      )
-    )
-  `
 
 export const makeTranscriptQueries = ({
   reader,

@@ -8,7 +8,44 @@ interface ActionsInput {
   readonly action_turn_id?: string
 }
 
-export const actionsPage = (input: ActionsInput, page: SessionToolEvidencePage) => {
+export type ActionsPage = {
+  readonly note: string
+  readonly items: {
+    cursor: number
+    turn_id: string | null
+    tool_call_id: string
+    tool_name: string
+    status: string
+    changes_state: boolean
+    source: {
+      readonly kind: "chat_action"
+      readonly session_id: string
+      readonly turn_id: string
+      readonly run_id: string
+      readonly tool_call_id: string
+    } | null
+    payload: { text: string; total_chars: number }
+    continue_args: {
+      limit: number
+      before_action: number
+      content_offset: number
+      action_turn_id?: string
+      session_ref: string
+      view: "actions"
+      content_chars: number
+    } | null
+  }[]
+  readonly next_args: {
+    limit: number
+    before_action: number
+    action_turn_id?: string
+    session_ref: string
+    view: "actions"
+    content_chars: number
+  } | null
+}
+
+export const actionsPage = (input: ActionsInput, page: SessionToolEvidencePage): ActionsPage => {
   const scope = {
     session_ref: input.session_ref,
     view: "actions" as const,

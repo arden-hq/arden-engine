@@ -12,6 +12,18 @@ const resourceMetadataUrl = new URL(
 )
 const target = { credentialKey: "preset:github", binding: "preset:github" }
 
+export interface GitHubOAuth {
+  readonly cancel: () => void
+  readonly hasGrant: () => Promise<boolean>
+  readonly token: () => Promise<string | undefined>
+  readonly clear: () => Promise<void>
+  readonly start: (input: {
+    readonly beforeCommit: () => Promise<void>
+    readonly onConnected: () => Promise<void>
+    readonly onFailure: () => Promise<void>
+  }) => Promise<string>
+}
+
 export const makeGitHubOAuth = ({
   vault,
   credentials,
@@ -24,7 +36,7 @@ export const makeGitHubOAuth = ({
   readonly callbacks: Pick<McpOAuthCallbacks, "start" | "register" | "cancel">
   readonly operations: KeyedSerialQueue
   readonly fetch?: FetchLike
-}) => {
+}): GitHubOAuth => {
   let pending: { readonly controller: AbortController } | undefined
   const provider = (onAuthorization: (url: URL) => void, beforeCommit: () => Promise<void>) =>
     new McpOAuthProvider({

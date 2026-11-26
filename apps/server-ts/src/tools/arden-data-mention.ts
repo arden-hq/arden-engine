@@ -1,7 +1,6 @@
 import { isWithin } from "@arden-hq/std/paths"
 import { homedir } from "node:os"
 import path from "node:path"
-
 import { ardenStateRoot } from "../storage/local-paths.js"
 
 export const ardenDataRoots = (dataDir: string): ReadonlyArray<string> => [

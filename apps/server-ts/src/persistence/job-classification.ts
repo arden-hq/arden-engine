@@ -8,6 +8,13 @@ export const JobPurposeSchema = Schema.Literals([
 ])
 export type JobPurpose = typeof JobPurposeSchema.Type
 
+export const JOB_PURPOSE = {
+  userAutomation: "user_automation",
+  spaceReview: "space_review",
+  taskExecution: "task_execution",
+  system: "system"
+} as const satisfies Record<string, JobPurpose>
+
 export type JobClassification =
   | {
       readonly purpose: "user_automation"

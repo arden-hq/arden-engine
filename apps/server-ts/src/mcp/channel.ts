@@ -1,4 +1,4 @@
-import { parseJsonBody, parseJsonText } from "@arden-hq/protocol/common"
+import { parseJsonBody, parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { after } from "@arden-hq/std/timer"
 import type {
   FetchLike,
@@ -438,7 +438,7 @@ interface StatelessRequest {
 
 const statelessRequest = (body: RequestInit["body"]): StatelessRequest | undefined => {
   if (typeof body !== "string" || !body.includes(EVENTS_PROTOCOL_VERSION)) return undefined
-  const message = parseJsonText(body)
+  const message = parseJsonTextOrUndefined(body)
   if (!Predicate.isObject(message)) return undefined
   const { id, method, params } = message
   if ((typeof id !== "string" && typeof id !== "number") || typeof method !== "string") {

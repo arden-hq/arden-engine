@@ -21,6 +21,7 @@ import type { createGoogleClientConfiguration } from "./client-configuration.js"
 import { currentMillis, iso } from "../runtime/clock.js"
 import { GoogleConnectionError } from "./errors.js"
 import { sha256Base64Url } from "@arden-hq/std/hash"
+import { type GoogleOAuth } from "./oauth-types.js"
 
 const CALLBACK_PATH = "/oauth/callback"
 const CALLBACK_TIMEOUT_MS = 10 * 60 * 1_000
@@ -165,7 +166,7 @@ export const makeGoogleOAuth = ({
   readonly fetcher: typeof globalThis.fetch
   readonly endpoints: GoogleEndpoints
   readonly now: () => number
-}) => {
+}): GoogleOAuth => {
   const pending = new Map<GoogleServiceId, PendingAuthorization>()
 
   const closePending = async (service: GoogleServiceId): Promise<void> => {

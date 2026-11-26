@@ -1,12 +1,13 @@
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { namedPublicRef } from "../public-ref.js"
-import type { SessionLifecycleEvents } from "../sessions/events.js"
-import type { WorkOwner } from "./automation-rows.js"
+import type { SessionLifecycleEvents, SessionLifecycleEventError } from "../sessions/events.js"
 import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
 import { spaceJobId } from "../space-job-id.js"
 import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { UnitOfWork } from "../unit-of-work.js"
+import { type WorkOwner } from "./automation-rows.js"
 
 export const attemptRunSessionId = (trunk: string, attemptId: number): string =>
   `${trunk}::i${attemptId}`
@@ -40,10 +41,21 @@ export const followSpaceName = (
     WHERE origin_automation_id = ${spaceJobId(spaceId)} AND session_type = 'channel'
       AND name = ${`${before} worker`}`.pipe(Effect.asVoid)
 
+export interface OwnerChats {
+  readonly openChat: (chat: {
+    readonly owner: WorkOwner
+    readonly name: string
+    readonly spaceId: string | null
+    readonly model: string | null
+    readonly now: string
+  }) => Effect.Effect<string, SqlError | SessionLifecycleEventError, UnitOfWork>
+  readonly isLiveChat: (sessionId: string) => Effect.Effect<boolean, SqlError>
+}
+
 export const makeOwnerChats = (
   sql: SqlClient.SqlClient,
   sessionEvents: SessionLifecycleEvents["Service"]
-) => {
+): OwnerChats => {
   const openChat = Effect.fn("SqliteAutomationStore.openChat")(function* (chat: {
     readonly owner: WorkOwner
     readonly name: string

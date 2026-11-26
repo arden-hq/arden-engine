@@ -23,11 +23,7 @@ import {
 import { friendlySessionRef } from "../public-ref.js"
 import { nextId } from "./deps.js"
 import { insertSession } from "./session-insert.js"
-import {
-  makeAutomationRowReads,
-  systemSpecOf,
-  type AutomationStoreDeps
-} from "./automation-rows.js"
+import { systemSpecOf, type AutomationStoreDeps } from "./automation-rows.js"
 import { storeError, automationIdEffect, readWorkOwner, type WorkOwner } from "./automation-rows.js"
 import { attemptRunSessionId } from "./owner-chat.js"
 import { enqueue } from "./automation-enqueue.js"
@@ -37,6 +33,7 @@ import { sessionDescendants } from "./tree-walk.js"
 import { runAuthorityState, type RunAuthorityState } from "./run-context.js"
 import { iso } from "../../runtime/clock.js"
 import { parkedOnQuota, quotaPauseUntil } from "./run-wait.js"
+import { makeAutomationRowReads } from "./automation-row-reads.js"
 
 interface ObservedChatRunRow {
   readonly status: string

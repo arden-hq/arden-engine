@@ -8,7 +8,7 @@ import { arrivalHeadline, arrivalSource, doorRef } from "../transcript/chat-even
 import { postQuietLine } from "./ending-arrival.js"
 import type { EntityFact } from "./entity-events.js"
 import type { DestinationRow } from "./run-destination.js"
-import { enqueueRunDelivery } from "./work-deliveries.js"
+import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
 export type UpdateWeight = ChatUpdate["weight"] | "quiet"
 

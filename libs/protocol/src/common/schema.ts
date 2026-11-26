@@ -37,12 +37,14 @@ export const optionalNonNegativeInt = Schema.optionalKey(NonNegativeIntSchema)
 export const optionalBoolean = Schema.optionalKey(Schema.Boolean)
 export const optionalUnknown = Schema.optionalKey(Schema.Unknown)
 
-export const withExtras = <Fields extends Schema.Struct.Fields>(
-  fields: Fields
-): Schema.StructWithRest<
+type WithExtras<Fields extends Schema.Struct.Fields> = Schema.StructWithRest<
   Schema.Struct<Fields>,
   readonly [Schema.$Record<Schema.String, Schema.Unknown>]
-> => Schema.StructWithRest(Schema.Struct(fields), extraFields)
+>
+
+export const withExtras = <Fields extends Schema.Struct.Fields>(
+  fields: Fields
+): WithExtras<Fields> => Schema.StructWithRest(Schema.Struct(fields), extraFields)
 
 const eventCommon = <const Type extends string>(type: Type) => ({
   type: Schema.Literal(type),
@@ -51,10 +53,12 @@ const eventCommon = <const Type extends string>(type: Type) => ({
   replay: optionalBoolean
 })
 
+type EventFields<Type extends string> = ReturnType<typeof eventCommon<Type>>
+
 export const event = <const Type extends string, Fields extends Schema.Struct.Fields>(
   type: Type,
   fields: Fields
-) =>
+): WithExtras<EventFields<Type> & { session_id: typeof optionalString } & Fields> =>
   withExtras({
     ...eventCommon(type),
     session_id: optionalString,
@@ -70,7 +74,7 @@ export const sessionEvent = <
   type: Type,
   sessionId: SessionId,
   fields: Fields
-) =>
+): WithExtras<EventFields<Type> & { session_id: SessionId } & Fields> =>
   withExtras({
     ...eventCommon(type),
     session_id: sessionId,
