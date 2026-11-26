@@ -1,3 +1,4 @@
+import { RunContextSchema } from "../runs/stored-context.js"
 import { publicTask } from "../work/public.js"
 import { TaskRecordSchema, TaskSourceRecordSchema } from "../work/task-record.js"
 import { decodeKeyedTaskDraftEffect } from "../work/task-input.js"
@@ -15,7 +16,6 @@ import {
 } from "@arden-hq/protocol/effect/proposals"
 import { TASK_PROPOSAL_ACCEPTED_IN, TASK_PROPOSAL_START_SPACE } from "@arden-hq/protocol/proposals"
 import { SpaceTaskCaptureInputSchema } from "@arden-hq/protocol/effect/spaces/work"
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { DateTime, Effect, Schema } from "effect"
 import {
   TaskProposalStore,

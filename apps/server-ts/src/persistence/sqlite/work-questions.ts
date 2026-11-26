@@ -1,7 +1,11 @@
 import {
-  RunQuestionContentSchema,
-  ResolveRunQuestionInputSchema
-} from "@arden-hq/protocol/effect/runs"
+  StoredResolveInputSchema,
+  StoredRunQuestionContentSchema,
+  type StoredResolveInput,
+  type StoredRunQuestion,
+  type StoredRunQuestionContent,
+  type StoredRunQuestionList
+} from "../runs/stored-question.js"
 import { DateTime, Effect, Schema } from "effect"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { WorkStore, WorkStoreError, type FocusQuestionTargetInput } from "../work/store.js"
@@ -26,13 +30,7 @@ import { stoppedRunSql } from "./status-sets.js"
 import { decodeJson } from "./json.js"
 import { answerMisfit, questionAnswerBody } from "./question-answer.js"
 import { focusOpenLabel, type FocusChoiceTarget } from "@arden-hq/protocol/sessions/focus-choices"
-import type {
-  RunQuestionContent,
-  RunQuestion,
-  ResolveRunQuestionInput,
-  RunQuestionListOptions,
-  RunQuestionList
-} from "@arden-hq/protocol/runs"
+import type { RunQuestionListOptions } from "@arden-hq/protocol/runs"
 import { sha256Hex } from "@arden-hq/std/hash"
 import type { PermissionOfferRecord } from "../permissions/offer.js"
 import type { ContractProposalRecord } from "../work/contract.js"
@@ -50,12 +48,12 @@ const namedFocusChoices = (target: FocusChoiceTarget) =>
 
 const sameAsked = (
   recorded: string,
-  asked: RunQuestionContent,
+  asked: StoredRunQuestionContent,
   focus: boolean
 ): Effect.Effect<boolean, WorkStoreError> =>
   !focus
     ? Effect.succeed(recorded === JSON.stringify(asked))
-    : decodeJson(RunQuestionContentSchema, recorded).pipe(
+    : decodeJson(StoredRunQuestionContentSchema, recorded).pipe(
         Effect.map(
           (prior) => JSON.stringify({ ...prior, choices: focusChoices }) === JSON.stringify(asked)
         ),
@@ -69,20 +67,20 @@ export interface WorkQuestionSql {
   readonly askQuestion: (options: {
     readonly runId: string
     readonly toolCallId: string
-    readonly content: RunQuestionContent
+    readonly content: StoredRunQuestionContent
     readonly reuseOpenTaskQuestion?: true
     readonly timeout?: { readonly seconds: number; readonly fallbackChoiceId: string }
     readonly focusTarget?: FocusQuestionTargetInput
     readonly permissionOffer?: PermissionOfferRecord
     readonly contractProposal?: ContractProposalRecord
-  }) => Effect.Effect<RunQuestion, WorkStoreError>
+  }) => Effect.Effect<StoredRunQuestion, WorkStoreError>
   readonly resolveQuestion: (options: {
     readonly questionId: string
-    readonly input: ResolveRunQuestionInput
-  }) => Effect.Effect<RunQuestion, WorkStoreError>
+    readonly input: StoredResolveInput
+  }) => Effect.Effect<StoredRunQuestion, WorkStoreError>
   readonly questions: (
     options: RunQuestionListOptions
-  ) => Effect.Effect<RunQuestionList, WorkStoreError>
+  ) => Effect.Effect<StoredRunQuestionList, WorkStoreError>
   readonly expireQuestions: () => Effect.Effect<void, WorkStoreError>
 }
 
@@ -98,7 +96,7 @@ export const makeWorkQuestionSql = (options: {
     sessionEvents
   })
 
-  const ensureQuestionDestination = Effect.fn("RunQuestion.ensureDestination")(function* (
+  const ensureQuestionDestination = Effect.fn("StoredRunQuestion.ensureDestination")(function* (
     runId: string
   ): Effect.fn.Return<void, WorkStoreError> {
     const rows = yield* sql<{ readonly space_id: string | null }>`
@@ -149,9 +147,12 @@ export const makeWorkQuestionSql = (options: {
       request.focusTarget === undefined
         ? request.content
         : { ...request.content, choices: focusChoices }
-    const content = yield* Schema.decodeUnknownEffect(RunQuestionContentSchema)(contentInput, {
-      onExcessProperty: "error"
-    }).pipe(Effect.mapError((cause) => workError("invalid", "Invalid Run question", cause)))
+    const content = yield* Schema.decodeUnknownEffect(StoredRunQuestionContentSchema)(
+      contentInput,
+      {
+        onExcessProperty: "error"
+      }
+    ).pipe(Effect.mapError((cause) => workError("invalid", "Invalid Run question", cause)))
     if (
       request.reuseOpenTaskQuestion &&
       (request.timeout !== undefined ||
@@ -289,7 +290,7 @@ export const makeWorkQuestionSql = (options: {
   })
 
   const resolveQuestion: WorkStore["Service"]["resolveQuestion"] = Effect.fn(function* (request) {
-    const input = yield* Schema.decodeUnknownEffect(ResolveRunQuestionInputSchema)(request.input, {
+    const input = yield* Schema.decodeUnknownEffect(StoredResolveInputSchema)(request.input, {
       onExcessProperty: "error"
     }).pipe(Effect.mapError((cause) => workError("invalid", "Invalid question answer", cause)))
     const now = DateTime.formatIso(yield* DateTime.now)
@@ -368,79 +369,79 @@ export const makeWorkQuestionSql = (options: {
       )
   })
 
-  const expireQuestions: WorkStore["Service"]["expireQuestions"] = Effect.fn("RunQuestion.expire")(
-    function* () {
-      const now = DateTime.formatIso(yield* DateTime.now)
-      yield* writer
-        .transact(
-          Effect.gen(function* () {
-            const due = yield* sql<{
-              readonly question_id: string
-              readonly stopped: number
-            }>`SELECT timer.question_id,
+  const expireQuestions: WorkStore["Service"]["expireQuestions"] = Effect.fn(
+    "StoredRunQuestion.expire"
+  )(function* () {
+    const now = DateTime.formatIso(yield* DateTime.now)
+    yield* writer
+      .transact(
+        Effect.gen(function* () {
+          const due = yield* sql<{
+            readonly question_id: string
+            readonly stopped: number
+          }>`SELECT timer.question_id,
         ${stoppedRunSql("run")} AS stopped
         FROM run_question_timers AS timer JOIN run_questions AS question ON question.question_id = timer.question_id
         JOIN chat_runs AS run ON run.run_id = question.run_id
         WHERE timer.status = 'pending' AND (timer.expires_at <= ${now} OR ${stoppedRunSql("run")})
         ORDER BY timer.expires_at, timer.question_id LIMIT 32`
-            for (const row of due) {
-              const question = yield* get(row.question_id)
-              const timer = question.timer
-              if (timer === undefined) continue
-              if (question.status !== "open" || row.stopped === 1) {
-                yield* sql`UPDATE run_question_timers SET status = 'cancelled' WHERE question_id = ${row.question_id}`
-                yield* journalQuestionChange(row.question_id)
-                continue
-              }
-              const fallback = question.content.choices.find(
-                (choice) => choice.id === timer.fallback_choice_id
-              )
-              if (
-                fallback === undefined ||
-                question.permission_offer !== null ||
-                question.focus_choice !== null
-              )
-                return yield* workError("storage", "Timed question has no ordinary fallback")
-              yield* closeQuestionInTransaction({
-                sql,
-                questionId: row.question_id,
-                timer: "elapsed",
-                now
-              })
-              yield* enqueueRunDelivery({
-                sql,
-                eventId: `question-timeout:${row.question_id}`,
-                now,
-                subject: "Question timer elapsed",
-                body: `<question_timeout>${JSON.stringify({
-                  question_id: question.question_id,
-                  prompt: question.content.prompt,
-                  fallback: fallback.label,
-                  instruction:
-                    "The user did not answer. Continue with this previously declared fallback within your existing authority. Silence grants no approval or permission."
-                })}</question_timeout>`,
-                payload: {
-                  kind: "answer",
-                  timeout: true,
-                  sessionId: question.session_id,
-                  context: question.context,
-                  runIds: [question.run_id],
-                  questionId: question.question_id
-                }
-              })
+          for (const row of due) {
+            const question = yield* get(row.question_id)
+            const timer = question.timer
+            if (timer === undefined) continue
+            if (question.status !== "open" || row.stopped === 1) {
+              yield* sql`UPDATE run_question_timers SET status = 'cancelled' WHERE question_id = ${row.question_id}`
               yield* journalQuestionChange(row.question_id)
+              continue
             }
-          })
+            const fallback = question.content.choices.find(
+              (choice) => choice.id === timer.fallback_choice_id
+            )
+            if (
+              fallback === undefined ||
+              question.permission_offer !== null ||
+              question.focus_choice !== null
+            )
+              return yield* workError("storage", "Timed question has no ordinary fallback")
+            yield* closeQuestionInTransaction({
+              sql,
+              questionId: row.question_id,
+              timer: "elapsed",
+              now
+            })
+            yield* enqueueRunDelivery({
+              sql,
+              eventId: `question-timeout:${row.question_id}`,
+              now,
+              subject: "Question timer elapsed",
+              body: `<question_timeout>${JSON.stringify({
+                question_id: question.question_id,
+                prompt: question.content.prompt,
+                fallback: fallback.label,
+                instruction:
+                  "The user did not answer. Continue with this previously declared fallback within your existing authority. Silence grants no approval or permission."
+              })}</question_timeout>`,
+              payload: {
+                kind: "answer",
+                timeout: true,
+                sessionId: question.session_id,
+                context: question.context,
+                runIds: [question.run_id],
+                questionId: question.question_id
+              }
+            })
+            yield* journalQuestionChange(row.question_id)
+          }
+        })
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          cause instanceof WorkStoreError
+            ? cause
+            : workError("storage", "Could not expire question timers", cause)
         )
-        .pipe(
-          Effect.mapError((cause) =>
-            cause instanceof WorkStoreError
-              ? cause
-              : workError("storage", "Could not expire question timers", cause)
-          )
-        )
-    }
-  )
+      )
+  })
 
   return { askQuestion, resolveQuestion, questions, expireQuestions }
 }

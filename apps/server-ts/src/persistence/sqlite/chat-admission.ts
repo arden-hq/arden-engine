@@ -1,9 +1,9 @@
+import { type RunContext } from "../runs/stored-context.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import { readDefaultApprovalMode } from "./default-approval-mode.js"
 import { agentResultPresentation } from "./agent-result-presentation.js"
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
-import type { RunContext } from "@arden-hq/protocol/runs"
 import { QuestionAnswerSchema } from "@arden-hq/protocol/effect/chat"
 import {
   ChatWriteConflictError,

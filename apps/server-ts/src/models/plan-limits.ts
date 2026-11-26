@@ -1,4 +1,8 @@
-import { hasPlanCredits, type PlanCredits, type PlanLimitsReport } from "@arden-hq/protocol/runs"
+import {
+  hasPlanCredits,
+  type StoredPlanCredits as PlanCredits,
+  type StoredPlanLimitsReport as PlanLimitsReport
+} from "./plan-limits-shape.js"
 import {
   effectiveBackgroundLimit,
   KEEP_GOING,

@@ -1,5 +1,5 @@
+import { HomeLetterBodySchema } from "../../persistence/home/letter-schema.js"
 import { Effect } from "effect"
-import { HomeLetterBodySchema } from "@arden-hq/protocol/effect/runs"
 import type { ChatMessage } from "../../chat/message.js"
 import type { AutomationQueue } from "../../persistence/automations/queue.js"
 import type {

@@ -1,4 +1,4 @@
-import type { RunContext } from "@arden-hq/protocol/runs"
+import { type RunContext } from "../src/persistence/runs/stored-context.js"
 import { describe, expect, it } from "vitest"
 import {
   deriveAuthority,

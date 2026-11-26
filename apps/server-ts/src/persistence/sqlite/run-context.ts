@@ -1,10 +1,12 @@
-import { INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
-import type { RunContext, RunOrigin, RunTaskBinding } from "@arden-hq/protocol/runs"
 import {
   RunContextSchema,
   RunOriginSchema,
-  RunTaskBindingSchema
-} from "@arden-hq/protocol/effect/runs"
+  RunTaskBindingSchema,
+  type RunContext,
+  type RunOrigin,
+  type RunTaskBinding
+} from "../runs/stored-context.js"
+import { INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { JobClassification } from "../job-classification.js"

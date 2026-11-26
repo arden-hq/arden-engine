@@ -1,4 +1,5 @@
 import type { CommandAckMessage } from "@arden-hq/relay-protocol"
+import { QUESTION_TEXT } from "@arden-hq/protocol/runs"
 import { Predicate, type Schema } from "effect"
 import type { Loopback, LoopbackResponse } from "./ports.js"
 import type { Command } from "./routes.js"
@@ -99,7 +100,14 @@ export const runCommand = async (
       const words = command.args.text.trim()
       const answer = (() => {
         if (choices !== undefined)
-          return { kind: "choices", choice_ids: choices, ...(words === "" ? {} : { text: words }) }
+          return {
+            kind: "choices",
+            choice_ids: choices,
+            typed:
+              words === ""
+                ? { kind: QUESTION_TEXT.none }
+                : { kind: QUESTION_TEXT.given, text: words }
+          }
         if (choice === undefined || choice === null)
           return { kind: "text", text: command.args.text }
         return { kind: "choice", choice_id: choice }

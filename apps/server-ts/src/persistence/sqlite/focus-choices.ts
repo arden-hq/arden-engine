@@ -1,3 +1,4 @@
+import { RunContextSchema } from "../runs/stored-context.js"
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { FOCUS_CHOICE_STATUS, type FocusChoice } from "@arden-hq/protocol/sessions/focus-choices"
@@ -7,7 +8,6 @@ import {
   ResolveFocusChoiceInputSchema
 } from "@arden-hq/protocol/effect/sessions/focus-choices"
 import { ChatForwardedSourceSchema } from "@arden-hq/protocol/effect/chat"
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
 import { DateTime, Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {

@@ -3,7 +3,10 @@ import { AUTOMATION_DESTINATION } from "@arden-hq/protocol/common"
 import { outcomeSql } from "./automation-run-outcome.js"
 import { runAncestors } from "./tree-walk.js"
 import { reviewSpaceIdSql } from "./automation-rows.js"
-import type { UsageAutomationOutcome, UsageAutomationRow } from "@arden-hq/protocol/runs"
+import type {
+  StoredUsageAutomationOutcome as UsageAutomationOutcome,
+  StoredUsageAutomationRow as UsageAutomationRow
+} from "../usage/report.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 

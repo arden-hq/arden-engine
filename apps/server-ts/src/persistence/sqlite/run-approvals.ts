@@ -1,3 +1,4 @@
+import { RunOriginSchema } from "../runs/stored-context.js"
 import {
   APPROVAL_ASKER,
   APPROVAL_CARD,
@@ -10,7 +11,7 @@ import {
   type ApprovalPreview
 } from "@arden-hq/protocol/chat"
 import type { RuleSavedIn, RunApproval, RunApprovalWork } from "@arden-hq/protocol/runs"
-import { RuleSavedInSchema, RunOriginSchema } from "@arden-hq/protocol/effect/runs"
+import { RuleSavedInSchema } from "@arden-hq/protocol/effect/runs"
 import { sanitizeApprovalPresentation } from "@arden-hq/protocol/chat"
 import { Effect, Option, Schema } from "effect"
 import { JsonObjectSchema, type JsonObject } from "../json.js"

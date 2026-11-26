@@ -1,5 +1,5 @@
+import { type RunOrigin } from "../persistence/runs/stored-context.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { RunOrigin } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
 
 import type {

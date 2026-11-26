@@ -1,3 +1,4 @@
+import { wireRunQuestion } from "../../persistence/runs/stored-question.js"
 import type { InboxGroup, InboxItem, InboxView } from "@arden-hq/protocol/inbox"
 import type { InboxEntry, InboxEntryGroup, InboxState } from "../../persistence/inbox/store.js"
 
@@ -41,7 +42,7 @@ const entryToWire = (entry: InboxEntry): InboxItem => {
         automation_paused: entry.automationPaused
       }
     case "question":
-      return { ...base, source: entry.source, question: entry.question }
+      return { ...base, source: entry.source, question: wireRunQuestion(entry.question) }
     case "incident":
       return {
         ...base,

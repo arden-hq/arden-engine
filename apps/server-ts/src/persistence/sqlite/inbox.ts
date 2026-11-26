@@ -29,7 +29,7 @@ import {
   type InboxState,
   type OpenAsks
 } from "../inbox/store.js"
-import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
+import type { RunApproval } from "@arden-hq/protocol/runs"
 import { makeRunQuestionReader, type QuestionRow } from "./run-question-read.js"
 import { MAX_SCRIPT_RESULT_ATTEMPTS } from "../scripts/results.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -82,7 +82,7 @@ interface DismissRow {
 }
 
 interface Snapshot {
-  readonly questions: ReadonlyArray<RunQuestion>
+  readonly questions: OpenAsks["questions"]
   readonly now: string
   readonly spaces: ReadonlyArray<SpaceRow>
   readonly tasks: ReadonlyArray<TaskRow>

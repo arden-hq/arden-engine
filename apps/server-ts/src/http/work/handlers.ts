@@ -1,3 +1,8 @@
+import {
+  storedResolveInput,
+  wireRunQuestion,
+  wireRunQuestionList
+} from "../../persistence/runs/stored-question.js"
 import { StopTaskRecordSchema, WorkPageRecordSchema } from "../../persistence/work/task-record.js"
 import { HomeStore } from "../../persistence/home/store.js"
 import { SpaceWorkPageQuerySchema } from "@arden-hq/protocol/effect/spaces/work"
@@ -123,15 +128,17 @@ export const WorkHandlers = HttpApiBuilder.group(
         store.attempts(params.itemId, workerAttemptPageOptions(query)).pipe(Effect.catch(failStore))
       )
       .handle("questions", ({ query }) =>
-        store.questions(runQuestionListOptions(query)).pipe(Effect.catch(failStore))
+        store
+          .questions(runQuestionListOptions(query))
+          .pipe(Effect.map(wireRunQuestionList), Effect.catch(failStore))
       )
       .handle("resolveQuestion", ({ params, payload }) =>
         store
           .resolveQuestion({
             questionId: params.questionId,
-            input: payload
+            input: storedResolveInput(payload)
           })
-          .pipe(Effect.catch(failStore))
+          .pipe(Effect.map(wireRunQuestion), Effect.catch(failStore))
       )
       .handle("create", ({ params, payload }) =>
         store

@@ -1,5 +1,5 @@
+import { type RunOrigin } from "../runs/stored-context.js"
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
-import type { RunOrigin } from "@arden-hq/protocol/runs"
 
 const CHAIN_LIMIT = 1
 

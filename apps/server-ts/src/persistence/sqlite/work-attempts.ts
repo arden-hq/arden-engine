@@ -1,8 +1,8 @@
+import { RunOriginSchema, wireRunContext } from "../runs/stored-context.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import {
   WorkerAttemptPageOptionsSchema,
-  WorkerAttemptPageSchema,
-  RunOriginSchema
+  WorkerAttemptPageSchema
 } from "@arden-hq/protocol/effect/runs"
 import {
   RUN_PAGE,
@@ -58,14 +58,14 @@ export const makeWorkAttempts = (sql: SqlClient.SqlClient): WorkStore["Service"]
         const { origin, item_id, task_generation, ...attempt } = row
         return {
           ...attempt,
-          context: {
+          context: wireRunContext({
             origin: yield* decodeJson(RunOriginSchema, origin).pipe(
               Effect.mapError((cause) =>
                 workError("storage", "Stored attempt origin is corrupt", cause)
               )
             ),
             task: { item_id, generation: task_generation }
-          }
+          })
         }
       })
     )

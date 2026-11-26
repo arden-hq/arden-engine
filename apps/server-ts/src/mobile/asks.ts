@@ -1,3 +1,4 @@
+import { type StoredRunQuestion } from "../persistence/runs/stored-question.js"
 import { previewLine } from "@arden-hq/protocol/chat"
 import {
   MOBILE_FILING,
@@ -6,7 +7,7 @@ import {
   type MobileDetail,
   type MobileFiling
 } from "@arden-hq/protocol/mobile"
-import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
+import type { RunApproval } from "@arden-hq/protocol/runs"
 import { grantedOnlyInTheApp, type ToolDisplay } from "@arden-hq/protocol/tools"
 import { namedTool } from "@arden-hq/protocol/views"
 
@@ -32,7 +33,7 @@ export function mobileAsks({
   spaceNames,
   displayOf
 }: {
-  readonly questions: ReadonlyArray<RunQuestion>
+  readonly questions: ReadonlyArray<StoredRunQuestion>
   readonly approvals: ReadonlyArray<RunApproval>
   readonly places: ReadonlyMap<string, AskPlace>
   readonly spaceNames: ReadonlyMap<string, string>
@@ -55,7 +56,7 @@ export function mobileAsks({
     (question) =>
       question.status === "open" && places.get(question.destination_session_id)?.onboarding !== true
   )
-  const question = (asked: RunQuestion): MobileAsk => ({
+  const question = (asked: StoredRunQuestion): MobileAsk => ({
     kind: "question",
     question_id: asked.question_id,
     run_id: asked.run_id,

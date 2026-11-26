@@ -1,6 +1,4 @@
-import type { AutomationEvent } from "@arden-hq/protocol"
 import { Effect, Schema, Stream } from "effect"
-import { Event as SseEvent } from "effect/unstable/encoding/Sse"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { AutomationRuntime } from "../../automations/runtime.js"
 import { availableAutomationEvents } from "../../automations/event-producers.js"
@@ -14,10 +12,9 @@ import { LocalCaller } from "../middleware/local-only.js"
 import { AutomationId } from "../../persistence/automations/model.js"
 import {
   SESSION_LIFECYCLE_STREAM_ID,
-  SessionLifecycleEvents,
-  type SessionLifecycleDelivery
+  SessionLifecycleEvents
 } from "../../persistence/sessions/events.js"
-import { isInternalLifecycleEvent } from "../../persistence/sessions/internal-events.js"
+import { forApp, lifecycleSse } from "./lifecycle-sse.js"
 import { ArdenApi } from "../api.js"
 import {
   completionErrorToHttp,
@@ -44,41 +41,6 @@ const decodeLastEventId = (value: string | undefined) =>
     : Schema.decodeUnknownEffect(LastEventIdSchema)(value).pipe(
         Effect.mapError(() => new HttpApiError.BadRequest({}))
       )
-
-type AppDelivery =
-  | Extract<SessionLifecycleDelivery, { kind: "reset" }>
-  | (Extract<SessionLifecycleDelivery, { kind: "record" }> & { readonly event: AutomationEvent })
-
-const forApp = (delivery: SessionLifecycleDelivery): delivery is AppDelivery =>
-  delivery.kind === "reset" || !isInternalLifecycleEvent(delivery.event)
-
-const lifecycleSse = (delivery: AppDelivery): SseEvent => {
-  if (delivery.kind === "reset") {
-    return {
-      _tag: "Event",
-      id: String(delivery.cursor),
-      event: "stream_reset",
-      data: JSON.stringify({
-        type: "stream_reset",
-        session_id: SESSION_LIFECYCLE_STREAM_ID,
-        seq: delivery.cursor,
-        reason: delivery.reason
-      })
-    }
-  }
-  return {
-    _tag: "Event",
-    id: String(delivery.sequence),
-    event: delivery.event.type,
-    data: JSON.stringify({
-      ...delivery.event,
-      session_id: SESSION_LIFECYCLE_STREAM_ID,
-      seq: delivery.sequence,
-      timestamp: delivery.event.timestamp ?? delivery.createdAtMs,
-      ...(delivery.replayed ? { replay: true } : {})
-    })
-  }
-}
 
 export const AutomationHandlers = HttpApiBuilder.group(
   ArdenApi,

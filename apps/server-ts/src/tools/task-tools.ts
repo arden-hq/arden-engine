@@ -33,7 +33,7 @@ import { SpaceStore } from "../persistence/spaces/store.js"
 import { noSpace } from "./spaces.js"
 import { toolFailure } from "./tool-failure.js"
 import { taskHandle } from "./task-handle.js"
-import { askUserQuestion } from "./ask-user-input.js"
+import { askUserQuestion, questionData } from "./ask-user-input.js"
 import type { ServerRunContext } from "./run-context.js"
 import { workTarget, type WorkTarget } from "./work-reach.js"
 import { recordApplied, type CallEffects } from "../execution/tool-effect.js"
@@ -525,7 +525,7 @@ const applyTaskChange = async (
     return {
       result: `The Task is waiting on question_id ${question.question_id}; the user sees it as a card, and answering it resumes the Task.${updated === undefined ? "" : " The other fields were saved."} Continue independent work, or end this Run while waiting for the answer.`,
       preview: question.content.prompt,
-      data: { question }
+      data: questionData(question)
     }
   }
   if (updated === undefined) throw new Error("A Task change without a question saves the Task")

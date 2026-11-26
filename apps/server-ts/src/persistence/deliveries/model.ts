@@ -1,4 +1,5 @@
-import { AnswerWithdrawalReasonSchema, RunContextSchema } from "@arden-hq/protocol/effect/runs"
+import { RunContextSchema } from "../runs/stored-context.js"
+import { AnswerWithdrawalReasonSchema } from "@arden-hq/protocol/effect/runs"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import {
   ChatReplyContextSchema,

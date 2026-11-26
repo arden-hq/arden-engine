@@ -198,6 +198,7 @@ import { todoItemStates } from "./0197_todo_item_states.js"
 import { navigationStates } from "./0198_navigation_states.js"
 import { lifecycleEventLinks } from "./0199_lifecycle_event_links.js"
 import { sessionSnapshotStates } from "./0200_session_snapshot_states.js"
+import { memoryContextStates } from "./0201_memory_context_states.js"
 
 /**
  * How a migration keeps every reference whole. A whole-database check reads
@@ -427,7 +428,8 @@ export const migrations: ReadonlyArray<Migration> = [
   todoItemStates,
   navigationStates,
   lifecycleEventLinks,
-  sessionSnapshotStates
+  sessionSnapshotStates,
+  memoryContextStates
 ]
 
 export const checkMigrationOrder = (list: ReadonlyArray<Migration>): number => {

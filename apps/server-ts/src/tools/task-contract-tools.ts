@@ -1,5 +1,6 @@
+import { questionData } from "./ask-user-input.js"
+import { type StoredRunQuestionContent } from "../persistence/runs/stored-question.js"
 import { ToolExecutionError, type ToolContext } from "@arden-hq/loop"
-import type { RunQuestionContent } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import {
   ContractLineInputSchema,
@@ -125,7 +126,7 @@ const savedLine = (contract: TaskContract, lineId: number): ContractLine => {
   return line
 }
 
-const proposalCard = (contract: TaskContract, change: ContractChange): RunQuestionContent => {
+const proposalCard = (contract: TaskContract, change: ContractChange): StoredRunQuestionContent => {
   if (change.kind === "retire") {
     const line = savedLine(contract, change.line_id)
     return {
@@ -211,7 +212,7 @@ const makeTaskContractTools = (services: TaskToolServices): ReadonlyArray<Server
       return {
         result: `Proposed (question_id ${question.question_id}): ${content.prompt} The owner sees it as a card; only their answer saves it, so do not say it is saved. Carry on with the work; their answer arrives at your next step.`,
         preview: content.prompt,
-        data: { question },
+        data: questionData(question),
         host: appliedReceipt(
           ctx,
           inChatTarget({

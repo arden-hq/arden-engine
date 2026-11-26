@@ -1,5 +1,6 @@
+import { type StoredRunQuestion } from "../runs/stored-question.js"
 import { storeErrorFields } from "../errors.js"
-import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
+import type { RunApproval } from "@arden-hq/protocol/runs"
 import type {
   InboxFailureOrigin,
   InboxPlanLimitReached,
@@ -54,7 +55,7 @@ export interface InboxFailureEntry extends InboxEntryBase {
 
 export interface InboxQuestionEntry extends InboxEntryBase {
   readonly source: "question"
-  readonly question: RunQuestion
+  readonly question: StoredRunQuestion
 }
 
 export interface InboxIncidentEntry extends InboxEntryBase {
@@ -114,7 +115,7 @@ export type InboxDismissScope =
   | { readonly scope: "items"; readonly keys: ReadonlyArray<string> }
 
 export interface OpenAsks {
-  readonly questions: ReadonlyArray<RunQuestion>
+  readonly questions: ReadonlyArray<StoredRunQuestion>
   readonly approvals: ReadonlyArray<RunApproval>
 }
 

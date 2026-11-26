@@ -1,5 +1,5 @@
+import { RunOriginSchema } from "../runs/stored-context.js"
 import type { AutomationContextMode, AutomationToolScope } from "@arden-hq/protocol/automations"
-import { RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import { Effect, Result, Schema } from "effect"
 import { type AutomationRules, type SystemAutomationSpec } from "../automations/model.js"
 import { AutomationStoreError, type AutomationQueueSource } from "../automations/store.js"

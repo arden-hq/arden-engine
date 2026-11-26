@@ -1,4 +1,4 @@
-import type { HomeEvidence, HomeLetterBody } from "@arden-hq/protocol/runs"
+import { type HomeEvidence, type HomeLetterBody } from "../persistence/home/letter-schema.js"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { Effect } from "effect"
 import type { HomeAddressBook, HomeAddressNeeds } from "../persistence/home/model.js"

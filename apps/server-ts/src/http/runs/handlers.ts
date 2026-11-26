@@ -2,6 +2,8 @@ import { LocalCaller } from "../middleware/local-only.js"
 import { runListOptions } from "@arden-hq/protocol/effect/runs"
 import { RUN_LIST_FILTER, RUN_PAGE, RUN_PAGE_NEXT, RUN_TRACE } from "@arden-hq/protocol/runs"
 import { runDetail } from "./run-detail.js"
+import { wireSessionRun, wireUsageReport } from "./usage-wire.js"
+import { wirePlanLimits } from "./plan-limits-wire.js"
 import type { SessionUsageReport } from "@arden-hq/protocol/runs"
 import { DateTime, Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
@@ -177,24 +179,25 @@ export const RunHandlers = HttpApiBuilder.group(
             source === undefined
               ? undefined
               : yield* Effect.promise(() => currentPlanReading(source, now))
-          return planLimitsReport(
-            reading,
-            source?.history() ?? [],
-            stopPercent(settings.ardenLimit) ?? 100,
-            now
+          return wirePlanLimits(
+            planLimitsReport(
+              reading,
+              source?.history() ?? [],
+              stopPercent(settings.ardenLimit) ?? 100,
+              now
+            )
           )
         }).pipe(Effect.catch(failInternal("Runs")))
       )
       .handle("usage", ({ query }) =>
-        usage
-          .report({ days: query.days })
-          .pipe(
-            Effect.mapError((cause) =>
-              cause instanceof UsageStoreError
-                ? storeErrorToHttp(cause)
-                : new HttpApiError.InternalServerError({})
-            )
+        usage.report({ days: query.days }).pipe(
+          Effect.map(wireUsageReport),
+          Effect.mapError((cause) =>
+            cause instanceof UsageStoreError
+              ? storeErrorToHttp(cause)
+              : new HttpApiError.InternalServerError({})
           )
+        )
       )
       .handle(
         "sessionUsage",
@@ -205,10 +208,12 @@ export const RunHandlers = HttpApiBuilder.group(
           const windows = yield* contextWindows(stored.runs.map((run) => run.model_id))
           return {
             session_id: stored.session_id,
-            runs: stored.runs.map((run) => ({
-              ...run,
-              context_window: run.model_id === null ? null : (windows.get(run.model_id) ?? null)
-            }))
+            runs: stored.runs.map((run) =>
+              wireSessionRun(
+                run,
+                run.model_id === null ? null : (windows.get(run.model_id) ?? null)
+              )
+            )
           } satisfies SessionUsageReport
         })
       )

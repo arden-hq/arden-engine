@@ -1,6 +1,11 @@
 import { byteLength } from "@arden-hq/std/text"
 import { utcDay } from "@arden-hq/std/time"
-import type { RunMemoryRecallRole, RunMemorySource } from "@arden-hq/protocol/runs"
+import {
+  MEMORY_OUTCOME,
+  type RunMemoryPlacement,
+  type RunMemoryRecallRole,
+  type RunMemorySource
+} from "@arden-hq/protocol/runs"
 import { pageKind, recordFolders, type PageKind } from "../wiki/collections.js"
 import { PAGE_AGE_RULE } from "../wiki/page-age.js"
 import { activeRunPages, type PageRecord, type RunPage } from "../wiki/snapshot.js"
@@ -133,7 +138,7 @@ const pageSource = (
     | { readonly kind: "core" }
     | { readonly kind: "recalled"; readonly role: RunMemoryRecallRole },
   record: PageRecord,
-  placement: Pick<RunMemorySource, "bytes" | "outcome" | "reason">
+  placement: RunMemoryPlacement
 ): RunMemorySource => ({
   ...kind,
   page_id: record.page.pageId,
@@ -179,7 +184,7 @@ const renderStandingFacts = (
         record,
         cut
           ? { bytes: byteLength(block), outcome: "cut", reason: "standing_page_allowance" }
-          : { bytes: byteLength(block), outcome: "whole", reason: null }
+          : { bytes: byteLength(block), outcome: "whole" }
       )
     )
   }
@@ -252,8 +257,7 @@ const renderRecall = (
     sources.push(
       pageSource({ kind: "recalled", role: roleOf(record) }, record, {
         bytes: byteLength(block),
-        outcome,
-        reason: outcome === "cut" ? "recall_allowance" : null
+        ...(outcome === MEMORY_OUTCOME.cut ? { outcome, reason: "recall_allowance" } : { outcome })
       })
     )
   }

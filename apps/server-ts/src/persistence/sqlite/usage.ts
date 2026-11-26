@@ -1,16 +1,15 @@
 import type {
-  RunUsage,
-  SessionRunUsage,
-  UsageDailyCell,
-  UsageReport
-} from "@arden-hq/protocol/runs"
+  StoredSessionRun as SessionRunUsage,
+  StoredUsageDailyCell as UsageDailyCell,
+  StoredUsageReport as UsageReport
+} from "../usage/report.js"
+import type { StoredRunUsage as RunUsage } from "../runs/stored-result.js"
 import { utcDay as utcDayOf } from "@arden-hq/std/time"
 import { DateTime, Effect, Option } from "effect"
 
 import { UsageStore, UsageStoreError, type StoredSessionUsage } from "../usage/store.js"
 import { backgroundUsage } from "./usage-background.js"
 import { DAILY_COST_SUM } from "./run-usage.js"
-import { providerCost } from "../runs/stored-result.js"
 import type { PersistenceDeps } from "./deps.js"
 
 const error = (
@@ -103,7 +102,7 @@ const callUsage = (row: ModelCallRow): RunUsage | null =>
         cache_read: row.cache_read,
         cache_write: row.cache_write,
         total: row.total,
-        cost: providerCost(row.cost ?? undefined)
+        ...withCost(row.cost)
       }
 
 /** A reported cost read back from SQLite, where NULL is unknown; absent from the answer then. */

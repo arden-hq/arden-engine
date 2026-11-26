@@ -12,20 +12,18 @@ import { partialService } from "./kit.js"
 const SOURCES: MemorySources = {
   standing: () => ({
     text: "## Core Memory",
-    sources: [
-      { kind: "core", page_id: "me", version: "v1", bytes: 20, outcome: "whole", reason: null }
-    ]
+    sources: [{ kind: "core", page_id: "me", version: "v1", bytes: 20, outcome: "whole" }]
   }),
   recall: () => ({
     text: "## Memory context",
     sources: [
       {
         kind: "recalled",
+        role: "knowledge",
         page_id: "garden",
         version: "v1",
         bytes: 30,
-        outcome: "whole",
-        reason: null
+        outcome: "whole"
       }
     ]
   })
@@ -90,7 +88,7 @@ it("an owner is sent and recorded core and recall; a worker gets no recall", asy
   const worker = await run(() => Effect.succeed({ ...SOURCES, recall: undefined }), "worker")
   expect(worker.prefetched.memoryContext.recall).toEqual([])
   expect(worker.records).toHaveLength(1)
-  expect(worker.records[0]).toMatchObject({ reader: "worker", query: null })
+  expect(worker.records[0]).toMatchObject({ reader: "worker", recall: { kind: "none" } })
 })
 
 it("sends and records no sources when the turn has no Memory or Memory fails", async () => {

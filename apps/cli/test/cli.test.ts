@@ -330,22 +330,30 @@ const QUESTION: RunQuestion = {
   turn_id: "turn-1",
   session_id: "session-1",
   destination_session_id: "session-1",
-  context: { origin: { kind: "chat", session_id: "session-1", turn_id: "turn-1" }, task: null },
+  context: {
+    origin: { kind: "chat", session_id: "session-1", turn_id: "turn-1", chain_depth: 0 },
+    task: { kind: "none" },
+    belongs_to: { kind: "own" }
+  },
   content: {
     prompt: "Which inbox?",
-    detail: null,
+    detail: { kind: "none" },
     choices: [
-      { id: "work", label: "Work" },
-      { id: "home", label: "Home" }
-    ]
+      { id: "work", label: "Work", detail: { kind: "none" } },
+      { id: "home", label: "Home", detail: { kind: "none" } }
+    ],
+    multiple: false
   },
   status: "open",
-  resolution: null,
-  continuation: null,
-  focus_choice: null,
-  permission_offer: null,
-  continuity_revision: null,
-  created_at: "2026-08-30T00:00:00.000Z"
+  resolution: { kind: "unresolved" },
+  continuation: { kind: "none" },
+  focus_choice: { kind: "none" },
+  permission_offer: { kind: "none" },
+  contract_proposal: { kind: "none" },
+  source_title: { kind: "none" },
+  continuity: { kind: "none" },
+  created_at: "2026-08-30T00:00:00.000Z",
+  timer: { kind: "none" }
 }
 
 const QUESTION_EVENT: HeadlessRunEvent = {

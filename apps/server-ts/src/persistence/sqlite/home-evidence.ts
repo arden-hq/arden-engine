@@ -1,6 +1,6 @@
+import { HOME_HEADLINES } from "../home/letter-schema.js"
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { SqlClient, SqlError, Statement } from "effect/unstable/sql"
-import { HOME_HEADLINES } from "@arden-hq/protocol/effect/runs"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import {
   HomeEvidencePageSchema,

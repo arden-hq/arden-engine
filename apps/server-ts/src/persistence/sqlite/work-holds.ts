@@ -1,4 +1,4 @@
-import type { RunQuestion } from "@arden-hq/protocol/runs"
+import { type StoredRunQuestion } from "../runs/stored-question.js"
 import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -11,7 +11,7 @@ import { blockTaskOnYou } from "./task-block.js"
 export const holdQuestionTask = Effect.fn("WorkQuestions.holdTask")(function* (options: {
   readonly sql: SqlClient.SqlClient
   readonly sessionEvents: SessionLifecycleEvents["Service"]
-  readonly question: RunQuestion
+  readonly question: StoredRunQuestion
   readonly now: string
 }) {
   const { sql, question, now } = options

@@ -1,5 +1,6 @@
+import { storedAnswerSaid, type StoredRunQuestion } from "../persistence/runs/stored-question.js"
 import { RUN_PAGE, RUN_QUESTION_FILTER, RUN_QUESTION_STATE } from "@arden-hq/protocol/runs"
-import { answerSaid, answerWords, type RunQuestion } from "@arden-hq/protocol/runs"
+import { answerWords } from "@arden-hq/protocol/runs"
 import { clipLine } from "@arden-hq/std/text"
 import { DateTime, Effect } from "effect"
 import type { WorkStore } from "../persistence/work/store.js"
@@ -38,7 +39,7 @@ export const spaceAsksContext = Effect.fn("Context.spaceAsks")(
 )
 
 const askedLine = (
-  question: RunQuestion,
+  question: StoredRunQuestion,
   since: number,
   includeOpen: boolean
 ): ReadonlyArray<string> => {
@@ -49,7 +50,7 @@ const askedLine = (
       : []
   const resolution = question.resolution
   if (resolution === null || Date.parse(resolution.resolved_at) < since) return []
-  const said = answerSaid(question.content.choices, resolution.answer)
+  const said = storedAnswerSaid(question.content.choices, resolution.answer)
   if (said === undefined) return []
   return [
     `- ${prompt}: answered ${resolution.resolved_at.slice(0, 10)}: ${clipLine(answerWords(said), 300)}`

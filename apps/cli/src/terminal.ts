@@ -5,7 +5,7 @@ import { activeRunId } from "@arden-hq/protocol/sessions"
 import { HeadlessHttpError, type HeadlessRunEvent } from "@arden-hq/headless"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { grantedOnlyInTheApp, type ToolCatalogResponse } from "@arden-hq/protocol/tools"
-import { runDecoders, type RunQuestion } from "@arden-hq/protocol/runs"
+import { QUESTION_TEXT, runDecoders, type RunQuestion } from "@arden-hq/protocol/runs"
 import { errorMessage } from "@arden-hq/std/errors"
 import { sleep } from "@arden-hq/std/sleep"
 import { clipLine, cutText } from "@arden-hq/std/text"
@@ -253,7 +253,7 @@ export const requestResponder = (input: {
     const content = question.content
     const heading = [
       `Arden asks: ${content.prompt}`,
-      ...(content.detail === null ? [] : [`  ${clip(content.detail)}`])
+      ...(content.detail.kind === QUESTION_TEXT.none ? [] : [`  ${clip(content.detail.text)}`])
     ].join("\n")
     if (ask === undefined) return undefined
     const answer =

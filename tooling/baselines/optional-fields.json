@@ -10,10 +10,5 @@
   "libs/protocol/src/runs/approval-schema.ts": 12,
   "libs/protocol/src/runs/approvals.ts": 3,
   "libs/protocol/src/runs/attempts.ts": 5,
-  "libs/protocol/src/runs/context.ts": 2,
-  "libs/protocol/src/runs/contracts.ts": 5,
-  "libs/protocol/src/runs/home.ts": 17,
-  "libs/protocol/src/runs/progress.ts": 3,
-  "libs/protocol/src/runs/questions.ts": 14,
-  "libs/protocol/src/runs/schema.ts": 33
+  "libs/protocol/src/runs/progress.ts": 3
 }

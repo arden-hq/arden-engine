@@ -1,5 +1,7 @@
 import type { RunApproval } from "@arden-hq/protocol/runs"
 import type { ToolDisplay } from "@arden-hq/protocol/tools"
+import { RunQuestionAnswerSchema } from "@arden-hq/protocol/effect/runs"
+import { Predicate, Schema } from "effect"
 import { expect, it } from "vitest"
 import { mobileAsks } from "../src/mobile/asks.js"
 import { runCommand } from "../src/relay/commands.js"
@@ -100,4 +102,26 @@ it("a phone decision goes to the engine as it came, and its answer is the result
   const denied = engine({ status: 200, body: { status: "ok" } })
   await decide(denied.loopback, "cid-3", false)
   expect(denied.requests[0]?.body).toMatchObject({ approved: false })
+})
+
+it("a phone answer with several choices and words reaches the engine as an answer it accepts", async () => {
+  const requests: Array<unknown> = []
+  const loopback: Loopback = {
+    request: async ({ body }) => {
+      requests.push(body)
+      return { status: 200, body: { status: "ok" } }
+    },
+    events: async function* () {}
+  }
+  await runCommand(loopback, "cid-answer", {
+    kind: "answer",
+    args: { question_id: "q-1", text: " and soon ", option_ids: ["a", "b"] }
+  })
+  const [sent] = requests
+  const answer = Predicate.isObject(sent) ? sent["answer"] : undefined
+  expect(Schema.decodeUnknownSync(RunQuestionAnswerSchema)(answer)).toEqual({
+    kind: "choices",
+    choice_ids: ["a", "b"],
+    typed: { kind: "given", text: "and soon" }
+  })
 })

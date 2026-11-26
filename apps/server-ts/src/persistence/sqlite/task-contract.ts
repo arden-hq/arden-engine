@@ -1,4 +1,4 @@
-import type { ResolveRunQuestionInput } from "@arden-hq/protocol/runs"
+import { type StoredResolveAnswer } from "../runs/stored-question.js"
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -175,9 +175,7 @@ export const isContractProposal = (
     Effect.mapError(fail("Could not read the proposal"))
   )
 
-export const contractAnswerMisfit = (
-  answer: ResolveRunQuestionInput["answer"]
-): string | undefined =>
+export const contractAnswerMisfit = (answer: StoredResolveAnswer): string | undefined =>
   answer.kind === "choice" || answer.kind === "dismiss" || answer.kind === "text"
     ? undefined
     : "A contract line takes Save, a reply or Skip."
@@ -186,7 +184,7 @@ export const settleContractProposalInTransaction = Effect.fn("TaskContract.settl
   function* (options: {
     readonly sql: SqlClient.SqlClient
     readonly questionId: string
-    readonly answer: ResolveRunQuestionInput["answer"]
+    readonly answer: StoredResolveAnswer
     readonly now: string
   }) {
     const { sql, questionId, answer, now } = options

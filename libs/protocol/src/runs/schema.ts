@@ -1,12 +1,8 @@
 import { Schema } from "effect"
 import type { Effect } from "effect"
-import { AutomationRunOutcomeSchema } from "../automations/outcome.js"
 import { ChatProjectionEventSchema } from "../chat/schema.js"
-import type { JsonRecord } from "../common/json.js"
 import {
-  AppDestinationSchema,
   IsoDateTimeStringSchema,
-  RuntimeRunStatusSchema,
   withExtras,
   NonNegativeIntSchema,
   PositiveIntSchema
@@ -21,18 +17,14 @@ import {
   RUN_REASONING,
   RUN_RESULT,
   RUN_STOP_REASON,
-  RUN_TRACE
-} from "./contracts.js"
-import type {
-  PlanLimitsReport,
-  RunDetail,
-  RunEventPage,
-  RunMemoryContext,
-  RunMemorySource,
-  SessionUsageReport,
-  UsageReport
-} from "./contracts.js"
-import { MODEL_CALL_KINDS } from "./usage.js"
+  RUN_TRACE,
+  PLAN_LIMIT_REACHED,
+  PLAN_CREDITS,
+  CREDIT_BALANCE,
+  PLAN_NAME
+} from "./run-states.js"
+import type { PlanLimitsReport, RunDetail, RunEventPage } from "./contracts.js"
+import { RunMemoryContextSchema } from "./memory.js"
 import { RunCursorPageNextSchema } from "./list-options.js"
 import { ACTIVE_RUN_STATUSES, RUN_STATUS, TERMINAL_RUN_STATUSES } from "./status.js"
 import { CONTEXT_SIZE } from "../chat/events/run.js"
@@ -87,75 +79,6 @@ export const RunLocalInstructionSourceSchema = Schema.Union([
     status: Schema.Literals([LOCAL_INSTRUCTION_STATUS.empty, LOCAL_INSTRUCTION_STATUS.unreadable])
   })
 ])
-
-const RunMemoryOutcomeSchema = Schema.Literals(["whole", "passage", "cut", "dropped"] as const)
-const RunMemoryCutReasonSchema = Schema.Literals([
-  "standing_page_allowance",
-  "index_allowance",
-  "space_page_allowance",
-  "recall_allowance"
-] as const)
-const memoryPlacement = {
-  bytes: NonNegativeIntSchema,
-  outcome: RunMemoryOutcomeSchema,
-  reason: Schema.NullOr(RunMemoryCutReasonSchema)
-}
-
-const pageFields = {
-  page_id: IdentifierSchema,
-  version: IdentifierSchema,
-  ...memoryPlacement
-}
-
-/** One Memory source of a composition: identity and bytes, never text. */
-const RunMemorySourceSchema: Schema.Codec<RunMemorySource> = Schema.Union([
-  withExtras({
-    kind: Schema.Literal("space"),
-    space_id: IdentifierSchema,
-    page_id: Schema.NullOr(IdentifierSchema),
-    version: Schema.NullOr(IdentifierSchema),
-    ...memoryPlacement
-  }),
-  withExtras({ kind: Schema.Literal("core"), ...pageFields }),
-  withExtras({
-    kind: Schema.Literal("recalled"),
-    role: Schema.optionalKey(Schema.Literals(["knowledge", "record", "contract"] as const)),
-    ...pageFields
-  }),
-  withExtras({
-    kind: Schema.Literal("index"),
-    root: Schema.String,
-    listed: NonNegativeIntSchema,
-    folded: Schema.Array(withExtras({ folder: Schema.String, pages: PositiveIntSchema })),
-    ...memoryPlacement
-  })
-]).check(
-  Schema.makeFilter((source) =>
-    (source.outcome === "cut" || source.outcome === "dropped") === (source.reason !== null)
-      ? undefined
-      : { path: ["reason"], issue: "names the limit exactly when the source was cut or dropped" }
-  )
-)
-
-/** The one shape of a stored Memory composition; a Run's record is a list of them. */
-export const RunMemoryContextSchema: Schema.Codec<RunMemoryContext> = withExtras({
-  reader: Schema.Literals(["owner", "worker"] as const),
-  revision: Schema.NullOr(IdentifierSchema),
-  query: Schema.NullOr(Schema.String),
-  budget: Schema.optionalKey(
-    withExtras({
-      standing_page: PositiveIntSchema,
-      standing_frame: PositiveIntSchema,
-      index: Schema.optionalKey(PositiveIntSchema),
-      space: PositiveIntSchema,
-      space_instructions: PositiveIntSchema,
-      space_page: PositiveIntSchema,
-      space_page_list: PositiveIntSchema,
-      recall: PositiveIntSchema
-    })
-  ),
-  sources: Schema.Array(RunMemorySourceSchema)
-})
 
 const runDetailFields = {
   version: Schema.Literal(1),
@@ -276,76 +199,6 @@ export const decodeRunTerminalResultEffect = (
 ): Effect.Effect<Schema.Schema.Type<typeof RunTerminalResultSchema>, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(RunTerminalResultSchema)(value)
 
-const SessionTypeSchema = Schema.Literals(["chat", "channel", "agent"] as const)
-
-export const UsageDailyCellSchema = withExtras({
-  day: Schema.String.check(Schema.isMinLength(10), Schema.isMaxLength(10)),
-  space_id: Schema.NullOr(Schema.NonEmptyString),
-  space_name: Schema.NullOr(Schema.NonEmptyString),
-  origin: Schema.Literals(["user", "automation"] as const),
-  session_type: Schema.NullOr(SessionTypeSchema),
-  model_id: Schema.NullOr(Schema.NonEmptyString),
-  kind: Schema.Literals(MODEL_CALL_KINDS),
-  total: NonNegativeIntSchema,
-  output: NonNegativeIntSchema,
-  cache_read: NonNegativeIntSchema,
-  cache_write: NonNegativeIntSchema,
-  cost: Schema.optionalKey(NonNegativeNumberSchema),
-  runs: NonNegativeIntSchema
-})
-
-export const UsageTopSessionSchema = withExtras({
-  session_id: IdentifierSchema,
-  name: Schema.NullOr(Schema.String),
-  space_id: Schema.NullOr(Schema.NonEmptyString),
-  space_name: Schema.NullOr(Schema.NonEmptyString),
-  session_type: SessionTypeSchema,
-  total: NonNegativeIntSchema,
-  output: NonNegativeIntSchema,
-  cache_read: NonNegativeIntSchema,
-  cache_write: NonNegativeIntSchema,
-  cost: Schema.optionalKey(NonNegativeNumberSchema),
-  runs: NonNegativeIntSchema,
-  average_last_input: Schema.NullOr(NonNegativeIntSchema)
-})
-
-export const UsageAutomationOutcomeSchema = withExtras({
-  outcome: Schema.NullOr(AutomationRunOutcomeSchema),
-  checks: NonNegativeIntSchema,
-  runs: NonNegativeIntSchema,
-  unaccounted_runs: NonNegativeIntSchema,
-  total: NonNegativeIntSchema,
-  output: NonNegativeIntSchema,
-  cache_read: NonNegativeIntSchema,
-  cache_write: NonNegativeIntSchema
-})
-
-export const UsageAutomationRowSchema = withExtras({
-  task_id: Schema.NullOr(Schema.NonEmptyString),
-  item_id: Schema.NullOr(Schema.NonEmptyString),
-  space_id: Schema.NullOr(Schema.NonEmptyString),
-  name: Schema.NonEmptyString,
-  destination: Schema.NullOr(AppDestinationSchema),
-  purpose: Schema.NullOr(
-    Schema.Literals(["user_automation", "space_review", "task_execution", "system"])
-  ),
-  handler: Schema.NullOr(Schema.NonEmptyString),
-  checks: NonNegativeIntSchema,
-  runs: NonNegativeIntSchema,
-  unaccounted_runs: NonNegativeIntSchema,
-  total: NonNegativeIntSchema,
-  cache_read: NonNegativeIntSchema,
-  outcomes: Schema.Array(UsageAutomationOutcomeSchema)
-})
-
-export const UsageReportSchema: Schema.Codec<UsageReport, JsonRecord> = withExtras({
-  days: PositiveIntSchema,
-  since: Schema.String.check(Schema.isMinLength(10), Schema.isMaxLength(10)),
-  daily: Schema.Array(UsageDailyCellSchema),
-  top_sessions: Schema.Array(UsageTopSessionSchema),
-  automations: Schema.Array(UsageAutomationRowSchema)
-})
-
 /**
  * `GET /chat/runs`: a page of the server's Runs, oldest first, sub-agent Runs
  * included. `next` is present when more Runs follow; pass it as `after` to
@@ -370,37 +223,6 @@ export const RunListSchema = withExtras({
 })
 export type RunList = typeof RunListSchema.Type
 
-export const SessionUsageReportSchema: Schema.Codec<SessionUsageReport> = withExtras({
-  session_id: IdentifierSchema,
-  runs: Schema.Array(
-    withExtras({
-      run_id: IdentifierSchema,
-      turn_id: IdentifierSchema,
-      turn_index: Schema.NullOr(NonNegativeIntSchema),
-      status: RuntimeRunStatusSchema,
-      started_at: IsoDateTimeStringSchema,
-      ended_at: Schema.NullOr(IsoDateTimeStringSchema),
-      model_id: Schema.NullOr(IdentifierSchema),
-      reasoning_effort: Schema.NullOr(Schema.NonEmptyString),
-      context_window: Schema.NullOr(PositiveIntSchema),
-      timing: Schema.NullOr(
-        withExtras({
-          duration_ms: NonNegativeIntSchema,
-          tool_time_ms: NonNegativeIntSchema,
-          steps: NonNegativeIntSchema
-        })
-      ),
-      calls: Schema.Array(
-        withExtras({
-          usage: Schema.NullOr(RunUsageSchema),
-          admitted_at: Schema.NullOr(IsoDateTimeStringSchema),
-          responded_at: Schema.NullOr(IsoDateTimeStringSchema)
-        })
-      )
-    })
-  )
-})
-
 const PlanWindowSchema = withExtras({
   used_percent: NonNegativeNumberSchema,
   window_seconds: PositiveIntSchema,
@@ -410,7 +232,10 @@ const PlanWindowSchema = withExtras({
     elapsed_percent: NonNegativeNumberSchema,
     on_pace_percent: NonNegativeNumberSchema,
     ahead: Schema.Boolean,
-    reaches_limit_at: Schema.NullOr(IsoDateTimeStringSchema)
+    reaches_limit: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(PLAN_LIMIT_REACHED.not_before_reset) }),
+      Schema.Struct({ kind: Schema.Literal(PLAN_LIMIT_REACHED.at), at: IsoDateTimeStringSchema })
+    ])
   })
 })
 
@@ -418,18 +243,26 @@ export const PlanLimitsReportSchema: Schema.Codec<PlanLimitsReport> = withExtras
   plans: Schema.Array(
     withExtras({
       provider: Schema.NonEmptyString,
-      plan: Schema.NullOr(Schema.NonEmptyString),
+      plan: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal(PLAN_NAME.unnamed) }),
+        Schema.Struct({ kind: Schema.Literal(PLAN_NAME.named), name: Schema.NonEmptyString })
+      ]),
       windows: Schema.Array(PlanWindowSchema),
-      credits: Schema.NullOr(
-        Schema.Union([
-          Schema.Struct({ kind: Schema.Literal("unlimited") }),
-          Schema.Struct({
-            kind: Schema.Literal("limited"),
-            available: Schema.Boolean,
-            balance: Schema.NullOr(NonNegativeNumberSchema)
-          })
-        ])
-      ),
+      credits: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal(PLAN_CREDITS.unreported) }),
+        Schema.Struct({ kind: Schema.Literal(PLAN_CREDITS.unlimited) }),
+        Schema.Struct({
+          kind: Schema.Literal(PLAN_CREDITS.limited),
+          available: Schema.Boolean,
+          balance: Schema.Union([
+            Schema.Struct({ kind: Schema.Literal(CREDIT_BALANCE.unreported) }),
+            Schema.Struct({
+              kind: Schema.Literal(CREDIT_BALANCE.reported),
+              amount: NonNegativeNumberSchema
+            })
+          ])
+        })
+      ]),
       observed_at: IsoDateTimeStringSchema
     })
   )

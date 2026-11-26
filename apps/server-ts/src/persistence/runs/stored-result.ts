@@ -43,7 +43,7 @@ export type StoredRunTerminalResult = typeof StoredRunTerminalResultSchema.Type
 export const providerCost = (usd: number | undefined): ProviderCost =>
   usd === undefined ? { kind: PROVIDER_COST.unreported } : { kind: PROVIDER_COST.reported, usd }
 
-const wireRunUsage = (usage: StoredRunUsage): RunUsage => ({
+export const wireRunUsage = (usage: StoredRunUsage): RunUsage => ({
   prompt: usage.prompt,
   completion: usage.completion,
   total: usage.total,

@@ -1,3 +1,4 @@
+import { RunOriginSchema } from "../runs/stored-context.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { makeTurnInputs } from "./transcript-turn-inputs.js"
 import { makeResolveReference } from "./transcript-reference.js"
@@ -8,7 +9,6 @@ import { Effect, Schema } from "effect"
 import { makeTranscriptSearches } from "./transcript-search.js"
 import { makeToolResultInSession, type TranscriptRow } from "./transcript-tool-result.js"
 import { makeToolCallCounts } from "./transcript-tool-calls.js"
-import { RunOriginSchema } from "@arden-hq/protocol/effect/runs"
 import {
   TranscriptDataCorruptionError,
   TranscriptQueries,

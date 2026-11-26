@@ -1,5 +1,5 @@
+import { type HomeLetter } from "../persistence/home/letter-schema.js"
 import type { MobileLetter, MobileLink } from "@arden-hq/protocol/mobile"
-import type { HomeLetter } from "@arden-hq/protocol/runs"
 
 export type ArdenPlace =
   | { readonly kind: "session_ref"; readonly ref: string }

@@ -1,4 +1,10 @@
 import {
+  type StoredResolveInput,
+  type StoredRunQuestion,
+  type StoredRunQuestionContent,
+  type StoredRunQuestionList
+} from "../runs/stored-question.js"
+import {
   type TaskAttachmentRecord,
   type TaskCommentRecord,
   type TaskRecord,
@@ -24,13 +30,7 @@ import type {
 import type { CreateSpaceTaskAttachmentRequest } from "@arden-hq/protocol/effect/spaces/work"
 import type { RunDelivery } from "../deliveries/model.js"
 import type { WorkerAttemptPage, WorkerAttemptPageOptions } from "@arden-hq/protocol/runs"
-import type {
-  ResolveRunQuestionInput,
-  RunQuestion,
-  RunQuestionContent,
-  RunQuestionList,
-  RunQuestionListOptions
-} from "@arden-hq/protocol/runs"
+import type { RunQuestionListOptions } from "@arden-hq/protocol/runs"
 import { Context, Effect, Schema } from "effect"
 import type { TaskInferenceReview } from "./inference.js"
 import type { TaskDirectionChanged } from "./task-direction.js"
@@ -164,18 +164,18 @@ export class WorkStore extends Context.Service<
     ) => Effect.Effect<void, WorkStoreError>
     readonly questions: (
       options: RunQuestionListOptions
-    ) => Effect.Effect<RunQuestionList, WorkStoreError>
+    ) => Effect.Effect<StoredRunQuestionList, WorkStoreError>
     readonly expireQuestions: () => Effect.Effect<void, WorkStoreError>
     readonly askQuestion: (options: {
       readonly runId: string
       readonly toolCallId: string
-      readonly content: RunQuestionContent
+      readonly content: StoredRunQuestionContent
       readonly reuseOpenTaskQuestion?: true
       readonly timeout?: { readonly seconds: number; readonly fallbackChoiceId: string }
       readonly focusTarget?: FocusQuestionTargetInput
       readonly permissionOffer?: PermissionOfferRecord
       readonly contractProposal?: ContractProposalRecord
-    }) => Effect.Effect<RunQuestion, WorkStoreError>
+    }) => Effect.Effect<StoredRunQuestion, WorkStoreError>
     readonly meetCriterion: (input: {
       readonly itemId: string
       readonly lineId: number
@@ -183,8 +183,8 @@ export class WorkStore extends Context.Service<
     }) => Effect.Effect<CriterionMet, WorkStoreError>
     readonly resolveQuestion: (options: {
       readonly questionId: string
-      readonly input: ResolveRunQuestionInput
-    }) => Effect.Effect<RunQuestion, WorkStoreError>
+      readonly input: StoredResolveInput
+    }) => Effect.Effect<StoredRunQuestion, WorkStoreError>
     readonly moveToChat: (input: {
       readonly itemId: string
       readonly sessionId: string

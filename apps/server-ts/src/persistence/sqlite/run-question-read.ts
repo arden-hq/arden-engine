@@ -1,8 +1,6 @@
-import {
-  RunContextSchema,
-  RunQuestionContentSchema,
-  RunQuestionSchema
-} from "@arden-hq/protocol/effect/runs"
+import { StoredRunQuestionContentSchema, type StoredRunQuestion } from "../runs/stored-question.js"
+import { RunContextSchema } from "../runs/stored-context.js"
+import { StoredRunQuestionSchema } from "../runs/stored-question.js"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
@@ -12,7 +10,6 @@ import {
   RUN_PAGE_NEXT,
   RUN_QUESTION_FILTER,
   RUN_QUESTION_STATE,
-  type RunQuestion,
   type RunQuestionFilter
 } from "@arden-hq/protocol/runs"
 import type { Fragment, Statement } from "effect/unstable/sql/Statement"
@@ -47,18 +44,18 @@ export interface QuestionRow {
 const CursorSchema = Schema.Struct({ at: Schema.String, id: Schema.String })
 
 export interface RunQuestionReader {
-  readonly get: (id: string) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly get: (id: string) => Effect.Effect<StoredRunQuestion, WorkStoreError>
   readonly questions: WorkStore["Service"]["questions"]
   readonly select: Statement<Row>
   readonly openSelect: Statement<Row>
-  readonly decode: (row: QuestionRow) => Effect.Effect<RunQuestion, WorkStoreError>
+  readonly decode: (row: QuestionRow) => Effect.Effect<StoredRunQuestion, WorkStoreError>
 }
 
 export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionReader => {
   const decode = Effect.fn(
     function* (row: QuestionRow) {
       const context = yield* decodeJson(RunContextSchema, row.context)
-      const content = yield* decodeJson(RunQuestionContentSchema, row.content)
+      const content = yield* decodeJson(StoredRunQuestionContentSchema, row.content)
       const resolution =
         row.resolution === null ? null : yield* decodeJson(Schema.Json, row.resolution)
       const continuation =
@@ -76,7 +73,7 @@ export const makeRunQuestionReader = (sql: SqlClient.SqlClient): RunQuestionRead
       const contractProposal =
         encodedProposal === null ? undefined : yield* decodeJson(Schema.Json, encodedProposal)
       const permissionOffer = offer === null ? null : yield* decodeJson(Schema.Json, offer)
-      return yield* Schema.decodeUnknownEffect(RunQuestionSchema)({
+      return yield* Schema.decodeUnknownEffect(StoredRunQuestionSchema)({
         ...fields,
         permission_offer: permissionOffer,
         context,

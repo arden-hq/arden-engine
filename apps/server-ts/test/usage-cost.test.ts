@@ -69,10 +69,7 @@ it("keeps the cost providers report beside usage, and leaves a total unknown whe
         usage: { ...tokens(5), cost: 0.00002 }
       })
       const pricedCalls = yield* usage.sessionUsage({ sessionId: priced.sessionId, limit: 5 })
-      expect(pricedCalls.runs[0]?.calls.map((call) => call.usage?.cost)).toEqual([
-        { kind: "reported", usd: 0.0004 },
-        { kind: "reported", usd: 0.0001 }
-      ])
+      expect(pricedCalls.runs[0]?.calls.map((call) => call.usage?.cost)).toEqual([0.0004, 0.0001])
       const first = yield* usage.report({ days: 1 })
       expect(first.daily.map((cell) => [cell.kind, cell.total, cell.cost]).sort()).toEqual([
         ["chat", 34, 0.0005],

@@ -1,5 +1,5 @@
+import { type RunContext } from "../runs/stored-context.js"
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
-import type { RunContext } from "@arden-hq/protocol/runs"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { CommunicationStoreError } from "../continuity/store.js"

@@ -1,5 +1,10 @@
+import type { RunQuestion } from "@arden-hq/protocol/runs"
+import {
+  StoredRunQuestionContentSchema,
+  wireRunQuestion,
+  type StoredRunQuestion
+} from "../persistence/runs/stored-question.js"
 import { Schema } from "effect"
-import { RunQuestionContentSchema } from "@arden-hq/protocol/effect/runs"
 import { ApprovalModeSchema } from "@arden-hq/protocol/effect/permissions"
 import type { OfferRequest } from "./permission-offer.js"
 import { wordsRuleText } from "../persistence/permissions/rules.js"
@@ -7,8 +12,8 @@ import { wordsRuleText } from "../persistence/permissions/rules.js"
 const WORDS_OFFER_MAX = 120
 import { slugify } from "@arden-hq/std/slug"
 
-type QuestionContent = typeof RunQuestionContentSchema.Type
-const choiceFields = RunQuestionContentSchema.fields.choices.value.fields
+type QuestionContent = typeof StoredRunQuestionContentSchema.Type
+const choiceFields = StoredRunQuestionContentSchema.fields.choices.value.fields
 
 const FocusTargetSchema = Schema.Union([
   Schema.Struct({
@@ -54,10 +59,10 @@ const ChoiceInputSchema = Schema.Union([
 ])
 
 export const AskUserParametersSchema = Schema.Struct({
-  prompt: RunQuestionContentSchema.fields.prompt.annotate({
+  prompt: StoredRunQuestionContentSchema.fields.prompt.annotate({
     description: "One specific question that needs the user's decision."
   }),
-  detail: RunQuestionContentSchema.fields.detail.annotate({
+  detail: StoredRunQuestionContentSchema.fields.detail.annotate({
     description:
       "At most one short sentence of context the answer depends on, or the material itself behind an exact Markdown link on its own paragraph: [Open draft](returned-file-url), [Open form](verified-url), [Review changes](verified-url). The card shows two lines of it; do not restate the question or say what you have not done yet. Standalone links appear as contextual action buttons; label the actual action and reuse a verified destination, never guess one. Opening a link does not answer the question. Use null for a self-contained question."
   }),
@@ -235,3 +240,7 @@ export const permissionRequest = (
 }
 
 const TOOL_DECISION = { allow: "approve", ask: "ask", deny: "deny" } as const
+
+export const questionData = (question: StoredRunQuestion): { readonly question: RunQuestion } => ({
+  question: wireRunQuestion(question)
+})

@@ -1,6 +1,5 @@
+import { HOME_HEADLINES, type HomeEvidence } from "../persistence/home/letter-schema.js"
 import { cutText } from "@arden-hq/std/text"
-import { HOME_HEADLINES } from "@arden-hq/protocol/effect/runs"
-import type { HomeEvidence } from "@arden-hq/protocol/runs"
 import type {
   HomeLetterInput,
   HomeLetterRules,

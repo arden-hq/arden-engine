@@ -1,6 +1,6 @@
+import { type StoredResolveAnswer } from "../runs/stored-question.js"
 import { WORDS_RULE_REPLACES } from "@arden-hq/protocol/permissions"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type { ResolveRunQuestionInput } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import {
@@ -107,7 +107,7 @@ export const recordPermissionOfferInTransaction = Effect.fn("PermissionOffer.rec
   }
 )
 
-export const offerAnswerMisfit = (answer: ResolveRunQuestionInput["answer"]): string | undefined =>
+export const offerAnswerMisfit = (answer: StoredResolveAnswer): string | undefined =>
   answer.kind === "choice" || answer.kind === "dismiss"
     ? undefined
     : "A permission offer takes one of its choices, or Not now"
@@ -118,7 +118,7 @@ export const settlePermissionOfferInTransaction = Effect.fn("PermissionOffer.set
   function* (options: {
     readonly sql: SqlClient.SqlClient
     readonly questionId: string
-    readonly answer: ResolveRunQuestionInput["answer"]
+    readonly answer: StoredResolveAnswer
     readonly now: string
   }) {
     const { sql, now } = options

@@ -1,5 +1,6 @@
 import { storeErrorFields } from "../errors.js"
-import type { ModelCallKind, SessionRunRecord, UsageReport } from "@arden-hq/protocol/runs"
+import type { ModelCallKind } from "@arden-hq/protocol/runs"
+import type { StoredSessionRun, StoredUsageReport } from "./report.js"
 import { Context, Effect, Schema } from "effect"
 import type { StoredRunUsage } from "../runs/stored-result.js"
 
@@ -24,7 +25,7 @@ export type UsageTokens = StoredRunUsage
 
 export interface StoredSessionUsage {
   readonly session_id: string
-  readonly runs: ReadonlyArray<SessionRunRecord>
+  readonly runs: ReadonlyArray<StoredSessionRun>
 }
 
 export class UsageStore extends Context.Service<
@@ -33,7 +34,7 @@ export class UsageStore extends Context.Service<
     readonly report: (options: {
       readonly days: number
       readonly throughDay?: string
-    }) => Effect.Effect<UsageReport, UsageStoreError>
+    }) => Effect.Effect<StoredUsageReport, UsageStoreError>
     readonly sessionUsage: (options: {
       readonly sessionId: string
       readonly limit: number

@@ -27,7 +27,7 @@
   "apps/server-ts/src/persistence/sqlite/automation-run-requests.ts": 37,
   "apps/server-ts/src/persistence/sqlite/chat-admission.ts": 291,
   "apps/server-ts/src/persistence/sqlite/chat-agent-spawn.ts": 270,
-  "apps/server-ts/src/persistence/sqlite/chat-events.ts": 263,
+  "apps/server-ts/src/persistence/sqlite/chat-events.ts": 262,
   "apps/server-ts/src/persistence/sqlite/chat-terminal.ts": 230,
   "apps/server-ts/src/persistence/sqlite/compaction.ts": 90,
   "apps/server-ts/src/persistence/sqlite/events.ts": 108,
