@@ -1,6 +1,8 @@
+import { STORE_REASON } from "../errors.js"
 import { AUTOMATION_APPROVAL } from "@arden-hq/protocol/permissions"
 import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { RunOriginSchema } from "../runs/stored-context.js"
+import type { TriggersSource } from "../automations/model.js"
 import type { AutomationContextMode, AutomationToolScope } from "@arden-hq/protocol/automations"
 import { Effect, Result, Schema, type SchemaAST } from "effect"
 import { type AutomationRules, type SystemAutomationSpec } from "../automations/model.js"
@@ -54,7 +56,7 @@ export type AutomationRow = JobClassification & {
   readonly thread_origin_automation_id: string | null
   readonly own_chat_id: string | null
   readonly tool_scope: string
-  readonly triggers_source: string | null
+  readonly triggers_source: TriggersSource | null
   readonly prompt_author: string | null
   readonly instruction_revision_id: number | null
 }
@@ -293,7 +295,7 @@ export const skipCorrupt = <Row, A, R>(options: {
     options.decode(row).pipe(
       Effect.map(Result.succeed),
       Effect.catchIf(
-        (error) => error.reason === "corrupt",
+        (error) => error.reason === STORE_REASON.corrupt,
         (error) =>
           Effect.logWarning(`Skipped ${options.what} that no longer decodes`).pipe(
             Effect.annotateLogs({ ...options.skipped(row), store_message: error.message }),

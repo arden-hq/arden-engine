@@ -1,3 +1,4 @@
+import { isSessionHandoff } from "../persistence/transcript/model.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { cutText } from "@arden-hq/std/text"
 import type { ChatMessage } from "@arden-hq/loop"
@@ -14,7 +15,7 @@ const MAX_MESSAGE_CHARS = 500
 const MAX_TOTAL_CHARS = 2_000
 
 const isHandoff = (message: ChatMessage): boolean =>
-  Predicate.isObject(message.compaction) && message.compaction.kind === "session_handoff"
+  Predicate.isObject(message.compaction) && isSessionHandoff(message.compaction.kind)
 
 export const ownerInstructionsDue = (messages: ReadonlyArray<ChatMessage>): boolean => {
   let turns = 0

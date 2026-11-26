@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 import type { DriveUploadStore } from "../persistence/drive-uploads/store.js"
 import { defineGoogleTool, type GoogleGrantDescription } from "./google-tool-grant.js"
@@ -12,6 +12,32 @@ import type { SharedFileAccess } from "./shared-files.js"
 import type { ServerTool } from "./define.js"
 import { toolRefusal } from "./tool-failure.js"
 
+const DRIVE_ROLE = {
+  reader: "reader",
+  commenter: "commenter",
+  writer: "writer",
+  fileOrganizer: "fileOrganizer",
+  organizer: "organizer",
+  owner: "owner"
+} as const
+
+type DriveRole = (typeof DRIVE_ROLE)[keyof typeof DRIVE_ROLE]
+
+const DRIVE_PERMISSION_TYPE = { user: "user" } as const
+
+interface NewDrivePermission {
+  readonly type: typeof DRIVE_PERMISSION_TYPE.user
+  readonly emailAddress: string
+  readonly role: DriveRole
+}
+
+const STRONG_ROLES: ReadonlyArray<DriveRole> = [
+  DRIVE_ROLE.owner,
+  DRIVE_ROLE.organizer,
+  DRIVE_ROLE.fileOrganizer,
+  DRIVE_ROLE.writer
+]
+
 const FileRefSchema = Schema.NonEmptyString.annotate({
   description:
     "Exact account-qualified file_ref from drive_search, a Drive upload, or a Calendar attachment."
@@ -23,7 +49,7 @@ const ShareParametersSchema = Schema.Struct({
     Schema.isMaxLength(320),
     Schema.isPattern(/^[^@\s]+@[^@\s]+$/u)
   ).annotate({ description: "Email address of the one person to share with." }),
-  role: Schema.Literals(["reader", "writer"]).annotate({
+  role: Schema.Literals([DRIVE_ROLE.reader, DRIVE_ROLE.writer] as const).annotate({
     description: "Grant this person read or edit access. No public or domain sharing."
   })
 })
@@ -45,7 +71,7 @@ const shareApproval = Schema.Struct({
   account: Schema.String,
   file_id: Schema.String,
   recipient: Schema.String,
-  role: Schema.Literals(["reader", "writer"])
+  role: Schema.Literals([DRIVE_ROLE.reader, DRIVE_ROLE.writer] as const)
 })
 
 const SHARE_GRANT: GoogleGrantDescription = {
@@ -111,7 +137,7 @@ export const makeDriveFileTools = ({
             { label: "Account", value: file.account },
             { label: "File", value: file.name },
             { label: "Person", value: input.recipient },
-            { label: "Access", value: input.role === "reader" ? "Read" : "Edit" }
+            { label: "Access", value: input.role === DRIVE_ROLE.reader ? "Read" : "Edit" }
           ],
           note: "This grants access to the live Drive file, including future edits."
         },
@@ -127,7 +153,7 @@ export const makeDriveFileTools = ({
       const approved = Schema.decodeUnknownOption(shareApproval)(ctx.approval?.data)
       const ref = parseFileRef(input.file_ref)
       if (
-        approved._tag === "None" ||
+        Option.isNone(approved) ||
         approved.value.file_id !== ref.id ||
         approved.value.recipient !== input.recipient.toLowerCase() ||
         approved.value.role !== input.role
@@ -165,7 +191,7 @@ export const makeDriveFileTools = ({
         const body = permissions(response.value)
         existing = (body.permissions ?? []).find(
           (entry) =>
-            entry.type === "user" &&
+            entry.type === DRIVE_PERMISSION_TYPE.user &&
             entry.emailAddress?.toLowerCase() === input.recipient.toLowerCase()
         )
         page = existing === undefined ? body.nextPageToken : undefined
@@ -173,8 +199,8 @@ export const makeDriveFileTools = ({
       if (
         existing !== undefined &&
         (existing.role === input.role ||
-          (existing.role === "commenter" && input.role === "reader") ||
-          ["owner", "organizer", "fileOrganizer", "writer"].includes(existing.role ?? ""))
+          (existing.role === DRIVE_ROLE.commenter && input.role === DRIVE_ROLE.reader) ||
+          STRONG_ROLES.some((role) => role === existing.role))
       )
         return {
           result: `${input.recipient} already has the requested access to ${file.name}.`,
@@ -209,14 +235,18 @@ export const makeDriveFileTools = ({
           headers: { "content-type": "application/json" },
           body: JSON.stringify(
             existing === undefined
-              ? { type: "user", emailAddress: input.recipient, role: input.role }
+              ? ({
+                  type: DRIVE_PERMISSION_TYPE.user,
+                  emailAddress: input.recipient,
+                  role: input.role
+                } satisfies NewDrivePermission)
               : { role: input.role }
           )
         }
       })
       const changed = permission(response.value)
       return {
-        result: `Granted ${input.role === "reader" ? "read" : "edit"} access to ${input.recipient} for ${file.name}.`,
+        result: `Granted ${input.role === DRIVE_ROLE.reader ? "read" : "edit"} access to ${input.recipient} for ${file.name}.`,
         preview: `Shared ${file.name}`,
         data: {
           file_ref: `${file.account}:${file.id}`,

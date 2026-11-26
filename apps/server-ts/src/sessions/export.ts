@@ -1,3 +1,5 @@
+import { SESSION_EXPORT_FORMAT } from "@arden-hq/protocol/sessions"
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import type { SessionExportFormat, SessionExportResponse } from "@arden-hq/protocol/sessions"
 import { DateTime, Effect, Predicate } from "effect"
 import type { ActiveSessionSnapshot } from "../persistence/sessions/model.js"
@@ -162,7 +164,7 @@ export const renderSessionExport = (
   const filenameBase = safeFilenameBase(model.session.name ?? model.session.public_ref)
   const warnings = [...SESSION_EXPORT_WARNINGS]
   switch (format) {
-    case "archive":
+    case SESSION_EXPORT_FORMAT.archive:
       return {
         format,
         filename: `${filenameBase}.arden.json`,
@@ -170,7 +172,7 @@ export const renderSessionExport = (
         content: `${JSON.stringify(archiveDocument(model), null, 2)}\n`,
         warnings
       }
-    case "json":
+    case SESSION_EXPORT_FORMAT.json:
       return {
         format,
         filename: `${filenameBase}.json`,
@@ -178,7 +180,7 @@ export const renderSessionExport = (
         content: `${JSON.stringify(readableDocument(model), null, 2)}\n`,
         warnings
       }
-    case "jsonl":
+    case SESSION_EXPORT_FORMAT.jsonl:
       return {
         format,
         filename: `${filenameBase}.jsonl`,
@@ -186,7 +188,7 @@ export const renderSessionExport = (
         content: renderJsonl(model),
         warnings
       }
-    case "markdown":
+    case SESSION_EXPORT_FORMAT.markdown:
       return {
         format,
         filename: `${filenameBase}.md`,
@@ -299,10 +301,10 @@ const renderDisplayContent = (content: unknown): string => {
       return ["_Structured content block; full data is in the canonical envelope below._"]
     }
     const value = block
-    if (value.type === "text" && typeof value.text === "string") {
+    if (value.type === CONTENT_BLOCK_TYPE.text && typeof value.text === "string") {
       return [markdownDisplayText(value.text)]
     }
-    if (value.type === "image") {
+    if (value.type === CONTENT_BLOCK_TYPE.image) {
       const mediaType = typeof value.media_type === "string" ? value.media_type : "unknown type"
       const bytes = typeof value.data === "string" ? value.data.length : 0
       return [`_Embedded image (${mediaType}; ${bytes} encoded characters). Full data is below._`]

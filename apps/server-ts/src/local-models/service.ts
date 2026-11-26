@@ -1,3 +1,10 @@
+import {
+  LOCAL_MODEL_INSTALL_REASON,
+  LOCAL_MODEL_INSTALL_STATE,
+  LOCAL_MODEL_KIND,
+  type LocalModelInstallReason
+} from "@arden-hq/protocol/local-models"
+import { DOWNLOAD_REASON } from "../lib/download.js"
 import { embeddingSearchUsesModel, isEmbeddingSearchStopped } from "@arden-hq/protocol/embeddings"
 import type {
   LocalModelInfo,
@@ -55,22 +62,27 @@ const totalBytesOf = (manifest: ModelManifest) =>
 
 const ResumeSchema = Schema.fromJsonString(Schema.Struct({ resume: Schema.Array(Schema.String) }))
 
+const DISK_FULL = { noSpace: "ENOSPC" } as const
+
+type DiskFullCode = (typeof DISK_FULL)[keyof typeof DISK_FULL]
+const isDiskFull = (code: unknown): code is DiskFullCode => code === DISK_FULL.noSpace
+
 const isNoSpace = (error: unknown): boolean => {
   let current: unknown = error
   for (let depth = 0; depth < 8 && typeof current === "object" && current !== null; depth += 1) {
-    if ("code" in current && current.code === "ENOSPC") return true
+    if ("code" in current && isDiskFull(current.code)) return true
     current = "cause" in current ? current.cause : undefined
   }
   return false
 }
 
-const failureReason = (reason: string): "network" | "hash" | "disk" => {
+const failureReason = (reason: string): LocalModelInstallReason => {
   switch (reason) {
-    case "http":
-    case "incomplete":
+    case DOWNLOAD_REASON.http:
+    case DOWNLOAD_REASON.incomplete:
       return "network"
-    case "hash":
-    case "size":
+    case DOWNLOAD_REASON.hash:
+    case DOWNLOAD_REASON.size:
       return "hash"
     default:
       return "disk"
@@ -127,7 +139,7 @@ export const localModelsLayer = (options: {
         installedState({ manifest, root: options.root }).pipe(
           Effect.tap((state) =>
             Effect.sync(() => {
-              if (state === "installed") installed.add(manifest.id)
+              if (state === LOCAL_MODEL_INSTALL_STATE.installed) installed.add(manifest.id)
               else installed.delete(manifest.id)
             })
           )
@@ -178,7 +190,7 @@ export const localModelsLayer = (options: {
       })
 
       const adoptForSearch = (manifest: ModelManifest) =>
-        manifest.kind !== "embedding"
+        manifest.kind !== LOCAL_MODEL_KIND.embedding
           ? Effect.void
           : embeddings.status().pipe(
               Effect.flatMap((search) =>
@@ -220,7 +232,7 @@ export const localModelsLayer = (options: {
             totalBytes
           })
         }
-        if (noSpace || failureReason(error.reason) !== "network") {
+        if (noSpace || failureReason(error.reason) !== LOCAL_MODEL_INSTALL_REASON.network) {
           yield* writeResume((ids) => ids.delete(manifest.id))
         }
         yield* Effect.logWarning("A local model download failed", { id: manifest.id, error })
@@ -335,7 +347,9 @@ export const localModelsLayer = (options: {
 
 export const installedPresetModels = (root: string): Effect.Effect<ReadonlyArray<PresetModel>> =>
   Effect.filter(LOCAL_MODEL_CATALOG, (manifest) =>
-    installedState({ manifest, root }).pipe(Effect.map((state) => state === "installed"))
+    installedState({ manifest, root }).pipe(
+      Effect.map((state) => state === LOCAL_MODEL_INSTALL_STATE.installed)
+    )
   ).pipe(
     Effect.map((manifests) =>
       manifests.map((manifest) => ({ manifest, directory: path.join(root, manifest.id) }))
@@ -343,7 +357,9 @@ export const installedPresetModels = (root: string): Effect.Effect<ReadonlyArray
   )
 
 export const isInstalled = (root: string, manifest: ModelManifest): Effect.Effect<boolean> =>
-  installedState({ manifest, root }).pipe(Effect.map((state) => state === "installed"))
+  installedState({ manifest, root }).pipe(
+    Effect.map((state) => state === LOCAL_MODEL_INSTALL_STATE.installed)
+  )
 
 export const localDecisionEndpointLayer = (
   root: string

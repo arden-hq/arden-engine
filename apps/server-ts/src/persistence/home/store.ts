@@ -11,6 +11,15 @@ import type {
 } from "./model.js"
 export type { HomeLetterSnapshot } from "./model.js"
 
+export const HOME_LETTER_DISPOSITION = {
+  ready: "ready",
+  noChange: "no_change",
+  skippedNoInput: "skipped_no_input",
+  superseded: "superseded"
+} as const
+export type HomeLetterDisposition =
+  (typeof HOME_LETTER_DISPOSITION)[keyof typeof HOME_LETTER_DISPOSITION]
+
 export class HomeStore extends Context.Service<
   HomeStore,
   {
@@ -25,7 +34,7 @@ export class HomeStore extends Context.Service<
     readonly checkHomeLetter: (
       snapshot: HomeLetterSnapshot,
       rules: HomeLetterRules
-    ) => Effect.Effect<"ready" | "no_change" | "skipped_no_input" | "superseded", WorkStoreError>
+    ) => Effect.Effect<HomeLetterDisposition, WorkStoreError>
     readonly publishHomeLetter: (input: {
       readonly lease: JobLeaseRef
       readonly attemptId: number

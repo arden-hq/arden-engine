@@ -1,3 +1,5 @@
+const IDLE_CAPABLE_MODEL = "openai-codex/gpt-6.1-sol"
+const STOP_FINISH = "stop"
 import { usageInputTokens, type CompletionResponse } from "@arden-hq/loop"
 import type { SummaryRequest } from "./summary-requests.js"
 import { currentMillis } from "../runtime/clock.js"
@@ -40,14 +42,14 @@ export class IdleCompactionQueue {
   ) {}
 
   private static rejection(input: IdleCompactionRequest, inputTokens: number): string | undefined {
-    if (input.response.finish_reason !== "stop") return "request did not end on stop"
+    if (input.response.finish_reason !== STOP_FINISH) return "request did not end on stop"
     if (
       (input.response.message.tool_calls?.length ?? 0) > 0 ||
       (input.response.message.provider_tool_calls?.length ?? 0) > 0
     )
       return "request ended on tool calls"
     if (input.response.continuation === true) return "request is a continuation"
-    if (input.request.model !== "openai-codex/gpt-6.1-sol") return "model is not idle-capable"
+    if (input.request.model !== IDLE_CAPABLE_MODEL) return "model is not idle-capable"
     if (input.request.responseFormat !== undefined) return "structured output request"
     if (input.request.cacheScope === undefined) return "request has no cache scope"
     if ((input.response.usage.cache_read_tokens ?? 0) === 0) return "no cache read"

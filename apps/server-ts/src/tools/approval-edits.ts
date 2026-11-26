@@ -5,7 +5,7 @@ import {
   type ToolContext,
   type ToolResultOutput
 } from "@arden-hq/loop"
-import type { ApprovalEditOutcome } from "../persistence/tools/store.js"
+import { APPROVAL_EDIT_OUTCOME, type ApprovalEditOutcome } from "../persistence/tools/store.js"
 import { sameJson } from "@arden-hq/std/json"
 
 export interface ApprovalEditLine {
@@ -43,7 +43,7 @@ export const makeApprovalEditor = <S extends StandardSchemaV1>(
     const merged: JsonObject = { ...kept, ...patch }
     if (sameJson(merged, requested)) return { _tag: "Unchanged" }
     const decoded = decodeSync(parameters, merged)
-    if (decoded._tag === "Refused") return decoded
+    if (decoded._tag === APPROVAL_EDIT_OUTCOME.Refused) return decoded
     const problem = edits.check?.(decoded.value)
     if (problem !== undefined) return { _tag: "Refused", reason: problem }
     return { _tag: "Edited", arguments: merged }
@@ -71,7 +71,7 @@ export const executeEdited = async <S extends StandardSchemaV1, RunCtx>(
   )
   if (changed.length > 0) throw refused(`The card cannot change ${changed.join(", ")}`)
   const requested = decodeSync(definition.parameters, edited.requested)
-  if (requested._tag === "Refused") throw refused(requested.reason)
+  if (requested._tag === APPROVAL_EDIT_OUTCOME.Refused) throw refused(requested.reason)
   const problem = edits.check?.(input)
   if (problem !== undefined) throw refused(problem)
   const lines = edits.describe(requested.value, input)

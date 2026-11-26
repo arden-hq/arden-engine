@@ -3,7 +3,11 @@ import type { SqlClient } from "effect/unstable/sql"
 
 import { runIsActive } from "./background-pause.js"
 import type { Writer } from "./deps.js"
-import { StorageSessionStoreError, type StorageSessionStore } from "../storage/session-store.js"
+import {
+  CHECKPOINT_MODE,
+  StorageSessionStoreError,
+  type StorageSessionStore
+} from "../storage/session-store.js"
 
 const PageCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const FreePagesRow = Schema.Struct({ free: PageCount, page_size: PageCount })
@@ -46,7 +50,9 @@ export const makeFreePages = ({
   checkpoint: (mode) =>
     writer
       .run(
-        writer.sql.unsafe(`PRAGMA wal_checkpoint(${mode === "passive" ? "PASSIVE" : "TRUNCATE"})`)
+        writer.sql.unsafe(
+          `PRAGMA wal_checkpoint(${mode === CHECKPOINT_MODE.passive ? "PASSIVE" : "TRUNCATE"})`
+        )
       )
       .pipe(Effect.asVoid, Effect.mapError(failed("Could not checkpoint the database"))),
   foregroundWork: () =>

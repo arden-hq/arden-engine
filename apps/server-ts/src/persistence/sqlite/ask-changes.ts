@@ -7,15 +7,20 @@ import { touch } from "./tells/capture.js"
 import { causingAutomation, readRunCause } from "./run-cause.js"
 import { liftChat } from "./session-unread.js"
 
+const ASK_CHANGE = {
+  approvalOpened: "approval_opened",
+  questionChanged: "question_changed"
+} as const
+
 type AskChange =
   | {
-      readonly kind: "approval_opened"
+      readonly kind: typeof ASK_CHANGE.approvalOpened
       readonly runId: string
       readonly sessionId: string
       readonly toolCallId: string
       readonly toolName: string
     }
-  | { readonly kind: "question_changed"; readonly questionId: string }
+  | { readonly kind: typeof ASK_CHANGE.questionChanged; readonly questionId: string }
 
 export const journalAskChange = Effect.fn("AskChanges.journal")(function* (
   sql: SqlClient.SqlClient,
@@ -26,7 +31,7 @@ export const journalAskChange = Effect.fn("AskChanges.journal")(function* (
   change: AskChange
 ) {
   switch (change.kind) {
-    case "approval_opened": {
+    case ASK_CHANGE.approvalOpened: {
       yield* markAskDestination(sql, sessionEvents, change.runId)
       const cause = yield* readRunCause(sql, change.runId)
       yield* sessionEvents.appendEventInTransaction({
@@ -39,7 +44,7 @@ export const journalAskChange = Effect.fn("AskChanges.journal")(function* (
       })
       return true
     }
-    case "question_changed": {
+    case ASK_CHANGE.questionChanged: {
       const open = yield* sql<{ readonly run_id: string }>`SELECT run_id FROM run_questions
         WHERE question_id = ${change.questionId} AND resolution IS NULL AND closed_at IS NULL`
       if (open[0] !== undefined) yield* markAskDestination(sql, sessionEvents, open[0].run_id)

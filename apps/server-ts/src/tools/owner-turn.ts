@@ -1,7 +1,7 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect } from "effect"
 
-import { boundary, type Target } from "../execution/decide.js"
+import { boundary, VERDICT, type Target } from "../execution/decide.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { refusalError } from "./refusal.js"
 import type { ServerRunContext } from "./run-context.js"
@@ -29,10 +29,10 @@ export const requireOwnerTurn = async (
   )
   if (header === null) throw unverified(false)
   const verdict = boundary(run.authority, target)
-  if (verdict.kind !== "allow")
+  if (verdict.kind !== VERDICT.allow)
     throw refusalError({
       what: refusalWording.notOwnerTurn,
       rule: "boundary",
-      instead: verdict.kind === "deny" ? verdict.instead : []
+      instead: verdict.kind === VERDICT.deny ? verdict.instead : []
     })
 }

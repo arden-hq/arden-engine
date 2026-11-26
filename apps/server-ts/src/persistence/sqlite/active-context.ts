@@ -18,6 +18,8 @@ export class ActiveContextError extends Schema.TaggedError<ActiveContextError>()
   }
 ) {}
 
+const ACTIVE_CONTEXT_COLUMNS = { ids: "ids", envelopes: "envelopes" } as const
+
 type ActiveContextFailure = ActiveContextError | SqlError.SqlError
 
 interface BoundsRow {
@@ -71,10 +73,10 @@ const windowRows = <Row extends object>(
   sql: SqlClient.SqlClient,
   sessionId: string,
   bounds: { readonly from: number; readonly head: number | null },
-  columns: "ids" | "envelopes"
+  columns: (typeof ACTIVE_CONTEXT_COLUMNS)[keyof typeof ACTIVE_CONTEXT_COLUMNS]
 ) => sql<Row>`
   SELECT m.seq, m.message_id
-    ${columns === "envelopes" ? sql`, m.role, m.message_json, m.client_id, m.created_at` : sql``}
+    ${columns === ACTIVE_CONTEXT_COLUMNS.envelopes ? sql`, m.role, m.message_json, m.client_id, m.created_at` : sql``}
   FROM session_messages AS m
   WHERE m.session_id = ${sessionId}
     AND (m.seq >= ${bounds.from} OR m.seq = ${bounds.head})
@@ -128,7 +130,12 @@ export const loadActiveContext = Effect.fn("ActiveContext.load")(function* (
   sessionId: string
 ): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ActiveContextFailure> {
   const bounds = yield* loadBounds(sql, sessionId)
-  const rows = yield* windowRows<ActiveRow>(sql, sessionId, bounds, "envelopes")
+  const rows = yield* windowRows<ActiveRow>(
+    sql,
+    sessionId,
+    bounds,
+    ACTIVE_CONTEXT_COLUMNS.envelopes
+  )
   yield* requireCount(sessionId, bounds.count, rows.length)
   return yield* Effect.forEach(rows, (row) => decodeRow(sessionId, row))
 })
@@ -138,7 +145,12 @@ export const loadActiveIds = Effect.fn("ActiveContext.loadIds")(function* (
   sessionId: string
 ): Effect.fn.Return<ReadonlyArray<string>, ActiveContextFailure> {
   const bounds = yield* loadBounds(sql, sessionId)
-  const rows = yield* windowRows<Pick<ActiveRow, "message_id">>(sql, sessionId, bounds, "ids")
+  const rows = yield* windowRows<Pick<ActiveRow, "message_id">>(
+    sql,
+    sessionId,
+    bounds,
+    ACTIVE_CONTEXT_COLUMNS.ids
+  )
   yield* requireCount(sessionId, bounds.count, rows.length)
   return rows.map((row) => row.message_id)
 })

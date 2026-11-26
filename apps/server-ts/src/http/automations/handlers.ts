@@ -8,7 +8,7 @@ import { StructuredCompletion } from "../../models/structured-completion.js"
 import { GoogleConnections } from "../../google/service.js"
 import { McpConnections } from "../../mcp/service.js"
 import { AutomationCatalog, type PromptWriter } from "../../persistence/automations/catalog.js"
-import { LocalCaller } from "../middleware/local-only.js"
+import { LOCAL_CALLER, LocalCaller } from "../middleware/local-only.js"
 import { AutomationId } from "../../persistence/automations/model.js"
 import {
   SESSION_LIFECYCLE_STREAM_ID,
@@ -26,7 +26,7 @@ import {
 } from "../errors.js"
 
 const promptWriter = Effect.gen(function* () {
-  const writer: PromptWriter = (yield* LocalCaller) === "desktop" ? "owner" : "agent"
+  const writer: PromptWriter = (yield* LocalCaller) === LOCAL_CALLER.desktop ? "owner" : "agent"
   return writer
 })
 

@@ -1,3 +1,4 @@
+import { SESSION_LIST_SCOPE, SESSION_LIST_SORT } from "@arden-hq/protocol/sessions"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { latestSessionRunQuery } from "./session-latest-run.js"
 import { sessionOriginColumns, sessionParentStep } from "./session-origin.js"
@@ -35,14 +36,14 @@ import { pendingDecisionCards } from "./pending-decision-cards.js"
 
 const sessionListOptionsSchema = Schema.Struct({
   spaceId: Schema.optionalKey(Schema.NonEmptyString),
-  scope: Schema.optionalKey(Schema.Literals(["primary", "agent", "all"] as const)),
+  scope: Schema.optionalKey(Schema.Literals(Object.values(SESSION_LIST_SCOPE))),
   live: Schema.optionalKey(Schema.Boolean),
   parentSessionIds: Schema.optionalKey(
     Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(100))
   ),
   limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 501 }))),
   offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  sort: Schema.optionalKey(Schema.Literals(["activity", "accessed"] as const)),
+  sort: Schema.optionalKey(Schema.Literals(Object.values(SESSION_LIST_SORT))),
   cursor: Schema.optionalKey(
     Schema.Struct({
       at: Schema.String,
@@ -253,10 +254,11 @@ export const makeSessionListing = ({
     const spaceFilter =
       input.spaceId === undefined ? reader`` : reader`AND s.space_id = ${input.spaceId}`
     let agentFilter = reader``
-    if (input.scope === "primary")
+    if (input.scope === SESSION_LIST_SCOPE.primary)
       agentFilter = reader`AND s.session_type = 'chat'
       AND s.parent_session_id IS NULL AND s.parent_message_id IS NULL`
-    else if (input.scope === "agent") agentFilter = reader`AND s.session_type = 'agent'`
+    else if (input.scope === SESSION_LIST_SCOPE.agent)
+      agentFilter = reader`AND s.session_type = 'agent'`
     const liveFilter =
       input.live === true ? reader`AND latest_run.status IN ${activeRunStatusList}` : reader``
     const sessions =
@@ -278,7 +280,7 @@ export const makeSessionListing = ({
         ? reader``
         : reader`AND s.session_id IN ${reader.in(input.sessionIds)}`
     const orderTimestamp =
-      sort === "accessed"
+      sort === SESSION_LIST_SORT.accessed
         ? reader`COALESCE(s.last_accessed_at, s.last_activity)`
         : reader`s.last_activity`
     const cursorFilter =

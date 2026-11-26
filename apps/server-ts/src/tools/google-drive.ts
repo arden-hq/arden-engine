@@ -6,12 +6,14 @@ import { Schema } from "effect"
 import { connectedAccountEmails } from "./google-accounts.js"
 import {
   createParametersSchema,
+  DOC_EDIT,
   EditDocParametersSchema,
   searchParametersSchema,
   sheetUpdate,
   SheetWriteParametersSchema
 } from "./google-drive-schemas.js"
 import { googleCall } from "./google-request.js"
+import { DRIVE_FILE_KIND, driveFileKind, SEARCH_MIME_QUERY } from "./google-drive-mime.js"
 import { replacedCount } from "./google-docs-document.js"
 import { encodeOpaque } from "../lib/opaque-ref.js"
 import { toolRefusal } from "./tool-failure.js"
@@ -20,8 +22,6 @@ import {
   DRIVE_API,
   DOCS_API,
   SHEETS_API,
-  SEARCH_MIME_QUERY,
-  driveFileKind,
   fileList,
   createdDocument,
   createdSpreadsheet,
@@ -35,7 +35,14 @@ import {
   namedFile
 } from "./google-drive-support.js"
 
+type SheetWriteTool = (typeof SHEET_WRITE_TOOL)[keyof typeof SHEET_WRITE_TOOL]
+
 const SheetWriteStandardSchema = Schema.toStandardSchemaV1(SheetWriteParametersSchema)
+
+const SHEET_WRITE_TOOL = {
+  update: "drive_update_sheet",
+  append: "drive_append_sheet_rows"
+} as const
 
 export const makeDriveTools = ({
   google
@@ -128,11 +135,14 @@ export const makeDriveTools = ({
         if (nextPageRef !== null) lines.push(`Next page_ref: ${nextPageRef}`)
         if (body.incompleteSearch === true) lines.push("Google reported an incomplete search.")
         const source_refs = files
-          .filter((file) => file.kind === "document" || file.kind === "spreadsheet")
+          .filter(
+            (file) =>
+              file.kind === DRIVE_FILE_KIND.document || file.kind === DRIVE_FILE_KIND.spreadsheet
+          )
           .slice(0, MAX_FOUND_SOURCES)
           .map((file) => ({
             provider: "drive",
-            kind: file.kind === "document" ? "doc" : "sheet",
+            kind: file.kind === DRIVE_FILE_KIND.document ? "doc" : "sheet",
             ref: file.file_ref,
             title: file.name,
             use: "found" as const,
@@ -235,14 +245,14 @@ export const makeDriveTools = ({
       },
       execute: async (input, ctx, effects) => {
         const ref = parseFileRef(input.document_ref)
-        if (input.operation === "replace" && input.match === undefined) {
+        if (input.operation === DOC_EDIT.replace && input.match === undefined) {
           throw toolRefusal("match is required for replace operations.", "Missing match text")
         }
-        if (input.operation === "append" && input.match !== undefined) {
+        if (input.operation === DOC_EDIT.append && input.match !== undefined) {
           throw toolRefusal("match is only valid for replace operations.", "Unexpected match text")
         }
         const request =
-          input.operation === "append"
+          input.operation === DOC_EDIT.append
             ? { insertText: { text: input.text, endOfSegmentLocation: {} } }
             : {
                 replaceAllText: {
@@ -266,7 +276,8 @@ export const makeDriveTools = ({
           signal: ctx.signal,
           effects
         })
-        const replaced = input.operation === "replace" ? replacedCount(response.value) : undefined
+        const replaced =
+          input.operation === DOC_EDIT.replace ? replacedCount(response.value) : undefined
         if (replaced === 0)
           throw toolRefusal(
             "No exact case-sensitive match for match text in the Google Doc. Nothing changed.",
@@ -344,33 +355,33 @@ export const makeDriveTools = ({
         }
       }
     }),
-    ...(["drive_update_sheet", "drive_append_sheet_rows"] as const).map((name) =>
+    ...Object.values(SHEET_WRITE_TOOL).map((name: SheetWriteTool) =>
       defineServerTool<typeof SheetWriteStandardSchema>({
         name,
         summary:
-          name === "drive_update_sheet"
+          name === SHEET_WRITE_TOOL.update
             ? "Writes values into part of a Google Sheet."
             : "Adds rows to the end of a table in a Google Sheet.",
         discovery: { group: "drive" },
         description:
-          name === "drive_update_sheet"
+          name === SHEET_WRITE_TOOL.update
             ? "Write a row-major value matrix to an exact Google Sheet A1 range. Use drive_append_sheet_rows to add after an existing table. Asks by default."
             : "Append row-major values after the table found within a Google Sheet A1 range, inserting rows as needed. Use drive_update_sheet for an exact target range. Asks by default.",
         parameters: SheetWriteStandardSchema,
         metadata: {
           effect: "external",
           display_name:
-            name === "drive_update_sheet" ? "Update Google Sheet" : "Append Google Sheet Rows",
+            name === SHEET_WRITE_TOOL.update ? "Update Google Sheet" : "Append Google Sheet Rows",
           kind: "tool",
           action: "write",
           approval_preview:
-            name === "drive_update_sheet"
+            name === SHEET_WRITE_TOOL.update
               ? "Update this Google Sheet range."
               : "Append rows to this Google Sheet.",
           source: "google_drive",
           changes_state: true,
           concurrency_group: "drive_write",
-          destructive: name === "drive_update_sheet",
+          destructive: name === SHEET_WRITE_TOOL.update,
           default_approval: "ask",
           policy_scope: "external",
           permissions: ["google_drive"],
@@ -380,7 +391,7 @@ export const makeDriveTools = ({
         execute: async (input, ctx, effects) => {
           const ref = parseFileRef(input.spreadsheet_ref)
           const suffix =
-            name === "drive_update_sheet"
+            name === SHEET_WRITE_TOOL.update
               ? `/values/${encodeURIComponent(input.range)}?valueInputOption=${input.value_input_option}`
               : `/values/${encodeURIComponent(input.range)}:append?valueInputOption=${input.value_input_option}&insertDataOption=INSERT_ROWS`
           await effects.target(
@@ -391,7 +402,7 @@ export const makeDriveTools = ({
             service: "google_drive",
             url: `${SHEETS_API}/${encodeURIComponent(ref.id)}${suffix}`,
             init: {
-              method: name === "drive_update_sheet" ? "PUT" : "POST",
+              method: name === SHEET_WRITE_TOOL.update ? "PUT" : "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
                 range: input.range,
@@ -406,8 +417,8 @@ export const makeDriveTools = ({
           const body = sheetUpdate(response.value)
           const written = body.updatedRange ?? body.updates?.updatedRange ?? input.range
           return {
-            result: `${name === "drive_update_sheet" ? "Updated" : "Appended rows to"} ${written}.`,
-            preview: name === "drive_update_sheet" ? "Sheet updated" : "Rows appended",
+            result: `${name === SHEET_WRITE_TOOL.update ? "Updated" : "Appended rows to"} ${written}.`,
+            preview: name === SHEET_WRITE_TOOL.update ? "Sheet updated" : "Rows appended",
             data: {
               spreadsheet_ref: fileRef(response.account.email, ref.id),
               range: written

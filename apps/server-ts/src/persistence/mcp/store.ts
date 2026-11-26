@@ -1,6 +1,6 @@
 import { storeErrorFields } from "../errors.js"
 import { Context, Effect, Schema } from "effect"
-import type { McpPresetId } from "@arden-hq/protocol/mcp"
+import { MCP_AUTH, type McpPresetId } from "@arden-hq/protocol/mcp"
 
 export type McpStoreOperation =
   | "list"
@@ -39,11 +39,11 @@ export const McpStoredTransportSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("http"),
     url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
-    auth: Schema.Literals(["none", "oauth", "headers"] as const),
+    auth: Schema.Literals([MCP_AUTH.none, MCP_AUTH.oauth, MCP_AUTH.headers]),
     headerKeys: McpStoredSecretKeysSchema
   }).check(
     Schema.makeFilter((transport) =>
-      transport.auth === "headers" || transport.headerKeys.length === 0
+      transport.auth === MCP_AUTH.headers || transport.headerKeys.length === 0
         ? undefined
         : { path: ["headerKeys"], issue: "requires header authentication" }
     )

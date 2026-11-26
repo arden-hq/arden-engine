@@ -1,7 +1,7 @@
 import type { ModelCatalog as CatalogListing } from "@arden-hq/protocol/models"
 import { Clock, Context, Effect, Schema, Scope, Semaphore } from "effect"
 import { makeSettingsRuntime, type ModelSettingsRuntime } from "../persistence/models/settings.js"
-import { decodeModelHost, type ModelHost, type ModelHostSource } from "./host.js"
+import { decodeModelHost, MODEL_HOST_SOURCE, type ModelHost, type ModelHostSource } from "./host.js"
 
 export class ModelCatalogError extends Schema.TaggedError<ModelCatalogError>()(
   "ModelCatalogError",
@@ -12,7 +12,8 @@ export class ModelCatalogError extends Schema.TaggedError<ModelCatalogError>()(
   }
 ) {}
 
-export type CatalogRefresh = "revalidate" | "fresh"
+const CATALOG_REFRESH = { revalidate: "revalidate", fresh: "fresh" } as const
+export type CatalogRefresh = (typeof CATALOG_REFRESH)[keyof typeof CATALOG_REFRESH]
 
 export class ModelCatalog extends Context.Service<
   ModelCatalog,
@@ -47,8 +48,8 @@ export const makeModelCatalog = Effect.fn("ModelCatalog.make")(function* (
 ): Effect.fn.Return<ModelCatalog["Service"], ModelCatalogError, Scope.Scope> {
   const { host, install } = options
   let refresh = options.refresh
-  let pendingHost = host?.kind === "discovering" ? host.host : undefined
-  let runtime = makeSettingsRuntime(host?.kind === "ready" ? host.host : undefined)
+  let pendingHost = host?.kind === MODEL_HOST_SOURCE.discovering ? host.host : undefined
+  let runtime = makeSettingsRuntime(host?.kind === MODEL_HOST_SOURCE.ready ? host.host : undefined)
   let initialized = pendingHost === undefined
   let discoveredAt = yield* Clock.currentTimeMillis
   const permit = yield* Semaphore.make(1)
@@ -104,7 +105,7 @@ export const makeModelCatalog = Effect.fn("ModelCatalog.make")(function* (
       })
       yield* installHost(host)
     })
-    if (options.refresh === "fresh" || !initialized || !runtime.available) {
+    if (options.refresh === CATALOG_REFRESH.fresh || !initialized || !runtime.available) {
       yield* permit.withPermit(rediscover)
       return runtime.catalog
     }
@@ -122,7 +123,7 @@ export const makeModelCatalog = Effect.fn("ModelCatalog.make")(function* (
     yield* permit.withPermit(
       Effect.gen(function* () {
         refresh = source.refresh
-        if (source.host.kind === "discovering") {
+        if (source.host.kind === MODEL_HOST_SOURCE.discovering) {
           pendingHost = source.host.host
           initialized = false
           return

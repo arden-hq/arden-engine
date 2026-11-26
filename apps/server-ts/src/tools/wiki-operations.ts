@@ -1,5 +1,6 @@
 import { countOf } from "@arden-hq/std/count"
 import { Effect, Schema } from "effect"
+import { WIKI_LINK_STATUS } from "@arden-hq/protocol/wiki"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { RunQueries } from "../persistence/runs/queries.js"
@@ -214,7 +215,7 @@ const makeWikiOperationTools = ({
           `Outgoing (${outgoing.length} of ${report.outgoing.length}):`,
           ...outgoing.map(
             (link) =>
-              `- ${link.target_path ?? link.target}${link.heading === null ? "" : `#${link.heading}`}${link.status === "unresolved" ? " (unresolved)" : ""}`
+              `- ${link.target_path ?? link.target}${link.heading === null ? "" : `#${link.heading}`}${link.status === WIKI_LINK_STATUS.unresolved ? " (unresolved)" : ""}`
           ),
           `Backlinks (${backlinks.length} of ${report.backlinks.length}):`,
           ...backlinks.map((link) => `- ${link.source_path ?? link.source_page_id}`)

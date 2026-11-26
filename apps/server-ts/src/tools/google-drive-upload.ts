@@ -1,14 +1,16 @@
 import { formatBytes } from "@arden-hq/std/count"
 import { errorMessage } from "@arden-hq/std/errors"
 import { sha256Hex } from "@arden-hq/std/hash"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 
-import type {
-  DriveUploadKey,
-  DriveUploadReservation,
-  DriveUploadStore
+import {
+  DRIVE_UPLOAD_STATUS,
+  type DriveUploadKey,
+  type DriveUploadReservation,
+  type DriveUploadStore
 } from "../persistence/drive-uploads/store.js"
+import { GOOGLE_DIAGNOSTIC } from "../google/errors.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { accountEmail, type GoogleToolConnections } from "./google-accounts.js"
 import { decodeDriveFileMetadata, DRIVE_FILE_METADATA_FIELDS } from "./google-drive-metadata.js"
@@ -86,7 +88,7 @@ const requestHash = (input: UploadInput, key: DriveUploadKey): string =>
   )
 const decodeFiles = (record: DriveUploadReservation): ReadonlyArray<PreparedFile> => {
   const result = Schema.decodeUnknownOption(savedFiles)(record.snapshotJson)
-  if (result._tag === "None" || result.value.length !== 1)
+  if (Option.isNone(result) || result.value.length !== 1)
     throw toolRefusal(
       "The saved Drive upload file is unavailable. Nothing was uploaded.",
       "Drive upload unavailable"
@@ -176,7 +178,7 @@ const existingRemote = async (
       .pipe(
         Effect.map((response) => decodeDriveFileMetadata(response.value, response.account.email)),
         Effect.catch((error) =>
-          error.diagnostic.kind === "http" && error.diagnostic.status === 404
+          error.diagnostic.kind === GOOGLE_DIAGNOSTIC.http && error.diagnostic.status === 404
             ? Effect.succeed(undefined)
             : Effect.fail(googleToolFailure(error, "google_drive", record.account))
         )
@@ -288,7 +290,7 @@ export const makeDriveUploadTool = (services: UploadServices): ServerTool =>
     },
     execute: async (input, ctx, effects) => {
       const approved = Schema.decodeUnknownOption(approval)(ctx.approval?.data)
-      if (approved._tag === "None")
+      if (Option.isNone(approved))
         throw toolRefusal(
           "Approve this upload before it sends the file to Google Drive.",
           "Upload approval required"
@@ -336,7 +338,7 @@ export const makeDriveUploadTool = (services: UploadServices): ServerTool =>
           }
         }
       }
-      if (record.status === "confirmed")
+      if (record.status === DRIVE_UPLOAD_STATUS.confirmed)
         throw toolRefusal(
           "The previously uploaded Drive file is missing. Arden will not create another file on retry.",
           "Drive file unavailable"

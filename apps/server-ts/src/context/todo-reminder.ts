@@ -4,6 +4,8 @@ import type { EffectiveSessionTodoResponse } from "@arden-hq/protocol/sessions/t
 import { SESSION_TODO } from "@arden-hq/protocol/sessions/todos"
 import { isOpenTodo, statedReason } from "../persistence/todos/items.js"
 
+const TODO_UPDATE_TOOL = "todo_update"
+
 export const TODO_REMINDER_SOURCE = "todo_reminder"
 
 const TODO_REMINDER_TURNS = 10
@@ -16,7 +18,7 @@ export const todoReminderDue = (messages: ReadonlyArray<ChatMessage>): boolean =
     if (message.role === ROLE.developer && message.arden_context_source === TODO_REMINDER_SOURCE)
       return false
     if (message.role !== ROLE.assistant) continue
-    if ((message.tool_calls ?? []).some((call) => call.function.name === "todo_update"))
+    if ((message.tool_calls ?? []).some((call) => call.function.name === TODO_UPDATE_TOOL))
       return false
     turns += 1
     if (turns >= TODO_REMINDER_TURNS) return true

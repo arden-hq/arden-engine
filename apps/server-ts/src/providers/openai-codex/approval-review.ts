@@ -1,5 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { ToolChoice } from "@arden-hq/loop"
+import { MODEL_STREAM_ITEM_TAG, ToolChoice } from "@arden-hq/loop"
 import type { ApprovalReviewSource } from "../../models/provider.js"
 import {
   makeOpenAiResponsesProvider,
@@ -35,7 +35,7 @@ export const makeCodexApprovalReview = (
         },
         signal
       })) {
-        if (item._tag !== "Completed") continue
+        if (item._tag !== MODEL_STREAM_ITEM_TAG.completed) continue
         return item
       }
       throw new Error("Approval review completed without an assessment")

@@ -3,7 +3,7 @@ import { cutText } from "@arden-hq/std/text"
 import { AUTOMATION_CONTEXT_MODE, type AutomationContextMode } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
-import type { AutomationJobPrompt } from "../automations/job-prompt.js"
+import { AUTOMATION_JOB_PROMPT, type AutomationJobPrompt } from "../automations/job-prompt.js"
 import { readSpaceReviewContext, readTaskWorkerContext } from "./space-job-context.js"
 import type { AutomationStoreError } from "../automations/store.js"
 import type { WorkOwner } from "./automation-rows.js"
@@ -24,7 +24,11 @@ export const makeClaimedPrompt = (sql: SqlClient.SqlClient): ClaimedPrompt => {
   ) {
     const text = owner.authored.prompt
     if (contextMode !== AUTOMATION_CONTEXT_MODE.fresh)
-      return { kind: "text", text, triggerContext } satisfies AutomationJobPrompt
+      return {
+        kind: AUTOMATION_JOB_PROMPT.text,
+        text,
+        triggerContext
+      } satisfies AutomationJobPrompt
     const cards = yield* sql<{
       readonly count: number
       readonly run_id: string
@@ -55,7 +59,7 @@ export const makeClaimedPrompt = (sql: SqlClient.SqlClient): ClaimedPrompt => {
               "\n"
             )}${cards[0] !== undefined && cards[0].count > cards.length ? "\nMore pending cards remain unresolved." : ""}`
     return {
-      kind: "text",
+      kind: AUTOMATION_JOB_PROMPT.text,
       text: `${text}${pendingContext}`,
       triggerContext
     } satisfies AutomationJobPrompt
@@ -69,7 +73,7 @@ export const makeClaimedPrompt = (sql: SqlClient.SqlClient): ClaimedPrompt => {
     switch (owner.kind) {
       case JOB_SUBJECT_KIND.task:
         return {
-          kind: "space_job",
+          kind: AUTOMATION_JOB_PROMPT.spaceJob,
           context: {
             kind: "task_execution",
             task: yield* readTaskWorkerContext(sql, owner.itemId)
@@ -78,7 +82,7 @@ export const makeClaimedPrompt = (sql: SqlClient.SqlClient): ClaimedPrompt => {
         } satisfies AutomationJobPrompt
       case JOB_SUBJECT_KIND.spaceReview:
         return {
-          kind: "space_job",
+          kind: AUTOMATION_JOB_PROMPT.spaceJob,
           context: {
             kind: "space_review",
             space: yield* readSpaceReviewContext(sql, owner.spaceId)

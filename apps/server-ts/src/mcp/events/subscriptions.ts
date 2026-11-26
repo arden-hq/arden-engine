@@ -1,13 +1,18 @@
 import { backoffDelayMs } from "@arden-hq/std/retry"
 import type { JsonValue } from "@arden-hq/protocol"
 import type { McpEvent } from "@arden-hq/protocol/mcp"
-import { type Cause, Context, Effect, Fiber, Option, Queue, Scope } from "effect"
+import { type Cause, Context, Effect, Fiber, Option, Queue, Result, Scope } from "effect"
 
 import { errorMessage } from "@arden-hq/std/errors"
 import type { McpLiveEvents } from "../runtime-state.js"
-import { McpEventRequestError, type McpEventStreamEnd } from "../channel.js"
+import { MCP_EVENT_STREAM_END, McpEventRequestError, type McpEventStreamEnd } from "../channel.js"
 import { pollMcpEvents } from "./requests.js"
-import { EVENT_ERROR_CODES, type McpEventOccurrence, type McpStreamSignal } from "./wire.js"
+import {
+  EVENT_ERROR_CODES,
+  MCP_STREAM_SIGNAL,
+  type McpEventOccurrence,
+  type McpStreamSignal
+} from "./wire.js"
 
 const REPLAY_WINDOW_MS = 60 * 60_000
 const POLL_MAX_EVENTS = 100
@@ -59,9 +64,11 @@ interface SessionEnd {
   readonly why: string
 }
 
+const STREAM_ITEM = { signal: "signal", end: "end" } as const
+
 type StreamItem =
-  | { readonly kind: "signal"; readonly signal: McpStreamSignal }
-  | { readonly kind: "end"; readonly end: McpEventStreamEnd }
+  | { readonly kind: typeof STREAM_ITEM.signal; readonly signal: McpStreamSignal }
+  | { readonly kind: typeof STREAM_ITEM.end; readonly end: McpEventStreamEnd }
 
 interface LiveEvent extends McpLiveEvents {
   readonly event: McpEvent
@@ -122,7 +129,7 @@ export const makeMcpEventSubscriptions = Effect.fnUntraced(function* (
           ),
         catch: (cause) => cause
       }).pipe(Effect.result)
-      if (polled._tag === "Failure") return failedSession(healthy, polled.failure)
+      if (Result.isFailure(polled)) return failedSession(healthy, polled.failure)
       const result = polled.success
       healthy = true
       if (result.truncated) yield* truncatedWarning(subscription)
@@ -161,8 +168,8 @@ export const makeMcpEventSubscriptions = Effect.fnUntraced(function* (
             maxAgeMs: REPLAY_WINDOW_MS
           },
           {
-            onSignal: (signal) => offer({ kind: "signal", signal }),
-            onEnd: (end) => offer({ kind: "end", end })
+            onSignal: (signal) => offer({ kind: STREAM_ITEM.signal, signal }),
+            onEnd: (end) => offer({ kind: STREAM_ITEM.end, end })
           }
         )
       ),
@@ -191,32 +198,32 @@ export const makeMcpEventSubscriptions = Effect.fnUntraced(function* (
         } satisfies SessionEnd
       }
       const item = next.value
-      if (item.kind === "end") {
-        return item.end.kind === "ended"
+      if (item.kind === STREAM_ITEM.end) {
+        return item.end.kind === MCP_EVENT_STREAM_END.ended
           ? { healthy: active, forbidden: false, why: "the app ended it" }
           : refusedSession(active, item.end.error)
       }
       const signal = item.signal
       switch (signal.kind) {
-        case "active":
+        case MCP_STREAM_SIGNAL.active:
           active = true
           if (signal.truncated) yield* truncatedWarning(subscription)
           yield* save([], signal.cursor)
           break
-        case "event":
+        case MCP_STREAM_SIGNAL.event:
           active = true
           yield* save([signal.occurrence], signal.cursor)
           break
-        case "heartbeat":
+        case MCP_STREAM_SIGNAL.heartbeat:
           yield* save([], signal.cursor)
           break
-        case "error":
+        case MCP_STREAM_SIGNAL.error:
           yield* Effect.logWarning("MCP app reported an event delivery error").pipe(
             annotate(subscription),
             Effect.annotateLogs({ code: signal.error.code, cause: signal.error.message })
           )
           break
-        case "terminated":
+        case MCP_STREAM_SIGNAL.terminated:
           return refusedSession(active, signal.error)
       }
     }

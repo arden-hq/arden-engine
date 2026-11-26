@@ -1,4 +1,5 @@
 import { AppSettingsTabIdSchema } from "@arden-hq/protocol/effect/common"
+import { APP_DESTINATION } from "@arden-hq/protocol"
 import { memoryHref } from "../lib/memory-link.js"
 import { Schema } from "effect"
 
@@ -104,19 +105,19 @@ const placeHref = (destination: ToolDestination): string => {
   const part = (kind: string, value: string | undefined) =>
     value === undefined ? `arden:${kind}` : `arden:${kind}/${encodeURIComponent(value)}`
   switch (destination.kind) {
-    case "home":
+    case APP_DESTINATION.home:
       return "arden:home"
-    case "session":
+    case APP_DESTINATION.session:
       return part("session", destination.session_ref)
-    case "settings":
+    case APP_DESTINATION.settings:
       return part("settings", destination.tab)
-    case "automation":
+    case APP_DESTINATION.automation:
       return part("automation", destination.automation_ref)
-    case "task":
+    case APP_DESTINATION.task:
       return part("task", destination.item_id)
-    case "memory":
+    case APP_DESTINATION.memory:
       return destination.path === undefined ? "arden:memory" : memoryHref(destination.path)
-    case "space":
+    case APP_DESTINATION.space:
       return part("space", destination.space_id)
   }
 }
@@ -125,15 +126,15 @@ const placeDomain = (
   destination: ToolDestination
 ): "session" | "automation" | "memory" | "space" | "task" | "other" => {
   switch (destination.kind) {
-    case "session":
-    case "automation":
-    case "memory":
-    case "space":
+    case APP_DESTINATION.session:
+    case APP_DESTINATION.automation:
+    case APP_DESTINATION.memory:
+    case APP_DESTINATION.space:
       return destination.kind
-    case "task":
+    case APP_DESTINATION.task:
       return "task"
-    case "home":
-    case "settings":
+    case APP_DESTINATION.home:
+    case APP_DESTINATION.settings:
       return "other"
   }
 }

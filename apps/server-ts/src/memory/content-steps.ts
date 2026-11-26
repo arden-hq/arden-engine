@@ -1,3 +1,4 @@
+import { CONTENT_STEP_RESULT } from "../wiki/content-steps.js"
 import { DateTime, Effect } from "effect"
 
 import type { SessionQueries, SessionQueryFailure } from "../persistence/sessions/queries.js"
@@ -117,7 +118,7 @@ const runMemoryContentSteps = Effect.fn("Memory.runContentSteps")(function* (inp
   ]
   for (const step of steps) {
     const result = yield* input.wiki.applyContentStep(step)
-    if (result.kind === "applied" && result.changedPaths.length > 0) {
+    if (result.kind === CONTENT_STEP_RESULT.applied && result.changedPaths.length > 0) {
       yield* Effect.logInfo(
         `Memory content step ${step.name} rewrote ${result.changedPaths.length} pages`
       )

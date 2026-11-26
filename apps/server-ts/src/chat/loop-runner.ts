@@ -1,6 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
-import { makeAgent, resolveModelCapabilities, usageInputTokens } from "@arden-hq/loop"
+import { makeAgent, resolveModelCapabilities, StopReason, usageInputTokens } from "@arden-hq/loop"
+import { CHAT_SENT_FROM } from "@arden-hq/protocol/chat"
 import type {
   AgentStreamEvent,
   ChatMessage,
@@ -284,7 +285,8 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
           waitForPendingMessages: input.waitForPendingMessages,
           hasPendingInput: input.peekPendingInput,
           isOwnerMessage: (message) =>
-            isWrittenByPerson(message) && !("sent_from" in message && message.sent_from === "cli"),
+            isWrittenByPerson(message) &&
+            !("sent_from" in message && message.sent_from === CHAT_SENT_FROM.cli),
           holdBackgroundCalls: (calls) => input.tools.holdBackground(calls),
           claimBackgroundCalls: (toolCallIds) => input.tools.claimBackground(toolCallIds),
           ...(answerFixInHistory(input.messages, new Set(input.mintedMessageIds)).length > 0
@@ -314,7 +316,11 @@ export const makeLoopChatRunner = (config: LoopChatRunnerOptions): ChatRunner =>
       signal: input.signal,
       ...(output === undefined ? {} : { output })
     })) {
-      if (!("_tag" in event) && event.stop_reason === "end_turn" && !input.signal.aborted) {
+      if (
+        !("_tag" in event) &&
+        event.stop_reason === StopReason.END_TURN &&
+        !input.signal.aborted
+      ) {
         const last = event.messages.at(-1)
         if (
           last?.role === ROLE.tool ||

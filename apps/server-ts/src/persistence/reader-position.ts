@@ -9,7 +9,13 @@ export class ReaderPositionError extends Schema.TaggedError<ReaderPositionError>
   }
 ) {}
 
-export type PositionAdvance = "advanced" | "already_there" | "moved"
+export const POSITION_ADVANCE = {
+  advanced: "advanced",
+  alreadyThere: "already_there",
+  moved: "moved"
+} as const
+
+export type PositionAdvance = (typeof POSITION_ADVANCE)[keyof typeof POSITION_ADVANCE]
 
 export interface ReaderPosition<A> {
   readonly start: (initial: A) => Effect.Effect<A, ReaderPositionError>

@@ -1,10 +1,17 @@
+import {
+  AUTOMATION_CHAT_CHOICE,
+  AUTOMATION_CONTEXT_MODE,
+  AUTOMATION_HISTORY
+} from "@arden-hq/protocol/automations"
+import { CHANGE_ENTRY_OUTCOME } from "@arden-hq/protocol/chat"
 import { parseJsonText } from "@arden-hq/protocol/common"
 import { sameJson } from "@arden-hq/std/json"
 import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 import { AutomationTriggersSchema } from "./automation-schedule.js"
 import { sha256Hex } from "@arden-hq/std/hash"
-import type { AutomationWriteTool } from "../automations/tool-names.js"
+import { AUTOMATION_WRITE_TOOL, type AutomationWriteTool } from "../automations/tool-names.js"
 import { triggerRecord, type TriggerRecord } from "../automations/trigger-record.js"
 
 export interface AutomationWriteSource {
@@ -35,14 +42,14 @@ interface InstructionSnapshot extends Omit<StoredInstruction, "triggers"> {
 }
 
 export type InstructionDestination =
-  | { readonly kind: "own" }
-  | { readonly kind: "yours"; readonly publicRef: string }
+  | { readonly kind: typeof AUTOMATION_CHAT_CHOICE.own }
+  | { readonly kind: typeof AUTOMATION_CHAT_CHOICE.yours; readonly publicRef: string }
 
 export const instructionDestination = Effect.fn("Automation.instructionDestination")(function* (
   sql: SqlClient.SqlClient,
   automationId: string,
   sessionId: string | null
-) {
+): Effect.fn.Return<InstructionDestination | undefined, SqlError> {
   if (sessionId === null) return undefined
   const [row] = yield* sql<{
     readonly origin_automation_id: string | null
@@ -50,9 +57,9 @@ export const instructionDestination = Effect.fn("Automation.instructionDestinati
   }>`SELECT origin_automation_id, public_ref FROM sessions
       WHERE session_id = ${sessionId} LIMIT 1`
   if (row === undefined) return undefined
-  if (row.origin_automation_id === automationId) return { kind: "own" as const }
+  if (row.origin_automation_id === automationId) return { kind: AUTOMATION_CHAT_CHOICE.own }
   if (row.origin_automation_id !== null || row.public_ref === null) return undefined
-  return { kind: "yours" as const, publicRef: row.public_ref }
+  return { kind: AUTOMATION_CHAT_CHOICE.yours, publicRef: row.public_ref }
 })
 
 export const instructionSnapshot = (row: StoredInstruction): InstructionSnapshot => ({
@@ -85,27 +92,31 @@ export const matchesInstructionReceipt = (input: {
   if (
     input.automationRef === undefined ||
     field(input.result, "is_error") === true ||
-    field(receipt, "outcome") !== "applied" ||
+    field(receipt, "outcome") !== CHANGE_ENTRY_OUTCOME.applied ||
     field(data, "automation_ref") !== input.automationRef ||
     field(data, "prompt") !== input.instruction.prompt ||
     field(data, "model") !== input.instruction.model ||
     field(data, "cooldown_minutes") !== input.instruction.cooldown_minutes ||
-    field(data, "history") !== (input.instruction.context_mode === "fresh" ? "fresh" : "chat") ||
+    field(data, "history") !==
+      (input.instruction.context_mode === AUTOMATION_CONTEXT_MODE.fresh
+        ? AUTOMATION_HISTORY.fresh
+        : AUTOMATION_HISTORY.chat) ||
     !sameJson(field(data, "triggers"), input.instruction.triggers)
   )
     return false
   if (input.destination === undefined) return false
-  if (input.destination.kind === "own") {
-    if (field(data, "chat") !== "own" || field(data, "chat_ref") != null) return false
+  if (input.destination.kind === AUTOMATION_CHAT_CHOICE.own) {
+    if (field(data, "chat") !== AUTOMATION_CHAT_CHOICE.own || field(data, "chat_ref") != null)
+      return false
   } else if (
-    field(data, "chat") !== "yours" ||
+    field(data, "chat") !== AUTOMATION_CHAT_CHOICE.yours ||
     field(data, "chat_ref") !== input.destination.publicRef
   )
     return false
-  if (input.toolName === "automation_update")
+  if (input.toolName === AUTOMATION_WRITE_TOOL.update)
     return field(input.args, "automation_ref") === input.automationRef
   return (
-    input.toolName === "automation_create" &&
+    input.toolName === AUTOMATION_WRITE_TOOL.create &&
     field(input.args, "prompt") === input.instruction.prompt
   )
 }

@@ -1,20 +1,33 @@
 import {
   MANAGED_OBJECT_HASH,
   MANAGED_REF_KIND,
+  isManagedObjectFormat,
   readManagedObjectRef,
-  type ManagedObjectAddress
+  type ManagedObjectAddress,
+  type ManagedObjectFormat
 } from "./ref.js"
 
+const MANAGED_OBJECT_SOURCE_KIND = { tool: "tool", workflow: "workflow" } as const
+export const MANAGED_OBJECT_KIND = "managed_output"
+
 export type ManagedObjectSource =
-  | { readonly kind: "tool"; readonly name: string; readonly call_id: string }
-  | { readonly kind: "workflow"; readonly workflow_ref: string; readonly attempt: number }
+  | {
+      readonly kind: typeof MANAGED_OBJECT_SOURCE_KIND.tool
+      readonly name: string
+      readonly call_id: string
+    }
+  | {
+      readonly kind: typeof MANAGED_OBJECT_SOURCE_KIND.workflow
+      readonly workflow_ref: string
+      readonly attempt: number
+    }
 
 export interface ManagedObjectDescriptor {
-  readonly kind: "managed_output"
+  readonly kind: typeof MANAGED_OBJECT_KIND
   readonly ref: string
   readonly sha256: string
   readonly bytes: number
-  readonly format: "text" | "json"
+  readonly format: ManagedObjectFormat
   readonly owner_session_hash: string
   readonly source: ManagedObjectSource
 }
@@ -33,7 +46,7 @@ export const readManagedObjectDescriptor = (
     typeof value !== "object" ||
     value === null ||
     !("kind" in value) ||
-    value.kind !== "managed_output" ||
+    value.kind !== MANAGED_OBJECT_KIND ||
     !("ref" in value) ||
     typeof value.ref !== "string" ||
     !("sha256" in value) ||
@@ -44,7 +57,7 @@ export const readManagedObjectDescriptor = (
     !Number.isSafeInteger(value.bytes) ||
     value.bytes < 0 ||
     !("format" in value) ||
-    (value.format !== "text" && value.format !== "json") ||
+    !isManagedObjectFormat(value.format) ||
     !("owner_session_hash" in value) ||
     typeof value.owner_session_hash !== "string" ||
     !MANAGED_OBJECT_HASH.test(value.owner_session_hash) ||
@@ -61,7 +74,7 @@ export const readManagedObjectDescriptor = (
   )
     return undefined
   return {
-    kind: "managed_output",
+    kind: MANAGED_OBJECT_KIND,
     ref: value.ref,
     sha256: value.sha256,
     bytes: value.bytes,
@@ -73,7 +86,7 @@ export const readManagedObjectDescriptor = (
 
 export const isManagedObjectSource = (value: unknown): value is ManagedObjectSource => {
   if (typeof value !== "object" || value === null || !("kind" in value)) return false
-  if (value.kind === "tool") {
+  if (value.kind === MANAGED_OBJECT_SOURCE_KIND.tool) {
     return (
       "name" in value &&
       typeof value.name === "string" &&
@@ -84,7 +97,7 @@ export const isManagedObjectSource = (value: unknown): value is ManagedObjectSou
     )
   }
   return (
-    value.kind === "workflow" &&
+    value.kind === MANAGED_OBJECT_SOURCE_KIND.workflow &&
     "workflow_ref" in value &&
     typeof value.workflow_ref === "string" &&
     value.workflow_ref.length > 0 &&

@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { contentParts } from "./content.js"
 import {
@@ -21,12 +22,12 @@ export const transcriptSearchText = (message: StoredMessageEnvelope): string | n
       contentParts(message.content)
         .flatMap((part) => {
           switch (part.type) {
-            case "text":
+            case CONTENT_BLOCK_TYPE.text:
               return [part.text]
-            case "context":
+            case CONTENT_BLOCK_TYPE.context:
               return part.content ? [part.content] : []
-            case "image":
-            case "audio":
+            case CONTENT_BLOCK_TYPE.image:
+            case CONTENT_BLOCK_TYPE.audio:
               return []
           }
         })

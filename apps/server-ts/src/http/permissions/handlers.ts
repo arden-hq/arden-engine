@@ -1,3 +1,4 @@
+import { PERMISSION_RULE_LIST } from "@arden-hq/protocol/permissions"
 import { ApprovalPolicyStore } from "../../persistence/permissions/approval-policy.js"
 import type { PermissionRuleList } from "@arden-hq/protocol/permissions"
 import { Effect } from "effect"
@@ -37,7 +38,7 @@ export const PermissionHandlers = HttpApiBuilder.group(
     })
 
     const listOf = Effect.fn("PermissionHandlers.listOf")(function* (list: PermissionRuleList) {
-      if (list.kind !== "space") return list
+      if (list.kind !== PERMISSION_RULE_LIST.space) return list
       const space = yield* spaces.get(list.space_id).pipe(Effect.orElseSucceed(() => null))
       if (space === null) return yield* notFound("That Space was not found")
       return { kind: "space", spaceId: list.space_id } satisfies RuleList

@@ -1,4 +1,6 @@
 import { ToolExecutionError } from "@arden-hq/loop"
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
+import { PLATFORM } from "@arden-hq/std/process"
 import { Option, Schema } from "effect"
 import { execFile } from "node:child_process"
 
@@ -30,22 +32,22 @@ export const makeMacAppsHelper = ({
   timeoutMs = HELPER_TIMEOUT_MS
 }: MacAppsHelperOptions = {}): MacAppsHelper => ({
   run: async (args, { signal, effects }) => {
-    if (platform !== "darwin" || path === undefined || path === "") throw unavailable()
+    if (platform !== PLATFORM.darwin || path === undefined || path === "") throw unavailable()
     signal.throwIfAborted()
     effects?.sent()
     const outcome = await execute(path, args, signal, timeoutMs)
-    if (outcome.kind === "printed") {
+    if (outcome.kind === HELPER_OUTCOME.printed) {
       const value = parseJson(outcome.stdout)
       if (Option.isNone(value)) throw unreadable(effects !== undefined)
       effects?.applied()
       return value.value
     }
     signal.throwIfAborted()
-    if (outcome.kind === "missing") {
+    if (outcome.kind === HELPER_OUTCOME.missing) {
       effects?.failed()
       throw unavailable()
     }
-    if (outcome.kind === "timed_out") {
+    if (outcome.kind === HELPER_OUTCOME.timed_out) {
       throw toolRefusal(
         `The Mac did not answer in ${Math.round(timeoutMs / 1_000)} seconds; macOS may be waiting for the owner to allow access.${effects === undefined ? "" : " The change may or may not have been made: read the item before you try again."}`,
         "No answer from the Mac"
@@ -63,11 +65,18 @@ export const makeMacAppsHelper = ({
   }
 })
 
+const HELPER_OUTCOME = {
+  printed: "printed",
+  faulted: "faulted",
+  missing: "missing",
+  timed_out: "timed_out"
+} as const
+
 type Outcome =
-  | { readonly kind: "printed"; readonly stdout: string }
-  | { readonly kind: "faulted"; readonly stderr: string }
-  | { readonly kind: "missing" }
-  | { readonly kind: "timed_out" }
+  | { readonly kind: typeof HELPER_OUTCOME.printed; readonly stdout: string }
+  | { readonly kind: typeof HELPER_OUTCOME.faulted; readonly stderr: string }
+  | { readonly kind: typeof HELPER_OUTCOME.missing }
+  | { readonly kind: typeof HELPER_OUTCOME.timed_out }
 
 const execute = (
   path: string,
@@ -82,7 +91,8 @@ const execute = (
       { signal, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, encoding: "utf8" },
       (error, stdout, stderr) => {
         if (error === null) return resolve({ kind: "printed", stdout })
-        if (error.code === "ENOENT" || error.code === "EACCES") return resolve({ kind: "missing" })
+        if (isErrnoCode(error, ERRNO.ENOENT) || isErrnoCode(error, ERRNO.EACCES))
+          return resolve({ kind: "missing" })
         if (error.killed === true && !signal.aborted) return resolve({ kind: "timed_out" })
         resolve({ kind: "faulted", stderr })
       }

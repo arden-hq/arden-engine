@@ -5,10 +5,24 @@ const MemoryCaptureProgressSchema = Schema.Struct({
   offset: Schema.Natural
 })
 
+export const MEMORY_CAPTURE_POSITION = {
+  Beginning: "Beginning",
+  AfterSequence: "AfterSequence",
+  AtPosition: "AtPosition"
+} as const
+
+export const MEMORY_CAPTURE_MOVE = { moved: "moved", superseded: "superseded" } as const
+
 const MemoryCapturePositionSchema = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal("Beginning") }),
-  Schema.Struct({ _tag: Schema.Literal("AfterSequence"), sequence: Schema.Natural }),
-  Schema.Struct({ _tag: Schema.Literal("AtPosition"), progress: MemoryCaptureProgressSchema })
+  Schema.Struct({ _tag: Schema.Literal(MEMORY_CAPTURE_POSITION.Beginning) }),
+  Schema.Struct({
+    _tag: Schema.Literal(MEMORY_CAPTURE_POSITION.AfterSequence),
+    sequence: Schema.Natural
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal(MEMORY_CAPTURE_POSITION.AtPosition),
+    progress: MemoryCaptureProgressSchema
+  })
 ])
 export type MemoryCapturePosition = typeof MemoryCapturePositionSchema.Type
 
@@ -33,7 +47,7 @@ export const MemoryCaptureBatchSchema = Schema.Struct({
 })
 export type MemoryCaptureBatch = typeof MemoryCaptureBatchSchema.Type
 
-export type MemoryCaptureMove = "moved" | "superseded"
+export type MemoryCaptureMove = (typeof MEMORY_CAPTURE_MOVE)[keyof typeof MEMORY_CAPTURE_MOVE]
 
 export class MemoryCaptureStoreError extends Schema.TaggedError<MemoryCaptureStoreError>()(
   "MemoryCaptureStoreError",

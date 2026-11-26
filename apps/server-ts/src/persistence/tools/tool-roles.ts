@@ -4,6 +4,7 @@ export const WORKFLOW_CANCEL_TOOL = "workflow_cancel"
 export const SPAWN_AGENT_TOOL = "spawn_agent"
 export const AGENT_MESSAGE_TOOL = "agent_message"
 export const BROWSER_TASK_TOOL = "browser_task"
+export const BROWSER_PERMISSION_TOOL = "browser_permission"
 export const COMPUTER_TOOL = "computer_repl"
 
 const RETIRED_DYNAMIC_WORKFLOW_TOOL = "dynamic_workflow"

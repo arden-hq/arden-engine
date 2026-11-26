@@ -1,60 +1,79 @@
 import type { ToolApprovalDecision } from "@arden-hq/loop"
-import { type PathAccess } from "../execution/rules.js"
-import { type ToolFacts } from "../execution/decide.js"
-import { type ApprovalMode } from "@arden-hq/protocol/permissions"
-import { type OfferHolders } from "../persistence/permissions/offer.js"
-import type { RuleChange } from "../persistence/permissions/rules.js"
-import {
-  type PermissionRule,
-  type RuleDecision,
-  type RuleSubject
+import { PERMISSION_RULE_DECISION, type ApprovalMode } from "@arden-hq/protocol/permissions"
+import type { PathAccess } from "../execution/rules.js"
+import type { ToolFacts } from "../execution/decide.js"
+import { PERMISSION_CHANGE, type OfferHolders } from "../persistence/permissions/offer.js"
+import type {
+  PermissionRule,
+  RuleChange,
+  RuleDecision,
+  RuleSubject
 } from "../persistence/permissions/rules.js"
 import type { HostCommandGrantPlan } from "./bash-permissions.js"
 
+interface CompiledHardRule {
+  readonly subject: RuleSubject
+  readonly decision: RuleDecision
+}
+
 export type OfferRequest =
-  | { readonly kind: "tool"; readonly tool: string; readonly decision: ToolApprovalDecision }
-  | { readonly kind: "site"; readonly tool: string; readonly origin: string }
-  | { readonly kind: "connector"; readonly server: string }
-  | { readonly kind: "mode"; readonly mode: ApprovalMode }
-  | { readonly kind: "command"; readonly command: string }
   | {
-      readonly kind: "words"
+      readonly kind: typeof PERMISSION_CHANGE.tool
+      readonly tool: string
+      readonly decision: ToolApprovalDecision
+    }
+  | {
+      readonly kind: typeof PERMISSION_CHANGE.site
+      readonly tool: string
+      readonly origin: string
+    }
+  | { readonly kind: typeof PERMISSION_CHANGE.connector; readonly server: string }
+  | { readonly kind: typeof PERMISSION_CHANGE.mode; readonly mode: ApprovalMode }
+  | { readonly kind: typeof PERMISSION_CHANGE.command; readonly command: string }
+  | {
+      readonly kind: typeof PERMISSION_CHANGE.words
       readonly text: string
       readonly decision: RuleDecision
       readonly rules?: ReadonlyArray<CompiledHardRule>
     }
   | {
-      readonly kind: "path"
+      readonly kind: typeof PERMISSION_CHANGE.path
       readonly path: string
       readonly access: PathAccess
-      readonly decision: "allow" | "never"
+      readonly decision:
+        | typeof PERMISSION_RULE_DECISION.allow
+        | typeof PERMISSION_RULE_DECISION.never
     }
-  | { readonly kind: "rule"; readonly ruleId: string; readonly decision: RuleChange }
+  | {
+      readonly kind: typeof PERMISSION_CHANGE.rule
+      readonly ruleId: string
+      readonly decision: RuleChange
+    }
 
 export type OfferFacts =
   | {
-      readonly kind: "tool"
+      readonly kind: typeof PERMISSION_CHANGE.tool
       readonly decision: ToolApprovalDecision
       readonly tool: ToolFacts
       readonly rule: ToolApprovalDecision | undefined
       readonly holders: OfferHolders
     }
   | {
-      readonly kind: "site"
+      readonly kind: typeof PERMISSION_CHANGE.site
       readonly tool: ToolFacts
       readonly origin: string
       readonly rule: ToolApprovalDecision | undefined
       readonly holders: OfferHolders
     }
   | {
-      readonly kind: "connector"
+      readonly kind: typeof PERMISSION_CHANGE.connector
       readonly server: string
       readonly tools: number
       readonly rule: ToolApprovalDecision | undefined
       readonly holders: OfferHolders
     }
   | {
-      readonly kind: "mode"
+      readonly kind: typeof PERMISSION_CHANGE.mode
       readonly requested: ApprovalMode
       readonly holder:
         | {
@@ -66,7 +85,7 @@ export type OfferFacts =
         | undefined
     }
   | {
-      readonly kind: "command"
+      readonly kind: typeof PERMISSION_CHANGE.command
       readonly grant: HostCommandGrantPlan
       readonly system: HostCommandGrantPlan
       readonly alwaysAsk: boolean
@@ -74,22 +93,24 @@ export type OfferFacts =
       readonly holders: OfferHolders
     }
   | {
-      readonly kind: "words"
+      readonly kind: typeof PERMISSION_CHANGE.words
       readonly text: string
       readonly decision: RuleDecision
       readonly rules: ReadonlyArray<CompiledHardRule>
       readonly holders: OfferHolders
     }
   | {
-      readonly kind: "path"
+      readonly kind: typeof PERMISSION_CHANGE.path
       readonly path: string | undefined
       readonly access: PathAccess
-      readonly decision: "allow" | "never"
+      readonly decision:
+        | typeof PERMISSION_RULE_DECISION.allow
+        | typeof PERMISSION_RULE_DECISION.never
       readonly tooWide: boolean
       readonly holders: OfferHolders
     }
   | {
-      readonly kind: "rule"
+      readonly kind: typeof PERMISSION_CHANGE.rule
       readonly rule: PermissionRule | undefined
       readonly decision: RuleChange
     }
@@ -115,8 +136,3 @@ export type OfferRefusal =
   | "host_commands"
   | "no_holder"
   | "not_the_person"
-
-interface CompiledHardRule {
-  readonly subject: RuleSubject
-  readonly decision: RuleDecision
-}

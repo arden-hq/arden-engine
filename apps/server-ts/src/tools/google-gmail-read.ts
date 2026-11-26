@@ -1,3 +1,4 @@
+import { isFulfilled, isRejected } from "@arden-hq/std/attempt"
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { emailSource } from "./google-gmail-source.js"
@@ -121,10 +122,10 @@ export const gmailReadTools = ({
           },
           ctx.signal
         )
-        const hits = settled.flatMap((item) => (item.status === "fulfilled" ? [item.value] : []))
+        const hits = settled.flatMap((item) => (isFulfilled(item) ? [item.value] : []))
         const messages = hits.map((hit) => hit.found)
         const source_refs = hits.map((hit) => hit.source)
-        const failures = settled.filter((item) => item.status === "rejected")
+        const failures = settled.filter(isRejected)
         if (messages.length === 0 && failures.length > 0) {
           const failure = failures[0]?.reason
           throw failure instanceof ToolExecutionError

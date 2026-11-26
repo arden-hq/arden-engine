@@ -6,12 +6,14 @@ export interface DriveUploadKey {
   readonly operationKey: string
 }
 
+export const DRIVE_UPLOAD_STATUS = { reserved: "reserved", confirmed: "confirmed" } as const
+
 export interface DriveUploadReservation extends DriveUploadKey {
   readonly remoteFileId: string
   readonly requestHash: string
   readonly intentHash: string
   readonly snapshotJson: string
-  readonly status: "reserved" | "confirmed"
+  readonly status: (typeof DRIVE_UPLOAD_STATUS)[keyof typeof DRIVE_UPLOAD_STATUS]
 }
 
 export class DriveUploadStoreError extends Schema.TaggedError<DriveUploadStoreError>()(

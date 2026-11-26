@@ -4,6 +4,7 @@ import { Cause, Context, Effect, Layer, Scope } from "effect"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { ChatMessage } from "../chat/message.js"
 import {
+  DEFERRED_STORE_DECISION,
   DeferredToolCalls,
   deferredFollowUpId,
   type DeferredToolCall,
@@ -139,11 +140,11 @@ export class DeferredCalls extends Context.Service<
       const decide = Effect.fn("DeferredCalls.decide")(function* (input: DeferredDecisionInput) {
         const decision = yield* store.decide(input)
         switch (decision.kind) {
-          case "not_deferred":
+          case DEFERRED_STORE_DECISION.not_deferred:
             return DEFERRED_DECISION.not_deferred
-          case "settled":
+          case DEFERRED_STORE_DECISION.settled:
             return DEFERRED_DECISION.decided
-          case "approved":
+          case DEFERRED_STORE_DECISION.approved:
             if (lifecycle.isAccepting()) yield* start(decision.call)
             return DEFERRED_DECISION.decided
         }

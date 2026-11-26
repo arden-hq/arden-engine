@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import {
   type ChatWriteStore,
   type ChatWriteReceiveInput,
+  CHAT_WRITE_STORED,
   type ChatWriteReceiveResult,
   type ChatWriteFailure
 } from "../chat/store.js"
@@ -66,7 +67,7 @@ export const makeChatAdmission = ({
     start: (input) =>
       receive({ ...input, wake: true }).pipe(
         Effect.flatMap((result) =>
-          result._tag === "Stored"
+          result._tag === CHAT_WRITE_STORED.stored
             ? Effect.die("A waking admission cannot store an idle message")
             : Effect.succeed(result)
         )

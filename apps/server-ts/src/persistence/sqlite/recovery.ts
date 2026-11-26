@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { ACTIVE_RUN_STATUSES } from "@arden-hq/protocol/runs"
 import { disposableForkSql } from "../schema/fork-disposition.js"
 import { DateTime, Effect } from "effect"
@@ -231,8 +232,10 @@ export const interruptActiveChatRunsAfterRestart = Effect.fn(
           const valid =
             lineage.length > 0 &&
             lineage.every((row) => row.edge_valid === 1) &&
-            lineage.some((row) => row.session_type !== "agent")
-          const side = valid ? lineage.find((row) => row.session_type === "chat") : undefined
+            lineage.some((row) => row.session_type !== SESSION_TYPE.agent)
+          const side = valid
+            ? lineage.find((row) => row.session_type === SESSION_TYPE.chat)
+            : undefined
           if (side !== undefined) {
             const retained = yield* sql`SELECT 1 FROM session_fork_requests AS fork
               JOIN sessions AS parent ON parent.session_id = fork.source_session_id

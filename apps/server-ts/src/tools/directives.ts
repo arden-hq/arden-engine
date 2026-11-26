@@ -8,7 +8,7 @@ import { rulesPage } from "../context/global-instructions.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "../wiki/authority.js"
 import { RULES_PAGE_PATH } from "../wiki/code-owned-pages.js"
-import type { WikiError } from "../wiki/errors.js"
+import { WIKI_ERROR_REASON, type WikiError } from "../wiki/errors.js"
 import { reviseWikiPage } from "../wiki/page.js"
 import { Wiki } from "../wiki/service.js"
 import { appliedReceipt } from "./call-receipt.js"
@@ -36,7 +36,9 @@ const changedSinceRead = (): ToolExecutionError =>
   )
 
 const failure = (error: WikiError): ToolExecutionError =>
-  error.reason === "conflict" ? changedSinceRead() : toolFailure(error, "Instructions unavailable")
+  error.reason === WIKI_ERROR_REASON.conflict
+    ? changedSinceRead()
+    : toolFailure(error, "Instructions unavailable")
 
 const readFirst = () =>
   new ToolExecutionError(

@@ -1,4 +1,4 @@
-import { LocalCaller } from "../middleware/local-only.js"
+import { LOCAL_CALLER, LocalCaller } from "../middleware/local-only.js"
 import { runListOptions } from "@arden-hq/protocol/effect/runs"
 import {
   RUN_LIST_FILTER,
@@ -58,7 +58,8 @@ export const RunHandlers = HttpApiBuilder.group(
       .handle(
         "list",
         Effect.fn("RunsHandlers.list")(function* ({ query }) {
-          if ((yield* LocalCaller) === "cli") return yield* new HttpApiError.Forbidden({})
+          if ((yield* LocalCaller) === LOCAL_CALLER.cli)
+            return yield* new HttpApiError.Forbidden({})
           const options = runListOptions(query)
           const cut =
             options.page.kind === RUN_PAGE.after

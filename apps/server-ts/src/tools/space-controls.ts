@@ -1,4 +1,4 @@
-import { boundary } from "../execution/decide.js"
+import { boundary, VERDICT } from "../execution/decide.js"
 import { refusalError } from "./refusal.js"
 import type { ToolContext } from "@arden-hq/loop"
 import { SpaceInstructionsTextSchema, SpaceNameSchema } from "@arden-hq/protocol/effect/spaces"
@@ -73,11 +73,11 @@ export const requireChat = async (
   if (!run || run.sessionId !== ctx.run.sessionId || liveness === undefined || !runMayAct(liveness))
     throw refusal("This Chat's turn has ended or was stopped, and nothing it started still runs")
   const verdict = boundary(ctx.run.authority, { kind: "space_control" })
-  if (verdict.kind !== "allow")
+  if (verdict.kind !== VERDICT.allow)
     throw refusalError({
       what: "Only the user's own turn changes standing Space settings or Undoes a Task",
       rule: "boundary",
-      instead: verdict.kind === "deny" ? verdict.instead : []
+      instead: verdict.kind === VERDICT.deny ? verdict.instead : []
     })
 }
 

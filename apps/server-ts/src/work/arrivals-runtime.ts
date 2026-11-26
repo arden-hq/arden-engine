@@ -5,7 +5,7 @@ import { arrivalBatches } from "./arrival-batches.js"
 import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
 import type { ChatSendInput } from "../chat/message-input.js"
 import { ChatMessage } from "../chat/message.js"
-import type { RunDelivery } from "../persistence/deliveries/model.js"
+import { RUN_DELIVERY_KIND, type RunDelivery } from "../persistence/deliveries/model.js"
 import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
 import { serializeOperationalCause } from "../runtime/operational-events.js"
 import { pollEverySecond, runOutbox, type Outbox } from "../runtime/outbox.js"
@@ -19,7 +19,9 @@ const arrivalSender = (delivery: RunDelivery): StoredInteractionSender | undefin
   }
   const { payload } = delivery
   const personsAnswer =
-    payload.kind === "answer" && payload.timeout !== true && payload.questionId !== null
+    payload.kind === RUN_DELIVERY_KIND.answer &&
+    payload.timeout !== true &&
+    payload.questionId !== null
   if (personsAnswer || delivery.forwardedFrom !== undefined) return undefined
   return {
     kind: INTERACTION_KIND.event,
@@ -36,14 +38,18 @@ export const toSendInput = (delivery: RunDelivery): ChatSendInput => {
     message: delivery.interaction?.content ?? delivery.body,
     ...(sender === undefined ? {} : { sender }),
     ...(delivery.forwardedFrom === undefined ? {} : { forwardedFrom: delivery.forwardedFrom }),
-    ...(delivery.payload.kind === "answer" &&
+    ...(delivery.payload.kind === RUN_DELIVERY_KIND.answer &&
     delivery.payload.timeout !== true &&
     delivery.payload.questionId !== null
       ? { questionAnswer: { questionId: delivery.payload.questionId } }
       : {}),
-    ...(delivery.payload.kind === "connection" ? { connection: delivery.payload.connection } : {}),
-    ...(delivery.payload.kind === "update" ? { update: delivery.payload.update } : {}),
-    ...(delivery.payload.kind === "update" && delivery.payload.replyTo !== undefined
+    ...(delivery.payload.kind === RUN_DELIVERY_KIND.connection
+      ? { connection: delivery.payload.connection }
+      : {}),
+    ...(delivery.payload.kind === RUN_DELIVERY_KIND.update
+      ? { update: delivery.payload.update }
+      : {}),
+    ...(delivery.payload.kind === RUN_DELIVERY_KIND.update && delivery.payload.replyTo !== undefined
       ? { replyTo: delivery.payload.replyTo }
       : {}),
     ...(delivery.images === undefined || delivery.images.length === 0

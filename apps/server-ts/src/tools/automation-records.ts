@@ -1,6 +1,7 @@
 import { ToolExecutionError } from "@arden-hq/loop"
 import type { Automation } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
+import { STORE_REASON } from "../persistence/errors.js"
 import type { AutomationCatalog } from "../persistence/automations/catalog.js"
 import { RECORDED_HISTORY_THROUGH } from "../persistence/history.js"
 import type { AutomationStoreError } from "../persistence/automations/store.js"
@@ -14,15 +15,15 @@ import { toolFailure } from "./tool-failure.js"
 
 const failurePreview = (error: AutomationStoreError): string => {
   switch (error.reason) {
-    case "invalid":
+    case STORE_REASON.invalid:
       return "Invalid Automation request"
-    case "not_found":
+    case STORE_REASON.not_found:
       return "Automation not found"
-    case "conflict":
+    case STORE_REASON.conflict:
       return "Automation changed"
-    case "corrupt":
+    case STORE_REASON.corrupt:
       return "Automation data is corrupt"
-    case "storage":
+    case STORE_REASON.storage:
       return "Automations unavailable"
   }
 }

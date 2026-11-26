@@ -14,6 +14,7 @@ import {
 } from "../artifacts/conversation-model.js"
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
 import { recordApplied } from "../execution/tool-effect.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { managedObjectRefParts } from "../persistence/managed-output/descriptor.js"
 import { RunQueries } from "../persistence/runs/queries.js"
@@ -37,16 +38,18 @@ const ParametersSchema = Schema.Struct({
 
 type Input = typeof ParametersSchema.Type
 
+const DELETE_ITEM = { artifact: "artifact", output: "output" } as const
+
 type Item =
   | {
-      readonly kind: "artifact"
+      readonly kind: typeof DELETE_ITEM.artifact
       readonly session: string
       readonly manifest: ConversationArtifactManifest
       readonly path: string
       readonly madeHere: boolean
     }
   | {
-      readonly kind: "output"
+      readonly kind: typeof DELETE_ITEM.output
       readonly ref: string
       readonly digest: string
       readonly bytes: number | undefined
@@ -66,12 +69,12 @@ const refused = (message: string, preview: string): ToolExecutionError =>
   new ToolExecutionError(message, { preview, retryable: false })
 
 const storeFailure = (error: ConversationArtifactError): ToolExecutionError =>
-  error.reason === "not_found"
+  error.reason === STORE_REASON.not_found
     ? refused("No such artifact in this chat; it may already be deleted.", "Artifact not found")
     : toolFailure(error, "Artifact unavailable")
 
 const isNotFound = (cause: unknown): boolean =>
-  Predicate.hasProperty(cause, "reason") && cause.reason === "not_found"
+  Predicate.hasProperty(cause, "reason") && cause.reason === STORE_REASON.not_found
 
 const makeArtifactDeleteTool = (services: Services): ServerTool => {
   const resolve = async (input: Input, ctx: ToolContext<ServerRunContext>) => {
@@ -134,7 +137,7 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
       const manifest = await Effect.runPromise(
         services.artifacts.manifest(candidate.session, candidate.ref).pipe(
           Effect.catch((error) =>
-            error.reason === "not_found" ? Effect.succeed(undefined) : Effect.fail(error)
+            error.reason === STORE_REASON.not_found ? Effect.succeed(undefined) : Effect.fail(error)
           ),
           Effect.mapError(storeFailure)
         ),
@@ -201,7 +204,7 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
     approvalPrompt: async (input, ctx) => card((await resolve(input, ctx)).items),
     approvalRequirement: async (input, ctx) => {
       const { items } = await resolve(input, ctx)
-      return items.some((item) => item.kind === "artifact" && !item.madeHere)
+      return items.some((item) => item.kind === DELETE_ITEM.artifact && !item.madeHere)
         ? card(items)
         : undefined
     },
@@ -213,7 +216,7 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
       let failure: unknown
       for (const item of items) {
         try {
-          if (item.kind === "artifact") {
+          if (item.kind === DELETE_ITEM.artifact) {
             const removed = await recordApplied(
               effects,
               Effect.runPromise(services.artifacts.removeArtifact(item.session, item.manifest.ref))
@@ -231,7 +234,7 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
             deleted.push(item)
           } else missing.push(item.ref)
         } catch (cause) {
-          if (item.kind === "artifact" && isNotFound(cause)) {
+          if (item.kind === DELETE_ITEM.artifact && isNotFound(cause)) {
             missing.push(item.manifest.ref)
             continue
           }
@@ -267,7 +270,7 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
         preview: deleted.length === 1 ? `Deleted ${names[0]}` : `Deleted ${deleted.length} files`,
         data: {
           deleted: deleted.map((item) =>
-            item.kind === "artifact"
+            item.kind === DELETE_ITEM.artifact
               ? { ref: item.manifest.ref, title: item.manifest.title, path: item.path }
               : { ref: item.ref, title: itemName(item) }
           ),
@@ -277,7 +280,7 @@ const makeArtifactDeleteTool = (services: Services): ServerTool => {
         host: appliedReceipt(
           ctx,
           deleted.map((item) =>
-            item.kind === "artifact"
+            item.kind === DELETE_ITEM.artifact
               ? {
                   kind: "versioned_resource" as const,
                   resourceRef: `output:${item.manifest.ref}`,
@@ -310,10 +313,10 @@ const artifactRefIn = (given: string, root: string): string | undefined => {
 }
 
 const itemName = (item: Item): string =>
-  item.kind === "artifact" ? item.manifest.title : "Saved full output"
+  item.kind === DELETE_ITEM.artifact ? item.manifest.title : "Saved full output"
 
 const cardLine = (item: Item): string => {
-  if (item.kind === "output")
+  if (item.kind === DELETE_ITEM.output)
     return item.bytes === undefined
       ? `${itemName(item)} (not stored, ${item.digest.slice(0, 8)})`
       : `${itemName(item)} (${formatBytes(item.bytes)}, ${item.digest.slice(0, 8)})`

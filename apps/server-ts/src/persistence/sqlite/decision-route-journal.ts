@@ -1,3 +1,6 @@
+import { DECISION_ROUTE_SOURCE, type DecisionRouteSource } from "@arden-hq/protocol/chat"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
+import { TOOL_APPROVAL_KIND } from "./tool-rows.js"
 import { Effect } from "effect"
 import { disposableForkSql } from "../schema/fork-disposition.js"
 import type { SqlClient } from "effect/unstable/sql"
@@ -8,7 +11,7 @@ import { decisionRoutesSql } from "./pending-decision-cards.js"
 export interface DecisionRouteRef {
   readonly viewer_session_id: string
   readonly source_session_id: string
-  readonly source_kind: "run" | "deferred"
+  readonly source_kind: DecisionRouteSource
   readonly run_id: string
   readonly tool_call_id: string
   readonly basis:
@@ -21,7 +24,7 @@ export interface DecisionRouteRef {
 
 export const loadPendingDecisionRoutes = Effect.fn("DecisionRoutes.loadPending")(function* (
   sql: SqlClient.SqlClient,
-  sourceKind: "run" | "deferred",
+  sourceKind: DecisionRouteSource,
   runId: string,
   toolCallId: string
 ) {
@@ -34,7 +37,7 @@ export const loadPendingDecisionRoutes = Effect.fn("DecisionRoutes.loadPending")
   const current = yield* find
   if (current.length > 0) return current
   const source =
-    sourceKind === "run"
+    sourceKind === DECISION_ROUTE_SOURCE.run
       ? (yield* sql<{ readonly session_id: string; readonly kind: string }>`
         SELECT session_id, kind FROM tool_approvals
         WHERE run_id = ${runId} AND tool_call_id = ${toolCallId}
@@ -52,7 +55,7 @@ export const loadPendingDecisionRoutes = Effect.fn("DecisionRoutes.loadPending")
   const valid =
     lineage.length > 0 &&
     lineage.every((row) => row.edge_valid === 1) &&
-    lineage.some((row) => row.session_type !== "agent")
+    lineage.some((row) => row.session_type !== SESSION_TYPE.agent)
   const recipients: DecisionRouteRef[] = (
     valid
       ? lineage
@@ -72,8 +75,8 @@ export const loadPendingDecisionRoutes = Effect.fn("DecisionRoutes.loadPending")
     basis: row.session_id === source.session_id ? "source_v1" : "agent_delegation_v1"
   }))
   const side =
-    valid && sourceKind === "run" && source.kind === "tool_outcome"
-      ? lineage.find((row) => row.session_type === "chat")
+    valid && sourceKind === DECISION_ROUTE_SOURCE.run && source.kind === TOOL_APPROVAL_KIND.outcome
+      ? lineage.find((row) => row.session_type === SESSION_TYPE.chat)
       : undefined
   if (side !== undefined) {
     const parent = yield* sql<{ readonly session_id: string }>`

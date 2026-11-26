@@ -1,3 +1,7 @@
+import { SPACE_TASK_EVENT_TYPE } from "@arden-hq/protocol/spaces/work"
+import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
+import { PAGE_KIND, RECORD_PRODUCER } from "../../wiki/collections.js"
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { localDayOf, machineTimeZone } from "@arden-hq/std/time"
 import { DateTime, Effect, Predicate } from "effect"
@@ -22,6 +26,9 @@ import type { AutomationRunner } from "../runner.js"
 import type { ReaderPosition } from "../../persistence/reader-position.js"
 import { handlerItemText, type SystemAutomationHandler } from "../system-handler.js"
 import { chatHref } from "../../sessions/chat-href.js"
+
+const DAILY_DIRECTORY = "daily"
+const DAILY_CONTRACT_PATH = `${DAILY_DIRECTORY}/README.md`
 
 const DAILY_CONTRACT = `## Purpose
 Dated personal chronology and reflection, including summaries of recorded Arden activity.
@@ -147,7 +154,7 @@ export const taskExcerpts = (events: ReadonlyArray<DayTaskEvent>): Excerpts => {
         const where = first.spaceName === undefined ? "" : ` in ${first.spaceName}`
         const said = changes
           .map((change) =>
-            change.summary === undefined || change.type === "created"
+            change.summary === undefined || change.type === SPACE_TASK_EVENT_TYPE.created
               ? `${change.type} at ${change.at}`
               : `${change.type} at ${change.at}: ${change.summary}`
           )
@@ -179,9 +186,11 @@ const itemExcerpts = (items: ReadonlyArray<DayItem>): Excerpts =>
     ITEM_SHARE
   )
 
+const DAY_PREPARATION = { settled: "settled", write: "write" } as const
+
 type DayPreparation =
-  | { readonly kind: "settled"; readonly note?: string }
-  | { readonly kind: "write"; readonly markdown: string }
+  | { readonly kind: typeof DAY_PREPARATION.settled; readonly note?: string }
+  | { readonly kind: typeof DAY_PREPARATION.write; readonly markdown: string }
 
 const makeDailySummaryRunner = (
   services: ItemLoopServices & {
@@ -271,25 +280,25 @@ const makeDailySummaryRunner = (
   ): Effect.fn.Return<DayPreparation, Error> {
     const start = dayStart(date, timezone)
     const end = dayStart(nextDay(date), timezone)
-    const path = `daily/${date}.md`
+    const path = `${DAILY_DIRECTORY}/${date}.md`
     const snapshot = yield* services.wiki.snapshot()
     const existing = snapshot.wholeSet.find(
       (page) => page.resource.path.toLowerCase() === path.toLowerCase()
     )
     const folders = recordFolders(snapshot.pages)
     if (existing !== undefined)
-      return existing.page.lifecycle === "active" &&
+      return existing.page.lifecycle === WIKI_PAGE_LIFECYCLE.active &&
         producingAutomation(folders, existing.resource.path) === DAILY_SUMMARY_AUTOMATION_ID
-        ? { kind: "settled" }
-        : { kind: "settled", note: `${path} is kept by another writer` }
+        ? { kind: DAY_PREPARATION.settled }
+        : { kind: DAY_PREPARATION.settled, note: `${path} is kept by another writer` }
     const startMs = DateTime.toEpochMillis(start)
     const endMs = DateTime.toEpochMillis(end)
     const reports = snapshot.pages.filter((page) => {
       const kind = pageKind(folders, page.resource.path)
       return (
-        page.page.lifecycle === "active" &&
-        kind.kind === "record" &&
-        kind.folder.producer.kind === "automation" &&
+        page.page.lifecycle === WIKI_PAGE_LIFECYCLE.active &&
+        kind.kind === PAGE_KIND.record &&
+        kind.folder.producer.kind === RECORD_PRODUCER.automation &&
         kind.folder.producer.automationId !== DAILY_SUMMARY_AUTOMATION_ID
       )
     })
@@ -315,7 +324,7 @@ const makeDailySummaryRunner = (
     }))
     const messages = chats.reduce((count, chat) => count + chat.length, 0)
     if (messages + reportCandidates.length + tasks.length + items.length === 0)
-      return { kind: "settled" }
+      return { kind: DAY_PREPARATION.settled }
     const used = (lines: ReadonlyArray<{ readonly text: string }>) =>
       lines.reduce((chars, line) => chars + line.text.length, 0)
     const chosen = pickChatExcerpts(chats, {
@@ -347,11 +356,13 @@ const makeDailySummaryRunner = (
     ]
     const sources = [...chosen.picked, ...keptReports, ...tasks, ...items].map((line) => line.ref)
     const contract = snapshot.pages.find(
-      (page) => page.resource.path === "daily/README.md" && page.page.lifecycle === "active"
+      (page) =>
+        page.resource.path === DAILY_CONTRACT_PATH &&
+        page.page.lifecycle === WIKI_PAGE_LIFECYCLE.active
     )
     if (contract === undefined)
       yield* services.wiki.createDirectory({
-        path: "daily",
+        path: DAILY_DIRECTORY,
         body: DAILY_CONTRACT,
         authority: GLOBAL_WIKI_LOCATION_AUTHORITY,
         producerAutomationId: DAILY_SUMMARY_AUTOMATION_ID,
@@ -383,7 +394,7 @@ const makeDailySummaryRunner = (
       "Reports changed again after this day and unavailable records are not covered. This is not proof of all activity. Report edit dates do not establish event dates."
     ].join(" ")
     return {
-      kind: "write",
+      kind: DAY_PREPARATION.write,
       markdown: `Destination: ${path}\nObservation period for wiki_publish_report: ${JSON.stringify({ start: DateTime.formatIso(start), end: DateTime.formatIso(end) })} (end exclusive), ${timezone}\nSource refs:\n${markdownValue(sources)}\n${coverage}\n\n${evidence.join("\n\n")}`
     }
   })
@@ -401,7 +412,7 @@ const makeDailySummaryRunner = (
         const date = nextDay(settled)
         if (date >= today) return "idle" as const
         const prepared = yield* prepareDay(date)
-        if (prepared.kind === "settled") {
+        if (prepared.kind === DAY_PREPARATION.settled) {
           if (prepared.note !== undefined) notes.push(prepared.note)
           yield* services.position.advance({ expected: settled, next: date })
           return "advance" as const
@@ -409,7 +420,7 @@ const makeDailySummaryRunner = (
         return { kind: "daily" as const, date, timezone, markdown: prepared.markdown }
       }),
       commit: settle,
-      skip: (data) => settle(data).pipe(Effect.as(`daily/${data.date}.md`)),
+      skip: (data) => settle(data).pipe(Effect.as(`${DAILY_DIRECTORY}/${data.date}.md`)),
       summary: (item) =>
         [
           item === undefined
@@ -428,7 +439,9 @@ const contentText = (content: unknown): string =>
     ? content
     : (Array.isArray(content) ? content : [])
         .flatMap((part) =>
-          Predicate.isObject(part) && part.type === "text" && typeof part.text === "string"
+          Predicate.isObject(part) &&
+          part.type === CONTENT_BLOCK_TYPE.text &&
+          typeof part.text === "string"
             ? [part.text]
             : []
         )

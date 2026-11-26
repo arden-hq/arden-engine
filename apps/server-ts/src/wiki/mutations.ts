@@ -12,6 +12,7 @@ import type { WikiLocationAuthority } from "./authority.js"
 import { archivePage, mergePage, newPage, updatePage } from "./commit.js"
 import { type WikiCommitIdentity } from "./origin.js"
 import {
+  SPACE_PAGE_ENSURED,
   ensureWikiSpacePage,
   logNoSpacePage,
   restoreWikiSpace,
@@ -135,7 +136,7 @@ export const makeWikiMutationMethods = (
     const ensured = yield* ensureOne(input)
     if (ensured === undefined) return undefined
     const created =
-      ensured.kind !== "created"
+      ensured.kind !== SPACE_PAGE_ENSURED.created
         ? undefined
         : yield* changes.saved("create", ensured.created.pageId)
     return { space: ensured.space, created }
@@ -155,7 +156,7 @@ export const makeWikiMutationMethods = (
       )
       if (ensured === null) counts.failed += 1
       else if (ensured === undefined) counts.active -= 1
-      else if (ensured.kind === "created") counts.made += 1
+      else if (ensured.kind === SPACE_PAGE_ENSURED.created) counts.made += 1
       else counts[ensured.kind] += 1
     }
     return counts satisfies SpacePageCounts

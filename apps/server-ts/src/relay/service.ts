@@ -15,6 +15,7 @@ import { hostname } from "node:os"
 import type { PowerHost } from "../config/options.js"
 import type { CredentialVault } from "../credentials/vault.js"
 import type { LocalAccess } from "../http/middleware/local-only.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import { effectiveRelayUrl, RelayStore, type RelayStoreError } from "../persistence/relay/store.js"
 import { LIFECYCLE_DELIVERY, SessionLifecycleEvents } from "../persistence/sessions/events.js"
 import { CONNECTOR_STATE, RelayConnector } from "./connector.js"
@@ -29,7 +30,7 @@ import { ServerLifecycle } from "../runtime/lifecycle.js"
 export class RelayServiceError extends Schema.TaggedError<RelayServiceError>()(
   "RelayServiceError",
   {
-    reason: Schema.Literals(["unavailable", "not_found"]),
+    reason: Schema.Literals([STORE_REASON.unavailable, STORE_REASON.not_found]),
     message: Schema.String
   }
 ) {}
@@ -289,7 +290,7 @@ export const relayLayer = (
       })
 
       const unavailable = (message: string) =>
-        new RelayServiceError({ reason: "unavailable", message })
+        new RelayServiceError({ reason: STORE_REASON.unavailable, message })
 
       const pair = Effect.fn("RelayService.pair")(function* () {
         if (options.vault === undefined)
@@ -320,7 +321,10 @@ export const relayLayer = (
             ? false
             : yield* Effect.promise(() => instance.decide(input.dev, input.allow))
         if (!decided)
-          return yield* new RelayServiceError({ reason: "not_found", message: "No such request" })
+          return yield* new RelayServiceError({
+            reason: STORE_REASON.not_found,
+            message: "No such request"
+          })
         if (input.allow) pairingUntil = 0
         return yield* status()
       })
@@ -328,7 +332,10 @@ export const relayLayer = (
       const remove = Effect.fn("RelayService.remove")(function* (dev: string) {
         const known = yield* store.device(dev)
         if (known === undefined)
-          return yield* new RelayServiceError({ reason: "not_found", message: "No such phone" })
+          return yield* new RelayServiceError({
+            reason: STORE_REASON.not_found,
+            message: "No such phone"
+          })
         const instance = connector?.instance
         if (instance === undefined) yield* store.revokeDevice(dev)
         else yield* Effect.promise(() => instance.remove(dev))

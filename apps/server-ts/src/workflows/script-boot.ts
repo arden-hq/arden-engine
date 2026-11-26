@@ -1,10 +1,17 @@
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
+import { CHAT_MESSAGE_FAILURE } from "../chat/message-errors.js"
 import { MESSAGE_PREVIEW, recoverBy } from "@arden-hq/protocol/workflows"
 import { Cause, Effect, Layer, Stream } from "effect"
 
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
 import { ChatMessage } from "../chat/message.js"
 import { ScriptResults } from "../persistence/scripts/results.js"
-import { ScriptStore, type ScriptRecord } from "../persistence/scripts/store.js"
+import {
+  SCRIPT_STORE_REASON,
+  ScriptStore,
+  type ScriptRecord
+} from "../persistence/scripts/store.js"
 import { retryScriptResults } from "./delivery.js"
 import { WorkflowHost } from "./host.js"
 import { ScriptRunner } from "./script-runner.js"
@@ -25,7 +32,8 @@ const resumeScripts = Effect.fn("ScriptBoot.resume")(function* () {
       yield* runner.resume({ record, binding: { run, host: workflowHost.forRun(run) } })
     }).pipe(
       Effect.catchTag("ChatMessageError", (error) =>
-        error.reason === "unavailable" || error.reason === "storage"
+        error.reason === CHAT_MESSAGE_FAILURE.unavailable ||
+        error.reason === CHAT_MESSAGE_FAILURE.storage
           ? Effect.logWarning("Script recovery is waiting for its runtime", {
               ref: record.ref,
               reason: error.reason
@@ -33,7 +41,8 @@ const resumeScripts = Effect.fn("ScriptBoot.resume")(function* () {
           : Effect.fail(error)
       ),
       Effect.catchTag("ScriptStoreError", (error) =>
-        error.reason === "storage" || error.reason === "conflict"
+        error.reason === SCRIPT_STORE_REASON.storage ||
+        error.reason === SCRIPT_STORE_REASON.conflict
           ? Effect.logWarning("Script recovery will retry", {
               ref: record.ref,
               reason: error.reason
@@ -99,7 +108,9 @@ export const ScriptBoot = Layer.effectDiscard(
           Stream.tick("1 minute"),
           changes.stream.pipe(
             Stream.filter(
-              (change) => change.kind === "record" && change.event.type === "session_activity"
+              (change) =>
+                change.kind === JOURNAL_DELIVERY.record &&
+                change.event.type === SERVER_EVENT_TYPE.sessionActivity
             ),
             Stream.map(() => undefined),
             Stream.orDie

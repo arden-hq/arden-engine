@@ -5,6 +5,8 @@ import { Effect, Schema } from "effect"
 
 import {
   BrowserClient,
+  SITE_PERMISSION,
+  SITE_PERMISSION_ANSWER,
   SitePermissionRequestRefSchema,
   SitePermissionSchema,
   type SitePermission
@@ -17,7 +19,7 @@ import {
   TabRefSchema
 } from "./browser-support.js"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
-import { personCard } from "../execution/decide.js"
+import { PERSON_CARD, personCard } from "../execution/decide.js"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 
 const PermissionParametersSchema = Schema.Struct({
@@ -35,24 +37,39 @@ const PermissionParametersSchema = Schema.Struct({
     .annotate({ description: "Every permission the page asked for, as the result listed them." })
 }).check(Schema.makeFilter((input) => originIssues(input.origin)))
 
+const SITE_DECISION = { ask: "ask", answer: "answer", deny: "deny" } as const
+
+const DENY_DEFERRED = "deferred"
+
 type SitePermissionDecision =
-  | { readonly kind: "ask" }
-  | { readonly kind: "answer"; readonly answer: "once" | "always" }
-  | { readonly kind: "deny"; readonly reason: "deferred" | "never_ask" | "read_only" }
+  | { readonly kind: typeof SITE_DECISION.ask }
+  | {
+      readonly kind: typeof SITE_DECISION.answer
+      readonly answer: typeof SITE_PERMISSION_ANSWER.once | typeof SITE_PERMISSION_ANSWER.always
+    }
+  | {
+      readonly kind: typeof SITE_DECISION.deny
+      readonly reason: typeof DENY_DEFERRED | "never_ask" | "read_only"
+    }
 
 export const sitePermissionDecision = (input: {
   readonly mode: ChatApprovalMode
   readonly permissions: ReadonlyArray<SitePermission>
   readonly approval: { readonly always: boolean } | undefined
 }): SitePermissionDecision => {
-  if (input.permissions.some((permission) => permission !== "location")) {
-    return { kind: "deny", reason: "deferred" }
+  if (input.permissions.some((permission) => permission !== SITE_PERMISSION.location)) {
+    return { kind: SITE_DECISION.deny, reason: DENY_DEFERRED }
   }
   if (input.approval !== undefined) {
-    return { kind: "answer", answer: input.approval.always ? "always" : "once" }
+    return {
+      kind: SITE_DECISION.answer,
+      answer: input.approval.always ? SITE_PERMISSION_ANSWER.always : SITE_PERMISSION_ANSWER.once
+    }
   }
   const card = personCard(input.mode)
-  return card === "ask" ? { kind: "ask" } : { kind: "deny", reason: card }
+  return card === PERSON_CARD.ask
+    ? { kind: SITE_DECISION.ask }
+    : { kind: SITE_DECISION.deny, reason: card }
 }
 
 const permissionCard = (input: typeof PermissionParametersSchema.Type): ServerApprovalPrompt => {
@@ -116,7 +133,7 @@ const makeBrowserPermissionTool = (browser: BrowserClient["Service"]): ServerToo
         permissions: input.permissions,
         approval: undefined
       })
-      return decision.kind === "ask" ? permissionCard(input) : undefined
+      return decision.kind === SITE_DECISION.ask ? permissionCard(input) : undefined
     },
     execute: async (input, ctx, effects) => {
       const decision = sitePermissionDecision({
@@ -125,13 +142,13 @@ const makeBrowserPermissionTool = (browser: BrowserClient["Service"]): ServerToo
         approval:
           ctx.approval === undefined ? undefined : { always: ctx.approval.grantStanding === true }
       })
-      if (decision.kind === "deny" && decision.reason === "deferred") {
+      if (decision.kind === SITE_DECISION.deny && decision.reason === DENY_DEFERRED) {
         throw new ToolExecutionError(DENIAL.deferred, {
           preview: DECISION_WORD.denied,
           retryable: false
         })
       }
-      if (decision.kind === "ask") {
+      if (decision.kind === SITE_DECISION.ask) {
         throw new ToolExecutionError("A site permission is answered only on the user's card.", {
           preview: "Needs approval",
           retryable: false
@@ -146,12 +163,13 @@ const makeBrowserPermissionTool = (browser: BrowserClient["Service"]): ServerToo
           requestRef: input.request_ref,
           origin: input.origin,
           permissions: input.permissions,
-          answer: decision.kind === "answer" ? decision.answer : "deny"
+          answer:
+            decision.kind === SITE_DECISION.answer ? decision.answer : SITE_PERMISSION_ANSWER.deny
         },
         ctx.signal,
         { effects }
       )
-      return decision.kind === "deny"
+      return decision.kind === SITE_DECISION.deny
         ? { ...browserOutput(output), result: DENIAL[decision.reason] }
         : browserOutput(output)
     }

@@ -1,3 +1,5 @@
+import { bytes, similarity, vector } from "./embedding-vectors.js"
+import { WIKI_INDEX_ROLE } from "../persistence/memory/embedding-store.js"
 import type { EmbeddingIndexStatus } from "@arden-hq/protocol/embeddings"
 import {
   Clock,
@@ -14,7 +16,6 @@ import {
 
 import {
   WikiEmbeddingStore,
-  type StoredWikiEmbeddingChunk,
   type WikiEmbeddingPageWrite
 } from "../persistence/memory/embedding-store.js"
 import { EmbeddingSettingsStore } from "../persistence/settings/store.js"
@@ -23,6 +24,10 @@ import { Wiki } from "../wiki/service.js"
 import { type Snapshot } from "../wiki/snapshot.js"
 import {
   applyControl,
+  CONTROL_REJECTION,
+  CONTROL_RESULT,
+  EMBEDDING_CONTROL,
+  INDEX_PLAN,
   coveredPages,
   etaSeconds,
   indexStatus,
@@ -55,7 +60,7 @@ export class WikiEmbeddingIndexError extends Schema.TaggedError<WikiEmbeddingInd
 
 export class EmbeddingControlRejected extends Schema.TaggedError<EmbeddingControlRejected>()(
   "EmbeddingControlRejected",
-  { reason: Schema.Literals(["unknown_model", "no_previous"] as const) }
+  { reason: Schema.Literals(Object.values(CONTROL_REJECTION)) }
 ) {}
 
 export class WikiEmbeddingIndex extends Context.Service<
@@ -80,23 +85,6 @@ const indexError = (
   message: string,
   cause: unknown
 ) => new WikiEmbeddingIndexError({ operation, message, cause })
-
-const bytes = (embedding: Float32Array): Uint8Array =>
-  Uint8Array.from(new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength))
-
-const vector = (chunk: StoredWikiEmbeddingChunk): Float32Array => {
-  const copied = Uint8Array.from(chunk.embedding)
-  return new Float32Array(copied.buffer, copied.byteOffset, copied.byteLength / 4)
-}
-
-const similarity = (left: Float32Array, right: Float32Array): number => {
-  let score = 0
-  for (const [index, value] of left.entries()) {
-    const other = right[index]
-    if (other !== undefined) score += value * other
-  }
-  return score
-}
 
 const rankSemanticMatches = (
   matches: ReadonlyArray<SemanticMemoryMatch>,
@@ -268,15 +256,15 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
       { discard: true }
     )
     switch (plan.kind) {
-      case "off":
-      case "unavailable":
+      case INDEX_PLAN.off:
+      case INDEX_PLAN.unavailable:
         yield* Ref.set(sample, undefined)
         return
-      case "steady":
+      case INDEX_PLAN.steady:
         yield* Ref.set(sample, undefined)
         yield* reconcileWith(plan.target.modelId, plan.target.indexVersion, snapshot, generation)
         return
-      case "build": {
+      case INDEX_PLAN.build: {
         const serving = plan.serving
         if (
           serving !== undefined &&
@@ -361,7 +349,8 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
     const { settings, catalog, indexes } = yield* readState("status")
     const plan = planIndex({ settings, indexes, catalog })
     const versions = pageVersions(snapshot)
-    const target = plan.kind === "steady" || plan.kind === "build" ? plan.target : undefined
+    const target =
+      plan.kind === INDEX_PLAN.steady || plan.kind === INDEX_PLAN.build ? plan.target : undefined
     const stored =
       target === undefined || !indexes.some((index) => index.indexVersion === target.indexVersion)
         ? []
@@ -379,7 +368,8 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
       catalog,
       indexes,
       building: indexes.find(
-        (index) => index.role === "building" && index.indexVersion === target?.indexVersion
+        (index) =>
+          index.role === WIKI_INDEX_ROLE.building && index.indexVersion === target?.indexVersion
       ),
       indexedPages: covered,
       totalPages: versions.size,
@@ -407,7 +397,7 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
       Effect.gen(function* () {
         const { settings, catalog, indexes } = yield* readState("control")
         const result = applyControl({ settings, indexes, catalog, control: request })
-        if (result.kind === "rejected")
+        if (result.kind === CONTROL_RESULT.rejected)
           return yield* new EmbeddingControlRejected({ reason: result.reason })
         yield* settingsStore
           .updateSettings(result.settings)
@@ -417,8 +407,8 @@ const make = Effect.fn("WikiEmbeddingIndex.make")(function* () {
             )
           )
         yield* Ref.update(controls, (generation) => generation + 1)
-        if (request.kind !== "pause") yield* Ref.set(lastError, undefined)
-        if (request.kind !== "pause") yield* Ref.set(sample, undefined)
+        if (request.kind !== EMBEDDING_CONTROL.pause) yield* Ref.set(lastError, undefined)
+        if (request.kind !== EMBEDDING_CONTROL.pause) yield* Ref.set(sample, undefined)
       })
     )
     const snapshot = yield* wiki

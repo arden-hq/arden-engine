@@ -6,6 +6,8 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { userContent } from "../transcript/user-content.js"
 
+const SQLITE_JSON_ARRAY_TYPE = "array"
+
 export const messageQuote = Effect.fn("MessageQuote.read")(function* (
   sql: SqlClient.SqlClient,
   where: { readonly sessionId: string; readonly messageId: string }
@@ -21,7 +23,8 @@ export const messageQuote = Effect.fn("MessageQuote.read")(function* (
   const row = rows[0]
   if (row === undefined || row.content === null) return undefined
   if (row.role !== ROLE.user && row.role !== ROLE.assistant) return undefined
-  const content: unknown = row.content_type === "array" ? parseJsonText(row.content) : row.content
+  const content: unknown =
+    row.content_type === SQLITE_JSON_ARRAY_TYPE ? parseJsonText(row.content) : row.content
   const text = userContent(content).text
   if (text === "") return undefined
   return {

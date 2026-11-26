@@ -18,7 +18,6 @@ import {
   type ChatImageInput
 } from "@arden-hq/protocol/chat"
 import { CONFIGURED_SERVER_EXIT } from "@arden-hq/protocol/daemon"
-import { extname } from "node:path"
 
 import {
   createCliClient,
@@ -48,13 +47,25 @@ import {
   type CommandReceiptError
 } from "./run-receipt.js"
 
-export type ApprovalHandling = "wait" | "decline" | "ask_then_decline"
+import {
+  CLI_OUTPUT_FORMAT,
+  RECEIPT_STATUS,
+  SESSION_TARGET,
+  STDIN_KIND,
+  type ApprovalHandling
+} from "./cli-words.js"
+import { readImages } from "./run-images.js"
+export type { ApprovalHandling }
 
 export type SessionTarget =
-  | { readonly kind: "new"; readonly space: string | undefined; readonly model: string | undefined }
-  | { readonly kind: "existing"; readonly sessionId: string }
-  | { readonly kind: "latest" }
-  | { readonly kind: "fork"; readonly sessionId: string }
+  | {
+      readonly kind: typeof SESSION_TARGET.new
+      readonly space: string | undefined
+      readonly model: string | undefined
+    }
+  | { readonly kind: typeof SESSION_TARGET.existing; readonly sessionId: string }
+  | { readonly kind: typeof SESSION_TARGET.latest }
+  | { readonly kind: typeof SESSION_TARGET.fork; readonly sessionId: string }
 
 export interface RunOptions {
   readonly promptArgument: string | undefined
@@ -80,39 +91,16 @@ export interface WaitOptions {
 const promptFor = async (options: RunOptions, dependencies: CliDependencies): Promise<string> => {
   const argument = options.promptArgument?.trim()
   if (argument !== undefined && argument.length > 0) {
-    if (dependencies.stdin !== "pipe" && dependencies.stdin !== "file") return argument
+    if (dependencies.stdin !== STDIN_KIND.pipe && dependencies.stdin !== STDIN_KIND.file)
+      return argument
     const piped = (await dependencies.readStdin()).trim()
     return piped.length === 0 ? argument : `${argument}\n\n<stdin>\n${piped}\n</stdin>`
   }
-  if (dependencies.stdin === "terminal") {
+  if (dependencies.stdin === STDIN_KIND.terminal) {
     throw new UsageError("Provide a prompt argument or pipe a prompt on stdin")
   }
   return (await dependencies.readStdin()).trim()
 }
-
-const imageMediaType = (path: string): ChatImageInput["mediaType"] => {
-  const extension = extname(path).toLowerCase()
-  if (extension === ".png") return "image/png"
-  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg"
-  throw new UsageError(`--image takes .png or .jpg files: ${path}`)
-}
-
-const readImages = (
-  paths: ReadonlyArray<string>,
-  dependencies: CliDependencies
-): Promise<Array<ChatImageInput>> =>
-  Promise.all(
-    paths.map(async (path) => {
-      const mediaType = imageMediaType(path)
-      let bytes: Uint8Array
-      try {
-        bytes = await dependencies.readFile(path)
-      } catch (cause) {
-        throw new UsageError(`Cannot read image ${path}: ${errorMessage(cause)}`)
-      }
-      return { mediaType, data: Buffer.from(bytes).toString("base64") }
-    })
-  )
 
 const isJsonObject = (value: unknown): value is OutputSchema =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -168,20 +156,20 @@ const resolveSession = async (
   target: SessionTarget
 ): Promise<ResolvedSession> => {
   switch (target.kind) {
-    case "existing":
+    case SESSION_TARGET.existing:
       return { sessionId: target.sessionId, created: false }
-    case "latest": {
+    case SESSION_TARGET.latest: {
       const page = await client.listSessions(latestChats(1))
       const latest = page.sessions[0]
       if (latest === undefined) throw new UsageError("There is no chat to continue")
       return { sessionId: latest.session_id, created: false }
     }
-    case "fork":
+    case SESSION_TARGET.fork:
       return {
         sessionId: (await client.branchSession(target.sessionId, wholeFork)).session_id,
         created: false
       }
-    case "new": {
+    case SESSION_TARGET.new: {
       if (target.model !== undefined) await requireModel(client, target.model)
       const spaceId =
         target.space === undefined ? undefined : await resolveSpace(client, target.space)
@@ -316,7 +304,12 @@ export const runCommand = async (
       failedReceipt(
         "run",
         { code: status, message },
-        { identity: identity(), status, exitCode: status === "interrupted" ? 130 : 124, declined }
+        {
+          identity: identity(),
+          status,
+          exitCode: status === RECEIPT_STATUS.interrupted ? 130 : 124,
+          declined
+        }
       )
     )
 
@@ -501,7 +494,7 @@ export const sessionsCommand = async (
       is_active: runIsActive(session.run),
       pending_approvals: session.pending_approvals_count
     }))
-    if (options.output === "json") {
+    if (options.output === CLI_OUTPUT_FORMAT.json) {
       dependencies.writeStdout(
         `${JSON.stringify({ version: 1, type: "session_list", sessions })}\n`
       )

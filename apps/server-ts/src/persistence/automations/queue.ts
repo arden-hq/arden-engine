@@ -12,7 +12,7 @@ import type {
 import type { AutomationId } from "./model.js"
 import type { RunEvents } from "./event-batch.js"
 
-const AUTOMATION_BLOCKED_KIND = {
+export const AUTOMATION_BLOCKED_KIND = {
   transient: "transient",
   needs_input: "needs_input",
   capability: "capability",

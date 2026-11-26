@@ -1,6 +1,7 @@
 import type { ChatProjectionEvent, TodoListItem } from "@arden-hq/protocol"
 import {
   SESSION_TODO,
+  TODO_STATUS,
   type EffectiveSessionTodoResponse,
   type SetTodoOverrideRequest,
   type TodoLifecycleResponse,
@@ -169,7 +170,7 @@ export const makeTodoStore = ({
         todoError("set_agent", "invalid", "Invalid agent todo update", id, cause)
       )
     )
-    const completed = input.items.every((item) => item.status === "completed")
+    const completed = input.items.every((item) => item.status === TODO_STATUS.completed)
     return yield* writer
       .transact(
         Effect.gen(function* () {

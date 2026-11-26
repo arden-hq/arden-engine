@@ -1,5 +1,5 @@
-import { isLoopbackHost } from "@arden-hq/std/url"
-import { cardTitle, readAmount } from "@arden-hq/std/vault-card"
+import { isLoopbackHost, WEB_PROTOCOL } from "@arden-hq/std/url"
+import { AMOUNT_READ, cardTitle, readAmount } from "@arden-hq/std/vault-card"
 import { APPROVAL_FIELD_LABEL } from "@arden-hq/protocol/chat"
 import { DECISION_WORD } from "@arden-hq/protocol/permissions"
 import { Effect, Schema } from "effect"
@@ -11,7 +11,7 @@ import {
   type VaultKeysService,
   type VaultList
 } from "../credentials/vault-keys.js"
-import { personCard } from "../execution/decide.js"
+import { PERSON_CARD, personCard } from "../execution/decide.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { tabOriginOf } from "./browser-ask-secret.js"
 import {
@@ -35,7 +35,8 @@ const shopIssues = (value: string, path: string): Array<Schema.FilterIssue> => {
   if (!URL.canParse(value)) return [{ path: [path], issue: "must be an exact https origin" }]
   const url = new URL(value)
   const secure =
-    url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname))
+    url.protocol === WEB_PROTOCOL.https ||
+    (url.protocol === WEB_PROTOCOL.http && isLoopbackHost(url.hostname))
   return url.origin === value && secure
     ? []
     : [{ path: [path], issue: "must be an exact https origin without a path" }]
@@ -82,21 +83,26 @@ const FrameParametersSchema = Schema.Struct({
 type PayInput = typeof PayParametersSchema.Type
 type Card = NonNullable<VaultList["cards"]>[number]
 
-type PayUse = { readonly kind: "allowed" } | { readonly kind: "ask" } | { readonly kind: "refuse" }
+export const USE_DECISION = { allowed: "allowed", ask: "ask", refuse: "refuse" } as const
+
+type PayUse =
+  | { readonly kind: typeof USE_DECISION.allowed }
+  | { readonly kind: typeof USE_DECISION.ask }
+  | { readonly kind: typeof USE_DECISION.refuse }
 
 export const payDecision = (input: {
   readonly answered: boolean
   readonly mode: ChatApprovalMode
 }): PayUse => {
-  if (personCard(input.mode) === "read_only") return { kind: "refuse" }
-  return input.answered ? { kind: "allowed" } : { kind: "ask" }
+  if (personCard(input.mode) === PERSON_CARD.readOnly) return { kind: USE_DECISION.refuse }
+  return input.answered ? { kind: USE_DECISION.allowed } : { kind: USE_DECISION.ask }
 }
 
 const host = (origin: string): string => new URL(origin).host
 
 const amountText = (input: Pick<PayInput, "amount" | "currency">): string => {
   const read = readAmount(input.amount, input.currency)
-  if (read.kind !== "ok")
+  if (read.kind !== AMOUNT_READ.ok)
     throw toolRefusal(
       "Give the amount as a plain number above zero with at most the currency's decimals (84.20), and the currency as its three-letter code (USD).",
       "Amount refused"
@@ -230,7 +236,7 @@ const makeVaultPayTool = (
       refuseSecretShaped(input.reason)
       const card = findCard(await listOrRefuse(vault), input.card_id)
       const decision = payDecision({ answered: false, mode: ctx.run.approvalMode })
-      if (decision.kind === "refuse") throw toolRefusal(READ_ONLY, DECISION_WORD.denied)
+      if (decision.kind === USE_DECISION.refuse) throw toolRefusal(READ_ONLY, DECISION_WORD.denied)
       await requireTabOnShop(input, ctx.run, ctx.signal)
       return payCard(input, card)
     },
@@ -242,11 +248,11 @@ const makeVaultPayTool = (
         mode: ctx.run.approvalMode
       })
       switch (decision.kind) {
-        case "refuse":
+        case USE_DECISION.refuse:
           throw toolRefusal(READ_ONLY, DECISION_WORD.denied)
-        case "ask":
+        case USE_DECISION.ask:
           throw toolRefusal("A payment is allowed only on the user's card.", "Needs approval")
-        case "allowed":
+        case USE_DECISION.allowed:
           return {
             result: paymentAllowed(card, input),
             preview: `${cardTitle(card)} allowed`,
@@ -294,7 +300,7 @@ const makeAllowFrameTool = (
     },
     approvalRequirement: async (input, ctx) => {
       const card = findCard(await listOrRefuse(vault), input.card_id)
-      if (payDecision({ answered: false, mode: ctx.run.approvalMode }).kind === "refuse")
+      if (payDecision({ answered: false, mode: ctx.run.approvalMode }).kind === USE_DECISION.refuse)
         throw toolRefusal(READ_ONLY, DECISION_WORD.denied)
       const checked = await runBrowserForRun(
         browser,

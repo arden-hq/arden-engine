@@ -19,7 +19,7 @@ export type McpSaveOperation = typeof MCP_OPERATION.create | typeof MCP_OPERATIO
 
 const McpOperation = Schema.Literals(Object.values(MCP_OPERATION))
 
-const MCP_ERROR_REASON = {
+export const MCP_ERROR_REASON = {
   notFound: "not_found",
   conflict: "conflict",
   invalid: "invalid",

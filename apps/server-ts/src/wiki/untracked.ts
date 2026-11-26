@@ -1,3 +1,4 @@
+import { UNTRACKED_FILE_KIND } from "@arden-hq/revisions/effect"
 import type { UntrackedFile, WorkingTreeStatusOptions } from "@arden-hq/revisions/effect"
 import { Effect, Option } from "effect"
 
@@ -24,12 +25,14 @@ export interface UntrackedFiles {
 }
 
 export const untrackedFiles = (files: ReadonlyArray<UntrackedFile>): UntrackedFiles => {
-  const readable = files.filter((file) => file.kind !== "unreadable").map((file) => file.path)
+  const readable = files
+    .filter((file) => file.kind !== UNTRACKED_FILE_KIND.unreadable)
+    .map((file) => file.path)
   return {
     notInMemory: readable.filter(isPagePath),
     otherFiles: readable.filter((path) => !isPagePath(path)),
     unreadableFiles: files.flatMap((file) =>
-      file.kind === "unreadable" ? [{ path: file.path, reason: file.reason }] : []
+      file.kind === UNTRACKED_FILE_KIND.unreadable ? [{ path: file.path, reason: file.reason }] : []
     )
   }
 }
@@ -39,7 +42,7 @@ export const untrackedPageIds = Effect.fn("Wiki.untrackedPageIds")(function* (
 ) {
   const ids: Array<{ readonly path: string; readonly pageId: string }> = []
   for (const file of files) {
-    if (file.kind !== "read") continue
+    if (file.kind !== UNTRACKED_FILE_KIND.read) continue
     const text = utf8(file.content)
     if (text === undefined) continue
     const parsed = yield* Effect.option(parseWikiPage(text))

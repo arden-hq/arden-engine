@@ -24,7 +24,11 @@ import {
   SESSION_EXPORT_MEDIA_TYPE,
   SESSION_LIST_FILTER,
   SESSION_LIST_NEXT,
-  SESSION_LIST_PAGE
+  SESSION_LIST_PAGE,
+  SESSION_LIST_SORT,
+  SESSION_LIST_SCOPE,
+  SESSION_FORK_DISPOSITION,
+  SESSION_TRIAGE_ACTION
 } from "./contracts.js"
 import { QueryBooleanTextSchema } from "../common/routes.js"
 import { FIND_QUERY_MAX_LENGTH } from "../views/find-text.js"
@@ -38,7 +42,6 @@ import {
   PositiveIntSchema
 } from "../common/schema.js"
 import {
-  SESSION_LIST_SORT,
   BRANCH_REQUEST,
   CAPTURE_LINE,
   CLEARED,
@@ -73,7 +76,7 @@ const QueryLimitSchema = QueryNonNegativeIntSchema.check(
   Schema.isBetween({ minimum: 1, maximum: 500 })
 )
 const SessionListSortSchema = Schema.Literals(Object.values(SESSION_LIST_SORT))
-const SessionListScopeSchema = Schema.Literals(["primary", "agent", "all"] as const)
+const SessionListScopeSchema = Schema.Literals(Object.values(SESSION_LIST_SCOPE))
 const SessionListCursorSchema = Schema.Struct({
   at: IsoDateTimeStringSchema,
   session_id: Schema.NonEmptyString
@@ -173,7 +176,7 @@ export const CreateSessionResponseSchema: Schema.Codec<CreateSessionResponse> = 
 })
 
 export const BranchSessionRequestSchema = Schema.Struct({
-  disposition: Schema.Literals(["retained", "disposable"]),
+  disposition: Schema.Literals(Object.values(SESSION_FORK_DISPOSITION)),
   request: Schema.Union([
     Schema.Struct({ kind: Schema.Literal(BRANCH_REQUEST.once) }),
     Schema.Struct({
@@ -393,7 +396,7 @@ export const ChatSearchResponseSchema: Schema.Codec<ChatSearchResponse> = withEx
 export * from "./state-schema.js"
 
 export const SessionTriageActionRequestSchema = Schema.Struct({
-  action: Schema.Literals(["dismiss", "accept", "undo"] as const)
+  action: Schema.Literals(Object.values(SESSION_TRIAGE_ACTION))
 })
 
 export const decodeCreateSessionRequestEffect = (

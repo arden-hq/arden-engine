@@ -7,6 +7,7 @@ export const ardenDataRoots = (dataDir: string): ReadonlyArray<string> => [
   ...new Set([path.resolve(dataDir), ardenStateRoot(dataDir)])
 ]
 
+const PATH_SEPARATOR = "/"
 const PATH_CHARACTER = /[A-Za-z0-9_.\-/~$]/
 
 const spellings = (root: string, home: string, cwd: string): ReadonlyArray<string> => {
@@ -32,7 +33,7 @@ const standsAlone = (text: string, start: number, end: number): boolean => {
   const after = text[end]
   return (
     (before === undefined || !PATH_CHARACTER.test(before)) &&
-    (after === undefined || after === "/" || !PATH_CHARACTER.test(after))
+    (after === undefined || after === PATH_SEPARATOR || !PATH_CHARACTER.test(after))
   )
 }
 

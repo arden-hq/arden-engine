@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Context, type Effect } from "effect"
 import type { AutomationEventType, EventAutomationTrigger } from "@arden-hq/protocol/automations"
 import type { AutomationTriggerEvent, JournalRecord } from "./model.js"
@@ -6,12 +7,19 @@ import type { AutomationStoreError } from "./store.js"
 export const feedsActivityTriggers = (session: {
   readonly sessionType: string
   readonly originAutomationId: string | null
-}): boolean => session.sessionType === "chat" && session.originAutomationId === null
+}): boolean => session.sessionType === SESSION_TYPE.chat && session.originAutomationId === null
+
+export const TRIGGER_FEED_KIND = {
+  inputCommitted: "input_committed",
+  activity: "activity",
+  runCompleted: "run_completed",
+  other: "other"
+} as const
 
 export interface TriggerFeedRecord {
   readonly sequence: number
   readonly atMs: number
-  readonly kind: "input_committed" | "activity" | "run_completed" | "other"
+  readonly kind: (typeof TRIGGER_FEED_KIND)[keyof typeof TRIGGER_FEED_KIND]
   readonly sessionId: string | null
   readonly journal: JournalRecord | undefined
 }

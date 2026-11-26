@@ -29,7 +29,7 @@ export const resolveWikiWriteBoundary = Effect.fn("Wiki.resolveWriteBoundary")(f
   snapshot: Snapshot,
   operation: WikiOperation
 ): Effect.fn.Return<WikiWriteBoundary | undefined, WikiError> {
-  if (authority._tag === "Global") return undefined
+  if (authority._tag === GLOBAL_WIKI_LOCATION_AUTHORITY._tag) return undefined
 
   const space = yield* spaces
     .get(authority.spaceId)

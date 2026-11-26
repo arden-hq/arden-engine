@@ -13,11 +13,16 @@ import { McpStdioTransport } from "../mcp/transport.js"
 import { KeyedSerialQueue } from "../mcp/serial.js"
 import type { ComputerApp, ComputerSetup } from "@arden-hq/protocol/computer"
 import { nativeAppMetadata } from "./app-metadata.js"
-import { NativeObservations } from "./contract.js"
+import { PLATFORM } from "@arden-hq/std/process"
+import { NATIVE_DRIVER_TOOL, NativeObservations } from "./contract.js"
 import { currentMillis } from "../runtime/clock.js"
 import { CUA_RELEASE } from "./release.js"
 import { verifyCuaApp } from "./install.js"
-import { permissionSessionState, permissionGrantState } from "./permissions.js"
+import {
+  PERMISSION_SESSION_STATE,
+  permissionSessionState,
+  permissionGrantState
+} from "./permissions.js"
 import { appBundles, nativeCallRefusal, windowCall, withoutOwnApps } from "./own-windows.js"
 
 const executeFile = promisify(execFile)
@@ -146,7 +151,7 @@ export class NativeDriver {
             if (refusal !== undefined)
               return { isError: true, content: [{ type: "text", text: refusal }] }
             const result = await windowCall(name, args, this.ownPid, send)
-            if (name !== "list_apps") return result
+            if (name !== NATIVE_DRIVER_TOOL.listApps) return result
             this.#learnBundles(result)
             return withoutOwnApps(result, this.ownPid)
           } catch (cause) {
@@ -188,8 +193,12 @@ export class NativeDriver {
         : undefined
     }
     const pid = args.pid
-    if (typeof pid === "number" && name !== "list_apps" && known(pid) === undefined) {
-      const listed = await send("list_apps", {})
+    if (
+      typeof pid === "number" &&
+      name !== NATIVE_DRIVER_TOOL.listApps &&
+      known(pid) === undefined
+    ) {
+      const listed = await send(NATIVE_DRIVER_TOOL.listApps, {})
       if (!listed.isError) this.#learnBundles(listed)
     }
     return nativeCallRefusal(args, this.ownPid, known)
@@ -215,7 +224,7 @@ export class NativeDriver {
     permissions = false
   ): Promise<DriverConnection> {
     if (this.#connection !== undefined) return this.#connection
-    if (process.platform !== "darwin") {
+    if (process.platform !== PLATFORM.darwin) {
       throw new Error(
         "Native app control is available on macOS. See Settings → Permissions → Computer control for setup."
       )
@@ -293,7 +302,7 @@ export class NativeDriver {
           CallToolResultSchema,
           { signal, timeout: 10_000 }
         )
-        if (permissionSessionState(session) === "ready") return connection
+        if (permissionSessionState(session) === PERMISSION_SESSION_STATE.ready) return connection
         if (!permissions)
           throw new Error(
             "Complete permission setup in Settings → Permissions before computer use."

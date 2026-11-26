@@ -1,3 +1,4 @@
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { TOOL_TITLE, isActiveRunStatus } from "@arden-hq/protocol/runs"
 import { DateTime, Effect, Schema } from "effect"
@@ -87,7 +88,7 @@ export const makeRunProgressQuery = ({
           )
         )
         switch (event.type) {
-          case "TOOL_CALL_START":
+          case SERVER_EVENT_TYPE.toolCallStart:
             active.set(event.tool_call_id, {
               tool_call_id: event.tool_call_id,
               title:
@@ -96,11 +97,11 @@ export const makeRunProgressQuery = ({
                   : { kind: TOOL_TITLE.titled, title: event.title }
             })
             break
-          case "TOOL_CALL_END":
-          case "TOOL_CALL_RESULT":
+          case SERVER_EVENT_TYPE.toolCallEnd:
+          case SERVER_EVENT_TYPE.toolCallResult:
             active.delete(event.tool_call_id)
             break
-          case "model_response_reset":
+          case SERVER_EVENT_TYPE.modelResponseReset:
             for (const id of event.tool_call_ids) active.delete(id)
             break
         }
@@ -136,14 +137,14 @@ const foldWaitingToolCalls = (events: ReadonlyArray<WaitingEvent>): ReadonlyArra
   const waiting = new Set<string>()
   for (const event of events) {
     switch (event.type) {
-      case "TOOL_CALL_WAITING":
+      case SERVER_EVENT_TYPE.toolCallWaiting:
         waiting.add(event.tool_call_id)
         break
-      case "TOOL_CALL_START":
-      case "TOOL_CALL_RESULT":
+      case SERVER_EVENT_TYPE.toolCallStart:
+      case SERVER_EVENT_TYPE.toolCallResult:
         waiting.delete(event.tool_call_id)
         break
-      case "model_response_reset":
+      case SERVER_EVENT_TYPE.modelResponseReset:
         for (const id of event.tool_call_ids) waiting.delete(id)
         break
     }

@@ -1,3 +1,6 @@
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import { INTERNAL_LIFECYCLE_EVENT } from "../persistence/sessions/internal-events.js"
 import { Effect, Layer, Stream } from "effect"
 import {
   SessionLifecycleEvents,
@@ -7,10 +10,11 @@ import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { ChatStop } from "./chat-stop.js"
 
 const endsWork = (delivery: SessionLifecycleDelivery): boolean => {
-  if (delivery.kind === "reset") return true
+  if (delivery.kind === JOURNAL_DELIVERY.reset) return true
   const event = delivery.event
   return (
-    event.type === "run_settled" || (event.type === "session_blocking_work" && !event.blocking_work)
+    event.type === INTERNAL_LIFECYCLE_EVENT.runSettled ||
+    (event.type === SERVER_EVENT_TYPE.sessionBlockingWork && !event.blocking_work)
   )
 }
 

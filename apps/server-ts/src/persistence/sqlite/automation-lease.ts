@@ -1,6 +1,6 @@
 import { JobLeaseLostError } from "@arden-hq/jobs"
 import type { JobLeaseRef } from "@arden-hq/jobs"
-import { Clock, Effect } from "effect"
+import { Clock, Effect, Option } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { WorkStoreError } from "../work/store.js"
 import { iso } from "../../runtime/clock.js"
@@ -77,7 +77,7 @@ export const jobMayPublish = Effect.fn("AutomationLease.mayPublish")(function* (
   }
 ) {
   const parsed = yield* Effect.option(Effect.try(() => parseLease(options.lease)))
-  if (parsed._tag === "None" || parsed.value.runId !== options.attemptId) return false
+  if (Option.isNone(parsed) || parsed.value.runId !== options.attemptId) return false
   const live = yield* sql`SELECT 1 FROM automation_event_queue AS queue
     JOIN automation_runs AS attempt ON attempt.id = ${options.attemptId}
       AND attempt.task_id = queue.task_id

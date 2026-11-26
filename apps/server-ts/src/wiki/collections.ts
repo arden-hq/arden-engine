@@ -1,3 +1,4 @@
+import { MARKDOWN_NODE } from "./markdown-node.js"
 import { PATH_SEGMENT, RESOURCE_STATE } from "@arden-hq/revisions/effect"
 import { WIKI_REPORT_FIELDS, WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
 import { parseCalendarDay } from "@arden-hq/std/time"
@@ -18,7 +19,7 @@ export const DIRECTORY_CONTRACT_HEADINGS = [
 ] as const
 
 export const hasText = (node: Nodes): boolean => {
-  if (node.type === "html" || node.type === "definition") return false
+  if (node.type === MARKDOWN_NODE.html || node.type === MARKDOWN_NODE.definition) return false
   if ("value" in node) return node.value.trim().length > 0
   return "children" in node && node.children.some(hasText)
 }
@@ -27,11 +28,13 @@ export const directorySections = (body: string): ReadonlyMap<string, string> => 
   const nodes = fromMarkdown(body).children
   const sections = new Map<string, string>()
   for (const [index, node] of nodes.entries()) {
-    if (node.type !== "heading" || node.depth !== 2) continue
+    if (node.type !== MARKDOWN_NODE.heading || node.depth !== 2) continue
     const name = node.children.map((child) => ("value" in child ? child.value : "")).join("")
     const start = node.position?.end.offset
     const following = nodes.slice(index + 1)
-    const boundary = following.findIndex((next) => next.type === "heading" && next.depth <= 2)
+    const boundary = following.findIndex(
+      (next) => next.type === MARKDOWN_NODE.heading && next.depth <= 2
+    )
     const content = boundary < 0 ? following : following.slice(0, boundary)
     const end = boundary < 0 ? undefined : following[boundary]?.position?.start.offset
     if (start !== undefined)
@@ -54,9 +57,11 @@ export const IMPORTED_DIRECTORY = "imported"
 export const isImportedPath = (path: string): boolean =>
   path.toLowerCase().startsWith(`${IMPORTED_DIRECTORY}/`)
 
+export const RECORD_PRODUCER = { automation: "automation", import: "import" } as const
+
 type RecordProducer =
-  | { readonly kind: "automation"; readonly automationId: string }
-  | { readonly kind: "import" }
+  | { readonly kind: typeof RECORD_PRODUCER.automation; readonly automationId: string }
+  | { readonly kind: typeof RECORD_PRODUCER.import }
 
 interface RecordFolder {
   readonly directory: string
@@ -65,7 +70,7 @@ interface RecordFolder {
 
 const IMPORTED_FOLDER: RecordFolder = {
   directory: IMPORTED_DIRECTORY,
-  producer: { kind: "import" }
+  producer: { kind: RECORD_PRODUCER.import }
 }
 
 export const PAGE_KIND = { knowledge: "knowledge", contract: "contract", record: "record" } as const
@@ -98,7 +103,7 @@ export const markedProducer = (page: ParsedWikiPage): string | undefined => {
 const folderProducer = (readmePath: string, page: ParsedWikiPage): RecordProducer | undefined => {
   if (isImportedPath(readmePath)) return IMPORTED_FOLDER.producer
   const automationId = markedProducer(page)
-  return automationId === undefined ? undefined : { kind: "automation", automationId }
+  return automationId === undefined ? undefined : { kind: RECORD_PRODUCER.automation, automationId }
 }
 
 export const recordFolders = (pages: ReadonlyArray<PageRecord>): RecordFolders => {
@@ -144,7 +149,7 @@ const recordPage = (folders: RecordFolders, path: string): PageKind | undefined 
       return {
         kind: PAGE_KIND.record,
         folder,
-        day: folder.producer.kind === "automation" ? dayOfName(path) : undefined
+        day: folder.producer.kind === RECORD_PRODUCER.automation ? dayOfName(path) : undefined
       }
   }
   return undefined
@@ -155,7 +160,8 @@ export const pageKind = (folders: RecordFolders, path: string): PageKind =>
 
 export const producingAutomation = (folders: RecordFolders, path: string): string | undefined => {
   const kind = pageKind(folders, path)
-  return kind.kind !== PAGE_KIND.knowledge && kind.folder.producer.kind === "automation"
+  return kind.kind !== PAGE_KIND.knowledge &&
+    kind.folder.producer.kind === RECORD_PRODUCER.automation
     ? kind.folder.producer.automationId
     : undefined
 }
@@ -206,7 +212,8 @@ export const wikiCollections = (pages: ReadonlyArray<RunPage>): ReadonlyArray<Wi
         consumers: excerpt(sections.get("Consumers")),
         records: excerpt(sections.get("Records")),
         producer:
-          kind.kind === PAGE_KIND.contract && kind.folder.producer.kind === "automation"
+          kind.kind === PAGE_KIND.contract &&
+          kind.folder.producer.kind === RECORD_PRODUCER.automation
             ? kind.folder.producer.automationId
             : undefined,
         contract: DIRECTORY_CONTRACT_HEADINGS.every((heading) => sections.get(heading))

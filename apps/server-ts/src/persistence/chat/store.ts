@@ -24,14 +24,6 @@ import type { JobLeaseRef } from "@arden-hq/jobs"
 import type { AutomationId } from "../automations/model.js"
 import type { PlanReading, QuotaPauseReason } from "../../models/plan-limits.js"
 
-export const CHAT_WRITE_STORED = { stored: "Stored" } as const
-
-export const CHAT_AGENT_SPAWN_REASON = {
-  invalidParent: "invalid_parent",
-  maxDepth: "max_depth",
-  workingDirectory: "working_directory"
-} as const
-
 export interface ChatAutomationOrigin {
   readonly automationId: AutomationId
   readonly name: string
@@ -94,12 +86,14 @@ export interface ChatWriteTerminalResult {
   readonly committed: ChatWriteCommit
 }
 
+export const CHAT_WRITE_FINISH = { completed: "Completed", continued: "Continued" } as const
+
 interface ChatWriteFinishCompleted extends ChatWriteTerminalResult {
-  readonly _tag: "Completed"
+  readonly _tag: typeof CHAT_WRITE_FINISH.completed
 }
 
 interface ChatWriteFinishContinued {
-  readonly _tag: "Continued"
+  readonly _tag: typeof CHAT_WRITE_FINISH.continued
   readonly activeMessages: ReadonlyArray<StoredMessageEnvelope>
   readonly assistantMessageId: string
   readonly eventSequence: number
@@ -153,10 +147,15 @@ export interface ChatWriteResume {
   readonly scheduling: ChatRunScheduling
 }
 
+export const CHAT_RUN_SCHEDULING = {
+  unrestricted: "unrestricted",
+  agentTree: "agent_tree"
+} as const
+
 export type ChatRunScheduling =
-  | { readonly kind: "unrestricted" }
+  | { readonly kind: typeof CHAT_RUN_SCHEDULING.unrestricted }
   | {
-      readonly kind: "agent_tree"
+      readonly kind: typeof CHAT_RUN_SCHEDULING.agentTree
       readonly treeRootSessionId: string
       readonly maxConcurrentAgents: number
     }
@@ -185,6 +184,12 @@ export interface ChatWriteSpawnAgentResult {
   readonly result: ToolResult
   readonly child: ChatWriteResume
 }
+
+export const CHAT_AGENT_SPAWN_REASON = {
+  invalidParent: "invalid_parent",
+  maxDepth: "max_depth",
+  workingDirectory: "working_directory"
+} as const
 
 export class ChatAgentSpawnError extends Schema.TaggedError<ChatAgentSpawnError>()(
   "ChatAgentSpawnError",
@@ -283,6 +288,8 @@ interface ChatWriteQueued {
 
 export type ChatWriteStartResult = ChatWriteStarted | ChatWriteExisting | ChatWriteQueued
 
+export const CHAT_WRITE_STORED = { stored: "Stored" } as const
+
 export type ChatWriteReceiveResult =
   | ChatWriteStartResult
   | { readonly _tag: typeof CHAT_WRITE_STORED.stored }
@@ -308,9 +315,15 @@ export interface ChatQueueHead extends ChatQueuedMessage {
   readonly sessionId: string
 }
 
+export const MODEL_ADMISSION = { admitted: "admitted", paused: "paused" } as const
+
 export type ModelAdmission =
-  | { readonly kind: "admitted" }
-  | { readonly kind: "paused"; readonly reason: QuotaPauseReason; readonly until: string }
+  | { readonly kind: typeof MODEL_ADMISSION.admitted }
+  | {
+      readonly kind: typeof MODEL_ADMISSION.paused
+      readonly reason: QuotaPauseReason
+      readonly until: string
+    }
 
 export class ChatWriteStore extends Context.Service<
   ChatWriteStore,

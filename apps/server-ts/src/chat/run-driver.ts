@@ -1,14 +1,22 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { ContextExperiments } from "../context/experiments.js"
-import { TOOL_KIND } from "@arden-hq/protocol/chat"
+import { TOOL_KIND, TOOL_PRESENTATION } from "@arden-hq/protocol/chat"
 import type { StoredRunTerminalResult } from "../persistence/runs/stored-result.js"
 import { tokenUsageEvent } from "./token-usage-event.js"
-import type { AgentEvent, Result as LoopResult } from "@arden-hq/loop"
+import {
+  AGENT_EVENT_TAG,
+  HISTORY_CHANGE_KIND,
+  StopReason,
+  type AgentEvent,
+  type Result as LoopResult
+} from "@arden-hq/loop"
 import { Cause, Effect, Schema, Stream } from "effect"
 import { ChatEventStore } from "../persistence/events/store.js"
 import { WorkStore } from "../persistence/work/store.js"
 import {
   ChatWriteStore,
+  CHAT_WRITE_FINISH,
+  MODEL_ADMISSION,
   type ModelAdmission,
   type ChatCheckpointAnchor
 } from "../persistence/chat/store.js"
@@ -128,7 +136,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
                 input.model === null ? undefined : host.planReading(input.model)
               )
             )
-            if (admission.kind === "paused") {
+            if (admission.kind === MODEL_ADMISSION.paused) {
               quotaPause = admission
               throw new Error(`Paused on a plan limit until ${admission.until}`)
             }
@@ -167,9 +175,13 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
           checkpointMessages: (messages, context, completionMessageId, change) => {
             purpose?.checkpoint([...messages])
             const incremental =
-              change?.kind === "append" && appendReady && checkpointAnchor !== undefined
+              change?.kind === HISTORY_CHANGE_KIND.append &&
+              appendReady &&
+              checkpointAnchor !== undefined
             const snapshot =
-              change?.kind === "replace" || incremental ? change.messages : [...messages]
+              change?.kind === HISTORY_CHANGE_KIND.replace || incremental
+                ? change.messages
+                : [...messages]
             const anchor = incremental ? checkpointAnchor : undefined
             const done = checkpointGate(
               {
@@ -293,13 +305,15 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
             if (isAgentEvent(output)) {
               batches.push(...mapper.map(output))
               if (
-                output._tag === "ToolStarted" &&
+                output._tag === AGENT_EVENT_TAG.toolStarted &&
                 !output.parent_id &&
-                output.host.presentation !== "conversation" &&
+                output.host.presentation !== TOOL_PRESENTATION.conversation &&
                 (output.host.kind === TOOL_KIND.agent ||
                   isPublicActivityTool(
                     output.name,
-                    output.host.presentation === "status" ? "status" : undefined
+                    output.host.presentation === TOOL_PRESENTATION.status
+                      ? TOOL_PRESENTATION.status
+                      : undefined
                   ))
               )
                 purpose?.work(output)
@@ -316,7 +330,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
       return yield* runnerError(input, "Structured Chat runner ended without a terminal result")
     }
     const result = loopResult
-    if (result.stop_reason === "paused") {
+    if (result.stop_reason === StopReason.PAUSED) {
       const reasons = new Set(result.paused_tools.map((tool) => tool.reason))
       const failure = pausedRunFailure(reasons)
       if (failure !== undefined) {
@@ -380,7 +394,7 @@ export const runChat = Effect.fn("ChatMessage.runChat")(function* (
       }).pipe(Effect.mapError(mapWriteError))
     )
     purpose?.stop()
-    if (terminal._tag === "Continued") {
+    if (terminal._tag === CHAT_WRITE_FINISH.continued) {
       input.eventSequence.value = terminal.eventSequence
       if (typeof terminalMessage?.message_id === "string") {
         yield* host.scheduleLetterSubject(input.sessionId, {

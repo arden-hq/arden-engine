@@ -1,3 +1,4 @@
+import { CHAT_RUN_ERROR_CODE } from "@arden-hq/protocol/chat"
 import { cutText, firstLine } from "@arden-hq/std/text"
 import { captureMutationVersions } from "./mutation-links.js"
 import type { MutationOperationIdentity } from "../tools/mutation-receipt.js"
@@ -16,10 +17,12 @@ const FAILURES_BEFORE_GIVING_UP = 3
 
 const AUTO_RESUME_WAIT_HOURS = [1, 6, 24, 72] as const
 
+const GIVE_UP_CAUSE = { streak: "streak", lasting: "lasting" } as const
+
 export type GiveUpCause =
-  | { readonly kind: "streak" }
+  | { readonly kind: typeof GIVE_UP_CAUSE.streak }
   | {
-      readonly kind: "lasting"
+      readonly kind: typeof GIVE_UP_CAUSE.lasting
       readonly said: string
       readonly next: string
       readonly canEndWithoutOwner: boolean
@@ -50,13 +53,13 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
   if (refused !== undefined && isLastingRunError(refused.error_code)) {
     const error = (refused.error ?? "").trim()
     return {
-      kind: "lasting",
+      kind: GIVE_UP_CAUSE.lasting,
       said: providerSentence(error) ?? (cutText(firstLine(error), 200) || "Its run failed."),
       next:
-        refused.error_code === "model_unavailable"
+        refused.error_code === CHAT_RUN_ERROR_CODE.modelUnavailable
           ? "Pick another model for it, then resume it."
           : "Resume it once that's fixed.",
-      canEndWithoutOwner: refused.error_code !== "request_invalid"
+      canEndWithoutOwner: refused.error_code !== CHAT_RUN_ERROR_CODE.requestInvalid
     }
   }
   const streak = yield* sql<{ readonly failed_runs: number }>`UPDATE scheduled_tasks
@@ -64,7 +67,9 @@ export const givesUp = Effect.fn("AutomationGiveUp.givesUp")(function* (
         WHEN failed_item IS ${item} THEN failed_runs + 1 ELSE 1 END,
       failed_item = ${item}, failed_attempt = ${attemptId}
     WHERE task_id = ${automationId} RETURNING failed_runs`
-  return (streak[0]?.failed_runs ?? 0) >= FAILURES_BEFORE_GIVING_UP ? { kind: "streak" } : undefined
+  return (streak[0]?.failed_runs ?? 0) >= FAILURES_BEFORE_GIVING_UP
+    ? { kind: GIVE_UP_CAUSE.streak }
+    : undefined
 })
 
 export const endStreak = (sql: SqlClient.SqlClient, automationId: string): Statement<Row> =>
@@ -88,7 +93,9 @@ const bookAutoResume = Effect.fn("AutomationGiveUp.bookAutoResume")(function* (
 })
 
 export const giveUpReason = (cause: GiveUpCause): string =>
-  cause.kind === "lasting" ? cause.said : `it failed ${FAILURES_BEFORE_GIVING_UP} runs in a row`
+  cause.kind === GIVE_UP_CAUSE.lasting
+    ? cause.said
+    : `it failed ${FAILURES_BEFORE_GIVING_UP} runs in a row`
 
 export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (options: {
   readonly sql: SqlClient.SqlClient
@@ -111,7 +118,7 @@ export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (op
     halt: "pause"
   })
   const triesAgain =
-    cause.kind === "lasting" && cause.canEndWithoutOwner
+    cause.kind === GIVE_UP_CAUSE.lasting && cause.canEndWithoutOwner
       ? yield* bookAutoResume(sql, automationId)
       : false
   yield* recordAutomationEvent(sql, {
@@ -120,7 +127,7 @@ export const pauseOnGivingUp = Effect.fn("AutomationGiveUp.pause")(function* (op
     attemptId: options.attemptId,
     event: "paused",
     text:
-      cause.kind === "streak"
+      cause.kind === GIVE_UP_CAUSE.streak
         ? `Paused after ${FAILURES_BEFORE_GIVING_UP} failed runs in a row. Resume it once the cause is fixed.`
         : `Paused: ${cause.said} ${triesAgain ? "Arden will try it again by itself. " : ""}${cause.next}`
   })

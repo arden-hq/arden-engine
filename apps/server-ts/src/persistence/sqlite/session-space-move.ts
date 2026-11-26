@@ -9,10 +9,24 @@ import { activeRunStatusList } from "./status-sets.js"
 import { sessionDescendants } from "./tree-walk.js"
 import { mainSpaceId } from "./main-space.js"
 
+export const CONVERSATION_MOVE = {
+  moved: "moved",
+  onRunEnd: "on_run_end",
+  missing: "missing"
+} as const
+
 type ConversationMove =
-  | { readonly kind: "moved"; readonly spaceId: string; readonly spaceName: string }
-  | { readonly kind: "on_run_end"; readonly spaceId: string; readonly spaceName: string }
-  | { readonly kind: "missing" }
+  | {
+      readonly kind: typeof CONVERSATION_MOVE.moved
+      readonly spaceId: string
+      readonly spaceName: string
+    }
+  | {
+      readonly kind: typeof CONVERSATION_MOVE.onRunEnd
+      readonly spaceId: string
+      readonly spaceName: string
+    }
+  | { readonly kind: typeof CONVERSATION_MOVE.missing }
 
 interface MoveRequest {
   readonly sql: SqlClient.SqlClient
@@ -37,7 +51,7 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
     LIMIT 1
   `
   const session = sessions[0]
-  if (session === undefined) return { kind: "missing" } satisfies ConversationMove
+  if (session === undefined) return { kind: CONVERSATION_MOVE.missing } satisfies ConversationMove
   if (session.automation === 1) {
     return yield* storeError(
       "move",
@@ -53,7 +67,7 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
   if (active.length > 0) {
     if (askingRunId !== undefined && active.every((run) => run.run_id === askingRunId)) {
       yield* holdMove(sql, askingRunId, sessionId, spaceId, mutation)
-      return { kind: "on_run_end", spaceId, spaceName } satisfies ConversationMove
+      return { kind: CONVERSATION_MOVE.onRunEnd, spaceId, spaceName } satisfies ConversationMove
     }
     return yield* storeError(
       "move",
@@ -70,7 +84,8 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
     WHERE session_id IN (SELECT session_id FROM subtree) AND space_id IS NOT ${spaceId}
     RETURNING session_id
   `
-  if (moved.length === 0) return { kind: "moved", spaceId, spaceName } satisfies ConversationMove
+  if (moved.length === 0)
+    return { kind: CONVERSATION_MOVE.moved, spaceId, spaceName } satisfies ConversationMove
   const operationId = yield* nextId
   const memberIds = moved.map((row) => row.session_id)
   yield* sql`INSERT INTO session_membership_changes (session_id, version, operation_id)
@@ -84,7 +99,7 @@ export const moveConversationInTransaction = Effect.fn("SessionSpaceMove.move")(
         AND EXISTS (SELECT 1 FROM tool_calls WHERE run_id = ${mutation.runId}
           AND tool_call_id = ${mutation.toolCallId} AND changes_state = 1)`
   }
-  return { kind: "moved", spaceId, spaceName } satisfies ConversationMove
+  return { kind: CONVERSATION_MOVE.moved, spaceId, spaceName } satisfies ConversationMove
 })
 
 export const applySpaceMoveAtRunEnd = Effect.fn("SessionSpaceMove.applyAtRunEnd")(
@@ -124,7 +139,7 @@ export const applySpaceMoveAtRunEnd = Effect.fn("SessionSpaceMove.applyAtRunEnd"
       askingRunId: undefined,
       mutation
     })
-    return moved.kind === "moved" ? mutation : undefined
+    return moved.kind === CONVERSATION_MOVE.moved ? mutation : undefined
   },
   (effect, { runId }) =>
     Effect.catchCause(effect, (cause) =>

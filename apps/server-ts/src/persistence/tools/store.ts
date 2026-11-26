@@ -32,7 +32,7 @@ export interface ToolExecutionApprovalContext {
   readonly alternative?: "draft"
 }
 
-const TOOL_EXECUTION_BEGIN = {
+export const TOOL_EXECUTION_BEGIN = {
   started: "Started",
   recovered: "Recovered",
   notAdmitted: "NotAdmitted"
@@ -147,7 +147,7 @@ export const TOOL_OUTCOME_UNCERTAIN = "tool_outcome_uncertain"
 export const TOOL_PERSISTENCE_FAILED = "tool_persistence_failed"
 export const TOOL_MUTATION_STALLED = "tool_mutation_stalled"
 
-const MUTATION_BLOCKER = {
+export const MUTATION_BLOCKER = {
   decisionRequired: "decision_required",
   awaitingApproval: "awaiting_approval",
   stalled: "stalled"

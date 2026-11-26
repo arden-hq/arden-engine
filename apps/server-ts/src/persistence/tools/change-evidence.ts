@@ -1,7 +1,9 @@
 import type { ToolResult } from "@arden-hq/loop"
 import {
+  CHANGE_ENTRY_DOMAIN,
   CHANGE_ENTRY_LINK,
   CHANGE_ENTRY_PLACE,
+  CHANGE_ENTRY_VERSION,
   CHANGE_ENTRY_TITLE,
   type ChangeEvidence,
   type ChangeEntry
@@ -11,6 +13,7 @@ import type { EffectTargetOrigin } from "../../execution/tool-effect.js"
 import {
   boundedLabel,
   boundedPlace,
+  MUTATION_RESOURCE,
   mutationOperationId,
   readMutationReceipt,
   receiptResources,
@@ -27,27 +30,29 @@ export interface CallTarget {
   readonly origin: EffectTargetOrigin
 }
 
-const targetDomain = (source: string): ChangeEntry["domain"] => {
-  switch (source) {
-    case "gmail":
-    case "gmail_draft":
-      return "email"
-    case "calendar":
-    case "mac_calendar":
-      return "calendar"
-    case "google_drive":
-      return "document"
-    case "command":
-    case "browser":
-    case "app":
-      return source
-    default:
-      return "other"
-  }
+const TARGET_DOMAIN: ReadonlyMap<string, ChangeEntry["domain"]> = new Map([
+  ["gmail", CHANGE_ENTRY_DOMAIN.email],
+  ["gmail_draft", CHANGE_ENTRY_DOMAIN.email],
+  ["calendar", CHANGE_ENTRY_DOMAIN.calendar],
+  ["mac_calendar", CHANGE_ENTRY_DOMAIN.calendar],
+  ["google_drive", CHANGE_ENTRY_DOMAIN.document],
+  ["command", CHANGE_ENTRY_DOMAIN.command],
+  ["browser", CHANGE_ENTRY_DOMAIN.browser],
+  ["app", CHANGE_ENTRY_DOMAIN.app]
+])
+
+const targetDomain = (source: string): ChangeEntry["domain"] =>
+  TARGET_DOMAIN.get(source) ?? CHANGE_ENTRY_DOMAIN.other
+
+const BEFORE_OF_ORIGIN: Readonly<Record<EffectTargetOrigin, ChangeEntry["before"]>> = {
+  created: { kind: CHANGE_ENTRY_VERSION.absent },
+  named: { kind: CHANGE_ENTRY_VERSION.unrecorded }
 }
 
 const versionSide = (version: string): ChangeEntry["before"] =>
-  version === "absent" ? { kind: "absent" } : { kind: "version", version }
+  version === CHANGE_ENTRY_VERSION.absent
+    ? { kind: CHANGE_ENTRY_VERSION.absent }
+    : { kind: CHANGE_ENTRY_VERSION.version, version }
 
 const entryId = (operationId: string, kind: "resource" | "target", index: number): string =>
   index === 0 ? `${operationId}:${kind}` : `${operationId}:${kind}:${index}`
@@ -78,7 +83,7 @@ const resourceEntry = (
   fileComparison: "patch" | "truncated" | "unavailable"
 ): ChangeEntry => {
   const label = entryLabel(resource)
-  if (resource.kind === "target") {
+  if (resource.kind === MUTATION_RESOURCE.target) {
     return {
       entry_id,
       domain: resource.domain,
@@ -91,7 +96,7 @@ const resourceEntry = (
       comparison: "unavailable"
     }
   }
-  const file = resource.kind === "file_revision"
+  const file = resource.kind === MUTATION_RESOURCE.file_revision
   return {
     entry_id,
     domain: resource.domain ?? (file ? "file" : "resource"),
@@ -116,7 +121,7 @@ const targetEntry = (
   ...entryLabel(target),
   place: placeOf(target),
   outcome,
-  before: target.origin === "created" ? { kind: "absent" } : { kind: "unrecorded" },
+  before: BEFORE_OF_ORIGIN[target.origin],
   after: { kind: "unrecorded" },
   comparison: "unavailable"
 })

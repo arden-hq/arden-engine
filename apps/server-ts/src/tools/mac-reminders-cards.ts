@@ -8,11 +8,12 @@ import {
   type MacApps,
   type MacReminderRecord
 } from "./mac-apps-records.js"
-import type {
-  ReminderCompleteSchema,
-  ReminderCreateSchema,
-  ReminderDeleteSchema,
-  ReminderEditSchema
+import {
+  MAC_PRIORITY,
+  type ReminderCompleteSchema,
+  type ReminderCreateSchema,
+  type ReminderDeleteSchema,
+  type ReminderEditSchema
 } from "./mac-apps-schemas.js"
 import {
   changeablePlace,
@@ -30,9 +31,11 @@ export const readReminder = async (
 ): Promise<MacReminderRecord> =>
   record(ReminderRecordSchema, await helper.run(["reminders", "get", reminderRef], { signal }))
 
+const REMINDER_ADDRESS_FIELD = "reminder_ref"
+
 export const reminderChanges = (input: typeof ReminderEditSchema.Type): void => {
   const changed = Object.entries(input).some(
-    ([key, value]) => key !== "reminder_ref" && value !== undefined
+    ([key, value]) => key !== REMINDER_ADDRESS_FIELD && value !== undefined
   )
   if (!changed) throw toolRefusal("Provide at least one reminder change.", "No reminder changes")
 }
@@ -107,7 +110,7 @@ export const makeMacRemindersCards = (apps: MacApps): MacRemindersCards => {
           ),
           ...optionalField(
             "Priority",
-            input.priority === "none" ? undefined : priorityWords(input.priority)
+            input.priority === MAC_PRIORITY.none ? undefined : priorityWords(input.priority)
           ),
           ...optionalField("Link", input.url)
         ],

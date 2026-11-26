@@ -11,7 +11,7 @@ import type {
   IdleAutomationTrigger,
   TimeSchedule
 } from "@arden-hq/protocol/automations"
-import { HOME_LETTER_AUTOMATION_REF } from "@arden-hq/protocol/automations"
+import { AUTOMATION_EVENT_TYPE, HOME_LETTER_AUTOMATION_REF } from "@arden-hq/protocol/automations"
 import { Context, type Effect, Schema } from "effect"
 import type { InternalLifecycleEvent } from "../sessions/internal-events.js"
 import type { AutomationStoreError } from "./store.js"
@@ -39,9 +39,14 @@ export const HOME_LETTER_AUTOMATION_ID = AutomationId.make(HOME_LETTER_AUTOMATIO
 export const DAILY_SUMMARY_AUTOMATION_ID = AutomationId.make("builtin-daily-summary")
 export const EVENTS_AUTOMATION_ID = AutomationId.make("builtin-urgent-events")
 
-export type SystemPromptEdit = "owner" | "fixed"
+export const SYSTEM_PROMPT_EDIT = { owner: "owner", fixed: "fixed" } as const
+export type SystemPromptEdit = (typeof SYSTEM_PROMPT_EDIT)[keyof typeof SYSTEM_PROMPT_EDIT]
 
-export type SystemTriggerScope = "any" | "item_events"
+export const SYSTEM_TRIGGER_SCOPE = { any: "any", item_events: "item_events" } as const
+export type SystemTriggerScope = (typeof SYSTEM_TRIGGER_SCOPE)[keyof typeof SYSTEM_TRIGGER_SCOPE]
+
+export const TRIGGERS_SOURCE = { manual: "manual" } as const
+export type TriggersSource = (typeof TRIGGERS_SOURCE)[keyof typeof TRIGGERS_SOURCE]
 
 export interface SystemAutomationSpec {
   readonly automationId: AutomationId
@@ -170,9 +175,11 @@ export interface JournalRecord {
   readonly event: AutomationEvent | InternalLifecycleEvent
 }
 
+export const ASK_REF_KIND = { question: "question", card: "card" } as const
+
 export type AskRef =
-  | { readonly kind: "question"; readonly questionId: string }
-  | { readonly kind: "card"; readonly runId: string; readonly toolCallId: string }
+  | { readonly kind: typeof ASK_REF_KIND.question; readonly questionId: string }
+  | { readonly kind: typeof ASK_REF_KIND.card; readonly runId: string; readonly toolCallId: string }
 
 export interface JournalReads {
   readonly chat: (sessionId: string) => Effect.Effect<EventChat | undefined, AutomationStoreError>
@@ -191,7 +198,7 @@ export interface RaisedEvent {
 }
 
 export const wikiChangedRevision = (event: AutomationTriggerEvent): string | null =>
-  event.eventType === "wiki.changed" ? event.eventKey : null
+  event.eventType === AUTOMATION_EVENT_TYPE.wiki_changed ? event.eventKey : null
 
 export class AutomationRules extends Context.Service<
   AutomationRules,

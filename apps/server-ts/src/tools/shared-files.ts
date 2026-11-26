@@ -1,5 +1,4 @@
 import { PermissionRules } from "../persistence/permissions/rules.js"
-import { formatBytes } from "@arden-hq/std/count"
 import { sha256Hex } from "@arden-hq/std/hash"
 import { Effect, Option, Schema } from "effect"
 import { basename, join } from "node:path"
@@ -7,8 +6,7 @@ import { basename, join } from "node:path"
 import { ConversationArtifactError } from "../artifacts/conversation-model.js"
 import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
-import { sharedResourceSessions } from "../execution/authority.js"
-import { PrivateFileError, readRegularFile } from "../fs/private-store.js"
+import { ACTOR, sharedResourceSessions } from "../execution/authority.js"
 import { JsonObjectSchema, type JsonObject } from "../persistence/json.js"
 import { managedObjectRefParts } from "../persistence/managed-output/descriptor.js"
 import { sessionLineage } from "../persistence/sessions/lineage.js"
@@ -22,10 +20,15 @@ import { cwdFor, filesystemError } from "./file-tool-support.js"
 import {
   fileMediaType,
   safeAttachmentName,
+  TRANSCRIPT_FILE,
   transcriptFiles,
   type TranscriptFile
 } from "./shared-file-sources.js"
-import { checkUploadPath, uploadRefusalText } from "./shared-file-policy.js"
+import { checkUploadPath, UPLOAD_PATH_CHECK, uploadRefusalText } from "./shared-file-policy.js"
+import { PERMISSION_PATH_ACCESS, PERMISSION_RULE_DECISION } from "@arden-hq/protocol/permissions"
+import { STORE_REASON } from "../persistence/errors.js"
+import { MANAGED_OBJECT_FORMAT } from "../persistence/managed-output/ref.js"
+import { boundedFile, enforceSize } from "./shared-file-bounds.js"
 import { toolFailure, toolRefusal } from "./tool-failure.js"
 import type { ResolvedFile, SharedFileContext, SharedFileServices } from "./shared-file-types.js"
 
@@ -58,13 +61,19 @@ const PreparedFields = {
   sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/u)),
   source: FileRefSchema
 }
+export const PREPARED_FILE = { snapshot: "snapshot", outside: "outside" } as const
+
 export const PreparedFileSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("snapshot"),
+    kind: Schema.Literal(PREPARED_FILE.snapshot),
     artifact_ref: Schema.NonEmptyString,
     ...PreparedFields
   }),
-  Schema.Struct({ kind: Schema.Literal("outside"), path: Schema.NonEmptyString, ...PreparedFields })
+  Schema.Struct({
+    kind: Schema.Literal(PREPARED_FILE.outside),
+    path: Schema.NonEmptyString,
+    ...PreparedFields
+  })
 ])
 export type PreparedFile = typeof PreparedFileSchema.Type
 
@@ -96,7 +105,7 @@ const prepareFiles = async ({
     stateRoots: services.stateRoots,
     userUploadRoots: [join(services.dataDir, "uploads")],
     attachedPaths: (await transcriptFiles(services.transcript, owners, ctx.signal)).flatMap(
-      (file) => (file.kind === "path" ? [file.path] : [])
+      (file) => (file.kind === TRANSCRIPT_FILE.path ? [file.path] : [])
     )
   }
   const prepared: PreparedFile[] = []
@@ -120,20 +129,26 @@ const prepareFiles = async ({
       continue
     }
     const source = await sourceFile(services, ctx, owners, ref, remaining)
-    if (source.kind === "path") {
+    if (source.kind === TRANSCRIPT_FILE.path) {
       const check = await checkUploadPath({ path: source.path, roots })
-      if (check.kind === "refused")
+      if (check.kind === UPLOAD_PATH_CHECK.refused)
         throw toolRefusal(uploadRefusalText(check.reason), "File unavailable")
-      if (pathRuleFor(policy, { lexical: source.path, real: check.path }, "read") === "never")
-        throw neverRuleRefusal(check.path, "read")
-      if (check.kind === "outside" && !allowOutside) {
+      if (
+        pathRuleFor(
+          policy,
+          { lexical: source.path, real: check.path },
+          PERMISSION_PATH_ACCESS.read
+        ) === PERMISSION_RULE_DECISION.never
+      )
+        throw neverRuleRefusal(check.path, PERMISSION_PATH_ACCESS.read)
+      if (check.kind === UPLOAD_PATH_CHECK.outside && !allowOutside) {
         throw toolRefusal(
           `${check.name} is outside the folders a rule lets Arden use. Ask the user for a folder rule, or to attach the file in chat, then retry.`,
           "File access required"
         )
       }
       const bytes = await boundedFile(check.path, remaining)
-      if (check.kind === "outside") {
+      if (check.kind === UPLOAD_PATH_CHECK.outside) {
         prepared.push({
           kind: "outside",
           path: check.path,
@@ -194,14 +209,14 @@ const readPreparedFiles = async ({
     if (!owners.includes(file.session_id))
       throw toolRefusal("The approved file belongs to another chat.", "File access denied")
     enforceSize(file.size, remaining, file.name)
-    if (file.kind === "outside" && ctx.approval === undefined) {
+    if (file.kind === PREPARED_FILE.outside && ctx.approval === undefined) {
       throw toolRefusal(
         "This file can be uploaded only after its card is approved.",
         "File approval required"
       )
     }
     const bytes =
-      file.kind === "outside"
+      file.kind === PREPARED_FILE.outside
         ? await boundedFile(file.path, remaining)
         : Buffer.from(
             (
@@ -311,7 +326,7 @@ export const fileOwnerSessions = async (
   ctx: SharedFileContext
 ): Promise<ReadonlyArray<string>> => {
   const lineage =
-    ctx.run.authority.actor.kind === "agent"
+    ctx.run.authority.actor.kind === ACTOR.agent
       ? await Effect.runPromise(sessionLineage(services.sessions, ctx.run.sessionId), {
           signal: ctx.signal
         })
@@ -342,7 +357,7 @@ const ownedArtifact = async (
       }
     } catch (cause) {
       if (!(cause instanceof ConversationArtifactError)) throw filesystemError(cause, "read", ref)
-      if (cause.reason !== "not_found") throw toolFailure(cause, "File unavailable")
+      if (cause.reason !== STORE_REASON.not_found) throw toolFailure(cause, "File unavailable")
     }
   }
   throw toolRefusal(
@@ -364,8 +379,8 @@ const sourceFile = async (
   if ("attachment" in ref) {
     const file = (
       await transcriptFiles(services.transcript, [ctx.run.sessionId], ctx.signal)
-    ).filter((entry) => entry.kind === "image")[ref.attachment - 1]
-    if (file?.kind !== "image")
+    ).filter((entry) => entry.kind === TRANSCRIPT_FILE.image)[ref.attachment - 1]
+    if (file?.kind !== TRANSCRIPT_FILE.image)
       throw toolRefusal(
         "There is no attached image with that number. Use chat_files_list to find its file reference.",
         "Attachment unavailable"
@@ -382,7 +397,7 @@ const sourceFile = async (
       })
     return {
       kind: "bytes",
-      name: `arden-output.${managed.format === "json" ? "json" : "txt"}`,
+      name: `arden-output.${managed.format === MANAGED_OBJECT_FORMAT.json ? "json" : "txt"}`,
       bytes: Buffer.from(text, "utf8")
     }
   }
@@ -439,28 +454,6 @@ const publishSnapshot = async ({
     sha256: manifest.sha256,
     source: source ?? { artifact_ref: manifest.ref }
   }
-}
-
-const boundedFile = async (path: string, maxBytes: number): Promise<Buffer> => {
-  try {
-    return (await readRegularFile(path, maxBytes)).bytes
-  } catch (cause) {
-    if (cause instanceof PrivateFileError && cause.reason === "too_large") {
-      throw toolRefusal(
-        `${basename(path)} exceeds the remaining file limit of ${formatBytes(maxBytes)}. Choose fewer or smaller files.`,
-        "Files too large"
-      )
-    }
-    throw filesystemError(cause, "read", path)
-  }
-}
-
-const enforceSize = (size: number, maximum: number, name: string): void => {
-  if (size > maximum)
-    throw toolRefusal(
-      `${name} exceeds the remaining file limit of ${formatBytes(maximum)}. Choose fewer or smaller files.`,
-      "Files too large"
-    )
 }
 
 export interface SharedFileAccess {

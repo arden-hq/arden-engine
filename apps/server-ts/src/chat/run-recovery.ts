@@ -1,3 +1,4 @@
+import { STORE_REASON } from "../persistence/errors.js"
 import { timerSleep } from "../lib/timer-sleep.js"
 import { Cause, Effect, Scope, Stream, type Semaphore } from "effect"
 import { ChatWriteStore, type ChatWriteResume } from "../persistence/chat/store.js"
@@ -15,7 +16,7 @@ const resumeRun = Effect.fn("ChatMessage.resumeRun")(function* (
   const store = yield* ChatWriteStore
   const claimed = yield* store.claimResume(runId).pipe(
     Effect.catchTag("ChatWriteError", (error) =>
-      error.reason === "corrupt"
+      error.reason === STORE_REASON.corrupt
         ? store
             .fail({
               runId,

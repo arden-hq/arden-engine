@@ -1,5 +1,5 @@
 import type { JsonValue } from "@arden-hq/protocol"
-import type { McpEvent, McpEventDelivery } from "@arden-hq/protocol/mcp"
+import { MCP_EVENT_DELIVERY, type McpEvent, type McpEventDelivery } from "@arden-hq/protocol/mcp"
 import { Option, Predicate, Schema } from "effect"
 
 export const EVENTS_PROTOCOL_VERSION = "2026-07-28"
@@ -104,19 +104,32 @@ export interface McpEventError {
   readonly message: string
 }
 
+export const MCP_STREAM_SIGNAL = {
+  active: "active",
+  event: "event",
+  heartbeat: "heartbeat",
+  error: "error",
+  terminated: "terminated"
+} as const
+
 export type McpStreamSignal =
-  | { readonly kind: "active"; readonly cursor: string | undefined; readonly truncated: boolean }
   | {
-      readonly kind: "event"
+      readonly kind: typeof MCP_STREAM_SIGNAL.active
+      readonly cursor: string | undefined
+      readonly truncated: boolean
+    }
+  | {
+      readonly kind: typeof MCP_STREAM_SIGNAL.event
       readonly occurrence: McpEventOccurrence
       readonly cursor: string | undefined
     }
-  | { readonly kind: "heartbeat"; readonly cursor: string | undefined }
-  | { readonly kind: "error"; readonly error: McpEventError }
-  | { readonly kind: "terminated"; readonly error: McpEventError }
+  | { readonly kind: typeof MCP_STREAM_SIGNAL.heartbeat; readonly cursor: string | undefined }
+  | { readonly kind: typeof MCP_STREAM_SIGNAL.error; readonly error: McpEventError }
+  | { readonly kind: typeof MCP_STREAM_SIGNAL.terminated; readonly error: McpEventError }
 
-const isDelivery = (value: string): value is McpEventDelivery =>
-  value === "poll" || value === "push" || value === "webhook"
+const DELIVERIES: ReadonlySet<string> = new Set<McpEventDelivery>(Object.values(MCP_EVENT_DELIVERY))
+
+const isDelivery = (value: string): value is McpEventDelivery => DELIVERIES.has(value)
 
 export const decodeEventsPage = (value: unknown): McpEventsPage | undefined => {
   const page = Schema.decodeUnknownOption(EventsListResultSchema)(value)

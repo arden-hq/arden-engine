@@ -25,28 +25,39 @@ export const spaceOwnsPath = (pagePath: string, path: string): boolean => {
   return target === boundary || isWithin(`/${spaceFolder(boundary)}`, `/${target}`)
 }
 
+const SPACE_BINDING = { bound: "bound", halfMade: "half_made" } as const
+
 export type SpaceBinding =
   | {
-      readonly kind: "bound"
+      readonly kind: typeof SPACE_BINDING.bound
       readonly space_id: string
       readonly page_id: string
       readonly page_path: string
     }
-  | { readonly kind: "half_made"; readonly space_id: string; readonly row: SpaceBindingRow }
+  | {
+      readonly kind: typeof SPACE_BINDING.halfMade
+      readonly space_id: string
+      readonly row: SpaceBindingRow
+    }
 
 export const spaceBinding = (row: SpaceBindingRow): SpaceBinding =>
   row.page_id !== null && row.page_path !== null && canonicalWikiPath(row.page_path) !== undefined
-    ? { kind: "bound", space_id: row.space_id, page_id: row.page_id, page_path: row.page_path }
-    : { kind: "half_made", space_id: row.space_id, row }
+    ? {
+        kind: SPACE_BINDING.bound,
+        space_id: row.space_id,
+        page_id: row.page_id,
+        page_path: row.page_path
+      }
+    : { kind: SPACE_BINDING.halfMade, space_id: row.space_id, row }
 
 export const bindingOwnsPath = (binding: SpaceBinding, path: string): boolean =>
-  binding.kind === "half_made" || spaceOwnsPath(binding.page_path, path)
+  binding.kind === SPACE_BINDING.halfMade || spaceOwnsPath(binding.page_path, path)
 
 const overlapsAnother = (others: ReadonlyArray<SpaceBinding>, path: string): boolean =>
   others.some(
     (other) =>
       bindingOwnsPath(other, path) ||
-      (other.kind === "bound" && spaceOwnsPath(path, other.page_path))
+      (other.kind === SPACE_BINDING.bound && spaceOwnsPath(path, other.page_path))
   )
 
 export const heldByAnother = (
@@ -54,7 +65,7 @@ export const heldByAnother = (
   pageId: string,
   pagePath: string
 ): boolean =>
-  others.some((other) => other.kind === "bound" && other.page_id === pageId) ||
+  others.some((other) => other.kind === SPACE_BINDING.bound && other.page_id === pageId) ||
   overlapsAnother(others, pagePath)
 
 export const freeSpacePage = (
@@ -65,9 +76,9 @@ export const freeSpacePage = (
 
 const keepsPage = (binding: SpaceBinding, pageId: string, path: string): boolean => {
   switch (binding.kind) {
-    case "bound":
+    case SPACE_BINDING.bound:
       return binding.page_id === pageId || binding.page_path === path
-    case "half_made":
+    case SPACE_BINDING.halfMade:
       return binding.row.page_id === pageId || binding.row.page_path === path
   }
 }
@@ -128,9 +139,14 @@ export const spacePageList = (
   pages: spacePages(pages, space).filter((record) => record.page.pageId !== space.pageId)
 })
 
+export const SPACE_PAGE_PLAN = { keep: "keep", rebind: "rebind", create: "create" } as const
+
 export type SpacePagePlan =
-  | { readonly kind: "keep" | "rebind"; readonly page: FreeSpacePage }
-  | { readonly kind: "create" }
+  | {
+      readonly kind: typeof SPACE_PAGE_PLAN.keep | typeof SPACE_PAGE_PLAN.rebind
+      readonly page: FreeSpacePage
+    }
+  | { readonly kind: typeof SPACE_PAGE_PLAN.create }
 
 export const planSpacePage = (
   pages: ReadonlyArray<RunPage>,
@@ -141,10 +157,10 @@ export const planSpacePage = (
     space.page_id === null
       ? undefined
       : activeRunPages(pages).find((page) => page.page.pageId === space.page_id)
-  if (record === undefined) return { kind: "create" }
+  if (record === undefined) return { kind: SPACE_PAGE_PLAN.create }
   const path = record.resource.path
-  if (canonicalWikiPath(path) === undefined) return { kind: "create" }
+  if (canonicalWikiPath(path) === undefined) return { kind: SPACE_PAGE_PLAN.create }
   const page = freeSpacePage(others, { pageId: record.page.pageId, pagePath: path })
-  if (page === undefined) return { kind: "create" }
-  return { kind: path === space.page_path ? "keep" : "rebind", page }
+  if (page === undefined) return { kind: SPACE_PAGE_PLAN.create }
+  return { kind: path === space.page_path ? SPACE_PAGE_PLAN.keep : SPACE_PAGE_PLAN.rebind, page }
 }

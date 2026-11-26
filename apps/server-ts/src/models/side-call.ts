@@ -3,9 +3,11 @@ import type { ModelDefinition } from "./host.js"
 
 const THINKING_OFF = "none"
 
+export const OUTPUT_LIMIT_DELIVERY = { sent: "sent", omitted: "omitted" } as const
+
 export const REASONING_ALLOWANCE_TOKENS = 4_096
 
-export type OutputLimitDelivery = NonNullable<ModelCapabilities["outputLimit"]>
+export type OutputLimitDelivery = (typeof OUTPUT_LIMIT_DELIVERY)[keyof typeof OUTPUT_LIMIT_DELIVERY]
 
 export const outputLimitDelivery = (capabilities: ModelCapabilities): OutputLimitDelivery =>
   capabilities.outputLimit ?? "sent"
@@ -19,7 +21,10 @@ export const sideCallEffort = ({
   readonly declared: ReadonlyArray<string>
   readonly delivery: OutputLimitDelivery
 }): string | undefined =>
-  assigned ?? (delivery === "sent" && declared.includes(THINKING_OFF) ? THINKING_OFF : undefined)
+  assigned ??
+  (delivery === OUTPUT_LIMIT_DELIVERY.sent && declared.includes(THINKING_OFF)
+    ? THINKING_OFF
+    : undefined)
 
 export const sideCallOutputLimit = ({
   answerTokens,
@@ -42,7 +47,7 @@ export const chatStepOutputLimit = ({
   readonly context: ModelDefinition["context"]
   readonly delivery: OutputLimitDelivery
 }): number | undefined => {
-  if (delivery === "omitted") return undefined
+  if (delivery === OUTPUT_LIMIT_DELIVERY.omitted) return undefined
   const room = context.hardLimit - context.compactionTrigger
   if (room < 1) return context.outputCap
   return Math.min(room, context.outputCap ?? Number.POSITIVE_INFINITY)

@@ -10,6 +10,7 @@ import type {
   StorageSettings
 } from "@arden-hq/protocol/storage"
 import {
+  STORAGE_CLEANUP_ACTION,
   STORAGE_CURRENT_SESSION,
   STORAGE_LIMIT,
   type StorageCleanupTarget
@@ -304,7 +305,9 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
     let selectedBytes = 0
     const addSessions = (
       candidates: ReadonlyArray<StorageSessionCandidate>,
-      kind: "delete_archived_session" | "delete_inactive_session"
+      kind:
+        | typeof STORAGE_CLEANUP_ACTION.delete_archived_session
+        | typeof STORAGE_CLEANUP_ACTION.delete_inactive_session
     ): void => {
       for (const session of candidates) {
         if (targetBytes === null || Math.max(0, beforeBytes - selectedBytes) <= targetBytes) return
@@ -321,7 +324,7 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
             agents: session.deletesWith.agents,
             sideChats: session.deletesWith.sideChats,
             description:
-              kind === "delete_archived_session"
+              kind === STORAGE_CLEANUP_ACTION.delete_archived_session
                 ? "Permanently delete archived Chat."
                 : "Permanently delete inactive current Chat."
           }
@@ -332,13 +335,13 @@ const make = Effect.fn("StorageMaintenance.make")(function* (options: StorageMai
     if (settings.allowArchivedSessionDeletion) {
       addSessions(
         sessions.filter((session) => session.archived),
-        "delete_archived_session"
+        STORAGE_CLEANUP_ACTION.delete_archived_session
       )
     }
     if (settings.allowInactiveSessionDeletion) {
       addSessions(
         sessions.filter((session) => !session.archived),
-        "delete_inactive_session"
+        STORAGE_CLEANUP_ACTION.delete_inactive_session
       )
     }
 

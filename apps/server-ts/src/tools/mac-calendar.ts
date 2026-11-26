@@ -26,7 +26,8 @@ import {
   EventCreateSchema,
   EventDeleteSchema,
   EventEditSchema,
-  EventReadSchema
+  EventReadSchema,
+  MAC_SPAN
 } from "./mac-apps-schemas.js"
 import {
   editedEventTimes,
@@ -323,7 +324,7 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
           result: [
             `Updated the event: ${titleOf(updated)}`,
             eventTimeLine(updated),
-            ...(span === "future" ? ["Applied to this and every later occurrence."] : []),
+            ...(span === MAC_SPAN.future ? ["Applied to this and every later occurrence."] : []),
             `Reference: ${updated.id}`
           ].join("\n"),
           preview: `Updated ${titleOf(updated)}`,
@@ -362,7 +363,7 @@ export const makeMacCalendarTools = (apps: MacApps): ReadonlyArray<ServerTool> =
         const title = deleted.title === "" ? titleOf(current) : deleted.title
         return {
           result:
-            span === "future"
+            span === MAC_SPAN.future
               ? `Deleted this and every later occurrence of ${title}.`
               : `Deleted the event ${title}.`,
           preview: `Deleted ${title}`,

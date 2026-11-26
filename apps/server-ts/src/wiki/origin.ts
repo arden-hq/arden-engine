@@ -47,7 +47,7 @@ export type WikiCommitOrigin =
   | { readonly kind: typeof WIKI_ORIGIN_KIND.space_page }
   | { readonly kind: typeof WIKI_ORIGIN_KIND.system; readonly name: string }
 
-const WIKI_COMMIT_SOURCE = {
+export const WIKI_COMMIT_SOURCE = {
   user: "user",
   agent: "agent",
   automation: "automation",

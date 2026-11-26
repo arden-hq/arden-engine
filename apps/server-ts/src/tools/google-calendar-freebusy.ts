@@ -8,9 +8,15 @@ export interface BusyBlock {
   readonly end: number
 }
 
+export const CALENDAR_BUSY = { known: "known", unknown: "unknown" } as const
+
 export type CalendarBusy =
-  | { readonly kind: "known"; readonly id: string; readonly busy: ReadonlyArray<BusyBlock> }
-  | { readonly kind: "unknown"; readonly id: string; readonly reason: string }
+  | {
+      readonly kind: typeof CALENDAR_BUSY.known
+      readonly id: string
+      readonly busy: ReadonlyArray<BusyBlock>
+    }
+  | { readonly kind: typeof CALENDAR_BUSY.unknown; readonly id: string; readonly reason: string }
 
 const FreeBusyResponseSchema = Schema.Struct({
   calendars: Schema.optionalKey(

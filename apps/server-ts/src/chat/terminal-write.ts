@@ -1,11 +1,15 @@
 import { Effect, Result, Schedule } from "effect"
-import { ChatWriteError, type ChatWriteFailure } from "../persistence/chat/store.js"
+import {
+  CHAT_WRITE_FAILURE,
+  ChatWriteError,
+  type ChatWriteFailure
+} from "../persistence/chat/store.js"
 
 const TERMINAL_WRITE_RETRIES = 3
 const TERMINAL_WRITE_BACKOFF = "50 millis"
 
 export const isRunAlreadyTerminal = (failure: ChatWriteFailure): boolean =>
-  failure instanceof ChatWriteError && failure.reason === "terminal"
+  failure instanceof ChatWriteError && failure.reason === CHAT_WRITE_FAILURE.terminal
 
 export const persistRunTerminal = <A>(
   write: Effect.Effect<A, ChatWriteFailure>
@@ -16,7 +20,7 @@ export const persistRunTerminal = <A>(
         times: TERMINAL_WRITE_RETRIES,
         schedule: Schedule.exponential(TERMINAL_WRITE_BACKOFF),
         while: (failure: ChatWriteFailure) =>
-          failure instanceof ChatWriteError && failure.reason === "storage"
+          failure instanceof ChatWriteError && failure.reason === CHAT_WRITE_FAILURE.storage
       }),
       Effect.result
     )

@@ -1,8 +1,8 @@
 import { type ServerTool } from "./define.js"
-import type { GoogleToolConnections } from "./google-accounts.js"
 import { Schema } from "effect"
 import { randomUUID } from "node:crypto"
 
+import type { GoogleToolConnections } from "./google-accounts.js"
 import { accountEmail, connectedAccountEmails } from "./google-accounts.js"
 import { googleCall } from "./google-request.js"
 import { allDayText, event, eventData, meetLink, namedEvent } from "./google-calendar-events.js"
@@ -39,7 +39,7 @@ import {
   parseEventRef,
   RESPONSE_WORDS,
   rsvpFor,
-  scopeText,
+  isSeriesScope,
   validEmail,
   whenText
 } from "./google-calendar-support.js"
@@ -225,7 +225,7 @@ export const makeCalendarTools = ({
         const ref = parseEventRef(input.event_ref, input.calendar_id)
         const fields = Object.entries(input).filter(
           ([key, value]) =>
-            key !== "event_ref" && key !== "scope" && key !== "calendar_id" && value !== undefined
+            !["event_ref", "scope", "calendar_id"].includes(key) && value !== undefined
         )
         if (fields.length === 0)
           throw toolRefusal("Provide at least one event change.", "No event changes")
@@ -315,7 +315,7 @@ export const makeCalendarTools = ({
         return {
           result: [
             `Updated Calendar event: ${data.title}`,
-            ...(scopeText(current.item, targetId) === "Every event in the series"
+            ...(isSeriesScope(current.item, targetId)
               ? ["Applied to every event in the series."]
               : []),
             ...(!addMeet
@@ -388,10 +388,9 @@ export const makeCalendarTools = ({
           effects
         })
         return {
-          result:
-            scopeText(current.item, targetId) === "Every event in the series"
-              ? `Deleted every event in the series of ${input.event_ref}.`
-              : `Deleted Calendar event ${input.event_ref}.`,
+          result: isSeriesScope(current.item, targetId)
+            ? `Deleted every event in the series of ${input.event_ref}.`
+            : `Deleted Calendar event ${input.event_ref}.`,
           preview: "Calendar event deleted",
           data: { event_ref: input.event_ref, account_ref: ref.account }
         }
@@ -461,7 +460,7 @@ export const makeCalendarTools = ({
           result: [
             `${RESPONSE_WORDS[input.response].verb}: ${data.title}`,
             whenText(data),
-            ...(scopeText(current.item, targetId) === "Every event in the series"
+            ...(isSeriesScope(current.item, targetId)
               ? ["Applied to every event in the series."]
               : []),
             ...(data.organizer === null ? [] : [`${data.organizer} was told.`])

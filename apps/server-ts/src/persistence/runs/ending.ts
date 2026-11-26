@@ -37,6 +37,8 @@ export const ENDING_DETAIL = {
   noChange: "no_change",
   needsYou: "needs_you",
   step: "step",
+  needsInput: "needs_input",
+  capability: "capability",
   damaged: "damaged"
 } as const
 

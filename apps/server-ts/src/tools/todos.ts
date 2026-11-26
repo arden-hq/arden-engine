@@ -4,6 +4,7 @@ import { Effect, Schema, SchemaTransformation } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { TodoStore, TodoStoreError } from "../persistence/todos/store.js"
 import { explanationOf, explanationText } from "../persistence/todos/items.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import {
   TODO_REASON,
   TODO_STATUS,
@@ -69,9 +70,9 @@ const TodoItemInputSchema = Schema.Struct({
 
 const TodoItemSchema = TodoItemInputSchema.check(
   Schema.makeFilter((item) => {
-    if (item.status === "cancelled" && item.reason === undefined)
+    if (item.status === TODO_STATUS.cancelled && item.reason === undefined)
       return { path: ["reason"], issue: "A cancelled item needs its reason" }
-    if (item.status !== "cancelled" && item.reason !== undefined)
+    if (item.status !== TODO_STATUS.cancelled && item.reason !== undefined)
       return { path: ["reason"], issue: "Only a cancelled item takes a reason" }
     return undefined
   })
@@ -107,14 +108,14 @@ const TodoUpdateParametersSchema = Schema.Struct({
     })
 }).check(
   Schema.makeFilter((input) =>
-    input.items.filter((item) => item.status === "in_progress").length <= 1
+    input.items.filter((item) => item.status === TODO_STATUS.in_progress).length <= 1
       ? undefined
       : "At most one todo item can be in_progress"
   )
 )
 
 const todoFailure = (error: TodoStoreError): ToolExecutionError =>
-  toolFailure(error, error.reason === "conflict" ? "Todo changed" : "Todo update failed")
+  toolFailure(error, error.reason === STORE_REASON.conflict ? "Todo changed" : "Todo update failed")
 
 const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): ServerTool =>
   defineServerTool({
@@ -154,7 +155,9 @@ const makeTodoTool = ({ store }: { readonly store: TodoStore["Service"] }): Serv
           { signal: ctx.signal }
         )
       )
-      const completed = snapshot.items.filter((item) => item.status === "completed").length
+      const completed = snapshot.items.filter(
+        (item) => item.status === TODO_STATUS.completed
+      ).length
       return {
         result: "Todo list updated.",
         preview: `${completed}/${snapshot.items.length} done`,

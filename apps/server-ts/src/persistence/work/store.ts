@@ -43,7 +43,7 @@ export interface TaskIntent {
   readonly now: string
 }
 
-const TASK_FINISH_CHECK = { warn: "warn", close: "close" } as const
+export const TASK_FINISH_CHECK = { warn: "warn", close: "close" } as const
 
 export type TaskFinishCheck =
   | {
@@ -88,7 +88,7 @@ export type TaskScope =
 
 export type CreateTaskInput = TaskDraft & { readonly key?: string }
 
-const TASK_ADDRESS = { key: "key", item: "item" } as const
+export const TASK_ADDRESS = { key: "key", item: "item" } as const
 
 export type TaskAddress =
   | { readonly kind: typeof TASK_ADDRESS.key; readonly scope: TaskScope; readonly key: string }
@@ -125,7 +125,7 @@ export const TELL_LIMIT = 5
 
 export const TELL_TEXT_LIMIT = 500
 
-const TELL_OUTCOME = { told: "told", again: "again", refused: "refused" } as const
+export const TELL_OUTCOME = { told: "told", again: "again", refused: "refused" } as const
 
 export type TellOutcome =
   | {

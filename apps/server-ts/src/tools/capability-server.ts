@@ -27,11 +27,26 @@ const serverLabel = (suggested: string | undefined, url: string): string => {
   return isServerName(fromHost) ? fromHost : "server"
 }
 
+const SERVER_REFUSAL = {
+  child_agent: "child_agent",
+  invalid_url: "invalid_url",
+  not_from_owner: "not_from_owner"
+} as const
+
+type ServerRefusal = (typeof SERVER_REFUSAL)[keyof typeof SERVER_REFUSAL]
+
+export const SERVER_VERDICT = { accepted: "accepted", refused: "refused" } as const
+
 export type ServerRequestVerdict =
-  | { readonly kind: "accepted"; readonly id: string; readonly url: string; readonly name: string }
   | {
-      readonly kind: "refused"
-      readonly reason: "child_agent" | "invalid_url" | "not_from_owner"
+      readonly kind: typeof SERVER_VERDICT.accepted
+      readonly id: string
+      readonly url: string
+      readonly name: string
+    }
+  | {
+      readonly kind: typeof SERVER_VERDICT.refused
+      readonly reason: ServerRefusal
     }
 
 export const vetServerRequest = (input: {
@@ -61,11 +76,11 @@ export const refusalText = (
   reason: Extract<ServerRequestVerdict, { kind: "refused" }>["reason"]
 ): string => {
   switch (reason) {
-    case "child_agent":
+    case SERVER_REFUSAL.child_agent:
       return "Only the main conversation can offer a server. Ask your parent agent to do it."
-    case "invalid_url":
+    case SERVER_REFUSAL.invalid_url:
       return "That address cannot be offered: it must be https (http only for localhost) and carry no password."
-    case "not_from_owner":
+    case SERVER_REFUSAL.not_from_owner:
       return "That URL did not come from the user's messages, so no server was offered. Ask the user to write the address in chat."
   }
 }

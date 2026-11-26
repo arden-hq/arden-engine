@@ -1,3 +1,11 @@
+import {
+  MUTATION_BLOCKER,
+  TOOL_EXECUTION_BEGIN,
+  TOOL_STORE_FAILURE
+} from "../persistence/tools/store.js"
+import { RUN_AUTHORITY_STATE } from "../persistence/sqlite/run-context.js"
+import { TOOL_STATUS } from "../persistence/sqlite/status-sets.js"
+import { CALL_PLAN } from "../persistence/sqlite/task-direction.js"
 import type { ChatSendReceipt } from "../persistence/chat/send-contracts.js"
 import { cleanApprovalDraft } from "../persistence/tools/approval-draft.js"
 import { failedToolResult, PauseRequested, ToolExecutionError } from "@arden-hq/loop"
@@ -204,7 +212,10 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
     ).pipe(
       Effect.catchCause((cause) => {
         const error = Cause.squash(cause)
-        if (error instanceof ToolExecutionStoreError && error.reason === "blocked") {
+        if (
+          error instanceof ToolExecutionStoreError &&
+          error.reason === TOOL_STORE_FAILURE.blocked
+        ) {
           return toolStore
             .requireOutcomeDecision({ runId: run.runId, sessionId: run.sessionId })
             .pipe(
@@ -216,7 +227,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
                 })
               ),
               Effect.flatMap((blocker) =>
-                blocker === "stalled"
+                blocker === MUTATION_BLOCKER.stalled
                   ? halt(request, { reason: TOOL_MUTATION_STALLED, detail: STALLED_MUTATION })
                   : halt(request, { reason: TOOL_OUTCOME_UNCERTAIN, detail: UNCERTAIN_MUTATION })
               )
@@ -229,8 +240,8 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
         })
       })
     )
-    if (begun._tag === "NotAdmitted") {
-      if (begun.authority === "settling") return failedToolResult(SETTLING)
+    if (begun._tag === TOOL_EXECUTION_BEGIN.notAdmitted) {
+      if (begun.authority === RUN_AUTHORITY_STATE.settling) return failedToolResult(SETTLING)
       if (!options.detached)
         yield* host.cancelAgent({ runId: run.runId }).pipe(
           Effect.catchCause((cause) =>
@@ -245,8 +256,8 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
         )
       return failedToolResult(REVOKED)
     }
-    if (begun._tag === "Recovered") {
-      if (request.changesState && begun.outcome.status === "uncertain") {
+    if (begun._tag === TOOL_EXECUTION_BEGIN.recovered) {
+      if (request.changesState && begun.outcome.status === TOOL_STATUS.uncertain) {
         return yield* halt(request, { reason: TOOL_OUTCOME_UNCERTAIN, detail: UNCERTAIN_MUTATION })
       }
       return begun.outcome.result
@@ -274,7 +285,7 @@ export const makeDurableTools = Effect.fn("ChatMessage.durableTools")(function* 
         ? runPromise(
             toolStore.admitPlanned(identity).pipe(
               Effect.map((plan) =>
-                plan === "current" ? undefined : failedToolResult(taskDirectionReview())
+                plan === CALL_PLAN.current ? undefined : failedToolResult(taskDirectionReview())
               ),
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)

@@ -87,7 +87,7 @@ const makeReportTool = ({ work, queue, sessions }: ReportToolServices): ServerTo
       ends_turn: { argument: "event", equals: "blocked" }
     },
     execute: async (input, ctx, effects) => {
-      if (input.event === "blocked") {
+      if (input.event === RUN_VERDICT.blocked) {
         await recordApplied(
           effects,
           Effect.runPromise(
@@ -108,7 +108,7 @@ const makeReportTool = ({ work, queue, sessions }: ReportToolServices): ServerTo
           host: await verdictReceipt(sessions, ctx, `Blocked: ${input.line}`)
         }
       }
-      if (input.event === "news") {
+      if (input.event === RUN_VERDICT.news) {
         effects.applied()
         return {
           result: "News recorded. Say it in your final reply; the user sees this Run's line.",

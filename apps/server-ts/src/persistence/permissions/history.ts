@@ -27,27 +27,34 @@ interface PermissionChangeBase {
   readonly source_tool_call_id: string | null
 }
 
+export const PERMISSION_HISTORY_KIND = {
+  standing: "standing",
+  command: "command",
+  override: "override",
+  rule: "rule"
+} as const
+
 export type PermissionChange =
   | (PermissionChangeBase & {
-      readonly permission_kind: "standing"
+      readonly permission_kind: typeof PERMISSION_HISTORY_KIND.standing
       readonly permission_id: string
       readonly principal: string
       readonly server_name: string | null
       readonly tool_name: string
     })
   | (PermissionChangeBase & {
-      readonly permission_kind: "command"
+      readonly permission_kind: typeof PERMISSION_HISTORY_KIND.command
       readonly permission_id: string
       readonly argument_count: number
     })
   | (PermissionChangeBase & {
-      readonly permission_kind: "override"
+      readonly permission_kind: typeof PERMISSION_HISTORY_KIND.override
       readonly tool_name: string
       readonly previous_mode: string | null
       readonly next_mode: string | null
     })
   | (PermissionChangeBase & {
-      readonly permission_kind: "rule"
+      readonly permission_kind: typeof PERMISSION_HISTORY_KIND.rule
       readonly permission_id: string
       readonly principal: string
       readonly subject_kind: string

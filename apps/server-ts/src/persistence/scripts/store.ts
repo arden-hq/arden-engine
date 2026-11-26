@@ -33,8 +33,16 @@ export interface ScriptSettlement {
   readonly sourceRefs: ReadonlyArray<WorkflowSourceRef>
 }
 
+export const SCRIPT_STORE_REASON = {
+  not_found: "not_found",
+  conflict: "conflict",
+  unsafe_retry: "unsafe_retry",
+  corrupt: "corrupt",
+  storage: "storage"
+} as const
+
 export class ScriptStoreError extends Schema.TaggedError<ScriptStoreError>()("ScriptStoreError", {
-  reason: Schema.Literals(["not_found", "conflict", "unsafe_retry", "corrupt", "storage"] as const),
+  reason: Schema.Literals(Object.values(SCRIPT_STORE_REASON)),
   message: Schema.String,
   ref: Schema.optionalKey(Schema.String),
   cause: Schema.optionalKey(Schema.Defect())

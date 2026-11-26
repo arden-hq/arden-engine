@@ -19,6 +19,7 @@ import {
   findFreeSlots,
   parseClockMinute,
   readFreeBusy,
+  CALENDAR_BUSY,
   type BusyBlock
 } from "./google-calendar-freebusy.js"
 import {
@@ -221,7 +222,7 @@ export const makeCalendarLookupTools = ({
         const knownBusy: Array<ReadonlyArray<BusyBlock>> = []
         const lines: Array<string> = []
         for (const calendar of calendars) {
-          if (calendar.kind === "unknown") {
+          if (calendar.kind === CALENDAR_BUSY.unknown) {
             lines.push(
               `${calendar.id}: UNKNOWN (${calendar.reason}). Its availability could not be read; do not treat it as free.`
             )
@@ -235,7 +236,7 @@ export const makeCalendarLookupTools = ({
           )
         }
         const unknown = calendars.flatMap((calendar) =>
-          calendar.kind === "unknown" ? [calendar.id] : []
+          calendar.kind === CALENDAR_BUSY.unknown ? [calendar.id] : []
         )
         const slots =
           slotQuery === undefined || zone === undefined || knownBusy.length === 0
@@ -269,7 +270,7 @@ export const makeCalendarLookupTools = ({
             time_min: iso(min),
             time_max: iso(max),
             calendars: calendars.map((calendar) =>
-              calendar.kind === "unknown"
+              calendar.kind === CALENDAR_BUSY.unknown
                 ? { calendar_id: calendar.id, status: "unknown", reason: calendar.reason }
                 : {
                     calendar_id: calendar.id,

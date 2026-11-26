@@ -4,6 +4,9 @@ import {
   MESSAGE_PREVIEW,
   NO_RECOVERY,
   WORKFLOW_PREVIEW,
+  WORKFLOW_EFFECT,
+  WORKFLOW_ERROR_CODE,
+  WORKFLOW_STATUS,
   recoverBy,
   type WorkflowEffectDisposition,
   type WorkflowError,
@@ -23,15 +26,21 @@ import type {
 import type { ScriptSettlement } from "../persistence/scripts/store.js"
 import { scriptAgentKey } from "../persistence/workflows/script-identity.js"
 import { addSourceRefs } from "../persistence/workflows/source-refs.js"
-import type {
-  ScriptAgentChildAttemptEvent,
-  ScriptAgentObserver,
-  ScriptAgentRequest,
-  ScriptHost
+import {
+  CHILD_ATTEMPT,
+  type ScriptAgentChildAttemptEvent,
+  type ScriptAgentObserver,
+  type ScriptAgentRequest,
+  type ScriptHost
 } from "./runtime/contract.js"
+import { AGENT_REUSE, NESTED_RETRY } from "../persistence/sqlite/script-derive.js"
 import { executeScript } from "./runtime/script-runtime.js"
 import { type ScriptOptions } from "./runtime/script-run.js"
-import type { ScriptOutcome, ScriptProgress } from "./runtime/script-outcome.js"
+import {
+  SCRIPT_OUTCOME_STATUS,
+  type ScriptOutcome,
+  type ScriptProgress
+} from "./runtime/script-outcome.js"
 
 export interface AdoptedScript {
   readonly adopt: (input: {
@@ -63,20 +72,20 @@ const isChildFailureEvent = (event: ScriptAgentChildAttemptEvent): event is Chil
   "error" in event
 
 const isUnsafe = (effect: WorkflowEffectDisposition): effect is "applied" | "unknown" =>
-  effect === "applied" || effect === "unknown"
+  effect === WORKFLOW_EFFECT.applied || effect === WORKFLOW_EFFECT.unknown
 
 const recoveryAction = (retryable: boolean): WorkflowRecovery =>
   retryable ? recoverBy("retry") : NO_RECOVERY
 
 const childErrorCode = (status: ChildFailureEvent["status"]): WorkflowErrorCode => {
   switch (status) {
-    case "invalid_output":
+    case CHILD_ATTEMPT.invalidOutput:
       return "schema_invalid"
-    case "interrupted":
-    case "cancelled":
+    case CHILD_ATTEMPT.interrupted:
+    case CHILD_ATTEMPT.cancelled:
       return status
-    case "failed":
-    case "launch_failed":
+    case CHILD_ATTEMPT.failed:
+    case CHILD_ATTEMPT.launchFailed:
       return "agent_failed"
   }
 }
@@ -95,7 +104,7 @@ const refusedStepError = (
 ): WorkflowError => ({
   code: "uncertain_effect",
   message:
-    effect === "applied"
+    effect === WORKFLOW_EFFECT.applied
       ? `An earlier run of this ${step} changed something outside Arden, so it does not run again`
       : `An earlier run of this ${step} may have changed something outside Arden, so it does not run again`,
   retryable: false,
@@ -230,13 +239,13 @@ export const executeScriptAttempt = async (
       })
     })
     tally.started += 1
-    if (decision.kind === "reuse") {
+    if (decision.kind === AGENT_REUSE.reuse) {
       runtimeObserver.recordReuse(decision.toolCallId)
       tally.finished += 1
       addSourceRefs(sources, decision.sourceRefs)
       return decision.value
     }
-    if (decision.kind === "refuse") {
+    if (decision.kind === AGENT_REUSE.refuse) {
       const error = refusedStepError("agent", decision.effect)
       needsAttention ??= error
       lastAgentError = error
@@ -250,7 +259,12 @@ export const executeScriptAttempt = async (
       recordChildAttempt: async (event) => {
         lastEvent = event
         await runtimeObserver.recordChildAttempt(event)
-        if (event.status === "queued" || event.status === "running" || !("child" in event)) return
+        if (
+          event.status === CHILD_ATTEMPT.queued ||
+          event.status === CHILD_ATTEMPT.running ||
+          !("child" in event)
+        )
+          return
         const observed = await Effect.runPromise(journal.observeChild(event.child.runId))
         if (isUnsafe(observed.effectDisposition)) effect = observed.effectDisposition
         addSourceRefs(sources, observed.sourceRefs)
@@ -298,7 +312,7 @@ export const executeScriptAttempt = async (
     const resolved = await Effect.runPromise(
       journal.nestedCall({ ...origin, toolCallId: request.toolCallId, attempt: options.attempt })
     )
-    if (resolved.kind === "refuse") {
+    if (resolved.kind === NESTED_RETRY.refuse) {
       const error = refusedStepError("call", resolved.effect)
       needsAttention ??= error
       throw new ToolExecutionError(error.message, { preview: "Needs review", retryable: false })
@@ -357,7 +371,7 @@ export const executeScriptAttempt = async (
   await Promise.allSettled([...inflight])
 
   const sourceRefs = [...sources.values()]
-  const value = outcome.status === "completed" ? outcome.value : null
+  const value = outcome.status === SCRIPT_OUTCOME_STATUS.completed ? outcome.value : null
   if (needsAttention !== undefined) {
     return {
       status: "needs_attention",
@@ -369,15 +383,18 @@ export const executeScriptAttempt = async (
       sourceRefs
     }
   }
-  if (outcome.status === "completed") {
+  if (outcome.status === SCRIPT_OUTCOME_STATUS.completed) {
     return { status: "succeeded", value, error: null, sourceRefs }
   }
   const error =
-    outcome.error.code === "agent_failed" && lastAgentError !== undefined
+    outcome.error.code === WORKFLOW_ERROR_CODE.agent_failed && lastAgentError !== undefined
       ? lastAgentError
       : outcomeError(outcome)
   return {
-    status: error.code === "cancelled" ? "cancelled" : "failed",
+    status:
+      error.code === WORKFLOW_ERROR_CODE.cancelled
+        ? WORKFLOW_STATUS.cancelled
+        : WORKFLOW_STATUS.failed,
     value: null,
     error,
     sourceRefs

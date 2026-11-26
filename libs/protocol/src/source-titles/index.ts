@@ -7,6 +7,8 @@ export type {
   SourceMetadataInput,
   SourceMetadata,
   SourceMetadataStatus,
+  SourcePlaceKind,
+  SourceProvider,
   SourceUnavailable
 } from "./schema.js"
 export {
@@ -14,5 +16,7 @@ export {
   SOURCE_INPUT,
   SOURCE_LINK,
   SOURCE_METADATA_STATUS,
+  SOURCE_PLACE_KIND,
+  SOURCE_PROVIDER,
   SOURCE_UNAVAILABLE
 } from "./schema.js"

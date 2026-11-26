@@ -1,3 +1,5 @@
+import { STORE_REASON } from "../persistence/errors.js"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import type {
   HistoryResponse,
   HistoryRouteOptions,
@@ -118,7 +120,7 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
             })
             .pipe(
               Effect.catch((error) =>
-                error.reason === "unavailable"
+                error.reason === STORE_REASON.unavailable
                   ? Effect.succeed(unresolvedBudget(input))
                   : Effect.fail(
                       new ChatHistoryError({
@@ -146,7 +148,8 @@ export class ChatHistory extends Context.Service<ChatHistory, ChatHistoryShape>(
         const agentParentSource = Effect.fn("ChatHistory.agentParentSource")(function* (
           header: SessionHistoryHeader
         ) {
-          if (header.sessionType !== "agent" || header.parentSessionId === null) return undefined
+          if (header.sessionType !== SESSION_TYPE.agent || header.parentSessionId === null)
+            return undefined
           const parent = yield* sessions.loadHistoryHeader(header.parentSessionId)
           return parent === null
             ? undefined

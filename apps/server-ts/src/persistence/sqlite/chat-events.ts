@@ -1,3 +1,5 @@
+import { AUTOMATION_CONTEXT_MODE } from "@arden-hq/protocol/automations"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { machineTimeZone } from "@arden-hq/std/time"
 import { DateTime, Duration, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -48,7 +50,7 @@ export const findChatEvents = Effect.fn("SqliteChatEvents.find")(function* (
     LEFT JOIN space_conversations AS conversation ON conversation.space_id = s.space_id
     LEFT JOIN chat_event_cursors AS cursor ON cursor.session_id = s.session_id
     WHERE s.session_id = ${sessionId} AND s.archived_at IS NULL`)[0]
-  if (scope === undefined || scope.session_type === "agent") return undefined
+  if (scope === undefined || scope.session_type === SESSION_TYPE.agent) return undefined
   const since = DateTime.formatIso(
     scope.checked_at === null
       ? DateTime.subtractDuration(options.now, FIRST_LOOK)
@@ -146,7 +148,8 @@ export const takeChatEventsBeforeQueued = Effect.fn("SqliteChatEvents.beforeQueu
     readonly operation: ChatWriteOperation
   }
 ): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ChatWriteError> {
-  if (options.queued === 0 || options.run.automation_context_mode === "fresh") return []
+  if (options.queued === 0 || options.run.automation_context_mode === AUTOMATION_CONTEXT_MODE.fresh)
+    return []
   const sessionId = options.run.session_id
   const look = yield* findChatEvents(sql, { sessionId, now: options.now }).pipe(
     Effect.mapError(lookError(options.operation, sessionId))

@@ -85,12 +85,14 @@ export const parseCalendarEventRef = (
   return undefined
 }
 
-export type EventScope = "this" | "series"
+const EVENT_SCOPE = { this: "this", series: "series" } as const
+
+export type EventScope = (typeof EVENT_SCOPE)[keyof typeof EVENT_SCOPE]
 
 export const scopeTargetId = (
   scope: EventScope,
   event: { readonly id: string; readonly recurringEventId?: string | undefined }
-): string => (scope === "series" ? (event.recurringEventId ?? event.id) : event.id)
+): string => (scope === EVENT_SCOPE.series ? (event.recurringEventId ?? event.id) : event.id)
 
 export const isRecurring = (event: {
   readonly recurringEventId?: string | undefined
@@ -163,11 +165,17 @@ export const reminderBody = (
 
 export type RsvpAnswer = "accepted" | "declined" | "tentative"
 
+export const RSVP_PLAN = {
+  organizer: "organizer",
+  not_attendee: "not_attendee",
+  answer: "answer"
+} as const
+
 export type RsvpPlan =
-  | { readonly kind: "organizer" }
-  | { readonly kind: "not_attendee" }
+  | { readonly kind: typeof RSVP_PLAN.organizer }
+  | { readonly kind: typeof RSVP_PLAN.not_attendee }
   | {
-      readonly kind: "answer"
+      readonly kind: typeof RSVP_PLAN.answer
       readonly body: {
         readonly attendees: ReadonlyArray<Readonly<Record<string, unknown>>>
         readonly attendeesOmitted: true

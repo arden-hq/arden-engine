@@ -1,16 +1,25 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
 import type { CompletionResponse } from "@arden-hq/loop"
-import { Effect, Redacted, Schema } from "effect"
+import { Effect, Option, Redacted, Schema } from "effect"
 
 import { type DecisionInputKind, DecisionsError } from "./questions.js"
 
-type DecisionWireFormat = "decisions" | "systemone" | "openrouter-decisions" | "llama-systemone"
+export const DECISION_WIRE_FORMAT = {
+  decisions: "decisions",
+  systemone: "systemone",
+  openrouterDecisions: "openrouter-decisions",
+  llamaSystemone: "llama-systemone"
+} as const
+
+type DecisionWireFormat = (typeof DECISION_WIRE_FORMAT)[keyof typeof DECISION_WIRE_FORMAT]
+
+const DECISION_AUTH = { none: "none", bearer: "bearer", header: "header" } as const
 
 type DecisionEndpointAuth =
-  | { readonly kind: "none" }
-  | { readonly kind: "bearer"; readonly apiKey: Redacted.Redacted<string> }
+  | { readonly kind: typeof DECISION_AUTH.none }
+  | { readonly kind: typeof DECISION_AUTH.bearer; readonly apiKey: Redacted.Redacted<string> }
   | {
-      readonly kind: "header"
+      readonly kind: typeof DECISION_AUTH.header
       readonly name: string
       readonly value: Redacted.Redacted<string>
     }
@@ -42,9 +51,9 @@ export const postDecisionRequest = Effect.fn("Decisions.post")(function* (
   const url = new URL(endpoint.baseUrl)
   const path = url.pathname.replace(/\/+$/, "")
   const route =
-    endpoint.format === "openrouter-decisions"
+    endpoint.format === DECISION_WIRE_FORMAT.openrouterDecisions
       ? "/alpha/decisions"
-      : `/v1/${endpoint.format === "llama-systemone" ? "systemone" : endpoint.format}`
+      : `/v1/${endpoint.format === DECISION_WIRE_FORMAT.llamaSystemone ? DECISION_WIRE_FORMAT.systemone : endpoint.format}`
   url.pathname = path.endsWith(route)
     ? path
     : `${path.endsWith("/v1") ? path.slice(0, -3) : path}${route}`
@@ -93,7 +102,7 @@ export const postDecisionRequest = Effect.fn("Decisions.post")(function* (
       })
   })
   const decoded = Schema.decodeUnknownOption(DecisionUsageSchema)(body)
-  if (decoded._tag === "Some") {
+  if (Option.isSome(decoded)) {
     endpoint.onUsage?.({
       prompt_tokens: decoded.value.usage.input_tokens,
       completion_tokens: decoded.value.usage.output_tokens
@@ -111,11 +120,11 @@ const DecisionUsageSchema = Schema.Struct({
 
 const authHeader = (auth: DecisionEndpointAuth): Record<string, string> => {
   switch (auth.kind) {
-    case "none":
+    case DECISION_AUTH.none:
       return {}
-    case "bearer":
+    case DECISION_AUTH.bearer:
       return { authorization: `Bearer ${Redacted.value(auth.apiKey)}` }
-    case "header":
+    case DECISION_AUTH.header:
       return { [auth.name]: Redacted.value(auth.value) }
   }
 }

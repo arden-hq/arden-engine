@@ -1,3 +1,4 @@
+import { INBOX_SCOPE } from "@arden-hq/protocol/inbox"
 import { type StoredRunQuestion } from "../runs/stored-question.js"
 import { storeErrorFields } from "../errors.js"
 import type { RunApproval } from "@arden-hq/protocol/runs"
@@ -106,13 +107,13 @@ export interface InboxState {
 }
 
 export type InboxReadScope =
-  | { readonly scope: "all" }
-  | { readonly scope: "items"; readonly keys: ReadonlyArray<string> }
+  | { readonly scope: typeof INBOX_SCOPE.all }
+  | { readonly scope: typeof INBOX_SCOPE.items; readonly keys: ReadonlyArray<string> }
 
 export type InboxDismissScope =
-  | { readonly scope: "all" }
-  | { readonly scope: "group"; readonly groupKey: string }
-  | { readonly scope: "items"; readonly keys: ReadonlyArray<string> }
+  | { readonly scope: typeof INBOX_SCOPE.all }
+  | { readonly scope: typeof INBOX_SCOPE.group; readonly groupKey: string }
+  | { readonly scope: typeof INBOX_SCOPE.items; readonly keys: ReadonlyArray<string> }
 
 export interface OpenAsks {
   readonly questions: ReadonlyArray<StoredRunQuestion>

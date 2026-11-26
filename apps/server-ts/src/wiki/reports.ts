@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 
 import type { SpaceStore } from "../persistence/spaces/store.js"
-import { markedProducer, recordFolders } from "./collections.js"
+import { markedProducer, RECORD_PRODUCER, recordFolders } from "./collections.js"
 import { canonicalWikiPath } from "./paths.js"
 import { GLOBAL_WIKI_LOCATION_AUTHORITY } from "./authority.js"
 import { publishReport } from "./commit.js"
@@ -76,7 +76,7 @@ export const publishWikiReport = Effect.fn("Wiki.publishReport")(function* (
     Effect.fn("Wiki.planReport")(function* (snapshot) {
       const destination = recordFolders(snapshot.pages).get(normal(directory))?.producer
       if (
-        destination?.kind !== "automation" ||
+        destination?.kind !== RECORD_PRODUCER.automation ||
         destination.automationId !== input.producerAutomationId
       ) {
         return yield* wikiError(

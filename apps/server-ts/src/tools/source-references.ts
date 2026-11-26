@@ -4,11 +4,14 @@ import {
   SOURCE_DATE,
   SOURCE_INPUT,
   SOURCE_LINK,
+  SOURCE_METADATA_STATUS,
+  SOURCE_PLACE_KIND,
+  SOURCE_PROVIDER,
   type SourceLink,
   type SourceMetadata,
   type SourceMetadataInput
 } from "@arden-hq/protocol/source-titles"
-import { publicWebUrl } from "@arden-hq/std/url"
+import { PUBLIC_WEB_URL, publicWebUrl } from "@arden-hq/std/url"
 import type { GoogleToolConnections } from "./google-accounts.js"
 import { googleCall, decodeGoogle } from "./google-request.js"
 import { GMAIL_REF_KIND, gmailRefKind, parseGmailRef } from "./google-gmail-refs.js"
@@ -65,20 +68,22 @@ export function makeSourceReferences({
     const mailKind = gmailKind ?? GMAIL_REF_KIND.message
     let provider = place?.provider
     if (provider === undefined) {
-      if (gmailKind !== undefined) provider = "gmail"
-      else if (web.kind === "ok") provider = "web"
-      else provider = "unknown"
+      if (gmailKind !== undefined) provider = SOURCE_PROVIDER.gmail
+      else if (web.kind === PUBLIC_WEB_URL.ok) provider = SOURCE_PROVIDER.web
+      else provider = SOURCE_PROVIDER.unknown
     }
     let kind = place?.kind
     if (kind === undefined) {
-      if (provider === "gmail") kind = mailKind
-      else kind = web.kind === "ok" ? "web_page" : "reference"
+      if (provider === SOURCE_PROVIDER.gmail) kind = mailKind
+      else
+        kind =
+          web.kind === PUBLIC_WEB_URL.ok ? SOURCE_PLACE_KIND.web_page : SOURCE_PLACE_KIND.reference
     }
     const identity = { ref: input.ref, provider, kind }
     const unavailable = (
       reason: "not_connected" | "not_found" | "unsupported" | "unavailable" | "unnamed"
     ): SourceMetadata => ({ ...identity, status: "unavailable", reason })
-    if (place?.title.trim() && provider !== "web")
+    if (place?.title.trim() && provider !== SOURCE_PROVIDER.web)
       return {
         ...identity,
         status: "resolved",
@@ -87,11 +92,12 @@ export function makeSourceReferences({
         link: place.link
       }
     const drive =
-      provider === "google_drive" ||
-      provider === "drive" ||
-      (web.kind === "ok" && ["docs.google.com", "drive.google.com"].includes(web.url.hostname))
+      provider === SOURCE_PROVIDER.google_drive ||
+      provider === SOURCE_PROVIDER.drive ||
+      (web.kind === PUBLIC_WEB_URL.ok &&
+        ["docs.google.com", "drive.google.com"].includes(web.url.hostname))
     let accountKey = ""
-    if (provider === "gmail") {
+    if (provider === SOURCE_PROVIDER.gmail) {
       try {
         const ref = parseGmailRef(mailKind, input.ref)
         const account = google
@@ -121,29 +127,29 @@ export function makeSourceReferences({
           )
         })
         if (account) accountKey = account.id
-        else if (web.kind !== "ok") return unavailable("not_connected")
+        else if (web.kind !== PUBLIC_WEB_URL.ok) return unavailable("not_connected")
       } catch {
         return unavailable("unsupported")
       }
     }
     const key = JSON.stringify([accountKey, input])
-    const cacheable = provider === "gmail" || (drive && accountKey !== "")
+    const cacheable = provider === SOURCE_PROVIDER.gmail || (drive && accountKey !== "")
     const held = cacheable ? cache.get(key) : undefined
-    if (held && currentMillis() - held.at < (held.value.status === "resolved" ? 86400000 : 300000))
-      return held.value
+    const holdMillis = held?.value.status === SOURCE_METADATA_STATUS.resolved ? 86400000 : 300000
+    if (held && currentMillis() - held.at < holdMillis) return held.value
     const joined = pending.get(key)
     if (joined) return joined
     if (pending.size >= 64) return unavailable("unavailable")
     const perform = async (): Promise<SourceMetadata> => {
       try {
-        if (provider === "arden" && kind === "automation") {
+        if (provider === SOURCE_PROVIDER.arden && kind === SOURCE_PLACE_KIND.automation) {
           if (!automations) return unavailable("unsupported")
           const automation = await Effect.runPromise(automations.get(AutomationId.make(input.ref)))
           if (!automation) return unavailable("not_found")
           const link = linkTo(automationResource(automation).href)
           return { ...identity, status: "resolved", title: automation.name, date: undated, link }
         }
-        if (provider === "arden" && kind === "run") {
+        if (provider === SOURCE_PROVIDER.arden && kind === SOURCE_PLACE_KIND.run) {
           if (!runs || !sessions) return unavailable("unsupported")
           const run = await Effect.runPromise(runs.get(input.ref))
           if (!run) return unavailable("not_found")
@@ -160,7 +166,7 @@ export function makeSourceReferences({
             link
           }
         }
-        if (provider === "gmail") {
+        if (provider === SOURCE_PROVIDER.gmail) {
           const isThread = mailKind === GMAIL_REF_KIND.thread
           const ref = parseGmailRef(mailKind, input.ref)
           const url = new URL(
@@ -198,7 +204,7 @@ export function makeSourceReferences({
           }
         }
         if (drive && accountKey === "") {
-          if (web.kind !== "ok") return unavailable("not_connected")
+          if (web.kind !== PUBLIC_WEB_URL.ok) return unavailable("not_connected")
           const title = await titles.read({ url: web.url.href, title: place?.title ?? "" })
           if (title === null) return unavailable("not_connected")
           return {
@@ -229,10 +235,10 @@ export function makeSourceReferences({
             status: "resolved",
             title: file.name,
             date: undated,
-            link: linkTo(web.kind === "ok" ? input.ref : file.webViewLink)
+            link: linkTo(web.kind === PUBLIC_WEB_URL.ok ? input.ref : file.webViewLink)
           }
         }
-        if (web.kind !== "ok") return unavailable("unsupported")
+        if (web.kind !== PUBLIC_WEB_URL.ok) return unavailable("unsupported")
         const title = await titles.read({ url: web.url.href, title: place?.title ?? "" })
         return title === null
           ? unavailable("unnamed")

@@ -1,4 +1,5 @@
-import { APPROVAL_ASKER } from "@arden-hq/protocol/chat"
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import { APPROVAL_ASKER, TOOL_APPROVAL_ALTERNATIVE } from "@arden-hq/protocol/chat"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ChatEventStore } from "../events/store.js"
@@ -17,6 +18,8 @@ import { toldKey, UnitOfWork } from "../unit-of-work.js"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
 import { journalAskChange } from "./ask-changes.js"
 import {
+  APPROVAL_STATUS,
+  TOOL_APPROVAL_KIND,
   type ToolApprovalKind,
   type ValidToolExecutionIdentity,
   type UpdatedToolRow,
@@ -85,8 +88,8 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
   const existing = yield* loadApprovalRow(sql, input.runId, input.toolCallId, operation)
   if (existing !== null) {
     if (
-      existing.kind === "tool_approval" &&
-      existing.status === "approved" &&
+      existing.kind === TOOL_APPROVAL_KIND.approval &&
+      existing.status === APPROVAL_STATUS.approved &&
       existing.session_id === input.sessionId &&
       existing.tool_name === input.toolName
     ) {
@@ -142,7 +145,7 @@ export const ensurePendingToolApprovalInTransaction = Effect.fn(
       existing.scope !== input.scope ||
       existing.preview !== input.preview ||
       existing.diff !== (input.diff ?? null) ||
-      existing.status !== "pending" ||
+      existing.status !== APPROVAL_STATUS.pending ||
       existing.resolved_at !== null ||
       existing.result_feedback !== null ||
       existing.kind !== input.kind ||
@@ -326,7 +329,7 @@ export const appendEscalatedApprovalDraft = Effect.fn(
     ? routes
     : routes.filter((route) => route.viewer_session_id !== sourceSessionId)
   const work =
-    draft.event.type === "approval_needed"
+    draft.event.type === SERVER_EVENT_TYPE.approvalNeeded
       ? workOf(
           (yield* sql<{ readonly work_json: string | null }>`
             SELECT COALESCE(json_extract(metadata_json, '$.run_context.belongs_to'),
@@ -410,8 +413,8 @@ export const resumeApprovedTool = Effect.fn("SqliteToolExecutionStore.resumeAppr
     if (
       approval.session_id !== identity.sessionId ||
       approval.tool_name !== identity.toolName ||
-      approval.kind !== "tool_approval" ||
-      approval.status !== "approved" ||
+      approval.kind !== TOOL_APPROVAL_KIND.approval ||
+      approval.status !== APPROVAL_STATUS.approved ||
       approval.resolved_at === null ||
       approval.resolution_json === null
     ) {
@@ -469,7 +472,10 @@ export const resumeApprovedTool = Effect.fn("SqliteToolExecutionStore.resumeAppr
               toolError("begin", "corrupt", "Stored edited arguments are invalid", identity, cause)
             )
           )
-    if (resolution.alternative !== undefined && resolution.alternative !== "draft") {
+    if (
+      resolution.alternative !== undefined &&
+      resolution.alternative !== TOOL_APPROVAL_ALTERNATIVE.draft
+    ) {
       return yield* toolError(
         "begin",
         "corrupt",
@@ -486,7 +492,9 @@ export const resumeApprovedTool = Effect.fn("SqliteToolExecutionStore.resumeAppr
         savedIn: resolution.saved_in
       }),
       ...(edited === undefined ? {} : { edited }),
-      ...(resolution.alternative === "draft" ? { alternative: "draft" as const } : {})
+      ...(resolution.alternative === TOOL_APPROVAL_ALTERNATIVE.draft
+        ? { alternative: TOOL_APPROVAL_ALTERNATIVE.draft }
+        : {})
     }
   }
 )

@@ -101,11 +101,13 @@ export const createParametersSchema = (
       description: "Title for the new file, from 1 to 1,024 characters."
     }).check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
   })
+export const DOC_EDIT = { append: "append", replace: "replace" } as const
+
 export const EditDocParametersSchema = Schema.Struct({
   document_ref: fileRefSchema(
     "Google Docs URL, raw document id, or exact account-qualified document_ref returned by a Drive tool. A URL or raw id works only while one Drive account is connected."
   ),
-  operation: Schema.Literals(["append", "replace"] as const).annotate({
+  operation: Schema.Literals(Object.values(DOC_EDIT)).annotate({
     description:
       "append inserts text at the end of the first tab; replace changes every exact case-sensitive match in all tabs."
   }),

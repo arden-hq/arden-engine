@@ -1,5 +1,5 @@
 import { AUTOMATION_EVENT_TYPE, AUTOMATION_OCCURRENCE } from "@arden-hq/protocol/automations"
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Option, Schema } from "effect"
 
 import type { AutomationJobLeaseRef } from "../automations/store.js"
 import { AutomationStoreError } from "../automations/store.js"
@@ -36,7 +36,7 @@ const forkSource = (run: {
   const trigger = Schema.decodeUnknownOption(Schema.fromJsonString(ForkSourceSchema))(
     run.trigger_json ?? ""
   )
-  if (trigger._tag === "None") return undefined
+  if (Option.isNone(trigger)) return undefined
   return trigger.value.source === AUTOMATION_OCCURRENCE.count
     ? trigger.value.session_id
     : trigger.value.context.chat.session_id

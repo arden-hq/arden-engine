@@ -1,3 +1,4 @@
+import { SPAWN_AGENT_TOOL } from "../tools/tool-roles.js"
 import type { ToolResult } from "@arden-hq/loop"
 import { ToolEffectSchema } from "../../execution/tool-effect.js"
 import { Effect, Schema } from "effect"
@@ -9,22 +10,32 @@ import {
   type PendingConnectionDecision
 } from "../../connections/recovery.js"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
-import { ToolExecutionStoreError, type ToolExecutionIdentity } from "../tools/store.js"
+import {
+  TOOL_STORE_FAILURE,
+  ToolExecutionStoreError,
+  type ToolExecutionIdentity
+} from "../tools/store.js"
 import { decodeJson } from "./json.js"
 import {
   loadFullResult,
+  STORED_TOOL_RESULT_REASON,
   PersistedToolResultSchema,
   type PersistedToolResult
 } from "./tool-result-storage.js"
 import { TOOL_STATUSES, type ToolStatus } from "./status-sets.js"
-
-export const TOOL_APPROVAL_KIND = { approval: "tool_approval", outcome: "tool_outcome" } as const
 
 export type ToolOperation = ToolExecutionStoreError["operation"]
 
 const isToolStatus = (status: string): status is ToolStatus =>
   (TOOL_STATUSES as readonly string[]).includes(status)
 
+export const TOOL_APPROVAL_KIND = { approval: "tool_approval", outcome: "tool_outcome" } as const
+export const APPROVAL_STATUS = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected"
+} as const
+type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STATUS]
 export type ToolApprovalKind = (typeof TOOL_APPROVAL_KIND)[keyof typeof TOOL_APPROVAL_KIND]
 
 export interface ValidToolExecutionIdentity extends Omit<ToolExecutionIdentity, "arguments"> {
@@ -53,7 +64,7 @@ export interface ApprovalRow {
   readonly scope: string
   readonly preview: string | null
   readonly diff: string | null
-  readonly status: string
+  readonly status: ApprovalStatus
   readonly requested_at: string
   readonly resolved_at: string | null
   readonly expires_at: string | null
@@ -112,7 +123,7 @@ export const resultEquivalent = (left: PersistedToolResult, right: PersistedTool
   rawResultEquivalent(canonicalResult(left), canonicalResult(right))
 
 export const canonicalToolArguments = (toolName: string, arguments_: JsonObject): JsonObject => {
-  if (toolName !== "spawn_agent" || typeof arguments_.task !== "string") return arguments_
+  if (toolName !== SPAWN_AGENT_TOOL || typeof arguments_.task !== "string") return arguments_
   return { ...arguments_, task: arguments_.task.trim() }
 }
 
@@ -247,7 +258,9 @@ export const decodeStoredResult = Effect.fn("SqliteToolExecutionStore.decodeStor
       Effect.mapError((cause) =>
         toolError(
           operation,
-          cause.reason === "corrupt" ? "corrupt" : "storage",
+          cause.reason === STORED_TOOL_RESULT_REASON.corrupt
+            ? TOOL_STORE_FAILURE.corrupt
+            : TOOL_STORE_FAILURE.storage,
           cause.message,
           identity,
           cause

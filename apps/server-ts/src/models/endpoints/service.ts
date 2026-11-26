@@ -10,7 +10,15 @@ import type {
   ModelEndpoints as ModelEndpointsView,
   ModelEndpointSaveResult
 } from "@arden-hq/protocol/model-endpoints"
-import { SEARCH_ENDPOINT_MODEL_ID } from "@arden-hq/protocol/model-endpoints"
+import {
+  DECISION_SOURCE,
+  MODEL_ENDPOINT_AUTH,
+  MODEL_ENDPOINT_FORMAT,
+  MODEL_ENDPOINT_INPUT,
+  MODEL_ENDPOINT_KIND,
+  MODEL_ENDPOINT_RESULT,
+  SEARCH_ENDPOINT_MODEL_ID
+} from "@arden-hq/protocol/model-endpoints"
 import { Context, Duration, Effect, Layer, Schema, Semaphore } from "effect"
 
 import type { CredentialVault } from "../../credentials/vault.js"
@@ -21,6 +29,7 @@ import {
 } from "../../embedding/openai-compatible.js"
 import { ModelEndpointStore, type StoredEndpoint } from "../../persistence/model-endpoints/store.js"
 import type { DecisionEndpoint } from "../decisions/endpoint.js"
+import { IMAGE_PROBE } from "../decisions/service.js"
 import { LocalDecisionEndpoint } from "../decisions/local.js"
 import { checkDecisionEndpoint } from "../decisions/service.js"
 import { DecisionEndpointSource, type SelectedDecisionEndpoint } from "../decisions/source.js"
@@ -179,9 +188,12 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     kind: ModelEndpointKind,
     draft: ModelEndpointDraft
   ) {
-    if ((kind === "search") !== (draft.format === "openai-embeddings"))
+    if (
+      (kind === MODEL_ENDPOINT_KIND.search) !==
+      (draft.format === MODEL_ENDPOINT_FORMAT.openaiEmbeddings)
+    )
       return yield* invalid(`The ${draft.format} format is not a ${kind} format`)
-    if (kind === "search" && draft.input !== "text")
+    if (kind === MODEL_ENDPOINT_KIND.search && draft.input !== MODEL_ENDPOINT_INPUT.text)
       return yield* invalid("A search endpoint reads text")
     const base = {
       baseUrl: draft.baseUrl,
@@ -190,19 +202,19 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       input: draft.input
     }
     switch (draft.auth.kind) {
-      case "bearer":
+      case MODEL_ENDPOINT_AUTH.bearer:
         return {
           ...base,
           auth: { kind: "bearer" },
           secret: draft.auth.apiKey
         } satisfies ResolvedEndpoint
-      case "header":
+      case MODEL_ENDPOINT_AUTH.header:
         return {
           ...base,
           auth: { kind: "header", name: draft.auth.name },
           secret: draft.auth.value
         } satisfies ResolvedEndpoint
-      case "keep": {
+      case MODEL_ENDPOINT_AUTH.keep: {
         const stored = (yield* settings())[kind]
         const secret = yield* readSecret(kind)
         if (
@@ -219,7 +231,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     credentialLock.withPermit(resolveUnlocked(kind, draft))
 
   const runCheck = (kind: ModelEndpointKind, endpoint: ResolvedEndpoint) =>
-    kind === "search"
+    kind === MODEL_ENDPOINT_KIND.search
       ? checkEmbeddingEndpoint({
           baseUrl: endpoint.baseUrl,
           model: endpoint.model,
@@ -245,7 +257,10 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
             return {
               check: {
                 result: "works",
-                input: image !== "not_declared" && image.ok ? "text+image" : "text",
+                input:
+                  image !== IMAGE_PROBE.notDeclared && image.ok
+                    ? MODEL_ENDPOINT_INPUT.textImage
+                    : MODEL_ENDPOINT_INPUT.text,
                 ms: text.ms
               },
               dimensions: null
@@ -262,13 +277,17 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     const result = (yield* runCheck(kind, endpoint)).check
     const stored = (yield* settings())[kind]
     const sameAsSaved =
-      draft.auth.kind === "keep" &&
+      draft.auth.kind === MODEL_ENDPOINT_AUTH.keep &&
       stored !== null &&
       stored.baseUrl === draft.baseUrl &&
       stored.format === draft.format &&
       stored.model === draft.model
     if (sameAsSaved)
-      yield* report(kind, result.result === "works" ? undefined : result.result, revision)
+      yield* report(
+        kind,
+        result.result === MODEL_ENDPOINT_RESULT.works ? undefined : result.result,
+        revision
+      )
     return result
   })
 
@@ -278,7 +297,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
   ) {
     const endpoint = yield* resolve(kind, draft)
     const { check: result, dimensions } = yield* runCheck(kind, endpoint)
-    if (result.result !== "works") return result
+    if (result.result !== MODEL_ENDPOINT_RESULT.works) return result
     const stored: StoredEndpoint = {
       baseUrl: endpoint.baseUrl,
       format: endpoint.format,
@@ -291,13 +310,13 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
     yield* credentialLock.withPermit(
       Effect.uninterruptible(
         Effect.gen(function* () {
-          if (draft.auth.kind === "keep") {
+          if (draft.auth.kind === MODEL_ENDPOINT_AUTH.keep) {
             const latest = yield* resolveUnlocked(kind, draft)
             if (
               latest.secret !== endpoint.secret ||
               latest.auth.kind !== endpoint.auth.kind ||
-              (latest.auth.kind === "header" &&
-                endpoint.auth.kind === "header" &&
+              (latest.auth.kind === MODEL_ENDPOINT_AUTH.header &&
+                endpoint.auth.kind === MODEL_ENDPOINT_AUTH.header &&
                 latest.auth.name !== endpoint.auth.name)
             )
               return yield* invalid("The saved endpoint key changed during Check")
@@ -317,8 +336,8 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
               )
             )
           }
-          if (draft.auth.kind === "keep") revisions[kind] += 1
-          if (kind === "search") yield* registerSearch(stored, endpoint.secret)
+          if (draft.auth.kind === MODEL_ENDPOINT_AUTH.keep) revisions[kind] += 1
+          if (kind === MODEL_ENDPOINT_KIND.search) yield* registerSearch(stored, endpoint.secret)
         })
       )
     )
@@ -343,7 +362,8 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
               )
             )
           )
-          if (kind === "search") yield* models.unregister(SEARCH_ENDPOINT_MODEL_ID)
+          if (kind === MODEL_ENDPOINT_KIND.search)
+            yield* models.unregister(SEARCH_ENDPOINT_MODEL_ID)
           return next
         })
       )
@@ -371,22 +391,22 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
       Effect.gen(function* () {
         const saved = yield* settings()
         const secret =
-          saved.decisionSource === "endpoint" && saved.decision !== null
+          saved.decisionSource === DECISION_SOURCE.endpoint && saved.decision !== null
             ? yield* readSecret("decision")
             : undefined
         return { revision: revisions.decision, saved, secret }
       })
     )
     switch (saved.decisionSource) {
-      case "off":
+      case DECISION_SOURCE.off:
         return undefined
-      case "local": {
+      case DECISION_SOURCE.local: {
         const endpoint = yield* local.endpoint()
         return endpoint === undefined
           ? undefined
           : ({ origin: "local", endpoint } satisfies SelectedDecisionEndpoint)
       }
-      case "endpoint": {
+      case DECISION_SOURCE.endpoint: {
         const stored = saved.decision
         if (stored === null) return undefined
         if (secret === undefined) return undefined
@@ -465,7 +485,7 @@ const make = Effect.fn("ModelEndpoints.make")(function* (options: ModelEndpoints
           ),
         report: (selected, failure) => {
           const revision = observed.get(selected.endpoint)
-          return selected.origin === "endpoint" && revision !== undefined
+          return selected.origin === DECISION_SOURCE.endpoint && revision !== undefined
             ? reportQuietly("decision", failure, revision)
             : Effect.void
         }

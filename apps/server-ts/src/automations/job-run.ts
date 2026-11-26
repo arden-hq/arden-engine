@@ -1,4 +1,9 @@
-import { Clock, Effect } from "effect"
+import { Clock, Effect, Option } from "effect"
+import { AUTOMATION_CHAT_CHOICE, AUTOMATION_CONTEXT_MODE } from "@arden-hq/protocol/automations"
+import { JOB_PURPOSE } from "../persistence/job-classification.js"
+import { OBSERVED_RUN } from "../persistence/automations/queue.js"
+import { AUTOMATION_JOB_STATUS } from "../persistence/automations/store.js"
+import { RUN_AUTHORITY_STATE } from "../persistence/sqlite/run-context.js"
 import type { ChatMessage } from "../chat/message.js"
 import type {
   AutomationQueue,
@@ -18,7 +23,7 @@ import {
   type AutomationRunner,
   type AwaitAutomationRun
 } from "./runner.js"
-import { ChatMessageConflictError } from "../chat/message-errors.js"
+import { CHAT_CONFLICT_KIND, ChatMessageConflictError } from "../chat/message-errors.js"
 import { TRANSIENT_RUN_ERROR_CODES } from "@arden-hq/protocol/chat"
 import { JOB_RETRY_LADDER_MS } from "../persistence/automations/retry-ladders.js"
 
@@ -34,7 +39,7 @@ export const retried = Effect.fn("Automation.retried")(function* <
 ): Effect.fn.Return<Ended, E> {
   let observed = first
   for (const [step, delay] of JOB_RETRY_LADDER_MS.slice(tries - 1).entries()) {
-    if (observed.status !== "failed" || observed.wrote) break
+    if (observed.status !== OBSERVED_RUN.failed || observed.wrote) break
     if (!TRANSIENT_RUN_ERROR_CODES.some((transient) => transient === observed.errorCode)) break
     yield* Effect.sleep(delay)
     const next = yield* again(tries + step + 1)
@@ -68,7 +73,7 @@ export const runByRule = Effect.fn("Automation.runByRule")(function* (
     start(tries).pipe(
       Effect.option,
       Effect.flatMap((runId) =>
-        runId._tag === "None" ? Effect.succeed(undefined) : ended(runId.value)
+        Option.isNone(runId) ? Effect.succeed(undefined) : ended(runId.value)
       )
     )
   )
@@ -85,11 +90,13 @@ export const makeAutomationJobRunner = (services: {
   const runSession = Effect.fn("AutomationJobRunner.runSession")(function* (
     job: AutomationJobLease
   ): Effect.fn.Return<string | undefined, Error> {
-    if (job.payload.purpose === "space_review") return yield* services.queue.prepareRunSession(job)
-    if (job.payload.contextMode === "fork") {
+    if (job.payload.purpose === JOB_PURPOSE.spaceReview)
+      return yield* services.queue.prepareRunSession(job)
+    if (job.payload.contextMode === AUTOMATION_CONTEXT_MODE.fork) {
       return (yield* services.queue.prepareForkSession(job))?.sessionId
     }
-    if (job.payload.chatKind === "yours") return yield* services.queue.prepareOwnChat(job)
+    if (job.payload.chatKind === AUTOMATION_CHAT_CHOICE.yours)
+      return yield* services.queue.prepareOwnChat(job)
     if (job.payload.sessionId === null) throw new Error("Automation has no Chat session")
     return job.payload.sessionId
   })
@@ -104,10 +111,13 @@ export const makeAutomationJobRunner = (services: {
         ? {
             runId: handlerRunId,
             sessionId: checkpoint.input.sessionId,
-            authority: captured?.authority ?? "revoked"
+            authority: captured?.authority ?? RUN_AUTHORITY_STATE.revoked
           }
         : captured
-    if (job.payload.handler !== null && (bound === null || bound.authority === "active")) {
+    if (
+      job.payload.handler !== null &&
+      (bound === null || bound.authority === RUN_AUTHORITY_STATE.active)
+    ) {
       return yield* services.executeHandler(job)
     }
     const sessionId = bound?.sessionId ?? (yield* runSession(job))
@@ -122,7 +132,7 @@ export const makeAutomationJobRunner = (services: {
         name: job.payload.name
       }).pipe(
         Effect.catch((cause) =>
-          cause instanceof ChatMessageConflictError && cause.kind === "session_busy"
+          cause instanceof ChatMessageConflictError && cause.kind === CHAT_CONFLICT_KIND.sessionBusy
             ? Effect.map(Clock.currentTimeMillis, (now) => ({
                 status: "deferred" as const,
                 cause: "session_busy" as const,
@@ -133,16 +143,16 @@ export const makeAutomationJobRunner = (services: {
             : Effect.fail(cause)
         )
       )
-      if ("status" in receipt && receipt.status === "deferred") return receipt
+      if ("status" in receipt && receipt.status === AUTOMATION_JOB_STATUS.deferred) return receipt
       if (receipt.runId === null) throw new Error("Automation Chat run has no identity")
     }
 
     const observe = () => awaitEnded(services.queue.observeOccurrence(job.payload.automationRunId))
     const once =
-      job.payload.purpose === "task_execution" ||
-      job.payload.purpose === "space_review" ||
+      job.payload.purpose === JOB_PURPOSE.taskExecution ||
+      job.payload.purpose === JOB_PURPOSE.spaceReview ||
       job.payload.handler !== null ||
-      bound?.authority === "revoked"
+      bound?.authority === RUN_AUTHORITY_STATE.revoked
     const first = yield* observe()
     const observed = once
       ? first
@@ -155,14 +165,14 @@ export const makeAutomationJobRunner = (services: {
           }).pipe(
             Effect.option,
             Effect.flatMap((started) =>
-              started._tag === "None" ? Effect.succeed(undefined) : observe()
+              Option.isNone(started) ? Effect.succeed(undefined) : observe()
             )
           )
         )
     return {
       status: "ended",
       outcome: occurrenceOutcome(observed, {
-        revoked: bound?.authority === "revoked",
+        revoked: bound?.authority === RUN_AUTHORITY_STATE.revoked,
         handler: job.payload.handler !== null
       }),
       result: observed.result,
@@ -183,9 +193,9 @@ const occurrenceOutcome = (
   options: { readonly revoked: boolean; readonly handler: boolean }
 ): AutomationJobOutcome => {
   if (options.revoked) return "superseded"
-  if (observed.status === "cancelled") return "cancelled"
+  if (observed.status === OBSERVED_RUN.cancelled) return "cancelled"
   if (options.handler) return "failed"
-  if (observed.status !== "completed") return observed.status
+  if (observed.status !== OBSERVED_RUN.completed) return observed.status
   if (observed.blocked === null) return "finished"
   return blockedOutcome(observed.blocked)
 }

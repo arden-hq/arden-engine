@@ -1,3 +1,6 @@
+import { CHANGE_ENTRY_OUTCOME } from "@arden-hq/protocol/chat"
+import { EVIDENCE_KIND } from "@arden-hq/protocol/spaces/work"
+import { TOOL_STATUS } from "./status-sets.js"
 import { type TaskPatch } from "../work/task-patch.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -43,7 +46,7 @@ export const verifyTaskCompletion = Effect.fn("Work.verifyCompletion")(
     const labels = yield* Effect.forEach(
       patch.completion_evidence,
       Effect.fn(function* (evidence) {
-        if (evidence.kind === "attachment") {
+        if (evidence.kind === EVIDENCE_KIND.attachment) {
           const rows = yield* sql<{ readonly name: string }>`SELECT name FROM space_task_attachments
         WHERE attachment_id = ${evidence.attachment_id} AND item_id = ${itemId}
           AND size > 0 AND length(data) = size`
@@ -67,7 +70,12 @@ export const verifyTaskCompletion = Effect.fn("Work.verifyCompletion")(
       SELECT status, changes_state, result_json FROM tool_calls
       WHERE run_id = ${runId} AND tool_call_id = ${evidence.tool_call_id}`
         const row = rows[0]
-        if (!row || row.status !== "completed" || !row.changes_state || row.result_json === null) {
+        if (
+          !row ||
+          row.status !== TOOL_STATUS.completed ||
+          !row.changes_state ||
+          row.result_json === null
+        ) {
           return yield* workError(
             "invalid",
             "Completion evidence must identify a confirmed write in this Run. A read or unfinished call does not prove delivery."
@@ -83,7 +91,7 @@ export const verifyTaskCompletion = Effect.fn("Work.verifyCompletion")(
         if (
           result.is_error ||
           !receipt ||
-          receipt.outcome === "unknown" ||
+          receipt.outcome === CHANGE_ENTRY_OUTCOME.unknown ||
           receipt.operation_id !== operationId ||
           receipt.receipt_ref !== operationId
         ) {

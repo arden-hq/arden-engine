@@ -1,10 +1,12 @@
 import { ToolExecutionError } from "@arden-hq/loop"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect, Schema } from "effect"
 import { defineServerTool, type ServerTool } from "./define.js"
 import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { WorkStore } from "../persistence/work/store.js"
-import { readSpecialChat } from "../context/special-chat.js"
+import { readSpecialChat, SPECIAL_CHAT_KIND } from "../context/special-chat.js"
+import { OFFER_OUTCOME } from "./permission-offer.js"
 import { toolFailure } from "./tool-failure.js"
 import {
   AskUserParametersSchema,
@@ -14,7 +16,7 @@ import {
   questionData
 } from "./ask-user-input.js"
 import { recordApplied } from "../execution/tool-effect.js"
-import { takesAnswersMidRun } from "../execution/authority.js"
+import { ACTOR, takesAnswersMidRun } from "../execution/authority.js"
 import { FocusChoiceStore } from "../persistence/focus-choices/store.js"
 import { appliedReceipt, inChatTarget } from "./call-receipt.js"
 import type { ServerRunContext } from "./run-context.js"
@@ -80,8 +82,9 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
         services.sessions.loadHeaderSnapshot(ctx.run.sessionId).pipe(
           Effect.map((session) => ({
             onboarding:
-              session !== null && readSpecialChat(session.metadata)?.kind === "onboarding",
-            agentChat: session?.header.sessionType === "agent",
+              session !== null &&
+              readSpecialChat(session.metadata)?.kind === SPECIAL_CHAT_KIND.onboarding,
+            agentChat: session?.header.sessionType === SESSION_TYPE.agent,
             header: session?.header
           })),
           Effect.orElseSucceed(() => ({ onboarding: false, agentChat: false, header: undefined }))
@@ -139,10 +142,10 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
         toolCallId: ctx.toolCallId,
         request: permissionRequest(input.permission)
       })
-      if (offered.kind === "offered") effects.applied()
-      if (offered.kind !== "offered")
+      if (offered.kind === OFFER_OUTCOME.offered) effects.applied()
+      if (offered.kind !== OFFER_OUTCOME.offered)
         return {
-          result: `No card shown. ${offered.kind === "refused" ? offered.reason : "Nothing to offer."}`,
+          result: `No card shown. ${offered.kind === OFFER_OUTCOME.refused ? offered.reason : "Nothing to offer."}`,
           preview: "No permission offered"
         }
       return {
@@ -178,7 +181,7 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
       destructive: null
     },
     execute: async (_input, ctx) => {
-      if (ctx.run.authority.actor.kind !== "person")
+      if (ctx.run.authority.actor.kind !== ACTOR.person)
         throw new ToolExecutionError(
           "Only the person's own chat reads its permission rules. If a call is refused, say so in your report.",
           { preview: "Not available here", retryable: false }

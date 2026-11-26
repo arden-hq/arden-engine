@@ -2,6 +2,7 @@ import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
 import {
+  MEMORY_CAPTURE_POSITION,
   MemoryCaptureBatchIdentitySchema,
   type MemoryCaptureBatchIdentity,
   type MemoryCaptureMove,
@@ -20,20 +21,21 @@ interface PositionColumns {
 
 const columnsOf = (position: MemoryCapturePosition): PositionColumns => {
   switch (position._tag) {
-    case "Beginning":
+    case MEMORY_CAPTURE_POSITION.Beginning:
       return { read_seq: -1, read_offset: null }
-    case "AfterSequence":
+    case MEMORY_CAPTURE_POSITION.AfterSequence:
       return { read_seq: position.sequence, read_offset: null }
-    case "AtPosition":
+    case MEMORY_CAPTURE_POSITION.AtPosition:
       return { read_seq: position.progress.sequence, read_offset: position.progress.offset }
   }
 }
 
 const positionOf = (columns: PositionColumns): MemoryCapturePosition => {
-  if (columns.read_seq < 0) return { _tag: "Beginning" }
-  if (columns.read_offset === null) return { _tag: "AfterSequence", sequence: columns.read_seq }
+  if (columns.read_seq < 0) return { _tag: MEMORY_CAPTURE_POSITION.Beginning }
+  if (columns.read_offset === null)
+    return { _tag: MEMORY_CAPTURE_POSITION.AfterSequence, sequence: columns.read_seq }
   return {
-    _tag: "AtPosition",
+    _tag: MEMORY_CAPTURE_POSITION.AtPosition,
     progress: { sequence: columns.read_seq, offset: columns.read_offset }
   }
 }

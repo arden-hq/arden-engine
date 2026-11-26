@@ -5,7 +5,7 @@ import {
   PERMISSION_RULE_SUBJECT,
   type WordsRuleReplaces
 } from "@arden-hq/protocol/permissions"
-import type { ToolApprovalOverride } from "@arden-hq/protocol/tools"
+import { TOOL_APPROVAL_OVERRIDE, type ToolApprovalOverride } from "@arden-hq/protocol/tools"
 import { Context, Effect, Schema } from "effect"
 import { storeErrorFields } from "../errors.js"
 
@@ -68,19 +68,19 @@ export type RuleChange = (typeof RULE_CHANGE)[keyof typeof RULE_CHANGE]
 
 export const settingOfRule = (decision: RuleDecision): ToolApprovalOverride => {
   switch (decision) {
-    case "allow":
-      return "approve"
-    case "ask":
-      return "ask"
-    case "never":
-      return "deny"
+    case PERMISSION_RULE_DECISION.allow:
+      return TOOL_APPROVAL_OVERRIDE.approve
+    case PERMISSION_RULE_DECISION.ask:
+      return TOOL_APPROVAL_OVERRIDE.ask
+    case PERMISSION_RULE_DECISION.never:
+      return TOOL_APPROVAL_OVERRIDE.deny
   }
 }
 
 const RULE_OF_SETTING: Readonly<Record<ToolApprovalOverride, RuleDecision>> = {
-  approve: PERMISSION_RULE_DECISION.allow,
-  ask: PERMISSION_RULE_DECISION.ask,
-  deny: PERMISSION_RULE_DECISION.never
+  [TOOL_APPROVAL_OVERRIDE.approve]: PERMISSION_RULE_DECISION.allow,
+  [TOOL_APPROVAL_OVERRIDE.ask]: PERMISSION_RULE_DECISION.ask,
+  [TOOL_APPROVAL_OVERRIDE.deny]: PERMISSION_RULE_DECISION.never
 }
 
 export const ruleOfSetting = (setting: ToolApprovalOverride): RuleDecision =>

@@ -19,6 +19,18 @@ export const sendEditable = mailEditable(SEND_EDITABLE_FIELDS)
 
 export const replyEditable = mailEditable(REPLY_EDITABLE_FIELDS)
 
+export const MAIL_EDIT_FIELD = {
+  subject: "subject",
+  body: "body",
+  omit_attachments: "omit_attachments"
+} as const
+
+type MailEditField = (typeof MAIL_EDIT_FIELD)[keyof typeof MAIL_EDIT_FIELD]
+
+interface MailEditLine extends ApprovalEditLine {
+  readonly field: MailEditField
+}
+
 interface MailWords {
   readonly subject?: string
   readonly body: string
@@ -30,15 +42,15 @@ const inQuotes = (text: string): string => `"${text}"`
 export const mailEditLines = (
   requested: MailWords,
   edited: MailWords
-): ReadonlyArray<ApprovalEditLine> => {
-  const lines: Array<ApprovalEditLine> = []
+): ReadonlyArray<MailEditLine> => {
+  const lines: Array<MailEditLine> = []
   if (
     requested.subject !== undefined &&
     edited.subject !== undefined &&
     requested.subject !== edited.subject
   ) {
     lines.push({
-      field: "subject",
+      field: MAIL_EDIT_FIELD.subject,
       label: "Subject",
       from: inQuotes(requested.subject),
       to: inQuotes(edited.subject)
@@ -46,7 +58,7 @@ export const mailEditLines = (
   }
   if (requested.body !== edited.body) {
     lines.push({
-      field: "body",
+      field: MAIL_EDIT_FIELD.body,
       label: "Message",
       from: inQuotes(requested.body),
       to: inQuotes(edited.body)
@@ -57,7 +69,7 @@ export const mailEditLines = (
     JSON.stringify(edited.omit_attachments ?? [])
   ) {
     lines.push({
-      field: "omit_attachments",
+      field: MAIL_EDIT_FIELD.omit_attachments,
       label: "Omitted attachments",
       from:
         (requested.omit_attachments ?? []).map((index) => String(index + 1)).join(", ") || "None",

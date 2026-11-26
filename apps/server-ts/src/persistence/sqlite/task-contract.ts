@@ -1,3 +1,5 @@
+import { CONTRACT_PROPOSAL_CHANGE, RUN_QUESTION_ANSWER } from "@arden-hq/protocol/runs"
+import { CONTRACT_LINE } from "@arden-hq/protocol/spaces/work"
 import { type StoredResolveAnswer } from "../runs/stored-question.js"
 import { DateTime, Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -58,11 +60,11 @@ export const readTaskContract = Effect.fn("TaskContract.read")(function* (
     lines: lines.map((row): ContractLine => {
       const base = { lineId: row.line_id, text: row.text, sourceMessageId: row.source_message_id }
       switch (row.kind) {
-        case "rule":
+        case CONTRACT_LINE.rule:
           return { ...base, kind: "rule" }
-        case "criterion":
+        case CONTRACT_LINE.criterion:
           return { ...base, kind: "criterion", evidence: evidenceOf(row.evidence_json) }
-        case "decision":
+        case CONTRACT_LINE.decision:
           return { ...base, kind: "decision", rejected: row.rejected ?? undefined }
       }
     }),
@@ -164,7 +166,7 @@ export const recordContractProposalInTransaction = Effect.fn("TaskContract.recor
 )
 
 const targetOf = (change: ContractChange): number | undefined =>
-  change.kind === "add" ? change.replaces : change.line_id
+  change.kind === CONTRACT_PROPOSAL_CHANGE.add ? change.replaces : change.line_id
 
 export const isContractProposal = (
   sql: SqlClient.SqlClient,
@@ -176,7 +178,9 @@ export const isContractProposal = (
   )
 
 export const contractAnswerMisfit = (answer: StoredResolveAnswer): string | undefined =>
-  answer.kind === "choice" || answer.kind === "dismiss" || answer.kind === "text"
+  answer.kind === RUN_QUESTION_ANSWER.choice ||
+  answer.kind === RUN_QUESTION_ANSWER.dismiss ||
+  answer.kind === RUN_QUESTION_ANSWER.text
     ? undefined
     : "A contract line takes Save, a reply or Skip."
 
@@ -200,7 +204,7 @@ export const settleContractProposalInTransaction = Effect.fn("TaskContract.settl
     if (proposal === undefined) return
     const change = Option.getOrUndefined(decodeChange(proposal.change_json))
     if (change === undefined) return yield* workError("storage", "Stored proposal is corrupt")
-    const confirmed = answer.kind === "choice"
+    const confirmed = answer.kind === RUN_QUESTION_ANSWER.choice
     if (confirmed) {
       const target = targetOf(change)
       if (target !== undefined)
@@ -208,7 +212,8 @@ export const settleContractProposalInTransaction = Effect.fn("TaskContract.settl
           WHERE line_id = ${target} AND item_id = ${proposal.item_id} AND retired_at IS NULL`.pipe(
           Effect.mapError(fail("Could not retire the contract line"))
         )
-      if (change.kind === "add") yield* saveLine(sql, proposal, change.line, now)
+      if (change.kind === CONTRACT_PROPOSAL_CHANGE.add)
+        yield* saveLine(sql, proposal, change.line, now)
     }
     yield* sql`UPDATE task_contract_proposals
       SET decision = ${confirmed ? "confirmed" : "dismissed"}
@@ -228,7 +233,7 @@ const saveLine = (
       item_id, kind, text, rejected, source_message_id, evidence_json, created_at, retired_at
     ) VALUES (
       ${proposal.item_id}, ${line.kind}, ${line.text},
-      ${line.kind === "decision" ? (line.rejected ?? null) : null},
+      ${line.kind === CONTRACT_LINE.decision ? (line.rejected ?? null) : null},
       ${proposal.source_message_id}, NULL, ${now}, NULL
     )`.pipe(Effect.mapError(fail("Could not save the contract line")))
 
@@ -243,7 +248,7 @@ export const makeTaskContractSql = (options: {
         .transact(
           Effect.gen(function* () {
             const line = yield* liveLine(sql, input.itemId, input.lineId)
-            if (line.kind !== "criterion")
+            if (line.kind !== CONTRACT_LINE.criterion)
               return yield* workError(
                 "invalid",
                 `L${input.lineId} is a ${line.kind}, not a done-when criterion`

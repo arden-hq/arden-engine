@@ -1,3 +1,5 @@
+export const SESSION_RUN_TABLE = "chat_runs"
+
 export const SESSION_OWNED_TABLES = [
   "automation_count_state",
   "chat_compactions",
@@ -9,5 +11,5 @@ export const SESSION_OWNED_TABLES = [
   "session_turns",
   "tool_approvals",
   "tool_calls",
-  "chat_runs"
+  SESSION_RUN_TABLE
 ] as const

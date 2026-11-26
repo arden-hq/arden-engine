@@ -28,10 +28,18 @@ const HomeOfferSchema = Schema.Struct({
   settled_at: Schema.NullOr(at)
 })
 
+export const HOME_EVIDENCE = {
+  task: "task",
+  run: "run",
+  question: "question",
+  approval: "approval",
+  offer: "offer"
+} as const
+
 export const HomeEvidenceSchema = Schema.Union([
   Schema.Struct({
     ...source,
-    kind: Schema.Literal("task"),
+    kind: Schema.Literal(HOME_EVIDENCE.task),
     event_id: Schema.NullOr(Schema.Natural),
     item_id: identity,
     history_revision: Schema.optionalKey(Schema.NullOr(identity)),
@@ -44,7 +52,7 @@ export const HomeEvidenceSchema = Schema.Union([
   }),
   Schema.Struct({
     ...source,
-    kind: Schema.Literal("run"),
+    kind: Schema.Literal(HOME_EVIDENCE.run),
     run_id: identity,
     session_id: identity,
     context: RunContextSchema,
@@ -52,10 +60,14 @@ export const HomeEvidenceSchema = Schema.Union([
     text: Schema.String,
     error: Schema.NullOr(Schema.String)
   }),
-  Schema.Struct({ ...source, kind: Schema.Literal("question"), question: StoredRunQuestionSchema }),
   Schema.Struct({
     ...source,
-    kind: Schema.Literal("approval"),
+    kind: Schema.Literal(HOME_EVIDENCE.question),
+    question: StoredRunQuestionSchema
+  }),
+  Schema.Struct({
+    ...source,
+    kind: Schema.Literal(HOME_EVIDENCE.approval),
     run_id: identity,
     session_id: identity,
     tool_call_id: identity,
@@ -63,7 +75,7 @@ export const HomeEvidenceSchema = Schema.Union([
     preview: Schema.NullOr(Schema.String),
     context: Schema.NullOr(RunContextSchema)
   }),
-  Schema.Struct({ ...source, kind: Schema.Literal("offer"), offer: HomeOfferSchema })
+  Schema.Struct({ ...source, kind: Schema.Literal(HOME_EVIDENCE.offer), offer: HomeOfferSchema })
 ])
 
 export const HOME_HEADLINES = ["Nothing needs you", "Since your last visit"] as const

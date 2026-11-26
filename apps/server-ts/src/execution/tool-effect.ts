@@ -25,7 +25,7 @@ export interface EffectTarget {
 
 export const MAX_CALL_TARGETS = 50
 
-const EFFECT_TARGET_ORIGIN = { named: "named", created: "created" } as const
+export const EFFECT_TARGET_ORIGIN = { named: "named", created: "created" } as const
 export type EffectTargetOrigin = (typeof EFFECT_TARGET_ORIGIN)[keyof typeof EFFECT_TARGET_ORIGIN]
 
 const CALL_SETTLED = { succeeded: "succeeded", threw: "threw" } as const

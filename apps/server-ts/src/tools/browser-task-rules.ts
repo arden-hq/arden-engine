@@ -1,5 +1,6 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
+import { BROWSER_ACT_ACTION } from "../browser/service.js"
 import { atNodeRef } from "./browser-support.js"
 
 const isAct = Schema.is(
@@ -33,7 +34,7 @@ const labelName = (label: string): string | undefined => {
   const name = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.String))(
     label.slice(space + 1)
   )
-  return name._tag === "Some" ? name.value.trim() : undefined
+  return Option.isSome(name) ? name.value.trim() : undefined
 }
 
 const normalized = (text: string): string =>
@@ -129,7 +130,12 @@ export const refusalOf = (
   if (picks && input.target !== undefined && nodeRef === undefined)
     return "Aim this at an element by its ref from the latest page."
   const label = picks && nodeRef !== undefined ? labelOf(atNodeRef(nodeRef)) : undefined
-  if (picks && nodeRef !== undefined && label === undefined && input.action !== "click")
+  if (
+    picks &&
+    nodeRef !== undefined &&
+    label === undefined &&
+    input.action !== BROWSER_ACT_ACTION.click
+  )
     return "Arden cannot tell what this box says; finish with decide and name it."
   const choice = label === undefined ? undefined : choiceOf(label)
   if (choice === "")
@@ -139,13 +145,13 @@ export const refusalOf = (
   if (input.secret !== undefined && !task.secrets.includes(input.secret))
     return `The saved secret ${input.secret} is not one this task may fill.`
   if (
-    (input.action === "fill" || input.action === "type") &&
+    (input.action === BROWSER_ACT_ACTION.fill || input.action === BROWSER_ACT_ACTION.type) &&
     input.value !== undefined &&
     !task.rule.given(input.value)
   )
     return "That value is not among the values given for this task; type only those, or finish with decide."
   if (
-    input.action === "select" &&
+    input.action === BROWSER_ACT_ACTION.select &&
     (input.values ?? []).some((option) => !task.rule.answers(option))
   )
     return "That choice is not named in this task; finish with decide and name the field."

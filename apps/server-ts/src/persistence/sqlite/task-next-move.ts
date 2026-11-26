@@ -1,3 +1,6 @@
+import { CHAT_RUN_ERROR_CODE } from "@arden-hq/protocol/chat"
+import { MODEL_ROLE } from "@arden-hq/protocol/models"
+import { STORED_RUN_STATUS } from "./status-sets.js"
 import { outcomeSql } from "./automation-run-outcome.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { Effect } from "effect"
@@ -26,7 +29,15 @@ import {
 } from "../automations/retry-ladders.js"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
-export type TaskStopCause = TransientRunErrorCode | "request_invalid" | "stalled" | "failed"
+export const TASK_STOP_CAUSE = {
+  providerUnavailable: "provider_unavailable",
+  rateLimited: "rate_limited",
+  runInterrupted: "run_interrupted",
+  requestInvalid: "request_invalid",
+  stalled: "stalled",
+  failed: "failed"
+} as const
+export type TaskStopCause = (typeof TASK_STOP_CAUSE)[keyof typeof TASK_STOP_CAUSE]
 const STUCK_AFTER_WAKES = 3
 const RECORD_ONLY_GAP_MS = 2 * 60_000
 const TRANSIENT_CAUSE: Readonly<Record<TransientRunErrorCode, string>> = {
@@ -43,7 +54,10 @@ const words = (value: string): string => value.trim().replaceAll(/\s+/g, " ")
 export const failureWords = (error: string | null, errorCode: string | null = null): string => {
   const text = error === null ? "" : words(inArdenWords(error))
   if (text.length === 0) return "The run gave up after repeated failures."
-  if (errorCode === "request_invalid" || errorCode === "model_unavailable")
+  if (
+    errorCode === CHAT_RUN_ERROR_CODE.requestInvalid ||
+    errorCode === CHAT_RUN_ERROR_CODE.modelUnavailable
+  )
     return inTaskWords(runFailureText(errorCode, text).text)
   const refusal = providerSentence(text)
   const status = /^(\w+) request failed with status (\d+)/.exec(text)
@@ -124,7 +138,10 @@ export const failTaskItem = Effect.fn("TaskNextMove.fail")(function* (
     input.chatRunId,
     "failed",
     summary,
-    transient ?? (input.errorCode === "request_invalid" ? "request_invalid" : "failed"),
+    transient ??
+      (input.errorCode === CHAT_RUN_ERROR_CODE.requestInvalid
+        ? TASK_STOP_CAUSE.requestInvalid
+        : TASK_STOP_CAUSE.failed),
     input.now
   )
   if (budgetStopped) return
@@ -244,7 +261,7 @@ export const keepTaskMoving = Effect.fn("TaskNextMove.keepMoving")(function* (
   const item = rows[0]
   if (item === undefined) return
   if (item.moved === 1) {
-    if (item.runs_in === "background" && item.next_attempt_at === null)
+    if (item.runs_in === MODEL_ROLE.background && item.next_attempt_at === null)
       yield* scheduleRetry(sql, item.item_id, input.now, input.now)
     return
   }
@@ -307,11 +324,11 @@ export const settleTaskRun = Effect.fn("TaskNextMove.settleTaskRun")(function* (
   const run = rows[0]
   if (run === undefined) return
   switch (run.status) {
-    case "completed":
+    case STORED_RUN_STATUS.completed:
       return yield* keepTaskMoving(writer, { itemId: run.item_id, chatRunId: runId, now })
-    case "error":
-    case "failed":
-    case "interrupted":
+    case STORED_RUN_STATUS.error:
+    case STORED_RUN_STATUS.failed:
+    case STORED_RUN_STATUS.interrupted:
       return yield* failTaskItem(writer, {
         itemId: run.item_id,
         error: run.error_message,

@@ -1,7 +1,8 @@
 import { Effect } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlClient, SqlError } from "effect/unstable/sql"
 
 import {
+  EFFECT_TARGET_ORIGIN,
   MAX_CALL_TARGETS,
   type EffectTarget,
   type EffectTargetOrigin
@@ -16,6 +17,13 @@ import { touchingToolStatusList } from "./status-sets.js"
 
 const CLOCK_SKEW_MS = 2 * 60_000
 
+export const EFFECT_TARGET_RESULT = {
+  notRunning: "not_running",
+  tooMany: "too_many",
+  stored: "stored"
+} as const
+type EffectTargetResult = (typeof EFFECT_TARGET_RESULT)[keyof typeof EFFECT_TARGET_RESULT]
+
 export const storeEffectTarget = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   input: {
@@ -25,7 +33,7 @@ export const storeEffectTarget = Effect.fnUntraced(function* (
     readonly origin: EffectTargetOrigin
   },
   at: string
-) {
+): Effect.fn.Return<EffectTargetResult, SqlError.SqlError> {
   const [call] = yield* sql<{ readonly others: number }>`
     SELECT (SELECT count(*) FROM tool_call_targets AS target
       WHERE target.run_id = call.run_id AND target.tool_call_id = call.tool_call_id
@@ -34,14 +42,14 @@ export const storeEffectTarget = Effect.fnUntraced(function* (
     FROM tool_calls AS call
     WHERE call.run_id = ${input.runId} AND call.tool_call_id = ${input.toolCallId}
       AND call.status = 'running'`
-  if (call === undefined) return "not_running" as const
-  if (call.others >= MAX_CALL_TARGETS) return "too_many" as const
+  if (call === undefined) return EFFECT_TARGET_RESULT.notRunning
+  if (call.others >= MAX_CALL_TARGETS) return EFFECT_TARGET_RESULT.tooMany
   const label = boundedLabel(input.target)
   const title = label.title ?? null
   const href = label.href ?? null
   const place = boundedPlace(input.target.place) ?? null
   const onConflict =
-    input.origin === "named"
+    input.origin === EFFECT_TARGET_ORIGIN.named
       ? sql`DO UPDATE SET at = excluded.at, title = excluded.title, href = excluded.href,
           place = excluded.place, origin = excluded.origin`
       : sql`DO UPDATE SET title = COALESCE(tool_call_targets.title, excluded.title),
@@ -52,7 +60,7 @@ export const storeEffectTarget = Effect.fnUntraced(function* (
     VALUES (${input.runId}, ${input.toolCallId}, ${input.target.source}, ${input.target.objectId},
       ${at}, ${title}, ${href}, ${place}, ${input.origin})
     ON CONFLICT (run_id, tool_call_id, source, object_id) ${onConflict}`
-  return "stored" as const
+  return EFFECT_TARGET_RESULT.stored
 })
 
 export const readEffectTargets = Effect.fnUntraced(function* (

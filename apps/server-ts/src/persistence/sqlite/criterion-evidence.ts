@@ -1,3 +1,6 @@
+import { TOOL_EFFECT } from "../../execution/tool-effect.js"
+import { EVIDENCE_KIND } from "@arden-hq/protocol/spaces/work"
+import { TOOL_STATUS } from "./status-sets.js"
 import { stat } from "node:fs/promises"
 import { isAbsolute } from "node:path"
 import { Effect, Option } from "effect"
@@ -41,7 +44,7 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
   const read = <A>(effect: Effect.Effect<A, unknown>) =>
     effect.pipe(Effect.mapError((cause) => workError("storage", "Could not read evidence", cause)))
   switch (evidence.kind) {
-    case "tool_call": {
+    case EVIDENCE_KIND.tool_call: {
       const rows = yield* read(
         sql.unsafe<{
           readonly run_id: string
@@ -57,7 +60,7 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
         return yield* refuse(
           `No run of this Task made tool call ${evidence.tool_call_id} after the criterion was saved (${after}). Cite a call one of its runs made since.`
         )
-      if (call.status !== "completed")
+      if (call.status !== TOOL_STATUS.completed)
         return yield* refuse(
           `Tool call ${evidence.tool_call_id} has not finished (${call.status}).`
         )
@@ -65,7 +68,7 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
         return yield* refuse(
           `Tool call ${evidence.tool_call_id} failed; a failed call proves nothing.`
         )
-      if (call.effect === "run_record" || call.tool_name.startsWith("task_"))
+      if (call.effect === TOOL_EFFECT.runRecord || call.tool_name.startsWith("task_"))
         return yield* refuse(
           `${call.tool_name} only records what a run says. Cite the call that did the work.`
         )
@@ -82,7 +85,7 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
         exit_code: 0
       }
     }
-    case "file": {
+    case EVIDENCE_KIND.file: {
       if (!isAbsolute(evidence.path))
         return yield* refuse(`Give the file's absolute path, not ${JSON.stringify(evidence.path)}.`)
       const found = yield* Effect.tryPromise(() => stat(evidence.path)).pipe(
@@ -95,7 +98,7 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
         return yield* refuse(`${evidence.path} was last changed ${modifiedAt}. ${tooOld}`)
       return { kind: "file", path: evidence.path, size: found.size, modified_at: modifiedAt }
     }
-    case "attachment": {
+    case EVIDENCE_KIND.attachment: {
       const rows = yield* read(sql<{
         readonly name: string
         readonly created_at: string
@@ -112,7 +115,7 @@ export const resolveEvidence = Effect.fn("TaskContract.resolveEvidence")(functio
         )
       return { kind: "attachment", attachment_id: evidence.attachment_id, name: saved.name }
     }
-    case "url": {
+    case EVIDENCE_KIND.url: {
       const url = canonicalUrl(evidence.url)
       if (url === undefined) return yield* refuse(`${JSON.stringify(evidence.url)} is not a URL.`)
       const rows = yield* read(

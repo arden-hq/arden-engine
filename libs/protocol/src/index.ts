@@ -170,6 +170,7 @@ export {
 }
 
 export {
+  VISUALIZATION_KIND,
   VISUALIZATION_LIBRARIES,
   VISUALIZATION_RUNTIME_VERSION
 } from "./visualizations/contracts.js"

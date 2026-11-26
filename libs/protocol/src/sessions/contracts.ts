@@ -17,11 +17,6 @@ import type {
   SessionSummary,
   SessionThreadSource
 } from "./states.js"
-export const SESSION_FORK_DISPOSITION = { retained: "retained", disposable: "disposable" } as const
-
-export type SessionForkDisposition =
-  (typeof SESSION_FORK_DISPOSITION)[keyof typeof SESSION_FORK_DISPOSITION]
-
 export * from "./states.js"
 
 export const SESSION_LIST_FILTER = {
@@ -63,7 +58,12 @@ export interface SessionListOptions {
   readonly page: SessionListPage
 }
 
-export type SessionListScope = "primary" | "agent" | "all"
+export const SESSION_FORK_DISPOSITION = { retained: "retained", disposable: "disposable" } as const
+export type SessionForkDisposition =
+  (typeof SESSION_FORK_DISPOSITION)[keyof typeof SESSION_FORK_DISPOSITION]
+
+export const SESSION_LIST_SCOPE = { primary: "primary", agent: "agent", all: "all" } as const
+export type SessionListScope = (typeof SESSION_LIST_SCOPE)[keyof typeof SESSION_LIST_SCOPE]
 
 export const SESSION_LIST_SORT = { activity: "activity", accessed: "accessed" } as const
 export type SessionListSort = (typeof SESSION_LIST_SORT)[keyof typeof SESSION_LIST_SORT]
@@ -144,7 +144,7 @@ export type BranchRequestKey =
   | { readonly kind: typeof BRANCH_REQUEST.keyed; readonly request_id: string }
 
 export interface BranchSessionRequest {
-  readonly disposition: "retained" | "disposable"
+  readonly disposition: SessionForkDisposition
   readonly request: BranchRequestKey
   readonly share_resources: boolean
   readonly name: SessionName
@@ -392,7 +392,8 @@ export type SessionTriageDecision =
   | NoSessionTriageDecision
   | MovedSessionTriageDecision
 
-export type SessionTriageAction = "dismiss" | "accept" | "undo"
+export const SESSION_TRIAGE_ACTION = { dismiss: "dismiss", accept: "accept", undo: "undo" } as const
+export type SessionTriageAction = (typeof SESSION_TRIAGE_ACTION)[keyof typeof SESSION_TRIAGE_ACTION]
 
 export interface SessionTriageActionRequest {
   readonly action: SessionTriageAction

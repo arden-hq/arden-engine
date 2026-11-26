@@ -13,8 +13,14 @@ import path from "node:path"
 import { type PresetModel, renderModelsPreset } from "./models-preset.js"
 import { currentMillis } from "../runtime/clock.js"
 
+export const LLAMA_SERVER_FAILURE = {
+  missing: "missing",
+  start: "start",
+  request: "request"
+} as const
+
 export class LlamaServerError extends Schema.TaggedError<LlamaServerError>()("LlamaServerError", {
-  reason: Schema.Literals(["missing", "start", "request"]),
+  reason: Schema.Literals(Object.values(LLAMA_SERVER_FAILURE)),
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
@@ -55,7 +61,11 @@ interface Running {
 }
 
 const startError = (message: string, cause?: unknown) =>
-  new LlamaServerError({ reason: "start", message, ...(cause === undefined ? {} : { cause }) })
+  new LlamaServerError({
+    reason: LLAMA_SERVER_FAILURE.start,
+    message,
+    ...(cause === undefined ? {} : { cause })
+  })
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {
@@ -116,19 +126,23 @@ export const llamaServerLayer = (options: {
         const binary = options.binary
         if (binary === undefined) {
           return yield* new LlamaServerError({
-            reason: "missing",
+            reason: LLAMA_SERVER_FAILURE.missing,
             message: "This build has no llama-server"
           })
         }
         yield* Effect.tryPromise({
           try: () => access(binary),
           catch: (cause) =>
-            new LlamaServerError({ reason: "missing", message: `${binary} is missing`, cause })
+            new LlamaServerError({
+              reason: LLAMA_SERVER_FAILURE.missing,
+              message: `${binary} is missing`,
+              cause
+            })
         })
         const models = yield* options.models()
         if (models.length === 0) {
           return yield* new LlamaServerError({
-            reason: "missing",
+            reason: LLAMA_SERVER_FAILURE.missing,
             message: "No local model is installed"
           })
         }
@@ -228,7 +242,7 @@ export const llamaServerLayer = (options: {
             Effect.tap((started) => Effect.sync(() => (running = started))),
             Effect.tapError((error) =>
               Effect.sync(() => {
-                if (error.reason === "start") fastFailures += 1
+                if (error.reason === LLAMA_SERVER_FAILURE.start) fastFailures += 1
               })
             )
           )

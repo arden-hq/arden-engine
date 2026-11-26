@@ -19,6 +19,7 @@ import type { QueueContext } from "./automation-queue-context.js"
 import type { PersistenceDeps } from "./deps.js"
 import { touchCause } from "./effect-targets.js"
 import type { UnitOfWork } from "../unit-of-work.js"
+import { POSITION_ADVANCE } from "../reader-position.js"
 import { readerPosition } from "./reader-position.js"
 import { iso } from "../../runtime/clock.js"
 import { eventCauseOf } from "../automations/event-cause.js"
@@ -159,7 +160,7 @@ export const makeAutomationEventDispatch = ({
             expected: input.previousRevision,
             next: input.revision
           })
-          if (moved !== "advanced") return null
+          if (moved !== POSITION_ADVANCE.advanced) return null
           return input.event === undefined
             ? { queued: 0 }
             : yield* dispatchInTransaction(input.event)

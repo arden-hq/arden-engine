@@ -5,7 +5,7 @@ export { makeAgent } from "./agent/agent.js"
 export { resolveModelCapabilities } from "./agent/provider-capabilities.js"
 export type { Agent, AgentInvocationOptions, AgentOptions } from "./agent/agent.js"
 export type { AgentCostGetter } from "./agent/run-state.js"
-export type { HistoryChange } from "./agent/history-journal.js"
+export { HISTORY_CHANGE_KIND, type HistoryChange } from "./agent/history-journal.js"
 export type { AgentOutputOptions } from "./agent/structured-output.js"
 
 export type { AgentConfig, AgentConfigInput } from "./agent/config.js"
@@ -53,7 +53,6 @@ export {
   ToolChoice,
   usageInputTokens
 } from "./contracts/provider.js"
-export { FinishReason } from "./contracts/provider.js"
 export type {
   DeliveryMode,
   ModelStreamItemTag,
@@ -176,6 +175,7 @@ export type {
   Toolset,
   ToolDisplayTitle
 } from "./contracts/tools.js"
+export { FinishReason } from "./contracts/provider.js"
 export type {
   CompletionResponse,
   ModelCapabilities,

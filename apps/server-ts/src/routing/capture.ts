@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { SpaceKind } from "@arden-hq/protocol/spaces"
+import { SPACE_KIND, type SpaceKind } from "@arden-hq/protocol/spaces"
 
 import type { CompletionImage } from "../models/structured-completion.js"
 import type { SessionListEntry, SessionListQuery } from "../persistence/sessions/store.js"
@@ -72,7 +72,9 @@ export const makeCaptureRouter = (
         return yield* routeCapture({ ...input, candidates, decisions: dependencies.decisions })
       })
     )
-    return decision.kind === "keep" ? yield* guarded(lastSpaces(dependencies)) : decision
+    return decision.kind === ROUTER_DECISION.keep
+      ? yield* guarded(lastSpaces(dependencies))
+      : decision
   })
 }
 
@@ -84,7 +86,9 @@ const lastSpaces = Effect.fn("CaptureRouter.lastSpaces")(function* (dependencies
     ) => Effect.Effect<ReadonlyArray<Pick<SessionListEntry, "lastActivity">>, unknown>
   }
 }): Effect.fn.Return<RouterDecision, unknown> {
-  const spaces = (yield* dependencies.spaces.list()).filter((space) => space.kind !== "main")
+  const spaces = (yield* dependencies.spaces.list()).filter(
+    (space) => space.kind !== SPACE_KIND.main
+  )
   const active = yield* Effect.forEach(spaces, (space) =>
     dependencies.sessions
       .list({ spaceId: space.space_id, scope: "primary", sort: "activity", limit: 1 })

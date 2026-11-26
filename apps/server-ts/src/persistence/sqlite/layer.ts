@@ -1,3 +1,4 @@
+import { SQLITE_MEMORY_FILENAME } from "./deps.js"
 import { HomeStore } from "../home/store.js"
 import { makeHomeStore } from "./home-letter.js"
 import { Context, Effect, Layer } from "effect"
@@ -298,7 +299,7 @@ export const sqliteStoresOnWriter = (
       )
       yield* diagnostics.startupPhase("schema_ready")
       const reader =
-        options.filename === ":memory:"
+        options.filename === SQLITE_MEMORY_FILENAME
           ? sql
           : yield* makeSqliteThreadClient({
               filename: options.filename,

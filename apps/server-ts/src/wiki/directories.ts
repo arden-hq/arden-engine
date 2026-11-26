@@ -15,6 +15,8 @@ import {
   DIRECTORY_CONTRACT_HEADINGS,
   directorySections,
   markedProducer,
+  PAGE_KIND,
+  RECORD_PRODUCER,
   pageKind,
   recordFolders
 } from "./collections.js"
@@ -133,7 +135,10 @@ export const createWikiDirectory = Effect.fn("Wiki.createDirectory")(function* (
       }
       yield* requireWikiWritePaths(boundary, "create", [readmePath])
       const placed = pageKind(recordFolders(snapshot.wholeSet), readmePath)
-      if (placed.kind === "record" && placed.folder.producer.kind === "automation") {
+      if (
+        placed.kind === PAGE_KIND.record &&
+        placed.folder.producer.kind === RECORD_PRODUCER.automation
+      ) {
         return yield* wikiError(
           "create",
           "blocked",

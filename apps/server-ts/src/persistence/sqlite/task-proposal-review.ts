@@ -1,4 +1,9 @@
-import { TASK_PROPOSAL_PLACEMENT, type TaskProposalReview } from "@arden-hq/protocol/proposals"
+import { STORE_REASON } from "../errors.js"
+import {
+  TASK_PROPOSAL_PLACEMENT,
+  TASK_PROPOSAL_STATUS,
+  type TaskProposalReview
+} from "@arden-hq/protocol/proposals"
 import { Effect, Result } from "effect"
 import type { SpaceReviewStore } from "../automations/space-review-store.js"
 import { TaskProposalStore, TaskProposalStoreError } from "../proposals/store.js"
@@ -13,17 +18,17 @@ const unavailable = (message: string) => new TaskProposalStoreError({ reason: "s
 
 const currentOfferMessage = (message: string, proposal: TaskProposalReview["proposal"]): string => {
   switch (proposal.status) {
-    case "retired":
+    case TASK_PROPOSAL_STATUS.retired:
       return "The review retired this offer based on evidence; it is no longer available to accept."
-    case "accepted":
+    case TASK_PROPOSAL_STATUS.accepted:
       return "This offer was accepted while the review was running. The current proposal shows the settled Task."
-    case "rejected":
+    case TASK_PROPOSAL_STATUS.rejected:
       return "This offer was rejected while the review was running."
-    case "expired":
+    case TASK_PROPOSAL_STATUS.expired:
       return "This offer expired unanswered while the review was running."
-    case "offered":
+    case TASK_PROPOSAL_STATUS.offered:
       return message
-    case "held":
+    case TASK_PROPOSAL_STATUS.held:
       return "The current proposal is held and cannot be accepted until it is offered again."
   }
 }
@@ -43,10 +48,10 @@ export const withTaskProposalReview = (
         return yield* Effect.fail(
           new TaskProposalStoreError({ reason: "not_found", message: "Task proposal not found" })
         )
-      if (proposal.status !== "offered")
+      if (proposal.status !== TASK_PROPOSAL_STATUS.offered)
         return yield* Effect.fail(
           conflict(
-            proposal.status === "held" ? "not_offered" : "settled",
+            proposal.status === TASK_PROPOSAL_STATUS.held ? "not_offered" : "settled",
             "Only an offered Task proposal can be rechecked"
           )
         )
@@ -62,9 +67,10 @@ export const withTaskProposalReview = (
       )
       if (Result.isFailure(queued)) {
         const error = queued.failure
-        if (error.reason !== "conflict") return yield* Effect.fail(unavailable(error.message))
+        if (error.reason !== STORE_REASON.conflict)
+          return yield* Effect.fail(unavailable(error.message))
         const current = yield* proposals.get(proposalId)
-        if (current === undefined || current.status !== "offered")
+        if (current === undefined || current.status !== TASK_PROPOSAL_STATUS.offered)
           return yield* Effect.fail(conflict("settled", "The Task proposal is no longer offered"))
         if (current.revision !== expectedRevision)
           return yield* Effect.fail(conflict("proposal_changed", "The Task proposal changed"))

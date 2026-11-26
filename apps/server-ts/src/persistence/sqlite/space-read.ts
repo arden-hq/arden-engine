@@ -1,3 +1,5 @@
+import { AUTOMATION_RUN_STATUS } from "@arden-hq/protocol/automations"
+import { TASK_STATUS } from "@arden-hq/protocol/spaces/work"
 import { SnapshotRecordSchema } from "../work/task-record.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { openRunSince } from "./automation-running.js"
@@ -57,7 +59,7 @@ const workerAvailability = (
   nowMs: number
 ): SpaceAgentAvailability => {
   if (worker === undefined) return "unavailable"
-  if (worker.latest_status === "failed") return "error"
+  if (worker.latest_status === AUTOMATION_RUN_STATUS.failed) return "error"
   if (liveTasks === 0) return "ready"
   const lastRunMs = lastRunAt === null ? Number.NaN : Date.parse(lastRunAt)
   return Number.isNaN(lastRunMs) || nowMs - lastRunMs > WORKER_STALE_AFTER_MS ? "stale" : "ready"
@@ -318,8 +320,8 @@ export const makeSpaceReads = (
         )
       )
       const worker = workers[0]
-      const workerLatestFailed = worker?.latest_status === "failed"
-      const liveTasks = workItems.filter((item) => item.status === "open").length
+      const workerLatestFailed = worker?.latest_status === AUTOMATION_RUN_STATUS.failed
+      const liveTasks = workItems.filter((item) => item.status === TASK_STATUS.open).length
       const spaceRuns = yield* reader<{ readonly last_run_at: string | null }>`
         SELECT MAX((SELECT run.ended_at FROM automation_runs AS run
             WHERE run.task_id = job.id AND +run.status = 'completed'

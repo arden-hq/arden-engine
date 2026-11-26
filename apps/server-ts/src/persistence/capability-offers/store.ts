@@ -11,7 +11,13 @@ export class CapabilityOfferStoreError extends Schema.TaggedError<CapabilityOffe
   }
 ) {}
 
-export type DeclineResult = "declined" | "already_answered" | "unknown"
+export const CAPABILITY_OFFER_DECLINE = {
+  declined: "declined",
+  alreadyAnswered: "already_answered",
+  unknown: "unknown"
+} as const
+
+export type DeclineResult = (typeof CAPABILITY_OFFER_DECLINE)[keyof typeof CAPABILITY_OFFER_DECLINE]
 
 export class CapabilityOfferStore extends Context.Service<
   CapabilityOfferStore,

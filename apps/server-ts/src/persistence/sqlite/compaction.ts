@@ -1,6 +1,7 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import {
+  CONTEXT_COMPACTION_PURPOSE,
   ContextCompactionStore,
   ContextCompactionStoreError,
   type ContextCompactionCommitInput,
@@ -32,13 +33,13 @@ import {
 } from "./compaction-context.js"
 
 const snapshotInputSchema = Schema.Struct({
-  purpose: Schema.optionalKey(Schema.Literal("idle")),
+  purpose: Schema.optionalKey(Schema.Literal(CONTEXT_COMPACTION_PURPOSE.idle)),
   sessionId: Schema.NonEmptyString,
   runId: Schema.optionalKey(Schema.NonEmptyString)
 })
 
 const commitInputSchema = Schema.Struct({
-  purpose: Schema.optionalKey(Schema.Literal("idle")),
+  purpose: Schema.optionalKey(Schema.Literal(CONTEXT_COMPACTION_PURPOSE.idle)),
   sessionId: Schema.NonEmptyString,
   runId: Schema.optionalKey(Schema.NonEmptyString),
   expectedContextGeneration: Schema.Natural,
@@ -252,7 +253,7 @@ export const makeContextCompactionStore = ({
         UPDATE sessions
         SET metadata = ${metadataJson},
             context_generation = context_generation + 1,
-            last_activity = CASE WHEN ${valid.purpose === "idle" ? 1 : 0} = 1
+            last_activity = CASE WHEN ${valid.purpose === CONTEXT_COMPACTION_PURPOSE.idle ? 1 : 0} = 1
               THEN last_activity ELSE ${timestamp} END
         WHERE session_id = ${valid.sessionId}
           AND archived_at IS NULL
@@ -274,7 +275,7 @@ export const makeContextCompactionStore = ({
             firstSequence: sequence,
             messages: [handoffEnvelope]
           }).pipe(Effect.mapError(mapStorage("commit", "Could not extend the Session turn", valid)))
-          if (valid.purpose === "idle") {
+          if (valid.purpose === CONTEXT_COMPACTION_PURPOSE.idle) {
             yield* sessionEvents
               .appendInTransaction("session_activity", valid.sessionId)
               .pipe(

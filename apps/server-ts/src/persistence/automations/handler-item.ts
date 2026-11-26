@@ -4,9 +4,17 @@ import { JOB_RETRY_LADDER_MS } from "./retry-ladders.js"
 
 export const MAX_HANDLER_ITEM_ATTEMPTS = JOB_RETRY_LADDER_MS.length + 1
 
-const HANDLER_ITEM_KIND = { memory: "memory", daily: "daily", wiki: "wiki" } as const
+export const HANDLER_ITEM_KIND = { memory: "memory", daily: "daily", wiki: "wiki" } as const
 
-const HANDLER_ITEM_PHASE = { pending: "pending", settled: "settled" } as const
+export const HANDLER_ITEM_PHASE = { pending: "pending", settled: "settled" } as const
+
+export const HANDLER_OUTCOME = {
+  done: "done",
+  nothingToDo: "nothing_to_do",
+  blocked: "blocked",
+  failed: "failed",
+  cancelled: "cancelled"
+} as const
 
 export const HandlerItemInputSchema = Schema.Struct({
   sessionId: Schema.NonEmptyString,

@@ -5,7 +5,8 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { SkillError } from "../skills/errors.js"
-import { SKILL_TOOL_NAME } from "../skills/guard.js"
+import { STORE_REASON } from "../persistence/errors.js"
+import { SKILL_CREATE_TOOL_NAME, SKILL_TOOL_NAME, SKILL_UPDATE_TOOL_NAME } from "../skills/guard.js"
 import { loadSkillInstructions } from "../skills/instructions.js"
 import { SkillCatalog } from "../skills/service.js"
 import { BUILT_IN_SKILLS } from "../skills/builtin.js"
@@ -109,7 +110,9 @@ const NOT_FOUND_MESSAGE = [
 
 const failure = (error: SkillError): ToolExecutionError =>
   toolFailure(
-    error.reason === "not_found" ? { reason: error.reason, message: NOT_FOUND_MESSAGE } : error,
+    error.reason === STORE_REASON.not_found
+      ? { reason: error.reason, message: NOT_FOUND_MESSAGE }
+      : error,
     FAILURE_PREVIEWS[error.reason]
   )
 
@@ -168,7 +171,7 @@ const makeSkillCreateTool = ({
   readonly skills: SkillCatalog["Service"]
 }): ServerTool =>
   defineServerTool({
-    name: "skill_create",
+    name: SKILL_CREATE_TOOL_NAME,
     summary: "Creates a Skill.",
     discovery: { group: "arden_settings" },
     description: [
@@ -305,7 +308,7 @@ const makeSkillUpdateTool = ({
   readonly skills: SkillCatalog["Service"]
 }): ServerTool =>
   defineServerTool({
-    name: "skill_update",
+    name: SKILL_UPDATE_TOOL_NAME,
     summary: "Changes a Skill.",
     discovery: { group: "arden_settings" },
     description:

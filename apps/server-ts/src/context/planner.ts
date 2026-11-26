@@ -1,6 +1,11 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { isToolExecution, ROLE } from "@arden-hq/std/message-vocabulary"
+import {
+  ASSISTANT_OUTPUT_PART_TYPE,
+  ASSISTANT_TEXT_PHASE,
+  CONTENT_BLOCK_TYPE
+} from "@arden-hq/loop"
 import { Predicate } from "effect"
-import { isWrittenByPerson } from "../persistence/transcript/model.js"
+import { isSessionHandoff, isWrittenByPerson } from "../persistence/transcript/model.js"
 
 import type { StoredMessageEnvelope } from "../persistence/transcript/model.js"
 import { ownerText } from "../persistence/transcript/owner-words.js"
@@ -27,15 +32,16 @@ const textContent = (content: unknown): string => {
     .flatMap((block) => {
       if (!Predicate.isObject(block)) return []
       const value = block
-      if (value.type === "text" && typeof value.text === "string") return [value.text]
+      if (value.type === CONTENT_BLOCK_TYPE.text && typeof value.text === "string")
+        return [value.text]
       if (
-        value.type === "context" &&
+        value.type === CONTENT_BLOCK_TYPE.context &&
         value.content_type !== TIME_SINCE_LAST_MESSAGE_CONTEXT &&
         typeof value.content === "string"
       )
         return [value.content]
-      if (value.type === "image") return ["[image omitted]"]
-      if (value.type === "audio") return ["[audio omitted]"]
+      if (value.type === CONTENT_BLOCK_TYPE.image) return ["[image omitted]"]
+      if (value.type === CONTENT_BLOCK_TYPE.audio) return ["[audio omitted]"]
       return []
     })
     .join("\n")
@@ -120,17 +126,17 @@ const orderedAssistantBody = (
   for (const part of message.output_parts) {
     if (!Predicate.isObject(part)) return undefined
     const value = part
-    if (value.type === "reasoning") {
+    if (value.type === ASSISTANT_OUTPUT_PART_TYPE.reasoning) {
       if (typeof value.text !== "string" || value.text.length === 0) return undefined
       continue
     }
-    if (value.type === "text") {
+    if (value.type === ASSISTANT_OUTPUT_PART_TYPE.text) {
       if (
         typeof value.text !== "string" ||
         value.text.length === 0 ||
         (value.phase !== undefined &&
-          value.phase !== "commentary" &&
-          value.phase !== "final_answer")
+          value.phase !== ASSISTANT_TEXT_PHASE.commentary &&
+          value.phase !== ASSISTANT_TEXT_PHASE.finalAnswer)
       )
         return undefined
       textParts.push(value.text)
@@ -138,10 +144,10 @@ const orderedAssistantBody = (
       continue
     }
     if (
-      value.type !== "tool_call" ||
+      value.type !== ASSISTANT_OUTPUT_PART_TYPE.toolCall ||
       typeof value.tool_call_id !== "string" ||
       value.tool_call_id.length === 0 ||
-      (value.execution !== "runtime" && value.execution !== "provider")
+      !isToolExecution(value.execution)
     )
       return undefined
     const key = `${value.execution}:${value.tool_call_id}`
@@ -191,7 +197,7 @@ const serializeMessage = (message: StoredMessageEnvelope, owned: ReadonlySet<str
 const compactionId = (message: StoredMessageEnvelope): string | undefined => {
   const value = message.compaction
   if (!Predicate.isObject(value)) return undefined
-  return value.kind === "session_handoff" && typeof value.compaction_id === "string"
+  return isSessionHandoff(value.kind) && typeof value.compaction_id === "string"
     ? value.compaction_id
     : undefined
 }

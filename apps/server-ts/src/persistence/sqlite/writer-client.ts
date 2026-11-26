@@ -1,6 +1,6 @@
 import { Context, Duration, Effect, Layer, Schedule, Scope } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql"
+import { SqlError } from "effect/unstable/sql"
 import { Reactivity } from "effect/unstable/reactivity"
 import { makeSqliteThreadClient, type SqliteThreadClientConfig } from "@arden-hq/sqlite-thread"
 
@@ -10,7 +10,7 @@ const rollbackOnFailedCommit = <C extends SqlClient.SqlClient>(client: C, retrie
   const waitForLock = <A>(operation: Effect.Effect<A, SqlError.SqlError>) =>
     operation.pipe(
       Effect.retry({
-        while: (error) => error.reason._tag === "LockTimeoutError",
+        while: (error) => error.reason instanceof SqlError.LockTimeoutError,
         times: retries,
         schedule: Schedule.spaced("25 millis")
       })

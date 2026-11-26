@@ -1,11 +1,12 @@
 import { formatBytes } from "@arden-hq/std/count"
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
 import { Schema } from "effect"
 import { constants } from "node:fs"
 import { mkdir, open } from "node:fs/promises"
 import { basename, extname, join } from "node:path"
 
 import { readRegularFile } from "../fs/private-store.js"
-import type { SharedFileAccess } from "./shared-files.js"
+import { PREPARED_FILE, type SharedFileAccess } from "./shared-files.js"
 import { safeAttachmentName } from "./shared-file-sources.js"
 
 import { mutationReceiptHost } from "../persistence/tools/mutation-receipt.js"
@@ -170,7 +171,7 @@ const writeNew = async (directory: string, name: string, bytes: Buffer): Promise
       }
       return target
     } catch (cause) {
-      if (!(cause instanceof Error) || !("code" in cause) || cause.code !== "EEXIST") throw cause
+      if (!isErrnoCode(cause, ERRNO.EEXIST)) throw cause
       const existing = await readRegularFile(target, MAX_EMAIL_ATTACHMENT_BYTES).catch(
         () => undefined
       )
@@ -255,7 +256,7 @@ export const gmailAttachmentTool = ({
         bytes,
         mediaType: part.mimeType
       })
-      if (saved.kind !== "snapshot")
+      if (saved.kind !== PREPARED_FILE.snapshot)
         throw toolRefusal("The attachment could not be saved safely.", "Attachment unavailable")
       const directory =
         folder.cwd === null

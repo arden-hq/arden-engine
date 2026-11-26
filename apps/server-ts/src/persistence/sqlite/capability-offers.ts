@@ -1,8 +1,13 @@
+import { CONNECTION_ARRIVAL } from "@arden-hq/protocol/chat"
 import { RunContextSchema, type RunContext } from "../runs/stored-context.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { candidateConnected, type OfferCandidate } from "../capability-offers/match.js"
-import { CapabilityOfferStoreError, type CapabilityOfferStore } from "../capability-offers/store.js"
+import {
+  CAPABILITY_OFFER_DECLINE,
+  CapabilityOfferStoreError,
+  type CapabilityOfferStore
+} from "../capability-offers/store.js"
 import { currentIso } from "../../runtime/clock.js"
 import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
@@ -38,7 +43,7 @@ const connectionBody = (server: string, outcome: "connected" | "declined"): stri
     server,
     outcome,
     instruction:
-      outcome === "connected"
+      outcome === CONNECTION_ARRIVAL.connected
         ? `The user connected ${server}. Its tools are available now; continue the task.`
         : `The user chose not to connect ${server}. Continue without it; do not offer it again.`
   })}</connection_result>`
@@ -79,7 +84,7 @@ const settle = Effect.fn("CapabilityOffers.settle")(function* (
     sql,
     eventId: `capability-offer:${row.session_id}:${row.tool_call_id}`,
     now: at,
-    subject: outcome === "connected" ? "Connection made" : "Connection declined",
+    subject: outcome === CONNECTION_ARRIVAL.connected ? "Connection made" : "Connection declined",
     body: connectionBody(server, outcome),
     payload: {
       kind: "connection",
@@ -162,13 +167,15 @@ export const makeCapabilityOfferStore = ({
           tool_call_id, run_id, candidates_json, offered_at, outcome FROM capability_offers
           WHERE session_id = ${input.sessionId} AND tool_call_id = ${input.toolCallId}`
           const row = rows[0]
-          if (row === undefined) return "unknown" as const
-          if (row.outcome !== null) return "already_answered" as const
+          if (row === undefined) return CAPABILITY_OFFER_DECLINE.unknown
+          if (row.outcome !== null) return CAPABILITY_OFFER_DECLINE.alreadyAnswered
           const candidates = yield* decodeJson(CandidatesSchema, row.candidates_json).pipe(
             Effect.catch(() => Effect.succeed([]))
           )
           const settled = yield* settle(sql, row, "declined", titlesOf(candidates) || "it", at)
-          return settled ? ("declined" as const) : ("already_answered" as const)
+          return settled
+            ? CAPABILITY_OFFER_DECLINE.declined
+            : CAPABILITY_OFFER_DECLINE.alreadyAnswered
         })
       )
       .pipe(Effect.mapError(failed("Could not decline the connection offer")))

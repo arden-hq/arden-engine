@@ -4,8 +4,10 @@ import type { Schema } from "effect"
 import type { AgentMode } from "../../sessions/agent-mode.js"
 import type { CallParent } from "../../persistence/tools/tool-roles.js"
 
+export const APPROVAL_CONTINUATION = { caller: "caller" } as const
+
 export interface CodeModeCallRequest {
-  readonly approvalContinuation?: "caller"
+  readonly approvalContinuation?: typeof APPROVAL_CONTINUATION.caller
   readonly beforeExecute?: ToolCallRequest["beforeExecute"]
   readonly onResult?: (result: ToolResult) => void
   readonly onSettled?: (facts: NestedCallFacts) => void
@@ -66,22 +68,37 @@ type ScriptAgentChildAttemptBase = {
   readonly parentToolCallId: string
 }
 
+export const CHILD_ATTEMPT = {
+  queued: "queued",
+  running: "running",
+  succeeded: "succeeded",
+  failed: "failed",
+  interrupted: "interrupted",
+  cancelled: "cancelled",
+  invalidOutput: "invalid_output",
+  launchFailed: "launch_failed"
+} as const
+
 export type ScriptAgentChildAttemptEvent =
   | (ScriptAgentChildAttemptBase & {
-      readonly status: "queued"
+      readonly status: typeof CHILD_ATTEMPT.queued
     })
   | (ScriptAgentChildAttemptBase & {
-      readonly status: "running" | "succeeded"
+      readonly status: typeof CHILD_ATTEMPT.running | typeof CHILD_ATTEMPT.succeeded
       readonly child: ScriptAgentChildReference
     })
   | (ScriptAgentChildAttemptBase & {
-      readonly status: "failed" | "interrupted" | "cancelled" | "invalid_output"
+      readonly status:
+        | typeof CHILD_ATTEMPT.failed
+        | typeof CHILD_ATTEMPT.interrupted
+        | typeof CHILD_ATTEMPT.cancelled
+        | typeof CHILD_ATTEMPT.invalidOutput
       readonly child: ScriptAgentChildReference
       readonly error: string
       readonly retryable: boolean
     })
   | (ScriptAgentChildAttemptBase & {
-      readonly status: "launch_failed"
+      readonly status: typeof CHILD_ATTEMPT.launchFailed
       readonly error: string
       readonly retryable: boolean
     })

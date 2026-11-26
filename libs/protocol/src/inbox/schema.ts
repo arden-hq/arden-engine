@@ -3,6 +3,7 @@ import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../co
 import { checkRunApprovalConnection, runApprovalFields } from "../runs/approval-schema.js"
 import { RunQuestionSchema } from "../runs/questions.js"
 import {
+  INBOX_SCOPE,
   INBOX_ITEM_LIMIT,
   INBOX_ITEM_SOURCE,
   INBOX_PLAN_LIMIT_LEVEL,
@@ -236,11 +237,11 @@ export const InboxViewSchema: Schema.Codec<InboxView> = withExtras({
 )
 
 export const MarkAllInboxReadRequestSchema = Schema.Struct({
-  scope: Schema.Literal("all")
+  scope: Schema.Literal(INBOX_SCOPE.all)
 })
 
 export const MarkInboxItemsReadRequestSchema = Schema.Struct({
-  scope: Schema.Literal("items"),
+  scope: Schema.Literal(INBOX_SCOPE.items),
   keys: Schema.Array(Schema.String).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(INBOX_ITEM_LIMIT)
@@ -253,11 +254,11 @@ export const MarkInboxReadRequestSchema = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("scope"))
 
 export const DismissAllInboxRequestSchema = Schema.Struct({
-  scope: Schema.Literal("all")
+  scope: Schema.Literal(INBOX_SCOPE.all)
 })
 
 export const DismissInboxItemsRequestSchema = Schema.Struct({
-  scope: Schema.Literal("items"),
+  scope: Schema.Literal(INBOX_SCOPE.items),
   keys: Schema.Array(Schema.String).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(INBOX_ITEM_LIMIT)
@@ -265,7 +266,7 @@ export const DismissInboxItemsRequestSchema = Schema.Struct({
 })
 
 export const DismissInboxGroupRequestSchema = Schema.Struct({
-  scope: Schema.Literal("group"),
+  scope: Schema.Literal(INBOX_SCOPE.group),
   group_key: Schema.String.check(Schema.isMinLength(1))
 })
 
@@ -278,7 +279,8 @@ export const DismissInboxRequestSchema = Schema.Union([
 export const decodeMarkInboxReadRequestEffect = (
   value: unknown
 ): Effect.Effect<
-  { readonly scope: "all" } | { readonly scope: "items"; readonly keys: readonly string[] },
+  | { readonly scope: typeof INBOX_SCOPE.all }
+  | { readonly scope: typeof INBOX_SCOPE.items; readonly keys: readonly string[] },
   Schema.SchemaError,
   never
 > => Schema.decodeUnknownEffect(MarkInboxReadRequestSchema)(value, { onExcessProperty: "error" })
@@ -291,9 +293,9 @@ export const encodeMarkInboxReadRequestEffect = (
 export const decodeDismissInboxRequestEffect = (
   value: unknown
 ): Effect.Effect<
-  | { readonly scope: "all" }
-  | { readonly scope: "group"; readonly group_key: string }
-  | { readonly scope: "items"; readonly keys: readonly string[] },
+  | { readonly scope: typeof INBOX_SCOPE.all }
+  | { readonly scope: typeof INBOX_SCOPE.group; readonly group_key: string }
+  | { readonly scope: typeof INBOX_SCOPE.items; readonly keys: readonly string[] },
   Schema.SchemaError,
   never
 > => Schema.decodeUnknownEffect(DismissInboxRequestSchema)(value, { onExcessProperty: "error" })

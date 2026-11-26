@@ -10,7 +10,13 @@ const RevisionSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 export const MAX_UPLOAD_FILES = 10
 
-export const SitePermissionSchema = Schema.Literals(["camera", "microphone", "location"] as const)
+export const SITE_PERMISSION = {
+  camera: "camera",
+  microphone: "microphone",
+  location: "location"
+} as const
+
+export const SitePermissionSchema = Schema.Literals(Object.values(SITE_PERMISSION))
 export type SitePermission = typeof SitePermissionSchema.Type
 export const SitePermissionRequestRefSchema = Schema.String.check(
   Schema.isPattern(/^permission-[a-f0-9]{1,64}$/u)
@@ -32,7 +38,8 @@ export const BROWSER_TOOL = {
   snapshot: "browser_snapshot",
   screenshot: "browser_screenshot",
   act: "browser_act",
-  wait: "browser_wait"
+  wait: "browser_wait",
+  procedureVerify: "browser_procedure_verify"
 } as const
 export type BrowserToolName = (typeof BROWSER_TOOL)[keyof typeof BROWSER_TOOL]
 
@@ -76,6 +83,19 @@ export const BROWSER_OPERATION = {
   card_frame: "card_frame"
 } as const
 
+export const BROWSER_SNAPSHOT_MODE = { interactive: "interactive", text: "text" } as const
+
+export const BROWSER_WAIT_CONDITION = {
+  load: "load",
+  url: "url",
+  text: "text",
+  element: "element",
+  time: "time",
+  download: "download"
+} as const
+
+export const BROWSER_DISPOSITION = { current: "current", new: "new" } as const
+
 export const BROWSER_POINTER_ACTION = { click: "click", drag: "drag" } as const
 
 export const BROWSER_ACT_ACTION = {
@@ -117,7 +137,7 @@ const BrowserOperationSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal(BROWSER_OPERATION.open),
     url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
-    disposition: Schema.Literals(["current", "new"] as const),
+    disposition: Schema.Literals(Object.values(BROWSER_DISPOSITION)),
     tabRef: Schema.optionalKey(TabRefSchema),
     profileRef: ProfileRefSchema
   }),
@@ -275,23 +295,25 @@ export interface BrowserOutput extends Omit<typeof BrowserOutputSchema.Type, "mo
   readonly modelContent?: ReadonlyArray<ModelContentBlock>
 }
 
-export const BrowserErrorCodeSchema = Schema.Literals([
-  "browser_unavailable",
-  "invalid_browser_request",
-  "invalid_tab_ref",
-  "browser_navigation_failed",
-  "browser_snapshot_failed",
-  "browser_screenshot_failed",
-  "browser_snapshot_required",
-  "stale_browser_snapshot",
-  "stale_browser_scope",
-  "browser_grant_mismatch",
-  "browser_action_outcome_unknown",
-  "browser_action_failed",
-  "browser_wait_failed",
-  "browser_cancelled",
-  "browser_internal_error"
-] as const)
+export const BROWSER_ERROR_CODE = {
+  unavailable: "browser_unavailable",
+  invalidRequest: "invalid_browser_request",
+  invalidTabRef: "invalid_tab_ref",
+  navigationFailed: "browser_navigation_failed",
+  snapshotFailed: "browser_snapshot_failed",
+  screenshotFailed: "browser_screenshot_failed",
+  snapshotRequired: "browser_snapshot_required",
+  staleSnapshot: "stale_browser_snapshot",
+  staleScope: "stale_browser_scope",
+  grantMismatch: "browser_grant_mismatch",
+  actionOutcomeUnknown: "browser_action_outcome_unknown",
+  actionFailed: "browser_action_failed",
+  waitFailed: "browser_wait_failed",
+  cancelled: "browser_cancelled",
+  internalError: "browser_internal_error"
+} as const
+
+export const BrowserErrorCodeSchema = Schema.Literals(Object.values(BROWSER_ERROR_CODE))
 
 export type BrowserErrorCode = typeof BrowserErrorCodeSchema.Type
 
@@ -396,7 +418,7 @@ export class BrowserClient extends Context.Service<
           Effect.retry({
             times: 1,
             while: (error: BrowserClientError) =>
-              error.code === "stale_browser_scope" && !error.outcomeUnknown
+              error.code === BROWSER_ERROR_CODE.staleScope && !error.outcomeUnknown
           })
         )
         return BrowserClient.of({ execute })

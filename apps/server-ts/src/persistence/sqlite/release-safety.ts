@@ -1,3 +1,4 @@
+import { MIGRATION_PLAN } from "../migrations/runner.js"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -67,7 +68,7 @@ const guardDataVersion = Effect.fn("SqlitePersistence.guardDataVersion")(functio
       ? undefined
       : Option.getOrUndefined(Option.map(decodeVersionRecord(text), (record) => record.version))
   const verdict = dataVersionVerdict(recorded, storage.appVersion)
-  if (verdict.kind === "newer") {
+  if (verdict.kind === MIGRATION_PLAN.newer) {
     return yield* new StorageStartupError({
       operation: NEWER_DATA_OPERATION,
       message: `This data was last opened by Arden ${verdict.recorded}, which is newer than this Arden ${storage.appVersion}. Install ${verdict.recorded} or newer.`
@@ -110,8 +111,8 @@ export const migrateAtStartup = Effect.fn("SqlitePersistence.migrateAtStartup")(
     },
     catch: (cause) => initError("Could not read the SQLite schema version", cause)
   })
-  if (plan.kind === "newer") return yield* newerDataError(plan.version)
-  if (plan.kind !== "pending") return
+  if (plan.kind === MIGRATION_PLAN.newer) return yield* newerDataError(plan.version)
+  if (plan.kind !== MIGRATION_PLAN.pending) return
   yield* diagnostics.startupPhase("schema_conversion_started")
   yield* flushHostPort
   const database = yield* Effect.try({
@@ -125,11 +126,13 @@ export const migrateAtStartup = Effect.fn("SqlitePersistence.migrateAtStartup")(
       )
   })
   const outcome = yield* runPendingMigrations(database).pipe(
-    Effect.map((plan): MigrationOutcome => ({ kind: "done", plan })),
-    Effect.catch((failure) => Effect.succeed<MigrationOutcome>({ kind: "failed", ...failure })),
+    Effect.map((plan): MigrationOutcome => ({ kind: MIGRATION_OUTCOME.done, plan })),
+    Effect.catch((failure) =>
+      Effect.succeed<MigrationOutcome>({ kind: MIGRATION_OUTCOME.failed, ...failure })
+    ),
     Effect.ensuring(Effect.sync(() => database.close()))
   )
-  if (outcome.kind === "failed") {
+  if (outcome.kind === MIGRATION_OUTCOME.failed) {
     return yield* new StorageStartupError({
       operation:
         outcome.cause instanceof MigrationError ? SCHEMA_CONVERT_FAILED_OPERATION : "initialize",
@@ -140,8 +143,8 @@ export const migrateAtStartup = Effect.fn("SqlitePersistence.migrateAtStartup")(
       cause: outcome.cause
     })
   }
-  if (outcome.plan.kind === "newer") return yield* newerDataError(outcome.plan.version)
-  if (outcome.plan.kind === "pending") {
+  if (outcome.plan.kind === MIGRATION_PLAN.newer) return yield* newerDataError(outcome.plan.version)
+  if (outcome.plan.kind === MIGRATION_PLAN.pending) {
     yield* Effect.logInfo("Migrated the database", {
       from: outcome.plan.from,
       to: LATEST_SCHEMA_VERSION
@@ -156,7 +159,7 @@ const runPendingMigrations = Effect.fn("SqlitePersistence.runPendingMigrations")
   const attempt = <A>(run: () => A) =>
     Effect.try({ try: run, catch: (cause): MigrationRunFailure => ({ cause }) })
   const plan = yield* attempt(() => planMigrations(database))
-  if (plan.kind !== "pending") return plan
+  if (plan.kind !== MIGRATION_PLAN.pending) return plan
   const steps = pendingMigrationSteps(plan)
   for (const [index, step] of steps.entries()) {
     yield* diagnostics.migration({ step: index + 1, total: steps.length, name: step.name })
@@ -179,9 +182,11 @@ const flushHostPort = Effect.sleep(0).pipe(
   )
 )
 
+const MIGRATION_OUTCOME = { done: "done", failed: "failed" } as const
+
 type MigrationOutcome =
-  | { readonly kind: "done"; readonly plan: MigrationPlan }
-  | { readonly kind: "failed"; readonly cause: unknown }
+  | { readonly kind: typeof MIGRATION_OUTCOME.done; readonly plan: MigrationPlan }
+  | { readonly kind: typeof MIGRATION_OUTCOME.failed; readonly cause: unknown }
 
 const newerDataError = (version: number): StorageStartupError =>
   new StorageStartupError({

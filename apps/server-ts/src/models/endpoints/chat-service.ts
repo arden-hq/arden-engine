@@ -1,8 +1,11 @@
-import type {
-  ChatEndpointCheck,
-  ChatEndpointDraft,
-  ChatEndpointSaveResult,
-  ChatModelEndpoint
+import {
+  CHAT_ENDPOINT_AUTH,
+  CHAT_ENDPOINT_SERVICE,
+  MODEL_ENDPOINT_RESULT,
+  type ChatEndpointCheck,
+  type ChatEndpointDraft,
+  type ChatEndpointSaveResult,
+  type ChatModelEndpoint
 } from "@arden-hq/protocol/model-endpoints"
 import { Effect, type Semaphore } from "effect"
 
@@ -81,20 +84,20 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
     const { draft, editing } = request
     const base = { baseUrl: draft.baseUrl, fetch: deps.fetch }
     const shape =
-      draft.service === "llama.cpp"
+      draft.service === CHAT_ENDPOINT_SERVICE.llamaCpp
         ? { service: draft.service }
         : { service: draft.service, models: draft.models }
     const stored = editing === undefined ? undefined : yield* findSaved(editing)
     switch (draft.auth.kind) {
-      case "none":
+      case CHAT_ENDPOINT_AUTH.none:
         return { ...shape, ...base, key: undefined } satisfies ChatEndpointTarget
-      case "bearer":
+      case CHAT_ENDPOINT_AUTH.bearer:
         return { ...shape, ...base, key: draft.auth.apiKey } satisfies ChatEndpointTarget
-      case "keep": {
+      case CHAT_ENDPOINT_AUTH.keep: {
         const key = stored === undefined ? undefined : yield* deps.secrets.read(stored.id)
         if (
           stored === undefined ||
-          stored.auth.kind !== "bearer" ||
+          stored.auth.kind !== CHAT_ENDPOINT_AUTH.bearer ||
           key === undefined ||
           new URL(stored.baseUrl).origin !== new URL(draft.baseUrl).origin
         )
@@ -167,7 +170,7 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
     const stored = servers.find((server) => server.id === editing)
     if (stored !== undefined && isSaved(stored, draft))
       yield* report(stored.id, healthOf(result.result), seen)
-    if (result.result !== "works") return result
+    if (result.result !== MODEL_ENDPOINT_RESULT.works) return result
     const checked = identity(draft, editing)
     return {
       result: "works",
@@ -186,7 +189,8 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
     const result = yield* Effect.promise(() =>
       checkChatEndpoint(target, { taken: takenBy(servers, editing) })
     )
-    if (result.result !== "works") return result satisfies ChatEndpointSaveResult
+    if (result.result !== MODEL_ENDPOINT_RESULT.works)
+      return result satisfies ChatEndpointSaveResult
     const id = editing ?? deps.newId()
     const stored: StoredChatEndpoint = {
       id,
@@ -206,7 +210,7 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
             takenBy(yield* saved(), editing)
           )
           if (clash !== undefined) return { kind: "refused", clash } as const
-          if (draft.auth.kind === "keep") {
+          if (draft.auth.kind === CHAT_ENDPOINT_AUTH.keep) {
             const latest = yield* resolveUnlocked(request)
             if (latest.key !== target.key)
               return yield* deps.invalid("The saved key changed during Check")
@@ -221,7 +225,7 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
         })
       )
     )
-    if (written.kind === "refused") return written.clash satisfies ChatEndpointSaveResult
+    if ("clash" in written) return written.clash satisfies ChatEndpointSaveResult
     deps.listChanged()
     return {
       result: "saved",
@@ -260,7 +264,8 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
             ? current.chat.filter((server) => server.id !== id)
             : placed(current.chat, next, previousList)
       }))
-    if (key === undefined && previousStored?.auth.kind !== "bearer") return yield* write(stored)
+    if (key === undefined && previousStored?.auth.kind !== CHAT_ENDPOINT_AUTH.bearer)
+      return yield* write(stored)
     const previous = yield* deps.secrets.readDocument(id)
     yield* write(undefined)
     const written = key === undefined ? deps.secrets.restore(id, null) : deps.secrets.write(id, key)
@@ -277,7 +282,7 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
   const start = Effect.fn("ChatEndpoint.start")(function* () {
     const servers = yield* saved()
     for (const stored of servers) {
-      if (stored.auth.kind !== "bearer") continue
+      if (stored.auth.kind !== CHAT_ENDPOINT_AUTH.bearer) continue
       const key = yield* deps.secrets.read(stored.id)
       if (key === undefined)
         yield* Effect.logWarning("A model server's key is missing; its requests will be refused", {
@@ -296,9 +301,12 @@ export const makeChatEndpoint = Effect.fn("ChatEndpoint.make")(function* (deps: 
       const found = yield* Effect.promise(() =>
         discoverChatEndpoint(targetOf(stored, key, deps), new Map())
       )
-      if (found.result === "unreachable" || found.result === "key_refused")
+      if (
+        found.result === MODEL_ENDPOINT_RESULT.unreachable ||
+        found.result === MODEL_ENDPOINT_RESULT.keyRefused
+      )
         return yield* report(stored.id, found.result, seen)
-      if (found.result !== "works")
+      if (found.result !== MODEL_ENDPOINT_RESULT.works)
         return yield* Effect.logWarning("A model server no longer offers its saved models", {
           id: stored.id,
           result: found.result
@@ -402,9 +410,10 @@ const takenBy = (
 const isSaved = (stored: StoredChatEndpoint, draft: ChatEndpointDraft): boolean =>
   stored.service === draft.service &&
   stored.baseUrl === draft.baseUrl &&
-  (draft.service === "llama.cpp" ||
+  (draft.service === CHAT_ENDPOINT_SERVICE.llamaCpp ||
     JSON.stringify(stored.models.map((model) => model.id)) === JSON.stringify(draft.models)) &&
-  (draft.auth.kind === "keep" || (draft.auth.kind === "none" && stored.auth.kind === "none"))
+  (draft.auth.kind === CHAT_ENDPOINT_AUTH.keep ||
+    (draft.auth.kind === CHAT_ENDPOINT_AUTH.none && stored.auth.kind === CHAT_ENDPOINT_AUTH.none))
 
 const HEALTH_OF_RESULT: {
   readonly [Result in ChatEndpointCheck["result"]]: EndpointFailureReason | undefined
@@ -431,7 +440,7 @@ const targetOf = (
   deps: Pick<ChatEndpointDeps, "fetch">
 ): ChatEndpointTarget => {
   const base = { baseUrl: stored.baseUrl, key, fetch: deps.fetch }
-  return stored.service === "llama.cpp"
+  return stored.service === CHAT_ENDPOINT_SERVICE.llamaCpp
     ? { ...base, service: "llama.cpp" }
     : { ...base, service: stored.service, models: stored.models.map((model) => model.id) }
 }

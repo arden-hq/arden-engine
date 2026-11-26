@@ -1,6 +1,7 @@
 import { seesEveryChat } from "./session-browse-scope.js"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { DateTime, Effect, Schema } from "effect"
 import type { RunQueries } from "../persistence/runs/queries.js"
 import { parentCompletion } from "../persistence/runs/parent-completion.js"
@@ -91,7 +92,7 @@ export const runInspectTool = (services: {
         execute(services.runs.ending(run.runId))
       ])
       const report =
-        owner.sessionType !== "agent" ||
+        owner.sessionType !== SESSION_TYPE.agent ||
         owner.parentSessionId === null ||
         (ending === undefined && isActiveRunStatus(run.status))
           ? undefined

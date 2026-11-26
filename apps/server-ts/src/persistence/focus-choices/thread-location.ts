@@ -4,7 +4,7 @@ export type ThreadLocation = {
   readonly kind: (typeof THREAD_LOCATION)[keyof typeof THREAD_LOCATION]
 }
 
-const THREAD_TRANSITION = {
+export const THREAD_TRANSITION = {
   moved: "moved",
   kept: "kept",
   typedHere: "typed_here",
@@ -19,7 +19,7 @@ export const THREAD_STEP = {
 
 type ThreadTransition = (typeof THREAD_TRANSITION)[keyof typeof THREAD_TRANSITION]
 
-const THREAD_EVENT = {
+export const THREAD_EVENT = {
   chooseTarget: "choose_target",
   chooseHere: "choose_here",
   typedHere: "typed_here",

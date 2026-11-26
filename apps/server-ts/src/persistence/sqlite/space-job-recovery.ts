@@ -1,14 +1,22 @@
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
-import type { SpaceJobSql } from "./space-job-types.js"
+import { TASK_WAKER, type SpaceJobSql } from "./space-job-types.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { taskMayWakeSql } from "./task-wake.js"
 
 const CHUNK_SIZE = 50
 
+const RECOVERY_STAGE = {
+  spaces: "spaces",
+  reviews: "reviews",
+  tasks: "tasks",
+  unstarted: "unstarted",
+  due: "due"
+} as const
+
 export interface SpaceJobRecoveryCursor {
-  readonly stage: "spaces" | "reviews" | "tasks" | "unstarted" | "due"
+  readonly stage: (typeof RECOVERY_STAGE)[keyof typeof RECOVERY_STAGE]
   readonly after: string | undefined
 }
 
@@ -22,9 +30,9 @@ export const makeSpaceJobRecovery = (options: {
 }): SpaceJobSql["reconcile"] =>
   Effect.fn("SpaceJobSql.reconcileChunk")(function* (now, cursor) {
     const { sql } = options
-    const { stage, after } = cursor ?? { stage: "spaces", after: undefined }
+    const { stage, after } = cursor ?? { stage: RECOVERY_STAGE.spaces, after: undefined }
     switch (stage) {
-      case "spaces": {
+      case RECOVERY_STAGE.spaces: {
         const rows = yield* sql<{ readonly space_id: string }>`
         SELECT space_id FROM spaces
         WHERE json_extract(inference_policy, '$.enabled') = 1 AND archived_at IS NULL
@@ -32,9 +40,11 @@ export const makeSpaceJobRecovery = (options: {
         ORDER BY space_id LIMIT ${CHUNK_SIZE}`
         for (const row of rows) yield* options.syncSpace(row.space_id, now)
         const next = rows.at(-1)?.space_id
-        return next === undefined ? { stage: "reviews", after: undefined } : { stage, after: next }
+        return next === undefined
+          ? { stage: RECOVERY_STAGE.reviews, after: undefined }
+          : { stage, after: next }
       }
-      case "reviews": {
+      case RECOVERY_STAGE.reviews: {
         const rows = yield* sql<{ readonly task_id: string }>`
         WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
         SELECT keyed.task_id FROM (
@@ -50,9 +60,11 @@ export const makeSpaceJobRecovery = (options: {
         ORDER BY keyed.task_id LIMIT ${CHUNK_SIZE}`
         for (const row of rows) yield* options.stopWork(row.task_id)
         const next = rows.at(-1)?.task_id
-        return next === undefined ? { stage: "tasks", after: undefined } : { stage, after: next }
+        return next === undefined
+          ? { stage: RECOVERY_STAGE.tasks, after: undefined }
+          : { stage, after: next }
       }
-      case "tasks": {
+      case RECOVERY_STAGE.tasks: {
         const rows = yield* sql<{ readonly item_id: string }>`
         WITH authority AS MATERIALIZED (${automationRecoveryAuthority(sql)})
         SELECT item.item_id
@@ -66,10 +78,10 @@ export const makeSpaceJobRecovery = (options: {
         for (const row of rows) yield* options.syncTask(row.item_id, now)
         const next = rows.at(-1)?.item_id
         return next === undefined
-          ? { stage: "unstarted", after: undefined }
+          ? { stage: RECOVERY_STAGE.unstarted, after: undefined }
           : { stage, after: next }
       }
-      case "unstarted": {
+      case RECOVERY_STAGE.unstarted: {
         const rows = yield* sql<{ readonly item_id: string }>`
         SELECT item.item_id FROM space_tasks AS item
         WHERE ${taskMayWakeSql(sql, "item")}
@@ -83,11 +95,13 @@ export const makeSpaceJobRecovery = (options: {
             WHERE pending.task_id = 'task:' || item.item_id)
         ORDER BY item.item_id LIMIT ${CHUNK_SIZE}`
         for (const row of rows)
-          yield* options.queueTaskWake(row.item_id, now, { kind: "continuation" })
+          yield* options.queueTaskWake(row.item_id, now, { kind: TASK_WAKER.continuation })
         const next = rows.at(-1)?.item_id
-        return next === undefined ? { stage: "due", after: undefined } : { stage, after: next }
+        return next === undefined
+          ? { stage: RECOVERY_STAGE.due, after: undefined }
+          : { stage, after: next }
       }
-      case "due":
+      case RECOVERY_STAGE.due:
         yield* options.materializeDue(now)
         return undefined
     }

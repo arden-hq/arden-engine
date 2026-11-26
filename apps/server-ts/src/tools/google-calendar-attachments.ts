@@ -3,6 +3,7 @@ import { canonicalJson } from "@arden-hq/std/json"
 import { Option, Schema } from "effect"
 
 import type { JsonObject } from "../persistence/json.js"
+import { GOOGLE_MIME } from "./google-drive-mime.js"
 import type { GoogleToolConnections } from "./google-accounts.js"
 import { CalendarAttachmentSchema } from "../google/calendar-client.js"
 import { readDriveFileMetadata } from "./google-drive-metadata.js"
@@ -102,7 +103,7 @@ export const prepareCalendarAttachments = async ({
   const add: CalendarAttachment[] = []
   for (const ref of refs) {
     const file = await readDriveFileMetadata({ google, fileRef: ref, signal })
-    if (file.mimeType === "application/vnd.google-apps.folder") {
+    if (file.mimeType === GOOGLE_MIME.folder) {
       throw toolRefusal(
         `${file.name} is a folder. Choose a file to attach.`,
         "Cannot attach a folder"

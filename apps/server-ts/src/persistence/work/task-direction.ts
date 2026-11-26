@@ -4,7 +4,7 @@ import { sha256Hex } from "@arden-hq/std/hash"
 import { canonicalJson } from "@arden-hq/std/json"
 import { Schema } from "effect"
 import { DIRECTION_REVIEW_HOST } from "../tools/mutation-receipt.js"
-import type { ContractLine } from "./contract.js"
+import { CONTRACT_LINE_KIND, type ContractLine } from "./contract.js"
 
 export interface TaskDirection {
   readonly itemId: string
@@ -30,15 +30,20 @@ export const taskDirectionReceipt = (direction: TaskDirection): TaskDirectionRec
         line_id: line.lineId,
         kind: line.kind,
         text: line.text,
-        rejected: line.kind === "decision" ? (line.rejected ?? null) : null
+        rejected: line.kind === CONTRACT_LINE_KIND.decision ? (line.rejected ?? null) : null
       }))
     })
   )
 })
 
+export const TASK_TOOL_CALL_PLAN = { turn: "turn", call: "call" } as const
+
 export type ToolCallPlan =
-  | { readonly kind: "turn"; readonly shown: TaskDirectionReceipt | undefined }
-  | ({ readonly kind: "call" } & CallParent)
+  | {
+      readonly kind: typeof TASK_TOOL_CALL_PLAN.turn
+      readonly shown: TaskDirectionReceipt | undefined
+    }
+  | ({ readonly kind: typeof TASK_TOOL_CALL_PLAN.call } & CallParent)
 
 export const sameDirection = (a: TaskDirectionReceipt, b: TaskDirectionReceipt): boolean =>
   a.item_id === b.item_id && a.digest === b.digest

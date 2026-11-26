@@ -1,3 +1,4 @@
+import { MARKDOWN_NODE } from "./markdown-node.js"
 import { PATH_SEGMENT } from "@arden-hq/revisions/effect"
 import { cutText, foldSpace } from "@arden-hq/std/text"
 import { WIKI_PAGE_LIFECYCLE, type WikiPage } from "@arden-hq/protocol/wiki"
@@ -104,7 +105,7 @@ const parseYaml = (source: string): unknown => {
 export const normal = (value: string): string => value.trim().toLowerCase()
 
 export const isReadme = (path: string): boolean =>
-  posix.basename(path).toLowerCase() === "readme.md"
+  posix.basename(path).toLowerCase() === README_FILE
 
 const pageNamesForPath = (path: string): ReadonlyArray<string> => {
   const names = [path, ...(path.endsWith(".md") ? [path.slice(0, -3)] : [])]
@@ -123,10 +124,19 @@ export const namesTakenAt = (paths: Iterable<string>): Set<string> =>
 export const takesName = (taken: ReadonlySet<string>, path: string): boolean =>
   nameKeys(path).some((key) => taken.has(key))
 
+const GENERATED_MARK = { open: "<!-- generated -->", close: "<!-- /generated -->" } as const
+
+type GeneratedMark = (typeof GENERATED_MARK)[keyof typeof GENERATED_MARK]
+const isGeneratedMark = (value: string): value is GeneratedMark =>
+  value === GENERATED_MARK.open || value === GENERATED_MARK.close
+
+const README_FILE = "readme.md"
+const README_NAME = "README"
+
 const PATH_SPELLING = /^(?:[a-z0-9][a-z0-9._-]*\/)*(?:[a-z0-9][a-z0-9._-]*|README)(?:\.md)?$/u
 
 const isPathName = (name: string): boolean =>
-  PATH_SPELLING.test(name) && (name.includes("/") || name.endsWith(".md") || name === "README")
+  PATH_SPELLING.test(name) && (name.includes("/") || name.endsWith(".md") || name === README_NAME)
 
 interface PageAliases {
   readonly names: ReadonlyArray<string>
@@ -171,18 +181,14 @@ const validateGeneratedBoundaries = (body: string): void => {
   let line = 0
   for (const value of body.split("\n")) {
     line += 1
-    if (
-      GENERATED_TOKEN.test(value) &&
-      value !== "<!-- generated -->" &&
-      value !== "<!-- /generated -->"
-    ) {
+    if (GENERATED_TOKEN.test(value) && !isGeneratedMark(value)) {
       throw fail("generated boundaries must occupy their own canonical line")
     }
-    if (value === "<!-- generated -->") {
+    if (value === GENERATED_MARK.open) {
       if (opening !== -1) throw fail("generated content must have one opening boundary")
       opening = line
     }
-    if (value === "<!-- /generated -->") {
+    if (value === GENERATED_MARK.close) {
       if (closing !== -1) throw fail("generated content must have one closing boundary")
       closing = line
     }
@@ -347,13 +353,14 @@ type MarkdownNode = {
 }
 
 export const visibleText = (node: MarkdownNode): string => {
-  if (node.type === "text" || node.type === "inlineCode") return node.value ?? ""
-  if (node.type === "image") return node.alt ?? ""
+  if (node.type === MARKDOWN_NODE.text || node.type === MARKDOWN_NODE.inlineCode)
+    return node.value ?? ""
+  if (node.type === MARKDOWN_NODE.image) return node.alt ?? ""
   return node.children?.map(visibleText).join("") ?? ""
 }
 
 const firstParagraph = (node: MarkdownNode): MarkdownNode | undefined => {
-  if (node.type === "paragraph") return node
+  if (node.type === MARKDOWN_NODE.paragraph) return node
   for (const child of node.children ?? []) {
     const found = firstParagraph(child)
     if (found !== undefined) return found

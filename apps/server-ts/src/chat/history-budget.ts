@@ -1,4 +1,4 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
+import { ROLE, TOOL_EXECUTION } from "@arden-hq/std/message-vocabulary"
 import {
   CONTEXT_LIMIT,
   CONTEXT_MODEL,
@@ -28,7 +28,7 @@ export const boundActiveWorkTail = (
   for (const carrier of carriers) {
     costByCarrier.set(carrier.message_id, bytes(carrier) + 1)
     for (const call of carrier.role === ROLE.assistant ? carrier.tool_calls : []) {
-      if (call.execution !== "provider") ownerByCall.set(call.id, carrier.message_id)
+      if (call.execution !== TOOL_EXECUTION.provider) ownerByCall.set(call.id, carrier.message_id)
     }
   }
   for (const message of work.messages) {

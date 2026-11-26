@@ -7,7 +7,12 @@ import type {
   ModelSettingsPatch,
   ReasoningTarget
 } from "@arden-hq/protocol/models"
-import { MODEL_SETTINGS_CHANGE, MODEL_TARGET, REASONING_TARGET } from "@arden-hq/protocol/models"
+import {
+  MODEL_RESET_SCOPE,
+  MODEL_SETTINGS_CHANGE,
+  MODEL_TARGET,
+  REASONING_TARGET
+} from "@arden-hq/protocol/models"
 import { Result, Schema } from "effect"
 import type { ModelDefinition, ModelHost } from "../../models/host.js"
 import type { ModelSettingsSnapshot } from "./store.js"
@@ -81,7 +86,7 @@ export const resetScope = (
   defaults: PersistedModelSettings,
   scope: ModelResetScope
 ): PersistedModelSettings =>
-  scope === "chat"
+  scope === MODEL_RESET_SCOPE.chat
     ? {
         ...stored,
         chatModelId: defaults.chatModelId,

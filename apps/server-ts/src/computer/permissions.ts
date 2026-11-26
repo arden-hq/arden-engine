@@ -1,4 +1,5 @@
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { Schema } from "effect"
 import type { ComputerSetup } from "@arden-hq/protocol/computer"
 
@@ -19,16 +20,24 @@ export function permissionGrantState(raw: unknown): ComputerSetup["permissions"]
   return { kind: "granted" }
 }
 
-export function permissionSessionState(raw: unknown): "ready" | "pending" {
+export const PERMISSION_SESSION_STATE = { ready: "ready", pending: "pending" } as const
+
+type PermissionSessionState =
+  (typeof PERMISSION_SESSION_STATE)[keyof typeof PERMISSION_SESSION_STATE]
+
+const PENDING_PERMISSIONS_PREFIX = "permissions_pending:"
+
+export function permissionSessionState(raw: unknown): PermissionSessionState {
   if (!Schema.is(Envelope)(raw)) throw new Error("Cua did not return a computer-use session result")
   const result = CallToolResultSchema.parse(raw)
-  if (!result.isError) return "ready"
+  if (!result.isError) return PERMISSION_SESSION_STATE.ready
   if (
     Schema.is(Pending)(result.structuredContent) &&
     result.content.some(
-      (part) => part.type === "text" && part.text.startsWith("permissions_pending:")
+      (part) =>
+        part.type === CONTENT_BLOCK_TYPE.text && part.text.startsWith(PENDING_PERMISSIONS_PREFIX)
     )
   )
-    return "pending"
+    return PERMISSION_SESSION_STATE.pending
   throw new Error("Cua could not initialize the computer-use session")
 }

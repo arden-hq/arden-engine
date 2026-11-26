@@ -1,3 +1,4 @@
+import { MODEL_ENDPOINT_RESULT } from "@arden-hq/protocol/model-endpoints"
 import { Schema } from "effect"
 
 export type EndpointFailureReason = "key_refused" | "wrong_format" | "unreachable"
@@ -17,4 +18,6 @@ export const failureForStatus = (status: number): EndpointFailureReason => {
 }
 
 export const runtimeFailure = (reason: EndpointFailureReason): "key_refused" | "unreachable" =>
-  reason === "key_refused" ? "key_refused" : "unreachable"
+  reason === MODEL_ENDPOINT_RESULT.keyRefused
+    ? MODEL_ENDPOINT_RESULT.keyRefused
+    : MODEL_ENDPOINT_RESULT.unreachable

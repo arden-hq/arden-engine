@@ -1,4 +1,5 @@
 import {
+  HOME_EVIDENCE,
   HomeEvidenceSchema,
   HomeLetterBodySchema,
   HomeLetterResponseSchema,
@@ -11,7 +12,7 @@ import type { SqlError } from "effect/unstable/sql"
 import { HomePresenceInputSchema } from "@arden-hq/protocol/effect/runs"
 import { HOME_LETTER_AUTOMATION_ID } from "../automations/model.js"
 import { WorkStoreError } from "../work/store.js"
-import { HomeStore, type HomeLetterSnapshot } from "../home/store.js"
+import { HOME_LETTER_DISPOSITION, HomeStore, type HomeLetterSnapshot } from "../home/store.js"
 import type { HomeAddressBook, HomeAddressNeeds, HomeLetterRules } from "../home/model.js"
 import { jobMayPublish } from "./automation-lease.js"
 import { handlerToolContent } from "./automation-handler-tool.js"
@@ -124,9 +125,10 @@ export const makeHomeStore = ({
   const taskState = Effect.fn("Home.taskState")(function* (entries: readonly HomeEvidence[]) {
     const ids = new Set(
       entries.flatMap((entry) => {
-        if (entry.kind === "task") return [entry.item_id]
-        if (entry.kind === "offer") return []
-        const task = entry.kind === "question" ? entry.question.context.task : entry.context?.task
+        if (entry.kind === HOME_EVIDENCE.task) return [entry.item_id]
+        if (entry.kind === HOME_EVIDENCE.offer) return []
+        const task =
+          entry.kind === HOME_EVIDENCE.question ? entry.question.context.task : entry.context?.task
         return task === null || task === undefined ? [] : [task.item_id]
       })
     )
@@ -270,12 +272,12 @@ export const makeHomeStore = ({
       transaction(
         Effect.gen(function* () {
           const current = yield* snapshot(rules)
-          if (current.entries.length === 0) return "skipped_no_input" as const
-          if (current.fingerprint !== input.fingerprint) return "superseded" as const
+          if (current.entries.length === 0) return HOME_LETTER_DISPOSITION.skippedNoInput
+          if (current.fingerprint !== input.fingerprint) return HOME_LETTER_DISPOSITION.superseded
           const cached = yield* state()
           return cached.source_fingerprint === input.fingerprint
-            ? ("no_change" as const)
-            : ("ready" as const)
+            ? HOME_LETTER_DISPOSITION.noChange
+            : HOME_LETTER_DISPOSITION.ready
         })
       ),
     publishHomeLetter: Effect.fn("WorkStore.publishHomeLetter")(function* (input) {

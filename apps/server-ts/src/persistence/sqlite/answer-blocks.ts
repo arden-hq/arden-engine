@@ -1,5 +1,5 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { savedBlockState } from "@arden-hq/answer-ui/state"
+import { SAVED_BLOCK_STATE_KIND, savedBlockState } from "@arden-hq/answer-ui/state"
 import { DateTime, Effect, Predicate, Schema } from "effect"
 import { answerBlockBodies } from "@arden-hq/protocol/chat"
 import {
@@ -123,9 +123,9 @@ export const makeAnswerBlockStore = ({
     const body = answerBlockBodies(messageText(envelope.content))[blockIndex]
     if (body === undefined) return yield* fail("not_found", "The message has no block here")
     const kept = savedBlockState(body, input.state)
-    if (kept.kind === "unreadable")
+    if (kept.kind === SAVED_BLOCK_STATE_KIND.unreadable)
       return yield* fail("invalid", "The block is shown as code and has no values to save")
-    if (kept.kind === "too_large")
+    if (kept.kind === SAVED_BLOCK_STATE_KIND.tooLarge)
       return yield* fail("invalid", "The block's values are over the size limit")
     const stateJson = JSON.stringify(kept.state)
     const state = yield* decodeJson(JsonObjectSchema, stateJson).pipe(

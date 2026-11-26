@@ -1,4 +1,5 @@
 import {
+  TRIGGER_MERGE,
   mergeTriggerInputs,
   type AutomationTrigger,
   type AutomationTriggerInput,
@@ -60,7 +61,7 @@ export const writtenTriggers = (
   automationId?: string
 ): Effect.Effect<StoredTriggers, AutomationStoreError> => {
   const merged = mergeTriggerInputs(stored, sent)
-  if (merged.kind === "ok") return Effect.succeed(merged)
+  if (merged.kind === TRIGGER_MERGE.ok) return Effect.succeed(merged)
   return Effect.fail(
     new AutomationStoreError({
       operation,
@@ -71,14 +72,15 @@ export const writtenTriggers = (
   )
 }
 
-const MERGE_REFUSAL: Readonly<Record<Exclude<TriggerMerge["kind"], "ok">, (id: string) => string>> =
-  {
-    unknown_id: (id) => `This Automation has no trigger ${id}; send a new trigger without an id`,
-    deleted_id: (id) =>
-      `Trigger ${id} was deleted since these triggers were read; read the Automation again and send its current triggers`,
-    duplicate_id: (id) => `Trigger ${id} is sent twice`,
-    missing_app_event: () => EVENT_TRIGGER_REFUSAL.missingAppEvent
-  }
+const MERGE_REFUSAL: Readonly<
+  Record<Exclude<TriggerMerge["kind"], typeof TRIGGER_MERGE.ok>, (id: string) => string>
+> = {
+  unknown_id: (id) => `This Automation has no trigger ${id}; send a new trigger without an id`,
+  deleted_id: (id) =>
+    `Trigger ${id} was deleted since these triggers were read; read the Automation again and send its current triggers`,
+  duplicate_id: (id) => `Trigger ${id} is sent twice`,
+  missing_app_event: () => EVENT_TRIGGER_REFUSAL.missingAppEvent
+}
 
 export const sameTriggers = (
   left: ReadonlyArray<AutomationTrigger>,

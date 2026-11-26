@@ -1,3 +1,4 @@
+export { BROWSER_SCOPE } from "./schema.js"
 import { decoderFor } from "../common/boundary.js"
 import {
   BrowserScopeSchema,

@@ -40,4 +40,5 @@ export interface ChatMessageShape {
   }) => Effect.Effect<void>
 }
 
-export type StopReason = "quit" | "restart"
+export const STOP_REASON = { quit: "quit", restart: "restart" } as const
+export type StopReason = (typeof STOP_REASON)[keyof typeof STOP_REASON]

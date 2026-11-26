@@ -1,10 +1,14 @@
+import { ERRNO, isErrnoCode } from "@arden-hq/std/errors"
 import { timerSleep } from "../lib/timer-sleep.js"
 import { readdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { Cause, Clock, Context, Effect, Layer, Schema, Semaphore } from "effect"
 
 import { ConversationArtifacts } from "../artifacts/conversation.js"
-import { ManagedOutputLifecycleStore } from "../persistence/managed-output/lifecycle-store.js"
+import {
+  ManagedOutputLifecycleStore,
+  UPLOAD_DECISION
+} from "../persistence/managed-output/lifecycle-store.js"
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
 import { isUploadId } from "../persistence/sessions/chat-uploads.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
@@ -35,7 +39,7 @@ const uploadFolder = (root: string): UploadFolder => ({
   },
   olderThan: async (cutoffMs) => {
     const entries = await readdir(root, { withFileTypes: true }).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+      if (isErrnoCode(error, ERRNO.ENOENT)) return []
       throw error
     })
     const old: Array<string> = []
@@ -98,8 +102,8 @@ const makeSessionFileCleanup = Effect.fn("SessionFileCleanup.make")(function* (
         const decision = yield* attempt(`Could not check upload ${uploadId}`, () =>
           lifecycle.decideUpload(uploadId)
         )
-        if (decision === "wait") return
-        if (decision !== "remove") continue
+        if (decision === UPLOAD_DECISION.wait) return
+        if (decision !== UPLOAD_DECISION.remove) continue
         const failure = yield* Effect.promise(() =>
           uploads.remove(uploadId).then(
             () => undefined,

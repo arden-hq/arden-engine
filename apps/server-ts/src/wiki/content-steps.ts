@@ -37,9 +37,17 @@ export interface WikiContentStep<E> {
   ) => Effect.Effect<ContentStepRewrite, E>
 }
 
+export const CONTENT_STEP_RESULT = {
+  alreadyApplied: "already_applied",
+  applied: "applied"
+} as const
+
 type WikiContentStepResult =
-  | { readonly kind: "already_applied" }
-  | { readonly kind: "applied"; readonly changedPaths: ReadonlyArray<string> }
+  | { readonly kind: typeof CONTENT_STEP_RESULT.alreadyApplied }
+  | {
+      readonly kind: typeof CONTENT_STEP_RESULT.applied
+      readonly changedPaths: ReadonlyArray<string>
+    }
 
 export interface WikiContentStepMethods {
   readonly applyContentStep: <E>(
@@ -66,7 +74,7 @@ export const makeWikiContentStepMethods = (
     const receipt = yield* repository
       .idempotencyReceipt(key)
       .pipe(Effect.mapError(mapRevisionError("read")))
-    if (receipt !== null) return { kind: "already_applied" } as const
+    if (receipt !== null) return { kind: CONTENT_STEP_RESULT.alreadyApplied }
     const { value: applied } = yield* changes.change(
       {
         operation: "update",
@@ -138,6 +146,6 @@ export const makeWikiContentStepMethods = (
         .finalizeIdempotencyReceipt(key, key)
         .pipe(Effect.mapError(mapRevisionError("update")))
     }
-    return { kind: "applied", changedPaths: applied.changed } as const
+    return { kind: CONTENT_STEP_RESULT.applied, changedPaths: applied.changed }
   })
 })

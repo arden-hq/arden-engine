@@ -1,3 +1,4 @@
+import { LOCAL_MODEL_KIND } from "@arden-hq/protocol/local-models"
 import path from "node:path"
 
 import type { ModelManifest } from "./manifest.js"
@@ -26,7 +27,7 @@ const modelLines = (model: PresetModel): ReadonlyArray<string> => {
     `parallel = ${PARALLEL_SLOTS}`,
     "load-on-startup = false"
   ]
-  if (manifest.kind === "embedding") {
+  if (manifest.kind === LOCAL_MODEL_KIND.embedding) {
     return [
       ...common,
       "embeddings = true",

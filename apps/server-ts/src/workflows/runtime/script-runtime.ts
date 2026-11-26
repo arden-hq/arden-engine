@@ -2,12 +2,26 @@ import { Schema } from "effect"
 
 import {
   CODE_MODE_FRAME_LINES,
+  CODE_MODE_RUNTIME_NAME,
   executeCodeMode,
   readableRuntimeError
 } from "./code-mode-runtime.js"
-import { isScriptEnvelope, type ScriptError, type ScriptOutcome } from "./script-outcome.js"
+import { CODE_MODE_FAILURE, CODE_MODE_STATUS } from "./code-mode-outcome.js"
+import {
+  SCRIPT_ENVELOPE_STATUS,
+  SCRIPT_OUTCOME_STATUS,
+  isScriptEnvelope,
+  type ScriptError,
+  type ScriptOutcome
+} from "./script-outcome.js"
 import { makeScriptRun, type ScriptOptions } from "./script-run.js"
-import { buildScript } from "./script-source.js"
+import {
+  SCRIPT_RPC_AGENT,
+  SCRIPT_RPC_DESCRIBE,
+  SCRIPT_RPC_PHASE,
+  SCRIPT_RPC_TOOL,
+  buildScript
+} from "./script-source.js"
 import { runScriptTool } from "./script-tool.js"
 import { runScriptAgent } from "./script-agent.js"
 import {
@@ -50,9 +64,9 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
     maxCalls: maxAgents + MAX_TOOL_CALLS + MAX_PARALLEL_ITEMS,
     maxConcurrency: maxAgents + MAX_TOOL_CALLS + MAX_PARALLEL_ITEMS,
     maxOutputBytes: SCRIPT_OUTPUT_BYTES,
-    runtimeName: "Code Mode",
+    runtimeName: CODE_MODE_RUNTIME_NAME,
     call: ({ name, args, signal }) => {
-      if (name === "__script_phase") {
+      if (name === SCRIPT_RPC_PHASE) {
         const title = args["title"]
         const id = args["id"]
         if (typeof title === "string" && typeof id === "string") {
@@ -61,9 +75,9 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
         }
         return Promise.resolve(null)
       }
-      if (name === "__script_describe") return runDescribe(args)
-      if (name === "__script_tool") return runScriptTool(run, args, signal)
-      if (name === "__script_agent") return runScriptAgent(run, agentCount++, args, signal)
+      if (name === SCRIPT_RPC_DESCRIBE) return runDescribe(args)
+      if (name === SCRIPT_RPC_TOOL) return runScriptTool(run, args, signal)
+      if (name === SCRIPT_RPC_AGENT) return runScriptAgent(run, agentCount++, args, signal)
       return Promise.reject(new Error(`${name} is not available in Code Mode`))
     }
   })
@@ -78,13 +92,17 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
 
   if (halted.value !== undefined) throw halted.value
   const agents = [...progressAgents.values()]
-  if (outcome.status === "failed") {
+  if (outcome.status === CODE_MODE_STATUS.failed) {
     let code: ScriptError["code"] = "internal"
-    if (outcome.reason === "cancelled") code = "cancelled"
-    else if (outcome.reason === "timed_out") code = "timed_out"
+    if (outcome.reason === CODE_MODE_FAILURE.cancelled) code = "cancelled"
+    else if (outcome.reason === CODE_MODE_FAILURE.timedOut) code = "timed_out"
     return {
-      status: "failed",
-      error: { code, message: outcome.error, retryable: outcome.reason !== "cancelled" },
+      status: SCRIPT_OUTCOME_STATUS.failed,
+      error: {
+        code,
+        message: outcome.error,
+        retryable: outcome.reason !== CODE_MODE_FAILURE.cancelled
+      },
       calls: toolCalls,
       logs: [],
       phases: [...progressPhases],
@@ -93,7 +111,7 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
   }
   if (!isScriptEnvelope(outcome.value)) {
     return {
-      status: "failed",
+      status: SCRIPT_OUTCOME_STATUS.failed,
       error: {
         code: "internal",
         message: "Code Mode returned an invalid envelope",
@@ -105,10 +123,10 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
       agents
     }
   }
-  if (outcome.value.status === "failed") {
+  if (outcome.value.status === SCRIPT_ENVELOPE_STATUS.failed) {
     const { line, ...error } = outcome.value.error
     return {
-      status: "failed",
+      status: SCRIPT_OUTCOME_STATUS.failed,
       error: {
         ...error,
         message: failureMessage(readableRuntimeError(error.message), line, [
@@ -122,7 +140,7 @@ export const executeScript = async (options: ScriptOptions): Promise<ScriptOutco
     }
   }
   return {
-    status: "completed",
+    status: SCRIPT_OUTCOME_STATUS.completed,
     phase_entries: [...phaseEntries.values()],
     value: outcome.value.value,
     calls: toolCalls,

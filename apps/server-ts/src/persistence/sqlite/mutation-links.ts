@@ -1,3 +1,4 @@
+import { RECORDED_HISTORY_ENTRY_KIND } from "../history.js"
 import { Effect } from "effect"
 import { Statement, type SqlClient } from "effect/unstable/sql"
 import {
@@ -115,7 +116,7 @@ export const readMutationVersionsOf = Effect.fn("MutationLinks.readMany")(functi
           place: { kind: CHANGE_ENTRY_PLACE.unplaced },
           outcome: "applied",
           before:
-            row.kind === "created"
+            row.kind === RECORDED_HISTORY_ENTRY_KIND.created
               ? { kind: "absent" }
               : { kind: "version", version: String(row.version - 1) },
           after: { kind: "version", version: String(row.version) },

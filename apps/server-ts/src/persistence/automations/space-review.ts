@@ -126,7 +126,7 @@ const SpaceReviewReadsSchema = Schema.Struct({
 })
 export type SpaceReviewReads = typeof SpaceReviewReadsSchema.Type
 
-const SPACE_REVIEW_ADMISSION = {
+export const SPACE_REVIEW_ADMISSION = {
   changed: "changed",
   unchanged: "unchanged",
   nothingToActOn: "nothing_to_act_on"

@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 
 import { PathSchema } from "./file-tool-support.js"
 import { textSelectFields } from "./text-select.js"
+import { FIND_ALL_PATTERN } from "./ripgrep.js"
 
 export const SEARCH_OUTPUT_MODE = {
   content: "content",
@@ -95,7 +96,7 @@ export const FindParametersSchema = Schema.Struct({
     })
   ),
   pattern: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024)).pipe(
-    Schema.withDecodingDefault(Effect.succeed("*")),
+    Schema.withDecodingDefault(Effect.succeed(FIND_ALL_PATTERN)),
     Schema.annotateEncoded({
       description: "File-path glob such as '**/*.ts' (1-1,024 characters). Defaults to '*'."
     })
@@ -127,8 +128,8 @@ export const SearchParametersSchema = Schema.Struct({
       description: "Optional file-path glob such as '**/*.ts'; it filters files, not matched text."
     })
   ),
-  output_mode: Schema.Literals(["content", "files_only", "count"] as const).pipe(
-    Schema.withDecodingDefault(Effect.succeed("content" as const)),
+  output_mode: Schema.Literals(Object.values(SEARCH_OUTPUT_MODE)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(SEARCH_OUTPUT_MODE.content)),
     Schema.annotateEncoded({
       description:
         "Return matching lines, matching file paths, or per-file counts. Defaults to content."

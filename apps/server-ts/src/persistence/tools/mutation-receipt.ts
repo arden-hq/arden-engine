@@ -18,8 +18,16 @@ const ReceiptHrefSchema = Schema.optionalKey(
   Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_HREF_MAX))
 )
 
+export const MUTATION_RESOURCE = {
+  none: "none",
+  versioned_resource: "versioned_resource",
+  target: "target",
+  resources: "resources",
+  file_revision: "file_revision"
+} as const
+
 const FileRevisionReconciliationSchema = Schema.Struct({
-  kind: Schema.Literal("file_revision"),
+  kind: Schema.Literal(MUTATION_RESOURCE.file_revision),
   absolute_path: ReceiptIdentifierSchema,
   before_version: ReceiptIdentifierSchema,
   after_version: ReceiptIdentifierSchema
@@ -58,7 +66,7 @@ const MutationReceiptV1Schema = Schema.Struct({
   before_version: Schema.NullOr(ReceiptIdentifierSchema),
   after_version: Schema.NullOr(ReceiptIdentifierSchema),
   reconcile: Schema.NullOr(FileRevisionReconciliationSchema),
-  resource_kind: Schema.optionalKey(Schema.Literal("target")),
+  resource_kind: Schema.optionalKey(Schema.Literal(MUTATION_RESOURCE.target)),
   domain: Schema.optionalKey(ChangeEntrySchema.fields.domain),
   title: ReceiptTitleSchema,
   href: ReceiptHrefSchema,
@@ -87,7 +95,7 @@ const MutationReceiptV1Schema = Schema.Struct({
     if (receipt.resources_omitted !== undefined) {
       return "only a receipt that lists its resources counts the ones it left out"
     }
-    if (receipt.resource_kind === "target") {
+    if (receipt.resource_kind === MUTATION_RESOURCE.target) {
       return receipt.resource_ref !== null &&
         receipt.before_version === null &&
         receipt.after_version === null &&
@@ -129,23 +137,26 @@ interface ResourceLabel {
 
 type ArdenResource =
   | ({
-      readonly kind: "versioned_resource"
+      readonly kind: typeof MUTATION_RESOURCE.versioned_resource
       readonly resourceRef: string
       readonly beforeVersion: string
       readonly afterVersion: string
     } & ResourceLabel)
   | ({
-      readonly kind: "target"
+      readonly kind: typeof MUTATION_RESOURCE.target
       readonly resourceRef: string
       readonly domain: ChangeDomain
     } & Omit<ResourceLabel, "domain">)
 
 type MutationResource =
-  | { readonly kind: "none" }
+  | { readonly kind: typeof MUTATION_RESOURCE.none }
   | ArdenResource
-  | { readonly kind: "resources"; readonly resources: ReadonlyArray<ArdenResource> }
   | {
-      readonly kind: "file_revision"
+      readonly kind: typeof MUTATION_RESOURCE.resources
+      readonly resources: ReadonlyArray<ArdenResource>
+    }
+  | {
+      readonly kind: typeof MUTATION_RESOURCE.file_revision
       readonly absolutePath: string
       readonly beforeVersion: string
       readonly afterVersion: string
@@ -187,7 +198,7 @@ export const mutationOperationId = (identity: MutationOperationIdentity): string
 
 export const makeMutationReceipt = (input: MakeMutationReceiptInput): MutationReceiptV1 => {
   const operationId = mutationOperationId(input.identity)
-  if (input.resource.kind === "resources") {
+  if (input.resource.kind === MUTATION_RESOURCE.resources) {
     const distinct = [
       ...new Map(input.resource.resources.map((item) => [item.resourceRef, item])).values()
     ]
@@ -206,7 +217,7 @@ export const makeMutationReceipt = (input: MakeMutationReceiptInput): MutationRe
       ...(omitted > 0 ? { resources_omitted: omitted } : {})
     }
   }
-  if (input.resource.kind === "none") {
+  if (input.resource.kind === MUTATION_RESOURCE.none) {
     return {
       version: 1,
       operation_id: operationId,
@@ -218,7 +229,7 @@ export const makeMutationReceipt = (input: MakeMutationReceiptInput): MutationRe
       reconcile: null
     }
   }
-  if (input.resource.kind === "versioned_resource") {
+  if (input.resource.kind === MUTATION_RESOURCE.versioned_resource) {
     return {
       version: 1,
       operation_id: operationId,
@@ -232,7 +243,7 @@ export const makeMutationReceipt = (input: MakeMutationReceiptInput): MutationRe
       ...boundedLabel(input.resource)
     }
   }
-  if (input.resource.kind === "target") {
+  if (input.resource.kind === MUTATION_RESOURCE.target) {
     return {
       version: 1,
       operation_id: operationId,
@@ -266,7 +277,7 @@ export const makeMutationReceipt = (input: MakeMutationReceiptInput): MutationRe
 }
 
 const receiptResource = (resource: ArdenResource): ReceiptResource =>
-  resource.kind === "target"
+  resource.kind === MUTATION_RESOURCE.target
     ? {
         kind: "target",
         resource_ref: resource.resourceRef,
@@ -285,7 +296,7 @@ const receiptResource = (resource: ArdenResource): ReceiptResource =>
 export type ListedResource =
   | ReceiptResource
   | {
-      readonly kind: "file_revision"
+      readonly kind: typeof MUTATION_RESOURCE.file_revision
       readonly resource_ref: string
       readonly before_version: string
       readonly after_version: string
@@ -303,7 +314,7 @@ export const receiptResources = (receipt: MutationReceiptV1): ReadonlyArray<List
     ...(receipt.title === undefined ? {} : { title: receipt.title }),
     ...(receipt.href === undefined ? {} : { href: receipt.href })
   }
-  if (receipt.resource_kind === "target") {
+  if (receipt.resource_kind === MUTATION_RESOURCE.target) {
     return receipt.domain === undefined
       ? []
       : [{ kind: "target", resource_ref: ref, ...label, domain: receipt.domain }]
@@ -313,7 +324,7 @@ export const receiptResources = (receipt: MutationReceiptV1): ReadonlyArray<List
   if (before === null || after === null) return []
   const versions = { resource_ref: ref, before_version: before, after_version: after, ...label }
   return [
-    receipt.reconcile?.kind === "file_revision"
+    receipt.reconcile?.kind === MUTATION_RESOURCE.file_revision
       ? { kind: "file_revision", ...versions }
       : { kind: "versioned_resource", ...versions }
   ]

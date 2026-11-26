@@ -26,11 +26,16 @@ const RetractionFields = {
   removed: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.String }))
 }
 
-const OpenRetraction = Schema.Struct({ ...RetractionFields, status: Schema.Literal("open") })
+export const RETRACTION_STATUS = { open: "open", closed: "closed" } as const
+
+const OpenRetraction = Schema.Struct({
+  ...RetractionFields,
+  status: Schema.Literal(RETRACTION_STATUS.open)
+})
 
 const ClosedRetraction = Schema.Struct({
   ...RetractionFields,
-  status: Schema.Literal("closed"),
+  status: Schema.Literal(RETRACTION_STATUS.closed),
   closed: Said
 })
 
@@ -86,7 +91,7 @@ export const openRetractions = Effect.fn("Wiki.openRetractions")(function* (
     return []
   }
   return (yield* readableRetractions(page.value.metadata)).filter(
-    (entry): entry is OpenRetraction => entry.status === "open"
+    (entry): entry is OpenRetraction => entry.status === RETRACTION_STATUS.open
   )
 })
 

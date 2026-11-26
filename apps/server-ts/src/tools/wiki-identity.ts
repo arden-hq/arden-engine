@@ -1,13 +1,18 @@
 import { RunContextSchema, type RunContext } from "../persistence/runs/stored-context.js"
 import { ToolExecutionError } from "@arden-hq/loop"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 
-import type { MemoryAuthority, RunAuthority } from "../execution/authority.js"
+import {
+  MEMORY_AUTHORITY,
+  type MemoryAuthority,
+  type RunAuthority
+} from "../execution/authority.js"
 import { refusalError } from "./refusal.js"
 import { systemHandlerForAutomation } from "../automations/system.js"
-import { AutomationId } from "../persistence/automations/model.js"
+import { AutomationId, SYSTEM_HANDLER } from "../persistence/automations/model.js"
 import type { ChatRunRecord } from "../persistence/runs/model.js"
-import type { RunCause, RunQueries } from "../persistence/runs/queries.js"
+import { RunQueryError, type RunCause, type RunQueries } from "../persistence/runs/queries.js"
 import {
   MemoryCaptureBatchIdentitySchema,
   type MemoryCaptureBatchIdentity
@@ -42,7 +47,7 @@ const readRun = async (
             `Could not resolve this Run's writing identity: ${cause.message}`,
             {
               preview: "Memory write identity unavailable",
-              retryable: cause._tag === "RunQueryError"
+              retryable: cause instanceof RunQueryError
             }
           )
       )
@@ -72,12 +77,12 @@ export const readWikiRun = async (
 
 export const memoryLocation = (memory: MemoryAuthority): WikiLocationAuthority => {
   switch (memory._tag) {
-    case "Global":
-    case "Capture":
+    case MEMORY_AUTHORITY.global:
+    case MEMORY_AUTHORITY.capture:
       return GLOBAL_WIKI_LOCATION_AUTHORITY
-    case "Space":
+    case MEMORY_AUTHORITY.space:
       return { _tag: "Space", spaceId: memory.space_id }
-    case "None":
+    case MEMORY_AUTHORITY.none:
       throw refusalError({
         what: "This run may not write Memory",
         rule: "boundary",
@@ -114,7 +119,7 @@ export const readRunCause = (
 const automationWriter = (cause: RunCause & { readonly automationId: string }) => {
   const upkeep =
     systemHandlerForAutomation(AutomationId.make(cause.automationId))?.spec.handler ===
-    "wiki_maintenance"
+    SYSTEM_HANDLER.wikiMaintenance
   return {
     actor: `Automation ${cause.automationId}`,
     origin: upkeep
@@ -135,12 +140,12 @@ const admittedIdentity = async (
   input: WikiRunIdentityContext
 ): Promise<Omit<WikiWriteIdentity, "authority">> => {
   const { record, context } = await readWikiRun(runs, input)
-  if (context.origin.kind === "unrecorded")
+  if (context.origin.kind === RUN_ORIGIN.unrecorded)
     throw identityUnavailable("This Run's writing origin was not recorded.")
   if (
-    context.origin.kind === "automation" &&
+    context.origin.kind === RUN_ORIGIN.automation &&
     systemHandlerForAutomation(AutomationId.make(context.origin.automation_id))?.spec.handler ===
-      "memory_capture"
+      SYSTEM_HANDLER.memoryCapture
   ) {
     const captureBatch = await Effect.runPromise(
       Schema.decodeUnknownEffect(MemoryCaptureBatchIdentitySchema)(
@@ -161,7 +166,7 @@ const admittedIdentity = async (
   const cause = await readRunCause(runs, input)
   if (cause.automationId !== undefined)
     return automationWriter({ ...cause, automationId: cause.automationId })
-  if (context.origin.kind !== "chat")
+  if (context.origin.kind !== RUN_ORIGIN.chat)
     throw identityUnavailable("This Run's Automation is no longer recorded.")
   return {
     actor: "Agent",

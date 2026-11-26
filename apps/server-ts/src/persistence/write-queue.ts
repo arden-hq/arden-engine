@@ -6,7 +6,9 @@ const WRITE_QUEUE_CAPACITY = 64
 const INTERACTIVE_BURST = 8
 const SLOW_WAIT_MS = 500
 
-type Lane = "interactive" | "ordinary"
+const WRITE_LANE = { interactive: "interactive", ordinary: "ordinary" } as const
+
+type Lane = (typeof WRITE_LANE)[keyof typeof WRITE_LANE]
 
 interface WriteRequest {
   readonly lane: Lane
@@ -75,7 +77,9 @@ export class PersistenceWriteQueue extends Context.Service<
             ? available.value
             : yield* Effect.race(Queue.take(queues.interactive), Queue.take(queues.ordinary))
           interactiveStreak =
-            request.lane === "interactive" ? Math.min(interactiveStreak + 1, INTERACTIVE_BURST) : 0
+            request.lane === WRITE_LANE.interactive
+              ? Math.min(interactiveStreak + 1, INTERACTIVE_BURST)
+              : 0
           yield* reportSlowWait(request)
           const started = yield* Clock.currentTimeMillis
           yield* Effect.uninterruptible(request.execute)
@@ -124,13 +128,13 @@ export class PersistenceWriteQueue extends Context.Service<
         )
 
       const flush = Effect.all(
-        [submit("interactive", Effect.void), submit("ordinary", Effect.void)],
+        [submit(WRITE_LANE.interactive, Effect.void), submit(WRITE_LANE.ordinary, Effect.void)],
         { discard: true }
       )
       yield* Effect.addFinalizer(() => flush)
       return PersistenceWriteQueue.of({
-        run: (operation) => submit("ordinary", operation),
-        runInteractive: (operation) => submit("interactive", operation),
+        run: (operation) => submit(WRITE_LANE.ordinary, operation),
+        runInteractive: (operation) => submit(WRITE_LANE.interactive, operation),
         flush,
         waiting: Effect.all([Queue.size(queues.interactive), Queue.size(queues.ordinary)]).pipe(
           Effect.map(([interactive, ordinary]) => interactive + ordinary)

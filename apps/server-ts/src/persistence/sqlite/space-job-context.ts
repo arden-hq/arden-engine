@@ -1,3 +1,4 @@
+import { TASK_SPEAKS_IN } from "../automations/job-prompt.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SpaceReviewSnapshot, TaskWorkerSnapshot } from "../automations/job-prompt.js"
@@ -169,7 +170,10 @@ export const readTaskWorkerContext = Effect.fn("SpaceJobSql.taskWorkerContext")(
             spaceInstructions: task.space_instructions ?? undefined,
             pagePath: task.page_path ?? undefined
           },
-    speaksIn: task.space_id === null || task.speaks_in_space_chat !== 1 ? "chat" : "space",
+    speaksIn:
+      task.space_id === null || task.speaks_in_space_chat !== 1
+        ? TASK_SPEAKS_IN.chat
+        : TASK_SPEAKS_IN.space,
     history: lately,
     comments: recent.map((comment) => ({
       author: comment.author,

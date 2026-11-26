@@ -1,3 +1,5 @@
+import { STORE_REASON } from "../../persistence/errors.js"
+import { MODEL_ENDPOINT_KIND, MODEL_ENDPOINT_RESULT } from "@arden-hq/protocol/model-endpoints"
 import {
   chatEndpointCheckResponse,
   chatEndpointSaveResponse,
@@ -12,6 +14,7 @@ import { isEmbeddingSearchStopped } from "@arden-hq/protocol/embeddings"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
+import { EMBEDDING_CONTROL } from "../../embedding/index-plan.js"
 import { WikiEmbeddingIndex } from "../../embedding/wiki-index.js"
 import { ModelEndpoints, type ModelEndpointsError } from "../../models/endpoints/service.js"
 import { ArdenApi } from "../api.js"
@@ -23,11 +26,11 @@ const failed = (
   HttpApiError.UnprocessableEntity | HttpApiError.NotFound | HttpApiError.InternalServerError
 > => {
   switch (error.reason) {
-    case "invalid":
+    case STORE_REASON.invalid:
       return Effect.fail(new HttpApiError.UnprocessableEntity({}))
-    case "not_found":
+    case STORE_REASON.not_found:
       return Effect.fail(new HttpApiError.NotFound({}))
-    case "storage":
+    case STORE_REASON.storage:
       return Effect.logWarning("Model endpoint request failed", error).pipe(
         Effect.andThen(Effect.fail(new HttpApiError.InternalServerError({})))
       )
@@ -57,11 +60,15 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
       Effect.orElseSucceed(() => false)
     )
     const followSearchChange = Effect.fn("ModelEndpoints.followSearchChange")(function* (
-      control: "resume" | "off"
+      control: typeof EMBEDDING_CONTROL.resume | typeof EMBEDDING_CONTROL.off
     ) {
       if (!(yield* searchUsesEndpoint)) return
       yield* embeddings
-        .control(control === "off" ? { kind: "off", keepIndex: false } : { kind: "resume" })
+        .control(
+          control === EMBEDDING_CONTROL.off
+            ? { kind: EMBEDDING_CONTROL.off, keepIndex: false }
+            : { kind: EMBEDDING_CONTROL.resume }
+        )
         .pipe(
           Effect.catch((cause) =>
             Effect.logWarning("Wiki search did not follow the endpoint change", cause)
@@ -114,8 +121,8 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
         return draftOf(payload).pipe(
           Effect.flatMap((draft) => endpoints.save(kind, draft).pipe(Effect.catch(failed))),
           Effect.tap((result) =>
-            result.result === "saved" && kind === "search"
-              ? followSearchChange("resume")
+            result.result === MODEL_ENDPOINT_RESULT.saved && kind === MODEL_ENDPOINT_KIND.search
+              ? followSearchChange(EMBEDDING_CONTROL.resume)
               : Effect.void
           ),
           Effect.map(modelEndpointSaveResponse)
@@ -123,7 +130,11 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
       })
       .handle("remove", ({ params }) => {
         const kind = params.kind
-        return (kind === "search" ? followSearchChange("off") : Effect.void).pipe(
+        return (
+          kind === MODEL_ENDPOINT_KIND.search
+            ? followSearchChange(EMBEDDING_CONTROL.off)
+            : Effect.void
+        ).pipe(
           Effect.andThen(endpoints.remove(kind)),
           Effect.map(modelEndpointsResponse),
           Effect.catch(failed)

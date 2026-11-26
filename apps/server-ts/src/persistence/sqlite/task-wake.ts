@@ -1,12 +1,14 @@
+import { SPACE_TASK_OWNER, TASK_STATUS } from "@arden-hq/protocol/spaces/work"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { TaskRow } from "./space-job-rows.js"
 import { taskHasHold } from "./task-hold-state.js"
 import { taskOpenSql } from "./task-status-sql.js"
 
-export const taskIsLive = (task: TaskRow): boolean => task.status === "open" && task.held === 0
+export const taskIsLive = (task: TaskRow): boolean =>
+  task.status === TASK_STATUS.open && task.held === 0
 
 export const taskStands = (task: TaskRow): boolean =>
-  taskIsLive(task) && task.owner === "worker" && task.space_archived_at === null
+  taskIsLive(task) && task.owner === SPACE_TASK_OWNER.worker && task.space_archived_at === null
 
 export const taskMayWake = (task: TaskRow): boolean => taskStands(task) && task.blocked === 0
 

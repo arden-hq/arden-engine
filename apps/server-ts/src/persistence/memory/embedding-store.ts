@@ -1,6 +1,8 @@
 import { Context, Effect, Schema } from "effect"
 
-type WikiEmbeddingIndexRole = "serving" | "building"
+export const WIKI_INDEX_ROLE = { serving: "serving", building: "building" } as const
+
+type WikiEmbeddingIndexRole = (typeof WIKI_INDEX_ROLE)[keyof typeof WIKI_INDEX_ROLE]
 
 export interface WikiEmbeddingIndexRecord {
   readonly indexVersion: string

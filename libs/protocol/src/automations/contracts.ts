@@ -154,11 +154,16 @@ interface YourAutomationChat extends JsonRecord {
 export type AutomationChat = OwnAutomationChat | YourAutomationChat
 
 export type SystemAutomationChat = { readonly kind: "none" } | AutomationChat
+export const AUTOMATION_DESCRIPTION = {
+  none: "none",
+  manual: "manual",
+  generated: "generated"
+} as const
 
 export type AutomationDescription =
-  | { readonly kind: "none" }
-  | { readonly kind: "manual"; readonly text: string }
-  | { readonly kind: "generated"; readonly text: string }
+  | { readonly kind: typeof AUTOMATION_DESCRIPTION.none }
+  | { readonly kind: typeof AUTOMATION_DESCRIPTION.manual; readonly text: string }
+  | { readonly kind: typeof AUTOMATION_DESCRIPTION.generated; readonly text: string }
 
 export type AutomationModel =
   | { readonly kind: "inherited" }
@@ -318,8 +323,10 @@ export interface SkippedAutomationRun extends AutomationRunFields {
 
 export type AutomationRun = RunningAutomationRun | EndedAutomationRun | SkippedAutomationRun
 
+export const AUTOMATION_RUN_SKIP_REASON = { prefilter: "prefilter" } as const
+
 export interface AutomationRunSkip extends JsonRecord {
-  readonly reason: "prefilter"
+  readonly reason: typeof AUTOMATION_RUN_SKIP_REASON.prefilter
   readonly backend: string
   readonly event: AutomationSkippedEvent
   readonly asked: ReadonlyArray<string>

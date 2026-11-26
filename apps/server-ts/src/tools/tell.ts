@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect"
 
 import { defineServerTool, type ServerTool } from "./define.js"
 import { toolFailure } from "./tool-failure.js"
-import { TELL_TEXT_LIMIT, WorkStore } from "../persistence/work/store.js"
+import { TELL_OUTCOME, TELL_TEXT_LIMIT, WorkStore } from "../persistence/work/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import { appliedReceipt, inChatTarget } from "./call-receipt.js"
 
@@ -54,7 +54,7 @@ const makeTellTool = ({
           .pipe(Effect.mapError((error) => toolFailure(error, "Not told"))),
         { signal: ctx.signal }
       )
-      if (told.kind === "refused")
+      if (told.kind === TELL_OUTCOME.refused)
         throw new ToolExecutionError(told.reason, { preview: "Not told", retryable: false })
       effects.applied()
       const chatId = told.chatId

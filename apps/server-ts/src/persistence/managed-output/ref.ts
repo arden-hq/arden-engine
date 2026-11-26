@@ -1,10 +1,11 @@
 export const MANAGED_OBJECT_HASH = /^[a-f0-9]{64}$/u
 const MANAGED_OBJECT_PREFIX = "arden:managed-output/"
 
-const MANAGED_OBJECT_FORMATS = ["text", "json"] as const
-type ManagedObjectFormat = (typeof MANAGED_OBJECT_FORMATS)[number]
+export const MANAGED_OBJECT_FORMAT = { text: "text", json: "json" } as const
+const MANAGED_OBJECT_FORMATS = Object.values(MANAGED_OBJECT_FORMAT)
+export type ManagedObjectFormat = (typeof MANAGED_OBJECT_FORMAT)[keyof typeof MANAGED_OBJECT_FORMAT]
 
-const isFormat = (value: string | undefined): value is ManagedObjectFormat =>
+export const isManagedObjectFormat = (value: unknown): value is ManagedObjectFormat =>
   MANAGED_OBJECT_FORMATS.some((format) => format === value)
 
 export interface ManagedObjectAddress {
@@ -37,7 +38,7 @@ export const readManagedObjectRef = (ref: string): ManagedObjectRef => {
     digest === undefined ||
     !MANAGED_OBJECT_HASH.test(owner) ||
     !MANAGED_OBJECT_HASH.test(digest) ||
-    !isFormat(format)
+    !isManagedObjectFormat(format)
   )
     return { kind: MANAGED_REF_KIND.malformed }
   return { kind: MANAGED_REF_KIND.managed, owner, digest, format }

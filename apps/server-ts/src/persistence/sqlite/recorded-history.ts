@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import {
+  RECORDED_HISTORY_ENTRY_KIND,
   RECORDED_HISTORY_NEXT,
   RECORDED_HISTORY_THROUGH,
   RecordedHistoryEntrySchema,
@@ -30,9 +31,7 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
     const table = sql.literal(selectedTable.history)
     const owner = sql.literal(selectedTable.owner)
     const key = sql.literal(selectedTable.key)
-    const scope = sql.literal(
-      kind === "automation" ? "purpose = 'user_automation' AND builtin = 0" : "1"
-    )
+    const scope = sql.literal("scope" in selectedTable ? selectedTable.scope : "1")
     const exists = yield* sql`SELECT 1 FROM ${owner} WHERE ${key} = ${input.id} AND ${scope}`
     if (exists.length === 0)
       return yield* new RecordedHistoryError({
@@ -55,11 +54,7 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
     const first = yield* sql<{
       readonly kind: string
     }>`SELECT kind FROM ${table} WHERE ${key} = ${input.id} AND version = 1`
-    const state = sql.literal(
-      kind === "automation"
-        ? "json_set(state_json, '$.instruction', json((SELECT instruction_json FROM automation_instruction_revisions WHERE revision_id = json_extract(state_json, '$.instruction_revision_id') AND task_id = automation_configuration_revisions.task_id)))"
-        : "state_json"
-    )
+    const state = sql.literal("state" in selectedTable ? selectedTable.state : "state_json")
     const rows = yield* sql<{
       readonly version: number
       readonly kind: string
@@ -80,8 +75,8 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
       )
     )
     let coverage: RecordedHistoryPage["coverage"] = "pending_baseline"
-    if (first[0]?.kind === "created") coverage = "from_creation"
-    if (first[0]?.kind === "baseline") coverage = "from_baseline"
+    if (first[0]?.kind === RECORDED_HISTORY_ENTRY_KIND.created) coverage = "from_creation"
+    if (first[0]?.kind === RECORDED_HISTORY_ENTRY_KIND.baseline) coverage = "from_baseline"
     return {
       entries,
       through_version: through,
@@ -113,7 +108,10 @@ const historyTables = {
   automation: {
     owner: "scheduled_tasks",
     history: "automation_configuration_revisions",
-    key: "task_id"
+    key: "task_id",
+    scope: "purpose = 'user_automation' AND builtin = 0",
+    state:
+      "json_set(state_json, '$.instruction', json((SELECT instruction_json FROM automation_instruction_revisions WHERE revision_id = json_extract(state_json, '$.instruction_revision_id') AND task_id = automation_configuration_revisions.task_id)))"
   }
 } as const
 

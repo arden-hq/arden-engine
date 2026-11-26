@@ -1,3 +1,4 @@
+import { AUTOMATION_CONTEXT_MODE } from "@arden-hq/protocol/automations"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatProjectionEvent } from "@arden-hq/protocol"
 import { isConversationalInput } from "@arden-hq/loop"
@@ -91,7 +92,7 @@ export const makeChatCheckpoint = ({
           }
           const pending = yield* loadPendingInTransaction(sql, run, "drain")
           const look =
-            run.automation_context_mode === "fresh"
+            run.automation_context_mode === AUTOMATION_CONTEXT_MODE.fresh
               ? undefined
               : yield* findChatEvents(sql, { sessionId: run.session_id, now }).pipe(
                   Effect.mapError(lookError("drain", run.session_id))

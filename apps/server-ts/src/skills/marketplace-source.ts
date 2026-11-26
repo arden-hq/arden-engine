@@ -1,4 +1,4 @@
-import { parseJsonBody } from "@arden-hq/protocol/common"
+import { isRelativePathSegment, parseJsonBody } from "@arden-hq/protocol/common"
 import type { MarketplaceSkill } from "@arden-hq/protocol/skills"
 import {
   marketplaceSkillId,
@@ -9,7 +9,8 @@ import {
 } from "@arden-hq/protocol/effect/skills"
 import { Effect, Schema } from "effect"
 
-import { type SkillError, skillError } from "./errors.js"
+import { SKILL_ERROR_REASON, SKILL_OPERATION, type SkillError, skillError } from "./errors.js"
+import { GIT_DIRECTORY, GIT_TREE_TYPE, SKILL_FILE_NAME, SKILL_TREE_MODE } from "./names.js"
 
 const SEARCH_ROOT = "https://skills.sh/api/search"
 const POPULAR_ROOT = "https://skills.sh/api/skills/all-time/0"
@@ -69,7 +70,7 @@ const RepositoryPathSchema = Schema.String.check(
       return "must be a bounded relative path"
     }
     if (/[\u0000-\u001f\u007f]/.test(value)) return "must not contain control characters"
-    return parts.some((part) => part === "" || part === "." || part === "..")
+    return parts.some((part) => part.length === 0 || isRelativePathSegment(part))
       ? "must not contain empty or traversing path components"
       : undefined
   })
@@ -106,10 +107,10 @@ const RelativeFilePathSchema = Schema.String.check(
       return "must be a shallow relative path"
     }
     if (/[\u0000-\u001f\u007f]/.test(value)) return "must not contain control characters"
-    if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    if (parts.some((part) => part.length === 0 || isRelativePathSegment(part))) {
       return "must not contain empty or traversing path components"
     }
-    return parts.includes(".git") || value === ".disabled"
+    return parts.includes(GIT_DIRECTORY) || value === SKILL_FILE_NAME.disabled
       ? "contains a reserved local path"
       : undefined
   })
@@ -118,14 +119,14 @@ const RelativeFilePathSchema = Schema.String.check(
 const SkillTreeEntrySchema = Schema.Union([
   Schema.Struct({
     path: RelativeFilePathSchema,
-    mode: Schema.Literals(["100644", "100755"] as const),
-    type: Schema.Literal("blob"),
+    mode: Schema.Literals([SKILL_TREE_MODE.regular, SKILL_TREE_MODE.executable] as const),
+    type: Schema.Literal(GIT_TREE_TYPE.blob),
     size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
   }),
   Schema.Struct({
     path: RelativeFilePathSchema,
-    mode: Schema.Literal("040000"),
-    type: Schema.Literal("tree")
+    mode: Schema.Literal(SKILL_TREE_MODE.directory),
+    type: Schema.Literal(GIT_TREE_TYPE.tree)
   })
 ])
 
@@ -134,7 +135,7 @@ const SkillTreeSchema = Schema.Struct({
   truncated: Schema.Literal(false)
 }).check(
   Schema.makeFilter((value) => {
-    const files = value.tree.filter((entry) => entry.type === "blob")
+    const files = value.tree.filter((entry) => entry.type === GIT_TREE_TYPE.blob)
     if (files.length > MAX_SKILL_FILES) {
       return { path: ["tree"], issue: `must contain at most ${MAX_SKILL_FILES} files` }
     }
@@ -224,9 +225,9 @@ const request = Effect.fn("SkillMarketplace.request")(function* (
   })
   if (!response.ok) {
     const reason =
-      operation === "install" && response.status === 404
-        ? ("not_found" as const)
-        : ("unavailable" as const)
+      operation === SKILL_OPERATION.install && response.status === 404
+        ? SKILL_ERROR_REASON.not_found
+        : SKILL_ERROR_REASON.unavailable
     return yield* skillError(operation, reason, "Skill marketplace is unavailable")
   }
   return response
@@ -329,7 +330,7 @@ export const resolveRemoteSkill = Effect.fn("SkillMarketplace.resolveRemoteSkill
   const suffix = `/${name}/SKILL.md`
   const roots = new Set(
     repository.tree
-      .filter((entry) => entry.type === "blob")
+      .filter((entry) => entry.type === GIT_TREE_TYPE.blob)
       .map((entry) => entry.path)
       .filter((path) => path === `${name}/SKILL.md` || path.endsWith(suffix))
       .map((path) => path.slice(0, -"/SKILL.md".length))
@@ -357,11 +358,17 @@ export const resolveRemoteSkill = Effect.fn("SkillMarketplace.resolveRemoteSkill
   }
   const selected = yield* decodeProvider(SkillTreeSchema, selectedValue, "install")
   const files = selected.tree.flatMap((entry): ReadonlyArray<RemoteSkillFile> =>
-    entry.type === "blob"
-      ? [{ path: entry.path, size: entry.size, executable: entry.mode === "100755" }]
+    entry.type === GIT_TREE_TYPE.blob
+      ? [
+          {
+            path: entry.path,
+            size: entry.size,
+            executable: entry.mode === SKILL_TREE_MODE.executable
+          }
+        ]
       : []
   )
-  if (!files.some((file) => file.path === "SKILL.md")) {
+  if (!files.some((file) => file.path === SKILL_FILE_NAME.skill)) {
     return yield* skillError("install", "invalid", "Marketplace skill has no SKILL.md")
   }
   return {

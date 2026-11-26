@@ -1,3 +1,6 @@
+import { APPROVAL_HANDLING, CLI_OUTPUT_FORMAT } from "./cli-words.js"
+import { RUN_QUESTION_CONTINUATION } from "@arden-hq/protocol/runs"
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
 import {
   APPROVAL_ASKED,
   APPROVAL_CARD,
@@ -37,9 +40,9 @@ export const progressLines = (): ((event: HeadlessRunEvent) => string | undefine
   const named = new Set<string>()
   return (event) => {
     const data = event.data
-    if (data.type === "RUN_ERROR") return `error: ${data.message}`
-    if (data.type === "run_cancelled") return "the Run was cancelled"
-    if (data.type === "TOOL_CALL_START") {
+    if (data.type === SERVER_EVENT_TYPE.runError) return `error: ${data.message}`
+    if (data.type === SERVER_EVENT_TYPE.runCancelled) return "the Run was cancelled"
+    if (data.type === SERVER_EVENT_TYPE.toolCallStart) {
       if (named.has(data.tool_call_id)) return undefined
       const name = data.display_name
       const title = data.title.kind === TOOL_TITLE.titled ? data.title.text : ""
@@ -49,12 +52,12 @@ export const progressLines = (): ((event: HeadlessRunEvent) => string | undefine
       })
       return undefined
     }
-    if (data.type === "TOOL_CALL_ARGS") {
+    if (data.type === SERVER_EVENT_TYPE.toolCallArgs) {
       const call = calls.get(data.tool_call_id)
       if (call !== undefined) call.args += data.delta
       return undefined
     }
-    if (data.type !== "TOOL_CALL_END") return undefined
+    if (data.type !== SERVER_EVENT_TYPE.toolCallEnd) return undefined
     const call = calls.get(data.tool_call_id)
     if (call === undefined) return undefined
     calls.delete(data.tool_call_id)
@@ -79,44 +82,55 @@ const keyArgument = (args: string): string | undefined => {
 const DECLINED_NOTE =
   "No one was at the command line to answer this, so it was declined. Carry on without it."
 
-type ApprovalChoice = "allow_once" | "always_allow" | "deny" | "leave"
+const APPROVAL_CHOICE = {
+  allowOnce: "allow_once",
+  alwaysAllow: "always_allow",
+  deny: "deny",
+  leave: "leave"
+} as const
+
+type ApprovalChoice = (typeof APPROVAL_CHOICE)[keyof typeof APPROVAL_CHOICE]
 
 const approvalLabel = (choice: ApprovalChoice): string => {
   switch (choice) {
-    case "allow_once":
+    case APPROVAL_CHOICE.allowOnce:
       return DECISION_WORD.allowOnce
-    case "always_allow":
+    case APPROVAL_CHOICE.alwaysAllow:
       return DECISION_WORD.alwaysAllow
-    case "deny":
+    case APPROVAL_CHOICE.deny:
       return DECISION_WORD.deny
-    case "leave":
+    case APPROVAL_CHOICE.leave:
       return "Leave it waiting"
   }
 }
 
-type CardKind = "app_only" | "ordinary" | "unknown"
+const CARD_KIND = { appOnly: "app_only", ordinary: "ordinary", unknown: "unknown" } as const
+
+type CardKind = (typeof CARD_KIND)[keyof typeof CARD_KIND]
 
 const cardNote = (card: CardKind): string | undefined => {
   switch (card) {
-    case "ordinary":
+    case CARD_KIND.ordinary:
       return undefined
-    case "app_only":
+    case CARD_KIND.appOnly:
       return "Only the Arden app can allow this."
-    case "unknown":
+    case CARD_KIND.unknown:
       return "Arden could not check whether this can be allowed from here, so it cannot be allowed here. If this keeps happening, update Arden."
   }
 }
 
 const approvalChoices = (card: CardKind, standing: boolean): Array<ApprovalChoice> => {
-  if (card !== "ordinary") return ["deny", "leave"]
+  if (card !== CARD_KIND.ordinary) return ["deny", "leave"]
   return standing ? ["allow_once", "always_allow", "deny"] : ["allow_once", "deny"]
 }
 
-type ConnectionChoice = "connected" | "skip"
+const CONNECTION_CHOICE = { connected: "connected", skip: "skip" } as const
+
+type ConnectionChoice = (typeof CONNECTION_CHOICE)[keyof typeof CONNECTION_CHOICE]
 
 const CONNECTION_LABELS: Record<ConnectionChoice, string> = {
-  connected: "I connected it in Arden, go on",
-  skip: "Skip it"
+  [CONNECTION_CHOICE.connected]: "I connected it in Arden, go on",
+  [CONNECTION_CHOICE.skip]: "Skip it"
 }
 
 const SKIP_QUESTION = "Answer later in Arden"
@@ -140,13 +154,14 @@ export const requestResponder = (input: {
   const runs = new Set([input.runId])
   const questions: Array<RunQuestion> = []
   const say = (line: string): void => {
-    if (input.output === "text") input.dependencies.writeStderr(`arden: ${line}\n`)
+    if (input.output === CLI_OUTPUT_FORMAT.text) input.dependencies.writeStderr(`arden: ${line}\n`)
   }
-  const ask = input.handling === "decline" ? undefined : input.dependencies.askInTerminal
+  const ask =
+    input.handling === APPROVAL_HANDLING.decline ? undefined : input.dependencies.askInTerminal
   const toolNames = new Map<string, string>()
   const toolName = (toolId: string, fallback: string): string => toolNames.get(toolId) ?? fallback
   const unanswered = (data: HeadlessRunEvent["data"], runId: string, name: string) =>
-    input.handling === "ask_then_decline" ? decline(data, runId) : wait(name)
+    input.handling === APPROVAL_HANDLING.askThenDecline ? decline(data, runId) : wait(name)
   const choose = async <Choice extends string>(
     heading: string,
     choices: ReadonlyArray<readonly [Choice, string]>
@@ -203,11 +218,11 @@ export const requestResponder = (input: {
       offered.map((value) => [value, approvalLabel(value)] as const)
     )
     if (choice === undefined) return unanswered(data, runId, name)
-    if (choice === "leave") return say(`${name} stays waiting.`)
+    if (choice === APPROVAL_CHOICE.leave) return say(`${name} stays waiting.`)
     await input.client.answerApproval({
       ...answering(data, runId),
       result: "",
-      decision: decisionOf(choice !== "deny", choice === "always_allow")
+      decision: decisionOf(choice !== APPROVAL_CHOICE.deny, choice === APPROVAL_CHOICE.alwaysAllow)
     })
     say(`${approvalLabel(choice)}: ${name}`)
   }
@@ -226,7 +241,7 @@ export const requestResponder = (input: {
       toolId: data.tool_id,
       connectionId: data.connection_id,
       result: { kind: CONNECTION_RESULT.cardDefault },
-      approved: choice === "connected"
+      approved: choice === CONNECTION_CHOICE.connected
     })
     say(`${CONNECTION_LABELS[choice]}: ${data.label}`)
   }
@@ -238,10 +253,17 @@ export const requestResponder = (input: {
   }
 
   const decline = async (data: HeadlessRunEvent["data"], runId: string): Promise<void> => {
-    if (data.type !== "approval_needed" && data.type !== "connection_needed") return
-    const name = data.type === "approval_needed" ? toolName(data.tool_id, data.name) : data.label
+    if (
+      data.type !== SERVER_EVENT_TYPE.approvalNeeded &&
+      data.type !== SERVER_EVENT_TYPE.connectionNeeded
+    )
+      return
+    const name =
+      data.type === SERVER_EVENT_TYPE.approvalNeeded
+        ? toolName(data.tool_id, data.name)
+        : data.label
     try {
-      if (data.type === "approval_needed") {
+      if (data.type === SERVER_EVENT_TYPE.approvalNeeded) {
         await input.client.answerApproval({
           ...answering(data, runId),
           result: DECLINED_NOTE,
@@ -257,7 +279,7 @@ export const requestResponder = (input: {
         })
       }
       input.declined.push({
-        kind: data.type === "approval_needed" ? "approval" : "connection",
+        kind: data.type === SERVER_EVENT_TYPE.approvalNeeded ? "approval" : "connection",
         tool_id: data.tool_id,
         name
       })
@@ -294,7 +316,9 @@ export const requestResponder = (input: {
     })
     const continuation = resolved.continuation
     const next =
-      continuation?.kind === "started" ? continuation.run_id : await nextRunIn(question.session_id)
+      continuation?.kind === RUN_QUESTION_CONTINUATION.started
+        ? continuation.run_id
+        : await nextRunIn(question.session_id)
     if (next === undefined || runs.has(next)) {
       say("The answer goes to Arden's next turn in this chat.")
       return undefined
@@ -330,10 +354,11 @@ export const requestResponder = (input: {
     },
     onEvent: async (event, signal) => {
       const data = event.data
-      if (data.type === "TOOL_CALL_START") toolNames.set(data.tool_call_id, data.display_name)
+      if (data.type === SERVER_EVENT_TYPE.toolCallStart)
+        toolNames.set(data.tool_call_id, data.display_name)
       const runId = "run_id" in data && typeof data.run_id === "string" ? data.run_id : input.runId
       if (!runs.has(runId)) return
-      if (data.type === "TOOL_CALL_RESULT") {
+      if (data.type === SERVER_EVENT_TYPE.toolCallResult) {
         const question =
           data.data.kind === TOOL_DATA.attached ? questionOf(data.data.value) : undefined
         if (question === undefined || handled.has(question.question_id)) return
@@ -342,11 +367,15 @@ export const requestResponder = (input: {
         else questions.push(question)
         return
       }
-      if (data.type !== "approval_needed" && data.type !== "connection_needed") return
+      if (
+        data.type !== SERVER_EVENT_TYPE.approvalNeeded &&
+        data.type !== SERVER_EVENT_TYPE.connectionNeeded
+      )
+        return
       if (handled.has(data.tool_id)) return
       handled.add(data.tool_id)
-      if (input.handling === "decline") return decline(data, runId)
-      if (data.type === "approval_needed") return answerApproval(data, runId, signal)
+      if (input.handling === APPROVAL_HANDLING.decline) return decline(data, runId)
+      if (data.type === SERVER_EVENT_TYPE.approvalNeeded) return answerApproval(data, runId, signal)
       return answerConnection(data, runId)
     }
   }

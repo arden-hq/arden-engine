@@ -1,3 +1,6 @@
+import { JOB_SUBJECT_KIND } from "../space-job-id.js"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
+import { AGENT_MODE, INTERACTION_REFERENCE } from "@arden-hq/protocol/chat"
 import { RunContextSchema, type RunContext } from "../runs/stored-context.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import type { StoredInteractionSender } from "../transcript/interaction.js"
@@ -11,6 +14,7 @@ import {
   type RunAuthority
 } from "../../execution/authority.js"
 import {
+  NARROW_RESULT,
   handedAuthority,
   narrow,
   orphanAgentAuthority,
@@ -52,16 +56,16 @@ const executionOwner = Effect.fn("RunAuthority.executionOwner")(function* (
   )
   if (owner === undefined) return null
   switch (owner.kind) {
-    case "automation":
+    case JOB_SUBJECT_KIND.automation:
       return {
         kind: owner.kind,
         key: owner.key,
         purpose: owner.purpose,
         handler: owner.authored.handler
       } satisfies ExecutionOwner
-    case "space_review":
+    case JOB_SUBJECT_KIND.spaceReview:
       return { kind: owner.kind, key: owner.key, spaceId: owner.spaceId } satisfies ExecutionOwner
-    case "task":
+    case JOB_SUBJECT_KIND.task:
       return { kind: owner.kind, key: owner.key, spaceId: owner.spaceId } satisfies ExecutionOwner
   }
 })
@@ -123,7 +127,7 @@ const chatAuthority = Effect.fn("RunAuthority.chat")(function* (
     policy: input.policy,
     originOwner: yield* executionOwner(
       sql,
-      origin.kind === "automation" ? origin.automation_id : null
+      origin.kind === RUN_ORIGIN.automation ? origin.automation_id : null
     ),
     chatOwner: yield* executionOwner(sql, input.chatAutomationId)
   })
@@ -140,7 +144,8 @@ const agentRequest = (
   mode: input.agent?.mode ?? "work",
   sessionId: input.sessionId,
   parentRunId,
-  workspaceRoot: input.agent?.mode === "code" ? (input.agent.workspace?.root ?? null) : null,
+  workspaceRoot:
+    input.agent?.mode === AGENT_MODE.code ? (input.agent.workspace?.root ?? null) : null,
   taskItemId: input.context.task?.item_id ?? null
 })
 
@@ -152,7 +157,9 @@ export const delegateAuthority = Effect.fn("RunAuthority.delegate")(function* (
   const parent = yield* readRunAuthority(sql, parentRunId)
   if (parent === undefined) return orphanAgentAuthority(request)
   const narrowed = narrow(parent, request)
-  return narrowed.kind === "narrowed" ? narrowed.authority : orphanAgentAuthority(request)
+  return narrowed.kind === NARROW_RESULT.narrowed
+    ? narrowed.authority
+    : orphanAgentAuthority(request)
 })
 
 export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
@@ -163,7 +170,7 @@ export const handoffSender = Effect.fn("RunAuthority.handoffSender")(function* (
   if (
     sender?.kind !== INTERACTION_KIND.message ||
     sender.from.source !== INTERACTION_SOURCE.agent ||
-    sender.caused_by?.type !== "tool_call"
+    sender.caused_by?.type !== INTERACTION_REFERENCE.toolCall
   )
     return undefined
   const rows = yield* sql<{

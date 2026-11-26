@@ -7,6 +7,8 @@ export interface CodeModeToolFacts {
   readonly inScope: boolean
 }
 
+const NAME_DOT = "."
+
 export const resolveToolName = (
   requested: string,
   known: ReadonlySet<string>
@@ -17,7 +19,7 @@ export const resolveToolName = (
   for (let index = 0; index < name.length; index += 1) {
     let separator = 0
     if (name.startsWith("__", index)) separator = 2
-    else if (name[index] === ".") separator = 1
+    else if (name[index] === NAME_DOT) separator = 1
     if (separator === 0) continue
     const rest = name.slice(index + separator)
     if (known.has(rest)) return rest

@@ -10,6 +10,7 @@ import { wikiError, type WikiError } from "./errors.js"
 import type { WikiChangeWriter, WikiChanges, WikiPlan } from "./page-change.js"
 import { formatWikiPage, reviseWikiPage } from "./page.js"
 import {
+  RETRACTION_STATUS,
   claimKey,
   MAX_CLAIM_CHARS,
   MIN_CLAIM_WORDS,
@@ -83,7 +84,7 @@ const renderForgotten = (stored: ReadonlyArray<Schema.Json>): string => {
       [
         `## ${entry.id}. ${entry.claim}`,
         "",
-        entry.status === "open"
+        entry.status === RETRACTION_STATUS.open
           ? `Open. Asked ${said(entry.said)}.`
           : `Undone ${said(entry.closed)}. Asked ${said(entry.said)}.`,
         "",
@@ -185,7 +186,7 @@ const forgetPlan = Effect.fn("Wiki.forgetPlan")(function* (
   const { stored, entries } = storedRetractions(current?.page.metadata ?? {})
   const entry: OpenRetraction = {
     id: entries.reduce((last, existing) => Math.max(last, existing.id), 0) + 1,
-    status: "open",
+    status: RETRACTION_STATUS.open,
     said: { chat: input.turn.chat, at: DateTime.formatIso(yield* DateTime.now) },
     claim,
     removed
@@ -205,8 +206,8 @@ const undoPlan = Effect.fn("Wiki.undoPlan")(function* (
   const current = forgottenPage(snapshot)
   const { stored, entries } = storedRetractions(current?.page.metadata ?? {})
   const open = entries.find((entry) => entry.id === input.id)
-  if (current === undefined || open === undefined || open.status !== "open") {
-    const listed = entries.filter((entry) => entry.status === "open")
+  if (current === undefined || open === undefined || open.status !== RETRACTION_STATUS.open) {
+    const listed = entries.filter((entry) => entry.status === RETRACTION_STATUS.open)
     return yield* wikiError(
       "forget",
       "not_found",
@@ -217,7 +218,7 @@ const undoPlan = Effect.fn("Wiki.undoPlan")(function* (
   }
   const entry: Retraction = {
     ...open,
-    status: "closed",
+    status: RETRACTION_STATUS.closed,
     closed: { chat: input.turn.chat, at: DateTime.formatIso(yield* DateTime.now) }
   }
   const page = withEntriesKeepingUnreadable(

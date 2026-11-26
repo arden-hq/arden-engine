@@ -17,7 +17,7 @@ export const EventAdmissionRowSchema = Schema.Struct({
   run_id: Schema.NonEmptyString
 })
 
-const ADMISSION_STATE = { active: "active", terminal: "terminal" } as const
+export const ADMISSION_STATE = { active: "active", terminal: "terminal" } as const
 
 export type EventAdmissionState =
   | { readonly kind: typeof ADMISSION_STATE.active; readonly runId: string | undefined }

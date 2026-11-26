@@ -4,8 +4,8 @@ import type {
   ComputerStep,
   ComputerWindow
 } from "@arden-hq/protocol/computer"
-import { COMPUTER_APP } from "@arden-hq/protocol/computer"
-import type { NativeAction } from "./contract.js"
+import { COMPUTER_APP, COMPUTER_STEP } from "@arden-hq/protocol/computer"
+import { NATIVE_ACTION, NATIVE_BUTTON, type NativeAction } from "./contract.js"
 
 export const appNameOf = (app: ComputerApp): string | undefined =>
   app.kind === COMPUTER_APP.identified ? app.name : undefined
@@ -63,67 +63,67 @@ const pressedKeys = (action: Extract<NativeAction, { action: "key" }>): string =
 
 export function pastTitle(action: NativeAction, app: string): string {
   switch (action.action) {
-    case "activate":
+    case NATIVE_ACTION.activate:
       return `Brought ${app} forward`
-    case "menu":
+    case NATIVE_ACTION.menu:
       return `Chose ${action.path.join(" → ")} in ${app}`
-    case "click":
-    case "pixel_click":
-      return action.button === "right" ? `Right-clicked in ${app}` : `Clicked in ${app}`
-    case "type":
+    case NATIVE_ACTION.click:
+    case NATIVE_ACTION.pixel_click:
+      return action.button === NATIVE_BUTTON.right ? `Right-clicked in ${app}` : `Clicked in ${app}`
+    case NATIVE_ACTION.type:
       return `Typed in ${app}`
-    case "set_value":
+    case NATIVE_ACTION.set_value:
       return `Replaced text in ${app}`
-    case "key":
+    case NATIVE_ACTION.key:
       return `Pressed ${pressedKeys(action)} in ${app}`
-    case "scroll":
+    case NATIVE_ACTION.scroll:
       return `Scrolled in ${app}`
-    case "drag":
+    case NATIVE_ACTION.drag:
       return `Dragged in ${app}`
   }
 }
 
 export function actionQuestion(action: NativeAction, app: string): string {
   switch (action.action) {
-    case "activate":
+    case NATIVE_ACTION.activate:
       return `Bring ${app} forward?`
-    case "menu":
+    case NATIVE_ACTION.menu:
       return `Choose ${action.path.join(" → ")} in ${app}?`
-    case "click":
-    case "pixel_click":
-      return action.button === "right" ? `Right-click in ${app}?` : `Click in ${app}?`
-    case "type":
+    case NATIVE_ACTION.click:
+    case NATIVE_ACTION.pixel_click:
+      return action.button === NATIVE_BUTTON.right ? `Right-click in ${app}?` : `Click in ${app}?`
+    case NATIVE_ACTION.type:
       return `Type in ${app}?`
-    case "set_value":
+    case NATIVE_ACTION.set_value:
       return `Replace the text in ${app}?`
-    case "key":
+    case NATIVE_ACTION.key:
       return `Press ${keyChord(action)} in ${app}?`
-    case "scroll":
+    case NATIVE_ACTION.scroll:
       return `Scroll in ${app}?`
-    case "drag":
+    case NATIVE_ACTION.drag:
       return `Drag in ${app}?`
   }
 }
 
 export function actionWords(action: NativeAction): string {
   switch (action.action) {
-    case "activate":
+    case NATIVE_ACTION.activate:
       return "Bring the window forward"
-    case "menu":
+    case NATIVE_ACTION.menu:
       return "Choose a menu item"
-    case "click":
-      return action.button === "right" ? "Right-click" : "Click"
-    case "pixel_click":
-      return action.button === "right" ? "Right-click a point" : "Click a point"
-    case "type":
+    case NATIVE_ACTION.click:
+      return action.button === NATIVE_BUTTON.right ? "Right-click" : "Click"
+    case NATIVE_ACTION.pixel_click:
+      return action.button === NATIVE_BUTTON.right ? "Right-click a point" : "Click a point"
+    case NATIVE_ACTION.type:
       return "Type text"
-    case "set_value":
+    case NATIVE_ACTION.set_value:
       return "Replace all text"
-    case "key":
+    case NATIVE_ACTION.key:
       return "Press keys"
-    case "scroll":
+    case NATIVE_ACTION.scroll:
       return `Scroll ${action.direction}`
-    case "drag":
+    case NATIVE_ACTION.drag:
       return "Drag"
   }
 }
@@ -163,7 +163,7 @@ export const actStep = (
 })
 
 export function scriptStep(steps: readonly ComputerStep[]): ComputerStep | undefined {
-  const acts = steps.filter((step) => step.kind === "act")
+  const acts = steps.filter((step) => step.kind === COMPUTER_STEP.act)
   const [act] = acts
   const frames = replayFrames(steps)
   if (act !== undefined && acts.length === 1) return { ...act, frames }
@@ -177,7 +177,7 @@ function replayFrames(steps: readonly ComputerStep[]): ComputerFrame[] {
   const frames: ComputerFrame[] = []
   let change: string | undefined
   for (const step of steps) {
-    if (step.kind === "act") change = step.title
+    if (step.kind === COMPUTER_STEP.act) change = step.title
     for (const frame of step.frames) {
       frames.push(change === undefined ? frame : { ...frame, caption: change })
       change = undefined

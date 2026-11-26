@@ -5,6 +5,7 @@ import {
   SCRIPT_END,
   SCRIPT_FAILURE,
   WORKFLOW_PREVIEW,
+  WORKFLOW_STATUS,
   WORKFLOW_RECOVERY,
   type ScriptAgent,
   type ScriptDetail,
@@ -16,7 +17,12 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import type { ServerRunContext } from "./run-context.js"
 import { ScriptJournal } from "../persistence/scripts/journal.js"
 import { ScriptResults } from "../persistence/scripts/results.js"
-import { ScriptStore, ScriptStoreError, type ScriptRecord } from "../persistence/scripts/store.js"
+import {
+  SCRIPT_STORE_REASON,
+  ScriptStore,
+  ScriptStoreError,
+  type ScriptRecord
+} from "../persistence/scripts/store.js"
 import { SessionQueries } from "../persistence/sessions/queries.js"
 import {
   ScriptAccessError,
@@ -70,7 +76,7 @@ const failure = (error: unknown): ToolExecutionError => {
   if (error instanceof ScriptStoreError) {
     return toolFailure(
       error,
-      error.reason === "unsafe_retry" ? "Needs review" : "Script unavailable"
+      error.reason === SCRIPT_STORE_REASON.unsafe_retry ? "Needs review" : "Script unavailable"
     )
   }
   return new ToolExecutionError("The script could not be read", {
@@ -201,7 +207,7 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
       const record = await owned(services, ctx, input.workflow_ref)
       const detail = await run(scriptDetail(services.journal, record), ctx.signal)
       const result =
-        record.status === "running"
+        record.status === WORKFLOW_STATUS.running
           ? undefined
           : await run(
               services.results.text({ workflowRef: record.ref, attempt: record.attempt }),
@@ -294,7 +300,8 @@ const makeWorkflowTools = (services: ScriptToolServices): ReadonlyArray<ServerTo
         services.runner.cancel({ ref: record.ref, cancelAgent: ctx.run.cancelAgent }),
         ctx.signal
       )
-      const stopped = record.status === "running" && cancelled.status === "cancelled"
+      const stopped =
+        record.status === WORKFLOW_STATUS.running && cancelled.status === WORKFLOW_STATUS.cancelled
       if (stopped) effects.applied()
       else effects.unchanged()
       return {

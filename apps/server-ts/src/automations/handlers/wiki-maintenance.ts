@@ -1,3 +1,4 @@
+import { WIKI_MAINTENANCE_PREPARATION } from "../../wiki/maintenance.js"
 import { Effect } from "effect"
 import type { Wiki } from "../../wiki/service.js"
 import type { ReaderPosition } from "../../persistence/reader-position.js"
@@ -24,8 +25,8 @@ const makeWikiMaintenanceRunner = (
     next: Effect.fn("WikiMaintenance.next")(function* () {
       const processedHead = yield* services.position.read()
       const prepared = yield* services.wiki.prepareMaintenance({ processedHead })
-      if (prepared.kind === "idle") return "idle" as const
-      if (prepared.kind === "advance") {
+      if (prepared.kind === WIKI_MAINTENANCE_PREPARATION.idle) return "idle" as const
+      if (prepared.kind === WIKI_MAINTENANCE_PREPARATION.advance) {
         yield* services.position.advance({ expected: processedHead, next: prepared.sourceHead })
         return "advance" as const
       }

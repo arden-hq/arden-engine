@@ -9,31 +9,6 @@ import { toolRefusal } from "./tool-failure.js"
 export const DRIVE_API = "https://www.googleapis.com/drive/v3/files"
 export const DOCS_API = "https://docs.googleapis.com/v1/documents"
 export const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
-const DOC_MIME = "application/vnd.google-apps.document"
-const SHEET_MIME = "application/vnd.google-apps.spreadsheet"
-const FOLDER_MIME = "application/vnd.google-apps.folder"
-const PRESENTATION_MIME = "application/vnd.google-apps.presentation"
-export const SEARCH_MIME_QUERY = {
-  any: "",
-  document: `mimeType='${DOC_MIME}'`,
-  spreadsheet: `mimeType='${SHEET_MIME}'`
-} as const
-
-export const driveFileKind = (mimeType: string): string => {
-  switch (mimeType) {
-    case DOC_MIME:
-      return "document"
-    case SHEET_MIME:
-      return "spreadsheet"
-    case FOLDER_MIME:
-      return "folder"
-    case PRESENTATION_MIME:
-      return "presentation"
-    default:
-      return "file"
-  }
-}
-
 const DriveFileSchema = Schema.Struct({
   id: Schema.NonEmptyString,
   name: Schema.NonEmptyString,

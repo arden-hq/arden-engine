@@ -15,6 +15,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import type { JsonValue } from "@arden-hq/protocol"
+import { MCP_TRANSPORT, type McpTransportKind } from "@arden-hq/protocol/mcp"
 import { Predicate } from "effect"
 
 import {
@@ -63,7 +64,21 @@ export class McpEventRequestError extends Error {
   }
 }
 
-type Lifecycle = "session" | "stateless"
+const MCP_LIFECYCLE = { session: "session", stateless: "stateless" } as const
+
+type Lifecycle = (typeof MCP_LIFECYCLE)[keyof typeof MCP_LIFECYCLE]
+
+const MCP_METHOD = {
+  initialize: "initialize",
+  cancelled: "notifications/cancelled"
+} as const
+
+type McpMethod = (typeof MCP_METHOD)[keyof typeof MCP_METHOD]
+
+const isMethod = (message: { readonly method: string }, method: McpMethod): boolean =>
+  message.method === method
+
+export const MCP_EVENT_STREAM_END = { ended: "ended", refused: "refused" } as const
 
 interface PendingRequest {
   readonly resolve: (result: unknown) => void
@@ -82,8 +97,8 @@ export interface McpChannelTransport {
 }
 
 export type McpEventStreamEnd =
-  | { readonly kind: "ended" }
-  | { readonly kind: "refused"; readonly error: McpEventError }
+  | { readonly kind: typeof MCP_EVENT_STREAM_END.ended }
+  | { readonly kind: typeof MCP_EVENT_STREAM_END.refused; readonly error: McpEventError }
 
 export interface McpEventStreamRequest {
   readonly name: string
@@ -106,7 +121,7 @@ export class McpChannel {
   onerror?: NonNullable<Transport["onerror"]>
   onmessage?: NonNullable<Transport["onmessage"]>
 
-  private lifecycle: Lifecycle = "session"
+  private lifecycle: Lifecycle = MCP_LIFECYCLE.session
   private eventsOffered = false
   private closed = false
   private nextId = 1
@@ -118,7 +133,7 @@ export class McpChannel {
 
   private attached: McpChannelTransport | undefined
 
-  constructor(private readonly delivery: "http" | "stdio") {}
+  constructor(private readonly delivery: McpTransportKind) {}
 
   attach(inner: McpChannelTransport): this {
     inner.onmessage = (message, extra) => this.receive(message, extra)
@@ -221,10 +236,14 @@ export class McpChannel {
   }
 
   send(message: JSONRPCMessage, options?: TransportSendOptions): Promise<void> {
-    if (this.delivery === "http" && isJSONRPCRequest(message) && message.method === "initialize") {
+    if (
+      this.delivery === MCP_TRANSPORT.http &&
+      isJSONRPCRequest(message) &&
+      isMethod(message, MCP_METHOD.initialize)
+    ) {
       return this.initialize(message, options)
     }
-    if (this.lifecycle === "session") return this.inner.send(message, options)
+    if (this.lifecycle === MCP_LIFECYCLE.session) return this.inner.send(message, options)
     if (isJSONRPCRequest(message)) {
       const key = String(message.id)
       this.unfetched.add(key)
@@ -233,7 +252,7 @@ export class McpChannel {
         .finally(() => this.forgetUnfetched(key))
     }
     if (isJSONRPCNotification(message)) {
-      if (message.method === "notifications/cancelled") {
+      if (isMethod(message, MCP_METHOD.cancelled)) {
         const requestId = message.params?.["requestId"]
         if (typeof requestId === "string" || typeof requestId === "number") {
           this.abortFetch(String(requestId))
@@ -256,7 +275,7 @@ export class McpChannel {
         throw cause.code === undefined && cause.cause !== undefined ? cause.cause : cause
       })
     if (discovered === undefined) return this.inner.send(message, options)
-    this.lifecycle = "stateless"
+    this.lifecycle = MCP_LIFECYCLE.stateless
     this.eventsOffered = discovered.events
     queueMicrotask(() =>
       this.onmessage?.({ jsonrpc: "2.0", id: message.id, result: discovered.initialize })

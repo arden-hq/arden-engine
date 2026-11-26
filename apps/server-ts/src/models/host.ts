@@ -127,9 +127,11 @@ export type ModelDefinition = typeof ModelDefinitionSchema.Type
 export type ModelHostDefaults = typeof ModelHostDefaultsSchema.Type
 export type ModelHost = typeof ModelHostSchema.Type
 
+export const MODEL_HOST_SOURCE = { ready: "ready", discovering: "discovering" } as const
+
 export type ModelHostSource =
-  | { readonly kind: "ready"; readonly host: ModelHost }
-  | { readonly kind: "discovering"; readonly host: Promise<ModelHost> }
+  | { readonly kind: typeof MODEL_HOST_SOURCE.ready; readonly host: ModelHost }
+  | { readonly kind: typeof MODEL_HOST_SOURCE.discovering; readonly host: Promise<ModelHost> }
 
 const NO_MODEL_ASSIGNMENT: ModelAssignment = Object.freeze({
   modelId: null,

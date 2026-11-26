@@ -2,6 +2,20 @@ import { Predicate, Schema } from "effect"
 
 type JsonObject = Record<string, unknown>
 
+export const JSON_SCHEMA_TYPE = { object: "object", string: "string" } as const
+
+type JsonSchemaType = (typeof JSON_SCHEMA_TYPE)[keyof typeof JSON_SCHEMA_TYPE]
+
+const JSON_SCHEMA_KEYWORD = { type: "type", enum: "enum", const: "const" } as const
+
+export const isSchemaOfType = (
+  schema: Readonly<Record<string, unknown>>,
+  type: JsonSchemaType
+): boolean => schema[JSON_SCHEMA_KEYWORD.type] === type
+
+export const takesAnyValue = (schema: Readonly<Record<string, unknown>>): boolean =>
+  schema[JSON_SCHEMA_KEYWORD.enum] === undefined && schema[JSON_SCHEMA_KEYWORD.const] === undefined
+
 interface ObjectVariant {
   readonly properties: Readonly<Record<string, unknown>>
   readonly required: ReadonlyArray<string>
@@ -11,7 +25,7 @@ interface ObjectVariant {
 const objectVariant = (value: unknown): ObjectVariant | undefined => {
   if (
     !Predicate.isObject(value) ||
-    value.type !== "object" ||
+    value.type !== JSON_SCHEMA_TYPE.object ||
     !Predicate.isObject(value.properties)
   ) {
     return undefined
@@ -24,9 +38,11 @@ const objectVariant = (value: unknown): ObjectVariant | undefined => {
 
 const stringEnum = (value: unknown): ReadonlyArray<unknown> | undefined =>
   Predicate.isObject(value) &&
-  value.type === "string" &&
+  value.type === JSON_SCHEMA_TYPE.string &&
   Array.isArray(value.enum) &&
-  Object.keys(value).every((key) => key === "type" || key === "enum")
+  Object.keys(value).every(
+    (key) => key === JSON_SCHEMA_KEYWORD.type || key === JSON_SCHEMA_KEYWORD.enum
+  )
     ? value.enum
     : undefined
 
@@ -41,7 +57,7 @@ const mergedProperty = (schemas: ReadonlyArray<unknown>): unknown => {
 }
 
 const objectRoot = (schema: JsonObject): JsonObject => {
-  if (schema.type === "object" || !Array.isArray(schema.anyOf)) return schema
+  if (isSchemaOfType(schema, JSON_SCHEMA_TYPE.object) || !Array.isArray(schema.anyOf)) return schema
   const variants = schema.anyOf.map(objectVariant)
   if (!variants.every((variant) => variant !== undefined)) return schema
   const names = [...new Set(variants.flatMap((variant) => Object.keys(variant.properties)))]

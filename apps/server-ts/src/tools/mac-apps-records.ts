@@ -119,6 +119,7 @@ export const titleOf = (item: { readonly title: string }): string =>
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/u
 const LOCAL_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/u
+const NEGATIVE_OFFSET_SIGN = "-"
 const OFFSET = /(?:Z|([+-])(\d{2}):(\d{2}))$/u
 
 export const isDay = (value: string): boolean => DAY.test(value)
@@ -172,7 +173,8 @@ export const makeTimeWords =
     const minutes =
       offset[1] === undefined
         ? 0
-        : (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 60 + Number(offset[3]))
+        : (offset[1] === NEGATIVE_OFFSET_SIGN ? -1 : 1) *
+          (Number(offset[2]) * 60 + Number(offset[3]))
     return minutes === offsetMinutes(new Date(value)) ? withoutZone(words) : words
   }
 

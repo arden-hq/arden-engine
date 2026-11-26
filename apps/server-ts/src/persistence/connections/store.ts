@@ -25,10 +25,16 @@ export interface ConnectionItem extends Omit<FetchedConnectionItem, "source"> {
   readonly fetchedAt: string
 }
 
+export const CONNECTION_ITEM_AVAILABILITY = {
+  available: "available",
+  expired: "expired",
+  unknown: "unknown"
+} as const
+
 export type ConnectionItemAvailability =
-  | { readonly kind: "available"; readonly item: ConnectionItem }
-  | { readonly kind: "expired" }
-  | { readonly kind: "unknown" }
+  | { readonly kind: typeof CONNECTION_ITEM_AVAILABILITY.available; readonly item: ConnectionItem }
+  | { readonly kind: typeof CONNECTION_ITEM_AVAILABILITY.expired }
+  | { readonly kind: typeof CONNECTION_ITEM_AVAILABILITY.unknown }
 
 export const CONNECTION_ITEM_KEEP_DAYS = 30
 

@@ -1,9 +1,13 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
-import type {
-  GitHubConnectionState,
-  GitHubConnectRequest,
-  McpPresetId,
-  McpServer as PublicMcpServer
+import {
+  MCP_AUTH,
+  MCP_CONNECTION_STATUS,
+  MCP_PRESET_ID,
+  MCP_TRANSPORT,
+  type GitHubConnectionState,
+  type GitHubConnectRequest,
+  type McpPresetId,
+  type McpServer as PublicMcpServer
 } from "@arden-hq/protocol/mcp"
 import type {
   McpCreateServerRequestSchema,
@@ -178,14 +182,14 @@ export const mcpConnectionsLayer = (
                   "Trusted MCP preset transports cannot be changed"
                 )
               }
-              if (name === "github") githubOAuth.cancel()
+              if (name === MCP_PRESET_ID.github) githubOAuth.cancel()
               runtime.interruptConnection(name)
               const prepared = await secrets.next(name, input.transport, current.config, "update")
               const transport = prepared.transport
               const config = { ...current.config, transport }
               const changesOAuthIdentity =
-                current.config.transport.type === "http" &&
-                (transport.type !== "http" ||
+                current.config.transport.type === MCP_TRANSPORT.http &&
+                (transport.type !== MCP_TRANSPORT.http ||
                   current.config.transport.url !== transport.url ||
                   current.config.transport.auth !== transport.auth)
               if (changesOAuthIdentity) await runtime.clearOAuth(current.config)
@@ -211,7 +215,7 @@ export const mcpConnectionsLayer = (
       const setEnabled = (name: string, enabled: boolean) =>
         Effect.tryPromise({
           try: () => {
-            if (name === "github") githubOAuth.cancel()
+            if (name === MCP_PRESET_ID.github) githubOAuth.cancel()
             runtime.interruptConnection(name)
             return operations.run(name, async () => {
               const current = runtime.requireRuntime(name, "set_enabled")
@@ -237,7 +241,7 @@ export const mcpConnectionsLayer = (
       const reconnect = (name: string) =>
         Effect.tryPromise({
           try: () => {
-            if (name === "github") githubOAuth.cancel()
+            if (name === MCP_PRESET_ID.github) githubOAuth.cancel()
             runtime.interruptConnection(name)
             return operations.run(name, async () => {
               const current = runtime.requireRuntime(name, "reconnect")
@@ -264,11 +268,11 @@ export const mcpConnectionsLayer = (
       const remove = (name: string) =>
         Effect.tryPromise({
           try: () => {
-            if (name === "github") githubOAuth.cancel()
+            if (name === MCP_PRESET_ID.github) githubOAuth.cancel()
             runtime.interruptConnection(name)
             return operations.run(name, async () => {
               const current = runtime.requireRuntime(name, "remove")
-              if (current.config.presetId === "github") await github.forget()
+              if (current.config.presetId === MCP_PRESET_ID.github) await github.forget()
               await runtime.clearOAuth(current.config)
               await secrets.clear(current.config)
               await purgeApprovalOverrides(name, "remove")
@@ -290,12 +294,12 @@ export const mcpConnectionsLayer = (
       const startOAuth = (name: string) =>
         Effect.tryPromise({
           try: () => {
-            if (name === "github") githubOAuth.cancel()
+            if (name === MCP_PRESET_ID.github) githubOAuth.cancel()
             runtime.interruptConnection(name)
             return operations.run(name, async () => {
               const current = runtime.requireRuntime(name, "oauth")
               const transport = current.config.transport
-              if (current.config.presetId === "github" && current.config.enabled) {
+              if (current.config.presetId === MCP_PRESET_ID.github && current.config.enabled) {
                 try {
                   const url = await githubOAuth.start({
                     beforeCommit: async () => {
@@ -333,8 +337,8 @@ export const mcpConnectionsLayer = (
               }
               if (
                 !current.config.enabled ||
-                transport.type !== "http" ||
-                transport.auth !== "oauth"
+                transport.type !== MCP_TRANSPORT.http ||
+                transport.auth !== MCP_AUTH.oauth
               ) {
                 throw mcpError("oauth", "invalid", "MCP server does not use OAuth")
               }
@@ -391,14 +395,15 @@ export const mcpConnectionsLayer = (
         operations.run(name, async () => {
           const current = runtime.get(name)
           if (current === undefined || !current.config.enabled) return
-          if (current.status === "connected" && current.client !== failed) return
+          if (current.status === MCP_CONNECTION_STATUS.connected && current.client !== failed)
+            return
           await runtime.connectNow(current.config, { status: "reconnecting" })
         })
 
       const githubServers = () =>
         runtime.names().flatMap((name) => {
           const entry = runtime.get(name)
-          return entry?.config.presetId === "github" ? [entry.config] : []
+          return entry?.config.presetId === MCP_PRESET_ID.github ? [entry.config] : []
         })
 
       const reconnectGitHub = async (): Promise<void> => {
@@ -477,7 +482,7 @@ export const mcpConnectionsLayer = (
             runtime.onConnected((config) =>
               listener({
                 presetId: config.presetId ?? undefined,
-                url: config.transport.type === "http" ? config.transport.url : undefined
+                url: config.transport.type === MCP_TRANSPORT.http ? config.transport.url : undefined
               })
             ),
           onChanged: runtime.onChanged,

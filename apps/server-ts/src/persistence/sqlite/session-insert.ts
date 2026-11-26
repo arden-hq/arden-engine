@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import type { SessionLifecycleEventError, SessionLifecycleEvents } from "../sessions/events.js"
@@ -40,16 +41,18 @@ interface AgentSessionInsert extends SessionInsertBase {
   }
 }
 
+const LIFECYCLE_ANNOUNCE = { announce: "announce", silent: "silent" } as const
+
 type SessionInsert = OwnerChatInsert | ChildChatInsert | ChannelSessionInsert | AgentSessionInsert
 
 interface AnnouncedSession<A, E, R> {
-  readonly kind: "announce"
+  readonly kind: typeof LIFECYCLE_ANNOUNCE.announce
   readonly events: SessionLifecycleEvents["Service"]
   readonly complete: Effect.Effect<A, E, R>
 }
 
 interface SilentSession {
-  readonly kind: "silent"
+  readonly kind: typeof LIFECYCLE_ANNOUNCE.silent
   readonly reason: "worker_channel" | "run_session" | "branch"
 }
 
@@ -85,7 +88,7 @@ export function insertSession<A, E, R>({
     ${session.originAutomationId}, ${parent.sessionId}, ${parent.runId}, ${parent.toolCallId},
     ${parent.messageId}, ${session.spaceId}, ${session.chatModel}, 0, 0, 0, 0
   )`
-  if (lifecycle.kind === "silent") return Effect.asVoid(insert)
+  if (lifecycle.kind === LIFECYCLE_ANNOUNCE.silent) return Effect.asVoid(insert)
   return insert.pipe(
     Effect.andThen(lifecycle.complete),
     Effect.tap(() => lifecycle.events.appendInTransaction("session_created", session.sessionId))
@@ -94,16 +97,16 @@ export function insertSession<A, E, R>({
 
 const parentLinks = (session: SessionInsert) => {
   switch (session.type) {
-    case "chat":
+    case SESSION_TYPE.chat:
       return {
         sessionId: session.parent?.sessionId ?? null,
         runId: null,
         toolCallId: null,
         messageId: session.parent?.messageId ?? null
       }
-    case "channel":
+    case SESSION_TYPE.channel:
       return { sessionId: null, runId: null, toolCallId: null, messageId: null }
-    case "agent":
+    case SESSION_TYPE.agent:
       return { ...session.parent, messageId: null }
   }
 }

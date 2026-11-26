@@ -1,7 +1,7 @@
 import type { JsonValue } from "@arden-hq/protocol"
 
 import { markdownValue } from "../../prompts/format.js"
-import { optionsOf, type DecisionInput, type DecisionQuestion } from "./questions.js"
+import { DECISION_KIND, optionsOf, type DecisionInput, type DecisionQuestion } from "./questions.js"
 
 export const stateText = (input: Pick<DecisionInput, "instructions" | "state">): string =>
   `${input.instructions.trim()}\n\n${stateMarkdown(input.state)}`
@@ -23,7 +23,7 @@ export const stateMarkdown = (state: JsonValue): string => {
 
 const questionLine = (name: string, question: DecisionQuestion): string => {
   const answers =
-    question.kind === "predicate"
+    question.kind === DECISION_KIND.predicate
       ? "Answer true or false."
       : [
           "Answer with one of:",

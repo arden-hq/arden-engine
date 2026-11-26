@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { STORE_REASON } from "../../persistence/errors.js"
 import type { RelayStoreError } from "../../persistence/relay/store.js"
 import { RelayService, type RelayServiceError } from "../../relay/service.js"
 import { ArdenApi } from "../api.js"
@@ -9,9 +10,9 @@ const serviceError = (
   error: RelayServiceError
 ): Effect.Effect<never, HttpApiError.NotFound | HttpApiError.ServiceUnavailable> => {
   switch (error.reason) {
-    case "not_found":
+    case STORE_REASON.not_found:
       return Effect.fail(new HttpApiError.NotFound({}))
-    case "unavailable":
+    case STORE_REASON.unavailable:
       return Effect.fail(new HttpApiError.ServiceUnavailable({}))
   }
 }

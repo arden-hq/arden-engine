@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 
 import { causedChainDepth } from "../automations/chain-depth.js"
-import type { AskFeedRow, AskRef } from "../automations/model.js"
+import { ASK_REF_KIND, type AskFeedRow, type AskRef } from "../automations/model.js"
 import { runColumns, runDestinationSessionId } from "./run-destination.js"
 import { causingAutomation, causingWakeDepth } from "./run-cause.js"
 import { pendingDecisionCards } from "./pending-decision-cards.js"
@@ -45,7 +45,7 @@ export const readOpenAsk = Effect.fnUntraced(function* (sql: SqlClient.SqlClient
     WHERE card.run_id = ${runId} AND card.tool_call_id = ${toolCallId}
       AND card.kind = 'tool_approval'`
   const rows =
-    ask.kind === "question"
+    ask.kind === ASK_REF_KIND.question
       ? yield* sql<AskSqlRow>`
           SELECT 'question:' || question.question_id AS ask_key, 'question' AS kind,
             json_extract(question.content, '$.prompt') AS text,
@@ -67,11 +67,11 @@ export const readOpenAsk = Effect.fnUntraced(function* (sql: SqlClient.SqlClient
 })
 
 const askOfKey = (key: string): AskRef | undefined => {
-  if (key.startsWith("question:")) return { kind: "question", questionId: key.slice(9) }
+  if (key.startsWith("question:")) return { kind: ASK_REF_KIND.question, questionId: key.slice(9) }
   const card = /^approval:(.+):([^:]+)$/u.exec(key)
   return card?.[1] === undefined || card[2] === undefined
     ? undefined
-    : { kind: "card", runId: card[1], toolCallId: card[2] }
+    : { kind: ASK_REF_KIND.card, runId: card[1], toolCallId: card[2] }
 }
 
 export const dropClosedAsks = Effect.fnUntraced(function* (sql: SqlClient.SqlClient, now: string) {

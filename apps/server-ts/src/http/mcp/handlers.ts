@@ -1,33 +1,41 @@
 import {
   GITHUB_CONNECTION,
+  MCP_PRESET_AUTH,
+  MCP_TRANSPORT,
   type GitHubConnectionState,
   type McpServer
 } from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
-import type { McpConnectionError } from "../../mcp/errors.js"
+import { MCP_ERROR_REASON, type McpConnectionError } from "../../mcp/errors.js"
 import { McpConnections } from "../../mcp/service.js"
 import { mcpPresetCatalog } from "../../mcp/presets.js"
 import { errorMessage } from "@arden-hq/std/errors"
 import { ArdenApi } from "../api.js"
-import { CapabilityOfferStore } from "../../persistence/capability-offers/store.js"
-import { LocalCaller } from "../middleware/local-only.js"
+import {
+  CAPABILITY_OFFER_DECLINE,
+  CapabilityOfferStore
+} from "../../persistence/capability-offers/store.js"
+import { LOCAL_CALLER, LocalCaller } from "../middleware/local-only.js"
 import { McpRejected, McpUnavailable } from "./api.js"
 import { failInternal, storeErrorToHttp, StoreInvalid } from "../errors.js"
 
 const OFFER_OPEN = "open" as const
 
 const mapError = (error: McpConnectionError) => {
-  if (error.reason === "auth_required") return new StoreInvalid({ detail: error.message })
-  if (error.reason === "rejected") return new McpRejected({ detail: error.message })
-  if (error.reason === "not_set_up" || error.reason === "unavailable")
+  if (error.reason === MCP_ERROR_REASON.authRequired)
+    return new StoreInvalid({ detail: error.message })
+  if (error.reason === MCP_ERROR_REASON.rejected) return new McpRejected({ detail: error.message })
+  if (error.reason === MCP_ERROR_REASON.notSetUp || error.reason === MCP_ERROR_REASON.unavailable)
     return new McpUnavailable({ detail: error.message })
   return storeErrorToHttp({ reason: error.reason, message: error.message })
 }
 
 const logFailure = (error: McpConnectionError) =>
-  error.reason === "not_set_up" || error.reason === "unavailable" || error.reason === "storage"
+  error.reason === MCP_ERROR_REASON.notSetUp ||
+  error.reason === MCP_ERROR_REASON.unavailable ||
+  error.reason === MCP_ERROR_REASON.storage
     ? Effect.logWarning("MCP request failed").pipe(
         Effect.annotateLogs({
           operation: error.operation,
@@ -42,7 +50,7 @@ const toHttp = <A>(effect: Effect.Effect<A, McpConnectionError>) =>
   effect.pipe(Effect.tapError(logFailure), Effect.mapError(mapError))
 
 const transportResponse = (transport: McpServer["transport"]) =>
-  transport.type === "stdio"
+  transport.type === MCP_TRANSPORT.stdio
     ? {
         type: transport.type,
         command: transport.command,
@@ -101,7 +109,8 @@ export const McpHandlers = HttpApiBuilder.group(
       .handle(
         "listOffers",
         Effect.fn("McpHandlers.listOffers")(function* ({ params }) {
-          if ((yield* LocalCaller) !== "desktop") return yield* new HttpApiError.Forbidden({})
+          if ((yield* LocalCaller) !== LOCAL_CALLER.desktop)
+            return yield* new HttpApiError.Forbidden({})
           const rows = yield* offers.list(params.sessionId).pipe(Effect.catch(failInternal("Mcp")))
           return {
             offers: rows.map((row) => ({
@@ -115,11 +124,13 @@ export const McpHandlers = HttpApiBuilder.group(
       .handle(
         "declineOffer",
         Effect.fn("McpHandlers.declineOffer")(function* ({ payload }) {
-          if ((yield* LocalCaller) !== "desktop") return yield* new HttpApiError.Forbidden({})
+          if ((yield* LocalCaller) !== LOCAL_CALLER.desktop)
+            return yield* new HttpApiError.Forbidden({})
           const result = yield* offers
             .decline({ sessionId: payload.session_id, toolCallId: payload.tool_call_id })
             .pipe(Effect.catch(failInternal("Mcp")))
-          if (result === "unknown") return yield* new HttpApiError.NotFound({})
+          if (result === CAPABILITY_OFFER_DECLINE.unknown)
+            return yield* new HttpApiError.NotFound({})
           return { outcome: result }
         })
       )
@@ -132,7 +143,7 @@ export const McpHandlers = HttpApiBuilder.group(
             setup_url: preset.setupUrl,
             servers: preset.servers,
             auth:
-              preset.auth.type === "token"
+              preset.auth.type === MCP_PRESET_AUTH.token
                 ? { type: preset.auth.type }
                 : {
                     type: preset.auth.type,

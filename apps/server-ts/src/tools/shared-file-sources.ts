@@ -5,7 +5,8 @@ import path from "node:path"
 
 import type { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { ownerText } from "../persistence/transcript/owner-words.js"
-import { fileKind } from "./read-binary.js"
+import { FILE_KIND, fileKind } from "./read-binary.js"
+import { IMAGE_MEDIA_TYPE } from "@arden-hq/std/message-vocabulary"
 import { toolFailure } from "./tool-failure.js"
 
 const AttachedImageSchema = Schema.Struct({
@@ -14,18 +15,20 @@ const AttachedImageSchema = Schema.Struct({
   data: Schema.NonEmptyString
 })
 
+export const TRANSCRIPT_FILE = { image: "image", path: "path" } as const
+
 export type TranscriptFile = {
   readonly sessionId: string
   readonly name: string
   readonly key: string
 } & (
   | {
-      readonly kind: "image"
+      readonly kind: typeof TRANSCRIPT_FILE.image
       readonly data: string
       readonly mediaType: string
       readonly number: number
     }
-  | { readonly kind: "path"; readonly path: string }
+  | { readonly kind: typeof TRANSCRIPT_FILE.path; readonly path: string }
 )
 
 export const transcriptFiles = async (
@@ -70,7 +73,7 @@ export const transcriptFiles = async (
               kind: "image",
               sessionId,
               key: `chat-file:${record.messageId}:${index}`,
-              name: `attachment-${number}.${image.value.media_type === "image/png" ? "png" : "jpg"}`,
+              name: `attachment-${number}.${image.value.media_type === IMAGE_MEDIA_TYPE.png ? "png" : "jpg"}`,
               mediaType: image.value.media_type,
               data: image.value.data,
               number
@@ -123,8 +126,8 @@ export const fileMediaTypeForName = (name: string): string =>
 
 export const fileMediaType = (bytes: Uint8Array, name: string): string => {
   const kind = fileKind({ bytes, name })
-  if (kind.kind === "image") return `image/${kind.format}`
-  if (kind.kind === "pdf") return "application/pdf"
+  if (kind.kind === FILE_KIND.image) return `image/${kind.format}`
+  if (kind.kind === FILE_KIND.pdf) return "application/pdf"
   return fileMediaTypeForName(name)
 }
 

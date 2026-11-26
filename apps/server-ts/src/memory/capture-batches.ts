@@ -1,4 +1,6 @@
 import { WIKI_PAGE_LIFECYCLE } from "@arden-hq/protocol/wiki"
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
+import { MEMORY_CAPTURE_MOVE, MEMORY_CAPTURE_POSITION } from "../persistence/memory/store.js"
 import { type RunOrigin } from "../persistence/runs/stored-context.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
@@ -24,12 +26,32 @@ const CAPTURE_RECORD_LIMIT = 40
 const CAPTURE_CHAR_LIMIT = 6_000
 const TRANSCRIPT_PAGE_LIMIT = 120
 
+const CAPTURE_EVIDENCE = {
+  human: "human",
+  automation: "automation",
+  task: "task",
+  space: "space",
+  unknown: "unknown"
+} as const
+
 type CaptureEvidenceKind =
-  | { readonly kind: "human" }
-  | { readonly kind: "automation"; readonly automationId: string; readonly occurrenceId: string }
-  | { readonly kind: "task"; readonly itemId: string; readonly occurrenceId: string }
-  | { readonly kind: "space"; readonly spaceId: string; readonly occurrenceId: string }
-  | { readonly kind: "unknown" }
+  | { readonly kind: typeof CAPTURE_EVIDENCE.human }
+  | {
+      readonly kind: typeof CAPTURE_EVIDENCE.automation
+      readonly automationId: string
+      readonly occurrenceId: string
+    }
+  | {
+      readonly kind: typeof CAPTURE_EVIDENCE.task
+      readonly itemId: string
+      readonly occurrenceId: string
+    }
+  | {
+      readonly kind: typeof CAPTURE_EVIDENCE.space
+      readonly spaceId: string
+      readonly occurrenceId: string
+    }
+  | { readonly kind: typeof CAPTURE_EVIDENCE.unknown }
 
 interface CaptureExcerpt {
   readonly record: TranscriptMessageRecord
@@ -70,22 +92,25 @@ export const makeMemoryCaptureBatches = (input: {
     excerpt: CaptureExcerpt,
     captureNow: Date
   ): string => {
-    if (excerpt.record.role === ROLE.assistant && excerpt.evidence.kind === "human") {
+    if (
+      excerpt.record.role === ROLE.assistant &&
+      excerpt.evidence.kind === CAPTURE_EVIDENCE.human
+    ) {
       return "Assistant context only"
     }
     switch (excerpt.evidence.kind) {
-      case "human":
+      case CAPTURE_EVIDENCE.human:
         return `Human source, cite as ${chatCitation(
           { publicRef: chat.publicRef, title: chat.name ?? "" },
           evidenceDateLabel([DateTime.toDate(excerpt.record.createdAt)], captureNow)
         )}`
-      case "automation":
+      case CAPTURE_EVIDENCE.automation:
         return `Automation source: ${excerpt.evidence.automationId}; occurrence ${excerpt.evidence.occurrenceId}; not a human assertion`
-      case "task":
+      case CAPTURE_EVIDENCE.task:
         return `Task worker source: ${excerpt.evidence.itemId}; occurrence ${excerpt.evidence.occurrenceId}; not a human assertion`
-      case "space":
+      case CAPTURE_EVIDENCE.space:
         return `Space worker source: ${excerpt.evidence.spaceId}; occurrence ${excerpt.evidence.occurrenceId}; not a human assertion`
-      case "unknown":
+      case CAPTURE_EVIDENCE.unknown:
         return "Unverified source context only; not a human assertion"
     }
   }
@@ -118,7 +143,7 @@ export const makeMemoryCaptureBatches = (input: {
       const moved = yield* captures[operation](identity).pipe(
         Effect.mapError(captureError(message, identity.sessionId))
       )
-      if (moved === "superseded")
+      if (moved === MEMORY_CAPTURE_MOVE.superseded)
         yield* Effect.logInfo(`Memory capture batch superseded before ${operation}`, {
           sessionId: identity.sessionId
         })
@@ -237,7 +262,7 @@ export const makeMemoryCaptureBatches = (input: {
               captureError("Could not prepare durable Memory capture work", work.sessionId)
             )
           )
-        if (prepared === "superseded") continue
+        if (prepared === MEMORY_CAPTURE_MOVE.superseded) continue
       }
       return yield* offer(read.identity, read.excerpts)
     }
@@ -306,10 +331,10 @@ const readCaptureBatch = Effect.fn("Memory.readCaptureBatch")(function* (
     ...selected,
     reviewable: selected.excerpts.some(
       (excerpt) =>
-        excerpt.evidence.kind !== "unknown" &&
+        excerpt.evidence.kind !== CAPTURE_EVIDENCE.unknown &&
         (excerpt.record.role === ROLE.user ||
           excerpt.record.role === ROLE.interaction ||
-          excerpt.evidence.kind !== "human")
+          excerpt.evidence.kind !== CAPTURE_EVIDENCE.human)
     )
   }
 })
@@ -319,23 +344,33 @@ const evidenceKind = (
   origin: RunOrigin | undefined,
   owned: ReadonlySet<string>
 ): CaptureEvidenceKind => {
-  if (owned.has(record.messageId)) return { kind: "human" }
+  if (owned.has(record.messageId)) return { kind: CAPTURE_EVIDENCE.human }
   switch (origin?.kind) {
-    case "automation":
+    case RUN_ORIGIN.automation:
       return {
-        kind: "automation",
+        kind: CAPTURE_EVIDENCE.automation,
         automationId: origin.automation_id,
         occurrenceId: origin.occurrence_id
       }
-    case "task":
-      return { kind: "task", itemId: origin.item_id, occurrenceId: origin.occurrence_id }
-    case "space":
-      return { kind: "space", spaceId: origin.space_id, occurrenceId: origin.occurrence_id }
-    case "chat":
-      return record.role === ROLE.assistant ? { kind: "human" } : { kind: "unknown" }
-    case "unrecorded":
+    case RUN_ORIGIN.task:
+      return {
+        kind: CAPTURE_EVIDENCE.task,
+        itemId: origin.item_id,
+        occurrenceId: origin.occurrence_id
+      }
+    case RUN_ORIGIN.space:
+      return {
+        kind: CAPTURE_EVIDENCE.space,
+        spaceId: origin.space_id,
+        occurrenceId: origin.occurrence_id
+      }
+    case RUN_ORIGIN.chat:
+      return record.role === ROLE.assistant
+        ? { kind: CAPTURE_EVIDENCE.human }
+        : { kind: CAPTURE_EVIDENCE.unknown }
+    case RUN_ORIGIN.unrecorded:
     case undefined:
-      return { kind: "unknown" }
+      return { kind: CAPTURE_EVIDENCE.unknown }
   }
 }
 
@@ -411,28 +446,28 @@ const selectExcerpts = (
 }
 
 const offsetIn = (position: MemoryCapturePosition, sequence: number): number | undefined =>
-  position._tag === "AtPosition" && position.progress.sequence === sequence
+  position._tag === MEMORY_CAPTURE_POSITION.AtPosition && position.progress.sequence === sequence
     ? position.progress.offset
     : undefined
 
 const afterSequence = (position: MemoryCapturePosition): number => {
   switch (position._tag) {
-    case "Beginning":
+    case MEMORY_CAPTURE_POSITION.Beginning:
       return -1
-    case "AfterSequence":
+    case MEMORY_CAPTURE_POSITION.AfterSequence:
       return position.sequence
-    case "AtPosition":
+    case MEMORY_CAPTURE_POSITION.AtPosition:
       return position.progress.sequence - 1
   }
 }
 
 const sequenceOf = (position: MemoryCapturePosition): number => {
   switch (position._tag) {
-    case "Beginning":
+    case MEMORY_CAPTURE_POSITION.Beginning:
       return -1
-    case "AfterSequence":
+    case MEMORY_CAPTURE_POSITION.AfterSequence:
       return position.sequence
-    case "AtPosition":
+    case MEMORY_CAPTURE_POSITION.AtPosition:
       return position.progress.sequence
   }
 }

@@ -169,10 +169,12 @@ export const StoredResolveInputSchema = Schema.Struct({
   client_id: identity,
   answer: Schema.Union([
     StoredRunQuestionAnswerSchema,
-    Schema.Struct({ kind: Schema.Literal("wait") })
+    Schema.Struct({ kind: Schema.Literal(RUN_QUESTION_ANSWER.wait) })
   ])
 })
-export type StoredResolveAnswer = StoredRunQuestionAnswer | { readonly kind: "wait" }
+export type StoredResolveAnswer =
+  | StoredRunQuestionAnswer
+  | { readonly kind: typeof RUN_QUESTION_ANSWER.wait }
 
 export interface StoredRunQuestionList {
   readonly questions: ReadonlyArray<StoredRunQuestion>

@@ -1,7 +1,13 @@
 import { after } from "@arden-hq/std/timer"
 import { StringDecoder } from "node:string_decoder"
 
-import type { LiveProcess, OutputStream, ProcessExit, ProcessInput } from "./live-process.js"
+import {
+  PROCESS_INPUT,
+  type LiveProcess,
+  type OutputStream,
+  type ProcessExit,
+  type ProcessInput
+} from "./live-process.js"
 import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 
 import type { ShellAccess } from "../tools/shell-policy.js"
@@ -10,8 +16,15 @@ import { currentMillis } from "../runtime/clock.js"
 const MAX_REPLAY_CHARS = 512 * 1024
 const MAX_READ_CHARS = 64 * 1024
 const MAX_DETACHED = 16
+const CTRL_C = "\u0003"
 
-type TerminalPhase = "foreground" | "detached"
+export const TERMINAL_PHASE = { foreground: "foreground", detached: "detached" } as const
+
+export const TERMINAL_EVENT = { output: "output", state: "state", removed: "removed" } as const
+
+const EXIT_NOTICE = { pending: "pending", done: "done" } as const
+
+type TerminalPhase = (typeof TERMINAL_PHASE)[keyof typeof TERMINAL_PHASE]
 
 export interface TerminalInfo {
   readonly id: number
@@ -38,13 +51,13 @@ interface TerminalRead {
 
 type TerminalEvent =
   | {
-      readonly type: "output"
+      readonly type: typeof TERMINAL_EVENT.output
       readonly terminal: TerminalInfo
       readonly data: string
       readonly cursor: number
     }
-  | { readonly type: "state"; readonly terminal: TerminalInfo }
-  | { readonly type: "removed"; readonly terminal: TerminalInfo }
+  | { readonly type: typeof TERMINAL_EVENT.state; readonly terminal: TerminalInfo }
+  | { readonly type: typeof TERMINAL_EVENT.removed; readonly terminal: TerminalInfo }
 
 type TerminalWrite = "sent" | "stdin_closed" | "exited"
 
@@ -55,7 +68,7 @@ interface Entry {
   cursor: number
   readCursor: number
   readonly readerCursors: Map<string, number>
-  exitNotice: "pending" | "done"
+  exitNotice: (typeof EXIT_NOTICE)[keyof typeof EXIT_NOTICE]
   readonly detach: () => void
 }
 
@@ -116,7 +129,9 @@ export const makeTerminalStore = (): TerminalStore => {
     emit({ type: "removed", terminal: entry.info })
   }
   const prune = (): void => {
-    const detached = [...entries.values()].filter((entry) => entry.info.phase === "detached")
+    const detached = [...entries.values()].filter(
+      (entry) => entry.info.phase === TERMINAL_PHASE.detached
+    )
     if (detached.length <= MAX_DETACHED) return
     const oldest = [
       ...detached.filter((entry) => entry.info.exit !== undefined),
@@ -171,7 +186,7 @@ export const makeTerminalStore = (): TerminalStore => {
         cursor: 0,
         readCursor: 0,
         readerCursors: new Map(),
-        exitNotice: "pending",
+        exitNotice: EXIT_NOTICE.pending,
         detach: () => {
           stopData()
           stopExit()
@@ -189,7 +204,7 @@ export const makeTerminalStore = (): TerminalStore => {
       const entry = entries.get(id)
       if (entry === undefined) return undefined
       entry.readCursor = entry.cursor
-      update(entry, { phase: "detached" })
+      update(entry, { phase: TERMINAL_PHASE.detached })
       prune()
       return entries.get(id)?.info
     },
@@ -214,7 +229,7 @@ export const makeTerminalStore = (): TerminalStore => {
       const dropped = from - previous
       if (readerId === undefined) {
         entry.readCursor = entry.cursor
-        if (entry.info.exit !== undefined) entry.exitNotice = "done"
+        if (entry.info.exit !== undefined) entry.exitNotice = EXIT_NOTICE.done
       } else {
         entry.readerCursors.delete(readerId)
         entry.readerCursors.set(readerId, entry.cursor)
@@ -252,24 +267,24 @@ export const makeTerminalStore = (): TerminalStore => {
     write: (id, chars) => {
       const entry = entries.get(id)
       if (entry === undefined || entry.info.exit !== undefined) return "exited"
-      if (chars === "\u0003") {
+      if (chars === CTRL_C) {
         entry.process.interrupt()
         return "sent"
       }
-      if (entry.process.input === "closed") return "stdin_closed"
+      if (entry.process.input === PROCESS_INPUT.closed) return "stdin_closed"
       return entry.process.write(chars) ? "sent" : "exited"
     },
     kill: (id, options) => {
       const entry = entries.get(id)
       if (entry === undefined) return
-      if (options?.notify === false) entry.exitNotice = "done"
+      if (options?.notify === false) entry.exitNotice = EXIT_NOTICE.done
       entry.process.kill()
     },
     stopRuns: (runIds) => {
       const stopped = new Set(runIds)
       for (const entry of entries.values()) {
         if (!stopped.has(entry.info.runId) || entry.info.exit !== undefined) continue
-        entry.exitNotice = "done"
+        entry.exitNotice = EXIT_NOTICE.done
         entry.process.kill()
       }
     },
@@ -278,7 +293,7 @@ export const makeTerminalStore = (): TerminalStore => {
       const entry = entries.get(id)
       const notice = unreadExit(entry)
       if (entry === undefined || notice === undefined) return undefined
-      entry.exitNotice = "done"
+      entry.exitNotice = EXIT_NOTICE.done
       entry.readCursor = entry.cursor
       return notice
     },
@@ -305,9 +320,9 @@ export const makeTerminalStore = (): TerminalStore => {
 const unreadExit = (entry: Entry | undefined): ExitNotice | undefined => {
   if (
     entry === undefined ||
-    entry.info.phase !== "detached" ||
+    entry.info.phase !== TERMINAL_PHASE.detached ||
     entry.info.exit === undefined ||
-    entry.exitNotice === "done"
+    entry.exitNotice === EXIT_NOTICE.done
   )
     return undefined
   const available = entry.cursor - entry.replay.length

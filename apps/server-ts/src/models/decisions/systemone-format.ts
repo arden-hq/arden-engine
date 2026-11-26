@@ -1,9 +1,13 @@
 import { Effect, Schema } from "effect"
 
-import { type DecisionEndpoint, postDecisionRequest } from "./endpoint.js"
+import { DECISION_WIRE_FORMAT, type DecisionEndpoint, postDecisionRequest } from "./endpoint.js"
+import { MODEL_ENDPOINT_INPUT } from "@arden-hq/protocol/model-endpoints"
+import { IMAGE_MEDIA_TYPE } from "@arden-hq/std/message-vocabulary"
 import { fitJevImage } from "./image-fit.js"
 import {
   calibratedAnswer,
+  DECISION_KIND,
+  DECISIONS_ERROR_REASON,
   type DecisionAnswer,
   type DecisionBackend,
   type DecisionInput,
@@ -18,37 +22,37 @@ export const systemOneFormatBackend = (endpoint: DecisionEndpoint): DecisionBack
   input: endpoint.input,
   classify: Effect.fn("Decisions.systemone")(function* (input: DecisionInput) {
     yield* validateDecisionInput(input)
-    if (input.images.length > 0 && endpoint.input === "text") {
+    if (input.images.length > 0 && endpoint.input === MODEL_ENDPOINT_INPUT.text) {
       return yield* new DecisionsError({
-        reason: "invalid_request",
+        reason: DECISIONS_ERROR_REASON.invalidRequest,
         message: "This endpoint has not passed the image check"
       })
     }
     if (
-      endpoint.format === "llama-systemone" &&
-      Object.values(input.questions).some((q) => q.kind === "box")
+      endpoint.format === DECISION_WIRE_FORMAT.llamaSystemone &&
+      Object.values(input.questions).some((q) => q.kind === DECISION_KIND.box)
     ) {
       return yield* new DecisionsError({
-        reason: "invalid_request",
+        reason: DECISIONS_ERROR_REASON.invalidRequest,
         message: "The local decision transport does not support boxes"
       })
     }
     if (
-      endpoint.format !== "llama-systemone" &&
+      endpoint.format !== DECISION_WIRE_FORMAT.llamaSystemone &&
       input.images.some((image) => !["image/png", "image/jpeg"].includes(image.mediaType))
     ) {
       return yield* new DecisionsError({
-        reason: "invalid_request",
+        reason: DECISIONS_ERROR_REASON.invalidRequest,
         message: "Jev images must be PNG or JPEG"
       })
     }
     const images =
-      endpoint.format === "llama-systemone"
+      endpoint.format === DECISION_WIRE_FORMAT.llamaSystemone
         ? input.images
         : yield* Effect.forEach(input.images, (image) => fitJevImage(image, input.signal))
     const body = yield* postDecisionRequest(endpoint, {
       body: systemOneRequest(endpoint, { ...input, images }),
-      ...(endpoint.format === "systemone" && input.images.length > 0
+      ...(endpoint.format === DECISION_WIRE_FORMAT.systemone && input.images.length > 0
         ? { headers: { "TypeSafe-Danger-Zone-Images": "true" } }
         : {}),
       signal: input.signal
@@ -72,7 +76,7 @@ const systemOneState = (endpoint: DecisionEndpoint, input: DecisionInput) => {
   const state = { task: input.instructions, state: input.state }
   if (input.images.length === 0) return { state }
   switch (endpoint.format) {
-    case "systemone": {
+    case DECISION_WIRE_FORMAT.systemone: {
       const refs = input.images.map(() => crypto.randomUUID())
       return {
         state: { ...state, images: refs },
@@ -81,14 +85,14 @@ const systemOneState = (endpoint: DecisionEndpoint, input: DecisionInput) => {
             refs[index],
             {
               type: "image",
-              format: image.mediaType === "image/png" ? "png" : "jpg",
+              format: image.mediaType === IMAGE_MEDIA_TYPE.png ? "png" : "jpg",
               data_base64: image.data
             }
           ])
         )
       }
     }
-    case "openrouter-decisions":
+    case DECISION_WIRE_FORMAT.openrouterDecisions:
       return {
         state: [
           state,
@@ -98,26 +102,26 @@ const systemOneState = (endpoint: DecisionEndpoint, input: DecisionInput) => {
           }))
         ]
       }
-    case "llama-systemone":
+    case DECISION_WIRE_FORMAT.llamaSystemone:
       return {
         state,
         images: input.images.map((image) => `data:${image.mediaType};base64,${image.data}`)
       }
-    case "decisions":
+    case DECISION_WIRE_FORMAT.decisions:
       return { state }
   }
 }
 
 const systemOneQuestion = (question: DecisionQuestion, format: DecisionEndpoint["format"]) => {
   switch (question.kind) {
-    case "box":
+    case DECISION_KIND.box:
       return {
         type: "box",
-        instructions: `${question.instructions} in \`${format === "systemone" ? `images[${question.image}]` : `[${question.image + 1}]`}\`.`
+        instructions: `${question.instructions} in \`${format === DECISION_WIRE_FORMAT.systemone ? `images[${question.image}]` : `[${question.image + 1}]`}\`.`
       }
-    case "predicate":
+    case DECISION_KIND.predicate:
       return { type: "noul", instructions: question.instructions }
-    case "choice":
+    case DECISION_KIND.choice:
       return {
         type: "choice",
         instructions: question.instructions,
@@ -125,7 +129,7 @@ const systemOneQuestion = (question: DecisionQuestion, format: DecisionEndpoint[
           question.options.map((option) => [option.value, option.description])
         )
       }
-    case "score":
+    case DECISION_KIND.score:
       return {
         type: "score",
         instructions: question.instructions,
@@ -149,17 +153,23 @@ const BoxSchema = Schema.Struct({
   )
 )
 
+const SYSTEMONE_ANSWER = { box: "box", noul: "noul", choice: "choice", score: "score" } as const
+
 const SystemOneAnswerSchema = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("box"), box: BoxSchema, confidence: Probability }),
-  Schema.Struct({ type: Schema.Literal("noul"), noul: Probability }),
   Schema.Struct({
-    type: Schema.Literal("choice"),
+    type: Schema.Literal(SYSTEMONE_ANSWER.box),
+    box: BoxSchema,
+    confidence: Probability
+  }),
+  Schema.Struct({ type: Schema.Literal(SYSTEMONE_ANSWER.noul), noul: Probability }),
+  Schema.Struct({
+    type: Schema.Literal(SYSTEMONE_ANSWER.choice),
     choice: Schema.String,
     confidence: Probability,
     probabilities: Schema.Record(Schema.String, Probability)
   }),
   Schema.Struct({
-    type: Schema.Literal("score"),
+    type: Schema.Literal(SYSTEMONE_ANSWER.score),
     score: Schema.Number,
     confidence: Probability,
     probabilities: Schema.Record(Schema.String, Probability)
@@ -197,28 +207,28 @@ const systemOneAnswer = (
   raw: typeof SystemOneAnswerSchema.Type
 ): DecisionAnswer | undefined => {
   switch (raw.type) {
-    case "box":
-      return question.kind === "box"
+    case SYSTEMONE_ANSWER.box:
+      return question.kind === DECISION_KIND.box
         ? { kind: "box", image: question.image, box: raw.box, confidence: raw.confidence }
         : undefined
-    case "noul":
-      return question.kind === "predicate"
+    case SYSTEMONE_ANSWER.noul:
+      return question.kind === DECISION_KIND.predicate
         ? calibratedAnswer(question, {
             probabilities: { true: raw.noul, false: 1 - raw.noul },
             picked: undefined,
             confidence: undefined
           })
         : undefined
-    case "choice":
-      return question.kind === "choice"
+    case SYSTEMONE_ANSWER.choice:
+      return question.kind === DECISION_KIND.choice
         ? calibratedAnswer(question, {
             probabilities: raw.probabilities,
             picked: raw.choice,
             confidence: raw.confidence
           })
         : undefined
-    case "score": {
-      if (question.kind !== "score") return undefined
+    case SYSTEMONE_ANSWER.score: {
+      if (question.kind !== DECISION_KIND.score) return undefined
       const byLevel = Object.entries(raw.probabilities).map(([index, probability]) => {
         const level = question.levels[Number(index)]
         return level === undefined ? undefined : ([level.value, probability] as const)

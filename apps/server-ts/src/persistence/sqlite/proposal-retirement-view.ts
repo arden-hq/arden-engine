@@ -1,7 +1,9 @@
 import { RetirementSourceRecordSchema, type RetirementSourceRecord } from "../work/task-record.js"
-import type {
-  TaskProposalRetirement,
-  TaskProposalRetirementEvidence
+import { SIGNAL_SOURCE } from "@arden-hq/protocol/signals"
+import {
+  TASK_PROPOSAL_RETIREMENT_SOURCE,
+  type TaskProposalRetirement,
+  type TaskProposalRetirementEvidence
 } from "@arden-hq/protocol/proposals"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -61,10 +63,17 @@ const namesOf = Effect.fn("TaskProposal.retirementNames")(function* (
     ...new Set(sources.flatMap((source) => pick(source) ?? []))
   ]
   const sessionIds = ids((source) =>
-    source.kind === "chat" || source.kind === "chat_action" ? source.session_id : undefined
+    source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.chat ||
+    source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action
+      ? source.session_id
+      : undefined
   )
-  const taskIds = ids((source) => (source.kind === "task" ? source.item_id : undefined))
-  const itemIds = ids((source) => (source.kind === "connection_item" ? source.item_id : undefined))
+  const taskIds = ids((source) =>
+    source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.task ? source.item_id : undefined
+  )
+  const itemIds = ids((source) =>
+    source.kind === TASK_PROPOSAL_RETIREMENT_SOURCE.connection_item ? source.item_id : undefined
+  )
   const sessions =
     sessionIds.length === 0
       ? []
@@ -97,7 +106,7 @@ const namesOf = Effect.fn("TaskProposal.retirementNames")(function* (
         row.item_id,
         {
           title: row.title,
-          url: row.source === "github" ? (githubItemUrl(row.thread_key) ?? null) : null
+          url: row.source === SIGNAL_SOURCE.github ? (githubItemUrl(row.thread_key) ?? null) : null
         }
       ])
     )
@@ -109,8 +118,8 @@ const evidenceOf = (
   names: Names
 ): TaskProposalRetirementEvidence | undefined => {
   switch (source.kind) {
-    case "chat":
-    case "chat_action": {
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.chat:
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.chat_action: {
       const label = names.chats.get(source.session_id)
       return label === undefined
         ? undefined
@@ -124,13 +133,13 @@ const evidenceOf = (
             label: label === null ? { kind: "unnamed" } : { kind: "named", name: label }
           }
     }
-    case "memory":
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.memory:
       return { kind: "memory", page_ref: source.page_ref }
-    case "task": {
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.task: {
       const label = names.tasks.get(source.item_id)
       return label === undefined ? undefined : { kind: "task", item_id: source.item_id, label }
     }
-    case "connection_item": {
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.connection_item: {
       const item = names.items.get(source.item_id)
       return item === undefined
         ? undefined
@@ -141,7 +150,7 @@ const evidenceOf = (
             link: item.url === null ? { kind: "unlinked" } : { kind: "linked", url: item.url }
           }
     }
-    case "space":
+    case TASK_PROPOSAL_RETIREMENT_SOURCE.space:
       return undefined
   }
 }

@@ -98,9 +98,9 @@ export const commandLineAccess = HttpRouter.middleware(
       switch (requirement.kind) {
         case COMMAND_LINE_RULE.open:
           return yield* httpApp
-        case "refused":
+        case REQUIREMENT.refused:
           return forbidden
-        case "own": {
+        case REQUIREMENT.own: {
           const own = yield* sessions
             .commandLineChat(requirement.target)
             .pipe(Effect.orElseSucceed(() => false))

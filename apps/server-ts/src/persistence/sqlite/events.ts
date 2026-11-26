@@ -1,3 +1,6 @@
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import { ACTIVE_PROJECTION } from "../events/active-projection.js"
 import { runActivityView } from "@arden-hq/protocol/chat"
 import {
   appendInTransaction as appendJournalInTransaction,
@@ -41,6 +44,7 @@ import {
 } from "../events/active-projection.js"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
 import {
+  ADMISSION_STATE,
   type EventAdmissionState,
   EventAdmissionRowSchema,
   eventAdmissionState,
@@ -138,9 +142,9 @@ export const makeChatEventStore = (
         eventError("append", "Stored Chat event admission state is corrupt", cause)
       )
     )
-    return valid.event_type === "RUN_STARTED"
-      ? { kind: "active", runId: valid.run_id }
-      : { kind: "terminal", runId: valid.run_id }
+    return valid.event_type === SERVER_EVENT_TYPE.runStarted
+      ? { kind: ADMISSION_STATE.active, runId: valid.run_id }
+      : { kind: ADMISSION_STATE.terminal, runId: valid.run_id }
   })
 
   const appendInTransaction = Effect.fn("SqliteChatEventStore.appendInTransaction")(function* (
@@ -158,9 +162,9 @@ export const makeChatEventStore = (
     let rejectedIndex = rejectedDraftIndex(admission, valid.events)
     if (
       rejectedIndex === 0 &&
-      admission?.kind === "active" &&
+      admission?.kind === ADMISSION_STATE.active &&
       admission.runId !== undefined &&
-      valid.events[0]?.event.type === "RUN_STARTED"
+      valid.events[0]?.event.type === SERVER_EVENT_TYPE.runStarted
     ) {
       const runs = yield* sql<{ readonly status: string }>`
         SELECT status FROM chat_runs WHERE run_id = ${admission.runId} LIMIT 1
@@ -182,7 +186,7 @@ export const makeChatEventStore = (
     }
 
     const active = activeProjections.get(valid.sessionId)
-    const retained = active?.kind === "ready" ? active.records : []
+    const retained = active?.kind === ACTIVE_PROJECTION.ready ? active.records : []
     const drafts = yield* Effect.forEach(valid.events, (draft) =>
       journalDraft(withContentAnchor(draft.event, retained), draft.runId, isDurableDraft(draft))
     )
@@ -280,7 +284,7 @@ export const makeChatEventStore = (
       activeProjections.get(committed.sessionId) ??
       (yield* storedEventAdmission(committed.sessionId).pipe(
         Effect.map((stored): ActiveProjectionState | undefined =>
-          stored?.kind === "active"
+          stored?.kind === ADMISSION_STATE.active
             ? { kind: "ready", runId: stored.runId, records: [], bytes: 0 }
             : undefined
         ),
@@ -310,8 +314,12 @@ export const makeChatEventStore = (
           index > 0
         )
         activeProjectionBytes = otherProjectionBytes + projectionBytes(projection)
-        const restarted = record.event.type === "RUN_STARTED" && projection !== previous
-        if (previous?.kind !== "terminal" && (projection?.kind === "terminal" || restarted)) {
+        const restarted =
+          record.event.type === SERVER_EVENT_TYPE.runStarted && projection !== previous
+        if (
+          previous?.kind !== ACTIVE_PROJECTION.terminal &&
+          (projection?.kind === ACTIVE_PROJECTION.terminal || restarted)
+        ) {
           trimFloor = Math.max(trimFloor, heldThrough(previous))
         }
       }
@@ -421,12 +429,13 @@ export const makeChatEventStore = (
     }
     const current = activeProjections.get(input.sessionId)
     if (current === undefined) return { ...coverage, kind: "complete", records: [] }
-    if (current.kind === "overflow") {
+    if (current.kind === ACTIVE_PROJECTION.overflow) {
       return input.throughSequence > input.afterSequence
         ? { ...coverage, kind: "overflow", throughSequence: current.throughSequence }
         : { ...coverage, kind: "complete", records: [] }
     }
-    if (current.kind === "terminal") return { ...coverage, kind: "complete", records: [] }
+    if (current.kind === ACTIVE_PROJECTION.terminal)
+      return { ...coverage, kind: "complete", records: [] }
     const partial = current.records.find(
       ({ fromSequence, record }) =>
         fromSequence <= input.throughSequence &&
@@ -461,7 +470,7 @@ export const makeChatEventStore = (
       .pipe(Effect.mapError(mapError("follow", "Could not open Chat event follower")))
     const stream = opened.stream.pipe(
       Stream.mapEffect((delivery): Effect.Effect<ChatEventDelivery, ChatEventStoreError> =>
-        delivery.kind === "record"
+        delivery.kind === JOURNAL_DELIVERY.record
           ? decodeRecord(delivery.record, "follow").pipe(
               Effect.map((record) => ({
                 kind: "record" as const,
@@ -479,7 +488,7 @@ export const makeChatEventStore = (
   return ChatEventStore.of({
     currentActivity: (sessionId, runId) => {
       const state = activeProjections.get(sessionId)
-      return state?.kind !== "terminal" && state?.runId === runId
+      return state?.kind !== ACTIVE_PROJECTION.terminal && state?.runId === runId
         ? runActivityView(state.activity)
         : undefined
     },

@@ -1,3 +1,4 @@
+import { LOCAL_MODEL_KIND } from "@arden-hq/protocol/local-models"
 import { Schema } from "effect"
 
 import { type ModelManifest, ModelManifestSchema } from "./manifest.js"
@@ -98,8 +99,8 @@ export type EmbeddingManifest = Extract<ModelManifest, { kind: "embedding" }>
 export type DecisionManifest = Extract<ModelManifest, { kind: "decision" }>
 
 export const LOCAL_EMBEDDING_MODELS = LOCAL_MODEL_CATALOG.filter(
-  (manifest): manifest is EmbeddingManifest => manifest.kind === "embedding"
+  (manifest): manifest is EmbeddingManifest => manifest.kind === LOCAL_MODEL_KIND.embedding
 )
 export const LOCAL_DECISION_MODELS = LOCAL_MODEL_CATALOG.filter(
-  (manifest): manifest is DecisionManifest => manifest.kind === "decision"
+  (manifest): manifest is DecisionManifest => manifest.kind === LOCAL_MODEL_KIND.decision
 )

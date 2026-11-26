@@ -1,6 +1,8 @@
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
+import { JOB_PURPOSE } from "../job-classification.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { QuotaClass, QuotaPauseReason } from "../../models/plan-limits.js"
+import { QUOTA_CLASS, type QuotaClass, type QuotaPauseReason } from "../../models/plan-limits.js"
 import { WorkStoreError } from "../work/store.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { reviewSpaceIdSql } from "./automation-rows.js"
@@ -39,9 +41,11 @@ export const runQuotaClass = Effect.fn("PlanQuota.runClass")(function* (
 })
 
 const quotaClass = (kind: string | null, purpose: string | null): QuotaClass => {
-  if (purpose === "task_execution") return "interactive"
-  if (purpose !== null) return "background"
-  return kind === "automation" || kind === "space" ? "background" : "interactive"
+  if (purpose === JOB_PURPOSE.taskExecution) return QUOTA_CLASS.interactive
+  if (purpose !== null) return QUOTA_CLASS.background
+  return kind === RUN_ORIGIN.automation || kind === RUN_ORIGIN.space
+    ? QUOTA_CLASS.background
+    : QUOTA_CLASS.interactive
 }
 
 export const parkRunForQuota = Effect.fn("PlanQuota.park")(function* (

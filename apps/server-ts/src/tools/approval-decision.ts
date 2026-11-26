@@ -1,9 +1,9 @@
-import type { AskReason, CallFacts, ToolFacts } from "../execution/decide.js"
+import { ASK_REASON, type AskReason, type CallFacts, type ToolFacts } from "../execution/decide.js"
 import { parseMcpSource } from "../mcp/naming.js"
 import { COMMAND_TOOL } from "../persistence/permissions/command-policy.js"
 import type { RuleSubject } from "../persistence/permissions/rules.js"
 import { commandReadsOnly } from "./bash-safe-commands.js"
-import type { ServerToolMetadataInput, ShellCommand } from "./define.js"
+import { TOOL_REQUIREMENT, type ServerToolMetadataInput, type ShellCommand } from "./define.js"
 import { isDestructiveCommand } from "./destructive-commands.js"
 
 interface DecidedTool {
@@ -24,7 +24,9 @@ export const toolFacts = (definition: DecidedTool): ToolFacts => {
     always_ask: metadata.always_ask === true,
     approval_bypass: metadata.approval_bypass === true,
     refuse_unattended: metadata.refuse_unattended === true,
-    per_call: definition.approvalRequirement !== undefined && metadata.requirement !== "boundary",
+    per_call:
+      definition.approvalRequirement !== undefined &&
+      metadata.requirement !== TOOL_REQUIREMENT.boundary,
     standing: metadata.standing
   }
 }
@@ -48,7 +50,7 @@ export const cardGrantSubject = (input: {
   readonly site: string | undefined
 }): RuleSubject | undefined => {
   const { name, metadata } = input.definition
-  if (input.reason !== "default" && input.reason !== "override") return undefined
+  if (input.reason !== ASK_REASON.default && input.reason !== ASK_REASON.override) return undefined
   if (metadata.destructive === true || metadata.always_ask === true) return undefined
   if (name === COMMAND_TOOL || parseMcpSource(metadata.source) !== undefined) return undefined
   return input.site === undefined

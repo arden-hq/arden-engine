@@ -1,22 +1,35 @@
+import {
+  COMPACTION_OPERATION,
+  CONTEXT_COMPACTION_FAILURE,
+  ContextCompactionError,
+  error,
+  mapEventError,
+  mapModelError,
+  mapSettingsError,
+  mapStoreError
+} from "./compaction-errors.js"
+
+export { CONTEXT_COMPACTION_FAILURE, ContextCompactionError }
+import { STORE_REASON } from "../persistence/errors.js"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { CONTEXT_COMPACTION_STATUS } from "@arden-hq/protocol/context"
 import { randomUUID } from "node:crypto"
 import { ModelCatalog } from "../models/catalog.js"
 import { ServerConfig } from "../config/service.js"
-import { Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
-import { ModelStore, ModelStoreError } from "../persistence/models/store.js"
+import { Context, DateTime, Effect, Exit, Layer } from "effect"
+import { ModelStore } from "../persistence/models/store.js"
 import { ModelProviderService } from "../models/provider.js"
 import { meteredModelCall } from "../models/call-usage.js"
 import { UsageStore } from "../persistence/usage/store.js"
-import { ChatEventStore, ChatEventStoreError } from "../persistence/events/store.js"
+import { ChatEventStore } from "../persistence/events/store.js"
 import {
   ContextCompactionStore,
-  ContextCompactionStoreError,
   type ContextCompactionSnapshot
 } from "../persistence/compaction/store.js"
-import type {
-  StoredMessageEnvelope,
-  TranscriptMessageDraft
+import {
+  COMPACTION_KIND,
+  type StoredMessageEnvelope,
+  type TranscriptMessageDraft
 } from "../persistence/transcript/model.js"
 import { estimateHistoryTokens, handoffContent } from "./handoff.js"
 import { planCompaction, type CompactionPlan } from "./planner.js"
@@ -30,10 +43,7 @@ import {
   type IdleCompactionDecision
 } from "./idle-queue.js"
 import { makeIdleCompactor } from "./idle-compactor.js"
-import {
-  IntelligenceSettingsStore,
-  IntelligenceSettingsStoreError
-} from "../persistence/settings/store.js"
+import { IntelligenceSettingsStore } from "../persistence/settings/store.js"
 
 export type ManualCompactionResult =
   | { readonly status: typeof CONTEXT_COMPACTION_STATUS.noSession; readonly message: string }
@@ -59,79 +69,6 @@ export interface AutomaticCompactionInput {
   readonly signal: AbortSignal
 }
 
-export const CONTEXT_COMPACTION_FAILURE = {
-  invalid: "invalid",
-  notFound: "not_found",
-  conflict: "conflict",
-  unavailable: "unavailable",
-  provider: "provider",
-  storage: "storage"
-} as const
-
-export class ContextCompactionError extends Schema.TaggedError<ContextCompactionError>()(
-  "ContextCompactionError",
-  {
-    operation: Schema.Literals(["manual", "automatic", "idle"] as const),
-    reason: Schema.Literals(Object.values(CONTEXT_COMPACTION_FAILURE)),
-    message: Schema.String,
-    sessionId: Schema.optionalKey(Schema.NonEmptyString),
-    runId: Schema.optionalKey(Schema.NonEmptyString),
-    cause: Schema.optionalKey(Schema.Defect())
-  }
-) {}
-
-const error = (
-  operation: "manual" | "automatic" | "idle",
-  reason: ContextCompactionError["reason"],
-  message: string,
-  input?: { readonly sessionId?: string; readonly runId?: string; readonly cause?: unknown }
-) =>
-  new ContextCompactionError({
-    operation,
-    reason,
-    message,
-    ...(input?.sessionId === undefined ? {} : { sessionId: input.sessionId }),
-    ...(input?.runId === undefined ? {} : { runId: input.runId }),
-    ...(input?.cause === undefined ? {} : { cause: input.cause })
-  })
-
-const mapStoreError = (
-  operation: "manual" | "automatic" | "idle",
-  cause: ContextCompactionStoreError
-): ContextCompactionError =>
-  error(operation, cause.reason === "corrupt" ? "storage" : cause.reason, cause.message, {
-    ...(cause.sessionId === undefined ? {} : { sessionId: cause.sessionId }),
-    ...(cause.runId === undefined ? {} : { runId: cause.runId }),
-    cause
-  })
-
-const mapModelError = (
-  operation: "manual" | "automatic" | "idle",
-  sessionId: string,
-  cause: ModelStoreError
-): ContextCompactionError => {
-  const reason =
-    cause.reason === "unavailable" || cause.reason === "storage" ? cause.reason : "invalid"
-  return error(operation, reason, cause.message, { sessionId, cause })
-}
-
-const mapSettingsError = (
-  operation: "manual" | "automatic" | "idle",
-  sessionId: string,
-  cause: IntelligenceSettingsStoreError
-): ContextCompactionError => error(operation, "storage", cause.message, { sessionId, cause })
-
-const mapEventError = (
-  sessionId: string,
-  runId: string,
-  cause: ChatEventStoreError
-): ContextCompactionError =>
-  error("automatic", "storage", cause.message, {
-    sessionId,
-    runId,
-    cause
-  })
-
 const storedInputTokens = (snapshot: {
   readonly metadata: ContextCompactionSnapshot["metadata"]
 }): number | null => {
@@ -152,7 +89,7 @@ const makeHandoff = Effect.fn("ContextCompaction.makeHandoff")(function* (
   const preservedTailIds = plan.tail.map((message) => message.message_id)
   const receipt = {
     compactionId: messageId,
-    kind: "session_handoff" as const,
+    kind: COMPACTION_KIND.sessionHandoff,
     messageStartId: plan.messageStartId,
     messageEndId: plan.messageEndId,
     ...(plan.parentCompactionId === undefined
@@ -345,7 +282,9 @@ export class ContextCompaction extends Context.Service<
           .commit({
             sessionId: snapshot.sessionId,
             ...(snapshot.runId === null ? {} : { runId: snapshot.runId }),
-            ...(operation === "idle" ? { purpose: "idle" as const } : {}),
+            ...(operation === COMPACTION_OPERATION.idle
+              ? { purpose: COMPACTION_OPERATION.idle }
+              : {}),
             expectedContextGeneration: snapshot.contextGeneration,
             expectedContextVersion: snapshot.contextVersion,
             handoff
@@ -361,7 +300,7 @@ export class ContextCompaction extends Context.Service<
         const snapshot = yield* store.snapshot({ sessionId }).pipe(
           Effect.mapError((cause) => mapStoreError("manual", cause)),
           Effect.catchTag("ContextCompactionError", (cause) =>
-            cause.reason === "not_found" ? Effect.succeed(null) : Effect.fail(cause)
+            cause.reason === STORE_REASON.not_found ? Effect.succeed(null) : Effect.fail(cause)
           )
         )
         if (snapshot === null) {

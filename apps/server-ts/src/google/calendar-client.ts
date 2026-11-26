@@ -130,7 +130,7 @@ const CalendarEventSchema = Schema.Struct({
 })
 export type CalendarListedEvent = (typeof CalendarEventSchema)["Type"]
 
-const CALENDAR_EVENT_STATUS = {
+export const CALENDAR_EVENT_STATUS = {
   confirmed: "confirmed",
   tentative: "tentative",
   cancelled: "cancelled"

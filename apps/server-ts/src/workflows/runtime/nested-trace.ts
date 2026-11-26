@@ -14,7 +14,8 @@ export const SCRIPT_PROGRESS_STATUS = {
   failed: "failed"
 } as const
 
-type ScriptProgressStatus = (typeof SCRIPT_PROGRESS_STATUS)[keyof typeof SCRIPT_PROGRESS_STATUS]
+export type ScriptProgressStatus =
+  (typeof SCRIPT_PROGRESS_STATUS)[keyof typeof SCRIPT_PROGRESS_STATUS]
 
 export interface ScriptProgressTool extends NestedCallFacts {
   readonly phase_id: string | null

@@ -1,5 +1,7 @@
 import {
+  PAUSE_REASON,
   PauseRequested,
+  TOOL_APPROVAL_DECISION,
   ToolExecutionError,
   type ToolApprovalContext,
   type ToolApprovalGate,
@@ -10,14 +12,27 @@ import type { ChatApprovalMode } from "@arden-hq/protocol/chat"
 import { Option, Schema } from "effect"
 import { RuleSavedInSchema, type RuleSavedIn } from "@arden-hq/protocol/effect/runs"
 import { homedir } from "node:os"
-import type {
-  ApprovalReview,
-  ApprovalReviewAsk,
-  ApprovalReviewInput,
-  ApprovalReviewVerdict
-} from "./approval-review.js"
-import { decide, waivesRequirement, type CallFacts, type DenyRule } from "../execution/decide.js"
-import { narrowerApprovalMode } from "@arden-hq/protocol/permissions"
+import type { ApprovalReview, ApprovalReviewInput } from "./approval-review.js"
+import {
+  APPROVAL_REVIEW_ASK,
+  APPROVAL_REVIEW_VERDICT,
+  type ApprovalReviewAsk,
+  type ApprovalReviewVerdict
+} from "./approval-review-verdict.js"
+import { TOOL_APPROVAL_OVERRIDE } from "@arden-hq/protocol/tools"
+import { OUTWARD_CATEGORY } from "../execution/review.js"
+import {
+  ALLOW_BY,
+  ASK_DELIVERY,
+  ASK_REASON,
+  VERDICT,
+  decide,
+  waivesRequirement,
+  type CallFacts,
+  type DenyRule
+} from "../execution/decide.js"
+import { CONNECTION_PAUSE_REASON } from "../connections/recovery.js"
+import { APPROVAL_MODE, narrowerApprovalMode } from "@arden-hq/protocol/permissions"
 import { isRefusal, refusalError, withBreaker } from "./refusal.js"
 import { cardGrantSubject, commandFacts, toolFacts } from "./approval-decision.js"
 import { TOOL_GRANT, toolGrantData } from "../persistence/permissions/tool-grant.js"
@@ -33,10 +48,20 @@ import {
   summaryOf,
   type ServerToolMetadataInput
 } from "./define.js"
-import { defaultImpact } from "../execution/impact.js"
+import { CALL_IMPACT, defaultImpact } from "../execution/impact.js"
 import { NOT_RUN_HOST } from "../persistence/tools/mutation-receipt.js"
 import { taskDirectionReview } from "../persistence/work/task-direction.js"
 import { ObservationSnapshotSchema, type ServerRunContext } from "./run-context.js"
+
+const DEFER_OUTCOME = { published: "published", needsReview: "needs_review" } as const
+
+type DeferOutcome = (typeof DEFER_OUTCOME)[keyof typeof DEFER_OUTCOME]
+
+const PLANNED_STATE = { current: "current", needsReview: "needs_review" } as const
+
+type PlannedState = (typeof PLANNED_STATE)[keyof typeof PLANNED_STATE]
+
+const USER_REVIEWER = "user"
 
 type ApprovalFact =
   | {
@@ -63,7 +88,7 @@ export interface ApprovalGatePolicy {
     readonly args: unknown
     readonly changesState: boolean
     readonly prompt: ToolApprovalPrompt
-  }) => Promise<"published" | "needs_review">
+  }) => Promise<DeferOutcome>
   readonly offer: (input: {
     readonly run: ServerRunContext
     readonly toolCallId: string
@@ -77,7 +102,7 @@ export interface ApprovalGatePolicy {
   readonly planned: (call: {
     readonly runId: string
     readonly toolCallId: string
-  }) => Promise<"current" | "needs_review">
+  }) => Promise<PlannedState>
 }
 
 export const makeApprovalGate =
@@ -94,7 +119,7 @@ export const makeApprovalGate =
       const result =
         live.noApproval &&
         cause instanceof PauseRequested &&
-        (cause.reason === "approval" || cause.reason === "connection")
+        (cause.reason === PAUSE_REASON.approval || cause.reason === CONNECTION_PAUSE_REASON)
           ? refusalError({
               what: `${definition.name} needs attention and cannot run in a Side chat`,
               rule: "floor",
@@ -140,7 +165,7 @@ export const makeApprovalGate =
         approved: ctx.approval !== undefined
       }
     )
-    if (live.noApproval && (decision.kind === "ask" || ctx.approval !== undefined))
+    if (live.noApproval && (decision.kind === VERDICT.ask || ctx.approval !== undefined))
       return refused(
         refusalError({
           what: `${definition.name} needs approval and cannot run in a Side chat`,
@@ -148,7 +173,7 @@ export const makeApprovalGate =
           instead: []
         })
       )
-    if (decision.kind === "deny")
+    if (decision.kind === VERDICT.deny)
       return refused(
         refusalError({
           what: `${definition.name} is not allowed in this run: ${DENY_REASON[decision.rule]}`,
@@ -156,12 +181,12 @@ export const makeApprovalGate =
           instead: decision.instead
         })
       )
-    if (decision.kind === "ask") {
+    if (decision.kind === VERDICT.ask) {
       if (
         definition.metadata.changes_state &&
         ctx.approval === undefined &&
         (await services.policy.planned({ runId: ctx.run.runId, toolCallId: ctx.toolCallId })) ===
-          "needs_review"
+          PLANNED_STATE.needsReview
       )
         throw taskDirectionReview()
       const prompt =
@@ -195,7 +220,10 @@ export const makeApprovalGate =
                   name: definition.name,
                   description: definition.description,
                   args: input,
-                  category: impact.kind === "outward" ? impact.category : "unknown",
+                  category:
+                    impact.kind === CALL_IMPACT.outward
+                      ? impact.category
+                      : OUTWARD_CATEGORY.unknown,
                   prompt
                 })
               : plan((whole) =>
@@ -207,13 +235,17 @@ export const makeApprovalGate =
                     prompt: { preview: whole.preview }
                   })
                 )
-          ).catch((): ApprovalReviewVerdict => ({ verdict: "ask", why: { kind: "failed" } }))
+          ).catch((): ApprovalReviewVerdict => ({
+            verdict: APPROVAL_REVIEW_VERDICT.ask,
+            why: { kind: APPROVAL_REVIEW_ASK.failed }
+          }))
         : undefined
-      if (review?.verdict !== "allow") {
-        if (decision.presentation.delivery === "refuse") throw liveStateRefusal()
+      if (review?.verdict !== APPROVAL_REVIEW_VERDICT.allow) {
+        if (decision.presentation.delivery === ASK_DELIVERY.refuse) throw liveStateRefusal()
         const note = cardNote(decision.reason, review?.why)
         const noted = note === undefined ? prompt : withWhy(prompt, note)
-        const rule = review?.verdict === "ask" ? helperRule(review.why) : undefined
+        const rule =
+          review?.verdict === APPROVAL_REVIEW_VERDICT.ask ? helperRule(review.why) : undefined
         const card = withToolGrant(
           withRunReads(
             definition.name === COMMAND_TOOL && rule !== undefined
@@ -221,11 +253,11 @@ export const makeApprovalGate =
               : noted,
             ctx.run
           ),
-          decision.presentation.delivery === "pause"
+          decision.presentation.delivery === ASK_DELIVERY.pause
             ? cardGrantSubject({ reason: decision.reason, definition, site })
             : undefined
         )
-        if (decision.presentation.delivery === "chat") {
+        if (decision.presentation.delivery === ASK_DELIVERY.chat) {
           const kept = await services.policy
             .defer({
               run: ctx.run,
@@ -239,8 +271,8 @@ export const makeApprovalGate =
               (outcome) => outcome,
               () => "failed" as const
             )
-          if (kept === "needs_review") throw taskDirectionReview()
-          throw kept === "published" ? waitsInChat() : unattendedRefusal()
+          if (kept === DEFER_OUTCOME.needsReview) throw taskDirectionReview()
+          throw kept === DEFER_OUTCOME.published ? waitsInChat() : unattendedRefusal()
         }
         throw new PauseRequested("approval", card.preview, card)
       }
@@ -249,7 +281,7 @@ export const makeApprovalGate =
       return withApprovalFact(result, { by: "helper", decision: "approved", reason: review.reason })
     }
     const result = await execute(ctx).catch(refused)
-    if (decision.kind === "allow" && decision.by === "user")
+    if (decision.kind === VERDICT.allow && decision.by === ALLOW_BY.user)
       await services.policy.offer({
         run: ctx.run,
         toolCallId: ctx.toolCallId,
@@ -257,12 +289,12 @@ export const makeApprovalGate =
         site
       })
     const wouldAsk =
-      impact.kind !== "inert" &&
+      impact.kind !== CALL_IMPACT.inert &&
       (required !== undefined ||
         definition.approvalRequirement !== undefined ||
-        rule === "ask" ||
+        rule === TOOL_APPROVAL_DECISION.ask ||
         forced ||
-        definition.metadata.default_approval === "ask")
+        definition.metadata.default_approval === TOOL_APPROVAL_OVERRIDE.ask)
     return withApprovalFact(result, approvalFact(ctx.approval, mode, wouldAsk))
   }
 
@@ -276,7 +308,8 @@ const DENY_REASON: Record<DenyRule, string> = {
   read_only: "this run is read-only"
 }
 
-const userOnlyCard = (prompt: ToolApprovalPrompt): boolean => prompt.data?.["reviewer"] === "user"
+const userOnlyCard = (prompt: ToolApprovalPrompt): boolean =>
+  prompt.data?.["reviewer"] === USER_REVIEWER
 
 const UNATTENDED_REFUSAL =
   "This needs the user's approval, and no one can give it during this run, so it did not run. Skip this step, finish the rest of the work, and say in your report that it waits on the user's approval."
@@ -301,17 +334,17 @@ const unattendedRefusal = () =>
   })
 
 const helperRule = (why: ApprovalReviewAsk): string | undefined =>
-  why.kind === "judged" ? why.rule : undefined
+  why.kind === APPROVAL_REVIEW_ASK.judged ? why.rule : undefined
 
 const helperNote = (why: ApprovalReviewAsk): string | undefined =>
-  why.kind === "judged" ? why.reason : undefined
+  why.kind === APPROVAL_REVIEW_ASK.judged ? why.reason : undefined
 
 const STANDING_NOTE =
   "Your automations always ask before they change directives, skills, automations or permissions."
 
 const cardNote = (reason: string, why: ApprovalReviewAsk | undefined): string | undefined => {
   if (why !== undefined) return helperNote(why)
-  return reason === "standing" ? STANDING_NOTE : undefined
+  return reason === ASK_REASON.standing ? STANDING_NOTE : undefined
 }
 
 const withWhy = (prompt: ToolApprovalPrompt, note: string): ToolApprovalPrompt =>
@@ -374,8 +407,7 @@ const approvalFact = (
       ...(approval.edited === undefined ? {} : { edited: true })
     }
   }
-  // oxlint-disable-next-line arden/restricted-owner -- names the mode that let the call through, after decide()
-  if (wouldAsk && (mode === "safe" || mode === "allow"))
+  if (wouldAsk && (mode === APPROVAL_MODE.safe || mode === APPROVAL_MODE.allow))
     return { by: "mode", decision: "approved", mode }
   return undefined
 }

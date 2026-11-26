@@ -1,9 +1,9 @@
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { Backfill, BackfillContext } from "./backfills/backfill.js"
 import { SessionLifecycleEvents } from "../sessions/events.js"
 import { inOwnSavepoint } from "./own-savepoint.js"
-import { deleteSessionTree } from "./session-tree-deletion.js"
+import { SESSION_TREE_DELETION, deleteSessionTree } from "./session-tree-deletion.js"
 
 const TREES_PER_CHUNK = 20
 
@@ -29,12 +29,13 @@ export const orphanAgentSessionsBackfill: Backfill<unknown, BackfillContext> = {
           sql`session_id = ${orphan.session_id} AND ${sql.literal(orphanAgent)}`
         )
       )
-      if (deleted._tag === "Failure")
+      if (Exit.isFailure(deleted))
         yield* Effect.logWarning("Could not delete an orphaned agent", {
           sessionId: orphan.session_id,
           cause: deleted.cause
         })
-      else if (deleted.value.kind === "deleted") converted += deleted.value.sessions
+      else if (deleted.value.kind === SESSION_TREE_DELETION.deleted)
+        converted += deleted.value.sessions
     }
     return { converted, next: orphans.at(-1)?.session_id }
   }),

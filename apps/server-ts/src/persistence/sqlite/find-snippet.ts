@@ -141,17 +141,20 @@ const indexedWordRanges = (folded: string, { word, prefix }: IndexedWord) =>
       !WORD_CHAR.test(folded.charAt(start - 1)) && (prefix || !WORD_CHAR.test(folded.charAt(end)))
   )
 
+const FTS_COLUMN_SEPARATOR = ":"
+const FTS_PREFIX_MARKER = "*"
 const FTS_OPERATORS = new Set(["AND", "OR", "NOT", "NEAR"])
 const FTS_TOKEN = /,\s*\d+|"((?:[^"]|"")*)"(\*?)|([\p{L}\p{N}_]+)(\*?)(:?)/gu
 const INDEX_WORD = /[\p{L}\p{N}]+/gu
 
 const ftsQueryWords = (query: string): ReadonlyArray<IndexedWord> =>
   [...query.matchAll(FTS_TOKEN)].flatMap(([, phrase, phraseStar, bare, bareStar, column]) => {
-    if (bare !== undefined && (column === ":" || FTS_OPERATORS.has(bare))) return []
+    if (bare !== undefined && (column === FTS_COLUMN_SEPARATOR || FTS_OPERATORS.has(bare)))
+      return []
     const words = [...(phrase?.replaceAll('""', '"') ?? bare ?? "").matchAll(INDEX_WORD)].map(
       ([word]) => word
     )
-    const star = (phrase === undefined ? bareStar : phraseStar) === "*"
+    const star = (phrase === undefined ? bareStar : phraseStar) === FTS_PREFIX_MARKER
     return words.map((word, index) => ({ word, prefix: star && index === words.length - 1 }))
   })
 

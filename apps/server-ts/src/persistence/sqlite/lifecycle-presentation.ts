@@ -1,3 +1,4 @@
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
 import type { AutomationEvent } from "@arden-hq/protocol"
 import { SESSION_RUN } from "@arden-hq/protocol/sessions"
 import { sessionActivity } from "../../sessions/session-states.js"
@@ -11,7 +12,11 @@ export const withCurrentSessionActivity = ({
   readonly event: AutomationEvent | InternalLifecycleEvent
   readonly currentActivity: ChatEventStore["Service"]["currentActivity"]
 }): AutomationEvent | InternalLifecycleEvent => {
-  if (event.type !== "session_created" && event.type !== "session_activity") return event
+  if (
+    event.type !== SERVER_EVENT_TYPE.sessionCreated &&
+    event.type !== SERVER_EVENT_TYPE.sessionActivity
+  )
+    return event
   const run = event.session.run
   return {
     ...event,

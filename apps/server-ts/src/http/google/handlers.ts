@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
-import type { GoogleConnectionError } from "../../google/errors.js"
+import { GOOGLE_CONNECTION_REASON, type GoogleConnectionError } from "../../google/errors.js"
 import { GoogleConnections } from "../../google/service.js"
 import { ArdenApi } from "../api.js"
 import { failInternal, storeErrorToHttp, StoreInvalid } from "../errors.js"
@@ -14,12 +14,15 @@ const mapError = (
   | HttpApiError.ServiceUnavailable
   | HttpApiError.InternalServerError => {
   if (
-    error.reason === "access_denied" ||
-    error.reason === "auth_required" ||
-    error.reason === "invalid_response"
+    error.reason === GOOGLE_CONNECTION_REASON.accessDenied ||
+    error.reason === GOOGLE_CONNECTION_REASON.authRequired ||
+    error.reason === GOOGLE_CONNECTION_REASON.invalidResponse
   )
     return new StoreInvalid({})
-  if (error.reason === "not_configured" || error.reason === "provider")
+  if (
+    error.reason === GOOGLE_CONNECTION_REASON.notConfigured ||
+    error.reason === GOOGLE_CONNECTION_REASON.provider
+  )
     return new HttpApiError.ServiceUnavailable({})
   return storeErrorToHttp({ reason: error.reason, message: error.message })
 }

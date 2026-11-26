@@ -1,5 +1,5 @@
 import { encodePng } from "../../lib/png.js"
-import type { DecisionInput, DecisionResult } from "./questions.js"
+import { DECISION_KIND, type DecisionInput, type DecisionResult } from "./questions.js"
 
 export const decisionVisionProbe = (): Pick<DecisionInput, "images" | "questions"> => ({
   images: [image(false), image(true)],
@@ -8,26 +8,30 @@ export const decisionVisionProbe = (): Pick<DecisionInput, "images" | "questions
       kind: "choice",
       instructions: "In the FIRST attached image, which side contains the red rectangle?",
       options: [
-        { value: "left", description: "Left half" },
-        { value: "right", description: "Right half" }
+        { value: PROBE_SIDE.left, description: "Left half" },
+        { value: PROBE_SIDE.right, description: "Right half" }
       ]
     },
     second: {
       kind: "choice",
       instructions: "In the SECOND attached image, which side contains the red rectangle?",
       options: [
-        { value: "left", description: "Left half" },
-        { value: "right", description: "Right half" }
+        { value: PROBE_SIDE.left, description: "Left half" },
+        { value: PROBE_SIDE.right, description: "Right half" }
       ]
     }
   }
 })
 
+const PROBE_SIDE = { left: "left", right: "right" } as const
+type ProbeSide = (typeof PROBE_SIDE)[keyof typeof PROBE_SIDE]
+const isSide = (value: string, side: ProbeSide): boolean => value === side
+
 export const readsProbeImages = (result: DecisionResult): boolean =>
-  result.answers.first?.kind === "choice" &&
-  result.answers.first.value === "left" &&
-  result.answers.second?.kind === "choice" &&
-  result.answers.second.value === "right"
+  result.answers.first?.kind === DECISION_KIND.choice &&
+  isSide(result.answers.first.value, PROBE_SIDE.left) &&
+  result.answers.second?.kind === DECISION_KIND.choice &&
+  isSide(result.answers.second.value, PROBE_SIDE.right)
 
 const image = (right: boolean): DecisionInput["images"][number] => {
   const size = 320

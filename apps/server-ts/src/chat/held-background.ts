@@ -1,6 +1,6 @@
 import type { HeldToolCall } from "@arden-hq/loop"
 import { isTerminalRunStatus } from "@arden-hq/protocol/runs"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 
 export interface HeldBackground {
   readonly hold: (runId: string, calls: ReadonlyArray<HeldToolCall>) => void
@@ -58,7 +58,7 @@ export const stopHeldOfEndedRuns = Effect.fn("HeldBackground.stopHeldOfEndedRuns
       ),
       Effect.option
     )
-    if (run._tag === "None") continue
+    if (Option.isNone(run)) continue
     if (run.value === null || isTerminalRunStatus(run.value.status)) heldBackground.stop([runId])
   }
 })

@@ -17,7 +17,7 @@ import { RULE_CHANGE, settingOfRule, type RuleDecision } from "../persistence/pe
 
 import type { OfferFacts, OfferRefusal } from "./permission-offer-facts.js"
 
-const OFFER_PLAN = { offer: "offer", refuse: "refuse" } as const
+export const OFFER_PLAN = { offer: "offer", refuse: "refuse" } as const
 
 export type OfferPlan =
   | {

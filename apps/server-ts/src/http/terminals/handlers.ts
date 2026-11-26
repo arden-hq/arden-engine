@@ -1,3 +1,5 @@
+import { PROCESS_INPUT } from "../../terminals/live-process.js"
+import { TERMINAL_PHASE } from "../../terminals/store.js"
 import { TERMINAL_STATE, type SessionTerminal } from "@arden-hq/protocol/sessions/terminals"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
@@ -19,7 +21,7 @@ export const TerminalHandlers = HttpApiBuilder.group(
       const terminal = store.get(terminalId)
       return terminal !== undefined &&
         terminal.sessionId === sessionId &&
-        terminal.phase === "detached"
+        terminal.phase === TERMINAL_PHASE.detached
         ? Effect.succeed(terminal)
         : Effect.fail(new HttpApiError.NotFound({}))
     }
@@ -29,7 +31,7 @@ export const TerminalHandlers = HttpApiBuilder.group(
         Effect.sync(() => ({
           terminals: store
             .list(params.sessionId)
-            .filter((terminal) => terminal.phase === "detached")
+            .filter((terminal) => terminal.phase === TERMINAL_PHASE.detached)
             .map((terminal) => wireTerminal(terminal, store.replay(terminal.id)?.cursor ?? 0))
         }))
       )
@@ -64,7 +66,10 @@ export const TerminalHandlers = HttpApiBuilder.group(
       .handle("close", ({ params }) =>
         Effect.sync(() => {
           const terminal = store.get(params.terminalId)
-          if (terminal?.sessionId === params.sessionId && terminal.phase === "detached") {
+          if (
+            terminal?.sessionId === params.sessionId &&
+            terminal.phase === TERMINAL_PHASE.detached
+          ) {
             store.kill(terminal.id, { notify: false })
             store.remove(terminal.id)
           }
@@ -81,7 +86,7 @@ const wireTerminal = (terminal: TerminalInfo, cursor: number): SessionTerminal =
     command: terminal.command,
     cwd: terminal.cwd,
     access: terminal.access,
-    tty: terminal.input === "pipe",
+    tty: terminal.input === PROCESS_INPUT.pipe,
     started_at: iso(terminal.startedAt),
     cursor
   }

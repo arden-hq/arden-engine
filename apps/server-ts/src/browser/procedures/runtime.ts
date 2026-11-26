@@ -1,7 +1,9 @@
 import { makeJobWorker } from "@arden-hq/jobs"
 import { Effect, Layer, Stream } from "effect"
 import { BrowserProcedureStore } from "../../persistence/browser-procedures/store.js"
-import { SessionLifecycleEvents } from "../../persistence/sessions/events.js"
+import { SERVER_EVENT_TYPE } from "@arden-hq/protocol"
+import { LIFECYCLE_DELIVERY, SessionLifecycleEvents } from "../../persistence/sessions/events.js"
+import { INTERNAL_LIFECYCLE_EVENT } from "../../persistence/sessions/internal-events.js"
 import { ServerLifecycle } from "../../runtime/lifecycle.js"
 import { currentMillis } from "../../runtime/clock.js"
 import { BrowserProcedures } from "./service.js"
@@ -40,9 +42,9 @@ export const BrowserProcedureRuntime = Layer.effectDiscard(
           follow.stream.pipe(
             Stream.filter(
               (event) =>
-                event.kind === "reset" ||
-                event.event.type === "run_settled" ||
-                event.event.type === "session_blocking_work"
+                event.kind === LIFECYCLE_DELIVERY.reset ||
+                event.event.type === INTERNAL_LIFECYCLE_EVENT.runSettled ||
+                event.event.type === SERVER_EVENT_TYPE.sessionBlockingWork
             )
           ),
           Stream.tick("30 seconds")

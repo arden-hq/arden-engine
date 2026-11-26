@@ -1,3 +1,4 @@
+import { SPACE_TASK_RUNS_IN } from "@arden-hq/protocol/spaces/work"
 import { DateTime, Effect, Schema } from "effect"
 import { WorkStoreError, type WorkStore } from "../work/store.js"
 import { workError } from "./work-records.js"
@@ -52,7 +53,7 @@ export const makeWorkVisibility = ({
               FROM space_tasks WHERE item_id = ${valid.itemId}`)[0]
             if (task === undefined) return yield* workError("not_found", "Task not found")
             if (task.home_session_id === valid.sessionId) return
-            if (task.runs_in === "chat" && task.unfinished === 1)
+            if (task.runs_in === SPACE_TASK_RUNS_IN.chat && task.unfinished === 1)
               yield* requireInChatHome(sql, { sessionId: valid.sessionId, itemId: valid.itemId })
             if (task.space_id === null) {
               const taken = yield* sql`SELECT 1 FROM space_tasks

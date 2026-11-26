@@ -1,14 +1,15 @@
 import { INTERACTION_KIND, INTERACTION_SOURCE } from "@arden-hq/std/message-vocabulary"
 import { cutText, foldSpace } from "@arden-hq/std/text"
-import type { WorkflowSourceRef } from "@arden-hq/protocol/workflows"
+import { WORKFLOW_STATUS, type WorkflowSourceRef } from "@arden-hq/protocol/workflows"
 import { Cause, Effect, Schema } from "effect"
 
 import { errorMessage } from "@arden-hq/std/errors"
 import { workflowDeliveryClientId } from "../persistence/chat/workflow-delivery.js"
-import type {
-  ScriptResultDelivery,
-  ScriptResultError,
-  ScriptResults
+import {
+  SCRIPT_DELIVERY_DEFERRAL,
+  type ScriptResultDelivery,
+  type ScriptResultError,
+  type ScriptResults
 } from "../persistence/scripts/results.js"
 import type { ChatRunnerSendMessageRequest } from "../chat/runner-contract.js"
 import {
@@ -24,6 +25,8 @@ class ScriptDeliveryError extends Schema.TaggedError<ScriptDeliveryError>()("Scr
   attempt: Schema.Int,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
+
+const UNAVAILABLE_MANAGED_OUTPUT_KIND = "managed_output_unavailable"
 
 const MAX_DELIVERY_SOURCES = 8
 const MAX_DELIVERY_SOURCE_BYTES = 8 * 1_024
@@ -58,7 +61,7 @@ const localizeSource = async (
 }
 
 const inlineSourceText = (localized: LocalizedWorkflowSource): string => {
-  if (localized.source.kind === "managed_output_unavailable") {
+  if (localized.source.kind === UNAVAILABLE_MANAGED_OUTPUT_KIND) {
     return `${JSON.stringify(sourceIdentity(localized.source))}\nAvailability: full output unavailable (historical source bytes missing).`
   }
   if (localized.managedOutput === null) return JSON.stringify(sourceIdentity(localized.source))
@@ -178,7 +181,7 @@ const scriptResultRequest = (
       from: { source: INTERACTION_SOURCE.workflow, id: payload.workflowRef },
       to: { source: INTERACTION_SOURCE.agent, id: payload.sessionRef },
       ...(payload.preview === null ? {} : { preview: payload.preview }),
-      outcome: payload.status === "succeeded" ? "completed" : payload.status,
+      outcome: payload.status === WORKFLOW_STATUS.succeeded ? "completed" : payload.status,
       caused_by: { type: "workflow", id: `${payload.workflowRef}:${payload.attempt}` }
     },
     workflowDelivery: {
@@ -256,7 +259,7 @@ const scriptResultOutbox = (
       .defer({ deliveryId: delivery.deliveryId, error: errorMessage(error) })
       .pipe(
         Effect.flatMap((deferral) =>
-          deferral.kind === "retrying"
+          deferral.kind === SCRIPT_DELIVERY_DEFERRAL.retrying
             ? Effect.logWarning("Script result delivery failed; retrying later", {
                 ...identity,
                 attempts: deferral.attempts,

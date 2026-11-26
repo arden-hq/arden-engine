@@ -6,6 +6,12 @@ import type { PersistenceDeps } from "../deps.js"
 import { SessionLifecycleEvents } from "../../sessions/events.js"
 import { runIsActive } from "../background-pause.js"
 
+const CHUNK_ATTEMPT = { done: "done", stale: "stale" } as const
+
+type ChunkAttempt<A> =
+  | { readonly kind: typeof CHUNK_ATTEMPT.done; readonly value: A }
+  | { readonly kind: typeof CHUNK_ATTEMPT.stale }
+
 export interface BackfillState {
   readonly name: string
   readonly converted: number
@@ -67,7 +73,11 @@ export const makeBackfillChunks = ({
                 })
               )
               .pipe(Effect.mapError(failed(`Could not prepare backfill ${backfill.name}`)))
-      const attempted = yield* writer
+      const attempted: ChunkAttempt<{
+        state: BackfillState
+        previousCursor: string | undefined
+        cursor: string | undefined
+      }> = yield* writer
         .transact(
           Effect.gen(function* () {
             const rows = yield* sql<BackfillRow>`
@@ -75,17 +85,18 @@ export const makeBackfillChunks = ({
           WHERE name = ${backfill.name}`
             const row = rows[0]
             const previousCursor = row?.cursor ?? undefined
-            if (previousCursor !== (before?.cursor ?? undefined)) return { kind: "stale" as const }
+            if (previousCursor !== (before?.cursor ?? undefined))
+              return { kind: CHUNK_ATTEMPT.stale }
             if (row?.finished_at != null)
               return {
-                kind: "done" as const,
+                kind: CHUNK_ATTEMPT.done,
                 value: { state: stateOf(row), previousCursor, cursor: previousCursor }
               }
             const chunkEffect =
               backfill.prepare === undefined
                 ? backfill.chunk({ cursor: previousCursor, limit })
                 : prepared
-            if (chunkEffect === undefined) return { kind: "stale" as const }
+            if (chunkEffect === undefined) return { kind: CHUNK_ATTEMPT.stale }
             const chunk = yield* chunkEffect.pipe(
               Effect.provideService(SqlClient.SqlClient, sql),
               Effect.provideService(SessionLifecycleEvents, sessionEvents)
@@ -102,7 +113,7 @@ export const makeBackfillChunks = ({
             updated_at = excluded.updated_at,
             finished_at = excluded.finished_at`
             return {
-              kind: "done" as const,
+              kind: CHUNK_ATTEMPT.done,
               value: {
                 state: { name: backfill.name, converted, finished: finishedAt !== null },
                 previousCursor,
@@ -112,7 +123,7 @@ export const makeBackfillChunks = ({
           })
         )
         .pipe(Effect.mapError(failed(`Could not run a chunk of backfill ${backfill.name}`)))
-      if (attempted.kind === "done") return attempted.value
+      if (attempted.kind === CHUNK_ATTEMPT.done) return attempted.value
     }
   })
   return {

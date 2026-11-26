@@ -3,7 +3,7 @@ import { deleteStreamInTransaction } from "@arden-hq/journal/effect"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { uploadIdsIn } from "../sessions/chat-uploads.js"
-import { SESSION_OWNED_TABLES } from "../sessions/ownership.js"
+import { SESSION_OWNED_TABLES, SESSION_RUN_TABLE } from "../sessions/ownership.js"
 import { deleteRunSidecarsBySessionInTransaction } from "./run-sidecar-mutations.js"
 import { haltAutomation } from "./automation-halt.js"
 import { taskJobId } from "../space-job-id.js"
@@ -41,7 +41,7 @@ export const deleteSessionOwnedData = Effect.fn("SqliteSession.deleteOwnedData")
   yield* sql`UPDATE space_tasks SET home_session_id = NULL, runs_in = 'background'
     WHERE home_session_id = ${sessionId}`
   for (const table of SESSION_OWNED_TABLES) {
-    if (table === "chat_runs") {
+    if (table === SESSION_RUN_TABLE) {
       yield* sql`DELETE FROM chat_runs WHERE session_id = ${sessionId}
         AND NOT EXISTS (SELECT 1 FROM run_questions WHERE run_questions.run_id = chat_runs.run_id)
         AND NOT EXISTS (SELECT 1 FROM automation_runs WHERE automation_runs.chat_run_id = chat_runs.run_id)

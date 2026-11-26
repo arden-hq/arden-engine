@@ -1,4 +1,5 @@
-import { INBOX_ITEM_LIMIT } from "@arden-hq/protocol/inbox"
+import { SPACE_TASK_WAITING_ON } from "@arden-hq/protocol/spaces/work"
+import { INBOX_ITEM_LIMIT, INBOX_SCOPE } from "@arden-hq/protocol/inbox"
 import { blockedSpaceGroups, blockedTaskEntries, group, type TaskRow } from "./inbox-blocked.js"
 import { DateTime, Effect } from "effect"
 import { planLimitEntries } from "./inbox-plan-limit.js"
@@ -54,7 +55,8 @@ export const makeInboxStore = ({
 
     const tasks = snapshot.tasks.filter(
       (task): task is TaskRow & { readonly waiting_on: InboxBlockedTaskEntry["waitingOn"] } =>
-        task.waiting_on === "you" || task.waiting_on === "external"
+        task.waiting_on === SPACE_TASK_WAITING_ON.you ||
+        task.waiting_on === SPACE_TASK_WAITING_ON.external
     )
     if (tasks.length !== snapshot.tasks.length) {
       return yield* storeError(operation, "storage", "Stored Inbox data is corrupt")
@@ -228,8 +230,8 @@ export const makeInboxStore = ({
           const snapshot = yield* loadSnapshot("mark_read", now, cutoff)
           const projection = yield* makeProjection("mark_read", snapshot)
           const liveKeys = new Set(projection.live.map((item) => item.key))
-          const requested = request.scope === "all" ? [] : [...new Set(request.keys)]
-          const keys = request.scope === "all" ? [...liveKeys] : requested
+          const requested = request.scope === INBOX_SCOPE.all ? [] : [...new Set(request.keys)]
+          const keys = request.scope === INBOX_SCOPE.all ? [...liveKeys] : requested
           const unknown = requested.filter((key) => !liveKeys.has(key))
           if (unknown.length > 0) {
             return yield* storeError(
@@ -286,11 +288,11 @@ export const makeInboxStore = ({
           const snapshot = yield* loadSnapshot("dismiss", now, cutoff)
           const projection = yield* makeProjection("dismiss", snapshot)
           const liveKeys = new Set(projection.live.map((item) => item.key))
-          const requested = request.scope === "items" ? [...new Set(request.keys)] : []
+          const requested = request.scope === INBOX_SCOPE.items ? [...new Set(request.keys)] : []
           let keys = requested
-          if (request.scope === "all") {
+          if (request.scope === INBOX_SCOPE.all) {
             keys = [...liveKeys]
-          } else if (request.scope === "group") {
+          } else if (request.scope === INBOX_SCOPE.group) {
             keys = projection.live
               .filter((item) => item.groupKey === request.groupKey)
               .map((item) => item.key)
@@ -303,7 +305,7 @@ export const makeInboxStore = ({
               `Inbox item is no longer available: ${unknown[0]}`
             )
           }
-          if (request.scope === "group" && keys.length === 0) {
+          if (request.scope === INBOX_SCOPE.group && keys.length === 0) {
             return yield* storeError(
               "dismiss",
               "not_found",

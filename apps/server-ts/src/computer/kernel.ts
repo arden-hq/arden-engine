@@ -8,6 +8,7 @@ import { currentMillis } from "../runtime/clock.js"
 
 const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
 const isJson = Schema.is(Schema.Json)
+const COMPUTER_RESULT_KEY = "computer"
 const MAX_BYTES = 1024 * 1024
 const MAX_ARGUMENT_BYTES = 64 * 1024
 
@@ -204,7 +205,7 @@ export class ComputerKernel {
           ? {
               data: isJsonObject(result.data)
                 ? Object.fromEntries(
-                    Object.entries(result.data).filter(([key]) => key !== "computer")
+                    Object.entries(result.data).filter(([key]) => key !== COMPUTER_RESULT_KEY)
                   )
                 : result.data
             }

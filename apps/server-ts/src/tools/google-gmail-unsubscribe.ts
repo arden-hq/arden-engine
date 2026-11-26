@@ -1,5 +1,5 @@
 import { ToolExecutionError } from "@arden-hq/loop"
-import { publicWebUrl } from "@arden-hq/std/url"
+import { isWebProtocol, PUBLIC_WEB_URL, publicWebUrl, WEB_PROTOCOL } from "@arden-hq/std/url"
 import { Schema } from "effect"
 
 import type { CallEffects } from "../execution/tool-effect.js"
@@ -21,23 +21,32 @@ const MAX_REDIRECTS = 3
 const REQUEST_TIMEOUT_MS = 20_000
 const ONE_CLICK_BODY = "List-Unsubscribe=One-Click"
 
+const UNSUBSCRIBE_METHOD = {
+  oneClick: "one_click",
+  mailto: "mailto",
+  webOnly: "web_only",
+  none: "none"
+} as const
+
 type UnsubscribeMethod =
-  | { readonly kind: "one_click"; readonly url: URL }
+  | { readonly kind: typeof UNSUBSCRIBE_METHOD.oneClick; readonly url: URL }
   | {
-      readonly kind: "mailto"
+      readonly kind: typeof UNSUBSCRIBE_METHOD.mailto
       readonly to: string
       readonly subject: string
       readonly body: string
     }
-  | { readonly kind: "web_only"; readonly host: string }
-  | { readonly kind: "none" }
+  | { readonly kind: typeof UNSUBSCRIBE_METHOD.webOnly; readonly host: string }
+  | { readonly kind: typeof UNSUBSCRIBE_METHOD.none }
 
 const entries = (value: string): ReadonlyArray<string> =>
   [...value.matchAll(/<([^<>]*)>/gu)].map((match) => (match[1] ?? "").trim())
 
 const httpsUrl = (value: string): URL | undefined => {
   const page = publicWebUrl(value)
-  return page.kind === "ok" && page.url.protocol === "https:" ? page.url : undefined
+  return page.kind === PUBLIC_WEB_URL.ok && page.url.protocol === WEB_PROTOCOL.https
+    ? page.url
+    : undefined
 }
 
 const mailtoTarget = (
@@ -78,7 +87,7 @@ const unsubscribeMethod = (
   const web = targets.flatMap((target) => {
     try {
       const parsed = new URL(target)
-      return parsed.protocol === "https:" || parsed.protocol === "http:" ? [parsed.hostname] : []
+      return isWebProtocol(parsed.protocol) ? [parsed.hostname] : []
     } catch {
       return []
     }
@@ -108,7 +117,7 @@ const postOneClick = async ({
   const signal = AbortSignal.any([callSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
   let current = url
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    if (current.protocol !== "https:") {
+    if (current.protocol !== WEB_PROTOCOL.https) {
       throw toolRefusal("The unsubscribe address must use https.", "Unsubscribe not https")
     }
     const address = await publicAddress(current, signal)
@@ -157,18 +166,18 @@ const postOneClick = async ({
 
 const methodLine = (method: UnsubscribeMethod): string => {
   switch (method.kind) {
-    case "one_click":
+    case UNSUBSCRIBE_METHOD.oneClick:
       return `One-click request to ${method.url.hostname}`
-    case "mailto":
+    case UNSUBSCRIBE_METHOD.mailto:
       return `Email to ${method.to}`
-    case "web_only":
-    case "none":
+    case UNSUBSCRIBE_METHOD.webOnly:
+    case UNSUBSCRIBE_METHOD.none:
       return "None"
   }
 }
 
 const refusalFor = (method: UnsubscribeMethod): ToolExecutionError =>
-  method.kind === "web_only"
+  method.kind === UNSUBSCRIBE_METHOD.webOnly
     ? toolRefusal(
         `This sender offers only a web page (${method.host}) to unsubscribe. Arden does not open links from email; the user can open the message and use its unsubscribe link. Nothing was done.`,
         "Web page only"
@@ -250,7 +259,10 @@ export const gmailUnsubscribeTool = ({
     },
     approvalPrompt: async (input, ctx) => {
       const found = await readHeaders(input.message_ref, ctx.signal)
-      if (found.method.kind === "web_only" || found.method.kind === "none") {
+      if (
+        found.method.kind === UNSUBSCRIBE_METHOD.webOnly ||
+        found.method.kind === UNSUBSCRIBE_METHOD.none
+      ) {
         throw refusalFor(found.method)
       }
       return {
@@ -270,7 +282,7 @@ export const gmailUnsubscribeTool = ({
     execute: async (input, ctx, effects) => {
       const found = await readHeaders(input.message_ref, ctx.signal)
       const { method } = found
-      if (method.kind === "one_click") {
+      if (method.kind === UNSUBSCRIBE_METHOD.oneClick) {
         await effects.target({
           source: "gmail",
           objectId: `list-unsubscribe:${sha256Hex(method.url.href)}`,
@@ -283,7 +295,7 @@ export const gmailUnsubscribeTool = ({
           data: { account_ref: found.account, method: "one_click", host: done.host }
         }
       }
-      if (method.kind === "mailto") {
+      if (method.kind === UNSUBSCRIBE_METHOD.mailto) {
         const sent = await gmailSend({
           google,
           account: found.account,

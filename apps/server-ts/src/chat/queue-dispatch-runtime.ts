@@ -1,3 +1,7 @@
+import { JOURNAL_DELIVERY } from "@arden-hq/journal/effect"
+import { INTERNAL_LIFECYCLE_EVENT } from "../persistence/sessions/internal-events.js"
+import { STORE_REASON } from "../persistence/errors.js"
+import { CHAT_CONFLICT_KIND } from "./message-errors.js"
 import { Clock, Context, Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 import { SessionLifecycleEvents } from "../persistence/sessions/events.js"
 import { ChatWriteStore, type ChatQueueHead } from "../persistence/chat/store.js"
@@ -85,12 +89,12 @@ const tryHead = (
     .pipe(
       Effect.as("sent" as const),
       Effect.catchTag("ChatMessageConflictError", (error) => {
-        if (error.kind === "session_busy") return Effect.succeed("waits" as const)
-        if (error.kind === "queue_changed") return Effect.succeed("retry" as const)
+        if (error.kind === CHAT_CONFLICT_KIND.sessionBusy) return Effect.succeed("waits" as const)
+        if (error.kind === CHAT_CONFLICT_KIND.queueChanged) return Effect.succeed("retry" as const)
         return keepQueued(error.message)
       }),
       Effect.catchTag("ChatMessageError", (error) =>
-        error.reason === "unavailable" || error.reason === "storage"
+        error.reason === STORE_REASON.unavailable || error.reason === STORE_REASON.storage
           ? Effect.succeed("retry" as const)
           : keepQueued(error.message)
       )
@@ -126,8 +130,9 @@ export const QueueDispatchRuntime: Layer.Layer<
         yield* follow.stream.pipe(
           Stream.filter(
             (delivery) =>
-              delivery.kind === "reset" ||
-              (delivery.kind === "record" && delivery.event.type === "run_settled")
+              delivery.kind === JOURNAL_DELIVERY.reset ||
+              (delivery.kind === JOURNAL_DELIVERY.record &&
+                delivery.event.type === INTERNAL_LIFECYCLE_EVENT.runSettled)
           ),
           Stream.runForEach(() => Queue.offer(signals, undefined)),
           Effect.catch((cause) => Effect.logWarning("Queue dispatch lost the run feed", { cause })),

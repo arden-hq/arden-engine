@@ -1,3 +1,5 @@
+import { JOB_PURPOSE } from "../job-classification.js"
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import type { SessionOwner, SessionPresentation } from "@arden-hq/protocol"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -54,8 +56,10 @@ export const sessionPresentations = Effect.fn("Sessions.presentation")(function*
 
 const presentation = (row: PresentationRow): SessionPresentation => {
   const topLevelChat =
-    row.session_type === "chat" && row.parent_session_id === null && row.parent_message_id === null
-  if (topLevelChat && row.purpose === "space_review") {
+    row.session_type === SESSION_TYPE.chat &&
+    row.parent_session_id === null &&
+    row.parent_message_id === null
+  if (topLevelChat && row.purpose === JOB_PURPOSE.spaceReview) {
     return {
       kind: "execution",
       label: "Space review",
@@ -70,7 +74,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
     return { kind: "conversation", role: row.conversation_space_id === null ? "topic" : "space" }
   }
   if (
-    row.session_type === "chat" &&
+    row.session_type === SESSION_TYPE.chat &&
     row.parent_session_id !== null &&
     row.parent_message_id === null
   ) {
@@ -85,7 +89,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
       }
     }
   }
-  if (row.session_type === "agent") {
+  if (row.session_type === SESSION_TYPE.agent) {
     return {
       kind: "execution",
       label: "Agent",
@@ -101,7 +105,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
     }
   }
   switch (row.purpose) {
-    case "space_review":
+    case JOB_PURPOSE.spaceReview:
       return {
         kind: "execution",
         label: "Space review",
@@ -111,7 +115,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
             ? NO_OWNER
             : { kind: "space", id: row.owner_space_id, name: row.space_name || "Space" }
       }
-    case "task_execution":
+    case JOB_PURPOSE.taskExecution:
       return {
         kind: "execution",
         label: "Task worker",
@@ -121,7 +125,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
             ? NO_OWNER
             : { kind: "task", id: row.owner_task_id, name: row.task_name || row.job_name || "Task" }
       }
-    case "user_automation":
+    case JOB_PURPOSE.userAutomation:
       return {
         kind: "execution",
         label: "Automation",
@@ -131,7 +135,7 @@ const presentation = (row: PresentationRow): SessionPresentation => {
             ? NO_OWNER
             : { kind: "automation", id: row.task_id, name: row.job_name || "Automation" }
       }
-    case "system":
+    case JOB_PURPOSE.system:
       return {
         kind: "execution",
         label: "System",

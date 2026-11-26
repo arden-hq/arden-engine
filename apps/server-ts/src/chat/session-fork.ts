@@ -4,7 +4,7 @@ import { ConversationArtifacts } from "../artifacts/conversation.js"
 import { SessionStore } from "../persistence/sessions/store.js"
 import { ServerLifecycle } from "../runtime/lifecycle.js"
 import { SessionFileCleanup } from "../storage/session-file-cleanup.js"
-import { ChatStop } from "./chat-stop.js"
+import { ChatStop, END_RESULT } from "./chat-stop.js"
 import type { SessionStoreError } from "../persistence/sessions/store.js"
 import type { ConversationArtifactError } from "../artifacts/conversation-model.js"
 
@@ -36,7 +36,7 @@ export const makeForkPreparation = ({
       return
     }
     const ended = yield* stop.end({ sessionId: childSessionId, action: "delete", stop: false })
-    if (ended.kind === "running") {
+    if (ended.kind === END_RESULT.running) {
       yield* Effect.logWarning("Kept a fork that could not prepare: it has work running", {
         childSessionId
       })

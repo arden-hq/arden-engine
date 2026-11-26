@@ -3,6 +3,7 @@ import {
   AuthorityHistoryError,
   AuthorityHistoryStore,
   HistoryWindowSchema,
+  PERMISSION_HISTORY_KIND,
   type HistoryPage,
   type HistoryWindow,
   type PermissionChange,
@@ -13,7 +14,7 @@ import type { PersistenceDeps } from "./deps.js"
 
 interface PermissionChangeRow {
   readonly change_id: number
-  readonly permission_kind: "standing" | "command" | "override" | "rule"
+  readonly permission_kind: PermissionChange["permission_kind"]
   readonly permission_id: string | null
   readonly action: PermissionChange["action"]
   readonly principal: string | null
@@ -47,41 +48,41 @@ const permissionChange = (row: PermissionChangeRow): PermissionChange => {
     recorded_at: row.recorded_at
   }
   switch (row.permission_kind) {
-    case "standing":
+    case PERMISSION_HISTORY_KIND.standing:
       if (row.permission_id === null || row.principal === null || row.tool_name === null)
         throw new Error("Stored standing permission history is incomplete")
       return {
         ...source,
-        permission_kind: "standing",
+        permission_kind: PERMISSION_HISTORY_KIND.standing,
         permission_id: row.permission_id,
         principal: row.principal,
         server_name: row.server_name,
         tool_name: row.tool_name
       }
-    case "command":
+    case PERMISSION_HISTORY_KIND.command:
       if (row.permission_id === null || row.argument_count === null)
         throw new Error("Stored command permission history is incomplete")
       return {
         ...source,
-        permission_kind: "command",
+        permission_kind: PERMISSION_HISTORY_KIND.command,
         permission_id: row.permission_id,
         argument_count: row.argument_count
       }
-    case "override":
+    case PERMISSION_HISTORY_KIND.override:
       if (row.tool_name === null) throw new Error("Stored tool override history is incomplete")
       return {
         ...source,
-        permission_kind: "override",
+        permission_kind: PERMISSION_HISTORY_KIND.override,
         tool_name: row.tool_name,
         previous_mode: row.previous_mode,
         next_mode: row.next_mode
       }
-    case "rule":
+    case PERMISSION_HISTORY_KIND.rule:
       if (row.permission_id === null || row.principal === null || row.subject_kind === null)
         throw new Error("Stored permission rule history is incomplete")
       return {
         ...source,
-        permission_kind: "rule",
+        permission_kind: PERMISSION_HISTORY_KIND.rule,
         permission_id: row.permission_id,
         principal: row.principal,
         subject_kind: row.subject_kind,

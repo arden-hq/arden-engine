@@ -1,3 +1,4 @@
+import { STORAGE_FILE_KIND, type StorageFile } from "@arden-hq/protocol/storage"
 import { Effect } from "effect"
 import { lstat, readdir } from "node:fs/promises"
 import type { Stats } from "node:fs"
@@ -31,7 +32,7 @@ export interface CategoryTally {
 interface StorageUnitMember {
   readonly name: string
   readonly path: string
-  readonly kind: "file" | "directory"
+  readonly kind: StorageFile["kind"]
   readonly sizeBytes: number
   readonly modifiedMilliseconds: number
   readonly fingerprint: string
@@ -71,8 +72,8 @@ const requireFileSize = (status: Stats): number => {
 }
 
 const unitKind = (status: Stats): StorageUnitMember["kind"] | null => {
-  if (status.isFile()) return "file"
-  if (status.isDirectory()) return "directory"
+  if (status.isFile()) return STORAGE_FILE_KIND.file
+  if (status.isDirectory()) return STORAGE_FILE_KIND.directory
   return null
 }
 

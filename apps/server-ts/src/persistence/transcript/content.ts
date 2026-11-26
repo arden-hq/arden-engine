@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { isWrittenByPerson } from "./model.js"
 import { Option, Predicate, Schema } from "effect"
 import { answerBlockText } from "@arden-hq/answer-ui"
@@ -7,15 +8,15 @@ import type { StoredMessageEnvelope } from "./model.js"
 import { ownerText } from "./owner-words.js"
 
 const ContentPartSchema = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+  Schema.Struct({ type: Schema.Literal(CONTENT_BLOCK_TYPE.text), text: Schema.String }),
   Schema.Struct({
-    type: Schema.Literal("context"),
+    type: Schema.Literal(CONTENT_BLOCK_TYPE.context),
     content_type: Schema.String,
     content: Schema.optionalKey(Schema.NullOr(Schema.String)),
     metadata: Schema.optionalKey(Schema.NullOr(Schema.Record(Schema.String, Schema.String)))
   }),
   Schema.Struct({
-    type: Schema.Literals(["image", "audio"] as const),
+    type: Schema.Literals([CONTENT_BLOCK_TYPE.image, CONTENT_BLOCK_TYPE.audio]),
     media_type: Schema.String,
     data: Schema.String
   })
@@ -27,12 +28,12 @@ const decodeContentPart = Schema.decodeUnknownOption(ContentPartSchema)
 const decodePart = (part: unknown) =>
   decodeContentPart(
     Predicate.isObject(part) && !("type" in part) && "content_type" in part
-      ? { ...part, type: "context" }
+      ? { ...part, type: CONTENT_BLOCK_TYPE.context }
       : part
   )
 
 export const contentParts = (content: unknown): ReadonlyArray<ContentPart> => {
-  if (Predicate.isString(content)) return [{ type: "text", text: content }]
+  if (Predicate.isString(content)) return [{ type: CONTENT_BLOCK_TYPE.text, text: content }]
   if (!Array.isArray(content)) return []
   return content.flatMap((part) => {
     const decoded = decodePart(part)
@@ -42,20 +43,20 @@ export const contentParts = (content: unknown): ReadonlyArray<ContentPart> => {
 
 export const authoredText = (content: unknown): string =>
   contentParts(content)
-    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .flatMap((part) => (part.type === CONTENT_BLOCK_TYPE.text ? [part.text] : []))
     .join("\n")
 
 export const evidenceText = (content: unknown): string =>
   contentParts(content)
     .flatMap((part) => {
       switch (part.type) {
-        case "text":
+        case CONTENT_BLOCK_TYPE.text:
           return [part.text]
-        case "image":
+        case CONTENT_BLOCK_TYPE.image:
           return ["[image]"]
-        case "audio":
+        case CONTENT_BLOCK_TYPE.audio:
           return ["[audio]"]
-        case "context": {
+        case CONTENT_BLOCK_TYPE.context: {
           const source = [part.content_type, part.metadata?.tool_name, part.metadata?.tool_call_id]
             .filter((value) => value !== undefined)
             .join(" · ")

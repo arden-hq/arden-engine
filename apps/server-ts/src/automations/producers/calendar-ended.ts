@@ -1,9 +1,10 @@
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Option } from "effect"
 
 import type { AutomationTriggerEvent } from "../../persistence/automations/model.js"
 import { AutomationTriggers } from "../../persistence/automations/triggers.js"
+import { isCancelledStatus } from "../../google/calendar-client.js"
 import type { GoogleConnections } from "../../google/service.js"
-import type { AutomationEventProducer } from "../event-producer.js"
+import { AUTOMATION_EVENT_SOURCE, type AutomationEventProducer } from "../event-producer.js"
 import {
   calendarEventContext,
   calendarEventId,
@@ -16,11 +17,11 @@ const ENDED_LOOKBACK_MS = 30 * 60_000
 
 const endedEvents = (input: PolledCalendarEvent): ReadonlyArray<AutomationTriggerEvent> => {
   const { event, nowMs } = input
-  if (event.status === "cancelled") return []
+  if (isCancelledStatus(event.status)) return []
   const endValue = event.end?.dateTime
   if (endValue === undefined) return []
   const ended = DateTime.make(endValue)
-  if (ended._tag === "None") return []
+  if (Option.isNone(ended)) return []
   const endMs = DateTime.toEpochMillis(ended.value)
   if (endMs > nowMs || endMs <= nowMs - ENDED_LOOKBACK_MS) return []
   const end = DateTime.formatIso(ended.value)
@@ -34,7 +35,9 @@ const endedEvents = (input: PolledCalendarEvent): ReadonlyArray<AutomationTrigge
       chainDepth: 0,
       context: {
         event: calendarEventContext(input, {
-          ...(started?._tag === "Some" ? { start: DateTime.formatIso(started.value) } : {}),
+          ...(started !== undefined && Option.isSome(started)
+            ? { start: DateTime.formatIso(started.value) }
+            : {}),
           end,
           minutes_since_end: Math.max(0, Math.floor((nowMs - endMs) / 60_000))
         })
@@ -58,6 +61,6 @@ export const calendarEndedEventProducer: AutomationEventProducer<
 > = {
   eventType: "event_ended",
   available: ({ googleAccounts }) => googleAccounts.some(hasReadyCalendar),
-  source: { kind: "on_demand", poll: () => pollEnded() },
+  source: { kind: AUTOMATION_EVENT_SOURCE.onDemand, poll: () => pollEnded() },
   failureMessage: "Google Calendar ended-event trigger producer failed"
 }

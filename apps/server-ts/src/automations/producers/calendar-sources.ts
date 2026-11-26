@@ -1,5 +1,5 @@
 import { googleAccountHasGrant, type GoogleAccount } from "@arden-hq/protocol/google"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 
 import {
   calendarListUrl,
@@ -40,7 +40,7 @@ export const watchedCalendars = Effect.fn("AutomationTriggerProducers.watchedCal
         ),
         Effect.option
       )
-    if (result._tag === "None") return [PRIMARY_CALENDAR]
+    if (Option.isNone(result)) return [PRIMARY_CALENDAR]
     entries.push(...(result.value.items ?? []))
     pageToken = result.value.nextPageToken
     if (pageToken === undefined || pageToken === "") break

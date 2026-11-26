@@ -2,6 +2,7 @@ import { DateTime, Effect, Schema } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import { DAILY_SUMMARY_AUTOMATION_ID } from "../automations/model.js"
 import {
+  POSITION_ADVANCE,
   ReaderPositionError,
   ReaderPositions,
   type PositionAdvance,
@@ -108,14 +109,14 @@ export const readerPosition = <R extends Reader>(reader: R): ReaderPositionStore
     yield* valid(input.expected)
     yield* valid(input.next)
     const current = yield* readRow(sql)
-    if (current.position === input.next) return "already_there"
-    if (current.position !== input.expected) return "moved"
+    if (current.position === input.next) return POSITION_ADVANCE.alreadyThere
+    if (current.position !== input.expected) return POSITION_ADVANCE.moved
     const now = DateTime.formatIso(yield* DateTime.now)
     const moved = yield* sql<{ readonly namespace: string }>`
         UPDATE monitor_state SET state = ${JSON.stringify({ [field]: input.next })}, updated_at = ${now}
         WHERE namespace = ${namespace} AND state = ${current.raw}
         RETURNING namespace`
-    return moved.length === 0 ? "moved" : "advanced"
+    return moved.length === 0 ? POSITION_ADVANCE.moved : POSITION_ADVANCE.advanced
   })
 
   const stored = (cause: unknown): ReaderPositionError =>
@@ -129,7 +130,7 @@ export const readerPosition = <R extends Reader>(reader: R): ReaderPositionStore
         .transact(
           advance(writer.sql, input).pipe(
             Effect.filterOrFail(
-              (outcome) => outcome !== "moved",
+              (outcome) => outcome !== POSITION_ADVANCE.moved,
               () => failure("moved", "moved before this advance")()
             )
           )

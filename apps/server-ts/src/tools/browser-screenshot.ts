@@ -1,5 +1,11 @@
-import { ToolExecutionError, type ImageInput, type ToolResultOutput } from "@arden-hq/loop"
-import { Effect, Schema } from "effect"
+import {
+  CONTENT_BLOCK_TYPE,
+  ToolExecutionError,
+  type ImageInput,
+  type ToolResultOutput
+} from "@arden-hq/loop"
+import { Effect, Exit, Schema } from "effect"
+import { IMAGE_MEDIA_TYPE } from "@arden-hq/std/message-vocabulary"
 
 import { ScreenshotCaptureSchema } from "../artifacts/conversation-model.js"
 import { type ConversationArtifacts } from "../artifacts/conversation.js"
@@ -30,8 +36,8 @@ export const preserveBrowserScreenshot = async (input: {
   readonly imageInput: ImageInput | undefined
 }): Promise<ToolResultOutput> => {
   const capture = Schema.decodeUnknownExit(ScreenshotCaptureSchema)(input.output.data)
-  const image = input.output.modelContent?.find((block) => block.type === "image")
-  if (capture._tag === "Failure" || image === undefined || image.media_type !== "image/png") {
+  const image = input.output.modelContent?.find((block) => block.type === CONTENT_BLOCK_TYPE.image)
+  if (Exit.isFailure(capture) || image === undefined || image.media_type !== IMAGE_MEDIA_TYPE.png) {
     throw new ToolExecutionError("Browser screenshot returned no PNG or capture metadata", {
       preview: "Screenshot unavailable",
       retryable: true

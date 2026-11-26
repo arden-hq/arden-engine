@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import type { ComputerFeedback } from "@arden-hq/protocol/computer"
-import type { NativeAction } from "./contract.js"
+import { NATIVE_ACTION, type NativeAction } from "./contract.js"
 
 const Rect = Schema.Struct({
   x: Schema.Number,
@@ -51,8 +51,10 @@ export function nativeFeedback({
   if (visual === undefined) return UNLOCATED
   const frame = { width: visual.screenshot_width, height: visual.screenshot_height }
   const base = { id: action.observation, frame }
-  if (action.action === "pixel_click") return { ...base, kind: "pointer", x: action.x, y: action.y }
-  if (action.action === "drag") return { ...base, kind: "pointer", x: action.to_x, y: action.to_y }
+  if (action.action === NATIVE_ACTION.pixel_click)
+    return { ...base, kind: "pointer", x: action.x, y: action.y }
+  if (action.action === NATIVE_ACTION.drag)
+    return { ...base, kind: "pointer", x: action.to_x, y: action.to_y }
   if (!("element" in action) || action.element === undefined) return UNLOCATED
   const rect = visual.elements.find(
     (element) => element.element_token === action.element

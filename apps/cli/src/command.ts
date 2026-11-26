@@ -1,4 +1,6 @@
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
+import { WEB_PROTOCOL } from "@arden-hq/std/url"
+import { APP_KIND, FOUND_SERVER, type StdinKind } from "./cli-words.js"
 import type { PendingChatGptLogin } from "@arden-hq/headless/chatgpt-login"
 import {
   createHeadlessClient,
@@ -43,7 +45,7 @@ export type StartServer = (
   input: StartServerInput
 ) => Promise<Pick<ConfiguredServer, "connection" | "stop">>
 
-export type StdinKind = "terminal" | "pipe" | "file" | "other"
+export type { StdinKind } from "./cli-words.js"
 
 export type ServerConnection = ConfiguredServerConnection
 
@@ -146,7 +148,7 @@ const parseServerUrl = (value: string): URL => {
   } catch {
     throw new UsageError("Arden server URL is invalid")
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
+  if (url.protocol !== WEB_PROTOCOL.http && url.protocol !== WEB_PROTOCOL.https) {
     throw new UsageError("Arden server URL must use http or https")
   }
   return url
@@ -166,19 +168,19 @@ export const resolveServer = async (
   }
   const found = await findServer(dependencies)
   switch (found.kind) {
-    case "found":
+    case FOUND_SERVER.found:
       return found.connection
-    case "none":
+    case FOUND_SERVER.none:
       throw new ServerUnavailableError(NOT_RUNNING)
-    case "too_old":
+    case FOUND_SERVER.tooOld:
       throw new ServerUnavailableError(TOO_OLD_TO_START)
   }
 }
 
 export type FoundServer =
-  | { readonly kind: "found"; readonly connection: ServerConnection }
-  | { readonly kind: "none" }
-  | { readonly kind: "too_old" }
+  | { readonly kind: typeof FOUND_SERVER.found; readonly connection: ServerConnection }
+  | { readonly kind: typeof FOUND_SERVER.none }
+  | { readonly kind: typeof FOUND_SERVER.tooOld }
 
 const TOO_OLD_TO_START =
   "Arden is not running, and the installed Arden is too old to start from the command line. Open Arden, or update it."
@@ -192,7 +194,7 @@ export const findServer = async (dependencies: CliDependencies): Promise<FoundSe
   if ((dependencies.env[ARDEN_DIR_VARIABLE]?.trim() ?? "") !== "") return { kind: "none" }
   const app = await dependencies.appLauncher.find()
   if (app === undefined) return { kind: "none" }
-  if (app.kind === "too_old") return { kind: "too_old" }
+  if (app.kind === APP_KIND.tooOld) return { kind: FOUND_SERVER.tooOld }
   return { kind: "found", connection: await startAppInBackground(app.path, dependencies) }
 }
 

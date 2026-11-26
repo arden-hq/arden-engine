@@ -6,6 +6,12 @@ import { deleteSessionOwnedData } from "./session-deletion.js"
 import { sessionActiveWorkSql } from "./work-retention.js"
 import { sessionDescendants } from "./tree-walk.js"
 
+export const SESSION_TREE_DELETION = {
+  missing: "missing",
+  active: "active",
+  deleted: "deleted"
+} as const
+
 export const sessionDeletionTree = (
   sql: SqlClient.SqlClient,
   walk: {
@@ -24,9 +30,9 @@ export const sessionDeletionTree = (
   })
 
 type SessionTreeDeletion =
-  | { readonly kind: "missing" }
-  | { readonly kind: "active" }
-  | { readonly kind: "deleted"; readonly sessions: number }
+  | { readonly kind: typeof SESSION_TREE_DELETION.missing }
+  | { readonly kind: typeof SESSION_TREE_DELETION.active }
+  | { readonly kind: typeof SESSION_TREE_DELETION.deleted; readonly sessions: number }
 
 export const deleteSessionTree = Effect.fn("SqliteSession.deleteTree")(function* (
   sql: SqlClient.SqlClient,
@@ -43,12 +49,16 @@ export const deleteSessionTree = Effect.fn("SqliteSession.deleteTree")(function*
     JOIN (SELECT session_id, MAX(depth) AS depth FROM owned GROUP BY session_id) AS owned
       ON owned.session_id = s.session_id
     ORDER BY owned.depth DESC`
-  if (rows.length === 0) return { kind: "missing" } satisfies SessionTreeDeletion
+  if (rows.length === 0)
+    return { kind: SESSION_TREE_DELETION.missing } satisfies SessionTreeDeletion
   if (rows.some((row) => row.has_active_work !== 0))
-    return { kind: "active" } satisfies SessionTreeDeletion
+    return { kind: SESSION_TREE_DELETION.active } satisfies SessionTreeDeletion
   for (const row of rows) {
     yield* deleteSessionOwnedData(sql, sessionEvents, row.session_id)
     yield* sql`DELETE FROM sessions WHERE session_id = ${row.session_id}`
   }
-  return { kind: "deleted", sessions: rows.length } satisfies SessionTreeDeletion
+  return {
+    kind: SESSION_TREE_DELETION.deleted,
+    sessions: rows.length
+  } satisfies SessionTreeDeletion
 })

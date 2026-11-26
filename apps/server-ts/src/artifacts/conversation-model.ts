@@ -70,7 +70,7 @@ export const artifactRole = (manifest: ConversationArtifactManifest): ArtifactRo
   return spilled ? "working" : "output"
 }
 
-const ARTIFACT_SOURCE = { path: "path", bytes: "bytes" } as const
+export const ARTIFACT_SOURCE = { path: "path", bytes: "bytes" } as const
 
 export interface CreateImageArtifactInput {
   readonly sessionId: string

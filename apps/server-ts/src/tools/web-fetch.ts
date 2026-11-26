@@ -2,9 +2,9 @@ import { abortAfter } from "@arden-hq/std/timer"
 import { clipLine } from "@arden-hq/std/text"
 import { countOf, formatBytes } from "@arden-hq/std/count"
 import { defineServerTool, type ServerTool } from "./define.js"
-import { readHtml } from "./html-content.js"
+import { readHtml, WEB_FORMAT } from "./html-content.js"
 import { ToolExecutionError } from "@arden-hq/loop"
-import { publicWebUrl, type WebUrlIssue } from "@arden-hq/std/url"
+import { PUBLIC_WEB_URL, publicWebUrl, WEB_PROTOCOL, type WebUrlIssue } from "@arden-hq/std/url"
 import { retryableStatus } from "@arden-hq/std/retry"
 import { Effect, Schema } from "effect"
 import { lookup as dnsLookup } from "node:dns/promises"
@@ -23,9 +23,26 @@ const MAX_TIMEOUT_SECONDS = 60
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const MAX_REDIRECTS = 5
 
-const FormatSchema = Schema.Literals(["markdown", "text", "html"] as const).pipe(
-  Schema.withDecodingDefault(Effect.succeed("markdown" as const))
+const FormatSchema = Schema.Literals(Object.values(WEB_FORMAT)).pipe(
+  Schema.withDecodingDefault(Effect.succeed(WEB_FORMAT.markdown))
 )
+
+const LOCALHOST = "localhost"
+const IDENTITY_ENCODING = "identity"
+
+const WEB_MIME = {
+  html: "text/html",
+  eventStream: "text/event-stream",
+  json: "application/json",
+  ldJson: "application/ld+json",
+  xml: "application/xml",
+  xhtml: "application/xhtml+xml"
+} as const
+
+type WebMime = (typeof WEB_MIME)[keyof typeof WEB_MIME]
+
+const isMime = (mime: string, ...among: ReadonlyArray<WebMime>): boolean =>
+  among.some((candidate) => candidate === mime)
 
 const ParametersSchema = Schema.Struct({
   url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
@@ -138,7 +155,7 @@ export const sendRequest = ({
       }
       callback(null, address.address, address.family)
     }
-    const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(
+    const request = (url.protocol === WEB_PROTOCOL.https ? httpsRequest : httpRequest)(
       url,
       {
         method,
@@ -186,7 +203,7 @@ const canonicalUrl = (raw: string, base?: URL): URL => {
     )
   }
   const page = publicWebUrl(raw, base)
-  if (page.kind === "ok") return page.url
+  if (page.kind === PUBLIC_WEB_URL.ok) return page.url
   const [message, preview] = URL_REFUSAL[page.issue]
   throw toolRefusal(message, preview)
 }
@@ -206,7 +223,7 @@ const unbracketedHostname = (url: URL): string =>
 const isLocalHostname = (hostname: string): boolean => {
   const normalized = hostname.toLowerCase().replace(/\.$/u, "")
   return (
-    normalized === "localhost" ||
+    normalized === LOCALHOST ||
     normalized.endsWith(".localhost") ||
     normalized.endsWith(".local") ||
     normalized.endsWith(".internal") ||
@@ -257,11 +274,11 @@ const header = (headers: IncomingHttpHeaders, name: string): string | undefined 
 
 const accepts = (format: typeof FormatSchema.Type): string => {
   switch (format) {
-    case "markdown":
+    case WEB_FORMAT.markdown:
       return "text/markdown, text/plain;q=0.9, text/html;q=0.8, application/json;q=0.7"
-    case "text":
+    case WEB_FORMAT.text:
       return "text/plain, text/markdown;q=0.9, text/html;q=0.8, application/json;q=0.7"
-    case "html":
+    case WEB_FORMAT.html:
       return "text/html, application/xhtml+xml;q=0.9, text/plain;q=0.8"
   }
 }
@@ -277,12 +294,9 @@ const isRedirect = (status: number): boolean =>
   status === 301 || status === 302 || status === 303 || status === 307 || status === 308
 
 const isReadableContentType = (mime: string): boolean =>
-  (mime.startsWith("text/") && mime !== "text/event-stream") ||
-  mime === "application/json" ||
-  mime === "application/ld+json" ||
+  (mime.startsWith("text/") && !isMime(mime, WEB_MIME.eventStream)) ||
+  isMime(mime, WEB_MIME.json, WEB_MIME.ldJson, WEB_MIME.xml, WEB_MIME.xhtml) ||
   mime.endsWith("+json") ||
-  mime === "application/xml" ||
-  mime === "application/xhtml+xml" ||
   mime.endsWith("+xml")
 
 const readBody = async (response: WebFetchResponse): Promise<Buffer> => {
@@ -358,7 +372,7 @@ export const fetchPage = async (
       throw failure(`Web server returned HTTP ${response.status}.`, `HTTP ${response.status}`)
     }
     const contentEncoding = header(response.headers, "content-encoding")?.trim().toLowerCase()
-    if (contentEncoding !== undefined && contentEncoding !== "identity") {
+    if (contentEncoding !== undefined && contentEncoding !== IDENTITY_ENCODING) {
       response.cancel()
       throw toolRefusal(
         `Web server ignored the identity encoding request (${contentEncoding}).`,
@@ -398,15 +412,14 @@ const formatContent = (
   readonly json: boolean
 } => {
   const mime = textBefore(page.contentType, ";").trim().toLowerCase()
-  const rendered =
-    mime === "text/html" || mime === "application/xhtml+xml"
-      ? readHtml(page.content, { base: page.url, format })
-      : { content: page.content.trim(), title: undefined }
+  const rendered = isMime(mime, WEB_MIME.html, WEB_MIME.xhtml)
+    ? readHtml(page.content, { base: page.url, format })
+    : { content: page.content.trim(), title: undefined }
   return {
     content: rendered.content || "(page contained no readable text)",
     title: rendered.title,
     body: rendered.content,
-    json: mime === "application/json" || mime.endsWith("+json")
+    json: isMime(mime, WEB_MIME.json) || mime.endsWith("+json")
   }
 }
 

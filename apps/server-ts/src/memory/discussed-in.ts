@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 import { JOB_PURPOSE } from "../persistence/job-classification.js"
 
@@ -46,7 +47,7 @@ const userChats = (sessions: Sessions) => {
   return Effect.fn("Memory.userChat")(function* (sessionId: string) {
     if (resolved.has(sessionId)) return resolved.get(sessionId) ?? null
     let header = yield* sessions.loadHistoryHeader(sessionId)
-    for (let hop = 0; hop < PARENT_HOPS && header?.sessionType === "agent"; hop += 1) {
+    for (let hop = 0; hop < PARENT_HOPS && header?.sessionType === SESSION_TYPE.agent; hop += 1) {
       header =
         header.parentSessionId === null
           ? null
@@ -54,7 +55,7 @@ const userChats = (sessions: Sessions) => {
     }
     const chat =
       header === null ||
-      header.sessionType === "agent" ||
+      header.sessionType === SESSION_TYPE.agent ||
       (header.originAutomationId !== null && header.originJobPurpose !== JOB_PURPOSE.spaceReview)
         ? null
         : header

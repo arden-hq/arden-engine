@@ -199,7 +199,14 @@ export interface OfferHolders {
   } | null
 }
 
+export const OFFER_HISTORY = {
+  none: "none",
+  open: "open",
+  declined: "declined",
+  saved: "saved"
+} as const
+
 export interface OfferHistory {
   readonly approvals: number
-  readonly offer: "none" | "open" | "declined" | "saved"
+  readonly offer: (typeof OFFER_HISTORY)[keyof typeof OFFER_HISTORY]
 }

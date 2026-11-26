@@ -2,11 +2,12 @@ import type { ToolEntry, ToolInputSource } from "@arden-hq/loop"
 import { Predicate } from "effect"
 
 import type { ToolScopeKey } from "../execution/policy.js"
-import type { RunAuthority } from "../execution/authority.js"
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
+import { ACTOR, type RunAuthority } from "../execution/authority.js"
 import { refusalPath } from "../execution/decide.js"
 import { renderRefusal } from "../execution/refusal.js"
 import { parseMcpSource } from "../mcp/naming.js"
-import { discoveryOf, type ServerTool, type ServerToolMetadata } from "./define.js"
+import { ALWAYS_LOADED, discoveryOf, type ServerTool, type ServerToolMetadata } from "./define.js"
 import { scopedRunToolNames } from "./tool-scopes.js"
 import { toolParametersJsonSchema } from "./tool-json-schema.js"
 import type { SpecialChat } from "../context/special-chat.js"
@@ -39,7 +40,7 @@ export const SPACE_CHAT_PRELOAD: ChatPreload = {
 
 const groupOf = (tool: ServerTool): string | undefined => {
   const discovery = discoveryOf(tool.definition)
-  return discovery === undefined || discovery === "always_loaded" ? undefined : discovery.group
+  return discovery === undefined || discovery === ALWAYS_LOADED ? undefined : discovery.group
 }
 
 export const preloadToolNames = (
@@ -277,15 +278,19 @@ export const ownedToolNames = (
     .filter(
       (tool) =>
         tool.meta.invocation_only !== true &&
-        discoveryOf(tool.definition) !== "always_loaded" &&
+        discoveryOf(tool.definition) !== ALWAYS_LOADED &&
         ownedByScopes(tool.meta, scopes)
     )
     .map((tool) => tool.definition.name)
 
+const REFUSAL_REASON = { scope: "scope", denied: "denied" } as const
+
+type RefusalReason = (typeof REFUSAL_REASON)[keyof typeof REFUSAL_REASON]
+
 export const refusalText =
-  (authority: RunAuthority): ((name: string, reason: "scope" | "denied") => string) =>
-  (name: string, reason: "scope" | "denied"): string => {
-    if (reason === "denied")
+  (authority: RunAuthority): ((name: string, reason: RefusalReason) => string) =>
+  (name: string, reason: RefusalReason): string => {
+    if (reason === REFUSAL_REASON.denied)
       return renderRefusal({
         what: `${name} is not allowed in this run: the user turned this tool off`,
         rule: "user_deny",
@@ -299,13 +304,13 @@ export const refusalText =
   }
 
 const reachClause = (actor: RunAuthority["actor"]): string => {
-  if (actor.kind !== "agent") return "outside what this run may use"
+  if (actor.kind !== ACTOR.agent) return "outside what this run may use"
   switch (actor.mode) {
-    case "research":
+    case AGENT_MODE.research:
       return "not available to research agents: they read and research only"
-    case "code":
+    case AGENT_MODE.code:
       return "not available to code agents: they work with files, the shell and code in their own folder"
-    case "work":
+    case AGENT_MODE.work:
       return "outside what this agent may use"
   }
 }
@@ -331,7 +336,7 @@ export const applyToolCatalog = (
     const sources = INPUT_SOURCES[name]
     const group = toolGroup(tool)
     const deferred =
-      (tool === undefined || discoveryOf(tool.definition) !== "always_loaded") &&
+      (tool === undefined || discoveryOf(tool.definition) !== ALWAYS_LOADED) &&
       entry.meta.hosted !== true &&
       !(tool !== undefined && ownedByScopes(tool.meta, context.scopes))
     return {

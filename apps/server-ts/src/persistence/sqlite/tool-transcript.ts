@@ -35,19 +35,23 @@ interface ToolCallPositionBase {
   readonly messageIndex: number
 }
 
+const TOOL_CALL_POSITION = { valid: "ValidArguments", invalid: "InvalidArguments" } as const
+
 interface ValidToolCallPosition extends ToolCallPositionBase {
-  readonly _tag: "ValidArguments"
+  readonly _tag: typeof TOOL_CALL_POSITION.valid
   readonly arguments: JsonObject
 }
 
 interface InvalidToolCallPosition extends ToolCallPositionBase {
-  readonly _tag: "InvalidArguments"
+  readonly _tag: typeof TOOL_CALL_POSITION.invalid
 }
 
 type ToolCallPosition = ValidToolCallPosition | InvalidToolCallPosition
 
+const TOOL_TRANSCRIPT_OPERATION = { finish: "finish", fail: "fail", cancel: "cancel" } as const
+
 interface RecoverToolTranscriptInput {
-  readonly operation: "finish" | "fail" | "cancel"
+  readonly operation: (typeof TOOL_TRANSCRIPT_OPERATION)[keyof typeof TOOL_TRANSCRIPT_OPERATION]
   readonly sessionId: string
   readonly runId: string
   readonly terminalAt: string
@@ -106,10 +110,10 @@ const loadToolCallPositions = Effect.fn("ToolTranscript.loadToolCallPositions")(
       }
       positions.push(
         Option.match(decodeToolArguments(call.function.arguments), {
-          onNone: () => ({ ...common, _tag: "InvalidArguments" as const }),
+          onNone: () => ({ ...common, _tag: TOOL_CALL_POSITION.invalid }),
           onSome: (arguments_) => ({
             ...common,
-            _tag: "ValidArguments" as const,
+            _tag: TOOL_CALL_POSITION.valid,
             arguments: canonicalToolArguments(call.function.name, arguments_)
           })
         })
@@ -182,7 +186,7 @@ const missingToolOutputEnvelope = (
     created_at: input.terminalAt,
     tool_call_id: toolCallId,
     content:
-      input.operation === "cancel"
+      input.operation === TOOL_TRANSCRIPT_OPERATION.cancel
         ? "The tool was not executed because the assistant run was cancelled before it started."
         : "The tool was not executed because the assistant run ended before it started."
   })
@@ -221,7 +225,7 @@ const matchingExecutionForPosition = (
   position: ToolCallPosition,
   execution: SettledRunToolExecution | undefined
 ): SettledRunToolExecution | undefined => {
-  if (execution === undefined || position._tag === "InvalidArguments") return undefined
+  if (execution === undefined || position._tag === TOOL_CALL_POSITION.invalid) return undefined
   if (execution.toolName !== position.toolName) return undefined
   if (!argumentsEquivalent(execution.arguments, position.arguments)) return undefined
   if (position.changesState !== undefined && execution.changesState !== position.changesState) {

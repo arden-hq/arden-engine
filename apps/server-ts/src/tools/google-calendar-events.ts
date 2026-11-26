@@ -1,11 +1,15 @@
 import { Schema } from "effect"
 
 import type { EffectTarget } from "../execution/tool-effect.js"
-import { calendarEventTarget } from "../google/calendar-client.js"
 import { allDayDays, calendarEventRef } from "./google-calendar-rules.js"
 import { decodeGoogle } from "./google-request.js"
-import { passage } from "./source-passage.js"
-import { CalendarAttachmentSchema } from "../google/calendar-client.js"
+import { passage, SOURCE_USE } from "./source-passage.js"
+import {
+  CALENDAR_EVENT_STATUS,
+  calendarEventTarget,
+  CalendarAttachmentSchema,
+  PRIMARY_CALENDAR
+} from "../google/calendar-client.js"
 import { calendarAttachmentRef } from "./google-calendar-attachments.js"
 
 const DESCRIPTION_CHARS = 4_000
@@ -75,9 +79,12 @@ export const eventList = decodeGoogle(
 const displayTime = (value: CalendarEvent["start"]): string =>
   value?.dateTime ?? value?.date ?? "unknown"
 
+const VIDEO_ENTRY_POINT = "video"
+
 export const meetLink = (item: CalendarEvent): string | null =>
   item.hangoutLink ??
-  item.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri ??
+  item.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === VIDEO_ENTRY_POINT)
+    ?.uri ??
   null
 
 export type EventData = {
@@ -166,7 +173,7 @@ export const eventSource = (
   title: string
   use: "read" | "found"
 } => {
-  const excerpt = use === "read" ? passage(data.description) : undefined
+  const excerpt = use === SOURCE_USE.read ? passage(data.description) : undefined
   return {
     provider: "calendar",
     kind: "event",
@@ -213,8 +220,8 @@ export const renderCalendarEvent = (
   const shown = description.slice(0, DESCRIPTION_CHARS)
   return [
     `# Calendar event: ${data.title.replace(/\s+/gu, " ")}`,
-    `When: ${allDayText(data) ?? `${data.start} to ${data.end}`}${data.status === "confirmed" ? "" : ` (${data.status})`}`,
-    `Calendar: ${account}${data.calendar_id === "primary" ? "" : ` (calendar_id ${data.calendar_id})`}`,
+    `When: ${allDayText(data) ?? `${data.start} to ${data.end}`}${data.status === CALENDAR_EVENT_STATUS.confirmed ? "" : ` (${data.status})`}`,
+    `Calendar: ${account}${data.calendar_id === PRIMARY_CALENDAR ? "" : ` (calendar_id ${data.calendar_id})`}`,
     ...(data.organizer === null ? [] : [`Organizer: ${data.organizer}`]),
     ...(data.my_response === null ? [] : [`Your response: ${data.my_response}`]),
     ...repeatsLines(data),

@@ -1,3 +1,4 @@
+import { MODEL_FILE_ROLE } from "./manifest.js"
 import { Effect, Layer, Schema } from "effect"
 
 import type { EmbeddingManifest } from "./catalog.js"
@@ -29,7 +30,7 @@ const modelError = (
 ) => new EmbeddingModelError({ operation, message, ...(cause === undefined ? {} : { cause }) })
 
 const localEmbeddingIndexVersion = (manifest: EmbeddingManifest): string => {
-  const weights = manifest.files.find((file) => file.role === "weights")
+  const weights = manifest.files.find((file) => file.role === MODEL_FILE_ROLE.weights)
   return `${manifest.id}@${weights?.sha256.slice(0, 16) ?? "unknown"}:llama-server:${manifest.pooling}:l2:${MAX_TOKENS}:${OVERLAP_TOKENS}:v1`
 }
 

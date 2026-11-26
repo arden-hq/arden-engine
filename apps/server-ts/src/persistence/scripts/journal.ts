@@ -28,9 +28,11 @@ export type NestedResolution =
   | { readonly kind: "run"; readonly toolCallId: string }
   | { readonly kind: "refuse"; readonly toolCallId: string; readonly effect: UnsafeEffect }
 
+export const RETRY_VERDICT = { allow: "allow", refuse: "refuse" } as const
+
 export type RetryVerdict =
-  | { readonly kind: "allow" }
-  | { readonly kind: "refuse"; readonly effect: UnsafeEffect }
+  | { readonly kind: typeof RETRY_VERDICT.allow }
+  | { readonly kind: typeof RETRY_VERDICT.refuse; readonly effect: UnsafeEffect }
 
 export interface ChildObservation {
   readonly effectDisposition: WorkflowEffectDisposition

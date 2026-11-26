@@ -1,16 +1,21 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import type {
-  SessionTriageAction,
-  SessionTriageDecision,
-  SessionTriageTarget
+import {
+  SESSION_TRIAGE_ACTION,
+  SESSION_TRIAGE_DECISION,
+  SESSION_TYPE,
+  type SessionTriageAction,
+  type SessionTriageDecision,
+  type SessionTriageTarget
 } from "@arden-hq/protocol/sessions"
+import { SPACE_KIND } from "@arden-hq/protocol/spaces"
+import { STORE_REASON } from "../persistence/errors.js"
 import { DateTime, Effect, Schema } from "effect"
 
 import {
   type StructuredCompletion,
   StructuredCompletionError
 } from "../models/structured-completion.js"
-import type { SpaceStore } from "../persistence/spaces/store.js"
+import { SpaceStoreError, type SpaceStore } from "../persistence/spaces/store.js"
 import type { ActiveSessionSnapshot, SessionHeaderSnapshot } from "../persistence/sessions/model.js"
 import type { SessionQueries } from "../persistence/sessions/queries.js"
 import { type SessionStore, SessionStoreError } from "../persistence/sessions/store.js"
@@ -18,6 +23,7 @@ import {
   freshTriage,
   NO_TRIAGE,
   StoredTriageSchema,
+  TRIAGE_OUTCOME,
   type StoredTriage
 } from "../persistence/sessions/triage.js"
 import { type StoredMessageEnvelope, visibleMessageCount } from "../persistence/transcript/model.js"
@@ -27,7 +33,6 @@ import { createSpaceWithPage } from "../wiki/space-page.js"
 import { SPACE_INSTRUCTIONS_INPUT } from "@arden-hq/protocol/spaces"
 import { conversationLine, newestWithinBudget } from "./conversation.js"
 import type { SessionQueryFailure } from "../persistence/sessions/queries.js"
-import type { SpaceStoreError } from "../persistence/spaces/store.js"
 
 const TRIAGE_MESSAGE_MAX_CHARS = 4_000
 const TRIAGE_TRANSCRIPT_MAX_CHARS = 24_000
@@ -45,13 +50,15 @@ export interface SessionTriageDependencies {
   readonly zone?: DateTime.TimeZone
 }
 
+const TRIAGE_CONFLICT = { stale: "stale", busy: "busy" } as const
+
 export class SessionTriageConflict extends Schema.TaggedError<SessionTriageConflict>()(
   "SessionTriageConflict",
-  { reason: Schema.Literals(["stale", "busy"] as const), message: Schema.String }
+  { reason: Schema.Literals(Object.values(TRIAGE_CONFLICT)), message: Schema.String }
 ) {}
 
 const staleSuggestion = (message = "This suggestion no longer applies") =>
-  new SessionTriageConflict({ reason: "stale", message })
+  new SessionTriageConflict({ reason: TRIAGE_CONFLICT.stale, message })
 
 const BUSY_MESSAGE = "Arden is still working in this Chat. File it once the work is done."
 
@@ -79,7 +86,7 @@ export const makeSessionTriage = (
 
     const spaces = yield* dependencies.spaces.list()
     const candidates = spaces
-      .filter((space) => space.kind !== "main")
+      .filter((space) => space.kind !== SPACE_KIND.main)
       .map((space): SessionTriageTarget => ({ space_id: space.space_id, title: space.name }))
     const output = yield* dependencies.completion.runTool({
       role: "helper",
@@ -97,7 +104,8 @@ export const makeSessionTriage = (
     })
     const validated = yield* validatedTriageDecision(output, candidates)
     const decision =
-      validated.decision === "create" && nameTaken(spaces, validated.new_title)
+      validated.decision === SESSION_TRIAGE_DECISION.create &&
+      nameTaken(spaces, validated.new_title)
         ? { ...NO_TRIAGE, rationale: validated.rationale }
         : validated
     const checked = {
@@ -106,13 +114,13 @@ export const makeSessionTriage = (
       checked_count: visibleMessageCount(session.messages)
     }
 
-    if (decision.decision === "move" && output.confident) {
+    if (decision.decision === SESSION_TRIAGE_DECISION.move && output.confident) {
       const moved = yield* dependencies.store
         .moveToSpace(sessionId, decision.target.space_id)
         .pipe(Effect.catchTag("SessionStoreError", () => Effect.succeed(undefined)))
       if (moved !== undefined) {
         yield* dependencies.store.saveTriage(sessionId, {
-          outcome: "filed",
+          outcome: TRIAGE_OUTCOME.filed,
           ...checked,
           filed: {
             space_id: decision.target.space_id,
@@ -123,7 +131,10 @@ export const makeSessionTriage = (
         return movedTo(decision.target, decision.rationale)
       }
     }
-    yield* dependencies.store.saveTriage(sessionId, { outcome: "suggested", ...checked })
+    yield* dependencies.store.saveTriage(sessionId, {
+      outcome: TRIAGE_OUTCOME.suggested,
+      ...checked
+    })
     return decision
   })
 
@@ -144,15 +155,21 @@ export const makeSessionTriageAction = (
     if (stored === undefined) return yield* staleSuggestion("This Chat has no filing suggestion")
 
     switch (action) {
-      case "dismiss": {
-        if (stored.outcome !== "suggested" && stored.outcome !== "dismissed") {
+      case SESSION_TRIAGE_ACTION.dismiss: {
+        if (
+          stored.outcome !== TRIAGE_OUTCOME.suggested &&
+          stored.outcome !== TRIAGE_OUTCOME.dismissed
+        ) {
           return yield* staleSuggestion("Only a suggestion can be dismissed")
         }
-        yield* dependencies.store.saveTriage(sessionId, { ...stored, outcome: "dismissed" })
+        yield* dependencies.store.saveTriage(sessionId, {
+          ...stored,
+          outcome: TRIAGE_OUTCOME.dismissed
+        })
         return NO_TRIAGE
       }
-      case "accept": {
-        if (stored.outcome !== "suggested" || !mainChat(session)) {
+      case SESSION_TRIAGE_ACTION.accept: {
+        if (stored.outcome !== TRIAGE_OUTCOME.suggested || !mainChat(session)) {
           return yield* staleSuggestion()
         }
         if (yield* dependencies.sessions.blockingWork(sessionId)) {
@@ -160,15 +177,15 @@ export const makeSessionTriageAction = (
         }
         const filed = yield* fileChat(dependencies, sessionId, stored.decision).pipe(
           Effect.catchTag("SessionTriageConflict", (conflict) =>
-            conflict.reason === "stale"
+            conflict.reason === TRIAGE_CONFLICT.stale
               ? dependencies.store
-                  .saveTriage(sessionId, { ...stored, outcome: "dismissed" })
+                  .saveTriage(sessionId, { ...stored, outcome: TRIAGE_OUTCOME.dismissed })
                   .pipe(Effect.andThen(Effect.fail(conflict)))
               : Effect.fail(conflict)
           )
         )
         yield* dependencies.store.saveTriage(sessionId, {
-          outcome: "filed",
+          outcome: TRIAGE_OUTCOME.filed,
           decision: stored.decision,
           checked_at: stored.checked_at,
           checked_count: stored.checked_count,
@@ -176,8 +193,8 @@ export const makeSessionTriageAction = (
         })
         return movedTo({ space_id: filed.space_id, title: filed.title }, stored.decision.rationale)
       }
-      case "undo": {
-        if (stored.outcome !== "filed") {
+      case SESSION_TRIAGE_ACTION.undo: {
+        if (stored.outcome !== TRIAGE_OUTCOME.filed) {
           return yield* staleSuggestion("Triage did not file this Chat")
         }
         const { space_id: spaceId, created } = stored.filed
@@ -199,24 +216,24 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
   decision: SessionTriageDecision
 ) {
   switch (decision.decision) {
-    case "move": {
+    case SESSION_TRIAGE_DECISION.move: {
       const target = decision.target
       const moved = yield* dependencies.store.moveToSpace(sessionId, target.space_id).pipe(
         Effect.catchIf(
-          (error) => error.reason === "not_found",
+          (error) => error.reason === STORE_REASON.not_found,
           () => Effect.fail(staleSuggestion(`${target.title} is no longer a Space`))
         )
       )
       yield* requireMoved(moved)
       return { space_id: target.space_id, title: target.title, created: false }
     }
-    case "create": {
+    case SESSION_TRIAGE_DECISION.create: {
       const space = yield* createSpaceWithPage(dependencies, {
         name: decision.new_title,
         instructions: { kind: SPACE_INSTRUCTIONS_INPUT.unwritten }
       }).pipe(
         Effect.catchIf(
-          (error) => error._tag === "SpaceStoreError" && error.reason === "conflict",
+          (error) => error instanceof SpaceStoreError && error.reason === STORE_REASON.conflict,
           () => Effect.fail(staleSuggestion(`A Space named ${decision.new_title} already exists`))
         )
       )
@@ -239,8 +256,8 @@ const fileChat = Effect.fn("SessionTriage.fileChat")(function* (
       )
       return { space_id: space.space_id, title: space.name, created: true }
     }
-    case "none":
-    case "moved":
+    case SESSION_TRIAGE_DECISION.none:
+    case SESSION_TRIAGE_DECISION.moved:
       return yield* staleSuggestion()
   }
 })
@@ -263,9 +280,9 @@ const movedTo = (target: SessionTriageTarget, rationale: string): SessionTriageD
 })
 
 const mainChat = (session: SessionHeaderSnapshot): boolean =>
-  session.header.spaceKind === "main" &&
+  session.header.spaceKind === SPACE_KIND.main &&
   !session.header.spaceConversation &&
-  session.header.sessionType === "chat" &&
+  session.header.sessionType === SESSION_TYPE.chat &&
   session.header.parentSessionId === null &&
   !Object.hasOwn(session.metadata, "capture") &&
   !Object.hasOwn(session.metadata, "onboarding")
@@ -322,7 +339,7 @@ const validatedTriageDecision = (
   candidates: ReadonlyArray<SessionTriageTarget>
 ): Effect.Effect<SessionTriageDecision, StructuredCompletionError> => {
   switch (decision.decision) {
-    case "move": {
+    case SESSION_TRIAGE_DECISION.move: {
       const target =
         decision.target === null
           ? undefined
@@ -330,24 +347,24 @@ const validatedTriageDecision = (
       return target === undefined
         ? Effect.fail(invalidOutput("The triage decision names a Space that does not exist"))
         : Effect.succeed({
-            decision: "move" as const,
+            decision: SESSION_TRIAGE_DECISION.move,
             target,
             new_title: null,
             rationale: decision.rationale
           })
     }
-    case "create": {
+    case SESSION_TRIAGE_DECISION.create: {
       const title = decision.new_title?.trim()
       return title === undefined || title.length === 0
         ? Effect.fail(invalidOutput("The triage decision creates a Space without a title"))
         : Effect.succeed({
-            decision: "create" as const,
+            decision: SESSION_TRIAGE_DECISION.create,
             target: null,
             new_title: title.slice(0, TRIAGE_TITLE_MAX_CHARS),
             rationale: decision.rationale
           })
     }
-    case "none":
+    case SESSION_TRIAGE_DECISION.none:
       return Effect.succeed({ ...NO_TRIAGE, rationale: decision.rationale })
   }
 }

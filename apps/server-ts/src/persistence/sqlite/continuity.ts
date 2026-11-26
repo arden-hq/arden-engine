@@ -1,6 +1,7 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
 import type { CommunicationEnvelope } from "@arden-hq/protocol/chat"
 import {
+  RENDERED_CONTINUITY_RECORD,
   SEEN_ACKNOWLEDGEMENT,
   type SpaceContinuitySeenState
 } from "@arden-hq/protocol/spaces/continuity"
@@ -106,13 +107,13 @@ export const makeCommunicationStore = ({
             }
             const arrivals = new Set(
               input.rendered.flatMap((record) =>
-                record.kind === "arrival" ? [record.arrival_id] : []
+                record.kind === RENDERED_CONTINUITY_RECORD.arrival ? [record.arrival_id] : []
               )
             )
             let arrivalTarget = current.arrivals_through
             let questionTarget = current.question_changes_through
             for (const record of input.rendered) {
-              if (record.kind === "arrival") {
+              if (record.kind === RENDERED_CONTINUITY_RECORD.arrival) {
                 const rows = yield* sql<{
                   readonly sequence: number
                 }>`SELECT communication_sequence AS sequence

@@ -40,6 +40,12 @@ interface TaskWorkerSpace {
   readonly pagePath: string | undefined
 }
 
+export const TASK_SPEAKS_IN = { chat: "chat", space: "space" } as const
+export const SPACE_JOB_PROMPT = {
+  spaceReview: "space_review",
+  taskExecution: "task_execution"
+} as const
+
 export interface TaskWorkerSnapshot {
   readonly itemId: string
   readonly text: string
@@ -54,7 +60,7 @@ export interface TaskWorkerSnapshot {
   readonly waitingOn: string | undefined
   readonly updatedAt: string
   readonly space: TaskWorkerSpace | undefined
-  readonly speaksIn: "chat" | "space"
+  readonly speaksIn: (typeof TASK_SPEAKS_IN)[keyof typeof TASK_SPEAKS_IN]
   readonly comments: ReadonlyArray<TaskWorkerComment>
   readonly history: ReadonlyArray<{ readonly at: string; readonly summary: string }>
   readonly saved: ReadonlyArray<TaskWorkerAttachment>
@@ -64,13 +70,25 @@ export interface TaskWorkerSnapshot {
 }
 
 export type SpaceJobPromptContext =
-  | { readonly kind: "space_review"; readonly space: SpaceReviewSnapshot | undefined }
-  | { readonly kind: "task_execution"; readonly task: TaskWorkerSnapshot | undefined }
+  | {
+      readonly kind: typeof SPACE_JOB_PROMPT.spaceReview
+      readonly space: SpaceReviewSnapshot | undefined
+    }
+  | {
+      readonly kind: typeof SPACE_JOB_PROMPT.taskExecution
+      readonly task: TaskWorkerSnapshot | undefined
+    }
+
+export const AUTOMATION_JOB_PROMPT = { text: "text", spaceJob: "space_job" } as const
 
 export type AutomationJobPrompt =
-  | { readonly kind: "text"; readonly text: string; readonly triggerContext: string | undefined }
   | {
-      readonly kind: "space_job"
+      readonly kind: typeof AUTOMATION_JOB_PROMPT.text
+      readonly text: string
+      readonly triggerContext: string | undefined
+    }
+  | {
+      readonly kind: typeof AUTOMATION_JOB_PROMPT.spaceJob
       readonly context: SpaceJobPromptContext
       readonly triggerContext: string | undefined
     }

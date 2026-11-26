@@ -7,7 +7,11 @@ import { readHeadSequence } from "@arden-hq/journal/effect"
 import { Clock, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationStoreError } from "../automations/store.js"
-import { AutomationTriggers, type TriggerFeedRecord } from "../automations/triggers.js"
+import {
+  AutomationTriggers,
+  TRIGGER_FEED_KIND,
+  type TriggerFeedRecord
+} from "../automations/triggers.js"
 import type { WikiEventOutbox } from "../automations/wiki-event-outbox.js"
 import { SESSION_LIFECYCLE_STREAM_ID } from "../sessions/events.js"
 import { makeSpaceJobSql } from "./space-jobs.js"
@@ -118,13 +122,13 @@ export const makeAutomationTriggerFeed = ({
                   raised.event,
                   raised.dueAt === undefined ? {} : { dueAt: raised.dueAt }
                 )
-            if (record.kind === "run_completed" && record.sessionId !== null)
+            if (record.kind === TRIGGER_FEED_KIND.runCompleted && record.sessionId !== null)
               yield* spaceJobs.queueInferenceChat(record.sessionId, iso(nowMs))
-            if (record.kind !== "other" && record.sessionId !== null) {
+            if (record.kind !== TRIGGER_FEED_KIND.other && record.sessionId !== null) {
               const sessionId = record.sessionId
               let quietChat: QuietChat | null | undefined
               for (const task of yield* listeningAutomations("trigger_feed")) {
-                if (task.chatQuiet !== null && record.kind !== "run_completed") {
+                if (task.chatQuiet !== null && record.kind !== TRIGGER_FEED_KIND.runCompleted) {
                   quietChat ??= yield* loadQuietChat(sql, sessionId)
                   if (quietChat !== null) {
                     yield* armChatQuiet({
@@ -138,7 +142,7 @@ export const makeAutomationTriggerFeed = ({
                     })
                   }
                 }
-                if (task.idle !== null && record.kind === "input_committed") {
+                if (task.idle !== null && record.kind === TRIGGER_FEED_KIND.inputCommitted) {
                   yield* sql`INSERT INTO automation_idle_state (task_id, latest_input_sequence, latest_input_at)
                       VALUES (${task.automationId}, ${record.sequence}, ${iso(record.atMs)})
                       ON CONFLICT(task_id) DO UPDATE SET
@@ -154,7 +158,7 @@ export const makeAutomationTriggerFeed = ({
                 }
                 if (
                   task.count !== null &&
-                  record.kind === "run_completed" &&
+                  record.kind === TRIGGER_FEED_KIND.runCompleted &&
                   record.atMs >=
                     ((yield* cooldownEnd(sql, task.automationId)) ?? Number.NEGATIVE_INFINITY)
                 ) {

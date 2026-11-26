@@ -1,3 +1,4 @@
+import { SYSTEM_HANDLER } from "../../persistence/automations/model.js"
 import { ITEM_EVENTS } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { ChatMessage } from "../../chat/message.js"
@@ -5,7 +6,7 @@ import type { AutomationQueue } from "../../persistence/automations/queue.js"
 import { EVENTS_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import type { PostStore } from "../../persistence/posts/store.js"
 import { PROMPTS } from "../../prompts/catalog.js"
-import { readHandlerRun } from "../handler-tool-result.js"
+import { HANDLER_READ, readHandlerRun } from "../handler-tool-result.js"
 import { runByRule } from "../job-run.js"
 import {
   POST_MESSAGE_TOOL,
@@ -25,7 +26,7 @@ export const makeEventsRunner = (services: {
   readonly awaitRun: AwaitAutomationRun
 }): AutomationRunner =>
   Effect.fn("EventsRunner")(function* (job) {
-    const itemIds = job.payload.handler === "events" ? job.payload.itemIds : []
+    const itemIds = job.payload.handler === SYSTEM_HANDLER.events ? job.payload.itemIds : []
     if (itemIds.length === 0) return jobResult.withoutRun("no_input", "Nothing arrived to check")
     const sessionId =
       job.payload.chatRun?.sessionId ?? (yield* services.queue.prepareRunSession(job))
@@ -48,7 +49,7 @@ export const makeEventsRunner = (services: {
       schema: PostMessageInputSchema,
       missing: "The run ended without posting a message or reporting no change"
     })
-    if (read.kind === "ended") return read.result
+    if (read.kind === HANDLER_READ.ended) return read.result
     const post = read.value
     yield* services.posts.post({
       automationId: job.payload.automationId,

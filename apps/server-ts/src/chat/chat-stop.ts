@@ -1,6 +1,6 @@
 import type { ChatRunningWork } from "@arden-hq/protocol/sessions"
 import { chatName } from "@arden-hq/protocol/views"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Result } from "effect"
 import { RunQueries, type ChatWork, type RunQueryError } from "../persistence/runs/queries.js"
 import type { ScriptStoreError } from "../persistence/scripts/store.js"
 import { WorkStore, type WorkStoreError } from "../persistence/work/store.js"
@@ -10,12 +10,20 @@ import { SessionQueries, type SessionQueryFailure } from "../persistence/session
 import { SpaceStore, SpaceStoreError, archiveRefusal } from "../persistence/spaces/store.js"
 import { TerminalSessions } from "../terminals/service.js"
 import { ScriptRunner } from "../workflows/script-runner.js"
-import { ChatMessageError, type ChatMessageFailure } from "./message-errors.js"
+import {
+  CHAT_MESSAGE_FAILURE,
+  ChatMessageError,
+  type ChatMessageFailure
+} from "./message-errors.js"
 import { ChatMessage } from "./message.js"
 
 const CHAT_END = { archive: "archive", delete: "delete" } as const
 
 export type ChatEnd = (typeof CHAT_END)[keyof typeof CHAT_END]
+
+const RUN_WORK = { reply: "reply", agent: "agent", automation: "automation" } as const
+type RunWorkKind = (typeof RUN_WORK)[keyof typeof RUN_WORK]
+const isRunWork = (run: { readonly kind: string }, kind: RunWorkKind): boolean => run.kind === kind
 
 export const END_RESULT = { ended: "ended", not_found: "not_found", running: "running" } as const
 
@@ -85,7 +93,7 @@ export class ChatStop extends Context.Service<
             .cancel({ sessionId: chatSessionId })
             .pipe(
               Effect.catch((error) =>
-                error instanceof ChatMessageError && error.reason === "not_found"
+                error instanceof ChatMessageError && error.reason === CHAT_MESSAGE_FAILURE.not_found
                   ? Effect.void
                   : Effect.fail(error)
               )
@@ -101,7 +109,7 @@ export class ChatStop extends Context.Service<
         action: ChatEnd,
         mutation: MutationOperationIdentity | undefined
       ) =>
-        (action === "archive"
+        (action === CHAT_END.archive
           ? sessions.archive(sessionId, mutation)
           : sessions.permanentDelete(sessionId)
         ).pipe(Effect.map((found): ChatEndResult => ({ kind: found ? "ended" : "not_found" })))
@@ -122,7 +130,7 @@ export class ChatStop extends Context.Service<
           const ended = yield* act(input.sessionId, input.action, input.mutation).pipe(
             Effect.result
           )
-          if (ended._tag === "Success") return ended.success
+          if (Result.isSuccess(ended)) return ended.success
           const again = yield* running(input.sessionId)
           if (attempt >= STOP_ATTEMPTS || !hasRunningWork(again)) return yield* ended.failure
         }
@@ -157,7 +165,7 @@ export class ChatStop extends Context.Service<
         for (let attempt = 1; ; attempt += 1) {
           if (input.stop) for (const chat of first.chats) yield* stop(chat.sessionId)
           const archived = yield* spaces.archive(input.spaceId).pipe(Effect.result)
-          if (archived._tag === "Success")
+          if (Result.isSuccess(archived))
             return {
               kind: archived.success === null ? "not_found" : "ended"
             } satisfies SpaceEndResult
@@ -193,9 +201,9 @@ export class ChatStop extends Context.Service<
 const STOP_ATTEMPTS = 3
 
 const countRunningWork = (work: ChatWork, commands: number): ChatRunningWork => ({
-  replies: work.runs.filter((run) => run.kind === "reply").length,
-  agents: work.runs.filter((run) => run.kind === "agent").length,
-  automations: work.runs.filter((run) => run.kind === "automation").length,
+  replies: work.runs.filter((run) => isRunWork(run, RUN_WORK.reply)).length,
+  agents: work.runs.filter((run) => isRunWork(run, RUN_WORK.agent)).length,
+  automations: work.runs.filter((run) => isRunWork(run, RUN_WORK.automation)).length,
   workflows: work.workflows.length,
   commands
 })

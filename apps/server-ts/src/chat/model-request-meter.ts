@@ -1,3 +1,4 @@
+import { MODEL_STREAM_ITEM_TAG } from "@arden-hq/loop"
 import type { CompletionResponse, ModelProvider, ModelRequestMiddleware } from "@arden-hq/loop"
 import { STREAM_MARK, type ModelPhaseTiming, type StreamMark } from "@arden-hq/protocol/daemon"
 import type { StoredRunUsage as RunUsage } from "../persistence/runs/stored-result.js"
@@ -102,7 +103,7 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
           for await (const item of await stream(request)) {
             const receivedAt = clock()
             const elapsed = Math.max(0, Math.round(receivedAt - start))
-            if (item._tag === "ProviderStreamRetry") {
+            if (item._tag === MODEL_STREAM_ITEM_TAG.providerStreamRetry) {
               retries += 1
               scheduledBackoffMs += item.delayMs ?? 0
               Effect.runSync(
@@ -118,14 +119,21 @@ export const makeModelRequestMeter = (input: MeterInput): ModelRequestMeter => {
             } else {
               firstItemMs ??= elapsed
             }
-            if (item._tag === "TextDelta" && item.content.trim().length > 0) firstTextMs ??= elapsed
-            if (item._tag === "ToolCallDelta" || item._tag === "ProviderToolCall") {
+            if (item._tag === MODEL_STREAM_ITEM_TAG.textDelta && item.content.trim().length > 0)
+              firstTextMs ??= elapsed
+            if (
+              item._tag === MODEL_STREAM_ITEM_TAG.toolCallDelta ||
+              item._tag === MODEL_STREAM_ITEM_TAG.providerToolCall
+            ) {
               firstToolMs ??= elapsed
             }
-            if (item._tag === "OutputItemReady" && (item.message.tool_calls?.length ?? 0) > 0) {
+            if (
+              item._tag === MODEL_STREAM_ITEM_TAG.outputItemReady &&
+              (item.message.tool_calls?.length ?? 0) > 0
+            ) {
               firstToolMs ??= elapsed
             }
-            if (item._tag === "Completed") completed = true
+            if (item._tag === MODEL_STREAM_ITEM_TAG.completed) completed = true
             try {
               yield item
             } finally {

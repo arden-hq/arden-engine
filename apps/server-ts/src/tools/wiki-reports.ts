@@ -1,3 +1,4 @@
+import { RUN_ORIGIN } from "@arden-hq/protocol/runs"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { Effect, Schema } from "effect"
 
@@ -62,7 +63,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
     execute: async (input, ctx, effects) => {
       if (
         (await readWikiRun(services.runs, { ...ctx.run, signal: ctx.signal })).context.origin
-          .kind !== "chat"
+          .kind !== RUN_ORIGIN.chat
       ) {
         throw new ToolExecutionError(
           "Configure report destinations in the user's setup conversation",
@@ -166,7 +167,7 @@ const makeWikiReportTools = (services: Services): ReadonlyArray<ServerTool> => [
         context: { origin }
       } = await readWikiRun(services.runs, { ...ctx.run, signal: ctx.signal })
       const cause = await readRunCause(services.runs, { ...ctx.run, signal: ctx.signal })
-      if (origin.kind !== "automation" || cause.automationId === undefined) {
+      if (origin.kind !== RUN_ORIGIN.automation || cause.automationId === undefined) {
         throw new ToolExecutionError("Only an Automation run can publish its managed report", {
           preview: "No report producer",
           retryable: false

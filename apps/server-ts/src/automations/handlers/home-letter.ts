@@ -1,3 +1,4 @@
+import { SYSTEM_HANDLER } from "../../persistence/automations/model.js"
 import { HomeLetterBodySchema } from "../../persistence/home/letter-schema.js"
 import { Effect } from "effect"
 import type { ChatMessage } from "../../chat/message.js"
@@ -7,11 +8,11 @@ import type {
   AutomationJobResult
 } from "../../persistence/automations/store.js"
 import type { HomeLetterInputs } from "../../persistence/automations/home-letter-inputs.js"
-import type { HomeStore } from "../../persistence/home/store.js"
+import { HOME_LETTER_DISPOSITION, type HomeStore } from "../../persistence/home/store.js"
 import { HOME_LETTER_AUTOMATION_ID } from "../../persistence/automations/model.js"
 import { HOME_LETTER_PROMPT, HOME_LETTER_RULES, homeLetterInput } from "../home-letter-prompt.js"
 import { HOME_LETTER_TOOL, withHomeLetterTool } from "../home-letter-tool.js"
-import { readHandlerRun } from "../handler-tool-result.js"
+import { HANDLER_READ, readHandlerRun } from "../handler-tool-result.js"
 import { runByRule } from "../job-run.js"
 import { jobResult, type AutomationRunner, type AwaitAutomationRun } from "../runner.js"
 import type { SystemAutomationHandler } from "../system-handler.js"
@@ -32,7 +33,8 @@ const makeHomeLetterRunner = (services: {
   Effect.fn("HomeLetterRunner")(function* (
     job: AutomationJobLease
   ): Effect.fn.Return<AutomationJobResult, Error> {
-    const frozen = job.payload.handler === "home_letter" ? job.payload.homeLetterInput : undefined
+    const frozen =
+      job.payload.handler === SYSTEM_HANDLER.homeLetter ? job.payload.homeLetterInput : undefined
     const snapshot =
       frozen?.snapshot ?? (yield* services.home.homeLetterSnapshot(HOME_LETTER_RULES))
     const input = yield* services.homeLetterInputs.freezeHomeInput(
@@ -41,7 +43,7 @@ const makeHomeLetterRunner = (services: {
     )
     if (job.payload.chatRun === null) {
       const disposition = yield* services.home.checkHomeLetter(input.snapshot, HOME_LETTER_RULES)
-      if (disposition !== "ready") {
+      if (disposition !== HOME_LETTER_DISPOSITION.ready) {
         const [outcome, line] = UNREADY[disposition]
         return jobResult.withoutRun(outcome, line)
       }
@@ -62,7 +64,7 @@ const makeHomeLetterRunner = (services: {
       schema: HomeLetterBodySchema,
       missing: "The run ended without writing a Home letter or reporting no change"
     })
-    if (read.kind === "ended") return read.result
+    if (read.kind === HANDLER_READ.ended) return read.result
     const body = read.value
     const published = yield* services.home.publishHomeLetter({
       lease: { id: job.id, token: job.token },

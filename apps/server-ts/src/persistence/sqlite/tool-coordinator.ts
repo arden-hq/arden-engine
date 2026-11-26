@@ -1,3 +1,4 @@
+import { TOOL_STATUS } from "./status-sets.js"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ToolExecutionStore } from "../tools/store.js"
@@ -36,7 +37,7 @@ export const makeToolCoordinatorSuspend = ({
       .transactInteractive(
         Effect.gen(function* () {
           const row = yield* requireRow(sql, identity, "pause")
-          if (row.status !== "running" && row.status !== "ready") {
+          if (row.status !== TOOL_STATUS.running && row.status !== TOOL_STATUS.ready) {
             return yield* toolError(
               "pause",
               "conflict",

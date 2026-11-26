@@ -1,9 +1,12 @@
 import { countOf } from "@arden-hq/std/count"
 import {
   AUTOMATION_ACTIVITY_TRIGGERS,
+  AUTOMATION_CHAT_CHOICE,
   AUTOMATION_EVENTS,
+  AUTOMATION_HISTORY,
   automationEnabledWord,
   DEFAULT_EVENT_LEAD_MINUTES,
+  DROPPED_TRIGGER_FIELD,
   eventLeadWords,
   APP_EVENT,
   LEAD_EVENT,
@@ -41,6 +44,20 @@ import { oldConditions } from "../persistence/automations/event-words.js"
 import { lastRunAt, nextRunAt } from "./automation-tool-data.js"
 import type { CardTrigger } from "./automation-tool-triggers.js"
 
+const WORDS_AUDIENCE = { agent: "agent", card: "card" } as const
+
+type WordsAudience = (typeof WORDS_AUDIENCE)[keyof typeof WORDS_AUDIENCE]
+
+const MODEL_SOURCE = {
+  override: "override",
+  chat: "chat",
+  source_chat: "source_chat",
+  background: "background",
+  unknown: "unknown"
+} as const
+
+type ModelSource = (typeof MODEL_SOURCE)[keyof typeof MODEL_SOURCE]
+
 type TriggerWordsOf = AutomationTriggerSpec | AutomationTriggerEdit
 
 type TriggerView =
@@ -56,9 +73,10 @@ const asInput = (trigger: AutomationTrigger): TriggerView => ({
 const triggerWords = (
   input: TriggerView,
   oldWords: ReadonlyMap<string, AutomationOldCondition>,
-  audience: "agent" | "card"
+  audience: WordsAudience
 ): string => {
-  const id = audience === "agent" && input.kind === TRIGGER_INPUT.edit ? `${input.id}: ` : ""
+  const id =
+    audience === WORDS_AUDIENCE.agent && input.kind === TRIGGER_INPUT.edit ? `${input.id}: ` : ""
   const old = input.kind === TRIGGER_INPUT.edit ? oldWords.get(input.id) : undefined
   return `${id}${triggerHead(input.trigger, audience)}${eventFields(input.trigger, old, audience)}`
 }
@@ -81,16 +99,16 @@ const scheduleWords = (schedule: TimeTriggerSchedule): string => {
   }
 }
 
-const appWords = (app: McpEventSelector, audience: "agent" | "card"): string => {
+const appWords = (app: McpEventSelector, audience: WordsAudience): string => {
   const filters = Object.keys(app.arguments).length === 0 ? "" : ` ${JSON.stringify(app.arguments)}`
-  return audience === "agent"
+  return audience === WORDS_AUDIENCE.agent
     ? `mcp.event (${app.server}/${app.event}${filters})`
     : `${app.server}: ${app.event}`
 }
 
 const eventHead = (
   trigger: Extract<TriggerWordsOf, { readonly type: "event" }>,
-  audience: "agent" | "card"
+  audience: WordsAudience
 ): string => {
   if (trigger.event_type === APP_EVENT && "server" in trigger.mcp_event)
     return appWords(trigger.mcp_event, audience)
@@ -102,10 +120,10 @@ const eventHead = (
             : DEFAULT_EVENT_LEAD_MINUTES
         )
       : AUTOMATION_EVENTS[trigger.event_type].name
-  return audience === "agent" ? `${trigger.event_type} (${lead})` : lead
+  return audience === WORDS_AUDIENCE.agent ? `${trigger.event_type} (${lead})` : lead
 }
 
-const triggerHead = (trigger: TriggerWordsOf, audience: "agent" | "card"): string => {
+const triggerHead = (trigger: TriggerWordsOf, audience: WordsAudience): string => {
   switch (trigger.type) {
     case TRIGGER_TYPE.time:
       return scheduleWords(trigger.schedule)
@@ -121,7 +139,7 @@ const triggerHead = (trigger: TriggerWordsOf, audience: "agent" | "card"): strin
 const eventFields = (
   trigger: TriggerWordsOf,
   old: AutomationOldCondition | undefined,
-  audience: "agent" | "card"
+  audience: WordsAudience
 ): string => {
   if (trigger.type !== TRIGGER_TYPE.event) return ""
   const sentence =
@@ -132,7 +150,9 @@ const eventFields = (
     old === undefined
       ? ""
       : `, old condition: ${old.words}${
-          audience === "agent" && !old.readable ? " (some of its fields have no words)" : ""
+          audience === WORDS_AUDIENCE.agent && !old.readable
+            ? " (some of its fields have no words)"
+            : ""
         }`
   return `${sentence}${condition}`
 }
@@ -167,13 +187,13 @@ export const droppedTriggerLines = (
   indent: string
 ): ReadonlyArray<string> => {
   const merged = mergeTriggerInputs({ triggers: current.triggers, lastId: 0 }, sent)
-  if (merged.kind !== "ok") return []
+  if (merged.kind !== TRIGGER_MERGE.ok) return []
   const old = byTrigger(current.old_conditions)
   return merged.dropped.map((dropped) => {
     switch (dropped.field) {
-      case "run_only_if":
+      case DROPPED_TRIGGER_FIELD.run_only_if:
         return `${indent}${dropped.id}: run only if "${dropped.value}"`
-      case "condition":
+      case DROPPED_TRIGGER_FIELD.condition:
         return `${indent}${dropped.id}: old condition ${old.get(dropped.id)?.words ?? "(no words)"}`
     }
   })
@@ -212,9 +232,9 @@ export const cardTriggerWords = (
 export const historyLabel = (automation: Automation): string => {
   if (AutomationSchema.guards.system(automation)) return "set by the system"
   switch (automation.history) {
-    case "fresh":
+    case AUTOMATION_HISTORY.fresh:
       return "starts fresh"
-    case "chat":
+    case AUTOMATION_HISTORY.chat:
       return "reads the chat"
   }
 }
@@ -225,13 +245,13 @@ export const chatLabel = (
   currentSessionId: string
 ): string => {
   if (SystemAutomationChatSchema.guards.none(automation.chat)) return "none"
-  if (automation.chat.kind === "own") return "its own chat"
+  if (automation.chat.kind === AUTOMATION_CHAT_CHOICE.own) return "its own chat"
   if (automation.chat.session_id === currentSessionId) return "this chat"
   return info.chat_ref ?? "one of your chats"
 }
 
 export const modelLabel = (info: AutomationModelInfo): string =>
-  info.model_source === "source_chat"
+  info.model_source === MODEL_SOURCE.source_chat
     ? "each chat's own model"
     : `${info.effective_model ?? "unknown"} (${info.model_source})`
 
@@ -251,7 +271,7 @@ export const systemLines = (automation: Automation): ReadonlyArray<string> => {
 }
 
 export type AutomationModelInfo = {
-  readonly model_source: "override" | "chat" | "source_chat" | "background" | "unknown"
+  readonly model_source: ModelSource
   readonly effective_model: string | null
   readonly chat_ref: string | null
   readonly action_mode: string | null

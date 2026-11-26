@@ -1,6 +1,7 @@
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { quoted } from "@arden-hq/std/count"
 import { Schema } from "effect"
+import { BROWSER_ACT_ACTION } from "../browser/service.js"
 import type { JsonObject } from "../persistence/json.js"
 import type { ActParametersSchema } from "./browser-parameters.js"
 import { resolveRef, uiTargetData } from "./ui-target.js"
@@ -48,26 +49,26 @@ const actApprovalTitle = (
   const unnamed = label === undefined ? "this" : `this ${label.role}`
   const what = name.length > 0 ? quoted(name, 80) : unnamed
   switch (input.action) {
-    case "click":
+    case BROWSER_ACT_ACTION.click:
       return `Click ${what}?`
-    case "dblclick":
+    case BROWSER_ACT_ACTION.dblclick:
       return `Double-click ${what}?`
-    case "hover":
+    case BROWSER_ACT_ACTION.hover:
       return `Point at ${what}?`
-    case "focus":
+    case BROWSER_ACT_ACTION.focus:
       return `Focus ${what}?`
-    case "fill":
-    case "type":
+    case BROWSER_ACT_ACTION.fill:
+    case BROWSER_ACT_ACTION.type:
       return name.length > 0 ? `Type into ${what}?` : "Type into this field?"
-    case "select":
+    case BROWSER_ACT_ACTION.select:
       return `Choose in ${what}?`
-    case "check":
+    case BROWSER_ACT_ACTION.check:
       return `Tick ${what}?`
-    case "uncheck":
+    case BROWSER_ACT_ACTION.uncheck:
       return `Untick ${what}?`
-    case "press":
+    case BROWSER_ACT_ACTION.press:
       return `Press ${input.value ?? "a key"}?`
-    case "scroll":
+    case BROWSER_ACT_ACTION.scroll:
       return `Scroll ${input.direction ?? "down"}?`
   }
 }
@@ -113,7 +114,7 @@ export const actApprovalPresentation = (
 const withheldTextNotice = (
   input: ActInput
 ): { readonly label: string; readonly text: string } | undefined => {
-  if (input.action === "press") return undefined
+  if (input.action === BROWSER_ACT_ACTION.press) return undefined
   const entries =
     input.values !== undefined && input.values.length > 0
       ? input.values.length

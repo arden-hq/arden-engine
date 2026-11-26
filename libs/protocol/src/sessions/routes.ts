@@ -6,6 +6,7 @@ import { NonNegativeIntSchema, PositiveIntSchema } from "../common/schema.js"
 import {
   SESSION_LIST_FILTER,
   SESSION_LIST_PAGE,
+  SESSION_LIST_SCOPE,
   type SessionListFilter,
   type SessionListPage
 } from "./contracts.js"
@@ -13,7 +14,7 @@ import type { Effect } from "effect/Effect"
 
 const SessionIdSchema = routeSegment()
 const SessionListOptionsSchema = Schema.Struct({
-  scope: Schema.Literals(["primary", "agent", "all"] as const),
+  scope: Schema.Literals(Object.values(SESSION_LIST_SCOPE)),
   live: Schema.Boolean,
   limit: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(500)),
   sort: Schema.Literals(["activity", "accessed"] as const),

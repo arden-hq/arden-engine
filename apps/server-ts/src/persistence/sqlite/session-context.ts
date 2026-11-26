@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect, Schema } from "effect"
 import {
@@ -6,7 +7,11 @@ import {
   type RevertOptions,
   type SessionStore
 } from "../sessions/store.js"
-import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../transcript/model.js"
+import {
+  COMPACTION_KIND,
+  StoredMessageEnvelopeSchema,
+  type StoredMessageEnvelope
+} from "../transcript/model.js"
 import { JsonObjectSchema } from "../json.js"
 import { decodeJson, encodeJson } from "./json.js"
 import { rebuildSessionTurns } from "./turns.js"
@@ -193,7 +198,7 @@ export const makeSessionContext = ({
             userMessage = rawContent
               .flatMap((block) => {
                 if (typeof block !== "object" || block === null || Array.isArray(block)) return []
-                return block.type === "text" &&
+                return block.type === CONTENT_BLOCK_TYPE.text &&
                   typeof block.text === "string" &&
                   block.text.length > 0
                   ? [block.text]
@@ -212,7 +217,7 @@ export const makeSessionContext = ({
               typeof receipt === "object" && receipt !== null && !Array.isArray(receipt)
                 ? (receipt as Readonly<Record<string, unknown>>)
                 : null
-            if (receiptRecord?.kind === "session_handoff") {
+            if (receiptRecord?.kind === COMPACTION_KIND.sessionHandoff) {
               handoffIndex = index
               break
             }
@@ -256,7 +261,7 @@ export const makeSessionContext = ({
             const backgroundResultRefs = copyStrings(previousReceipt.background_result_refs)
             const compaction = {
               compaction_id: compactionId,
-              kind: "session_handoff",
+              kind: COMPACTION_KIND.sessionHandoff,
               ...(typeof previousReceipt.message_start_id === "string"
                 ? { message_start_id: previousReceipt.message_start_id }
                 : {}),

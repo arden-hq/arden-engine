@@ -1,15 +1,17 @@
 import { Schema } from "effect"
 import { NativeTargetSchema } from "../computer/contract.js"
 
+export const NATIVE_READ = { apps: "apps", windows: "windows", state: "state" } as const
+
 export const ReadSchema = Schema.Union([
   Schema.Struct({
-    operation: Schema.Literal("apps").annotate({
+    operation: Schema.Literal(NATIVE_READ.apps).annotate({
       description:
         "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
     })
   }),
   Schema.Struct({
-    operation: Schema.Literal("windows").annotate({
+    operation: Schema.Literal(NATIVE_READ.windows).annotate({
       description:
         "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
     }),
@@ -18,7 +20,7 @@ export const ReadSchema = Schema.Union([
     })
   }),
   Schema.Struct({
-    operation: Schema.Literal("state").annotate({
+    operation: Schema.Literal(NATIVE_READ.state).annotate({
       description:
         "apps lists installed and running apps. windows lists one app's windows (needs pid). state observes one window (needs target)."
     }),

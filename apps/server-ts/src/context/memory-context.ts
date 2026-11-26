@@ -1,3 +1,5 @@
+import { MEMORY_OUTCOME } from "@arden-hq/protocol/runs"
+import { ACTOR } from "../execution/authority.js"
 import { byteLength } from "@arden-hq/std/text"
 import {
   MEMORY_BUDGET_STATE,
@@ -12,11 +14,11 @@ import {
 import type { Actor } from "../execution/authority.js"
 import { corePageBudget, STANDING_FACTS_PAGES } from "../memory/core-memory.js"
 import { recallQuery, type MemorySources, type RenderedMemory } from "../memory/retrieval.js"
-import { textSection, type RuntimeSection } from "./runtime-update.js"
+import { RUNTIME_SECTION, textSection, type RuntimeSection } from "./runtime-update.js"
 import { renderSpaceContext, type SpaceView } from "./space-render.js"
 
 export const memoryReaderOf = (actor: Actor): RunMemoryReader | undefined =>
-  actor.kind === "person" ? "owner" : undefined
+  actor.kind === ACTOR.person ? "owner" : undefined
 
 const standingPageLimitChars = Math.max(
   ...STANDING_FACTS_PAGES.map((path) => {
@@ -85,7 +87,12 @@ export const assembleMemoryContext = ({
       space === undefined || spaced === undefined
         ? []
         : [
-            { kind: "space", key: "Current Space", text: spaced.text, space: space.view },
+            {
+              kind: RUNTIME_SECTION.space,
+              key: "Current Space",
+              text: spaced.text,
+              space: space.view
+            },
             ...textSection("Space pages", list?.text)
           ],
     recall: textSection("Memory recall", recall?.text, "turn"),
@@ -128,7 +135,7 @@ const renderSpace = (
 ): { readonly text: string; readonly sources: ReadonlyArray<RunMemorySource> } => {
   const rendered = space.rendered
   const identity = {
-    kind: "space" as const,
+    kind: RUNTIME_SECTION.space,
     space_id: space.view.space_id,
     page:
       space.page === undefined
@@ -137,7 +144,7 @@ const renderSpace = (
     bytes: byteLength(rendered.text)
   }
   const source: RunMemorySource =
-    rendered.page === undefined || rendered.page.outcome === "whole"
+    rendered.page === undefined || rendered.page.outcome === MEMORY_OUTCOME.whole
       ? { ...identity, outcome: "whole" }
       : { ...identity, outcome: rendered.page.outcome, reason: "space_page_allowance" }
   return { text: rendered.text, sources: [source] }

@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { ChatAutomationOrigin, ChatWriteError } from "../chat/store.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
+import { AutomationContextModeSchema } from "@arden-hq/protocol/effect/automations"
 import type { ChatEventStore } from "../events/store.js"
 import { AutomationId } from "../automations/model.js"
 import { writeError, type ChatWriteOperation } from "./chat-write-errors.js"
@@ -58,8 +59,7 @@ export const runOutputSchema = Effect.fn("SqliteChatWriteStore.runOutputSchema")
   )
 })
 
-const isAutomationContextMode = (value: string | null): value is AutomationContextMode =>
-  value === "fresh" || value === "continue" || value === "fork"
+const isAutomationContextMode = Schema.is(AutomationContextModeSchema)
 
 export const runAutomationContextMode = Effect.fn("SqliteChatWriteStore.runAutomationContextMode")(
   function* (

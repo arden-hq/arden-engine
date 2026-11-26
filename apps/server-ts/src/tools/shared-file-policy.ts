@@ -12,23 +12,32 @@ export interface UploadRoots {
   readonly home?: string
 }
 
-export type UploadRefusal =
-  | "arden_internal"
-  | "hidden"
-  | "secret"
-  | "missing"
-  | "not_a_file"
-  | "no_attachment"
-  | "no_artifact"
+const UPLOAD_REFUSAL = {
+  ardenInternal: "arden_internal",
+  hidden: "hidden",
+  secret: "secret",
+  missing: "missing",
+  notAFile: "not_a_file",
+  noAttachment: "no_attachment",
+  noArtifact: "no_artifact"
+} as const
+
+export type UploadRefusal = (typeof UPLOAD_REFUSAL)[keyof typeof UPLOAD_REFUSAL]
+
+export const UPLOAD_PATH_CHECK = {
+  allowed: "allowed",
+  outside: "outside",
+  refused: "refused"
+} as const
 
 export type UploadPathCheck =
   | {
-      readonly kind: "allowed" | "outside"
+      readonly kind: typeof UPLOAD_PATH_CHECK.allowed | typeof UPLOAD_PATH_CHECK.outside
       readonly path: string
       readonly name: string
       readonly size: number
     }
-  | { readonly kind: "refused"; readonly reason: UploadRefusal }
+  | { readonly kind: typeof UPLOAD_PATH_CHECK.refused; readonly reason: UploadRefusal }
 
 const refused = (reason: UploadRefusal): UploadPathCheck => ({ kind: "refused", reason })
 
@@ -40,7 +49,7 @@ export const checkUploadPath = async ({
   readonly roots: UploadRoots
 }): Promise<UploadPathCheck> => {
   const target = await realFile(expandPath(rawPath, roots.folders[0]))
-  if (target.kind === "refused") return target
+  if (target.kind === UPLOAD_PATH_CHECK.refused) return target
   const explicitlyAttached = (await realRoots(roots.attachedPaths ?? [])).includes(target.path)
   const artifactRoot = (await realRoots(roots.artifacts)).find((root) =>
     isWithin(root, target.path)
@@ -70,19 +79,19 @@ export const checkUploadPath = async ({
 
 export const uploadRefusalText = (reason: UploadRefusal): string => {
   switch (reason) {
-    case "arden_internal":
+    case UPLOAD_REFUSAL.ardenInternal:
       return "That file is part of Arden's own data, so Arden won't upload it. Only files Arden made for you can leave that folder."
-    case "hidden":
+    case UPLOAD_REFUSAL.hidden:
       return "That file is hidden or sits in a hidden folder, so Arden won't upload it."
-    case "secret":
+    case UPLOAD_REFUSAL.secret:
       return "That file looks like a key or a credential, so Arden won't upload it."
-    case "missing":
+    case UPLOAD_REFUSAL.missing:
       return "That file doesn't exist."
-    case "not_a_file":
+    case UPLOAD_REFUSAL.notAFile:
       return "That path is a folder or a special file, not a file Arden can upload."
-    case "no_attachment":
+    case UPLOAD_REFUSAL.noAttachment:
       return "There is no attached file with that number in this chat."
-    case "no_artifact":
+    case UPLOAD_REFUSAL.noArtifact:
       return "There is no file with that artifact_ref in this chat."
   }
 }

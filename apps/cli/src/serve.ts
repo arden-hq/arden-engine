@@ -1,4 +1,12 @@
 import {
+  APPROVAL_HANDLING,
+  CLI_OUTPUT_FORMAT,
+  FOUND_SERVER,
+  SERVER_EXIT,
+  SERVER_FAILURE,
+  type ServerFailure
+} from "./cli-words.js"
+import {
   ConfiguredServerError,
   startConfiguredServer,
   type ConfiguredServer
@@ -62,12 +70,13 @@ const startServer: StartServer = async ({ config, logFile, env }) => {
 
 const startFailure = (cause: unknown): unknown => {
   if (!(cause instanceof ConfiguredServerError)) return cause
-  switch (cause.reason) {
-    case "settings":
+  const reason: ServerFailure = cause.reason
+  switch (reason) {
+    case SERVER_FAILURE.settings:
       return new UsageError(cause.message)
-    case "provider":
+    case SERVER_FAILURE.provider:
       return new ProviderUnavailableError(cause.message)
-    case "start":
+    case SERVER_FAILURE.start:
       return new ServerUnavailableError(cause.message)
   }
 }
@@ -136,19 +145,19 @@ const serveQuietly = async (
     `Arden is running at ${server.ready.url}. Send prompts from another terminal: arden "…"\nIts log goes to ${logFile}. Ctrl-C stops it.\n`
   )
   let stopping = false
-  const stopped = new Promise<"stopped">((resolve) => {
+  const stopped = new Promise<typeof SERVER_EXIT.stopped>((resolve) => {
     const stop = (): void => {
       stopping = true
       process.removeListener("SIGINT", stop)
       process.removeListener("SIGTERM", stop)
-      void server.stop().then(() => resolve("stopped"))
+      void server.stop().then(() => resolve(SERVER_EXIT.stopped))
     }
     process.once("SIGINT", stop)
     process.once("SIGTERM", stop)
   })
   const outcome = await Promise.race([stopped, server.exited])
   log.end()
-  if (outcome === "stopped" || stopping) return 0
+  if (outcome === SERVER_EXIT.stopped || stopping) return 0
   dependencies.writeStderr(`arden: The Arden server stopped (exit ${outcome}); see ${logFile}\n`)
   return outcome === null || outcome === 0 ? 1 : outcome
 }
@@ -205,9 +214,10 @@ export const execCommand = async (
     const run: RunOptions = {
       ...options.run,
       approvals:
-        dependencies.askInTerminal === undefined || options.run.approvals === "decline"
-          ? "decline"
-          : "ask_then_decline"
+        dependencies.askInTerminal === undefined ||
+        options.run.approvals === APPROVAL_HANDLING.decline
+          ? APPROVAL_HANDLING.decline
+          : APPROVAL_HANDLING.askThenDecline
     }
     return await runCommand(run, { ...dependencies, connect })
   } finally {
@@ -227,7 +237,7 @@ export const promptCommand = async (
   } catch (cause) {
     return runCommand(options, { ...dependencies, connect: () => Promise.reject(cause) })
   }
-  if (found.kind === "found") {
+  if (found.kind === FOUND_SERVER.found) {
     const connection = found.connection
     return runCommand(options, { ...dependencies, connect: async () => connection })
   }
@@ -237,7 +247,7 @@ export const promptCommand = async (
       connect: () => Promise.reject(new UsageError(DETACH_NEEDS_SERVER))
     })
   }
-  if (found.kind === "too_old" && options.output === "text")
+  if (found.kind === FOUND_SERVER.tooOld && options.output === CLI_OUTPUT_FORMAT.text)
     dependencies.writeStderr(`arden: ${TOO_OLD_FOR_PROMPT}\n`)
   return execCommand({ config: undefined, logFile: undefined, run: options }, dependencies)
 }

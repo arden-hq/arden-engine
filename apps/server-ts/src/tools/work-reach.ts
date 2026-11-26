@@ -1,5 +1,5 @@
-import { rootOf, type RunAuthority } from "../execution/authority.js"
-import { boundary, type Path } from "../execution/decide.js"
+import { ACTOR, rootOf, type RunAuthority } from "../execution/authority.js"
+import { boundary, VERDICT, WORK_REACH, type Path } from "../execution/decide.js"
 import { AutomationId } from "../persistence/automations/model.js"
 
 export const WORK_TARGET = { job: "job", space: "space", chat: "chat" } as const
@@ -57,21 +57,21 @@ export const workTarget = (input: {
     op: input.op
   })
   const root = rootOf(authority.actor)
-  if (verdict.kind !== "allow") {
-    const instead = verdict.kind === "deny" ? verdict.instead : []
-    if (root === "unrecorded")
+  if (verdict.kind !== VERDICT.allow) {
+    const instead = verdict.kind === VERDICT.deny ? verdict.instead : []
+    if (root === ACTOR.unrecorded)
       return { kind: WORK_TARGET_DECISION.refused, reason: WORK_REFUSAL_REASON.unrecorded, instead }
     return {
       kind: WORK_TARGET_DECISION.refused,
       reason:
-        root === "person"
+        root === ACTOR.person
           ? WORK_REFUSAL_REASON.outside_delegated_space
           : WORK_REFUSAL_REASON.outside_job_space,
       instead
     }
   }
   switch (verdict.reach) {
-    case "full": {
+    case WORK_REACH.full: {
       const spaceId = requestedSpaceId ?? chatSpaceId
       return spaceId === undefined
         ? {
@@ -80,9 +80,9 @@ export const workTarget = (input: {
           }
         : { kind: WORK_TARGET_DECISION.target, target: { kind: WORK_TARGET.space, spaceId } }
     }
-    case "delegate":
+    case WORK_REACH.delegate:
       return spaceTarget(requestedSpaceId ?? authority.owns.space_id ?? chatSpaceId)
-    case "job":
+    case WORK_REACH.job:
     case undefined: {
       const owner = authority.owns.automation_id
       if (owner === null)

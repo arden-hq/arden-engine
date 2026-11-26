@@ -11,6 +11,7 @@ import {
   isRecurring,
   parseCalendarEventRef,
   planRsvp,
+  RSVP_PLAN,
   scopeTargetId,
   type EventScope,
   type RsvpAnswer
@@ -183,12 +184,22 @@ export const reminderText = (minutes: ReadonlyArray<number>): string =>
 export const whenText = (data: ReturnType<typeof eventData>): string =>
   allDayText(data) ?? `${isoDateTimeWords(data.start)} to ${isoDateTimeWords(data.end)}`
 
-export const scopeText = (item: CalendarEvent, targetId: string): string | undefined => {
+const SCOPE_TEXT = {
+  series: "Every event in the series",
+  single: "This event only"
+} as const
+
+type ScopeText = (typeof SCOPE_TEXT)[keyof typeof SCOPE_TEXT]
+
+export const scopeText = (item: CalendarEvent, targetId: string): ScopeText | undefined => {
   if (!isRecurring(item)) return undefined
   return targetId !== item.id || item.recurringEventId === undefined
-    ? "Every event in the series"
-    : "This event only"
+    ? SCOPE_TEXT.series
+    : SCOPE_TEXT.single
 }
+
+export const isSeriesScope = (item: CalendarEvent, targetId: string): boolean =>
+  scopeText(item, targetId) === SCOPE_TEXT.series
 
 export const timeFields = (input: {
   readonly start?: string | undefined
@@ -271,17 +282,17 @@ export const rsvpFor = (
     comment: input.comment
   })
   switch (plan.kind) {
-    case "organizer":
+    case RSVP_PLAN.organizer:
       throw toolRefusal(
         "You organize this event, so there is no invitation to answer. Use calendar_edit_event to change it or calendar_delete_event to cancel it.",
         "You are the organizer"
       )
-    case "not_attendee":
+    case RSVP_PLAN.not_attendee:
       throw toolRefusal(
         "You are not a guest of this event, so there is no invitation to answer.",
         "Not invited"
       )
-    case "answer":
+    case RSVP_PLAN.answer:
       return plan.body
   }
 }

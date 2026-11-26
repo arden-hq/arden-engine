@@ -1,3 +1,4 @@
+import { CONTENT_BLOCK_TYPE } from "@arden-hq/loop"
 import { ageWords } from "@arden-hq/std/time"
 import { isWrittenByPerson } from "../persistence/transcript/model.js"
 import { Predicate } from "effect"
@@ -14,7 +15,7 @@ interface ConversationMessage {
 
 const isIdleGap = (value: unknown): boolean =>
   Predicate.isObject(value) &&
-  value.type === "context" &&
+  value.type === CONTENT_BLOCK_TYPE.context &&
   value.content_type === TIME_SINCE_LAST_MESSAGE_CONTEXT
 
 const withoutIdleGap = <Message extends ConversationMessage>(message: Message): Message => {

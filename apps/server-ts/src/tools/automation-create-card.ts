@@ -8,7 +8,11 @@ import type { ModelStore } from "../persistence/models/store.js"
 import { personalAutomationTriggers } from "../automations/schedule.js"
 import { InvalidAutomationScheduleError } from "../persistence/automations/model.js"
 import { type ApprovalEditLine, type ServerApprovalEdits } from "./approval-edits.js"
-import type { CreateParametersSchema } from "./automation-tool-schema.js"
+import {
+  CREATE_CHAT,
+  type CreateChat,
+  type CreateParametersSchema
+} from "./automation-tool-schema.js"
 import { cardTriggerWords } from "./automation-tool-text.js"
 import {
   cardTriggers,
@@ -16,7 +20,7 @@ import {
   newTriggerInput,
   toolTriggerSpecs
 } from "./automation-tool-triggers.js"
-import { freshTriggerIds } from "@arden-hq/protocol/automations"
+import { AUTOMATION_HISTORY, freshTriggerIds } from "@arden-hq/protocol/automations"
 import { APPROVAL_MODE_LABEL } from "./onboarding.js"
 import { toolFailure } from "./tool-failure.js"
 import type { ServerApprovalPrompt } from "./define.js"
@@ -24,16 +28,16 @@ import type { ServerRunContext } from "./run-context.js"
 import { sameJson } from "@arden-hq/std/json"
 
 export const createChatWhere = (
-  where: "current" | "own" | undefined,
+  where: CreateChat | undefined,
   chatRef: string | undefined
-): "current" | "own" | undefined => where ?? (chatRef === undefined ? "own" : undefined)
+): CreateChat | undefined => where ?? (chatRef === undefined ? CREATE_CHAT.own : undefined)
 
 export const createDestinationLabel = (
-  where: "current" | "own" | undefined,
+  where: CreateChat | undefined,
   chatRef: string | undefined
 ): string => {
   if (chatRef !== undefined) return chatRef
-  return createChatWhere(where, chatRef) === "current" ? "This chat" : "Its own chat"
+  return createChatWhere(where, chatRef) === CREATE_CHAT.current ? "This chat" : "Its own chat"
 }
 
 const CREATE_EDITABLE_FIELDS = [
@@ -53,10 +57,13 @@ export const jsonArguments = Schema.decodeUnknownSync(Schema.Record(Schema.Strin
 export const createConflict = (input: CreateInput): string | undefined => {
   const schedule = triggersProblem(input.triggers)
   if (schedule !== undefined) return schedule
-  if (input.chat === "own" && input.chat_ref !== undefined) {
+  if (input.chat === CREATE_CHAT.own && input.chat_ref !== undefined) {
     return "Choose chat=own or a chat_ref, not both"
   }
-  if (input.approval_mode !== undefined && createChatWhere(input.chat, input.chat_ref) !== "own") {
+  if (
+    input.approval_mode !== undefined &&
+    createChatWhere(input.chat, input.chat_ref) !== CREATE_CHAT.own
+  ) {
     return "An Automation in one of the user's chats uses that chat's action mode: omit approval_mode, or give it a chat of its own (omit chat)"
   }
   return undefined
@@ -81,7 +88,7 @@ const triggersProblem = (triggers: CreateInput["triggers"]): string | undefined 
 }
 
 const createActionModeLabel = (input: CreateInput, chatMode: ChatApprovalMode): string => {
-  if (createChatWhere(input.chat, input.chat_ref) === "own") {
+  if (createChatWhere(input.chat, input.chat_ref) === CREATE_CHAT.own) {
     return APPROVAL_MODE_LABEL[input.approval_mode ?? DEFAULT_APPROVAL_MODE]
   }
   return input.chat_ref === undefined
@@ -95,7 +102,10 @@ const createModelLabel = async (
   signal: AbortSignal
 ): Promise<string> => {
   if (input.model !== undefined && input.model !== null) return input.model
-  if (input.history === "chat" && createChatWhere(input.chat, input.chat_ref) !== "own") {
+  if (
+    input.history === AUTOMATION_HISTORY.chat &&
+    createChatWhere(input.chat, input.chat_ref) !== CREATE_CHAT.own
+  ) {
     return "The chat's own model"
   }
   const settings = await Effect.runPromise(
@@ -108,7 +118,7 @@ const createModelLabel = async (
 }
 
 const modeWords = (input: CreateInput): string =>
-  createChatWhere(input.chat, input.chat_ref) === "own"
+  createChatWhere(input.chat, input.chat_ref) === CREATE_CHAT.own
     ? APPROVAL_MODE_LABEL[input.approval_mode ?? DEFAULT_APPROVAL_MODE]
     : "the chat's own"
 
@@ -190,7 +200,10 @@ export const createCardOf =
             : [{ label: "About", value: input.description }]),
           { label: "When", value: createWords(input.triggers) },
           { label: "Reports to", value: createDestinationLabel(input.chat, input.chat_ref) },
-          { label: "History", value: input.history === "chat" ? "Reads the chat" : "Starts fresh" },
+          {
+            label: "History",
+            value: input.history === AUTOMATION_HISTORY.chat ? "Reads the chat" : "Starts fresh"
+          },
           ...(input.reads === undefined ? [] : [{ label: "Reads", value: input.reads }]),
           ...(input.will_not === undefined ? [] : [{ label: "Won’t", value: input.will_not }]),
           { label: "Action mode", value: createActionModeLabel(input, ctx.run.approvalMode) },

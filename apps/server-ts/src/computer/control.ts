@@ -9,6 +9,7 @@ import type {
   ComputerStatus
 } from "@arden-hq/protocol/computer"
 import {
+  COMPUTER_ACTIVITY,
   COMPUTER_APP,
   COMPUTER_FEEDBACK,
   COMPUTER_MODE,
@@ -153,7 +154,9 @@ export class ComputerControl {
             preview: { kind: COMPUTER_PREVIEW.empty }
           }
     const replace =
-      !same || activity === "acting" || kept.operation.kind === COMPUTER_OPERATION.unlabelled
+      !same ||
+      activity === COMPUTER_ACTIVITY.acting ||
+      kept.operation.kind === COMPUTER_OPERATION.unlabelled
     this.#active = token
     if (previous.kind === COMPUTER_SESSION.unclaimed || previous.session_id !== sessionId)
       this.#foregroundSession = undefined

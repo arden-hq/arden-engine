@@ -1,4 +1,9 @@
-import { ranOutcome, runStatusOf, type AutomationRunOutcome } from "@arden-hq/protocol/automations"
+import {
+  AUTOMATION_RUN_OUTCOME,
+  ranOutcome,
+  runStatusOf,
+  type AutomationRunOutcome
+} from "@arden-hq/protocol/automations"
 import { linkedChat } from "./event-links.js"
 import { AutomationRunOutcomeSchema } from "@arden-hq/protocol/effect/automations"
 import { Effect, Schema } from "effect"
@@ -65,7 +70,11 @@ const storedStatus = (
   outcome: AutomationRunOutcome
 ): "completed" | "failed" | "cancelled" | "interrupted" => {
   if (ranOutcome(outcome)) return "completed"
-  if (outcome === "cancelled" || outcome === "interrupted") return outcome
+  if (
+    outcome === AUTOMATION_RUN_OUTCOME.cancelled ||
+    outcome === AUTOMATION_RUN_OUTCOME.interrupted
+  )
+    return outcome
   return "failed"
 }
 

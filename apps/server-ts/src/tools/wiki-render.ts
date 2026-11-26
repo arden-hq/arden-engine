@@ -34,7 +34,7 @@ export const writtenPageData = (page: {
   lifecycle: page.lifecycle.kind
 })
 
-const LISTING_ENTRY = { directory: "directory", page: "page" } as const
+export const LISTING_ENTRY = { directory: "directory", page: "page" } as const
 
 export interface ListingEntry {
   readonly kind: (typeof LISTING_ENTRY)[keyof typeof LISTING_ENTRY]

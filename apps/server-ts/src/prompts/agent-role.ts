@@ -1,3 +1,4 @@
+import { AGENT_MODE } from "@arden-hq/protocol/chat"
 import { joinPromptSections, renderPromptSection } from "./format.js"
 
 export const renderAgentRolePrompt = (
@@ -10,7 +11,7 @@ export const renderAgentRolePrompt = (
       },
   task: string
 ): string => {
-  if (agent.mode === "work")
+  if (agent.mode === AGENT_MODE.work)
     return (
       joinPromptSections([
         renderPromptSection(
@@ -20,7 +21,7 @@ export const renderAgentRolePrompt = (
         renderPromptSection("Request", task)
       ]) ?? task
     )
-  if (agent.mode === "research") {
+  if (agent.mode === AGENT_MODE.research) {
     return (
       joinPromptSections([
         renderPromptSection(

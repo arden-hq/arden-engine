@@ -1,12 +1,13 @@
 import { sleep } from "@arden-hq/std/sleep"
 import { RecordedToolPause } from "../execution/recorded-tool-pause.js"
 import type { JsonObject } from "@arden-hq/loop"
-import type { WorkflowStatus } from "@arden-hq/protocol/workflows"
+import { WORKFLOW_EFFECT, WORKFLOW_STATUS, type WorkflowStatus } from "@arden-hq/protocol/workflows"
+
 import { Cause, Context, Effect, FiberSet, Layer, type Scope } from "effect"
 
 import type { ServerToolRun } from "../chat/runner-contract.js"
 import { ManagedOutputs } from "../artifacts/managed-output/managed-output.js"
-import { ScriptJournal, type RetryVerdict } from "../persistence/scripts/journal.js"
+import { RETRY_VERDICT, ScriptJournal, type RetryVerdict } from "../persistence/scripts/journal.js"
 import { ScriptResults } from "../persistence/scripts/results.js"
 import {
   ScriptStore,
@@ -18,7 +19,9 @@ import { drainScriptResults } from "./delivery.js"
 import { ScriptShutdown, type ScriptHost } from "./runtime/contract.js"
 import type { ScriptOutcome, ScriptProgress } from "./runtime/script-outcome.js"
 import { executeScriptAttempt, type AdoptedScript } from "./script-attempt.js"
-import { attemptStep, interruptedByRestart } from "./script-retry.js"
+import { ATTEMPT_STEP, RETRY_CAUSE, attemptStep, interruptedByRestart } from "./script-retry.js"
+import { SCRIPT_OUTCOME_STATUS } from "./runtime/script-outcome.js"
+import { SCRIPT_PROGRESS_STATUS } from "./runtime/nested-trace.js"
 
 interface ScriptBinding {
   readonly run: ServerToolRun
@@ -54,29 +57,31 @@ export const detachedScriptData = (input: {
 
 export const statusLine = (status: WorkflowStatus): string => {
   switch (status) {
-    case "succeeded":
+    case WORKFLOW_STATUS.succeeded:
       return "Script finished"
-    case "failed":
+    case WORKFLOW_STATUS.failed:
       return "Script failed"
-    case "cancelled":
+    case WORKFLOW_STATUS.cancelled:
       return "Script cancelled"
-    case "needs_attention":
+    case WORKFLOW_STATUS.needs_attention:
       return "Script stopped for review"
-    case "queued":
-    case "running":
-    case "needs_input":
-    case "cancelling":
+    case WORKFLOW_STATUS.queued:
+    case WORKFLOW_STATUS.running:
+    case WORKFLOW_STATUS.needs_input:
+    case WORKFLOW_STATUS.cancelling:
       return "Script running"
   }
 }
 
+const DRIVE_START = { run: "run", after: "after" } as const
+
 type DriveStart =
   | {
-      readonly kind: "run"
+      readonly kind: typeof DRIVE_START.run
       readonly adopted: AdoptedScript | undefined
       readonly progress: ScriptProgressSnapshot
     }
-  | { readonly kind: "after"; readonly settlement: ScriptSettlement }
+  | { readonly kind: typeof DRIVE_START.after; readonly settlement: ScriptSettlement }
 
 interface LiveScript {
   readonly controller: AbortController
@@ -150,7 +155,7 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
     else shutdown.addEventListener("abort", stopForShutdown, { once: true })
     let record = initial
     let next = start
-    let progress = start.kind === "run" ? start.progress : emptyProgress
+    let progress = start.kind === DRIVE_START.run ? start.progress : emptyProgress
     let pendingProgress = Promise.resolve()
     const emit = (status: WorkflowStatus, message: string): Promise<void> => {
       const data = detachedScriptData({
@@ -180,12 +185,14 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
     try {
       while (!controller.signal.aborted) {
         const settlement =
-          next.kind === "after"
+          next.kind === DRIVE_START.after
             ? next.settlement
             : await runAttempt(record, binding, next.adopted, controller.signal, {
                 onProgress: (current) => {
                   progress = { ...current, logs: progress.logs }
-                  const done = current.agents.filter((agent) => agent.status === "completed")
+                  const done = current.agents.filter(
+                    (agent) => agent.status === SCRIPT_PROGRESS_STATUS.completed
+                  )
                   void emit(
                     "running",
                     current.agents.length > 0
@@ -198,7 +205,7 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
                     phase_entries: progress.phase_entries ?? [],
                     phases: outcome.phases.length ? [...outcome.phases] : progress.phases,
                     agents:
-                      outcome.status === "failed" && outcome.agents.length
+                      outcome.status === SCRIPT_OUTCOME_STATUS.failed && outcome.agents.length
                         ? [...outcome.agents]
                         : progress.agents,
                     tools: progress.tools,
@@ -212,9 +219,9 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
         const step = await nextStep(
           record,
           settlement,
-          next.kind === "after" ? "restart" : "attempt"
+          next.kind === DRIVE_START.after ? RETRY_CAUSE.restart : RETRY_CAUSE.attempt
         )
-        if (step.kind === "retry") {
+        if (step.kind === ATTEMPT_STEP.retry) {
           await sleepUnlessAborted(step.delayMs, controller.signal)
           if (controller.signal.aborted) return await stopped()
           record = await Effect.runPromise(
@@ -280,7 +287,7 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
   const nextStep = async (
     record: ScriptRecord,
     settlement: ScriptSettlement,
-    cause: "attempt" | "restart"
+    cause: (typeof RETRY_CAUSE)[keyof typeof RETRY_CAUSE]
   ) => {
     const step = attemptStep({
       cause,
@@ -288,12 +295,12 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
       autoRetries: record.autoRetries,
       verdict: undefined
     })
-    if (step.kind !== "check") return step
+    if (step.kind !== ATTEMPT_STEP.check) return step
     const verdict = await Effect.runPromise(journal.retryVerdict(origin(record))).catch(
-      (): RetryVerdict => ({ kind: "refuse", effect: "unknown" })
+      (): RetryVerdict => ({ kind: RETRY_VERDICT.refuse, effect: WORKFLOW_EFFECT.unknown })
     )
     const checked = attemptStep({ cause, settlement, autoRetries: record.autoRetries, verdict })
-    return checked.kind === "check" ? { kind: "settle" as const, settlement } : checked
+    return checked.kind === ATTEMPT_STEP.check ? { kind: ATTEMPT_STEP.settle, settlement } : checked
   }
 
   const fork = (record: ScriptRecord, binding: ScriptBinding, start: DriveStart) =>
@@ -322,10 +329,10 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
     })
 
   const start: ScriptRunnerShape["start"] = (input) =>
-    live.has(input.record.ref) || input.record.status !== "running"
+    live.has(input.record.ref) || input.record.status !== WORKFLOW_STATUS.running
       ? Effect.void
       : fork(input.record, input.binding, {
-          kind: "run",
+          kind: DRIVE_START.run,
           adopted: input.adopted,
           progress: input.progress
         })
@@ -333,7 +340,7 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
   const resume: ScriptRunnerShape["resume"] = Effect.fn("ScriptRunner.resume")(function* (input) {
     if (live.has(input.record.ref)) return
     const record = yield* store.get(input.record.ref)
-    if (record.status !== "running") return
+    if (record.status !== WORKFLOW_STATUS.running) return
     if (
       yield* journal
         .awaitingDecision(origin(record))
@@ -344,7 +351,10 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
       .activeChildRuns(origin(record))
       .pipe(Effect.mapError(journalFailure(record.ref)))
     if (children.length > 0) return
-    yield* fork(record, input.binding, { kind: "after", settlement: interruptedByRestart })
+    yield* fork(record, input.binding, {
+      kind: DRIVE_START.after,
+      settlement: interruptedByRestart
+    })
   })
 
   const retry: ScriptRunnerShape["retry"] = Effect.fn("ScriptRunner.retry")(function* (input) {
@@ -352,24 +362,28 @@ const makeScriptRunner = Effect.fn("ScriptRunner.make")(function* (): Effect.fn.
     const verdict = yield* journal
       .retryVerdict(origin(current))
       .pipe(Effect.mapError(journalFailure(input.ref)))
-    if (verdict.kind === "refuse") {
+    if (verdict.kind === RETRY_VERDICT.refuse) {
       return yield* new ScriptStoreError({
         reason: "unsafe_retry",
         message:
-          verdict.effect === "applied"
+          verdict.effect === WORKFLOW_EFFECT.applied
             ? "The script is not run again: an earlier step changed something outside Arden"
             : "The script is not run again: an earlier step may have changed something outside Arden",
         ref: input.ref
       })
     }
     const record = yield* store.retry({ ref: input.ref, expectedVersion: input.expectedVersion })
-    yield* fork(record, input.binding, { kind: "run", adopted: undefined, progress: emptyProgress })
+    yield* fork(record, input.binding, {
+      kind: DRIVE_START.run,
+      adopted: undefined,
+      progress: emptyProgress
+    })
     return record
   })
 
   const cancel: ScriptRunnerShape["cancel"] = Effect.fn("ScriptRunner.cancel")(function* (input) {
     const record = yield* store.cancel(input.ref)
-    if (record.status !== "cancelled") return record
+    if (record.status !== WORKFLOW_STATUS.cancelled) return record
     const running = live.get(input.ref)
     running?.controller.abort(new DOMException("Script cancelled", "AbortError"))
     const runIds = yield* journal

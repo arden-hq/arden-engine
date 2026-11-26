@@ -2,7 +2,7 @@ import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { Context, Effect, Schema } from "effect"
 import type { SpaceStore } from "../persistence/spaces/store.js"
 import { mapRevisionError, wikiError, type WikiError } from "./errors.js"
-import { decodeWikiOrigin, type WikiCommitOrigin } from "./origin.js"
+import { decodeWikiOrigin, WIKI_ORIGIN_KIND, type WikiCommitOrigin } from "./origin.js"
 import { isSpacePage } from "./space-index.js"
 
 export class WikiChangeSinkError extends Schema.TaggedError<WikiChangeSinkError>()(
@@ -68,7 +68,7 @@ export const makeWikiPublisher = Effect.fn("Wiki.makePublisher")(function* (
         ...(change.after === null ? [] : [change.after])
       ])
       const origin = decodeWikiOrigin(commit.origin)
-      let hasSpacePage = origin.kind === "space_page"
+      let hasSpacePage = origin.kind === WIKI_ORIGIN_KIND.space_page
       for (const resource of resources) {
         if (hasSpacePage) break
         hasSpacePage = yield* isSpacePage(spaces, resource.resourceId, resource.path).pipe(

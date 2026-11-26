@@ -1,3 +1,4 @@
+import { SPACE_REVIEW_DISPOSITION } from "../automations/space-review.js"
 import { writtenByPersonSql } from "./person-written-sql.js"
 import { readChatSettled, settledFingerprint } from "./chat-ownership.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
@@ -184,13 +185,13 @@ export const makeSpaceReviewStore = ({
                 "conflict",
                 "Only an active Space review can report its disposition"
               )
-            if (valid.kind === "no_change") {
+            if (valid.kind === SPACE_REVIEW_DISPOSITION.no_change) {
               if (yield* attemptedActions(sql, runId))
                 return yield* failure(
                   "invalid",
                   "No change cannot hide attempted mutations or questions"
                 )
-            } else if (valid.kind === "changed") {
+            } else if (valid.kind === SPACE_REVIEW_DISPOSITION.changed) {
               for (const itemId of valid.task_ids) {
                 const task =
                   yield* sql`SELECT 1 FROM space_tasks AS task WHERE task.item_id = ${itemId} AND task.space_id = ${runs[0].space_id} AND task.status != 'cancelled'
@@ -217,7 +218,10 @@ export const makeSpaceReviewStore = ({
                   "invalid",
                   "Changed result requires a successful recorded action"
                 )
-            } else if (valid.kind === "proposed" || valid.kind === "reconciled") {
+            } else if (
+              valid.kind === SPACE_REVIEW_DISPOSITION.proposed ||
+              valid.kind === SPACE_REVIEW_DISPOSITION.reconciled
+            ) {
               yield* validateProposed(sql, runId, runs[0].space_id, valid.proposal_ids)
             } else {
               for (const questionId of valid.question_ids) {
@@ -233,7 +237,7 @@ export const makeSpaceReviewStore = ({
             }
             const encoded = yield* encodeJson(SpaceReviewDispositionSchema, valid)
             yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.space_review_disposition', json(${encoded})) WHERE run_id = ${runId}`
-            if (valid.kind === "no_change")
+            if (valid.kind === SPACE_REVIEW_DISPOSITION.no_change)
               yield* sql`UPDATE chat_runs SET metadata_json = json_set(metadata_json, '$.no_change_reason', ${valid.summary}) WHERE run_id = ${runId}`
             else
               yield* sql`UPDATE chat_runs SET metadata_json = json_remove(metadata_json, '$.no_change_reason') WHERE run_id = ${runId}`
@@ -267,10 +271,13 @@ export const makeSpaceReviewStore = ({
           if (!rows[0]?.disposition)
             return yield* failure("invalid", "Space review has no validated successful result")
           const disposition = yield* decodeJson(SpaceReviewDispositionSchema, rows[0].disposition)
-          if (disposition.kind === "no_change") {
+          if (disposition.kind === SPACE_REVIEW_DISPOSITION.no_change) {
             if (yield* attemptedActions(sql, runId))
               return yield* failure("conflict", "Actions followed the no-change disposition")
-          } else if (disposition.kind === "proposed" || disposition.kind === "reconciled") {
+          } else if (
+            disposition.kind === SPACE_REVIEW_DISPOSITION.proposed ||
+            disposition.kind === SPACE_REVIEW_DISPOSITION.reconciled
+          ) {
             yield* validateProposed(sql, runId, current.space_id, disposition.proposal_ids)
           }
           const input = yield* encodeJson(SpaceReviewInputSchema, context.space_review_input)

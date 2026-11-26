@@ -1,3 +1,5 @@
+export const INBOX_SCOPE = { all: "all", items: "items", group: "group" } as const
+
 import type { JsonRecord } from "../common/json.js"
 import type { RunApproval } from "../runs/approvals.js"
 import type { RunQuestion } from "../runs/questions.js"
@@ -162,27 +164,27 @@ export interface InboxView extends JsonRecord {
 }
 
 export interface MarkAllInboxReadRequest {
-  readonly scope: "all"
+  readonly scope: typeof INBOX_SCOPE.all
 }
 
 export interface MarkInboxItemsReadRequest {
-  readonly scope: "items"
+  readonly scope: typeof INBOX_SCOPE.items
   readonly keys: ReadonlyArray<string>
 }
 
 export type MarkInboxReadRequest = MarkAllInboxReadRequest | MarkInboxItemsReadRequest
 
 export interface DismissAllInboxRequest {
-  readonly scope: "all"
+  readonly scope: typeof INBOX_SCOPE.all
 }
 
 export interface DismissInboxGroupRequest {
-  readonly scope: "group"
+  readonly scope: typeof INBOX_SCOPE.group
   readonly group_key: string
 }
 
 export interface DismissInboxItemsRequest {
-  readonly scope: "items"
+  readonly scope: typeof INBOX_SCOPE.items
   readonly keys: ReadonlyArray<string>
 }
 

@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, readdir, rm, stat } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeSqliteThreadClient } from "@arden-hq/sqlite-thread"
-import { publicWebUrl } from "@arden-hq/std/url"
+import { PUBLIC_WEB_URL, publicWebUrl } from "@arden-hq/std/url"
 import { Effect, Schema } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 
@@ -107,7 +107,7 @@ const webPlace = (
   | { readonly domain: string; readonly host: string; readonly section: string | undefined }
   | undefined => {
   const page = publicWebUrl(raw)
-  if (page.kind === "refused") return undefined
+  if (page.kind === PUBLIC_WEB_URL.refused) return undefined
   const url = page.url
   const host = url.hostname.toLowerCase().replace(/^www\./, "")
   const labels = host.split(".")
@@ -128,12 +128,16 @@ interface ProfileHistory {
   readonly file: string
 }
 
+const DEFAULT_PROFILE = "Default"
+
 const findProfiles = async (home: string): Promise<ReadonlyArray<ProfileHistory>> => {
   const found = await Promise.all(
     BROWSERS.map(async (browser) => {
       const root = join(home, "Library", "Application Support", browser.root)
       const entries = await readdir(root).catch(() => [])
-      const profiles = entries.filter((name) => name === "Default" || /^Profile \d+$/.test(name))
+      const profiles = entries.filter(
+        (name) => name === DEFAULT_PROFILE || /^Profile \d+$/.test(name)
+      )
       const present = await Promise.all(
         profiles.map(async (profile) => {
           const file = join(root, profile, "History")

@@ -1,21 +1,47 @@
 import { formatBytes } from "@arden-hq/std/count"
+import { isImageMediaType } from "@arden-hq/std/message-vocabulary"
 import {
   ToolExecutionError,
   type ModelContentBlock,
   type PauseRequested,
   type StandardSchemaV1
 } from "@arden-hq/loop"
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Schema } from "effect"
 
 import type { EffectTarget } from "../execution/tool-effect.js"
 import { defineServerTool, type ServerTool } from "../tools/define.js"
 import { toolFailure } from "../tools/tool-failure.js"
 import type { McpToolBinding } from "./catalog.js"
-import { McpConnectionError } from "./errors.js"
+import { MCP_ERROR_REASON, McpConnectionError } from "./errors.js"
 import { mcpSource } from "./naming.js"
 import { mcpConnectionPause } from "./recovery.js"
 import { McpConnections } from "./service.js"
 import { sha256Hex } from "@arden-hq/std/hash"
+
+const MCP_CONTENT_BLOCK = {
+  text: "text",
+  image: "image",
+  audio: "audio",
+  resource: "resource",
+  resourceLink: "resource_link"
+} as const
+
+type McpContentBlock = CallToolResult["content"][number]
+
+type ResourceLinkBlock = Extract<
+  McpContentBlock,
+  { readonly type: typeof MCP_CONTENT_BLOCK.resourceLink }
+>
+
+const isResourceLink = (block: McpContentBlock): block is ResourceLinkBlock =>
+  block.type === MCP_CONTENT_BLOCK.resourceLink
+
+const SOURCE_FIELD_CHARS: ReadonlyMap<string, number> = new Map([
+  ["ref", 8_192],
+  ["uri", 8_192],
+  ["title", 512]
+])
 
 const MAX_MEDIA_CHARS = 8 * 1_024 * 1_024
 const MAX_SOURCE_REFS = 64
@@ -66,11 +92,8 @@ const projectResult = (
     return value
   }
 
-  const compactSourceField = (field: string, value: string): string => {
-    if (field === "ref" || field === "uri") return value.slice(0, 8_192)
-    if (field === "title") return value.slice(0, 512)
-    return value.slice(0, 256)
-  }
+  const compactSourceField = (field: string, value: string): string =>
+    value.slice(0, SOURCE_FIELD_CHARS.get(field) ?? 256)
 
   const addSourceRef = (source: Readonly<Record<string, string>>): void => {
     if (sourceRefs.length >= MAX_SOURCE_REFS) {
@@ -86,16 +109,13 @@ const projectResult = (
 
   for (const block of result.content) {
     switch (block.type) {
-      case "text":
+      case MCP_CONTENT_BLOCK.text:
         text.push(reservePayload(block.text))
         break
-      case "image":
-      case "audio":
+      case MCP_CONTENT_BLOCK.image:
+      case MCP_CONTENT_BLOCK.audio:
         fallback.push(reservePayload(`[${block.type} content]`))
-        if (
-          block.type === "audio" ||
-          (block.mimeType !== "image/png" && block.mimeType !== "image/jpeg")
-        ) {
+        if (block.type === MCP_CONTENT_BLOCK.audio || !isImageMediaType(block.mimeType)) {
           omittedMedia.push(
             reservePayload(
               `[MCP ${block.type} (${block.mimeType}) was not sent to the model: unsupported media type.]`
@@ -122,7 +142,7 @@ const projectResult = (
           )
         }
         break
-      case "resource":
+      case MCP_CONTENT_BLOCK.resource:
         addSourceRef({
           provider: "mcp",
           kind: "resource",
@@ -146,7 +166,7 @@ const projectResult = (
           fallback.push(reservePayload(`[MCP binary resource: ${block.resource.uri}]`))
         }
         break
-      case "resource_link":
+      case MCP_CONTENT_BLOCK.resourceLink:
         addSourceRef({
           provider: "mcp",
           kind: "resource_link",
@@ -207,7 +227,7 @@ const projectResult = (
 
 const failure = (binding: McpToolBinding, cause: unknown): ToolExecutionError | PauseRequested => {
   if (cause instanceof ToolExecutionError) return cause
-  if (cause instanceof McpConnectionError && cause.reason === "auth_required") {
+  if (cause instanceof McpConnectionError && cause.reason === MCP_ERROR_REASON.authRequired) {
     return mcpConnectionPause(binding.serverName, cause.message)
   }
   if (cause instanceof McpConnectionError) {
@@ -254,7 +274,7 @@ const linkedTarget = (
   content: Awaited<ReturnType<McpConnections["Service"]["call"]>>["content"],
   named: EffectTarget | undefined
 ): EffectTarget | undefined => {
-  const link = content.find((block) => block.type === "resource_link")
+  const link = content.find(isResourceLink)
   if (link === undefined || link.uri.length > MAX_LINKED_URI) return undefined
   const label = {
     title: link.title ?? link.name,

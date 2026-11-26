@@ -1,24 +1,25 @@
 import { countOf, listWords } from "@arden-hq/std/count"
-import { fitsCard, keyName, readAddresses } from "@arden-hq/std/vault-key"
-import { CONTACT_FIELD_LABEL, CONTACT_FIELDS } from "@arden-hq/std/vault-contact"
+import { ADDRESSES_READ, fitsCard, keyName, readAddresses } from "@arden-hq/std/vault-key"
+import { CONTACT_FIELD, CONTACT_FIELD_LABEL, CONTACT_FIELDS } from "@arden-hq/std/vault-contact"
 import { APPROVAL_FIELD_LABEL, type ChatApprovalMode } from "@arden-hq/protocol/chat"
-import { DECISION_WORD } from "@arden-hq/protocol/permissions"
+import { DECISION_WORD, PERMISSION_RULE_DECISION } from "@arden-hq/protocol/permissions"
 import { Effect, Schema } from "effect"
 
 import {
   looksLikeSecret,
   VAULT_USE_KEY_TOOL,
   VaultKeys,
+  VaultUnavailableError,
   type VaultKeysService,
   type VaultList
 } from "../credentials/vault-keys.js"
 import { matchesVaultKey, readRunRules, ruleDecision } from "../execution/rules.js"
-import { personCard } from "../execution/decide.js"
+import { PERSON_CARD, personCard } from "../execution/decide.js"
 import type { RunAuthority } from "../execution/authority.js"
 import { PermissionRules, type RuleDecision } from "../persistence/permissions/rules.js"
 import { EmptyParametersSchema } from "./automation-tool-schema.js"
 import { browserAskSecretTools } from "./browser-ask-secret.js"
-import { cardLines, vaultCardTools } from "./vault-cards.js"
+import { cardLines, USE_DECISION, vaultCardTools } from "./vault-cards.js"
 import { defineServerTool, type ServerApprovalPrompt, type ServerTool } from "./define.js"
 import { toolRefusal } from "./tool-failure.js"
 
@@ -60,20 +61,22 @@ const AskKeyParametersSchema = Schema.Struct({
 })
 
 type KeyUse =
-  | { readonly kind: "allowed" }
-  | { readonly kind: "ask" }
-  | { readonly kind: "refuse"; readonly reason: "never" | "read_only" }
+  | { readonly kind: typeof USE_DECISION.allowed }
+  | { readonly kind: typeof USE_DECISION.ask }
+  | { readonly kind: typeof USE_DECISION.refuse; readonly reason: "never" | "read_only" }
 
 export const keyUseDecision = (input: {
   readonly answered: boolean
   readonly rule: RuleDecision | undefined
   readonly mode: ChatApprovalMode
 }): KeyUse => {
-  if (input.rule === "never") return { kind: "refuse", reason: "never" }
-  if (input.answered || input.rule === "allow") return { kind: "allowed" }
-  return personCard(input.mode) === "read_only"
-    ? { kind: "refuse", reason: "read_only" }
-    : { kind: "ask" }
+  if (input.rule === PERMISSION_RULE_DECISION.never)
+    return { kind: USE_DECISION.refuse, reason: "never" }
+  if (input.answered || input.rule === PERMISSION_RULE_DECISION.allow)
+    return { kind: USE_DECISION.allowed }
+  return personCard(input.mode) === PERSON_CARD.readOnly
+    ? { kind: USE_DECISION.refuse, reason: "read_only" }
+    : { kind: USE_DECISION.ask }
 }
 
 const USE_REFUSAL: Record<Extract<KeyUse, { kind: "refuse" }>["reason"], string> = {
@@ -87,7 +90,7 @@ const findKey = (list: VaultList, name: string) =>
 
 const vaultRefusal = (cause: unknown): never => {
   throw toolRefusal(
-    cause instanceof Error && cause.name === "VaultUnavailableError"
+    cause instanceof VaultUnavailableError
       ? cause.message
       : "Arden could not read its Vault just now. Try again in a moment.",
     "Vault unavailable"
@@ -170,7 +173,7 @@ const vaultListText = (list: VaultList): { result: string; preview: string } => 
       `- ${contact.name}`,
       ...CONTACT_FIELDS.flatMap((field) => {
         const value = contact[field]
-        return field === "name" || value === undefined
+        return field === CONTACT_FIELD.name || value === undefined
           ? []
           : [`  ${CONTACT_FIELD_LABEL[field]}: ${value}`]
       })
@@ -273,7 +276,7 @@ const makeVaultUseKeyTool = (
         rule: await ruleFor(ctx.run.authority, key.id),
         mode: ctx.run.approvalMode
       })
-      return decision.kind === "ask" ? useCard(key, input.reason) : undefined
+      return decision.kind === USE_DECISION.ask ? useCard(key, input.reason) : undefined
     },
     execute: async (input, ctx) => {
       refuseSecretShaped(input.reason)
@@ -289,11 +292,11 @@ const makeVaultUseKeyTool = (
         mode: ctx.run.approvalMode
       })
       switch (decision.kind) {
-        case "refuse":
+        case USE_DECISION.refuse:
           throw toolRefusal(USE_REFUSAL[decision.reason], DECISION_WORD.denied)
-        case "ask":
+        case USE_DECISION.ask:
           throw toolRefusal("A key is allowed only on the user's card.", "Needs approval")
-        case "allowed":
+        case USE_DECISION.allowed:
           vault.grant(ctx.run.runId, key.id)
           return { result: usable(key), preview: `${key.name} key allowed` }
       }
@@ -307,7 +310,7 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
     const addresses = readAddresses(input.addresses.join(" "))
     if (name === undefined)
       throw toolRefusal("Give the key a plain name of up to 64 characters.", "Name refused")
-    if (addresses.kind !== "ok")
+    if (addresses.kind !== ADDRESSES_READ.ok)
       throw toolRefusal(
         "Each address must be a host such as api.todoist.com, or a local address with its port such as localhost:11434.",
         "Address refused"
@@ -350,7 +353,7 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
     approvalRequirement: async (input, ctx) => {
       const ask = readAsk(input)
       if (findKey(await listOrRefuse(vault), ask.name) !== undefined) return undefined
-      if (personCard(ctx.run.approvalMode) !== "ask") return undefined
+      if (personCard(ctx.run.approvalMode) !== PERSON_CARD.ask) return undefined
       if (!vault.takeAsk(ctx.run.sessionId, ctx.toolCallId))
         throw toolRefusal(
           "You asked the user for keys or passwords 5 times in 5 minutes. Stop asking; say what you need and let the user add it in Settings → Vault.",
@@ -371,7 +374,7 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
           preview: `${key.name} key saved`
         }
       }
-      if (personCard(ctx.run.approvalMode) !== "ask")
+      if (personCard(ctx.run.approvalMode) !== PERSON_CARD.ask)
         return {
           result:
             "Not asked: in this mode Arden does not ask the user for a key. Tell the user they can add it in Settings → Vault.",

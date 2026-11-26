@@ -36,7 +36,7 @@ export const CALL_PLAN = {
 
 type CallPlan = (typeof CALL_PLAN)[keyof typeof CALL_PLAN]
 
-const needsReview = (plan: CallPlan): boolean => plan === CALL_PLAN.needsReview
+export const needsReview = (plan: CallPlan): boolean => plan === CALL_PLAN.needsReview
 
 export const readCallPlan = Effect.fn("TaskDirection.readCallPlan")(function* (
   sql: SqlClient.SqlClient,

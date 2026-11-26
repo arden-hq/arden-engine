@@ -1,11 +1,14 @@
-import type { ModelContentBlock, ToolCallRequest, ToolResult } from "@arden-hq/loop"
+import {
+  CONTENT_BLOCK_TYPE,
+  type ModelContentBlock,
+  type ToolCallRequest,
+  type ToolResult
+} from "@arden-hq/loop"
 import type { ToolsetMiddleware } from "../execution/toolset-middleware.js"
 
-export const SKILL_CREATE_TOOL_NAME = "skill_create"
-
-export const SKILL_UPDATE_TOOL_NAME = "skill_update"
-
 export const SKILL_TOOL_NAME = "skill"
+export const SKILL_CREATE_TOOL_NAME = "skill_create"
+export const SKILL_UPDATE_TOOL_NAME = "skill_update"
 export const TRUSTED_SKILL_CONTENT_TYPE = "trusted_skill_instructions"
 export const BUILT_IN_SKILL_SOURCE = "arden_builtin_skill"
 export const LOCAL_SKILL_SOURCE = "user_installed_local_skill"
@@ -13,7 +16,10 @@ export const LOCAL_SKILL_SOURCE = "user_installed_local_skill"
 const SKILL_SOURCES: ReadonlySet<unknown> = new Set([BUILT_IN_SKILL_SOURCE, LOCAL_SKILL_SOURCE])
 
 const carriedSkill = (block: ModelContentBlock): string | undefined => {
-  if (block.type !== "context" || block.content_type !== TRUSTED_SKILL_CONTENT_TYPE)
+  if (
+    block.type !== CONTENT_BLOCK_TYPE.context ||
+    block.content_type !== TRUSTED_SKILL_CONTENT_TYPE
+  )
     return undefined
   const name = block.metadata?.skill_name
   return SKILL_SOURCES.has(block.metadata?.source) &&
@@ -24,7 +30,11 @@ const carriedSkill = (block: ModelContentBlock): string | undefined => {
 }
 
 const keepBlock = (block: ModelContentBlock, toolName: string): boolean => {
-  if (block.type !== "context" || block.content_type !== TRUSTED_SKILL_CONTENT_TYPE) return true
+  if (
+    block.type !== CONTENT_BLOCK_TYPE.context ||
+    block.content_type !== TRUSTED_SKILL_CONTENT_TYPE
+  )
+    return true
   return toolName === SKILL_TOOL_NAME && carriedSkill(block) !== undefined
 }
 

@@ -1,4 +1,5 @@
-import { AGENT_RUN } from "@arden-hq/protocol/workflows"
+import { AGENT_RUN, WORKFLOW_EFFECT } from "@arden-hq/protocol/workflows"
+import { TOOL_STATUS } from "./status-sets.js"
 import type { RuntimeRunStatus } from "@arden-hq/protocol/chat"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
@@ -20,7 +21,11 @@ import type { PersistenceDeps } from "./deps.js"
 import { decodeJson } from "./json.js"
 import { callChange } from "./run-effects.js"
 import {
+  AGENT_REUSE,
   agentReuseDecision,
+  CALL_CHANGE,
+  NESTED_RETRY,
+  SCRIPT_CHILD_RUN,
   latestNestedRuns,
   nestedRerunId,
   nestedRetryDecision,
@@ -184,11 +189,11 @@ const scriptAgentDecision = Effect.fn("ScriptJournal.agentDecision")(function* (
   const children = yield* readScriptChildren(sql, input, (id) => id.key === input.key)
   const decided = agentReuseDecision(children, outputCheck(input.schema))
   switch (decided.kind) {
-    case "launch":
+    case AGENT_REUSE.launch:
       return { kind: "launch", launch: nextLaunch(children) }
-    case "refuse":
+    case AGENT_REUSE.refuse:
       return decided
-    case "reuse":
+    case AGENT_REUSE.reuse:
       return {
         ...decided,
         sourceRefs:
@@ -207,17 +212,18 @@ const scriptNestedCall = Effect.fn("ScriptJournal.nestedCall")(function* (
   if (latest === undefined) return { kind: "run", toolCallId: input.toolCallId }
   if (latest.rejected) return { kind: "run", toolCallId: latest.toolCallId }
   switch (nestedRetryDecision(latest)) {
-    case "reuse":
+    case NESTED_RETRY.reuse:
       return { kind: "run", toolCallId: latest.toolCallId }
-    case "rerun":
-      return latest.status === "ready"
+    case NESTED_RETRY.rerun:
+      return latest.status === TOOL_STATUS.ready
         ? { kind: "run", toolCallId: latest.toolCallId }
         : { kind: "run", toolCallId: nestedRerunId(input.toolCallId, input.attempt) }
-    case "refuse":
+    case NESTED_RETRY.refuse:
       return {
         kind: "refuse",
         toolCallId: latest.toolCallId,
-        effect: latest.change === "applied" ? "applied" : "unknown"
+        effect:
+          latest.change === CALL_CHANGE.applied ? WORKFLOW_EFFECT.applied : WORKFLOW_EFFECT.unknown
       }
   }
 })
@@ -252,15 +258,15 @@ const agentMode = (mode: string | null): ScriptAgentView["mode"] =>
 const agentStatus = (runStatus: string | null): ScriptAgentView["status"] => {
   const run = scriptChildRun(runStatus ?? undefined, undefined)
   switch (run.status) {
-    case "active":
+    case SCRIPT_CHILD_RUN.active:
       return "running"
-    case "missing":
+    case SCRIPT_CHILD_RUN.missing:
       return "failed"
-    case "completed":
+    case SCRIPT_CHILD_RUN.completed:
       return "completed"
-    case "failed":
-    case "interrupted":
-    case "cancelled":
+    case SCRIPT_CHILD_RUN.failed:
+    case SCRIPT_CHILD_RUN.interrupted:
+    case SCRIPT_CHILD_RUN.cancelled:
       return "failed"
   }
 }

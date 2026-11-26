@@ -19,7 +19,7 @@ export type ToldOutcome =
   | typeof AUTOMATION_RUN_OUTCOME.blocked
   | typeof AUTOMATION_RUN_OUTCOME.failed
 
-const RUN_TERMINAL = {
+export const RUN_TERMINAL = {
   completed: "completed",
   failed: "failed",
   cancelled: "cancelled"

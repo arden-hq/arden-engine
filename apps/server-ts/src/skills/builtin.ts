@@ -2,6 +2,7 @@ import { SKILL_PLACE, SKILL_VERSION, type Skill } from "@arden-hq/protocol/skill
 import type { SkillLoadedContent } from "./skill-schemas.js"
 import { catalogSignatures } from "@arden-hq/answer-ui"
 import { compilePromptTemplate, renderPromptTemplate } from "@arden-hq/prompt-template"
+import { PLATFORM } from "@arden-hq/std/process"
 import { Effect } from "effect"
 
 import { readAuthoredFile } from "../prompts/catalog.js"
@@ -84,9 +85,9 @@ const readBuiltInSkill = (name: BuiltInSkillName): BuiltInSkill => {
 const MAC_ONLY: ReadonlySet<BuiltInSkillName> = new Set(["apple-apps"])
 
 export const BUILT_IN_SKILLS: ReadonlyArray<BuiltInSkill> = Object.freeze(
-  BUILT_IN_SKILL_NAMES.filter((name) => process.platform === "darwin" || !MAC_ONLY.has(name)).map(
-    readBuiltInSkill
-  )
+  BUILT_IN_SKILL_NAMES.filter(
+    (name) => process.platform === PLATFORM.darwin || !MAC_ONLY.has(name)
+  ).map(readBuiltInSkill)
 )
 
 const byName = new Map<string, BuiltInSkill>(BUILT_IN_SKILLS.map((skill) => [skill.name, skill]))

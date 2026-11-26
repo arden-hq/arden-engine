@@ -1,3 +1,4 @@
+import { CHANGE_ENTRY_VERSION } from "@arden-hq/protocol/chat"
 import {
   RESOURCE_STATE,
   type CollectionReport,
@@ -25,7 +26,7 @@ import { diffLines } from "diff"
 import { Effect } from "effect"
 
 import { decodeWikiOrigin, type WikiCommitOrigin, wikiOriginChat } from "./origin.js"
-import { mapRevisionError, type WikiError, wikiError } from "./errors.js"
+import { mapRevisionError, type WikiError, WIKI_ERROR_REASON, wikiError } from "./errors.js"
 import { pageWikiLinks, type WikiLinkToken } from "./links.js"
 import { contentRestoring } from "./restore.js"
 import {
@@ -66,18 +67,25 @@ export interface WikiHistoryMethods {
   readonly lineOrigin: (pageId: string, text: string) => Effect.Effect<WikiLineOrigin, WikiError>
 }
 
+export const WIKI_LINE_ORIGIN = {
+  added: "added",
+  ambiguous: "ambiguous",
+  absent: "absent",
+  older: "older"
+} as const
+
 type WikiLineOrigin =
   | {
-      readonly kind: "added"
+      readonly kind: typeof WIKI_LINE_ORIGIN.added
       readonly line: string
       readonly timestamp: string
       readonly actor: string
       readonly origin: WikiCommitOrigin
       readonly reason: string
     }
-  | { readonly kind: "ambiguous"; readonly lines: number }
-  | { readonly kind: "absent" }
-  | { readonly kind: "older"; readonly searched: number }
+  | { readonly kind: typeof WIKI_LINE_ORIGIN.ambiguous; readonly lines: number }
+  | { readonly kind: typeof WIKI_LINE_ORIGIN.absent }
+  | { readonly kind: typeof WIKI_LINE_ORIGIN.older; readonly searched: number }
 
 const linesOf = (text: string): ReadonlyArray<string> => text.split("\n").map((line) => line.trim())
 
@@ -163,7 +171,9 @@ export const makeWikiHistoryMethods = (
         contentRestoring(repository, current, commits, { commitId: commit.commitId, side }).pipe(
           Effect.map(({ unchanged }) => !unchanged),
           Effect.catchIf(
-            (error) => error.reason === "invalid" || error.reason === "conflict",
+            (error) =>
+              error.reason === WIKI_ERROR_REASON.invalid ||
+              error.reason === WIKI_ERROR_REASON.conflict,
             () => Effect.succeed(false)
           )
         )
@@ -208,7 +218,7 @@ export const makeWikiHistoryMethods = (
         for (const version of [change.before, change.after])
           if (version?.resourceId === pageId) known.set(version.versionId, version)
     const after = known.get(options.after)
-    const before = options.before === "absent" ? null : known.get(options.before)
+    const before = options.before === CHANGE_ENTRY_VERSION.absent ? null : known.get(options.before)
     if (after === undefined || before === undefined) return yield* notFound("diff", pageId)
     const page = yield* repository
       .diffVersionsPage(live(before), live(after), { offset: 0, limit: VERSION_DIFF_CHARS })

@@ -7,7 +7,12 @@ import type { StoredRunUsage as RunUsage } from "../runs/stored-result.js"
 import { utcDay as utcDayOf } from "@arden-hq/std/time"
 import { DateTime, Effect, Option } from "effect"
 
-import { UsageStore, UsageStoreError, type StoredSessionUsage } from "../usage/store.js"
+import {
+  USAGE_OWNER,
+  UsageStore,
+  UsageStoreError,
+  type StoredSessionUsage
+} from "../usage/store.js"
 import { backgroundUsage } from "./usage-background.js"
 import { DAILY_COST_SUM } from "./run-usage.js"
 import type { PersistenceDeps } from "./deps.js"
@@ -332,8 +337,8 @@ export const makeUsageStore = Effect.fn("SqliteUsageStore.make")(function* ({
     "SqliteUsageStore.recordModelCall"
   )(function* (input) {
     const day = utcDay(yield* DateTime.now, 0)
-    const sessionId = input.owner.type === "session" ? input.owner.sessionId : null
-    const spaceId = input.owner.type === "space" ? input.owner.spaceId : ""
+    const sessionId = input.owner.type === USAGE_OWNER.session ? input.owner.sessionId : null
+    const spaceId = input.owner.type === USAGE_OWNER.space ? input.owner.spaceId : ""
     const { usage } = input
     yield* writer
       .run(

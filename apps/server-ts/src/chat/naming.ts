@@ -1,3 +1,4 @@
+import { SESSION_TYPE } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 import { splitAttachedFiles } from "@arden-hq/protocol/chat"
 
@@ -40,7 +41,7 @@ export const makeSessionNaming = (
     const header = yield* dependencies.sessions.loadHistoryHeader(input.sessionId)
     if (
       header === null ||
-      header.sessionType !== "chat" ||
+      header.sessionType !== SESSION_TYPE.chat ||
       header.originAutomationId !== null ||
       (header.name?.trim().length ?? 0) > 0
     )

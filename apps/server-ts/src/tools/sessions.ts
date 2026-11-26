@@ -4,13 +4,18 @@ import { defineServerTool, type ServerTool } from "./define.js"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { DateTime, Effect, Schema } from "effect"
 import { SessionQueries } from "../persistence/sessions/queries.js"
-import { SessionStore, type SessionListQuery } from "../persistence/sessions/store.js"
+import {
+  OWN_CHAT_MOVE_WHEN,
+  SessionStore,
+  type SessionListQuery
+} from "../persistence/sessions/store.js"
 import { observedKey } from "./run-context.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { SummaryStore } from "../persistence/summaries/store.js"
 import { chatSummaryText } from "./chat-summary.js"
 import { permittedBrowseScope } from "./session-browse-scope.js"
 import { recordApplied } from "../execution/tool-effect.js"
+import { CHAT_BROWSE_SCOPE } from "../execution/decide.js"
 import { appliedReceipt, chatTarget } from "./call-receipt.js"
 import { actionsPage } from "./session-actions-page.js"
 import {
@@ -20,6 +25,7 @@ import {
   MAX_CONTENT_CHARS,
   MAX_SINGLE_CONTENT_CHARS,
   MoveParametersSchema,
+  READ_VIEW,
   ReadParametersSchema
 } from "./session-tool-parameters.js"
 import {
@@ -71,7 +77,9 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
     execute: async (input, ctx) => {
       const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const scope: SessionListQuery =
-        permittedBrowseScope(input.scope, ctx.run) === "all_spaces" ? { scope: "all" } : own.browse
+        permittedBrowseScope(input.scope, ctx.run) === CHAT_BROWSE_SCOPE.allSpaces
+          ? { scope: "all" }
+          : own.browse
       const page = await Effect.runPromise(
         services.store
           .list({
@@ -160,7 +168,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       const input = {
         ...requested,
         limit:
-          requested.view === "actions"
+          requested.view === READ_VIEW.actions
             ? Math.min(requested.limit, MAX_ACTIONS_LIMIT)
             : requested.limit,
         content_chars:
@@ -170,7 +178,7 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
       }
       const own = await currentScope(services.queries, ctx.run, ctx.signal)
       const session = await resolveReadable(services, input.session_ref, ctx.signal)
-      if (input.view === "actions") {
+      if (input.view === READ_VIEW.actions) {
         const page = await Effect.runPromise(
           services.queries
             .readToolEvidence({
@@ -378,13 +386,13 @@ const makeSessionTools = (services: SessionToolServices): ReadonlyArray<ServerTo
         })
       }
       switch (moved.when) {
-        case "now":
+        case OWN_CHAT_MOVE_WHEN.now:
           return {
             result: `Moved this chat to ${moved.spaceName}.`,
             preview: `Moved to ${moved.spaceName}`,
             data: { space_id: moved.spaceId, when: moved.when }
           }
-        case "run_end":
+        case OWN_CHAT_MOVE_WHEN.run_end:
           return {
             result: `This chat moves to ${moved.spaceName} as soon as this reply ends; nothing more to do. Tell the user it is moving to ${moved.spaceName} when you finish.`,
             preview: `Moving to ${moved.spaceName} after this reply`,

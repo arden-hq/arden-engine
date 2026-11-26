@@ -6,6 +6,7 @@ import {
   type DecisionBackend,
   type DecisionInput,
   type DecisionQuestion,
+  DECISION_KIND,
   DecisionsError,
   invalidOutput,
   validateDecisionInput,
@@ -24,7 +25,7 @@ export const llmDecisionBackend = (
   input: "text+image",
   classify: Effect.fn("Decisions.llm")(function* (input: DecisionInput) {
     yield* validateDecisionInput(input)
-    if (Object.values(input.questions).some((question) => question.kind === "box")) {
+    if (Object.values(input.questions).some((question) => question.kind === DECISION_KIND.box)) {
       return yield* new DecisionsError({
         reason: "invalid_request",
         message: "This decision backend does not support boxes"
@@ -66,8 +67,8 @@ const selectedAnswers = Effect.fn("Decisions.selectedAnswers")(function* (
 })
 
 const selectedAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswer | undefined => {
-  if (question.kind === "box") return undefined
-  if (question.kind === "predicate") {
+  if (question.kind === DECISION_KIND.box) return undefined
+  if (question.kind === DECISION_KIND.predicate) {
     if (typeof raw !== "boolean") return undefined
     return {
       kind: "predicate",
@@ -85,20 +86,20 @@ const selectedAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswe
     kind: "selected-only" as const,
     probabilities: Object.fromEntries(values.map((value) => [value, value === raw ? 1 : 0]))
   }
-  return question.kind === "choice"
+  return question.kind === DECISION_KIND.choice
     ? { kind: "choice", value: raw, distribution }
     : { kind: "score", value: raw, level, distribution }
 }
 
 const answerSchema = (question: DecisionQuestion) => {
   switch (question.kind) {
-    case "box":
+    case DECISION_KIND.box:
       return Schema.Never
-    case "predicate":
+    case DECISION_KIND.predicate:
       return Schema.Boolean
-    case "choice":
+    case DECISION_KIND.choice:
       return literalsOf(question.options)
-    case "score":
+    case DECISION_KIND.score:
       return literalsOf(question.levels)
   }
 }

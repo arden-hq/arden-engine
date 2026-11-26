@@ -14,7 +14,9 @@ import type { AutomationStoreError } from "./store.js"
 import type { AutomationId } from "./model.js"
 import type { AutomationWriteSource } from "../sqlite/automation-instruction-provenance.js"
 
-export type PromptWriter = "owner" | "agent"
+export const PROMPT_WRITER = { owner: "owner", agent: "agent" } as const
+
+export type PromptWriter = (typeof PROMPT_WRITER)[keyof typeof PROMPT_WRITER]
 
 type PromptAuthor = PromptWriter | "unknown"
 

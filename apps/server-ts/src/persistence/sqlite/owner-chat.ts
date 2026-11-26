@@ -1,3 +1,4 @@
+import { JOB_SUBJECT_KIND } from "../space-job-id.js"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import { namedPublicRef } from "../public-ref.js"
@@ -18,13 +19,15 @@ export const attemptRunSessionIdSql = (
   attemptId: Statement.Fragment
 ): Statement.Fragment => sql`(${trunk} || '::i' || ${attemptId})`
 
+const REVIEW_CHAT_MODE = { keep: "keep", replace: "replace" } as const
+
 export const recordReviewChat = (
   sql: SqlClient.SqlClient,
   spaceId: string,
   sessionId: string,
-  mode: "keep" | "replace"
+  mode: (typeof REVIEW_CHAT_MODE)[keyof typeof REVIEW_CHAT_MODE]
 ): Effect.Effect<void, SqlError, never> =>
-  (mode === "keep"
+  (mode === REVIEW_CHAT_MODE.keep
     ? sql`INSERT INTO space_review_chats (space_id, session_id) VALUES (${spaceId}, ${sessionId})
         ON CONFLICT(space_id) DO NOTHING`
     : sql`INSERT INTO space_review_chats (space_id, session_id) VALUES (${spaceId}, ${sessionId})
@@ -82,7 +85,7 @@ export const makeOwnerChats = (
         kind: "announce",
         events: sessionEvents,
         complete:
-          owner.kind === "space_review"
+          owner.kind === JOB_SUBJECT_KIND.spaceReview
             ? recordReviewChat(sql, owner.spaceId, threadId, "replace")
             : sql`UPDATE scheduled_tasks SET thread_id = ${threadId}
                 WHERE task_id = ${owner.key} AND purpose IN ('user_automation', 'system')`.pipe(

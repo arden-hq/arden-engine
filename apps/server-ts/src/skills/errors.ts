@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-const SKILL_OPERATION = {
+export const SKILL_OPERATION = {
   list: "list",
   content: "content",
   create: "create",

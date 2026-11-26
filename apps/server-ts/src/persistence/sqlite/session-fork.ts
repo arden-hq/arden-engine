@@ -7,6 +7,8 @@ import type { JsonObject } from "../json.js"
 import { StoredMessageEnvelopeSchema, type StoredMessageEnvelope } from "../transcript/model.js"
 import { writeError } from "./chat-write-errors.js"
 
+const FORK_PRESENTATION = { preserve: "preserve", inherited: "inherited" } as const
+
 export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(function* (input: {
   readonly history: ReadonlyArray<Readonly<Record<string, unknown>>>
   readonly parentSessionId: string
@@ -14,7 +16,7 @@ export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(functi
   readonly closeOpenCall: (callId: string) => string
   readonly timestamp: string
   readonly operation: "spawn_agent" | "fork_session"
-  readonly presentation: "preserve" | "inherited"
+  readonly presentation: (typeof FORK_PRESENTATION)[keyof typeof FORK_PRESENTATION]
 }): Effect.fn.Return<ReadonlyArray<StoredMessageEnvelope>, ChatWriteError> {
   const kept = input.history.filter((message) => message.role !== ROLE.system)
   const completedToolCalls = new Set(
@@ -48,7 +50,9 @@ export const prepareForkContext = Effect.fn("SessionFork.prepareContext")(functi
           ? fields.message_id
           : `fork:${input.forkId}:${index}`,
       created_at: typeof fields.created_at === "string" ? fields.created_at : input.timestamp,
-      ...(input.presentation === "inherited" ? { forked_from: input.parentSessionId } : {})
+      ...(input.presentation === FORK_PRESENTATION.inherited
+        ? { forked_from: input.parentSessionId }
+        : {})
     }).pipe(
       Effect.mapError((cause) =>
         writeError(input.operation, "invalid", "The parent's history cannot be forked", {

@@ -11,10 +11,12 @@ export class UsageStoreError extends Schema.TaggedError<UsageStoreError>()("Usag
   })
 }) {}
 
+export const USAGE_OWNER = { session: "session", space: "space", none: "none" } as const
+
 type UsageOwner =
-  | { readonly type: "session"; readonly sessionId: string }
-  | { readonly type: "space"; readonly spaceId: string }
-  | { readonly type: "none" }
+  | { readonly type: typeof USAGE_OWNER.session; readonly sessionId: string }
+  | { readonly type: typeof USAGE_OWNER.space; readonly spaceId: string }
+  | { readonly type: typeof USAGE_OWNER.none }
 
 export interface ModelCallUsage {
   readonly kind: Exclude<ModelCallKind, "chat">

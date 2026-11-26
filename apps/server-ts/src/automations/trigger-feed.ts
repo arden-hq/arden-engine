@@ -1,5 +1,6 @@
 import {
   feedsActivityTriggers,
+  TRIGGER_FEED_KIND,
   type TriggerFeedRecord
 } from "../persistence/automations/triggers.js"
 import { LINK, SERVER_EVENT_TYPE } from "@arden-hq/protocol"
@@ -19,14 +20,14 @@ export const triggerFeedRecord = (
     journal: { atMs: delivery.createdAtMs, event }
   }
   if (event.type === SERVER_EVENT_TYPE.chatInputCommitted) {
-    return { ...base, kind: "input_committed", sessionId: event.chat_session_id }
+    return { ...base, kind: TRIGGER_FEED_KIND.inputCommitted, sessionId: event.chat_session_id }
   }
   if (
     event.type === INTERNAL_LIFECYCLE_EVENT.runSettled &&
     event.personal &&
     event.status === RUN_SETTLED_STATUS.completed
   ) {
-    return { ...base, kind: "run_completed", sessionId: event.session_id }
+    return { ...base, kind: TRIGGER_FEED_KIND.runCompleted, sessionId: event.session_id }
   }
   if (
     event.type === SERVER_EVENT_TYPE.sessionActivity &&
@@ -38,7 +39,7 @@ export const triggerFeedRecord = (
           : null
     })
   ) {
-    return { ...base, kind: "activity", sessionId: event.session.session_id }
+    return { ...base, kind: TRIGGER_FEED_KIND.activity, sessionId: event.session.session_id }
   }
-  return { ...base, kind: "other", sessionId: null }
+  return { ...base, kind: TRIGGER_FEED_KIND.other, sessionId: null }
 }

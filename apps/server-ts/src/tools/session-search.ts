@@ -1,6 +1,8 @@
 import { countOf } from "@arden-hq/std/count"
 import { ToolExecutionError } from "@arden-hq/loop"
 import { DateTime, Effect, Schema, SchemaTransformation } from "effect"
+import { CHAT_BROWSE_SCOPE } from "../execution/decide.js"
+import { STORE_REASON } from "../persistence/errors.js"
 import { defineServerTool, type ServerTool } from "./define.js"
 import {
   TranscriptDataCorruptionError,
@@ -86,11 +88,11 @@ const failurePreview = (
   error: Exclude<TranscriptSearchFailure, TranscriptDataCorruptionError>
 ): string => {
   switch (error.reason) {
-    case "not_found":
+    case STORE_REASON.not_found:
       return "Session not found"
-    case "invalid":
+    case STORE_REASON.invalid:
       return "Invalid search query"
-    case "storage":
+    case STORE_REASON.storage:
       return "Search unavailable"
   }
 }
@@ -186,7 +188,7 @@ const makeSessionSearchTool = ({
       destructive: null
     },
     execute: async (input, ctx) => {
-      const allSpaces = permittedBrowseScope(input.scope, ctx.run) === "all_spaces"
+      const allSpaces = permittedBrowseScope(input.scope, ctx.run) === CHAT_BROWSE_SCOPE.allSpaces
       const spansSpaces =
         allSpaces ||
         (input.session_ref === undefined &&

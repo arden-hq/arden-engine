@@ -1,3 +1,4 @@
+import { PLACE_KIND } from "../runs/ending.js"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
@@ -33,8 +34,9 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
   if (address === undefined) return { kind: "refused", reason: NOWHERE }
   const { place, agent, source } = address
   const { context, owner } = address.reply
-  if (place.kind === "own") return { kind: "refused", reason: OWN_CHAT }
-  if (place.kind !== "chat" && place.kind !== "parent") return { kind: "refused", reason: NOWHERE }
+  if (place.kind === PLACE_KIND.own) return { kind: "refused", reason: OWN_CHAT }
+  if (place.kind !== PLACE_KIND.chat && place.kind !== PLACE_KIND.parent)
+    return { kind: "refused", reason: NOWHERE }
   const count =
     (yield* sql<{ readonly count: number }>`SELECT count(*) AS count FROM run_tells
     WHERE run_id = ${input.runId}`)[0]?.count ?? 0
@@ -52,7 +54,7 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
       ${now}, ${shown ? 1 : 0}, NULL)`
   const key = `tell:${input.runId}:${n}`
   const delivered = Effect.gen(function* () {
-    if (place.kind === "parent") {
+    if (place.kind === PLACE_KIND.parent) {
       if (context === undefined || agent === undefined)
         return yield* Effect.fail(new Error("The worker has no parent to tell"))
       yield* enqueueRunDelivery({
@@ -72,7 +74,7 @@ export const recordTell = Effect.fn("RunTell.record")(function* (
       })
       return
     }
-    if (place.kind !== "chat" || context === undefined || owner === undefined)
+    if (place.kind !== PLACE_KIND.chat || context === undefined || owner === undefined)
       return yield* Effect.fail(new Error("There is no chat to tell"))
     const weight = updateWeight({ kind: "tell", shown })
     if (weight === undefined) return

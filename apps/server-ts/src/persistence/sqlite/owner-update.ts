@@ -1,55 +1,83 @@
 import { messageQuote } from "./message-quote.js"
-import type { ChatUpdate, CommunicationDoor } from "@arden-hq/protocol/chat"
+import {
+  COMMUNICATION_DOOR,
+  UPDATE_WEIGHT,
+  type ChatUpdate,
+  type CommunicationDoor
+} from "@arden-hq/protocol/chat"
+import { RECORD_TOLD_STATUS } from "@arden-hq/protocol"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import type { RunDeliveryPayload } from "../deliveries/model.js"
-import type { EndingRecord } from "../runs/ending.js"
+import {
+  ENDING_DETAIL,
+  ENDING_PURPOSE,
+  ENDING_STATUS,
+  PLACE_KIND,
+  type EndingRecord
+} from "../runs/ending.js"
 import { arrivalHeadline, arrivalSource, doorRef } from "../transcript/chat-events.js"
 import { postQuietLine } from "./ending-arrival.js"
 import type { EntityFact } from "./entity-events.js"
 import type { DestinationRow } from "./run-destination.js"
 import { enqueueRunDelivery } from "./work-delivery-routing.js"
 
-export type UpdateWeight = ChatUpdate["weight"] | "quiet"
+const OWNER_UPDATE_WEIGHT = { ...UPDATE_WEIGHT, quiet: "quiet" } as const
+
+export type UpdateWeight = (typeof OWNER_UPDATE_WEIGHT)[keyof typeof OWNER_UPDATE_WEIGHT]
+
+const UPDATE_FACT = { ending: "ending", entity: "entity", tell: "tell", met: "met" } as const
 
 export type UpdatePayload = Extract<RunDeliveryPayload, { readonly kind: "update" }>
 
 export type Readable = Pick<EndingRecord, "purpose" | "status" | "detail" | "text" | "placeKind">
 
 export const told = (record: Readable): boolean =>
-  record.placeKind === "chat" &&
+  record.placeKind === PLACE_KIND.chat &&
   record.text.trim() !== "" &&
-  record.purpose !== "system" &&
-  (record.status === "finished" || record.status === "blocked" || record.status === "failed")
+  record.purpose !== ENDING_PURPOSE.system &&
+  (record.status === ENDING_STATUS.finished ||
+    record.status === ENDING_STATUS.blocked ||
+    record.status === ENDING_STATUS.failed)
 
 export const waitsOnOwner = (detail: string | null): boolean =>
-  detail === "needs_you" || detail === "needs_input" || detail === "capability"
+  detail === ENDING_DETAIL.needsYou ||
+  detail === ENDING_DETAIL.needsInput ||
+  detail === ENDING_DETAIL.capability
 
 export type UpdateFact =
-  | { readonly kind: "ending"; readonly record: Readable; readonly shown: boolean }
-  | { readonly kind: "entity"; readonly fact: EntityFact; readonly shown: boolean }
-  | { readonly kind: "tell"; readonly shown: boolean }
-  | { readonly kind: "met"; readonly shown: boolean }
+  | { readonly kind: typeof UPDATE_FACT.ending; readonly record: Readable; readonly shown: boolean }
+  | { readonly kind: typeof UPDATE_FACT.entity; readonly fact: EntityFact; readonly shown: boolean }
+  | { readonly kind: typeof UPDATE_FACT.tell; readonly shown: boolean }
+  | { readonly kind: typeof UPDATE_FACT.met; readonly shown: boolean }
 
 export const updateWeight = (fact: UpdateFact): UpdateWeight | undefined => {
   switch (fact.kind) {
-    case "ending": {
+    case UPDATE_FACT.ending: {
       if (!told(fact.record)) return undefined
       const { status, detail } = fact.record
-      if (!fact.shown) return status === "finished" && detail === "step" ? "news" : "quiet"
-      return status === "failed" || (status === "blocked" && waitsOnOwner(detail)) ? "owed" : "news"
+      if (!fact.shown)
+        return status === ENDING_STATUS.finished && detail === ENDING_DETAIL.step
+          ? OWNER_UPDATE_WEIGHT.news
+          : OWNER_UPDATE_WEIGHT.quiet
+      return status === ENDING_STATUS.failed ||
+        (status === ENDING_STATUS.blocked && waitsOnOwner(detail))
+        ? OWNER_UPDATE_WEIGHT.owed
+        : OWNER_UPDATE_WEIGHT.news
     }
-    case "entity":
+    case UPDATE_FACT.entity:
       return entityWeight(fact.fact, fact.shown)
-    case "tell":
-    case "met":
-      return fact.shown ? "news" : "quiet"
+    case UPDATE_FACT.tell:
+    case UPDATE_FACT.met:
+      return fact.shown ? OWNER_UPDATE_WEIGHT.news : OWNER_UPDATE_WEIGHT.quiet
   }
 }
 
 export const entityWeight = (fact: EntityFact, shown: boolean): UpdateWeight => {
-  if (!shown) return "quiet"
-  return fact.event === "done" ? "news" : "owed"
+  if (!shown) return OWNER_UPDATE_WEIGHT.quiet
+  return fact.event === RECORD_TOLD_STATUS.done
+    ? OWNER_UPDATE_WEIGHT.news
+    : OWNER_UPDATE_WEIGHT.owed
 }
 
 export const tellChat = Effect.fn("OwnerUpdate.tellChat")(function* (options: {
@@ -66,7 +94,7 @@ export const tellChat = Effect.fn("OwnerUpdate.tellChat")(function* (options: {
   readonly occurredAt: string
 }) {
   const { weight, ...told } = options
-  if (weight === "quiet") return yield* postQuietLine(told)
+  if (weight === OWNER_UPDATE_WEIGHT.quiet) return yield* postQuietLine(told)
   yield* enqueueUpdate({ ...told, weight })
 })
 
@@ -91,7 +119,10 @@ const enqueueUpdate = Effect.fn("OwnerUpdate.enqueue")(function* (options: {
     line,
     door
   }
-  const taskItem = door.kind === "task" || door.kind === "artifact" ? door.item_id : undefined
+  const taskItem =
+    door.kind === COMMUNICATION_DOOR.task || door.kind === COMMUNICATION_DOOR.artifact
+      ? door.item_id
+      : undefined
   const stableKey =
     taskItem === undefined
       ? null

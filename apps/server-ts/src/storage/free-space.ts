@@ -1,10 +1,10 @@
 import { backoffDelayMs } from "@arden-hq/std/retry"
 import { Cause, Clock, Duration, Effect, Queue, Semaphore } from "effect"
-
-import type {
-  CheckpointMode,
-  StorageSessionStore,
-  StorageSessionStoreError
+import {
+  CHECKPOINT_MODE,
+  type CheckpointMode,
+  type StorageSessionStore,
+  type StorageSessionStoreError
 } from "../persistence/storage/session-store.js"
 
 const MIB = 1_024 * 1_024
@@ -54,8 +54,9 @@ export const startsDrain = ({
 }: {
   readonly free: number
   readonly plan: FreeSpacePlan
-  readonly trigger: "schedule" | "requested"
-}): boolean => free > plan.reservePages && (trigger === "requested" || free >= plan.startPages)
+  readonly trigger: (typeof DRAIN_TRIGGER)[keyof typeof DRAIN_TRIGGER]
+}): boolean =>
+  free > plan.reservePages && (trigger === DRAIN_TRIGGER.requested || free >= plan.startPages)
 
 const passContinues = ({
   batches,
@@ -67,14 +68,22 @@ const passContinues = ({
   readonly plan: FreeSpacePlan
 }): boolean => batches < plan.passBatches && elapsedMillis < plan.passMillis
 
+const PASS_END = { done: "done", yielded: "yielded", budget: "budget" } as const
+
+export const DRAIN_TRIGGER = { schedule: "schedule", requested: "requested" } as const
+
+const DRAIN_STATE = { idle: "idle", draining: "draining" } as const
+
+const NO_CHECKPOINT = "none" as const
+
 export interface PassResult {
-  readonly end: "done" | "yielded" | "budget"
+  readonly end: (typeof PASS_END)[keyof typeof PASS_END]
   readonly released: number
 }
 
 export type DrainState =
-  | { readonly kind: "idle" }
-  | { readonly kind: "draining"; readonly stalls: number }
+  | { readonly kind: typeof DRAIN_STATE.idle }
+  | { readonly kind: typeof DRAIN_STATE.draining; readonly stalls: number }
 
 export interface NextStep {
   readonly state: DrainState
@@ -82,16 +91,17 @@ export interface NextStep {
   readonly checkpoint: CheckpointMode | "none"
 }
 
-const idle: DrainState = { kind: "idle" }
+const idle: DrainState = { kind: DRAIN_STATE.idle }
 
 const afterPass = (state: DrainState, pass: PassResult): NextStep => {
-  if (pass.end === "done") return { state: idle, delay: IDLE_INTERVAL, checkpoint: "truncate" }
-  if (pass.end === "yielded" && pass.released === 0) {
-    const stalls = state.kind === "draining" ? state.stalls + 1 : 1
+  if (pass.end === PASS_END.done)
+    return { state: idle, delay: IDLE_INTERVAL, checkpoint: CHECKPOINT_MODE.truncate }
+  if (pass.end === PASS_END.yielded && pass.released === 0) {
+    const stalls = state.kind === DRAIN_STATE.draining ? state.stalls + 1 : 1
     return {
       state: { kind: "draining", stalls },
       delay: Duration.millis(backoffDelayMs(CONTENDED_BACKOFF, stalls)),
-      checkpoint: "none"
+      checkpoint: NO_CHECKPOINT
     }
   }
   return { state: { kind: "draining", stalls: 0 }, delay: ACTIVE_INTERVAL, checkpoint: "passive" }
@@ -136,15 +146,15 @@ export const makeFreeSpaceWorker = Effect.fn("FreeSpace.make")(function* (
 
   const step = Effect.fn("FreeSpace.step")(function* (
     state: DrainState,
-    trigger: "schedule" | "requested"
+    trigger: (typeof DRAIN_TRIGGER)[keyof typeof DRAIN_TRIGGER]
   ): Effect.fn.Return<NextStep, StorageSessionStoreError> {
     const pages = yield* store.freePages()
     const plan = planPages(policy, pages.pageSize)
-    if (state.kind === "idle" && !startsDrain({ free: pages.free, plan, trigger })) {
-      return { state, delay: IDLE_INTERVAL, checkpoint: "none" }
+    if (state.kind === DRAIN_STATE.idle && !startsDrain({ free: pages.free, plan, trigger })) {
+      return { state, delay: IDLE_INTERVAL, checkpoint: NO_CHECKPOINT }
     }
     const next = afterPass(state, yield* lock.withPermit(runPass(store, plan)))
-    if (next.checkpoint !== "none") yield* store.checkpoint(next.checkpoint)
+    if (next.checkpoint !== NO_CHECKPOINT) yield* store.checkpoint(next.checkpoint)
     return next
   })
 
@@ -153,8 +163,8 @@ export const makeFreeSpaceWorker = Effect.fn("FreeSpace.make")(function* (
     const plan = planPages(policy, pages.pageSize)
     const pass = yield* lock.withPermit(runPass(store, plan))
     const next = afterPass(idle, pass)
-    if (next.checkpoint !== "none") yield* store.checkpoint(next.checkpoint)
-    if (pass.end !== "done") yield* Queue.offer(wake, undefined)
+    if (next.checkpoint !== NO_CHECKPOINT) yield* store.checkpoint(next.checkpoint)
+    if (pass.end !== PASS_END.done) yield* Queue.offer(wake, undefined)
     return pass
   })
 
@@ -170,7 +180,9 @@ export const makeFreeSpaceWorker = Effect.fn("FreeSpace.make")(function* (
         Effect.catchCause((cause) =>
           Effect.logWarning("Could not release free database space", {
             error: Cause.squash(cause)
-          }).pipe(Effect.as<NextStep>({ state: idle, delay: IDLE_INTERVAL, checkpoint: "none" }))
+          }).pipe(
+            Effect.as<NextStep>({ state: idle, delay: IDLE_INTERVAL, checkpoint: NO_CHECKPOINT })
+          )
         )
       )
       state = next.state

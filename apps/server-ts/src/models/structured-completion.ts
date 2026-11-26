@@ -3,6 +3,8 @@ import {
   createTool,
   createToolset,
   makeAgent,
+  MODEL_STREAM_ITEM_TAG,
+  STRUCTURED_OUTPUT_SUPPORT,
   resolveModelCapabilities,
   StructuredOutputError,
   UnsupportedStructuredOutputError,
@@ -29,8 +31,12 @@ import { withUntrustedDataRule } from "./instructions.js"
 import { makeModelRequestMeter, responseUsage } from "../chat/model-request-meter.js"
 import type { ServerToolRun } from "../chat/runner-contract.js"
 
+const RUN_MODEL_USAGE = { run: "run" } as const
+
+const STRUCTURED_ROLE = { helper: "helper" } as const
+
 interface RunModelUsage {
-  readonly kind: "run"
+  readonly kind: typeof RUN_MODEL_USAGE.run
   readonly run: NonNullable<ServerToolRun["modelUsage"]>
 }
 
@@ -43,10 +49,10 @@ const noTools: Toolset = Object.freeze({
   }
 })
 
-export type StructuredCompletionRole = "helper" | { readonly chat: string }
+export type StructuredCompletionRole = typeof STRUCTURED_ROLE.helper | { readonly chat: string }
 
 const roleLabel = (role: StructuredCompletionRole): string =>
-  role === "helper" ? "Helper" : "Chat"
+  role === STRUCTURED_ROLE.helper ? "Helper" : "Chat"
 
 export const STRUCTURED_COMPLETION_FAILURE = {
   unavailable: "unavailable",
@@ -218,7 +224,7 @@ export class StructuredCompletion extends Context.Service<
       ): Effect.fn.Return<ResolvedAssignment, StructuredCompletionError> {
         const label = roleLabel(role)
         const assignment = yield* (
-          role === "helper" ? models.roleSelection(role) : models.selection(role.chat)
+          role === STRUCTURED_ROLE.helper ? models.roleSelection(role) : models.selection(role.chat)
         ).pipe(
           Effect.mapError(
             (cause) =>
@@ -293,7 +299,7 @@ export class StructuredCompletion extends Context.Service<
         const { label, model, route, capabilities } = resolved
         const unavailableMessage = (effectiveModel: string): string =>
           `The ${label} model (${effectiveModel}) does not support constrained structured output. Choose a model with structured output support in model settings.`
-        if (capabilities.structuredOutput === "none") {
+        if (capabilities.structuredOutput === STRUCTURED_OUTPUT_SUPPORT.none) {
           return yield* new StructuredCompletionError({
             reason: "unavailable",
             message: unavailableMessage(model)
@@ -383,7 +389,7 @@ export class StructuredCompletion extends Context.Service<
               let result: Result | undefined
               for await (const event of agent.stream(history, options)) {
                 if (!("_tag" in event)) result = event
-                else if (event._tag === "TextDelta") onText(event.content)
+                else if (event._tag === MODEL_STREAM_ITEM_TAG.textDelta) onText(event.content)
               }
               if (result === undefined) throw new Error("The text stream ended without a result")
               return result
@@ -454,7 +460,7 @@ export class StructuredCompletion extends Context.Service<
             catch: providerFailed(resolved.label)
           })
         const usage = input.usage
-        if (usage.kind === "run") {
+        if (usage.kind === RUN_MODEL_USAGE.run) {
           const meter = makeModelRequestMeter({
             admit: usage.run.admit,
             signal: input.signal ?? new AbortController().signal,
