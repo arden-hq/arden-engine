@@ -10,7 +10,8 @@ import {
   AskUserParametersSchema,
   askUserQuestion,
   PermissionOfferParametersSchema,
-  permissionRequest
+  permissionRequest,
+  questionData
 } from "./ask-user-input.js"
 import { recordApplied } from "../execution/tool-effect.js"
 import { takesAnswersMidRun } from "../execution/authority.js"
@@ -102,7 +103,7 @@ const makeWorkTools = (services: WorkToolServices): ReadonlyArray<ServerTool> =>
           ? `Asked question_id ${question.question_id}. The card is showing. End your turn now with no text; an answer or Skip starts the next turn.`
           : `Asked question_id ${question.question_id}. The user sees it as a card in Chat; never say where it sits ("above", "below") — call it the question, or name the choice. ${waitingNote}`,
         preview: question.content.prompt,
-        data: { question },
+        data: questionData(question),
         host: appliedReceipt(
           ctx,
           inChatTarget({

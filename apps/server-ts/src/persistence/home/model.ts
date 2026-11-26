@@ -1,11 +1,11 @@
-import { Schema } from "effect"
-import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import {
   HOME_HEADLINES,
   HomeEvidenceSchema,
-  HomeLetterResponseSchema
-} from "@arden-hq/protocol/effect/runs"
-import type { HomeEvidence } from "@arden-hq/protocol/runs"
+  HomeLetterResponseSchema,
+  type HomeEvidence
+} from "./letter-schema.js"
+import { Schema } from "effect"
+import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 
 const HomeLetterSnapshotSchema = Schema.Struct({
   window: HomeLetterResponseSchema.fields.window,

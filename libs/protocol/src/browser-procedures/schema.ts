@@ -21,16 +21,17 @@ export const BrowserProcedureDetailSchema = Schema.Struct({
   verification: Schema.String,
   evidence_count: Schema.Int
 })
+export const BrowserProcedureJobSchema = Schema.Union([
+  Schema.Struct({
+    id: Schema.String,
+    status: Schema.Union([Schema.Literal("pending"), Schema.Literal("running")])
+  }),
+  Schema.Struct({ id: Schema.String, status: Schema.Literal("failed"), error: Schema.String })
+])
 export const BrowserProcedureListSchema = Schema.Struct({
   enabled: Schema.Boolean,
   procedures: Schema.Array(BrowserProcedureSummarySchema),
-  jobs: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      status: Schema.Literals(["pending", "running", "failed"]),
-      error: Schema.optionalKey(Schema.String)
-    })
-  )
+  jobs: Schema.Array(BrowserProcedureJobSchema)
 })
 export const BrowserProcedureEnabledSchema = Schema.Struct({ enabled: Schema.Boolean })
 export const BrowserProcedureMutationSchema = Schema.Struct({ ok: Schema.Literal(true) })

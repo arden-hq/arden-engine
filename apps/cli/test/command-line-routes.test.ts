@@ -1,4 +1,6 @@
 import { createHeadlessClient } from "@arden-hq/headless"
+import { liveSessions } from "../src/session-list.js"
+import { newChat, wholeFork } from "../src/session-requests.js"
 import { commandLineRoute } from "@arden-hq/protocol/daemon"
 import { describe, expect, it } from "vitest"
 
@@ -13,12 +15,20 @@ const RUN = {
 
 const CALLS: Record<keyof CliClient, (client: CliClient) => Promise<unknown>> = {
   answerApproval: (client) =>
-    client.answerApproval({ runId: "run-1", toolId: "tool-1", result: "", approved: true }),
+    client.answerApproval({
+      runId: "run-1",
+      toolId: "tool-1",
+      result: "",
+      decision: { kind: "denied", grant: { kind: "once" } },
+      asked: { kind: "unstated" },
+      command: { kind: "none" }
+    }),
   answerConnection: (client) =>
     client.answerConnection({
       runId: "run-1",
       toolId: "tool-1",
       connectionId: "connection-1",
+      result: { kind: "default" },
       approved: true
     }),
   answerQuestion: (client) =>
@@ -26,15 +36,28 @@ const CALLS: Record<keyof CliClient, (client: CliClient) => Promise<unknown>> = 
       client_id: "client-1",
       answer: { kind: "choice", choice_id: "work" }
     }),
-  branchSession: (client) => client.branchSession("session-1"),
-  cancel: (client) => client.cancel({ runId: "run-1" }),
-  createSession: (client) => client.createSession(),
+  branchSession: (client) => client.branchSession("session-1", wholeFork),
+  cancel: (client) => client.cancel({ kind: "run", runId: "run-1" }),
+  createSession: (client) =>
+    client.createSession(newChat({ spaceId: undefined, model: undefined })),
   deleteSession: (client) => client.deleteSession("session-1"),
   health: (client) => client.health(),
   listModels: (client) => client.listModels(),
   listSpaces: (client) => client.listSpaces(),
-  listSessions: (client) => client.listSessions({ live: true }),
-  submit: (client) => client.submit({ sessionId: "session-1", message: "hi" }),
+  listSessions: (client) => client.listSessions(liveSessions),
+  submit: (client) =>
+    client.submit({
+      sessionId: "session-1",
+      clientId: "client-1",
+      message: "hi",
+      images: [],
+      replyTo: [],
+      approvalReply: { kind: "none" },
+      approvalMode: { kind: "current" },
+      sentFrom: { kind: "typed" },
+      capture: { kind: "none" },
+      outputSchema: { kind: "free" }
+    }),
   wait: (client) => client.wait(RUN, { timeoutMs: 200 }),
   waitForRun: (client) => client.waitForRun("run-1", { timeoutMs: 200 })
 }

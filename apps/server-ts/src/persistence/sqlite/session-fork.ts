@@ -1,7 +1,6 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Schema } from "effect"
-import { SessionForkOriginSchema } from "@arden-hq/protocol/effect/common"
-import type { SessionForkOrigin } from "@arden-hq/protocol/sessions"
+import { SessionForkOriginSchema, type SessionForkOrigin } from "../sessions/fork-origin.js"
 
 import type { ChatWriteError } from "../chat/store.js"
 import type { JsonObject } from "../json.js"

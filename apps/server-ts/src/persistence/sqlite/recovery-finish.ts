@@ -1,3 +1,5 @@
+import { contextSize, messageEnd, RUN_USAGE } from "@arden-hq/protocol/chat"
+import { type StoredRunUsage, wireRunUsage } from "../runs/stored-result.js"
 import { journalRunIdSql } from "./journal-run-boundary.js"
 import { randomUUID } from "node:crypto"
 import type { RunEnding } from "./tool-receipts.js"
@@ -78,7 +80,8 @@ export const terminalEvent = (
         run_id: run.run_id,
         session_id: run.session_id,
         turn_id: run.turn_id,
-        message_count: messageCount
+        message_count: messageCount,
+        ...runTotals(undefined, undefined)
       }
     case "cancel":
       return {
@@ -242,10 +245,7 @@ export const continueFinishedRunInTransaction = Effect.fn("SqlitePersistence.con
       { event: { type: "transcript_changed" }, runId: run.run_id }
     ]
     for (const messageId of openText) {
-      events.push({
-        event: { type: "TEXT_MESSAGE_END", message_id: messageId, session_id: run.session_id },
-        runId: run.run_id
-      })
+      events.push({ event: textEnd(messageId, run.session_id, undefined), runId: run.run_id })
     }
     events.push({
       event: assistantTextStart(nextAssistantMessageId),
@@ -303,3 +303,25 @@ export const durableFinalReply = (
     const text = replyText(latest).trim()
     return text.length === 0 ? undefined : text
   }).pipe(Effect.orElseSucceed(() => undefined))
+
+export const textEnd = (
+  messageId: string,
+  sessionId: string,
+  content: unknown
+): ChatProjectionEvent => ({
+  type: "TEXT_MESSAGE_END",
+  message_id: messageId,
+  session_id: sessionId,
+  ...messageEnd(typeof content === "string" ? content : undefined)
+})
+
+export const runTotals = (
+  usage: StoredRunUsage | undefined,
+  inputTokens: number | null | undefined
+): Pick<Extract<ChatProjectionEvent, { readonly type: "RUN_FINISHED" }>, "usage" | "context"> => ({
+  usage:
+    usage === undefined
+      ? { kind: RUN_USAGE.unmetered }
+      : { kind: RUN_USAGE.metered, usage: wireRunUsage(usage) },
+  context: contextSize(inputTokens)
+})

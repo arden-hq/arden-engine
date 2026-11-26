@@ -21,7 +21,11 @@ import {
 } from "../permissions/approval-policy.js"
 import { readRunAuthority } from "./run-authority.js"
 import { runAuthorityState, type RunAuthorityState } from "./run-context.js"
-import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
+import {
+  AUTOMATION_APPROVAL,
+  DEFAULT_APPROVAL_MODE,
+  INHERITED_MODE
+} from "@arden-hq/protocol/permissions"
 import type { PersistenceDeps } from "./deps.js"
 import { decisionLineageSql } from "../schema/decision-visibility.js"
 import { isUserAutomationPurpose } from "../job-classification.js"
@@ -99,6 +103,11 @@ const storage = (cause: unknown) =>
         message: "Could not read or update permission settings",
         cause
       })
+const inheritedMode = (approval_mode: ApprovalMode): SessionPermission => ({
+  kind: "inherited",
+  mode: { kind: INHERITED_MODE.set, approval_mode }
+})
+const MODE_UNSET: SessionPermission = { kind: "inherited", mode: { kind: INHERITED_MODE.unset } }
 const invalid = (message: string) => new ApprovalPolicyError({ reason: "invalid", message })
 
 export const makeApprovalPolicyStore = ({
@@ -128,7 +137,7 @@ export const makeApprovalPolicyStore = ({
     const row = rows[0]
     if (!row)
       return yield* new ApprovalPolicyError({ reason: "not_found", message: "Chat not found" })
-    if (row.disposable === 1) return { kind: "inherited", approval_mode: "ask" }
+    if (row.disposable === 1) return inheritedMode("ask")
     const owner =
       row.origin_automation_id === null
         ? undefined
@@ -137,7 +146,7 @@ export const makeApprovalPolicyStore = ({
       const mode = yield* Schema.decodeUnknownEffect(ApprovalModeSchema)(
         row.mode ?? DEFAULT_APPROVAL_MODE
       )
-      if (row.parent_session_id !== null) return { kind: "inherited", approval_mode: mode }
+      if (row.parent_session_id !== null) return inheritedMode(mode)
       return yield* chatPermission(mode)
     }
     if (row.origin_automation_id !== null) {
@@ -148,24 +157,23 @@ export const makeApprovalPolicyStore = ({
         kind: "automation",
         automation_id: row.origin_automation_id,
         tool_scope: job.toolScope,
-        ...(job.approval.kind === "space"
-          ? { auto_approve: true, approval_mode: yield* spaceDefaultMode() }
-          : { auto_approve: job.approval.autoApprove })
+        approval:
+          job.approval.kind === "space"
+            ? { kind: AUTOMATION_APPROVAL.space, approval_mode: yield* spaceDefaultMode() }
+            : { kind: AUTOMATION_APPROVAL.own, auto_approve: job.approval.autoApprove }
       }
     }
     if (row.session_type !== "chat") {
-      if (row.session_type !== "agent") return { kind: "inherited" }
+      if (row.session_type !== "agent") return MODE_UNSET
       const [latest] = yield* sql<{ readonly run_id: string }>`
         SELECT run_id FROM chat_runs WHERE session_id = ${sessionId}
         ORDER BY started_at DESC, run_id DESC LIMIT 1
       `
-      if (latest === undefined) return { kind: "inherited" }
+      if (latest === undefined) return MODE_UNSET
       const authority = yield* readRunAuthority(sql, latest.run_id)
-      if (authority === undefined) return { kind: "inherited" }
+      if (authority === undefined) return MODE_UNSET
       const current = yield* live({ runId: latest.run_id, authority })
-      return current.state === "active"
-        ? { kind: "inherited", approval_mode: current.mode }
-        : { kind: "inherited" }
+      return current.state === "active" ? inheritedMode(current.mode) : MODE_UNSET
     }
     const mode = yield* Schema.decodeUnknownEffect(ApprovalModeSchema)(
       row.mode ?? DEFAULT_APPROVAL_MODE
@@ -175,9 +183,8 @@ export const makeApprovalPolicyStore = ({
 
   const setSession = Effect.fn("ApprovalPolicy.setSession")(function* (input: {
     readonly sessionId: string
-    readonly mode?: typeof ApprovalModeSchema.Type
+    readonly mode: typeof ApprovalModeSchema.Type
   }) {
-    if (input.mode === undefined) return yield* invalid("No permission change was provided")
     const mode = yield* Schema.decodeUnknownEffect(ApprovalModeSchema)(input.mode).pipe(
       Effect.mapError(() => invalid("Invalid approval mode"))
     )

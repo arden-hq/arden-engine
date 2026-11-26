@@ -3,25 +3,31 @@ import {
   ConnectionActionSchema,
   ConnectionStateSchema,
   event,
-  optionalBoolean,
-  optionalNullableString,
   sessionEvent
 } from "../../common/schema.js"
-import { ApprovalPresentationSchema, type ApprovalPresentation } from "../approval-presentation.js"
+import {
+  ApprovalAskedSchema,
+  ApprovalAskerSchema,
+  ApprovalCardSchema,
+  ApprovalDiffSchema,
+  ApprovalGrantFolderSchema,
+  ApprovalPreviewSchema,
+  ConnectionAccountSchema
+} from "../approval-fields-schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
-import type { CommonServerEventFields } from "../../common/event-fields.js"
-import type { ConnectionAction, ConnectionState } from "../runtime.js"
 import type { JsonRecord } from "../../common/json.js"
-import { RunApprovalWorkSchema, type RunApprovalWork } from "../../runs/context.js"
+import type {
+  ApprovalAsked,
+  ApprovalAsker,
+  ApprovalCard,
+  ApprovalDiff,
+  ApprovalGrantFolder,
+  ApprovalPreview,
+  ConnectionAccount,
+  ConnectionAction,
+  ConnectionState
+} from "../runtime.js"
 import { RuleSavedInSchema, type RuleSavedIn } from "../../runs/questions.js"
-
-/** A few event-specific payloads intentionally carry a nullable session id. */
-interface NullableSessionServerEventFields extends JsonRecord {
-  readonly timestamp?: number
-  readonly seq?: number
-  readonly session_id?: string | null
-  readonly replay?: boolean
-}
 
 /** Persisted with each delivery so historical routing survives later moves. */
 export interface DecisionRoute extends JsonRecord {
@@ -47,43 +53,36 @@ const DecisionRouteSchema = Schema.Struct({
   ] as const)
 })
 
-export interface ApprovalNeededEvent extends NullableSessionServerEventFields {
+export interface ApprovalNeededEvent extends JsonRecord {
   readonly type: "approval_needed"
   readonly tool_id: string
-  /** The asking's `requested_at`; `POST /tools/result` takes it as `asked_at`. Older events lack it. */
-  readonly asked_at?: string
+  readonly asked: ApprovalAsked
   readonly name: string
-  readonly path?: string | null
-  readonly diff?: string | null
-  readonly content_preview?: string | null
-  readonly run_id?: string | null
-  readonly session_id?: string | null
-  readonly action?: string | null
-  readonly scope?: string | null
-  readonly expires_at?: string | null
-  /** Where the card's "Always allow" saves (`RuntimeApprovalSnapshot.rule_places`). */
-  readonly rule_places?: ReadonlyArray<RuleSavedIn>
-  readonly can_attach_folder_to_space?: boolean
-  /** The folder those choices keep, written for the card. */
-  readonly grant_folder?: string
-  readonly presentation?: ApprovalPresentation
-  readonly decision_route?: DecisionRoute
-  /** The Task or Automation the asking run works for, on a card delivered to
-   *  another chat; it names who asks there. */
-  readonly work?: RunApprovalWork
+  readonly preview: ApprovalPreview
+  readonly diff: ApprovalDiff
+  readonly run_id: string
+  readonly session_id: string
+  readonly action: string
+  readonly rule_places: ReadonlyArray<RuleSavedIn>
+  readonly can_attach_folder_to_space: boolean
+  readonly grant_folder: ApprovalGrantFolder
+  readonly card: ApprovalCard
+  readonly decision_route: DecisionRoute
+  readonly asker: ApprovalAsker
 }
 
-export interface ApprovalResolvedEvent extends CommonServerEventFields {
+export interface ApprovalResolvedEvent extends JsonRecord {
   readonly type: "approval_resolved"
   readonly run_id: string
   readonly tool_id: string
   readonly approved: boolean
-  readonly decision_route?: DecisionRoute
+  readonly decision_route: DecisionRoute
 }
 
-export interface ConnectionNeededEvent extends CommonServerEventFields {
+export interface ConnectionNeededEvent extends JsonRecord {
   readonly type: "connection_needed"
   readonly run_id: string
+  readonly session_id: string
   readonly tool_id: string
   readonly integration_id: string
   readonly connection_id: string
@@ -95,17 +94,17 @@ export interface ConnectionNeededEvent extends CommonServerEventFields {
   readonly settings_tab: string
   readonly required_scopes: ReadonlyArray<string>
   readonly source: "recovery" | "suggestion"
-  readonly account_ref?: string | null
-  readonly decision_route?: DecisionRoute
+  readonly account: ConnectionAccount
+  readonly decision_route: DecisionRoute
 }
 
-export interface ConnectionResolvedEvent extends CommonServerEventFields {
+export interface ConnectionResolvedEvent extends JsonRecord {
   readonly type: "connection_resolved"
   readonly run_id: string
   readonly tool_id: string
   readonly connection_id: string
   readonly approved: boolean
-  readonly decision_route?: DecisionRoute
+  readonly decision_route: DecisionRoute
 }
 
 /** Decisions the run waits on: tool approvals and connection requests, asked and resolved. */
@@ -115,35 +114,31 @@ export type ApprovalEvent =
   | ConnectionNeededEvent
   | ConnectionResolvedEvent
 
-export const ApprovalNeededEventSchema = sessionEvent("approval_needed", optionalNullableString, {
+export const ApprovalNeededEventSchema = sessionEvent("approval_needed", Schema.String, {
   tool_id: Schema.String,
-  asked_at: Schema.optionalKey(Schema.String),
+  asked: ApprovalAskedSchema,
   name: Schema.String,
-  path: optionalNullableString,
-  diff: optionalNullableString,
-  content_preview: optionalNullableString,
-  run_id: optionalNullableString,
-  action: optionalNullableString,
-  scope: optionalNullableString,
-  expires_at: optionalNullableString,
-  rule_places: Schema.optionalKey(Schema.Array(RuleSavedInSchema)),
-  can_attach_folder_to_space: optionalBoolean,
-  grant_folder: Schema.optionalKey(Schema.String),
-  presentation: Schema.optionalKey(ApprovalPresentationSchema),
-  decision_route: Schema.optionalKey(DecisionRouteSchema),
-  work: Schema.optionalKey(RunApprovalWorkSchema)
+  preview: ApprovalPreviewSchema,
+  diff: ApprovalDiffSchema,
+  run_id: Schema.String,
+  action: Schema.String,
+  rule_places: Schema.Array(RuleSavedInSchema),
+  can_attach_folder_to_space: Schema.Boolean,
+  grant_folder: ApprovalGrantFolderSchema,
+  card: ApprovalCardSchema,
+  decision_route: DecisionRouteSchema,
+  asker: ApprovalAskerSchema
 })
 
 export const ApprovalResolvedEventSchema = event("approval_resolved", {
   run_id: Schema.String,
   tool_id: Schema.String,
   approved: Schema.Boolean,
-  decision_route: Schema.optionalKey(DecisionRouteSchema)
+  decision_route: DecisionRouteSchema
 })
 
-export const ConnectionNeededEventSchema = event("connection_needed", {
+export const ConnectionNeededEventSchema = sessionEvent("connection_needed", Schema.String, {
   run_id: Schema.String,
-  session_id: optionalNullableString,
   tool_id: Schema.String,
   integration_id: Schema.String,
   connection_id: Schema.String,
@@ -155,8 +150,8 @@ export const ConnectionNeededEventSchema = event("connection_needed", {
   settings_tab: Schema.String,
   required_scopes: Schema.Array(Schema.String),
   source: Schema.Literals(["recovery", "suggestion"] as const),
-  account_ref: optionalNullableString,
-  decision_route: Schema.optionalKey(DecisionRouteSchema)
+  account: ConnectionAccountSchema,
+  decision_route: DecisionRouteSchema
 })
 
 export const ConnectionResolvedEventSchema = event("connection_resolved", {
@@ -164,7 +159,7 @@ export const ConnectionResolvedEventSchema = event("connection_resolved", {
   tool_id: Schema.String,
   connection_id: Schema.String,
   approved: Schema.Boolean,
-  decision_route: Schema.optionalKey(DecisionRouteSchema)
+  decision_route: DecisionRouteSchema
 })
 
 export const approvalEventSchemas = [

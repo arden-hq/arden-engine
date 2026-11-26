@@ -1,3 +1,4 @@
+import { decisionBody } from "./fixtures/chat-requests.js"
 import { LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import type { MacMessage } from "@arden-hq/relay-protocol"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
@@ -267,9 +268,7 @@ it("a decision keeps a result only for the relay's own running decide", async ()
             run_id: runId,
             tool_id: toolId,
             result: "",
-            approved: true,
-            command_id: commandId,
-            asked_at: askedAt(databasePath, runId, toolId)
+            ...decisionBody(true, { askedAt: askedAt(databasePath, runId, toolId), commandId })
           })
         })
       const decide = (secret: string, runId: string, commandId: string) =>
@@ -330,9 +329,10 @@ it("a decision that reaches Arden after the phone was told it failed settles not
             run_id: phone.runId,
             tool_id: toolId,
             result: "",
-            approved: true,
-            command_id: commandId,
-            asked_at: askedAt(databasePath, phone.runId, toolId)
+            ...decisionBody(true, {
+              askedAt: askedAt(databasePath, phone.runId, toolId),
+              commandId
+            })
           })
         })
       const rejected = {

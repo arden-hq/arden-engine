@@ -1,8 +1,8 @@
 import { Schema } from "effect"
-import { event, optionalString } from "../../common/schema.js"
+import { event } from "../../common/schema.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { AssistantTextPhase } from "../history.js"
-import type { CommonServerEventFields } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 
 export const STREAM_RECORD = { part: "part", unowned: "unowned" } as const
 
@@ -10,34 +10,49 @@ export type StreamRecord =
   | { readonly kind: typeof STREAM_RECORD.part; readonly record_id: string }
   | { readonly kind: typeof STREAM_RECORD.unowned }
 
-export interface TextMessageStartEvent extends CommonServerEventFields {
+export const MESSAGE_CLOSURE = { complete: "complete", abandoned: "abandoned" } as const
+
+export type MessageClosure =
+  | { readonly kind: typeof MESSAGE_CLOSURE.complete; readonly content: string }
+  | { readonly kind: typeof MESSAGE_CLOSURE.abandoned }
+
+export const CONTENT_START = { unanchored: "unanchored", anchored: "anchored" } as const
+
+export type ContentStart =
+  | { readonly kind: typeof CONTENT_START.unanchored }
+  | { readonly kind: typeof CONTENT_START.anchored; readonly seq: number }
+
+export const messageEnd = (
+  content: string | undefined
+): { readonly closure: MessageClosure; readonly content_start: ContentStart } => ({
+  closure:
+    content === undefined
+      ? { kind: MESSAGE_CLOSURE.abandoned }
+      : { kind: MESSAGE_CLOSURE.complete, content },
+  content_start: { kind: CONTENT_START.unanchored }
+})
+
+export interface TextMessageStartEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_START"
   readonly message_id: string
   readonly record: StreamRecord
-  readonly role?: string
 }
 
 /** Lossy presentation delta. TEXT_MESSAGE_END restates the full text. */
-export interface TextMessageContentEvent extends CommonServerEventFields {
+export interface TextMessageContentEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_CONTENT"
   readonly message_id: string
   readonly delta: string
 }
 
-export interface TextMessageEndEvent extends CommonServerEventFields {
+export interface TextMessageEndEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_END"
   readonly message_id: string
-  /**
-   * The authoritative full text: clients replace accumulated deltas with it.
-   * Absent only on abnormal closure (failure/cancel/recovery), where the
-   * accumulated stream stands.
-   */
-  readonly content?: string
-  /** Sequence where visible content began, retained when deltas are pruned. */
-  readonly content_start_seq?: number
+  readonly closure: MessageClosure
+  readonly content_start: ContentStart
 }
 
-export interface TextMessagePhaseEvent extends CommonServerEventFields {
+export interface TextMessagePhaseEvent extends JsonRecord {
   readonly type: "TEXT_MESSAGE_PHASE"
   readonly message_id: string
   readonly phase: AssistantTextPhase
@@ -55,10 +70,19 @@ export const StreamRecordSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal(STREAM_RECORD.unowned) })
 ])
 
+export const MessageClosureSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(MESSAGE_CLOSURE.complete), content: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal(MESSAGE_CLOSURE.abandoned) })
+])
+
+export const ContentStartSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CONTENT_START.unanchored) }),
+  Schema.Struct({ kind: Schema.Literal(CONTENT_START.anchored), seq: Schema.Int })
+])
+
 export const TextMessageStartEventSchema = event("TEXT_MESSAGE_START", {
   message_id: Schema.String,
-  record: StreamRecordSchema,
-  role: optionalString
+  record: StreamRecordSchema
 })
 
 // Delta contract: every delta variant below is lossy presentation. A delta is
@@ -78,10 +102,8 @@ export const TextMessageContentEventSchema = event("TEXT_MESSAGE_CONTENT", {
 
 export const TextMessageEndEventSchema = event("TEXT_MESSAGE_END", {
   message_id: Schema.String,
-  // Present on every normal completion; absent only on abnormal closure
-  // (failure/cancel/recovery), where the accumulated stream stands.
-  content: optionalString,
-  content_start_seq: Schema.optionalKey(Schema.Int)
+  closure: MessageClosureSchema,
+  content_start: ContentStartSchema
 })
 
 export const TextMessagePhaseEventSchema = event("TEXT_MESSAGE_PHASE", {

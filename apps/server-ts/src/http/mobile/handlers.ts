@@ -1,14 +1,16 @@
-import type { SpaceTask } from "@arden-hq/protocol/spaces/work"
+import { HISTORY_PAGE_LIMIT, HISTORY_WINDOW, RUNTIME_RUN } from "@arden-hq/protocol/chat"
+import { type TaskRecord } from "../../persistence/work/task-record.js"
+import { nameText, runIsActive, spaceIdOf } from "../../sessions/session-states.js"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
-import type { MobileAsk } from "@arden-hq/protocol/mobile"
+import { MOBILE_FILING, type MobileAsk } from "@arden-hq/protocol/mobile"
 import type { SessionListItem } from "@arden-hq/protocol/sessions"
 import { chatName } from "@arden-hq/protocol/views"
-import { Array as Arr, DateTime, Effect } from "effect"
+import { Array as Arr, Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { addressedHomeLetter } from "../../automations/home-letter-links.js"
 import { ChatHistory } from "../../chat/history.js"
 import { ChatHistoryInvalidCursor, ChatSessionNotFound } from "../../chat/history-errors.js"
-import { mobileAsks, type AskPlace } from "../../mobile/asks.js"
+import { filingOf, mobileAsks, type AskPlace } from "../../mobile/asks.js"
 import { conversationLookupKeys, conversationPage } from "../../mobile/conversation.js"
 import { isSpaceHome, looseChats, mobileSpace } from "../../mobile/spaces.js"
 import { letterLookupKeys, mobileLetter, type PhoneHome } from "../../mobile/letter.js"
@@ -65,7 +67,7 @@ export const MobileHandlers = HttpApiBuilder.group(
     ) {
       const tasks = yield* Effect.forEach(itemIds, (itemId) =>
         work.get({ kind: "item", itemId }).pipe(
-          Effect.map((task): [string, SpaceTask][] => [[itemId, task]]),
+          Effect.map((task): [string, TaskRecord][] => [[itemId, task]]),
           Effect.catch(() => Effect.succeed([]))
         )
       )
@@ -104,8 +106,8 @@ export const MobileHandlers = HttpApiBuilder.group(
         asking.map((session): [string, AskPlace] => [
           session.session_id,
           {
-            name: session.name ?? undefined,
-            spaceId: session.space_id ?? undefined,
+            name: nameText(session.name) ?? undefined,
+            spaceId: spaceIdOf(session.space) ?? undefined,
             home: isSpaceHome(session),
             onboarding: session.origin === "onboarding"
           }
@@ -141,12 +143,18 @@ export const MobileHandlers = HttpApiBuilder.group(
         asks,
         letter:
           newest === undefined
-            ? null
-            : mobileLetter(newest, {
-                sessionIds: new Map(resolved.flat()),
-                taskPlaces: yield* taskPlaces(taskIds)
-              }),
-        next_at: letters.next_at,
+            ? { kind: "awaiting" as const }
+            : {
+                kind: "written" as const,
+                ...mobileLetter(newest, {
+                  sessionIds: new Map(resolved.flat()),
+                  taskPlaces: yield* taskPlaces(taskIds)
+                })
+              },
+        next:
+          letters.next_at === null
+            ? { kind: "paused" as const }
+            : { kind: "due" as const, at: letters.next_at },
         cursor
       }
     })
@@ -161,7 +169,10 @@ export const MobileHandlers = HttpApiBuilder.group(
           space,
           chats: yield* list({ spaceId: space.key, scope: "primary", limit: SPACE_CHAT_LIMIT }),
           live: live.filter((session) => session.space_id === space.key),
-          asks: asks.filter((ask: MobileAsk) => ask.space_id === space.key)
+          asks: asks.filter(
+            (ask: MobileAsk) =>
+              ask.space.kind === MOBILE_FILING.space && ask.space.space_id === space.key
+          )
         })
       })
       const rows = yield* Effect.forEach(overview.spaces, spaceRow)
@@ -182,12 +193,21 @@ export const MobileHandlers = HttpApiBuilder.group(
       sessionId: string,
       before: string | undefined
     ) {
-      const page = yield* history.get(before === undefined ? { sessionId } : { sessionId, before })
+      const page = yield* history.get({
+        sessionId,
+        limit: HISTORY_PAGE_LIMIT,
+        window:
+          before === undefined
+            ? { kind: HISTORY_WINDOW.latest }
+            : { kind: HISTORY_WINDOW.before, cursor: before }
+      })
       const [session] = yield* list({ sessionIds: [sessionId], scope: "all", limit: 1 })
       if (session === undefined) return yield* new HttpApiError.NotFound({})
       const active = page.runtime.active_run
       const progress =
-        active === null ? undefined : ((yield* runs.progress(active.run_id)) ?? undefined)
+        active.kind === RUNTIME_RUN.idle
+          ? undefined
+          : ((yield* runs.progress(active.run.run_id)) ?? undefined)
       const keys = conversationLookupKeys(page)
       const resolved = yield* Effect.forEach(keys.refs, (sessionRef) =>
         list({ sessionRef, scope: "all", limit: 1 }).pipe(
@@ -198,7 +218,10 @@ export const MobileHandlers = HttpApiBuilder.group(
       const taskHomes = yield* taskPlaces(keys.taskIds)
       const named = [...new Set([...keys.sessionIds, ...sessionIds.values()])]
       const names = new Map(
-        (yield* chatsById(named)).map((row): [string, string] => [row.session_id, chatName(row)])
+        (yield* chatsById(named)).map((row): [string, string] => [
+          row.session_id,
+          chatName(nameText(row.name))
+        ])
       )
       const savedBlocks = new Map<string, Map<number, JsonObject>>()
       for (const saved of yield* answerBlocks.list(sessionId)) {
@@ -206,31 +229,30 @@ export const MobileHandlers = HttpApiBuilder.group(
         blocks.set(saved.blockIndex, saved.state)
         savedBlocks.set(saved.messageId, blocks)
       }
-      const spaceId = session.space_id ?? null
+      const spaceId = spaceIdOf(session.space)
       const spaceChats =
         spaceId === null ? [] : yield* list({ spaceId, scope: "primary", limit: SPACE_CHAT_LIMIT })
       return {
         session_id: sessionId,
-        title: chatName(session),
-        space_id: spaceId,
+        title: chatName(nameText(session.name)),
+        space: filingOf(spaceId),
         ...conversationPage({
           history: page,
           progress,
-          now: DateTime.formatIso(yield* DateTime.now),
           lookups: { sessionIds, taskPlaces: taskHomes, names, savedBlocks }
         }),
         chats: spaceChats
           .filter(
             (chat: SessionListItem) =>
               chat.session_id !== sessionId &&
-              chat.presentation?.kind === "conversation" &&
+              chat.presentation.kind === "conversation" &&
               !isSpaceHome(chat)
           )
           .map((chat) => ({
             session_id: chat.session_id,
-            title: chatName(chat),
+            title: chatName(nameText(chat.name)),
             updated_at: chat.last_activity,
-            working: chat.is_active === true
+            working: runIsActive(chat.run)
           }))
       }
     })

@@ -1,3 +1,4 @@
+import { publicServer } from "./public-server.js"
 import { after, type Timer } from "@arden-hq/std/timer"
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
@@ -191,40 +192,8 @@ export const makeMcpRuntime = ({
   let nextGeneration = 1
   let shuttingDown = false
 
-  const snapshotOne = (entry: RuntimeEntry): PublicMcpServer => {
-    const transport = entry.config.transport
-    return {
-      name: entry.config.name,
-      presetId: entry.config.presetId,
-      enabled: entry.config.enabled,
-      status: entry.status,
-      detail: entry.detail,
-      diagnostics: entry.diagnostics ?? null,
-      accountIdentity: accountIdentities.get(entry.config.name) ?? null,
-      transport:
-        transport.type === "stdio"
-          ? {
-              type: "stdio",
-              command: transport.command,
-              args: transport.args,
-              environmentKeys: transport.environmentKeys,
-              cwd: transport.cwd
-            }
-          : {
-              type: "http",
-              url: transport.url,
-              auth: transport.auth,
-              headerKeys: transport.headerKeys
-            },
-      tools: entry.tools.map((tool) => ({
-        name: tool.remoteName,
-        fullName: tool.fullName,
-        title: tool.title,
-        description: tool.description
-      })),
-      events: entry.events
-    }
-  }
+  const snapshotOne = (entry: RuntimeEntry): PublicMcpServer =>
+    publicServer(entry, accountIdentities.get(entry.config.name) ?? null)
 
   const readEvents = async (
     config: McpStoredServer,

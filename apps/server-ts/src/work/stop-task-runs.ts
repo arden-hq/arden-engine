@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { ChatMessageShape } from "../chat/message.js"
+import type { ChatMessageShape } from "../chat/message-shape.js"
 import type { WorkStore, WorkStoreError } from "../persistence/work/store.js"
 
 export interface StoppedTaskRun {

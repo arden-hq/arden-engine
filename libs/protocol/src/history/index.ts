@@ -8,7 +8,6 @@ export const decodeRecordedHistory = decoderFor(
   "Invalid recorded history"
 )
 
-/** Exact windows on the existing domain-owned readers. */
 export function recordedHistoryPath(input: {
   readonly domain: RecordedHistoryDomain
   readonly id: string
@@ -24,5 +23,5 @@ export function recordedHistoryPath(input: {
     session: `/sessions/${id}/configuration-history`,
     automation: `/automations/${id}/configuration-history`
   }
-  return `${paths[input.domain]}?after_version=${input.version - 1}&through_version=${input.version}&limit=1`
+  return `${paths[input.domain]}?after_version=${input.version - 1}&through=version&through_version=${input.version}&limit=1`
 }

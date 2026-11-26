@@ -1,49 +1,37 @@
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema } from "../common/schema.js"
 import { RunContextSchema } from "./context.js"
+import { RunCursorPageNextSchema } from "./list-options.js"
 
 const identity = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(1024))
 const text = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(8000))
+
+export const QUESTION_TEXT = { none: "none", given: "given" } as const
+
+const givenText = <S extends Schema.Top>(given: S) =>
+  Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(QUESTION_TEXT.none) }),
+    Schema.Struct({ kind: Schema.Literal(QUESTION_TEXT.given), text: given })
+  ])
+
 export const RunQuestionContentSchema = Schema.Struct({
-  prompt: text.pipe(
-    Schema.annotateEncoded({ description: "One specific question that needs the user's decision." })
-  ),
-  detail: Schema.NullOr(text).annotate({
-    description: "Relevant draft or context, or null if the question is self-contained."
-  }),
+  prompt: text,
+  detail: givenText(text),
   choices: Schema.Array(
     Schema.Struct({
-      id: identity.pipe(Schema.annotateEncoded({ description: "Stable choice identifier." })),
-      label: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(160)).pipe(
-        Schema.annotateEncoded({ description: "Short label shown on the answer button." })
-      ),
-      detail: Schema.optionalKey(
-        Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(240)).pipe(
-          Schema.annotateEncoded({
-            description: "One plain line under the label saying what this choice means."
-          })
-        )
-      )
+      id: identity,
+      label: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(160)),
+      detail: givenText(Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(240)))
     })
-  )
-    .check(
-      Schema.isMaxLength(6),
-      Schema.makeFilter((choices) =>
-        new Set(choices.map((choice) => choice.id)).size === choices.length
-          ? undefined
-          : "choice ids must be unique"
-      )
+  ).check(
+    Schema.isMaxLength(6),
+    Schema.makeFilter((choices) =>
+      new Set(choices.map((choice) => choice.id)).size === choices.length
+        ? undefined
+        : "choice ids must be unique"
     )
-    .pipe(
-      Schema.annotateEncoded({
-        description: "Up to six choices; use an empty array for a free-text answer."
-      })
-    ),
-  /** True lets the answer pick several choices. Absent (every question
-   *  stored before it) or false: one choice. */
-  multiple: Schema.optionalKey(
-    Schema.Boolean.annotate({ description: "True when the user may pick more than one choice." })
-  )
+  ),
+  multiple: Schema.Boolean
 })
 
 const uniqueIds = Schema.makeFilter((ids: ReadonlyArray<string>) =>
@@ -53,8 +41,6 @@ const uniqueIds = Schema.makeFilter((ids: ReadonlyArray<string>) =>
 export const RunQuestionAnswerSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("text"), text }),
   Schema.Struct({ kind: Schema.Literal("choice"), choice_id: identity }),
-  /** Several picks on a question marked `multiple`, with the words the user
-   *  typed beside them, if any. */
   Schema.Struct({
     kind: Schema.Literal("choices"),
     choice_ids: Schema.Array(identity).check(
@@ -62,17 +48,23 @@ export const RunQuestionAnswerSchema = Schema.Union([
       Schema.isMaxLength(6),
       uniqueIds
     ),
-    text: Schema.optionalKey(text)
+    typed: givenText(text)
   }),
   Schema.Struct({ kind: Schema.Literal("hold") }),
   Schema.Struct({ kind: Schema.Literal("dismiss") })
 ])
 
-const resolutionSchema = Schema.Struct({
-  client_id: identity,
-  answer: RunQuestionAnswerSchema,
-  resolved_at: IsoDateTimeStringSchema
-})
+export const QUESTION_RESOLUTION = { unresolved: "unresolved", resolved: "resolved" } as const
+
+const resolutionSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(QUESTION_RESOLUTION.unresolved) }),
+  Schema.Struct({
+    kind: Schema.Literal(QUESTION_RESOLUTION.resolved),
+    client_id: identity,
+    answer: RunQuestionAnswerSchema,
+    resolved_at: IsoDateTimeStringSchema
+  })
+])
 
 export const AnswerWithdrawalReasonSchema = Schema.Literals([
   "execution_allowance_unavailable",
@@ -80,12 +72,11 @@ export const AnswerWithdrawalReasonSchema = Schema.Literals([
   "task_changed",
   "space_policy_changed"
 ])
+
 const continuationSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({ kind: Schema.Literal("queued") }),
-  /** The asking run was still working: the answer waits in that run for its
-   *  next model step. */
   Schema.Struct({ kind: Schema.Literal("steering"), run_id: identity }),
-  /** The asking run took the answer in mid-run, at `at`. */
   Schema.Struct({ kind: Schema.Literal("steered"), run_id: identity, at: IsoDateTimeStringSchema }),
   Schema.Struct({ kind: Schema.Literal("started"), run_id: identity, at: IsoDateTimeStringSchema }),
   Schema.Struct({
@@ -95,14 +86,14 @@ const continuationSchema = Schema.Union([
   })
 ])
 
-export const RunQuestionFocusChoiceSchema = Schema.Struct({
-  space_id: identity,
-  revision: NonNegativeIntSchema,
-  status: Schema.Literals(["offered", "settled"] as const)
-})
+export const QUESTION_PART = { none: "none", present: "present" } as const
 
-/** Where an owner's tap saved a permission rule: a Space by name, Arden's own
- *  jobs' list, or everywhere. */
+const optionalPart = <F extends Schema.Struct.Fields>(fields: F) =>
+  Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(QUESTION_PART.none) }),
+    Schema.Struct({ kind: Schema.Literal(QUESTION_PART.present), ...fields })
+  ])
+
 export const RuleSavedInSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("space"), name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("system") }),
@@ -111,25 +102,32 @@ export const RuleSavedInSchema = Schema.Union([
 export type RuleSavedIn = typeof RuleSavedInSchema.Type
 export const isRuleSavedIn = Schema.is(RuleSavedInSchema)
 
-/** The question offers a lasting permission change: one tool's rule
- *  (`tool_name`), or a connector's, the chat's mode or a command prefix
- *  (null). A choice saves it in that scope, and only the person's own answer
- *  does; `saved_in` says where the rule went once it is saved. */
-export const RunQuestionPermissionOfferSchema = Schema.Struct({
-  tool_name: Schema.NullOr(identity),
-  saved_in: Schema.NullOr(RuleSavedInSchema)
+export const OFFER_TOOL = { other: "other", tool: "tool" } as const
+export const OFFER_SAVED = { unsaved: "unsaved", saved: "saved" } as const
+
+export const RunQuestionPermissionOfferSchema = optionalPart({
+  tool: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(OFFER_TOOL.other) }),
+    Schema.Struct({ kind: Schema.Literal(OFFER_TOOL.tool), tool_name: identity })
+  ]),
+  saved: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(OFFER_SAVED.unsaved) }),
+    Schema.Struct({ kind: Schema.Literal(OFFER_SAVED.saved), place: RuleSavedInSchema })
+  ])
 })
 
-/** The question proposes a change to a Task's contract: a line added, one
- *  that replaces a saved line, or a saved line removed. Only the person's
- *  Save keeps it. */
-export const RunQuestionContractProposalSchema = Schema.Struct({
-  item_id: identity,
-  /** The Task's name. */
-  task: Schema.String,
-  change: Schema.Literals(["add", "replace", "remove"]),
-  /** The line it adds, or the line it removes. */
-  line: Schema.String
+export const RUN_QUESTION_STATUS = {
+  open: "open",
+  suspended: "suspended",
+  closed: "closed",
+  resolved: "resolved"
+} as const
+
+const timerSchema = optionalPart({
+  expires_at: IsoDateTimeStringSchema,
+  seconds: Schema.Int.check(Schema.isGreaterThan(0)),
+  fallback_choice_id: identity,
+  status: Schema.Literals(["pending", "elapsed", "cancelled"])
 })
 
 export const RunQuestionSchema = Schema.Struct({
@@ -137,42 +135,46 @@ export const RunQuestionSchema = Schema.Struct({
   run_id: identity,
   turn_id: identity,
   session_id: identity,
-  /** The chat the question is destined to: where its card shows and who reads it. */
   destination_session_id: identity,
   context: RunContextSchema,
   content: RunQuestionContentSchema,
-  status: Schema.Literals(["open", "suspended", "closed", "resolved"]),
-  resolution: Schema.NullOr(resolutionSchema),
-  continuation: Schema.NullOr(continuationSchema),
-  focus_choice: Schema.NullOr(RunQuestionFocusChoiceSchema),
-  permission_offer: Schema.NullOr(RunQuestionPermissionOfferSchema),
-  /** Absent on every question that proposes no contract change. */
-  contract_proposal: Schema.optionalKey(RunQuestionContractProposalSchema),
-  /** The asking chat's name (a run copy's parent's), for the card's head;
-   *  absent when neither has one. */
-  source_title: Schema.optionalKey(Schema.String),
-  continuity_revision: Schema.NullOr(NonNegativeIntSchema),
+  status: Schema.Literals([
+    RUN_QUESTION_STATUS.open,
+    RUN_QUESTION_STATUS.suspended,
+    RUN_QUESTION_STATUS.closed,
+    RUN_QUESTION_STATUS.resolved
+  ]),
+  resolution: resolutionSchema,
+  continuation: continuationSchema,
+  focus_choice: optionalPart({
+    space_id: identity,
+    revision: NonNegativeIntSchema,
+    status: Schema.Literals(["offered", "settled"] as const)
+  }),
+  permission_offer: RunQuestionPermissionOfferSchema,
+  contract_proposal: optionalPart({
+    item_id: identity,
+    task: Schema.String,
+    change: Schema.Literals(["add", "replace", "remove"]),
+    line: Schema.String
+  }),
+  source_title: optionalPart({ title: Schema.String }),
+  continuity: optionalPart({ revision: NonNegativeIntSchema }),
   created_at: IsoDateTimeStringSchema,
-  timer: Schema.optionalKey(
-    Schema.Struct({
-      expires_at: IsoDateTimeStringSchema,
-      seconds: Schema.Int.check(Schema.isGreaterThan(0)),
-      fallback_choice_id: identity,
-      status: Schema.Literals(["pending", "elapsed", "cancelled"])
-    })
-  )
+  timer: timerSchema
 }).check(
   Schema.makeFilter((question) =>
-    question.timer === undefined ||
+    question.timer.kind === QUESTION_PART.none ||
     (question.content.choices[0]?.id === question.timer.fallback_choice_id &&
-      question.content.multiple !== true &&
-      question.focus_choice === null &&
-      question.permission_offer === null)
+      !question.content.multiple &&
+      question.focus_choice.kind === QUESTION_PART.none &&
+      question.permission_offer.kind === QUESTION_PART.none)
       ? undefined
       : "timers require an ordinary single-choice question and its first choice as fallback"
   ),
   Schema.makeFilter((question) =>
-    (question.status === "resolved") === (question.resolution !== null)
+    (question.status === RUN_QUESTION_STATUS.resolved) ===
+    (question.resolution.kind === QUESTION_RESOLUTION.resolved)
       ? undefined
       : "resolved questions must have exactly one resolution"
   )
@@ -180,14 +182,7 @@ export const RunQuestionSchema = Schema.Struct({
 
 export const RunQuestionListSchema = Schema.Struct({
   questions: Schema.Array(RunQuestionSchema),
-  next_cursor: Schema.NullOr(identity)
-})
-export const RunQuestionListOptionsSchema = Schema.Struct({
-  space_id: Schema.optionalKey(identity),
-  session_id: Schema.optionalKey(identity),
-  item_id: Schema.optionalKey(identity),
-  state: Schema.optionalKey(Schema.Literals(["actionable", "all"])),
-  cursor: Schema.optionalKey(identity)
+  next: RunCursorPageNextSchema
 })
 export const ResolveRunQuestionInputSchema = Schema.Struct({
   client_id: identity,
@@ -195,13 +190,18 @@ export const ResolveRunQuestionInputSchema = Schema.Struct({
 })
 
 type RunQuestionAnswer = typeof RunQuestionAnswerSchema.Type
+export type QuestionText = (typeof RunQuestionContentSchema.Type)["detail"]
 
-/** What an answer says: the labels it chose, in the question's order, and
- *  the words typed with it. Undefined for a hold or a skip, which say
- *  nothing. A choice id the question no longer holds is named by its id. */
 export interface AnswerSaid {
   readonly chosen: ReadonlyArray<string>
-  readonly typed: string | undefined
+  readonly typed: QuestionText
+}
+
+const typedText = (value: string): QuestionText => {
+  const trimmed = value.trim()
+  return trimmed.length === 0
+    ? { kind: QUESTION_TEXT.none }
+    : { kind: QUESTION_TEXT.given, text: trimmed }
 }
 
 export const answerSaid = (
@@ -214,25 +214,30 @@ export const answerSaid = (
   ]
   switch (answer.kind) {
     case "text":
-      return { chosen: [], typed: answer.text.trim() }
+      return { chosen: [], typed: { kind: QUESTION_TEXT.given, text: answer.text.trim() } }
     case "choice":
-      return { chosen: labelsOf([answer.choice_id]), typed: undefined }
+      return { chosen: labelsOf([answer.choice_id]), typed: { kind: QUESTION_TEXT.none } }
     case "choices":
-      return { chosen: labelsOf(answer.choice_ids), typed: answer.text?.trim() || undefined }
+      return {
+        chosen: labelsOf(answer.choice_ids),
+        typed:
+          answer.typed.kind === QUESTION_TEXT.none ? answer.typed : typedText(answer.typed.text)
+      }
     case "hold":
     case "dismiss":
       return undefined
   }
 }
 
-/** The answer as one line: the chosen labels, then what was typed. */
 export const answerWords = (said: AnswerSaid): string =>
-  [said.chosen.join(", "), said.typed ?? ""].filter((part) => part.length > 0).join("; ")
+  [said.chosen.join(", "), said.typed.kind === QUESTION_TEXT.given ? said.typed.text : ""]
+    .filter((part) => part.length > 0)
+    .join("; ")
 
 export type RunQuestion = typeof RunQuestionSchema.Type
 export type RunQuestionContent = typeof RunQuestionContentSchema.Type
+export type RunQuestionAnswerValue = RunQuestionAnswer
 export type RunQuestionList = typeof RunQuestionListSchema.Type
-export type RunQuestionListOptions = typeof RunQuestionListOptionsSchema.Type
 export type ResolveRunQuestionInput = typeof ResolveRunQuestionInputSchema.Type
 
 export const encodeResolveRunQuestionEffect = (
@@ -242,8 +247,6 @@ export const encodeResolveRunQuestionEffect = (
     onExcessProperty: "error"
   }).pipe(Effect.map(JSON.stringify))
 
-/** Only resolved questions leave a transcript row that advances the seen cursor.
- * Open questions live in the dock; closed and suspended questions leave no row. */
 export const settledQuestionDrawn = (
   question: Pick<typeof RunQuestionSchema.Type, "status">
-): boolean => question.status === "resolved"
+): boolean => question.status === RUN_QUESTION_STATUS.resolved

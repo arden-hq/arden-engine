@@ -12,11 +12,18 @@ export interface IdleCompactionCandidate extends IdleCompactionRequest {
   readonly inputTokens: number
 }
 
-export interface IdleCompactionDecision {
-  readonly sessionId: string
-  readonly decision: "queued" | "skipped" | "ran" | "failed"
-  readonly reason: string
-}
+export type IdleCompactionDecision =
+  | {
+      readonly sessionId: string
+      readonly decision: "queued" | "skipped" | "ran"
+      readonly reason: string
+    }
+  | {
+      readonly sessionId: string
+      readonly decision: "failed"
+      readonly reason: string
+      readonly cause: string
+    }
 
 const MIN_INPUT_TOKENS = 64_000
 const LATE_MS = 60_000
@@ -48,7 +55,7 @@ export class IdleCompactionQueue {
     return undefined
   }
 
-  private decide(sessionId: string, decision: IdleCompactionDecision["decision"], reason: string) {
+  private decide(sessionId: string, decision: "queued" | "skipped", reason: string) {
     this.options.report?.({ sessionId, decision, reason })
   }
 

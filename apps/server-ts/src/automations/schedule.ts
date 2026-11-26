@@ -1,16 +1,20 @@
 import {
+  CONDITION_OPERATOR,
   decodeTimeTrigger,
   nextScheduleRunAt as nextTimesRunAt,
   type ScheduleClock,
   type TimeSchedule
 } from "@arden-hq/protocol/automations"
-import type {
-  AutomationCondition,
-  AutomationConditionInput,
-  AutomationTrigger,
-  AutomationTriggerInput,
-  CountAutomationTrigger,
-  IdleAutomationTrigger
+import {
+  APP_EVENT,
+  LEAD_EVENT,
+  TRIGGER_STATE,
+  type AutomationComparisonCondition,
+  type AutomationCondition,
+  type AutomationTrigger,
+  type CountAutomationTrigger,
+  type EventAutomationTrigger,
+  type IdleAutomationTrigger
 } from "@arden-hq/protocol/automations"
 import { Option, Schema } from "effect"
 import {
@@ -19,18 +23,6 @@ import {
 } from "../persistence/automations/model.js"
 import { eventTriggerIssue } from "./event-producers.js"
 
-const TimeFieldsSchema = Schema.Struct({
-  type: Schema.Literal("time"),
-  at: Schema.optionalKey(Schema.Trim),
-  on: Schema.optionalKey(Schema.Trim),
-  days: Schema.optionalKey(Schema.Trim),
-  every: Schema.optionalKey(Schema.Trim),
-  start: Schema.optionalKey(Schema.Trim),
-  end: Schema.optionalKey(Schema.Trim)
-})
-
-const decodeTimeFields = Schema.decodeUnknownOption(TimeFieldsSchema)
-
 const invalidSchedule = (): never => {
   throw new InvalidAutomationScheduleError("The Automation schedule is invalid")
 }
@@ -38,17 +30,19 @@ const invalidSchedule = (): never => {
 const PositiveIntSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const decodePositiveInt = Schema.decodeUnknownOption(PositiveIntSchema)
 
-const normalizeCondition = (
-  condition: AutomationCondition | AutomationConditionInput
-): AutomationCondition => {
+const comparisonWithValue = (
+  condition: Exclude<AutomationComparisonCondition, { readonly op: "exists" }>
+): AutomationComparisonCondition =>
+  condition.op === CONDITION_OPERATOR.in
+    ? { kind: "compare", field: condition.field, op: condition.op, value: condition.value }
+    : { kind: "compare", field: condition.field, op: condition.op, value: condition.value }
+
+const normalizeCondition = (condition: AutomationCondition): AutomationCondition => {
   switch (condition.kind) {
     case "compare":
-      return {
-        kind: "compare",
-        field: condition.field,
-        op: condition.op,
-        ...(condition.value === undefined ? {} : { value: condition.value })
-      }
+      return condition.op === CONDITION_OPERATOR.exists
+        ? { kind: "compare", field: condition.field, op: condition.op }
+        : comparisonWithValue(condition)
     case "not":
       return { kind: "not", condition: normalizeCondition(condition.condition) }
     case "and":
@@ -60,8 +54,39 @@ const normalizeCondition = (
   }
 }
 
+const normalizedEvent = (trigger: EventAutomationTrigger): EventAutomationTrigger => {
+  const filters = {
+    run_only_if: trigger.run_only_if,
+    condition:
+      trigger.condition.kind === TRIGGER_STATE.old
+        ? { kind: TRIGGER_STATE.old, condition: normalizeCondition(trigger.condition.condition) }
+        : trigger.condition
+  }
+  if (trigger.event_type === LEAD_EVENT)
+    return {
+      id: trigger.id,
+      type: "event",
+      event_type: trigger.event_type,
+      lead: trigger.lead,
+      ...filters
+    }
+  if (trigger.event_type === APP_EVENT)
+    return {
+      id: trigger.id,
+      type: "event",
+      event_type: trigger.event_type,
+      mcp_event: {
+        server: trigger.mcp_event.server,
+        event: trigger.mcp_event.event,
+        arguments: trigger.mcp_event.arguments
+      },
+      ...filters
+    }
+  return { id: trigger.id, type: "event", event_type: trigger.event_type, ...filters }
+}
+
 export const personalAutomationTriggers = (
-  triggers: ReadonlyArray<AutomationTriggerInput | AutomationTrigger>
+  triggers: ReadonlyArray<AutomationTrigger>
 ): PersonalAutomationTriggers => {
   if (triggers.length === 0) {
     throw new InvalidAutomationScheduleError("An Automation requires at least one trigger")
@@ -73,11 +98,9 @@ export const personalAutomationTriggers = (
   for (const trigger of triggers) {
     switch (trigger.type) {
       case "time": {
-        const decoded = decodeTimeFields(trigger)
-        if (Option.isNone(decoded)) return invalidSchedule()
-        const { stored, schedule } = decodeTimeTrigger(decoded.value) ?? invalidSchedule()
+        const { stored, schedule } = decodeTimeTrigger(trigger.schedule) ?? invalidSchedule()
         times.push(schedule)
-        normalized.push(withId(trigger, stored))
+        normalized.push({ id: trigger.id, type: "time", schedule: stored })
         break
       }
       case "idle": {
@@ -92,8 +115,8 @@ export const personalAutomationTriggers = (
             "An idle trigger requires whole positive idle_minutes"
           )
         }
-        idle = { type: "idle", idle_minutes: minutes.value }
-        normalized.push(withId(trigger, idle))
+        idle = { id: trigger.id, type: "idle", idle_minutes: minutes.value }
+        normalized.push(idle)
         break
       }
       case "count": {
@@ -108,49 +131,21 @@ export const personalAutomationTriggers = (
             "A count trigger requires a whole positive every_n"
           )
         }
-        count = { type: "count", every_n: everyN.value }
-        normalized.push(withId(trigger, count))
+        count = { id: trigger.id, type: "count", every_n: everyN.value }
+        normalized.push(count)
         break
       }
       case "event": {
-        const event = {
-          type: "event" as const,
-          event_type: trigger.event_type,
-          ...(trigger.lead_minutes === undefined || trigger.lead_minutes === null
-            ? {}
-            : { lead_minutes: trigger.lead_minutes }),
-          ...(trigger.mcp_event === undefined || trigger.mcp_event === null
-            ? {}
-            : {
-                mcp_event: {
-                  server: trigger.mcp_event.server,
-                  event: trigger.mcp_event.event,
-                  arguments: trigger.mcp_event.arguments ?? {}
-                }
-              }),
-          ...(trigger.condition === undefined
-            ? {}
-            : {
-                condition: trigger.condition === null ? null : normalizeCondition(trigger.condition)
-              }),
-          ...(trigger.run_only_if === undefined || trigger.run_only_if === null
-            ? {}
-            : { run_only_if: trigger.run_only_if })
-        }
+        const event = normalizedEvent(trigger)
         const issue = eventTriggerIssue(event)
         if (issue !== null) throw new InvalidAutomationScheduleError(issue)
-        normalized.push(withId(trigger, event))
+        normalized.push(event)
         break
       }
     }
   }
   return { triggers: normalized, times, idle, count }
 }
-
-const withId = <T extends AutomationTrigger>(
-  sent: AutomationTriggerInput | AutomationTrigger,
-  normalized: T
-): T => (sent.id === undefined ? normalized : { ...normalized, id: sent.id })
 
 export const nextScheduleRunAt = (
   schedule: Pick<PersonalAutomationTriggers, "times">,

@@ -1,4 +1,5 @@
 import {
+  type AutomationCountThrough,
   type AutomationTrigger,
   type AutomationTriggerContext,
   type EventAutomationTrigger
@@ -117,7 +118,7 @@ export interface TriggerArming {
       | {
           readonly source: "count"
           readonly session_id: string
-          readonly through_sequence: number | null
+          readonly through: AutomationCountThrough
           readonly every_n: number
           readonly queued_at: string
         }
@@ -232,7 +233,10 @@ export const makeTriggerArming = ({
           source: "count",
           queued_at: iso(nowMs),
           session_id: first.session_id,
-          through_sequence: first.through_sequence,
+          through:
+            first.through_sequence === null
+              ? { kind: "unrecorded" }
+              : { kind: "message", sequence: first.through_sequence },
           every_n: task.count
         })
         yield* sql`

@@ -1,5 +1,9 @@
 import { parseJsonBody } from "@arden-hq/protocol/common"
-import type { GitHubConnectionState, GitHubConnectRequest } from "@arden-hq/protocol/mcp"
+import {
+  GITHUB_CONNECTION,
+  type GitHubConnectionState,
+  type GitHubConnectRequest
+} from "@arden-hq/protocol/mcp"
 import { Schema } from "effect"
 
 import {
@@ -179,11 +183,17 @@ export const makeGitHubConnection = ({
     state: async (): Promise<GitHubConnectionState> => {
       const choice = await readChoice()
       if (choice !== undefined)
-        return { connection: { readOnly: choice.readOnly, source: "token" } }
+        return {
+          connection: {
+            kind: GITHUB_CONNECTION.connected,
+            readOnly: choice.readOnly,
+            source: "token"
+          }
+        }
       return {
         connection: (await oauth?.hasGrant())
-          ? { readOnly: await appReadOnly(), source: "app" }
-          : null
+          ? { kind: GITHUB_CONNECTION.connected, readOnly: await appReadOnly(), source: "app" }
+          : { kind: GITHUB_CONNECTION.disconnected }
       }
     },
     connect: async (request: GitHubConnectRequest): Promise<void> => {

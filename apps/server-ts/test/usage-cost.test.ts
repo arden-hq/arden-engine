@@ -1,3 +1,5 @@
+import { messageInput, receiptRunId } from "./fixtures/chat-requests.js"
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider, Toolset } from "@arden-hq/loop"
@@ -159,7 +161,7 @@ const finishedResult = async (cost: number | undefined) => {
       await running.fetch("/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Cost" })
+        body: JSON.stringify(newChat({ name: "Cost" }))
       })
     ).json()) as { readonly session_id: string }
     const receipt = chatDecoders.receipt(
@@ -167,16 +169,17 @@ const finishedResult = async (cost: number | undefined) => {
         await running.fetch(chatRoutes.message, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: chatRequests.message({ sessionId: session.session_id, message: "Go" }).body
+          body: chatRequests.message(messageInput(session.session_id, "Go")).body
         })
       ).json()
     )
-    const runId = receipt.runId
-    if (runId === null) throw new Error("Chat receipt did not include a run id")
+    const runId = receiptRunId(receipt)
     const detail = async () =>
       runDecoders.detail(await (await running.fetch(runRoutes.detail(runId))).json())
     await expect.poll(async () => (await detail()).status, { timeout: 8_000 }).toBe("completed")
-    return (await detail()).result
+    const ended = await detail()
+    if (!("result" in ended) || ended.result.kind === "none") throw new Error("Run had no result")
+    return ended.result.result
   } finally {
     await server?.stop().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })
@@ -188,23 +191,22 @@ it(
   { timeout: 20_000 },
   async () => {
     const priced = await finishedResult(0.0003)
-    expect(priced?.cost).toBe(0.0003)
-    expect(priced?.usage).toEqual({
+    expect(priced.usage).toEqual({
       prompt: 2,
       completion: 1,
       total: 3,
       cache_read: 0,
       cache_write: 0,
-      cost: 0.0003
+      cost: { kind: "reported", usd: 0.0003 }
     })
     const unpriced = await finishedResult(undefined)
-    expect(unpriced === null ? [] : Object.keys(unpriced)).not.toContain("cost")
-    expect(unpriced?.usage).toEqual({
+    expect(unpriced.usage).toEqual({
       prompt: 2,
       completion: 1,
       total: 3,
       cache_read: 0,
-      cache_write: 0
+      cache_write: 0,
+      cost: { kind: "unreported" }
     })
   }
 )

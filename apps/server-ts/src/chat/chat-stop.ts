@@ -129,7 +129,7 @@ export class ChatStop extends Context.Service<
         const busy: Array<{ readonly name: string; readonly running: ChatRunningWork }> = []
         for (const chat of chats) {
           const now = yield* running(chat.sessionId)
-          if (hasRunningWork(now)) busy.push({ name: chatName(chat), running: now })
+          if (hasRunningWork(now)) busy.push({ name: chatName(chat.name), running: now })
         }
         return { chats, busy }
       })

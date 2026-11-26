@@ -11,6 +11,7 @@ import { SessionQueries } from "../persistence/sessions/queries.js"
 import { TranscriptQueries } from "../persistence/transcript/queries.js"
 import { ownerKeystrokes } from "../persistence/transcript/owner-words.js"
 import { McpConnections } from "../mcp/service.js"
+import { connectedServer } from "../mcp/public-server.js"
 import { refusalText, vetServerRequest } from "./capability-server.js"
 
 const MAX_CANDIDATES = 3
@@ -310,10 +311,7 @@ export const capabilityTools = Effect.gen(function* () {
       connectedServers: async () =>
         (await Effect.runPromise(mcp.snapshot()))
           .filter((server) => server.status === "connected")
-          .map((server) => ({
-            presetId: server.presetId ?? undefined,
-            url: server.transport.type === "http" ? server.transport.url : undefined
-          })),
+          .map(connectedServer),
       ownerWords: (sessionId) => readOwnerWords(transcript, sessionId),
       isChildAgent: async (sessionId) => {
         const header = await Effect.runPromise(sessions.loadHistoryHeader(sessionId))

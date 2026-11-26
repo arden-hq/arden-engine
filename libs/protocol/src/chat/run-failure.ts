@@ -35,12 +35,15 @@ export const providerSentence = (message: string): string | undefined => {
   return undefined
 }
 
-export interface RunFailureText {
-  /** The words the chat error row shows. */
-  readonly text: string
-  /** The raw failure behind `text`, for Details and Report problem; undefined when `text` is it. */
-  readonly detail: string | undefined
-}
+export const RUN_FAILURE_TEXT = { raw: "raw", explained: "explained" } as const
+
+export type RunFailureText =
+  | { readonly kind: typeof RUN_FAILURE_TEXT.raw; readonly text: string }
+  | {
+      readonly kind: typeof RUN_FAILURE_TEXT.explained
+      readonly text: string
+      readonly detail: string
+    }
 
 /**
  * Failures stored before `request_invalid` existed carry `provider_error`
@@ -69,11 +72,13 @@ export const runFailureText = (
 ): RunFailureText => {
   if (code === "model_unavailable")
     return {
+      kind: RUN_FAILURE_TEXT.explained,
       text: `${providerSentence(message) ?? MODEL_UNAVAILABLE_FALLBACK} ${MODEL_UNAVAILABLE_NEXT}`,
       detail: message
     }
-  if (!isRequestInvalid(code, message)) return { text: message, detail: undefined }
+  if (!isRequestInvalid(code, message)) return { kind: RUN_FAILURE_TEXT.raw, text: message }
   return {
+    kind: RUN_FAILURE_TEXT.explained,
     text: IMAGE_TOO_LARGE.test(message) ? IMAGE_TOO_LARGE_TEXT : REQUEST_INVALID_TEXT,
     detail: message
   }
@@ -90,7 +95,7 @@ const TASK_REFUSAL = /^\w+ refused the run \(HTTP \d+\): /
 export const failureSentence = (message: string, surface: "chat" | "task"): string => {
   const failure = runFailureText(undefined, message)
   const sentence =
-    failure.detail !== undefined
+    failure.kind === RUN_FAILURE_TEXT.explained
       ? failure.text
       : (providerSentence(message) ?? message.replace(TASK_REFUSAL, ""))
   return surface === "task" ? inTaskWords(sentence) : sentence

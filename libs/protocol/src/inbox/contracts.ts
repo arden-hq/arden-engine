@@ -14,27 +14,59 @@ export type InboxGroupKind =
   | "limits"
 export type InboxTaskWaitingOn = "you" | "external"
 
+export const INBOX_SPACE = { loose: "loose", space: "space" } as const
+
+export type InboxSpace =
+  | { readonly kind: "loose" }
+  | { readonly kind: "space"; readonly space_id: string; readonly title: string }
+
+export type InboxReadMark =
+  | { readonly kind: "unmarked" }
+  | { readonly kind: "marked"; readonly read_at: string }
+
+export type InboxTaskNumbering =
+  | { readonly kind: "unnumbered" }
+  | { readonly kind: "numbered"; readonly seq: number }
+
+export type InboxTaskAsk =
+  | { readonly kind: "unasked" }
+  | { readonly kind: "asked"; readonly text: string; readonly at: string }
+
+export type InboxFailureRun =
+  | { readonly kind: "unstarted" }
+  | { readonly kind: "started"; readonly run_id: string }
+
+export type InboxFailureOrigin =
+  | { readonly kind: "workflow"; readonly workflow_ref: string; readonly run_id: string }
+  | {
+      readonly kind: "automation"
+      readonly automation_task_id: string
+      readonly run: InboxFailureRun
+    }
+  | { readonly kind: "task"; readonly run: InboxFailureRun }
+
+export type InboxPlanLimitReached =
+  | { readonly level: "used_up" }
+  | { readonly level: "background" | "arden"; readonly limit_percent: number }
+
 interface InboxItemBase extends JsonRecord {
-  /** Stable identity used by the read-mark endpoint. */
   readonly key: string
   readonly group_key: string
   readonly at: string
   readonly counted: boolean
   readonly unread: boolean
-  readonly read_at: string | null
+  readonly read_mark: InboxReadMark
 }
 
 export interface InboxBlockedTaskItem extends InboxItemBase {
   readonly source: "blocked_task"
-  readonly space_id: string | null
-  readonly space_title: string | null
+  readonly space: InboxSpace
   readonly item_id: string
   readonly stable_key: string
-  readonly seq: number | null
+  readonly numbering: InboxTaskNumbering
   readonly text: string
   readonly waiting_on: InboxTaskWaitingOn
-  readonly question: string | null
-  readonly question_at: string | null
+  readonly ask: InboxTaskAsk
 }
 
 export interface InboxApprovalItem extends InboxItemBase, RunApproval {
@@ -43,18 +75,12 @@ export interface InboxApprovalItem extends InboxItemBase, RunApproval {
 
 export interface InboxFailureGroupItem extends InboxItemBase {
   readonly source: "failure"
-  readonly space_id: string | null
-  readonly space_title: string | null
-  readonly automation_task_id: string | null
-  readonly run_id?: string | null
-  /** Set when a Workflow's result never reached its Chat: that Workflow. */
-  readonly workflow_ref?: string | null
+  readonly space: InboxSpace
+  readonly origin: InboxFailureOrigin
   readonly cause: string
   readonly run_count: number
   readonly first_at: string
   readonly last_at: string
-  /** The Automation paused itself after these failures (D-12): the row offers
-   *  Resume, and it is one row for all of them. */
   readonly automation_paused: boolean
 }
 
@@ -72,15 +98,10 @@ export interface InboxIncidentItem extends InboxItemBase {
   readonly source_run_id: string
 }
 
-/** The plan reached one of your limits. One notice per crossing: a new level
- *  or a new window is a new item, so reading or dismissing it holds until then. */
 export interface InboxPlanLimitItem extends InboxItemBase {
   readonly source: "plan_limit"
-  /** background: background work paused; arden: Arden stopped; used_up: the plan is used up. */
-  readonly level: "background" | "arden" | "used_up"
+  readonly reached: InboxPlanLimitReached
   readonly used_percent: number
-  /** The limit reached; null when the plan itself is used up. */
-  readonly limit_percent: number | null
   readonly window_seconds: number
   readonly resets_at: string
 }
@@ -93,14 +114,23 @@ export type InboxItem =
   | InboxIncidentItem
   | InboxPlanLimitItem
 
-export interface InboxGroup extends JsonRecord {
+interface InboxGroupBase extends JsonRecord {
   readonly key: string
-  readonly kind: InboxGroupKind
   readonly title: string
-  readonly space_id: string | null
   readonly count: number
   readonly items: ReadonlyArray<InboxItem>
 }
+
+export interface InboxSpaceGroup extends InboxGroupBase {
+  readonly kind: "space"
+  readonly space: InboxSpace
+}
+
+export interface InboxSourceGroup extends InboxGroupBase {
+  readonly kind: Exclude<InboxGroupKind, "space">
+}
+
+export type InboxGroup = InboxSpaceGroup | InboxSourceGroup
 
 export interface InboxView extends JsonRecord {
   readonly generated_at: string

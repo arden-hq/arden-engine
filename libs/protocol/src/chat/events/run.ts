@@ -1,116 +1,161 @@
-import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { QuestionAnswerSchema } from "../schema-fields.js"
 import { Schema } from "effect"
-import {
-  event,
-  eventUsage,
-  optionalBoolean,
-  optionalNullableString,
-  optionalNumber,
-  optionalString,
-  sessionEvent
-} from "../../common/schema.js"
+import { event, eventUsage, sessionEvent } from "../../common/schema.js"
 import { InteractionSchema, AgentResultSchema } from "../interaction.js"
 import { eventTypeLiterals } from "../../common/event-types.js"
 import type { Agrees, Assert } from "../../common/type-agreement.js"
 import type { AgentResult, Interaction } from "../history.js"
 import type { ChatUpdate } from "../communication.js"
 import { ChatUpdateSchema } from "../communication-schema.js"
-import type { CommonServerEventFields, EventUsage } from "../../common/event-fields.js"
+import type { ChatServerEvent } from "./stream.js"
+import { MESSAGE_CLOSURE } from "./text.js"
+import { PROVIDER_COST, type EventUsage } from "../../common/event-fields.js"
+import type { JsonRecord } from "../../common/json.js"
 
-export interface RunStartedEvent extends CommonServerEventFields {
+export const RUN_CAUSE = {
+  questionAnswer: "question_answer",
+  agentResult: "agent_result",
+  interaction: "interaction",
+  update: "update",
+  automation: "automation"
+} as const
+
+export const AUTOMATION_PROMPT = { own: "own", delegated: "delegated" } as const
+
+export type AutomationPrompt =
+  | { readonly kind: typeof AUTOMATION_PROMPT.own; readonly text: string }
+  | { readonly kind: typeof AUTOMATION_PROMPT.delegated }
+
+export type RunCause =
+  | { readonly kind: typeof RUN_CAUSE.questionAnswer; readonly question_id: string }
+  | { readonly kind: typeof RUN_CAUSE.agentResult; readonly agent_result: AgentResult }
+  | { readonly kind: typeof RUN_CAUSE.interaction; readonly interaction: Interaction }
+  | { readonly kind: typeof RUN_CAUSE.update; readonly update: ChatUpdate }
+  | {
+      readonly kind: typeof RUN_CAUSE.automation
+      readonly task_id: string
+      readonly name: string
+      readonly prompt: AutomationPrompt
+      readonly context_mode: "fresh" | "continue" | "fork"
+    }
+
+export interface RunStartedEvent extends JsonRecord {
   readonly type: "RUN_STARTED"
   readonly run_id: string
   readonly session_id: string
-  readonly integrations?: ReadonlyArray<string>
-  readonly integration_errors?: Readonly<Record<string, string>>
-  readonly session_name?: string | null
-  readonly question_answer?: { readonly question_id: string }
-  readonly agent_result?: AgentResult
-  /** Who sent the message that started this run, when it was not the user. */
-  readonly interaction?: Interaction
-  /** The background update that started this run, drawn as its own row. */
-  readonly update?: ChatUpdate
-  readonly is_meta_run?: boolean
-  readonly meta_client_id?: string | null
-  readonly automation_task_id?: string
-  readonly automation_name?: string
-  readonly automation_prompt?: string
-  readonly automation_context_mode?: "fresh" | "continue" | "fork"
+  readonly causes: ReadonlyArray<RunCause>
   readonly turn_id: string
 }
 
-export interface SessionUpdatedEvent extends CommonServerEventFields {
+export const SESSION_NAME = { unnamed: "unnamed", named: "named" } as const
+
+export type SessionName =
+  | { readonly kind: typeof SESSION_NAME.unnamed }
+  | { readonly kind: typeof SESSION_NAME.named; readonly name: string }
+
+export interface SessionUpdatedEvent extends JsonRecord {
   readonly type: "session_updated"
   readonly session_id: string
-  readonly name?: string | null
+  readonly name: SessionName
 }
 
-export interface RunFinishedEvent extends CommonServerEventFields {
+export const RUN_USAGE = { unmetered: "unmetered", metered: "metered" } as const
+
+export type RunUsage =
+  | { readonly kind: typeof RUN_USAGE.unmetered }
+  | { readonly kind: typeof RUN_USAGE.metered; readonly usage: EventUsage }
+
+export const CONTEXT_SIZE = { unmeasured: "unmeasured", measured: "measured" } as const
+
+export type ContextSize =
+  | { readonly kind: typeof CONTEXT_SIZE.unmeasured }
+  | { readonly kind: typeof CONTEXT_SIZE.measured; readonly input_tokens: number }
+
+export const contextSize = (inputTokens: number | null | undefined): ContextSize =>
+  inputTokens === undefined || inputTokens === null
+    ? { kind: CONTEXT_SIZE.unmeasured }
+    : { kind: CONTEXT_SIZE.measured, input_tokens: inputTokens }
+
+export const contextUsage = (counts: {
+  readonly prompt: number
+  readonly completion: number
+  readonly cache_read: number
+  readonly cache_write: number
+}): EventUsage => ({
+  ...counts,
+  total: counts.prompt + counts.completion + counts.cache_read + counts.cache_write,
+  cost: { kind: PROVIDER_COST.unreported }
+})
+
+export interface RunFinishedEvent extends JsonRecord {
   readonly type: "RUN_FINISHED"
   readonly run_id: string
   readonly turn_id: string
-  readonly usage?: EventUsage
-  readonly context_input_tokens?: number | null
-  readonly message_count?: number
+  readonly usage: RunUsage
+  readonly context: ContextSize
+  readonly message_count: number
 }
 
-export interface RunCancelledEvent extends CommonServerEventFields {
+export interface RunCancelledEvent extends JsonRecord {
   readonly type: "run_cancelled"
   readonly run_id: string
   readonly turn_id: string
 }
 
-export interface RunErrorEvent extends CommonServerEventFields {
+export interface RunErrorEvent extends JsonRecord {
   readonly type: "RUN_ERROR"
   readonly run_id: string
   readonly turn_id: string
   readonly message: string
-  readonly code?: ChatRunErrorCode
-  readonly debug_id?: string | null
-  readonly recoverable?: boolean
+  readonly code: ChatRunErrorCode
 }
 
-export interface TokenUsageEvent extends CommonServerEventFields {
+export interface TokenUsageEvent extends JsonRecord {
   readonly type: "token_usage"
   readonly run_id: string
   readonly usage: EventUsage
-  readonly cost?: number
-  readonly context_input_tokens?: number | null
-  readonly message_count?: number | null
-  readonly scope?: "run" | "tool" | string
-  readonly task_id?: string | null
-  readonly child_run_id?: string | null
+  readonly context: ContextSize
+  readonly message_count: number
+  readonly scope: "run" | "tool" | string
 }
 
-export interface RunActivityEvent extends CommonServerEventFields {
+export interface RunActivityEvent extends JsonRecord {
   readonly type: "run_activity"
   readonly run_id: string
-  readonly tool_call_ids?: ReadonlyArray<string>
+  readonly target: RunActivityTarget
   readonly description: string
 }
 
-export interface ThinkingEvent extends CommonServerEventFields {
+export const RUN_ACTIVITY_TARGET = { run: "run", calls: "calls" } as const
+
+export type RunActivityTarget =
+  | { readonly kind: typeof RUN_ACTIVITY_TARGET.run }
+  | {
+      readonly kind: typeof RUN_ACTIVITY_TARGET.calls
+      readonly tool_call_ids: ReadonlyArray<string>
+    }
+
+export interface ThinkingEvent extends JsonRecord {
   readonly type: "thinking"
   readonly status: string
-  readonly run_id?: string | null
+  readonly run_id: string
 }
 
 /** Live-only: the run took an owner message into its history. The row reads it until the model acts. */
-export interface InputTakenEvent extends CommonServerEventFields {
+export interface InputTakenEvent extends JsonRecord {
   readonly type: "input_taken"
   readonly run_id: string
 }
 
 /** Live-only reconnect status; never persisted, never a run failure. */
-export interface StreamRetryEvent extends CommonServerEventFields {
+export interface StreamRetryEvent extends JsonRecord {
   readonly type: "stream_retry"
   readonly run_id: string
   readonly attempt: number
   readonly max_attempts: number
 }
 
-export interface ModelResponseResetEvent extends CommonServerEventFields {
+export interface ModelResponseResetEvent extends JsonRecord {
   readonly type: "model_response_reset"
   readonly message_ids: ReadonlyArray<string>
   readonly tool_call_ids: ReadonlyArray<string>
@@ -122,7 +167,7 @@ export interface ModelResponseResetEvent extends CommonServerEventFields {
  * screen until the new one completes. `replaced`: the new answer completed
  * and the old one (`message_ids`) left the transcript for good.
  */
-export interface FinalTextSupersededEvent extends CommonServerEventFields {
+export interface FinalTextSupersededEvent extends JsonRecord {
   readonly type: "final_text_superseded"
   readonly run_id: string
   readonly message_ids: ReadonlyArray<string>
@@ -144,36 +189,53 @@ export type RunLifecycleEvent =
   | ModelResponseResetEvent
   | FinalTextSupersededEvent
 
+const ContextSizeSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CONTEXT_SIZE.unmeasured) }),
+  Schema.Struct({ kind: Schema.Literal(CONTEXT_SIZE.measured), input_tokens: Schema.Number })
+])
+
+const RunCauseSchema = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal(RUN_CAUSE.questionAnswer),
+    question_id: QuestionAnswerSchema.fields.question_id
+  }),
+  Schema.Struct({ kind: Schema.Literal(RUN_CAUSE.agentResult), agent_result: AgentResultSchema }),
+  Schema.Struct({ kind: Schema.Literal(RUN_CAUSE.interaction), interaction: InteractionSchema }),
+  Schema.Struct({ kind: Schema.Literal(RUN_CAUSE.update), update: ChatUpdateSchema }),
+  Schema.Struct({
+    kind: Schema.Literal(RUN_CAUSE.automation),
+    task_id: Schema.String,
+    name: Schema.String,
+    prompt: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal(AUTOMATION_PROMPT.own), text: Schema.String }),
+      Schema.Struct({ kind: Schema.Literal(AUTOMATION_PROMPT.delegated) })
+    ]),
+    context_mode: Schema.Literals(["fresh", "continue", "fork"] as const)
+  })
+])
+
 export const RunStartedEventSchema = sessionEvent("RUN_STARTED", Schema.String, {
   run_id: Schema.String,
-  integrations: Schema.optionalKey(Schema.Array(Schema.String)),
-  integration_errors: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-  session_name: optionalNullableString,
-  is_meta_run: optionalBoolean,
-  question_answer: Schema.optionalKey(QuestionAnswerSchema),
-  agent_result: Schema.optionalKey(AgentResultSchema),
-  interaction: Schema.optionalKey(InteractionSchema),
-  update: Schema.optionalKey(ChatUpdateSchema),
-  meta_client_id: optionalNullableString,
-  automation_task_id: optionalString,
-  automation_name: optionalString,
-  automation_prompt: optionalString,
-  automation_context_mode: Schema.optionalKey(
-    Schema.Literals(["fresh", "continue", "fork"] as const)
-  ),
+  causes: Schema.Array(RunCauseSchema),
   turn_id: Schema.NonEmptyString
 })
 
 export const SessionUpdatedEventSchema = sessionEvent("session_updated", Schema.String, {
-  name: optionalNullableString
+  name: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SESSION_NAME.unnamed) }),
+    Schema.Struct({ kind: Schema.Literal(SESSION_NAME.named), name: Schema.String })
+  ])
 })
 
 export const RunFinishedEventSchema = event("RUN_FINISHED", {
   run_id: Schema.String,
   turn_id: Schema.NonEmptyString,
-  usage: Schema.optionalKey(eventUsage),
-  context_input_tokens: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  message_count: optionalNumber
+  usage: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_USAGE.unmetered) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_USAGE.metered), usage: eventUsage })
+  ]),
+  context: ContextSizeSchema,
+  message_count: Schema.Number
 })
 
 export const RunCancelledEventSchema = event("run_cancelled", {
@@ -243,31 +305,32 @@ export const RunErrorEventSchema = event("RUN_ERROR", {
   run_id: Schema.String,
   turn_id: Schema.NonEmptyString,
   message: Schema.String,
-  code: Schema.optionalKey(ChatRunErrorCodeSchema),
-  debug_id: optionalNullableString,
-  recoverable: optionalBoolean
+  code: ChatRunErrorCodeSchema
 })
 
 export const TokenUsageEventSchema = event("token_usage", {
   run_id: Schema.String,
   usage: eventUsage,
-  cost: optionalNumber,
-  context_input_tokens: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  message_count: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  scope: optionalString,
-  task_id: optionalNullableString,
-  child_run_id: optionalNullableString
+  context: ContextSizeSchema,
+  message_count: Schema.Number,
+  scope: Schema.String
 })
 
 export const RunActivityEventSchema = event("run_activity", {
   run_id: Schema.NonEmptyString,
-  tool_call_ids: Schema.optionalKey(Schema.Array(Schema.String)),
+  target: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_ACTIVITY_TARGET.run) }),
+    Schema.Struct({
+      kind: Schema.Literal(RUN_ACTIVITY_TARGET.calls),
+      tool_call_ids: Schema.Array(Schema.String)
+    })
+  ]),
   description: Schema.String.check(Schema.isMaxLength(160))
 })
 
 export const ThinkingEventSchema = event("thinking", {
   status: Schema.String,
-  run_id: optionalNullableString
+  run_id: Schema.String
 })
 
 /**
@@ -346,15 +409,12 @@ export const isRunTerminalEvent = <Event extends { readonly type: string }>(
  * comes. This is the only rule that
  * ends "Reading your message", for the main chat and the agent peek alike.
  */
-export const endsReadingMessage = (event: {
-  readonly type: string
-  readonly role?: string
-  readonly delta?: string
-  readonly content?: string
-}): boolean =>
+export const endsReadingMessage = (event: ChatServerEvent): boolean =>
   isRunTerminalEvent(event) ||
   event.type === "TOOL_CALL_START" ||
-  (event.type === "TEXT_MESSAGE_START" && event.role !== ROLE.user) ||
+  event.type === "TEXT_MESSAGE_START" ||
   event.type === "TEXT_MESSAGE_CONTENT" ||
-  (event.type === "REASONING_MESSAGE_CONTENT" && Boolean(event.delta?.trim())) ||
-  (event.type === "REASONING_MESSAGE_END" && Boolean(event.content?.trim()))
+  (event.type === "REASONING_MESSAGE_CONTENT" && event.delta.trim().length > 0) ||
+  (event.type === "REASONING_MESSAGE_END" &&
+    event.closure.kind === MESSAGE_CLOSURE.complete &&
+    event.closure.content.trim().length > 0)

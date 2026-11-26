@@ -1,7 +1,15 @@
 import { Effect, Schema } from "effect"
 import { IsoDateTimeStringSchema, withExtras, PositiveIntSchema } from "../common/schema.js"
 import { routeSegment } from "../common/routes.js"
-import type { ScriptDetail, ScriptSummary } from "./contracts.js"
+import {
+  AGENT_RUN,
+  SCRIPT_END,
+  SCRIPT_FAILURE,
+  WORKFLOW_PREVIEW,
+  WORKFLOW_RECOVERY,
+  type ScriptDetail,
+  type ScriptSummary
+} from "./contracts.js"
 import { WORKFLOW_STATUSES } from "./status.js"
 
 const strict = { onExcessProperty: "error" } as const
@@ -42,8 +50,14 @@ export const WorkflowErrorSchema = withExtras({
   code: WorkflowErrorCodeSchema,
   message: Schema.String,
   retryable: Schema.Boolean,
-  recovery_action: Schema.NullOr(Schema.String),
-  preview: Schema.optionalKey(Schema.String)
+  recovery: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WORKFLOW_RECOVERY.none) }),
+    Schema.Struct({ kind: Schema.Literal(WORKFLOW_RECOVERY.action), text: Schema.String })
+  ]),
+  preview: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WORKFLOW_PREVIEW.message) }),
+    Schema.Struct({ kind: Schema.Literal(WORKFLOW_PREVIEW.line), text: Schema.String })
+  ])
 })
 
 export const ScriptSummarySchema: Schema.Codec<ScriptSummary> = withExtras({
@@ -54,10 +68,16 @@ export const ScriptSummarySchema: Schema.Codec<ScriptSummary> = withExtras({
   origin_session_ref: IdentifierSchema,
   origin_run_id: IdentifierSchema,
   origin_tool_call_id: IdentifierSchema,
-  error: Schema.NullOr(WorkflowErrorSchema),
+  failure: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SCRIPT_FAILURE.none) }),
+    Schema.Struct({ kind: Schema.Literal(SCRIPT_FAILURE.failed), error: WorkflowErrorSchema })
+  ]),
   created_at: IsoDateTimeStringSchema,
   updated_at: IsoDateTimeStringSchema,
-  ended_at: Schema.NullOr(IsoDateTimeStringSchema)
+  end: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SCRIPT_END.open) }),
+    Schema.Struct({ kind: Schema.Literal(SCRIPT_END.ended), at: IsoDateTimeStringSchema })
+  ])
 })
 
 const ScriptAgentSchema = withExtras({
@@ -65,13 +85,19 @@ const ScriptAgentSchema = withExtras({
   attempts: Schema.Array(
     withExtras({
       session_ref: IdentifierSchema,
-      run_id: Schema.NullOr(IdentifierSchema),
       tool_call_id: IdentifierSchema,
-      status: Schema.String
+      run: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal(AGENT_RUN.none) }),
+        Schema.Struct({
+          kind: Schema.Literal(AGENT_RUN.run),
+          run_id: IdentifierSchema,
+          status: Schema.String
+        })
+      ])
     })
   ),
   label: Schema.String,
-  mode: Schema.NullOr(Schema.Literals(["research", "code", "work"] as const)),
+  mode: Schema.Literals(["research", "code", "work", "unrecorded"] as const),
   status: Schema.Literals(["running", "completed", "failed"] as const),
   session_ref: IdentifierSchema
 })

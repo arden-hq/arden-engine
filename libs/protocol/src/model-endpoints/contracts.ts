@@ -65,14 +65,18 @@ export interface ModelEndpoint extends JsonRecord {
   /** Confirmed by the last Check. */
   readonly input: ModelEndpointInput
   readonly auth: ModelEndpointAuthInfo
-  /** Search: the vector width the endpoint answers. Decision: null. */
-  readonly dimensions: number | null
   readonly health: ModelEndpointHealth
 }
 
+export const MODEL_ENDPOINT_SLOT = { unset: "unset", saved: "saved" } as const
+
+export type ModelEndpointSlot =
+  | { readonly state: "unset" }
+  | { readonly state: "saved"; readonly endpoint: ModelEndpoint }
+
 export interface ModelEndpoints extends JsonRecord {
-  readonly search: ModelEndpoint | null
-  readonly decision: ModelEndpoint | null
+  readonly search: ModelEndpointSlot
+  readonly decision: ModelEndpointSlot
   /**
    * The saved model servers, in the order they were added; their models are
    * offered for chats beside ChatGPT's. A model id is on one server only.
@@ -189,12 +193,8 @@ export type ChatEndpointCheckFailure =
       readonly message: string
     }
   | { readonly result: "window_unknown"; readonly model: string; readonly message: string }
-  | {
-      readonly result: "model_missing"
-      /** Null: the server lists no model at all. */
-      readonly model: string | null
-      readonly message: string
-    }
+  | { readonly result: "model_missing"; readonly model: string; readonly message: string }
+  | { readonly result: "no_model"; readonly message: string }
   | {
       /** The id is one another group of the model list uses: Codex's (`openai-codex/…`) or another saved server's. */
       readonly result: "model_taken"
@@ -236,7 +236,6 @@ export type ModelEndpointCheck =
   | {
       readonly result: "works"
       readonly input: ModelEndpointInput
-      readonly dimensions: number | null
       readonly ms: number
     }
   | ModelEndpointCheckFailure

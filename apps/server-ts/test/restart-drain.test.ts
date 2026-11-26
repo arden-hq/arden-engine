@@ -1,3 +1,5 @@
+import { decisionBody, messageInput, receiptRunId } from "./fixtures/chat-requests.js"
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Schema } from "effect"
@@ -151,7 +153,7 @@ const startRun = async (server: ServerHandle): Promise<string> => {
     await server.fetch("/sessions", {
       method: "POST",
       headers,
-      body: JSON.stringify({ name: "Drain" })
+      body: JSON.stringify(newChat({ name: "Drain" }))
     })
   ).json()) as { readonly session_id: string }
   const receipt = chatDecoders.receipt(
@@ -159,12 +161,11 @@ const startRun = async (server: ServerHandle): Promise<string> => {
       await server.fetch(chatRoutes.message, {
         method: "POST",
         headers,
-        body: chatRequests.message({ sessionId: session.session_id, message: "Save this" }).body
+        body: chatRequests.message(messageInput(session.session_id, "Save this")).body
       })
     ).json()
   )
-  if (receipt.runId === null) throw new Error("Chat receipt did not include a run id")
-  return receipt.runId
+  return receiptRunId(receipt)
 }
 
 const waitForStatus = (server: ServerHandle, runId: string, status: string) =>
@@ -412,7 +413,7 @@ it(
           runId,
           toolId: "call-slow-write",
           result: "It did not complete",
-          approved: false
+          ...decisionBody(false, { askedAt: undefined, commandId: undefined })
         })
       })
       expect(resolution.status).toBe(200)

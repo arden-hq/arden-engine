@@ -1,9 +1,9 @@
+import type { RunCancelTarget } from "./send-contracts.js"
 import type { HandlerItemRef } from "../automations/handler-item.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import type { EventUsage } from "@arden-hq/protocol"
+import type { StoredRunUsage } from "../runs/stored-result.js"
 import type { ToolResult } from "@arden-hq/loop"
 import type {
-  CancelInput,
   ChatApprovalMode,
   ChatImageInput,
   ChatReceiptStatus,
@@ -11,7 +11,8 @@ import type {
 } from "@arden-hq/protocol/chat"
 import type { ModelRole } from "@arden-hq/protocol/models"
 import type { ChatSentFrom } from "@arden-hq/protocol/chat"
-import type { RunMemoryComposition, RunTerminalResult } from "@arden-hq/protocol/runs"
+import type { RunMemoryComposition } from "@arden-hq/protocol/runs"
+import type { StoredRunTerminalResult as RunTerminalResult } from "../runs/stored-result.js"
 import type { StoredMessageEnvelope } from "../transcript/model.js"
 import type { JsonObject } from "../json.js"
 import type { CommittedEventBatch } from "../events/model.js"
@@ -75,7 +76,7 @@ export interface ChatWriteFinishInput {
   readonly messages: ReadonlyArray<StoredMessageEnvelope>
   readonly result?: RunTerminalResult
   readonly stopReason?: string
-  readonly usage?: EventUsage
+  readonly usage?: StoredRunUsage
   readonly lastInputTokens?: number | null
   readonly terminalTextEnded?: boolean
   readonly supersededMessageIds?: ReadonlyArray<string>
@@ -348,8 +349,10 @@ export class ChatWriteStore extends Context.Service<
     readonly fail: (
       input: ChatWriteFailInput
     ) => Effect.Effect<ChatWriteTerminalResult, ChatWriteFailure>
-    readonly cancel: (input: CancelInput) => Effect.Effect<ChatWriteCancelResult, ChatWriteFailure>
-    readonly stopEndedWork: (input: CancelInput) => Effect.Effect<
+    readonly cancel: (
+      input: RunCancelTarget
+    ) => Effect.Effect<ChatWriteCancelResult, ChatWriteFailure>
+    readonly stopEndedWork: (input: RunCancelTarget) => Effect.Effect<
       {
         readonly runIds: ReadonlyArray<string>
         readonly descendantRunIds: ReadonlyArray<string>

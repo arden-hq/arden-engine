@@ -3,7 +3,21 @@ import type {
   ManagedFileRepositoryShape,
   ResourceVersion
 } from "@arden-hq/revisions/effect"
-import type { WikiPage, WikiPageSummary, WikiResourceVersion } from "@arden-hq/protocol/wiki"
+import {
+  WIKI_CHANGE_ACTION,
+  WIKI_COMMIT_PARENT,
+  WIKI_EXCERPT,
+  WIKI_MOMENT,
+  WIKI_PAGE_LIFECYCLE,
+  type WikiEditAction,
+  type WikiHistoryChange,
+  type WikiHistoryCommit,
+  type WikiMoment,
+  type WikiPage,
+  type WikiPageLifecycle,
+  type WikiPageSummary,
+  type WikiResourceVersion
+} from "@arden-hq/protocol/wiki"
 import { Effect } from "effect"
 
 import { mapRevisionError, WikiError, wikiError, type WikiOperation } from "./errors.js"
@@ -257,59 +271,78 @@ const pageExcerpt = (page: ParsedWikiPage): string | null => {
   return excerpt
 }
 
-const mapVersion = (version: ResourceVersion | null): WikiResourceVersion | null =>
-  version === null
-    ? null
-    : {
-        resourceId: version.resourceId,
-        path: version.path,
-        state: version.state,
-        versionId: version.versionId
-      }
+const mapVersion = (version: ResourceVersion): WikiResourceVersion => ({
+  resourceId: version.resourceId,
+  path: version.path,
+  state: version.state,
+  versionId: version.versionId
+})
+
+const WIKI_EDIT_ACTIONS: ReadonlyArray<WikiEditAction> = [
+  WIKI_CHANGE_ACTION.update,
+  WIKI_CHANGE_ACTION.move,
+  WIKI_CHANGE_ACTION.archive,
+  WIKI_CHANGE_ACTION.restore
+]
+
+const isEditAction = (action: string): action is WikiEditAction =>
+  WIKI_EDIT_ACTIONS.some((known) => known === action)
+
+const mapChange = (change: Commit["changes"][number]): ReadonlyArray<WikiHistoryChange> => {
+  if (change.after === null) return []
+  if (change.before === null) {
+    return [{ action: WIKI_CHANGE_ACTION.create, after: mapVersion(change.after) }]
+  }
+  if (!isEditAction(change.action)) return []
+  return [
+    { action: change.action, before: mapVersion(change.before), after: mapVersion(change.after) }
+  ]
+}
 
 export const mapHistory = (
   commit: Commit
-): {
-  commitId: string
-  parentId: string | null
-  actor: string
-  origin: string
-  reason: string
-  timestamp: string
-  changes: {
-    action: string
-    before: WikiResourceVersion | null
-    after: WikiResourceVersion | null
-  }[]
-} => ({
+): Pick<
+  WikiHistoryCommit,
+  "commitId" | "parent" | "actor" | "origin" | "reason" | "timestamp" | "changes"
+> => ({
   commitId: commit.commitId,
-  parentId: commit.parentId,
+  parent:
+    commit.parentId === null
+      ? { kind: WIKI_COMMIT_PARENT.root }
+      : { kind: WIKI_COMMIT_PARENT.commit, id: commit.parentId },
   actor: commit.actor,
   origin: commit.origin,
   reason: commit.reason,
   timestamp: commit.timestamp,
-  changes: commit.changes.map((change) => ({
-    action: change.action,
-    before: mapVersion(change.before),
-    after: mapVersion(change.after)
-  }))
+  changes: commit.changes.flatMap(mapChange)
 })
 
-export const summary = (record: PageRecord, head: string, times?: PageTimes): WikiPageSummary => ({
-  pageId: record.page.pageId,
-  path: record.resource.path,
-  resourceState: record.resource.state,
-  title: record.page.title,
-  excerpt: pageExcerpt(record.page),
-  aliases: record.page.aliases,
-  lifecycle: record.page.lifecycle,
-  redirectTo: record.page.redirectTo,
-  metadata: record.page.metadata,
-  version: record.resource.versionId,
-  repositoryHead: head,
-  createdAt: times?.createdAt ?? null,
-  updatedAt: times?.updatedAt ?? null
-})
+export const pageLifecycle = (page: ParsedWikiPage): WikiPageLifecycle =>
+  page.redirectTo === null
+    ? { kind: WIKI_PAGE_LIFECYCLE.active }
+    : { kind: WIKI_PAGE_LIFECYCLE.redirect, to: page.redirectTo }
+
+const moment = (at: string | null | undefined): WikiMoment =>
+  at === null || at === undefined ? { kind: WIKI_MOMENT.unrecorded } : { kind: WIKI_MOMENT.at, at }
+
+export const summary = (record: PageRecord, head: string, times?: PageTimes): WikiPageSummary => {
+  const excerpt = pageExcerpt(record.page)
+  return {
+    pageId: record.page.pageId,
+    path: record.resource.path,
+    resourceState: record.resource.state,
+    title: record.page.title,
+    excerpt:
+      excerpt === null ? { kind: WIKI_EXCERPT.blank } : { kind: WIKI_EXCERPT.text, text: excerpt },
+    aliases: record.page.aliases,
+    lifecycle: pageLifecycle(record.page),
+    metadata: record.page.metadata,
+    version: record.resource.versionId,
+    repositoryHead: head,
+    created: moment(times?.createdAt),
+    updated: moment(times?.updatedAt)
+  }
+}
 
 export const detail = (record: PageRecord, head: string, times?: PageTimes): WikiPage => ({
   ...summary(record, head, times),

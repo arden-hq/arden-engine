@@ -1,4 +1,5 @@
 import type { RecordToldStatus } from "@arden-hq/protocol"
+import { linkedAutomation, linkedChat, linkedTask } from "./event-links.js"
 import { Effect } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SessionLifecycleEvents } from "../sessions/events.js"
@@ -208,8 +209,8 @@ export const announceNotice = Effect.fn("Notices.announce")(function* (
     unread: true,
     title: notice.title,
     text: notice.text,
-    chat_session_id: notice.chatSessionId,
-    automation_id: notice.automationId,
-    item_id: notice.itemId
+    chat: linkedChat(notice.chatSessionId),
+    automation: linkedAutomation(notice.automationId),
+    task: linkedTask(notice.itemId)
   })
 })

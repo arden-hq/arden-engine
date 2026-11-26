@@ -1,3 +1,11 @@
+import {
+  INTERNAL_TOOLS,
+  TOOL_GROUP,
+  TOOL_GROUP_WORDS,
+  TOOL_META,
+  type ToolMeta
+} from "./tool-registry.js"
+
 /**
  * What a tool NAME alone says about itself, in the words a reader sees: its
  * verb, glyph and grouping noun. One registry for every surface that names a
@@ -29,271 +37,9 @@ export type StepIconKey =
   | "browser"
   | "dot"
 
-interface ToolMeta {
-  activity?: "internal"
-  verb: VerbPhrase | "Step"
-  icon: StepIconKey
-  noun?: string
-  many?: VerbPhrase
-}
-
 /** The vocabulary entry a send the user kept with Save as draft on its card
  *  reads with: it says a draft was saved, not that mail was sent. */
 export const SAVED_DRAFT_WORDS = "email_draft"
-
-const TOOL_META: Record<string, ToolMeta> = {
-  file_read: { verb: "Read", icon: "file", noun: "file" },
-  file_write: { verb: "Wrote", icon: "file-plus", noun: "file" },
-  file_edit: { verb: "Edited", icon: "edit", noun: "file" },
-  file_list: { verb: "Listed files", icon: "folder" },
-  file_find: { verb: "Found files", icon: "search" },
-  file_search_text: { verb: "Searched code", icon: "search" },
-  bash: { verb: "Ran", icon: "terminal", noun: "command" },
-  exec_command: { verb: "Ran", icon: "terminal", noun: "command" },
-  write_stdin: { verb: "Checked a running command", icon: "terminal" },
-  code_mode: { verb: "Ran code", icon: "terminal" },
-  code_mode_phase: { verb: "Step", icon: "list" },
-  spawn_agent: { verb: "Started an agent", icon: "dot", noun: "agent", activity: "internal" },
-  dynamic_workflow: { verb: "Ran a workflow", icon: "list", noun: "workflow" },
-  current_time: { verb: "Checked the time", icon: "clock" },
-  visualize: { verb: "Created a visual", icon: "image", noun: "visual" },
-  load_tools: { verb: "Loaded tools", icon: "wrench" },
-  tool_search: { verb: "Looked for tools", icon: "search" },
-  skill: { verb: "Loaded a skill", icon: "wrench", noun: "skill" },
-  playbook: { verb: "Loaded a playbook", icon: "wrench", noun: "playbook" },
-  notify: { verb: "Notified you", icon: "bell" },
-  todo_update: { verb: "Updated the plan", icon: "list" },
-
-  web_search: { verb: "Searched the web", icon: "globe" },
-  web_fetch: { verb: "Fetched a page", icon: "globe", noun: "page" },
-
-  email_search: { verb: "Searched email", icon: "mail" },
-  email_thread_search: { verb: "Searched email threads", icon: "mail" },
-  email_read: { verb: "Read an email", icon: "mail", noun: "email" },
-  email_thread_read: { verb: "Read an email thread", icon: "mail", noun: "email thread" },
-  email_send: { verb: "Sent an email", icon: "mail" },
-  email_reply: { verb: "Replied to an email", icon: "mail" },
-  email_draft: { verb: "Saved an email draft", icon: "mail" },
-  email_label_list: { verb: "Listed Gmail labels", icon: "mail" },
-  email_update: { verb: "Updated email", icon: "mail" },
-  email_trash: { verb: "Moved email to Trash", icon: "mail" },
-  email_forward: { verb: "Sent an email forward", icon: "mail" },
-  email_attachment_save: { verb: "Saved an email attachment", icon: "mail" },
-  email_unsubscribe: { verb: "Updated an email subscription", icon: "mail" },
-
-  slack_search: { verb: "Searched Slack", icon: "slack" },
-  slack_channel: { verb: "Read a Slack channel", icon: "slack" },
-  slack_channels: { verb: "Listed Slack channels", icon: "slack" },
-  slack_dm: { verb: "Read a Slack DM", icon: "slack" },
-  slack_dms: { verb: "Listed Slack DMs", icon: "slack" },
-  slack_thread: { verb: "Read a Slack thread", icon: "slack" },
-  slack_user: { verb: "Looked up a Slack user", icon: "slack" },
-  slack_users: { verb: "Searched Slack users", icon: "slack" },
-  slack_file: { verb: "Fetched a Slack file", icon: "image" },
-  slack_post_message: { verb: "Posted to Slack", icon: "slack" },
-  slack_post_blocks: { verb: "Posted to Slack", icon: "slack" },
-
-  calendar_search: { verb: "Checked the calendar", icon: "calendar" },
-  calendar_create_event: { verb: "Created an event", icon: "calendar" },
-  calendar_edit_event: { verb: "Edited an event", icon: "calendar" },
-  calendar_delete_event: { verb: "Deleted an event", icon: "calendar" },
-  calendar_respond: { verb: "Replied to an invitation", icon: "calendar" },
-  calendar_list_calendars: { verb: "Listed calendars", icon: "calendar" },
-  calendar_free_busy: { verb: "Checked when calendars are busy", icon: "calendar" },
-
-  mac_calendar_list_calendars: { verb: "Listed calendars", icon: "calendar" },
-  mac_calendar_search: { verb: "Checked the calendar", icon: "calendar" },
-  mac_calendar_read_event: { verb: "Read an event", icon: "calendar", noun: "event" },
-  mac_calendar_create_event: { verb: "Created an event", icon: "calendar" },
-  mac_calendar_edit_event: { verb: "Edited an event", icon: "calendar" },
-  mac_calendar_delete_event: { verb: "Deleted an event", icon: "calendar" },
-  mac_reminders_list_lists: { verb: "Listed reminder lists", icon: "list" },
-  mac_reminders_search: { verb: "Checked reminders", icon: "list" },
-  mac_reminders_create: { verb: "Added a reminder", icon: "list" },
-  mac_reminders_edit: { verb: "Edited a reminder", icon: "list" },
-  mac_reminders_complete: { verb: "Updated a reminder", icon: "list" },
-  mac_reminders_delete: { verb: "Deleted a reminder", icon: "list" },
-  mac_contacts_search: { verb: "Looked up a contact", icon: "search" },
-  mac_contacts_read: { verb: "Read a contact", icon: "search", noun: "contact" },
-
-  wiki_search: { verb: "Searched memory", icon: "book" },
-  wiki_read_page: { verb: "Read a page", icon: "book", noun: "page" },
-  wiki_list_pages: { verb: "Listed pages", icon: "book" },
-  wiki_links: { verb: "Read memory links", icon: "book" },
-  wiki_page_history: { verb: "Read a page's history", icon: "book" },
-  wiki_list_changes: { verb: "Listed memory changes", icon: "book" },
-  wiki_list_collections: { verb: "Listed memory collections", icon: "book" },
-  wiki_create_page: { verb: "Saved to memory", icon: "brain" },
-  wiki_edit_page: { verb: "Edited memory", icon: "brain" },
-  wiki_patch_page: { verb: "Edited memory", icon: "brain" },
-  wiki_apply_patch_set: { verb: "Edited memory", icon: "brain" },
-  wiki_archive_page: {
-    verb: "Archived a memory page",
-    icon: "brain",
-    many: "Archived memory pages"
-  },
-  wiki_move_page: { verb: "Moved a memory page", icon: "brain", many: "Moved memory pages" },
-  wiki_restore_page: {
-    verb: "Restored a memory page",
-    icon: "brain",
-    many: "Restored memory pages"
-  },
-  wiki_create_directory: {
-    verb: "Created a memory folder",
-    icon: "brain",
-    many: "Created memory folders"
-  },
-  wiki_configure_reports: { verb: "Set up memory reports", icon: "brain" },
-  wiki_publish_report: {
-    verb: "Published a memory report",
-    icon: "brain",
-    many: "Published memory reports"
-  },
-
-  session_search_transcripts: { verb: "Searched transcripts", icon: "history" },
-  session_read: { verb: "Read a chat", icon: "history" },
-  session_list: { verb: "Listed chats", icon: "history" },
-
-  automation_blocked: { verb: "Reported a blocker", icon: "clock" },
-  automation_create: { verb: "Created an automation", icon: "clock", many: "Created automations" },
-  automation_update: { verb: "Updated an automation", icon: "clock", many: "Updated automations" },
-  automation_delete: { verb: "Deleted an automation", icon: "clock", many: "Deleted automations" },
-  automation_list: { verb: "Listed automations", icon: "clock" },
-  automation_list_runs: { verb: "Listed automation runs", icon: "clock" },
-  automation_run: { verb: "Ran an automation", icon: "clock", many: "Ran automations" },
-  automation_diagnose: {
-    verb: "Checked an automation",
-    icon: "clock",
-    many: "Checked automations"
-  },
-
-  agent_message: {
-    verb: "Messaged an agent",
-    icon: "dot",
-    many: "Messaged agents",
-    activity: "internal"
-  },
-  forward_message: { verb: "Forwarded a message", icon: "dot", many: "Forwarded messages" },
-  report: { verb: "Reported back", icon: "dot" },
-  post_message: { verb: "Posted a message", icon: "dot" },
-  run_inspect: { verb: "Checked a run", icon: "dot", many: "Checked runs" },
-  run_no_change: { verb: "Reported no change", icon: "dot" },
-  workflow_get: { verb: "Checked a workflow", icon: "list", many: "Checked workflows" },
-  workflow_retry: { verb: "Retried a workflow", icon: "list", many: "Retried workflows" },
-  workflow_cancel: { verb: "Stopped a workflow", icon: "list", many: "Stopped workflows" },
-  goal_get: { verb: "Checked the goal", icon: "list" },
-  goal_create: { verb: "Set a goal", icon: "list", many: "Set goals" },
-  goal_update: { verb: "Updated the goal", icon: "list" },
-  goal_complete: { verb: "Completed the goal", icon: "list" },
-  goal_block: { verb: "Marked the goal blocked", icon: "list" },
-  claim_record: { verb: "Recorded a claim", icon: "list", many: "Recorded claims" },
-  claim_check: { verb: "Checked claims", icon: "list" },
-  claim_review: { verb: "Reviewed claims", icon: "list" },
-  evidence_record: { verb: "Recorded evidence", icon: "list" },
-
-  session_send_message: {
-    verb: "Sent a message to a chat",
-    icon: "dot",
-    many: "Sent messages to chats"
-  },
-  session_create: { verb: "Started a chat", icon: "dot", many: "Started chats" },
-  session_rename: { verb: "Renamed a chat", icon: "dot", many: "Renamed chats" },
-  session_archive: { verb: "Archived chats", icon: "dot" },
-  session_move: { verb: "Moved a chat", icon: "dot", many: "Moved chats" },
-  set_chat_summary: { verb: "Saved the chat summary", icon: "dot" },
-
-  space_list: { verb: "Listed Spaces", icon: "list" },
-  space_create: { verb: "Created a Space", icon: "list", many: "Created Spaces" },
-  space_board_read: { verb: "Read the Space board", icon: "list" },
-  space_page_read: { verb: "Read a Space page", icon: "list", many: "Read Space pages" },
-  space_page_create: { verb: "Wrote a Space page", icon: "list", many: "Wrote Space pages" },
-  space_page_write: { verb: "Wrote a Space page", icon: "list", many: "Wrote Space pages" },
-  space_page_patch: { verb: "Edited a Space page", icon: "list", many: "Edited Space pages" },
-  space_settings_update: { verb: "Updated Space settings", icon: "list" },
-  space_archive: { verb: "Archived a Space", icon: "list", many: "Archived Spaces" },
-  task_get: { verb: "Checked a Task", icon: "list", many: "Checked Tasks" },
-  task_start: { verb: "Started a Task", icon: "list", many: "Started Tasks" },
-  task_update: { verb: "Updated a Task", icon: "list", many: "Updated Tasks" },
-  task_wait: { verb: "Set a Task to wait", icon: "list", many: "Set Tasks to wait" },
-  task_finish: { verb: "Finished a Task", icon: "list", many: "Finished Tasks" },
-  task_comment: { verb: "Commented on a Task", icon: "list", many: "Commented on Tasks" },
-  task_follow: { verb: "Followed a Task here", icon: "list", many: "Followed Tasks here" },
-  task_move_here: { verb: "Moved a Task here", icon: "list", many: "Moved Tasks here" },
-  task_save_result: { verb: "Saved a Task report", icon: "list", many: "Saved Task reports" },
-  task_propose: { verb: "Proposed a Task", icon: "list", many: "Proposed Tasks" },
-  task_undo: { verb: "Undid a proposed Task", icon: "list", many: "Undid proposed Tasks" },
-  space_task_create: { verb: "Created a Task", icon: "list", many: "Created Tasks" },
-  space_task_update: { verb: "Updated a Task", icon: "list", many: "Updated Tasks" },
-  space_task_comment: { verb: "Commented on a Task", icon: "list", many: "Commented on Tasks" },
-  space_task_follow: { verb: "Followed a Task here", icon: "list", many: "Followed Tasks here" },
-  space_task_save_result: { verb: "Saved a Task report", icon: "list", many: "Saved Task reports" },
-  space_task_infer: { verb: "Proposed a Task", icon: "list", many: "Proposed Tasks" },
-  space_task_undo: { verb: "Undid a proposed Task", icon: "list", many: "Undid proposed Tasks" },
-  space_inference_review: { verb: "Reviewed proposed work", icon: "list" },
-  space_review_finish: { verb: "Finished a Space review", icon: "list" },
-
-  skill_list: { verb: "Listed skills", icon: "wrench" },
-  skill_create: { verb: "Created a skill", icon: "wrench", many: "Created skills" },
-  skill_update: { verb: "Updated a skill", icon: "wrench", many: "Updated skills" },
-  directives_get: { verb: "Read your directives", icon: "list" },
-  directives_set: { verb: "Updated your directives", icon: "list" },
-  usage_limits: { verb: "Checked plan limits", icon: "clock" },
-  usage_report: { verb: "Read usage", icon: "clock" },
-  model_catalog: { verb: "Listed models", icon: "wrench" },
-  google_accounts_list: { verb: "Listed Google accounts", icon: "wrench" },
-  capability_propose: {
-    verb: "Proposed a capability",
-    icon: "wrench",
-    many: "Proposed capabilities"
-  },
-  app_open: { verb: "Opened it in Arden", icon: "dot" },
-  artifact_save: { verb: "Saved an artifact", icon: "dot", many: "Saved artifacts" },
-  artifact_export: { verb: "Exported an artifact", icon: "dot", many: "Exported artifacts" },
-  artifact_delete: { verb: "Deleted an artifact", icon: "dot", many: "Deleted artifacts" },
-
-  browser_open: { verb: "Opened a page", icon: "browser", many: "Opened pages" },
-  browser_act: { verb: "Used the browser", icon: "browser" },
-  browser_upload: { verb: "Uploaded a file", icon: "browser", many: "Uploaded files" },
-  browser_permission: { verb: "Set a site permission", icon: "browser" },
-  browser_ask_secret: { verb: "Saved a site password", icon: "browser" },
-  vault_list: { verb: "Listed the Vault", icon: "dot" },
-  vault_use_key: { verb: "Used a saved key", icon: "dot" },
-  vault_ask_key: { verb: "Added a key", icon: "dot" },
-  vault_pay: { verb: "Used a saved card", icon: "dot" },
-  vault_allow_payment_frame: { verb: "Checked a payment form", icon: "dot" },
-  vault_checkout: { verb: "Used a saved card", icon: "browser" },
-  browser_snapshot: { verb: "Read the page", icon: "browser", many: "Read pages" },
-  browser_screenshot: { verb: "Took a screenshot", icon: "image", many: "Took screenshots" },
-  browser_tabs: { verb: "Checked browser tabs", icon: "browser" },
-  browser_wait: { verb: "Waited for the page", icon: "browser" },
-  browser_task: { verb: "Worked through the page", icon: "browser" },
-  browser_close: { verb: "Closed a tab", icon: "browser", many: "Closed tabs" },
-
-  drive_search: { verb: "Searched Google Drive", icon: "search" },
-  drive_read_doc: { verb: "Read a Google Doc", icon: "file", many: "Read Google Docs" },
-  drive_read_sheet: { verb: "Read a Google Sheet", icon: "table", many: "Read Google Sheets" },
-  drive_list_doc_tabs: { verb: "Listed doc tabs", icon: "file" },
-  drive_create_doc: {
-    verb: "Created a Google Doc",
-    icon: "file-plus",
-    many: "Created Google Docs"
-  },
-  drive_create_sheet: {
-    verb: "Created a Google Sheet",
-    icon: "file-plus",
-    many: "Created Google Sheets"
-  },
-  drive_edit_doc: { verb: "Edited a Google Doc", icon: "edit", many: "Edited Google Docs" },
-
-  browser_history_summary: { verb: "Read browser history", icon: "clock" },
-  agent_knowledge_scan: { verb: "Looked for notes from other assistants", icon: "search" },
-  agent_knowledge_import: { verb: "Imported notes", icon: "brain" },
-  agent_knowledge_digest: { verb: "Read notes from other assistants", icon: "brain" },
-  approval_mode_set: { verb: "Set how I ask", icon: "wrench" },
-  onboarding_finish: { verb: "Finished getting started", icon: "dot" },
-  show_tour: { verb: "Showed you around", icon: "dot" },
-  google_client_import: { verb: "Saved your Google key", icon: "wrench" }
-}
 
 /** `ask_user` and `permission_offer`: the question card is the call's visible
  *  result, drawn by the transcript on its own, so the trail neither draws nor
@@ -304,14 +50,11 @@ export function isAskCall(kind: string | undefined): boolean {
   return kind !== undefined && ASK_CALLS.has(kind.toLowerCase())
 }
 
-export function isPublicActivityTool({
-  name,
-  presentation
-}: {
-  name: string
-  presentation?: "work" | "conversation" | "status" | undefined
-}): boolean {
-  return presentation !== "status" && toolMeta(name)?.activity !== "internal"
+export function isPublicActivityTool(
+  name: string,
+  presentation: "work" | "conversation" | "status" | undefined
+): boolean {
+  return presentation !== "status" && !INTERNAL_TOOLS.has(name.toLowerCase())
 }
 
 /** The registry entry for a tool name, if the tool is one the app knows. The
@@ -319,6 +62,21 @@ export function isPublicActivityTool({
  *  own words or falls back to "Called tools". */
 export function toolMeta(kind: string | undefined): ToolMeta | undefined {
   return kind ? TOOL_META[kind.toLowerCase()] : undefined
+}
+
+export function toolNoun(kind: string): string | null {
+  const words = TOOL_GROUP_WORDS[kind.toLowerCase()]
+  return words?.kind === TOOL_GROUP.noun ? words.noun : null
+}
+
+export function toolManyWords(kind: string): VerbPhrase | undefined {
+  const words = TOOL_GROUP_WORDS[kind.toLowerCase()]
+  return words?.kind === TOOL_GROUP.many ? words.many : undefined
+}
+
+export interface ToolNaming {
+  readonly name: string
+  readonly displayName: string | null
 }
 
 const PREFIX_ICON: ReadonlyArray<readonly [RegExp, StepIconKey]> = [
@@ -346,7 +104,7 @@ const VERB_RULES: ReadonlyArray<readonly [RegExp, string, StepIconKey]> = [
   [/\brun\b|\bexec\b|\bbash\b/, "Ran", "terminal"]
 ]
 
-function humanize(s: string | undefined): string | null {
+function humanize(s: string | null): string | null {
   if (!s) return null
   const spaced = s
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -386,10 +144,11 @@ function iconFrom(lookup: ReturnType<typeof toolMetaFor>): StepIconKey {
 
 /** A tool's own verb, glyph and grouping noun from its name, then its
  *  display name, then its name's shape. */
-export function toolKindLabel(tool: {
-  readonly name: string | undefined
-  readonly displayName: string | undefined
-}): { verb: string; iconKey: StepIconKey; noun: string | null } {
+export function toolKindLabel(tool: ToolNaming): {
+  verb: string
+  iconKey: StepIconKey
+  noun: string | null
+} {
   const lookup = toolMetaFor(tool.name)
   return {
     verb:
@@ -399,16 +158,13 @@ export function toolKindLabel(tool: {
       humanize(tool.name) ??
       "Tool",
     iconKey: iconFrom(lookup),
-    noun: lookup.meta?.noun ?? null
+    noun: toolNoun(tool.name)
   }
 }
 
 /** What the reader calls a tool the app has no verb for: its own display
  *  name, or its name — never a bare "a tool". */
-export function namedTool(tool: {
-  readonly name: string | undefined
-  readonly displayName: string | undefined
-}): string {
+export function namedTool(tool: ToolNaming): string {
   return humanize(tool.displayName) ?? humanize(tool.name) ?? "a tool"
 }
 
@@ -485,7 +241,7 @@ const VERB_FORMS = {
 
 type PastVerb = keyof typeof VERB_FORMS
 
-type VerbPhrase = PastVerb | `${PastVerb} ${string}`
+export type VerbPhrase = PastVerb | `${PastVerb} ${string}`
 
 function verbIn(verb: string, state: "waiting" | "running"): string {
   const space = verb.indexOf(" ")

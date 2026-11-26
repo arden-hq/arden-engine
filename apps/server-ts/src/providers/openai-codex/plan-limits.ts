@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import type { PlanCredits } from "@arden-hq/protocol/runs"
+import type { StoredPlanCredits as PlanCredits } from "../../models/plan-limits-shape.js"
 import type { PlanLimitsSource, PlanReading, PlanWindowReading } from "../../models/plan-limits.js"
 import { currentMillis } from "../../runtime/clock.js"
 

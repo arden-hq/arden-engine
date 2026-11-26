@@ -1,7 +1,7 @@
-import { AgentResultSchema } from "@arden-hq/protocol/effect/chat"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { previewLine } from "../transcript/preview-line.js"
+import { StoredAgentResultSchema } from "../transcript/interaction.js"
 import type { Statement } from "effect/unstable/sql/Statement"
 import type { Row } from "effect/unstable/sql/SqlConnection"
 
@@ -26,7 +26,7 @@ export const agentResultPresentation = Effect.fn(function* (
     LIMIT 1`
   const row = rows[0]
   if (row === undefined) return undefined
-  const result = yield* Schema.decodeUnknownEffect(AgentResultSchema)(row)
+  const result = yield* Schema.decodeUnknownEffect(StoredAgentResultSchema)(row)
   const preview = previewLine(result.content)
   return preview === null ? result : { ...result, preview }
 })

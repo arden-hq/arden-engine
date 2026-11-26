@@ -2,6 +2,7 @@ import {
   feedsActivityTriggers,
   type TriggerFeedRecord
 } from "../persistence/automations/triggers.js"
+import { LINK } from "@arden-hq/protocol"
 import type { SessionLifecycleDelivery } from "../persistence/sessions/events.js"
 
 export const triggerFeedRecord = (
@@ -22,8 +23,11 @@ export const triggerFeedRecord = (
   if (
     event.type === "session_activity" &&
     feedsActivityTriggers({
-      sessionType: event.session.session_type ?? "chat",
-      originAutomationId: event.session.origin_automation_id ?? null
+      sessionType: event.session.session_type,
+      originAutomationId:
+        event.session.origin_automation.kind === LINK.automation
+          ? event.session.origin_automation.automation_id
+          : null
     })
   ) {
     return { ...base, kind: "activity", sessionId: event.session.session_id }

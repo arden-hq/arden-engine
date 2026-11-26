@@ -1,3 +1,6 @@
+import type { RetirementSourceRecord } from "../work/task-record.js"
+import { type TaskSourceRecord } from "../work/task-record.js"
+import { type KeyedTaskDraft } from "../work/task-input.js"
 import type { RecordedHistoryInput, RecordedHistoryPage } from "../history.js"
 import { storeReasons } from "../errors.js"
 import type {
@@ -6,14 +9,9 @@ import type {
   TaskProposal,
   TaskProposalList,
   TaskProposalReview,
-  TaskProposalScope,
-  TaskProposalRetirementSource
+  TaskProposalScope
 } from "@arden-hq/protocol/proposals"
-import type {
-  CreateSpaceTaskInput,
-  SpaceTaskCaptureInput,
-  SpaceTaskSource
-} from "@arden-hq/protocol/spaces/work"
+import type { SpaceTaskCaptureInput } from "@arden-hq/protocol/spaces/work"
 import { Context, Effect, Schema } from "effect"
 import type { TaskProposalConflictError } from "./conflict.js"
 
@@ -22,9 +20,9 @@ export interface ProposeSpaceTaskInput {
   readonly runId: string
   readonly sessionId: string
   readonly toolCallId: string
-  readonly input: CreateSpaceTaskInput
+  readonly input: KeyedTaskDraft
   readonly capture: SpaceTaskCaptureInput
-  readonly sources: ReadonlyArray<SpaceTaskSource>
+  readonly sources: ReadonlyArray<TaskSourceRecord>
   readonly inferenceSnapshot: string
 }
 
@@ -36,7 +34,7 @@ export interface RetireTaskProposalInput {
   readonly expectedRevision: number
   readonly snapshot: string
   readonly reason: string
-  readonly sources: ReadonlyArray<TaskProposalRetirementSource>
+  readonly sources: ReadonlyArray<RetirementSourceRecord>
 }
 
 export interface TaskProposalSettlementAuthority {
@@ -65,9 +63,9 @@ export interface ReviseTaskProposalInput {
   readonly runId: string
   readonly sessionId: string
   readonly toolCallId: string
-  readonly input: Omit<CreateSpaceTaskInput, "key">
+  readonly input: Omit<KeyedTaskDraft, "key">
   readonly capture: SpaceTaskCaptureInput
-  readonly sources: ReadonlyArray<SpaceTaskSource>
+  readonly sources: ReadonlyArray<TaskSourceRecord>
   readonly inferenceSnapshot: string
 }
 

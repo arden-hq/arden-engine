@@ -1,12 +1,38 @@
 import { countOf } from "@arden-hq/std/count"
 import type { Automation } from "@arden-hq/protocol/automations"
-import { effectiveBackgroundLimit } from "@arden-hq/protocol/settings"
+import {
+  effectiveBackgroundLimit,
+  LIMIT_SETTINGS_CHANGE,
+  PLAN_STOP,
+  TOKEN_CAP,
+  type AutomationLimit,
+  type PlanStop,
+  type TokenCap
+} from "@arden-hq/protocol/settings"
 import { Effect } from "effect"
 import type { LimitSettingsStore } from "../persistence/settings/store.js"
+import { capTokens, stopPercent } from "../models/plan-limits.js"
 import { toolFailure } from "./tool-failure.js"
 
-const keep = (given: number | null | undefined, previous: number | null | undefined) =>
-  given === undefined ? (previous ?? null) : given
+const UNLIMITED: AutomationLimit = {
+  pause: { kind: PLAN_STOP.unlimited },
+  cap: { kind: TOKEN_CAP.uncapped }
+}
+
+const pauseOf = (percent: number | null): PlanStop =>
+  percent === null ? { kind: PLAN_STOP.unlimited } : { kind: PLAN_STOP.at, percent }
+
+const capOf = (tokens: number | null): TokenCap =>
+  tokens === null ? { kind: TOKEN_CAP.uncapped } : { kind: TOKEN_CAP.capped, tokens }
+
+const nextLimit = (
+  previous: AutomationLimit,
+  pause: number | null | undefined,
+  cap: number | null | undefined
+): AutomationLimit => ({
+  pause: pause === undefined ? previous.pause : pauseOf(pause),
+  cap: cap === undefined ? previous.cap : capOf(cap)
+})
 
 export const setAutomationLimits = async (
   limits: LimitSettingsStore["Service"],
@@ -32,23 +58,23 @@ export const setAutomationLimits = async (
   const before = await Effect.runPromise(limits.settings().pipe(Effect.mapError(failure)), {
     signal: input.signal
   })
-  const previous = before.automationLimits[automation.task_id]
+  const previous = before.automationLimits[automation.task_id] ?? UNLIMITED
   const settings = await Effect.runPromise(
     limits
-      .updateSettings({
-        automationLimit: {
-          automationId: automation.task_id,
-          pauseAtPercent: keep(input.pause_at_percent, previous?.pauseAtPercent),
-          maxTokensPerRun: keep(input.max_tokens_per_run, previous?.maxTokensPerRun)
+      .updateSettings([
+        {
+          kind: LIMIT_SETTINGS_CHANGE.automationLimit,
+          automation: automation.task_id,
+          value: nextLimit(previous, input.pause_at_percent, input.max_tokens_per_run)
         }
-      })
+      ])
       .pipe(Effect.mapError(failure)),
     { signal: input.signal }
   )
-  const own = settings.automationLimits[automation.task_id]
-  const background = effectiveBackgroundLimit(settings)
-  const ownPause = own?.pauseAtPercent ?? undefined
-  const ownCap = own?.maxTokensPerRun ?? undefined
+  const own = settings.automationLimits[automation.task_id] ?? UNLIMITED
+  const background = stopPercent(effectiveBackgroundLimit(settings)) ?? null
+  const ownPause = stopPercent(own.pause)
+  const ownCap = capTokens(own.cap)
   const pause = (): string => {
     if (background === null)
       return ownPause === undefined

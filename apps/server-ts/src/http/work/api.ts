@@ -13,8 +13,8 @@ import {
   SpaceTaskCommentSchema,
   SpaceTaskSchema,
   SpaceWorkPageQuerySchema,
+  UpdateSpaceTaskRequestSchema,
   SpaceWorkPageSchema,
-  InternalUpdateSpaceTaskRequestSchema,
   MoveTaskToChatInputSchema,
   StopSpaceTaskInputSchema,
   StopSpaceTaskResponseSchema,
@@ -24,7 +24,7 @@ import {
   HomePresenceInputSchema,
   HomePresenceResponseSchema,
   ResolveRunQuestionInputSchema,
-  RunQuestionListOptionsSchema,
+  RunQuestionListQuerySchema,
   RunQuestionListSchema,
   RunQuestionSchema,
   WorkerAttemptPageQuerySchema,
@@ -75,7 +75,7 @@ export class WorkApi extends HttpApiGroup.make("work", { topLevel: true }).add(
     error: storeErrors
   }),
   HttpApiEndpoint.get("questions", "/chat/questions", {
-    query: RunQuestionListOptionsSchema,
+    query: RunQuestionListQuerySchema,
     success: RunQuestionListSchema,
     error: storeErrors
   }),
@@ -135,7 +135,7 @@ export class WorkApi extends HttpApiGroup.make("work", { topLevel: true }).add(
   }),
   HttpApiEndpoint.patch("update", "/spaces/work/:itemId", {
     params: { itemId: Schema.NonEmptyString },
-    payload: InternalUpdateSpaceTaskRequestSchema,
+    payload: UpdateSpaceTaskRequestSchema,
     success: SpaceTaskSchema,
     error: [
       StoreInvalid,

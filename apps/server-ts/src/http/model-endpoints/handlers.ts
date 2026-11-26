@@ -8,6 +8,7 @@ import {
   modelEndpointsResponse
 } from "@arden-hq/protocol/effect/model-endpoints"
 import { SEARCH_ENDPOINT_MODEL_ID } from "@arden-hq/protocol/model-endpoints"
+import { isEmbeddingSearchStopped } from "@arden-hq/protocol/embeddings"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
@@ -52,7 +53,7 @@ export const ModelEndpointHandlers = HttpApiBuilder.group(
     const embeddings = yield* WikiEmbeddingIndex
     const searchUsesEndpoint = embeddings.status().pipe(
       Effect.map(
-        (status) => status.state !== "idle" && status.modelId === SEARCH_ENDPOINT_MODEL_ID
+        (status) => !isEmbeddingSearchStopped(status) && status.modelId === SEARCH_ENDPOINT_MODEL_ID
       ),
       Effect.orElseSucceed(() => false)
     )

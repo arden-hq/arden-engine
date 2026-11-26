@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -86,7 +87,7 @@ it("the kickoff admission checks the chat and writes the mark in one step", asyn
       const busy = yield* sessions.create({ name: "Busy", spaceId: main })
       const archived = yield* sessions.create({ name: "Old", spaceId: main })
       const moved = yield* sessions.create({ name: "Moved", spaceId: main })
-      const work = yield* spaces.create({ name: "Work" })
+      const work = yield* spaces.create({ name: "Work", instructions: { kind: "unwritten" } })
       yield* ownerTurn(busy.sessionId, "turn-between")
       yield* sql`UPDATE sessions SET archived_at = ${AT} WHERE session_id = ${archived.sessionId}`
       yield* sessions.moveToSpace(moved.sessionId, work.space_id)
@@ -232,9 +233,13 @@ it("the onboarding route starts once in Main, answers 404 for an unknown chat an
       readonly spaces: ReadonlyArray<{ readonly space_id: string; readonly kind: string }>
     }
     const main = spaces.spaces.find((space) => space.kind === "main")?.space_id
-    const work = (await post("/spaces", { name: "Work" })) as { readonly space_id: string }
-    const inMain = (await post("/sessions", { space_id: main })) as { readonly session_id: string }
-    const outside = (await post("/sessions", { space_id: work.space_id })) as {
+    const work = (await post("/spaces", { name: "Work", instructions: { kind: "unwritten" } })) as {
+      readonly space_id: string
+    }
+    const inMain = (await post("/sessions", newChat({ spaceId: main }))) as {
+      readonly session_id: string
+    }
+    const outside = (await post("/sessions", newChat({ spaceId: work.space_id }))) as {
       readonly session_id: string
     }
     const first = await start(inMain.session_id)

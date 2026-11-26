@@ -12,9 +12,9 @@ import type { PersistenceDeps } from "./deps.js"
 import {
   AutomationTriggersSchema,
   listenerTriggers,
-  scheduleEffect,
-  writtenTriggers
+  scheduleEffect
 } from "./automation-schedule.js"
+import { freshTriggerIds } from "@arden-hq/protocol/automations"
 import { encodeJson } from "./json.js"
 import { systemTakesTrigger } from "../automations/system-settings.js"
 import { insertSession } from "./session-insert.js"
@@ -116,7 +116,7 @@ export const specSchedule = Effect.fn("SqliteAutomationStore.specSchedule")(func
   spec: SystemAutomationSpec,
   operation: "seed_builtin" | "update"
 ) {
-  const written = yield* writtenTriggers("new", spec.triggers, operation, spec.automationId)
+  const written = freshTriggerIds(spec.triggers)
   const schedule = yield* scheduleEffect(rules, written.triggers, operation, spec.automationId)
   const triggers = yield* encodeJson(AutomationTriggersSchema, schedule.triggers).pipe(
     Effect.mapError(

@@ -1,3 +1,4 @@
+export { keptCapture } from "@arden-hq/protocol/sessions"
 import { Effect } from "effect"
 
 import type { ModelStore } from "../persistence/models/store.js"

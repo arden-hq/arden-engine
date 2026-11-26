@@ -1,6 +1,6 @@
 import type { ChatRunningWork } from "../sessions/contracts.js"
 import type { JsonRecord } from "../common/json.js"
-import type { SpaceSnapshot, SpaceTaskStatus } from "./work/contracts.js"
+import type { SpaceSnapshot, SpaceTaskOwner, SpaceTaskStatus } from "./work/contracts.js"
 
 export type SpaceApprovalMode = "read_only" | "ask" | "safe" | "allow"
 
@@ -31,54 +31,102 @@ export type SpaceMarkColour = (typeof SPACE_MARK_COLOURS)[number]
 export const SPACE_MARK_MEDIA = ["pool", "swell"] as const
 export type SpaceMarkMedium = (typeof SPACE_MARK_MEDIA)[number]
 
-/** How the owner set a Space's mark. A Space without one shows the pool in its automatic colour. */
+export const MARK_COLOUR_CHOICE = { automatic: "automatic", chosen: "chosen" } as const
+
+export type SpaceMarkColourChoice =
+  | { readonly kind: "automatic" }
+  | { readonly kind: "chosen"; readonly colour: SpaceMarkColour }
+
 export interface SpaceMarkLook extends JsonRecord {
-  /** null: the colour the Space got automatically. */
-  readonly colour: SpaceMarkColour | null
+  readonly colour: SpaceMarkColourChoice
   readonly medium: SpaceMarkMedium
-  /** 0..1, from close in to far out. */
   readonly zoom: number
-  /** 0..1, from a clean lens to a prism. */
   readonly aberration: number
-  /** 0..1, from haze to hairline. */
   readonly focus: number
 }
+
+export const SPACE_MARK = { automatic: "automatic", set: "set" } as const
+
+export type SpaceMark =
+  | { readonly kind: "automatic" }
+  | { readonly kind: "set"; readonly look: SpaceMarkLook }
 
 export const SPACE_KINDS = ["ordinary", "main"] as const
 export type SpaceKind = (typeof SPACE_KINDS)[number]
 
-/** Who wrote a Space's standing instructions. Manual text is never overwritten. */
-export type SpaceInstructionsSource = "manual" | "generated"
+export const SPACE_INSTRUCTIONS = {
+  unwritten: "unwritten",
+  cleared: "cleared",
+  manual: "manual",
+  generated: "generated"
+} as const
+
+export type SpaceInstructions =
+  | { readonly kind: "unwritten" }
+  | { readonly kind: "cleared" }
+  | { readonly kind: "manual"; readonly text: string }
+  | { readonly kind: "generated"; readonly text: string }
+
+export const SPACE_PAGE = { unbound: "unbound", bound: "bound" } as const
+
+export type SpacePage =
+  | { readonly kind: "unbound" }
+  | { readonly kind: "bound"; readonly path: string }
+
+export const SPACE_STATE = { active: "active", archived: "archived" } as const
+
+export type SpaceState =
+  | { readonly kind: "active" }
+  | { readonly kind: "archived"; readonly archived_at: string }
 
 export interface Space extends JsonRecord {
   readonly inference: TaskInferencePolicy
   readonly space_id: string
   readonly kind: SpaceKind
   readonly name: string
-  readonly instructions: string | null
-  readonly instructions_source: SpaceInstructionsSource | null
-  readonly page_path: string | null
-  readonly mark: SpaceMarkLook | null
+  readonly instructions: SpaceInstructions
+  readonly page: SpacePage
+  readonly mark: SpaceMark
   readonly created_at: string
   readonly updated_at: string
-  readonly archived_at: string | null
+  readonly state: SpaceState
 }
 
 export interface SpaceListResponse extends JsonRecord {
   readonly spaces: ReadonlyArray<Space>
 }
 
+export const SPACE_INSTRUCTIONS_INPUT = {
+  unwritten: "unwritten",
+  cleared: "cleared",
+  written: "written"
+} as const
+
+export type SpaceInstructionsInput =
+  | { readonly kind: "cleared" }
+  | { readonly kind: "written"; readonly text: string }
+
 export interface CreateSpaceInput {
   readonly name: string
-  readonly instructions?: string | null
+  readonly instructions: { readonly kind: "unwritten" } | SpaceInstructionsInput
 }
 
+export const SPACE_CHANGE = { name: "name", instructions: "instructions", mark: "mark" } as const
+
+export type SpaceChange =
+  | { readonly kind: "name"; readonly name: string }
+  | { readonly kind: "instructions"; readonly instructions: SpaceInstructionsInput }
+  | { readonly kind: "mark"; readonly mark: SpaceMark }
+
+export const SPACE_EXPECTED = { latest: "latest", at: "at" } as const
+
+export type SpaceExpectedVersion =
+  | { readonly kind: "latest" }
+  | { readonly kind: "at"; readonly updated_at: string }
+
 export interface UpdateSpaceInput {
-  readonly expected_updated_at?: string
-  readonly name?: string
-  readonly instructions?: string | null
-  readonly page_path?: string | null
-  readonly mark?: SpaceMarkLook | null
+  readonly expected: SpaceExpectedVersion
+  readonly changes: ReadonlyArray<SpaceChange>
 }
 
 export interface SpaceArchiveResponse extends JsonRecord {
@@ -92,11 +140,17 @@ export interface SpaceEndConflict extends JsonRecord {
   readonly chats: ReadonlyArray<{ readonly name: string; readonly running: ChatRunningWork }>
 }
 
+export const LETTER_SUBJECT = { none: "none", given: "given" } as const
+
+export type LetterSubject =
+  | { readonly kind: "none" }
+  | { readonly kind: "given"; readonly subject: string }
+
 export interface SpaceUnseen extends JsonRecord {
   readonly at: string
   readonly session_id: string
   readonly line: string
-  readonly subject: string | null
+  readonly subject: LetterSubject
 }
 
 export interface SpaceUnseenEntry extends SpaceUnseen {
@@ -104,34 +158,51 @@ export interface SpaceUnseenEntry extends SpaceUnseen {
   readonly space_title: string
 }
 
+export const SPACE_UNSEEN = { caught_up: "caught_up", unseen: "unseen" } as const
+
+export type SpaceUnseenState =
+  | { readonly kind: "caught_up" }
+  | ({ readonly kind: "unseen" } & SpaceUnseen)
+
+export const LAST_LINE = { none: "none", line: "line" } as const
+
+export type LastLine = { readonly kind: "none" } | { readonly kind: "line"; readonly text: string }
+
 export interface SpaceSummary extends JsonRecord {
   readonly updated_at: string
   readonly key: string
   readonly kind: SpaceKind
   readonly title: string
-  readonly page_path: string | null
+  readonly page: SpacePage
   readonly live: boolean
   readonly pinned: boolean
-  readonly mark: SpaceMarkLook | null
-  readonly unseen: SpaceUnseen | null
-  /** The last assistant reply from the latest conversation with a reply, flattened for the Space row. */
-  readonly last_line?: string | null
+  readonly mark: SpaceMark
+  readonly unseen: SpaceUnseenState
+  readonly last_line: LastLine
 }
 
-export interface SpaceBriefItem extends JsonRecord {
+export interface SpaceBriefDone extends JsonRecord {
   readonly space_id: string
   readonly space_title: string
   readonly stable_key: string
   readonly text: string
-  readonly status?: SpaceTaskStatus
-  readonly owner?: "worker" | "user" | "external"
-  readonly completed_at: string | null
+  readonly completed_at: string
+  readonly updated_at: string
+}
+
+export interface SpaceBriefActive extends JsonRecord {
+  readonly space_id: string
+  readonly space_title: string
+  readonly stable_key: string
+  readonly text: string
+  readonly status: SpaceTaskStatus
+  readonly owner: SpaceTaskOwner
   readonly updated_at: string
 }
 
 export interface SpacesBrief extends JsonRecord {
-  readonly done: ReadonlyArray<SpaceBriefItem>
-  readonly in_progress: ReadonlyArray<SpaceBriefItem>
+  readonly done: ReadonlyArray<SpaceBriefDone>
+  readonly in_progress: ReadonlyArray<SpaceBriefActive>
 }
 
 /** The Spaces the owner placed first, in the order they placed them; every
@@ -146,44 +217,71 @@ export interface SpacesOverview extends JsonRecord {
   readonly brief: SpacesBrief
 }
 
-/** `stale` is a live board nothing has looked at for three days: silence,
- * not failure, and the state a "ready" worker used to hide. */
 export type SpaceAgentAvailability = "ready" | "stale" | "unavailable" | "error"
 
+export const AGENT_LATEST_RUN = { none: "none", run: "run" } as const
+export const AGENT_CHECKED = { never: "never", at: "at" } as const
+export const AGENT_REPORT = { none: "none", report: "report" } as const
+export const AGENT_RUNNING = { idle: "idle", running: "running" } as const
+export const AGENT_ERROR = { none: "none", failed: "failed" } as const
+
 export interface SpaceAgentStatus extends JsonRecord {
-  readonly latest_run_id: string | null
-  readonly last_checked: string | null
-  readonly next_check: string | null
-  readonly last_report: string | null
+  readonly latest_run: { readonly kind: "none" } | { readonly kind: "run"; readonly run_id: string }
+  readonly last_checked: { readonly kind: "never" } | { readonly kind: "at"; readonly at: string }
+  readonly last_report:
+    | { readonly kind: "none" }
+    | { readonly kind: "report"; readonly text: string }
   readonly woken_by: ReadonlyArray<string>
   readonly runs_today: number
   readonly runs_cap: number
-  readonly running_since: string | null
+  readonly running: { readonly kind: "idle" } | { readonly kind: "running"; readonly since: string }
   readonly availability: SpaceAgentAvailability
-  readonly last_error: string | null
+  readonly last_error:
+    | { readonly kind: "none" }
+    | { readonly kind: "failed"; readonly error: string }
 }
 
-/** Minimal fields required from the larger session-list projection. */
+export const SPACE_AGENT = { off: "off", on: "on" } as const
+
+export type SpaceAgent =
+  | { readonly kind: "off" }
+  | { readonly kind: "on"; readonly status: SpaceAgentStatus }
+
+export const SESSION_NAME = { untitled: "untitled", named: "named" } as const
+
+export type SessionName =
+  | { readonly kind: "untitled" }
+  | { readonly kind: "named"; readonly name: string }
+
+export const CHAT_SUMMARY = { unsummarized: "unsummarized", summarized: "summarized" } as const
+
+export type ChatSummaryState =
+  | { readonly kind: "unsummarized" }
+  | { readonly kind: "summarized"; readonly text: string }
+
 export interface SpaceSession extends JsonRecord {
   readonly session_id: string
-  /** The chat's `arden:session/` reference, which tools and links take. */
-  readonly session_ref?: string
-  readonly name: string | null
-  /** The assistant's last message as one plain line, for the Space page's chat rows; null when it has none. */
-  readonly last_line?: string | null
-  /** What the chat covered, from its Chat summary; absent until it has one. */
-  readonly summary?: string | null
-  readonly last_activity?: string
+  readonly session_ref: string
+  readonly name: SessionName
+  readonly last_line: LastLine
+  readonly summary: ChatSummaryState
+  readonly last_activity: string
 }
 
+export const SPACE_CONVERSATION = { unopened: "unopened", opened: "opened" } as const
+
+export type SpaceConversation =
+  | { readonly kind: "unopened" }
+  | { readonly kind: "opened"; readonly session_id: string }
+
 export interface SpaceDetail extends JsonRecord {
-  readonly conversation_session_id: string | null
+  readonly conversation: SpaceConversation
   readonly inference: TaskInferencePolicy
   readonly key: string
   readonly title: string
-  readonly page_path: string | null
-  readonly instructions: string | null
-  readonly agent: SpaceAgentStatus | null
+  readonly page: SpacePage
+  readonly instructions: SpaceInstructions
+  readonly agent: SpaceAgent
   readonly sessions: ReadonlyArray<SpaceSession>
   readonly work: SpaceSnapshot
 }

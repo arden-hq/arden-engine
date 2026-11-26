@@ -1,17 +1,21 @@
 import { abortAfter } from "@arden-hq/std/timer"
+import { latestChats, oneSession } from "./session-list.js"
+import { newChat, wholeFork } from "./session-requests.js"
+import { receiptFromRun, type ReceiptResult, type ReceiptRun } from "./run-receipt-detail.js"
+import { nameText, runIsActive, spaceIdOf } from "@arden-hq/protocol/sessions"
 import {
   HeadlessHttpError,
   HeadlessTimeoutError,
   type HeadlessRunEvent,
   type RunDetail,
-  type RunTerminalResult,
   type SubmittedRun
 } from "@arden-hq/headless"
+import { runMessage, type OutputSchema } from "./run-message.js"
 import {
+  CANCEL_TARGET,
   CHAT_MESSAGE_MAX_LENGTH,
   type ChatApprovalMode,
-  type ChatImageInput,
-  type ChatMessageInput
+  type ChatImageInput
 } from "@arden-hq/protocol/chat"
 import { CONFIGURED_SERVER_EXIT } from "@arden-hq/protocol/daemon"
 import { extname } from "node:path"
@@ -85,12 +89,12 @@ export interface CommandReceiptV1 {
   readonly client_id: string | null
   readonly run_status: RunDetail["status"] | null
   /** The model the Run ran on, as the server names it (llama.cpp, OpenRouter: the server's own id). */
-  readonly model_id: RunDetail["model_id"]
-  readonly reasoning_effort: RunDetail["reasoning_effort"]
+  readonly model_id: ReceiptRun["model_id"]
+  readonly reasoning_effort: ReceiptRun["reasoning_effort"]
   /** The server's terminal result as it sent it. Its `cost` is the dollars the
    *  provider reported for the Run's model requests, absent when it reported
    *  none (llama.cpp, Codex): never an estimate (see the CLI README). */
-  readonly result: RunTerminalResult | null
+  readonly result: ReceiptResult | null
   readonly error: CommandReceiptError | null
   readonly declined: ReadonlyArray<DeclinedRequest>
 }
@@ -153,45 +157,6 @@ export const invalidInputReceipt = (
   command: CommandReceiptV1["command"],
   message: string
 ): CommandReceiptV1 => failedReceipt(command, { code: "invalid_input", message }, { exitCode: 2 })
-
-const receiptFromRun = (
-  command: CommandReceiptV1["command"],
-  detail: RunDetail,
-  declined: ReadonlyArray<DeclinedRequest>
-): CommandReceiptV1 => {
-  const base = {
-    version: 1,
-    type: "command_receipt",
-    command,
-    run_id: detail.run_id,
-    session_id: detail.session_id,
-    client_id: detail.client_id,
-    run_status: detail.status,
-    model_id: detail.model_id,
-    reasoning_effort: detail.reasoning_effort,
-    declined
-  } as const
-  if (detail.status === "completed" && detail.result !== null) {
-    return { ...base, status: "completed", exit_code: 0, result: detail.result, error: null }
-  }
-
-  const error = detail.error ?? {
-    code: detail.status === "completed" ? "missing_result" : detail.status,
-    message:
-      detail.stop_reason ??
-      (detail.status === "completed"
-        ? "Completed Run has no terminal result"
-        : `Run ended with status ${detail.status}`)
-  }
-  return {
-    ...base,
-    status:
-      detail.status === "cancelled" || detail.status === "interrupted" ? detail.status : "failed",
-    exit_code: 1,
-    result: null,
-    error
-  }
-}
 
 const progressWriter = (
   dependencies: CliDependencies,
@@ -276,8 +241,6 @@ const readImages = (
     })
   )
 
-type OutputSchema = NonNullable<ChatMessageInput["outputSchema"]>
-
 const isJsonObject = (value: unknown): value is OutputSchema =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -335,24 +298,21 @@ const resolveSession = async (
     case "existing":
       return { sessionId: target.sessionId, created: false }
     case "latest": {
-      const page = await client.listSessions({ scope: "primary", sort: "activity", limit: 1 })
+      const page = await client.listSessions(latestChats(1))
       const latest = page.sessions[0]
       if (latest === undefined) throw new UsageError("There is no chat to continue")
       return { sessionId: latest.session_id, created: false }
     }
     case "fork":
       return {
-        sessionId: (await client.branchSession(target.sessionId)).session_id,
+        sessionId: (await client.branchSession(target.sessionId, wholeFork)).session_id,
         created: false
       }
     case "new": {
       if (target.model !== undefined) await requireModel(client, target.model)
       const spaceId =
         target.space === undefined ? undefined : await resolveSpace(client, target.space)
-      const created = await client.createSession({
-        ...(spaceId === undefined ? {} : { space_id: spaceId }),
-        ...(target.model === undefined ? {} : { chat_model: target.model })
-      })
+      const created = await client.createSession(newChat({ spaceId, model: target.model }))
       return { sessionId: created.session_id, created: true }
     }
   }
@@ -375,9 +335,9 @@ const requireModel = async (client: CliClient, model: string): Promise<void> => 
 
 const discardIfEmpty = async (client: CliClient, sessionId: string): Promise<void> => {
   try {
-    const page = await client.listSessions({ sessionIds: [sessionId], scope: "all" })
+    const page = await client.listSessions(oneSession(sessionId))
     const session = page.sessions.find((candidate) => candidate.session_id === sessionId)
-    if (session === undefined || session.message_count > 0 || session.is_active) return
+    if (session === undefined || session.message_count > 0 || runIsActive(session.run)) return
     await client.deleteSession(sessionId)
   } catch {}
 }
@@ -502,7 +462,7 @@ export const runCommand = async (
       () => new Error("Cancellation was not acknowledged within 5 seconds")
     )
     cancelPromise = client
-      .cancel({ runId: submitted.runId }, { signal: timeout.signal })
+      .cancel({ kind: CANCEL_TARGET.run, runId: submitted.runId }, { signal: timeout.signal })
       .then(
         () => undefined,
         (cause) => {
@@ -531,17 +491,10 @@ export const runCommand = async (
     if (resolved.created) unsent = resolved.sessionId
     if (interruptRequested) return stopped("interrupted", "Interrupted by SIGINT")
 
-    const accepted = await client
-      .submit({
-        sessionId,
-        message: prompt,
-        ...(images.length === 0 ? {} : { images }),
-        ...(outputSchema === undefined ? {} : { outputSchema }),
-        approvalMode: options.approvalMode
-      })
-      .catch((cause: unknown) => {
-        throw submitted403(cause, options.approvalMode)
-      })
+    const message = runMessage({ sessionId, prompt, images, outputSchema, ...options })
+    const accepted = await client.submit(message).catch((cause: unknown) => {
+      throw submitted403(cause, options.approvalMode)
+    })
     submitted = accepted
     unsent = undefined
     if (interruptRequested) {
@@ -673,17 +626,13 @@ export const sessionsCommand = async (
       dependencies,
       await resolveServer(options.urlArgument, dependencies)
     )
-    const page = await client.listSessions({
-      scope: "primary",
-      sort: "activity",
-      limit: options.limit
-    })
+    const page = await client.listSessions(latestChats(options.limit))
     const sessions = page.sessions.map((session) => ({
       session_id: session.session_id,
-      name: session.name,
-      space_id: session.space_id,
+      name: nameText(session.name),
+      space_id: spaceIdOf(session.space),
       last_activity: session.last_activity,
-      is_active: session.is_active,
+      is_active: runIsActive(session.run),
       pending_approvals: session.pending_approvals_count
     }))
     if (options.output === "json") {

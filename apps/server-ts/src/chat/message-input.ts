@@ -1,17 +1,12 @@
+import type { ChatMessageFields, ChatSendReceipt } from "../persistence/chat/send-contracts.js"
 import { onboardingClientId } from "../persistence/sessions/store.js"
 import { INTERACTION_KIND, INTERACTION_SOURCE, ROLE } from "@arden-hq/std/message-vocabulary"
 import type { HandlerItemRef } from "../persistence/automations/handler-item.js"
 import type { JobLeaseRef } from "@arden-hq/jobs"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
-import type {
-  ChatApprovalMode,
-  ChatMessageInput,
-  ChatReceipt,
-  ChatUpdate,
-  ConnectionArrival,
-  HistoryMessage,
-  InteractionSender
-} from "@arden-hq/protocol/chat"
+import type { ChatApprovalMode, ChatUpdate, ConnectionArrival } from "@arden-hq/protocol/chat"
+import type { ChatForwardedSource } from "../persistence/deliveries/model.js"
+import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
 import type { ModelRole } from "@arden-hq/protocol/models"
 import { DateTime, Effect, Schema } from "effect"
 import { ChatUpdateSchema } from "@arden-hq/protocol/effect/chat"
@@ -33,11 +28,11 @@ import { PROMPTS } from "../prompts/catalog.js"
 import { ChatMessageError } from "./message-errors.js"
 import { sha256Hex } from "@arden-hq/std/hash"
 
-export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
+export interface ChatSendInput extends Omit<ChatMessageFields, "capture"> {
   readonly wake?: boolean
   readonly deliveryId?: string
   readonly clientId: string
-  readonly sender?: InteractionSender
+  readonly sender?: StoredInteractionSender
   readonly workflowDelivery?: {
     readonly workflowRef: string
     readonly attempt: number
@@ -49,7 +44,7 @@ export interface ChatSendInput extends Omit<ChatMessageInput, "capture"> {
   readonly modelId?: string
   readonly announce?: true
   readonly fromChat?: ChatHandoffSource
-  readonly forwardedFrom?: HistoryMessage["forwarded_from"]
+  readonly forwardedFrom?: ChatForwardedSource
   readonly continuesTask?: TaskStepCause
   readonly capture?: ChatCaptureInput["via"]
   readonly fromQueue?: true
@@ -300,8 +295,8 @@ export const automationRequestHash = (input: ChatAutomationStartInput): string =
 export const receipt = (
   input: Pick<ChatSendInput, "sessionId" | "clientId">,
   runId: string | null,
-  status: ChatReceipt["status"]
-): ChatReceipt => ({
+  status: ChatSendReceipt["status"]
+): ChatSendReceipt => ({
   runId,
   sessionId: input.sessionId,
   status,

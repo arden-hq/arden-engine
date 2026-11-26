@@ -1,3 +1,4 @@
+import { CANCEL_TARGET } from "@arden-hq/protocol/chat"
 import { describe, expect, it } from "vitest"
 
 import { createHeadlessClient, HeadlessTimeoutError } from "../src/index.js"
@@ -12,7 +13,10 @@ describe("HeadlessClient", () => {
           init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
         })
     })
-    const cancellation = client.cancel({ runId: "run-1" }, { signal: controller.signal })
+    const cancellation = client.cancel(
+      { kind: CANCEL_TARGET.run, runId: "run-1" },
+      { signal: controller.signal }
+    )
     const reason = new Error("cancellation deadline")
     controller.abort(reason)
     await expect(cancellation).rejects.toBe(reason)
@@ -29,19 +33,20 @@ describe("HeadlessClient", () => {
           version: 1,
           run_id: "run-timeout",
           turn_id: "turn-timeout",
-          late_result_at: null,
           session_id: "session-timeout",
           status: "completed",
           started_at: "2026-08-30T00:00:00.000Z",
           updated_at: "2026-08-30T00:00:01.000Z",
           ended_at: "2026-08-30T00:00:01.000Z",
-          stop_reason: "end_turn",
-          last_event_sequence: 2,
-          model_id: "fixture-model",
-          reasoning_effort: null,
-          client_id: "client-timeout",
-          result: null,
-          error: null
+          stop_reason: { kind: "stated", reason: "end_turn" },
+          events: { kind: "through", sequence: 2 },
+          model: { kind: "model", model_id: "fixture-model" },
+          reasoning: { kind: "default" },
+          client: { kind: "client", client_id: "client-timeout" },
+          local_instructions: [],
+          memory_context: [],
+          result: { kind: "none" },
+          failure: { kind: "none" }
         })
       }
     })
@@ -67,19 +72,20 @@ describe("HeadlessClient", () => {
           version: 1,
           run_id: "run-goal",
           turn_id: "turn-goal",
-          late_result_at: null,
           session_id: "session-goal",
           status: "completed",
           started_at: "2026-10-05T00:00:00.000Z",
           updated_at: "2026-10-05T00:00:01.000Z",
           ended_at: "2026-10-05T00:00:01.000Z",
-          stop_reason: "end_turn",
-          last_event_sequence: 2,
-          model_id: "fixture-model",
-          reasoning_effort: null,
-          client_id: "focus:goal:run-before",
-          result: null,
-          error: null
+          stop_reason: { kind: "stated", reason: "end_turn" },
+          events: { kind: "through", sequence: 2 },
+          model: { kind: "model", model_id: "fixture-model" },
+          reasoning: { kind: "default" },
+          client: { kind: "client", client_id: "focus:goal:run-before" },
+          local_instructions: [],
+          memory_context: [],
+          result: { kind: "none" },
+          failure: { kind: "none" }
         })
     })
     const detail = await client.wait({
@@ -100,6 +106,7 @@ describe("HeadlessClient", () => {
       fetch: async () =>
         Response.json({
           models: ["gemma-4", "qwen3"],
+          names: { "gemma-4": "gemma-4", qwen3: "qwen3" },
           groups: [{ provider: "llama.cpp", label: "llama.cpp", models: ["gemma-4", "qwen3"] }],
           reasoning_efforts: { "gemma-4": ["none", "medium"] }
         })

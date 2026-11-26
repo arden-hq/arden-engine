@@ -1,12 +1,15 @@
 import {
   AUTOMATION_EVENTS,
-  type AutomationConditionInput,
+  TRIGGER_STATE,
+  TRIGGER_TYPE,
+  type AutomationComparisonCondition,
+  type AutomationCondition,
   type AutomationConditionOperator,
+  type AutomationEventLink,
   type AutomationEventType,
   type AutomationOldCondition,
   type AutomationSkippedEvent,
   type AutomationTrigger,
-  type AutomationTriggerInput,
   type EventAutomationTrigger
 } from "@arden-hq/protocol/automations"
 import type { JsonValue } from "@arden-hq/protocol"
@@ -17,8 +20,9 @@ export const runOnlyIfSentences = (
 ): readonly [string, ...Array<string>] | undefined => {
   const sentences: Array<string> = []
   for (const trigger of matched) {
-    if (trigger.run_only_if === undefined) return undefined
-    if (!sentences.includes(trigger.run_only_if)) sentences.push(trigger.run_only_if)
+    if (trigger.run_only_if.kind !== TRIGGER_STATE.sentence) return undefined
+    const sentence = trigger.run_only_if.sentence
+    if (!sentences.includes(sentence)) sentences.push(sentence)
   }
   const [first, ...rest] = sentences
   return first === undefined ? undefined : [first, ...rest]
@@ -38,6 +42,13 @@ const readField = (
       context
     )
 
+const NO_LINK: AutomationEventLink = { kind: "none" }
+
+const connectionItemLink = (itemId: string, url: string | undefined): AutomationEventLink =>
+  url === undefined
+    ? { kind: "connection_item", item_id: itemId }
+    : { kind: "connection_item_with_page", item_id: itemId, url }
+
 export const skippedEventOf = (
   eventType: AutomationEventType,
   context: Readonly<Record<string, JsonValue>>
@@ -52,18 +63,18 @@ export const skippedEventOf = (
       return {
         event_type: eventType,
         title: text("proposal_id") ?? fallback,
-        link: null
+        link: NO_LINK
       }
     case "event_approaching":
     case "event_ended":
-      return { event_type: eventType, title: text("event.summary") ?? fallback, link: null }
+      return { event_type: eventType, title: text("event.summary") ?? fallback, link: NO_LINK }
     case "wiki.changed": {
       const value = readField(context, "change.paths")
       const paths = Array.isArray(value)
         ? value.filter((path): path is string => typeof path === "string" && path !== "")
         : []
       const first = paths[0]
-      if (first === undefined) return { event_type: eventType, title: fallback, link: null }
+      if (first === undefined) return { event_type: eventType, title: fallback, link: NO_LINK }
       return {
         event_type: eventType,
         title: paths.length === 1 ? first : `${first} and ${paths.length - 1} more`,
@@ -78,7 +89,7 @@ export const skippedEventOf = (
         title: text("chat.name") ?? "Untitled chat",
         link:
           sessionId === undefined || sessionRef === undefined
-            ? null
+            ? NO_LINK
             : { kind: "chat", session_id: sessionId, session_ref: sessionRef }
       }
     }
@@ -88,10 +99,7 @@ export const skippedEventOf = (
       return {
         event_type: eventType,
         title: text("item.title") ?? fallback,
-        link:
-          itemId === undefined
-            ? null
-            : { kind: "connection_item", item_id: itemId, url: text("item.url") ?? null }
+        link: itemId === undefined ? NO_LINK : connectionItemLink(itemId, text("item.url"))
       }
     }
     case "task.changed": {
@@ -99,18 +107,18 @@ export const skippedEventOf = (
       return {
         event_type: eventType,
         title: text("task.text") ?? fallback,
-        link: itemId === undefined ? null : { kind: "task", item_id: itemId }
+        link: itemId === undefined ? NO_LINK : { kind: "task", item_id: itemId }
       }
     }
     case "calendar.changed":
-      return { event_type: eventType, title: text("event.summary") ?? fallback, link: null }
+      return { event_type: eventType, title: text("event.summary") ?? fallback, link: NO_LINK }
     case "mcp.event": {
       const server = text("app.server")
       const event = text("app.event")
       return {
         event_type: eventType,
         title: server === undefined || event === undefined ? fallback : `${server}: ${event}`,
-        link: null
+        link: NO_LINK
       }
     }
     case "ask.waiting":
@@ -123,7 +131,7 @@ export const skippedEventOf = (
         title: text(eventType === "ask.waiting" ? "ask.text" : "capture.note") ?? fallback,
         link:
           sessionId === undefined || sessionRef === undefined
-            ? null
+            ? NO_LINK
             : { kind: "chat", session_id: sessionId, session_ref: sessionRef }
       }
     }
@@ -136,7 +144,7 @@ export const skippedEventOf = (
         title: text("run.automation") ?? fallback,
         link:
           sessionId === undefined || sessionRef === undefined
-            ? null
+            ? NO_LINK
             : { kind: "chat", session_id: sessionId, session_ref: sessionRef }
       }
     }
@@ -227,17 +235,17 @@ const valueWords = (value: JsonValue | undefined, field: FieldWords): Words => {
 
 const compareWords = (
   eventType: AutomationEventType,
-  condition: Extract<AutomationConditionInput, { kind: "compare" }>
+  condition: AutomationComparisonCondition
 ): Words => {
   const known = fieldWords(eventType, condition.field)
   const field = known ?? { subject: `"${condition.field}"` }
+  if (condition.op === "exists")
+    return { text: `${field.subject} is set`, readable: known !== undefined }
   if (field.flag !== undefined && typeof condition.value === "boolean") {
     const holds = (condition.op === "eq") === condition.value
     if (condition.op === "eq" || condition.op === "ne")
       return { text: holds ? field.flag[0] : field.flag[1], readable: known !== undefined }
   }
-  if (condition.op === "exists")
-    return { text: `${field.subject} is set`, readable: known !== undefined }
   const value = valueWords(condition.value, field)
   const verb = condition.op === "in" ? "is one of" : OPERATOR_WORDS[condition.op]
   return {
@@ -248,7 +256,7 @@ const compareWords = (
 
 const clauseWords = (
   eventType: AutomationEventType,
-  condition: AutomationConditionInput,
+  condition: AutomationCondition,
   nested: boolean
 ): Words => {
   switch (condition.kind) {
@@ -273,12 +281,12 @@ const clauseWords = (
 }
 
 export const oldConditions = (
-  triggers: ReadonlyArray<AutomationTrigger | AutomationTriggerInput>
+  triggers: ReadonlyArray<AutomationTrigger>
 ): ReadonlyArray<AutomationOldCondition> =>
   triggers.flatMap((trigger) => {
-    if (trigger.type !== "event" || trigger.id === undefined) return []
-    if (trigger.condition === undefined || trigger.condition === null) return []
-    const words = clauseWords(trigger.event_type, trigger.condition, false)
+    if (trigger.type !== TRIGGER_TYPE.event || trigger.condition.kind !== TRIGGER_STATE.old)
+      return []
+    const words = clauseWords(trigger.event_type, trigger.condition.condition, false)
     return [
       {
         trigger_id: trigger.id,

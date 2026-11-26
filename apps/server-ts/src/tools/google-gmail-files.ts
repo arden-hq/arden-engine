@@ -1,4 +1,4 @@
-import type { ApprovalPresentation } from "@arden-hq/protocol/chat"
+import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
 import { toolRefusal } from "./tool-failure.js"
 import type { ToolContext } from "@arden-hq/loop"
 import { Schema } from "effect"
@@ -45,7 +45,7 @@ export const gmailFilesCard = async ({
   key,
   intent
 }: MailFileRequest): Promise<{
-  readonly attachments: NonNullable<ApprovalPresentation["attachments"]>
+  readonly attachments: NonNullable<ApprovalPresentationDraft["attachments"]>
   readonly data: JsonObject
 }> => {
   const files =

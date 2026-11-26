@@ -7,6 +7,18 @@ import {
 
 const queued = { queued_at: IsoDateTimeStringSchema }
 
+export const AutomationEventProducerSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("outside") }),
+  Schema.Struct({ kind: Schema.Literal("automation"), automation_id: Schema.NonEmptyString })
+]).pipe(Schema.toTaggedUnion("kind"))
+export type AutomationEventProducer = typeof AutomationEventProducerSchema.Type
+
+export const AutomationCountThroughSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unrecorded") }),
+  Schema.Struct({ kind: Schema.Literal("message"), sequence: NonNegativeIntSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+export type AutomationCountThrough = typeof AutomationCountThroughSchema.Type
+
 /** Immutable admission evidence; prompt text and mutable lease state stay out. */
 const DirectAutomationTriggerContextSchema = Schema.Union([
   Schema.Struct({
@@ -31,7 +43,7 @@ const DirectAutomationTriggerContextSchema = Schema.Union([
     ...queued,
     source: Schema.Literal("count"),
     session_id: Schema.NonEmptyString,
-    through_sequence: Schema.NullOr(NonNegativeIntSchema),
+    through: AutomationCountThroughSchema,
     every_n: PositiveIntSchema
   }),
   Schema.Struct({
@@ -39,9 +51,8 @@ const DirectAutomationTriggerContextSchema = Schema.Union([
     source: Schema.Literal("event"),
     event_type: Schema.NonEmptyString,
     event_key: Schema.NonEmptyString,
-    produced_by: Schema.NullOr(Schema.NonEmptyString),
-    /** Automation runs behind the event; absent: 0 (`chain-depth.ts`). */
-    chain_depth: Schema.optionalKey(NonNegativeIntSchema),
+    produced_by: AutomationEventProducerSchema,
+    chain_depth: NonNegativeIntSchema,
     context: Schema.Record(Schema.String, Schema.Json)
   }),
   Schema.Struct({ ...queued, source: Schema.Literal("wake") })

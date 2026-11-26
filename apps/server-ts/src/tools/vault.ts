@@ -262,7 +262,7 @@ const makeVaultUseKeyTool = (
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(UseKeyParametersSchema),
     metadata: {
-      display: { card: "vault_key_use" },
+      display: [{ fact: "card", value: "vault_key_use" }],
       effect: "none",
       display_name: "Use a key",
       kind: "tool",
@@ -346,7 +346,7 @@ const makeVaultAskKeyTool = (vault: VaultKeysService): ServerTool => {
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(AskKeyParametersSchema),
     metadata: {
-      display: { card: "vault_key_ask" },
+      display: [{ fact: "card", value: "vault_key_ask" }],
       effect: "none",
       display_name: "Ask for a key",
       kind: "tool",

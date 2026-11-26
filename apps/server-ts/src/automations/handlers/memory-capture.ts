@@ -63,7 +63,7 @@ export const memoryCaptureHandler: SystemAutomationHandler<"memory_capture"> = {
     triggers: [
       { type: "idle", idle_minutes: 10 },
       { type: "count", every_n: 10 },
-      { type: "time", at: "02:30", days: "daily" }
+      { type: "time", schedule: { kind: "daily", at: "02:30", days: "daily" } }
     ],
     enabled: true,
     cooldownMinutes: 5,

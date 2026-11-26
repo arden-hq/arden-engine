@@ -46,7 +46,7 @@ const READ = {
 const WRITE = {
   effect: "external",
   // The app's document card: it shows the card's own button and heads it with the title.
-  display: { card: "calendar" },
+  display: [{ fact: "card", value: "calendar" }],
   kind: "tool",
   action: "write",
   source: MAC_APPS_SOURCE,

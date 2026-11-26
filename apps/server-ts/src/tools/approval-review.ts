@@ -15,7 +15,7 @@ import {
   type ToolApprovalPrompt
 } from "@arden-hq/loop"
 import type { ApprovalReviewSource } from "../models/provider.js"
-import type { ApprovalPresentation } from "@arden-hq/protocol/chat"
+import type { ApprovalPresentationDraft } from "../persistence/tools/approval-draft.js"
 import { Effect, Schema } from "effect"
 import { STRUCTURED_OUTPUT_DIALECTS } from "../models/structured-output.js"
 import type { StructuredCompletion } from "../models/structured-completion.js"
@@ -364,7 +364,7 @@ export const renderAuthority = (authority: TrustedAuthority): string => {
 }
 
 const describeCall = (input: ApprovalReviewInput): string => {
-  const presentation = input.prompt.presentation as ApprovalPresentation | undefined
+  const presentation = input.prompt.presentation as ApprovalPresentationDraft | undefined
   const { target, scope } = splitUiTarget(input.prompt.data)
   const lines = [`Tool: ${input.name}`, `Purpose: ${input.description}`]
   if (presentation?.title) lines.push(`Card: ${presentation.title}`)

@@ -2,7 +2,8 @@ import { Effect, Schema } from "effect"
 
 import { encodeRouteEffect, encodeSegment, routeSegment } from "../../common/routes.js"
 import { PositiveIntSchema } from "../../common/schema.js"
-import { SpaceWorkPageOptionsSchema } from "./schema.js"
+import { SpaceWorkPageOptionsSchema } from "./page-schema.js"
+import { WORK_PAGE_SCOPE, WORK_PAGE_START } from "./contracts.js"
 
 const SpaceIdSchema = routeSegment()
 const ItemIdSchema = routeSegment()
@@ -61,16 +62,38 @@ export const encodeWorkPagePathEffect = (
     onExcessProperty: "error"
   }).pipe(
     Effect.map((options) => {
-      const query = new URLSearchParams()
-      if (options.spaceId !== undefined) query.set("space_id", options.spaceId)
-      if (options.sessionId !== undefined) query.set("session_id", options.sessionId)
-      if (options.turnId !== undefined) query.set("turn_id", options.turnId)
-      if (options.itemId !== undefined) query.set("item_id", options.itemId)
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.cursor !== undefined) query.set("cursor", options.cursor)
-      if (options.targetItemId !== undefined) query.set("target_item_id", options.targetItemId)
+      const query = new URLSearchParams({ scope: options.scope.kind })
+      switch (options.scope.kind) {
+        case WORK_PAGE_SCOPE.all:
+          break
+        case WORK_PAGE_SCOPE.space:
+          query.set("space_id", options.scope.space_id)
+          break
+        case WORK_PAGE_SCOPE.chat:
+          query.set("session_id", options.scope.session_id)
+          break
+        case WORK_PAGE_SCOPE.turn:
+          query.set("session_id", options.scope.session_id)
+          query.set("turn_id", options.scope.turn_id)
+          break
+        case WORK_PAGE_SCOPE.item:
+          query.set("item_id", options.scope.item_id)
+          break
+      }
+      query.set("start", options.start.kind)
+      switch (options.start.kind) {
+        case WORK_PAGE_START.first:
+          break
+        case WORK_PAGE_START.after:
+          query.set("cursor", options.start.cursor)
+          break
+        case WORK_PAGE_START.with_item:
+          query.set("target_item_id", options.start.item_id)
+          break
+      }
+      query.set("limit", String(options.limit))
       const search = query.toString()
-      return `/spaces/work/all${search === "" ? "" : `?${search}`}`
+      return `/spaces/work/all?${search}`
     })
   )
 

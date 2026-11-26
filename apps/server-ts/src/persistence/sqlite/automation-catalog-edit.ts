@@ -1,34 +1,37 @@
 import { openRunSince } from "./automation-running.js"
 import { captureMutationVersions } from "./mutation-links.js"
 import { haltAutomation } from "./automation-halt.js"
-import type {
-  Automation,
-  AutomationChatChoice,
-  AutomationContextMode,
-  AutomationHistory,
-  SystemAutomationSetting
+import {
+  freshTriggerIds,
+  type Automation,
+  type AutomationChange,
+  type AutomationChatChoice,
+  type AutomationContextMode,
+  type AutomationHistory,
+  type SystemAutomationSetting
 } from "@arden-hq/protocol/automations"
 import {
+  AutomationDescriptionInputSchema,
   InternalCreateAutomationRequestSchema,
   UpdateAutomationInputSchema
 } from "@arden-hq/protocol/effect/automations"
 import { Clock, Effect, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
 import type { AutomationRules, PersonalAutomationTriggers } from "../automations/model.js"
 import { AutomationCatalog, type PromptWriter } from "../automations/catalog.js"
 import { AutomationStoreError } from "../automations/store.js"
-import { isSpaceWorkJob, isUserAutomationPurpose, type JobPurpose } from "../job-classification.js"
+import { isUserAutomationPurpose } from "../job-classification.js"
 import { namedPublicRef } from "../public-ref.js"
 import { chatsFollowJobName } from "./job-labels.js"
 import { decodeJson, encodeJson } from "./json.js"
 import {
   AutomationTriggersSchema,
   sameTriggers,
+  refuseSystemRunOnlyIf,
   scheduleEffect,
   writtenTriggers
 } from "./automation-schedule.js"
 import { resumeAutomation } from "./automation-resume.js"
-import { DEFAULT_APPROVAL_MODE } from "@arden-hq/protocol/permissions"
+import { automationPatch, cooldownMinutesOf, modelIdOf } from "../automations/automation-patch.js"
 import { nextId } from "./deps.js"
 import { insertOwnChat, ownChat } from "./automation-own-chat.js"
 import { type AutomationRow, type AutomationStoreDeps } from "./automation-rows.js"
@@ -41,6 +44,8 @@ import { specSchedule } from "./system-automations.js"
 import { strict, storeError, automationIdEffect, systemSpecOf } from "./automation-rows.js"
 import { iso } from "../../runtime/clock.js"
 import {
+  defaultTriggerInputs,
+  hasRunOnlyIf,
   lockedSystemChanges,
   lockedSystemMessage,
   systemSettable,
@@ -51,6 +56,7 @@ import {
   type AutomationWriteSource
 } from "./automation-instruction-provenance.js"
 import { makeAutomationRowReads } from "./automation-row-reads.js"
+import { requireUserChat } from "./automation-user-chat.js"
 
 const updatedNextRunAt = (input: {
   readonly rules: AutomationRules["Service"]
@@ -118,22 +124,26 @@ export const makeAutomationCatalogEdits = ({
         storeError("create", "invalid", "Invalid Automation request", undefined, cause)
       )
     )
-    const chat = valid.chat ?? { kind: "own" as const }
+    const chat = valid.chat
     const model = yield* setupModel({
       chat: chat.kind,
       history: valid.history,
-      requested: valid.model,
+      requested: modelIdOf(valid.model),
       stored: null,
       operation: "create"
     })
-    const written = yield* writtenTriggers("new", valid.triggers, "create")
+    const written = freshTriggerIds(valid.triggers)
     const schedule = yield* scheduleEffect(rules, written.triggers, "create")
     const automationId = `automation:${yield* nextId}`
     const ownChatId = yield* nextId
     const nowMs = yield* Clock.currentTimeMillis
     const timestamp = iso(nowMs)
-    const enabled = valid.enabled !== false
+    const enabled = valid.enabled
     const nextRun = enabled ? rules.nextRunAt(schedule, nowMs) : null
+    const description = AutomationDescriptionInputSchema.match(valid.description, {
+      none: () => ({ text: null, source: null }),
+      manual: ({ text }) => ({ text, source: "manual" })
+    })
     const triggersJson = yield* encodeJson(AutomationTriggersSchema, schedule.triggers).pipe(
       Effect.mapError((cause) =>
         storeError("create", "storage", "Could not encode Automation triggers", undefined, cause)
@@ -171,7 +181,7 @@ export const makeAutomationCatalogEdits = ({
               context_mode: historyContextMode(valid.history),
               triggers: triggersJson,
               thread_id: threadId,
-              cooldown_minutes: valid.cooldown_minutes ?? null
+              cooldown_minutes: cooldownMinutesOf(valid.cooldown)
             },
             previousRevisionId: null,
             promptAuthor: promptWriter,
@@ -188,10 +198,10 @@ export const makeAutomationCatalogEdits = ({
             tool_scope, triggers_source, purpose, prompt_author, instruction_revision_id
           ) VALUES (
             ${automationId}, ${namedPublicRef(valid.name, automationId)}, ${valid.name},
-            ${valid.description ?? null}, ${valid.description === undefined ? null : "manual"},
+            ${description.text}, ${description.source},
             ${valid.prompt}, ${model}, ${historyContextMode(valid.history)}, ${triggersJson},
             ${written.lastId}, ${enabled ? 1 : 0}, ${timestamp}, NULL, ${nextRun === null ? null : iso(nextRun)},
-            NULL, 0, NULL, 0, ${valid.cooldown_minutes ?? null},
+            NULL, 0, NULL, 0, ${cooldownMinutesOf(valid.cooldown)},
             ${threadId},
             ${valid.idempotency_key}, 'global', 'all', 'manual', 'user_automation', ${promptWriter},
             ${instructionRevisionId}
@@ -207,7 +217,7 @@ export const makeAutomationCatalogEdits = ({
               sessionId: ownChatId,
               name: valid.name,
               model,
-              approvalMode: valid.approval_mode ?? DEFAULT_APPROVAL_MODE,
+              approvalMode: valid.approval_mode,
               startedAt: timestamp,
               complete: insertAutomation
             })
@@ -247,6 +257,7 @@ export const makeAutomationCatalogEdits = ({
       input,
       strict
     ).pipe(
+      Effect.map(({ changes }) => automationPatch(changes)),
       Effect.mapError((cause) =>
         storeError("update", "invalid", "Invalid Automation update", validAutomationId, cause)
       )
@@ -556,6 +567,8 @@ export const makeAutomationCatalogEdits = ({
       )
     }
     const spec = yield* systemSpecOf(rules, row, "update")
+    const resetTo = (change: AutomationChange) =>
+      update(validAutomationId, { changes: [change] }, "agent")
     if (!systemSettable(spec).includes(setting))
       return yield* storeError(
         "update",
@@ -565,13 +578,13 @@ export const makeAutomationCatalogEdits = ({
       )
     switch (setting) {
       case "triggers":
-        return yield* update(validAutomationId, { triggers: spec.triggers }, "agent")
+        return yield* resetTo({ kind: "triggers", triggers: defaultTriggerInputs(spec.triggers) })
       case "model":
-        return yield* update(validAutomationId, { model: null }, "agent")
+        return yield* resetTo({ kind: "model", model: { kind: "inherited" } })
       case "prompt":
-        return yield* update(validAutomationId, { prompt: spec.prompt }, "agent")
+        return yield* resetTo({ kind: "prompt", prompt: spec.prompt })
       case "enabled":
-        return yield* update(validAutomationId, { enabled: spec.enabled }, "agent")
+        return yield* resetTo({ kind: "enabled", enabled: spec.enabled })
     }
   })
 
@@ -606,59 +619,3 @@ const setupModel = (input: {
   }
   return Effect.succeed(input.requested === undefined ? input.stored : input.requested)
 }
-
-const requireUserChat = Effect.fn("SqliteAutomationStore.requireUserChat")(function* (
-  sql: SqlClient.SqlClient,
-  sessionId: string,
-  operation: "create" | "update",
-  automationId?: string
-) {
-  const rows = yield* sql<{
-    readonly session_type: string
-    readonly origin_automation_id: string | null
-    readonly origin_purpose: JobPurpose | null
-  }>`
-    SELECT session.session_type, session.origin_automation_id, origin.purpose AS origin_purpose
-    FROM sessions AS session LEFT JOIN scheduled_tasks AS origin
-      ON origin.task_id = session.origin_automation_id
-    WHERE session.session_id = ${sessionId} AND session.archived_at IS NULL
-    LIMIT 1
-  `
-  const chat = rows[0]
-  const yours =
-    (chat?.session_type === "chat" && chat.origin_automation_id === null) ||
-    (chat?.session_type === "channel" &&
-      chat.origin_purpose !== null &&
-      isSpaceWorkJob({ purpose: chat.origin_purpose }))
-  if (!yours) {
-    return yield* storeError(
-      operation,
-      "invalid",
-      "An Automation's chat must be one of your active chats or a Space room",
-      automationId
-    )
-  }
-})
-
-const hasRunOnlyIf = (trigger: PersonalAutomationTriggers["triggers"][number]): boolean =>
-  trigger.type === "event" && trigger.run_only_if !== undefined
-
-/**
- * A system Automation takes a "Run only if" sentence only when its handler comes with one: its
- * run is then a judgment of the event. For any other handler a sentence would skip work the app
- * relies on.
- */
-const refuseSystemRunOnlyIf = (
-  triggers: PersonalAutomationTriggers["triggers"],
-  automationId: string
-): Effect.Effect<void, AutomationStoreError> =>
-  triggers.some(hasRunOnlyIf)
-    ? Effect.fail(
-        storeError(
-          "update",
-          "invalid",
-          "This system Automation's triggers take no run_only_if sentence",
-          automationId
-        )
-      )
-    : Effect.void

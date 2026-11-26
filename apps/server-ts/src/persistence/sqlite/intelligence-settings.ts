@@ -1,8 +1,9 @@
-import { DEFAULT_INTELLIGENCE_SETTINGS } from "@arden-hq/protocol/settings"
 import {
-  IntelligenceSettingsPatchSchema,
-  IntelligenceSettingsSchema
-} from "@arden-hq/protocol/effect/settings"
+  applyIntelligenceSettingsPatch,
+  DEFAULT_INTELLIGENCE_SETTINGS,
+  type IntelligenceSettingsPatch
+} from "@arden-hq/protocol/settings"
+import { IntelligenceSettingsSchema } from "@arden-hq/protocol/effect/settings"
 import { Effect } from "effect"
 
 import { IntelligenceSettingsStore, IntelligenceSettingsStoreError } from "../settings/store.js"
@@ -16,13 +17,14 @@ export const makeIntelligenceSettingsStore = Effect.fn("SqliteIntelligenceSettin
       namespace: "intelligence_settings",
       label: "intelligence settings",
       schema: IntelligenceSettingsSchema,
-      patchSchema: IntelligenceSettingsPatchSchema,
+      patchSchema: IntelligenceSettingsSchema,
       defaults: DEFAULT_INTELLIGENCE_SETTINGS,
       error: IntelligenceSettingsStoreError
     })
     return IntelligenceSettingsStore.of({
       settings: document.read,
-      updateSettings: document.update
+      updateSettings: (patch: IntelligenceSettingsPatch) =>
+        document.update((current) => applyIntelligenceSettingsPatch(current, patch))
     })
   }
 )

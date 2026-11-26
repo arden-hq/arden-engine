@@ -1,9 +1,28 @@
-import type { RuleSavedIn, RunApproval, RunApprovalWork } from "@arden-hq/protocol/runs"
-import { RuleSavedInSchema, RunOriginSchema } from "@arden-hq/protocol/effect/runs"
-import { sanitizeApprovalPresentation } from "@arden-hq/protocol/chat"
+import { RunOriginSchema } from "../runs/stored-context.js"
+import {
+  APPROVAL_ASKER,
+  APPROVAL_CARD,
+  APPROVAL_DIFF,
+  APPROVAL_PREVIEW,
+  type ApprovalAsker,
+  type ApprovalCard,
+  type ApprovalDiff,
+  type ApprovalPresentation,
+  type ApprovalPreview
+} from "@arden-hq/protocol/chat"
+import {
+  APPROVAL_CONNECTION,
+  APPROVAL_TEXT,
+  type RuleSavedIn,
+  type RunApproval,
+  type RunApprovalText,
+  type RunApprovalWork
+} from "@arden-hq/protocol/runs"
+import { RuleSavedInSchema } from "@arden-hq/protocol/effect/runs"
+import { storedApprovalPresentation } from "../tools/approval-draft.js"
 import { Effect, Option, Schema } from "effect"
 import { JsonObjectSchema, type JsonObject } from "../json.js"
-import { grantFolderField } from "../permissions/grant-folder.js"
+import { grantFolderOf } from "../permissions/grant-folder.js"
 import { decodeJson } from "./json.js"
 import {
   ConnectionRequiredDataSchema,
@@ -34,47 +53,45 @@ const text = (payload: Readonly<Record<string, unknown>>, field: string): string
 export const decodeRunApproval = Effect.fn("decodeRunApproval")(function* (row: ApprovalRow) {
   const payload = yield* decodeJson(JsonObjectSchema, row.payload_json ?? "{}")
   const data = payload.approval_data
-  const connectionDecision = isConnectionRequiredData(data)
+  const connection = isConnectionRequiredData(data)
     ? pendingConnectionDecision(
         { runId: row.run_id, sessionId: row.session_id, toolCallId: row.tool_call_id },
-        yield* Schema.decodeUnknownEffect(ConnectionRequiredDataSchema)(data)
-      )
+        yield* Schema.decodeUnknownEffect(ConnectionRequiredDataSchema)(data),
+        row.source ?? "run"
+      ).snapshot
     : null
-  const connection =
-    connectionDecision === null
-      ? null
-      : {
-          ...connectionDecision.snapshot,
-          decision_delivery:
-            row.source === "deferred" ? ("deferred" as const) : ("blocking" as const)
-        }
   const kind = connection ? "integration_connection" : row.kind
   const subject = kind === "subagent_result" ? text(payload, "task") : null
+  const presentation = storedApprovalPresentation(payload.presentation)
   return {
     at: row.requested_at,
     run_id: row.run_id,
     session_id: row.session_id,
     destination_session_id: row.destination_session_id,
-    work: workOf(row.work_json),
+    asker: askerOf(row.work_json),
     tool_call_id: row.tool_call_id,
     decision_delivery: row.source === "deferred" ? "deferred" : "blocking",
     kind,
-    connection,
+    connection:
+      connection === null
+        ? { kind: APPROVAL_CONNECTION.none }
+        : { kind: APPROVAL_CONNECTION.connection, connection },
     tool_name: row.tool_name,
     action: row.action,
-    scope: row.scope,
-    preview: row.preview,
-    diff: row.diff,
-    description: text(payload, "description"),
-    detail: text(payload, "detail"),
-    subject: connection?.label ?? subject,
-    reason: connection?.reason ?? null,
-    presentation: sanitizeApprovalPresentation(payload.presentation) ?? null,
+    preview: approvalPreview(row.preview),
+    diff: approvalDiff(row.diff),
+    description: approvalText(text(payload, "description")),
+    detail: approvalText(text(payload, "detail")),
+    subject: approvalText(connection?.label ?? subject),
+    card: approvalCard(presentation),
     rule_places: storedRulePlaces(payload),
-    ...(payload.can_attach_folder_to_space === true ? { can_attach_folder_to_space: true } : {}),
-    ...grantFolderField(row.tool_name, data)
+    can_attach_folder_to_space: payload.can_attach_folder_to_space === true,
+    grant_folder: grantFolderOf(row.tool_name, data)
   } satisfies RunApproval
 })
+
+const approvalText = (value: string | null): RunApprovalText =>
+  value === null ? { kind: APPROVAL_TEXT.none } : { kind: APPROVAL_TEXT.text, text: value }
 
 const RulePlacesSchema = Schema.Array(RuleSavedInSchema)
 
@@ -97,3 +114,22 @@ export const workOf = (json: string | null): RunApprovalWork | null => {
       return null
   }
 }
+
+export const askerOf = (json: string | null): ApprovalAsker => {
+  const work = workOf(json)
+  return work === null ? { kind: APPROVAL_ASKER.chat } : { kind: APPROVAL_ASKER.work, work }
+}
+
+export const approvalPreview = (text: string | null): ApprovalPreview =>
+  text === null ? { kind: APPROVAL_PREVIEW.none } : { kind: APPROVAL_PREVIEW.preview, text }
+
+export const approvalDiff = (patch: string | null): ApprovalDiff =>
+  patch === null ? { kind: APPROVAL_DIFF.none } : { kind: APPROVAL_DIFF.diff, patch }
+
+export const storedCard = (presentation: unknown): ApprovalCard =>
+  approvalCard(storedApprovalPresentation(presentation))
+
+export const approvalCard = (presentation: ApprovalPresentation | undefined): ApprovalCard =>
+  presentation === undefined
+    ? { kind: APPROVAL_CARD.plain }
+    : { kind: APPROVAL_CARD.presented, presentation }

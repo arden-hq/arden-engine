@@ -1,6 +1,6 @@
+import { type RunContext, type RunOrigin } from "../runs/stored-context.js"
 import { parseJsonTextOrUndefined } from "@arden-hq/protocol/common"
 import type { CommunicationDoor } from "@arden-hq/protocol/chat"
-import type { RunContext, RunOrigin } from "@arden-hq/protocol/runs"
 import { automationRepeats } from "@arden-hq/protocol/automations"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"

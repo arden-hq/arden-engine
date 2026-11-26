@@ -2,7 +2,11 @@
 // was sent from Memory? Pure: it reads the run's record of what it was sent, the one record
 // `prefetchTurnMemory` writes for every run, and calls nothing.
 
-import type { RunMemoryContext, RunMemorySource } from "@arden-hq/protocol/runs"
+import {
+  MEMORY_SPACE_PAGE,
+  type RunMemoryContext,
+  type RunMemorySource
+} from "@arden-hq/protocol/runs"
 import { QUESTION_KINDS, type Question, type QuestionKind } from "./questions.js"
 
 /** The route a page reached the chat by: standing facts, recall or the Space context. */
@@ -38,6 +42,11 @@ const viaOf = (source: Exclude<RunMemorySource, { readonly kind: "index" }>): Vi
   }
 }
 
+const spacePageId = (
+  source: Extract<RunMemorySource, { readonly kind: "space" }>
+): string | undefined =>
+  source.page.kind === MEMORY_SPACE_PAGE.page ? source.page.page_id : undefined
+
 /**
  * What a new chat was sent, read from one composition of its run's record. A page reached the
  * chat unless its source's allowance had no room for it.
@@ -63,8 +72,9 @@ export const deliveryOf = ({
     }
     const via = viaOf(source)
     bytes[via] += source.bytes
-    if (source.page_id === null) continue
-    const path = paths.get(source.page_id)
+    const pageId = source.kind === "space" ? spacePageId(source) : source.page_id
+    if (pageId === undefined) continue
+    const path = paths.get(pageId)
     if (path === undefined) throw new Error("A recorded Memory page has no path on the copy")
     const placed = { path, via, whole: source.outcome === "whole" }
     if (source.outcome !== "dropped") pages.push(placed)

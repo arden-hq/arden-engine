@@ -1,5 +1,5 @@
+import { type RunOrigin } from "../runs/stored-context.js"
 import type { AutomationTriggerContext } from "@arden-hq/protocol/automations"
-import type { RunOrigin } from "@arden-hq/protocol/runs"
 
 const CHAIN_LIMIT = 1
 
@@ -9,7 +9,7 @@ export const wakeChainDepth = (wokenBy: AutomationTriggerContext | undefined): n
     case "coalesced":
       return Math.max(0, ...wokenBy.causes.map(wakeChainDepth))
     case "event":
-      return wokenBy.chain_depth ?? 0
+      return wokenBy.chain_depth
     case "scheduled":
     case "manual":
     case "home":

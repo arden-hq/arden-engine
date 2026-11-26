@@ -1,7 +1,12 @@
 import type { ManagedFileRepositoryShape } from "@arden-hq/revisions/effect"
 import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import type { WikiPage, WikiPageListOptions, WikiPagePage } from "@arden-hq/protocol/wiki"
-import { WIKI_PAGE_DEFAULT_LIMIT, WIKI_PAGE_MAX_LIMIT } from "@arden-hq/protocol/wiki"
+import {
+  WIKI_LIST_START,
+  WIKI_NEXT_PAGE,
+  WIKI_PAGE_LIST,
+  WIKI_PAGE_MAX_LIMIT
+} from "@arden-hq/protocol/wiki"
 import { DateTime, Effect, Option, Schema } from "effect"
 
 import { shownToRuns } from "./change.js"
@@ -45,7 +50,7 @@ interface WikiChangesPage {
 export interface WikiListingMethods {
   readonly head: () => Effect.Effect<string | null, WikiError>
   readonly snapshot: () => Effect.Effect<Snapshot, WikiError>
-  readonly list: (options?: WikiPageListOptions) => Effect.Effect<WikiPagePage, WikiError>
+  readonly list: (options: WikiPageListOptions) => Effect.Effect<WikiPagePage, WikiError>
   readonly listChanges: (input: WikiListChangesInput) => Effect.Effect<WikiChangesPage, WikiError>
   readonly read: (pageId: string) => Effect.Effect<WikiPage, WikiError>
   /** When each page at this head was created and last changed. */
@@ -124,20 +129,24 @@ export const makeWikiListingMethods = (
     return loaded
   })
 
-  const list = Effect.fn("Wiki.list")(function* (options: WikiPageListOptions = {}) {
+  const list = Effect.fn("Wiki.list")(function* (
+    options: WikiPageListOptions
+  ): Effect.fn.Return<WikiPagePage, WikiError> {
     const current = yield* snapshot()
-    const includeRedirects = options.includeRedirects === true
-    const limit = options.limit ?? WIKI_PAGE_DEFAULT_LIMIT
+    const { includeRedirects, limit, start } = options
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > WIKI_PAGE_MAX_LIMIT) {
       return yield* wikiError("list", "invalid", "Invalid Memory page limit")
     }
-    const cursor = options.cursor === undefined ? null : yield* decodeWikiListCursor(options.cursor)
+    const cursor =
+      start.kind === WIKI_LIST_START.after ? yield* decodeWikiListCursor(start.cursor) : null
     if (
       cursor !== null &&
       (cursor.repositoryHead !== current.head || cursor.includeRedirects !== includeRedirects)
     ) {
       return yield* wikiError("list", "conflict", "Memory changed while reading pages")
     }
+    const head = current.head
+    if (head === null) return { kind: WIKI_PAGE_LIST.empty }
     const shown = [
       ...(includeRedirects
         ? current.wholeSet
@@ -148,17 +157,19 @@ export const makeWikiListingMethods = (
     const selected = shown.slice(0, limit)
     const last = selected.at(-1)
     const times = yield* pageTimestamps
-      .forPages(current.head, new Set(selected.map((record) => record.page.pageId)))
+      .forPages(head, new Set(selected.map((record) => record.page.pageId)))
       .pipe(Effect.mapError(mapRevisionError("list")))
     return {
-      repositoryHead: current.head,
-      pages: selected.flatMap((record) =>
-        current.head === null ? [] : [summary(record, current.head, times.get(record.page.pageId))]
-      ),
-      nextCursor:
+      kind: WIKI_PAGE_LIST.snapshot,
+      repositoryHead: head,
+      pages: selected.map((record) => summary(record, head, times.get(record.page.pageId))),
+      next:
         shown.length > limit && last !== undefined
-          ? encodeWikiListCursor(current.head, last, includeRedirects)
-          : null
+          ? {
+              kind: WIKI_NEXT_PAGE.more,
+              cursor: encodeWikiListCursor(head, last, includeRedirects)
+            }
+          : { kind: WIKI_NEXT_PAGE.end }
     }
   })
 

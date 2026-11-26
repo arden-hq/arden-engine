@@ -1,3 +1,5 @@
+import { SKILL_PLACE, SKILL_VERSION, type Skill } from "@arden-hq/protocol/skills"
+import type { SkillLoadedContent } from "./service.js"
 import { catalogSignatures } from "@arden-hq/answer-ui"
 import { compilePromptTemplate, renderPromptTemplate } from "@arden-hq/prompt-template"
 import { Effect } from "effect"
@@ -99,3 +101,23 @@ export const reservedName = (operation: SkillOperation, name: string): SkillErro
 
 export const builtInUnchangeable = (operation: SkillOperation, name: string): SkillError =>
   skillError(operation, "invalid", `Skill ${name} is built in and cannot be changed`)
+
+const builtInSkill = (skill: BuiltInSkill): Skill => ({
+  name: skill.name,
+  description: skill.description,
+  version: { kind: SKILL_VERSION.versioned, version: skill.version },
+  enabled: true,
+  place: { kind: SKILL_PLACE.builtin, invocable: skill.userInvocable }
+})
+
+export const builtInLoaded = (skill: BuiltInSkill): SkillLoadedContent => ({
+  name: skill.name,
+  description: skill.description,
+  version: { kind: SKILL_VERSION.versioned, version: skill.version },
+  content: skill.content,
+  directory: null,
+  builtin: true,
+  enabled: true
+})
+
+export const BUILT_IN_LIST: ReadonlyArray<Skill> = BUILT_IN_SKILLS.map(builtInSkill)

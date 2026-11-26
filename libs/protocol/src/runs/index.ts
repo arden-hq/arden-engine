@@ -1,28 +1,32 @@
 import { RunProgressSchema } from "./progress.js"
 export type { RunProgress } from "./progress.js"
-export { RUN_PROGRESS_EVENT_TYPES } from "./progress.js"
+export { RUN_PROGRESS_EVENT_TYPES, RUN_PURPOSE, TOOL_TITLE } from "./progress.js"
 import {
   HomePresenceResponseSchema,
   encodeHomePresenceEffect,
   type HomePresenceInput
 } from "./home.js"
-export type { HomeLetter, HomeOffer } from "./home.js"
 import { decoderFor, runBoundary } from "../common/boundary.js"
-import { WorkerAttemptPageSchema, type WorkerAttemptPageOptions } from "./attempts.js"
-import type { RunEventPageOptions, SessionUsageOptions, UsageReportOptions } from "./contracts.js"
+import { WorkerAttemptPageSchema } from "./attempts.js"
+import type {
+  RunEventPageOptions,
+  RunListOptions,
+  RunQuestionListOptions,
+  SessionUsageOptions,
+  UsageReportOptions,
+  WorkerAttemptPageOptions
+} from "./list-options.js"
 import {
   PlanLimitsReportSchema,
   RunDetailSchema,
   RunEventPageSchema,
-  RunListSchema,
-  SessionUsageReportSchema,
-  UsageReportSchema
+  RunListSchema
 } from "./schema.js"
+import { SessionUsageReportSchema, UsageReportSchema } from "./usage-report.js"
 import {
   RunQuestionSchema,
   RunQuestionListSchema,
-  encodeResolveRunQuestionEffect,
-  type RunQuestionListOptions
+  encodeResolveRunQuestionEffect
 } from "./questions.js"
 import {
   encodeTaskAttemptsPathEffect,
@@ -30,6 +34,7 @@ import {
   encodeRunQuestionsPathEffect,
   encodeRunQuestionAnswerPathEffect,
   encodeRunEventPagePathEffect,
+  encodeRunListPathEffect,
   encodeSessionUsagePathEffect,
   encodeUsageReportPathEffect
 } from "./routes.js"
@@ -38,9 +43,19 @@ export * from "./contracts.js"
 export type { RunList } from "./schema.js"
 export * from "./status.js"
 export * from "./end.js"
-export { hasPlanCredits } from "./plan-credits.js"
 export { MODEL_CALL_KINDS, usageGroup, type ModelCallKind, type UsageGroup } from "./usage.js"
-export { answerSaid, answerWords, isRuleSavedIn, settledQuestionDrawn } from "./questions.js"
+export {
+  OFFER_SAVED,
+  OFFER_TOOL,
+  QUESTION_PART,
+  QUESTION_RESOLUTION,
+  QUESTION_TEXT,
+  RUN_QUESTION_STATUS,
+  answerSaid,
+  answerWords,
+  isRuleSavedIn,
+  settledQuestionDrawn
+} from "./questions.js"
 export type { RuleSavedIn } from "./questions.js"
 
 export const runDecoders = {
@@ -59,14 +74,14 @@ export const runDecoders = {
 
 export const runRoutes = {
   homePresence: "/home/presence",
-  taskAttempts(itemId: string, options: WorkerAttemptPageOptions = {}): string {
+  taskAttempts(itemId: string, options: WorkerAttemptPageOptions): string {
     return runBoundary(
       encodeTaskAttemptsPathEffect({ itemId, options }),
       "Invalid Task attempts route",
       "encode"
     )
   },
-  questions(options: RunQuestionListOptions = {}): string {
+  questions(options: RunQuestionListOptions): string {
     return runBoundary(encodeRunQuestionsPathEffect(options), "Invalid question route", "encode")
   },
   answerQuestion(questionId: string): string {
@@ -82,19 +97,21 @@ export const runRoutes = {
   detail(runId: string): string {
     return runBoundary(encodeRunDetailPathEffect(runId), "Invalid Run route", "encode")
   },
-  events(runId: string, options: RunEventPageOptions = {}): string {
+  events(runId: string, options: RunEventPageOptions): string {
     return runBoundary(
       encodeRunEventPagePathEffect({ runId, options }),
       "Invalid Run events route",
       "encode"
     )
   },
-  list: "/chat/runs",
+  list(options: RunListOptions): string {
+    return runBoundary(encodeRunListPathEffect(options), "Invalid Run list route", "encode")
+  },
   planLimits: "/usage/limits",
-  usage(options: UsageReportOptions = {}): string {
+  usage(options: UsageReportOptions): string {
     return runBoundary(encodeUsageReportPathEffect({ options }), "Invalid usage route", "encode")
   },
-  sessionUsage(sessionId: string, options: SessionUsageOptions = {}): string {
+  sessionUsage(sessionId: string, options: SessionUsageOptions): string {
     return runBoundary(
       encodeSessionUsagePathEffect({ sessionId, options }),
       "Invalid chat usage route",

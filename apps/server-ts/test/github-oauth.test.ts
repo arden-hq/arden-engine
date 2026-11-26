@@ -121,7 +121,7 @@ it("exchanges a PKCE-bound GitHub grant, refreshes it and retains access setting
   expect(url.searchParams.get("scope")).toBe("offline_access")
   expect(url.searchParams.get("code_challenge_method")).toBe("S256")
   expect(url.searchParams.get("state")).toMatch(/^[a-f0-9]{64}$/)
-  expect(await setup.github.state()).toEqual({ connection: null })
+  expect(await setup.github.state()).toEqual({ connection: { kind: "disconnected" } })
   await setup.finish()
   expect(setup.bodies[0]?.get("client_secret")).toBe("test-client-secret")
   expect(setup.bodies[0]?.get("client_id")).toBe("Iv-test-app")
@@ -148,10 +148,10 @@ it("exchanges a PKCE-bound GitHub grant, refreshes it and retains access setting
     oauth: setup.oauth
   })
   expect(await reread.state()).toEqual({
-    connection: { readOnly: false, source: "app" }
+    connection: { kind: "connected", readOnly: false, source: "app" }
   })
   await setup.github.forget()
-  expect(await setup.github.state()).toEqual({ connection: null })
+  expect(await setup.github.state()).toEqual({ connection: { kind: "disconnected" } })
   expect(setup.documents.size).toBe(0)
 })
 

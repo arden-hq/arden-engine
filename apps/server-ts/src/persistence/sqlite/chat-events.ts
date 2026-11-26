@@ -1,6 +1,6 @@
 import { firstLine } from "@arden-hq/std/text"
 import { machineTimeZone } from "@arden-hq/std/time"
-import { answerSaid, answerWords } from "@arden-hq/protocol/runs"
+import { storedAnswerWords } from "../runs/stored-question.js"
 import { ChatUpdateSchema, CommunicationEnvelopeSchema } from "@arden-hq/protocol/effect/chat"
 import { DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -546,8 +546,7 @@ const answers = Effect.fn("SqliteChatEvents.answers")(function* (
     const question = Schema.decodeUnknownOption(QuestionSchema)(row.content)
     const resolution = Schema.decodeUnknownOption(ResolutionSchema)(row.resolution)
     if (Option.isNone(question) || Option.isNone(resolution)) return []
-    const parts = answerSaid(question.value.choices, resolution.value.answer)
-    const said = parts === undefined ? undefined : answerWords(parts)
+    const said = storedAnswerWords(question.value.choices, resolution.value.answer)
     return [
       {
         kind: "answer",

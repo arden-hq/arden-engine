@@ -34,9 +34,15 @@ const PermissionRuleSubjectSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("tool"),
     tool: boundedNonEmpty(256),
-    server: Schema.NullOr(boundedNonEmpty(256)),
     title: boundedNonEmpty(512),
-    server_title: Schema.NullOr(boundedNonEmpty(512))
+    owner: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("arden") }),
+      Schema.Struct({
+        kind: Schema.Literal("connector"),
+        server: boundedNonEmpty(256),
+        title: boundedNonEmpty(512)
+      })
+    ])
   }),
   Schema.Struct({
     kind: Schema.Literal("site"),
@@ -68,7 +74,10 @@ export const PermissionRuleItemSchema: Schema.Codec<PermissionRuleItem> = withEx
   id: PermissionIdSchema,
   list: RuleListSchema,
   decision: RuleDecisionSchema,
-  from: Schema.NullOr(PermissionIdSchema),
+  from: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("standalone") }),
+    Schema.Struct({ kind: Schema.Literal("words"), rule_id: PermissionIdSchema })
+  ]),
   subject: PermissionRuleSubjectSchema
 })
 
@@ -117,9 +126,8 @@ export const DefaultApprovalModeSchema: Schema.Codec<DefaultApprovalMode> = Sche
   approval_mode: ApprovalModeSchema
 })
 
-/** `PATCH /permissions/sessions/:sessionId` body: the chat's mode. */
 export const SessionPermissionPatchRequestSchema = Schema.Struct({
-  approval_mode: Schema.optionalKey(ApprovalModeSchema)
+  approval_mode: ApprovalModeSchema
 })
 export const SessionPermissionSchema: Schema.Codec<SessionPermission> = Schema.Union([
   Schema.Struct({
@@ -130,13 +138,17 @@ export const SessionPermissionSchema: Schema.Codec<SessionPermission> = Schema.U
     kind: Schema.Literal("automation"),
     automation_id: Schema.String,
     tool_scope: Schema.String,
-    auto_approve: Schema.Boolean,
-    /** Present for a Space's task workers: the main mode (`DefaultApprovalMode`). */
-    approval_mode: Schema.optionalKey(ApprovalModeSchema)
+    approval: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("space"), approval_mode: ApprovalModeSchema }),
+      Schema.Struct({ kind: Schema.Literal("own"), auto_approve: Schema.Boolean })
+    ])
   }),
   Schema.Struct({
     kind: Schema.Literal("inherited"),
-    approval_mode: Schema.optionalKey(ApprovalModeSchema)
+    mode: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("set"), approval_mode: ApprovalModeSchema }),
+      Schema.Struct({ kind: Schema.Literal("unset") })
+    ])
   })
 ])
 
@@ -179,5 +191,8 @@ export const NewWordsRuleSchema: Schema.Codec<NewWordsRule> = withExtras({
   text: boundedNonEmpty(2000),
   decision: RuleDecisionSchema,
   rules: Schema.Array(CompiledRuleSchema).check(Schema.isMaxLength(16)),
-  replaces: Schema.optionalKey(PermissionIdSchema)
+  replaces: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("nothing") }),
+    Schema.Struct({ kind: Schema.Literal("rule"), rule_id: PermissionIdSchema })
+  ])
 })

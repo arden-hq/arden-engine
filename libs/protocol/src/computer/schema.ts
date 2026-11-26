@@ -1,8 +1,11 @@
 import { Schema } from "effect"
 import type {
+  ComputerApp,
   ComputerStatus,
+  ComputerOperation,
   ComputerPreview,
   ComputerFeedback,
+  ComputerSession,
   ComputerStep
 } from "./contracts.js"
 import type { ComputerSetup } from "./contracts.js"
@@ -30,17 +33,18 @@ export const ComputerSetupSchema: Schema.Codec<ComputerSetup> = Schema.Struct({
 
 const FeedbackFrame = Schema.Struct({ width: Schema.Number, height: Schema.Number })
 const FeedbackSchema: Schema.Codec<ComputerFeedback> = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unlocated") }),
   Schema.Struct({
+    kind: Schema.Literal("pointer"),
     id: Schema.String,
     frame: FeedbackFrame,
-    kind: Schema.Literal("pointer"),
     x: Schema.Number,
     y: Schema.Number
   }),
   Schema.Struct({
+    kind: Schema.Literal("target"),
     id: Schema.String,
     frame: FeedbackFrame,
-    kind: Schema.Literal("target"),
     x: Schema.Number,
     y: Schema.Number,
     width: Schema.Number,
@@ -48,27 +52,52 @@ const FeedbackSchema: Schema.Codec<ComputerFeedback> = Schema.Union([
   })
 ])
 
+const ComputerAppSchema: Schema.Codec<ComputerApp> = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unidentified") }),
+  Schema.Struct({ kind: Schema.Literal("identified"), name: Schema.String, icon: Schema.String })
+])
+
+const ComputerOperationSchema: Schema.Codec<ComputerOperation> = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unlabelled") }),
+  Schema.Struct({
+    kind: Schema.Literal("labelled"),
+    label: Schema.String,
+    delivery: Schema.Literals(["none", "background", "foreground"]),
+    feedback: FeedbackSchema
+  })
+])
+
+const ComputerSessionSchema: Schema.Codec<ComputerSession> = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unclaimed") }),
+  Schema.Struct({
+    kind: Schema.Literal("claimed"),
+    session_id: Schema.String,
+    target: Schema.String,
+    application: ComputerAppSchema,
+    operation: ComputerOperationSchema,
+    preview: Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("empty") }),
+      Schema.Struct({
+        kind: Schema.Literal("captured"),
+        id: Schema.String,
+        captured_at: Schema.Number,
+        surface: Schema.String
+      })
+    ])
+  })
+])
+
 export const ComputerStatusSchema: Schema.Codec<ComputerStatus> = Schema.Struct({
   mode: Schema.Literals(["ready", "paused"]),
-  session_id: Schema.NullOr(Schema.String),
   foreground_allowed: Schema.Boolean,
-  target: Schema.NullOr(Schema.String),
-  application: Schema.NullOr(Schema.Struct({ name: Schema.String, icon: Schema.String })),
-  operation: Schema.NullOr(
-    Schema.Struct({
-      label: Schema.String,
-      delivery: Schema.NullOr(Schema.Literals(["background", "foreground"])),
-      feedback: Schema.NullOr(FeedbackSchema)
-    })
-  ),
-  preview: Schema.NullOr(
-    Schema.Struct({ id: Schema.String, captured_at: Schema.Number, surface: Schema.String })
-  ),
+  session: ComputerSessionSchema,
   activity: Schema.Literals(["idle", "observing", "acting"])
 })
 
-export const ComputerPreviewSchema: Schema.Codec<ComputerPreview | null> = Schema.NullOr(
+export const ComputerPreviewSchema: Schema.Codec<ComputerPreview> = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("empty") }),
   Schema.Struct({
+    kind: Schema.Literal("captured"),
     id: Schema.String,
     session_id: Schema.String,
     captured_at: Schema.Number,
@@ -76,13 +105,16 @@ export const ComputerPreviewSchema: Schema.Codec<ComputerPreview | null> = Schem
     width: Schema.Number,
     height: Schema.Number
   })
-)
+])
 
 export const ComputerStepSchema: Schema.Codec<ComputerStep> = Schema.Struct({
   kind: Schema.Literals(["look", "act"]),
   title: Schema.String,
-  app: Schema.NullOr(Schema.Struct({ name: Schema.String, icon: Schema.String })),
-  window: Schema.NullOr(Schema.String),
+  app: ComputerAppSchema,
+  window: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("untitled") }),
+    Schema.Struct({ kind: Schema.Literal("titled"), title: Schema.String })
+  ]),
   frames: Schema.Array(
     Schema.Struct({
       image: Schema.String,

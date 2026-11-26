@@ -1,5 +1,11 @@
 import type { TodoListItem, TodoStatus } from "@arden-hq/protocol"
-import type { TodoOverrideItemInput } from "@arden-hq/protocol/sessions/todos"
+import {
+  TODO_EXPLANATION,
+  TODO_REASON,
+  TODO_STATUS,
+  type TodoExplanation,
+  type TodoOverrideItemInput
+} from "@arden-hq/protocol/sessions/todos"
 
 export const isOpenTodo = (item: Pick<TodoListItem, "status">): boolean =>
   OPEN_STATUSES[item.status]
@@ -23,21 +29,24 @@ export const assignTodoIds = ({
   const claimed = new Set<string>()
   return next.map((item) => {
     const match = previous.find(
-      (earlier) =>
-        earlier.id !== undefined &&
-        !claimed.has(earlier.id) &&
-        earlier.content.trim() === item.content.trim()
+      (earlier) => !claimed.has(earlier.id) && earlier.content.trim() === item.content.trim()
     )
     const id = match?.id ?? newId()
     claimed.add(id)
-    return {
-      id,
-      content: item.content,
-      status: item.status,
-      ...(item.status === "cancelled" && item.reason !== undefined ? { reason: item.reason } : {})
-    }
+    return { ...item, id }
   })
 }
+
+export const statedReason = (item: TodoListItem): ReadonlyArray<string> =>
+  item.status === TODO_STATUS.cancelled && item.reason.kind === TODO_REASON.stated
+    ? [item.reason.text]
+    : []
+
+export const explanationText = (explanation: TodoExplanation): string | null =>
+  explanation.kind === TODO_EXPLANATION.given ? explanation.text : null
+
+export const explanationOf = (text: string | null): TodoExplanation =>
+  text === null ? { kind: TODO_EXPLANATION.none } : { kind: TODO_EXPLANATION.given, text }
 
 export interface FinishRecord {
   readonly item_id: string
@@ -68,7 +77,7 @@ export const finishDecision = ({
     item_id: itemId,
     list: items !== undefined,
     open: open.length,
-    cancelled: (items ?? []).filter((item) => item.status === "cancelled").length
+    cancelled: (items ?? []).filter((item) => item.status === TODO_STATUS.cancelled).length
   }
   if (open.length > 0 && !warned)
     return { kind: "warn", open, record: { ...record, forced: false, closed: false } }
@@ -77,8 +86,12 @@ export const finishDecision = ({
 
 export const planGaps = (items: ReadonlyArray<TodoListItem>): ReadonlyArray<string> =>
   items.flatMap((item) => {
-    if (item.status === "cancelled")
-      return [`${item.content} (cancelled${item.reason === undefined ? "" : `: ${item.reason}`})`]
+    if (item.status === TODO_STATUS.cancelled)
+      return [
+        `${item.content} (cancelled${statedReason(item)
+          .map((reason) => `: ${reason}`)
+          .join("")})`
+      ]
     return isOpenTodo(item) ? [`${item.content} (left open)`] : []
   })
 

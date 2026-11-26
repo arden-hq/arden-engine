@@ -1,3 +1,4 @@
+import { HISTORY_WINDOW, TURN_WORK_VIEW } from "@arden-hq/protocol/chat"
 import { HttpApi } from "effect/unstable/httpapi"
 import { expect, it } from "vitest"
 import { automationRoutes } from "@arden-hq/protocol/automations"
@@ -62,10 +63,10 @@ const workflowTarget = { workflowRef: "workflow-1", sessionId }
 
 const tables: Readonly<Record<string, RouteTable>> = {
   automationRoutes: table(automationRoutes, {
-    events: () => automationRoutes.events(),
+    events: () => automationRoutes.events({ kind: "live" }),
     item: () => automationRoutes.item("task-1"),
     description: () => automationRoutes.description("task-1"),
-    runs: () => automationRoutes.runs("task-1"),
+    runs: () => automationRoutes.runs("task-1", { limit: 20 }),
     toggle: () => automationRoutes.toggle("task-1"),
     run: () => automationRoutes.run("task-1"),
     runWithEvent: () => automationRoutes.runWithEvent("task-1", 7),
@@ -76,8 +77,16 @@ const tables: Readonly<Record<string, RouteTable>> = {
     procedure: () => browserProcedureRoutes.procedure("procedure-1")
   }),
   chatRoutes: table(chatRoutes, {
-    history: () => chatRoutes.history({ sessionId }),
-    turnWork: () => chatRoutes.turnWork({ sessionId, turnId: "turn-1" }),
+    history: () =>
+      chatRoutes.history({ sessionId, limit: 100, window: { kind: HISTORY_WINDOW.latest } }),
+    turnWork: () =>
+      chatRoutes.turnWork({
+        sessionId,
+        turnId: "turn-1",
+        limit: 100,
+        window: { kind: HISTORY_WINDOW.latest },
+        view: TURN_WORK_VIEW.full
+      }),
     turnDetails: () => chatRoutes.turnDetails({ sessionId, turnId: "turn-1" }),
     toolCall: () => chatRoutes.toolCall({ sessionId, turnId: "turn-1", toolCallId: "call-1" }),
     toolResultValue: () =>
@@ -110,7 +119,7 @@ const tables: Readonly<Record<string, RouteTable>> = {
   workRoutes: table(workRoutes, {
     taskChat: () => workRoutes.taskChat(itemId),
     resultRead: () => workRoutes.resultRead(itemId),
-    page: () => workRoutes.page(),
+    page: () => workRoutes.page({ scope: { kind: "all" }, start: { kind: "first" }, limit: 50 }),
     attachment: () => workRoutes.attachment(7),
     collection: () => workRoutes.collection(spaceId),
     looseCollection: () => workRoutes.looseCollection(),
@@ -158,17 +167,37 @@ const tables: Readonly<Record<string, RouteTable>> = {
     device: () => relayRoutes.device("abcdefghijklmnopqrstuv")
   }),
   runRoutes: table(runRoutes, {
-    taskAttempts: () => runRoutes.taskAttempts(itemId),
-    questions: () => runRoutes.questions(),
+    taskAttempts: () => runRoutes.taskAttempts(itemId, { limit: 25, page: { kind: "first" } }),
+    questions: () =>
+      runRoutes.questions({
+        filter: { kind: "all" },
+        state: "actionable",
+        page: { kind: "first" }
+      }),
     answerQuestion: () => runRoutes.answerQuestion("question-1"),
     progress: () => runRoutes.progress("run-1"),
     detail: () => runRoutes.detail("run-1"),
-    events: () => runRoutes.events("run-1"),
-    usage: () => runRoutes.usage(),
-    sessionUsage: () => runRoutes.sessionUsage(sessionId)
+    events: () => runRoutes.events("run-1", { afterSequence: 0, limit: 100 }),
+    list: () =>
+      runRoutes.list({
+        filter: { kind: "all" },
+        active: false,
+        limit: 500,
+        page: { kind: "first" }
+      }),
+    usage: () => runRoutes.usage({ days: 7 }),
+    sessionUsage: () => runRoutes.sessionUsage(sessionId, { limit: 20 })
   }),
   sessionRoutes: table(sessionRoutes, {
-    list: () => sessionRoutes.list(),
+    list: () =>
+      sessionRoutes.list({
+        scope: "all",
+        live: false,
+        limit: 100,
+        sort: "activity",
+        filter: { kind: "all" },
+        page: { kind: "first" }
+      }),
     item: () => sessionRoutes.item(sessionId),
     branch: () => sessionRoutes.branch(sessionId),
     model: () => sessionRoutes.model(sessionId),
@@ -212,13 +241,20 @@ const tables: Readonly<Record<string, RouteTable>> = {
   storageRoutes: table(storageRoutes, {}),
   toolRoutes: table(toolRoutes, {}),
   wikiRoutes: table(wikiRoutes, {
-    pages: () => wikiRoutes.pages(),
+    pages: () =>
+      wikiRoutes.pages({ includeRedirects: false, limit: 100, start: { kind: "first" } }),
     page: () => wikiRoutes.page("page-1"),
     archive: () => wikiRoutes.archive("page-1"),
     restoreArchived: () => wikiRoutes.restoreArchived("page-1"),
-    history: () => wikiRoutes.history("page-1"),
+    history: () => wikiRoutes.history("page-1", { limit: 50 }),
     historyRestore: () => wikiRoutes.historyRestore("page-1", "commit-1"),
-    diff: () => wikiRoutes.diff("page-1"),
+    diff: () =>
+      wikiRoutes.diff("page-1", {
+        base: { kind: "empty" },
+        target: "version-1",
+        offset: 0,
+        limit: 100
+      }),
     versionDiff: () => wikiRoutes.versionDiff("page-1", { before: "absent", after: "version-1" }),
     links: () => wikiRoutes.links("page-1")
   }),

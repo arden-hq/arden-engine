@@ -1,4 +1,4 @@
-import { HOME_HEADLINES } from "@arden-hq/protocol/effect/runs"
+import { HOME_HEADLINES } from "../src/persistence/home/letter-schema.js"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"

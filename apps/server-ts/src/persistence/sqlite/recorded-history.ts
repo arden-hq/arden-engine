@@ -1,6 +1,8 @@
 import { Effect, Schema } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
 import {
+  RECORDED_HISTORY_NEXT,
+  RECORDED_HISTORY_THROUGH,
   RecordedHistoryEntrySchema,
   RecordedHistoryQuerySchema,
   type RecordedHistoryInput,
@@ -40,8 +42,11 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
     const [head] = yield* sql<{
       readonly version: number
     }>`SELECT COALESCE(MAX(version), 0) AS version FROM ${table} WHERE ${key} = ${input.id}`
-    const through = query.through_version ?? head?.version ?? 0
-    const after = query.after_version ?? 0
+    const through =
+      query.through === RECORDED_HISTORY_THROUGH.version
+        ? query.through_version
+        : (head?.version ?? 0)
+    const after = query.after_version
     if (after > through || through > (head?.version ?? 0))
       return yield* new RecordedHistoryError({
         reason: "invalid",
@@ -50,11 +55,6 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
     const first = yield* sql<{
       readonly kind: string
     }>`SELECT kind FROM ${table} WHERE ${key} = ${input.id} AND version = 1`
-    const operation = sql.literal(
-      kind === "session"
-        ? "(SELECT operation_id FROM session_membership_changes AS change WHERE change.session_id = session_revisions.session_id AND change.version = session_revisions.version)"
-        : "NULL"
-    )
     const state = sql.literal(
       kind === "automation"
         ? "json_set(state_json, '$.instruction', json((SELECT instruction_json FROM automation_instruction_revisions WHERE revision_id = json_extract(state_json, '$.instruction_revision_id') AND task_id = automation_configuration_revisions.task_id)))"
@@ -64,23 +64,18 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
       readonly version: number
       readonly kind: string
       readonly recorded_at: string
-      readonly operation_id: string | null
       readonly state_json: string
     }>`
-    SELECT version, kind, recorded_at, ${state} AS state_json, ${operation} AS operation_id FROM ${table}
+    SELECT version, kind, recorded_at, ${state} AS state_json FROM ${table}
     WHERE ${key} = ${input.id} AND version > ${after} AND version <= ${through}
-    ORDER BY version LIMIT ${(query.limit ?? 50) + 1}`
-    const selected = rows.slice(0, query.limit ?? 50)
-    const entries = yield* Effect.forEach(selected, ({ state_json, operation_id, ...row }) =>
+    ORDER BY version LIMIT ${query.limit + 1}`
+    const selected = rows.slice(0, query.limit)
+    const entries = yield* Effect.forEach(selected, ({ state_json, ...row }) =>
       Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))(
         state_json
       ).pipe(
         Effect.flatMap((state) =>
-          Schema.decodeUnknownEffect(RecordedHistoryEntrySchema)({
-            ...row,
-            state,
-            ...(operation_id === null ? {} : { operation_id })
-          })
+          Schema.decodeUnknownEffect(RecordedHistoryEntrySchema)({ ...row, state })
         )
       )
     )
@@ -90,7 +85,7 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
     return {
       entries,
       through_version: through,
-      next_after_version: rows.length > selected.length ? (selected.at(-1)?.version ?? null) : null,
+      next: nextPage(rows.length > selected.length, selected.at(-1)?.version),
       coverage
     }
   },
@@ -104,6 +99,11 @@ export const readRecordedHistory = Effect.fn("RecordedHistory.read")(
         })
   )
 )
+
+const nextPage = (more: boolean, last: number | undefined): RecordedHistoryPage["next"] =>
+  more && last !== undefined
+    ? { kind: RECORDED_HISTORY_NEXT.more, after_version: last }
+    : { kind: RECORDED_HISTORY_NEXT.end }
 
 const historyTables = {
   task: { owner: "space_tasks", history: "space_task_revisions", key: "item_id" },

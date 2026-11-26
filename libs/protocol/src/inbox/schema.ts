@@ -3,7 +3,55 @@ import { IsoDateTimeStringSchema, withExtras, NonNegativeIntSchema } from "../co
 import { checkRunApprovalConnection, runApprovalFields } from "../runs/approval-schema.js"
 import { RunQuestionSchema } from "../runs/questions.js"
 import { INBOX_ITEM_LIMIT } from "./contracts.js"
-import type { InboxView } from "./contracts.js"
+import type { InboxGroupKind, InboxView } from "./contracts.js"
+
+export const InboxSpaceSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("loose") }),
+  Schema.Struct({ kind: Schema.Literal("space"), space_id: Schema.String, title: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const InboxReadMarkSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unmarked") }),
+  Schema.Struct({ kind: Schema.Literal("marked"), read_at: IsoDateTimeStringSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const InboxTaskNumberingSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unnumbered") }),
+  Schema.Struct({ kind: Schema.Literal("numbered"), seq: NonNegativeIntSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const InboxTaskAskSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unasked") }),
+  Schema.Struct({
+    kind: Schema.Literal("asked"),
+    text: Schema.String,
+    at: IsoDateTimeStringSchema
+  })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const InboxFailureRunSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unstarted") }),
+  Schema.Struct({ kind: Schema.Literal("started"), run_id: Schema.String })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const InboxFailureOriginSchema = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("workflow"),
+    workflow_ref: Schema.String,
+    run_id: Schema.String
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("automation"),
+    automation_task_id: Schema.String,
+    run: InboxFailureRunSchema
+  }),
+  Schema.Struct({ kind: Schema.Literal("task"), run: InboxFailureRunSchema })
+]).pipe(Schema.toTaggedUnion("kind"))
+
+const InboxPlanLimitReachedSchema = Schema.Union([
+  Schema.Struct({ level: Schema.Literal("used_up") }),
+  Schema.Struct({ level: Schema.Literals(["background", "arden"]), limit_percent: Schema.Number })
+])
 
 const inboxItemBase = {
   key: Schema.String,
@@ -11,21 +59,19 @@ const inboxItemBase = {
   at: IsoDateTimeStringSchema,
   counted: Schema.Boolean,
   unread: Schema.Boolean,
-  read_at: Schema.NullOr(IsoDateTimeStringSchema)
+  read_mark: InboxReadMarkSchema
 } as const
 
 export const InboxBlockedTaskItemSchema = withExtras({
   ...inboxItemBase,
   source: Schema.Literal("blocked_task"),
-  space_id: Schema.NullOr(Schema.String),
-  space_title: Schema.NullOr(Schema.String),
+  space: InboxSpaceSchema,
   item_id: Schema.String,
   stable_key: Schema.String,
-  seq: Schema.NullOr(NonNegativeIntSchema),
+  numbering: InboxTaskNumberingSchema,
   text: Schema.String,
   waiting_on: Schema.Literals(["you", "external"] as const),
-  question: Schema.NullOr(Schema.String),
-  question_at: Schema.NullOr(IsoDateTimeStringSchema)
+  ask: InboxTaskAskSchema
 })
 
 export const InboxApprovalItemSchema = withExtras({
@@ -37,11 +83,8 @@ export const InboxApprovalItemSchema = withExtras({
 export const InboxFailureGroupItemSchema = withExtras({
   ...inboxItemBase,
   source: Schema.Literal("failure"),
-  space_id: Schema.NullOr(Schema.String),
-  space_title: Schema.NullOr(Schema.String),
-  automation_task_id: Schema.NullOr(Schema.String),
-  run_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  workflow_ref: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  space: InboxSpaceSchema,
+  origin: InboxFailureOriginSchema,
   cause: Schema.String,
   run_count: NonNegativeIntSchema,
   first_at: IsoDateTimeStringSchema,
@@ -62,9 +105,8 @@ export const InboxIncidentItemSchema = withExtras({
 export const InboxPlanLimitItemSchema = withExtras({
   ...inboxItemBase,
   source: Schema.Literal("plan_limit"),
-  level: Schema.Literals(["background", "arden", "used_up"]),
+  reached: InboxPlanLimitReachedSchema,
   used_percent: Schema.Number,
-  limit_percent: Schema.NullOr(Schema.Number),
   window_seconds: Schema.Number,
   resets_at: IsoDateTimeStringSchema
 })
@@ -78,9 +120,6 @@ export const InboxItemSchema = Schema.Union([
   InboxPlanLimitItemSchema
 ]).pipe(Schema.toTaggedUnion("source"))
 
-type InboxGroupKind = "space" | "questions" | "approvals" | "incidents" | "failures" | "limits"
-
-/** The one item source each group kind holds. */
 const SOURCE_BY_GROUP_KIND: Record<InboxGroupKind, (typeof InboxItemSchema)["Type"]["source"]> = {
   space: "blocked_task",
   questions: "question",
@@ -90,21 +129,26 @@ const SOURCE_BY_GROUP_KIND: Record<InboxGroupKind, (typeof InboxItemSchema)["Typ
   limits: "plan_limit"
 }
 
-export const InboxGroupSchema = withExtras({
+const inboxGroupBase = {
   key: Schema.String,
-  kind: Schema.Literals([
-    "space",
-    "questions",
-    "approvals",
-    "incidents",
-    "failures",
-    "limits"
-  ] as const satisfies ReadonlyArray<InboxGroupKind>),
   title: Schema.String,
-  space_id: Schema.NullOr(Schema.String),
   count: NonNegativeIntSchema,
   items: Schema.Array(InboxItemSchema)
-}).check(
+} as const
+
+export const InboxGroupSchema = Schema.Union([
+  withExtras({ ...inboxGroupBase, kind: Schema.Literal("space"), space: InboxSpaceSchema }),
+  withExtras({
+    ...inboxGroupBase,
+    kind: Schema.Literals([
+      "questions",
+      "approvals",
+      "incidents",
+      "failures",
+      "limits"
+    ] as const satisfies ReadonlyArray<InboxGroupKind>)
+  })
+]).check(
   Schema.makeFilter((group) =>
     group.items.every((item) => item.group_key === group.key)
       ? undefined

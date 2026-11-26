@@ -1,6 +1,7 @@
 import type { PauseRequested } from "@arden-hq/loop"
 import { GoogleServiceIdSchema } from "@arden-hq/protocol/effect/google"
 import type { GoogleServiceId } from "@arden-hq/protocol/google"
+import { CONNECTION_ACCOUNT } from "@arden-hq/protocol/chat"
 import { Effect, Schema } from "effect"
 
 import {
@@ -67,7 +68,12 @@ export const googleConnectionCheck: Effect.Effect<ConnectionCheck, never, Google
         Effect.mapError((cause) => new ConnectionCheckError({ reason: "rejected", cause })),
         Effect.flatMap((service) =>
           google
-            .verify(service, decision.snapshot.account_ref ?? undefined)
+            .verify(
+              service,
+              decision.snapshot.account.kind === CONNECTION_ACCOUNT.account
+                ? decision.snapshot.account.ref
+                : undefined
+            )
             .pipe(Effect.mapError(checkError))
         )
       )

@@ -12,10 +12,6 @@ export interface ToolPolicy extends JsonRecord {
   readonly scope: ToolScope
   readonly requiresApproval: boolean
   readonly permissions: ReadonlyArray<string>
-  readonly concurrencyGroup: string | null
-  readonly destructive: boolean | null
-  readonly openWorld: boolean | null
-  readonly idempotent: boolean | null
 }
 
 /** One registered tool as shown in application settings. This catalog is not
@@ -25,7 +21,7 @@ export interface ToolCatalogEntry extends JsonRecord {
   readonly displayName: string
   readonly description: string
   readonly kind: string
-  readonly source: string | null
+  readonly source: string
   readonly effectivePolicy: ToolPolicy
   /** The declared policy expressed in the same vocabulary as the settings UI. */
   readonly defaultApproval: ToolDefaultApproval

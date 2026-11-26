@@ -5,7 +5,7 @@ import type {
   ModelRole,
   ModelSettingsPatch
 } from "@arden-hq/protocol/models"
-import { ModelSettingsPatchSchema } from "@arden-hq/protocol/effect/models"
+import { CONTEXT_LIMIT } from "@arden-hq/protocol/chat"
 import { Effect, Result, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ModelCatalogError, type ModelCatalog } from "../../models/catalog.js"
@@ -234,20 +234,13 @@ export const makeModelStore = ({
   })
   const patch = Effect.fn("SqliteModelStore.patch")(function* (input: ModelSettingsPatch) {
     const runtime = yield* currentRuntime()
-    const valid = yield* Schema.decodeUnknownEffect(ModelSettingsPatchSchema)(input, {
-      onExcessProperty: "error"
-    }).pipe(
-      Effect.mapError((cause) =>
-        error("patch", "invalid", "Invalid model settings patch", undefined, cause)
-      )
-    )
     if (!runtime.available)
       return yield* error("patch", "unavailable", "No model catalog is configured")
     return yield* writer
       .transact(
         Effect.gen(function* () {
           const next = yield* lift(
-            applyPatch(yield* loadSettings(sql, "patch"), valid, runtime),
+            applyPatch(yield* loadSettings(sql, "patch"), input, runtime),
             "patch"
           )
           const json = yield* encode(next, "patch")
@@ -368,6 +361,7 @@ export const makeModelStore = ({
         )
       )
     return {
+      kind: CONTEXT_LIMIT.resolved,
       model: selected.id,
       hard_limit: selected.context.hardLimit,
       compaction_trigger: Math.floor(selected.context.hardLimit * controls.compactionThreshold),

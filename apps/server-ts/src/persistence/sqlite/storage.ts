@@ -1,4 +1,9 @@
-import { DEFAULT_STORAGE_SETTINGS, type StorageSettings } from "@arden-hq/protocol/storage"
+import {
+  DEFAULT_STORAGE_SETTINGS,
+  STORAGE_LIMIT,
+  type StorageSettings,
+  type StorageSpaceLimit
+} from "@arden-hq/protocol/storage"
 import { Effect, Schema } from "effect"
 
 import {
@@ -19,9 +24,16 @@ interface StorageSettingsRow {
 }
 
 const StorageSettingsSchema = Schema.Struct({
-  maxSpaceGiB: Schema.NullOr(
-    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0.1), Schema.isLessThanOrEqualTo(1_000_000))
-  ),
+  maxSpace: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(STORAGE_LIMIT.unlimited) }),
+    Schema.Struct({
+      kind: Schema.Literal(STORAGE_LIMIT.limited),
+      gib: Schema.Number.check(
+        Schema.isGreaterThanOrEqualTo(0.1),
+        Schema.isLessThanOrEqualTo(1_000_000)
+      )
+    })
+  ]),
   allowArchivedSessionDeletion: Schema.Boolean,
   allowInactiveSessionDeletion: Schema.Boolean,
   inactiveSessionDays: Schema.Int.check(
@@ -50,8 +62,14 @@ const error = (
 const storage = (operation: StoragePolicyStoreOperation, message: string) => (cause: unknown) =>
   cause instanceof StoragePolicyStoreError ? cause : error(operation, "storage", message, cause)
 
+const maxSpaceColumn = (limit: StorageSpaceLimit): number | null =>
+  limit.kind === STORAGE_LIMIT.limited ? limit.gib : null
+
 const settingsFromRow = (row: StorageSettingsRow): StorageSettings => ({
-  maxSpaceGiB: row.max_space_gib,
+  maxSpace:
+    row.max_space_gib === null
+      ? { kind: STORAGE_LIMIT.unlimited }
+      : { kind: STORAGE_LIMIT.limited, gib: row.max_space_gib },
   allowArchivedSessionDeletion: row.allow_archived_session_deletion === 1,
   allowInactiveSessionDeletion: row.allow_inactive_session_deletion === 1,
   inactiveSessionDays: row.inactive_session_days,
@@ -70,7 +88,7 @@ export const makeStoragePolicyStore = Effect.fn("SqliteStoragePolicyStore.make")
       allow_archived_session_deletion, allow_inactive_session_deletion,
       inactive_session_days, minimum_current_sessions
     ) VALUES (
-      1, ${DEFAULT_STORAGE_SETTINGS.maxSpaceGiB},
+      1, ${maxSpaceColumn(DEFAULT_STORAGE_SETTINGS.maxSpace)},
       ${DEFAULT_STORAGE_SETTINGS.allowArchivedSessionDeletion ? 1 : 0},
       ${DEFAULT_STORAGE_SETTINGS.allowInactiveSessionDeletion ? 1 : 0},
       ${DEFAULT_STORAGE_SETTINGS.inactiveSessionDays}, ${DEFAULT_STORAGE_SETTINGS.minimumCurrentSessions}
@@ -109,7 +127,7 @@ export const makeStoragePolicyStore = Effect.fn("SqliteStoragePolicyStore.make")
         Effect.gen(function* () {
           const rows = yield* sql<StorageSettingsRow>`
         UPDATE storage_settings
-        SET max_space_gib = ${settings.maxSpaceGiB},
+        SET max_space_gib = ${maxSpaceColumn(settings.maxSpace)},
             allow_archived_session_deletion = ${settings.allowArchivedSessionDeletion ? 1 : 0},
             allow_inactive_session_deletion = ${settings.allowInactiveSessionDeletion ? 1 : 0},
             inactive_session_days = ${settings.inactiveSessionDays},

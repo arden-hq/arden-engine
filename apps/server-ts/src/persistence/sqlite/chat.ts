@@ -1,5 +1,5 @@
 import { DateTime, Effect, Schema } from "effect"
-import { RunTerminalResultSchema } from "@arden-hq/protocol/effect/runs"
+import { StoredRunUsageSchema } from "../runs/stored-result.js"
 import { ChatWriteStore } from "../chat/store.js"
 import type { ModelCatalog } from "../../models/catalog.js"
 import type { IntelligenceSettingsStore, LimitSettingsStore } from "../settings/store.js"
@@ -48,7 +48,7 @@ const makeChatWriteStore = ({
         Schema.Struct({
           runId: Schema.NonEmptyString,
           sampleId: Schema.NonEmptyString,
-          usage: RunTerminalResultSchema.schema.fields.usage
+          usage: StoredRunUsageSchema
         }),
         input,
         "checkpoint"

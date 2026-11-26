@@ -301,17 +301,11 @@ export const decodePendingConnection = Effect.fn(
       )
     )
   )
-  const decision = pendingConnectionDecision(
+  return pendingConnectionDecision(
     { runId: row.run_id, sessionId: row.session_id, toolCallId: row.tool_call_id },
-    data
+    data,
+    row.source ?? "run"
   )
-  return {
-    ...decision,
-    snapshot: {
-      ...decision.snapshot,
-      decision_delivery: row.source === "deferred" ? "deferred" : "blocking"
-    }
-  }
 })
 
 export const loadApprovalRow = Effect.fn("SqliteToolExecutionStore.loadApprovalRow")(function* (

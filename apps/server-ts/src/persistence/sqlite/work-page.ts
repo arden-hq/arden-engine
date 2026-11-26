@@ -1,11 +1,12 @@
+import { WorkPageRecordSchema } from "../work/task-record.js"
+import { type WorkPageRecord } from "../work/task-record.js"
 import { countsAsRun } from "./automation-skip-record.js"
 import { readTaskApprovals } from "./work-approvals.js"
 import { readWorkState } from "./work-activity.js"
 import { readTaskResults } from "./work-results.js"
-import type { SpaceWorkPage, SpaceWorkPageOptions } from "@arden-hq/protocol/spaces/work"
-import { WORK_PAGE_DEFAULT_LIMIT } from "@arden-hq/protocol/spaces/work"
+import type { SpaceWorkPageOptions } from "@arden-hq/protocol/spaces/work"
+import { WORK_PAGE_SCOPE, WORK_PAGE_START } from "@arden-hq/protocol/spaces/work"
 import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-import { SpaceWorkPageSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { Effect, Option, Schema } from "effect"
 import type { PersistenceDeps } from "./deps.js"
 import { WorkStoreError } from "../work/store.js"
@@ -74,28 +75,39 @@ export const makeWorkPage = ({
   reader
 }: Pick<PersistenceDeps, "writer" | "reader">): ((
   options: SpaceWorkPageOptions
-) => Effect.Effect<SpaceWorkPage, WorkStoreError, never>) => {
+) => Effect.Effect<WorkPageRecord, WorkStoreError, never>) => {
   const sql = reader
   const sources = makeWorkSourceSql(sql)
   return Effect.fn("SqliteWorkStore.page")(function* (
     options: SpaceWorkPageOptions
-  ): Effect.fn.Return<SpaceWorkPage, WorkStoreError> {
-    const limit = options.limit ?? WORK_PAGE_DEFAULT_LIMIT
-    const cursor = yield* decodeWorkCursor(options.cursor)
+  ): Effect.fn.Return<WorkPageRecord, WorkStoreError> {
+    const limit = options.limit
+    const cursor = yield* decodeWorkCursor(
+      options.start.kind === WORK_PAGE_START.after ? options.start.cursor : undefined
+    )
+    const scope = options.scope
+    const targetItemId =
+      options.start.kind === WORK_PAGE_START.with_item ? options.start.item_id : undefined
+    const spaceId = scope.kind === WORK_PAGE_SCOPE.space ? scope.space_id : undefined
+    const sessionId =
+      scope.kind === WORK_PAGE_SCOPE.chat || scope.kind === WORK_PAGE_SCOPE.turn
+        ? scope.session_id
+        : undefined
+    const itemId = scope.kind === WORK_PAGE_SCOPE.item ? scope.item_id : undefined
     return yield* writer
       .snapshot(
         Effect.gen(function* () {
           const clauses = [sql`(item.space_id IS NULL OR space.archived_at IS NULL)`]
-          if (options.itemId) clauses.push(sql`item.item_id = ${options.itemId}`)
-          if (options.spaceId) clauses.push(sql`item.space_id = ${options.spaceId}`)
-          if (options.sessionId) clauses.push(sql`item.home_session_id = ${options.sessionId}`)
-          if (options.turnId)
+          if (itemId !== undefined) clauses.push(sql`item.item_id = ${itemId}`)
+          if (spaceId !== undefined) clauses.push(sql`item.space_id = ${spaceId}`)
+          if (sessionId !== undefined) clauses.push(sql`item.home_session_id = ${sessionId}`)
+          if (scope.kind === WORK_PAGE_SCOPE.turn)
             clauses.push(sql`(
         SELECT json_extract(source.source, '$.turn_id') FROM space_task_sources AS source
         WHERE source.item_id = item.item_id AND json_extract(source.source, '$.kind') = 'chat'
-          AND json_extract(source.source, '$.session_id') = ${options.sessionId}
+          AND json_extract(source.source, '$.session_id') = ${scope.session_id}
         ORDER BY source.created_at, source.source_key LIMIT 1
-      ) = ${options.turnId}`)
+      ) = ${scope.turn_id}`)
           if (cursor !== null) {
             clauses.push(sql`(
           item.updated_at < ${cursor.updatedAt}
@@ -118,18 +130,17 @@ export const makeWorkPage = ({
           const visibleRows = pageRows.slice(0, limit)
           const lastVisible = visibleRows.at(-1)
           const targetRows =
-            options.targetItemId === undefined ||
-            visibleRows.some((row) => row.item_id === options.targetItemId)
+            targetItemId === undefined || visibleRows.some((row) => row.item_id === targetItemId)
               ? []
               : yield* sql<WorkItemRow>`
           SELECT ${workItemColumns(sql, "item")}
           FROM space_tasks AS item
           LEFT JOIN spaces AS space ON space.space_id = item.space_id
           WHERE (item.space_id IS NULL OR space.archived_at IS NULL)
-            AND item.item_id = ${options.targetItemId}
-            AND (${options.spaceId ?? null} IS NULL OR item.space_id = ${options.spaceId ?? null})
-            AND (${options.sessionId === undefined ? 1 : 0} = 1
-              OR item.home_session_id = ${options.sessionId ?? null})
+            AND item.item_id = ${targetItemId}
+            AND (${spaceId ?? null} IS NULL OR item.space_id = ${spaceId ?? null})
+            AND (${sessionId === undefined ? 1 : 0} = 1
+              OR item.home_session_id = ${sessionId ?? null})
           LIMIT 1
         `.pipe(
                   Effect.mapError((cause) =>
@@ -169,7 +180,7 @@ export const makeWorkPage = ({
             FROM space_task_events
             WHERE item_id IN ${sql.in(itemIds)}
           )
-          WHERE ${options.itemId ?? null} IS NOT NULL OR recency <= ${WORK_PAGE_EVENT_WINDOW}
+          WHERE ${itemId ?? null} IS NOT NULL OR recency <= ${WORK_PAGE_EVENT_WINDOW}
           ORDER BY created_at ASC, event_id ASC
         `.pipe(
                   Effect.mapError((cause) =>
@@ -250,7 +261,7 @@ export const makeWorkPage = ({
             }
           })
 
-          return yield* Schema.decodeUnknownEffect(SpaceWorkPageSchema)({
+          return yield* Schema.decodeUnknownEffect(WorkPageRecordSchema)({
             items,
             events,
             comments,

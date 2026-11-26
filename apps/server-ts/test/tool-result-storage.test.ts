@@ -1,3 +1,4 @@
+import { isComputerStep } from "@arden-hq/protocol/computer"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ToolResult } from "@arden-hq/loop"
 import { SqliteClient } from "@effect/sql-sqlite-node"
@@ -6,6 +7,7 @@ import { SqlClient } from "effect/unstable/sql"
 import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
 
 import { ConversationArtifacts } from "../src/artifacts/conversation.js"
@@ -14,6 +16,7 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { makeToolResultObjects } from "../src/persistence/managed-output/tool-result-objects.js"
 import { ToolResultObjects } from "../src/persistence/managed-output/tool-result-objects.js"
+import { computerStepStates } from "../src/persistence/migrations/0192_computer_step_states.js"
 import { SessionLifecycleEvents } from "../src/persistence/sessions/events.js"
 import { SessionQueries } from "../src/persistence/sessions/queries.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
@@ -179,6 +182,82 @@ const filesUnder = async (directory: string): Promise<ReadonlyArray<string>> => 
 }
 
 describe("tool result storage", () => {
+  it("restores tagged Computer steps from pre-upgrade inline and managed results", async () => {
+    const screenshot = {
+      image: `data:image/png;base64,${IMAGE.data}`,
+      width: 320,
+      height: 200,
+      caption: "Looked at TextEdit"
+    }
+    const inline = {
+      kind: "look",
+      title: "Looked at the desktop",
+      app: null,
+      window: null,
+      frames: []
+    }
+    const managed = {
+      ...inline,
+      title: "Looked at TextEdit",
+      app: { name: "TextEdit", icon: "icon" },
+      window: "Notes",
+      frames: [screenshot]
+    }
+    await withRig(async (rig) => {
+      const stored = await Effect.runPromise(
+        Effect.gen(function* () {
+          const run = yield* startRun
+          for (const [toolCallId, computer] of [
+            ["inline", inline],
+            ["managed", managed]
+          ] as const) {
+            yield* settle(
+              { ...identityOf(run, toolCallId), toolName: "computer_read" },
+              {
+                ...smallResult,
+                data: { computer }
+              }
+            )
+          }
+          return { sessionId: run.sessionId, managedRow: yield* storedRow("managed") }
+        }).pipe(Effect.provide(storage(rig, { slim: true })))
+      )
+      expect(JSON.parse(stored.managedRow)).toMatchObject({
+        data: {},
+        stored_result: { omitted: ["data.computer"], ref: expect.any(String) }
+      })
+      const database = new DatabaseSync(rig.filename)
+      try {
+        computerStepStates.up(database)
+      } finally {
+        database.close()
+      }
+      const results = await Effect.runPromise(
+        Effect.gen(function* () {
+          const history = yield* ToolHistoryQueries
+          const metadata = yield* history.historyResultMetadata({
+            sessionId: stored.sessionId,
+            toolCallIds: ["inline", "managed"]
+          })
+          expect(yield* storedRow("managed")).toBe(stored.managedRow)
+          return [
+            metadata.get("inline")?.data?.["computer"],
+            metadata.get("managed")?.data?.["computer"]
+          ]
+        }).pipe(Effect.provide(storage(rig, { slim: true })))
+      )
+      expect(results.map(isComputerStep)).toEqual([true, true])
+      expect(results).toEqual([
+        { ...inline, app: { kind: "unidentified" }, window: { kind: "untitled" } },
+        {
+          ...managed,
+          app: { ...managed.app, kind: "identified" },
+          window: { kind: "titled", title: "Notes" }
+        }
+      ])
+    })
+  })
+
   it("gives back a large result whole when it is completed and when the call is replayed", async () => {
     await withRig(async (rig) => {
       const out = await Effect.runPromise(

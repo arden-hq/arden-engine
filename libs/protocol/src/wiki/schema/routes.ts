@@ -1,86 +1,81 @@
 import { Effect, Schema } from "effect"
 import { NonNegativeIntSchema, PositiveIntSchema } from "../../common/schema.js"
-import { strict, trimmedText, WikiPageIdSchema, WikiRevisionIdSchema } from "./shared.js"
-import { WIKI_PAGE_MAX_LIMIT } from "../contracts.js"
+import {
+  strict,
+  trimmedText,
+  WikiDiffBaseSchema,
+  WikiPageIdSchema,
+  WikiRevisionIdSchema
+} from "./shared.js"
+import { WIKI_DIFF_BASE, WIKI_LIST_START, WIKI_PAGE_MAX_LIMIT } from "../contracts.js"
+
+const ListLimitSchema = PositiveIntSchema.check(Schema.isLessThanOrEqualTo(WIKI_PAGE_MAX_LIMIT))
+const HistoryLimitSchema = PositiveIntSchema.check(Schema.isLessThanOrEqualTo(200))
+const DiffLimitSchema = PositiveIntSchema.check(Schema.isLessThanOrEqualTo(65_536))
+const CursorSchema = trimmedText(1_024)
 
 export const WikiPageListOptionsSchema = Schema.Struct({
-  includeRedirects: Schema.optionalKey(Schema.Boolean),
-  limit: Schema.optionalKey(
-    PositiveIntSchema.check(Schema.isLessThanOrEqualTo(WIKI_PAGE_MAX_LIMIT))
-  ),
-  cursor: Schema.optionalKey(trimmedText(1_024))
+  includeRedirects: Schema.Boolean,
+  limit: ListLimitSchema,
+  start: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WIKI_LIST_START.first) }),
+    Schema.Struct({ kind: Schema.Literal(WIKI_LIST_START.after), cursor: CursorSchema })
+  ])
 })
 
-export const WikiHistoryRouteOptionsSchema = Schema.Struct({
-  limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(200)))
-})
+export const WikiHistoryRouteOptionsSchema = Schema.Struct({ limit: HistoryLimitSchema })
 
 export const WikiDiffRouteOptionsSchema = Schema.Struct({
-  base: Schema.optionalKey(Schema.NullOr(WikiRevisionIdSchema)),
-  target: Schema.optionalKey(Schema.NullOr(WikiRevisionIdSchema)),
-  offset: Schema.optionalKey(NonNegativeIntSchema),
-  limit: Schema.optionalKey(PositiveIntSchema.check(Schema.isLessThanOrEqualTo(65_536))),
-  tail: Schema.optionalKey(Schema.Boolean)
-}).check(
-  Schema.makeFilter((options) =>
-    options.tail === true && (options.offset ?? 0) !== 0
-      ? { path: ["offset"], issue: "must be zero when tail is requested" }
-      : undefined
-  )
-)
+  base: WikiDiffBaseSchema,
+  target: WikiRevisionIdSchema,
+  offset: NonNegativeIntSchema,
+  limit: DiffLimitSchema
+})
 
-/** Two versions of one page, as a write's receipt names them: `before` is
- *  "absent" for a page the write created. Its own HTTP query codec: both are
- *  plain strings. */
 export const WikiVersionDiffRouteOptionsSchema = Schema.Struct({
   before: WikiRevisionIdSchema,
   after: WikiRevisionIdSchema
 })
 
-/** HTTP query codecs. Plain client options remain camel-case above. */
-export const WikiPageListQuerySchema = Schema.Struct({
-  include_redirects: Schema.optionalKey(Schema.Literals(["true", "false"] as const)),
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(WIKI_PAGE_MAX_LIMIT)
-    )
-  ),
-  cursor: Schema.optionalKey(trimmedText(1_024))
-})
-
-export const WikiHistoryQuerySchema = Schema.Struct({
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(200)
-    )
+const queryInt = (minimum: number, maximum: number) =>
+  Schema.NumberFromString.check(
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(minimum),
+    Schema.isLessThanOrEqualTo(maximum)
   )
-})
 
-export const WikiDiffQuerySchema = Schema.Struct({
-  base: Schema.optionalKey(WikiRevisionIdSchema),
-  target: Schema.optionalKey(WikiRevisionIdSchema),
-  offset: Schema.optionalKey(
-    Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
-  ),
-  limit: Schema.optionalKey(
-    Schema.NumberFromString.check(
-      Schema.isInt(),
-      Schema.isGreaterThanOrEqualTo(1),
-      Schema.isLessThanOrEqualTo(65_536)
-    )
-  ),
-  tail: Schema.optionalKey(Schema.Literals(["true", "false"] as const))
-}).check(
-  Schema.makeFilter((query) =>
-    query.tail === "true" && (query.offset ?? 0) !== 0
-      ? { path: ["offset"], issue: "must be zero when tail is requested" }
-      : undefined
-  )
-)
+const BooleanQuerySchema = Schema.Literals(["true", "false"] as const)
+
+const listQueryFields = {
+  include_redirects: BooleanQuerySchema,
+  limit: queryInt(1, WIKI_PAGE_MAX_LIMIT)
+} as const
+
+export const WikiPageListQuerySchema = Schema.Union([
+  Schema.Struct({ ...listQueryFields, start: Schema.Literal(WIKI_LIST_START.first) }),
+  Schema.Struct({
+    ...listQueryFields,
+    start: Schema.Literal(WIKI_LIST_START.after),
+    cursor: CursorSchema
+  })
+])
+
+export const WikiHistoryQuerySchema = Schema.Struct({ limit: queryInt(1, 200) })
+
+const diffQueryFields = {
+  target: WikiRevisionIdSchema,
+  offset: queryInt(0, Number.MAX_SAFE_INTEGER),
+  limit: queryInt(1, 65_536)
+} as const
+
+export const WikiDiffQuerySchema = Schema.Union([
+  Schema.Struct({ ...diffQueryFields, from: Schema.Literal(WIKI_DIFF_BASE.empty) }),
+  Schema.Struct({
+    ...diffQueryFields,
+    from: Schema.Literal(WIKI_DIFF_BASE.version),
+    base: WikiRevisionIdSchema
+  })
+])
 
 const encodePagePath = (pageId: string) => `/admin/wiki/pages/${encodeURIComponent(pageId)}`
 
@@ -89,12 +84,13 @@ export const encodeWikiPagesPathEffect = (
 ): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(WikiPageListOptionsSchema)(value, strict).pipe(
     Effect.map((options) => {
-      const query = new URLSearchParams()
-      if (options.includeRedirects === true) query.set("include_redirects", "true")
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.cursor !== undefined) query.set("cursor", options.cursor)
-      const search = query.toString()
-      return `/admin/wiki/pages${search === "" ? "" : `?${search}`}`
+      const query = new URLSearchParams({
+        include_redirects: String(options.includeRedirects),
+        limit: String(options.limit),
+        start: options.start.kind
+      })
+      if (options.start.kind === WIKI_LIST_START.after) query.set("cursor", options.start.cursor)
+      return `/admin/wiki/pages?${query.toString()}`
     })
   )
 
@@ -126,10 +122,7 @@ export const encodeWikiHistoryPathEffect = (
       options: WikiHistoryRouteOptionsSchema
     })
   )(value, strict).pipe(
-    Effect.map(({ pageId, options }) => {
-      const path = `${encodePagePath(pageId)}/history`
-      return options.limit === undefined ? path : `${path}?limit=${options.limit}`
-    })
+    Effect.map(({ pageId, options }) => `${encodePagePath(pageId)}/history?limit=${options.limit}`)
   )
 
 export const encodeWikiHistoryRestorePathEffect = (
@@ -157,14 +150,14 @@ export const encodeWikiDiffPathEffect = (
     })
   )(value, strict).pipe(
     Effect.map(({ pageId, options }) => {
-      const query = new URLSearchParams()
-      if (options.base != null) query.set("base", options.base)
-      if (options.target != null) query.set("target", options.target)
-      if (options.offset !== undefined) query.set("offset", String(options.offset))
-      if (options.limit !== undefined) query.set("limit", String(options.limit))
-      if (options.tail === true) query.set("tail", "true")
-      const search = query.toString()
-      return `${encodePagePath(pageId)}/diff${search === "" ? "" : `?${search}`}`
+      const query = new URLSearchParams({
+        target: options.target,
+        offset: String(options.offset),
+        limit: String(options.limit),
+        from: options.base.kind
+      })
+      if (options.base.kind === WIKI_DIFF_BASE.version) query.set("base", options.base.version)
+      return `${encodePagePath(pageId)}/diff?${query.toString()}`
     })
   )
 

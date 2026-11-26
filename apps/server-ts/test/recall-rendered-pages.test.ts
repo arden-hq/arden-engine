@@ -48,10 +48,11 @@ it("recall fits its room in bytes, cuts a long page, and records each block's by
   const text = recall?.text ?? ""
   const sources = recall?.sources ?? []
   expect(bytes(text)).toBeLessThanOrEqual(room)
-  expect(sources.map((source) => [source.page_id, source.outcome, source.reason])).toEqual([
-    ["id:projects/kitchen.md", "cut", "recall_allowance"],
-    ["id:projects/garden.md", "whole", null]
+  expect(sources).toMatchObject([
+    { page_id: "id:projects/kitchen.md", outcome: "cut", reason: "recall_allowance" },
+    { page_id: "id:projects/garden.md", outcome: "whole" }
   ])
+  expect(sources[1]).not.toHaveProperty("reason")
   const blocks = text.split(/\n\n(?=### )/u).slice(1)
   expect(blocks.map((block) => bytes(block.replace(/\n*$/u, "")))).toEqual(
     sources.map((source) => source.bytes)

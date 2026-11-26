@@ -1,26 +1,40 @@
 import { groupedCount } from "@arden-hq/std/count"
 import {
+  APP_EVENT,
   automationEnabledWord,
-  mergeTriggerInputs,
-  type Automation
+  TRIGGER_TYPE,
+  type Automation,
+  type AutomationHistory,
+  type McpEventSelector
 } from "@arden-hq/protocol/automations"
-import type { ApprovalPresentationField } from "@arden-hq/protocol/chat"
+import type { ApprovalFieldDraft } from "../persistence/tools/approval-draft.js"
 import type { UpdateParametersSchema } from "./automation-tool-schema.js"
 import { createDestinationLabel } from "./automation-create-card.js"
-import { triggerInputWords } from "./automation-tool-text.js"
+import { cardTriggerWords, storedTriggerWords } from "./automation-tool-text.js"
+import { cardTriggers, toolTriggerInput } from "./automation-tool-triggers.js"
+import { cooldownMinutes, descriptionText, historyOf, modelId } from "./automation-tool-data.js"
 import { APPROVAL_MODE_LABEL } from "./onboarding.js"
 
 type Changes = (typeof UpdateParametersSchema.Type)["changes"]
 
-const change = (label: string, from: string, to: string): ApprovalPresentationField =>
+const change = (label: string, from: string, to: string): ApprovalFieldDraft =>
   from === to ? { label, value: to } : { label, value: to, from }
 
 const modelWords = (model: string | null): string => model ?? "Background model"
 const HISTORY_WORDS = { chat: "Reads the chat", fresh: "Starts fresh" } as const
-const historyWords = (history: Automation["history"]): string =>
+const historyWords = (history: AutomationHistory | null): string =>
   history === null ? "Set by the system" : HISTORY_WORDS[history]
 const cooldownWords = (minutes: number | null): string =>
   minutes === null ? "None" : `${minutes} min`
+
+const storedApp =
+  (current: Automation) =>
+  (id: string): McpEventSelector | undefined => {
+    const trigger = current.triggers.find((candidate) => candidate.id === id)
+    return trigger?.type === TRIGGER_TYPE.event && trigger.event_type === APP_EVENT
+      ? trigger.mcp_event
+      : undefined
+  }
 
 export const updateCard = (
   current: Automation,
@@ -30,9 +44,9 @@ export const updateCard = (
   body?: { before?: string; label: string; text: string }
   title: string
   subject: string
-  fields: ApprovalPresentationField[]
+  fields: ApprovalFieldDraft[]
 } => {
-  const fields: Array<ApprovalPresentationField> = []
+  const fields: Array<ApprovalFieldDraft> = []
   if (changes.reset_to_default !== undefined) {
     fields.push({ label: "Reset", value: `${changes.reset_to_default} to its default` })
   }
@@ -47,15 +61,17 @@ export const updateCard = (
   }
   if (changes.name !== undefined) fields.push(change("Name", current.name, changes.name))
   if (changes.description !== undefined) {
-    fields.push(change("About", current.description ?? "None", changes.description ?? "None"))
+    fields.push(change("About", descriptionText(current) ?? "None", changes.description ?? "None"))
   }
   if (changes.triggers !== undefined) {
-    const merged = mergeTriggerInputs({ triggers: current.triggers, lastId: 0 }, changes.triggers)
     fields.push(
       change(
         "When",
-        triggerInputWords(current.triggers),
-        triggerInputWords(merged.kind === "ok" ? merged.triggers : changes.triggers)
+        storedTriggerWords(current.triggers),
+        cardTriggerWords(
+          current.triggers,
+          cardTriggers(changes.triggers, toolTriggerInput, storedApp(current))
+        )
       )
     )
   }
@@ -66,10 +82,10 @@ export const updateCard = (
     })
   }
   if (changes.history !== undefined) {
-    fields.push(change("History", historyWords(current.history), historyWords(changes.history)))
+    fields.push(change("History", historyWords(historyOf(current)), historyWords(changes.history)))
   }
   if (changes.model !== undefined) {
-    fields.push(change("Model", modelWords(current.model), modelWords(changes.model)))
+    fields.push(change("Model", modelWords(modelId(current)), modelWords(changes.model)))
   }
   if (changes.action_mode !== undefined) {
     fields.push({ label: "Action mode", value: APPROVAL_MODE_LABEL[changes.action_mode] })
@@ -78,7 +94,7 @@ export const updateCard = (
     fields.push(
       change(
         "Cooldown",
-        cooldownWords(current.cooldown_minutes),
+        cooldownWords(cooldownMinutes(current)),
         cooldownWords(changes.cooldown_minutes)
       )
     )

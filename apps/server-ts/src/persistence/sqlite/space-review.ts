@@ -2,6 +2,7 @@ import { writtenByPersonSql } from "./person-written-sql.js"
 import { readChatSettled, settledFingerprint } from "./chat-ownership.js"
 import { readSpaceReviewContext } from "./space-job-context.js"
 import { AutomationTriggerContextSchema } from "@arden-hq/protocol/effect/automations"
+import { eventCauseOf } from "../automations/event-cause.js"
 import { Clock, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { AutomationStoreError, type AutomationJobLeaseRef } from "../automations/store.js"
@@ -189,8 +190,7 @@ export const makeSpaceReviewStore = ({
             scheduled_for: null,
             automation_run_id: null,
             trigger_context: `The person explicitly asked to recheck proposal ${proposalId} at revision ${expectedRevision}.`,
-            trigger_context_snapshot: {
-              source: "event" as const,
+            trigger_context_snapshot: eventCauseOf({
               queued_at: queuedAt,
               event_type: "space.proposal_review_requested",
               event_key: requestId,
@@ -200,7 +200,7 @@ export const makeSpaceReviewStore = ({
                 expected_revision: expectedRevision,
                 request_id: requestId
               }
-            }
+            })
           }
           yield* enqueue(
             { sql, sessionEvents },

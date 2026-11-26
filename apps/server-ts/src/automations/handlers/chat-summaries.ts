@@ -80,7 +80,11 @@ export const chatSummariesHandler: SystemAutomationHandler<"chat_summaries"> = {
       {
         type: "event",
         event_type: "chat.quiet",
-        condition: { kind: "compare", field: "chat.your_messages", op: "gte", value: 1 }
+        run_only_if: { kind: "any_event" },
+        condition: {
+          kind: "old",
+          condition: { kind: "compare", field: "chat.your_messages", op: "gte", value: 1 }
+        }
       },
       { type: "count", every_n: 25 }
     ],

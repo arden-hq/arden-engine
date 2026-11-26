@@ -1,5 +1,5 @@
+import { type RunContext } from "../persistence/runs/stored-context.js"
 import { isWithin } from "@arden-hq/std/paths"
-import type { RunContext } from "@arden-hq/protocol/runs"
 import { Effect, Schema } from "effect"
 import { originChainDepth } from "../persistence/automations/chain-depth.js"
 import {

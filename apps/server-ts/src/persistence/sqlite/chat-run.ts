@@ -1,6 +1,6 @@
+import type { RunCancelTarget } from "../chat/send-contracts.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import type { CancelInput } from "@arden-hq/protocol/chat"
 import type { ChatAutomationOrigin, ChatWriteError } from "../chat/store.js"
 import type { AutomationContextMode } from "@arden-hq/protocol/automations"
 import type { ChatEventStore } from "../events/store.js"
@@ -118,7 +118,7 @@ export const loadRun = Effect.fn("SqliteChatWriteStore.loadRun")(function* (
 
 export const loadActiveRun = Effect.fn("SqliteChatWriteStore.loadActiveRun")(function* (
   sql: SqlClient.SqlClient,
-  input: CancelInput
+  input: RunCancelTarget
 ): Effect.fn.Return<RunRow, ChatWriteError> {
   const rows =
     input.runId !== undefined

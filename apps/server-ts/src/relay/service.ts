@@ -1,5 +1,12 @@
 import { sleep } from "@arden-hq/std/sleep"
-import type { RelayPairOffer, RelaySettingsPatch, RelayStatus } from "@arden-hq/protocol/relay"
+import {
+  RELAY_PAIR_REQUEST,
+  RELAY_PRESENCE,
+  RELAY_SETTING,
+  type RelayPairOffer,
+  type RelaySettingsPatch,
+  type RelayStatus
+} from "@arden-hq/protocol/relay"
 import { Clock, Context, DateTime, Effect, Layer, Queue, Schedule, Schema, Stream } from "effect"
 import { HttpServer } from "effect/unstable/http"
 import { hostname } from "node:os"
@@ -246,7 +253,6 @@ export const relayLayer = (
         const settings = yield* store.settings()
         const paired = yield* store.devices()
         const live = connector?.instance
-        const now = DateTime.formatIso(yield* DateTime.now)
         const connection = connectionOf({
           secure: options.vault !== undefined,
           enabled: settings.enabled,
@@ -261,18 +267,19 @@ export const relayLayer = (
           keeping_awake: keeping,
           pair_request:
             request === undefined
-              ? null
-              : { dev: request.dev, name: request.name, code: request.code },
-          devices: paired.map((device) => {
-            const online = live?.isOnline(device.dev) ?? false
-            return {
-              dev: device.dev,
-              name: device.name,
-              added_at: device.addedAt,
-              last_seen_at: online ? now : (device.lastSeenAt ?? null),
-              online
-            }
-          })
+              ? { kind: RELAY_PAIR_REQUEST.none }
+              : {
+                  kind: RELAY_PAIR_REQUEST.waiting,
+                  dev: request.dev,
+                  name: request.name,
+                  code: request.code
+                },
+          devices: paired.map((device) => ({
+            dev: device.dev,
+            name: device.name,
+            added_at: device.addedAt,
+            presence: presenceOf(live?.isOnline(device.dev) ?? false, device.lastSeenAt)
+          }))
         } satisfies RelayStatus
       })
 
@@ -328,11 +335,7 @@ export const relayLayer = (
       const updateSettings = Effect.fn("RelayService.updateSettings")(function* (
         patch: RelaySettingsPatch
       ) {
-        yield* store.updateSettings({
-          ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
-          ...(patch.relay_url === undefined ? {} : { relayUrl: patch.relay_url }),
-          ...(patch.keep_awake === undefined ? {} : { keepAwake: patch.keep_awake })
-        })
+        yield* store.updateSettings(storeChange(patch))
         yield* Effect.promise(reconcile)
         yield* holdAwake()
         return yield* status()
@@ -341,6 +344,27 @@ export const relayLayer = (
       return RelayService.of({ status, pair, decide, remove, updateSettings })
     })
   )
+
+const presenceOf = (
+  online: boolean,
+  lastSeenAt: string | undefined
+): RelayStatus["devices"][number]["presence"] => {
+  if (online) return { state: RELAY_PRESENCE.online }
+  return lastSeenAt === undefined
+    ? { state: RELAY_PRESENCE.unseen }
+    : { state: RELAY_PRESENCE.offline, last_seen_at: lastSeenAt }
+}
+
+const storeChange = (patch: RelaySettingsPatch) => {
+  switch (patch.setting) {
+    case RELAY_SETTING.enabled:
+      return { enabled: patch.enabled }
+    case RELAY_SETTING.relay_url:
+      return { relayUrl: patch.relay_url }
+    case RELAY_SETTING.keep_awake:
+      return { keepAwake: patch.keep_awake }
+  }
+}
 
 const connectionOf = (input: {
   readonly secure: boolean

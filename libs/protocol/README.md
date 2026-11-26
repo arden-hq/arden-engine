@@ -8,7 +8,7 @@ Plain entry points are ordinary TypeScript. They work in Node, Bun, Electron and
 
 | Import | What it gives you |
 | --- | --- |
-| `@arden-hq/protocol` | `ProtocolError`, `normalizeApiError`, the server event types and the SSE codec |
+| `@arden-hq/protocol` | `ProtocolError`, the server event types and the SSE codec |
 | `@arden-hq/protocol/<domain>` | The routes, request builders, decoders and types of one domain |
 | `@arden-hq/protocol/effect/<domain>` | The Effect schemas of that domain (server only) |
 | `@arden-hq/protocol/daemon` and `/daemon/effect` | The private boundary between Electron and the daemon |

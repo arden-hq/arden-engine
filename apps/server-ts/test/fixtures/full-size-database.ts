@@ -219,7 +219,9 @@ export const seedFullSizeDatabase = (filename: string, options: SeedOptions = {}
          prompt_author)
        SELECT ${automationId("n")}, 'ref-auto-' || ${pad(2, "n")}, 'Automation ' || n,
          'Check the news and report anything new.', 'claude-sonnet-4-5', 'continue',
-         CASE WHEN n < 3 THEN '[{"type":"time","every":"1h"}]' ELSE '[{"type":"time","every":"1d"}]' END,
+         CASE WHEN n < 3 THEN
+           '[{"id":"t1","type":"time","schedule":{"kind":"interval","every":"1h","days":{"kind":"every_day"},"window":{"kind":"all_day"}}}]'
+           ELSE '[{"id":"t1","type":"time","schedule":{"kind":"interval","every":"1d","days":{"kind":"every_day"},"window":{"kind":"all_day"}}}]' END,
          CASE WHEN n = ${AUTOMATIONS - 1} THEN 0 ELSE 1 END, ${at("n * 60")}, ${at(`${span} - 600`)},
          strftime('%Y-%m-%dT%H:%M:%fZ', ${end} + 1800 + 86400, 'unixepoch'), 'Nothing new.',
          ${threadId("n")}, 'read_only', 'user_automation', 'owner'

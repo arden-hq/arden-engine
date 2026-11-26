@@ -1,5 +1,4 @@
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
-import type { RunContext, RunOrigin } from "@arden-hq/protocol/runs"
+import { RunContextSchema, type RunContext, type RunOrigin } from "../runs/stored-context.js"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"

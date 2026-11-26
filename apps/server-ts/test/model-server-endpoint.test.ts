@@ -1,3 +1,5 @@
+import { messageInput, receiptRunId } from "./fixtures/chat-requests.js"
+import { newChat } from "./fixtures/new-chat.js"
 import { MODEL_PROVIDER_PROTOCOL } from "@arden-hq/loop"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ModelProvider, ModelProviderRequest } from "@arden-hq/loop"
@@ -206,7 +208,7 @@ const chatOn = async (running: Running, model: string) => {
       await running.call(sessionRoutes.collection, {
         method: "POST",
         headers,
-        body: JSON.stringify({})
+        body: JSON.stringify(newChat())
       })
     ).body
   ).session_id
@@ -215,7 +217,7 @@ const chatOn = async (running: Running, model: string) => {
       await running.call(sessionRoutes.model(sessionId), {
         method: "PUT",
         headers,
-        body: sessionRequests.setModel(model)
+        body: sessionRequests.setModel({ kind: "pinned", model_id: model })
       })
     ).status
   ).toBe(200)
@@ -224,12 +226,11 @@ const chatOn = async (running: Running, model: string) => {
       await running.call(chatRoutes.message, {
         method: "POST",
         headers,
-        body: chatRequests.message({ sessionId, message: "Hi" }).body
+        body: chatRequests.message(messageInput(sessionId, "Hi")).body
       })
     ).body
   )
-  const runId = receipt.runId
-  if (runId === null) throw new Error("no run")
+  const runId = receiptRunId(receipt)
   const status = async () =>
     runDecoders.detail((await running.call(runRoutes.detail(runId))).body).status
   await expect
@@ -284,10 +285,10 @@ describe("the model server beside the signed-in account", () => {
           await running.call(modelRoutes.settings, {
             method: "PATCH",
             headers,
-            body: modelRequests.update({
-              chatModelId: GEMMA,
-              roles: { helper: { modelId: GEMMA } }
-            })
+            body: modelRequests.update([
+              { kind: "chat_model", model: { kind: "model", modelId: GEMMA } },
+              { kind: "role_model", role: "helper", model: { kind: "model", modelId: GEMMA } }
+            ])
           })
         ).status
       ).toBe(200)

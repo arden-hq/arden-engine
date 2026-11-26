@@ -1,31 +1,35 @@
-import { cutText } from "@arden-hq/std/text"
 import { Schema } from "effect"
 import type { JsonValue } from "../common/json.js"
 import type { GoogleGrant } from "../google/contracts.js"
 import { GoogleGrantSchema } from "../google/schema.js"
-import { isRecord } from "@arden-hq/std/json"
+import type { Agrees, Assert } from "../common/type-agreement.js"
+
+export const PREVIOUS_VALUE = { none: "none", previous: "previous" } as const
+
+export type PreviousValue =
+  | { readonly kind: typeof PREVIOUS_VALUE.none }
+  | { readonly kind: typeof PREVIOUS_VALUE.previous; readonly text: string }
 
 export interface ApprovalPresentationField {
   readonly label: string
   readonly value: string
-  /** The value this call replaces; the card shows it struck before the new one. */
-  readonly from?: string
+  readonly from: PreviousValue
 }
 
 export interface ApprovalPresentationBody {
   readonly label: string
   readonly text: string
-  /** The text this call replaces; the card shows the change between them. */
-  readonly before?: string
+  readonly before: PreviousValue
 }
 
-export const EDITABLE_KIND = { arguments: "arguments", mailDraft: "mail_draft" } as const
+export const EDITABLE_KIND = {
+  fixed: "fixed",
+  arguments: "arguments",
+  mailDraft: "mail_draft"
+} as const
 
-/** The call's arguments a card may change in place before approving. */
 interface EditableArguments {
-  /** Top-level arguments the person may change; the rest stay as asked. */
   readonly fields: ReadonlyArray<string>
-  /** Every argument as the model asked for it. */
   readonly arguments: { readonly [key: string]: JsonValue }
 }
 
@@ -36,32 +40,59 @@ export type ApprovalPresentationEditable =
       readonly account: string
     })
 
-/** A picture of what the call acts on (a browser action's element on its
- *  page): an inline PNG or JPEG only, never a URL the app would fetch.
- *  `ring` marks the element, as fractions of the picture. */
+export type ApprovalEditable =
+  | { readonly kind: typeof EDITABLE_KIND.fixed }
+  | ApprovalPresentationEditable
+
+export const IMAGE_RING = { unmarked: "unmarked", marked: "marked" } as const
+
+export type ImageRing =
+  | { readonly kind: typeof IMAGE_RING.unmarked }
+  | {
+      readonly kind: typeof IMAGE_RING.marked
+      readonly x: number
+      readonly y: number
+      readonly width: number
+      readonly height: number
+    }
+
 export interface ApprovalPresentationImage {
   readonly src: string
   readonly width: number
   readonly height: number
-  readonly ring?: {
-    readonly x: number
-    readonly y: number
-    readonly width: number
-    readonly height: number
-  }
+  readonly ring: ImageRing
 }
 
-/**
- * A Google permission the account has not given yet. The app asks Google for
- * it when the person approves, and approves only once Google granted it.
- */
+export const PRESENTATION_IMAGE = { none: "none", image: "image" } as const
+
+export type PresentationImage =
+  | { readonly kind: typeof PRESENTATION_IMAGE.none }
+  | ({ readonly kind: typeof PRESENTATION_IMAGE.image } & ApprovalPresentationImage)
+
 export interface ApprovalPresentationGrant {
   readonly grant: GoogleGrant
-  /** The connected Google account's email. */
   readonly account: string
 }
 
-type ApprovalAttachment =
+export const NEEDS_GRANT = { none: "none", needed: "needed" } as const
+
+export type NeedsGrant =
+  | { readonly kind: typeof NEEDS_GRANT.none }
+  | ({ readonly kind: typeof NEEDS_GRANT.needed } & ApprovalPresentationGrant)
+
+export const PRESENTATION_BODY = { none: "none", body: "body" } as const
+
+export type PresentationBody =
+  | { readonly kind: typeof PRESENTATION_BODY.none }
+  | ({ readonly kind: typeof PRESENTATION_BODY.body } & ApprovalPresentationBody)
+
+export const PRESENTATION_TEXT = { none: "none", text: "text" } as const
+
+export type PresentationText =
+  | { readonly kind: typeof PRESENTATION_TEXT.none }
+  | { readonly kind: typeof PRESENTATION_TEXT.text; readonly text: string }
+
+export type ApprovalAttachment =
   | {
       readonly kind: "file"
       readonly index: number
@@ -77,41 +108,20 @@ type ApprovalAttachment =
     }
 
 export interface ApprovalPresentation {
-  readonly attachments?: ReadonlyArray<ApprovalAttachment>
+  readonly attachments: ReadonlyArray<ApprovalAttachment>
   readonly title: string
-  /** What the title is about — the path, name or address the card identifies. */
-  readonly subject?: string
+  readonly subject: PresentationText
   readonly fields: ReadonlyArray<ApprovalPresentationField>
-  readonly body?: ApprovalPresentationBody
-  /** The tool's own verb for approving, in place of "Approve". */
-  readonly approve_label?: string
-  /** The tool's own verb for rejecting, in place of "Reject". */
-  readonly reject_label?: string
-  /**
-   * Why this card came to the user rather than running: in Auto, the Helper's
-   * reason; otherwise the tool's own caution, such as a file outside the
-   * Local folders.
-   */
-  readonly note?: string
-  /**
-   * Why Arden asked rather than ran the call (the Helper's reason, or the
-   * rule that always asks): kept behind a question icon, never in the card's
-   * body. A caution the owner must see goes in `note`.
-   */
-  readonly why?: string
-  /** The tool's own words for its folder grant, in place of "Allow for this Space" or "Chat". */
-  readonly grant_label?: string
-  /**
-   * What the card's "Always allow" keeps, as its label names it: command
-   * prefixes ("modal …") or the Helper's words for the action. The one source
-   * of that label; never shown as a row.
-   */
-  readonly grant_rule?: string
-  /** Present when approving needs a Google permission the account lacks. */
-  readonly needs_grant?: ApprovalPresentationGrant
-  /** Present when the tool takes edits on its card. */
-  readonly editable?: ApprovalPresentationEditable
-  readonly image?: ApprovalPresentationImage
+  readonly body: PresentationBody
+  readonly approve_label: PresentationText
+  readonly reject_label: PresentationText
+  readonly note: PresentationText
+  readonly why: PresentationText
+  readonly grant_label: PresentationText
+  readonly grant_rule: PresentationText
+  readonly needs_grant: NeedsGrant
+  readonly editable: ApprovalEditable
+  readonly image: PresentationImage
 }
 
 export const APPROVAL_FIELD_LABEL = Object.freeze({
@@ -155,179 +165,9 @@ export const APPROVAL_PRESENTATION_LIMITS = Object.freeze({
   imageSide: 4_096
 })
 
-const ApprovalAttachmentSchema = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("file"),
-    index: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 499 })),
-    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
-    media_type: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-    size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("link"),
-    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
-    media_type: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-    url: Schema.String.check(Schema.isMaxLength(8192))
-  })
-])
-const AttachmentsSchema = Schema.Array(ApprovalAttachmentSchema).check(Schema.isMaxLength(500))
-
 const INLINE_IMAGE = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/u
 
-const sanitizeImage = (value: unknown): ApprovalPresentationImage | undefined => {
-  if (!isRecord(value)) return undefined
-  const { src, width, height, ring } = value
-  const side = (n: unknown): n is number =>
-    typeof n === "number" &&
-    Number.isInteger(n) &&
-    n > 0 &&
-    n <= APPROVAL_PRESENTATION_LIMITS.imageSide
-  if (
-    typeof src !== "string" ||
-    src.length > APPROVAL_PRESENTATION_LIMITS.imageSrc ||
-    !INLINE_IMAGE.test(src) ||
-    !side(width) ||
-    !side(height)
-  )
-    return undefined
-  const fraction = (n: unknown): n is number => typeof n === "number" && n >= 0 && n <= 1
-  const marked =
-    isRecord(ring) &&
-    fraction(ring.x) &&
-    fraction(ring.y) &&
-    fraction(ring.width) &&
-    fraction(ring.height)
-      ? { x: ring.x, y: ring.y, width: ring.width, height: ring.height }
-      : undefined
-  return { src, width, height, ...(marked === undefined ? {} : { ring: marked }) }
-}
-
-const invisibleControlCharacters =
-  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/gu
-
-const sanitizeInline = (value: unknown, maximum: number): string | undefined => {
-  if (typeof value !== "string") return undefined
-  const sanitized = value.replace(invisibleControlCharacters, "").replace(/\s+/gu, " ").trim()
-  if (sanitized.length === 0) return undefined
-  return cutText(sanitized, maximum)
-}
-
-const sanitizeBodyText = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined
-  const sanitized = value.replace(/\r\n?/gu, "\n").replace(invisibleControlCharacters, "")
-  if (sanitized.trim().length === 0) return undefined
-  return cutText(sanitized, APPROVAL_PRESENTATION_LIMITS.bodyText, { suffix: "\n… [truncated]" })
-}
-
-/**
- * Projects untrusted approval details into the one bounded public shape.
- * Unknown keys and malformed rows are dropped; executor approval data never
- * enters this function or the returned object.
- */
-export const sanitizeApprovalPresentation = (value: unknown): ApprovalPresentation | undefined => {
-  if (!isRecord(value)) return undefined
-  const title = sanitizeInline(value.title, APPROVAL_PRESENTATION_LIMITS.title)
-  if (title === undefined || !Array.isArray(value.fields)) return undefined
-  const subject = sanitizeInline(value.subject, APPROVAL_PRESENTATION_LIMITS.subject)
-  const approveLabel = sanitizeInline(
-    value.approve_label,
-    APPROVAL_PRESENTATION_LIMITS.decisionLabel
-  )
-  const rejectLabel = sanitizeInline(value.reject_label, APPROVAL_PRESENTATION_LIMITS.decisionLabel)
-  const note = sanitizeInline(value.note, APPROVAL_PRESENTATION_LIMITS.note)
-  const why = sanitizeInline(value.why, APPROVAL_PRESENTATION_LIMITS.why)
-  const grantLabel = sanitizeInline(value.grant_label, APPROVAL_PRESENTATION_LIMITS.decisionLabel)
-  const grantRule = sanitizeInline(value.grant_rule, APPROVAL_PRESENTATION_LIMITS.grantRule)
-
-  const fields: Array<ApprovalPresentationField> = []
-  for (const rawField of value.fields.slice(0, APPROVAL_PRESENTATION_LIMITS.fields)) {
-    if (!isRecord(rawField)) continue
-    const label = sanitizeInline(rawField.label, APPROVAL_PRESENTATION_LIMITS.fieldLabel)
-    const fieldValue = sanitizeInline(rawField.value, APPROVAL_PRESENTATION_LIMITS.fieldValue)
-    const from = sanitizeInline(rawField.from, APPROVAL_PRESENTATION_LIMITS.fieldValue)
-    if (label !== undefined && fieldValue !== undefined)
-      fields.push({ label, value: fieldValue, ...(from === undefined ? {} : { from }) })
-  }
-
-  const attachments = Array.isArray(value.attachments)
-    ? value.attachments.slice(0, 500).map((raw): ApprovalAttachment => {
-        const item = isRecord(raw) ? raw : {}
-        const name = sanitizeInline(item.name, 512) ?? "Unnamed file"
-        const media_type = sanitizeInline(item.media_type, 256) ?? "application/octet-stream"
-        const decoded = Schema.decodeUnknownOption(ApprovalAttachmentSchema)({
-          ...item,
-          name,
-          media_type
-        })
-        return decoded._tag === "Some"
-          ? decoded.value
-          : {
-              kind: "link",
-              name,
-              media_type,
-              url: typeof item.url === "string" ? cutText(item.url, 8192) : ""
-            }
-      })
-    : undefined
-  const editable = sanitizeEditable(value.editable)
-  const needsGrant = sanitizeGrant(value.needs_grant)
-  const image = sanitizeImage(value.image)
-
-  let body: ApprovalPresentationBody | undefined
-  if (isRecord(value.body)) {
-    const label = sanitizeInline(value.body.label, APPROVAL_PRESENTATION_LIMITS.bodyLabel)
-    const text = sanitizeBodyText(value.body.text)
-    const before = sanitizeBodyText(value.body.before)
-    if (label !== undefined && text !== undefined)
-      body = { label, text, ...(before === undefined ? {} : { before }) }
-  }
-
-  return {
-    title,
-    ...(subject === undefined ? {} : { subject }),
-    fields,
-    ...(attachments === undefined ? {} : { attachments }),
-    ...(body === undefined ? {} : { body }),
-    ...(approveLabel === undefined ? {} : { approve_label: approveLabel }),
-    ...(rejectLabel === undefined ? {} : { reject_label: rejectLabel }),
-    ...(note === undefined ? {} : { note }),
-    ...(why === undefined ? {} : { why }),
-    ...(grantLabel === undefined ? {} : { grant_label: grantLabel }),
-    ...(grantRule === undefined ? {} : { grant_rule: grantRule }),
-    ...(needsGrant === undefined ? {} : { needs_grant: needsGrant }),
-    ...(editable === undefined ? {} : { editable }),
-    ...(image === undefined ? {} : { image })
-  }
-}
-
-const sanitizeGrant = (value: unknown): ApprovalPresentationGrant | undefined => {
-  if (!isRecord(value)) return undefined
-  const decoded = Schema.decodeUnknownOption(GoogleGrantSchema)(value.grant)
-  const account = sanitizeInline(value.account, APPROVAL_PRESENTATION_LIMITS.fieldValue)
-  return decoded._tag === "Some" && account !== undefined
-    ? { grant: decoded.value, account }
-    : undefined
-}
-
-const sanitizeEditable = (value: unknown): ApprovalPresentationEditable | undefined => {
-  if (!isRecord(value) || !Array.isArray(value.fields) || !isRecord(value.arguments))
-    return undefined
-  const fields = value.fields.filter((field): field is string => typeof field === "string")
-  if (fields.length === 0 || fields.length > APPROVAL_PRESENTATION_LIMITS.editableFields) {
-    return undefined
-  }
-  const encoded = JSON.stringify(value.arguments)
-  if (encoded.length > APPROVAL_PRESENTATION_LIMITS.editableArguments) return undefined
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(EditableArgumentsSchema))(
-    encoded
-  )
-  if (decoded._tag !== "Some") return undefined
-  const edit = { fields, arguments: decoded.value }
-  const account = sanitizeInline(value.account, APPROVAL_PRESENTATION_LIMITS.fieldValue)
-  return account === undefined
-    ? { kind: EDITABLE_KIND.arguments, ...edit }
-    : { kind: EDITABLE_KIND.mailDraft, ...edit, account }
-}
+export const INLINE_IMAGE_PATTERN = INLINE_IMAGE
 
 const EditableArgumentsSchema = Schema.Record(Schema.String, Schema.Json)
 
@@ -346,64 +186,108 @@ const editableFields = {
   arguments: EditableArgumentsSchema
 }
 
+const tagged = <const Tag extends string>(kind: Tag) =>
+  Schema.Struct({ kind: Schema.Literal(kind) })
+
+const presentationText = (maximum: number) =>
+  Schema.Union([
+    tagged(PRESENTATION_TEXT.none),
+    Schema.Struct({ kind: Schema.Literal(PRESENTATION_TEXT.text), text: boundedText(maximum) })
+  ])
+
+const previousValue = (maximum: number) =>
+  Schema.Union([
+    tagged(PREVIOUS_VALUE.none),
+    Schema.Struct({ kind: Schema.Literal(PREVIOUS_VALUE.previous), text: boundedText(maximum) })
+  ])
+
+export const ApprovalAttachmentSchema = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("file"),
+    index: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 499 })),
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+    media_type: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+    size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("link"),
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+    media_type: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+    url: Schema.String.check(Schema.isMaxLength(8192))
+  })
+])
+
 export const ApprovalPresentationSchema = Schema.Struct({
-  attachments: Schema.optionalKey(AttachmentsSchema),
+  attachments: Schema.Array(ApprovalAttachmentSchema).check(Schema.isMaxLength(500)),
   title: boundedText(APPROVAL_PRESENTATION_LIMITS.title),
-  subject: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.subject)),
+  subject: presentationText(APPROVAL_PRESENTATION_LIMITS.subject),
   fields: Schema.Array(
     Schema.Struct({
       label: boundedText(APPROVAL_PRESENTATION_LIMITS.fieldLabel),
       value: boundedText(APPROVAL_PRESENTATION_LIMITS.fieldValue),
-      from: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.fieldValue))
+      from: previousValue(APPROVAL_PRESENTATION_LIMITS.fieldValue)
     })
   ).check(Schema.isMaxLength(APPROVAL_PRESENTATION_LIMITS.fields)),
-  body: Schema.optionalKey(
+  body: Schema.Union([
+    tagged(PRESENTATION_BODY.none),
     Schema.Struct({
+      kind: Schema.Literal(PRESENTATION_BODY.body),
       label: boundedText(APPROVAL_PRESENTATION_LIMITS.bodyLabel),
       text: boundedText(APPROVAL_PRESENTATION_LIMITS.bodyText),
-      before: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.bodyText))
+      before: previousValue(APPROVAL_PRESENTATION_LIMITS.bodyText)
     })
-  ),
-  approve_label: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.decisionLabel)),
-  reject_label: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.decisionLabel)),
-  note: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.note)),
-  why: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.why)),
-  grant_label: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.decisionLabel)),
-  grant_rule: Schema.optionalKey(boundedText(APPROVAL_PRESENTATION_LIMITS.grantRule)),
-  needs_grant: Schema.optionalKey(
+  ]),
+  approve_label: presentationText(APPROVAL_PRESENTATION_LIMITS.decisionLabel),
+  reject_label: presentationText(APPROVAL_PRESENTATION_LIMITS.decisionLabel),
+  note: presentationText(APPROVAL_PRESENTATION_LIMITS.note),
+  why: presentationText(APPROVAL_PRESENTATION_LIMITS.why),
+  grant_label: presentationText(APPROVAL_PRESENTATION_LIMITS.decisionLabel),
+  grant_rule: presentationText(APPROVAL_PRESENTATION_LIMITS.grantRule),
+  needs_grant: Schema.Union([
+    tagged(NEEDS_GRANT.none),
     Schema.Struct({
+      kind: Schema.Literal(NEEDS_GRANT.needed),
       grant: GoogleGrantSchema,
       account: boundedText(APPROVAL_PRESENTATION_LIMITS.fieldValue)
     })
-  ),
-  editable: Schema.optionalKey(
-    Schema.Union([
-      Schema.Struct({ kind: Schema.Literal(EDITABLE_KIND.arguments), ...editableFields }),
-      Schema.Struct({
-        kind: Schema.Literal(EDITABLE_KIND.mailDraft),
-        ...editableFields,
-        account: boundedText(APPROVAL_PRESENTATION_LIMITS.fieldValue)
-      })
-    ])
-  ),
-  image: Schema.optionalKey(
+  ]),
+  editable: Schema.Union([
+    tagged(EDITABLE_KIND.fixed),
+    Schema.Struct({ kind: Schema.Literal(EDITABLE_KIND.arguments), ...editableFields }),
     Schema.Struct({
+      kind: Schema.Literal(EDITABLE_KIND.mailDraft),
+      ...editableFields,
+      account: boundedText(APPROVAL_PRESENTATION_LIMITS.fieldValue)
+    })
+  ]),
+  image: Schema.Union([
+    tagged(PRESENTATION_IMAGE.none),
+    Schema.Struct({
+      kind: Schema.Literal(PRESENTATION_IMAGE.image),
       src: Schema.String.check(
         Schema.isMaxLength(APPROVAL_PRESENTATION_LIMITS.imageSrc),
         Schema.isPattern(INLINE_IMAGE)
       ),
       width: imageSide,
       height: imageSide,
-      ring: Schema.optionalKey(
-        Schema.Struct({ x: fraction, y: fraction, width: fraction, height: fraction })
-      )
+      ring: Schema.Union([
+        tagged(IMAGE_RING.unmarked),
+        Schema.Struct({
+          kind: Schema.Literal(IMAGE_RING.marked),
+          x: fraction,
+          y: fraction,
+          width: fraction,
+          height: fraction
+        })
+      ])
     })
-  )
+  ])
 })
 
-/** Outcome checks ask what happened; typed chat only refuses a permission request. */
-export function canDenyApprovalByReply(approval: {
-  readonly action?: string | undefined
-}): boolean {
+export type ApprovalPresentationAgrees = Assert<
+  Agrees<typeof ApprovalPresentationSchema.Type, ApprovalPresentation>
+>
+
+export function canDenyApprovalByReply(approval: { readonly action: string }): boolean {
   return approval.action !== "verify_outcome"
 }

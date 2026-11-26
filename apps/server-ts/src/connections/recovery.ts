@@ -5,7 +5,7 @@ import type {
   ConnectionAction,
   ConnectionState
 } from "@arden-hq/protocol"
-import type { RuntimeConnectionSnapshot } from "@arden-hq/protocol/chat"
+import { CONNECTION_ACCOUNT, type RuntimeConnectionSnapshot } from "@arden-hq/protocol/chat"
 import {
   AppSettingsTabIdSchema,
   ConnectionActionSchema,
@@ -71,7 +71,7 @@ export type ConnectionCheck = (
   decision: PendingConnectionDecision
 ) => Effect.Effect<void, ConnectionCheckError>
 
-const connectionId = (runId: string, toolCallId: string): string =>
+export const connectionId = (runId: string, toolCallId: string): string =>
   `connection:${runId}:${toolCallId}`
 
 export const isConnectionRequiredData = Schema.is(
@@ -80,9 +80,12 @@ export const isConnectionRequiredData = Schema.is(
   })
 )
 
+const DECISION_DELIVERY = { run: "blocking", deferred: "deferred" } as const
+
 export const pendingConnectionDecision = (
   call: { readonly runId: string; readonly sessionId: string; readonly toolCallId: string },
-  data: ConnectionRequiredData
+  data: ConnectionRequiredData,
+  source: keyof typeof DECISION_DELIVERY
 ): PendingConnectionDecision => ({
   snapshot: {
     run_id: call.runId,
@@ -98,18 +101,26 @@ export const pendingConnectionDecision = (
     settings_tab: data.settings_tab,
     required_scopes: data.required_scopes,
     source: data.source,
-    ...(data.account_ref === undefined ? {} : { account_ref: data.account_ref })
+    decision_delivery: DECISION_DELIVERY[source],
+    account:
+      data.account_ref === undefined
+        ? { kind: CONNECTION_ACCOUNT.default }
+        : { kind: CONNECTION_ACCOUNT.account, ref: data.account_ref }
   },
   provider: data.provider,
   service: data.service
 })
 
 export const connectionNeededEvent = (
-  decision: PendingConnectionDecision
-): ChatProjectionEvent => ({
-  type: "connection_needed",
-  ...decision.snapshot
-})
+  decision: PendingConnectionDecision,
+  decisionRoute: Extract<
+    ChatProjectionEvent,
+    { readonly type: "connection_needed" }
+  >["decision_route"]
+): ChatProjectionEvent => {
+  const { decision_delivery: _delivery, ...fields } = decision.snapshot
+  return { type: "connection_needed", ...fields, decision_route: decisionRoute }
+}
 
 export const requestConnection = (input: RequestConnectionInput): PauseRequested => {
   const data: ConnectionRequiredData = {

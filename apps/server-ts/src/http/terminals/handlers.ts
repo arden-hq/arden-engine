@@ -1,4 +1,4 @@
-import type { SessionTerminal } from "@arden-hq/protocol/sessions/terminals"
+import { TERMINAL_STATE, type SessionTerminal } from "@arden-hq/protocol/sessions/terminals"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
@@ -74,17 +74,23 @@ export const TerminalHandlers = HttpApiBuilder.group(
   })
 )
 
-const wireTerminal = (terminal: TerminalInfo, cursor: number): SessionTerminal => ({
-  id: terminal.id,
-  tool_call_id: terminal.toolCallId,
-  command: terminal.command,
-  cwd: terminal.cwd,
-  access: terminal.access,
-  tty: terminal.input === "pipe",
-  state: terminal.exit === undefined ? "running" : "exited",
-  exit_code: terminal.exit?.kind === "code" ? terminal.exit.code : null,
-  signal: terminal.exit?.kind === "signal" ? terminal.exit.signal : null,
-  started_at: iso(terminal.startedAt),
-  ended_at: terminal.endedAt === undefined ? null : iso(terminal.endedAt),
-  cursor
-})
+const wireTerminal = (terminal: TerminalInfo, cursor: number): SessionTerminal => {
+  const fields = {
+    id: terminal.id,
+    tool_call_id: terminal.toolCallId,
+    command: terminal.command,
+    cwd: terminal.cwd,
+    access: terminal.access,
+    tty: terminal.input === "pipe",
+    started_at: iso(terminal.startedAt),
+    cursor
+  }
+  return terminal.exit === undefined || terminal.endedAt === undefined
+    ? { ...fields, state: TERMINAL_STATE.running }
+    : {
+        ...fields,
+        state: TERMINAL_STATE.exited,
+        exit: terminal.exit,
+        ended_at: iso(terminal.endedAt)
+      }
+}

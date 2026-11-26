@@ -1,4 +1,3 @@
-import { ToolExecutionError } from "@arden-hq/loop"
 import { countOf } from "@arden-hq/std/count"
 import {
   AUTOMATION_ACTIVITY_TRIGGERS,
@@ -6,81 +5,129 @@ import {
   automationEnabledWord,
   DEFAULT_EVENT_LEAD_MINUTES,
   eventLeadWords,
+  APP_EVENT,
+  LEAD_EVENT,
   mergeTriggerInputs,
+  runStatusOf,
+  TRIGGER_INPUT,
+  TRIGGER_MERGE,
+  TRIGGER_STATE,
+  TRIGGER_TYPE,
   type Automation,
   type AutomationEventLink,
+  type AutomationRun,
   type AutomationOldCondition,
   type AutomationTrigger,
-  type AutomationTriggerInput
+  type AutomationTriggerEdit,
+  type AutomationTriggerInput,
+  type AutomationTriggerSpec,
+  type AutomationWaitingOn,
+  type IntervalWindow,
+  type McpEventSelector,
+  type TimeTriggerSchedule
 } from "@arden-hq/protocol/automations"
+import {
+  AutomationActivitySchema,
+  AutomationSchema,
+  SystemAutomationChatSchema,
+  AutomationEventLinkSchema,
+  AutomationRunChatSchema,
+  AutomationRunOutputSchema,
+  AutomationRunSchema,
+  AutomationSkipRunWithEventSchema
+} from "@arden-hq/protocol/effect/automations"
+import { clipLine, cutText } from "@arden-hq/std/text"
 import { oldConditions } from "../persistence/automations/event-words.js"
+import { lastRunAt, nextRunAt } from "./automation-tool-data.js"
+import type { CardTrigger } from "./automation-tool-triggers.js"
 
-export const requireAutomationRef = (automation: Automation): string => {
-  if (automation.automation_ref !== undefined) return automation.automation_ref
-  throw new ToolExecutionError("A stored Automation is missing its public reference", {
-    preview: "Automation data is corrupt",
-    retryable: false
-  })
-}
+type TriggerWordsOf = AutomationTriggerSpec | AutomationTriggerEdit
+
+type TriggerView =
+  | { readonly kind: "new"; readonly trigger: TriggerWordsOf }
+  | { readonly kind: "edit"; readonly id: string; readonly trigger: TriggerWordsOf }
+
+const asInput = (trigger: AutomationTrigger): TriggerView => ({
+  kind: "edit",
+  id: trigger.id,
+  trigger
+})
 
 const triggerWords = (
-  trigger: AutomationTrigger | AutomationTriggerInput,
+  input: TriggerView,
   oldWords: ReadonlyMap<string, AutomationOldCondition>,
   audience: "agent" | "card"
 ): string => {
-  const id = audience === "agent" && trigger.id !== undefined ? `${trigger.id}: ` : ""
-  return `${id}${triggerHead(trigger, audience)}${eventFields(trigger, oldWords, audience)}`
+  const id = audience === "agent" && input.kind === TRIGGER_INPUT.edit ? `${input.id}: ` : ""
+  const old = input.kind === TRIGGER_INPUT.edit ? oldWords.get(input.id) : undefined
+  return `${id}${triggerHead(input.trigger, audience)}${eventFields(input.trigger, old, audience)}`
 }
 
-const triggerHead = (
-  trigger: AutomationTrigger | AutomationTriggerInput,
-  audience: "agent" | "card"
-): string => {
-  switch (trigger.type) {
-    case "time": {
-      const cadence = trigger.at === undefined ? `every ${trigger.every}` : `at ${trigger.at}`
-      const days = trigger.on ?? trigger.days
-      const window =
-        trigger.start === undefined || trigger.end === undefined
-          ? ""
-          : ` between ${trigger.start}-${trigger.end}`
-      return `${cadence}${days === undefined ? "" : ` on ${days}`}${window}`
-    }
-    case "idle":
-      return AUTOMATION_ACTIVITY_TRIGGERS.idle.summary(trigger.idle_minutes)
-    case "count":
-      return AUTOMATION_ACTIVITY_TRIGGERS.count.summary(trigger.every_n)
-    case "event": {
-      const app = trigger.mcp_event
-      if (trigger.event_type === "mcp.event" && app !== undefined && app !== null) {
-        const filters =
-          app.arguments === undefined || Object.keys(app.arguments).length === 0
-            ? ""
-            : ` ${JSON.stringify(app.arguments)}`
-        return audience === "agent"
-          ? `mcp.event (${app.server}/${app.event}${filters})`
-          : `${app.server}: ${app.event}`
-      }
-      const lead =
-        trigger.event_type === "event_approaching"
-          ? eventLeadWords(trigger.lead_minutes ?? DEFAULT_EVENT_LEAD_MINUTES)
-          : AUTOMATION_EVENTS[trigger.event_type].name
-      return audience === "agent" ? `${trigger.event_type} (${lead})` : lead
+const windowWords = (window: IntervalWindow): string =>
+  window.kind === TRIGGER_STATE.between ? ` between ${window.start}-${window.end}` : ""
+
+const scheduleWords = (schedule: TimeTriggerSchedule): string => {
+  switch (schedule.kind) {
+    case TRIGGER_STATE.next:
+      return `at ${schedule.at}`
+    case TRIGGER_STATE.once:
+      return `at ${schedule.at} on ${schedule.on}`
+    case TRIGGER_STATE.daily:
+      return `at ${schedule.at} on ${schedule.days}`
+    case TRIGGER_STATE.interval: {
+      const days = schedule.days.kind === TRIGGER_STATE.days ? ` on ${schedule.days.days}` : ""
+      return `every ${schedule.every}${days}${windowWords(schedule.window)}`
     }
   }
 }
 
-const eventFields = (
-  trigger: AutomationTrigger | AutomationTriggerInput,
-  oldWords: ReadonlyMap<string, AutomationOldCondition>,
+const appWords = (app: McpEventSelector, audience: "agent" | "card"): string => {
+  const filters = Object.keys(app.arguments).length === 0 ? "" : ` ${JSON.stringify(app.arguments)}`
+  return audience === "agent"
+    ? `mcp.event (${app.server}/${app.event}${filters})`
+    : `${app.server}: ${app.event}`
+}
+
+const eventHead = (
+  trigger: Extract<TriggerWordsOf, { readonly type: "event" }>,
   audience: "agent" | "card"
 ): string => {
-  if (trigger.type !== "event") return ""
+  if (trigger.event_type === APP_EVENT && "server" in trigger.mcp_event)
+    return appWords(trigger.mcp_event, audience)
+  const lead =
+    trigger.event_type === LEAD_EVENT
+      ? eventLeadWords(
+          trigger.lead.kind === TRIGGER_STATE.minutes
+            ? trigger.lead.minutes
+            : DEFAULT_EVENT_LEAD_MINUTES
+        )
+      : AUTOMATION_EVENTS[trigger.event_type].name
+  return audience === "agent" ? `${trigger.event_type} (${lead})` : lead
+}
+
+const triggerHead = (trigger: TriggerWordsOf, audience: "agent" | "card"): string => {
+  switch (trigger.type) {
+    case TRIGGER_TYPE.time:
+      return scheduleWords(trigger.schedule)
+    case TRIGGER_TYPE.idle:
+      return AUTOMATION_ACTIVITY_TRIGGERS.idle.summary(trigger.idle_minutes)
+    case TRIGGER_TYPE.count:
+      return AUTOMATION_ACTIVITY_TRIGGERS.count.summary(trigger.every_n)
+    case TRIGGER_TYPE.event:
+      return eventHead(trigger, audience)
+  }
+}
+
+const eventFields = (
+  trigger: TriggerWordsOf,
+  old: AutomationOldCondition | undefined,
+  audience: "agent" | "card"
+): string => {
+  if (trigger.type !== TRIGGER_TYPE.event) return ""
   const sentence =
-    trigger.run_only_if === undefined || trigger.run_only_if === null
-      ? ""
-      : `, run only if: "${trigger.run_only_if}"`
-  const old = trigger.id === undefined ? undefined : oldWords.get(trigger.id)
+    trigger.run_only_if.kind === TRIGGER_STATE.sentence
+      ? `, run only if: "${trigger.run_only_if.sentence}"`
+      : ""
   const condition =
     old === undefined
       ? ""
@@ -102,8 +149,16 @@ export const triggersLabel = (
   automation.triggers
     .map(
       (trigger) =>
-        `${indent}${triggerWords(trigger, byTrigger(automation.old_conditions), "agent")}`
+        `${indent}${triggerWords(asInput(trigger), byTrigger(automation.old_conditions), "agent")}`
     )
+    .join("\n")
+
+const defaultTriggersLabel = (
+  triggers: ReadonlyArray<AutomationTriggerSpec>,
+  indent: string
+): string =>
+  triggers
+    .map((trigger) => `${indent}${triggerWords({ kind: "new", trigger }, new Map(), "agent")}`)
     .join("\n")
 
 export const droppedTriggerLines = (
@@ -124,21 +179,43 @@ export const droppedTriggerLines = (
   })
 }
 
-export const triggerInputWords = (
-  triggers: ReadonlyArray<AutomationTrigger | AutomationTriggerInput>
-): string => {
+export const storedTriggerWords = (triggers: ReadonlyArray<AutomationTrigger>): string => {
   const old = byTrigger(oldConditions(triggers))
-  return triggers.map((trigger) => triggerWords(trigger, old, "card")).join(" or ")
+  return triggers.map((trigger) => triggerWords(asInput(trigger), old, "card")).join(" or ")
+}
+
+const shownView = (view: TriggerView, appless: boolean): TriggerView =>
+  appless && view.trigger.type === TRIGGER_TYPE.event && view.trigger.event_type === APP_EVENT
+    ? { ...view, trigger: { ...view.trigger, mcp_event: { kind: TRIGGER_STATE.kept } } }
+    : view
+
+export const cardTriggerWords = (
+  current: ReadonlyArray<AutomationTrigger>,
+  cards: ReadonlyArray<CardTrigger>
+): string => {
+  const merged = mergeTriggerInputs(
+    { triggers: current, lastId: 0 },
+    cards.map((card) => card.input)
+  )
+  if (merged.kind !== TRIGGER_MERGE.ok)
+    return cards
+      .map((card) => triggerWords(shownView(card.input, card.appless), new Map(), "card"))
+      .join(" or ")
+  const old = byTrigger(oldConditions(merged.triggers))
+  return merged.triggers
+    .map((trigger, index) =>
+      triggerWords(shownView(asInput(trigger), cards[index]?.appless === true), old, "card")
+    )
+    .join(" or ")
 }
 
 export const historyLabel = (automation: Automation): string => {
+  if (AutomationSchema.guards.system(automation)) return "set by the system"
   switch (automation.history) {
     case "fresh":
       return "starts fresh"
     case "chat":
       return "reads the chat"
-    case null:
-      return "set by the system"
   }
 }
 
@@ -147,7 +224,7 @@ export const chatLabel = (
   info: AutomationModelInfo,
   currentSessionId: string
 ): string => {
-  if (automation.chat === null) return "none"
+  if (SystemAutomationChatSchema.guards.none(automation.chat)) return "none"
   if (automation.chat.kind === "own") return "its own chat"
   if (automation.chat.session_id === currentSessionId) return "this chat"
   return info.chat_ref ?? "one of your chats"
@@ -162,16 +239,13 @@ export const SYSTEM_ACCEPTS =
   "A system Automation accepts only triggers, model, prompt, enabled and plan limits; a fork (Chat summaries) runs on each chat's model, so it has no model to change, and a job that runs no model has no prompt."
 
 export const systemLines = (automation: Automation): ReadonlyArray<string> => {
-  const system = automation.system
-  if (system === null) return []
+  if (AutomationSchema.guards.user(automation)) return []
+  const system = automation.settings
   return [
     `  Accepts: ${system.settable.join(", ")}, plan limits${automation.manual_run ? "" : " · no manual run"}`,
     `  Changed from default: ${system.changed.length === 0 ? "nothing" : system.changed.join(", ")}`,
     ...(system.changed.includes("triggers")
-      ? [
-          "  Default triggers:",
-          triggersLabel({ triggers: system.default_triggers, old_conditions: [] }, "    ")
-        ]
+      ? ["  Default triggers:", defaultTriggersLabel(system.default_triggers, "    ")]
       : [])
   ]
 }
@@ -186,11 +260,16 @@ export type AutomationModelInfo = {
 export const scheduleStatus = (automation: Automation): string =>
   automationEnabledWord(automation.enabled)
 
-const currentRunStatus = (automation: Automation): string => {
-  if (automation.waiting_on === "approval") return " · paused for an approval"
-  if (automation.waiting_on === "connection") return " · paused for a reconnect"
-  if (automation.running_since !== null) return " · current run active"
-  return ""
+const currentRunStatus = (automation: Automation): string =>
+  AutomationActivitySchema.match(automation.activity, {
+    waiting: ({ on }) => WAITING_STATUS[on],
+    running: () => " · current run active",
+    idle: () => ""
+  })
+
+const WAITING_STATUS: Record<AutomationWaitingOn, string> = {
+  approval: " · paused for an approval",
+  connection: " · paused for a reconnect"
 }
 
 export const formatAutomation = (
@@ -198,7 +277,7 @@ export const formatAutomation = (
   modelInfo: AutomationModelInfo,
   currentSessionId: string
 ): string => {
-  const ref = requireAutomationRef(automation)
+  const ref = automation.automation_ref
   const builtin = automation.builtin ? " [system]" : ""
   return [
     `[${ref}] ${automation.name}${builtin}`,
@@ -208,7 +287,7 @@ export const formatAutomation = (
       : []),
     "  Triggers:",
     triggersLabel(automation, "    "),
-    ...(automation.system === null
+    ...(AutomationSchema.guards.user(automation)
       ? [
           `  Chat: ${chatLabel(automation, modelInfo, currentSessionId)}`,
           `  History: ${historyLabel(automation)}`
@@ -217,20 +296,64 @@ export const formatAutomation = (
     `  Model: ${modelLabel(modelInfo)}`,
     `  Action mode: ${modelInfo.action_mode ?? "inherited"}`,
     ...systemLines(automation),
-    `  next: ${automation.next_run_at ?? "none"} · last: ${automation.last_run_at ?? "never"}`
+    `  next: ${nextRunAt(automation) ?? "none"} · last: ${lastRunAt(automation) ?? "never"}`
   ].join("\n")
 }
 
-export const skippedEventCall = (link: AutomationEventLink | null): string | undefined => {
-  if (link === null) return undefined
-  switch (link.kind) {
-    case "chat":
-      return `session_read(session_ref=${JSON.stringify(link.session_ref)})`
-    case "memory_page":
-      return `wiki_read_page(path=${JSON.stringify(link.path)})`
-    case "task":
-      return `task_get(item_id=${JSON.stringify(link.item_id)})`
-    case "connection_item":
-      return `connection_item_read(item_id=${JSON.stringify(link.item_id)})`
+const skippedEventCall = (link: AutomationEventLink): string | undefined =>
+  AutomationEventLinkSchema.match(link, {
+    none: () => undefined,
+    chat: ({ session_ref }) => `session_read(session_ref=${JSON.stringify(session_ref)})`,
+    memory_page: ({ path }) => `wiki_read_page(path=${JSON.stringify(path)})`,
+    task: ({ item_id }) => `task_get(item_id=${JSON.stringify(item_id)})`,
+    connection_item: ({ item_id }) => `connection_item_read(item_id=${JSON.stringify(item_id)})`,
+    connection_item_with_page: ({ item_id }) =>
+      `connection_item_read(item_id=${JSON.stringify(item_id)})`
+  })
+
+const chatRunWords = AutomationRunChatSchema.match({
+  none: () => "",
+  chat: () => "",
+  chat_run: ({ run_id }) => `, run_id ${run_id}`
+})
+
+const outputSummary = AutomationRunOutputSchema.match({
+  none: () => undefined,
+  result: ({ result }) => result,
+  error: ({ error }) => error,
+  result_and_error: ({ error }) => error
+})
+
+const ranByUserWords = AutomationSkipRunWithEventSchema.match({
+  not_asked: () => "",
+  queued: () => ", since run by the user",
+  started: () => ", since run by the user",
+  cancelled: () => ""
+})
+
+const runHead = (
+  run: AutomationRun,
+  status: string,
+  chatRun: string,
+  said: string | undefined
+): string => {
+  const summary = said?.replace(/\s+/gu, " ").trim()
+  return [
+    `- ${run.started_at}: ${status}, ${run.context_mode} context`,
+    chatRun,
+    summary === undefined || summary === "" ? "" : `. ${cutText(summary, 300)}`
+  ].join("")
+}
+
+export const automationRunLines = (run: AutomationRun): string => {
+  if (!AutomationRunSchema.isAnyOf(["skipped"])(run)) {
+    return runHead(run, run.status, chatRunWords(run.chat), outputSummary(run.output))
   }
+  const { event } = run.skip
+  const open = skippedEventCall(event.link)
+  return [
+    runHead(run, runStatusOf("skipped:prefilter"), "", run.result),
+    `  Held back: ${AUTOMATION_EVENTS[event.event_type].name} ${JSON.stringify(clipLine(event.title, 200))} (untrusted data)${ranByUserWords(run.skip.run_with_event)}.`,
+    ...(open === undefined ? [] : [`  Open it with ${open}.`])
+  ].join("\n")
 }

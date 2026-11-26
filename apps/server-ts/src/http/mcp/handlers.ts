@@ -1,4 +1,8 @@
-import type { GitHubConnectionState, McpServer } from "@arden-hq/protocol/mcp"
+import {
+  GITHUB_CONNECTION,
+  type GitHubConnectionState,
+  type McpServer
+} from "@arden-hq/protocol/mcp"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 
@@ -11,6 +15,8 @@ import { CapabilityOfferStore } from "../../persistence/capability-offers/store.
 import { LocalCaller } from "../middleware/local-only.js"
 import { McpRejected, McpUnavailable } from "./api.js"
 import { failInternal, storeErrorToHttp, StoreInvalid } from "../errors.js"
+
+const OFFER_OPEN = "open" as const
 
 const mapError = (error: McpConnectionError) => {
   if (error.reason === "auth_required") return new StoreInvalid({ detail: error.message })
@@ -53,19 +59,23 @@ const transportResponse = (transport: McpServer["transport"]) =>
 
 const githubResponse = (state: GitHubConnectionState) => ({
   connection:
-    state.connection === null
-      ? null
-      : { read_only: state.connection.readOnly, source: state.connection.source }
+    state.connection.kind === GITHUB_CONNECTION.connected
+      ? {
+          kind: state.connection.kind,
+          read_only: state.connection.readOnly,
+          source: state.connection.source
+        }
+      : state.connection
 })
 
 const serverResponse = (server: McpServer) => ({
   name: server.name,
-  preset_id: server.presetId,
+  preset: server.preset,
   enabled: server.enabled,
   status: server.status,
   detail: server.detail,
   diagnostics: server.diagnostics,
-  account_identity: server.accountIdentity,
+  account: server.account,
   transport: transportResponse(server.transport),
   tools: server.tools.map((tool) => ({
     name: tool.name,
@@ -96,7 +106,7 @@ export const McpHandlers = HttpApiBuilder.group(
           return {
             offers: rows.map((row) => ({
               tool_call_id: row.toolCallId,
-              outcome: row.outcome,
+              outcome: row.outcome ?? OFFER_OPEN,
               offered_at: row.offeredAt
             }))
           }

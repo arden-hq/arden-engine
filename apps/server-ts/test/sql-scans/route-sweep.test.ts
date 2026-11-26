@@ -1,3 +1,4 @@
+import { newChat } from "../fixtures/new-chat.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -27,7 +28,7 @@ it(
       const created = await server.fetch("/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Sweep" })
+        body: JSON.stringify(newChat({ name: "Sweep" }))
       })
       const session = (await created.json()) as { readonly session_id: string }
       const routes: Array<string> = []

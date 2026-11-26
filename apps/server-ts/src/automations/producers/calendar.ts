@@ -1,5 +1,7 @@
 import {
   DEFAULT_EVENT_LEAD_MINUTES,
+  LEAD_EVENT,
+  TRIGGER_STATE,
   type EventAutomationTrigger
 } from "@arden-hq/protocol/automations"
 import { accountReadyFor, type GoogleAccount } from "@arden-hq/protocol/google"
@@ -130,7 +132,14 @@ const approachingEvents = (
 }
 
 const horizonMinutes = (triggers: ReadonlyArray<EventAutomationTrigger>): number =>
-  Math.max(0, ...triggers.map((trigger) => trigger.lead_minutes ?? DEFAULT_EVENT_LEAD_MINUTES))
+  Math.max(
+    0,
+    ...triggers.map((trigger) =>
+      trigger.event_type === LEAD_EVENT && trigger.lead.kind === TRIGGER_STATE.minutes
+        ? trigger.lead.minutes
+        : DEFAULT_EVENT_LEAD_MINUTES
+    )
+  )
 
 export const pollCalendarEvents = Effect.fn("AutomationTriggerProducers.pollCalendarEvents")(
   function* (input: {
@@ -249,9 +258,10 @@ export const calendarEventProducer: AutomationEventProducer<
   eventType: "event_approaching",
   available: ({ googleAccounts }) => googleAccounts.some(hasReadyCalendar),
   accepts: (trigger, event) => {
-    if (trigger.lead_minutes === undefined) return true
+    if (trigger.event_type !== LEAD_EVENT || trigger.lead.kind !== TRIGGER_STATE.minutes)
+      return true
     const minutes = readField(event.context, "event.minutes_until")
-    return typeof minutes === "number" && minutes <= trigger.lead_minutes
+    return typeof minutes === "number" && minutes <= trigger.lead.minutes
   },
   source: { kind: "on_demand", poll: pollApproaching },
   failureMessage: "Google Calendar Automation trigger producer failed"

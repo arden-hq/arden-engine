@@ -1,4 +1,5 @@
 import { ranOutcome, runStatusOf, type AutomationRunOutcome } from "@arden-hq/protocol/automations"
+import { linkedChat } from "./event-links.js"
 import { AutomationRunOutcomeSchema } from "@arden-hq/protocol/effect/automations"
 import { Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/unstable/sql"
@@ -49,12 +50,8 @@ export const announceEnded = (
   sessionEvents.appendEventInTransaction({
     type: "automation_finished",
     task_id: input.automationId,
-    purpose: input.purpose,
     outcome: input.run.outcome,
-    result: input.run.result,
-    error: input.run.error,
-    run_id: input.run.chatRunId,
-    run_session_id: input.run.chatRunId === null ? null : input.run.chatSessionId
+    run_chat: linkedChat(input.run.chatRunId === null ? null : input.run.chatSessionId)
   })
 
 export const shownRunStatus = (

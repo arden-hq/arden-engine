@@ -1,6 +1,7 @@
 import {
   AUTOMATION_EVENT_TYPES,
   AUTOMATION_EVENTS,
+  TRIGGER_STATE,
   type AutomationEventCatalogEntry,
   type AutomationEventType,
   type EventAutomationTrigger
@@ -67,17 +68,10 @@ export const eventsFromJournal = Effect.fnUntraced(function* (
   return raised
 })
 
-export const eventTriggerIssue = (trigger: EventAutomationTrigger): string | null => {
-  if (trigger.event_type === "mcp.event" && trigger.mcp_event === undefined) {
-    return "An mcp.event trigger requires mcp_event: the app's server, one event it lists, and its arguments"
-  }
-  if (trigger.event_type !== "mcp.event" && trigger.mcp_event !== undefined) {
-    return `mcp_event belongs only to mcp.event triggers, not ${trigger.event_type}`
-  }
-  return trigger.condition === undefined || trigger.condition === null
-    ? null
-    : conditionIssue(AUTOMATION_EVENTS[trigger.event_type], trigger.condition)
-}
+export const eventTriggerIssue = (trigger: EventAutomationTrigger): string | null =>
+  trigger.condition.kind === TRIGGER_STATE.old
+    ? conditionIssue(AUTOMATION_EVENTS[trigger.event_type], trigger.condition.condition)
+    : null
 
 export const eventTriggerMatches = (
   trigger: EventAutomationTrigger,
@@ -86,7 +80,10 @@ export const eventTriggerMatches = (
   if (trigger.event_type !== event.eventType) return false
   const accepts = producers[event.eventType].accepts
   if (accepts !== undefined && !accepts(trigger, event)) return false
-  return conditionMatches(trigger.condition, event.context)
+  return (
+    trigger.condition.kind !== TRIGGER_STATE.old ||
+    conditionMatches(trigger.condition.condition, event.context)
+  )
 }
 
 export const availableAutomationEvents = (

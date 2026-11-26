@@ -22,9 +22,15 @@ const CliToolSchema: Schema.Codec<CliTool> = withExtras({
   description: Schema.String.check(Schema.isMaxLength(512)),
   command: boundedNonEmpty(64),
   path: boundedNonEmpty(4096),
-  version: Schema.NullOr(boundedNonEmpty(64)),
+  version: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("reported"), text: boundedNonEmpty(64) }),
+    Schema.Struct({ kind: Schema.Literal("unreported") })
+  ]),
   sign_in: Schema.Literals(["signed_in", "signed_out", "unknown"] as const),
-  login_command: Schema.NullOr(boundedNonEmpty(256)),
+  login: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("command"), command: boundedNonEmpty(256) }),
+    Schema.Struct({ kind: Schema.Literal("none") })
+  ]),
   skill: CliToolSkillSchema
 })
 

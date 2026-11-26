@@ -1,5 +1,5 @@
 import { WorkflowErrorSchema } from "@arden-hq/protocol/effect/workflows"
-import type { WorkflowError } from "@arden-hq/protocol/workflows"
+import { MESSAGE_PREVIEW, NO_RECOVERY, type WorkflowError } from "@arden-hq/protocol/workflows"
 import { DateTime, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 
@@ -62,7 +62,8 @@ const cancelledError: WorkflowError = {
   code: "cancelled",
   message: "The script was cancelled",
   retryable: false,
-  recovery_action: null
+  recovery: NO_RECOVERY,
+  preview: MESSAGE_PREVIEW
 }
 
 const selectScripts = (sql: SqlClient.SqlClient) => sql`

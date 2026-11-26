@@ -1,54 +1,70 @@
 import { Schema } from "effect"
-import type {
-  WikiArchiveResponse,
-  WikiHistoryChange,
-  WikiHistoryCommit,
-  WikiLink,
-  WikiPage,
-  WikiPageDiff,
-  WikiVersionDiff,
-  WikiPageHistoryResponse,
-  WikiPageLinks,
-  WikiPagePage,
-  WikiPageSummary,
-  WikiRenamePlan,
-  WikiResourceVersion,
-  WikiRevisionConflict
+import {
+  WIKI_CHANGE_ACTION,
+  WIKI_CHAT_NAME,
+  WIKI_CHAT_SOURCE,
+  WIKI_CHAT_SPACE,
+  WIKI_CHAT_SUMMARY,
+  WIKI_COMMIT_PARENT,
+  WIKI_CONFLICT_CURRENT,
+  WIKI_LINK_ANCHOR,
+  WIKI_LINK_LABEL,
+  WIKI_LINK_STATUS,
+  WIKI_NEXT_PAGE,
+  WIKI_PAGE_LIST,
+  type WikiArchiveResponse,
+  type WikiHistoryChange,
+  type WikiHistoryCommit,
+  type WikiLink,
+  type WikiPage,
+  type WikiPageDiff,
+  type WikiVersionDiff,
+  type WikiPageHistoryResponse,
+  type WikiPageLinks,
+  type WikiPagePage,
+  type WikiPageSummary,
+  type WikiRenamePlan,
+  type WikiResourceVersion,
+  type WikiRevisionConflict
 } from "../contracts.js"
 import { IsoDateTimeStringSchema, NonNegativeIntSchema, withExtras } from "../../common/schema.js"
 import {
-  nullableRevisionIdSchema,
   pageFields,
   boundedText,
-  WikilinkNodeSchema,
+  WikiDiffBaseSchema,
   WikiPageIdSchema,
   WikiRevisionIdSchema,
   WikiResourceStateSchema,
   WikiRestoreSideSchema
 } from "./shared.js"
 
-/** Wire schemas retain additive fields; mapping removes known storage-only keys. */
-export const WikiPageSummarySchema = withExtras({
-  ...pageFields,
-  content: Schema.optionalKey(Schema.String)
-})
+export const WikiPageSummarySchema = withExtras(pageFields)
 
 export const WikiPageSchema = withExtras({
   ...pageFields,
   content: Schema.String
 })
 
-export const WikiPagePageSchema = withExtras({
-  repository_head: Schema.NullOr(WikiRevisionIdSchema),
-  pages: Schema.Array(WikiPageSummarySchema),
-  next_cursor: Schema.NullOr(boundedText(1_024))
-}).check(
-  Schema.makeFilter((page) => {
-    return page.pages.every((summary) => summary.repository_head === page.repository_head)
-      ? undefined
-      : { path: ["pages"], issue: "must belong to the declared repository snapshot" }
-  })
-)
+const WikiNextPageSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_NEXT_PAGE.end) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_NEXT_PAGE.more), cursor: boundedText(1_024) })
+])
+
+export const WikiPagePageSchema = Schema.Union([
+  withExtras({ kind: Schema.Literal(WIKI_PAGE_LIST.empty) }),
+  withExtras({
+    kind: Schema.Literal(WIKI_PAGE_LIST.snapshot),
+    repository_head: WikiRevisionIdSchema,
+    pages: Schema.Array(WikiPageSummarySchema),
+    next: WikiNextPageSchema
+  }).check(
+    Schema.makeFilter((page) =>
+      page.pages.every((summary) => summary.repository_head === page.repository_head)
+        ? undefined
+        : { path: ["pages"], issue: "must belong to the declared repository snapshot" }
+    )
+  )
+])
 
 export const WikiArchiveResponseSchema = withExtras({
   page_id: WikiPageIdSchema,
@@ -65,17 +81,33 @@ export const WikiResourceVersionSchema = withExtras({
   version_id: WikiRevisionIdSchema
 })
 
-export const WikiHistoryChangeSchema = withExtras({
-  action: boundedText(128),
-  before: Schema.NullOr(WikiResourceVersionSchema),
-  after: Schema.NullOr(WikiResourceVersionSchema)
-})
+export const WikiHistoryChangeSchema = Schema.Union([
+  withExtras({
+    action: Schema.Literal(WIKI_CHANGE_ACTION.create),
+    after: WikiResourceVersionSchema
+  }),
+  withExtras({
+    action: Schema.Literals([
+      WIKI_CHANGE_ACTION.update,
+      WIKI_CHANGE_ACTION.move,
+      WIKI_CHANGE_ACTION.archive,
+      WIKI_CHANGE_ACTION.restore
+    ]),
+    before: WikiResourceVersionSchema,
+    after: WikiResourceVersionSchema
+  })
+])
+
+const WikiCommitParentSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_COMMIT_PARENT.root) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_COMMIT_PARENT.commit), id: WikiRevisionIdSchema })
+])
 
 export const WikiHistoryCommitSchema = withExtras({
   added_lines: NonNegativeIntSchema,
   removed_lines: NonNegativeIntSchema,
   commit_id: WikiRevisionIdSchema,
-  parent_id: nullableRevisionIdSchema,
+  parent: WikiCommitParentSchema,
   actor: boundedText(1_024),
   origin: boundedText(1_024),
   reason: Schema.String.check(Schema.isMaxLength(16_384)),
@@ -104,25 +136,59 @@ export const WikiResourceDiffPageSchema = withExtras({
 )
 
 export const WikiPageDiffResponseSchema = withExtras({
-  base: nullableRevisionIdSchema,
+  base: WikiDiffBaseSchema,
   target: WikiRevisionIdSchema,
   diff: WikiResourceDiffPageSchema
 })
 
-export const WikiLinkSchema = withExtras({
+const WikiLinkAnchorSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_LINK_ANCHOR.page) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_LINK_ANCHOR.heading), heading: Schema.String })
+])
+
+const WikiLinkLabelSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(WIKI_LINK_LABEL.target) }),
+  Schema.Struct({ kind: Schema.Literal(WIKI_LINK_LABEL.alias), alias: Schema.String })
+])
+
+const linkFields = {
   source_page_id: WikiPageIdSchema,
-  node: WikilinkNodeSchema,
-  status: Schema.Literals(["resolved", "unresolved"] as const),
-  target_page_id: Schema.NullOr(WikiPageIdSchema)
-})
+  target: Schema.String,
+  anchor: WikiLinkAnchorSchema,
+  label: WikiLinkLabelSchema
+} as const
+
+export const WikiLinkSchema = Schema.Union([
+  withExtras({
+    ...linkFields,
+    status: Schema.Literal(WIKI_LINK_STATUS.resolved),
+    target_page_id: WikiPageIdSchema
+  }),
+  withExtras({ ...linkFields, status: Schema.Literal(WIKI_LINK_STATUS.unresolved) })
+])
 
 const WikiPageChatSchema = withExtras({
   session_ref: Schema.NonEmptyString,
-  name: Schema.NullOr(Schema.String),
-  space_id: Schema.NullOr(Schema.String),
-  space_name: Schema.NullOr(Schema.String),
-  saved_at: Schema.NullOr(Schema.String),
-  summary: Schema.optionalKey(Schema.NullOr(Schema.String))
+  name: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_NAME.untitled) }),
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_NAME.named), name: Schema.String })
+  ]),
+  space: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_SPACE.loose) }),
+    Schema.Struct({
+      kind: Schema.Literal(WIKI_CHAT_SPACE.space),
+      id: Schema.String,
+      name: Schema.String
+    })
+  ]),
+  source: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_SOURCE.cited) }),
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_SOURCE.saved), at: Schema.String })
+  ]),
+  summary: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_SUMMARY.pending) }),
+    Schema.Struct({ kind: Schema.Literal(WIKI_CHAT_SUMMARY.summarized), text: Schema.String })
+  ])
 })
 
 export const WikiPageLinksSchema = withExtras({
@@ -130,7 +196,7 @@ export const WikiPageLinksSchema = withExtras({
   repository_head: WikiRevisionIdSchema,
   outgoing: Schema.Array(WikiLinkSchema),
   backlinks: Schema.Array(WikiLinkSchema),
-  came_from: Schema.optionalKey(Schema.Array(WikiPageChatSchema))
+  came_from: Schema.Array(WikiPageChatSchema)
 })
 
 export const WikiRenamePlanSchema = withExtras({
@@ -145,9 +211,14 @@ export const WikiRenamePlanSchema = withExtras({
 export const WikiRevisionConflictDetailSchema = withExtras({
   error: Schema.Literal("page_revision_conflict"),
   message: Schema.String,
-  current_content: Schema.optionalKey(Schema.String),
-  current_revision: Schema.optionalKey(WikiRevisionIdSchema),
-  current_head: Schema.optionalKey(Schema.NullOr(WikiRevisionIdSchema))
+  current: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(WIKI_CONFLICT_CURRENT.unavailable) }),
+    Schema.Struct({
+      kind: Schema.Literal(WIKI_CONFLICT_CURRENT.page),
+      version: WikiRevisionIdSchema,
+      content: Schema.String
+    })
+  ])
 })
 
 export const WikiRevisionConflictEnvelopeSchema = withExtras({
@@ -170,12 +241,11 @@ const mapPageSummary = (
     excerpt,
     aliases,
     lifecycle,
-    redirect_to,
     metadata,
     version,
     repository_head,
-    created_at,
-    updated_at,
+    created,
+    updated,
     projection_pending: _projectionPending,
     content: _content,
     resource_id: _resourceId,
@@ -193,12 +263,11 @@ const mapPageSummary = (
     excerpt,
     aliases,
     lifecycle,
-    redirectTo: redirect_to,
     metadata,
     version,
     repositoryHead: repository_head,
-    createdAt: created_at,
-    updatedAt: updated_at
+    created,
+    updated
   }
 }
 
@@ -208,27 +277,25 @@ export const toWikiPage = (page: typeof WikiPageSchema.Type): WikiPage => ({
 })
 
 const mapResourceVersion = (
-  version: typeof WikiResourceVersionSchema.Type | null
-): WikiResourceVersion | null => {
-  if (version === null) return null
+  version: typeof WikiResourceVersionSchema.Type
+): WikiResourceVersion => {
   const { resource_id, path, blob_id: _blobId, state, version_id, ...extras } = version
   return { ...extras, resourceId: resource_id, path, state, versionId: version_id }
 }
 
-const mapHistoryChange = (change: typeof WikiHistoryChangeSchema.Type): WikiHistoryChange => {
-  const { action, before, after, ...extras } = change
-  return {
-    ...extras,
-    action,
-    before: mapResourceVersion(before),
-    after: mapResourceVersion(after)
-  }
-}
+const mapHistoryChange = (change: typeof WikiHistoryChangeSchema.Type): WikiHistoryChange =>
+  change.action === WIKI_CHANGE_ACTION.create
+    ? { action: change.action, after: mapResourceVersion(change.after) }
+    : {
+        action: change.action,
+        before: mapResourceVersion(change.before),
+        after: mapResourceVersion(change.after)
+      }
 
 const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHistoryCommit => {
   const {
     commit_id,
-    parent_id,
+    parent,
     added_lines,
     removed_lines,
     tree_id: _treeId,
@@ -245,7 +312,7 @@ const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHist
     addedLines: added_lines,
     removedLines: removed_lines,
     commitId: commit_id,
-    parentId: parent_id,
+    parent,
     actor,
     origin,
     reason,
@@ -256,17 +323,12 @@ const mapHistoryCommit = (commit: typeof WikiHistoryCommitSchema.Type): WikiHist
 }
 
 const mapLink = (link: typeof WikiLinkSchema.Type): WikiLink => {
-  const { source_page_id, node, status, target_page_id, ...extras } = link
-  const { page, fragment } = node
-  return {
-    ...extras,
-    sourcePageId: source_page_id,
-    target: fragment ? `${page ?? ""}#${fragment}` : (page ?? ""),
-    alias: node.alias,
-    heading: fragment,
-    status,
-    targetPageId: target_page_id
+  if (link.status === WIKI_LINK_STATUS.resolved) {
+    const { source_page_id, target_page_id, ...rest } = link
+    return { ...rest, sourcePageId: source_page_id, targetPageId: target_page_id }
   }
+  const { source_page_id, ...rest } = link
+  return { ...rest, sourcePageId: source_page_id }
 }
 
 export const toWikiRenamePlan = ({
@@ -287,17 +349,15 @@ export const toWikiRenamePlan = ({
   pageCount: page_count
 })
 
-export const toWikiPagePage = ({
-  repository_head,
-  pages,
-  next_cursor,
-  ...extras
-}: typeof WikiPagePageSchema.Type): WikiPagePage => ({
-  ...extras,
-  repositoryHead: repository_head,
-  pages: pages.map(mapPageSummary),
-  nextCursor: next_cursor
-})
+export const toWikiPagePage = (page: typeof WikiPagePageSchema.Type): WikiPagePage =>
+  page.kind === WIKI_PAGE_LIST.empty
+    ? { kind: page.kind }
+    : {
+        kind: page.kind,
+        repositoryHead: page.repository_head,
+        pages: page.pages.map(mapPageSummary),
+        next: page.next
+      }
 
 export const toWikiArchiveResponse = (
   response: typeof WikiArchiveResponseSchema.Type
@@ -382,32 +442,11 @@ export const toWikiPageLinks = ({
   repositoryHead: repository_head,
   outgoing: outgoing.map(mapLink),
   backlinks: backlinks.map(mapLink),
-  cameFrom: (came_from ?? []).map(
-    ({ session_ref, name, space_id, space_name, saved_at, summary, ...chatExtras }) => ({
-      ...chatExtras,
-      sessionRef: session_ref,
-      name,
-      spaceId: space_id,
-      spaceName: space_name,
-      savedAt: saved_at,
-      summary: summary ?? null
-    })
-  )
+  cameFrom: came_from.map(({ session_ref, ...chat }) => ({ ...chat, sessionRef: session_ref }))
 })
 
 const isRevisionConflictEnvelope = Schema.is(WikiRevisionConflictEnvelopeSchema)
 
 export const toWikiRevisionConflict = (
   response: typeof WikiRevisionConflictResponseSchema.Type
-): WikiRevisionConflict => {
-  const detail = isRevisionConflictEnvelope(response) ? response.detail : response
-  const { error, message, current_content, current_revision, current_head, ...extras } = detail
-  return {
-    ...extras,
-    error,
-    message,
-    ...(current_content === undefined ? {} : { currentContent: current_content }),
-    ...(current_revision === undefined ? {} : { currentVersion: current_revision }),
-    ...(current_head === undefined ? {} : { currentHead: current_head })
-  }
-}
+): WikiRevisionConflict => (isRevisionConflictEnvelope(response) ? response.detail : response)

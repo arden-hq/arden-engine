@@ -1,3 +1,4 @@
+import { decisionBody } from "./fixtures/chat-requests.js"
 import { daemonDecoders, LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { Effect, Layer } from "effect"
@@ -205,7 +206,12 @@ it("a card only the Arden app can grant is granted from the desktop, not from th
       server?.fetch("/tools/result", {
         method: "POST",
         headers: { "content-type": "application/json", [LOCAL_CAPABILITY_HEADER]: secret },
-        body: JSON.stringify({ run_id: runId, tool_id: toolId, result: "", approved })
+        body: JSON.stringify({
+          run_id: runId,
+          tool_id: toolId,
+          result: "",
+          ...decisionBody(approved, { askedAt: undefined, commandId: undefined })
+        })
       })
 
     expect((await fromPhone(shop, "pay", true)).state).toBe("rejected")
@@ -276,7 +282,12 @@ it("a configured server's owner keeps its routes and ordinary grants, but grants
         configured.server.fetch("/tools/result", {
           method: "POST",
           headers,
-          body: JSON.stringify({ run_id: shop, tool_id: toolId, result: "", approved: true })
+          body: JSON.stringify({
+            run_id: shop,
+            tool_id: toolId,
+            result: "",
+            ...decisionBody(true, { askedAt: undefined, commandId: undefined })
+          })
         })
       expect((await grant("pay")).status).toBe(409)
       expect(statusOf(databasePath, shop, "pay")).toEqual({ status: "pending" })

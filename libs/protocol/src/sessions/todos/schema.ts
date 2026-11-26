@@ -1,46 +1,64 @@
 import { Effect, Schema } from "effect"
-import { IsoDateTimeStringSchema, TodoListItemSchema, withExtras } from "../../common/schema.js"
-import type {
-  TodoSnapshot,
-  EffectiveSessionTodoResponse,
-  TodoLifecycleResponse
+import {
+  IsoDateTimeStringSchema,
+  PlannedTodoStatusSchema,
+  TodoListItemSchema,
+  withExtras
+} from "../../common/schema.js"
+import {
+  SESSION_TODO,
+  TODO_EXPLANATION,
+  TODO_REASON,
+  TODO_STATUS,
+  type TodoSnapshot,
+  type EffectiveSessionTodoResponse,
+  type TodoLifecycleResponse
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
 const TodoContentSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))
-const TodoStatusSchema = Schema.Literals([
-  "pending",
-  "in_progress",
-  "completed",
-  "cancelled"
-] as const)
 
-const TodoOverrideItemRequestSchema = Schema.Struct({
-  content: TodoContentSchema,
-  status: TodoStatusSchema,
-  reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300)))
-})
+const explanationSchema = <Text extends Schema.Top>(text: Text) =>
+  Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(TODO_EXPLANATION.none) }),
+    Schema.Struct({ kind: Schema.Literal(TODO_EXPLANATION.given), text })
+  ])
+
+const TodoExplanationSchema = explanationSchema(Schema.String)
 
 export const SetTodoOverrideRequestSchema = Schema.Struct({
-  items: Schema.Array(TodoOverrideItemRequestSchema).check(Schema.isMaxLength(50)),
-  explanation: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(2_000))))
+  items: Schema.Array(
+    Schema.Union([
+      Schema.Struct({ content: TodoContentSchema, status: PlannedTodoStatusSchema }),
+      Schema.Struct({
+        content: TodoContentSchema,
+        status: Schema.Literal(TODO_STATUS.cancelled),
+        reason: Schema.Union([
+          Schema.Struct({ kind: Schema.Literal(TODO_REASON.unstated) }),
+          Schema.Struct({
+            kind: Schema.Literal(TODO_REASON.stated),
+            text: Schema.String.check(Schema.isMaxLength(300))
+          })
+        ])
+      })
+    ])
+  ).check(Schema.isMaxLength(50)),
+  explanation: explanationSchema(Schema.String.check(Schema.isMaxLength(2_000)))
 })
 
-export const TodoSnapshotSchema: Schema.Codec<TodoSnapshot> = withExtras({
+const todoFields = {
   items: Schema.Array(TodoListItemSchema),
-  explanation: Schema.NullOr(Schema.String),
+  explanation: TodoExplanationSchema,
   updated_at: IsoDateTimeStringSchema
-})
+}
 
-const EffectiveSessionTodoSchema = withExtras({
-  items: Schema.Array(TodoListItemSchema),
-  explanation: Schema.NullOr(Schema.String),
-  updated_at: IsoDateTimeStringSchema,
-  edited: Schema.Boolean
-})
+export const TodoSnapshotSchema: Schema.Codec<TodoSnapshot> = withExtras(todoFields)
 
 export const EffectiveSessionTodoResponseSchema: Schema.Codec<EffectiveSessionTodoResponse> =
-  Schema.NullOr(EffectiveSessionTodoSchema)
+  Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SESSION_TODO.none) }),
+    withExtras({ ...todoFields, kind: Schema.Literal(SESSION_TODO.list), edited: Schema.Boolean })
+  ])
 
 export const TodoLifecycleResponseSchema: Schema.Codec<TodoLifecycleResponse> = withExtras({
   status: Schema.Literals(["cleared", "noop"] as const),

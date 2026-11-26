@@ -5,7 +5,7 @@ import type {
   AutomationToolScope,
   AutomationTrigger,
   AutomationTriggerContext,
-  AutomationTriggerInput,
+  AutomationTriggerSpec,
   CountAutomationTrigger,
   EventAutomationTrigger,
   IdleAutomationTrigger,
@@ -46,7 +46,7 @@ export interface SystemAutomationSpec {
   readonly description: string
   readonly prompt: string
   readonly handler: SystemHandlerId
-  readonly triggers: ReadonlyArray<AutomationTrigger>
+  readonly triggers: ReadonlyArray<AutomationTriggerSpec>
   readonly enabled: boolean
   readonly cooldownMinutes: number | null
   readonly toolScope: AutomationToolScope
@@ -64,6 +64,13 @@ export interface PersonalAutomationTriggers {
   readonly idle: IdleAutomationTrigger | null
   readonly count: CountAutomationTrigger | null
 }
+
+export const EVENT_TRIGGER_REFUSAL = {
+  missingAppEvent:
+    "An mcp.event trigger requires mcp_event: the app's server, one event it lists, and its arguments",
+  misplacedAppEvent: (eventType: AutomationEventType): string =>
+    `mcp_event belongs only to mcp.event triggers, not ${eventType}`
+} as const
 
 export class InvalidAutomationScheduleError extends Error {
   override readonly name = "InvalidAutomationScheduleError"
@@ -186,9 +193,7 @@ export const wikiChangedRevision = (event: AutomationTriggerEvent): string | nul
 export class AutomationRules extends Context.Service<
   AutomationRules,
   {
-    readonly triggers: (
-      triggers: ReadonlyArray<AutomationTriggerInput | AutomationTrigger>
-    ) => PersonalAutomationTriggers
+    readonly triggers: (triggers: ReadonlyArray<AutomationTrigger>) => PersonalAutomationTriggers
     readonly nextRunAt: (
       schedule: Pick<PersonalAutomationTriggers, "times">,
       afterMs: number

@@ -293,7 +293,6 @@ const probeSchemaManifest = Effect.fn("SqlitePersistence.probeSchemaManifest")(f
         diagnostics.operational({
           code: "storage.schema_drift",
           severity: "warning",
-          cause: null,
           objectType: row.type,
           objectName: row.name,
           verdict: "foreign_warning"

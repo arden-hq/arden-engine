@@ -12,6 +12,9 @@ import type {
   RevertSessionRequest,
   SessionExportFormat,
   SessionListOptions,
+  SessionChatModel,
+  SessionSpace,
+  SessionTarget,
   UpdateSessionModelRequest
 } from "./contracts.js"
 import {
@@ -125,15 +128,14 @@ const moveRequest = makeEncoder<MoveSessionToSpaceRequest>(
   encodeMoveSessionToSpaceRequestEffect,
   "Invalid move-session request"
 )
-/** Plain, reusable JSON bodies for session mutations. */
 export const sessionRequests = {
   create: createRequest,
   branch: branchRequest,
   rename: (name: string): string => renameRequest({ name }),
-  setModel: (chatModel: string | null): string => modelRequest({ chat_model: chatModel }),
-  clear: (sessionId: string | null = null): string => clearRequest({ session_id: sessionId }),
+  setModel: (chatModel: SessionChatModel): string => modelRequest({ chat_model: chatModel }),
+  clear: (target: SessionTarget): string => clearRequest({ target }),
   revert: revertRequest,
-  moveToSpace: (spaceId: string | null): string => moveRequest({ space_id: spaceId }),
+  moveToSpace: (space: SessionSpace): string => moveRequest({ space }),
   triageAction: (action: SessionTriageAction): string => triageActionRequest({ action }),
   capture: captureRequest
 } as const
@@ -145,7 +147,7 @@ const route = (program: ReturnType<typeof encodeSessionItemPathEffect>, message:
 export const sessionRoutes = {
   collection: "/sessions",
   capture: "/captures",
-  list(options: SessionListOptions = {}): string {
+  list(options: SessionListOptions): string {
     return runBoundary(encodeSessionListPathEffect(options), "Invalid session-list route", "encode")
   },
   archived: "/sessions/archived",

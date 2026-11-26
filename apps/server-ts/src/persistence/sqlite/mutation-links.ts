@@ -1,6 +1,12 @@
 import { Effect } from "effect"
 import { Statement, type SqlClient } from "effect/unstable/sql"
-import type { ChangeEntry, ChangeEvidence } from "@arden-hq/protocol/chat"
+import {
+  CHANGE_ENTRY_LINK,
+  CHANGE_ENTRY_PLACE,
+  CHANGE_ENTRY_TITLE,
+  type ChangeEntry,
+  type ChangeEvidence
+} from "@arden-hq/protocol/chat"
 import { mutationOperationId, type MutationOperationIdentity } from "../tools/mutation-receipt.js"
 import { outToolStatusList } from "./status-sets.js"
 import { runDescendants } from "./tree-walk.js"
@@ -104,6 +110,9 @@ export const readMutationVersionsOf = Effect.fn("MutationLinks.readMany")(functi
           entry_id: `${mutationOperationId(identity)}:${row.domain}:${row.resource_id}:${row.version}`,
           domain: row.domain,
           resource_ref: `${row.domain}:${row.resource_id}`,
+          title: { kind: CHANGE_ENTRY_TITLE.untitled },
+          link: { kind: CHANGE_ENTRY_LINK.unlinked },
+          place: { kind: CHANGE_ENTRY_PLACE.unplaced },
           outcome: "applied",
           before:
             row.kind === "created"

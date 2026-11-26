@@ -98,7 +98,12 @@ export const storageRoutes = {
   tidy: "/storage/tidy"
 } as const
 
-export { DEFAULT_STORAGE_RETENTION, type StorageRetention } from "./retention.js"
+export {
+  DEFAULT_STORAGE_RETENTION,
+  RETENTION,
+  type RetentionPeriod,
+  type StorageRetention
+} from "./retention.js"
 
 export type { StorageFile, StorageFiles } from "./files.js"
 export type { StorageBackfill, StorageBackfills } from "./backfills.js"

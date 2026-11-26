@@ -69,8 +69,7 @@ const judgeEvent = Effect.fn("Automation.judgeEvent")(function* (
     backend: first.backend,
     event: event.event,
     asked: event.sentences,
-    ran: null,
-    cancelled: null,
+    run_with_event: { kind: "not_asked" },
     prompt: event.prompt
   }
 })

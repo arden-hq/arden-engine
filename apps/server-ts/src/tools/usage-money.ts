@@ -1,5 +1,5 @@
 import { addCost } from "@arden-hq/loop"
-import type { UsageDailyCell } from "@arden-hq/protocol/runs"
+import type { StoredUsageDailyCell as UsageDailyCell } from "../persistence/usage/report.js"
 
 export type UsageMoney =
   | { readonly state: "reported"; readonly usd: number; readonly reason: string }

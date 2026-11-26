@@ -1,10 +1,23 @@
-import {
-  SpaceSchema,
-  StoredSpaceMarkLookSchema,
-  TaskInferencePolicySchema
-} from "@arden-hq/protocol/effect/spaces"
+import { SpaceKindSchema, TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
+import { IsoDateTimeStringSchema } from "@arden-hq/protocol/effect/common"
 import { Effect, Schema } from "effect"
-import { SpaceStoreError, type PersistedSpace } from "../spaces/store.js"
+import { StoredMarkLookSchema } from "../spaces/mark.js"
+import { INSTRUCTIONS_SOURCE, SpaceStoreError, type PersistedSpace } from "../spaces/store.js"
+
+const SpaceRecordSchema = Schema.Struct({
+  inference: TaskInferencePolicySchema,
+  space_id: Schema.NonEmptyString,
+  kind: SpaceKindSchema,
+  name: Schema.String,
+  instructions: Schema.NullOr(Schema.String),
+  instructions_source: Schema.NullOr(Schema.Literals(Object.values(INSTRUCTIONS_SOURCE))),
+  page_path: Schema.NullOr(Schema.String),
+  page_id: Schema.NullOr(Schema.String),
+  mark: Schema.NullOr(StoredMarkLookSchema),
+  created_at: IsoDateTimeStringSchema,
+  updated_at: IsoDateTimeStringSchema,
+  archived_at: Schema.NullOr(IsoDateTimeStringSchema)
+})
 import { decodeJson } from "./json.js"
 
 export interface SpaceRow {
@@ -44,10 +57,8 @@ export const decodeRow = Effect.fn("SqliteSpaceStore.decodeRow")(function* (
   const mark =
     row.mark === null
       ? null
-      : yield* decodeJson(StoredSpaceMarkLookSchema, row.mark).pipe(
-          Effect.orElseSucceed(() => null)
-        )
-  const decoded = yield* Schema.decodeUnknownEffect(SpaceSchema)({
+      : yield* decodeJson(StoredMarkLookSchema, row.mark).pipe(Effect.orElseSucceed(() => null))
+  return yield* Schema.decodeUnknownEffect(SpaceRecordSchema)({
     inference: yield* decodeJson(TaskInferencePolicySchema, row.inference_policy).pipe(
       Effect.mapError((cause) =>
         storeError(
@@ -65,6 +76,7 @@ export const decodeRow = Effect.fn("SqliteSpaceStore.decodeRow")(function* (
     instructions: row.instructions,
     instructions_source: row.instructions_source,
     page_path: row.page_path,
+    page_id: row.page_id,
     mark,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -74,10 +86,4 @@ export const decodeRow = Effect.fn("SqliteSpaceStore.decodeRow")(function* (
       storeError(operation, "storage", "Stored Space row is corrupt", row.space_id, cause)
     )
   )
-  const pageId = yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(row.page_id).pipe(
-    Effect.mapError((cause) =>
-      storeError(operation, "storage", "Stored Space page identity is corrupt", row.space_id, cause)
-    )
-  )
-  return { ...decoded, page_id: pageId }
 })

@@ -2,20 +2,32 @@ import { AppSettingsTabIdSchema } from "@arden-hq/protocol/effect/common"
 import { memoryHref } from "../lib/memory-link.js"
 import { Schema } from "effect"
 
+export const TOOL_DESTINATION = {
+  home: "home",
+  session: "session",
+  settings: "settings",
+  automation: "automation",
+  task: "task",
+  memory: "memory",
+  space: "space"
+} as const
+
 export const SessionRefSchema = Schema.NonEmptyString.check(Schema.isMaxLength(200)).annotate({
   description: "Exact session_ref returned by session_list."
 })
 
 export const ToolDestinationSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("home").annotate({ description: "Open Arden Home." })
+    kind: Schema.Literal(TOOL_DESTINATION.home).annotate({ description: "Open Arden Home." })
   }),
   Schema.Struct({
-    kind: Schema.Literal("session").annotate({ description: "Open one exact Session." }),
+    kind: Schema.Literal(TOOL_DESTINATION.session).annotate({
+      description: "Open one exact Session."
+    }),
     session_ref: SessionRefSchema
   }),
   Schema.Struct({
-    kind: Schema.Literal("settings").annotate({
+    kind: Schema.Literal(TOOL_DESTINATION.settings).annotate({
       description: "Open Settings or one Settings tab."
     }),
     tab: Schema.optionalKey(
@@ -25,7 +37,7 @@ export const ToolDestinationSchema = Schema.Union([
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("automation").annotate({
+    kind: Schema.Literal(TOOL_DESTINATION.automation).annotate({
       description: "Open the Automations list or one exact Automation."
     }),
     automation_ref: Schema.optionalKey(
@@ -35,13 +47,15 @@ export const ToolDestinationSchema = Schema.Union([
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("task").annotate({ description: "Open one exact Task's panel." }),
+    kind: Schema.Literal(TOOL_DESTINATION.task).annotate({
+      description: "Open one exact Task's panel."
+    }),
     item_id: Schema.NonEmptyString.check(Schema.isMaxLength(1_024)).annotate({
       description: "Exact item_id returned by space_board_read."
     })
   }),
   Schema.Struct({
-    kind: Schema.Literal("memory").annotate({
+    kind: Schema.Literal(TOOL_DESTINATION.memory).annotate({
       description: "Open Memory or one exact active Memory page."
     }),
     path: Schema.optionalKey(
@@ -52,7 +66,7 @@ export const ToolDestinationSchema = Schema.Union([
     )
   }),
   Schema.Struct({
-    kind: Schema.Literal("space").annotate({ description: "Open one exact Space." }),
+    kind: Schema.Literal(TOOL_DESTINATION.space).annotate({ description: "Open one exact Space." }),
     space_id: Schema.NonEmptyString.check(Schema.isMaxLength(512)).annotate({
       description: "Exact space_id from space_list."
     })

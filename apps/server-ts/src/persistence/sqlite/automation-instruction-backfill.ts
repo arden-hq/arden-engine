@@ -5,7 +5,7 @@ import type { Backfill } from "./backfills/backfill.js"
 import {
   instructionDestination,
   instructionHash,
-  instructionPayload,
+  instructionSnapshot,
   matchesInstructionReceipt,
   type InstructionRow
 } from "./automation-instruction-provenance.js"
@@ -79,8 +79,9 @@ export const automationInstructionBackfill: Backfill = {
     let converted = 0
     for (const row of rows) {
       if (row.instruction_revision_id !== null) continue
-      const payload = yield* Effect.try(() => instructionPayload(row)).pipe(Effect.option)
-      if (payload._tag === "None") continue
+      const snapshot = yield* Effect.try(() => instructionSnapshot(row)).pipe(Effect.option)
+      if (snapshot._tag === "None") continue
+      const payload = JSON.stringify(snapshot.value)
       const [candidate] = yield* sql<{
         readonly source_run_id: string
         readonly source_tool_call_id: string
@@ -113,7 +114,7 @@ export const automationInstructionBackfill: Backfill = {
             toolName: candidate.tool_name,
             automationRef: row.automation_ref,
             destination,
-            instruction: row
+            instruction: snapshot.value
           })
         ).pipe(Effect.orElseSucceed(() => false)))
       const source = sourceMatches ? candidate : undefined
@@ -122,7 +123,7 @@ export const automationInstructionBackfill: Backfill = {
           task_id, instruction_json, instruction_hash,
           prompt_author, source_run_id, source_tool_call_id, written_at
         ) VALUES (
-          ${row.task_id}, ${payload.value}, ${instructionHash(payload.value)},
+          ${row.task_id}, ${payload}, ${instructionHash(payload)},
           ${row.prompt_author}, ${source?.source_run_id ?? null},
           ${source?.source_tool_call_id ?? null},
           ${source?.ended_at ?? row.created_at}

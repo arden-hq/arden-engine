@@ -1,14 +1,14 @@
-import { parseJsonText } from "@arden-hq/protocol/common"
-import { openRunSince } from "./automation-running.js"
-import { DateTime, Effect, Schema } from "effect"
-import type { SqlError } from "effect/unstable/sql"
 import {
   HomeEvidenceSchema,
   HomeLetterBodySchema,
   HomeLetterResponseSchema,
-  HomePresenceInputSchema
-} from "@arden-hq/protocol/effect/runs"
-import type { HomeEvidence } from "@arden-hq/protocol/runs"
+  type HomeEvidence
+} from "../home/letter-schema.js"
+import { parseJsonText } from "@arden-hq/protocol/common"
+import { openRunSince } from "./automation-running.js"
+import { DateTime, Effect, Schema } from "effect"
+import type { SqlError } from "effect/unstable/sql"
+import { HomePresenceInputSchema } from "@arden-hq/protocol/effect/runs"
 import { HOME_LETTER_AUTOMATION_ID } from "../automations/model.js"
 import { WorkStoreError } from "../work/store.js"
 import { HomeStore, type HomeLetterSnapshot } from "../home/store.js"

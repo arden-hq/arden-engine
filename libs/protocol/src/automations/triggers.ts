@@ -9,6 +9,11 @@ import type { AutomationConditionOperator, AutomationEventCatalogField } from ".
  * triggers from it. A new event type is one entry here plus one server producer.
  */
 
+export const CONDITION_OPERATOR = {
+  in: "in",
+  exists: "exists"
+} as const satisfies Readonly<Record<string, AutomationConditionOperator>>
+
 export const TEXT_OPERATORS = [
   "eq",
   "ne",

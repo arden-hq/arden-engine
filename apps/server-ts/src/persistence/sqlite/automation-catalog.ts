@@ -1,7 +1,5 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
-import type { AutomationContextMode, AutomationRun } from "@arden-hq/protocol/automations"
 import { haltAutomation } from "./automation-halt.js"
-import { AutomationRunSchema, AutomationRunSkipSchema } from "@arden-hq/protocol/effect/automations"
 import { Clock, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import {
@@ -25,8 +23,8 @@ import {
   skipCorrupt
 } from "./automation-rows.js"
 import { iso } from "../../runtime/clock.js"
-import { inArdenWords } from "../restart-notice.js"
-import { outcomeSql, shownRunStatus } from "./automation-run-outcome.js"
+import { outcomeSql } from "./automation-run-outcome.js"
+import { automationRunOfRow, type AutomationRunRow } from "./automation-run-rows.js"
 import {
   instructionDestination,
   instructionHash,
@@ -36,26 +34,12 @@ import { userAutomationSql } from "./authority-sql.js"
 import { fullResultJson } from "./tool-result-storage.js"
 import { automationRowSelect, makeAutomationRowReads } from "./automation-row-reads.js"
 
-interface AutomationRunRow {
-  readonly id: number
-  readonly task_id: string
-  readonly chat_run_id: string | null
-  readonly chat_session_id: string | null
-  readonly context_mode: AutomationContextMode
-  readonly started_at: string
-  readonly ended_at: string | null
-  readonly outcome: string | null
-  readonly result: string | null
-  readonly error: string | null
-  readonly skip_json: string | null
-}
-
 const PromptAuthorSchema = Schema.Literals(["owner", "agent", "unknown"])
 const InstructionSnapshotSchema = Schema.Struct({
   prompt: Schema.String,
   model: Schema.NullOr(Schema.String),
   context_mode: Schema.Literals(["fresh", "continue"]),
-  triggers: AutomationTriggersSchema,
+  triggers: Schema.Array(Schema.Record(Schema.String, Schema.Json)),
   thread_id: Schema.NullOr(Schema.String),
   cooldown_minutes: Schema.NullOr(Schema.Number)
 })
@@ -219,10 +203,7 @@ export const makeAutomationCatalog = ({
                 toolName: receipt.tool_name,
                 automationRef: yield* automationRefOf(sql, row.task_id),
                 destination: yield* instructionDestination(sql, row.task_id, parsed.thread_id),
-                instruction: {
-                  ...parsed,
-                  triggers: JSON.stringify(parsed.triggers)
-                }
+                instruction: parsed
               })
             )
               return yield* storeError(
@@ -490,23 +471,8 @@ export const makeAutomationCatalog = ({
     )
     return yield* skipCorrupt({
       rows,
-      decode: ({ skip_json: skipJson, outcome, ...row }) =>
-        Effect.gen(function* () {
-          return {
-            status: yield* shownRunStatus(outcome),
-            skipped: skipJson === null ? null : yield* decodeJson(AutomationRunSkipSchema, skipJson)
-          }
-        }).pipe(
-          Effect.flatMap(({ status, skipped }) =>
-            Schema.decodeUnknownEffect(AutomationRunSchema)({
-              ...row,
-              status,
-              result: inArdenWords(row.result),
-              error: inArdenWords(row.error),
-              skipped
-            })
-          ),
-          Effect.map((run): AutomationRun => run),
+      decode: (row) =>
+        automationRunOfRow(row).pipe(
           Effect.mapError((cause) =>
             storeError(
               "runs",

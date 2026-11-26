@@ -1,6 +1,6 @@
 import type { ToolApprovalPrompt, ToolResult } from "@arden-hq/loop"
 import { DateTime, Effect, Option, Schema } from "effect"
-import type { ApprovalPresentation } from "@arden-hq/protocol/chat"
+import type { ApprovalPresentationDraft } from "../tools/approval-draft.js"
 import { JsonObjectSchema } from "../json.js"
 import {
   DeferredToolCalls,
@@ -79,7 +79,7 @@ export const makeDeferredToolCalls = ({
 
   const defer = Effect.fn("DeferredToolCalls.defer")(function* (input: {
     readonly call: DeferredToolCall
-    readonly prompt: ToolApprovalPrompt<ApprovalPresentation>
+    readonly prompt: ToolApprovalPrompt<ApprovalPresentationDraft>
   }) {
     const { call, prompt } = input
     const identity = { runId: call.runId, toolCallId: call.toolCallId }

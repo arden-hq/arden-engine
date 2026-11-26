@@ -72,7 +72,7 @@ const makeReportTool = ({ work, queue, sessions }: ReportToolServices): ServerTo
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(ReportToolInputSchema),
     metadata: {
-      display: { row: "report" },
+      display: [{ fact: "row", value: "report" }],
       effect: "run_record",
       outcome: true,
       display_name: "Report",

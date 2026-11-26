@@ -176,7 +176,7 @@ export const gmailForwardTool = ({
       kind: "tool",
       action: "write",
       approval_preview: "Forward this email.",
-      display: { mail: "forward" },
+      display: [{ fact: "mail", value: "forward" }],
       source: "gmail",
       changes_state: true,
       concurrency_group: "gmail_write",

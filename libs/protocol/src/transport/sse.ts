@@ -14,11 +14,7 @@ export function decodeSseFrames(
   input: string,
   options?: SseDecodeOptions
 ): ReadonlyArray<SseFrame> {
-  return runBoundary(
-    decodeSseFramesEffect(input, options),
-    "Invalid SSE stream",
-    "stream"
-  ) as ReadonlyArray<SseFrame>
+  return runBoundary(decodeSseFramesEffect(input, options), "Invalid SSE stream", "stream")
 }
 
 /** Decode a complete SSE buffer and validate each event payload. */
@@ -30,7 +26,7 @@ export function decodeServerEventStreamBuffer(
     decodeServerEventFramesEffect(input, options),
     "Invalid server event stream",
     "stream"
-  ) as ReadonlyArray<DecodedServerEventFrame>
+  )
 }
 
 /**
@@ -43,11 +39,7 @@ export function decodeServerEventStream(
   options?: SseDecodeOptions
 ): AsyncIterable<DecodedServerEventFrame> {
   const stream = Stream.toAsyncIterable(decodeServerEventStreamEffect(input, options))
-  return asyncIterableBoundary(
-    stream,
-    "Invalid server event stream",
-    "stream"
-  ) as AsyncIterable<DecodedServerEventFrame>
+  return asyncIterableBoundary(stream, "Invalid server event stream", "stream")
 }
 
 /**
@@ -59,5 +51,5 @@ export function decodeSseFrameStream(
   options?: SseDecodeOptions
 ): AsyncIterable<SseFrame> {
   const stream = Stream.toAsyncIterable(decodeSseFrameStreamEffect(input, options))
-  return asyncIterableBoundary(stream, "Invalid SSE stream", "stream") as AsyncIterable<SseFrame>
+  return asyncIterableBoundary(stream, "Invalid SSE stream", "stream")
 }

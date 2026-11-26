@@ -1,26 +1,29 @@
 import { previewLine } from "@arden-hq/protocol/chat"
 import type { SpaceSummary } from "@arden-hq/protocol/spaces"
 import type { MobileAsk, MobileSpaces } from "@arden-hq/protocol/mobile"
-import { isActiveRunStatus } from "@arden-hq/protocol/runs"
-import type { SessionListItem } from "@arden-hq/protocol/sessions"
-import { chatName, spaceState, isSystemRun } from "@arden-hq/protocol/views"
+import { SESSION_RUN, type SessionListItem } from "@arden-hq/protocol/sessions"
+import { nameText, runIsActive } from "../sessions/session-states.js"
+import { chatName, SPACE_ASK, spaceState, isSystemRun } from "@arden-hq/protocol/views"
 
 type MobileSpace = MobileSpaces["spaces"][number]
 type MobileLooseChat = MobileSpaces["loose"][number]
 
 const isConversation = (session: SessionListItem): boolean =>
-  session.presentation?.kind === "conversation"
+  session.presentation.kind === "conversation"
 
 export const isSpaceHome = (session: SessionListItem): boolean =>
-  session.presentation?.kind === "conversation" && session.presentation.role === "space"
+  session.presentation.kind === "conversation" && session.presentation.role === "space"
 
 const isWorking = (session: SessionListItem): boolean =>
-  !isSystemRun(session) && isActiveRunStatus(session.run_status)
+  !isSystemRun(session.presentation) && runIsActive(session.run)
 
 const askLabel = (ask: MobileAsk): string => {
   const text = ask.kind === "question" ? ask.prompt : ask.title
   return previewLine(text) ?? text
 }
+
+const conversationOf = (sessionId: string | undefined): MobileSpace["conversation"] =>
+  sessionId === undefined ? { kind: "unopened" } : { kind: "opened", session_id: sessionId }
 
 export function mobileSpace({
   space,
@@ -41,9 +44,9 @@ export function mobileSpace({
   return {
     id: space.key,
     name: space.title,
-    conversation_session_id: chats.find((chat) => isSpaceHome(chat))?.session_id ?? null,
+    conversation: conversationOf(chats.find((chat) => isSpaceHome(chat))?.session_id),
     state_line:
-      tone === "asks" && ask !== undefined
+      tone === "asks" && ask.kind === SPACE_ASK.waiting
         ? { tone, text: ask.text, more: ask.more }
         : { tone, text: "", more: 0 }
   }
@@ -57,9 +60,12 @@ export function looseChats(sessions: ReadonlyArray<SessionListItem>): MobileLoos
     )
     .map((session) => ({
       session_id: session.session_id,
-      title: chatName(session),
-      has_unread: session.has_unread === true,
-      run_status: session.run_status ?? null,
+      title: chatName(nameText(session.name)),
+      has_unread: session.has_unread,
+      run:
+        session.run.kind === SESSION_RUN.none
+          ? { kind: "unrun" }
+          : { kind: "run", status: session.run.status },
       working: isWorking(session),
       updated_at: session.last_activity
     }))

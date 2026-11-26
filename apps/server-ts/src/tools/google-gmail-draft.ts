@@ -379,7 +379,7 @@ export const gmailDraftTool = ({
     metadata: {
       effect: "external",
       display_name: "Save Email Draft",
-      display: { mail: "draft" },
+      display: [{ fact: "mail", value: "draft" }],
       kind: "tool",
       action: "write",
       approval_preview: "Save this Gmail draft.",

@@ -1,22 +1,26 @@
 import type { JsonRecord } from "../common/json.js"
 
-/** One locally installed skill. Filesystem details stay server-owned. */
+export const SKILL_VERSION = { versioned: "versioned", unversioned: "unversioned" } as const
+export const SKILL_PLACE = { builtin: "builtin", local: "local" } as const
+
+export type SkillVersion =
+  | { readonly kind: "versioned"; readonly version: string }
+  | { readonly kind: "unversioned" }
+
+export type SkillPlace =
+  | { readonly kind: "builtin"; readonly invocable: boolean }
+  | { readonly kind: "local"; readonly origin: "arden" | "shared"; readonly path: string }
+
 export interface Skill extends JsonRecord {
   readonly name: string
   readonly description: string
-  /** Human-authored semantic version. Exact loaded bytes remain identified by SHA-256. */
-  readonly version: string | null
+  readonly version: SkillVersion
   readonly enabled: boolean
-  /** Ships with the app: a built-in Skill (always enabled). Never removable. */
-  readonly builtin: boolean
-  /** A built-in Skill the user may also call from the / menu. Local Skills always can. */
-  readonly invocable?: true
-  /** Where a local Skill lives: Arden's own folder, or a root shared with other agents
-   *  (removable only there). Absent on built-ins. */
-  readonly origin?: "arden" | "shared"
-  /** The Skill's directory as discovered, so the user can find and edit it. Absent on built-ins. */
-  readonly path?: string
+  readonly place: SkillPlace
 }
+
+export const skillVersionText = (version: SkillVersion): string | null =>
+  version.kind === SKILL_VERSION.versioned ? version.version : null
 
 export interface SkillListResponse extends JsonRecord {
   readonly skills: ReadonlyArray<Skill>
@@ -45,14 +49,13 @@ export interface SkillInstallReceipt extends JsonRecord {
   readonly status: "installed"
   readonly name: string
   readonly description: string
-  readonly version: string | null
+  readonly version: SkillVersion
 }
 
-/** Markdown content for a skill. The server owns the source file location. */
 export interface SkillContent extends JsonRecord {
   readonly name: string
   readonly description: string
-  readonly version: string | null
+  readonly version: SkillVersion
   readonly content: string
 }
 

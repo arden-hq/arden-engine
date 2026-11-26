@@ -1,7 +1,7 @@
+import type { ToolDecisionFields } from "../chat/send-contracts.js"
 import type { JsonObject, ToolApprovalPrompt, ToolResult } from "@arden-hq/loop"
 import { Context, type Effect } from "effect"
-import type { ApprovalPresentation } from "@arden-hq/protocol/chat"
-import type { ToolResultInput } from "@arden-hq/protocol/chat"
+import type { ApprovalPresentationDraft } from "./approval-draft.js"
 import type { ToolExecutionStoreError } from "./store.js"
 
 export interface DeferredToolCall {
@@ -20,7 +20,7 @@ export type DeferredDecision =
   | { readonly kind: "approved"; readonly call: DeferredToolCall }
   | { readonly kind: "settled" }
 
-export type DeferredDecisionInput = Omit<ToolResultInput, "toolId"> & {
+export type DeferredDecisionInput = Omit<ToolDecisionFields, "toolId"> & {
   readonly toolCallId: string
 }
 
@@ -33,7 +33,7 @@ export class DeferredToolCalls extends Context.Service<
   {
     readonly defer: (input: {
       readonly call: DeferredToolCall
-      readonly prompt: ToolApprovalPrompt<ApprovalPresentation>
+      readonly prompt: ToolApprovalPrompt<ApprovalPresentationDraft>
     }) => Effect.Effect<"published" | "needs_review", ToolExecutionStoreError>
     readonly decide: (
       input: DeferredDecisionInput

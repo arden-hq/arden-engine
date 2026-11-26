@@ -1,15 +1,27 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
-import { Effect, Result } from "effect"
+import { engineOrderedJson } from "@arden-hq/std/json"
+import { Effect, Result, Schema } from "effect"
+import { AutomationTriggerSchema } from "@arden-hq/protocol/effect/automations"
+import { triggerRecord } from "../src/persistence/automations/trigger-record.js"
 import { SqlClient } from "effect/unstable/sql"
 import { expect, it } from "vitest"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { AutomationId } from "../src/persistence/automations/model.js"
 import { SessionStore } from "../src/persistence/sessions/store.js"
+import { automationInstructionBackfill } from "../src/persistence/sqlite/automation-instruction-backfill.js"
 import { ToolExecutionStore } from "../src/persistence/tools/store.js"
+import { automationData } from "../src/tools/automation-tool-data.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { RECORDED_HISTORY_THROUGH } from "../src/persistence/history.js"
+import { changes, newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 const AT = "2026-10-15T20:06:01.931Z"
+const wholeHistory = {
+  after_version: 0,
+  limit: 50,
+  through: RECORDED_HISTORY_THROUGH.head
+} as const
 
 it("a same-text owner save preserves an agent prompt's authorship and revision", async () => {
   const revisions = await withTempDatabase(
@@ -17,14 +29,13 @@ it("a same-text owner save preserves an agent prompt's authorship and revision",
       const sql = yield* SqlClient.SqlClient
       const catalog = yield* AutomationCatalog
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           name: "Monitor",
           prompt: "Check every morning.",
           history: "fresh",
-          triggers: [{ type: "time", every: "1d" }],
-          idempotency_key: "33333333-3333-4333-8333-333333333333",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1d")],
+          idempotency_key: "33333333-3333-4333-8333-333333333333"
+        }),
         "agent"
       )
       const pointer = () => sql<{ readonly revision_id: number; readonly author: string | null }>`
@@ -33,19 +44,19 @@ it("a same-text owner save preserves an agent prompt's authorship and revision",
       const [before] = yield* pointer()
       yield* catalog.update(
         AutomationId.make(automation.task_id),
-        { prompt: "Check every morning." },
+        changes({ kind: "prompt", prompt: "Check every morning." }),
         "owner"
       )
       const [same] = yield* pointer()
       yield* catalog.update(
         AutomationId.make(automation.task_id),
-        { name: "Daily monitor" },
+        changes({ kind: "name", name: "Daily monitor" }),
         "owner"
       )
       const [renamed] = yield* pointer()
       yield* catalog.update(
         AutomationId.make(automation.task_id),
-        { prompt: "List every failure." },
+        changes({ kind: "prompt", prompt: "List every failure." }),
         "owner"
       )
       const [changed] = yield* pointer()
@@ -91,14 +102,13 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
         changesState: true
       })
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           name: "Failure logger",
           prompt: "Record failures.",
           history: "fresh",
-          triggers: [{ type: "time", every: "1d" }],
-          idempotency_key: "44444444-4444-4444-8444-444444444444",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1d")],
+          idempotency_key: "44444444-4444-4444-8444-444444444444"
+        }),
         "agent",
         { runId: started.runId, toolCallId: "create" }
       )
@@ -129,7 +139,9 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
             prompt: row.prompt,
             model: row.model,
             history: row.context_mode,
-            triggers: JSON.parse(row.triggers) as unknown,
+            triggers: Schema.decodeUnknownSync(Schema.Array(AutomationTriggerSchema))(
+              JSON.parse(row.triggers)
+            ).map(triggerRecord),
             chat: "own",
             chat_ref: null,
             cooldown_minutes: row.cooldown_minutes
@@ -160,29 +172,129 @@ it("a saved instruction cannot trust an unfinished or failed source tool call", 
   })
 })
 
+it.each(["matching", "different"])(
+  "backfill checks a %s flat write receipt against tagged stored triggers",
+  async (receipt) => {
+    const { source, revision } = await withTempDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const catalog = yield* AutomationCatalog
+        const sessions = yield* SessionStore
+        const chat = yield* ChatWriteStore
+        const tools = yield* ToolExecutionStore
+        const session = yield* sessions.create({ name: "Source" })
+        const prompt = "Record failures."
+        const started = yield* chat.start({
+          sessionId: session.sessionId,
+          clientId: "request",
+          requestHash: "request",
+          assistantMessageId: "assistant",
+          message: {
+            message_id: "request",
+            client_id: "request",
+            role: ROLE.user,
+            content: "Create the failure logger.",
+            created_at: AT
+          }
+        })
+        if (started._tag !== "Started") return yield* Effect.die("Run did not start")
+        const source = { runId: started.runId, toolCallId: "create" }
+        yield* tools.begin({
+          ...source,
+          sessionId: session.sessionId,
+          toolName: "automation_create",
+          arguments: { name: "Failure logger", prompt },
+          changesState: true
+        })
+        const automation = yield* catalog.create(
+          newAutomation({
+            name: "Failure logger",
+            prompt,
+            history: "fresh",
+            triggers: [everyTrigger("1d")],
+            idempotency_key: "55555555-5555-4555-8555-555555555555"
+          }),
+          "agent",
+          source
+        )
+        const data = automationData(automation, {
+          model_source: "unknown",
+          effective_model: null,
+          chat_ref: null,
+          action_mode: null
+        })
+        const result = engineOrderedJson({
+          data: {
+            ...data,
+            triggers:
+              receipt === "matching"
+                ? data.triggers
+                : data.triggers.map((trigger) => ({ ...trigger, every: "2d" }))
+          },
+          host: { mutation_receipt: { outcome: "applied" } }
+        })
+        yield* sql`UPDATE tool_calls SET status = 'completed', ended_at = started_at,
+          result_json = ${result} WHERE run_id = ${source.runId} AND tool_call_id = ${source.toolCallId}`
+        yield* sql`UPDATE scheduled_tasks SET instruction_revision_id = NULL
+          WHERE task_id = ${automation.task_id}`
+        const calls = yield* automationInstructionBackfill.chunk({ cursor: undefined, limit: 10 })
+        yield* automationInstructionBackfill.chunk({ cursor: calls.next, limit: 10 })
+        const [row] = yield* sql<{ readonly revision_id: number | null }>`
+          SELECT instruction_revision_id AS revision_id FROM scheduled_tasks
+          WHERE task_id = ${automation.task_id}`
+        if (row?.revision_id == null) return yield* Effect.die("Backfill created no revision")
+        return { source, revision: yield* catalog.instructionRevision(row.revision_id) }
+      })
+    )
+    expect(revision).toMatchObject({
+      author: "agent",
+      source: receipt === "matching" ? source : undefined
+    })
+  }
+)
+
 it("configuration history resolves its original instruction after later edits and toggles", async () => {
   const result = await withTempDatabase(
     Effect.gen(function* () {
       const catalog = yield* AutomationCatalog
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           name: "History monitor",
           prompt: "First instruction",
           history: "fresh",
-          triggers: [{ type: "time", every: "1d" }],
-          idempotency_key: "66666666-6666-4666-8666-666666666666",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1d")],
+          idempotency_key: "66666666-6666-4666-8666-666666666666"
+        }),
         "owner"
       )
       const id = AutomationId.make(automation.task_id)
-      const first = yield* catalog.history({ id })
-      yield* catalog.update(id, { name: "Renamed monitor", prompt: "Second instruction" }, "owner")
+      const first = yield* catalog.history({ id, ...wholeHistory })
+      yield* catalog.update(
+        id,
+        changes(
+          { kind: "name", name: "Renamed monitor" },
+          { kind: "prompt", prompt: "Second instruction" }
+        ),
+        "owner"
+      )
       yield* catalog.toggle(id)
-      const current = yield* catalog.history({ id })
-      const original = yield* catalog.history({ id, through_version: first.through_version })
-      yield* catalog.update(id, { name: "Renamed monitor", prompt: "Second instruction" }, "owner")
-      const noop = yield* catalog.history({ id })
+      const current = yield* catalog.history({ id, ...wholeHistory })
+      const original = yield* catalog.history({
+        id,
+        after_version: 0,
+        limit: 50,
+        through: RECORDED_HISTORY_THROUGH.version,
+        through_version: first.through_version
+      })
+      yield* catalog.update(
+        id,
+        changes(
+          { kind: "name", name: "Renamed monitor" },
+          { kind: "prompt", prompt: "Second instruction" }
+        ),
+        "owner"
+      )
+      const noop = yield* catalog.history({ id, ...wholeHistory })
       return { first, current, original, noop }
     })
   )

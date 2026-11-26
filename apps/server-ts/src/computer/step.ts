@@ -1,7 +1,17 @@
-import type { ComputerFrame, ComputerStep } from "@arden-hq/protocol/computer"
+import type {
+  ComputerApp,
+  ComputerFrame,
+  ComputerStep,
+  ComputerWindow
+} from "@arden-hq/protocol/computer"
+import { COMPUTER_APP } from "@arden-hq/protocol/computer"
 import type { NativeAction } from "./contract.js"
 
-type App = ComputerStep["app"]
+export const appNameOf = (app: ComputerApp): string | undefined =>
+  app.kind === COMPUTER_APP.identified ? app.name : undefined
+
+const windowOf = (title: string | undefined): ComputerWindow =>
+  title === undefined ? { kind: "untitled" } : { kind: "titled", title }
 
 function roleWords(role: string): string {
   return role
@@ -118,16 +128,13 @@ export function actionWords(action: NativeAction): string {
   }
 }
 
-export const findStep = (app: NonNullable<App>): ComputerStep => ({
-  kind: "look",
-  title: `Found ${app.name}`,
-  app,
-  window: null,
-  frames: []
-})
+export const findStep = (app: ComputerApp | undefined): ComputerStep | undefined =>
+  app?.kind === COMPUTER_APP.identified
+    ? { kind: "look", title: `Found ${app.name}`, app, window: { kind: "untitled" }, frames: [] }
+    : undefined
 
 export const lookStep = (
-  app: App,
+  app: ComputerApp,
   name: string,
   window: string | undefined,
   frame: Omit<ComputerFrame, "caption"> | undefined
@@ -137,21 +144,21 @@ export const lookStep = (
     kind: "look",
     title,
     app,
-    window: window ?? null,
+    window: windowOf(window),
     frames: frame === undefined ? [] : [{ ...frame, caption: title }]
   }
 }
 
 export const actStep = (
   action: NativeAction,
-  app: App,
+  app: ComputerApp,
   name: string,
   window: string | undefined
 ): ComputerStep => ({
   kind: "act",
   title: pastTitle(action, name),
   app,
-  window: window ?? null,
+  window: windowOf(window),
   frames: []
 })
 
@@ -163,7 +170,7 @@ export function scriptStep(steps: readonly ComputerStep[]): ComputerStep | undef
   const last = (acts.length > 0 ? acts : steps).at(-1)
   if (last === undefined) return undefined
   if (acts.length === 0) return { ...last, frames }
-  return { ...last, title: `Used ${last.app?.name ?? "an app"}`, frames }
+  return { ...last, title: `Used ${appNameOf(last.app) ?? "an app"}`, frames }
 }
 
 function replayFrames(steps: readonly ComputerStep[]): ComputerFrame[] {

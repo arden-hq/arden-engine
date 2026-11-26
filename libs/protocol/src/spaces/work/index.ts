@@ -7,7 +7,7 @@ import type {
   CreateChatTaskInput,
   SpaceWorkPageOptions,
   SpaceTask,
-  UpdateSpaceTaskPatch,
+  TaskChange,
   MoveTaskToChatInput,
   AcknowledgeTaskResultInput
 } from "./contracts.js"
@@ -18,9 +18,9 @@ import {
   SpaceTaskCommentSchema,
   SpaceTaskSchema,
   StopSpaceTaskResponseSchema,
-  encodeCreateSpaceTaskAttachmentRequestEffect,
-  encodeUpdateSpaceTaskRequestEffect
+  encodeCreateSpaceTaskAttachmentRequestEffect
 } from "./schema.js"
+import { encodeUpdateSpaceTaskRequestEffect } from "./change-schema.js"
 import {
   encodeMoveTaskToChatEffect,
   encodeAcknowledgeTaskResultEffect,
@@ -83,9 +83,9 @@ export const workRequests = {
     encodeCreateSpaceTaskAttachmentRequestEffect,
     "Invalid work-attachment request"
   ),
-  update(currentTask: SpaceTask, patch: UpdateSpaceTaskPatch): string {
+  update(currentTask: SpaceTask, changes: ReadonlyArray<TaskChange>): string {
     return runBoundary(
-      encodeUpdateSpaceTaskRequestEffect(currentTask, patch),
+      encodeUpdateSpaceTaskRequestEffect({ expected_updated_at: currentTask.updated_at, changes }),
       "Invalid update-work request",
       "encode"
     )
@@ -115,7 +115,7 @@ export const workRoutes = {
   chatTask(sessionId: string): string {
     return runBoundary(encodeChatTaskPathEffect(sessionId), "Invalid chat Task route", "encode")
   },
-  page(options: SpaceWorkPageOptions = {}): string {
+  page(options: SpaceWorkPageOptions): string {
     return runBoundary(encodeWorkPagePathEffect(options), "Invalid Work page route", "encode")
   },
   attachment(attachmentId: number): string {

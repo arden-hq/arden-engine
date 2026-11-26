@@ -28,6 +28,40 @@ export const CHANGE_ENTRY_PLACE_MAX = 128
 /** Longest link an entry carries; producers drop longer links. */
 export const CHANGE_ENTRY_HREF_MAX = 2048
 
+export const CHANGE_ENTRY_TITLE = { untitled: "untitled", titled: "titled" } as const
+
+const ChangeEntryTitleSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CHANGE_ENTRY_TITLE.untitled) }),
+  Schema.Struct({
+    kind: Schema.Literal(CHANGE_ENTRY_TITLE.titled),
+    text: Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_TITLE_MAX))
+  })
+])
+
+export const CHANGE_ENTRY_LINK = { unlinked: "unlinked", linked: "linked" } as const
+
+const ChangeEntryLinkSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CHANGE_ENTRY_LINK.unlinked) }),
+  Schema.Struct({
+    kind: Schema.Literal(CHANGE_ENTRY_LINK.linked),
+    href: Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_HREF_MAX))
+  })
+])
+
+export const CHANGE_ENTRY_PLACE = { unplaced: "unplaced", placed: "placed" } as const
+
+const ChangeEntryPlaceSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(CHANGE_ENTRY_PLACE.unplaced) }),
+  Schema.Struct({
+    kind: Schema.Literal(CHANGE_ENTRY_PLACE.placed),
+    place: Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_PLACE_MAX))
+  })
+])
+
+export type ChangeEntryTitle = typeof ChangeEntryTitleSchema.Type
+export type ChangeEntryLink = typeof ChangeEntryLinkSchema.Type
+export type ChangeEntryPlace = typeof ChangeEntryPlaceSchema.Type
+
 /**
  * What a changed thing is. Besides objects, three domains name an action
  * Arden performed whose side effects it cannot list: "command" (a command it
@@ -56,17 +90,9 @@ export const ChangeEntrySchema = Schema.Struct({
     "app"
   ]),
   resource_ref: Schema.NonEmptyString,
-  /** The object's name as its owner or service gave it. */
-  title: Schema.optionalKey(
-    Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_TITLE_MAX))
-  ),
-  /** Where the object opens: an http(s) link the service returned, or an
-   *  `arden:` address for an Arden object. */
-  href: Schema.optionalKey(Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_HREF_MAX))),
-  /** Where an action happened (a site, a folder, an app), for action domains. */
-  place: Schema.optionalKey(
-    Schema.NonEmptyString.check(Schema.isMaxLength(CHANGE_ENTRY_PLACE_MAX))
-  ),
+  title: ChangeEntryTitleSchema,
+  link: ChangeEntryLinkSchema,
+  place: ChangeEntryPlaceSchema,
   outcome: ReceiptOutcomeSchema,
   before: VersionSideSchema,
   after: VersionSideSchema,

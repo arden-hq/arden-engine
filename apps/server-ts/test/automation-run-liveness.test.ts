@@ -10,6 +10,7 @@ import { AutomationQueue } from "../src/persistence/automations/queue.js"
 import { AutomationTriggers } from "../src/persistence/automations/triggers.js"
 import { ChatWriteStore } from "../src/persistence/chat/store.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 // A job run stays open only while a queue row names it. These cover each way a
 // run used to outlive its job, and the claims that must keep working as before.
@@ -21,14 +22,13 @@ const userAutomation = (key: string) =>
     const catalog = yield* AutomationCatalog
     const queue = yield* AutomationQueue
     const automation = yield* catalog.create(
-      {
+      newAutomation({
         history: "chat",
         name: "Liveness",
         prompt: "Review",
-        triggers: [{ type: "time", every: "1h" }],
-        idempotency_key: key,
-        idempotency_scope: "global"
-      },
+        triggers: [everyTrigger("1h")],
+        idempotency_key: key
+      }),
       "owner"
     )
     yield* queue.requestRun(AutomationId.make(automation.task_id))

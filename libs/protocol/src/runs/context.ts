@@ -3,56 +3,66 @@ import { NonNegativeIntSchema } from "../common/schema.js"
 
 const Identity = Schema.NonEmptyString
 
-/** Automation runs behind the wake that started this run; absent: 0, as for the owner's turn. */
-const wokenAt = { chain_depth: Schema.optionalKey(NonNegativeIntSchema) }
+const wokenAt = { chain_depth: NonNegativeIntSchema }
 
-/** Captured once at admission. Later delivery destinations do
- * not rewrite the request that caused this attempt. */
+export const RUN_ORIGIN = {
+  chat: "chat",
+  automation: "automation",
+  task: "task",
+  space: "space",
+  unrecorded: "unrecorded"
+} as const
+
 export const RunOriginSchema = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("chat"),
+    kind: Schema.Literal(RUN_ORIGIN.chat),
     session_id: Identity,
     turn_id: Identity,
     ...wokenAt
   }),
   Schema.Struct({
-    kind: Schema.Literal("automation"),
+    kind: Schema.Literal(RUN_ORIGIN.automation),
     automation_id: Identity,
     occurrence_id: Identity,
     ...wokenAt
   }),
   Schema.Struct({
-    kind: Schema.Literal("task"),
+    kind: Schema.Literal(RUN_ORIGIN.task),
     item_id: Identity,
     occurrence_id: Identity,
     ...wokenAt
   }),
   Schema.Struct({
-    kind: Schema.Literal("space"),
+    kind: Schema.Literal(RUN_ORIGIN.space),
     space_id: Identity,
     occurrence_id: Identity,
     ...wokenAt
   }),
-  Schema.Struct({ kind: Schema.Literal("unrecorded") })
+  Schema.Struct({ kind: Schema.Literal(RUN_ORIGIN.unrecorded) })
 ])
 
-export const RunTaskBindingSchema = Schema.Struct({
-  item_id: Identity,
-  generation: NonNegativeIntSchema
-})
+export const RUN_TASK_BINDING = { none: "none", task: "task" } as const
+
+export const RunTaskBindingSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(RUN_TASK_BINDING.none) }),
+  Schema.Struct({
+    kind: Schema.Literal(RUN_TASK_BINDING.task),
+    item_id: Identity,
+    generation: NonNegativeIntSchema
+  })
+])
+
+export const RUN_BELONGS_TO = { own: "own", carried: "carried" } as const
 
 export const RunContextSchema = Schema.Struct({
   origin: RunOriginSchema,
-  task: Schema.NullOr(RunTaskBindingSchema),
-  /** The work a run in a chat nobody watches belongs to: the origin of the
-   *  run that caused it (an answered question, a helper agent, a result),
-   *  carried down a chain. Its asks and results show there; `origin` still
-   *  decides who may act. Absent: the run shows where its origin says. */
-  belongs_to: Schema.optionalKey(RunOriginSchema)
+  task: RunTaskBindingSchema,
+  belongs_to: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(RUN_BELONGS_TO.own) }),
+    Schema.Struct({ kind: Schema.Literal(RUN_BELONGS_TO.carried), origin: RunOriginSchema })
+  ])
 })
 
-/** The work a run belongs to when it is a Task or an Automation: what names
- *  who asks on a card shown in another chat. */
 export const RunApprovalWorkSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("task"), item_id: Identity }),
   Schema.Struct({ kind: Schema.Literal("automation"), automation_id: Identity })

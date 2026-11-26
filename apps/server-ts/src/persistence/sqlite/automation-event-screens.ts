@@ -22,6 +22,7 @@ import { endAutomationRun } from "./automation-run-outcome.js"
 import { textOptions, eventKeyOf } from "./automation-event-batch.js"
 import { encodeQueueContext } from "./automation-queue-context.js"
 import { makeFencedOccurrences } from "./automation-fenced-occurrence.js"
+import { eventCauseOf } from "../automations/event-cause.js"
 
 export interface EventScreens {
   readonly recordEventScreen: (input: {
@@ -133,7 +134,6 @@ const insertSkip = Effect.fn("AutomationEventBatch.insertSkip")(function* (
   skip: StoredAutomationRunSkip,
   now: number
 ) {
-  const { run_only_if: _sentences, ...cause } = event
   const at = iso(now)
   const inserted = yield* sql<{ readonly id: number }>`INSERT INTO automation_runs (
       task_id, automation_ref, started_at, status, origin, item_id, task_generation, purpose,
@@ -142,7 +142,7 @@ const insertSkip = Effect.fn("AutomationEventBatch.insertSkip")(function* (
     SELECT task_id, automation_ref, ${at}, 'running',
       json_set(origin, '$.occurrence_id', json_extract(origin, '$.occurrence_id') || '#' || ${key}),
       item_id, task_generation, purpose, handler, context_mode,
-      ${JSON.stringify({ source: "event", ...cause })}, 0, instruction_revision_id
+      ${JSON.stringify(eventCauseOf(event))}, 0, instruction_revision_id
     FROM automation_runs WHERE id = ${runId}
     RETURNING id`
   const entry = inserted[0]

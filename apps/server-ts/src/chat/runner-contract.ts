@@ -1,9 +1,6 @@
-import type {
-  ChatApprovalMode,
-  ChatImageInput,
-  ChatReceipt,
-  InteractionSender
-} from "@arden-hq/protocol/chat"
+import type { ChatSendReceipt } from "../persistence/chat/send-contracts.js"
+import type { ChatApprovalMode, ChatImageInput } from "@arden-hq/protocol/chat"
+import type { StoredInteractionSender } from "../persistence/transcript/interaction.js"
 import type { ModelPhaseTiming } from "@arden-hq/protocol/daemon"
 import type {
   AgentStreamEvent,
@@ -14,7 +11,7 @@ import type {
   ToolResult
 } from "@arden-hq/loop"
 import type { HistoryChange } from "@arden-hq/loop"
-import type { RunUsage } from "@arden-hq/protocol/runs"
+import type { StoredRunUsage as RunUsage } from "../persistence/runs/stored-result.js"
 import type { RunPolicy } from "../execution/policy.js"
 import type { RunAuthority } from "../execution/authority.js"
 import type { EffectTarget, EffectTargetOrigin, ToolEffect } from "../execution/tool-effect.js"
@@ -78,7 +75,7 @@ export interface ChatRunnerSendMessageRequest {
   readonly message: string
   /** A handed capture's screenshot, moved into the chat it belongs to (`forward_message`). */
   readonly images?: ReadonlyArray<ChatImageInput>
-  readonly sender?: InteractionSender
+  readonly sender?: StoredInteractionSender
   /** A plain user message no client drew as it was sent; its chat's viewers reload. */
   readonly announce?: true
   /** The chat this message is handed over from: it reads there as Arden's handoff. */
@@ -146,7 +143,7 @@ export interface ChatRunnerTools {
   /** Cancel one active child-agent Run through the durable Chat owner. */
   readonly cancelAgent: (input: { readonly runId: string }) => Promise<void>
   /** Queue a message through the same durable Chat owner as the Desktop. */
-  readonly sendMessage: (request: ChatRunnerSendMessageRequest) => Promise<ChatReceipt>
+  readonly sendMessage: (request: ChatRunnerSendMessageRequest) => Promise<ChatSendReceipt>
   /**
    * Rebuild the durable nested-tool host of another run, as the HTTP retry and
    * boot resume do: a detached script retried from a later turn runs on the
@@ -249,7 +246,7 @@ export interface ServerToolRun {
   readonly executeDetachedTool: ChatRunnerTools["executeDetached"]
   readonly spawnAgent: (request: ChatRunnerSpawnAgentRequest) => Promise<ToolResult>
   readonly cancelAgent: ChatRunnerTools["cancelAgent"]
-  readonly sendMessage: (request: ChatRunnerSendMessageRequest) => Promise<ChatReceipt>
+  readonly sendMessage: (request: ChatRunnerSendMessageRequest) => Promise<ChatSendReceipt>
   readonly detachedRun: ChatRunnerTools["detachedRun"]
   readonly emitToolProgress: ChatRunnerTools["emitToolProgress"]
   readonly emitToolOutput: ChatRunnerTools["emitToolOutput"]

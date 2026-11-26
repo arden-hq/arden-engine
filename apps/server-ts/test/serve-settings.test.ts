@@ -1,3 +1,4 @@
+import { newChat } from "./fixtures/new-chat.js"
 import { contextDecoders, contextRoutes } from "@arden-hq/protocol/context"
 import { daemonDecoders, LOCAL_CAPABILITY_HEADER } from "@arden-hq/protocol/daemon"
 import { permissionDecoders } from "@arden-hq/protocol/permissions"
@@ -169,7 +170,7 @@ it("a configured server starts with its settings in place and publishes its acce
       dataDirectory,
       accessFile: join(dataDirectory, "cli-access.json"),
       usageFile: join(dataDirectory, "usage.json"),
-      offeredTools: ["exec_command"],
+      offeredTools: { kind: "listed", names: ["exec_command"] },
       toolsWithoutRule: configured.applied.toolsWithoutRule,
       mcpServers: [],
       provider: "responses",
@@ -213,7 +214,7 @@ it("a configured server starts with its settings in place and publishes its acce
     const created = await configured.request("/sessions", {
       method: "POST",
       headers,
-      body: JSON.stringify({ name: "Configured" })
+      body: JSON.stringify(newChat({ name: "Configured" }))
     })
     const session = Schema.decodeUnknownSync(Schema.Struct({ session_id: Schema.String }))(
       await created.json()

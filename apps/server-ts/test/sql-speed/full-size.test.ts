@@ -100,6 +100,8 @@ const SEARCH_CATCH_UP_MS = 180_000
 const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<string>>> => {
   const chats = [ids.chat, ids.fork, ids.agent, ids.channel, ids.thread]
   const q = (params: Record<string, string>) => `?${new URLSearchParams(params).toString()}`
+  const list = (params: Record<string, string>) =>
+    `/sessions${q({ scope: "all", live: "false", limit: "100", sort: "activity", filter: "all", page: "first", ...params })}`
   return {
     "/computer/setup": ["/computer/setup"],
     "/computer/preview": ["/computer/preview"],
@@ -134,9 +136,11 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/local-models": ["/local-models"],
     "/model-endpoints": ["/model-endpoints"],
     "/decisions/status": ["/decisions/status"],
-    "/session/history": chats.map((id) => `/session/history${q({ session_id: id })}`),
+    "/session/history": chats.map(
+      (id) => `/session/history${q({ session_id: id, limit: "100", window: "latest" })}`
+    ),
     "/session/turn-work": [
-      `/session/turn-work${q({ session_id: ids.chat, turn_id: ids.chatTurn })}`
+      `/session/turn-work${q({ session_id: ids.chat, turn_id: ids.chatTurn, limit: "100", window: "latest", view: "full" })}`
     ],
     "/session/turn-details": [
       `/session/turn-details${q({ session_id: ids.chat, turn_id: ids.chatTurn })}`
@@ -151,23 +155,32 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/sessions/:sessionId/queue": [`/sessions/${ids.chat}/queue`],
     "/chat/runs/status": ["/chat/runs/status"],
     "/chat/runs": [
-      "/chat/runs",
-      `/chat/runs${q({ session_id: ids.chat })}`,
-      `/chat/runs${q({ active: "true" })}`
+      `/chat/runs${q({ filter: "all", active: "false", limit: "500", page: "first" })}`,
+      `/chat/runs${q({ filter: "session", session_id: ids.chat, active: "false", limit: "500", page: "first" })}`,
+      `/chat/runs${q({ filter: "all", active: "true", limit: "500", page: "first" })}`
     ],
     "/chat/runs/:runId": [ids.chatRun, ids.forkRun, ids.agentRun].map((id) => `/chat/runs/${id}`),
     "/chat/runs/:runId/progress": [ids.chatRun, ids.forkRun].map(
       (id) => `/chat/runs/${id}/progress`
     ),
-    "/chat/runs/:runId/events": [`/chat/runs/${ids.chatRun}/events${q({ after_sequence: "0" })}`],
+    "/chat/runs/:runId/events": [
+      `/chat/runs/${ids.chatRun}/events${q({ after_sequence: "0", limit: "100" })}`
+    ],
     "/usage/limits": ["/usage/limits"],
-    "/usage": ["/usage", `/usage${q({ days: "30" })}`, `/usage${q({ days: "150" })}`],
-    "/usage/sessions/:sessionId": [`/usage/sessions/${ids.chat}`, `/usage/sessions/${ids.thread}`],
+    "/usage": [
+      `/usage${q({ days: "7" })}`,
+      `/usage${q({ days: "30" })}`,
+      `/usage${q({ days: "150" })}`
+    ],
+    "/usage/sessions/:sessionId": [
+      `/usage/sessions/${ids.chat}${q({ limit: "20" })}`,
+      `/usage/sessions/${ids.thread}${q({ limit: "20" })}`
+    ],
     "/scripts/:workflowRef": [`/scripts/${MISSING}${q({ session_id: ids.chat })}`],
     "/browser-procedures": ["/browser-procedures"],
     "/browser-procedures/:id": [`/browser-procedures/${MISSING}`],
     "/automations/:taskId/configuration-history": [
-      `/automations/${ids.busyAutomation}/configuration-history`
+      `/automations/${ids.busyAutomation}/configuration-history${q({ after_version: "0", through: "head", limit: "50" })}`
     ],
     "/automations": ["/automations"],
     "/automations/event-catalog": ["/automations/event-catalog"],
@@ -178,13 +191,17 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
       (id) => `/automations/${id}/runs`
     ),
     "/automations/events": [`/automations/events${q({ after_seq: "0" })}`],
-    "/spaces/:spaceId/history": [`/spaces/${ids.space}/history`],
+    "/spaces/:spaceId/history": [
+      `/spaces/${ids.space}/history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/spaces": ["/spaces"],
     "/spaces/overview": ["/spaces/overview"],
     "/spaces/archived": ["/spaces/archived"],
     "/spaces/:spaceId": [`/spaces/${ids.space}`],
     "/spaces/:spaceId/continuity/state": [`/spaces/${ids.space}/continuity/state`],
-    "/proposals/:proposalId/history": [`/proposals/${MISSING}/history`],
+    "/proposals/:proposalId/history": [
+      `/proposals/${MISSING}/history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/proposals": [
       `/proposals${q({ place: "space", space_id: ids.space })}`,
       `/proposals${q({ place: "chat", session_id: ids.chat })}`
@@ -192,31 +209,36 @@ const routeCalls = (ids: FullSizeIds): Readonly<Record<string, ReadonlyArray<str
     "/proposals/:proposalId/recheck": [`/proposals/${MISSING}/recheck`],
     "/spaces/:spaceId/focus-choices/:questionId": [`/spaces/${ids.space}/focus-choices/${MISSING}`],
     "/sessions/:sessionId/answer-blocks": [`/sessions/${ids.chat}/answer-blocks`],
-    "/spaces/work/:itemId/history": [`/spaces/work/${ids.taskItem}/history`],
-    "/spaces/work/:itemId/attempts": [`/spaces/work/${ids.taskItem}/attempts`],
+    "/spaces/work/:itemId/history": [
+      `/spaces/work/${ids.taskItem}/history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
+    "/spaces/work/:itemId/attempts": [
+      `/spaces/work/${ids.taskItem}/attempts${q({ limit: "25", page: "first" })}`
+    ],
     "/chat/questions": [
-      "/chat/questions",
-      `/chat/questions${q({ space_id: ids.space })}`,
-      `/chat/questions${q({ session_id: ids.chat })}`,
-      `/chat/questions${q({ state: "all" })}`
+      `/chat/questions${q({ filter: "all", state: "actionable", page: "first" })}`,
+      `/chat/questions${q({ filter: "space", space_id: ids.space, state: "actionable", page: "first" })}`,
+      `/chat/questions${q({ filter: "session", session_id: ids.chat, state: "actionable", page: "first" })}`,
+      `/chat/questions${q({ filter: "all", state: "all", page: "first" })}`
     ],
     "/spaces/work/attachments/:attachmentId": [`/spaces/work/attachments/1`],
     "/spaces/work/all": [
-      "/spaces/work/all",
-      `/spaces/work/all${q({ space_id: ids.space })}`,
-      `/spaces/work/all${q({ session_id: ids.chat })}`
+      `/spaces/work/all${q({ scope: "all", start: "first", limit: "50" })}`,
+      `/spaces/work/all${q({ scope: "space", space_id: ids.space, start: "first", limit: "50" })}`,
+      `/spaces/work/all${q({ scope: "chat", session_id: ids.chat, start: "first", limit: "50" })}`
     ],
-    "/sessions/:sessionId/configuration-history": [`/sessions/${ids.chat}/configuration-history`],
+    "/sessions/:sessionId/configuration-history": [
+      `/sessions/${ids.chat}/configuration-history${q({ after_version: "0", through: "head", limit: "50" })}`
+    ],
     "/sessions": [
-      "/sessions",
-      `/sessions${q({ scope: "all" })}`,
-      `/sessions${q({ scope: "agent" })}`,
-      `/sessions${q({ inbox: "true" })}`,
-      `/sessions${q({ live: "true" })}`,
-      `/sessions${q({ sort: "accessed" })}`,
-      `/sessions${q({ space_id: ids.space })}`,
-      `/sessions${q({ parent_session_ids: ids.chat })}`,
-      `/sessions${q({ session_ref: `ref-${ids.chat}` })}`
+      list({}),
+      list({ scope: "agent" }),
+      list({ inbox: "true" }),
+      list({ live: "true" }),
+      list({ sort: "accessed" }),
+      list({ filter: "space", space_id: ids.space }),
+      list({ filter: "children", parent_session_ids: ids.chat }),
+      list({ filter: "ref", session_ref: `ref-${ids.chat}` })
     ],
     "/sessions/:sessionId/export": [
       `/sessions/${ids.chat}/export${q({ format: "markdown" })}`,

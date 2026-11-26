@@ -1,6 +1,6 @@
+import { type RunOrigin } from "../runs/stored-context.js"
 import { storeReasons } from "../errors.js"
 import { Context, Effect, Schema } from "effect"
-import type { RunOrigin } from "@arden-hq/protocol/runs"
 import type { TurnToolCallCount } from "@arden-hq/protocol/chat"
 import type {
   StoredMessageEnvelope,

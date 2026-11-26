@@ -5,15 +5,17 @@ import {
   NonNegativeIntSchema,
   PositiveIntSchema
 } from "../common/schema.js"
-import type {
-  StorageCategory,
-  StorageCleanupAction,
-  StorageCleanupContext,
-  StorageCleanupPlan,
-  StorageCleanupRun,
-  StorageOverview,
-  StorageSettings,
-  StorageStatus
+import {
+  STORAGE_CURRENT_SESSION,
+  STORAGE_LIMIT,
+  type StorageCategory,
+  type StorageCleanupAction,
+  type StorageCleanupContext,
+  type StorageCleanupPlan,
+  type StorageCleanupRun,
+  type StorageOverview,
+  type StorageSettings,
+  type StorageStatus
 } from "./contracts.js"
 
 const strict = { onExcessProperty: "error" } as const
@@ -23,6 +25,17 @@ const MaxSpaceGiBSchema = Schema.Number.check(
   Schema.isGreaterThanOrEqualTo(0.1),
   Schema.isLessThanOrEqualTo(1_000_000)
 )
+const MaxSpaceSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(STORAGE_LIMIT.unlimited) }),
+  Schema.Struct({ kind: Schema.Literal(STORAGE_LIMIT.limited), gib: MaxSpaceGiBSchema })
+])
+const CurrentSessionSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(STORAGE_CURRENT_SESSION.none) }),
+  Schema.Struct({
+    kind: Schema.Literal(STORAGE_CURRENT_SESSION.session),
+    session_id: SessionIdSchema
+  })
+])
 export const StoragePlanIdSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
 const StorageCategoryIdSchema = Schema.Literals([
@@ -46,8 +59,14 @@ export const StorageCategoryResponseSchema = withExtras({
 
 export const StorageStatusResponseSchema = withExtras({
   total_bytes: NonNegativeIntSchema,
-  max_bytes: Schema.NullOr(PositiveIntSchema),
-  over_budget_bytes: NonNegativeIntSchema,
+  budget: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(STORAGE_LIMIT.unlimited) }),
+    Schema.Struct({
+      kind: Schema.Literal(STORAGE_LIMIT.limited),
+      max_bytes: PositiveIntSchema,
+      over_budget_bytes: NonNegativeIntSchema
+    })
+  ]),
   checked_at: IsoDateTimeStringSchema,
   categories: Schema.Array(StorageCategoryResponseSchema)
 }).check(
@@ -60,16 +79,16 @@ export const StorageStatusResponseSchema = withExtras({
     if (total !== status.total_bytes) {
       return { path: ["categories"], issue: "totals must equal total_bytes" }
     }
-    const overBudget =
-      status.max_bytes === null ? 0 : Math.max(0, status.total_bytes - status.max_bytes)
-    return overBudget === status.over_budget_bytes
+    const budget = status.budget
+    return budget.kind === STORAGE_LIMIT.unlimited ||
+      Math.max(0, status.total_bytes - budget.max_bytes) === budget.over_budget_bytes
       ? undefined
-      : { path: ["over_budget_bytes"], issue: "must match total_bytes and max_bytes" }
+      : { path: ["budget"], issue: "must match total_bytes and max_bytes" }
   })
 )
 
 export const StorageSettingsResponseSchema = withExtras({
-  max_space_gib: Schema.NullOr(MaxSpaceGiBSchema),
+  max_space: MaxSpaceSchema,
   allow_archived_session_deletion: Schema.Boolean,
   allow_inactive_session_deletion: Schema.Boolean,
   inactive_session_days: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(3_650)),
@@ -94,8 +113,14 @@ export const StorageCleanupActionResponseSchema = withExtras({
 export const StorageCleanupPlanResponseSchema = withExtras({
   plan_id: StoragePlanIdSchema,
   before_bytes: NonNegativeIntSchema,
-  budget_bytes: Schema.NullOr(PositiveIntSchema),
-  target_bytes: Schema.NullOr(PositiveIntSchema),
+  target: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(STORAGE_LIMIT.unlimited) }),
+    Schema.Struct({
+      kind: Schema.Literal(STORAGE_LIMIT.limited),
+      budget_bytes: PositiveIntSchema,
+      target_bytes: PositiveIntSchema
+    })
+  ]),
   estimated_after_bytes: NonNegativeIntSchema,
   estimated_reclaimable_bytes: NonNegativeIntSchema,
   attainable: Schema.Boolean,
@@ -116,17 +141,11 @@ export const StorageCleanupPlanResponseSchema = withExtras({
     if (after !== plan.estimated_after_bytes) {
       return { path: ["estimated_after_bytes"], issue: "must match the action total" }
     }
-    if ((plan.budget_bytes === null) !== (plan.target_bytes === null)) {
-      return { path: ["target_bytes"], issue: "must be absent exactly when budget_bytes is absent" }
+    const target = plan.target
+    if (target.kind === STORAGE_LIMIT.limited && target.target_bytes > target.budget_bytes) {
+      return { path: ["target"], issue: "must not exceed budget_bytes" }
     }
-    if (
-      plan.budget_bytes !== null &&
-      plan.target_bytes !== null &&
-      plan.target_bytes > plan.budget_bytes
-    ) {
-      return { path: ["target_bytes"], issue: "must not exceed budget_bytes" }
-    }
-    const attainable = plan.target_bytes === null || after <= plan.target_bytes
+    const attainable = target.kind === STORAGE_LIMIT.unlimited || after <= target.target_bytes
     return attainable === plan.attainable
       ? undefined
       : { path: ["attainable"], issue: "must match estimated_after_bytes and budget_bytes" }
@@ -141,7 +160,7 @@ export const StorageCleanupRunResponseSchema = withExtras({
 })
 
 export const StorageSettingsPatchRequestSchema = Schema.Struct({
-  max_space_gib: Schema.NullOr(MaxSpaceGiBSchema),
+  max_space: MaxSpaceSchema,
   allow_archived_session_deletion: Schema.Boolean,
   allow_inactive_session_deletion: Schema.Boolean,
   inactive_session_days: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(3_650)),
@@ -149,7 +168,7 @@ export const StorageSettingsPatchRequestSchema = Schema.Struct({
 })
 
 export const StorageCleanupContextRequestSchema = Schema.Struct({
-  current_session_id: Schema.NullOr(SessionIdSchema),
+  current_session: CurrentSessionSchema,
   pinned_session_ids: Schema.Array(SessionIdSchema)
 }).check(
   Schema.makeFilter((context) => {
@@ -165,14 +184,20 @@ export const StorageCleanupRequestSchema = Schema.Struct({
 })
 
 const StorageSettingsPatchInputSchema = Schema.Struct({
-  maxSpaceGiB: Schema.NullOr(MaxSpaceGiBSchema),
+  maxSpace: MaxSpaceSchema,
   allowArchivedSessionDeletion: Schema.Boolean,
   allowInactiveSessionDeletion: Schema.Boolean,
   inactiveSessionDays: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(3_650)),
   minimumCurrentSessions: PositiveIntSchema.check(Schema.isLessThanOrEqualTo(100_000))
 })
 const StorageCleanupContextInputSchema = Schema.Struct({
-  currentSessionId: Schema.NullOr(SessionIdSchema),
+  currentSession: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(STORAGE_CURRENT_SESSION.none) }),
+    Schema.Struct({
+      kind: Schema.Literal(STORAGE_CURRENT_SESSION.session),
+      sessionId: SessionIdSchema
+    })
+  ]),
   pinnedSessionIds: Schema.Array(SessionIdSchema)
 }).check(
   Schema.makeFilter((context) => {
@@ -204,14 +229,20 @@ const mapCategory = (category: StorageCategoryWire): StorageCategory => ({
 
 const mapStatus = (status: StorageStatusWire): StorageStatus => ({
   totalBytes: status.total_bytes,
-  maxBytes: status.max_bytes,
-  overBudgetBytes: status.over_budget_bytes,
+  budget:
+    status.budget.kind === STORAGE_LIMIT.limited
+      ? {
+          kind: status.budget.kind,
+          maxBytes: status.budget.max_bytes,
+          overBudgetBytes: status.budget.over_budget_bytes
+        }
+      : status.budget,
   checkedAt: status.checked_at,
   categories: status.categories.map(mapCategory)
 })
 
 export const mapSettings = (settings: StorageSettingsWire): StorageSettings => ({
-  maxSpaceGiB: settings.max_space_gib,
+  maxSpace: settings.max_space,
   allowArchivedSessionDeletion: settings.allow_archived_session_deletion,
   allowInactiveSessionDeletion: settings.allow_inactive_session_deletion,
   inactiveSessionDays: settings.inactive_session_days,
@@ -236,8 +267,14 @@ const mapAction = (action: StorageCleanupActionWire): StorageCleanupAction => ({
 const mapPlan = (plan: StorageCleanupPlanWire): StorageCleanupPlan => {
   const mapped: StorageCleanupPlan = {
     beforeBytes: plan.before_bytes,
-    budgetBytes: plan.budget_bytes,
-    targetBytes: plan.target_bytes,
+    target:
+      plan.target.kind === STORAGE_LIMIT.limited
+        ? {
+            kind: plan.target.kind,
+            budgetBytes: plan.target.budget_bytes,
+            targetBytes: plan.target.target_bytes
+          }
+        : plan.target,
     estimatedAfterBytes: plan.estimated_after_bytes,
     estimatedReclaimableBytes: plan.estimated_reclaimable_bytes,
     attainable: plan.attainable,
@@ -288,7 +325,7 @@ export const encodeStorageSettingsPatchEffect = (
   Schema.decodeUnknownEffect(StorageSettingsPatchInputSchema)(value, strict).pipe(
     Effect.map((settings) =>
       JSON.stringify({
-        max_space_gib: settings.maxSpaceGiB,
+        max_space: settings.maxSpace,
         allow_archived_session_deletion: settings.allowArchivedSessionDeletion,
         allow_inactive_session_deletion: settings.allowInactiveSessionDeletion,
         inactive_session_days: settings.inactiveSessionDays,
@@ -297,13 +334,27 @@ export const encodeStorageSettingsPatchEffect = (
     )
   )
 
+export const currentSessionToWire = (
+  current: StorageCleanupContext["currentSession"]
+): typeof CurrentSessionSchema.Type =>
+  current.kind === STORAGE_CURRENT_SESSION.session
+    ? { kind: current.kind, session_id: current.sessionId }
+    : current
+
+export const currentSessionFromWire = (
+  current: typeof CurrentSessionSchema.Type
+): StorageCleanupContext["currentSession"] =>
+  current.kind === STORAGE_CURRENT_SESSION.session
+    ? { kind: current.kind, sessionId: current.session_id }
+    : current
+
 export const encodeStorageCleanupContextEffect = (
   value: unknown
 ): Effect.Effect<string, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(StorageCleanupContextInputSchema)(value, strict).pipe(
     Effect.map((context) =>
       JSON.stringify({
-        current_session_id: context.currentSessionId,
+        current_session: currentSessionToWire(context.currentSession),
         pinned_session_ids: context.pinnedSessionIds
       })
     )
@@ -319,7 +370,7 @@ export const encodeStorageCleanupRequestEffect = (
         Effect.map((validContext) =>
           JSON.stringify({
             plan_id: validPlanId,
-            current_session_id: validContext.currentSessionId,
+            current_session: currentSessionToWire(validContext.currentSession),
             pinned_session_ids: validContext.pinnedSessionIds
           })
         )

@@ -1,12 +1,13 @@
 import { SessionStore } from "../../persistence/sessions/store.js"
-import type { Space, UpdateSpaceInput } from "@arden-hq/protocol/spaces"
+import type { UpdateSpaceInput } from "@arden-hq/protocol/spaces"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import {
   StructuredCompletion,
   StructuredCompletionError
 } from "../../models/structured-completion.js"
-import { SpaceStore, SpaceStoreError, type PersistedSpace } from "../../persistence/spaces/store.js"
+import { SpaceStore, SpaceStoreError } from "../../persistence/spaces/store.js"
+import { publicDetail, publicSpace } from "../../persistence/spaces/public.js"
 import { makeSpaceInstructions } from "../../assist/space-instructions.js"
 import { Wiki } from "../../wiki/service.js"
 import { WikiError } from "../../wiki/errors.js"
@@ -24,20 +25,6 @@ import {
 
 const lifecycleError = (error: SpaceStoreError | WikiError) =>
   error._tag === "SpaceStoreError" ? storeErrorToHttp(error) : wikiErrorToHttp(error)
-
-const publicSpace = (space: PersistedSpace): Space => ({
-  inference: space.inference,
-  space_id: space.space_id,
-  kind: space.kind,
-  name: space.name,
-  instructions: space.instructions,
-  instructions_source: space.instructions_source,
-  page_path: space.page_path,
-  mark: space.mark,
-  created_at: space.created_at,
-  updated_at: space.updated_at,
-  archived_at: space.archived_at
-})
 
 export const SpaceHandlers = HttpApiBuilder.group(
   ArdenApi,
@@ -148,7 +135,9 @@ export const SpaceHandlers = HttpApiBuilder.group(
         )
       )
       .handle("detail", ({ params }) =>
-        store.detail(params.spaceId).pipe(Effect.catch(failStore), Effect.flatMap(orNotFound))
+        store
+          .detail(params.spaceId)
+          .pipe(Effect.catch(failStore), Effect.flatMap(orNotFound), Effect.map(publicDetail))
       )
       .handle("archive", ({ params, query }) => archiveSpace(params.spaceId, query.stop))
   })

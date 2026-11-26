@@ -1,7 +1,8 @@
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import type { ChatMessage } from "@arden-hq/loop"
 import type { EffectiveSessionTodoResponse } from "@arden-hq/protocol/sessions/todos"
-import { isOpenTodo } from "../persistence/todos/items.js"
+import { SESSION_TODO } from "@arden-hq/protocol/sessions/todos"
+import { isOpenTodo, statedReason } from "../persistence/todos/items.js"
 
 export const TODO_REMINDER_SOURCE = "todo_reminder"
 
@@ -24,12 +25,15 @@ export const todoReminderDue = (messages: ReadonlyArray<ChatMessage>): boolean =
 }
 
 export const renderTodoReminder = (todo: EffectiveSessionTodoResponse): string | undefined => {
-  if (todo === null || todo.edited || !todo.items.some(isOpenTodo)) return undefined
+  if (todo.kind === SESSION_TODO.none || todo.edited || !todo.items.some(isOpenTodo))
+    return undefined
   return [
     "Your todo list in this chat still has open items. Keep it current with todo_update: mark items completed as you finish them, or cancelled with a reason. Do not mention this reminder.",
     ...todo.items.map(
       (item) =>
-        `- [${item.status}] ${item.content}${item.reason === undefined ? "" : ` (${item.reason})`}`
+        `- [${item.status}] ${item.content}${statedReason(item)
+          .map((reason) => ` (${reason})`)
+          .join("")}`
     )
   ].join("\n")
 }

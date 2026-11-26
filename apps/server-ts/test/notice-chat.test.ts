@@ -10,6 +10,7 @@ import { SessionStore } from "../src/persistence/sessions/store.js"
 import { recentNotices } from "../src/persistence/sqlite/notices.js"
 import { claimAll } from "./fixtures/job-runs.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { newAutomation, everyTrigger } from "./fixtures/automation-input.js"
 
 type Lease = Effect.Success<ReturnType<typeof claimAll>>[number]
 
@@ -19,14 +20,13 @@ it("a user's Automation that runs in its own chat: the notice opens that chat", 
       const catalog = yield* AutomationCatalog
       const queue = yield* AutomationQueue
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           history: "fresh",
           name: "Morning check",
           prompt: "Check",
-          triggers: [{ type: "time", every: "1h" }],
-          idempotency_key: "0d6f5e0a-5d0c-4d7e-9a43-6f5b8f0c2a11",
-          idempotency_scope: "global"
-        },
+          triggers: [everyTrigger("1h")],
+          idempotency_key: "0d6f5e0a-5d0c-4d7e-9a43-6f5b8f0c2a11"
+        }),
         "owner"
       )
       yield* queue.requestRun(AutomationId.make(automation.task_id))
@@ -48,15 +48,14 @@ it("a user's Automation that reads your chat runs in a fork; the notice opens th
       const yours = yield* sessions.create({ name: "My chat" })
       yield* sayHello(yours.sessionId)
       const automation = yield* catalog.create(
-        {
+        newAutomation({
           history: "chat",
           name: "Follow up",
           prompt: "Follow up",
-          triggers: [{ type: "time", every: "1h" }],
+          triggers: [everyTrigger("1h")],
           chat: { kind: "yours", session_id: yours.sessionId },
-          idempotency_key: "7c1d8f7e-2b8a-4b0e-8f45-0a9c3e2d1b77",
-          idempotency_scope: "global"
-        },
+          idempotency_key: "7c1d8f7e-2b8a-4b0e-8f45-0a9c3e2d1b77"
+        }),
         "owner"
       )
       const automationId = AutomationId.make(automation.task_id)

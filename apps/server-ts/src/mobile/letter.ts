@@ -1,5 +1,5 @@
+import { type HomeLetter } from "../persistence/home/letter-schema.js"
 import type { MobileLetter, MobileLink } from "@arden-hq/protocol/mobile"
-import type { HomeLetter } from "@arden-hq/protocol/runs"
 
 export type ArdenPlace =
   | { readonly kind: "session_ref"; readonly ref: string }
@@ -71,18 +71,22 @@ export function letterLookupKeys(letter: HomeLetter): {
 }
 
 export function mobileLetter(letter: HomeLetter, resolved: PhonePlaces): MobileLetter {
-  const linkOf = (href: string | null | undefined): MobileLink | null => {
+  const linkOf = (href: string | null | undefined): MobileLink | undefined => {
     const place = letterPlace(href)
-    if (place === undefined) return null
+    if (place === undefined) return undefined
     if (place.kind === "url") return place
-    return placeHome(place, resolved) ?? null
+    return placeHome(place, resolved)
+  }
+  const segmentOf = (segment: { readonly text: string; readonly href?: string | null }) => {
+    const link = linkOf(segment.href)
+    return link === undefined
+      ? { kind: "text" as const, text: segment.text }
+      : { kind: "link" as const, text: segment.text, link }
   }
   return {
     run_id: letter.run_id,
     generated_at: letter.generated_at,
-    paragraphs: letter.body.paragraphs.map((paragraph) =>
-      paragraph.map((segment) => ({ text: segment.text, link: linkOf(segment.href) }))
-    )
+    paragraphs: letter.body.paragraphs.map((paragraph) => paragraph.map(segmentOf))
   }
 }
 

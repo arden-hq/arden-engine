@@ -1,5 +1,5 @@
+import { type HomeLetterBody } from "../persistence/home/letter-schema.js"
 import { createTool, createToolset, ToolExecutionError, type Toolset } from "@arden-hq/loop"
-import type { HomeLetterBody } from "@arden-hq/protocol/runs"
 import { Schema } from "effect"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { TOOL_DISPLAY_TITLE } from "../execution/tool-call-presentation.js"

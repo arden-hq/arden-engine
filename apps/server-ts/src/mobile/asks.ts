@@ -1,6 +1,20 @@
-import { previewLine } from "@arden-hq/protocol/chat"
-import type { MobileAsk, MobileChange } from "@arden-hq/protocol/mobile"
-import type { RunApproval, RunQuestion } from "@arden-hq/protocol/runs"
+import { type StoredRunQuestion } from "../persistence/runs/stored-question.js"
+import {
+  APPROVAL_CARD,
+  PRESENTATION_BODY,
+  APPROVAL_DIFF,
+  APPROVAL_PREVIEW,
+  previewLine,
+  type ApprovalPresentation
+} from "@arden-hq/protocol/chat"
+import {
+  MOBILE_FILING,
+  type MobileAsk,
+  type MobileChange,
+  type MobileDetail,
+  type MobileFiling
+} from "@arden-hq/protocol/mobile"
+import { APPROVAL_TEXT, type RunApproval, type RunApprovalText } from "@arden-hq/protocol/runs"
 import { grantedOnlyInTheApp, type ToolDisplay } from "@arden-hq/protocol/tools"
 import { namedTool } from "@arden-hq/protocol/views"
 
@@ -11,6 +25,14 @@ export interface AskPlace {
   readonly onboarding: boolean
 }
 
+export const filingOf = (spaceId: string | null | undefined): MobileFiling =>
+  spaceId === undefined || spaceId === null
+    ? { kind: MOBILE_FILING.loose }
+    : { kind: MOBILE_FILING.space, space_id: spaceId }
+
+const detailOf = (text: string | null | undefined): MobileDetail =>
+  text === undefined || text === null ? { kind: "plain" } : { kind: "detailed", text }
+
 export function mobileAsks({
   questions,
   approvals,
@@ -18,7 +40,7 @@ export function mobileAsks({
   spaceNames,
   displayOf
 }: {
-  readonly questions: ReadonlyArray<RunQuestion>
+  readonly questions: ReadonlyArray<StoredRunQuestion>
   readonly approvals: ReadonlyArray<RunApproval>
   readonly places: ReadonlyMap<string, AskPlace>
   readonly spaceNames: ReadonlyMap<string, string>
@@ -33,7 +55,7 @@ export function mobileAsks({
     const spaceName = spaceId === undefined ? undefined : spaceNames.get(spaceId)
     return {
       session_id: sessionId,
-      space_id: spaceId ?? null,
+      space: filingOf(spaceId),
       place: (place?.home === true ? spaceName : place?.name?.trim()) || spaceName || "untitled"
     }
   }
@@ -41,19 +63,19 @@ export function mobileAsks({
     (question) =>
       question.status === "open" && places.get(question.destination_session_id)?.onboarding !== true
   )
-  const question = (asked: RunQuestion): MobileAsk => ({
+  const question = (asked: StoredRunQuestion): MobileAsk => ({
     kind: "question",
     question_id: asked.question_id,
     run_id: asked.run_id,
     ...where(asked.destination_session_id),
     asked_at: asked.created_at,
     prompt: asked.content.prompt,
-    detail: asked.content.detail,
+    detail: detailOf(asked.content.detail),
     multiple: asked.content.multiple === true,
     options: asked.content.choices.map((choice) => ({
       id: choice.id,
       label: choice.label,
-      detail: choice.detail ?? null
+      detail: detailOf(choice.detail)
     }))
   })
   return [
@@ -74,21 +96,32 @@ export function mobileAsks({
   ]
 }
 
+const textOf = (text: RunApprovalText): string | undefined =>
+  text.kind === APPROVAL_TEXT.text ? text.text : undefined
+
+const previewOf = (approval: RunApproval): string | undefined =>
+  approval.preview.kind === APPROVAL_PREVIEW.preview ? approval.preview.text : undefined
+
+const presentationOf = (approval: RunApproval): ApprovalPresentation | undefined =>
+  approval.card.kind === APPROVAL_CARD.presented ? approval.card.presentation : undefined
+
 function approvalTitle(approval: RunApproval): string {
   return (
-    oneLine(approval.presentation?.title) ??
-    oneLine(approval.description) ??
-    oneLine(approval.preview) ??
-    namedTool({ name: approval.tool_name, displayName: undefined })
+    oneLine(presentationOf(approval)?.title) ??
+    oneLine(textOf(approval.description)) ??
+    oneLine(previewOf(approval)) ??
+    namedTool({ name: approval.tool_name, displayName: null })
   )
 }
 
 function approvalChange(approval: RunApproval): MobileChange {
-  const files = approval.diff === null ? [] : parseUnifiedDiff(approval.diff)
+  const files =
+    approval.diff.kind === APPROVAL_DIFF.diff ? parseUnifiedDiff(approval.diff.patch) : []
   if (files.length > 0) return { kind: "diff", files }
-  const body = approval.presentation?.body
-  if (body?.label === "Command") return { kind: "command", command: body.text }
-  const fields = (approval.presentation?.fields ?? [])
+  const body = presentationOf(approval)?.body
+  if (body?.kind === PRESENTATION_BODY.body && body.label === "Command")
+    return { kind: "command", command: body.text }
+  const fields = (presentationOf(approval)?.fields ?? [])
     .filter((field) => field.value.trim().length > 0)
     .slice(0, 2)
     .map((field) => `${field.label}: ${field.value}`)
@@ -96,8 +129,8 @@ function approvalChange(approval: RunApproval): MobileChange {
   return {
     kind: "summary",
     text:
-      oneLine(approval.preview) ??
-      oneLine(approval.description) ??
+      oneLine(previewOf(approval)) ??
+      oneLine(textOf(approval.description)) ??
       oneLine(fields) ??
       approvalTitle(approval)
   }

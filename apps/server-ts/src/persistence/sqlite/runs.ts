@@ -6,7 +6,6 @@ import { readChatWork } from "./chat-work.js"
 import { makeRunProgressQuery, makeWaitingToolCallsQuery } from "./run-progress.js"
 import { runGoogleAccounts } from "./run-google-accounts.js"
 import { readRunLiveness } from "./run-liveness.js"
-import { ChatProjectionEventSchema } from "@arden-hq/protocol/effect/chat"
 import { DateTime, Effect, Schema } from "effect"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
 import { ChatRunRecordSchema } from "../runs/model.js"
@@ -23,6 +22,7 @@ import {
   RunQueryError
 } from "../runs/queries.js"
 import { decodeJson } from "./json.js"
+import { decodeStoredChatEvent } from "../events/stored-chat-event.js"
 import type { PersistenceDeps } from "./deps.js"
 import { activeRunStatusList } from "./status-sets.js"
 import { runAncestors } from "./tree-walk.js"
@@ -334,7 +334,8 @@ export const makeRunQueries = ({
       const decoded = yield* Effect.forEach(
         visible,
         Effect.fn("SqliteRunQueries.decoded.row")(function* (row) {
-          const event = yield* decodeJson(ChatProjectionEventSchema, row.data_json).pipe(
+          const event = yield* decodeJson(Schema.Json, row.data_json).pipe(
+            Effect.flatMap((data) => decodeStoredChatEvent(data, run.sessionId)),
             Effect.mapError((cause) => corruption(run.runId, "Run event payload is corrupt", cause))
           )
           if (event.type !== row.event_type) {

@@ -1,3 +1,4 @@
+import { RETENTION } from "@arden-hq/protocol/storage"
 import { ROLE } from "@arden-hq/std/message-vocabulary"
 import { DateTime, Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -91,9 +92,9 @@ export const compactExpiredAgentSessions = Effect.fn(
     const retention = yield* policy.retention()
     const now = yield* DateTime.now
     const agentCutoff =
-      retention.agentTraceDays === null
-        ? null
-        : DateTime.formatIso(DateTime.subtract(now, { days: retention.agentTraceDays }))
+      retention.agentTrace.kind === RETENTION.days
+        ? DateTime.formatIso(DateTime.subtract(now, { days: retention.agentTrace.days }))
+        : null
     const forkCutoff = DateTime.formatIso(DateTime.subtract(now, { days: UNUSED_FORK_TRACE_DAYS }))
     return yield* sql<ExpiredAgentRow>`
       -- trace_trim_due lists the agents and forked chats whose latest Run has

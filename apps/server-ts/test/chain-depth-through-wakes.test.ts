@@ -6,6 +6,7 @@ import { automationWikiChangeSinkLayer } from "../src/automations/wiki-change-si
 import { AutomationCatalog } from "../src/persistence/automations/catalog.js"
 import { WikiChangeSink } from "../src/wiki/publication.js"
 import { withTempDatabase } from "./fixtures/temp-database.js"
+import { newAutomation, eventTrigger } from "./fixtures/automation-input.js"
 
 it("Tidy wakes at any chain depth; an owner Automation on wiki.changed stops at the limit", async () => {
   const queued = await withTempDatabase(
@@ -14,14 +15,13 @@ it("Tidy wakes at any chain depth; an owner Automation on wiki.changed stops at 
       const catalog = yield* AutomationCatalog
       yield* catalog.seedSystemAutomations([wikiMaintenanceHandler.spec])
       const listener = yield* catalog.create(
-        {
+        newAutomation({
           name: "Made-up listener",
           prompt: "Read the Memory change",
           history: "fresh",
-          triggers: [{ type: "event", event_type: "wiki.changed" }],
-          idempotency_key: "7d9e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a",
-          idempotency_scope: "global"
-        },
+          triggers: [eventTrigger("wiki.changed")],
+          idempotency_key: "7d9e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a"
+        }),
         "owner"
       )
       const sink = yield* WikiChangeSink

@@ -14,16 +14,12 @@ export const catalogEntry = (name: string, display: ToolDisplay): ToolCatalogEnt
   displayName: name,
   description: "",
   kind: "tool",
-  source: null,
+  source: "arden",
   effectivePolicy: {
     action: "read",
     scope: "external",
     requiresApproval: true,
-    permissions: [],
-    concurrencyGroup: null,
-    destructive: null,
-    openWorld: null,
-    idempotent: null
+    permissions: []
   },
   defaultApproval: "ask",
   display
@@ -44,7 +40,17 @@ export const approvalNeeded = (toolId: string, runId = "run-1"): HeadlessRunEven
     tool_id: toolId,
     name: "write_file",
     run_id: runId,
-    session_id: "session-1"
+    session_id: "session-1",
+    asked: { kind: "unrecorded" },
+    preview: { kind: "no_preview" },
+    diff: { kind: "no_diff" },
+    action: "write",
+    rule_places: [],
+    can_attach_folder_to_space: false,
+    grant_folder: { kind: "none" },
+    card: { kind: "plain" },
+    decision_route: { source_kind: "run", source_session_id: "session-1", basis: "source_v1" },
+    asker: { kind: "chat" }
   }
 })
 
@@ -75,75 +81,80 @@ type ListedSession = Awaited<ReturnType<CliClient["listSessions"]>>["sessions"][
 
 export const listedSession = (messageCount: number): ListedSession => ({
   session_id: "session-1",
-  name: null,
+  public_ref: "ref-1",
+  name: { kind: "unnamed" },
   started_at: "2026-08-30T00:00:00.000Z",
   last_activity: "2026-08-30T00:00:00.000Z",
   message_count: messageCount,
   presentation: { kind: "conversation", role: "topic" },
-  public_ref: null,
-  last_accessed_at: null,
   has_unread: false,
-  space_id: null,
-  chat_model: null,
+  space: { kind: "none" },
+  chat_model: { kind: "inherited" },
   session_type: "chat",
-  origin_automation_id: null,
-  parent_session_id: null,
-  parent_tool_call_id: null,
-  parent_step: { kind: "none" },
-  parent_message_id: null,
-  parent_run_id: null,
-  active_run_id: null,
-  active_turn_id: null,
-  run_status: null,
+  origin_automation: { kind: "none" },
+  parent: { kind: "none" },
+  run: { kind: "none" },
   checkpoint_seq: 0,
   latest_event_seq: 0,
-  is_active: false,
   pending_approvals_count: 0,
   pending_connections_count: 0,
-  run_error_code: null,
-  run_stop_reason: null
+  triage: { kind: "none" },
+  fork: { kind: "none" },
+  thread_source: { kind: "none" },
+  origin: "ordinary",
+  current_activity: { kind: "idle" },
+  summary: { kind: "none" },
+  agent_workspace: { kind: "none" }
 })
 
 export const completedRun = (text = "Final answer"): RunDetail => ({
   version: 1,
   run_id: "run-1",
   turn_id: "turn-1",
-  late_result_at: null,
   session_id: "session-1",
   status: "completed",
   started_at: "2026-08-30T00:00:00.000Z",
   updated_at: "2026-08-30T00:00:01.000Z",
   ended_at: "2026-08-30T00:00:01.000Z",
-  stop_reason: "stop",
-  last_event_sequence: 2,
-  model_id: "fixture-model",
-  reasoning_effort: null,
-  client_id: "client-1",
+  stop_reason: { kind: "stated", reason: "stop" },
+  events: { kind: "through", sequence: 2 },
+  model: { kind: "model", model_id: "fixture-model" },
+  reasoning: { kind: "default" },
+  client: { kind: "client", client_id: "client-1" },
+  local_instructions: [],
+  memory_context: [],
   result: {
-    text,
-    data: { verdict: "ok" },
-    usage: { prompt: 4, completion: 2, total: 6, cache_read: 0, cache_write: 0 },
-    cost: 0,
-    duration_ms: 1_000,
-    tool_time_ms: 0,
-    steps: 1,
-    last_input_tokens: 4
+    kind: "on_time",
+    result: {
+      text,
+      data: { verdict: "ok" },
+      usage: {
+        prompt: 4,
+        completion: 2,
+        total: 6,
+        cache_read: 0,
+        cache_write: 0,
+        cost: { kind: "reported", usd: 0 }
+      },
+      duration_ms: 1_000,
+      tool_time_ms: 0,
+      steps: 1,
+      context: { kind: "measured", input_tokens: 4 }
+    }
   },
-  error: null
+  failure: { kind: "none" }
 })
 
 export const defaultClient = (): CliClient => ({
   createSession: async () => ({
     session_id: "session-1",
-    name: "Arden CLI",
+    name: { kind: "named", name: "Arden CLI" },
     started_at: "2026-08-30T00:00:00.000Z",
     last_activity: "2026-08-30T00:00:00.000Z",
     message_count: 0,
-    space_id: null,
-    chat_model: null,
-    origin: null,
-    parent_session_id: null,
-    parent_message_id: null
+    space: { kind: "none" },
+    chat_model: { kind: "inherited" },
+    origin: "ordinary"
   }),
   submit: async () => ({
     runId: "run-1",
@@ -158,7 +169,7 @@ export const defaultClient = (): CliClient => ({
   deleteSession: async () => undefined,
   answerApproval: async () => undefined,
   answerConnection: async () => undefined,
-  toolCatalog: async () => ({ tools: [catalogEntry("write_file", {})], unlisted: {} }),
+  toolCatalog: async () => ({ tools: [catalogEntry("write_file", [])], unlisted: {} }),
   answerQuestion: async () => {
     throw new Error("answerQuestion is not stubbed")
   },

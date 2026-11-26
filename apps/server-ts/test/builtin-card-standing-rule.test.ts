@@ -127,7 +127,7 @@ describe("Always allow on a built-in tool's card", () => {
           const tools = yield* ToolExecutionStore
           const history = yield* ToolHistoryQueries
           const rules = yield* PermissionRules
-          const space = yield* spaces.create({ name: "Home" })
+          const space = yield* spaces.create({ name: "Home", instructions: { kind: "unwritten" } })
           const { sessionId } = yield* sessions.create({ name: "Request", spaceId: space.space_id })
           const { runId } = yield* chat.start({
             sessionId,
@@ -194,7 +194,7 @@ describe("Always allow on a built-in tool's card", () => {
               const pending = (yield* history.pendingApprovals(sessionId)).find(
                 (approval) => approval.tool_id === toolCallId
               )
-              return { places: present(pending, "pending approval").rule_places ?? null }
+              return { places: present(pending, "pending approval").rule_places }
             })
           /** The owner's answer; an approved call then runs to its end, as the server runs it. */
           const answer = (
@@ -251,7 +251,7 @@ describe("Always allow on a built-in tool's card", () => {
           expect(
             yield* call("mac_reminders_delete", { reminder_ref: "REM-1" }, "delete-1")
           ).toEqual({
-            places: null
+            places: []
           })
           yield* answer("mac_reminders_delete", { reminder_ref: "REM-1" }, "delete-1", {
             approved: false

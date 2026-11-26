@@ -91,7 +91,7 @@ const makeBrowserPermissionTool = (browser: BrowserClient["Service"]): ServerToo
     ].join(" "),
     parameters: Schema.toStandardSchemaV1(PermissionParametersSchema),
     metadata: {
-      display: { card: "site_grant" },
+      display: [{ fact: "card", value: "site_grant" }],
       effect: "external",
       display_name: "Site permission",
       kind: "browser",

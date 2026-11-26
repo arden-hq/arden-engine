@@ -452,24 +452,24 @@ const isSaved = (stored: StoredChatEndpoint, draft: ChatEndpointDraft): boolean 
     JSON.stringify(stored.models.map((model) => model.id)) === JSON.stringify(draft.models)) &&
   (draft.auth.kind === "keep" || (draft.auth.kind === "none" && stored.auth.kind === "none"))
 
-/** What a Check says about a saved server's health; undefined says it works. */
-const healthOf = (result: ChatEndpointCheck["result"]): EndpointFailureReason | undefined => {
-  switch (result) {
-    case "works":
-      return undefined
-    case "key_refused":
-    case "unreachable":
-    case "wrong_format":
-      return result
-    case "address_refused":
-    case "no_tool_calls":
-    case "window_too_small":
-    case "window_unknown":
-    case "model_missing":
-    case "model_taken":
-      return "wrong_format"
-  }
+const HEALTH_OF_RESULT: {
+  readonly [Result in ChatEndpointCheck["result"]]: EndpointFailureReason | undefined
+} = {
+  works: undefined,
+  key_refused: "key_refused",
+  unreachable: "unreachable",
+  wrong_format: "wrong_format",
+  address_refused: "wrong_format",
+  no_tool_calls: "wrong_format",
+  window_too_small: "wrong_format",
+  window_unknown: "wrong_format",
+  model_missing: "wrong_format",
+  no_model: "wrong_format",
+  model_taken: "wrong_format"
 }
+
+const healthOf = (result: ChatEndpointCheck["result"]): EndpointFailureReason | undefined =>
+  HEALTH_OF_RESULT[result]
 
 /** A saved server as discovery asks it again: llama.cpp lists, the others name their models. */
 const targetOf = (

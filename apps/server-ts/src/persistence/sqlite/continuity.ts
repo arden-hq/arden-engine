@@ -1,5 +1,9 @@
 import { parseJsonText } from "@arden-hq/protocol/common"
 import type { CommunicationEnvelope } from "@arden-hq/protocol/chat"
+import {
+  SEEN_ACKNOWLEDGEMENT,
+  type SpaceContinuitySeenState
+} from "@arden-hq/protocol/spaces/continuity"
 import { Clock, DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { journalRecordsSql } from "@arden-hq/journal/effect"
@@ -32,13 +36,16 @@ const decodePayload = (value: string): CommunicationDeliveryPayload => {
   return parsed as CommunicationDeliveryPayload
 }
 
-const seenState = (row: SeenRow) => ({
+const seenState = (row: SeenRow): SpaceContinuitySeenState => ({
   state_version: row.state_version,
   seen_through: {
     arrivals_through: row.arrivals_through,
     question_changes_through: row.question_changes_through
   },
-  acknowledged_at: row.acknowledged_at
+  acknowledgement:
+    row.acknowledged_at === null
+      ? { kind: SEEN_ACKNOWLEDGEMENT.never }
+      : { kind: SEEN_ACKNOWLEDGEMENT.acknowledged, at: row.acknowledged_at }
 })
 
 const ensureSeenRow = Effect.fn(function* (sql: SqlClient.SqlClient, spaceId: string) {
@@ -224,8 +231,7 @@ export const makeCommunicationStore = ({
             }
             const envelope: CommunicationEnvelope = {
               kind: "arrival",
-              arrival: payload.arrival,
-              ...(payload.shown === false ? { shown: false } : {})
+              arrival: payload.arrival
             }
             yield* writeCommunicationEnvelopeInTransaction({
               sql,
@@ -234,7 +240,8 @@ export const makeCommunicationStore = ({
               messageId: `arrival:${delivery.deliveryId}`,
               envelope,
               createdAt: payload.arrival.occurred_at,
-              replace: false
+              replace: false,
+              quiet: payload.shown === false
             })
             const updated = yield* sql`UPDATE automation_deliveries SET status = 'delivered',
           delivered_at = ${payload.arrival.occurred_at},

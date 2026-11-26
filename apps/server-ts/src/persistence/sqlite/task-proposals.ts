@@ -1,24 +1,21 @@
+import { RunContextSchema } from "../runs/stored-context.js"
+import { publicTask } from "../work/public.js"
+import { TaskRecordSchema, TaskSourceRecordSchema } from "../work/task-record.js"
+import { decodeKeyedTaskDraftEffect } from "../work/task-input.js"
 import { captureMutationVersions } from "./mutation-links.js"
 import type { SqlClient } from "effect/unstable/sql"
 import { readRecordedHistory } from "./recorded-history.js"
 import type {
   TaskProposal,
-  TaskProposalCapturePolicy,
   TaskProposalRetirement,
   TaskProposalScope
 } from "@arden-hq/protocol/proposals"
 import {
   ResolveTaskProposalInputSchema,
-  TaskProposalCapturePolicySchema,
   TaskProposalSchema
 } from "@arden-hq/protocol/effect/proposals"
-import {
-  SpaceTaskCaptureInputSchema,
-  SpaceTaskSchema,
-  SpaceTaskSourceSchema,
-  decodeCreateSpaceTaskInputEffect
-} from "@arden-hq/protocol/effect/spaces/work"
-import { RunContextSchema } from "@arden-hq/protocol/effect/runs"
+import { TASK_PROPOSAL_ACCEPTED_IN, TASK_PROPOSAL_START_SPACE } from "@arden-hq/protocol/proposals"
+import { SpaceTaskCaptureInputSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { DateTime, Effect, Schema } from "effect"
 import {
   TaskProposalStore,
@@ -41,6 +38,12 @@ import { sourceIdentity, sourceRevision, normalized, evidenceKey } from "./propo
 import { retireProposal } from "./proposal-retirement.js"
 import { pruneChatLinks } from "./space-chat-links.js"
 import { projectRetirements } from "./proposal-retirement-view.js"
+import {
+  SignalSnapshotSchema,
+  proposalFieldsOf,
+  proposalStateOf,
+  signalOf
+} from "./proposal-projection.js"
 import { isOrdinaryChat } from "./in-chat-task.js"
 import { makeProposalRevision, proposalHash } from "./proposal-revision.js"
 import { userChatSql } from "./chat-ownership.js"
@@ -81,11 +84,7 @@ export interface ProposalRow {
   readonly waiting_since: string | null
 }
 
-const SignalSnapshotSchema = Schema.Struct({
-  source: Schema.NonEmptyString,
-  title: Schema.String,
-  from: Schema.NullOr(Schema.String)
-})
+const UNSTARTED = { kind: "unstarted" } as const
 
 const failure = (
   reason: TaskProposalStoreError["reason"],
@@ -99,9 +98,9 @@ const failure = (
   })
 
 const canonicalizeSources = (
-  sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>
-): Effect.Effect<ReadonlyArray<typeof SpaceTaskSourceSchema.Type>, TaskProposalStoreError> => {
-  const byIdentity = new Map<string, typeof SpaceTaskSourceSchema.Type>()
+  sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>
+): Effect.Effect<ReadonlyArray<typeof TaskSourceRecordSchema.Type>, TaskProposalStoreError> => {
+  const byIdentity = new Map<string, typeof TaskSourceRecordSchema.Type>()
   for (const source of sources) {
     const identity = sourceIdentity(source)
     const prior = byIdentity.get(identity)
@@ -141,53 +140,23 @@ export const makeTaskProposalStore = (options: {
     const capture = yield* decodeJson(SpaceTaskCaptureInputSchema, row.capture_json).pipe(
       Effect.mapError(corrupt)
     )
-    const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json).pipe(
+    const sources = yield* decodeJson(Schema.Array(TaskSourceRecordSchema), row.sources_json).pipe(
       Effect.mapError(corrupt)
     )
     const signal =
       row.signal_json === null
-        ? null
+        ? undefined
         : yield* decodeJson(SignalSnapshotSchema, row.signal_json).pipe(Effect.mapError(corrupt))
-    const capturePolicy =
-      row.capture_policy_json === null
-        ? null
-        : yield* decodeJson(TaskProposalCapturePolicySchema, row.capture_policy_json).pipe(
-            Effect.mapError(corrupt)
-          )
     const retirement =
       row.retirement_json === null
-        ? null
-        : ((known ?? (yield* projectRetirements(sql, [row]))).get(row.proposal_id) ?? {
-            reason: "",
-            evidence: []
-          })
-    return yield* Schema.decodeUnknownEffect(TaskProposalSchema)({
-      proposal_id: row.proposal_id,
-      place: row.place,
-      space_id: row.space_id,
-      chat_session_id: row.chat_session_id,
-      stable_key: row.stable_key,
-      text: row.text,
-      body: row.body,
-      owner: row.owner,
-      capture,
-      sources,
-      signal:
-        signal === null ? null : { source: signal.source, title: signal.title, from: signal.from },
-      source_run_id: row.source_run_id,
-      source_session_id: row.source_session_id,
-      source_turn_id: row.source_turn_id,
-      source_tool_call_id: row.source_tool_call_id,
-      capture_policy: capturePolicy,
-      revision: row.revision,
-      status: row.status,
-      retirement,
-      item_id: row.item_id,
-      put_off_until: row.status === "offered" ? row.put_off_until : null,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      settled_at: row.settled_at
-    }).pipe(Effect.mapError(corrupt))
+        ? undefined
+        : (known ?? (yield* projectRetirements(sql, [row]))).get(row.proposal_id)
+    const fields = proposalFieldsOf(row, { capture, sources, signal: signalOf(signal) })
+    const state = proposalStateOf(row, retirement)
+    if (fields === undefined || state === undefined) return yield* corrupt(row.proposal_id)
+    return yield* Schema.decodeUnknownEffect(TaskProposalSchema)({ ...fields, ...state }).pipe(
+      Effect.mapError(corrupt)
+    )
   })
 
   const read = Effect.fn("TaskProposal.read")(function* (
@@ -246,7 +215,7 @@ export const makeTaskProposalStore = (options: {
 
   const propose: TaskProposalStore["Service"]["propose"] = Effect.fn("TaskProposal.propose")(
     function* (request: ProposeSpaceTaskInput) {
-      const input = yield* decodeCreateSpaceTaskInputEffect(request.input).pipe(
+      const input = yield* decodeKeyedTaskDraftEffect(request.input).pipe(
         Effect.mapError((cause) => failure("invalid", "Invalid proposed Task", cause))
       )
       const taskCapture = yield* Schema.decodeUnknownEffect(SpaceTaskCaptureInputSchema)(
@@ -256,10 +225,9 @@ export const makeTaskProposalStore = (options: {
       if (taskCapture.basis !== "inferred") {
         return yield* failure("invalid", "Task proposals require inferred capture")
       }
-      const decodedSources = yield* Schema.decodeUnknownEffect(Schema.Array(SpaceTaskSourceSchema))(
-        request.sources,
-        { onExcessProperty: "error" }
-      ).pipe(
+      const decodedSources = yield* Schema.decodeUnknownEffect(
+        Schema.Array(TaskSourceRecordSchema)
+      )(request.sources, { onExcessProperty: "error" }).pipe(
         Effect.mapError((cause) => failure("invalid", "Invalid proposed Task evidence", cause))
       )
       if (decodedSources.length === 0) {
@@ -337,7 +305,7 @@ export const makeTaskProposalStore = (options: {
               failure("storage", "Task proposal Run context is corrupt", cause)
             )
           )
-          const capturePolicy: TaskProposalCapturePolicy = {
+          const capturePolicy = {
             origin: context.origin.kind,
             task_item_id: context.task?.item_id ?? null,
             task_generation: context.task?.generation ?? null
@@ -419,7 +387,7 @@ export const makeTaskProposalStore = (options: {
   })
 
   const assertItemsStored = Effect.fn("TaskProposal.assertItemsStored")(function* (
-    sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>
+    sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>
   ) {
     for (const source of sources) {
       if (source.kind !== "connection_item") continue
@@ -434,7 +402,7 @@ export const makeTaskProposalStore = (options: {
 
   const validateStoredSources = Effect.fn("TaskProposal.validateSources")(function* (
     spaceId: string,
-    sources: ReadonlyArray<typeof SpaceTaskSourceSchema.Type>,
+    sources: ReadonlyArray<typeof TaskSourceRecordSchema.Type>,
     authority: TaskProposalSettlementAuthority
   ) {
     for (const source of sources) {
@@ -499,7 +467,7 @@ export const makeTaskProposalStore = (options: {
         message: "The Task proposal source is no longer available"
       })
     }
-    const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json)
+    const sources = yield* decodeJson(Schema.Array(TaskSourceRecordSchema), row.sources_json)
     yield* assertItemsStored(sources)
     yield* validateStoredSources(spaceId, sources, authority)
     return yield* work.createInTransaction({
@@ -531,7 +499,7 @@ export const makeTaskProposalStore = (options: {
         message: "That Space is archived"
       })
     }
-    const sources = yield* decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources_json)
+    const sources = yield* decodeJson(Schema.Array(TaskSourceRecordSchema), row.sources_json)
     yield* assertItemsStored(sources)
     return yield* work.createInTransaction({
       scope: { kind: "space", spaceId },
@@ -592,27 +560,25 @@ export const makeTaskProposalStore = (options: {
               })
             }
             const proposal = yield* project(row)
-            if (row.settlement_task_json === null) return { proposal, task: null }
-            return {
-              proposal,
-              task: yield* decodeJson(
-                Schema.Record(Schema.String, Schema.Json),
-                row.settlement_task_json
+            if (row.settlement_task_json === null) return { proposal, task: UNSTARTED }
+            const receipt = yield* decodeJson(
+              Schema.Record(Schema.String, Schema.Json),
+              row.settlement_task_json
+            )
+              .pipe(
+                Effect.flatMap((saved) =>
+                  Schema.decodeUnknownEffect(TaskRecordSchema)({
+                    history_revision: null,
+                    ...saved
+                  })
+                )
               )
-                .pipe(
-                  Effect.flatMap((saved) =>
-                    Schema.decodeUnknownEffect(SpaceTaskSchema)({
-                      history_revision: null,
-                      ...saved
-                    })
-                  )
+              .pipe(
+                Effect.mapError((cause) =>
+                  failure("storage", "Accepted Task proposal receipt is corrupt", cause)
                 )
-                .pipe(
-                  Effect.mapError((cause) =>
-                    failure("storage", "Accepted Task proposal receipt is corrupt", cause)
-                  )
-                )
-            }
+              )
+            return { proposal, task: { kind: "started" as const, task: publicTask(receipt) } }
           }
           if (row.status === "held")
             return yield* new TaskProposalConflictError({
@@ -629,7 +595,7 @@ export const makeTaskProposalStore = (options: {
             yield* putOfferOff(sql, proposalId, at)
             const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
             yield* changed(row)
-            return { proposal, task: null }
+            return { proposal, task: UNSTARTED }
           }
           if (input.decision === "reject") {
             yield* sql`UPDATE task_proposals SET
@@ -638,15 +604,21 @@ export const makeTaskProposalStore = (options: {
             WHERE proposal_id = ${proposalId} AND status = 'offered'`
             const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
             yield* changed(row)
-            return { proposal, task: null }
+            return { proposal, task: UNSTARTED }
           }
           if (row.space_id === null)
             return yield* failure("invalid", "A chat's suggestions cannot be started yet")
+          const picked =
+            input.space.kind === TASK_PROPOSAL_START_SPACE.chosen ? input.space.space_id : undefined
           const task = (yield* authoredWithoutSpace(row))
-            ? yield* startWithoutSpace(row, input.space_id ?? row.space_id)
-            : yield* startOnSpace(row, row.space_id, input.space_id, authority)
-          if (input.session_id !== undefined && (yield* isOrdinaryChat(sql, input.session_id)))
-            yield* sql`UPDATE space_tasks SET home_session_id = ${input.session_id}
+            ? yield* startWithoutSpace(row, picked ?? row.space_id)
+            : yield* startOnSpace(row, row.space_id, picked, authority)
+          const acceptedIn =
+            input.accepted_in.kind === TASK_PROPOSAL_ACCEPTED_IN.chat
+              ? input.accepted_in.session_id
+              : undefined
+          if (acceptedIn !== undefined && (yield* isOrdinaryChat(sql, acceptedIn)))
+            yield* sql`UPDATE space_tasks SET home_session_id = ${acceptedIn}
               WHERE item_id = ${task.item_id} AND space_id IS NOT NULL`
           yield* sql`UPDATE task_proposals SET
           status = 'accepted', item_id = ${task.item_id},
@@ -656,7 +628,7 @@ export const makeTaskProposalStore = (options: {
           WHERE proposal_id = ${proposalId} AND status = 'offered'`
           const proposal = yield* read(proposalId).pipe(Effect.flatMap(project))
           yield* changed(row)
-          return { proposal, task }
+          return { proposal, task: { kind: "started" as const, task: publicTask(task) } }
         })
       )
     },

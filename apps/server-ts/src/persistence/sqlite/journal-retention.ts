@@ -1,3 +1,4 @@
+import { RETENTION } from "@arden-hq/protocol/storage"
 import { journalRecordsSql, retainFromInTransaction } from "@arden-hq/journal/effect"
 import { DateTime, Effect } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -318,9 +319,9 @@ export const trimJournals = Effect.fn("JournalRetention.trimJournals")(function*
   )
   const sessions = yield* policy.retention().pipe(
     Effect.flatMap((retention) =>
-      retention.agentTraceDays === null
-        ? Effect.succeed(0)
-        : trimSessionJournals(writer, retention.agentTraceDays)
+      retention.agentTrace.kind === RETENTION.days
+        ? trimSessionJournals(writer, retention.agentTrace.days)
+        : Effect.succeed(0)
     ),
     Effect.catchCause((cause) =>
       Effect.logWarning("Session journal retention failed", cause).pipe(Effect.as(0))

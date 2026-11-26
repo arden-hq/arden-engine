@@ -2,48 +2,96 @@ import { Effect, Schema } from "effect"
 import type { JsonRecord } from "../common/json.js"
 import { IsoDateTimeStringSchema, withExtras } from "../common/schema.js"
 
-/** One Automation's own limits; each null means none. */
+export const PLAN_STOP = { unlimited: "unlimited", at: "at" } as const
+
+export type PlanStop =
+  | { readonly kind: "unlimited" }
+  | { readonly kind: "at"; readonly percent: number }
+
+export const TOKEN_CAP = { uncapped: "uncapped", capped: "capped" } as const
+
+export type TokenCap =
+  | { readonly kind: "uncapped" }
+  | { readonly kind: "capped"; readonly tokens: number }
+
+export const KEEP_GOING = { off: "off", until: "until" } as const
+
+export type KeepGoing =
+  | { readonly kind: "off" }
+  | { readonly kind: "until"; readonly until: string }
+
 export interface AutomationLimit extends JsonRecord {
-  /** Pauses at this, never above the background limit. */
-  readonly pauseAtPercent: number | null
-  /** A run that uses this many tokens stops; the next occurrence starts fresh. */
-  readonly maxTokensPerRun: number | null
+  readonly pause: PlanStop
+  readonly cap: TokenCap
 }
 
-/**
- * How much of a plan Arden may use. A limit is a percentage of each plan
- * window; the lower one never applies above the higher one.
- */
 export interface LimitSettings extends JsonRecord {
-  /** Nothing in Arden uses the plan past this; null means Arden never stops on its own. */
-  readonly ardenLimitPercent: number | null
-  /** Automations, Space workers and maintenance pause past this; null adds no background stop. */
-  readonly backgroundLimitPercent: number | null
-  /** Chats may go past the Arden limit until this time; null means they stop at it. */
-  readonly keepGoingUntil: string | null
-  /** An Automation's own limits, by Automation id. Absent means it follows the background limit. */
+  readonly ardenLimit: PlanStop
+  readonly backgroundLimit: PlanStop
+  readonly keepGoing: KeepGoing
   readonly automationLimits: Readonly<Record<string, AutomationLimit>>
 }
 
-/** A change to the settings. `automationLimit` sets one Automation's limits;
- *  both null removes them. */
-export type LimitSettingsPatch = Partial<Omit<LimitSettings, "automationLimits">> & {
-  readonly automationLimit?: AutomationLimit & { readonly automationId: string }
-}
+export const LIMIT_SETTINGS_CHANGE = {
+  ardenLimit: "arden_limit",
+  backgroundLimit: "background_limit",
+  keepGoing: "keep_going",
+  automationLimit: "automation_limit"
+} as const
+
+export type LimitSettingsChange =
+  | { readonly kind: "arden_limit"; readonly value: PlanStop }
+  | { readonly kind: "background_limit"; readonly value: PlanStop }
+  | { readonly kind: "keep_going"; readonly value: KeepGoing }
+  | {
+      readonly kind: "automation_limit"
+      readonly automation: string
+      readonly value: AutomationLimit
+    }
+
+export type LimitSettingsPatch = ReadonlyArray<LimitSettingsChange>
 
 export const DEFAULT_LIMIT_SETTINGS: LimitSettings = Object.freeze({
-  ardenLimitPercent: 90,
-  backgroundLimitPercent: 70,
-  keepGoingUntil: null,
+  ardenLimit: { kind: PLAN_STOP.at, percent: 90 },
+  backgroundLimit: { kind: PLAN_STOP.at, percent: 70 },
+  keepGoing: { kind: KEEP_GOING.off },
   automationLimits: {}
 })
 
-/** Background work still follows the Arden limit when its own stop is Never. */
-export const effectiveBackgroundLimit = (settings: LimitSettings): number | null => {
-  if (settings.ardenLimitPercent === null) return settings.backgroundLimitPercent
-  if (settings.backgroundLimitPercent === null) return settings.ardenLimitPercent
-  return Math.min(settings.backgroundLimitPercent, settings.ardenLimitPercent)
+export const effectiveBackgroundLimit = (settings: LimitSettings): PlanStop => {
+  const { ardenLimit, backgroundLimit } = settings
+  if (ardenLimit.kind === PLAN_STOP.unlimited) return backgroundLimit
+  if (backgroundLimit.kind === PLAN_STOP.unlimited) return ardenLimit
+  return backgroundLimit.percent <= ardenLimit.percent ? backgroundLimit : ardenLimit
 }
+
+const isUnlimited = (limit: AutomationLimit): boolean =>
+  limit.pause.kind === PLAN_STOP.unlimited && limit.cap.kind === TOKEN_CAP.uncapped
+
+const applyLimitChange = (settings: LimitSettings, change: LimitSettingsChange): LimitSettings => {
+  switch (change.kind) {
+    case LIMIT_SETTINGS_CHANGE.ardenLimit:
+      return { ...settings, ardenLimit: change.value }
+    case LIMIT_SETTINGS_CHANGE.backgroundLimit:
+      return { ...settings, backgroundLimit: change.value }
+    case LIMIT_SETTINGS_CHANGE.keepGoing:
+      return { ...settings, keepGoing: change.value }
+    case LIMIT_SETTINGS_CHANGE.automationLimit: {
+      const { [change.automation]: _previous, ...others } = settings.automationLimits
+      return {
+        ...settings,
+        automationLimits: isUnlimited(change.value)
+          ? others
+          : { ...others, [change.automation]: change.value }
+      }
+    }
+  }
+}
+
+export const applyLimitSettingsPatch = (
+  settings: LimitSettings,
+  patch: LimitSettingsPatch
+): LimitSettings => patch.reduce(applyLimitChange, settings)
 
 const PercentSchema = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(10),
@@ -55,86 +103,69 @@ const TokensSchema = Schema.Int.check(
 )
 const AutomationIdSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 
-const AutomationLimitSchema = Schema.Struct({
-  pauseAtPercent: Schema.NullOr(PercentSchema),
-  maxTokensPerRun: Schema.NullOr(TokensSchema)
-})
+const PlanStopSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(PLAN_STOP.unlimited) }),
+  Schema.Struct({ kind: Schema.Literal(PLAN_STOP.at), percent: PercentSchema })
+])
 
-const AutomationLimitWireSchema = Schema.Struct({
-  pause_at_percent: Schema.NullOr(PercentSchema),
-  max_tokens_per_run: Schema.NullOr(TokensSchema)
-})
+const TokenCapSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(TOKEN_CAP.uncapped) }),
+  Schema.Struct({ kind: Schema.Literal(TOKEN_CAP.capped), tokens: TokensSchema })
+])
+
+const KeepGoingSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(KEEP_GOING.off) }),
+  Schema.Struct({ kind: Schema.Literal(KEEP_GOING.until), until: IsoDateTimeStringSchema })
+])
+
+const AutomationLimitSchema = Schema.Struct({ pause: PlanStopSchema, cap: TokenCapSchema })
 
 export const LimitSettingsSchema = Schema.Struct({
-  ardenLimitPercent: Schema.NullOr(PercentSchema),
-  backgroundLimitPercent: Schema.NullOr(PercentSchema),
-  keepGoingUntil: Schema.NullOr(IsoDateTimeStringSchema),
+  ardenLimit: PlanStopSchema,
+  backgroundLimit: PlanStopSchema,
+  keepGoing: KeepGoingSchema,
   automationLimits: Schema.Record(Schema.String, AutomationLimitSchema)
 })
 
-/** What a stored document may change: the Automation map is replaced whole. */
-export const LimitSettingsDocumentPatchSchema = Schema.Struct({
-  ardenLimitPercent: Schema.optionalKey(Schema.NullOr(PercentSchema)),
-  backgroundLimitPercent: Schema.optionalKey(Schema.NullOr(PercentSchema)),
-  keepGoingUntil: Schema.optionalKey(Schema.NullOr(IsoDateTimeStringSchema)),
-  automationLimits: Schema.optionalKey(Schema.Record(Schema.String, AutomationLimitSchema))
-})
-
 export const LimitSettingsResponseSchema = withExtras({
-  arden_limit_percent: Schema.NullOr(PercentSchema),
-  background_limit_percent: Schema.NullOr(PercentSchema),
-  keep_going_until: Schema.NullOr(IsoDateTimeStringSchema),
-  automation_limits: Schema.Record(Schema.String, AutomationLimitWireSchema)
+  arden_limit: PlanStopSchema,
+  background_limit: PlanStopSchema,
+  keep_going: KeepGoingSchema,
+  automation_limits: Schema.Record(Schema.String, AutomationLimitSchema)
 })
 
-const atLeastOne = Schema.makeFilter((patch: object) =>
-  Object.keys(patch).length > 0 ? undefined : "a limits patch requires at least one field"
-)
-
-export const LimitSettingsPatchSchema = Schema.Struct({
-  ardenLimitPercent: Schema.optionalKey(Schema.NullOr(PercentSchema)),
-  backgroundLimitPercent: Schema.optionalKey(Schema.NullOr(PercentSchema)),
-  keepGoingUntil: Schema.optionalKey(Schema.NullOr(IsoDateTimeStringSchema)),
-  automationLimit: Schema.optionalKey(
-    Schema.Struct({ automationId: AutomationIdSchema, ...AutomationLimitSchema.fields })
-  )
-}).check(atLeastOne)
+const LimitSettingsChangeSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(LIMIT_SETTINGS_CHANGE.ardenLimit), value: PlanStopSchema }),
+  Schema.Struct({
+    kind: Schema.Literal(LIMIT_SETTINGS_CHANGE.backgroundLimit),
+    value: PlanStopSchema
+  }),
+  Schema.Struct({ kind: Schema.Literal(LIMIT_SETTINGS_CHANGE.keepGoing), value: KeepGoingSchema }),
+  Schema.Struct({
+    kind: Schema.Literal(LIMIT_SETTINGS_CHANGE.automationLimit),
+    automation: AutomationIdSchema,
+    value: AutomationLimitSchema
+  })
+])
 
 export const LimitSettingsPatchRequestSchema = Schema.Struct({
-  arden_limit_percent: Schema.optionalKey(Schema.NullOr(PercentSchema)),
-  background_limit_percent: Schema.optionalKey(Schema.NullOr(PercentSchema)),
-  keep_going_until: Schema.optionalKey(Schema.NullOr(IsoDateTimeStringSchema)),
-  automation_limit: Schema.optionalKey(
-    Schema.Struct({ automation_id: AutomationIdSchema, ...AutomationLimitWireSchema.fields })
-  )
-}).check(atLeastOne)
+  changes: Schema.NonEmptyArray(LimitSettingsChangeSchema)
+})
 
 type LimitSettingsWire = Schema.Schema.Type<typeof LimitSettingsResponseSchema>
 
-const mapRecord = <A, B>(
-  record: Readonly<Record<string, A>>,
-  map: (value: A) => B
-): Record<string, B> =>
-  Object.fromEntries(Object.entries(record).map(([key, value]) => [key, map(value)]))
-
 export const mapLimitSettings = (wire: LimitSettingsWire): LimitSettings => ({
-  ardenLimitPercent: wire.arden_limit_percent,
-  backgroundLimitPercent: wire.background_limit_percent,
-  keepGoingUntil: wire.keep_going_until,
-  automationLimits: mapRecord(wire.automation_limits, (limit) => ({
-    pauseAtPercent: limit.pause_at_percent,
-    maxTokensPerRun: limit.max_tokens_per_run
-  }))
+  ardenLimit: wire.arden_limit,
+  backgroundLimit: wire.background_limit,
+  keepGoing: wire.keep_going,
+  automationLimits: wire.automation_limits
 })
 
 export const limitSettingsResponse = (settings: LimitSettings): LimitSettingsWire => ({
-  arden_limit_percent: settings.ardenLimitPercent,
-  background_limit_percent: settings.backgroundLimitPercent,
-  keep_going_until: settings.keepGoingUntil,
-  automation_limits: mapRecord(settings.automationLimits, (limit) => ({
-    pause_at_percent: limit.pauseAtPercent,
-    max_tokens_per_run: limit.maxTokensPerRun
-  }))
+  arden_limit: settings.ardenLimit,
+  background_limit: settings.backgroundLimit,
+  keep_going: settings.keepGoing,
+  automation_limits: settings.automationLimits
 })
 
 const strict = { onExcessProperty: "error" } as const
@@ -143,48 +174,12 @@ export const decodeLimitSettingsPatchRequestEffect = (
   value: unknown
 ): Effect.Effect<LimitSettingsPatch, Schema.SchemaError, never> =>
   Schema.decodeUnknownEffect(LimitSettingsPatchRequestSchema)(value, strict).pipe(
-    Effect.map((patch): LimitSettingsPatch => ({
-      ...(patch.arden_limit_percent === undefined
-        ? {}
-        : { ardenLimitPercent: patch.arden_limit_percent }),
-      ...(patch.background_limit_percent === undefined
-        ? {}
-        : { backgroundLimitPercent: patch.background_limit_percent }),
-      ...(patch.keep_going_until === undefined ? {} : { keepGoingUntil: patch.keep_going_until }),
-      ...(patch.automation_limit === undefined
-        ? {}
-        : {
-            automationLimit: {
-              automationId: patch.automation_limit.automation_id,
-              pauseAtPercent: patch.automation_limit.pause_at_percent,
-              maxTokensPerRun: patch.automation_limit.max_tokens_per_run
-            }
-          })
-    }))
+    Effect.map((patch) => patch.changes)
   )
 
 export const encodeLimitSettingsPatchEffect = (
-  value: unknown
+  value: LimitSettingsPatch
 ): Effect.Effect<string, Schema.SchemaError, never> =>
-  Schema.decodeUnknownEffect(LimitSettingsPatchSchema)(value, strict).pipe(
-    Effect.map((patch) =>
-      JSON.stringify({
-        ...(patch.ardenLimitPercent === undefined
-          ? {}
-          : { arden_limit_percent: patch.ardenLimitPercent }),
-        ...(patch.backgroundLimitPercent === undefined
-          ? {}
-          : { background_limit_percent: patch.backgroundLimitPercent }),
-        ...(patch.keepGoingUntil === undefined ? {} : { keep_going_until: patch.keepGoingUntil }),
-        ...(patch.automationLimit === undefined
-          ? {}
-          : {
-              automation_limit: {
-                automation_id: patch.automationLimit.automationId,
-                pause_at_percent: patch.automationLimit.pauseAtPercent,
-                max_tokens_per_run: patch.automationLimit.maxTokensPerRun
-              }
-            })
-      })
-    )
+  Schema.decodeUnknownEffect(LimitSettingsPatchRequestSchema)({ changes: value }, strict).pipe(
+    Effect.map(JSON.stringify)
   )

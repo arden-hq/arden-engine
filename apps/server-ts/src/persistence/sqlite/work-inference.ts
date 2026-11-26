@@ -1,6 +1,6 @@
+import { TaskSourceRecordSchema } from "../work/task-record.js"
+import { type TaskSourceRecord } from "../work/task-record.js"
 import { assertCurrentTaskRevision } from "./work-history.js"
-import type { SpaceTaskSource } from "@arden-hq/protocol/spaces/work"
-import { SpaceTaskSourceSchema } from "@arden-hq/protocol/effect/spaces/work"
 import { TaskInferencePolicySchema } from "@arden-hq/protocol/effect/spaces"
 import { Effect, Schema } from "effect"
 import type { SqlClient, SqlError } from "effect/unstable/sql"
@@ -51,7 +51,7 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
           WHERE space_id = ${spaceId} AND status IN ${openProposalStatusList}
           ORDER BY proposal_id LIMIT 1001`
         const proposals = yield* Effect.forEach(proposalRows, ({ sources_json, ...row }) =>
-          decodeJson(Schema.Array(SpaceTaskSourceSchema), sources_json).pipe(
+          decodeJson(Schema.Array(TaskSourceRecordSchema), sources_json).pipe(
             Effect.map((sources) => ({ ...row, sources }))
           )
         )
@@ -112,7 +112,7 @@ export const readInferenceReview = Effect.fn("Work.inferenceReview")(function* (
             }))
           ],
           (row) =>
-            decodeJson(Schema.Array(SpaceTaskSourceSchema), row.sources).pipe(
+            decodeJson(Schema.Array(TaskSourceRecordSchema), row.sources).pipe(
               Effect.map((sources) => ({ ...row, sources }))
             )
         )
@@ -146,7 +146,7 @@ export const assertInferenceAdmission = Effect.fn("Work.admitInference")(functio
     readonly spaceId: string
     readonly runId: string
     readonly snapshot: string
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
     readonly proposalId?: string
   }
 ): Effect.fn.Return<void, WorkStoreError> {
@@ -232,7 +232,7 @@ export const assertMainProposalAdmission = Effect.fn("Work.admitMainProposal")(f
     readonly spaceId: string
     readonly runId: string
     readonly snapshot: string
-    readonly sources: ReadonlyArray<SpaceTaskSource>
+    readonly sources: ReadonlyArray<TaskSourceRecord>
     readonly proposalId: string
   }
 ): Effect.fn.Return<void, WorkStoreError> {
@@ -294,7 +294,7 @@ export const assertMainProposalAdmission = Effect.fn("Work.admitMainProposal")(f
  * Propose, revise and retire all check chat evidence here. */
 export const assertCitedTurnsFinished = Effect.fn("Work.citedTurnsFinished")(function* (
   sql: SqlClient.SqlClient,
-  sources: ReadonlyArray<SpaceTaskSource>
+  sources: ReadonlyArray<TaskSourceRecord>
 ) {
   for (const source of sources) {
     if (source.kind !== "chat") continue

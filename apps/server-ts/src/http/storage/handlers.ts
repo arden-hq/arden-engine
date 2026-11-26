@@ -1,8 +1,10 @@
-import type {
-  StorageCleanupPlan,
-  StorageOverview,
-  StorageSettings
+import {
+  STORAGE_LIMIT,
+  type StorageCleanupPlan,
+  type StorageOverview,
+  type StorageSettings
 } from "@arden-hq/protocol/storage"
+import { currentSessionFromWire } from "@arden-hq/protocol/effect/storage"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 
@@ -13,7 +15,7 @@ import { ArdenApi } from "../api.js"
 import { failInternal, failStore } from "../errors.js"
 
 const settingsResponse = (settings: StorageSettings) => ({
-  max_space_gib: settings.maxSpaceGiB,
+  max_space: settings.maxSpace,
   allow_archived_session_deletion: settings.allowArchivedSessionDeletion,
   allow_inactive_session_deletion: settings.allowInactiveSessionDeletion,
   inactive_session_days: settings.inactiveSessionDays,
@@ -23,8 +25,14 @@ const settingsResponse = (settings: StorageSettings) => ({
 const overviewResponse = (overview: StorageOverview) => ({
   status: {
     total_bytes: overview.status.totalBytes,
-    max_bytes: overview.status.maxBytes,
-    over_budget_bytes: overview.status.overBudgetBytes,
+    budget:
+      overview.status.budget.kind === STORAGE_LIMIT.limited
+        ? {
+            kind: overview.status.budget.kind,
+            max_bytes: overview.status.budget.maxBytes,
+            over_budget_bytes: overview.status.budget.overBudgetBytes
+          }
+        : overview.status.budget,
     checked_at: overview.status.checkedAt,
     categories: overview.status.categories.map((category) => ({
       id: category.id,
@@ -41,8 +49,14 @@ const overviewResponse = (overview: StorageOverview) => ({
 const cleanupPlanResponse = (id: string, plan: StorageCleanupPlan) => ({
   plan_id: id,
   before_bytes: plan.beforeBytes,
-  budget_bytes: plan.budgetBytes,
-  target_bytes: plan.targetBytes,
+  target:
+    plan.target.kind === STORAGE_LIMIT.limited
+      ? {
+          kind: plan.target.kind,
+          budget_bytes: plan.target.budgetBytes,
+          target_bytes: plan.target.targetBytes
+        }
+      : plan.target,
   estimated_after_bytes: plan.estimatedAfterBytes,
   estimated_reclaimable_bytes: plan.estimatedReclaimableBytes,
   attainable: plan.attainable,
@@ -77,8 +91,8 @@ export const StorageHandlers = HttpApiBuilder.group(
       .handle("retention", () =>
         policy.retention().pipe(
           Effect.map((value) => ({
-            agent_trace_days: value.agentTraceDays,
-            wiki_history_days: value.wikiHistoryDays
+            agent_trace: value.agentTrace,
+            wiki_history: value.wikiHistory
           })),
           Effect.catch(failInternal("Storage"))
         )
@@ -86,13 +100,13 @@ export const StorageHandlers = HttpApiBuilder.group(
       .handle("updateRetention", ({ payload }) =>
         policy
           .updateRetention({
-            agentTraceDays: payload.agent_trace_days,
-            wikiHistoryDays: payload.wiki_history_days
+            agentTrace: payload.agent_trace,
+            wikiHistory: payload.wiki_history
           })
           .pipe(
             Effect.map((value) => ({
-              agent_trace_days: value.agentTraceDays,
-              wiki_history_days: value.wikiHistoryDays
+              agent_trace: value.agentTrace,
+              wiki_history: value.wikiHistory
             })),
             Effect.catch(failInternal("Storage"))
           )
@@ -109,7 +123,7 @@ export const StorageHandlers = HttpApiBuilder.group(
       .handle("updateSettings", ({ payload }) =>
         storage
           .updateSettings({
-            maxSpaceGiB: payload.max_space_gib,
+            maxSpace: payload.max_space,
             allowArchivedSessionDeletion: payload.allow_archived_session_deletion,
             allowInactiveSessionDeletion: payload.allow_inactive_session_deletion,
             inactiveSessionDays: payload.inactive_session_days,
@@ -120,7 +134,7 @@ export const StorageHandlers = HttpApiBuilder.group(
       .handle("previewCleanup", ({ payload }) =>
         storage
           .preview({
-            currentSessionId: payload.current_session_id,
+            currentSession: currentSessionFromWire(payload.current_session),
             pinnedSessionIds: payload.pinned_session_ids
           })
           .pipe(
@@ -131,7 +145,7 @@ export const StorageHandlers = HttpApiBuilder.group(
       .handle("executeCleanup", ({ payload }) =>
         storage
           .execute(payload.plan_id, {
-            currentSessionId: payload.current_session_id,
+            currentSession: currentSessionFromWire(payload.current_session),
             pinnedSessionIds: payload.pinned_session_ids
           })
           .pipe(

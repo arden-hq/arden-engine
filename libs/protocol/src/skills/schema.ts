@@ -1,12 +1,14 @@
 import { Effect, Schema } from "effect"
-import type {
-  MarketplaceSkillListResponse,
-  Skill,
-  SkillContent,
-  SkillInstallReceipt,
-  SkillListResponse,
-  SkillRemoveReceipt,
-  SkillToggleReceipt
+import {
+  SKILL_PLACE,
+  SKILL_VERSION,
+  type MarketplaceSkillListResponse,
+  type Skill,
+  type SkillContent,
+  type SkillInstallReceipt,
+  type SkillListResponse,
+  type SkillRemoveReceipt,
+  type SkillToggleReceipt
 } from "./contracts.js"
 import { NonNegativeIntSchema } from "../common/schema.js"
 import { splitMarketplaceSkillId, type MarketplaceSkillAddress } from "./marketplace-id.js"
@@ -90,15 +92,24 @@ export const SkillContentBodySchema = Schema.String.check(
   )
 )
 
+const SkillVersionStateSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal(SKILL_VERSION.versioned), version: SkillVersionSchema }),
+  Schema.Struct({ kind: Schema.Literal(SKILL_VERSION.unversioned) })
+])
+
 export const SkillSchema: Schema.Codec<Skill> = Schema.Struct({
   name: SkillNameSchema,
   description: SkillDescriptionSchema,
-  version: Schema.NullOr(SkillVersionSchema),
+  version: SkillVersionStateSchema,
   enabled: Schema.Boolean,
-  builtin: Schema.Boolean,
-  invocable: Schema.optionalKey(Schema.Literal(true)),
-  origin: Schema.optionalKey(Schema.Literals(["arden", "shared"] as const)),
-  path: Schema.optionalKey(Schema.String)
+  place: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal(SKILL_PLACE.builtin), invocable: Schema.Boolean }),
+    Schema.Struct({
+      kind: Schema.Literal(SKILL_PLACE.local),
+      origin: Schema.Literals(["arden", "shared"] as const),
+      path: Schema.String
+    })
+  ])
 })
 
 export const SkillListResponseSchema: Schema.Codec<SkillListResponse> = Schema.Struct({
@@ -154,13 +165,13 @@ export const SkillInstallReceiptSchema: Schema.Codec<SkillInstallReceipt> = Sche
   status: Schema.Literal("installed"),
   name: SkillNameSchema,
   description: SkillDescriptionSchema,
-  version: Schema.NullOr(SkillVersionSchema)
+  version: SkillVersionStateSchema
 })
 
 export const SkillContentSchema: Schema.Codec<SkillContent> = Schema.Struct({
   name: SkillNameSchema,
   description: SkillDescriptionSchema,
-  version: Schema.NullOr(SkillVersionSchema),
+  version: SkillVersionStateSchema,
   content: SkillContentBodySchema
 })
 

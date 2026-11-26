@@ -18,11 +18,9 @@ interface PendingOAuth {
   readonly state: string
 }
 
-export interface McpAuthorizationStart {
-  readonly name: string
-  readonly authorization_url: string | null
-  readonly status: "connected" | "pending"
-}
+export type McpAuthorizationStart =
+  | { readonly name: string; readonly status: "connected" | "authorized" }
+  | { readonly name: string; readonly status: "pending"; readonly authorization_url: string }
 
 export const makeMcpAuthorization = ({
   runtime,
@@ -79,11 +77,7 @@ export const makeMcpAuthorization = ({
     if (result === "AUTHORIZED") {
       await provider.commitInteractiveAuthorization()
       const connected = await runtime.connectNow(current.config)
-      return {
-        name,
-        authorization_url: null,
-        status: connected.status === "connected" ? "connected" : "pending"
-      }
+      return { name, status: connected.status === "connected" ? "connected" : "authorized" }
     }
     if (authorizationUrl === undefined) throw new Error("MCP sign-in returned no authorization URL")
     const state = await provider.state()

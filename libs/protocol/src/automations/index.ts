@@ -11,9 +11,10 @@ import {
   AutomationSchema,
   toAutomation,
   toAutomationList,
-  AutomationListResponseSchema,
+  AutomationListResponseSchema
+} from "./projection-schema.js"
+import {
   AutomationEventCatalogResponseSchema,
-  AutomationRunsResponseSchema,
   DeleteAutomationResponseSchema,
   RunAutomationResponseSchema,
   ToggleAutomationResponseSchema,
@@ -21,6 +22,7 @@ import {
   encodeResetAutomationSettingRequestEffect,
   encodeUpdateAutomationRequestEffect
 } from "./schema.js"
+import { AutomationRunsResponseSchema } from "./run-schema.js"
 import {
   encodeAutomationDescriptionPathEffect,
   encodeAutomationEventsPathEffect,
@@ -33,6 +35,7 @@ import {
 } from "./routes.js"
 
 export * from "./contracts.js"
+export { automationPermissionChat } from "./projection-schema.js"
 export * from "./outcome.js"
 export * from "./state.js"
 export * from "./triggers.js"
@@ -85,7 +88,7 @@ const route = (
 export const automationRoutes = {
   collection: "/automations",
   eventCatalog: "/automations/event-catalog",
-  events(options: AutomationEventRouteOptions = {}): string {
+  events(options: AutomationEventRouteOptions): string {
     return runBoundary(
       encodeAutomationEventsPathEffect(options),
       "Invalid automation-events route",
@@ -101,7 +104,7 @@ export const automationRoutes = {
       "Invalid automation-description route"
     )
   },
-  runs(taskId: string, options: AutomationRunsRouteOptions = {}): string {
+  runs(taskId: string, options: AutomationRunsRouteOptions): string {
     return runBoundary(
       encodeAutomationRunsPathEffect({ taskId, options }),
       "Invalid automation-runs route",

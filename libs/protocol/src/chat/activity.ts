@@ -1,22 +1,29 @@
 import { isPublicActivityTool } from "../views/tool-words.js"
 import type { ChatProjectionEvent } from "./events/stream.js"
+import { RUN_ACTIVITY_TARGET } from "./events/run.js"
+import { TOOL_PARENT } from "./tool-face.js"
 import type { JsonRecord } from "../common/json.js"
 
 export interface RunActivity extends JsonRecord {
   readonly run_id: string
   readonly sequence: number
   readonly description: string | null
-  readonly active_tool_call_ids?: ReadonlyArray<string>
-  readonly run_purpose?: string | null
-  readonly operations?: ReadonlyArray<{ readonly id: string; readonly text: string | null }>
+  readonly active_tool_call_ids: ReadonlyArray<string>
+  readonly run_purpose: string | null
+  readonly operations: ReadonlyArray<RunActivityOperation>
   readonly purpose: string | null
+}
+
+interface RunActivityOperation {
+  readonly id: string
+  readonly text: string | null
 }
 
 export interface RunActivityProjection {
   readonly runId: string
   readonly sequence: number
   readonly purpose: string | null
-  readonly operations: ReadonlyArray<{ readonly id: string; readonly text: string | null }>
+  readonly operations: ReadonlyArray<RunActivityOperation>
 }
 
 export const reduceRunActivity = (
@@ -24,7 +31,7 @@ export const reduceRunActivity = (
   record: {
     readonly event: ChatProjectionEvent
     readonly sequence: number
-    readonly runId?: string | null
+    readonly fromOtherRun: boolean
   }
 ): RunActivityProjection | undefined => {
   const event = record.event
@@ -32,22 +39,19 @@ export const reduceRunActivity = (
   if (event.type === "RUN_STARTED") {
     return { runId: event.run_id, sequence: record.sequence, purpose: null, operations: [] }
   }
-  if (
-    current === undefined ||
-    record.sequence <= current.sequence ||
-    (record.runId != null && record.runId !== current.runId)
-  )
+  if (current === undefined || record.sequence <= current.sequence || record.fromOtherRun)
     return current
   if (event.type === "run_activity") {
+    const target = event.target
     return event.run_id === current.runId
       ? {
           ...current,
           sequence: record.sequence,
-          ...(event.tool_call_ids === undefined
+          ...(target.kind === RUN_ACTIVITY_TARGET.run
             ? { purpose: event.description }
             : {
                 operations: current.operations.map((operation) =>
-                  event.tool_call_ids?.includes(operation.id)
+                  target.tool_call_ids.includes(operation.id)
                     ? { ...operation, text: event.description }
                     : operation
                 )
@@ -57,9 +61,9 @@ export const reduceRunActivity = (
   }
   if (
     event.type === "TOOL_CALL_START" &&
-    !event.parent_id &&
+    event.parent.kind === TOOL_PARENT.root &&
     event.presentation !== "conversation" &&
-    isPublicActivityTool({ name: event.tool_call_name, presentation: event.presentation })
+    isPublicActivityTool(event.tool_call_name, event.presentation)
   ) {
     return {
       ...current,
@@ -110,7 +114,6 @@ export const runActivityView = (
 export const runActivityProjection = (activity: RunActivity): RunActivityProjection => ({
   runId: activity.run_id,
   sequence: activity.sequence,
-  purpose: activity.run_purpose !== undefined ? activity.run_purpose : activity.purpose,
-  operations:
-    activity.operations ?? (activity.active_tool_call_ids ?? []).map((id) => ({ id, text: null }))
+  purpose: activity.run_purpose,
+  operations: activity.operations
 })

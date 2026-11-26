@@ -49,7 +49,7 @@ export const renderSpacePageList = (
   }
   const source: RunMemorySource =
     index.folded.length === 0 && index.unlisted === 0
-      ? { ...record, outcome: "whole", reason: null }
+      ? { ...record, outcome: "whole" }
       : { ...record, outcome: "cut", reason: "index_allowance" }
   return { text, sources: [source] }
 }

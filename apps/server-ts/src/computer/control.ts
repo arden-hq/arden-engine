@@ -1,4 +1,48 @@
-import type { ComputerStatus, ComputerPreview } from "@arden-hq/protocol/computer"
+import type {
+  ComputerApp,
+  ComputerFeedback,
+  ComputerFrameCapture,
+  ComputerOperation,
+  ComputerPreview,
+  ComputerSession,
+  ComputerStatus
+} from "@arden-hq/protocol/computer"
+import {
+  COMPUTER_APP,
+  COMPUTER_FEEDBACK,
+  COMPUTER_OPERATION,
+  COMPUTER_PREVIEW,
+  COMPUTER_SESSION
+} from "@arden-hq/protocol/computer"
+
+const MODE = { ready: "ready", paused: "paused" } as const
+const SURFACE = { desktop: "desktop", window: "window" } as const
+const UNCLAIMED: ComputerSession = { kind: COMPUTER_SESSION.unclaimed }
+const UNIDENTIFIED: ComputerApp = { kind: COMPUTER_APP.unidentified }
+const UNLABELLED: ComputerOperation = { kind: COMPUTER_OPERATION.unlabelled }
+const EMPTY: ComputerPreview = { kind: COMPUTER_PREVIEW.empty }
+
+export type ComputerSurface =
+  | { readonly kind: "desktop" }
+  | { readonly kind: "window"; readonly id: string }
+
+type LabelledOperation = Extract<ComputerOperation, { kind: typeof COMPUTER_OPERATION.labelled }>
+
+export const DESKTOP: ComputerSurface = { kind: SURFACE.desktop }
+export const windowSurface = (target: {
+  readonly pid: number
+  readonly window_id: number
+}): ComputerSurface => ({ kind: SURFACE.window, id: `${target.pid}:${target.window_id}` })
+export const labelled = (
+  label: string,
+  delivery: LabelledOperation["delivery"],
+  feedback: ComputerFeedback = { kind: COMPUTER_FEEDBACK.unlocated }
+): LabelledOperation => ({ kind: COMPUTER_OPERATION.labelled, label, delivery, feedback })
+
+const sameSurface = (left: ComputerSurface, right: ComputerSurface): boolean =>
+  left.kind === SURFACE.desktop
+    ? right.kind === SURFACE.desktop
+    : right.kind === SURFACE.window && left.id === right.id
 
 export class ComputerControl {
   #epoch = new AbortController()
@@ -9,17 +53,15 @@ export class ComputerControl {
     return this.#generation
   }
 
-  identify(target: string, application: ComputerStatus["application"]): void {
-    if (this.#active === undefined) return
-    this.#target = target
-    this.#application = application
+  identify(target: string, application: ComputerApp): void {
+    if (this.#active === undefined || this.#session.kind === COMPUTER_SESSION.unclaimed) return
+    this.#session = { ...this.#session, target, application }
   }
-  #application: ComputerStatus["application"] = null
-  #operation: ComputerStatus["operation"] = null
-  #preview: ComputerPreview | null = null
-  #surface: string | null = null
+  #session: ComputerSession = UNCLAIMED
+  #preview: ComputerPreview = EMPTY
+  #surface: ComputerSurface = { kind: "desktop" }
 
-  preview(): ComputerPreview | null {
+  preview(): ComputerPreview {
     return this.#preview
   }
 
@@ -30,16 +72,28 @@ export class ComputerControl {
   }: {
     sessionId: string
     surface: string
-    frame: ComputerPreview
+    frame: ComputerFrameCapture
   }): void {
-    if (this.#active === undefined || this.#sessionId !== sessionId || this.#surface !== surface)
+    if (
+      this.#active === undefined ||
+      this.#session.kind === COMPUTER_SESSION.unclaimed ||
+      this.#session.session_id !== sessionId ||
+      !sameSurface(this.#surface, { kind: "window", id: surface })
+    )
       return
-    this.#preview = frame
+    this.#preview = { kind: COMPUTER_PREVIEW.captured, ...frame }
+    this.#session = {
+      ...this.#session,
+      preview: {
+        kind: COMPUTER_PREVIEW.captured,
+        id: frame.id,
+        captured_at: frame.captured_at,
+        surface
+      }
+    }
   }
 
   #mode: ComputerStatus["mode"] = "ready"
-  #sessionId: string | null = null
-  #target: string | null = null
   #active: object | undefined
   #activity: ComputerStatus["activity"] = "idle"
 
@@ -47,25 +101,16 @@ export class ComputerControl {
     return {
       mode: this.#mode,
       foreground_allowed:
-        this.#foregroundSession !== undefined && this.#foregroundSession === this.#sessionId,
-      session_id: this.#sessionId,
-      target: this.#target,
-      application: this.#application,
-      operation: this.#operation,
-      preview:
-        this.#preview === null || this.#surface === null
-          ? null
-          : {
-              id: this.#preview.id,
-              captured_at: this.#preview.captured_at,
-              surface: this.#surface
-            },
+        this.#foregroundSession !== undefined &&
+        this.#session.kind === COMPUTER_SESSION.claimed &&
+        this.#foregroundSession === this.#session.session_id,
+      session: this.#session,
       activity: this.#activity
     }
   }
 
   signal(signal: AbortSignal): AbortSignal {
-    if (this.#mode === "paused")
+    if (this.#mode === MODE.paused)
       throw new Error("Computer control paused by the user. Wait for them to resume it in Arden.")
     return AbortSignal.any([signal, this.#epoch.signal])
   }
@@ -75,39 +120,56 @@ export class ComputerControl {
     activity,
     signal,
     sessionId,
-    surface = null,
-    operation = null
+    surface,
+    operation
   }: {
     target: string
     activity: "observing" | "acting"
     signal: AbortSignal
     sessionId: string
-    surface?: string | null
-    operation?: ComputerStatus["operation"]
+    surface: ComputerSurface
+    operation: LabelledOperation
   }): () => void {
     signal.throwIfAborted()
-    if (this.#mode === "paused") throw new Error("Computer control paused by the user")
+    if (this.#mode === MODE.paused) throw new Error("Computer control paused by the user")
     const token = {}
-    const sameWindow = this.#sessionId === sessionId && this.#surface === surface
-    if (!sameWindow) {
-      this.#preview = null
-      this.#application = null
-    }
+    const previous = this.#session
+    const same =
+      previous.kind === COMPUTER_SESSION.claimed &&
+      previous.session_id === sessionId &&
+      sameSurface(this.#surface, surface)
+    if (!same) this.#preview = EMPTY
     this.#surface = surface
-    if (!sameWindow || activity === "acting" || this.#operation === null) {
-      this.#operation =
-        operation === null
-          ? null
-          : {
-              ...operation,
-              feedback:
-                operation.feedback ?? (sameWindow ? (this.#operation?.feedback ?? null) : null)
-            }
-    }
+    const kept: Extract<ComputerSession, { kind: "claimed" }> =
+      same && previous.kind === COMPUTER_SESSION.claimed
+        ? previous
+        : {
+            kind: "claimed",
+            session_id: sessionId,
+            target,
+            application: UNIDENTIFIED,
+            operation: UNLABELLED,
+            preview: { kind: COMPUTER_PREVIEW.empty }
+          }
+    const replace =
+      !same || activity === "acting" || kept.operation.kind === COMPUTER_OPERATION.unlabelled
     this.#active = token
-    if (this.#sessionId !== sessionId) this.#foregroundSession = undefined
-    this.#sessionId = sessionId
-    if (!sameWindow || this.#target === null) this.#target = target
+    if (previous.kind === COMPUTER_SESSION.unclaimed || previous.session_id !== sessionId)
+      this.#foregroundSession = undefined
+    this.#session = {
+      ...kept,
+      operation: replace
+        ? {
+            ...operation,
+            feedback:
+              operation.feedback.kind === COMPUTER_FEEDBACK.unlocated &&
+              same &&
+              kept.operation.kind === COMPUTER_OPERATION.labelled
+                ? kept.operation.feedback
+                : operation.feedback
+          }
+        : kept.operation
+    }
     this.#activity = activity
     return () => {
       if (this.#active !== token) return
@@ -117,22 +179,32 @@ export class ComputerControl {
   }
 
   allowForeground(sessionId: string): boolean {
-    if (this.#mode === "paused" || this.#sessionId !== sessionId) return false
+    if (
+      this.#mode === MODE.paused ||
+      this.#session.kind === COMPUTER_SESSION.unclaimed ||
+      this.#session.session_id !== sessionId
+    )
+      return false
     this.#foregroundSession = sessionId
     return true
   }
 
   foregroundAllowed(sessionId: string): boolean {
-    return this.#mode === "ready" && this.#foregroundSession === sessionId
+    return this.#mode === MODE.ready && this.#foregroundSession === sessionId
   }
 
   requireForeground(sessionId: string): void {
-    if (this.#mode === "ready" && this.#foregroundSession === sessionId) return
-    this.#operation = {
-      label: "Waiting for foreground access",
-      delivery: "foreground",
-      feedback: null
-    }
+    if (this.#mode === MODE.ready && this.#foregroundSession === sessionId) return
+    if (this.#session.kind === COMPUTER_SESSION.claimed)
+      this.#session = {
+        ...this.#session,
+        operation: {
+          kind: "labelled",
+          label: "Waiting for foreground access",
+          delivery: "foreground",
+          feedback: { kind: "unlocated" }
+        }
+      }
     throw new Error(
       "Foreground input is not allowed yet. Continue with background control or a non-activating app API. If foreground is essential, call computer_act directly (not inside a computer script): the user is asked on a card and can allow it for this chat. Do not bypass this with shell, AppleScript activation, or another input tool."
     )
@@ -150,14 +222,11 @@ export class ComputerControl {
   }
 
   resume(): void {
-    if (this.#mode !== "paused") return
+    if (this.#mode !== MODE.paused) return
     this.#epoch = new AbortController()
     this.#mode = "ready"
-    this.#operation = null
-    this.#preview = null
-    this.#surface = null
-    this.#sessionId = null
-    this.#target = null
-    this.#application = null
+    this.#session = UNCLAIMED
+    this.#preview = EMPTY
+    this.#surface = { kind: "desktop" }
   }
 }

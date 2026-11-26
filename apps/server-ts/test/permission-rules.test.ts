@@ -28,7 +28,8 @@ const allowIsOverridden = (
       list,
       decision: "allow",
       rules: [{ subject, decision: "allow" }],
-      source: { kind: "settings" }
+      source: { kind: "settings" },
+      replaces: { kind: "nothing" }
     })
     const held = yield* rules.list()
     return !held.some(
@@ -43,7 +44,10 @@ it("a second rule for the same subject in the same list replaces the first, and 
   await withTempDatabase(
     Effect.gen(function* () {
       const rules = yield* PermissionRules
-      const created = yield* (yield* SpaceStore).create({ name: "Lab" })
+      const created = yield* (yield* SpaceStore).create({
+        name: "Lab",
+        instructions: { kind: "unwritten" }
+      })
       const space = { kind: "space", spaceId: created.space_id } as const
       const first = yield* rules.save(
         settings({ subject: browser, list: { kind: "global" }, decision: "allow" })
@@ -83,11 +87,13 @@ it("a card's or an offer's allow never lands over a rule the person set", async 
       const spaces = yield* SpaceStore
       const lab = {
         kind: "space",
-        spaceId: (yield* spaces.create({ name: "Lab" })).space_id
+        spaceId: (yield* spaces.create({ name: "Lab", instructions: { kind: "unwritten" } }))
+          .space_id
       } as const
       const jobs = {
         kind: "space",
-        spaceId: (yield* spaces.create({ name: "Jobs" })).space_id
+        spaceId: (yield* spaces.create({ name: "Jobs", instructions: { kind: "unwritten" } }))
+          .space_id
       } as const
       const tool = (name: string) => ({ kind: "tool", tool: name, server: null }) as const
       yield* rules.save(settings({ subject: tool("space_ask"), list: lab, decision: "ask" }))
@@ -339,7 +345,8 @@ it("saves words with their hard rules, and removing or recompiling the words rep
         list: global,
         decision: "never",
         rules: [{ subject: documents, decision: "never" }],
-        source: { kind: "settings" }
+        source: { kind: "settings" },
+        replaces: { kind: "nothing" }
       })
       const shape = () =>
         rules
@@ -364,7 +371,8 @@ it("saves words with their hard rules, and removing or recompiling the words rep
         list: global,
         decision: "never",
         rules: [],
-        source: { kind: "settings" }
+        source: { kind: "settings" },
+        replaces: { kind: "nothing" }
       })
       expect(yield* shape()).toEqual([
         {
@@ -378,7 +386,8 @@ it("saves words with their hard rules, and removing or recompiling the words rep
         list: global,
         decision: "never",
         rules: [{ subject: documents, decision: "never" }],
-        source: { kind: "settings" }
+        source: { kind: "settings" },
+        replaces: { kind: "nothing" }
       })
       yield* rules.change({ ruleId: words.id, decision: "remove", source: { kind: "settings" } })
       expect(yield* shape()).toEqual([])
@@ -403,7 +412,8 @@ it("words never change or take over a rule the owner set", async () => {
         list: global,
         decision: "allow",
         rules: [{ subject: documents, decision: "allow" }],
-        source: { kind: "settings" }
+        source: { kind: "settings" },
+        replaces: { kind: "nothing" }
       })
       const replaced = yield* rules
         .saveWords({
@@ -411,7 +421,7 @@ it("words never change or take over a rule the owner set", async () => {
           list: global,
           decision: "allow",
           rules: [],
-          replaces: own.id,
+          replaces: { kind: "rule", rule_id: own.id },
           source: { kind: "settings" }
         })
         .pipe(Effect.result)
@@ -440,7 +450,8 @@ it("a words rule's new decision reaches the hard rules it compiled to", async ()
           { subject: folder, decision: "allow" },
           { subject: command, decision: "allow" }
         ],
-        source: { kind: "settings" }
+        source: { kind: "settings" },
+        replaces: { kind: "nothing" }
       })
       const children = () =>
         rules

@@ -1,6 +1,7 @@
 import { ladderDelayMs } from "@arden-hq/std/retry"
 import { sleep } from "@arden-hq/std/sleep"
 import type { EventMessage, ResetMessage } from "@arden-hq/relay-protocol"
+import { ANONYMOUS_FRAME, SSE_FRAME_ID, type SseFrameId } from "@arden-hq/protocol"
 import { Option, Schema } from "effect"
 import type { Loopback, RelayLog } from "./ports.js"
 import type { StreamRoute } from "./routes.js"
@@ -34,7 +35,7 @@ export class RelayStream {
   #nextSeq = 1
   #sent = 0
   #acked = 0
-  #lastEventId: string | undefined
+  #lastEventId: SseFrameId = ANONYMOUS_FRAME
   #upstream = new AbortController()
   #sink: Sink | undefined
 
@@ -126,7 +127,7 @@ export class RelayStream {
     this.#nextSeq = 1
     this.#sent = 0
     this.#acked = 0
-    this.#lastEventId = undefined
+    this.#lastEventId = ANONYMOUS_FRAME
     void this.#run(this.#upstream.signal)
   }
 
@@ -136,13 +137,13 @@ export class RelayStream {
       try {
         const frames = this.#loopback.events({
           path: this.route.path,
-          lastEventId: this.route.kind === "bus" ? this.#lastEventId : undefined,
+          lastEventId: this.route.kind === "bus" ? this.#lastEventId : ANONYMOUS_FRAME,
           signal
         })
         for await (const frame of frames) {
           if (signal.aborted) return
           attempt = 0
-          if (frame.id !== undefined) this.#lastEventId = frame.id
+          if (frame.id.kind === SSE_FRAME_ID.identified) this.#lastEventId = frame.id
           this.#push(parse(frame.data))
         }
       } catch (cause) {
