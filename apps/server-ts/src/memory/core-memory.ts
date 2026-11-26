@@ -70,7 +70,6 @@ export const CORE_CONDENSE_ADVICE =
   "Condense wording first, then move project-specific, dated or rarely needed detail " +
   "to the page that owns it, leaving a short link. Keep every general fact and preference."
 
-/** Notice appended to a capture batch when a Core Memory page passes the condense threshold. */
 export const coreCondenseNotice = (page: {
   readonly path: string
   readonly chars: number
