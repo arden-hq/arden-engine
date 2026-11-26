@@ -117,7 +117,9 @@ interface TurnContextInput {
 }
 
 export const omittedSkills = (origin: SessionOrigin): ReadonlyArray<string> =>
-  origin.source === "scheduled_task" && !isSpaceWorkJob(origin.policy) ? ["work-coordination"] : []
+  origin.source === "scheduled_task" && !isSpaceWorkJob(origin.policy)
+    ? ["work-coordination", "automation-design"]
+    : []
 
 export const composeTurnContext = Effect.fn("Context.composeTurnContext")(function* (
   services: TurnContextServices,

@@ -254,6 +254,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
       summary: "Sets up a new automation.",
       discovery: { group: "automations" },
       description: [
+        "Load the automation-design Skill before creating an Automation.",
         "Create one Automation with time, event, idle, or chat-turn count triggers; several event triggers are allowed.",
         "Chain Automations only when the user asks: the later one gets an automation.run_ended trigger. A chain is one step deep (a run it started never starts another), and an Automation never wakes itself.",
         "Use it for future time, event, or cadence; do useful immediate work now and do not combine it with a Task in the chat or a Workflow merely for liveness.",
@@ -437,6 +438,7 @@ const makeAutomationTools = (services: AutomationToolServices): ReadonlyArray<Se
       summary: "Changes an automation’s instructions or schedule.",
       discovery: { group: "automations" },
       description: [
+        "Load the automation-design Skill before revising an Automation's instructions or schedule.",
         "Update one Automation by exact automation_ref.",
         "Use chat=current, chat=own or chat_ref to move future runs to another chat; history chooses whether each run starts fresh or reads that chat. Runs act with the action mode of their chat, or of their own chat when they start fresh in one of the user's. Four changes each go in a call of their own: action_mode, the plan limits (pause_at_percent and max_tokens_per_run together), reset_to_default, and a model change when the runs read one of the user's chats. Other changes edit instructions, model, triggers or schedule. Sending triggers replaces the list: send each trigger to keep with its id (t1, t2) from the Automation's text; a field you leave out keeps its stored value, such as an old field condition, and null clears it.",
         `${SYSTEM_ACCEPTS} Use reset_to_default to undo one of its changed settings.`,
